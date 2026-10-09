@@ -21,10 +21,7 @@ import {
   useSetMemberEmail,
   useSetMyEmail,
 } from "../../../api/generated/endpoints/users/users";
-import type {
-  MemberEmailOut,
-  MySecurityOut,
-} from "../../../api/generated/model";
+import type { MemberEmailOut } from "../../../api/generated/model";
 import { ApiError } from "../../../api/mutator";
 
 /** 409 is the one refusal this screen explains rather than reports. */
@@ -150,12 +147,6 @@ export function useMemberEmails(isAdmin: boolean): UseMemberEmailsResult {
   };
 }
 
-export interface UseMySecurityResult {
-  security: MySecurityOut | undefined;
-  isLoading: boolean;
-  error: unknown;
-}
-
 /**
  * What has been done to the caller's own account.
  *
@@ -169,7 +160,7 @@ export interface UseMySecurityResult {
  * whose reset is nobody else's business. The same reasoning keeps the address
  * off it.
  */
-export function useMySecurity(): UseMySecurityResult {
+export function useMySecurity() {
   const query = useGetMySecurity();
   return {
     security: query.data,

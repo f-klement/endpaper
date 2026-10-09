@@ -266,11 +266,9 @@ const OBJECT_WINDOW_BYTES = 64 * 1024;
  * **These are one stream's ceilings, and neither bounds a file.** A file
  * chooses how many streams it has; the running total below is what stops them
  * adding up.
- *
- * The second is exported, for `epub.MAX_PACKAGE_BYTES`'s reason.
  */
 const MAX_STREAM_BYTES = 8 * 1024 * 1024;
-export const MAX_INFLATED_BYTES = 16 * 1024 * 1024;
+const MAX_INFLATED_BYTES = 16 * 1024 * 1024;
 
 /**
  * The total this reader will spend on one file: read, inflated and parsed.
@@ -305,10 +303,8 @@ export const MAX_INFLATED_BYTES = 16 * 1024 * 1024;
  * either**, and it charges a second time for bytes that stream already paid to
  * inflate, so the real headroom is smaller than 8.2 by an amount nobody has
  * measured.
- *
- * Exported, for `epub.MAX_PACKAGE_BYTES`'s reason.
  */
-export const MAX_BUDGET_BYTES = 32 * 1024 * 1024;
+const MAX_BUDGET_BYTES = 32 * 1024 * 1024;
 
 /**
  * How deep a nested container may go, and how long a reference chain may be.
@@ -323,10 +319,8 @@ export const MAX_BUDGET_BYTES = 32 * 1024 * 1024;
  * label: nothing in the corpus nests or chains deep enough to be near either,
  * so there is no distribution to take a headroom from. What they are set
  * against is the stack and this reader's own patience, not a file.
- *
- * The first is exported, for `epub.MAX_PACKAGE_BYTES`'s reason.
  */
-export const MAX_DEPTH = 32;
+const MAX_DEPTH = 32;
 const MAX_RESOLVE_STEPS = 16;
 
 /**
@@ -1206,11 +1200,6 @@ class Document {
     );
     if (w.length !== 3 || w.some((width) => width < 0)) return dictionary;
     const record = w[0]! + w[1]! + w[2]!;
-    // **A bound on work, not on the answer.** A record of no bytes never moves
-    // the cursor, so the end of data check below can never stop it, and every
-    // run `/Index` names would be walked to its count while reading nothing and
-    // remembering nothing. The answer is the same without this line; what a
-    // crafted file costs to read is not.
     if (record === 0) return dictionary;
 
     const size = dictionary.entries.get("Size");
@@ -1232,11 +1221,6 @@ class Document {
         throw new PdfError("damaged", "a cross reference run of no real size");
       }
       for (let step = 0; step < count; step += 1) {
-        // **A bound and an answer both.** Past the end every field reads `NaN`,
-        // which remembers nothing, so without this a run is walked to the count
-        // it promises. And a last record cut inside its last field still has a
-        // whole type and offset, and would be remembered from bytes the stream
-        // does not hold.
         if (cursor + record > data.length) break;
         const fields = [0, 0, 0];
         for (let field = 0; field < 3; field += 1) {
@@ -1627,16 +1611,7 @@ function readXmp(packet: string): XmpRecord | null {
   if (end < open.index) return null;
   const xml = packet.slice(open.index, end + closing.length);
 
-  // Caught for `fb2.ts::readFb2Description`'s reason: a parser this reader
-  // does not choose may throw where the specification answers `parsererror`.
-  // The DOM's own, spelled through the parser: `Document` in this module is
-  // the PDF's.
-  let document: ReturnType<DOMParser["parseFromString"]>;
-  try {
-    document = new DOMParser().parseFromString(xml, "application/xml");
-  } catch {
-    return null;
-  }
+  const document = new DOMParser().parseFromString(xml, "application/xml");
   const root = document.documentElement;
   if (!root || root.localName !== "RDF") return null;
 
@@ -1798,15 +1773,6 @@ export async function readPdf(file: Blob): Promise<PdfReading> {
         // title with a colon in it.
         subtitle: null,
         authors: readAuthors(await field("Author"), xmp),
-        // **The one reader of the five that states no subject, and the
-        // exclusion is worth keeping exact.** `/Subject` is this format's
-        // description and is read as one six lines above; a reader taking
-        // "every format states a subject" literally would file the blurb
-        // twice, once as prose and once as a heading. `/Keywords` is the key
-        // that would be a candidate and is prose too, which
-        // `readIdentifiers` already records: whether a PDF's keywords are
-        // subjects is a decision about that field and not about this one.
-        categories: [],
         identifiers: readIdentifiers(xmp),
         isbn: firstIsbn(xmp),
         publisher: xmp?.publisher ?? null,

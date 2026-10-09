@@ -15,10 +15,10 @@
 import { vi } from "vitest";
 
 /** The track's `stop`. This is how a test sees the camera being released. */
-export const stopTrack = vi.fn<MediaStreamTrack["stop"]>();
+export const stopTrack = vi.fn();
 
 /** `navigator.mediaDevices.getUserMedia`. */
-export const getUserMedia = vi.fn<MediaDevices["getUserMedia"]>();
+export const getUserMedia = vi.fn();
 
 /**
  * A stream with one video track.
@@ -33,9 +33,7 @@ export function fakeStream(
   const track = {
     stop: stopTrack,
     getCapabilities: () => capabilities,
-    applyConstraints: vi
-      .fn<MediaStreamTrack["applyConstraints"]>()
-      .mockResolvedValue(undefined),
+    applyConstraints: vi.fn().mockResolvedValue(undefined),
   };
   return {
     getTracks: () => [track],

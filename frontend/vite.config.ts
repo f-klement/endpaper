@@ -1,7 +1,7 @@
 /// <reference types="vitest/config" />
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
-import { defineConfig, type Plugin } from "vite";
+import { defineConfig } from "vite";
 import { VitePWA } from "vite-plugin-pwa";
 
 // Lever A is applied per file with a `@vitest-environment node` docblock, not
@@ -20,77 +20,6 @@ import { VitePWA } from "vite-plugin-pwa";
 
 import { execSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-
-/**
- * The property generator and its random source, as the bundler resolves them.
- *
- * **A path and not a specifier**, because a specifier has more spellings than
- * any reader of the source holds: a template literal import, a `require`, a
- * path into `node_modules`, an `import.meta.glob`, each measured bundling the
- * package while a parse of the specifiers passed it. Whatever the spelling,
- * the module the bundler loads lives here, a package subpath import's
- * included, which this refused while the house rule passed it, measured.
- *
- * **Anchored at the start as well as after a separator**: an emitted asset
- * names its source relative to the root, `node_modules/fast-check/...` with no
- * separator before it, and the unanchored pattern let one through, measured.
- */
-const GENERATOR =
-  /(?:^|[\\/])node_modules[\\/](?:fast-check|pure-rand|@fast-check[\\/][^\\/]+)[\\/]/;
-
-/**
- * Refuse to build a bundle holding the property generator.
- *
- * `fast-check` is a development dependency run only under the suite, so a
- * compromised release reaches a test pod and not a member's browser. **The
- * image installs development dependencies before it builds**, so one stray
- * load of it would ship it with the build green. `tests/houseRules.test.ts` is
- * the early half, which names a file under `src/`; this is the half that asks
- * the bundler, and it holds two things by mechanism:
- *
- * - **What the bundler loads**, by `load`, in the page build and, through
- *   `worker.plugins` below, in every worker build. A worker is bundled with
- *   that list alone and never sees the page's plugins: measured, a worker
- *   under `scripts/` importing the package shipped it with every guard green
- *   before the worker build carried this.
- * - **What the build emits**, by `generateBundle`, which reads each chunk's
- *   modules and each asset's source files. A `new URL(path, import.meta.url)`
- *   asset is copied by reading the file and is never loaded, so `load` alone
- *   passed the package's entry into the bundle, measured.
- *
- * **What it does not hold, stated**: the package's bytes committed somewhere
- * outside `node_modules`, which no path names as the generator.
- *
- * **Build only.** The suite runs through this same configuration and loads
- * the generator on purpose, and the development server ships nothing. A clean
- * tree builds the same bytes with this as without it, measured.
- */
-function withoutTheGenerator(): Plugin {
-  const refuse = (what: string, id: string): never => {
-    throw new Error(
-      `the bundle would ${what} ${id}, the property generator, which is a ` +
-        "development dependency and must never reach the application. " +
-        "tests/houseRules.test.ts names the rule.",
-    );
-  };
-  return {
-    name: "endpaper:without-the-generator",
-    apply: "build",
-    enforce: "pre",
-    load(id) {
-      if (GENERATOR.test(id)) refuse("load", id);
-      return null;
-    },
-    generateBundle(_options, bundle) {
-      for (const output of Object.values(bundle)) {
-        const sources =
-          output.type === "chunk" ? output.moduleIds : output.originalFileNames;
-        const hit = sources.find((id) => GENERATOR.test(id));
-        if (hit !== undefined) refuse("emit", hit);
-      }
-    },
-  };
-}
 
 /**
  * The version the app shows, derived rather than declared.
@@ -125,26 +54,9 @@ function appVersion(): string {
   }
 }
 
-/**
- * The junit reporter, when the pipeline asks for one by naming its path.
- *
- * A function rather than an inline spread so the tuple keeps its mutable type:
- * vitest's `reporters` refuses a `readonly` one, and `as const` is the obvious
- * spelling that fails.
- */
-function junit(): ["junit", { outputFile: string }][] {
-  const outputFile = process.env.ENDPAPER_JUNIT;
-  return outputFile ? [["junit", { outputFile }]] : [];
-}
-
 export default defineConfig({
   define: { __APP_VERSION__: JSON.stringify(appVersion()) },
-  // A worker is built with this list and never with `plugins` below, so the
-  // generator guard is named in both; `withoutTheGenerator` says what each
-  // holds.
-  worker: { plugins: () => [withoutTheGenerator()] },
   plugins: [
-    withoutTheGenerator(),
     react(),
     // Tailwind 4 runs as a Vite plugin; there is no postcss.config.js any more.
     tailwindcss(),
@@ -344,47 +256,7 @@ export default defineConfig({
     maxWorkers: Number(process.env.ENDPAPER_TEST_WORKERS) || 2,
     // The suite mirrors src/ rather than sitting beside it.
     include: ["tests/**/*.test.{ts,tsx}"],
-    // **`tests/COVERAGE.md` is checked by a reporter rather than by a test**,
-    // and `tests/coverageRegister.reporter.ts` says why: no test file here can
-    // see another file's tasks, and vitest's own `list` counts an `it.each` as
-    // one test. So the only instrument that can count this suite is the run,
-    // and a reporter is where a run's own figures are.
-    //
-    // `default` is repeated because naming any reporter replaces the set rather
-    // than adding to it, which is how a change here silences the output
-    // everything else reads.
-    //
-    // **That replacement is a command line one too, and it is why the junit
-    // output is configured here rather than passed as a flag.** The pipeline
-    // ran `bun run test -- --reporter=junit`, which replaced this whole list,
-    // so the register was checked nowhere in CI while the suite stayed green.
-    // Measured on vitest 5.0.0. The pipeline now sets `ENDPAPER_JUNIT` and
-    // names no reporter, and `globalSetup` below fails any run whose reporters
-    // were replaced, so the next flag that does this says so rather than
-    // disarming the guard.
-    reporters: ["default", "./tests/coverageRegister.reporter.ts", ...junit()],
-    // The other half of that, and the half a command line cannot take away.
-    globalSetup: ["./tests/coverageRegister.globalSetup.ts"],
     setupFiles: ["./tests/setup.ts"],
-    // **Pinned because a guard in `tests/setup.ts` depends on it, and nothing
-    // named that dependency.** That file's `afterEach` refuses a leaked global
-    // for four objects, the suite's timezone among them. Setup files register
-    // their hooks before a test file's, and `stack` runs "after" hooks in
-    // reverse registration order, so setup's teardown runs **last**, after a
-    // test file has restored whatever it moved.
-    //
-    // Under `list` it runs **first** instead, so a file that moves the zone and
-    // restores it in its own `afterEach`, which is the idiomatic spelling, is
-    // judged before its restore. Driven: that reddens every arm in the file,
-    // 27 of 27 including unrelated ones, with a message blaming the reader's
-    // correct code. No file uses that idiom today, which is why this was
-    // latent rather than live.
-    //
-    // `stack` is already vitest's default, so this pins current behaviour
-    // rather than changing it. That is the point: it turns a silent breakage on
-    // a future default change, or on somebody setting `list` for an unrelated
-    // reason, into an explicit decision at this line.
-    sequence: { hooks: "stack" },
     // Not `false`, which is the usual answer for a suite that asserts on the
     // DOM rather than on paint. Under `false` Vite replaces every CSS module
     // with an empty string, `?raw` included, and `tests/theme/palettes.test.ts`

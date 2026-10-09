@@ -1,11 +1,10 @@
+from datetime import datetime
 from typing import Annotated
 
 from pydantic import AfterValidator, BaseModel, Field
 
 import mailer
 from enums import AuthMode, ThemeMode, VerificationProvenance
-from models import USERNAME_MAX
-from schemas.common import UtcDateTime
 
 # bcrypt only hashes the first 72 bytes; anything beyond it is not merely
 # useless but actively misleading, since two passwords sharing a 72-byte prefix
@@ -69,7 +68,7 @@ class UserCreate(BaseModel):
     `email` creates exactly the account it created before.
     """
 
-    username: str = Field(min_length=1, max_length=USERNAME_MAX, pattern=r"^\S.*$")
+    username: str = Field(min_length=1, max_length=50, pattern=r"^\S.*$")
     password: str = Field(min_length=MIN_PASSWORD_LENGTH, max_length=MAX_PASSWORD_BYTES)
     email: AddressField = None
 
@@ -84,37 +83,7 @@ class LoginRequest(BaseModel):
     an attacker something about the stored password.
     """
 
-    # **No pattern, deliberately, and `UserCreate` above having one is not an
-    # oversight here.** This field is checked against accounts that already
-    # exist, and `UserCreate` is not the only thing that mints one: `backup`
-    # restores the `users` table through Core, where no model validates
-    # anything. Such a row can hold a name `^\S.*$` refuses, and a pattern here
-    # would lock that member out of their own library while answering 422 where
-    # every other bad sign in answers 401. The login route gives one answer to
-    # every failure so that nobody can tell an account that exists from one
-    # that does not, and a 422 naming the shape of a name is a second answer.
-    #
-    # **The directory is not a second reason, though it reads like one.**
-    # ldap3 strips an assertion value in `evaluate_match`, so a directory name
-    # carrying leading whitespace is unsearchable and that member cannot sign
-    # in today whether or not this field has a pattern.
-    #
-    # It would also not buy what it looks like it buys: measured 2026-09-28,
-    # `^\S.*$` accepts a carriage return and a NUL, so it is not a log injection
-    # control. That control is at the log site, where `logvalues.clipped` escapes
-    # the value; see the comment in `auth_backends.authenticate_ldap`.
-    # `tests/routers/test_auth.py::TestALoginNameIsNotCheckedAgainstTheRegistrationPattern`
-    # is what goes red if the pattern is added back.
-    #
-    # **And if you add it anyway, fix the log line sweep in the same change.**
-    # `TestAnUntrustedUsernameCannotForgeALogLine` registers under the
-    # fallback forged name and signs in under the primary one, and it uses two
-    # only because `UserCreate` refuses the primary. Give this field the same
-    # pattern and both legs use one name, so the sign in answers 200 against the
-    # account the registration just made, with the same filler password. Every
-    # arm in that class is written to measure an unauthenticated request and
-    # would then be measuring an authenticated one, silently.
-    username: str = Field(min_length=1, max_length=USERNAME_MAX)
+    username: str = Field(min_length=1, max_length=50)
     password: str = Field(min_length=1, max_length=MAX_PASSWORD_BYTES)
 
 
@@ -133,7 +102,7 @@ class UserOut(BaseModel):
     id: int
     username: str
     is_admin: bool
-    created_at: UtcDateTime
+    created_at: datetime
     model_config = {"from_attributes": True}
 
 
@@ -248,7 +217,7 @@ class AppearanceUpdate(BaseModel):
 
 class Token(BaseModel):
     access_token: str
-    token_type: str = "bearer"  # noqa: S105  the OAuth token type, not a secret
+    token_type: str = "bearer"
     user: UserOut
 
 
@@ -280,9 +249,6 @@ class RegistrationOut(BaseModel):
 MAX_CODE_LENGTH = 64
 
 
-# The username on this model and on the three below carries no pattern either,
-# for the reason given at `LoginRequest.username`: each names an account that
-# already exists rather than minting one.
 class ResetRequest(BaseModel):
     """A member, signed out, asking to be let back in.
 
@@ -291,7 +257,7 @@ class ResetRequest(BaseModel):
     against.
     """
 
-    username: str = Field(min_length=1, max_length=USERNAME_MAX)
+    username: str = Field(min_length=1, max_length=50)
 
 
 class ResetRedeem(BaseModel):
@@ -302,7 +268,7 @@ class ResetRedeem(BaseModel):
     no account created before the policy for it to lock out.
     """
 
-    username: str = Field(min_length=1, max_length=USERNAME_MAX)
+    username: str = Field(min_length=1, max_length=50)
     code: str = Field(min_length=1, max_length=MAX_CODE_LENGTH)
     new_password: str = Field(
         min_length=MIN_PASSWORD_LENGTH, max_length=MAX_PASSWORD_BYTES
@@ -312,13 +278,13 @@ class ResetRedeem(BaseModel):
 class VerificationRequest(BaseModel):
     """Send the confirmation code for this account again."""
 
-    username: str = Field(min_length=1, max_length=USERNAME_MAX)
+    username: str = Field(min_length=1, max_length=50)
 
 
 class VerificationRedeem(BaseModel):
     """The confirmation code that arrived by mail."""
 
-    username: str = Field(min_length=1, max_length=USERNAME_MAX)
+    username: str = Field(min_length=1, max_length=50)
     code: str = Field(min_length=1, max_length=MAX_CODE_LENGTH)
 
 
@@ -333,7 +299,7 @@ class ResetCodeOut(BaseModel):
     """
 
     code: str
-    expires_at: UtcDateTime
+    expires_at: datetime
 
 
 class ResetRequestOut(BaseModel):
@@ -348,11 +314,11 @@ class ResetRequestOut(BaseModel):
 
     user_id: int
     username: str
-    requested_at: UtcDateTime
-    expires_at: UtcDateTime
-    approved_at: UtcDateTime | None = None
+    requested_at: datetime
+    expires_at: datetime
+    approved_at: datetime | None = None
     approved_by: str | None = None
-    code_expires_at: UtcDateTime | None = None
+    code_expires_at: datetime | None = None
 
 
 class MemberVerificationOut(BaseModel):
@@ -366,7 +332,7 @@ class MemberVerificationOut(BaseModel):
 
     id: int
     username: str
-    verified_at: UtcDateTime | None = None
+    verified_at: datetime | None = None
     verification_source: VerificationProvenance | None = None
     verified_by: str | None = None
     has_address: bool
@@ -384,9 +350,9 @@ class MySecurityOut(BaseModel):
     the member list, and who reset whose password is nobody else's business.
     """
 
-    password_reset_at: UtcDateTime | None = None
+    password_reset_at: datetime | None = None
     password_reset_approved_by: str | None = None
-    verified_at: UtcDateTime | None = None
+    verified_at: datetime | None = None
     verification_source: VerificationProvenance | None = None
     verified_by: str | None = None
 

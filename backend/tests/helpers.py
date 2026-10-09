@@ -6,9 +6,6 @@ importlib import mode this suite uses.
 """
 
 import re
-from collections.abc import Iterator
-from contextlib import contextmanager
-from dataclasses import dataclass
 from types import SimpleNamespace
 from typing import Any
 
@@ -67,157 +64,6 @@ def selects_for(client: Any, headers: dict[str, str], url: str) -> tuple[int, in
     return len(selects), body["total"]
 
 
-@dataclass
-class Statement:
-    """One statement the driver ran, and how many rows it handed back.
-
-    `entity` is the mapped class the ORM was loading and `relationship` says
-    whether it was loading it behind something else. **Both come off the
-    execution, never off the SQL.** A population matched out of statement text
-    has been wrong every time it was tried here, and the ORM already knows: it
-    hands the mapper to `do_orm_execute`, so there is nothing to recognise.
-
-    `entity` is `None` where no mapper was bound, which is a statement the ORM
-    did not issue as a load: a flush, a savepoint, a `text()`. Those are
-    attributed to nothing rather than guessed at.
-    """
-
-    sql: str
-    entity: type | None
-    relationship: bool
-    rows: int = 0
-
-
-@contextmanager
-def rows_at_the_engine() -> Iterator[list[Statement]]:
-    """Every statement one window ran, with the rows the driver handed over.
-
-    **A second instrument beside `selects_for` rather than a widening of it**,
-    and the reason is the event. `before_cursor_execute` fires before the
-    statement runs, so no listener on it can carry a row count, and the
-    obvious next step does not work either: `cursor.rowcount` is `-1` for
-    every SELECT on this driver and a real number only for writes, so a budget
-    summing it counts nothing while appearing to measure something. Three
-    seats reached that by three routes. What a `row_factory` gives, and a
-    listener cannot, is the cursor **with every row**.
-
-    **Per execute, never per fetch.** The count lives on the statement, so a
-    walk that streams a whole table in pages of ten reads as one statement of
-    however many rows it streamed. A per fetch reading is green on anything
-    that streams, which is the shape this exists to see.
-
-    **This measures transfer and never work.** `count(*)` over the whole table
-    is one row here, an `EXISTS` is one row, and a correlated subquery is
-    none. A member can read every row in the table and hand back a page
-    without any of it appearing in this list, so no reading over it may be
-    worded as a bound on what a statement cost.
-
-    **And as fetched, never as produced.** The count is taken row by row as
-    the driver hands them over, so a result abandoned part way counts what
-    entered the process rather than what the statement would have produced.
-    For everything read here the two agree, because a page compiles to a
-    LIMIT and every caller drains what it asked for.
-
-    **SQLite only, and loudly.** `row_factory` is a `sqlite3` API; on another
-    driver the same attribute means something else, and a silent zero would
-    make every reading over this pass. The suite runs on SQLite unless
-    `ENDPAPER_TEST_DATABASE_URL` asks otherwise, and the one job that asks
-    selects three files, none of them a caller of this.
-    """
-    from sqlalchemy import event
-    from sqlalchemy.orm import Session
-
-    from database import engine
-
-    assert engine.dialect.name == "sqlite", (
-        f"the row counter is a sqlite3 row_factory and this engine is "
-        f"{engine.dialect.name}, where the same attribute means something "
-        "else. Counting nothing here would pass every reading over it."
-    )
-
-    seen: list[Statement] = []
-
-    def stamp(state: Any) -> None:
-        # Carried on the execution's own options rather than in a slot this
-        # module pops at the next statement. A slot is ordered rather than
-        # attributed: measured, one autoflush INSERT between the event and
-        # its own statement moves every label along by one, and the load the
-        # arm is about lands unattributed.
-        #
-        # **One path inherits a stamp instead of being given one**, and
-        # removing this note is how it stops being known: `subqueryload`
-        # copies the parent execution's options onto its sub query, so that
-        # statement carries the parent's entity with `relationship` still
-        # unset until this event fires for it and overwrites both. Latent,
-        # because `shelf.py` uses `joinedload` and `selectinload` only; a
-        # sub query load added there would arrive keyed as a primary load of
-        # the parent entity until the overwrite lands.
-        mapper = state.bind_mapper
-        state.update_execution_options(
-            _rows_entity=mapper.class_ if mapper is not None else None,
-            _rows_relationship=bool(state.is_relationship_load),
-        )
-
-    def record(
-        conn: Any, cursor: Any, statement: str, parameters: Any, context: Any, many: Any
-    ) -> None:
-        options = context.execution_options
-        entry = Statement(
-            sql=statement,
-            entity=options.get("_rows_entity"),
-            relationship=bool(options.get("_rows_relationship")),
-        )
-        seen.append(entry)
-
-        def count(_cursor: Any, row: Any) -> Any:
-            entry.rows += 1
-            return row
-
-        cursor.row_factory = count
-
-    event.listen(Session, "do_orm_execute", stamp)
-    event.listen(engine, "before_cursor_execute", record)
-    try:
-        yield seen
-    finally:
-        event.remove(engine, "before_cursor_execute", record)
-        event.remove(Session, "do_orm_execute", stamp)
-
-
-def peak_rows(seen: list[Statement]) -> dict[tuple[type | None, bool], int]:
-    """The largest single load of each `(entity, relationship)` pair.
-
-    **Keyed on the pair, and each half of the key earns its place.** A
-    relationship load returns one row per related row behind the page, so it
-    is bounded by the fan out and not by the page: measured, a page of ten
-    over a shelf with three tags a book is ten rows of `Book` and thirty of
-    `Tag` in one correct walk, and an unkeyed **absolute** ceiling reddens on
-    that before it ever sees a defect.
-
-    **That is an argument against an absolute reading and not against
-    including the load.** A **relative** reading over two shelf sizes cancels
-    a constant fan out, so a relationship load belongs in the comparison. An
-    earlier shape here dropped them before the caller saw them, which put a
-    collection load hoisted off the page onto the whole shelf outside every
-    reading over this helper, keyed or not.
-
-    **The peak, never the sum.** Two statements adding up to the same total
-    are the same number, so a total cannot tell a second full pass from a
-    correct walk, and a one row probe anywhere in the request moves it. The
-    same reading is why the class in `tests/routers/test_books.py` counts
-    channels rather than summing them.
-
-    Statements the ORM did not issue as a load keep the key
-    `(None, False)` rather than being dropped, so a whole table read through
-    `text()` still has somewhere to appear.
-    """
-    peaks: dict[tuple[type | None, bool], int] = {}
-    for statement in seen:
-        key = (statement.entity, statement.relationship)
-        peaks[key] = max(peaks.get(key, 0), statement.rows)
-    return peaks
-
-
 def items(response: httpx.Response) -> list[Any]:
     """Unwrap a paginated response body.
 
@@ -263,48 +109,6 @@ NLG = "http://catalogue.nlg.gr:210/biblios"
 NKP = "http://aleph.nkp.cz:9991/NKC"
 BNE = "https://catalogo.bne.es/view/sru/34BNE_INST"
 
-#: Where each cover host resolves for the whole suite. `cover_resolver` below is
-#: what answers, and `tests/conftest.py` installs it on `covers.resolver`.
-#:
-#: **Every cover request is addressed to one of these and not to the name.**
-#: `covers._client` goes through `fetch.pinned_client`, which connects to the
-#: address rather than looking the name up twice, and respx's default mocker
-#: patches httpcore, which is below that transport. So a route registered under
-#: a cover host's name is never matched. `tests/test_opds.py` records the same
-#: property one door along.
-#:
-#: **Globally routable literals, deliberately, and a documentation range will
-#: not do.** `fetch.PUBLIC_ADDRESSES` admits `AddressClass.PUBLIC` only, and
-#: Python answers `is_private` True for 192.0.2.0/24, 198.51.100.0/24 and
-#: 203.0.113.0/24, so `fetch.classify` calls all three RESERVED and the policy
-#: refuses them: routes registered there would never be reached. Nothing
-#: connects to these, because respx answers below the transport.
-AT_OPEN_LIBRARY_COVERS = "https://1.2.3.4/"
-AT_DNB_COVERS = "https://1.2.3.5/opac/mvb/cover"
-AT_GOOGLE_BOOKS_COVERS = "https://1.2.3.6/"
-
-#: Where every other cover host answers, the two wildcard entries included.
-AT_ANY_COVER_HOST = "1.2.3.7"
-
-_COVER_ADDRESSES = {
-    "covers.openlibrary.org": "1.2.3.4",
-    "portal.dnb.de": "1.2.3.5",
-    "books.google.com": "1.2.3.6",
-}
-
-
-async def cover_resolver(host: str, port: int) -> tuple[str, ...]:
-    """`covers.resolver` for the suite: a fixed address per image service.
-
-    **A map rather than `tests/test_fetch.py`'s `_Answers`**, which answers one
-    address per *call* in order. A cover walk asks about a different host on
-    each hop, and `resolve` asks about two services in one run, so an ordered
-    double would make a route's address depend on how many lookups a test
-    happened to make before it.
-    """
-    return (_COVER_ADDRESSES.get(host, AT_ANY_COVER_HOST),)
-
-
 #: An SRU envelope holding no records. Every SRU source answers 200 with an
 #: empty set rather than a 404, so mocking a 404 would test a case none of them
 #: produces.
@@ -331,9 +135,7 @@ def silence_covers(mock: Any) -> Any:
     A cover is checked before it is stored now, so every successful lookup
     reaches these hosts and an unstubbed test fails on the request.
     """
-    # The addresses, not the names: see `AT_OPEN_LIBRARY_COVERS` for why a route
-    # under a cover host's name is never matched.
-    for base in (AT_OPEN_LIBRARY_COVERS, AT_DNB_COVERS):
+    for base in (OPEN_LIBRARY_COVERS, DNB_COVERS):
         mock.get(url__regex=f"{re.escape(base)}.*").mock(
             return_value=httpx.Response(404)
         )

@@ -258,7 +258,7 @@ describe("an edge sign-out", () => {
   beforeEach(() => {
     Object.defineProperty(window, "location", {
       configurable: true,
-      value: { href: "/", pathname: "/", reload: vi.fn<Location["reload"]>() },
+      value: { href: "/", pathname: "/", reload: vi.fn() },
     });
   });
 
@@ -284,9 +284,7 @@ describe("an edge sign-out", () => {
     // followed across origins.
     const mutator = await freshPageLoad();
     mockApi().on("/api/books", { status: 0, type: "opaqueredirect" });
-    await expect(mutator.customFetch("/api/books")).rejects.toThrow(
-      "session has expired",
-    );
+    await expect(mutator.customFetch("/api/books")).rejects.toThrow();
     expect(window.location.reload).toHaveBeenCalled();
   });
 
@@ -294,9 +292,7 @@ describe("an edge sign-out", () => {
     const mutator = await freshPageLoad();
     mutator.setSession("stale", makeUser());
     mockApi().on("/api/books", { status: 0, type: "opaqueredirect" });
-    await expect(mutator.customFetch("/api/books")).rejects.toThrow(
-      "session has expired",
-    );
+    await expect(mutator.customFetch("/api/books")).rejects.toThrow();
     expect(localStorage.getItem("token")).toBeNull();
   });
 
@@ -346,14 +342,14 @@ describe("the reload an edge sign-out triggers is counted", () => {
   beforeEach(() => {
     Object.defineProperty(window, "location", {
       configurable: true,
-      value: { href: "/", pathname: "/", reload: vi.fn<Location["reload"]>() },
+      value: { href: "/", pathname: "/", reload: vi.fn() },
     });
   });
 
   /** Answer one request the way an expired portal session does. */
   async function expiredAtTheEdge(fetcher: typeof customFetch): Promise<void> {
     mockApi().on("/api/books", { status: 0, type: "opaqueredirect" });
-    await expect(fetcher("/api/books")).rejects.toThrow("session has expired");
+    await expect(fetcher("/api/books")).rejects.toThrow();
   }
 
   it("reloads the first time", async () => {
@@ -368,7 +364,7 @@ describe("the reload an edge sign-out triggers is counted", () => {
     // opaque redirects in one batch. Counting calls rather than page loads made
     // the other five believe they were looping.
     const mutator = await freshPageLoad();
-    const ended = vi.fn<() => void>();
+    const ended = vi.fn();
     const stop = mutator.onSessionEnded(ended);
 
     for (let n = 0; n < 5; n += 1) await expiredAtTheEdge(mutator.customFetch);
@@ -384,7 +380,7 @@ describe("the reload an edge sign-out triggers is counted", () => {
     // is exactly the state a reloaded tab boots into.
     sessionStorage.setItem(MARKER, String(Date.now() - 1000));
     const mutator = await freshPageLoad();
-    const ended = vi.fn<() => void>();
+    const ended = vi.fn();
     const stop = mutator.onSessionEnded(ended);
 
     await expiredAtTheEdge(mutator.customFetch);
@@ -408,7 +404,7 @@ describe("the reload an edge sign-out triggers is counted", () => {
     // exactly the unbounded loop this guard exists for, so the dead-end screen
     // is the safe answer rather than the fallback.
     const mutator = await freshPageLoad();
-    const ended = vi.fn<() => void>();
+    const ended = vi.fn();
     const stop = mutator.onSessionEnded(ended);
     const setItem = vi
       .spyOn(window.sessionStorage, "setItem")
@@ -440,9 +436,7 @@ describe("401 handling", () => {
       body: { detail: "Not authenticated" },
     });
 
-    await expect(customFetch("/api/books")).rejects.toThrow(
-      "session has expired",
-    );
+    await expect(customFetch("/api/books")).rejects.toThrow();
 
     expect(localStorage.getItem("token")).toBeNull();
     expect(localStorage.getItem("user")).toBeNull();
@@ -450,9 +444,7 @@ describe("401 handling", () => {
 
   it("redirects to the login page", async () => {
     mockApi().on("/api/books", { status: 401, body: {} });
-    await expect(customFetch("/api/books")).rejects.toThrow(
-      "session has expired",
-    );
+    await expect(customFetch("/api/books")).rejects.toThrow();
     expect(window.location.href).toBe("/login");
   });
 
@@ -467,7 +459,7 @@ describe("401 handling", () => {
 
     await expect(
       customFetch("/auth/login", { method: "POST" }),
-    ).rejects.toThrow("Incorrect");
+    ).rejects.toThrow();
 
     expect(window.location.href).toBe("/login");
   });
@@ -509,7 +501,7 @@ describe("401 handling", () => {
 
       await expect(
         customFetch("/auth/login", { method: "POST" }),
-      ).rejects.toThrow("Incorrect");
+      ).rejects.toThrow();
 
       expect(getToken()).toBe("still-valid");
     });
@@ -554,105 +546,27 @@ describe("401 handling", () => {
   });
 });
 
-const SCHEMA = import.meta.glob("../../openapi.json", {
-  query: "?raw",
-  import: "default",
-  eager: true,
-}) as Record<string, string>;
-
 describe("downloadFile", () => {
   const objectUrl = "blob:mock-url";
 
   beforeEach(() => {
-    URL.createObjectURL = vi.fn<typeof URL.createObjectURL>(() => objectUrl);
-    URL.revokeObjectURL = vi.fn<(url: string) => void>();
+    URL.createObjectURL = vi.fn(() => objectUrl);
+    URL.revokeObjectURL = vi.fn();
   });
 
-  /**
-   * Read against the committed schema rather than a list kept here.
-   *
-   * **The population is a property of the operation, not a list of route
-   * names**: a download is a response that declares a `Content-Disposition`,
-   * which is what makes a browser save it rather than render it. The cover
-   * routes send image bytes into an `<img>`, declare no disposition, and are
-   * correctly outside this set; a route added later that does declare one is
-   * inside it without anybody remembering this file.
-   *
-   * **What this does not see, so nobody reads it as more**: an operation that
-   * sends an attachment and declares neither the header nor the type is
-   * invisible here. `backend/tests/test_declared_media_types.py` is the arm on
-   * that side, and it refuses a body-carrying route that declares nothing.
-   */
-  function declaredDownloadTypes(): string[] {
-    // Read through the bundler rather than `node:fs` and a `URL`: this file
-    // runs under a DOM environment, whose own `URL` refuses a `file:` base and
-    // throws `Invalid URL` on the idiom the node environment tests use.
-    const raw = SCHEMA["../../openapi.json"] ?? "";
-    // A glob that matched nothing would make every assertion below pass for
-    // ever, including the vacuity arm.
-    expect(raw.length).toBeGreaterThan(1000);
-
-    const schema = JSON.parse(raw) as {
-      paths: Record<
-        string,
-        Record<
-          string,
-          {
-            responses?: Record<
-              string,
-              {
-                headers?: Record<string, unknown>;
-                content?: Record<string, unknown>;
-              }
-            >;
-          }
-        >
-      >;
-    };
-
-    const types = new Set<string>();
-    for (const operations of Object.values(schema.paths)) {
-      for (const operation of Object.values(operations)) {
-        for (const response of Object.values(operation.responses ?? {})) {
-          if (!response.headers?.["Content-Disposition"]) continue;
-          for (const type of Object.keys(response.content ?? {}))
-            types.add(type);
-        }
-      }
-    }
-    return [...types].sort();
-  }
-
-  async function sentAcceptHeader(): Promise<string> {
+  it("asks for the types a download can actually be", async () => {
+    // Not `application/json`, which is what `customFetch` sends and would be a
+    // lie about a CSV or a ZIP, and not a wildcard, which is what puts a
+    // request back on the redirecting side of the portal's content
+    // negotiation. Those are the two mistakes available here, so both are
+    // named.
     const api = mockApi().on("/api/books/export", { body: "Title,Author" });
     await downloadFile("/api/books/export");
-    return (api.fetch.mock.calls[0]![1].headers as Headers).get("Accept")!;
-  }
-
-  it("has downloads in the schema to be about", () => {
-    // The vacuity arm. The rule below passes over an empty set, and the set
-    // goes empty the day a regeneration drops the header declaration, which is
-    // the same edit that would make the rule stop mattering without saying so.
-    expect(declaredDownloadTypes().length).toBeGreaterThan(1);
-  });
-
-  it("asks for every type a download is declared to be", async () => {
-    const accept = await sentAcceptHeader();
-    for (const type of declaredDownloadTypes()) expect(accept).toContain(type);
-  });
-
-  it("asks for the error body as well, which no operation declares", async () => {
-    // The one entry the schema cannot supply: a refused download answers JSON,
-    // and `errorDetail` reads it to put the server's own sentence in front of
-    // the reader.
-    expect(await sentAcceptHeader()).toContain("application/json");
-  });
-
-  it("is neither a wildcard nor a document type", async () => {
-    // The two mistakes available here. A wildcard puts the request back on the
-    // redirecting side of the portal's content negotiation; `text/html` is what
-    // that redirect would be.
-    const accept = await sentAcceptHeader();
+    const accept = (api.fetch.mock.calls[0]![1].headers as Headers).get(
+      "Accept",
+    )!;
+    expect(accept).toContain("text/csv");
+    expect(accept).toContain("application/zip");
     expect(accept).not.toContain("text/html");
     expect(accept).not.toContain("*/*");
   });

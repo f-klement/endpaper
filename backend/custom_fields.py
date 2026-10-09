@@ -11,13 +11,6 @@ already been through the Shelf.
 narrows to a viewer; this module is handed rows that were already narrowed, so
 taking one would put the privacy rule in two places.
 
-**Which definitions a Member may be told exist is therefore next door**, in
-`fields.py`, for the same reason `shelving.py` is not inside `collections`.
-The two questions are different: this module owns the table, its writes and
-what a value means, and `fields.Fields` owns who may be told a row is there.
-The one place they meet is `definitions`, which `Fields.listable` reads and
-narrows.
-
 ## Rendering a value as a link is an injection surface
 
 **The kind is declared, never detected**, so a value cannot become a link by
@@ -50,15 +43,6 @@ from models import (
     CustomField,
     CustomFieldValue,
 )
-
-#: The name of the table this module owns.
-#:
-#: Published so `folding.TRANSFERS` can declare a merge policy for it without
-#: importing `CustomFieldValue`, which is the import
-#: `TestOnlyABookReachesAValue::test_no_module_but_the_seam_imports_the_value`
-#: refuses to every other module. A merge needs this table's identity, not its
-#: values, and `resolve_merge` below is still the only thing that reads them.
-VALUES_TABLE = CustomFieldValue.__tablename__
 
 #: The two schemes a value may be linked at.
 #:
@@ -288,7 +272,7 @@ def _stored_form(kind: CustomFieldKind, value: str) -> str | None:
     string and no reader has to wonder which of the two a browser would follow.
     A TEXT field stores what was typed.
 
-    None means refuse, and only a URL field can produce it. It is a **400 at
+    None means refuse, and only a URL field can produce it. It is a **422 at
     the write**, which is the half `link_target` cannot do: silently degrading
     a mistyped URL to text would leave somebody looking at a field they
     declared a link and cannot click, with nothing saying why.
@@ -312,9 +296,7 @@ def definitions(db: Session) -> list[CustomField]:
     return db.query(CustomField).order_by(CustomField.id).all()
 
 
-def define(
-    db: Session, name: str, kind: CustomFieldKind, defined_by_user_id: int
-) -> CustomField:
+def define(db: Session, name: str, kind: CustomFieldKind) -> CustomField:
     """Define a field, or hand back the one that already has the name.
 
     **A collision returns the existing row rather than a 409**, which is what
@@ -342,13 +324,6 @@ def define(
     conflict, which changes behaviour under a load nobody has reported.
     `create_tag` has carried the identical second exposure since it was
     written.
-
-    **A collision does not re-author the row it hands back**, and that is the
-    half of `defined_by_user_id` worth stating. Authorship is who defined the
-    name, not who last asked for it, so a second Member typing an existing
-    name takes no stake in it; if it did, the rename rule built on the column
-    would be transferable by typing, which is the loop this feature already
-    has one of.
     """
     rows = definitions(db)
     folded = name.lower()
@@ -360,7 +335,7 @@ def define(
             f"This library already has {MAX_CUSTOM_FIELDS} custom fields, "
             "which is the most it can have. Delete one to add another."
         )
-    field = CustomField(name=name, kind=kind, created_by_user_id=defined_by_user_id)
+    field = CustomField(name=name, kind=kind)
     db.add(field)
     return field
 
@@ -379,14 +354,6 @@ def rename(db: Session, field: CustomField, name: str) -> CustomField:
     silently, by an operation whose whole purpose is not losing any. Its own
     name in a different case is not a collision, so fixing the capitalisation
     of a field is a rename like any other.
-
-    **The refusal does not name the field it clashed with, and that is a
-    privacy rule reaching a string rather than a wording preference.** The
-    clash is found over the whole table, which it has to be or two Members mint
-    colliding names, so the row it finds may be one `fields.Fields` would not
-    list for this caller. Naming it handed a hidden name back to anybody who
-    guessed it, which is a scoped list defeated by a 409. What the caller loses
-    is the stored capitalisation of a name they have just typed.
     """
     folded = name.lower()
     clash = next(
@@ -398,7 +365,7 @@ def rename(db: Session, field: CustomField, name: str) -> CustomField:
         None,
     )
     if clash is not None:
-        raise Refused("This library already has a field with that name.")
+        raise Refused(f"This library already has a field called {clash.name}.")
     field.name = name
     return field
 
@@ -406,16 +373,11 @@ def rename(db: Session, field: CustomField, name: str) -> CustomField:
 def remove(db: Session, field: CustomField) -> int:
     """Delete a field and every value under it. Returns how many values went.
 
-    User story 6. The count goes to the route's **log line** and no further,
-    for the reason in the second paragraph below, and the confirmation says
-    "every book" instead, which is true and needs no query.
-
-    **There is no counterexample, and this docstring used to name one.** It
-    cited `TagOut.book_count` as a count a confirmation may publish. That one
-    is the **reader's** count and deleting a tag is library wide, so it
-    understated the action by exactly the books the reader may not see: an
-    admin was told to take a tag off 3 books when it was on two hundred. The
-    tag confirmation now says "every book" for the same reason this one does.
+    User story 6. The count goes to the route's **log line** and no further:
+    `TagOut.book_count` exists so a confirmation can say "take this off 214
+    books", and the equivalent number here cannot be published, for the reason
+    in the second paragraph below. The confirmation says "every book" instead,
+    which is true and needs no query.
 
     **The values are deleted here rather than left to the cascade.** SQLite
     enforces a foreign key only while `PRAGMA foreign_keys` is on, which
@@ -564,15 +526,15 @@ def resolve_merge(db: Session, keeper_id: int, loser_ids: Collection[int]) -> No
     **Not scoped to a Book anybody is holding**, and it cannot be: the merge
     deletes the losing rows, the cascade takes their values with them, and the
     Library silently loses what it typed on the Book that lost. Classifications,
-    notes, quotes and reading records are all moved across by `folding.fold`
-    for the same reason, and every one of them is there because leaving it out
-    destroyed something quietly.
+    notes, quotes and reading records are all moved across in
+    `routers/books.py::_repoint_relations` for the same reason, and every one of
+    them is there because leaving it out destroyed something quietly.
 
     The values cannot simply move: `(book_id, field_id)` is unique, so a field
     filled in on two of the merged Books would violate it. **The keeper's own
     value wins and the duplicate is dropped**, because that is the value
     attached to the Book that continues to exist. Among losers, the lowest id
-    wins, which is the same tie break `folding.fold` uses for
+    wins, which is the same tie break `_repoint_relations` uses for
     classifications.
 
     Built to be called before the flush, so it reads what is in the database

@@ -12,18 +12,18 @@ import { describe, expect, it, vi } from "vitest";
 import BackupSection from "../../../../../src/pages/SettingsPage/DataSettingsPage/components/BackupSection";
 import { renderLocalised } from "../../../../utils";
 
-type SectionProps = React.ComponentProps<typeof BackupSection>;
-
-function renderSection(overrides: Partial<SectionProps> = {}) {
+function renderSection(
+  overrides: Partial<React.ComponentProps<typeof BackupSection>> = {},
+) {
   const props = {
     // The page owns the fold; these tests are about what is inside it.
     isDownloading: false,
     downloadError: null,
-    onDownload: vi.fn<SectionProps["onDownload"]>(),
+    onDownload: vi.fn(),
     isRestoring: false,
     restoreError: null,
     restored: null,
-    onRestore: vi.fn<SectionProps["onRestore"]>(),
+    onRestore: vi.fn(),
     ...overrides,
   };
   renderLocalised(<BackupSection {...props} />);

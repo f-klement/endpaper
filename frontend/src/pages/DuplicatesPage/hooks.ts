@@ -14,14 +14,6 @@ import { useInvalidate } from "../../api/invalidate";
 
 export interface UseDuplicatesResult {
   groups: DuplicateGroup[];
-  /**
-   * Groups the scan found, which is not the number of groups above.
-   *
-   * The server caps how many books one answer carries, so a library where an
-   * import ran twice is told the size of what happened instead of being
-   * handed it.
-   */
-  totalGroups: number;
   isLoading: boolean;
   error: unknown;
   refetch: () => void;
@@ -50,8 +42,7 @@ export function useDuplicates(): UseDuplicatesResult {
   });
 
   return {
-    groups: query.data?.groups ?? [],
-    totalGroups: query.data?.total_groups ?? 0,
+    groups: query.data ?? [],
     isLoading: query.isPending,
     error: query.error,
     refetch: () => void query.refetch(),

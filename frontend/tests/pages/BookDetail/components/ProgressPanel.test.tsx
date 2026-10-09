@@ -16,11 +16,8 @@ import { makeBook, makeProgress } from "../../../factories";
 import { renderLocalised } from "../../../utils";
 
 function renderPanel(book: Partial<BookOut> = {}, entries: ProgressOut[] = []) {
-  const onRecord =
-    vi.fn<
-      (entry: { page?: number; percent?: number; minutes?: number }) => void
-    >();
-  const onRemove = vi.fn<(progressId: number) => void>();
+  const onRecord = vi.fn();
+  const onRemove = vi.fn();
   renderLocalised(
     <ProgressPanel
       book={makeBook(book)}

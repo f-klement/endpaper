@@ -14,12 +14,7 @@ import { describe, expect, it, vi } from "vitest";
 import CollapsibleSection from "../../src/components/CollapsibleSection";
 import { renderLocalised } from "../utils";
 
-function render(
-  isOpen: boolean,
-  onToggle = vi.fn<
-    React.ComponentProps<typeof CollapsibleSection>["onToggle"]
-  >(),
-) {
+function render(isOpen: boolean, onToggle = vi.fn()) {
   renderLocalised(
     <CollapsibleSection
       id="lending"
@@ -83,7 +78,7 @@ describe("CollapsibleSection", () => {
         id="writing"
         title="Notes and quotes"
         isOpen={true}
-        onToggle={vi.fn<() => void>()}
+        onToggle={vi.fn()}
       >
         <input aria-label="note" defaultValue="half a thought" />
       </CollapsibleSection>,
@@ -94,7 +89,7 @@ describe("CollapsibleSection", () => {
         id="writing"
         title="Notes and quotes"
         isOpen={false}
-        onToggle={vi.fn<() => void>()}
+        onToggle={vi.fn()}
       >
         <input aria-label="note" defaultValue="half a thought" />
       </CollapsibleSection>,

@@ -2,21 +2,16 @@ import { useState } from "react";
 
 import { Button, Icon } from "../../../components";
 import { useTranslation } from "../../../i18n";
-import { MAX_NAME_LENGTH } from "../../../lib/savedSearches";
-import type { SavedSearchChoice } from "../hooks";
+import { MAX_NAME_LENGTH, type SavedSearch } from "../../../lib/savedSearches";
 import type { BookFilters } from "../types";
 
 interface SavedSearchesProps {
-  /** The kept views and the two verbs for them, as one value. */
-  saved: SavedSearchChoice;
+  searches: SavedSearch<BookFilters>[];
   /** Whether the grid is currently narrowed, so there is anything to save. */
   canSave: boolean;
-  /**
-   * Apply one. Stays a callback rather than joining `saved`, because applying a
-   * saved view writes the filters and the filters are not a preference: they
-   * belong to `useLibrary`, which is the one door they are written through.
-   */
   onApply: (filters: BookFilters) => void;
+  onSave: (name: string) => void;
+  onDelete: (id: string) => void;
 }
 
 /**
@@ -26,18 +21,19 @@ interface SavedSearchesProps {
  * "everything" is offering to save the page somebody is already on.
  */
 export default function SavedSearches({
-  saved,
+  searches,
   canSave,
   onApply,
+  onSave,
+  onDelete,
 }: SavedSearchesProps) {
-  const { searches, save, remove } = saved;
   const { t } = useTranslation();
   const [naming, setNaming] = useState(false);
   const [name, setName] = useState("");
 
   function commit() {
     if (!name.trim()) return;
-    save(name);
+    onSave(name);
     setName("");
     setNaming(false);
   }
@@ -60,7 +56,7 @@ export default function SavedSearches({
           </button>
           <button
             type="button"
-            onClick={() => remove(search.id)}
+            onClick={() => onDelete(search.id)}
             aria-label={t("saved.forget", { name: search.name })}
             className="rounded-full p-1 text-paper-600 hover:text-danger-600 dark:text-paper-400 dark:hover:text-danger-300"
           >

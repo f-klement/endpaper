@@ -14,8 +14,6 @@ import { describe, expect, it, vi } from "vitest";
 import AddressField from "../../../../../src/pages/SettingsPage/AccountSettingsPage/components/AddressField";
 import { renderLocalised } from "../../../../utils";
 
-type OnSave = NonNullable<React.ComponentProps<typeof AddressField>["onSave"]>;
-
 function member(
   overrides: Partial<Parameters<typeof AddressField>[0]["member"]> = {},
 ) {
@@ -36,7 +34,7 @@ describe("AddressField", () => {
         member={member({ email: "kim@example.org" })}
         label="Your address"
         disabled={false}
-        onSave={vi.fn<OnSave>()}
+        onSave={vi.fn()}
       />,
     );
 
@@ -46,7 +44,7 @@ describe("AddressField", () => {
   });
 
   it("trims what was typed before handing it over", async () => {
-    const onSave = vi.fn<OnSave>();
+    const onSave = vi.fn();
     renderLocalised(
       <AddressField
         member={member()}
@@ -66,7 +64,7 @@ describe("AddressField", () => {
   });
 
   it("hands over null for a field with nothing in it", async () => {
-    const onSave = vi.fn<OnSave>();
+    const onSave = vi.fn();
     renderLocalised(
       <AddressField
         member={member({ email: "kim@example.org" })}
@@ -88,7 +86,7 @@ describe("AddressField", () => {
         member={member({ email: "kim@directory.example", editable: false })}
         label="Your address"
         disabled={false}
-        onSave={vi.fn<OnSave>()}
+        onSave={vi.fn()}
       />,
     );
 
@@ -102,7 +100,7 @@ describe("AddressField", () => {
         member={member({ editable: false })}
         label="Your address"
         disabled={false}
-        onSave={vi.fn<OnSave>()}
+        onSave={vi.fn()}
       />,
     );
 
@@ -121,7 +119,7 @@ describe("AddressField", () => {
         member={member()}
         label="Your address"
         disabled={false}
-        onSave={vi.fn<OnSave>()}
+        onSave={vi.fn()}
       />,
     );
     expect(screen.getByText("None set.")).toBeInTheDocument();
@@ -142,7 +140,7 @@ describe("AddressField", () => {
         member={member()}
         label="Your address"
         disabled={false}
-        onSave={vi.fn<OnSave>()}
+        onSave={vi.fn()}
       />,
     );
     const field = screen.getByLabelText("Your address");
@@ -159,7 +157,7 @@ describe("AddressField", () => {
         member={member()}
         label="Your address"
         disabled={false}
-        onSave={vi.fn<OnSave>()}
+        onSave={vi.fn()}
       />,
     );
 
@@ -168,7 +166,7 @@ describe("AddressField", () => {
         member={member({ email: "kim@example.org" })}
         label="Your address"
         disabled={false}
-        onSave={vi.fn<OnSave>()}
+        onSave={vi.fn()}
       />,
     );
 

@@ -83,8 +83,6 @@ export * from "./digitalReferenceIn.ts";
 export * from "./digitalReferenceOut.ts";
 export * from "./divisionFacetOut.ts";
 export * from "./duplicateGroup.ts";
-export * from "./duplicateMember.ts";
-export * from "./duplicateReport.ts";
 export * from "./emailUpdate.ts";
 export * from "./enrichBookParams.ts";
 export * from "./exportBooksParams.ts";

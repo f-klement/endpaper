@@ -178,32 +178,6 @@ class TestCheckedConfig:
         monkeypatch.setenv("MAIL_USE_TLS", "false")
         assert mailer.checked_config(configured).use_tls is False
 
-    @pytest.mark.parametrize(
-        ("username", "password", "field"),
-        [
-            ("library", "p" + chr(0xE4) + "ss", "password"),
-            ("libr" + chr(0xE4) + "ry", "pass", "username"),
-        ],
-    )
-    def test_refuses_a_credential_the_mail_library_cannot_encode(
-        self, configured, username, password, field
-    ):
-        """`smtplib` encodes both as ASCII under PLAIN, LOGIN and CRAM-MD5, so
-        no server can accept them: a setting to change, not an outage. The
-        refusal names the field and never the value."""
-        settings_store.set_value(configured, SettingKey.MAIL_USERNAME, username)
-        settings_store.set_value(configured, SettingKey.MAIL_PASSWORD, password)
-        with pytest.raises(mailer.MailRefused, match=f"mail {field} has a character") as raised:
-            mailer.checked_config(configured)
-        assert chr(0xE4) not in str(raised.value)
-
-    def test_a_password_no_login_will_send_is_not_refused_for_its_characters(
-        self, configured
-    ):
-        """No username, no login: `_deliver` sends no credential at all."""
-        settings_store.set_value(configured, SettingKey.MAIL_PASSWORD, "p" + chr(0xE4) + "ss")
-        mailer.checked_config(configured)
-
     def test_no_message_names_the_password(self, configured):
         settings_store.set_value(configured, SettingKey.MAIL_USE_TLS, "false")
         settings_store.set_value(configured, SettingKey.MAIL_PASSWORD, "hunter2")

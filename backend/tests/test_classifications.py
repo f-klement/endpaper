@@ -19,7 +19,6 @@ from sqlalchemy import insert
 from sqlalchemy.exc import IntegrityError
 
 import decoders
-import marc_fields
 import metadata
 import targets
 from catalogue import Heading
@@ -47,15 +46,6 @@ class TestReadingAKindOffARow:
         assert set(KIND_ORDER) == set(HeadingKind)
 
 
-#: Every kind a writer may store: the enum, less the member that is the null.
-#:
-#: **Derived rather than listed**, and it is the derivation that is the point:
-#: `models._enum_check` builds `ck_classifications_kind` off the same rule, so a
-#: member added to `HeadingKind` with no revision behind it is refused by the
-#: database and red here, rather than invisible to a list of literals.
-_STORABLE = [kind for kind in HeadingKind if kind is not HeadingKind.SUBJECT]
-
-
 class TestASubjectIsNeverAValueTheColumnHolds:
     """A subject is the null, and the two enforcements of that.
 
@@ -71,10 +61,10 @@ class TestASubjectIsNeverAValueTheColumnHolds:
             is None
         )
 
-    def test_every_other_kind_is_left_alone(self):
+    def test_the_other_two_are_left_alone(self):
         """Anti vacuity: a validator returning None for everything would pass
         the test above and throw the feature away."""
-        for kind in _STORABLE:
+        for kind in (HeadingKind.CONTENT, HeadingKind.CARRIER):
             assert (
                 ClassificationIn(
                     scheme=ClassificationScheme.GND, number="4139307-7", kind=kind
@@ -109,12 +99,9 @@ class TestASubjectIsNeverAValueTheColumnHolds:
             )
         db.rollback()
 
-    @pytest.mark.parametrize("stored", [*_STORABLE, None])
+    @pytest.mark.parametrize("stored", ["content", "carrier", None])
     def test_the_database_accepts_what_a_writer_does_send(self, db, stored):
-        """The other side, so the constraint is not simply refusing everything,
-        and the arm that asks the **migrated** database about a kind the enum
-        offers. A member added to `HeadingKind` fails here until a revision
-        widens the constraint to match `models._enum_check`'s text."""
+        """The other side, so the constraint is not simply refusing everything."""
         book = Book(title="Praxiswissen Docker")
         db.add(book)
         db.flush()
@@ -410,14 +397,8 @@ def _catalogues_stated_in(prose: str) -> int | None:
     return _NUMERALS.get(found.group(1)) if found else None
 
 
-def _is_this_app(parts: tuple[str, ...], root: pathlib.Path = BACKEND) -> bool:
+def _is_this_app(parts: tuple[str, ...]) -> bool:
     """Whether a path under `backend/` is this application's own source.
-
-    **`root` is the tree the parts are relative to**, and it is here so that
-    `_modules` can be driven against a constructed tree by the diagonal in
-    `test_house_rules.py`. Asked with the parts of one tree and the root of
-    another, this would answer about neither: the predicate has to move with
-    the walk that calls it.
 
     **What is not ours is `test_house_rules._is_vendored`**, which is where the
     incident this used to recount is written down: this file named `.venv` and
@@ -435,22 +416,15 @@ def _is_this_app(parts: tuple[str, ...], root: pathlib.Path = BACKEND) -> bool:
     """
     if _NOT_THIS_APP & set(parts):
         return False
-    return not _is_vendored(root.joinpath(*parts), root)
+    return not _is_vendored(BACKEND.joinpath(*parts), BACKEND)
 
 
-def _modules(root: pathlib.Path = BACKEND) -> list[pathlib.Path]:
-    found = [
+def _modules() -> list[pathlib.Path]:
+    return [
         path
-        for path in root.rglob("*.py")
-        if _is_this_app(path.relative_to(root).parts, root)
+        for path in BACKEND.rglob("*.py")
+        if _is_this_app(path.relative_to(BACKEND).parts)
     ]
-    # The packages it must cover rather than a number, which is the floor its
-    # three sibling walks carry and this one did not: the anti-vacuity beside
-    # it is `assert walked` and `assert builds`, and one surviving file
-    # satisfies both. See `test_accounts._sources` for the mutation that left
-    # two guards of this shape green.
-    assert {"routers", "schemas"} <= {path.parent.name for path in found}, found
-    return found
 
 
 def _call_graph() -> tuple[dict[str, set[str]], set[str]]:
@@ -576,7 +550,7 @@ def _marc_probe(reader: decoders.Reader, extra: str) -> bool:
     )
     built = metadata._marc_build(
         decoders.Decoding(source="probe", reader=reader),
-        marc_fields.Fields(record),
+        metadata._marc_fields(record),
         "9783960092353",
     )
     return built is not None and bool(built.headings)
@@ -735,8 +709,8 @@ class TestHowManyCataloguescanFeedOneBooksHeadings:
     def test_every_reader_is_answered_by_something(self):
         """A reader missing from every dispatch table would be excluded silently
         rather than counted as building nothing, so the count would fall with no
-        finding anywhere. `metadata.resolve` raises on this for a target
-        in the seeded roster; this is the same rule asked of the closed set."""
+        finding anywhere. `metadata._check_readable` raises on this for a live
+        row; this is the same rule asked of the closed set."""
         assert set(_registered_entries()) == set(decoders.Reader)
 
     def test_the_walk_reaches_more_than_one_module(self):

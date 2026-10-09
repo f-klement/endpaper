@@ -348,25 +348,10 @@ export const customFetch = async <T>(
   // was measured twice and one of the two was written down as "absent".
   //
   // A 401 is the answer this file can act on. The 302 is what the endless
-  // spinner was built out of. Asking for JSON is also simply true of what this
-  // function fetches: every one of those operations either declares a JSON
-  // response or answers 204 with no body.
-  //
-  // **Of what this function fetches, and not of the whole schema**, which is a
-  // wider claim than the header needs and is false: `GET /api/backup` declares
-  // `application/zip` alone. The operations that send a file go through
-  // `downloadFile` below, which sends its own `Accept`, and the covers are
-  // loaded by the browser as images rather than through here.
-  //
-  // **So what would make this false is a caller, not a schema change**, and
-  // the callers that would are already generated: `downloadBackup`,
-  // `getCover` and `getLoginBackground` are each typed `Promise<Blob>` and
-  // each would fetch a non JSON body through this function. Nothing calls
-  // them. Calling one is the edit that breaks this paragraph, and it puts a
-  // blob behind an `Accept` that asked for JSON.
-  //
-  // The blob fallback below exists for a proxy's own error page rather than
-  // for an endpoint of ours.
+  // spinner was built out of. Asking for JSON is also simply true: every
+  // operation in the schema declares a JSON response, and the blob fallback
+  // below exists for a proxy's own error page rather than for an endpoint of
+  // ours.
   if (!headers.has("Accept")) headers.set("Accept", "application/json");
 
   // `redirect: "manual"` is what makes an edge sign-out detectable. Following
@@ -417,28 +402,15 @@ export const customFetch = async <T>(
 /**
  * What a download is willing to receive, and deliberately not a wildcard.
  *
- * `customFetch`'s plain `Accept: application/json` would be a lie here, and a
- * wildcard would put this request back on the wrong side of the portal's
- * content negotiation, which is the whole reason any of these requests carry
- * an `Accept` at all.
- *
- * **The list is pinned against the committed schema rather than maintained by
- * hand.** `tests/api/mutator.test.ts` derives the download operations from the
- * document, as those whose 200 declares a `Content-Disposition`, and requires
- * every media type they declare to be here. The hand maintained version said
- * "the ones this app actually downloads" and named `application/json` as an
- * export format, which does not exist, and `application/octet-stream`, which
- * nothing in this app sends, while omitting `text/plain` and
- * `application/marcxml+xml`, which are two of the three arms of the export.
- * Latent rather than broken, because the server performs no content
- * negotiation on these routes, and wrong in exactly the way the schema was
- * wrong about the same four operations.
- *
- * `application/json` stays, and is the one entry the schema does not supply: it
- * is the error body FastAPI sends when a download is refused.
+ * The three types are the ones this app actually downloads: a CSV or JSON
+ * export, and a ZIP backup, plus `application/json` for the error body FastAPI
+ * sends when the download is refused. `customFetch`'s plain
+ * `Accept: application/json` would be a lie here, and a wildcard would put this
+ * request back on the wrong side of the portal's content negotiation, which is
+ * the whole reason any of these requests carry an `Accept` at all.
  */
 const DOWNLOAD_ACCEPT =
-  "text/csv, text/plain, application/marcxml+xml, application/zip, application/json";
+  "application/octet-stream, application/zip, text/csv, application/json";
 
 /**
  * Fetch a file and hand it to the browser as a download.

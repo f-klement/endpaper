@@ -10,40 +10,21 @@ arrived with `fetch.pinned_client`, and it is the only class in this file whose
 addresses are resolved rather than written as literals.
 """
 
-import dataclasses
 import pathlib
 import time
-from dataclasses import dataclass
-from typing import Final
 from xml.etree import ElementTree
 
 import httpx
 import pytest
 import respx
-from hypothesis import given
-from hypothesis import strategies as st
 
 import fetch
 import opds
-import xml_parse
 from credentials import Credential
 from decoders import Decoding, Reader
 
 # **Imported, not copied.** The resolver double is one fact about how a lookup
 # is faked here, and `tests/test_fetch.py` is where the pin it feeds is tested.
-from tests.strategies import (
-    FAR_PAST_ANY_DEPTH,
-    Node,
-    answer_of,
-    charsets,
-    declared_encodings,
-    depths,
-    encoded,
-    field_values,
-    widths,
-    witness,
-    xml_of,
-)
 from tests.test_fetch import _Answers
 
 BACKEND = pathlib.Path(__file__).resolve().parent.parent
@@ -144,7 +125,7 @@ class TestWhatOneEntryBecomes:
         ]
 
     def test_several_authors_arrive_as_one_credit_list(self):
-        """Joined with a comma, which is what `books.author` is: see `authors.py`."""
+        """Joined with a comma, which is what `importing.identity_key` splits on."""
         entry = (
             "<entry><title>Good Omens</title>"
             "<author><name>Terry Pratchett</name></author>"
@@ -155,92 +136,6 @@ class TestWhatOneEntryBecomes:
         page = opds.read_page(_feed(entry))
 
         assert page.records[0].author == "Terry Pratchett, Neil Gaiman"
-
-    def test_a_catalogue_order_name_is_flipped_into_direct_order(self):
-        """This was the one import path that left a name in catalogue order.
-
-        Every other writer of `books.author` flips first, and `authors.py`
-        states that as an invariant. Unflipped, the credit folds to a bare
-        surname, so `Herbert, Frank` and `Herbert, James` became one author at
-        the site where that merges two books.
-        """
-        entry = (
-            "<entry><title>Dune</title>"
-            "<author><name>Herbert, Frank</name></author>"
-            '<link rel="http://opds-spec.org/acquisition" href="/d/3"/></entry>'
-        )
-
-        page = opds.read_page(_feed(entry))
-
-        assert page.records[0].author == "Frank Herbert"
-
-    def test_each_name_is_flipped_before_the_join_and_not_after(self):
-        """A joined credit line has a comma of its own.
-
-        `flip_catalogue_name` turns exactly one comma around, so running it
-        over the joined string would mangle every two author book. Per name is
-        the only place it is legal.
-        """
-        entry = (
-            "<entry><title>Good Omens</title>"
-            "<author><name>Pratchett, Terry</name></author>"
-            "<author><name>Gaiman, Neil</name></author>"
-            '<link rel="http://opds-spec.org/acquisition" href="/d/4"/></entry>'
-        )
-
-        page = opds.read_page(_feed(entry))
-
-        assert page.records[0].author == "Terry Pratchett, Neil Gaiman"
-
-    def test_a_name_is_capped_before_the_flip_and_not_after(self):
-        """The cap is observable, so it is pinned rather than only measured.
-
-        The flip moves the text after the comma to the front. Cap first and the
-        surname survives; cap after and the same slice keeps the given name
-        instead. An unbounded name also costs 0.760 s in the flip against 0.009 s
-        to parse the page it arrived in, on the event loop.
-        """
-        long_given = "B" * 600
-        entry = (
-            "<entry><title>Long</title>"
-            f"<author><name>Surname, {long_given}</name></author>"
-            '<link rel="http://opds-spec.org/acquisition" href="/d/6"/></entry>'
-        )
-
-        page = opds.read_page(_feed(entry))
-
-        assert page.records[0].author is not None
-        assert page.records[0].author.startswith("B")
-        assert page.records[0].author.endswith("Surname")
-
-    def test_a_name_that_is_only_a_comma_contributes_no_segment(self):
-        """The flip is what empties it, so the filter has to run after the flip.
-
-        `flip_catalogue_name(",")` is the empty string while `","` itself is not
-        blank, so filtering the raw value lets the segment through and the credit
-        line grows a comma nobody wrote.
-        """
-        entry = (
-            "<entry><title>Odd</title>"
-            "<author><name>,</name></author>"
-            "<author><name>Real Person</name></author>"
-            '<link rel="http://opds-spec.org/acquisition" href="/d/7"/></entry>'
-        )
-
-        page = opds.read_page(_feed(entry))
-
-        assert page.records[0].author == "Real Person"
-
-    def test_a_corporate_name_carrying_no_comma_is_left_alone(self):
-        entry = (
-            "<entry><title>Annual Report</title>"
-            "<author><name>British Library</name></author>"
-            '<link rel="http://opds-spec.org/acquisition" href="/d/5"/></entry>'
-        )
-
-        page = opds.read_page(_feed(entry))
-
-        assert page.records[0].author == "British Library"
 
     def test_an_author_element_with_no_name_contributes_no_empty_segment(self):
         entry = (
@@ -394,147 +289,6 @@ class TestTheIdentifierTheCensusSaysIsNotThere:
         assert opds.read_page(_feed(_book("Small Gods"))).records[0].isbn is None
 
 
-@dataclass(frozen=True)
-class FeedSpec:
-    """A feed page as a spec: its entries, how it is declared and labelled.
-
-    Drawn by `TestAPageIsReadOrRefusedByName` and rebuilt by `a_page` in every
-    named case it printed.
-    """
-
-    #: Each entry as its title, its one author and the `rel` of its one link,
-    #: any of which may be absent.
-    entries: tuple[tuple[str | None, str | None, str | None], ...]
-    #: The encoding the XML declaration names, or None for no declaration.
-    declaration: str | None
-    #: How deep a chain of elements inside one extra entry goes, 0 for none.
-    nest_depth: int
-    #: The charset the page is labelled with and written in.
-    charset: str
-    #: How many empty siblings the extra entry carries, 0 for none.
-    width: int = 0
-
-
-def page_text(spec: FeedSpec) -> str:
-    """The page the spec describes, as the server meant it."""
-    entries = []
-    for title, author, rel in spec.entries:
-        children = []
-        if title is not None:
-            children.append(Node("title", text=title))
-        if author is not None:
-            children.append(Node("author", children=(Node("name", text=author),)))
-        if rel is not None:
-            children.append(Node("link", (("rel", rel), ("href", "/d/1"))))
-        entries.append(Node("entry", children=tuple(children)))
-    if spec.nest_depth or spec.width:
-        entries.append(Node("entry", nest=spec.nest_depth, width=spec.width))
-    prolog = ""
-    if spec.declaration is not None:
-        prolog = f'<?xml version="1.0" encoding="{spec.declaration}"?>'
-    return (
-        prolog
-        + f'<feed xmlns="{opds.ATOM[1:-1]}">'
-        + "".join(xml_of(entry) for entry in entries)
-        + "</feed>"
-    )
-
-
-def a_page(spec: FeedSpec) -> str:
-    """The page the spec describes, as `holdings` hands it to `read_page`.
-
-    **Built at the `fetch.Fetched` seam, as bytes in a charset, and never as a
-    `str`**: the door only ever sees what that decoding produces.
-    """
-    written = encoded(page_text(spec), spec.charset)
-    return fetch.Fetched(200, written, spec.charset).text
-
-
-#: A `rel` an entry's link may carry: each that makes a holding, and two that do
-#: not, an entitlement and a navigation link.
-_RELS: Final = [*sorted(opds.HOLDING_RELS), "http://opds-spec.org/acquisition/borrow", "subsection"]
-
-FEEDS: Final = st.builds(
-    FeedSpec,
-    entries=st.lists(
-        st.tuples(
-            st.none() | field_values(),
-            st.none() | field_values(),
-            st.none() | st.sampled_from(_RELS),
-        ),
-        max_size=5,
-    ).map(tuple),
-    declaration=st.none() | declared_encodings(),
-    nest_depth=depths(xml_parse.MAX_DEPTH - 2),
-    charset=charsets(),
-    width=widths(),
-)
-
-
-def _read(spec: FeedSpec) -> opds.Page | opds.FeedUnreadable:
-    """What `read_page` answered for this page, or the refusal it raised."""
-    try:
-        return opds.read_page(a_page(spec))
-    except opds.FeedUnreadable as refusal:
-        return refusal
-
-
-@pytest.mark.property
-class TestAPageIsReadOrRefusedByName:
-    """`opds.read_page` answers a `Page` or `FeedUnreadable`, and nothing else.
-
-    Drawn at the transport's seam: the charset from the codec registry, often
-    one that decodes to a lone surrogate, which this door was already safe
-    from because its `ValueError` arm covers `UnicodeEncodeError`; and entries
-    whose links do and do not make a holding.
-    """
-
-    @given(spec=FEEDS)
-    def test_it_answers_a_page_or_refuses_inside_its_allocation_bound(self, spec):
-        """**The value is the spec's own**: every entry with no holding link is
-        counted as not held, which is what tells a member they pointed at the
-        wrong feed. Checked where the charset carried the page unchanged, since
-        a codec that rewrites markup writes a different page."""
-        page = a_page(spec)
-        got = answer_of(opds.read_page, page, answers=opds.Page, refuses=opds.FeedUnreadable)
-        assert got.peak <= opds.ALLOCATION_FACTOR * len(page.encode()) + xml_parse.ALLOCATION_FLOOR
-        if spec.nest_depth > xml_parse.MAX_DEPTH - 2:
-            assert got.refusal is not None
-        if got.value is not None and page == page_text(spec):
-            unheld = sum(rel not in opds.HOLDING_RELS for _, _, rel in spec.entries)
-            assert got.value.not_held == unheld + (1 if spec.nest_depth or spec.width else 0)
-
-    def test_the_generator_still_reaches_a_page_of_records(self):
-        witness(
-            FEEDS,
-            lambda spec: isinstance(page := _read(spec), opds.Page) and bool(page.records),
-            reaches="a page read into records",
-        )
-
-    def test_the_generator_still_reaches_an_entry_not_held(self):
-        witness(
-            FEEDS,
-            lambda spec: isinstance(page := _read(spec), opds.Page) and page.not_held > 0,
-            reaches="an entry counted as not held",
-        )
-
-    def test_the_generator_still_reaches_a_wide_entry_read(self):
-        """The allocation factor's positive control is this shape reaching the
-        parse, asked of what the door answered."""
-        witness(
-            FEEDS,
-            lambda spec: spec.width > 0 and isinstance(_read(spec), opds.Page),
-            reaches="an entry of `WIDE` empty siblings, read",
-        )
-
-    def test_the_generator_still_reaches_the_depth_bound(self):
-        witness(
-            FEEDS,
-            lambda spec: "nested more than" in str(_read(spec)),
-            reaches="a nest past the depth bound",
-        )
-
-
 class TestWhatThisReaderRefusesToParse:
     def test_a_doctype_is_refused_before_any_expansion(self):
         """`xml.etree` expands internal entities, so a body carrying a doctype
@@ -566,29 +320,6 @@ class TestWhatThisReaderRefusesToParse:
         """`ElementTree.fromstring` raises `ValueError`, not `ParseError`, here."""
         with pytest.raises(opds.FeedUnreadable):
             opds.read_page('<?xml version="1.0" encoding="Shift_JIS"?><feed/>')
-
-    def test_a_nest_far_past_any_real_feed_is_refused_inside_its_bound(self):
-        """Was read, at 39.7 times its bytes by `tracemalloc`, with no answer
-        showing it. The literal `TestAPageIsReadOrRefusedByName` printed
-        against the tree before the depth bound."""
-        page = a_page(
-            FeedSpec(entries=(), declaration=None, nest_depth=FAR_PAST_ANY_DEPTH, charset="037")
-        )
-        got = answer_of(opds.read_page, page, answers=opds.Page, refuses=opds.FeedUnreadable)
-        assert got.refusal is not None
-        assert "nested more than" in str(got.refusal)
-        assert got.peak <= opds.ALLOCATION_FACTOR * len(page.encode()) + xml_parse.ALLOCATION_FLOOR
-
-    def test_an_entry_at_the_depth_bound_is_read_and_one_deeper_is_refused(self):
-        """The positive control for `xml_parse.MAX_DEPTH` at this door. The feed
-        and the entry are two levels of it."""
-        at_the_bound = FeedSpec(
-            entries=(), declaration=None, nest_depth=xml_parse.MAX_DEPTH - 2, charset="utf-8"
-        )
-        assert opds.read_page(a_page(at_the_bound)).not_held == 1
-        one_deeper = dataclasses.replace(at_the_bound, nest_depth=xml_parse.MAX_DEPTH - 1)
-        with pytest.raises(opds.FeedUnreadable, match="nested more than"):
-            opds.read_page(a_page(one_deeper))
 
 
 class TestADecoderWorksOnAFile:
@@ -874,8 +605,7 @@ class TestTheBoundsAreStatedInOnePlace:
         # the sync budget is. Re-derived here from the two constants rather than
         # read off the call.
         assert fetch.TIMEOUT_SECONDS < 10_000
-        assert seen
-        assert seen[0] - started < fetch.TIMEOUT_SECONDS
+        assert seen and seen[0] - started < fetch.TIMEOUT_SECONDS
 
     @respx.mock
     async def test_a_refusal_never_names_the_address(self):

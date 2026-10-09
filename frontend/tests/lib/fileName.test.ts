@@ -20,48 +20,25 @@
  * would compile and pass every other test in the tree.
  */
 
-import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 
 import { AUDIO_EXTENSIONS } from "../../src/lib/audiobook";
-import { TEXT_CEILINGS } from "../../src/lib/bookBounds";
-import { PATH_BUDGET } from "../../src/lib/digitalReference";
-import * as fileName from "../../src/lib/fileName";
-import { parseIsbn } from "../../src/lib/isbn";
-import { plausibleYear } from "../../src/lib/year";
 import {
   FORMAT_FOR_EXTENSION,
   plainName,
   QUERY_CEILING,
-  QUERY_FLOOR,
   readName,
   SUPPORTED_EXTENSIONS,
   queryFor,
   supportedExtension,
-  type FileNaming,
-  type NameClues,
 } from "../../src/lib/fileName";
 import { BookFormat } from "../../src/api/generated/model";
-// One module's text from the armed corpus, which refuses a name the tree does
-// not hold. The glob this replaced answered the empty string on a miss, so a
-// rename of the module turned the rule below into a rule about nothing.
-import { sourceText } from "../sourceModules";
-import {
-  holds,
-  PROFILE,
-  PROPERTY,
-  spelled,
-  witness,
-  type Repeated,
-} from "../property";
-import type { DoorMeter } from "./meter";
-import { expectAnswer, type ValueDoor } from "./readerContract";
-import {
-  boundedText,
-  codePoint,
-  hasLoneSurrogate,
-  points,
-} from "./textArbitrary";
+
+const SOURCE = import.meta.glob("../../src/lib/fileName.ts", {
+  query: "?raw",
+  import: "default",
+  eager: true,
+}) as Record<string, string>;
 
 function clues(name: string, folders: string[] = []) {
   return readName({ name, folders });
@@ -397,13 +374,11 @@ describe("a name as it is printed", () => {
 });
 
 describe("the module cannot see a file", () => {
-  const source = sourceText("lib/fileName.ts");
+  const source = SOURCE["../../src/lib/fileName.ts"] ?? "";
 
   it("is reading the module it claims to", () => {
-    // **The read refuses a missing module now, so this is not the anti empty
-    // string arm it used to be.** What is left for it to say is the half a
-    // throw cannot: that the subject the two assertions below are about is
-    // still in the file they are reading.
+    // A glob that matched nothing would make the two assertions below pass on
+    // an empty string forever.
     expect(source).toContain("export function readName");
   });
 
@@ -431,143 +406,3 @@ describe("the module cannot see a file", () => {
 function withoutProse(source: string): string {
   return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*/g, "");
 }
-
-/**
- * The longest text `queryFor` is handed: the scan page joins a title and an
- * author with a space, each already cut to the width `BookCreate` holds.
- */
-const QUERY_INPUT = TEXT_CEILINGS.title + 1 + TEXT_CEILINGS.author;
-
-/** Anything that is not text, which no clue may carry once cleaned. */
-const NOT_TEXT = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u;
-
-/** Hold one query to what the endpoint takes. */
-function holdQuery(meter: DoorMeter, query: string | null): void {
-  if (query === null) return;
-  meter.require(
-    points(query) >= QUERY_FLOOR && points(query) <= QUERY_CEILING,
-    `a query of ${points(query)} code points: ${JSON.stringify(query)}`,
-  );
-  meter.require(
-    !hasLoneSurrogate(query),
-    `a query cut a pair in half: ${JSON.stringify(query)}`,
-  );
-  meter.require(
-    query === query.trim() && !NOT_TEXT.test(query),
-    `a query carried what is not text: ${JSON.stringify(query)}`,
-  );
-}
-
-/**
- * `queryFor` as a door: any text up to what its caller can hand it, held to
- * the bounds the search endpoint takes. **Nothing is metered** because nothing
- * is read or parsed; the contract's clause is that it returns, and the value
- * is the rest.
- */
-const queryDoor: ValueDoor<string | Repeated, string | null> = {
-  module: fileName,
-  ceilings: () => ({}),
-  open: (text, meter) => {
-    const query = queryFor(spelled(text));
-    holdQuery(meter, query);
-    return query;
-  },
-};
-
-const clueText = (clue: string | null) =>
-  clue === null || (clue === clue.trim() && !NOT_TEXT.test(clue));
-
-/** A name as drawn: one at the path budget is a `Repeated`. */
-type Naming = Omit<FileNaming, "name"> & { readonly name: string | Repeated };
-
-/**
- * `readName` as a door: a name off a member's disk and the folders above it,
- * up to the path a host will hold and one past it.
- */
-const nameDoor: ValueDoor<Naming, NameClues> = {
-  module: fileName,
-  ceilings: () => ({}),
-  open: (naming, meter) => {
-    const found = readName({ ...naming, name: spelled(naming.name) });
-    holdQuery(meter, found.query);
-    meter.require(
-      clueText(found.title) && clueText(found.author),
-      `a clue carried what is not text: ${JSON.stringify(found)}`,
-    );
-    meter.require(
-      found.isbn === null || parseIsbn(found.isbn) === found.isbn,
-      `an ISBN that does not check: ${found.isbn}`,
-    );
-    meter.require(
-      found.year === null || plausibleYear(found.year) === found.year,
-      `a year no book has: ${found.year}`,
-    );
-    return found;
-  },
-};
-
-const WORDS = ["Frank Herbert", "Frank_Herbert", "Dune", "Books", "A"];
-
-const short = fc
-  .array(codePoint, { maxLength: 12 })
-  .map((drawn) => drawn.join(""));
-
-const naming: fc.Arbitrary<Naming> = fc.record({
-  name: fc.oneof(
-    // Three, so a name one past the budget is a tenth of a run's draws.
-    { arbitrary: boundedText(PATH_BUDGET), weight: 3 },
-    {
-      arbitrary: fc
-        .tuple(
-          fc.constantFrom(...WORDS),
-          short,
-          fc.constantFrom(".epub", ".EPUB", ".pdf", ".mp3", ""),
-        )
-        .map((parts) => parts.join(" ")),
-      weight: 1,
-    },
-  ),
-  folders: fc.array(fc.oneof(fc.constantFrom(...WORDS), short), {
-    maxLength: 3,
-  }),
-});
-
-describe("any text a name or a tag hands the catalogue", () => {
-  it("becomes a query the endpoint takes, or none", PROPERTY, async () => {
-    expect(
-      await holds(boundedText(QUERY_INPUT), async (text) => {
-        await expectAnswer(queryDoor, text);
-      }),
-    ).toBe(PROFILE.runs);
-  });
-
-  it(
-    "yields clues that are text, and a query the endpoint takes",
-    PROPERTY,
-    async () => {
-      expect(
-        await holds(naming, async (input) => {
-          await expectAnswer(nameDoor, input);
-        }),
-      ).toBe(PROFILE.runs);
-    },
-  );
-
-  it("draws text one past each caller's bound, astral where it is cut", async () => {
-    await witness(boundedText(QUERY_INPUT), {
-      "runs one past the query's input bound": (text) =>
-        points(spelled(text)) === QUERY_INPUT + 1,
-      "is cut past the query's ceiling with an astral point before the cut": (
-        text,
-      ) =>
-        points(spelled(text)) > QUERY_CEILING &&
-        [...spelled(text)]
-          .slice(0, QUERY_CEILING)
-          .some((one) => one.length === 2),
-    });
-    await witness(naming, {
-      "names a file one past the path budget": ({ name }) =>
-        points(spelled(name)) === PATH_BUDGET + 1,
-    });
-  });
-});

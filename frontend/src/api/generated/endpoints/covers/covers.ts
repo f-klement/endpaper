@@ -63,8 +63,8 @@ export const getGetLoginBackgroundUrl = (extension: string) => {
 export const getLoginBackground = async (
   extension: string,
   options?: Parameters<typeof customFetch>[1],
-): Promise<Blob> => {
-  return customFetch<Blob>(getGetLoginBackgroundUrl(extension), {
+): Promise<unknown> => {
+  return customFetch<unknown>(getGetLoginBackgroundUrl(extension), {
     ...options,
     method: "GET",
   });
@@ -245,8 +245,8 @@ export const getCover = async (
   bookId: number,
   extension: string,
   options?: Parameters<typeof customFetch>[1],
-): Promise<Blob> => {
-  return customFetch<Blob>(getGetCoverUrl(bookId, extension), {
+): Promise<unknown> => {
+  return customFetch<unknown>(getGetCoverUrl(bookId, extension), {
     ...options,
     method: "GET",
   });

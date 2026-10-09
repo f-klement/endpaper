@@ -5,7 +5,6 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import {
-  type BulkAction,
   Locale,
   OwnershipStatus,
   TagCategory,
@@ -15,9 +14,9 @@ import { makeCollection, makeTag } from "../../../factories";
 import SelectionBar from "../../../../src/pages/Home/components/SelectionBar";
 import { renderLocalised } from "../../../utils";
 
-type Props = Parameters<typeof SelectionBar>[0];
-
-function renderBar(overrides: Partial<Props> = {}) {
+function renderBar(
+  overrides: Partial<Parameters<typeof SelectionBar>[0]> = {},
+) {
   const props = {
     selectedCount: 2,
     isApplying: false,
@@ -25,11 +24,11 @@ function renderBar(overrides: Partial<Props> = {}) {
     error: null,
     tags: [],
     collections: [],
-    onSelectAll: vi.fn<Props["onSelectAll"]>(),
-    onRun: vi.fn<Props["onRun"]>(),
-    onClear: vi.fn<Props["onClear"]>(),
-    onApply: vi.fn<Props["onApply"]>(),
-    onDone: vi.fn<Props["onDone"]>(),
+    onSelectAll: vi.fn(),
+    onRun: vi.fn(),
+    onClear: vi.fn(),
+    onApply: vi.fn(),
+    onDone: vi.fn(),
     ...overrides,
   };
   renderLocalised(<SelectionBar {...props} />);
@@ -179,11 +178,11 @@ describe("SelectionBar extra actions", () => {
           }),
         ]}
         collections={[]}
-        onSelectAll={vi.fn<() => void>()}
-        onRun={vi.fn<(action: BulkAction, value?: string | number) => void>()}
-        onClear={vi.fn<() => void>()}
-        onApply={vi.fn<(ownership: OwnershipStatus) => void>()}
-        onDone={vi.fn<() => void>()}
+        onSelectAll={vi.fn()}
+        onRun={vi.fn()}
+        onClear={vi.fn()}
+        onApply={vi.fn()}
+        onDone={vi.fn()}
       />,
       { locale: Locale.de },
     );

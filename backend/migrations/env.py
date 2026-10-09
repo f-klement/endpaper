@@ -53,10 +53,6 @@ def run_migrations_online() -> None:
         config.get_section(config.config_ini_section, {}),
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
-        # Its own engine, so the application's `hide_parameters` does not reach
-        # it, and a revision that fails mid write is logged by whoever runs it.
-        # See `database.engine`.
-        hide_parameters=True,
     )
 
     with connectable.connect() as connection:

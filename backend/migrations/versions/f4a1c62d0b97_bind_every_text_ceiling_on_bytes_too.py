@@ -27,20 +27,14 @@ the widest legitimate value lands exactly on it.
 
 **It caps a NUL carrying value rather than refusing one**, and saying so is the
 point: a first draft of this paragraph claimed the stronger thing. Measured, a
-quote of `"a\\x00" + "x" * 7998` is 8,000 bytes and is **accepted**; 8,001 is
+quote of `"a\x00" + "x" * 7998` is 8,000 bytes and is **accepted**; 8,001 is
 not. So the slack a NUL buys is bounded at four times the ceiling instead of
 being unbounded, which is the whole of what these constraints were written to
 stop.
 
-**`instr(x, char(0)) = 0` would make the character count readable rather than
-exact, and is deliberately not taken.** It stops `length()` halting at a NUL; it
-does not stop `length()` counting one character per UTF-8 lead byte and skipping
-the continuation bytes after it, so a value carrying no NUL at all still reads
-short. See `docs/decisions.md`, *The house rule learned what the revision beside
-it already knew*. The decision here stands on its other reason, below.
-
-The two credential columns carry it because a NUL is never a legitimate
-value there. These five hold text a member typed, `text` and
+**`instr(x, char(0)) = 0` would make the character ceiling exact and is
+deliberately not taken.** The two credential columns carry it because a NUL is
+never a legitimate value there. These five hold text a member typed, `text` and
 `note` above all, and the API stores a NUL in one today: `QuoteCreate` bounds
 the Python string and does not refuse the character.
 `tests/test_models.py::TestQuote::test_the_schema_admits_a_nul_which_is_why_this
@@ -58,7 +52,7 @@ is nothing to close.
 **`GLOB` charset rules are a different class and none is here.** Stated as the
 exclusion rather than as a count, because an earlier draft said "two" and named
 one that is not in the class at all. `ck_catalogue_targets_indexes` is genuinely
-defeated: `'bath.isbn\\x00 or 1=1'` is accepted where `'bath.isbn or 1=1'` is
+defeated: `'bath.isbn\x00 or 1=1'` is accepted where `'bath.isbn or 1=1'` is
 refused. `ck_opds_servers_base_url` is **not**, because a positive prefix GLOB
 can only fail under truncation, measured on sqlite 3.46.1; its defect is that
 nothing bounds the text after the prefix, which is a different one wanting the

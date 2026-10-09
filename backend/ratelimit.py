@@ -15,17 +15,8 @@ source address instead is worse than it looks here, because the app sits behind
 a reverse proxy: every request appears to come from the proxy, so the limit is
 either effectively global or depends on `X-Forwarded-For`, a header the client
 sets and can therefore rotate to evade the limit. A username cannot be rotated:
-it is the thing being attacked. So that check happens inside the handler,
-where the username is known.
-
-**That is a rule about a key, not about this module**, and the sentence above
-said "the check" while the module holds two shapes. `public_catalogue_limiter`
-is charged inside `routers.public.public_reader`, a router level dependency at
-two routers, because its key is the source address and an address is known
-before anything is parsed. The export and backup counters below are a third
-case again: their key is the **authenticated** username, which a dependency
-could also see, and they are still charged in the handler body. Why is at
-their sites, and it is a security property rather than a style one.
+it is the thing being attacked. So the check happens inside the handler, where
+the username is known.
 
 Storage is in-process, which suits a single-container, single-worker app: there
 is no second process to share counters with. Restarting clears the windows,
@@ -232,48 +223,6 @@ IDENTIFIER_BACKFILL_LIMIT = RateLimit(max_attempts=6, window_seconds=60)
 PUBLIC_CATALOGUE_LIMIT = RateLimit(max_attempts=120, window_seconds=60)
 
 
-# `GET /api/books/export`, and the unit is **one whole walk of one member's
-# visible shelf**: `_export_pages` reads `marc.EXPORT_PAGE_RECORDS` rows at a
-# time and each writer serialises a page at a time, so the peak is bounded,
-# but a worker thread and a database session are held for the life of the
-# response and the walk is one query per page from end to end.
-#
-# **Its own counter rather than sharing with the backup below, because they
-# are different units.** This is a member reading their own shelf and that is
-# an administrator materialising the whole database; sizing them together
-# means sizing a routine act against a rare one, and a member exporting twice
-# would ration the administrator's backup. That is the argument
-# `IDENTIFIER_BACKFILL_LIMIT` already makes for not sharing
-# `COVER_BACKFILL_LIMIT`. It cost one row in the documentation table and one
-# word in that table's guard, which is a price rather than a reason.
-#
-# Five a minute, because the menu offers **three** formats and a member
-# comparing all three spends three; five leaves a retry without touching
-# anybody using the feature, and past it somebody is looping.
-#
-# **What this does not bound, stated here because a counter reads as though it
-# bounded all three.** It counts *starts*, not responses in flight, so five
-# concurrent walks by one member are inside it and nothing counts across
-# members at all. The resource paging lengthened the hold on is the worker
-# thread and the session, and bounding that is a concurrency limit rather than
-# a rate limit. See `routers/books.export_books`.
-EXPORT_LIMIT = RateLimit(max_attempts=5, window_seconds=60)
-
-# `GET /api/backup`, and the unit is **one build of the whole database and
-# every cover image**, assembled in one pass and held in memory as `bytes`
-# before a byte is sent. Every start is that, whatever the archive weighs.
-#
-# Three a minute. Nobody takes two backups in a minute deliberately; three is
-# the impatient second click plus one, and past it somebody is looping.
-#
-# **It bounds how often an archive is built, and neither how large one is nor
-# how many are built at once**, and the first of those has no bound anywhere:
-# `routers/backup.MAX_ARCHIVE_BYTES` is the *restore* upload cap and is not
-# read on the way out. Said again at `routers/backup.download_backup`, because
-# that is where somebody reads the limit and concludes the download is capped.
-BACKUP_LIMIT = RateLimit(max_attempts=3, window_seconds=60)
-
-
 #: How many distinct keys one limiter remembers at once.
 #:
 #: **A bound, because the key is caller supplied on every limiter in this
@@ -449,8 +398,6 @@ authority_limiter = SlidingWindowLimiter(AUTHORITY_LIMIT)
 cover_backfill_limiter = SlidingWindowLimiter(COVER_BACKFILL_LIMIT)
 identifier_backfill_limiter = SlidingWindowLimiter(IDENTIFIER_BACKFILL_LIMIT)
 public_catalogue_limiter = SlidingWindowLimiter(PUBLIC_CATALOGUE_LIMIT)
-export_limiter = SlidingWindowLimiter(EXPORT_LIMIT)
-backup_limiter = SlidingWindowLimiter(BACKUP_LIMIT)
 recovery_request_address_limiter = SlidingWindowLimiter(RECOVERY_REQUEST_LIMIT)
 recovery_request_account_limiter = SlidingWindowLimiter(RECOVERY_REQUEST_LIMIT)
 recovery_code_limiter = SlidingWindowLimiter(RECOVERY_CODE_LIMIT)

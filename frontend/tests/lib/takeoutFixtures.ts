@@ -23,26 +23,7 @@
  * EPUBs; this builds what Google puts around them.
  */
 
-import fc from "fast-check";
-
-import { MAX_CONTAINER_BYTES, MAX_PACKAGE_BYTES } from "../../src/lib/epub";
-import {
-  MAX_BOOK_BYTES,
-  MAX_INFLATION_RATIO,
-  MAX_SIDECAR_BYTES,
-} from "../../src/lib/takeout";
-import {
-  around,
-  buildEpub,
-  buildZip,
-  entrySpec,
-  STORED,
-  zeroesAt,
-  type EntrySpec,
-  type Payload,
-} from "../zipFixtures";
-import { type Ceilings } from "./meter";
-import { sometimes, spelled, type Repeated, type Total } from "../property";
+import { buildEpub, buildZip, STORED, type EntrySpec } from "../zipFixtures";
 
 /** What Takeout named the folder in that export. Localised, so never matched. */
 export const LIBRARY_FOLDER = "Takeout/Google Play Books";
@@ -56,14 +37,7 @@ export interface SidecarSpec {
   author?: string;
   /** The line under `Volume ID`. `null` writes no such block at all. */
   volumeId?: string | null;
-  /**
-   * The second metadata entry, where the export carried one.
-   *
-   * A reading state sentence in all 24 measured, which is one line and so
-   * carries no value `labelled` can read. A test pinning what the volume id
-   * rule refuses writes a label and a value here instead, which is the shape
-   * the volume id entry itself has.
-   */
+  /** The reading state sentence, where the export carried one. */
   state?: string | null;
   /** One entry per annotation: the note the member wrote, often empty. */
   annotations?: string[];
@@ -125,11 +99,11 @@ export interface BookSpec {
   suffix?: string;
   sidecar?: SidecarSpec;
   /** The book file's bytes, for when it should not be an EPUB at all. */
-  file?: Payload;
+  file?: Uint8Array<ArrayBuffer> | string;
   /** The title inside the EPUB, which need not be the sidecar's. */
   epubTitle?: string;
   /** The EPUB's package document, when it should not be the ordinary one. */
-  opf?: Payload;
+  opf?: string;
   /** Further entries inside the EPUB, for a book whose text dwarfs it. */
   inside?: EntrySpec[];
   /** The mimetype entry's bytes, when they should not be the exact ones. */
@@ -244,42 +218,13 @@ export function padding(size: number): EntrySpec {
  * the EPUB's own zip where only the inner read pays for them.
  */
 export function hugePackage(size: number): string {
-  return spelled(hugePackageSpec(size));
-}
-
-/**
- * The same document as a spec, for an arbitrary: it prints as its parts, so a
- * counterexample carrying one is a literal a person can read.
- */
-export function hugePackageSpec(size: number): Repeated {
-  const unit = "<dc:subject>a subject</dc:subject>";
-  return {
-    before: `<?xml version="1.0" encoding="utf-8"?>
+  const one = "<dc:subject>a subject</dc:subject>";
+  return `<?xml version="1.0" encoding="utf-8"?>
 <package xmlns="http://www.idpf.org/2007/opf" xmlns:dc="http://purl.org/dc/elements/1.1/" version="3.0" unique-identifier="pub-id">
-  <metadata><dc:identifier id="pub-id">urn:uuid:1</dc:identifier><dc:title>Dune</dc:title><dc:language>en</dc:language>`,
-    unit,
-    times: Math.ceil(size / unit.length),
-    after: `</metadata>
+  <metadata><dc:identifier id="pub-id">urn:uuid:1</dc:identifier><dc:title>Dune</dc:title><dc:language>en</dc:language>${one.repeat(Math.ceil(size / one.length))}</metadata>
   <manifest/>
   <spine/>
-</package>`,
-  };
-}
-
-/** A whole Takeout archive: its books, then anything else it holds. */
-export interface TakeoutSpec {
-  readonly books: readonly BookSpec[];
-  readonly extra: readonly EntrySpec[];
-}
-
-/** The archive's bytes. */
-export async function buildTakeout(
-  spec: TakeoutSpec,
-): Promise<Uint8Array<ArrayBuffer>> {
-  const entries: EntrySpec[] = [];
-  for (const book of spec.books) entries.push(...(await bookEntries(book)));
-  entries.push(...spec.extra);
-  return buildZip({ entries });
+</package>`;
 }
 
 /** A whole Takeout archive holding these books, as the `File` a picker hands over. */
@@ -287,146 +232,14 @@ export async function takeoutFile(
   books: BookSpec[] = [{}],
   extra: EntrySpec[] = [],
 ): Promise<File> {
-  const data = await buildTakeout({ books, extra });
+  const entries: EntrySpec[] = [];
+  for (const book of books) entries.push(...(await bookEntries(book)));
+  entries.push(...extra);
+  const data = await buildZip({ entries });
   // A name of the export's own shape and not its name. The real archive's
   // filename is the owner's, and this file's docstring says nothing out of it
   // is here.
   return new File([data], "takeout-20200101T000000Z-1-001.zip", {
     type: "application/zip",
   });
-}
-
-// --- arbitraries over the specs above ----------------------------------------
-
-const sidecarSpec = fc.record({
-  title: sometimes(fc.string({ maxLength: 12 })),
-  author: sometimes(fc.constantFrom("", "Frank Herbert")),
-  volumeId: sometimes(
-    fc.constantFrom(null, A_VOLUME_ID, "aB3-dE6_gH9", "aB3-dE6_gH9jk"),
-  ),
-  state: sometimes(
-    fc.constantFrom(null, FINISHED_SENTENCE, `Volume ID\n${A_VOLUME_ID}`),
-  ),
-  annotations: sometimes(
-    fc.array(fc.string({ maxLength: 8 }), { maxLength: 3 }),
-  ),
-  storeLink: sometimes(
-    fc.constantFrom("View in the Google Play store", A_VOLUME_ID),
-  ),
-} satisfies Total<SidecarSpec>);
-
-const bookSpec = fc.record({
-  name: sometimes(fc.constantFrom("Dune", "Dune (1)", "../Dune", "a/b")),
-  suffix: sometimes(fc.constantFrom(".pdf", ".epub", ".html", "")),
-  sidecar: sometimes(sidecarSpec),
-  file: sometimes(
-    fc.oneof(fc.constant<Payload>("not a book"), zeroesAt([MAX_BOOK_BYTES])),
-  ),
-  epubTitle: sometimes(fc.string({ maxLength: 8 })),
-  opf: sometimes(
-    fc.oneof(
-      fc.constant<Payload>(hugePackageSpec(64 * 1024)),
-      zeroesAt([MAX_PACKAGE_BYTES]),
-    ),
-  ),
-  inside: sometimes(
-    fc.array(
-      entrySpec(
-        fc.constantFrom("OEBPS/content.opf", "META-INF/container.xml", "x"),
-        zeroesAt([MAX_CONTAINER_BYTES, MAX_PACKAGE_BYTES]),
-        [MAX_CONTAINER_BYTES, MAX_PACKAGE_BYTES],
-      ),
-      { maxLength: 2 },
-    ),
-  ),
-  mimetype: sometimes(
-    fc.constantFrom(null, "application/epub+zip\r\n", "application/epub+zi"),
-  ),
-  deflateMimetype: sometimes(fc.boolean()),
-  entryBeforeMimetype: sometimes(fc.boolean()),
-  declaredSize: sometimes(fc.constantFrom(0, 1, ...around(MAX_BOOK_BYTES))),
-} satisfies Total<BookSpec>);
-
-/**
- * Several books whose package documents each inflate to just under the
- * EPUB's own ceiling, declared honestly.
- *
- * **The budget's own shape**, composed because independent draws rarely give
- * several books the same expensive document: each one passes every per file
- * gate, so what stops the second is only the archive's total, and that total
- * is what the property is asked to hold.
- */
-const budgetSpend: fc.Arbitrary<TakeoutSpec> = fc.record({
-  books: fc.integer({ min: 2, max: 4 }).map((count) =>
-    Array.from({ length: count }, (_, index) => ({
-      name: `Book ${index}`,
-      opf: { zeroes: MAX_PACKAGE_BYTES - 1 },
-    })),
-  ),
-  extra: fc.constant([]),
-} satisfies Total<TakeoutSpec>);
-
-/**
- * One book whose file inflates past what the directory declared for it, at
- * the book's own ceiling.
- *
- * **Composed so a run from any seed draws it**: as two overrides drawn apart,
- * a file of zeroes and a declared size under it, it landed on a few runs in a
- * hundred, measured.
- */
-const lyingBook: fc.Arbitrary<TakeoutSpec> = fc.record({
-  books: fc
-    .record({
-      zeroes: fc.constantFrom(...around(MAX_BOOK_BYTES)),
-      declared: fc.constantFrom(0, 1, MAX_BOOK_BYTES - 1),
-    })
-    .map(({ zeroes, declared }) => [
-      {
-        name: "Book 0",
-        file: { zeroes },
-        declaredSize: Math.min(declared, zeroes - 1),
-      },
-    ]),
-  extra: fc.constant([]),
-} satisfies Total<TakeoutSpec>);
-
-/** A Takeout archive: any books drawn, or the budget's own shape. */
-export function takeoutSpec(): fc.Arbitrary<TakeoutSpec> {
-  const any = fc.record({
-    books: fc.array(bookSpec, { maxLength: 3 }),
-    extra: fc.array(
-      entrySpec(
-        fc.constantFrom("Takeout/pad.bin", "Takeout/x.html", "x.pdf"),
-        fc.oneof(fc.string({ maxLength: 16 }), zeroesAt([MAX_SIDECAR_BYTES])),
-        [MAX_SIDECAR_BYTES],
-      ),
-      { maxLength: 2 },
-    ),
-  } satisfies Total<TakeoutSpec>);
-  return fc.oneof(
-    { arbitrary: any, weight: 4 },
-    { arbitrary: budgetSpend, weight: 1 },
-    { arbitrary: lyingBook, weight: 1 },
-  );
-}
-
-/**
- * What reading a Takeout archive of `size` bytes may spend, wherever it is
- * read: by its own reader, and by the store opener that hands it over.
- *
- * **The budget is the archive's size times `MAX_INFLATION_RATIO`, plus one
- * book's worth of `readEpub`**: the inner reads are charged after they happen
- * and bounded by the EPUB's own ceilings rather than by what is left, so the
- * overspend is one container and one package document, once. `takeout.ts`
- * states that overspend at the ratio's own docstring, and this is that
- * sentence as a ceiling. And no XML parse is handed a declaration, the rule
- * the EPUBs inside are read under.
- */
-export function takeoutCeilings(size: number): Ceilings {
-  return {
-    perInflate: MAX_BOOK_BYTES,
-    inflated:
-      size * MAX_INFLATION_RATIO + MAX_CONTAINER_BYTES + MAX_PACKAGE_BYTES,
-    refusesEntities: true,
-  };
 }

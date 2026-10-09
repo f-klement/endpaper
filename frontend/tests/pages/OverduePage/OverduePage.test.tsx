@@ -6,13 +6,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import { OverdueSender } from "../../../src/api/generated/model";
 import OverduePage from "../../../src/pages/OverduePage";
-import {
-  endOfDay,
-  makeBook,
-  makeLoan,
-  makeLoanPage,
-  resetIds,
-} from "../../factories";
+import { makeBook, makeLoan, makeLoanPage, resetIds } from "../../factories";
 import { mockApi, renderWithProviders, type MockApi } from "../../utils";
 
 let api: MockApi;
@@ -41,7 +35,7 @@ function asAdmin(channels: unknown[] = []) {
 function overdueLoan(title = "Piranesi") {
   return makeLoan({
     is_overdue: true,
-    due_at: endOfDay("2026-01-05"),
+    due_at: "2026-01-05T00:00:00",
     book: makeBook({ title }),
   });
 }
@@ -154,7 +148,7 @@ describe("the delivery status", () => {
     asAdmin([
       {
         sender: OverdueSender.telegram,
-        last_run_at: "2026-08-01T09:00:00Z",
+        last_run_at: "2026-08-01T09:00:00",
         sent: true,
         reason: null,
         detail: null,

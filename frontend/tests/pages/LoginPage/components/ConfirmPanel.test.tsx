@@ -13,17 +13,15 @@ import ConfirmPanel from "../../../../src/pages/LoginPage/components/ConfirmPane
 import type { UseAddressConfirmationResult } from "../../../../src/pages/LoginPage/hooks";
 import { renderLocalised } from "../../../utils";
 
-type OnBack = NonNullable<React.ComponentProps<typeof ConfirmPanel>["onBack"]>;
-
 function state(
   overrides: Partial<UseAddressConfirmationResult> = {},
 ): UseAddressConfirmationResult {
   return {
-    confirm: vi.fn<(username: string, code: string) => void>(),
+    confirm: vi.fn(),
     isConfirming: false,
     hasConfirmed: false,
     confirmError: null,
-    resend: vi.fn<(username: string) => void>(),
+    resend: vi.fn(),
     isResending: false,
     hasResent: false,
     resendError: null,
@@ -33,9 +31,9 @@ function state(
 
 describe("ConfirmPanel", () => {
   it("confirms with the code that was typed", async () => {
-    const confirm = vi.fn<UseAddressConfirmationResult["confirm"]>();
+    const confirm = vi.fn();
     renderLocalised(
-      <ConfirmPanel state={state({ confirm })} onBack={vi.fn<OnBack>()} />,
+      <ConfirmPanel state={state({ confirm })} onBack={vi.fn()} />,
     );
 
     const user = userEvent.setup();
@@ -49,9 +47,9 @@ describe("ConfirmPanel", () => {
   it("will not resend to nobody", async () => {
     // The resend takes the same username field, so an empty one would send a
     // request naming nothing and spend the budget on it.
-    const resend = vi.fn<UseAddressConfirmationResult["resend"]>();
+    const resend = vi.fn();
     renderLocalised(
-      <ConfirmPanel state={state({ resend })} onBack={vi.fn<OnBack>()} />,
+      <ConfirmPanel state={state({ resend })} onBack={vi.fn()} />,
     );
 
     expect(
@@ -60,9 +58,9 @@ describe("ConfirmPanel", () => {
   });
 
   it("resends for the account that was typed", async () => {
-    const resend = vi.fn<UseAddressConfirmationResult["resend"]>();
+    const resend = vi.fn();
     renderLocalised(
-      <ConfirmPanel state={state({ resend })} onBack={vi.fn<OnBack>()} />,
+      <ConfirmPanel state={state({ resend })} onBack={vi.fn()} />,
     );
 
     const user = userEvent.setup();
@@ -74,10 +72,7 @@ describe("ConfirmPanel", () => {
 
   it("says nothing about whether the account was waiting", () => {
     renderLocalised(
-      <ConfirmPanel
-        state={state({ hasResent: true })}
-        onBack={vi.fn<OnBack>()}
-      />,
+      <ConfirmPanel state={state({ hasResent: true })} onBack={vi.fn()} />,
     );
 
     expect(
@@ -87,10 +82,7 @@ describe("ConfirmPanel", () => {
 
   it("tells the member to sign in once it is confirmed", () => {
     renderLocalised(
-      <ConfirmPanel
-        state={state({ hasConfirmed: true })}
-        onBack={vi.fn<OnBack>()}
-      />,
+      <ConfirmPanel state={state({ hasConfirmed: true })} onBack={vi.fn()} />,
     );
 
     expect(

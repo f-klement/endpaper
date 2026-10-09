@@ -212,23 +212,6 @@ def checked_config(
             "A mail password with neither STARTTLS nor TLS would cross the "
             "network in the clear. Switch one of them on."
         )
-    # `smtplib` encodes the credentials as ASCII under every mechanism it offers,
-    # PLAIN, LOGIN and CRAM-MD5, so one character outside it raises
-    # `UnicodeEncodeError` on every attempt against every server. Refused here it
-    # is a setting to change, on the banner at once; let through it read as a
-    # network failure and waited a day at least, and up to a reminder interval
-    # beside a channel that works. Only when a login will happen, which is when
-    # a username is set: `_deliver` sends no credential otherwise.
-    if username and not username.isascii():
-        raise MailRefused(
-            "The mail username has a character outside ASCII, which cannot be "
-            "sent to a mail server from here."
-        )
-    if username and not password.isascii():
-        raise MailRefused(
-            "The mail password has a character outside ASCII, which cannot be "
-            "sent to a mail server from here."
-        )
 
     sender = settings_store.in_force(db, SettingKey.MAIL_DEFAULT_SENDER).strip()
     if not sender:
@@ -324,8 +307,6 @@ def _deliver(smtp: smtplib.SMTP, config: MailConfig, message: EmailMessage) -> N
         smtp.login(config.username, config.password)
     refused = smtp.send_message(message)
     if refused:
-        # **This carries the refused addresses**, as the one `smtplib` raises
-        # itself when every recipient is refused does, so no caller may log its
-        # message: a recipient list is the one part of the envelope worth
-        # keeping out of a log. Both callers log the type alone.
+        # The count, not the addresses: this goes to a log, and a recipient
+        # list is the one part of the envelope worth keeping out of one.
         raise smtplib.SMTPRecipientsRefused(refused)

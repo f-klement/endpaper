@@ -37,32 +37,19 @@
  * Everything else in the minimum field set arrives: title, authors as separate
  * values, ISBN, series and index, publisher, year, language and description.
  *
- * **`<genre>` is read, and the format defines a controlled token set for it**
- * (`sf`, `det`, `prose_rus` and the rest). **Nothing here enforces that set**,
- * which is the half worth writing down: this reader reports the element's text
- * as the file wrote it, so a file writing a token with a semicolon in it
- * produces exactly the entry a controlled vocabulary would make impossible, and
- * `lib/bookRequest.boundCategories` is what drops it. No arm asserts the set,
- * and adding one would refuse a real file over a vocabulary this app does not
- * own. It is carried by every file in the corpus, 35 elements across 18, as
- * `lang` is. **The token is reported as written and never expanded into a
- * human readable genre name**: a table of those would be this app asserting a
- * subject the file did not.
+ * **`<genre>` is read by nothing here, and that is a destination problem rather
+ * than a reading one**, which is the sentence `mobi.ts`, `opf.ts` and `cbz.ts`
+ * each write about their own format's spelling of a subject. `FileMetadata` has
+ * no field for one, and no request body this app sends has anywhere to put it:
+ * `BookCreate` takes no `categories` and no free text tag, so a subject read
+ * here would reach a screen and no column. It is carried by every file in the
+ * corpus, 35 elements across 18, as `lang` is, so it is the one exclusion here
+ * worth revisiting when that door exists.
  *
  * **Lazy loaded**, like every reader: `lib/fileReaders.ts` imports this only
  * when a member picks a file whose name ends in one of the two extensions.
  */
 
-/**
- * **Scoping every read to a named parent is the whole of this reader's defence
- * against the wrong author**, which is why these two and never a search of the
- * subtree. `<description>` carries a `document-info` beside `title-info`, and
- * `document-info` has `<author>` children naming whoever produced the FB2 file
- * rather than whoever wrote the book. 15 of the 18 corpus files carry one. A
- * `getElementsByTagName("author")` would file the converter as a co-author of
- * every book.
- */
-import { childrenNamed, firstNamed } from "./elementChildren";
 import { plausibleYear } from "./year";
 import { parseIsbn } from "./isbn";
 import { type FileIdentifier, type FileMetadata } from "./fileReaders";
@@ -86,10 +73,8 @@ import { openZip, ZipError, zipFailureAs } from "./zip";
  * very long annotation is a FictionBook and a member told it is not one has been
  * told something false. The two are told apart by what the prefix holds: a
  * `<description>` opened and never closed, in a read that filled its bound.
- *
- * Exported, for `epub.MAX_PACKAGE_BYTES`'s reason.
  */
-export const MAX_HEADER_BYTES = 256 * 1024;
+const MAX_HEADER_BYTES = 256 * 1024;
 
 /**
  * How large a `.fb2.zip` entry may be at all.
@@ -104,10 +89,8 @@ export const MAX_HEADER_BYTES = 256 * 1024;
  * 32 MiB is 5.97 times the largest file in the corpus, 5,616,072 bytes. The
  * headroom is for the `<binary>` blocks: FB2 carries its cover, and sometimes
  * every illustration, base64 encoded inside the same document.
- *
- * Exported, for `epub.MAX_PACKAGE_BYTES`'s reason.
  */
-export const MAX_ARCHIVED_BYTES = 32 * 1024 * 1024;
+const MAX_ARCHIVED_BYTES = 32 * 1024 * 1024;
 
 /**
  * How far in the XML declaration is looked for.
@@ -154,6 +137,49 @@ export type Fb2Failure =
 export type Fb2Reading =
   | { readonly ok: true; readonly metadata: FileMetadata }
   | { readonly ok: false; readonly failure: Fb2Failure };
+
+/**
+ * Children of `parent` whose local name matches, in document order.
+ *
+ * A sibling walk and not a spread of `parent.children`, for the reason and the
+ * measurement `opf.ts` states at its own copy of this: the collection is live,
+ * indexing it is not required to be constant time, and the length is the
+ * member's file's choice. Duplicated rather than imported because `opf.ts` does
+ * not export it and this module does not own that file.
+ *
+ * **Scoping every read to a named parent is also the whole of this reader's
+ * defence against the wrong author.** `<description>` carries a `document-info`
+ * beside `title-info`, and `document-info` has `<author>` children naming
+ * whoever produced the FB2 file rather than whoever wrote the book. 15 of the 18
+ * corpus files carry one. A `getElementsByTagName("author")` would file the
+ * converter as a co-author of every book.
+ */
+function childrenNamed(parent: Element, local: string): Element[] {
+  const found: Element[] = [];
+  for (
+    let child = parent.firstElementChild;
+    child !== null;
+    child = child.nextElementSibling
+  ) {
+    if (child.localName === local) found.push(child);
+  }
+  return found;
+}
+
+function firstNamed(
+  parent: Element | null | undefined,
+  local: string,
+): Element | null {
+  if (parent === null || parent === undefined) return null;
+  for (
+    let child = parent.firstElementChild;
+    child !== null;
+    child = child.nextElementSibling
+  ) {
+    if (child.localName === local) return child;
+  }
+  return null;
+}
 
 function text(element: Element | null): string | null {
   const value = element?.textContent?.trim();
@@ -277,26 +303,6 @@ function nameOf(author: Element): string | null {
  * loop is quadratic in it, and this reader's own bound admits far more of them
  * than that stays affordable for.
  */
-/**
- * The genres the file declared, in its own order and with nothing folded.
- *
- * **Scoped to `title-info` like every other read here**, which is this
- * reader's whole defence against the wrong value: `document-info` describes
- * whoever produced the file. The format puts `<genre>` in both.
- *
- * Folding a repeat and bounding the count are the request's questions and are
- * `lib/bookRequest.boundCategories`', for the reason this module states about
- * `<genre>` above: it reports what the file said.
- */
-function readGenres(titleInfo: Element): string[] {
-  const genres: string[] = [];
-  for (const element of childrenNamed(titleInfo, "genre")) {
-    const genre = text(element);
-    if (genre !== null) genres.push(genre);
-  }
-  return genres;
-}
-
 function readAuthors(titleInfo: Element): string[] {
   const seen = new Set<string>();
   const authors: string[] = [];
@@ -474,18 +480,7 @@ export function readFb2Description(xml: string): FileMetadata | null {
   const header = headerDocument(xml);
   if (header === null) return null;
 
-  // **Caught, because a parser this reader does not choose may throw.**
-  // `parseFromString` answers a document it cannot read with a `parsererror`
-  // root, by the DOM Parsing specification, which is the refusal below.
-  // happy-dom's XML parser throws instead on some, measured on a processing
-  // instruction whose target a patch broke, and a reader answers rather than
-  // throws whichever parser it meets: `fileReaders.FileReader`'s contract.
-  let document: Document;
-  try {
-    document = new DOMParser().parseFromString(header, "application/xml");
-  } catch {
-    return null;
-  }
+  const document = new DOMParser().parseFromString(header, "application/xml");
   // Both halves are needed. A parse error yields a document whose root is
   // `parsererror`, and a well formed document that is not a FictionBook yields
   // a root that is simply something else.
@@ -506,7 +501,6 @@ export function readFb2Description(xml: string): FileMetadata | null {
     // FB2 has no second title element. See this module's docstring.
     subtitle: null,
     authors: readAuthors(titleInfo),
-    categories: readGenres(titleInfo),
     identifiers,
     isbn: firstIsbn(identifiers),
     publisher: text(firstNamed(publishInfo, "publisher")),

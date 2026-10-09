@@ -58,7 +58,7 @@ def _read_by_config() -> set[str]:
 
 
 def _documented() -> set[str]:
-    return set(re.findall(r"^([A-Z][A-Z0-9_]*)=", SAMPLE.read_text(), re.MULTILINE))
+    return set(re.findall(r"^([A-Z][A-Z0-9_]*)=", SAMPLE.read_text(), re.M))
 
 
 class TestTheSampleDocumentsWhatTheCodeReads:
@@ -91,7 +91,7 @@ class TestTheSampleDocumentsWhatTheCodeReads:
         is the kind of thing that gets shipped. Both are refused."""
         text = SAMPLE.read_text()
         for name in ("SECRET_KEY", "MAIL_PASSWORD", "TELEGRAM_BOT_TOKEN", "LDAP_BIND_PASSWORD"):
-            match = re.search(rf"^{name}=(.*)$", text, re.MULTILINE)
+            match = re.search(rf"^{name}=(.*)$", text, re.M)
             assert match, f"{name} is not in the sample"
             value = match.group(1).strip()
             assert value.startswith("replace-with-"), (

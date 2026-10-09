@@ -60,30 +60,12 @@ export const getDownloadBackupUrl = () => {
  * Not paginated and not streamed row by row: the archive has to be internally
  * consistent, so it is built in one pass from one session and then sent.
  * A library is megabytes, not gigabytes.
- *
- * **Rationed, and the schema does not say so.** The refusal is a 429 carrying
- * `Retry-After`, undeclared for the reason `routers/books.export_books`
- * states: this document enumerates no refusal on any of its operations, so
- * declaring one here would make it look deliberate and every other
- * operation's look accidental.
- * `tests/test_errors.py::TestTheDocumentEnumeratesNoRefusal` holds that fact,
- * because a reason described in prose rots silently where an asserted one
- * reddens.
- *
- * **The limit bounds how often an archive is built and nothing else.** It
- * does not bound how large one is: `MAX_ARCHIVE_BYTES` is the *restore*
- * upload cap and the body size middleware's, both on `/backup/restore`, and
- * the download reads neither, so `build_archive` returns the whole library as
- * `bytes` with nothing above it. Nor does it bound how many are built at
- * once: a sliding window counts starts, not responses in flight, so three
- * concurrent builds are inside it. Both of those are a concurrency bound,
- * which is a different instrument.
  * @summary Download Backup
  */
 export const downloadBackup = async (
   options?: Parameters<typeof customFetch>[1],
-): Promise<Blob> => {
-  return customFetch<Blob>(getDownloadBackupUrl(), {
+): Promise<unknown> => {
+  return customFetch<unknown>(getDownloadBackupUrl(), {
     ...options,
     method: "GET",
   });

@@ -4,19 +4,15 @@ import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
-import type {
-  QuoteCreate,
-  QuoteOut,
-  UserOut,
-} from "../../../../src/api/generated/model";
+import type { QuoteOut, UserOut } from "../../../../src/api/generated/model";
 import QuoteList from "../../../../src/pages/BookDetail/components/QuoteList";
 import { makeQuote, makeUser } from "../../../factories";
 import { renderLocalised } from "../../../utils";
 
 function renderList(quotes: QuoteOut[] = [], user: Partial<UserOut> = {}) {
-  const onAdd = vi.fn<(quote: QuoteCreate) => void>();
-  const onEdit = vi.fn<(quoteId: number, quote: QuoteCreate) => void>();
-  const onRemove = vi.fn<(quoteId: number) => void>();
+  const onAdd = vi.fn();
+  const onEdit = vi.fn();
+  const onRemove = vi.fn();
   renderLocalised(
     <QuoteList
       quotes={quotes}

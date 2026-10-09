@@ -4,17 +4,15 @@ import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import Toast, { type ToastAction } from "../../src/components/Toast";
+import Toast from "../../src/components/Toast";
 import { renderLocalised } from "../utils";
-
-type OnDismiss = NonNullable<React.ComponentProps<typeof Toast>["onDismiss"]>;
 
 afterEach(() => vi.useRealTimers());
 
 describe("Toast", () => {
   it("shows the message", () => {
     renderLocalised(
-      <Toast message="Moved to the trash." onDismiss={vi.fn<OnDismiss>()} />,
+      <Toast message="Moved to the trash." onDismiss={vi.fn()} />,
     );
     expect(screen.getByText("Moved to the trash.")).toBeInTheDocument();
   });
@@ -22,14 +20,14 @@ describe("Toast", () => {
   it("reports politely rather than interrupting", () => {
     // `alert` would cut a screen reader off mid-sentence, which is right for a
     // failure and rude for "that worked".
-    renderLocalised(<Toast message="Done" onDismiss={vi.fn<OnDismiss>()} />);
+    renderLocalised(<Toast message="Done" onDismiss={vi.fn()} />);
     const region = screen.getByRole("status");
     expect(region).toHaveAttribute("aria-live", "polite");
   });
 
   it("runs the action and then dismisses", async () => {
-    const onClick = vi.fn<ToastAction["onClick"]>();
-    const onDismiss = vi.fn<OnDismiss>();
+    const onClick = vi.fn();
+    const onDismiss = vi.fn();
     renderLocalised(
       <Toast
         message="Moved"
@@ -45,13 +43,13 @@ describe("Toast", () => {
   });
 
   it("renders no action button when there is nothing to do", () => {
-    renderLocalised(<Toast message="Done" onDismiss={vi.fn<OnDismiss>()} />);
+    renderLocalised(<Toast message="Done" onDismiss={vi.fn()} />);
     expect(screen.getAllByRole("button")).toHaveLength(1);
   });
 
   it("dismisses itself after the timeout", () => {
     vi.useFakeTimers();
-    const onDismiss = vi.fn<OnDismiss>();
+    const onDismiss = vi.fn();
     renderLocalised(
       <Toast message="Done" onDismiss={onDismiss} timeout={1000} />,
     );
@@ -65,7 +63,7 @@ describe("Toast", () => {
     // Otherwise dismissing by hand leaves a callback pending against a
     // component that is no longer there.
     vi.useFakeTimers();
-    const onDismiss = vi.fn<OnDismiss>();
+    const onDismiss = vi.fn();
     const { unmount } = renderLocalised(
       <Toast message="Done" onDismiss={onDismiss} timeout={1000} />,
     );

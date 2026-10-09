@@ -23,21 +23,6 @@ interface TagPickerProps {
   onCreate?: (name: string) => void;
   isCreating?: boolean;
   /**
-   * Names typed here that no row exists for yet, rendered as their own group.
-   *
-   * For the caller with no book to put a tag on: the scan form holds a typed
-   * name until the book is saved rather than asking the server to invent a
-   * tag, which is what used to leave a tag behind every cancelled scan.
-   *
-   * **One prop holding both halves, so the type is what says they arrive
-   * together.** As two optionals it was a rule in a sentence: passing the
-   * names alone type checked and rendered a remove button that did nothing,
-   * because the handler was reached through optional chaining. A chip that
-   * cannot be taken off again is a trap, and nothing here is on a book yet,
-   * so there is no other road back.
-   */
-  pending?: { names: string[]; onForget: (name: string) => void };
-  /**
    * Delete a tag the library invented, everywhere. Offered only alongside
    * `onCreate`, because the place you invent a vocabulary is the place you
    * correct it.
@@ -58,7 +43,6 @@ export default function TagPicker({
   onToggle,
   onCreate,
   isCreating = false,
-  pending,
   onDelete,
 }: TagPickerProps) {
   const { t, locale } = useTranslation();
@@ -183,42 +167,6 @@ export default function TagPicker({
           </div>
         );
       })}
-
-      {pending && pending.names.length > 0 && (
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-wide text-paper-600 dark:text-paper-400">
-            {t("tags.pending")}
-          </p>
-          {/* Always open, unlike the categories above: these are on screen
-              because somebody typed them a moment ago, and a group that
-              hides what was just typed reads as the typing having failed. */}
-          <div
-            role="group"
-            aria-label={t("tags.pending")}
-            className="mt-1 flex flex-wrap gap-1.5"
-          >
-            {pending.names.map((name) => (
-              <span
-                key={name}
-                className={`inline-flex items-center rounded-full border text-xs ${TAG_CHIP_SELECTED}`}
-              >
-                {/* The name as typed, never through `tagName`: there is no row
-                    and so no key to translate, and the catalogue has nothing
-                    to say about a word somebody invented on this form. */}
-                <span className="py-1 pl-2.5 pr-1">{name}</span>
-                <button
-                  type="button"
-                  onClick={() => pending.onForget(name)}
-                  aria-label={t("book.removeTag", { tag: name })}
-                  className="pr-1.5 pl-0.5 opacity-60 hover:opacity-100"
-                >
-                  <Icon name="close" className="h-3 w-3" />
-                </button>
-              </span>
-            ))}
-          </div>
-        </div>
-      )}
 
       {onCreate && (
         <div className="flex gap-1.5 pt-1">

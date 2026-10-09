@@ -1,179 +1,6 @@
-import type { ReactNode } from "react";
-
-import { useTranslation, type MessageKey, type Translate } from "../../../i18n";
+import { useTranslation } from "../../../i18n";
 import type { BookMatch } from "../../../api/generated/model";
-import type { AudioFailure } from "../../../lib/audiobook";
-import type { FileFailure } from "../../../lib/fileReaders";
-import { isBeingDecided } from "../hooks";
-import type {
-  NamedScanReason,
-  QueueFigures,
-  ScanReason,
-  ScannedEntry,
-} from "../hooks";
-import type { BulkProgress } from "../../../lib/bulkWrite";
-
-/**
- * What a member is told about a file that yielded nothing.
- *
- * A total mapping of `FileFailure` rather than a switch, so a reason added to
- * that closed union is a compile error here instead of a file reported with
- * whatever the last arm said.
- */
-const FILE_FAILURES: Record<FileFailure, MessageKey> = {
-  "not-an-epub": "file.notAnEpub",
-  "not-a-mobi": "file.notAMobi",
-  "not-an-fb2": "file.notAnFb2",
-  "not-a-comic": "file.notAComic",
-  "not-a-pdf": "file.notAPdf",
-  damaged: "file.damaged",
-  protected: "file.protected",
-  "too-large": "file.tooLarge",
-  unsupported: "file.unsupported",
-  "no-inflate": "file.noInflate",
-};
-
-/**
- * What a member is told about an audio file that said nothing about itself.
- *
- * Its own total mapping rather than an arm of `FILE_FAILURES`, because the two
- * unions are closed separately: an audio file that carries no tags is an
- * ordinary file rather than a broken one, and it still becomes a candidate
- * under whatever its folder is called.
- */
-const AUDIO_FAILURES: Record<AudioFailure, MessageKey> = {
-  "no-tags": "audio.noTags",
-  unreadable: "audio.unreadable",
-};
-
-/**
- * One sentence per reason that is a name and nothing else.
- *
- * A total `Record` rather than a switch, which is `STORE_FAILURES`' rule and
- * `OFFERED_AGAIN`'s: a reason added to `NamedScanReason` with no sentence here
- * is a compile error rather than a row rendered blank. The two tables above are
- * the same thing one level down, for the two arms that carry a reader's own
- * closed union.
- *
- * **Keyed on `NamedScanReason` rather than on `ScanReason["kind"]`**, because
- * three of the union's arms are answered above this table and never reach it:
- * keyed on every kind, this would have to carry a sentence for `file`, `audio`
- * and `server-said` that nothing would ever look up. `NamedScanReason` holds
- * the rest of that reasoning.
- */
-const REASONS: Record<NamedScanReason, MessageKey> = {
-  "no-title": "file.noTitle",
-  unreadable: "file.unreadable",
-  "not-in-catalogues": "fallback.notInCatalogues",
-  "lookup-failed": "fallback.lookupFailed",
-  "kept-the-name": "fallback.keptTheName",
-  "kept-for-now": "fallback.keptForNow",
-  unreachable: "common.cannotReachServer",
-};
-
-/**
- * The sentence one reason is told in, in the locale being read now.
- *
- * **The whole point of the queue holding a name.** The row was rendered in the
- * language in force when the file failed for as long as the sentence was what
- * was stored.
- *
- * The three arms handled before the table are the three that are not a bare
- * name: two carry a reader's own closed union, and `server-said` carries the
- * server's own words, which are the one thing here no catalogue of ours can
- * translate.
- */
-function reasonText(reason: ScanReason, t: Translate): string {
-  if (reason.kind === "file") return t(FILE_FAILURES[reason.failure]);
-  if (reason.kind === "audio") return t(AUDIO_FAILURES[reason.failure]);
-  if (reason.kind === "server-said") return reason.message;
-  return t(REASONS[reason.kind]);
-}
-
-/**
- * What the queue shows for a row in each state.
- *
- * **A total `Record` keyed on `ScannedEntry["state"]` rather than a run of
- * comparisons**, which is `FILE_FAILURES`' rule and `OFFERED_AGAIN`'s, and the
- * defect it closes was live: the run of comparisons this replaced covered
- * exactly the states that existed and had no last arm, so a ninth state
- * rendered a row on screen with nothing in it. Nothing was red, because a row
- * with no line is a row, and no test asked about a state nobody had added yet.
- * A ninth state is now a compile error here and at `QUEUE_STATES` in the hook,
- * which are the two places its author has to say what it means.
- *
- * **`derived` and `choosing` share one arm**, and that is the rule rather than
- * a saving: both are a row standing under the name its file carried, and what
- * separates them is whether records are on screen for it, which is drawn
- * below and not here.
- *
- * Each arm takes the reader's own `t`, because the row is drawn in the
- * language in force now and the reason it carries is a name until then: see
- * `reasonText`.
- */
-const ROW_LINE: Record<
-  ScannedEntry["state"],
-  (entry: ScannedEntry, t: Translate) => ReactNode
-> = {
-  "looking-up": (_entry, t) => (
-    <span className="text-paper-600 dark:text-paper-400">
-      {t("rapid.lookingUp")}
-    </span>
-  ),
-  reading: (entry, t) => (
-    <span className="text-paper-600 dark:text-paper-400">
-      {t("rapid.reading", { name: entry.label })}
-    </span>
-  ),
-  searching: (_entry, t) => (
-    <span className="text-paper-600 dark:text-paper-400">
-      {t("fallback.searching")}
-    </span>
-  ),
-  found: (entry) => (
-    <span className="text-paper-800 dark:text-paper-100">
-      {entry.draft?.title}
-    </span>
-  ),
-  "not-found": (entry, t) => (
-    <span className="text-amber-700 dark:text-amber-300">
-      {t("rapid.notFound", { isbn: entry.isbn })}
-    </span>
-  ),
-  // A book, not a failure: it carries what its name said and the batch adds it
-  // like any other. The note beside it says where the title came from and what
-  // the file itself could not say.
-  derived: (entry, t) => namedDraftLine(entry, t),
-  choosing: (entry, t) => namedDraftLine(entry, t),
-  // Named, not counted. After a shelf of thirty, "six could not be added" is
-  // unrecoverable: this says which six and why, and they stay in the queue so
-  // they can be retried or dropped.
-  failed: (entry, t) => (
-    <span className="text-danger-600 dark:text-danger-300">
-      {entry.draft?.title || entry.label}
-      {entry.reason && (
-        <span className="text-paper-600 dark:text-paper-400">
-          {" "}
-          {reasonText(entry.reason, t)}
-        </span>
-      )}
-    </span>
-  ),
-};
-
-/** The line a row standing under its file's own name reads. */
-function namedDraftLine(entry: ScannedEntry, t: Translate): ReactNode {
-  return (
-    <span className="text-paper-800 dark:text-paper-100">
-      {entry.draft?.title}
-      <span className="text-paper-600 dark:text-paper-400">
-        {" "}
-        {t("fallback.fromTheName")}
-        {entry.reason ? ` ${reasonText(entry.reason, t)}` : ""}
-      </span>
-    </span>
-  );
-}
+import type { ScannedEntry } from "../hooks";
 
 /**
  * One catalogue record as one line: what is shown, and what is announced.
@@ -199,28 +26,36 @@ function recordLine(match: BookMatch): string {
 interface RapidQueueProps {
   entries: ScannedEntry[];
   isAdding: boolean;
-  /** How far the run that is going has got, and `null` when none is. */
-  progress: BulkProgress | null;
-  result: {
-    added: number;
-    failed: number;
-    unreferenced: number;
-    stopped: boolean;
-  } | null;
+  result: { added: number; failed: number; unreferenced: number } | null;
   onRemove: (key: string) => void;
   onAddAll: () => void;
   onDiscard: () => void;
-  /** Halt the batch after the book in flight, leaving the rest in the queue. */
-  onStopAdding: () => void;
+  /** How many entries have only their name left to go on. */
+  waiting: number;
   /**
-   * What the queue adds up to, which this component renders and never counts.
+   * How many have records offered and neither taken nor refused.
    *
-   * **Taken whole from the hook**, because the batch excludes exactly the rows
-   * one of these figures counts and a predicate written twice is a screen able
-   * to report something the page did not do. `QueueFigures` says what each one
-   * is; saying it a second time here is how the two come to disagree.
+   * **Said, because the batch no longer takes these and that used to be
+   * silent**: a row still being decided keeps its file name draft, so adding it
+   * would throw away the records the catalogue found with nothing on screen.
+   *
+   * **Taken from the hook rather than counted here**, because the batch excludes
+   * exactly this set and a predicate written twice is a screen able to report
+   * something the page did not do.
    */
-  figures: QueueFigures;
+  deciding: number;
+  /**
+   * How many are standing under their file names in bulk, and can come back.
+   *
+   * Counted apart from `waiting` for the reason the hook counts it apart: the
+   * press that offers these names again names them, and the press that looks up
+   * files nobody has asked about does not quietly take them too.
+   */
+  keptForNow: number;
+  /** Roughly how long looking all of those up would take, in minutes. */
+  paceMinutes: number;
+  /** The same figure for a second pass over the names kept in bulk. */
+  keptPaceMinutes: number;
   isLookingUp: boolean;
   onLookUp: () => void;
   onStopLookUp: () => void;
@@ -236,13 +71,6 @@ interface RapidQueueProps {
    * reason this is not the refused "Keep every name".
    */
   onKeepAllForNow: () => void;
-  /**
-   * Take one subject off one queued book, before the batch writes it.
-   *
-   * Named for what it removes rather than for the row, because the row's own
-   * removal is `onRemove` one line up and the two are different remedies.
-   */
-  onDropSubject: (key: string, subject: string) => void;
   /** Ask the catalogues again about every name kept in bulk. */
   onLookUpKept: () => void;
   /**
@@ -271,12 +99,14 @@ export default function RapidQueue({
   entries,
   isAdding,
   result,
-  progress,
   onRemove,
   onAddAll,
   onDiscard,
-  onStopAdding,
-  figures,
+  waiting,
+  deciding,
+  keptForNow,
+  paceMinutes,
+  keptPaceMinutes,
   isLookingUp,
   onLookUp,
   onStopLookUp,
@@ -285,78 +115,43 @@ export default function RapidQueue({
   onKeepAllForNow,
   onLookUpKept,
   onSplit,
-  onDropSubject,
 }: RapidQueueProps) {
   const { t } = useTranslation();
-  // Read out here so every figure below is spelled the way the hook spells it.
-  const {
-    waiting,
-    deciding,
-    keptForNow,
-    emptyAnswers,
-    paceMinutes,
-    keptPaceMinutes,
-  } = figures;
 
   // **Said once, and only for the rows it is true of.** Explaining before the
   // fact would be a page apologising for something that may not happen, and
   // explaining per row would say it thirty times. A member who was offered
   // records and preferred the name is not a member the catalogues had nothing
   // for, so `answered` carries the two apart.
-  //
-  // **Counted by the hook and read here**, which is what every other figure on
-  // this screen already did: this was the one reading of a row's own fields
-  // left in the component, and a second reading is a second place for this
-  // sentence to appear beside a queue it is not true of.
-  const anyEmptyAnswer = emptyAnswers > 0;
+  const anyEmptyAnswer = entries.some((entry) => entry.answered === "nothing");
   const busy = isAdding || isLookingUp;
   // Rows standing under their names with somewhere to go back to, and no run in
   // the way. Read three times below, so it is named once.
   const showKept = keptForNow > 0 && !isLookingUp;
 
-  // The banner sits beside whatever is left rather than replacing it. Anything
+  // The banner sits above whatever is left rather than replacing it. Anything
   // still in the queue after a run is a book that did not go in.
-  //
-  // **It is rendered below the controls, and that is a safety rule rather than
-  // a layout preference.** See the block that mounts it at the foot of this
-  // component.
-  //
-  // **Never while a run is going**, which the stop made the ordinary case: the
-  // rows a member keeps are kept in order to be added, so pressing Add all
-  // again is the way back, and the previous run's verdict would otherwise sit
-  // amber above a live progress figure saying those same rows are still in the
-  // queue while they are being written. The hook clears the verdict when a run
-  // starts; this refuses the pair whoever renders it.
-  const banner =
-    result && !isAdding ? (
-      <p
-        role="status"
-        className={`text-sm rounded-xl px-3 py-2 mt-4 border ${
-          // A stopped run reads amber for the reason a run with failures does:
-          // the queue is not empty and the number is not the number that was
-          // asked for. Green there would call a halt a completed batch.
-          result.failed > 0 || result.stopped
-            ? "text-amber-800 bg-amber-50 border-amber-100 dark:text-amber-200 dark:bg-amber-950 dark:border-amber-900"
-            : "text-green-700 bg-green-50 border-green-100 dark:text-green-300 dark:bg-green-950 dark:border-green-900"
-        }`}
-      >
-        {result.stopped
-          ? t("rapid.addedStopped", {
-              count: result.added,
-              failed: result.failed,
-            })
-          : t("rapid.added", { count: result.added, failed: result.failed })}
-        {/* **A second sentence rather than a third number in the first.** A book
+  const banner = result ? (
+    <p
+      role="status"
+      className={`text-sm rounded-xl px-3 py-2 mt-4 border ${
+        result.failed > 0
+          ? "text-amber-800 bg-amber-50 border-amber-100 dark:text-amber-200 dark:bg-amber-950 dark:border-amber-900"
+          : "text-green-700 bg-green-50 border-green-100 dark:text-green-300 dark:bg-green-950 dark:border-green-900"
+      }`}
+    >
+      {t("rapid.added", { count: result.added, failed: result.failed })}
+      {/* **A second sentence rather than a third number in the first.** A book
           whose location was not recorded is in the catalogue and is not a
           failure, so saying it inside "N added, M below" would read as one.
           Absent at zero, which is every batch of barcodes. */}
-        {result.unreferenced > 0 && (
-          <span className="block mt-1">
-            {t("rapid.unreferenced", { count: result.unreferenced })}
-          </span>
-        )}
-      </p>
-    ) : null;
+      {result.unreferenced > 0 && (
+        <span className="block mt-1">
+          {t("rapid.unreferenced", { count: result.unreferenced })}
+        </span>
+      )}
+    </p>
+  ) : null;
 
   if (entries.length === 0) {
     if (banner) return banner;
@@ -369,6 +164,7 @@ export default function RapidQueue({
 
   return (
     <div className="mt-4 space-y-3">
+      {banner}
       <p className="text-sm font-medium text-paper-700 dark:text-paper-200">
         {t("rapid.queued", { count: entries.length })}
       </p>
@@ -416,7 +212,58 @@ export default function RapidQueue({
           >
             <div className="flex items-center gap-2">
               <span className="min-w-0 flex-1 truncate">
-                {ROW_LINE[entry.state](entry, t)}
+                {entry.state === "looking-up" && (
+                  <span className="text-paper-600 dark:text-paper-400">
+                    {t("rapid.lookingUp")}
+                  </span>
+                )}
+                {entry.state === "reading" && (
+                  <span className="text-paper-600 dark:text-paper-400">
+                    {t("rapid.reading", { name: entry.label })}
+                  </span>
+                )}
+                {entry.state === "found" && (
+                  <span className="text-paper-800 dark:text-paper-100">
+                    {entry.draft?.title}
+                  </span>
+                )}
+                {entry.state === "not-found" && (
+                  <span className="text-amber-700 dark:text-amber-300">
+                    {t("rapid.notFound", { isbn: entry.isbn })}
+                  </span>
+                )}
+                {entry.state === "searching" && (
+                  <span className="text-paper-600 dark:text-paper-400">
+                    {t("fallback.searching")}
+                  </span>
+                )}
+                {/* A book, not a failure: it carries what its name said and the
+                  batch adds it like any other. The note beside it says where
+                  the title came from and what the file itself could not say. */}
+                {(entry.state === "derived" || entry.state === "choosing") && (
+                  <span className="text-paper-800 dark:text-paper-100">
+                    {entry.draft?.title}
+                    <span className="text-paper-600 dark:text-paper-400">
+                      {" "}
+                      {t("fallback.fromTheName")}
+                      {entry.reason ? ` ${entry.reason}` : ""}
+                    </span>
+                  </span>
+                )}
+                {/* Named, not counted. After a shelf of thirty, "six could not
+                  be added" is unrecoverable: this says which six and why, and
+                  they stay in the queue so they can be retried or dropped. */}
+                {entry.state === "failed" && (
+                  <span className="text-danger-600 dark:text-danger-300">
+                    {entry.draft?.title || entry.label}
+                    {entry.reason && (
+                      <span className="text-paper-600 dark:text-paper-400">
+                        {" "}
+                        {entry.reason}
+                      </span>
+                    )}
+                  </span>
+                )}
               </span>
               <button
                 type="button"
@@ -461,72 +308,9 @@ export default function RapidQueue({
               </div>
             )}
 
-            {/* **The subjects the file stated, and the only place they can be
-                taken off.** Nothing here is written until "Add all", and no
-                route clears `books.categories` afterwards: enrichment can
-                replace the list and never empty it, and `BookDetailsUpdate`
-                has no such field, so the remedy after the batch is deleting
-                the book. That is the same argument the grouped audio block
-                above makes for the same moment, one field over.
-
-                **Folded away behind a summary rather than always open**, the
-                grouping block's shape, because a folder pick is several
-                hundred rows and a file states up to the endpoint's whole
-                budget: open, this queue would be unreadable. The summary
-                carries the count, so a member scanning the list sees that
-                there is something to look at without opening it.
-
-                `key={subject}` is safe because `lib/bookRequest.ts` folded
-                the exact repeats out before the draft was built, which is the
-                one thing this render leans on. */}
-            {entry.draft?.categories !== undefined &&
-              entry.draft.categories.length > 0 && (
-                <div className="mt-1.5 text-xs">
-                  <details>
-                    <summary className="cursor-pointer text-paper-600 dark:text-paper-400">
-                      {t("rapid.subjects", {
-                        count: entry.draft.categories.length,
-                      })}
-                    </summary>
-                    <div className="mt-1 flex flex-wrap gap-1.5">
-                      {entry.draft.categories.map((subject) => (
-                        <span
-                          key={subject}
-                          className="min-w-0 text-paper-600 bg-paper-100 px-2 py-0.5 rounded break-words dark:text-paper-400 dark:bg-paper-800"
-                        >
-                          {subject}
-                          <button
-                            type="button"
-                            onClick={() => onDropSubject(entry.key, subject)}
-                            disabled={busy}
-                            // Both the subject and the row, the reason the
-                            // split control one block up names the row: a
-                            // folder pick draws several hundred of these and
-                            // "Remove Fiction" repeats across all of them.
-                            aria-label={t("rapid.removeSubject", {
-                              subject,
-                              label: entry.label,
-                            })}
-                            className="ml-1 opacity-60 hover:opacity-100 disabled:opacity-30 leading-none"
-                          >
-                            ×
-                          </button>
-                        </span>
-                      ))}
-                    </div>
-                  </details>
-                </div>
-              )}
-
             {/* Accept or reject, per file. The ranking already put the likeliest
-                record first, and the rest are here to be disagreed with.
-
-                **The hook's own predicate rather than the state spelled out
-                here**, which is what it was: the rule for which rows are still
-                being decided is counted for the figure above by that predicate,
-                so a second spelling is a screen able to offer records the page
-                does not count as offered. */}
-            {isBeingDecided(entry) && entry.matches && (
+                record first, and the rest are here to be disagreed with. */}
+            {entry.state === "choosing" && entry.matches && (
               <div className="mt-2 space-y-1">
                 <p className="text-xs text-paper-600 dark:text-paper-400">
                   {t("fallback.matches", { count: entry.matches.length })}
@@ -673,26 +457,6 @@ export default function RapidQueue({
         )}
       </div>
 
-      {/* **A figure beside the way out of the run.** Stopping with nothing on
-          screen saying how far it had got is a button pressed blind, and this
-          is the same `{done} of {total}` the import cards on the settings page
-          have shown since they had a stop. It is the loop's own count rather
-          than a second one kept here.
-
-          **Not a live region, and not for the reason the block below is not
-          one.** That one is kept out of `role="status"` so the banner is the
-          only thing answering to the role. This one is a number that moves once
-          per book, so announcing it would read a three hundred book run out
-          loud a line at a time. */}
-      {isAdding && progress && (
-        <p className="text-xs text-paper-600 dark:text-paper-400">
-          {t("rapid.progress", {
-            done: progress.done,
-            total: progress.total,
-          })}
-        </p>
-      )}
-
       <div className="flex gap-2">
         <button
           type="button"
@@ -711,56 +475,6 @@ export default function RapidQueue({
           {isAdding ? t("rapid.adding") : t("rapid.addAll")}
         </button>
       </div>
-
-      {/* **The verdict and the stop are the last two children, and that is one
-          rule rather than two placements.**
-
-          A run ends in one commit: the stop unmounts, the progress figure
-          unmounts, the rows that were written are pruned, and the verdict
-          mounts. The member's finger is on the stop, which is the only control
-          a run leaves live, and the discard beside `Add all` clears a queue of
-          barcodes scanned one at a time with no confirmation and no undo.
-
-          **So the rule is that the commit which moves the discard may not make
-          it live, and the one that makes it live may not move it toward the
-          finger.** Both halves hold by document order rather than by
-          arithmetic, which is what makes them checkable without a layout
-          engine:
-
-          - Everything that commit removes sits **above** the row, so the
-            region above it only shrinks and the row can only move away from
-            the finger, never toward it. The progress figure alone guarantees
-            that: it is present for every run and goes at the end of every one.
-          - Everything that commit mounts sits **below** the row, and it is
-            text. The verdict takes the space the stop had, so what arrives
-            under a finger still tapping is a paragraph.
-
-          Drawing the verdict at the top of this container broke the second
-          half: the banner pushed the row down toward the finger by more than
-          the progress figure's removal lifted it, and `disabled={busy}` went
-          false in the same commit.
-
-          **The residue is outside this component and is a neighbour's
-          property**, so it is stated here rather than discovered: on the file
-          pick path `rapid.isActive` is false, `showQueue` and `showEntry` are
-          both true, and `ScanPage` opens that block with a full bleed
-          `aspect-[4/3]` panel, the camera or its dashed placeholder. Whatever
-          this container's foot does, the first control under it is the camera
-          button below that panel. Reordering that block is what would make
-          this false.
-
-          The `Stop` word and the full width are the paced lookup's stop, which
-          is the one this page has already taught. */}
-      {banner}
-      {isAdding && (
-        <button
-          type="button"
-          onClick={onStopAdding}
-          className="w-full py-2 rounded-xl border border-paper-200 text-sm font-medium text-paper-700 hover:bg-paper-50 dark:border-paper-700 dark:text-paper-200 dark:hover:bg-paper-800"
-        >
-          {t("rapid.stopAdding")}
-        </button>
-      )}
     </div>
   );
 }

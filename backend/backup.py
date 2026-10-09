@@ -385,19 +385,6 @@ def _parse_row(
     table: Table,
 ) -> dict[str, Any]:
     parsed = dict(row)
-    _parse_dates(parsed, parsers)
-    _storable_cover(parsed)
-    _fold_name(parsed, table)
-    _blank_tag_key(parsed, table)
-    _file_classification(parsed, table)
-    _refuse_a_bad_credential(parsed, table)
-    return parsed
-
-
-def _parse_dates(
-    parsed: dict[str, Any], parsers: dict[str, type[date] | type[datetime]]
-) -> None:
-    """Each date and timestamp column of a row, parsed from the archive's ISO text."""
     for name, kind in parsers.items():
         value = parsed.get(name)
         if isinstance(value, str) and value:
@@ -408,23 +395,17 @@ def _parse_dates(
                     f"{name!r} in the backup is not a date: {value!r}"
                 ) from error
 
-
-def _storable_cover(parsed: dict[str, Any]) -> None:
-    """A row's `cover_url`, through the rule the ORM's validator applies.
-
-    A restore inserts through Core, not the ORM, so `@validates` never fires
-    and `Book._store_covers_over_https` does not run. `covers.storable` is
-    that validator's whole rule, called directly: an earlier version of this
-    line repeated only the scheme upgrade, so an archive could still write
-    `javascript:` or `//host` straight past every other guard. An archive is
-    admin-supplied, and an admin is not a reason to trust a file: it may have
-    come from another deployment or been edited by hand.
-
-    Dropped rather than refused, matching the ORM backstop: one odd cover is
-    not a reason to fail a whole restore. Only `books` has this column, so
-    testing for the name keeps `_parse_row`, which calls this for every table,
-    generic.
-    """
+    # A restore inserts through Core, not the ORM, so `@validates` never fires
+    # and `Book._store_covers_over_https` does not run. `covers.storable` is
+    # that validator's whole rule, called directly: an earlier version of this
+    # line repeated only the scheme upgrade, so an archive could still write
+    # `javascript:` or `//host` straight past every other guard. An archive is
+    # admin-supplied, and an admin is not a reason to trust a file: it may have
+    # come from another deployment or been edited by hand.
+    #
+    # Dropped rather than refused, matching the ORM backstop: one odd cover is
+    # not a reason to fail a whole restore. Only `books` has this column, so
+    # testing for the name keeps this row parser generic.
     cover = parsed.get("cover_url")
     if isinstance(cover, str):
         stored = covers.storable(cover)
@@ -435,32 +416,29 @@ def _storable_cover(parsed: dict[str, Any]) -> None:
             )
         parsed["cover_url"] = stored
 
-
-def _fold_name(parsed: dict[str, Any], table: Table) -> None:
-    """A collection's `name_folded`, recomputed from its name rather than trusted.
-
-    The second derived column with the same problem, and it is not optional
-    the way the cover is. `Collection.name_folded` is written by a
-    `@validates` hook, which a Core insert never fires, so an archive decides
-    this value rather than the model. Two consequences, both real:
-
-    * An archive taken **before** the revision that added the column carries
-      no value for it. The column is NOT NULL, so the insert raises
-      `IntegrityError`, which is not `RestoreError`, so the route answers 500
-      rather than the 400 its docstring promises. Recomputing here is what
-      keeps an older backup restorable, which is the rule `FORMAT_VERSION`
-      states: a column the archive does not carry must not throw a library's
-      backups away.
-    * A hand-edited archive can carry a fold that disagrees with its name.
-      The unique index catches two rows folding the same; it can never catch
-      one row folding wrongly. Derived rather than trusted, for the same
-      reason an admin uploading the file is not a reason to trust the file.
-
-    Keyed on the column being in this table, because `tags` and `users` have
-    a name too and neither has a fold. `_parse_row` hands over the `Table`
-    from `_TABLES`, so the check costs nothing.
-    """
+    # The second derived column with the same problem, and it is not optional
+    # the way the cover is. `Collection.name_folded` is written by a
+    # `@validates` hook, which a Core insert never fires, so an archive decides
+    # this value rather than the model. Two consequences, both real:
+    #
+    # * An archive taken **before** the revision that added the column carries
+    #   no value for it. The column is NOT NULL, so the insert raises
+    #   `IntegrityError`, which is not `RestoreError`, so the route answers 500
+    #   rather than the 400 its docstring promises. Recomputing here is what
+    #   keeps an older backup restorable, which is the rule `FORMAT_VERSION`
+    #   states: a column the archive does not carry must not throw a library's
+    #   backups away.
+    # * A hand-edited archive can carry a fold that disagrees with its name.
+    #   The unique index catches two rows folding the same; it can never catch
+    #   one row folding wrongly. Derived rather than trusted, for the same
+    #   reason an admin uploading the file is not a reason to trust the file.
+    #
+    # Keyed on the column being in this table, because `tags` and `users` have
+    # a name too and neither has a fold. `_TABLES` is the only caller and holds
+    # the `Table`, so the check costs nothing.
     if "name_folded" in table.columns:
+        # `written_name` rather than `name`, which the date loop above binds to
+        # a column name. mypy catches the collision; a reader would not.
         written_name = parsed.get("name")
         # Refused rather than skipped. A non-string here used to fall past the
         # recompute and leave the archive's own fold standing, which is the
@@ -472,7 +450,7 @@ def _fold_name(parsed: dict[str, Any], table: Table) -> None:
         if not isinstance(written_name, str):
             raise RestoreError(
                 f"A row in {table.name!r} has a name that is not text: "
-                # Truncated like the `cover_url` warning in `_storable_cover`, and for the
+                # Truncated like the `cover_url` warning above, and for the
                 # same reason: a manifest may declare 1 GiB, so one value can
                 # carry ~500 MiB, and `repr` amplifies it about 4x before
                 # `json.dumps` takes another 5x into the response body.
@@ -486,62 +464,52 @@ def _fold_name(parsed: dict[str, Any], table: Table) -> None:
             )
         parsed["name_folded"] = fold_collection_name(written_name)
 
-
-def _blank_tag_key(parsed: dict[str, Any], table: Table) -> None:
-    """A tag's `key`, blanked so the repair after the inserts derives it.
-
-    The third derived column, and the one that arrives with a unique index on
-    it. `tags.key` says which seeded tag a row **is**, and it is recomputed
-    from the name by `_repair_seeded_tags` a few lines after the inserts, so
-    the archive's own value is never read for anything. Left standing it is
-    still enforced: an archive holding two rows with the same key raises
-    `IntegrityError` on the insert, which is not `RestoreError`, so the route
-    answers 500 rather than the 400 its docstring promises, over a column
-    nobody can see and whose value was about to be overwritten. Measured on
-    the real route by putting `"fiction"` on an invented row.
-
-    Blanked rather than validated, which is the difference from
-    `_refuse_a_colliding_pair` and turns on whether the value is data.
-    A collection's *name* is data: it is what the library typed, it cannot be
-    derived from anything else, and two that collide is a question only a
-    person can answer, so that pair is refused with both names in the
-    message. A key is not data. It is derived, this file derives it, and
-    refusing a restore over a claim we were going to discard would cost a
-    library its backup to protect a column it does not know exists.
-
-    `table.name == "tags"`, **not** `"key" in table.columns`: `settings.key`
-    is that table's row identity, `VARCHAR(64) NOT NULL PRIMARY KEY`, and
-    blanking it would raise "NOT NULL constraint failed: settings.key" and
-    take down every restore. Measured against the real column.
-    """
+    # The third derived column, and the one that arrives with a unique index on
+    # it. `tags.key` says which seeded tag a row **is**, and it is recomputed
+    # from the name by `_repair_seeded_tags` a few lines after the inserts, so
+    # the archive's own value is never read for anything. Left standing it is
+    # still enforced: an archive holding two rows with the same key raises
+    # `IntegrityError` on the insert, which is not `RestoreError`, so the route
+    # answers 500 rather than the 400 its docstring promises, over a column
+    # nobody can see and whose value was about to be overwritten. Measured on
+    # the real route by putting `"fiction"` on an invented row.
+    #
+    # Blanked rather than validated, which is the difference from
+    # `_refuse_a_colliding_pair` above and turns on whether the value is data.
+    # A collection's *name* is data: it is what the library typed, it cannot be
+    # derived from anything else, and two that collide is a question only a
+    # person can answer, so that pair is refused with both names in the
+    # message. A key is not data. It is derived, this file derives it, and
+    # refusing a restore over a claim we were going to discard would cost a
+    # library its backup to protect a column it does not know exists.
+    #
+    # `table.name == "tags"`, **not** `"key" in table.columns`: `settings.key`
+    # is that table's row identity, `VARCHAR(64) NOT NULL PRIMARY KEY`, and
+    # blanking it would raise "NOT NULL constraint failed: settings.key" and
+    # take down every restore. Measured against the real column.
     if table.name == "tags":
         parsed["key"] = None
 
-
-def _file_classification(parsed: dict[str, Any], table: Table) -> None:
-    """A classification's `sort_key`, recomputed from its number rather than trusted.
-
-    The fourth derived column, and the one whose failure is silent rather
-    than loud. `classifications.sort_key` is written by
-    `Classification._file_the_number`, which is a `@validates` hook and so
-    never fires here. Left to the archive it would restore whatever an
-    archive happened to hold, and a wrong key is not visible anywhere: the
-    row is there, the number is right, and the book stands in the wrong place
-    on one shelf order.
-
-    Derived rather than trusted for the reason `name_folded` is: an admin
-    uploading a file is not a reason to trust the file, and this value is
-    computable from the row. An archive taken before the column existed
-    carries nothing for it and the column is NOT NULL, so recomputing is also
-    what keeps that archive restorable at all, which is `FORMAT_VERSION`'s
-    promise.
-
-    `table.name`, not `"sort_key" in table.columns`, so that a second table
-    growing a column of that name does not silently acquire a filing rule.
-    """
+    # The fourth derived column, and the one whose failure is silent rather
+    # than loud. `classifications.sort_key` is written by
+    # `Classification._file_the_number`, which is a `@validates` hook and so
+    # never fires here. Left to the archive it would restore whatever an
+    # archive happened to hold, and a wrong key is not visible anywhere: the
+    # row is there, the number is right, and the book stands in the wrong place
+    # on one shelf order.
+    #
+    # Derived rather than trusted for the reason `name_folded` is: an admin
+    # uploading a file is not a reason to trust the file, and this value is
+    # computable from the row. An archive taken before the column existed
+    # carries nothing for it and the column is NOT NULL, so recomputing is also
+    # what keeps that archive restorable at all, which is `FORMAT_VERSION`'s
+    # promise.
+    #
+    # `table.name`, not `"sort_key" in table.columns`, so that a second table
+    # growing a column of that name does not silently acquire a filing rule.
     if table.name == "classifications":
         number = parsed.get("number")
-        # Refused rather than skipped, the shape `_fold_name` uses.
+        # Refused rather than skipped, the shape `name_folded` above uses.
         #
         # **What it buys is the promised 400, and not a correct key**, which is
         # the opposite of what this comment first claimed. Measured against the
@@ -575,27 +543,22 @@ def _file_classification(parsed: dict[str, Any], table: Table) -> None:
             )
         parsed["sort_key"] = filing.sort_key_for(parsed.get("scheme"), number)
 
-
-def _refuse_a_bad_credential(parsed: dict[str, Any], table: Table) -> None:
-    """A credential row refused unless it carries an envelope and a catalogue's name.
-
-    The fifth, and the one whose failure is a 500 rather than a wrong value.
-    `ck_catalogue_credentials_envelope` refuses anything that is not an
-    envelope, which is what stands between a hand-edited archive and a
-    plaintext password being sent to a catalogue. But a CHECK fires as
-    `IntegrityError`, which is not `RestoreError`, so the route answered 500
-    where this module's docstring promises 400. Exactly the shape
-    `_blank_tag_key` records for a colliding key.
-
-    **The rule is asked of the module that owns the format, not restated.**
-    `credentials.generation_of` answers empty for anything that is not a
-    version this build knows, so the constraint and this check cannot drift
-    into two definitions of "an envelope". The constraint stays as the last
-    line, for a write that never comes through here.
-
-    No value in the message: the column holds a secret, and an archive whose
-    row is not an envelope holds whatever a person put there.
-    """
+    # The fifth, and the one whose failure is a 500 rather than a wrong value.
+    # `ck_catalogue_credentials_envelope` refuses anything that is not an
+    # envelope, which is what stands between a hand-edited archive and a
+    # plaintext password being sent to a catalogue. But a CHECK fires as
+    # `IntegrityError`, which is not `RestoreError`, so the route answered 500
+    # where this module's docstring promises 400. Exactly the shape the `tags`
+    # arm above records for a colliding key.
+    #
+    # **The rule is asked of the module that owns the format, not restated.**
+    # `credentials.generation_of` answers empty for anything that is not a
+    # version this build knows, so the constraint and this check cannot drift
+    # into two definitions of "an envelope". The constraint stays as the last
+    # line, for a write that never comes through here.
+    #
+    # No value in the message: the column holds a secret, and an archive whose
+    # row is not an envelope holds whatever a person put there.
     if table.name == "catalogue_credentials":
         if not credentials.generation_of(str(parsed.get("envelope") or "")):
             raise RestoreError(
@@ -616,6 +579,7 @@ def _refuse_a_bad_credential(parsed: dict[str, Any], table: Table) -> None:
                 f"A row in {table.name!r} names a source that is not a catalogue: "
                 f"{str(parsed.get('source'))[:60]!r}"
             )
+    return parsed
 
 
 def _stored_values(db: Session, table: Table) -> list[dict[str, Any]]:
@@ -659,14 +623,7 @@ def build_archive(db: Session) -> bytes:
     """
     manifest: dict[str, Any] = {
         "format_version": FORMAT_VERSION,
-        # **Naive UTC, which is the frame every other timestamp in this file
-        # is in.** `datetime.now()` is the host's local wall clock, so this one
-        # header was in a different frame from the table values beside it and
-        # said nothing about which: an archive taken at 01:00 in Berlin read as
-        # an hour that the rows it describes had not reached. The spelling is
-        # `_settle_restored_accounts`'s rather than a second way of writing the
-        # same thing.
-        "created_at": datetime.now(UTC).replace(tzinfo=None).isoformat(),
+        "created_at": datetime.now().isoformat(),
         "tables": {},
     }
 
@@ -699,57 +656,22 @@ def read_manifest(data: bytes) -> dict[str, Any]:
     Every check happens **before** the database is touched. A restore that
     fails halfway leaves a library that is neither the backup nor what was
     there before, which is worse than either.
-
-    **Every failure to read the archive is the archive's, and is a refusal.**
-    The bytes are the caller's, so anything the zip reader, its three
-    decompressors or the JSON parser raise over them is a 400 rather than a
-    500. That is a class rather than a list, for the reason at the two blind
-    arms below.
     """
     try:
         archive = zipfile.ZipFile(BytesIO(data))
-    except Exception as error:
-        # **Blind, and the breadth is the point**, as at
-        # `credentials.origin_of`. Opening reads the central directory and
-        # raises `BadZipFile` for a damaged one and `NotImplementedError` for
-        # an archive declaring a zip version it does not implement: two
-        # unrelated types, measured over single byte patches of a backup.
+    except zipfile.BadZipFile as error:
         raise RestoreError("That file is not an Endpaper backup.") from error
 
     _reject_a_bomb(archive, len(data))
 
     try:
-        raw = archive.read(MANIFEST_NAME)
+        manifest: dict[str, Any] = json.loads(archive.read(MANIFEST_NAME))
     except KeyError as error:
         raise RestoreError(
             f"The archive has no {MANIFEST_NAME}, so it is not an Endpaper backup."
         ) from error
-    except Exception as error:
-        # **Blind, and the breadth is the point.** Reading one entry raised
-        # eight unrelated types over single byte patches of a two entry backup
-        # in each of the four compression methods zip offers: `BadZipFile`,
-        # `zlib.error`, `lzma.LZMAError`, `OSError` from bz2,
-        # `NotImplementedError`, `RuntimeError` for an entry flagged
-        # encrypted, `ValueError`, and `MemoryError` from an LZMA header
-        # declaring an enormous dictionary. They share no base but `Exception`,
-        # so naming them is a list, and the list this arm held before caught
-        # none of them: each was a 500. Nothing in this block is ours but the
-        # call, so nothing of ours is swallowed.
+    except (json.JSONDecodeError, UnicodeDecodeError) as error:
         raise RestoreError("The backup's contents could not be read.") from error
-
-    try:
-        manifest: object = json.loads(raw)
-    except (json.JSONDecodeError, UnicodeDecodeError, RecursionError) as error:
-        # `RecursionError` for a manifest nested past the parser's stack, which
-        # a stored entry reaches with a compression ratio of one and so passes
-        # `_reject_a_bomb`. `fetch.Fetched.json` converts the same error for a
-        # response body.
-        raise RestoreError("The backup's contents could not be read.") from error
-
-    # Valid JSON that is not an object is still not a manifest, and every read
-    # below assumes one: `[]` and `null` were an `AttributeError` here.
-    if not isinstance(manifest, dict):
-        raise RestoreError("The backup's manifest is not the shape a backup writes.")
 
     version = manifest.get("format_version")
     if version != FORMAT_VERSION:
@@ -1061,18 +983,7 @@ def restore(db: Session, data: bytes) -> dict[str, int]:
         filename = _safe_cover_name(entry)
         if filename is None:
             continue
-        try:
-            body = _cover_bytes(archive, entry)
-        except Exception:  # noqa: BLE001  the breadth is the point, see below
-            # **Declined like a write that failed, for the reason below**, and
-            # blind for `read_manifest`'s: reading one entry raises eight
-            # unrelated types over a damaged archive. A cover whose bytes fail
-            # their checksum was a 500 here, with the rows restored and the
-            # covers half written. The name is logged with the rest. **The
-            # breadth has a cost `read_manifest`'s does not**: `_cover_bytes`
-            # also runs this application's own sniff, so a defect there would
-            # decline every cover with a warning rather than raise.
-            body = None
+        body = _cover_bytes(archive, entry)
         if body is None:
             declined.append(filename)
             continue
@@ -1096,9 +1007,9 @@ def restore(db: Session, data: bytes) -> dict[str, int]:
     if declined:
         # `%r` on each name, not `%s` on the join. A zip name field holds 64 KB
         # and may contain a newline, so an archive could otherwise write its own
-        # lines into this log. `_storable_cover` states the same rule at its own site.
+        # lines into this log. `_parse_row` states the same rule at its own site.
         logger.warning(
-            "Declined %d archive entries that are unreadable or not an image this app serves: %s",
+            "Declined %d archive entries that are not an image this app serves: %s",
             len(declined),
             ", ".join(repr(name[:120]) for name in sorted(declined)[:20]),
         )
@@ -1163,8 +1074,8 @@ def _repair_seeded_tags(db: Session) -> None:
         # and the order SQLAlchemy flushes these in is not the order of this
         # loop. No key can move here: every row arrives null, `tags.name` is
         # unique, and `PREDEFINED_TAGS` maps 105 distinct names onto 105
-        # distinct keys, so this writes each key at most once. Delete
-        # `_blank_tag_key` and this becomes an `IntegrityError` on a restore.
+        # distinct keys, so this writes each key at most once. Delete the
+        # `_parse_row` block and this becomes an `IntegrityError` on a restore.
         seeded_key = keys_by_name.get(tag.name)
         should_be = seeded_key is not None
         if tag.is_predefined != should_be or tag.key != seeded_key:

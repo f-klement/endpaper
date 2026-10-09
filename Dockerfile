@@ -9,7 +9,7 @@
 #
 # Renovate bumps this line: the dockerfile manager reads an `ARG` default that a `FROM`
 # consumes, and the runtime stage consumes it directly.
-ARG BASE=python:3.14.8-alpine@sha256:f6a589d43c42b9e7f7dc67a12d37132491f362859a5d750607710cc56da3bc72
+ARG BASE=python:3.14.7-alpine@sha256:c6ead215bfd31f1e433d968853b7a769989117115b728874824e6c0a27cb96fc
 
 # Bumped by hand, and BOTH LINES TOGETHER. A version moved without its hash fails the
 # build at `sha256sum -c`, which is the failure you want. Renovate raises the version half
@@ -206,7 +206,7 @@ WORKDIR /app
 # variant ships it at /usr/local/bin/uv. Copying /uv from the alpine image fails with
 # "failed to get fileinfo for /kaniko/deps/.../uv: no such file or directory", which
 # reads like a kaniko cross-stage bug and is really just a missing file.
-COPY --from=ghcr.io/astral-sh/uv:0.12.24-alpine@sha256:5f129a9e14e36fb0a3be4719e5866e24d6a62c392370e17a96bf2ac15e2ae950 /usr/local/bin/uv /bin/uv
+COPY --from=ghcr.io/astral-sh/uv:0.12.15-alpine@sha256:f7fc5f0f42a6d0b49c96bfc35e9beeb06c4959b85c58af43fe0f8447d15f16d7 /usr/local/bin/uv /bin/uv
 
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \

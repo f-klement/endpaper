@@ -65,25 +65,6 @@
  * read the word, so a CBR named in an export lands on `BookFormat.COMIC`
  * rather than on `OTHER`.
  *
- * ## What this supplies that needed a decision
- *
- * **`Genre` is read whole and never split on its comma**, though the schema
- * documents the field as a comma separated list and `Writer` beside it is
- * split exactly that way. The reason is the destination rather than the
- * format: `books.categories` holds values that routinely contain a comma,
- * Google's own subjects being spelled "Fiction, general", which is why the
- * column joins on a semicolon in the first place.
- *
- * **That argument is about the destination's values and the question is about
- * the source's, so it is not on its own a reason.** The reason that survives a
- * CBZ corpus arriving is the asymmetry of being wrong: a wrong split yields two
- * headings a member can see on the queue row and take off one at a time, and a
- * wrong join yields one string no other book will ever match and that no route
- * clears once it is written. **This repository holds no CBZ corpus**, so
- * nothing here can say how often a real `Genre` is a list rather than one name,
- * and the cheaper mistake is the one to make. Reported as written; a member
- * sees it on the queue row before anything is stored.
- *
  * ## What this cannot supply, stated as the exclusion
  *
  * **Page count and the cover: not read.** Both would mean opening a page
@@ -96,6 +77,12 @@
  * comic's artist is not less than its writer; there is nowhere to say so.
  *
  * **The month and the day.** The column holds a year.
+ *
+ * **`Genre`, and it is a destination problem rather than a reading one**, which
+ * is the sentence `mobi.ts` and `fb2.ts` each write about their own spelling of
+ * a subject: `FileMetadata` has no field for one, and no request body this app
+ * sends has anywhere to put it either. `BookCreate` takes no `categories` and
+ * no free text tag, so a subject read here would reach a screen and no column.
  *
  * **Whether the entries are images.** This does not check, because the set of
  * image formats is open and refusing one nobody listed would refuse a real
@@ -127,10 +114,8 @@ import { openZip, ZipError, zipFailureAs, type ZipArchive } from "./zip";
  * It is a bound on **output**, so a document declaring itself small and
  * inflating to gigabytes is stopped by this rather than by the declaration.
  * `lib/zip.ts` carries that rule.
- *
- * Exported, for `epub.MAX_PACKAGE_BYTES`'s reason.
  */
-export const MAX_COMIC_INFO_BYTES = 1024 * 1024;
+const MAX_COMIC_INFO_BYTES = 1024 * 1024;
 
 /** The entry, wherever it sits. Compared lowercased: writers differ on case. */
 const COMIC_INFO_NAME = "comicinfo.xml";
@@ -179,7 +164,6 @@ function nothing(): FileMetadata {
     title: null,
     subtitle: null,
     authors: [],
-    categories: [],
     identifiers: [],
     isbn: null,
     publisher: null,
@@ -266,18 +250,6 @@ function readYear(root: Element): number | null {
  * in mebibytes, so `includes` in this loop is quadratic in a number a member
  * supplied file decides.
  */
-/**
- * The genre the file declared, as a list of nothing or of one.
- *
- * A list because `FileMetadata.categories` is one, not because ComicInfo
- * carries several: `field` reads the first element of a name and the schema
- * gives `Genre` once.
- */
-function readGenre(root: Element): string[] {
-  const genre = field(root, "Genre");
-  return genre === null ? [] : [genre];
-}
-
 function readWriters(root: Element): string[] {
   const raw = field(root, "Writer");
   if (raw === null) return [];
@@ -326,14 +298,7 @@ function readTitle(
  */
 export function readComicInfo(xml: string): FileMetadata | null {
   if (declaresEntities(xml)) return null;
-  // Caught for `fb2.ts::readFb2Description`'s reason: a parser this reader
-  // does not choose may throw where the specification answers `parsererror`.
-  let document: Document;
-  try {
-    document = new DOMParser().parseFromString(xml, "application/xml");
-  } catch {
-    return null;
-  }
+  const document = new DOMParser().parseFromString(xml, "application/xml");
   // Both halves are needed. A parse error yields a document whose root is
   // `parsererror`, and a well formed document that is not a ComicInfo yields a
   // root that is simply something else.
@@ -357,9 +322,6 @@ export function readComicInfo(xml: string): FileMetadata | null {
     // this module's docstring for why that took two attempts to get right.
     subtitle: null,
     authors: readWriters(root),
-    // One element, reported as written. This module's docstring carries why it
-    // is not split on its comma the way `Writer` is.
-    categories: readGenre(root),
     identifiers,
     isbn: gtin === null ? null : parseIsbn(gtin),
     publisher: field(root, "Publisher"),

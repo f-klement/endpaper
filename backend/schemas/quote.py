@@ -1,7 +1,8 @@
+from datetime import datetime
+
 from pydantic import BaseModel, Field, field_validator
 
 from models import QUOTE_NOTE_MAX, QUOTE_TEXT_MAX
-from schemas.common import UtcDateTime
 from schemas.progress import MAX_PAGE
 from schemas.user import UserOut
 
@@ -67,8 +68,8 @@ class QuoteOut(BaseModel):
     text: str
     page: int | None = None
     note: str | None = None
-    created_at: UtcDateTime
-    updated_at: UtcDateTime
+    created_at: datetime
+    updated_at: datetime
     author: UserOut | None = None
     model_config = {"from_attributes": True}
 

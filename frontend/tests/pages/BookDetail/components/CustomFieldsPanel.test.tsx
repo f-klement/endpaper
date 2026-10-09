@@ -11,21 +11,13 @@ import type {
 import CustomFieldsPanel from "../../../../src/pages/BookDetail/components/CustomFieldsPanel";
 import { renderLocalised } from "../../../utils";
 
-const LINK: CustomFieldOut = {
-  id: 1,
-  name: "Calibre-web",
-  kind: "url",
-  renamable: true,
-};
-const TEXT: CustomFieldOut = {
-  id: 2,
-  name: "Bought from",
-  kind: "text",
-  renamable: true,
-};
+const LINK: CustomFieldOut = { id: 1, name: "Calibre-web", kind: "url" };
+const TEXT: CustomFieldOut = { id: 2, name: "Bought from", kind: "text" };
 
-/** What the panel hands a save, which it does not export. */
-type OnSave = React.ComponentProps<typeof CustomFieldsPanel>["onSave"];
+interface Callbacks {
+  onSuccess: () => void;
+  onError: () => void;
+}
 
 function filled(overrides: Partial<CustomFieldValueOut> = {}) {
   return {
@@ -47,7 +39,9 @@ function renderPanel(overrides = {}) {
     // Answers success unless a test overrides it. A stub that never calls
     // back would leave the editor open in every test and hide the one thing
     // these assertions are about.
-    onSave: vi.fn<OnSave>((_id, _value, callbacks) => callbacks.onSuccess()),
+    onSave: vi.fn((_id: number, _value: string, callbacks: Callbacks) =>
+      callbacks.onSuccess(),
+    ),
     ...overrides,
   };
   renderLocalised(<CustomFieldsPanel {...props} />);
@@ -64,13 +58,7 @@ describe("CustomFieldsPanel", () => {
         values={[]}
         isSaving={false}
         error={null}
-        onSave={vi.fn<
-          (
-            fieldId: number,
-            value: string,
-            callbacks: { onSuccess: () => void; onError: () => void },
-          ) => void
-        >()}
+        onSave={vi.fn()}
       />,
     );
 
@@ -86,13 +74,7 @@ describe("CustomFieldsPanel", () => {
         values={[]}
         isSaving={false}
         error={new Error("Could not reach the server.")}
-        onSave={vi.fn<
-          (
-            fieldId: number,
-            value: string,
-            callbacks: { onSuccess: () => void; onError: () => void },
-          ) => void
-        >()}
+        onSave={vi.fn()}
       />,
     );
 
@@ -233,11 +215,13 @@ describe("CustomFieldsPanel", () => {
   });
 
   it("keeps what was typed when the server refuses it", async () => {
-    // The 400 on a url field exists so the member can be told; closing the
+    // The 422 on a url field exists so the member can be told; closing the
     // editor first threw away the half that makes the message actionable, and
     // the only way forward was to reopen and retype.
     const props = renderPanel({
-      onSave: vi.fn<OnSave>((_id, _value, callbacks) => callbacks.onError()),
+      onSave: vi.fn((_id: number, _value: string, callbacks: Callbacks) =>
+        callbacks.onError(),
+      ),
     });
 
     await userEvent.click(screen.getByRole("button", { name: "Edit details" }));
@@ -261,9 +245,9 @@ describe("CustomFieldsPanel", () => {
 
   it("keeps every draft when only one of two writes is refused", async () => {
     // A partial failure is the case a per-field close would get wrong: one
-    // field lands, the other is refused, and reopening has to show both drafts.
+    // field lands, the other 422s, and reopening has to show both drafts.
     const props = renderPanel({
-      onSave: vi.fn<OnSave>((id, _value, callbacks) =>
+      onSave: vi.fn((id: number, _value: string, callbacks: Callbacks) =>
         id === 1 ? callbacks.onError() : callbacks.onSuccess(),
       ),
     });

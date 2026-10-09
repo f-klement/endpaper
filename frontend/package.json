@@ -17,9 +17,7 @@
     "api:generate": "bun run api:schema && bun run api:client",
     "api:client": "orval",
     "format": "prettier --write src tests",
-    "format:check": "prettier --check src tests",
-    "lint": "oxlint src tests",
-    "lint:fix": "oxlint src tests --fix"
+    "format:check": "prettier --check src tests"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.101.4",
@@ -41,11 +39,9 @@
     "@vitejs/plugin-react": "^6.0.5",
     "@vitest/coverage-v8": "^5.0.0",
     "ajv": "^8.20.0",
-    "fast-check": "4.10.2",
     "happy-dom": "^20.11.6",
     "jsdom": "^30.0.1",
     "orval": "^8.24.0",
-    "oxlint": "^1.83.0",
     "prettier": "^3.9.6",
     "tailwindcss": "^4.3.3",
     "typescript": "^7.0.2",

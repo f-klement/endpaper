@@ -7,7 +7,6 @@ import {
   type UserOut,
 } from "../../../api/generated/model";
 import { useTranslation, type MessageKey } from "../../../i18n";
-import { endOfDayInstant } from "../../../lib/date";
 import { LENDING_LABELS, LENDING_ORDER } from "../../types";
 
 interface LoanPanelProps {
@@ -78,11 +77,10 @@ export default function LoanPanel({
       kind === "member"
         ? { kind: "member", userId: Number(target) }
         : { kind: "external", name: trimmedName },
-      // End of the picked day **where the member is**, as an instant.
-      // `lib/date.ts::endOfDayInstant` carries why the offset is on it: sent
-      // without one the server reads this wall clock as a UTC clock and the
-      // deadline lands late by the viewer's offset.
-      endOfDayInstant(dueAt),
+      // A date input gives a bare date; the API wants a timestamp. End of day
+      // rather than midnight, or a book due "today" is overdue from the moment
+      // it is lent.
+      dueAt ? `${dueAt}T23:59:59` : null,
       // Sent only when it is the answer to a question that was asked. The
       // server refuses a never-lent book without it, and accepts it as noise
       // on any other book.

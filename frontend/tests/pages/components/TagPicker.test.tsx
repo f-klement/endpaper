@@ -9,19 +9,12 @@ import { Locale, TagCategory, TagKey } from "../../../src/api/generated/model";
 import TagPicker from "../../../src/pages/components/TagPicker";
 import { makeTag, makeTagSet, resetIds } from "../../factories";
 
-type OnCreate = NonNullable<React.ComponentProps<typeof TagPicker>["onCreate"]>;
-type OnToggle = NonNullable<React.ComponentProps<typeof TagPicker>["onToggle"]>;
-
 beforeEach(resetIds);
 
 describe("TagPicker", () => {
   it("groups tags under their category heading", () => {
     renderLocalised(
-      <TagPicker
-        tags={makeTagSet()}
-        selectedIds={[]}
-        onToggle={vi.fn<OnToggle>()}
-      />,
+      <TagPicker tags={makeTagSet()} selectedIds={[]} onToggle={vi.fn()} />,
     );
     expect(screen.getByText("Type")).toBeInTheDocument();
     expect(screen.getByText("Genre")).toBeInTheDocument();
@@ -37,11 +30,7 @@ describe("TagPicker", () => {
     // itself, which keeps this test synchronous and asserts one thing.
     const tags = makeTagSet();
     renderLocalised(
-      <TagPicker
-        tags={tags}
-        selectedIds={[tags[0]!.id]}
-        onToggle={vi.fn<OnToggle>()}
-      />,
+      <TagPicker tags={tags} selectedIds={[tags[0]!.id]} onToggle={vi.fn()} />,
       { locale: Locale.de },
     );
 
@@ -64,7 +53,7 @@ describe("TagPicker", () => {
       <TagPicker
         tags={[invented]}
         selectedIds={[invented.id]}
-        onToggle={vi.fn<OnToggle>()}
+        onToggle={vi.fn()}
       />,
       { locale: Locale.de },
     );
@@ -92,7 +81,7 @@ describe("TagPicker", () => {
       <TagPicker
         tags={[comics, fiction]}
         selectedIds={[comics.id]}
-        onToggle={vi.fn<OnToggle>()}
+        onToggle={vi.fn()}
       />,
       { locale: Locale.de },
     );
@@ -109,7 +98,7 @@ describe("TagPicker", () => {
       <TagPicker
         tags={[makeTag({ name: "Fantasy" })]}
         selectedIds={[]}
-        onToggle={vi.fn<OnToggle>()}
+        onToggle={vi.fn()}
       />,
     );
     expect(screen.getByText("Genre")).toBeInTheDocument();
@@ -118,14 +107,14 @@ describe("TagPicker", () => {
 
   it("renders nothing for an empty tag list", () => {
     const { container } = renderLocalised(
-      <TagPicker tags={[]} selectedIds={[]} onToggle={vi.fn<OnToggle>()} />,
+      <TagPicker tags={[]} selectedIds={[]} onToggle={vi.fn()} />,
     );
     expect(container.querySelectorAll("button")).toHaveLength(0);
   });
 
   it("reports the tag id when one is clicked", async () => {
     const tags = makeTagSet();
-    const onToggle = vi.fn<OnToggle>();
+    const onToggle = vi.fn();
     renderLocalised(
       <TagPicker tags={tags} selectedIds={[]} onToggle={onToggle} />,
     );
@@ -142,11 +131,7 @@ describe("TagPicker", () => {
   it("marks a selected tag as pressed", async () => {
     const tags = makeTagSet();
     renderLocalised(
-      <TagPicker
-        tags={tags}
-        selectedIds={[tags[1]!.id]}
-        onToggle={vi.fn<OnToggle>()}
-      />,
+      <TagPicker tags={tags} selectedIds={[tags[1]!.id]} onToggle={vi.fn()} />,
     );
 
     // Genre opens itself because something in it is selected; Type does not.
@@ -165,11 +150,7 @@ describe("TagPicker", () => {
   describe("collapsing", () => {
     it("hides the tags until a category is opened", () => {
       renderLocalised(
-        <TagPicker
-          tags={makeTagSet()}
-          selectedIds={[]}
-          onToggle={vi.fn<OnToggle>()}
-        />,
+        <TagPicker tags={makeTagSet()} selectedIds={[]} onToggle={vi.fn()} />,
       );
 
       expect(screen.getByRole("button", { name: /Genre/ })).toHaveAttribute(
@@ -183,11 +164,7 @@ describe("TagPicker", () => {
 
     it("says how many are in each category", () => {
       renderLocalised(
-        <TagPicker
-          tags={makeTagSet()}
-          selectedIds={[]}
-          onToggle={vi.fn<OnToggle>()}
-        />,
+        <TagPicker tags={makeTagSet()} selectedIds={[]} onToggle={vi.fn()} />,
       );
       // The shape of the vocabulary stays visible while its contents do not.
       expect(
@@ -202,7 +179,7 @@ describe("TagPicker", () => {
         <TagPicker
           tags={tags}
           selectedIds={[tags[1]!.id]}
-          onToggle={vi.fn<OnToggle>()}
+          onToggle={vi.fn()}
         />,
       );
 
@@ -221,7 +198,7 @@ describe("TagPicker", () => {
         <TagPicker
           tags={tags}
           selectedIds={[tags[1]!.id]}
-          onToggle={vi.fn<OnToggle>()}
+          onToggle={vi.fn()}
         />,
       );
       expect(
@@ -234,7 +211,7 @@ describe("TagPicker", () => {
     // The caller decides what a second click means; this component only says
     // which tag was pressed.
     const tags = makeTagSet();
-    const onToggle = vi.fn<OnToggle>();
+    const onToggle = vi.fn();
     renderLocalised(
       <TagPicker tags={tags} selectedIds={[tags[1]!.id]} onToggle={onToggle} />,
     );
@@ -249,11 +226,7 @@ describe("TagPicker, inventing a tag", () => {
     // list is a different act from putting one on a book, and offering it
     // there produces tags nothing carries.
     renderLocalised(
-      <TagPicker
-        tags={makeTagSet()}
-        selectedIds={[]}
-        onToggle={vi.fn<OnToggle>()}
-      />,
+      <TagPicker tags={makeTagSet()} selectedIds={[]} onToggle={vi.fn()} />,
     );
     expect(
       screen.queryByRole("button", { name: "Create" }),
@@ -261,12 +234,12 @@ describe("TagPicker, inventing a tag", () => {
   });
 
   it("reports the typed name", async () => {
-    const onCreate = vi.fn<OnCreate>();
+    const onCreate = vi.fn();
     renderLocalised(
       <TagPicker
         tags={makeTagSet()}
         selectedIds={[]}
-        onToggle={vi.fn<OnToggle>()}
+        onToggle={vi.fn()}
         onCreate={onCreate}
       />,
     );
@@ -283,16 +256,14 @@ describe("TagPicker, inventing a tag", () => {
   it("creates on Enter without submitting the surrounding form", async () => {
     // The picker sits inside forms. Without preventDefault the Enter that
     // means "add this tag" submits the book instead.
-    const onCreate = vi.fn<OnCreate>();
-    const onSubmit = vi.fn<React.FormEventHandler<HTMLFormElement>>((event) =>
-      event.preventDefault(),
-    );
+    const onCreate = vi.fn();
+    const onSubmit = vi.fn((event: React.FormEvent) => event.preventDefault());
     renderLocalised(
       <form onSubmit={onSubmit}>
         <TagPicker
           tags={makeTagSet()}
           selectedIds={[]}
-          onToggle={vi.fn<OnToggle>()}
+          onToggle={vi.fn()}
           onCreate={onCreate}
         />
       </form>,
@@ -307,12 +278,12 @@ describe("TagPicker, inventing a tag", () => {
   });
 
   it("trims what was typed", async () => {
-    const onCreate = vi.fn<OnCreate>();
+    const onCreate = vi.fn();
     renderLocalised(
       <TagPicker
         tags={makeTagSet()}
         selectedIds={[]}
-        onToggle={vi.fn<OnToggle>()}
+        onToggle={vi.fn()}
         onCreate={onCreate}
       />,
     );
@@ -327,12 +298,12 @@ describe("TagPicker, inventing a tag", () => {
   });
 
   it("will not create an empty tag", async () => {
-    const onCreate = vi.fn<OnCreate>();
+    const onCreate = vi.fn();
     renderLocalised(
       <TagPicker
         tags={makeTagSet()}
         selectedIds={[]}
-        onToggle={vi.fn<OnToggle>()}
+        onToggle={vi.fn()}
         onCreate={onCreate}
       />,
     );
@@ -348,8 +319,8 @@ describe("TagPicker, inventing a tag", () => {
       <TagPicker
         tags={makeTagSet()}
         selectedIds={[]}
-        onToggle={vi.fn<OnToggle>()}
-        onCreate={vi.fn<OnCreate>()}
+        onToggle={vi.fn()}
+        onCreate={vi.fn()}
       />,
     );
 
@@ -368,64 +339,9 @@ describe("TagPicker, inventing a tag", () => {
           makeTag({ name: "Holiday reads", category: TagCategory.custom }),
         ]}
         selectedIds={[]}
-        onToggle={vi.fn<OnToggle>()}
+        onToggle={vi.fn()}
       />,
     );
     expect(screen.getByText("Your tags")).toBeInTheDocument();
-  });
-
-  it("shows a name with no row of its own, as typed and with no category", () => {
-    // The scan form's case: there is no book yet, so there is no row either,
-    // and the name has to be visible before it exists. Rendered raw and never
-    // through `tagName`, because a name with no row has no key to translate.
-    renderLocalised(
-      <TagPicker
-        tags={makeTagSet()}
-        selectedIds={[]}
-        onToggle={vi.fn<OnToggle>()}
-        onCreate={vi.fn<OnCreate>()}
-        pending={{
-          names: ["Loft finds"],
-          onForget: vi.fn<(name: string) => void>(),
-        }}
-      />,
-      { locale: Locale.de },
-    );
-
-    expect(screen.getByText("Loft finds")).toBeInTheDocument();
-  });
-
-  it("offers to take one of those names off again", () => {
-    // One prop carrying both halves: a chip that cannot be removed is a
-    // trap, and the name is not on a book yet so nothing else can undo it.
-    const onForget = vi.fn<(name: string) => void>();
-    renderLocalised(
-      <TagPicker
-        tags={makeTagSet()}
-        selectedIds={[]}
-        onToggle={vi.fn<OnToggle>()}
-        onCreate={vi.fn<OnCreate>()}
-        pending={{ names: ["Loft finds"], onForget }}
-      />,
-    );
-
-    fireEvent.click(screen.getByRole("button", { name: "Remove Loft finds" }));
-
-    expect(onForget).toHaveBeenCalledWith("Loft finds");
-  });
-
-  it("renders no such group for a picker given no pending names", () => {
-    // Home's filter panel and BookDetail's editor pass no `pending` at all:
-    // both always have somewhere to put a tag, so nothing is ever pending
-    // there.
-    renderLocalised(
-      <TagPicker
-        tags={makeTagSet()}
-        selectedIds={[]}
-        onToggle={vi.fn<OnToggle>()}
-      />,
-    );
-
-    expect(screen.queryByText("Once saved")).not.toBeInTheDocument();
   });
 });

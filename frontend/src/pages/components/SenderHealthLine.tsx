@@ -1,7 +1,6 @@
 import type { SenderHealth } from "../../api/generated/model";
 import { useTranslation } from "../../i18n";
 import { SENDER_ROW_REASONS } from "../../i18n/senderNames";
-import { longMonthDate } from "../../lib/date";
 
 interface SenderHealthLineProps {
   /** Undefined while the record loads, and for a channel that is switched off. */
@@ -53,9 +52,14 @@ export default function SenderHealthLine({ health }: SenderHealthLineProps) {
   // attempted and a household with nothing overdue attempts none. So a
   // standing failure can be months old, and "since 20 August" on a date that
   // is really last year reads as fresh evidence for something that is not.
-  // That is why this line takes the written out month rather than the plain
-  // numeric date the rest of the settings screens use.
-  const when = (iso: string | null | undefined) => longMonthDate(iso, locale);
+  const when = (iso: string | null | undefined) =>
+    iso === null || iso === undefined
+      ? ""
+      : new Date(iso).toLocaleDateString(locale, {
+          day: "numeric",
+          month: "long",
+          year: "numeric",
+        });
 
   // `sent` is null until the channel has run at all, so this is checked before
   // the two below rather than folded into a falsy test: `false` and `null` are
@@ -79,8 +83,9 @@ export default function SenderHealthLine({ health }: SenderHealthLineProps) {
       : "settings.overdueRowNothingSent",
   );
 
-  // Broken is the server's verdict, not a threshold recomputed here. The rules
-  // are `notifications._is_broken`'s and the evidence is in the record.
+  // Broken is the server's verdict, not a threshold recomputed here: a refusal
+  // the app decided itself counts at once, a transport failure only after a day
+  // and at least two consecutive failures. The evidence is in the record.
   if (health.broken) {
     return (
       <Line tone="loud">

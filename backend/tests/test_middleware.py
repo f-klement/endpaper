@@ -117,7 +117,7 @@ class TestContentSecurityPolicy:
         compilers = sorted(
             path.relative_to(root).as_posix()
             for path in source.rglob("*.ts*")
-            if re.search(r"^import\b.*\.wasm", path.read_text(encoding="utf-8"), re.MULTILINE)
+            if re.search(r"^import\b.*\.wasm", path.read_text(encoding="utf-8"), re.M)
         )
         granted = "'wasm-unsafe-eval'" in middleware._CSP
         assert granted == bool(compilers), compilers

@@ -17,7 +17,6 @@ pages are for changing it.
 | [cloud-exports.md](cloud-exports.md) | Reading a library out of a service's own export: which seam an export belongs to, and why a name inside a member's file is not evidence |
 | [legend.md](legend.md) | The library science vocabulary this codebase borrows: the catalogues, MARC, the classification and authority schemes, and the codes inside a record. |
 | [decisions.md](decisions.md) | Choices that look odd until you know why. Read before "fixing" one. |
-| [decisions-index.md](decisions-index.md) | Every entry of the register, with the section it sits under and how long it is. Generated from its headings, and a grep target rather than a page to read |
 | [../conformance/README.md](../conformance/README.md) | The shared fixture set: rules that must give the same answer in Python and in TypeScript, and how to add a case |
 
 ## Orientation

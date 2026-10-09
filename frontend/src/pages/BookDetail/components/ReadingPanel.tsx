@@ -1,7 +1,6 @@
 import type { BookOut } from "../../../api/generated/model";
+import { StarRating } from "../../../components";
 import { useTranslation } from "../../../i18n";
-import { longMonthDate } from "../../../lib/date";
-import StarRating from "./StarRating";
 
 interface ReadingPanelProps {
   book: BookOut;
@@ -18,6 +17,13 @@ interface ReadingPanelProps {
 export default function ReadingPanel({ book, onRate }: ReadingPanelProps) {
   const { t, locale } = useTranslation();
 
+  const formatDate = (iso: string) =>
+    new Date(iso).toLocaleDateString(locale, {
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+    });
+
   return (
     <div className="space-y-2">
       {/* h3, not h2: the section handle that folds this panel away is the
@@ -32,13 +38,9 @@ export default function ReadingPanel({ book, onRate }: ReadingPanelProps) {
         <p className="text-xs text-paper-600 dark:text-paper-400">
           {[
             book.my_started_at &&
-              t("reading.started", {
-                date: longMonthDate(book.my_started_at, locale),
-              }),
+              t("reading.started", { date: formatDate(book.my_started_at) }),
             book.my_finished_at &&
-              t("reading.finished", {
-                date: longMonthDate(book.my_finished_at, locale),
-              }),
+              t("reading.finished", { date: formatDate(book.my_finished_at) }),
           ]
             .filter(Boolean)
             .join(" · ")}

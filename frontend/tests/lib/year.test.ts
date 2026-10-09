@@ -23,10 +23,6 @@ import { describe, expect, it } from "vitest";
 
 import { boundNumber } from "../../src/lib/bookBounds";
 import { leadingYear, plausibleYear } from "../../src/lib/year";
-// The one enumeration of `src/`. **The instrument below was written here and
-// has moved there**, because every neighbouring rule walking this tree needed
-// it and each was carrying a pattern of its own instead.
-import { sourceModules } from "../sourceModules";
 
 /**
  * The module that owns the window, which is the one module the scans exempt.
@@ -35,7 +31,60 @@ import { sourceModules } from "../sourceModules";
  * with it: what they assert is that the window has one home, so the constant
  * naming that home is the thing that must not be able to drift from it.
  */
-const YEAR = "lib/year.ts";
+const YEAR = "../../src/lib/year.ts";
+
+/** What lives under `src/` and is not a module. The scans state it as their reach. */
+const STYLESHEETS = ["../../src/index.css", "../../src/theme/palettes.css"];
+
+const isModule = (path: string) => /\.tsx?$/.test(path);
+
+/**
+ * Every module under `src/`, as text, over a glob that proves its own reach.
+ *
+ * **Non-emptiness is not reach, and the difference is the whole guard.** A glob
+ * narrowed to `bookBounds.ts` alone satisfies every check that reads
+ * `sources[YEAR]`, and narrowing it is the shape a later simplification
+ * takes, so the scans below would sweep the one module they exempt and pass.
+ * What is asserted instead is what the glob holds **besides** the modules,
+ * stated as the exclusion: the two stylesheets under `src/`. No pattern that
+ * misses a directory can still answer that.
+ *
+ * The cost, since it is real: a third stylesheet, or any other kind of file
+ * added under `src/`, fails here until somebody names it. That is the safe
+ * direction, and a person deciding whether a new kind of file belongs in a
+ * source scan is the point rather than the price.
+ */
+function sourceModules(): Record<string, string> {
+  // **Two globs, and the one that measures the reach reads no content.** Names
+  // are all it needs, and an eager `?raw` sweep of everything would decode the
+  // first binary asset added under `src/` as UTF-8 and inline it into this
+  // bundle before failing on it, which is the one event that assertion exists
+  // to catch.
+  const everything = import.meta.glob("../../src/**/*");
+  const modules = import.meta.glob("../../src/**/*.{ts,tsx}", {
+    query: "?raw",
+    import: "default",
+    eager: true,
+  }) as Record<string, string>;
+
+  const named = Object.keys(everything);
+
+  // **Both assertions, because either glob alone can be narrowed.** The first
+  // says what the tree holds beyond the modules, stated as the exclusion, so a
+  // pattern that misses a directory cannot still answer it. The second binds
+  // the sweep the scans actually read to it, so narrowing that one is red here
+  // rather than in whichever neighbouring arm happens to name enough files.
+  expect(
+    named.filter((path) => !isModule(path)).sort(),
+    "a new kind of file under src/: name it in STYLESHEETS if the scans should skip it",
+  ).toEqual(STYLESHEETS);
+  expect(
+    Object.keys(modules).sort(),
+    "the scans have to read every module the tree holds",
+  ).toEqual(named.filter(isModule).sort());
+
+  return modules;
+}
 
 /** `1_450` is the same literal as `1450` to the compiler, and to a scan. */
 function withoutSeparators(text: string): string {
@@ -320,16 +369,16 @@ describe("plausibleYear", () => {
       .filter(([, text]) => DOORS.test(text));
 
     const READERS = [
-      "lib/appleBooks.ts",
-      "lib/calibre.ts",
-      "lib/cbz.ts",
-      "lib/fb2.ts",
-      "lib/fileName.ts",
-      "lib/kindle.ts",
-      "lib/kobo.ts",
-      "lib/mobi.ts",
-      "lib/opf.ts",
-      "lib/pdf.ts",
+      "../../src/lib/appleBooks.ts",
+      "../../src/lib/calibre.ts",
+      "../../src/lib/cbz.ts",
+      "../../src/lib/fb2.ts",
+      "../../src/lib/fileName.ts",
+      "../../src/lib/kindle.ts",
+      "../../src/lib/kobo.ts",
+      "../../src/lib/mobi.ts",
+      "../../src/lib/opf.ts",
+      "../../src/lib/pdf.ts",
     ];
 
     expect(named.map(([path]) => path).sort()).toEqual(READERS);

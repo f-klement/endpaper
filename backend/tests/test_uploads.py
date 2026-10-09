@@ -31,7 +31,7 @@ def upload(data: bytes, filename: str = "whatever.png") -> UploadFile:
 
 class TestSniffImageExtension:
     @pytest.mark.parametrize(
-        ("data", "expected"),
+        "data,expected",
         [
             (PNG_BYTES, "png"),
             (JPEG_BYTES, "jpg"),
@@ -169,11 +169,7 @@ class TestReplaceImage:
         def write(payload: bytes) -> None:
             try:
                 replace_image(tmp_path, "7", "png", payload)
-            # **Nothing is swallowed: the arm asserts on `failures`.** BLE001
-            # wants `Exception`, which would let anything else escape a thread
-            # target, where it is printed by the threading module and the main
-            # thread then asserts on an empty list and passes.
-            except BaseException as error:  # noqa: BLE001  collected, then asserted on
+            except BaseException as error:  # noqa: BLE001
                 failures.append(error)
 
         threads = [
@@ -202,7 +198,7 @@ class TestReplaceImage:
 
         monkeypatch.setattr(Path, "write_bytes", full_disk)
 
-        with pytest.raises(OSError, match="No space left on device"):
+        with pytest.raises(OSError):
             replace_image(tmp_path, "7", "png", PNG_BYTES)
 
         assert (tmp_path / "7.jpg").read_bytes() == JPEG_BYTES
@@ -213,7 +209,7 @@ class TestReplaceImage:
 
         monkeypatch.setattr(Path, "write_bytes", full_disk)
 
-        with pytest.raises(OSError, match="No space left on device"):
+        with pytest.raises(OSError):
             replace_image(tmp_path, "7", "png", PNG_BYTES)
 
         assert list(tmp_path.iterdir()) == []

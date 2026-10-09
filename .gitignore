@@ -45,21 +45,3 @@ capacitor_viability.md
 # not a rule, so it is enforced here instead of stated anywhere.
 plan.md
 session/
-
-# **`.claude/skills/` is tracked on purpose; `.claude/worktrees/` is not.** The
-# skills are rules and are reviewed like any other file. The worktree directory
-# holds a full checkout per agent, and until the skills arrived nothing under
-# `.claude` was ever committed, so `git add -A` had no way in. It does now.
-# Stripping it at publish is the other backstop and does not cover a commit.
-.claude/worktrees/
-
-# **A seat's working directory, when it lands here rather than in the session's own.**
-# Agent seats are given a private scratch path per seat; an instruction naming it
-# relatively was read as repository relative by three of them, which put untracked
-# `scratchpad/` trees in this checkout and in a worktree. Ignoring it is the commit time
-# backstop, and it is the one that matters: the two incidents this file already records
-# were both a bare `git add -A`, which is exactly what would sweep these in.
-scratchpad/
-
-# Claude Code per user permissions; the project settings beside it are tracked.
-.claude/settings.local.json

@@ -187,13 +187,10 @@ def _send_quietly(config: mailer.MailConfig, subject: str, body: str) -> None:
     """Send, and let a failure be a log line rather than an unhandled task."""
     try:
         mailer.send(config, subject, body)
-    except Exception as error:  # noqa: BLE001  after the response, so it reaches nobody
+    except Exception:
         # Broad, because this runs after the response has gone: anything raised
         # here reaches nobody, and smtplib raises several unrelated families.
-        # **The type, never the message**, so not `logger.exception`: a refused
-        # envelope's `SMTPRecipientsRefused` renders the member's address, and
-        # any other message here is one nobody checked.
-        logger.error("Could not send a confirmation code: %s", type(error).__name__)
+        logger.exception("Could not send a confirmation code")
 
 
 def _signup_refusal() -> str:
@@ -280,16 +277,7 @@ def _charge_a_request(username: str, request: Request) -> None:
     recovery_request_account_limiter.check(account_key(username))
 
 
-# `response_class` for the schema rather than for the wire: this route answers
-# with no body at all, and the default documents 202 as `application/json`, so
-# the committed schema promised a body the route never sends and the generated
-# client was typed off that promise. The bytes on the wire are the same either
-# way, so nothing the docstring below says about what this discloses moves.
-@router.post(
-    "/reset/request",
-    status_code=status.HTTP_202_ACCEPTED,
-    response_class=Response,
-)
+@router.post("/reset/request", status_code=status.HTTP_202_ACCEPTED)
 def request_password_reset(
     payload: ResetRequest, request: Request, db: DbSession
 ) -> Response:
@@ -348,12 +336,7 @@ def redeem_password_reset(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-# `response_class` for the reason `request_password_reset` carries.
-@router.post(
-    "/verify/request",
-    status_code=status.HTTP_202_ACCEPTED,
-    response_class=Response,
-)
+@router.post("/verify/request", status_code=status.HTTP_202_ACCEPTED)
 def request_verification(
     payload: VerificationRequest,
     request: Request,

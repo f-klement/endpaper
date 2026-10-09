@@ -1,22 +1,18 @@
-/** Tests for src/pages/BookDetail/components/StarRating.tsx. */
+/** Tests for src/components/StarRating.tsx. */
 
 import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
-import StarRating from "../../../../src/pages/BookDetail/components/StarRating";
-import { renderLocalised } from "../../../utils";
-
-type OnChange = NonNullable<
-  React.ComponentProps<typeof StarRating>["onChange"]
->;
+import StarRating from "../../src/components/StarRating";
+import { renderLocalised } from "../utils";
 
 describe("StarRating", () => {
   describe("as a control", () => {
     it("is a radio group, not five loose buttons", () => {
       // The values are mutually exclusive, and a screen reader should hear one
       // control with five options rather than five unrelated ones.
-      renderLocalised(<StarRating value={3} onChange={vi.fn<OnChange>()} />);
+      renderLocalised(<StarRating value={3} onChange={vi.fn()} />);
 
       expect(
         screen.getByRole("radiogroup", { name: "Your rating" }),
@@ -25,14 +21,14 @@ describe("StarRating", () => {
     });
 
     it("marks the current rating as checked", () => {
-      renderLocalised(<StarRating value={3} onChange={vi.fn<OnChange>()} />);
+      renderLocalised(<StarRating value={3} onChange={vi.fn()} />);
       expect(
         screen.getByRole("radio", { name: "Rate 3 out of 5" }),
       ).toBeChecked();
     });
 
     it("reports a new rating", async () => {
-      const onChange = vi.fn<OnChange>();
+      const onChange = vi.fn();
       renderLocalised(<StarRating value={null} onChange={onChange} />);
 
       await userEvent
@@ -44,7 +40,7 @@ describe("StarRating", () => {
 
     it("clears when the current rating is clicked again", async () => {
       // Otherwise a mis-tapped star is permanent: there is no other way back.
-      const onChange = vi.fn<OnChange>();
+      const onChange = vi.fn();
       renderLocalised(<StarRating value={3} onChange={onChange} />);
 
       await userEvent
@@ -55,7 +51,7 @@ describe("StarRating", () => {
     });
 
     it("offers an explicit clear once rated", async () => {
-      const onChange = vi.fn<OnChange>();
+      const onChange = vi.fn();
       renderLocalised(<StarRating value={2} onChange={onChange} />);
 
       await userEvent
@@ -66,7 +62,7 @@ describe("StarRating", () => {
     });
 
     it("hides the clear control when there is nothing to clear", () => {
-      renderLocalised(<StarRating value={null} onChange={vi.fn<OnChange>()} />);
+      renderLocalised(<StarRating value={null} onChange={vi.fn()} />);
       expect(
         screen.queryByRole("button", { name: "Clear rating" }),
       ).not.toBeInTheDocument();

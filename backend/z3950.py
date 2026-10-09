@@ -590,16 +590,7 @@ class Association:
         def close_it(done: Future[Session]) -> None:
             try:
                 session = done.result()
-            # **`BaseException` and not `Exception`, which is what BLE001
-            # asks for and would break this.** `pending` is a
-            # `concurrent.futures.Future`, and a cancelled one answers
-            # `result()` with `CancelledError`, which has derived from
-            # `BaseException` since 3.8. Narrowing to `Exception` lets that
-            # escape a done callback, where nothing is waiting to catch it.
-            # Nothing is swallowed that a caller could act on either: this
-            # callback runs on the worker thread, and an open that failed is
-            # reported to whoever awaited `_open`.
-            except BaseException:  # noqa: BLE001,S110  see above
+            except BaseException:
                 pass
             else:
                 try:

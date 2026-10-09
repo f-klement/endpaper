@@ -1,9 +1,8 @@
 import logging
-import re
 import secrets
 from datetime import date, datetime
 from enum import StrEnum
-from typing import Final, TypeGuard
+from typing import TypeGuard
 
 from sqlalchemy import (
     Boolean,
@@ -15,7 +14,6 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
-    MetaData,
     String,
     Table,
     Text,
@@ -215,29 +213,18 @@ class Collection(Base):
     **partitions**, which is why a book carries one collection rather than a
     list of them: see `Book.collection_id`.
 
-    **Never a privacy boundary.** Any member may make one and rename it, and
-    filing a book into one changes nothing about who can see it. `visible_to()`
-    decides that on its own and is not given a collection to consult, and this
-    is deliberately not a second scoping axis beside privacy: a label that
-    sometimes hides rows is a label somebody will eventually mistake for
-    permission, and the mistake is silent. `docs/decisions.md` records the
-    argument.
+    **Library wide, and never a privacy boundary.** Any member may make one,
+    rename it or delete it, and filing a book into one changes nothing about
+    who can see it. `visible_to()` decides that on its own and is not given a
+    collection to consult, and this is deliberately not a second scoping axis
+    beside privacy: a label that sometimes hides rows is a label somebody will
+    eventually mistake for permission, and the mistake is silent.
+    `docs/decisions.md` records the argument.
 
-    **The label is not library wide, and that half used to be stated here as
-    though it followed.** A collection whose every book is hidden from a member
-    is not named to them, because its name is their only evidence that
-    somebody's books are filed somewhere. That narrows an axis the row set was
-    already on, since the count has always been the caller's own; it adds none.
-    `shelving.Shelving` is the rule.
-
-    `created_by_user_id` is provenance and nothing else. No query consults it
-    except the archive, which selects every column of every table it takes and
-    so reads this one while naming it nowhere, and no schema declares a field
-    named for it. That is what keeps the paragraph above true rather than
-    merely intended, and it is why the rule is written over books rather than
-    over an owner.
-    Nullable, so deleting an account does not cascade away the library's
-    shelving.
+    `created_by_user_id` is provenance and nothing else. No query consults it,
+    which is what keeps the previous paragraph true rather than merely
+    intended. Nullable, so deleting an account does not cascade away the
+    library's shelving.
     """
 
     __tablename__ = "collections"
@@ -277,22 +264,7 @@ class Collection(Base):
     # would speed up. An index is a write cost, and this one would have no read
     # behind it.
     created_by_user_id: Mapped[int | None] = mapped_column(
-        Integer,
-        ForeignKey("users.id"),
-        nullable=True,
-        # **The marker is what the guard reads, and the prose is not.**
-        # `tests/test_house_rules.py::TestProvenanceColumnsAreNeverRead`
-        # derives its set from this key, so a column is covered because it
-        # says so here rather than because it is spelled like its neighbours.
-        # Removing the marker removes the protection, loudly: the guard
-        # asserts which columns carry it.
-        #
-        # **Two instruments read this key, and neither sees what the other
-        # does.** One walks the source for a read written as a statement; the
-        # other walks the Pydantic models for a field named for the column,
-        # which is read off the row by the validator with nothing written in
-        # the source at all.
-        info={"provenance": "models.Collection, docs/decisions.md, docs/data-model.md"},
+        Integer, ForeignKey("users.id"), nullable=True
     )
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
@@ -357,16 +329,10 @@ class AuthorAlias(Base):
     `tests/routers/test_books_authors.py::test_one_lookup_is_always_enough`
     asserts the invariant after three merges in a ring.
 
-    **The mapping is library wide and so are the names in it**: every member
-    resolves a spelling to the same person, and `canonical_name` is not
-    withheld from anybody. What is filtered is the shelf, not the mapping.
-
-    **A collection's name used to be the comparison here and is no longer
-    one.** That label is withheld from a member who can see nothing filed
-    under it (`shelving.Shelving`), so the two are now different answers to
-    the same question and the simile pointed the wrong way. What holds this
-    paragraph up on its own is the sentence after it: a row here proves no
-    book exists. An author appears for a member only because that
+    **The mapping is library wide and so are the names in it**, exactly like
+    a collection's name: every member resolves a spelling to the same person,
+    and `canonical_name` is not withheld from anybody. What is filtered is the
+    shelf, not the mapping. An author appears for a member only because that
     member can see a book credited to a spelling resolving to them, so an
     author whose every book is private appears for nobody else, and a row here
     proves no book exists: it outlives the book it was created for.
@@ -396,17 +362,11 @@ class AuthorAlias(Base):
     # repaired without editing the book.
     canonical_name: Mapped[str] = mapped_column(String(AUTHOR_NAME_MAX), nullable=False)
 
-    # Provenance, like `Collection.created_by_user_id`, and read by nothing
-    # but the archive: `backup.py` selects every column of every table it
-    # archives without naming any of them, which is why it is admin only.
-    # No schema declares a field reaching it either.
+    # Provenance, like `Collection.created_by_user_id`, and read by nothing.
     # Deliberately not indexed: no query consults it and there is no
     # delete-account path whose child check it would speed up.
     created_by_user_id: Mapped[int | None] = mapped_column(
-        Integer,
-        ForeignKey("users.id"),
-        nullable=True,
-        info={"provenance": "models.AuthorAlias"},
+        Integer, ForeignKey("users.id"), nullable=True
     )
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
@@ -426,108 +386,25 @@ class AuthorAlias(Base):
 AUTHORITY_IDENTIFIER_MAX = 60
 
 
-#: What an enum value may be spelled with, to be interpolated into DDL.
-#:
-#: **Where the rule is, rather than what it excludes**: `_enum_check` says why
-#: this is an allowlist and what breaks without it.
-_ENUM_VALUE: Final = re.compile(r"[a-z0-9_-]+")
-
-
-def _enum_check(
-    column: str,
-    members: type[StrEnum],
-    *,
-    nullable: bool = False,
-    excluding: tuple[StrEnum, ...] = (),
-) -> str:
-    """One column's CHECK expression, as an `IN` list derived from its enum.
-
-    **The one home for how an enum list is spelled in this schema**, with one
-    stated exception, `ck_catalogue_targets_transport`. How many constraints
-    that is stays out of this paragraph on purpose: a count beside a rule goes
-    stale against the rule and is then read as current.
-    `tests/test_models.py::TestNoConstraintSpellsAnEnumListOutByHand` is what
-    keeps the claim true, by refusing the shape rather than by counting the
-    instances. Written out by hand a list says nothing about the enum it came
-    from: both copies, the model's and the revision's, agree with each
-    other while the enum has moved past them, and that is the state every guard
-    here reads as clean. Derived, a member added to the enum moves this text,
-    the installed DDL does not move with it, and
-    `tests/test_schema.py::TestTheMigrationsAndTheModelsAgree::
-    test_every_check_constraint_agrees_on_its_expression` names the revision
-    that is missing. A derivation from the **wrong** enum is refused by the same
-    comparison, where a hand written list agreeing with a wrong migration is
-    refused by nothing.
-
-    **Declaration order, and the order is compared.** That used to be a
-    readability property and this docstring said so one guard later: the
-    comparison above is an equality over the text, so reordering an enum is a
-    schema change from where that test stands and needs a revision beside it,
-    which on SQLite is a batch rebuild of the table. Sorting instead would make
-    a reorder free and costs a revision **today**, `ck_classifications_kind`
-    rendering `('carrier', 'content')` against the `('content', 'carrier')` its
-    revision installed. A forgotten member is the live risk and a reorder is
-    not, so the free unification wins: declaration order renders every one of
-    them exactly as the revision that installed it already spells it.
-
-    **`nullable` writes the `IS NULL` arm** for a column whose null means the
-    record never said, and **`excluding` leaves out a member the column must
-    never hold**. Both are arms of the constraint rather than of the caller, so
-    that "which members may be stored" has one answer per column and the enum
-    keeps naming every member the application reads.
-
-    **A value outside `[a-z0-9_-]` is refused rather than rendered.** These
-    values are source literals and no request reaches them, so this is not an
-    injection so much as an edit nobody would see: measured by the security
-    seat, a member spelled `a') OR ('1'='1` renders DDL that applies cleanly and
-    permits **every** value, constraint gone, with nothing red.
-
-    **The charset rather than the quote, and that pair was argued.** Refusing
-    the one character is the enumeration here, because it names one of at least
-    two that break the invariant: a value carrying a **space** is the other, and
-    it is worse than a wrong constraint. The comparison this derivation rests on
-    normalises whitespace on both sides, and `_declared_constraint` states that
-    as a precondition of doing so, that no constraint in this schema holds a
-    string literal with internal whitespace. This function is the only thing
-    that can break that precondition, and it would break it at every site at
-    once. A backslash is the third, on Postgres with
-    `standard_conforming_strings` off. The set being named is SQL's and that
-    guard's rather than one this repository grows, which is what makes it an
-    allowlist worth keeping: every value in every enum this renders is inside
-    it today, counted rather than assumed.
-
-    The older guard,
-    `tests/test_schema.py::TestTheAuthorityIdentifierConstraintsOnAMigratedDatabase
-    ::test_every_scheme_the_enum_offers_is_storable`, asks the migrated database
-    whether each member is **storable**, which is indifferent to the order and
-    is why nothing noticed.
-    """
-    # `is`, not `in`: two StrEnums with the same value compare equal, so a
-    # membership test would drop a member of **this** enum because a member of
-    # another one spells its value the same way. Not reachable from the one
-    # caller that excludes anything; raised by the security seat, and identity
-    # is what the caller means.
-    values = [
-        member.value
-        for member in members
-        if not any(member is excluded for excluded in excluding)
-    ]
-    if unsafe := [value for value in values if not _ENUM_VALUE.fullmatch(value)]:
-        raise ValueError(f"an enum value cannot be spelled into DDL: {unsafe}")
-    listed = f"{column} IN (" + ", ".join(f"'{value}'" for value in values) + ")"
-    return f"{column} IS NULL OR {listed}" if nullable else listed
-
-
 def _scheme_check(members: type[StrEnum]) -> str:
-    """`_enum_check` for a `scheme` column, which two tables carry.
+    """A SQL `IN` list holding every member of an enum, in declaration order.
 
     **Any `StrEnum`, not `AuthorityScheme`'s alone**, because two tables derive
-    a scheme constraint from an enum and a signature naming one of them would
-    have the second author copy the body instead of calling it. The column name
-    is fixed here because `TestEverySchemeCheckListsItsOwnEnum` is written about
-    that column and reads `scheme IN (...)` out of the text.
+    a scheme constraint from an enum now and a signature naming one of them
+    would have the second author copy the body instead of calling it.
+
+    **Not sorted, and the order is a readability property rather than a
+    correctness one.** `StrEnum` iterates in declaration order, so the text this
+    renders reads in the same order as the enum above it and as the literal the
+    migration spells out. Nothing checks that the two texts match: the guard
+    that exists,
+    `tests/test_schema.py::TestTheAuthorityIdentifierConstraintsOnAMigratedDatabase
+    ::test_every_scheme_the_enum_offers_is_storable`, asks the migrated database
+    whether each member is **storable**, which is the question that matters and
+    is indifferent to the order. Keeping them in step is for whoever reads the
+    two files against each other.
     """
-    return _enum_check("scheme", members)
+    return "scheme IN (" + ", ".join(f"'{member.value}'" for member in members) + ")"
 
 
 class AuthorIdentifier(Base):
@@ -605,7 +482,7 @@ class AuthorIdentifier(Base):
             name="ck_author_identifiers_scheme",
         ),
         CheckConstraint(
-            _enum_check("provenance", AuthorityProvenance),
+            "provenance IN ('catalogue', 'member')",
             name="ck_author_identifiers_provenance",
         ),
         # A machine assertion never names a person. The other direction is
@@ -657,7 +534,7 @@ class AuthorIdentifier(Base):
     # Stored bare, without MARC's `(DE-588)` wrapper: the scheme is already a
     # column, and keeping the prefix would let one identifier arrive under two
     # spellings that `uq_author_identifiers_key_scheme` cannot collapse. The
-    # same rule `marc_fields.Subfields.gnd_identifier` applies to a subject heading.
+    # same rule `metadata._gnd_identifier` applies to a subject heading.
     identifier: Mapped[str] = mapped_column(
         String(AUTHORITY_IDENTIFIER_MAX), nullable=False
     )
@@ -666,15 +543,9 @@ class AuthorIdentifier(Base):
 
     # Set only on a `MEMBER` row, and null on a `CATALOGUE` one by check
     # constraint. Deliberately not indexed, like `author_aliases`: no query
-    # consults it. The CHECK above is SQL and reads the column in the
-    # database; the marker is about Python, which is where a filter, an
-    # authorisation clause, or a schema field publishing the id would be
-    # written.
+    # consults it.
     created_by_user_id: Mapped[int | None] = mapped_column(
-        Integer,
-        ForeignKey("users.id"),
-        nullable=True,
-        info={"provenance": "models.AuthorIdentifier, ck_author_identifiers_asserter"},
+        Integer, ForeignKey("users.id"), nullable=True
     )
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
@@ -766,29 +637,11 @@ class Tag(Base):
         return name
 
 
-#: The longest username a local account may hold, in characters.
-#:
-#: **One home, because the value had six copies and none of them was reachable
-#: from here.** `schemas/user.py` wrote the number at six fields,
-#: `auth_backends._free_username` truncated against it and
-#: `auth_backends._PROXY_USERNAME` bounded its repeat against it, so widening
-#: the column would have left every one of them behind with nothing red.
-#: `TestEveryTextCeilingComesFromTheColumn` is what reports the schema half
-#: now; the other two are structural, deriving from this name rather than
-#: repeating its value.
-#:
-#: A revision installs the literal rather than importing this, for the reason
-#: every revision here gives.
-USERNAME_MAX = 50
-
-
 class User(Base):
     __tablename__ = "users"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
-    username: Mapped[str] = mapped_column(
-        String(USERNAME_MAX), unique=True, index=True, nullable=False
-    )
+    username: Mapped[str] = mapped_column(String(50), unique=True, index=True, nullable=False)
     # Nullable since accounts authenticated by LDAP or by an upstream proxy
     # have no local password. Storing a dummy hash instead would leave a
     # credential that looks usable and is not.
@@ -1027,9 +880,7 @@ class Book(Base):
         # Constrained rather than degraded because this enum is **closed**: owned,
         # not owned, unknown is the whole of the question. SQLite cannot ALTER a
         # CHECK, so a constraint costs a table rebuild every time the enum grows,
-        # and this one will not. **That last clause is a claim about the future
-        # and `_enum_check` is what makes it checkable**: the day it stops being
-        # true this text moves and the installed DDL does not.
+        # and this one will not.
         #
         # The other half of the bargain is `DegradingEnum`, which is what
         # `format`, `condition` and `lending` take instead: a stray value reads
@@ -1037,7 +888,7 @@ class Book(Base):
         # `user_books.status`, `classifications.scheme` and `tags.category` have
         # neither yet and are exempt by name in `test_house_rules.py`.
         CheckConstraint(
-            _enum_check("ownership", OwnershipStatus),
+            "ownership IN ('owned', 'not_owned', 'unknown')",
             name="ck_books_ownership",
         ),
     )
@@ -1053,13 +904,11 @@ class Book(Base):
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     cover_url: Mapped[str | None] = mapped_column(String(COVER_URL_MAX), nullable=True)
 
-    # Enrichment fields, filled on demand from Google Books, which carries them
-    # far more often than Open Library does. Three of the four are left empty by
-    # the ordinary scan flow; `categories` is the exception, since
-    # `POST /api/books` accepts a subject list and writes this column directly.
-    # It is deliberately NOT the Tag system, whoever supplied it: tags are a
-    # small curated vocabulary the library chooses from, these are whatever a
-    # publisher or a member asserted, and nothing is minted from them.
+    # Enrichment fields. Left empty by the ordinary scan flow and filled on
+    # demand from Google Books, which carries them far more often than Open
+    # Library does. `categories` is Google's own subject list and is
+    # deliberately NOT the Tag system: tags are a small curated vocabulary the
+    # library chooses from, these are whatever the publisher supplied.
     page_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     language: Mapped[str | None] = mapped_column(String(LANGUAGE_MAX), nullable=True)
     categories: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -1322,37 +1171,6 @@ class Book(Base):
         return stored
 
 
-def children_of_books(metadata: MetaData) -> set[Table]:
-    """Every table with a foreign key to `books`.
-
-    Derived, because a foreign key is a structural fact the schema can answer,
-    and asked by two rules that would otherwise each keep a list. The privacy
-    pin in `tests/test_shelf.py` classifies each child as scoped by its own
-    Member or scoped by the Book; `folding.TRANSFERS` says what becomes of its
-    rows when the Book they point at loses a merge. Delete this and both become
-    hand written enumerations of the same ten tables.
-
-    Takes a `MetaData` rather than reading `Base` itself so the derivation can
-    be driven against a synthetic schema. That test is what says this is a rule
-    and not a list.
-
-    Identity against the `books` table object, not its name. A foreign key's
-    target is typed `FromClause` because a key can point into a join or a
-    subquery, so reading `.name` off it is unsound as well as unchecked.
-    Comparing the object is both narrower and stronger: a second table that
-    happened to be called "books" in another `MetaData` would not match.
-    """
-    books = metadata.tables.get("books")
-    if books is None:
-        return set()
-    return {
-        table
-        for table in metadata.tables.values()
-        if table is not books
-        and any(fk.column.table is books for fk in table.foreign_keys)
-    }
-
-
 class UserBook(Base):
     """One member's reading status for one book.
 
@@ -1523,7 +1341,7 @@ ONE_BORROWER_SQL = (
 
 
 def names_exactly_one_borrower(user_id: int | None, name: str | None) -> bool:
-    r"""Whether this pair identifies somebody a book can be asked back from.
+    """Whether this pair identifies somebody a book can be asked back from.
 
     The Python reading of `ONE_BORROWER_SQL` above, clause for clause, and the
     two are asserted against each other row by row rather than read side by
@@ -1756,8 +1574,8 @@ class Quote(Base):
     **It hangs off the book row, not off `copy_group`.** A page number is a
     fact about an edition: page 214 of the paperback is not page 214 of the
     hardback. Everything else per copy already lives this way (notes, loans,
-    progress), and `folding.fold` moves these across on a merge exactly as it
-    moves notes.
+    progress), and `_repoint_relations` moves these across on a merge exactly
+    as it moves notes.
 
     Deliberately absent, each because a reference implementation has one and
     this app has no use for it: an end position and a position mode (BookWyrm
@@ -2006,15 +1824,12 @@ class DigitalReference(Base):
         # closes the unbounded write, which is what the constraint is for, and
         # leaves a bounded slack rather than nothing.
         #
-        # **Refusing a NUL outright is a tighter arm and is deliberately not
+        # **Refusing a NUL outright is the tighter arm and is deliberately not
         # taken here.** `instr(x, char(0)) = 0` is what the two credential
-        # columns carry, and it tightens the character arm without making it
-        # exact: a lead byte is one character and any number of bytes, with no
-        # NUL in the value for it to refuse. What makes those two exact is the
-        # charset rule standing beside the clause. Neither is available here: a
-        # member's own prose is not machine written and is not confined to one
-        # charset, and imposing either would be a rule about content rather
-        # than a bound on size.
+        # columns carry, and it would make the character arm exact. It is right
+        # there because those columns are machine written and a NUL is never a
+        # legitimate value; a member's own text is different, and refusing one
+        # would be a rule about content rather than a bound on size.
         #
         # What it never refuses is a **NUL free** value the character arm
         # admits, and that is tight rather than merely safe: four bytes is
@@ -2173,6 +1988,20 @@ CLASSIFICATION_NUMBER_MAX = 120
 #: characters and is not the longest.
 CLASSIFICATION_LABEL_MAX = 200
 
+#: The longest subject list a client may write into `books.categories`.
+#:
+#: The second `Text` column on this table and on the **list** payload, so it
+#: inherits `DESCRIPTION_MAX`'s argument whole: an oversized value is paid for on
+#: every page of every listing, and the column stays `Text` so this bounds new
+#: writes without making a stored row unreadable.
+#:
+#: **Computed rather than chosen, so the arithmetic cannot drift from the
+#: sentence**: 32 headings at `CLASSIFICATION_NUMBER_MAX` plus their separators.
+#: 32 because the failure modes are asymmetric: too loose costs page weight, too
+#: tight drops a whole search result silently, since a row is dropped rather than
+#: a field. The widest shape measured here is 14 headings, so it clears 3x.
+CATEGORIES_MAX = 32 * CLASSIFICATION_NUMBER_MAX + 31 * 2
+
 #: How wide the stored shelf key has to be to hold any number the column takes.
 #:
 #: **Wider than the number, which is the whole trap.** A filing rule pads, so a
@@ -2268,23 +2097,8 @@ class Classification(Base):
         # `enums.HeadingKind`'s argument at its strongest rung instead of in a
         # comment: a subject is what a null reads as, so the word would be a
         # second spelling of one state.
-        #
-        # **Derived through `_enum_check` rather than written out**, and it is
-        # the paragraph above that this is bought against: "`HeadingKind` does
-        # not grow" was a reason nothing was testing. Written out, a member
-        # added to that enum **with a rank in `classifications.KIND_ORDER`**,
-        # which is the state an author reaches the moment they make
-        # `test_every_kind_has_a_rank` green, is written by every writer and
-        # refused by the database at the flush: a 500 on enrichment with
-        # nothing naming the constraint. The bare member add was always loud;
-        # what was silent is the constraint the author then never visits.
-        # `SUBJECT` is the `excluding` arm rather than a filter anywhere
-        # downstream, for the reason two paragraphs up, and `_enum_check`
-        # carries what the derivation costs when an enum is reordered.
         CheckConstraint(
-            _enum_check(
-                "kind", HeadingKind, nullable=True, excluding=(HeadingKind.SUBJECT,)
-            ),
+            "kind IS NULL OR kind IN ('content', 'carrier')",
             name="ck_classifications_kind",
         ),
     )
@@ -2391,7 +2205,7 @@ class BookIdentifier(Base):
 
     **A table rather than a column per scheme, and the case that decides it is
     already in the tree.** `POST /api/books/merge` folds up to 20 rows into one
-    and `folding.fold` moves their children across, so one Book really
+    and `_repoint_relations` moves their children across, so one Book really
     can end up carrying an ASIN and a Google volume id: two rows for one book
     are commonly two imports of two stores, which is the same argument
     `DigitalReference` makes about two machines. A nullable column would have
@@ -2444,7 +2258,7 @@ class BookIdentifier(Base):
     is open.** Some files must state the road, so the rule is not that nothing
     restates it: **no file states the road without the condition beside it.** A
     reader who meets the road alone believes a promise. Importing the store
-    file again offers a second Book, and `folding.fold` moves that Book's
+    file again offers a second Book, and `_repoint_relations` moves that Book's
     rows onto this one. It offers nothing when this Book already holds the ISBN
     the file carries: `_create_book` answers **409** rather than making a
     second Book, and an export carrying both an ISBN and a store identifier is
@@ -2505,40 +2319,22 @@ class BookIdentifier(Base):
             _scheme_check(BookIdentifierScheme),
             name="ck_book_identifiers_scheme",
         ),
-        # **Three arms and three rules, and the character ceiling is the one
-        # that bounds nothing on its own.** SQLite's `length()` counts
-        # characters up to the first NUL, so the ceiling alone admits a value
-        # nothing bounded on a Core insert, which is `backup.restore`. The NUL
-        # clause shuts that tail and **does not make the ceiling exact**:
-        # `length()` counts one character per lead byte and then skips
-        # continuation bytes without limit, so the pair admitted sixty counted
-        # characters at 1,000,020 bytes carrying no NUL at all, measured on
-        # sqlite 3.46.1 and 3.50.4. The byte budget is the only arm that counts
-        # what reaches the disk, and the only one a lead byte cannot walk past.
-        #
-        # **Four bytes per character is a property of valid UTF-8, not of this
-        # column**, which is why the budget is four times the ceiling: every
-        # writer binds a Python `str` and an archive's manifest is JSON, so the
-        # reachable maximum is 240 and the widest legitimate value lands exactly
-        # on the budget. The arm is the last line for a write that never came
-        # through this application, which is the reason
-        # `ck_opds_servers_base_url` gives for carrying one.
-        #
-        # **The pair the two credential columns carry is what this column
-        # cannot have**: a NUL clause beside a charset rule confining the value
-        # to one byte per character, a store's token being whatever the store
-        # wrote.
+        # **The NUL arm rather than a byte budget**, and both are accepted by
+        # `TestEveryTextCeilingBindsOnBytesToo`. SQLite's `length()` counts
+        # characters up to the first NUL, so the character ceiling alone admits
+        # a value nothing bounded on a Core insert, which is `backup.restore`.
+        # A budget at four times the ceiling caps such a value; refusing the NUL
+        # makes the ceiling exact, and that is available here where it is not on
+        # a member's own prose: every value in this column is a token a machine
+        # wrote, so a NUL is never a legitimate one. The two credential columns
+        # carry the same arm for the same reason.
         CheckConstraint(
             DialectSQL(
                 sqlite=(
                     f"length(value) > 0 AND length(value) <= {BOOK_IDENTIFIER_MAX}"
                     " AND instr(value, char(0)) = 0"
-                    f" AND length(CAST(value AS BLOB)) <= {4 * BOOK_IDENTIFIER_MAX}"
                 ),
-                postgresql=(
-                    f"length(value) > 0 AND length(value) <= {BOOK_IDENTIFIER_MAX}"
-                    f" AND octet_length(value) <= {4 * BOOK_IDENTIFIER_MAX}"
-                ),
+                postgresql=f"length(value) > 0 AND length(value) <= {BOOK_IDENTIFIER_MAX}",
             ),
             name="ck_book_identifiers_bounds",
         ),
@@ -2615,9 +2411,7 @@ class CustomField(Base):
     **Never a privacy boundary**, the same promise `Collection` makes. A field
     is a shape, not an access rule: what may be read is decided by
     `visible_to()` on the Book the value hangs off, and nothing here is
-    consulted by that decision. `created_by_user_id` does not change that and
-    is the one place the distinction has to be read carefully: it decides who
-    may **relabel** a name, and never which Books a value on it reaches.
+    consulted by that decision.
 
     Ordered by `id` wherever it is listed, which is the order the Library
     defined them in. No `position` column: reordering is a feature nobody asked
@@ -2663,13 +2457,12 @@ class CustomField(Base):
         # is what caught it, twice.
         #
         # Interpolated from the enum rather than written out, so adding a kind
-        # cannot leave the constraint behind. Through `_enum_check` rather than
-        # a `sorted` join of its own, now that every one of these is one rule:
-        # the DDL is stable across runs either way, `CustomFieldKind` renders
-        # the same text under both, and what a single order buys is that
-        # nothing has to decide which the next constraint takes.
+        # cannot leave the constraint behind. Sorted, so the DDL is stable
+        # across runs and a migration diff means something.
         CheckConstraint(
-            _enum_check("kind", CustomFieldKind),
+            "kind IN ({})".format(
+                ", ".join(f"'{kind.value}'" for kind in sorted(CustomFieldKind))
+            ),
             name="ck_custom_fields_kind",
         ),
     )
@@ -2685,40 +2478,6 @@ class CustomField(Base):
         String(CUSTOM_FIELD_NAME_MAX), unique=True, nullable=False
     )
     kind: Mapped[CustomFieldKind] = mapped_column(String(20), nullable=False)
-
-    # **The Member who defined it, and this one is read.** It carries no
-    # `info={"provenance": ...}` for that reason: the three columns that do
-    # are promises that nothing consults them, and this is the opposite, a
-    # column added because two questions had no answer without a member axis
-    # on the row.
-    #
-    # **`fields.Fields` is the only reader**, and it reads it off the class in
-    # one query rather than off a row, which is what keeps the guard on the
-    # other three able to refuse every instance read in the tree. The two
-    # questions it answers are that class's fourth arm, a definition its
-    # author may always be told about, and `renamable`, which is who may
-    # relabel a Library wide name.
-    #
-    # **A schema field named for it would be a second reader**, and that is
-    # the half no walk over source can see: Pydantic populates such a field
-    # by reading the attribute off the row, so the column would reach every
-    # client with no attribute access written anywhere. `CustomFieldOut`
-    # publishes a derived `renamable` instead, and
-    # `tests/test_fields.py::TestFieldsIsTheOnlyReaderOfTheAuthorColumn`
-    # refuses the declaration as well as the statement.
-    #
-    # **Nullable, and null is not an error.** Every row defined before this
-    # column existed has it, and so does every row from an archive taken
-    # before it. Null means the field has no author to ask, which is the
-    # state the whole table was in, so it keeps the rule it had: any Member
-    # may rename it. A new refusal that applied to those rows would take a
-    # working verb away from the library on the morning of the migration.
-    #
-    # Deliberately not indexed, like the three provenance columns: the table
-    # has a ceiling of `MAX_CUSTOM_FIELDS` rows and is read whole.
-    created_by_user_id: Mapped[int | None] = mapped_column(
-        Integer, ForeignKey("users.id"), nullable=True
-    )
 
     # **No `values` relationship, deliberately.** It would be a way to read
     # every Book's value for a field from a definition nobody had to be allowed
@@ -3039,17 +2798,7 @@ def visible_to(user_id: int) -> ColumnElement[bool]:
 
 
 def in_trash_for(user_id: int) -> ColumnElement[bool]:
-    """The mirror image of `visible_to`: the deleted books this account may see.
-
-    **This account's own trashed books and every account's trashed public
-    ones.** That is `visible_to` with the `deleted_at` arm turned over and
-    nothing else changed, and it is the set a trash listing is served for.
-
-    **It is not an ownership test, and reading it as one is how a widening
-    gets proposed.** Nothing below tests who deleted the row: there is no
-    `deleted_by` column, and the only account this predicate names is the one
-    being asked. This docstring said "has trashed away" until 2026-09-30, and
-    four sentences downstream had copied that, `Shelf.trashed_by` among them.
+    """The mirror image: books this account may see **and** has trashed away.
 
     Deliberately a separate function rather than a flag on `visible_to`. A
     predicate that sometimes means "on the shelf" and sometimes means "in the
@@ -3084,43 +2833,6 @@ def note_visible_to(user_id: int) -> ColumnElement[bool]:
     return or_(Note.is_private.is_(False), Note.user_id == user_id)
 
 
-#: How wide either index name on a catalogue target may be, in **bytes and in
-#: characters alike**.
-#:
-#: **One number in two units, and that is a property of the charset rule beside
-#: it rather than of the column.** `ck_catalogue_targets_indexes` confines both
-#: columns to `[A-Za-z0-9._]` and refuses a NUL, so `GLOB` reads the whole value
-#: and every character it admits is one byte. The bound is therefore written
-#: once, on the bytes, which is the unit a lead byte cannot walk past: measured
-#: on sqlite 3.46.1 and 3.50.4, one `x'C0'` and its continuation bytes are one
-#: character and as many bytes as somebody writes.
-#:
-#: **That equality rests on the database's text encoding being UTF-8**, which is
-#: SQLite's default and which nothing in `backend/` changes. Stated because it is
-#: the premise that decides the multiplier rather than a detail: under
-#: `PRAGMA encoding='UTF-16le'` a 64 character ASCII name measures 128 bytes and
-#: this bound would refuse a legitimate value, measured. A byte budget of four
-#: times the width has no such premise, and is the right form on any column whose
-#: characters are not confined.
-#:
-#: **The number is the column's declared width**, so the bound and the
-#: declaration say the same thing rather than two things. Measured over the
-#: eleven seeded rows, the widest index name is `bib.anywhere` at 12 characters.
-TARGET_INDEX_MAX = 64
-
-#: The widest address a catalogue target may hold, in characters.
-#:
-#: **`BASE_URL_MAX`'s number on purpose, and a separate constant on purpose**,
-#: which is the arrangement `BOOK_IDENTIFIER_MAX` states at its own site: two
-#: address columns in one schema answering the same question with two numbers is
-#: a difference somebody would later have to explain. They are two constants
-#: because that one is also a **route's** bound, imported by `schemas/opds.py`
-#: so a long address is a 422 rather than a 500, and this column has no route:
-#: `main.seed_catalogue_targets` is its only validating writer. The widest
-#: seeded address is 61 characters.
-TARGET_BASE_URL_MAX = 255
-
-
 class CatalogueTarget(Base):
     """One catalogue source as a row: its address, transport, indexes and bounds.
 
@@ -3149,16 +2861,6 @@ class CatalogueTarget(Base):
             ),
             name="ck_catalogue_targets_isbn_claim",
         ),
-        # **The exception to `_enum_check`, and it is the reason rather than an
-        # oversight.** `targets.Transport` declares `Z3950` and this list leaves
-        # it out on purpose, which `targets.Transport` argues at its own site: a
-        # row may not carry a transport no door serves yet. A derivation would
-        # have to spell that exclusion here as well, against an enum this module
-        # does not import and a column typed `str` rather than as that enum, so
-        # the hand written list is the honest copy. What the derived sites buy
-        # is that a member added to an enum moves the model's text; here a
-        # member added to `Transport` is a decision about whether a row may hold
-        # it, which is a revision either way.
         CheckConstraint(
             "transport IN ('sru', 'bespoke')",
             name="ck_catalogue_targets_transport",
@@ -3187,66 +2889,20 @@ class CatalogueTarget(Base):
         # `varchar` there cannot hold the byte, so the charset rule is total and
         # the ceiling exact without one. `b7d4e6f01a95` carries why the negation
         # is unanchored and why `COLLATE "C"` is on it.
-        #
-        # **The charset rule closed the smuggle and left the size**, which is a
-        # different rule and was missing altogether: neither column carried a
-        # bound of any kind, so a lead byte and its continuation bytes stored a
-        # megabyte behind one counted character, `String(64)` refusing nothing
-        # in SQLite. Measured on sqlite 3.46.1 and 3.50.4.
-        #
-        # **Bounded in bytes rather than in characters, once rather than
-        # twice.** The charset rule and the NUL clause together make every
-        # admitted character one byte, so the two units are the same number on
-        # this column, and the byte one is the one that still binds if a later
-        # hand weakens either. `TARGET_INDEX_MAX` carries that argument.
         CheckConstraint(
             DialectSQL(
                 sqlite=(
                     "(isbn_index = '' OR isbn_index NOT GLOB '*[^A-Za-z0-9._]*') "
                     "AND instr(isbn_index, char(0)) = 0 "
-                    f"AND length(CAST(isbn_index AS BLOB)) <= {TARGET_INDEX_MAX} "
                     "AND (title_index = '' OR title_index NOT GLOB '*[^A-Za-z0-9._]*') "
-                    "AND instr(title_index, char(0)) = 0 "
-                    f"AND length(CAST(title_index AS BLOB)) <= {TARGET_INDEX_MAX}"
+                    "AND instr(title_index, char(0)) = 0"
                 ),
                 postgresql=(
                     "(isbn_index = '' OR (isbn_index COLLATE \"C\") !~ '[^A-Za-z0-9._]') "
-                    f"AND octet_length(isbn_index) <= {TARGET_INDEX_MAX} "
-                    "AND (title_index = '' OR (title_index COLLATE \"C\") !~ '[^A-Za-z0-9._]') "
-                    f"AND octet_length(title_index) <= {TARGET_INDEX_MAX}"
+                    "AND (title_index = '' OR (title_index COLLATE \"C\") !~ '[^A-Za-z0-9._]')"
                 ),
             ),
             name="ck_catalogue_targets_indexes",
-        ),
-        # **The address, which carried no rule at all**, where
-        # `ck_opds_servers_base_url` on the sibling column carries four. The
-        # asymmetry was the defect: both columns hold an address a request is
-        # later built from, both are written by `backup.restore` through Core
-        # with no validating arm, and only one of them said so. The arms are
-        # that constraint's, for the reasons stated there, and they are not
-        # restated here.
-        #
-        # **What this refuses that nothing refused before**: a `file://` or a
-        # `gopher://` address, an address of unbounded length, and a megabyte
-        # parked behind one lead byte. **What it cannot refuse is a row this
-        # application wrote**: all eleven addresses in `targets.SEEDED` are
-        # `http` or `https` and the widest is 61 characters, so the upgrade
-        # that installs this cannot fail on one.
-        CheckConstraint(
-            DialectSQL(
-                sqlite=(
-                    "(base_url GLOB 'http://?*' OR base_url GLOB 'https://?*') "
-                    "AND instr(base_url, char(0)) = 0 "
-                    f"AND length(base_url) <= {TARGET_BASE_URL_MAX} "
-                    f"AND length(CAST(base_url AS BLOB)) <= {4 * TARGET_BASE_URL_MAX}"
-                ),
-                postgresql=(
-                    "(base_url ~ '^http://.' OR base_url ~ '^https://.') "
-                    f"AND length(base_url) <= {TARGET_BASE_URL_MAX} "
-                    f"AND octet_length(base_url) <= {4 * TARGET_BASE_URL_MAX}"
-                ),
-            ),
-            name="ck_catalogue_targets_base_url",
         ),
         # **`typeof` has no Postgres arm and must keep its SQLite one.** The
         # column is a real `integer` there, so the type test is the `IN` list's
@@ -3270,7 +2926,7 @@ class CatalogueTarget(Base):
     #: Position in `sources.DEFAULT_ORDER`. #130 reads it.
     rank: Mapped[int] = mapped_column(Integer, nullable=False)
     transport: Mapped[str] = mapped_column(String(16), nullable=False)
-    base_url: Mapped[str] = mapped_column(String(TARGET_BASE_URL_MAX), nullable=False)
+    base_url: Mapped[str] = mapped_column(String(255), nullable=False)
     reader: Mapped[str] = mapped_column(String(32), nullable=False)
     answers_lookup: Mapped[bool] = mapped_column(Boolean, nullable=False)
     answers_search: Mapped[bool] = mapped_column(Boolean, nullable=False)
@@ -3280,13 +2936,9 @@ class CatalogueTarget(Base):
     query_parameter: Mapped[str] = mapped_column(String(32), nullable=False, default="")
     query_language: Mapped[str | None] = mapped_column(String(8), nullable=True)
     record_schema: Mapped[str] = mapped_column(String(32), nullable=False, default="")
-    isbn_index: Mapped[str] = mapped_column(
-        String(TARGET_INDEX_MAX), nullable=False, default=""
-    )
+    isbn_index: Mapped[str] = mapped_column(String(64), nullable=False, default="")
     isbn_attribute: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    title_index: Mapped[str] = mapped_column(
-        String(TARGET_INDEX_MAX), nullable=False, default=""
-    )
+    title_index: Mapped[str] = mapped_column(String(64), nullable=False, default="")
     title_query_shape: Mapped[str | None] = mapped_column(String(32), nullable=True)
     lookup_records: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     search_multiplier: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -3311,34 +2963,6 @@ class CatalogueTarget(Base):
     #: instead of drifting from it in silence. #130 clears it on a row somebody
     #: edits, and that row stops being reconciled.
     is_seeded: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
-
-
-#: The widest sealed envelope this application can write, in bytes.
-#:
-#: **Derived from what the two writers can hand `credentials.seal`, not
-#: chosen.** An envelope is `<version>.<generation>.<nonce>.<ciphertext>`, every
-#: part base64url without padding, so it is ASCII and its bytes are its
-#: characters. The widest is the catalogue route's: `SourceCredentialIn` bounds
-#: the username at 320 characters and the password at 200, the pair is sealed as
-#: `username:password` encoded UTF-8, and four bytes is UTF-8's widest
-#: character, so the plaintext reaches 4*320 + 1 + 4*200 = 2,081 bytes. AES-GCM
-#: adds a 16 byte tag, base64 of 2,097 bytes is 2,796 characters, and the three
-#: separators, `v2` and the eight character generation tag and the sixteen
-#: character nonce make 29 more. The OPDS route's 255 and 255 reach 2,772.
-#:
-#: **Measured rather than only computed**: 2,825 bytes through `credentials.put`'s
-#: own call, against a real key, 2026-09-20.
-#:
-#: **Bounded in bytes rather than in characters** for the reason
-#: `TARGET_INDEX_MAX` gives on its own column: an envelope's characters are its
-#: bytes, and the byte count is the one a lead byte cannot walk past. This
-#: column is `Text` and has no declared width to agree with.
-#:
-#: `tests/test_schema.py::TestTheBoundsThisRevisionPutOnBytes::test_the_ceiling
-#: _is_what_the_two_routes_can_produce` recomputes the figure from the two
-#: routes' own bounds, so widening either one fails there rather than at a 500 on
-#: a deployment.
-CATALOGUE_ENVELOPE_MAX_BYTES = 2825
 
 
 class CatalogueCredential(Base):
@@ -3406,48 +3030,30 @@ class CatalogueCredential(Base):
         # because this module cannot import that one.
         # `tests/test_credentials.py::TestTheEnvelopeRuleAndItsConstraintAgree`
         # walks the two together.
-        # **The ceiling is a byte count, and that is what answers the NUL.**
-        # Measured on sqlite 3.46.1 and 3.50.4, this constraint without its
-        # third arm stored a valid shape followed by a NUL and 50,000
-        # characters whole, 50,048 bytes, with `length()` reporting 47. A NUL
-        # clause would not have closed that: the column had no ceiling for one
-        # to make readable, and what this column may hold at all was
-        # `credentials.unseal`'s question. `CATALOGUE_ENVELOPE_MAX_BYTES`
-        # answers it from what the two writers can produce.
-        #
-        # **So no arm here carries a NUL clause, on either engine, and none
-        # needs one.** `length(CAST(envelope AS BLOB))` counts the whole value
-        # whatever is in it; the floor reads **shorter** past a NUL and is
-        # therefore harder to satisfy rather than easier; and both `GLOB`
-        # patterns end in `*`, which absorbs any suffix, so truncation can only
-        # make them fail. That is three clauses and three reasons, and it is why
-        # this constraint is the one exception to the two rules beside it.
-        #
-        # **The ceiling caps what a NUL can hide; it does not refuse one.** 47
-        # characters of shape, a NUL, and 2,777 bytes behind it is stored, with
-        # `length()` reporting 47, which is the accepted outcome rather than an
-        # oversight: such a row is an unreadable credential and not a 500,
-        # `credentials.unseal` reading the generation tag before it decodes
-        # anything and catching `ValueError` after. Pinned by
-        # `test_a_nul_carrying_envelope_under_the_ceiling_is_capped_not_refused`
-        # so the paragraph above cannot be read as the stronger claim.
-        # `tests/test_dialect.py::TestEveryNulArmDroppedOnACharacterColumn::
-        # test_the_envelope_keeps_its_asymmetry` is what holds the exception.
+        # **Neither arm reads past a NUL and neither is given one**, which is
+        # the difference between this and the two GLOB rules that are: both of
+        # those have a ceiling for the clause to make exact, and `envelope` is
+        # `Text` with none. Measured on sqlite 3.46.1 and 3.50.4, a valid shape
+        # followed by a NUL and 50,000 characters is stored whole, 50,048 bytes,
+        # with `length()` reporting 47.
+        # Adding `instr(envelope, char(0)) = 0` alone bounds nothing, so it
+        # arrives with the question of what bounds this column, which is
+        # `credentials.unseal`'s to answer rather than this constraint's.
         # **Each separator is escaped on the Postgres arm and that is the
         # whole of it.** `GLOB` and a POSIX regex share `*` and part on `.`, so
         # the naive `~ '^v1.*.*.*'` admits `v1XYZ`, with no separator in it at
-        # all: measured on PostgreSQL 16.2.
+        # all: measured on PostgreSQL 16.2. Neither arm carries a NUL clause,
+        # here, and that asymmetry with the two rules below is deliberate on
+        # both engines: this column has no ceiling for one to make exact.
         CheckConstraint(
             DialectSQL(
                 sqlite=(
                     "(envelope GLOB 'v1.*.*.*' OR envelope GLOB 'v2.*.*.*') "
-                    "AND length(envelope) >= 40 "
-                    f"AND length(CAST(envelope AS BLOB)) <= {CATALOGUE_ENVELOPE_MAX_BYTES}"
+                    "AND length(envelope) >= 40"
                 ),
                 postgresql=(
                     r"(envelope ~ '^v1\..*\..*\.' OR envelope ~ '^v2\..*\..*\.') "
-                    "AND length(envelope) >= 40 "
-                    f"AND octet_length(envelope) <= {CATALOGUE_ENVELOPE_MAX_BYTES}"
+                    "AND length(envelope) >= 40"
                 ),
             ),
             name="ck_catalogue_credentials_envelope",
@@ -3505,14 +3111,6 @@ class CatalogueCredential(Base):
 #: A revision installs the literal rather than importing this, for the reason
 #: every revision here gives.
 BASE_URL_MAX = 255
-
-
-#: The longest name an OPDS server row may hold, in characters.
-#:
-#: **One home, read by the three places and for the reasons `BASE_URL_MAX`
-#: states**, on a different column: `ck_opds_servers_name`, the `String()`
-#: below it, and `schemas.opds.OpdsServerIn`.
-SERVER_NAME_MAX = 100
 
 
 #: The prefix every OPDS server's credential key carries.
@@ -3596,25 +3194,15 @@ class OpdsServer(Base):
         # satisfies `NOT GLOB '*[^a-z0-9_-]*'`. With a NUL refused, that charset
         # rule leaves only ASCII, so those two need no byte arm. A name is free
         # text and gets neither.
-        #
-        # **Four bytes per character is a property of valid UTF-8**, which
-        # `ck_opds_servers_base_url` states below, and the arm does a different
-        # job here. That column refuses a NUL; this one admits one on SQLite,
-        # PostgreSQL's `text` refusing a NUL outright. So a name's characters
-        # are counted only up to its first NUL, and this arm is the only thing
-        # bounding what follows.
-        # `TestEveryTextCeilingIsInstalledWithItsByteArm` pins that slack in
-        # `test_a_nul_carrying_value_under_the_byte_budget_is_stored` rather
-        # than closing it, which is where the argument for closing it belongs.
         CheckConstraint(
             DialectSQL(
                 sqlite=(
-                    f"length(name) BETWEEN 1 AND {SERVER_NAME_MAX} "
-                    f"AND length(CAST(name AS BLOB)) <= {4 * SERVER_NAME_MAX}"
+                    "length(name) BETWEEN 1 AND 100 "
+                    "AND length(CAST(name AS BLOB)) <= 400"
                 ),
                 postgresql=(
-                    f"length(name) BETWEEN 1 AND {SERVER_NAME_MAX} "
-                    f"AND octet_length(name) <= {4 * SERVER_NAME_MAX}"
+                    "length(name) BETWEEN 1 AND 100 "
+                    "AND octet_length(name) <= 400"
                 ),
             ),
             name="ck_opds_servers_name",
@@ -3710,13 +3298,10 @@ class OpdsServer(Base):
         # refusing that is what this arm is.
         #
         # Three arms and three reasons, none of them the others: the prefix says
-        # what an address is, `instr` stops the character count being read off
-        # the text before a NUL, and the cast is the only one that counts what
-        # is on the disk and the only one a lead byte cannot walk past. **The
-        # prefix needs no NUL clause and is not what `instr` is here for**: it
-        # ends in `*`, so truncation can only make it fail. Both ceilings are
-        # read off `BASE_URL_MAX`, which `schemas/opds.py` imports, so no write
-        # through the route can exceed either.
+        # what an address is, `instr` makes the character count exact, and the
+        # cast is the only one that counts what is on the disk. Both ceilings
+        # are read off `BASE_URL_MAX`, which `schemas/opds.py` imports, so no
+        # write through the route can exceed either.
         # **`.` is the Postgres spelling of GLOB's `?`, not `?`.** A regex `?`
         # is a quantifier, so the naive `~ '^http://?*'` quantifies a quantifier
         # and PostgreSQL 16.2 refuses to compile it at all, measured. The NUL
@@ -3743,7 +3328,7 @@ class OpdsServer(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     #: What the household calls this server. Shown on a screen, never sent
     #: anywhere and never part of an address.
-    name: Mapped[str] = mapped_column(String(SERVER_NAME_MAX), nullable=False)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
     #: The acquisition feed a sync walks. The origin computed from it is what
     #: every later address in that walk is held to: see `opds._next_page`.
     base_url: Mapped[str] = mapped_column(String(BASE_URL_MAX), nullable=False)

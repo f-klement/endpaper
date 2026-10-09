@@ -2,14 +2,7 @@
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import * as audiobook from "../../src/lib/audiobook";
-import {
-  MAX_ENTRY_BYTES,
-  MAX_ID3_BYTES,
-  MAX_READS,
-  readAudioTags,
-  type AudioReading,
-} from "../../src/lib/audiobook";
+import { readAudioTags } from "../../src/lib/audiobook";
 import {
   box,
   brokenBox,
@@ -24,21 +17,7 @@ import {
   synchronise,
   textFrame,
   utf16,
-  buildM4b,
-  buildMp3,
-  m4bSpec,
-  mp3Spec,
-  type Mp3Spec,
-  type Mp4Spec,
 } from "../audioFixtures";
-import { holds, PROFILE, PROPERTY, witness } from "../property";
-import {
-  expectNamedOutcome,
-  hostile,
-  overrunBreach,
-  type Door,
-  type Hostile,
-} from "./readerContract";
 
 const utf8 = new TextEncoder();
 
@@ -625,147 +604,4 @@ describe("an M4B", () => {
 
 afterEach(() => {
   vi.restoreAllMocks();
-});
-
-/**
- * `readAudioTags` as two doors, one per extension, because their bounds are
- * different: an M4B is a walk of boxes, each read at most `MAX_ENTRY_BYTES`;
- * an MP3 is a header and then the whole tag in one slice of at most
- * `MAX_ID3_BYTES`. Both are bounded in slices by `MAX_READS`.
- *
- * **Nothing here inflates**, so the meter's teeth are the number of reads and
- * the size of each, which is the budget this module keeps for itself.
- */
-const m4bDoor: Door<Mp4Spec, AudioReading> = {
-  module: audiobook,
-  ceilings: () => ({ reads: MAX_READS, perRead: MAX_ENTRY_BYTES }),
-  build: buildM4b,
-  open: (file) => readAudioTags(file, ".m4b"),
-};
-
-const mp3Door: Door<Mp3Spec, AudioReading> = {
-  module: audiobook,
-  ceilings: () => ({ reads: MAX_READS, perRead: MAX_ID3_BYTES }),
-  build: buildMp3,
-  open: (file) => readAudioTags(file, ".mp3"),
-};
-
-describe("any audiobook file a member picks", () => {
-  it(
-    "reads an M4B's tags or refuses by name, within its slice budget",
-    PROPERTY,
-    async () => {
-      expect(
-        await holds(
-          hostile(m4bSpec()),
-          async (input) => expectNamedOutcome(m4bDoor, input),
-          {
-            "spent the whole slice budget": (_, { counted }) =>
-              counted.reads === MAX_READS,
-            "read an entry at exactly its ceiling": (_, { counted }) =>
-              counted.largestRead === MAX_ENTRY_BYTES,
-          },
-        ),
-      ).toBe(PROFILE.runs);
-    },
-  );
-
-  it(
-    "reads an MP3's tags or refuses by name, never a tag past its ceiling in one slice",
-    PROPERTY,
-    async () => {
-      expect(
-        await holds(
-          hostile(mp3Spec()),
-          async (input) => expectNamedOutcome(mp3Door, input),
-          {
-            "read a tag at exactly its ceiling": (_, { counted }) =>
-              counted.largestRead === MAX_ID3_BYTES,
-          },
-        ),
-      ).toBe(PROFILE.runs);
-    },
-  );
-
-  it("is metered at both doors, so the ceilings above are not held over nothing", async () => {
-    const tagged = await expectNamedOutcome(m4bDoor, {
-      spec: {
-        entries: [{ key: "\u00a9alb", value: "Dune", kind: undefined }],
-        moovChildren: [],
-        before: [],
-        crowd: 0,
-        metaIsFullBox: undefined,
-        withoutTags: undefined,
-      },
-      patches: [],
-    });
-    const headed = await expectNamedOutcome(mp3Door, {
-      spec: {
-        head: {
-          major: undefined,
-          frames: [{ id: "TALB", encoding: 0, text: "Dune", flags: undefined }],
-          unsynchronised: undefined,
-          extendedHeader: undefined,
-          padding: undefined,
-          plainSize: undefined,
-        },
-        tail: undefined,
-      },
-      patches: [],
-    });
-
-    expect(tagged.outcome).toMatchObject({
-      answered: { ok: true, tags: { album: "Dune" } },
-    });
-    expect(tagged.counted.reads).toBeGreaterThan(1);
-    expect(headed.outcome).toMatchObject({
-      answered: { ok: true, tags: { album: "Dune" } },
-    });
-    expect(headed.counted.reads).toBeGreaterThan(1);
-  });
-
-  it("declares the bounds it is held to at both doors, so one deleted or loosened reds", async () => {
-    const slices = `made read ${MAX_READS + 1} against a ceiling of ${MAX_READS}`;
-    expect(
-      await overrunBreach(m4bDoor, { ceiling: "reads", bound: MAX_READS }),
-    ).toContain(slices);
-    expect(
-      await overrunBreach(mp3Door, { ceiling: "reads", bound: MAX_READS }),
-    ).toContain(slices);
-    expect(
-      await overrunBreach(m4bDoor, {
-        ceiling: "perRead",
-        bound: MAX_ENTRY_BYTES,
-      }),
-    ).toContain(`at once against a ceiling of ${MAX_ENTRY_BYTES}`);
-    expect(
-      await overrunBreach(mp3Door, {
-        ceiling: "perRead",
-        bound: MAX_ID3_BYTES,
-      }),
-    ).toContain(`at once against a ceiling of ${MAX_ID3_BYTES}`);
-  });
-
-  it("draws a crowd past the slice budget, the costliest walk, and a tag past its ceiling", async () => {
-    await witness(hostile(m4bSpec()), {
-      "crowds boxes past the slice budget": ({
-        spec,
-        patches,
-      }: Hostile<Mp4Spec>) => patches.length === 0 && spec.crowd > MAX_READS,
-      "holds an entry past its ceiling": ({
-        spec,
-        patches,
-      }: Hostile<Mp4Spec>) =>
-        patches.length === 0 &&
-        spec.entries.some(
-          (entry) =>
-            typeof entry.value === "object" &&
-            entry.value.zeroes > MAX_ENTRY_BYTES,
-        ),
-    });
-    await witness(hostile(mp3Spec()), {
-      "pads a tag past its ceiling": ({ spec, patches }: Hostile<Mp3Spec>) =>
-        patches.length === 0 && (spec.head?.padding ?? 0) > MAX_ID3_BYTES,
-    });
-  });
 });

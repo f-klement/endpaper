@@ -44,9 +44,9 @@ reasoning for why that is not CSRF, and why it must not be generalised to any
 other route, is at `auth.COVER_COOKIE_NAME`.
 """
 
-from typing import Annotated, Any, Final
+from typing import Annotated, Final
 
-from fastapi import APIRouter, HTTPException, Response, status
+from fastapi import APIRouter, HTTPException, status
 from fastapi import Path as PathParam
 from fastapi.responses import FileResponse
 
@@ -59,17 +59,6 @@ router = APIRouter(prefix="/covers", tags=["covers"])
 # new extension or the same bytes, and the cache buster is the filename itself.
 # `private` and not `public`: a shared cache in front of this must not serve one
 # member's cover to another, which is the whole point of the route existing.
-#
-# **It reaches the 206 and neither of the two refusals a `Range` header can
-# produce**, which is worth saying because this claim now has three statuses
-# under it rather than one. Both range handlers rebuild from the response's own
-# raw headers, so a partial answer carries this; a malformed `Range` (400) and
-# an unsatisfiable one (416) are built inside the framework as plain text
-# responses and carry no `Cache-Control` at all. Measured. Both run after the
-# dependency below has already refused an invisible book, and neither status is
-# one a conformant shared cache stores on its own, so nothing crosses members
-# either way. What would break the sentence above is a 206 losing the header,
-# not these two.
 _CACHE_CONTROL: Final = "private, max-age=604800"
 
 #: The `Content-Type` a cover is served with, chosen by its **filename**.
@@ -98,77 +87,6 @@ _MEDIA_TYPES: Final[dict[str, str]] = {
     "jpeg": "image/jpeg",
     "png": "image/png",
     "webp": "image/webp",
-}
-
-#: What these two routes promise for a 200, **derived from the table above** so
-#: the document cannot name a type the routes will not send or miss one they
-#: will. Three entries rather than four: two extensions share `image/jpeg`.
-#:
-#: Both routes declared `application/json` until this was added, for image
-#: bytes, which is the same defect the export routes carried and is what
-#: `tests/test_declared_media_types.py` now refuses for the class.
-#:
-#: No schema under each type: that is the OpenAPI 3.1 spelling for opaque bytes,
-#: since `format: binary` belonged to 3.0 and JSON Schema 2020-12 has no such
-#: format.
-_DECLARED_CONTENT: Final[dict[str, dict[str, Any]]] = {
-    media_type: {} for media_type in dict.fromkeys(_MEDIA_TYPES.values())
-}
-
-#: The envelope a request whose ranges **stay apart** is answered with, which is
-#: not a type any file is served as.
-#:
-#: `FileResponse` handles `Range` itself, after this module has returned.
-#:
-#: **Not a function of how many ranges the caller wrote.** `_parse_range_header`
-#: sorts the ranges and merges the ones that touch **before** anything counts, so
-#: what decides the answer is how many survive that merge. Measured against the
-#: pinned starlette: no header answers 200 under the file's own image type; one
-#: range answers **206** under that same type, and so does any set that merges to
-#: one, which two identical ranges and three adjacent ones both do; two or more
-#: that survive the merge answer 206 under this, built by
-#: `_handle_multiple_ranges` with a generated boundary; and above a hundred comma
-#: separated ranges the parser returns nothing at all and the route answers 200
-#: with the whole file.
-#:
-#: **The declaration is true for every one of those shapes**, which is why the
-#: merge is recorded here rather than handled. What it would not be true for is a
-#: 206 declaring `_DECLARED_CONTENT` alone: right for the single range somebody
-#: checking this would type, wrong for the first request whose ranges stay apart,
-#: which is the same defect as the JSON declaration this table replaced, one
-#: request shape along.
-#:
-#: **Deliberately not a member of `_MEDIA_TYPES`.** That table answers what one
-#: file on disk is labelled, keyed by the extensions `cover_store` hands back,
-#: and its safety claim is about types a browser executes. This is an envelope
-#: the framework builds around parts that each carry one of those labels, and
-#: nothing looks it up by extension. Putting it there would make
-#: `tests/routers/test_covers.py::TestTheMediaTypesAreNotDocuments` assert it is
-#: an extension the store serves, which it is not.
-_MULTIPART_BYTERANGES: Final = "multipart/byteranges"
-
-#: What these two routes promise for a **206**: the 200's set, because a single
-#: range still sends the file's own type, plus the envelope above.
-#:
-#: Derived from `_DECLARED_CONTENT` rather than rebuilt from `_MEDIA_TYPES`, so
-#: the two keys cannot drift from each other or from the map.
-#:
-#: **The 400 and the 416 a `Range` header can also produce are left undeclared,
-#: and that is a refusal rather than an omission.**
-#: `tests/test_errors.py::TestTheDocumentEnumeratesNoRefusal` holds that this
-#: document enumerates no refusal anywhere, which two published route docstrings
-#: argue from by name. Declaring one here would make both of them false through
-#: a decorator edit, and whether to declare refusals is a decision about the
-#: whole surface rather than about these two routes.
-#:
-#: **A conditional request is not a third key either.** `FileResponse` does no
-#: conditional handling at all, measured two ways: the only 304 in the pinned
-#: starlette's response module is in the check on whether a status may carry a
-#: body, and an `If-None-Match` echoing the etag this route has just sent
-#: answers 200 with the whole file. Declaring an answer the framework cannot
-#: send is the same defect as not declaring one it can.
-_DECLARED_PARTIAL_CONTENT: Final[dict[str, dict[str, Any]]] = _DECLARED_CONTENT | {
-    _MULTIPART_BYTERANGES: {}
 }
 
 
@@ -206,21 +124,7 @@ def _not_found() -> HTTPException:
 # `TestTheLoginBackground::test_the_route_spells_the_name_the_store_writes` is
 # what keeps the two the same fact. Here rather than in the docstring below,
 # which FastAPI publishes as this route's OpenAPI description.
-# `response_class=Response` **and** the dictionary. Either alone is weaker than
-# it reads: the dictionary alone leaves `application/json` in the 200 beside the
-# image types, and `response_class=FileResponse` alone declares no content at
-# all. `routers/books.export_books` carries the measurement. The handler stays
-# annotated `-> FileResponse`, which is what keeps it out of the population
-# `tests/routers/test_auth.py::TestARouteThatSendsNoBodyDocumentsNone` forbids
-# content to.
-@router.get(
-    "/login_bg.{extension}",
-    response_class=Response,
-    responses={
-        200: {"content": _DECLARED_CONTENT},
-        206: {"content": _DECLARED_PARTIAL_CONTENT},
-    },
-)
+@router.get("/login_bg.{extension}")
 def get_login_background(
     extension: Annotated[str, PathParam(pattern=r"^[A-Za-z]{3,4}$")],
 ) -> FileResponse:
@@ -249,14 +153,7 @@ def get_login_background(
     )
 
 
-@router.get(
-    "/{book_id}.{extension}",
-    response_class=Response,
-    responses={
-        200: {"content": _DECLARED_CONTENT},
-        206: {"content": _DECLARED_PARTIAL_CONTENT},
-    },
-)
+@router.get("/{book_id}.{extension}")
 def get_cover(
     book: BookForCover,
     extension: Annotated[str, PathParam(pattern=r"^[A-Za-z]{3,4}$")],

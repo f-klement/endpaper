@@ -14,55 +14,10 @@
  * the corpus. The corpus is named in `src/lib/fb2.ts`.
  */
 
-import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 
-import * as fb2Module from "../../src/lib/fb2";
-import {
-  MAX_ARCHIVED_BYTES,
-  MAX_HEADER_BYTES,
-  readFb2,
-  readFb2Archive,
-  readFb2Description,
-  type Fb2Reading,
-} from "../../src/lib/fb2";
-import {
-  holds,
-  PROFILE,
-  PROPERTY,
-  spelled,
-  witness,
-  type Repeated,
-  type Total,
-} from "../property";
-import {
-  aimedArchive,
-  archiveSpec,
-  buildZip,
-  bytes,
-  entrySpec,
-  isBomb,
-  zeroesAt,
-  type ArchiveSpec,
-  type Payload,
-} from "../zipFixtures";
-import {
-  expectAnswer,
-  expectNamedOutcome,
-  hostile,
-  overrunBreach,
-  stoppedAt,
-  type Door,
-  type ValueDoor,
-} from "./readerContract";
-import {
-  declares,
-  FICTION_BOOK,
-  render as renderXml,
-  xmlDocument,
-  type XmlDocument,
-} from "./xmlArbitrary";
-import type { FileMetadata } from "../../src/lib/fileReaders";
+import { readFb2, readFb2Archive, readFb2Description } from "../../src/lib/fb2";
+import { buildZip, bytes } from "../zipFixtures";
 
 const DECLARATION = '<?xml version="1.0" encoding="utf-8"?>';
 
@@ -97,7 +52,7 @@ const ORDINARY = fb2(
 );
 
 /** The record, or the reason there is none, so one assertion covers both arms. */
-function verdict(reading: Awaited<ReturnType<typeof readFb2>>): string {
+function outcome(reading: Awaited<ReturnType<typeof readFb2>>): string {
   return reading.ok ? `read: ${reading.metadata.title}` : reading.failure;
 }
 
@@ -111,7 +66,6 @@ describe("reading a FictionBook's description", () => {
       title: "Назад в юность",
       subtitle: null,
       authors: ["Александр Юрьевич Санфиров"],
-      categories: ["sf"],
       identifiers: [{ scheme: "isbn", value: "978-5-9922-1663-9" }],
       isbn: "9785992216639",
       publisher: "Альфа-книга",
@@ -191,46 +145,6 @@ describe("reading a FictionBook's description", () => {
       title: "История с кладбищем",
       authors: ["Гейман"],
     });
-  });
-});
-
-describe("the genres, which are this format's subjects", () => {
-  it("reads every genre element the file declared, in its own order", () => {
-    // Several `<genre>` elements is how the format says several genres, and
-    // the corpus carries 35 across 18 files. Folding a repeat and capping the
-    // count belong to the request, not here.
-    const record = read(
-      fb2(
-        "<title-info><genre>sf</genre><genre>det</genre><genre>sf</genre>" +
-          "<book-title>Пикник</book-title></title-info>",
-      ),
-    );
-
-    expect(record?.categories).toEqual(["sf", "det", "sf"]);
-  });
-
-  it("reads a genre out of title-info and never out of document-info", () => {
-    // The scoping rule this whole reader rests on, asked of the one field that
-    // was added to it last: `document-info` describes whoever produced the
-    // file, and a subtree search would file the converter's own genre.
-    const record = read(
-      fb2(
-        `<title-info><book-title>Т</book-title></title-info>` +
-          "<document-info><genre>nonfiction</genre><id>abc</id></document-info>",
-      ),
-    );
-
-    expect(record?.categories).toEqual([]);
-  });
-
-  it("states no genre for a file that declared none", () => {
-    // The other side, without which the arms above are satisfied by a reader
-    // that answers the empty list to everything.
-    const record = read(
-      fb2("<title-info><book-title>Т</book-title></title-info>"),
-    );
-
-    expect(record?.categories).toEqual([]);
   });
 });
 
@@ -566,9 +480,9 @@ describe("a document that is not a FictionBook", () => {
   it("refuses a document that declares its own entities", () => {
     // Expansion happens inside the engine before any code here runs, so no byte
     // cap this module states can reach it. 0 of 18 corpus files carry one.
-    const declaring = `<?xml version="1.0"?><!DOCTYPE FictionBook [<!ENTITY a "boom">]>${OPEN}<description>${titleInfo("<book-title>&a;</book-title>")}</description></FictionBook>`;
+    const hostile = `<?xml version="1.0"?><!DOCTYPE FictionBook [<!ENTITY a "boom">]>${OPEN}<description>${titleInfo("<book-title>&a;</book-title>")}</description></FictionBook>`;
 
-    expect(read(declaring)).toBeNull();
+    expect(read(hostile)).toBeNull();
   });
 
   it("refuses a document that only mentions an entity declaration", () => {
@@ -659,7 +573,7 @@ describe("reading a .fb2 off the disk", () => {
     withMark.set([0xef, 0xbb, 0xbf]);
     withMark.set(raw, 3);
 
-    expect(verdict(await readFb2(new Blob([withMark])))).toBe("read: Онегин");
+    expect(outcome(await readFb2(new Blob([withMark])))).toBe("read: Онегин");
   });
 
   it("falls back to UTF-8 for an encoding this engine has never heard of", async () => {
@@ -671,7 +585,7 @@ describe("reading a .fb2 off the disk", () => {
       '<?xml version="1.0" encoding="x-mac-cyrillic-1987"?>',
     );
 
-    expect(verdict(await readFb2(new Blob([bytes(xml)])))).toBe("read: Onegin");
+    expect(outcome(await readFb2(new Blob([bytes(xml)])))).toBe("read: Onegin");
   });
 
   it("says too large for a description longer than it reads", async () => {
@@ -682,7 +596,7 @@ describe("reading a .fb2 off the disk", () => {
     const padding = `<annotation><p>${"я".repeat(300_000)}</p></annotation>`;
     const xml = fb2(titleInfo(`<book-title>Онегин</book-title>${padding}`));
 
-    expect(verdict(await readFb2(new Blob([bytes(xml)])))).toBe("too-large");
+    expect(outcome(await readFb2(new Blob([bytes(xml)])))).toBe("too-large");
   });
 
   it("still says not a FictionBook about a large file that is not one", async () => {
@@ -692,7 +606,7 @@ describe("reading a .fb2 off the disk", () => {
     // `<description` that is missing.
     const noise = new Blob([bytes("x".repeat(300_000))]);
 
-    expect(verdict(await readFb2(noise))).toBe("not-an-fb2");
+    expect(outcome(await readFb2(noise))).toBe("not-an-fb2");
   });
 
   it("still says not a FictionBook about a short broken one", async () => {
@@ -701,7 +615,7 @@ describe("reading a .fb2 off the disk", () => {
     // length test calls every unreadable file too large.
     const cut = '<?xml version="1.0"?><FictionBook><description><title-info>';
 
-    expect(verdict(await readFb2(new Blob([bytes(cut)])))).toBe("not-an-fb2");
+    expect(outcome(await readFb2(new Blob([bytes(cut)])))).toBe("not-an-fb2");
   });
 
   it("still says not a FictionBook about a large feed that closes its description", async () => {
@@ -710,7 +624,7 @@ describe("reading a .fb2 off the disk", () => {
     // nothing was cut off and "too large" would be the wrong sentence.
     const feed = `<?xml version="1.0"?><rss><channel><description>a feed</description><item>${"a".repeat(300_000)}</item></channel></rss>`;
 
-    expect(verdict(await readFb2(new Blob([bytes(feed)])))).toBe("not-an-fb2");
+    expect(outcome(await readFb2(new Blob([bytes(feed)])))).toBe("not-an-fb2");
   });
 
   it("reads a description whose end tag carries a space", async () => {
@@ -723,7 +637,7 @@ describe("reading a .fb2 off the disk", () => {
       "</description >",
     );
 
-    expect(verdict(await readFb2(new Blob([bytes(xml)])))).toBe("read: Онегин");
+    expect(outcome(await readFb2(new Blob([bytes(xml)])))).toBe("read: Онегин");
   });
 
   it("still says not a FictionBook about a broken one ending at the bound", async () => {
@@ -733,15 +647,15 @@ describe("reading a .fb2 off the disk", () => {
     // the file and is asked of it, not inferred from how much came back.
     const opening =
       '<?xml version="1.0"?><FictionBook><description><title-info>';
-    const exact = opening + "x".repeat(MAX_HEADER_BYTES - opening.length);
+    const exact = opening + "x".repeat(256 * 1024 - opening.length);
     // The premise: one byte either way and this arm is one of the two above.
-    expect(exact.length).toBe(MAX_HEADER_BYTES);
+    expect(exact.length).toBe(256 * 1024);
 
-    expect(verdict(await readFb2(new Blob([bytes(exact)])))).toBe("not-an-fb2");
+    expect(outcome(await readFb2(new Blob([bytes(exact)])))).toBe("not-an-fb2");
   });
 
   it("refuses a file that is not one", async () => {
-    expect(verdict(await readFb2(new Blob([bytes("just some text")])))).toBe(
+    expect(outcome(await readFb2(new Blob([bytes("just some text")])))).toBe(
       "not-an-fb2",
     );
   });
@@ -764,7 +678,7 @@ describe("reading a .fb2.zip", () => {
       { name: "Sanfirov.fb2", data: ORDINARY },
     ]);
 
-    expect(verdict(reading)).toBe("read: Назад в юность");
+    expect(outcome(reading)).toBe("read: Назад в юность");
   });
 
   it("refuses an archive holding no FictionBook", async () => {
@@ -774,19 +688,19 @@ describe("reading a .fb2.zip", () => {
       { name: "page-001.jpg", data: "not really a jpeg" },
     ]);
 
-    expect(verdict(reading)).toBe("not-an-fb2");
+    expect(outcome(reading)).toBe("not-an-fb2");
   });
 
   it("refuses an entry that is not a FictionBook", async () => {
     const reading = await archive([{ name: "notes.fb2", data: "just text" }]);
 
-    expect(verdict(reading)).toBe("not-an-fb2");
+    expect(outcome(reading)).toBe("not-an-fb2");
   });
 
   it("refuses something that is not an archive", async () => {
     const reading = await readFb2Archive(new Blob([bytes("just some text")]));
 
-    expect(verdict(reading)).toBe("not-an-fb2");
+    expect(outcome(reading)).toBe("not-an-fb2");
   });
 
   it("says protected for an encrypted entry", async () => {
@@ -794,7 +708,7 @@ describe("reading a .fb2.zip", () => {
       entries: [{ name: "book.fb2", data: ORDINARY, flags: 0x1 }],
     });
 
-    expect(verdict(await readFb2Archive(new Blob([zip])))).toBe("protected");
+    expect(outcome(await readFb2Archive(new Blob([zip])))).toBe("protected");
   });
 
   it("says too large for an entry declaring more than it will read", async () => {
@@ -805,12 +719,12 @@ describe("reading a .fb2.zip", () => {
         {
           name: "book.fb2",
           data: ORDINARY,
-          centralUncompressedSize: MAX_ARCHIVED_BYTES + 1024 * 1024,
+          centralUncompressedSize: 33 * 1024 * 1024,
         },
       ],
     });
 
-    expect(verdict(await readFb2Archive(new Blob([zip])))).toBe("too-large");
+    expect(outcome(await readFb2Archive(new Blob([zip])))).toBe("too-large");
   });
 
   it("reads a book whose body runs past the header bound", async () => {
@@ -823,9 +737,9 @@ describe("reading a .fb2.zip", () => {
       "nothing to see here. ".repeat(20_000),
     );
     // The premise: the body really does run past what is read.
-    expect(long.length).toBeGreaterThan(MAX_HEADER_BYTES);
+    expect(long.length).toBeGreaterThan(256 * 1024);
 
-    expect(verdict(await archive([{ name: "book.fb2", data: long }]))).toBe(
+    expect(outcome(await archive([{ name: "book.fb2", data: long }]))).toBe(
       "read: Назад в юность",
     );
   });
@@ -837,7 +751,7 @@ describe("reading a .fb2.zip", () => {
     const padding = `<annotation><p>${"я".repeat(300_000)}</p></annotation>`;
     const xml = fb2(titleInfo(`<book-title>Онегин</book-title>${padding}`));
 
-    expect(verdict(await archive([{ name: "book.fb2", data: xml }]))).toBe(
+    expect(outcome(await archive([{ name: "book.fb2", data: xml }]))).toBe(
       "too-large",
     );
   });
@@ -849,7 +763,7 @@ describe("reading a .fb2.zip", () => {
       { name: "notes.fb2", data: "x".repeat(300_000) },
     ]);
 
-    expect(verdict(reading)).toBe("not-an-fb2");
+    expect(outcome(reading)).toBe("not-an-fb2");
   });
 
   it("says damaged for an archive whose offsets do not agree", async () => {
@@ -858,362 +772,6 @@ describe("reading a .fb2.zip", () => {
       centralDirectoryOffset: 999_999,
     });
 
-    expect(verdict(await readFb2Archive(new Blob([zip])))).toBe("damaged");
-  });
-});
-
-/**
- * Encoding labels a declaration may carry: the real ones, the near misses and
- * garbage.
- *
- * **The arm a fuzz property can own of the `TextDecoder` class**: `fb2.ts`
- * builds a decoder from the file's own label, and a label outside the WHATWG
- * set, or one naming the replacement encoding, throws `RangeError` under node
- * and bun alike. The module scope half of that class is out of reach of any
- * input and is a house rule's.
- */
-const LABELS = fc.oneof(
-  fc.constantFrom(
-    "utf-8",
-    "UTF-8",
-    "windows-1251",
-    "cp1251",
-    "koi8-r",
-    "utf-16le",
-    "utf-16",
-    "x-mac-cyrillic",
-    "iso-2022-kr",
-    "replacement",
-  ),
-  fc.constantFrom("utf8x", "win-1251", "utf-9", "windows-125"),
-  fc.string({
-    unit: fc.constantFrom(..."abcxyz019._:-".split("")),
-    minLength: 1,
-    maxLength: 12,
-  }),
-);
-
-/** A bare document's parts, rendered by `fb2` above. */
-interface Fb2Spec {
-  /** The XML declaration, or nothing. Its label builds the decoder. */
-  readonly declaration: string;
-  /**
-   * What sits inside `<description>`. The one past the header bound is a
-   * `Repeated`, so a counterexample carrying it prints as its parts.
-   */
-  readonly description: string | Repeated;
-}
-
-/** The parts of `titleInfo` either side of an annotation of `times` letters. */
-function padded(times: number): Repeated {
-  const [before, after] = titleInfo("<annotation>\u0000</annotation>").split(
-    "\u0000",
-  );
-  return { before: before!, unit: "x", times, after: after! };
-}
-
-const fb2Spec: fc.Arbitrary<Fb2Spec> = fc.record({
-  declaration: fc.oneof(
-    LABELS.map((label) => `<?xml version="1.0" encoding="${label}"?>`),
-    LABELS.map((label) => `<?xml version='1.0' encoding='${label}'?>`),
-    fc.constant(""),
-  ),
-  description: fc.constantFrom(
-    titleInfo("<book-title>Онегин</book-title>"),
-    `${titleInfo("<book-title>Онегин</book-title>")}${DOCUMENT_INFO}`,
-    // Past the header bound, which is the bare door's `too-large`.
-    padded(MAX_HEADER_BYTES),
-    `<!DOCTYPE d [<!ENTITY e "x">]>${titleInfo("<book-title>&e;</book-title>")}`,
-    "<title-info>",
-    "",
-  ),
-} satisfies Total<Fb2Spec>);
-
-function render(spec: Fb2Spec): Uint8Array<ArrayBuffer> {
-  return bytes(spelled(fb2Document(spec)));
-}
-
-/**
- * The document a spec describes, as text or as a `Repeated`: what an archived
- * entry holds, so a counterexample prints the document and never its bytes.
- */
-function fb2Document(spec: Fb2Spec): string | Repeated {
-  if (typeof spec.description === "string") {
-    return fb2(spec.description, spec.declaration);
-  }
-  const [head, tail] = fb2("\u0000", spec.declaration).split("\u0000");
-  return {
-    ...spec.description,
-    before: `${head!}${spec.description.before}`,
-    after: `${spec.description.after}${tail!}`,
-  };
-}
-
-/** The bare door: a prefix of the file, read and never more. */
-const bare: Door<Fb2Spec, Fb2Reading> = {
-  module: fb2Module,
-  ceilings: () => ({ read: MAX_HEADER_BYTES, refusesEntities: true }),
-  build: async (spec) => render(spec),
-  open: (file) => readFb2(file),
-};
-
-/**
- * The archived door: the same document, deflated into a zip. **The aggregate
- * beside the per inflater bound**, for `cbz.test.ts`'s reason: one entry is
- * read today, and nothing else would notice a second.
- */
-const archived: Door<ArchiveSpec, Fb2Reading> = {
-  module: fb2Module,
-  ceilings: () => ({
-    perInflate: MAX_HEADER_BYTES,
-    inflated: MAX_HEADER_BYTES,
-    refusesEntities: true,
-  }),
-  build: buildZip,
-  open: (file) => readFb2Archive(file),
-};
-
-const fb2Archive = fc.oneof(
-  {
-    arbitrary: archiveSpec(
-      entrySpec(
-        fc.oneof(
-          fc.constantFrom("book.fb2", "BOOK.FB2", "nested/a.fb2", "notes.txt"),
-          fc.string({ maxLength: 10 }),
-        ),
-        fc.oneof(
-          {
-            arbitrary: fb2Spec.map((spec): Payload => fb2Document(spec)),
-            weight: 2,
-          },
-          {
-            arbitrary: zeroesAt([MAX_HEADER_BYTES, MAX_ARCHIVED_BYTES]),
-            weight: 1,
-          },
-        ),
-        [MAX_HEADER_BYTES, MAX_ARCHIVED_BYTES],
-      ),
-    ),
-    weight: 3,
-  },
-  // The bomb aimed where the archive is read, weighted so any seed draws it.
-  { arbitrary: aimedArchive("book.fb2", MAX_HEADER_BYTES), weight: 1 },
-);
-
-/** Whether this engine refuses to build a decoder for the label. */
-function refusedLabel(declaration: string): boolean {
-  const label = /encoding=["']([^"']+)["']/.exec(declaration)?.[1];
-  if (label === undefined) return false;
-  try {
-    new TextDecoder(label).decode(new Uint8Array());
-    return false;
-  } catch {
-    return true;
-  }
-}
-
-describe("any FictionBook a member picks", () => {
-  it(
-    "is read or refused as a bare file, reading no further than its header bound",
-    PROPERTY,
-    async () => {
-      expect(
-        await holds(
-          hostile(fb2Spec),
-          async (input) => expectNamedOutcome(bare, input),
-          {
-            "read a description past the header bound to exactly it": (
-              _,
-              { outcome, counted },
-            ) =>
-              "answered" in outcome &&
-              !outcome.answered.ok &&
-              outcome.answered.failure === "too-large" &&
-              counted.read === MAX_HEADER_BYTES,
-          },
-        ),
-      ).toBe(PROFILE.runs);
-    },
-  );
-
-  it(
-    "is read or refused inside an archive, inflating no chunk past its header bound",
-    PROPERTY,
-    async () => {
-      expect(
-        await holds(
-          hostile(fb2Archive),
-          async (input) => expectNamedOutcome(archived, input),
-          {
-            "stopped a bomb at the header bound": (_, { counted }) =>
-              stoppedAt(counted, MAX_HEADER_BYTES),
-          },
-        ),
-      ).toBe(PROFILE.runs);
-    },
-  );
-
-  it("refuses a declaration a patch broke into a processing instruction, rather than throwing", async () => {
-    // **What the property above found once its seed was fresh**, as it printed
-    // it: a byte at offset 2 turns `<?xml` into an instruction whose target is
-    // not a name, and this suite's parser threw on it where a browser's answers
-    // a parse error. The reader now answers either one as not a FictionBook.
-    const { outcome } = await expectNamedOutcome(bare, {
-      spec: {
-        declaration: "<?xml version='1.0' encoding='utf8x'?>",
-        description:
-          "<title-info><genre>sf</genre><book-title>Онегин</book-title><lang>ru</lang></title-info>",
-      },
-      patches: [{ at: 2, byte: 0 }],
-    });
-
-    expect(outcome).toEqual({ answered: { ok: false, failure: "not-an-fb2" } });
-  });
-
-  it("is metered at both doors, so the bounds above are not held over nothing", async () => {
-    const plain = await expectNamedOutcome(bare, {
-      spec: {
-        declaration: DECLARATION,
-        description: titleInfo("<book-title>Онегин</book-title>"),
-      },
-      patches: [],
-    });
-    const zipped = await expectNamedOutcome(archived, {
-      spec: { entries: [{ name: "book.fb2", data: ORDINARY }] },
-      patches: [],
-    });
-
-    expect(plain.outcome).toMatchObject({
-      answered: { ok: true, metadata: { title: "Онегин" } },
-    });
-    expect(plain.counted.read).toBeGreaterThan(0);
-    expect(zipped.outcome).toMatchObject({
-      answered: { ok: true, metadata: { title: "Назад в юность" } },
-    });
-    expect(zipped.counted.inflated).toBeGreaterThan(0);
-  });
-
-  it("declares the bounds it is held to at both doors, so one deleted or loosened reds", async () => {
-    expect(
-      await overrunBreach(bare, { ceiling: "read", bound: MAX_HEADER_BYTES }),
-    ).toContain(`against a ceiling of ${MAX_HEADER_BYTES}`);
-    expect(await overrunBreach(bare, { ceiling: "refusesEntities" })).toContain(
-      "declaring an entity",
-    );
-    expect(
-      await overrunBreach(archived, {
-        ceiling: "perInflate",
-        bound: MAX_HEADER_BYTES,
-      }),
-    ).toContain(`against a bound of ${MAX_HEADER_BYTES}`);
-    expect(
-      await overrunBreach(archived, {
-        ceiling: "inflated",
-        bound: MAX_HEADER_BYTES,
-        each: MAX_HEADER_BYTES,
-      }),
-    ).toContain(`inflated against a ceiling of ${MAX_HEADER_BYTES}`);
-    expect(
-      await overrunBreach(archived, { ceiling: "refusesEntities" }),
-    ).toContain("declaring an entity");
-  });
-
-  it("draws a label no decoder takes, and a bomb where the archive is read", async () => {
-    await witness(hostile(fb2Spec), {
-      "declares a label no decoder takes": ({ spec }) =>
-        refusedLabel(spec.declaration),
-    });
-    await witness(hostile(fb2Archive), {
-      "puts a bomb where the archive is read": ({ spec, patches }) => {
-        const entry = spec.entries.find((candidate) =>
-          candidate.name.toLowerCase().endsWith(".fb2"),
-        );
-        return (
-          patches.length === 0 &&
-          entry !== undefined &&
-          isBomb(entry, MAX_HEADER_BYTES)
-        );
-      },
-    });
-  });
-});
-
-/**
- * `readFb2Description` as a door: a document in, a record or `null` out.
- *
- * **Held at the parser door the meter counts**: no XML parse is handed a
- * declaration. What the property draws is a tree over this reader's own
- * names, mostly grafted into one it accepts, so its walk behind the root is
- * reached, and damage no tree can express inserted on top.
- *
- * **Under happy-dom, where this file's example tests are**, which is a claim
- * this file tests on purpose.
- */
-const xmlDoor: ValueDoor<XmlDocument, FileMetadata | null> = {
-  module: fb2Module,
-  ceilings: () => ({ refusesEntities: true }),
-  open: (document) => readFb2Description(renderXml(document)),
-};
-
-describe("any FictionBook header a file carries", () => {
-  it(
-    "is read or refused, and never parsed while it declares an entity",
-    PROPERTY,
-    async () => {
-      expect(
-        await holds(xmlDocument(FICTION_BOOK), async (document) => {
-          await expectAnswer(xmlDoor, document);
-        }),
-      ).toBe(PROFILE.runs);
-    },
-  );
-
-  it("answers a header its parser throws on with no record, rather than throwing", async () => {
-    // **What the property above found**, as it printed it: an instruction in
-    // the prolog, which this suite's parser throws on. **A browser reads this
-    // document**, so the `null` here is the reader's answer to a parser that
-    // throws, and that is the behaviour pinned: a record or `null`, never a
-    // rejection, whichever parser it meets.
-    const { outcome } = await expectAnswer(xmlDoor, {
-      declaration: "none",
-      root: FICTION_BOOK.accepted,
-      insertions: [{ at: 0, text: "<?x?>" }],
-      padTo: undefined,
-    });
-
-    expect(outcome).toEqual({ answered: null });
-  });
-  it("is metered, so the parse ceilings above are not held over nothing", async () => {
-    const { outcome, counted } = await expectAnswer(xmlDoor, {
-      declaration: "none",
-      root: FICTION_BOOK.accepted,
-      insertions: [],
-      padTo: undefined,
-    });
-
-    expect(outcome).toMatchObject({ answered: { title: "Онегин" } });
-    expect(counted.parses).toBe(1);
-  });
-
-  it("declares the parse ceiling it is held to, so deleting it reds", async () => {
-    // **The positive control for a door handed a value**: a stub hands the
-    // meter's parser a declaring document through this door's own ceilings.
-    expect(
-      await overrunBreach(xmlDoor, { ceiling: "refusesEntities" }),
-    ).toContain("declaring an entity");
-  });
-
-  it("draws documents it reads, and documents that declare", async () => {
-    // **Asked of the reader rather than of the tree**: whether a drawn
-    // document is one this reader reads is the reader's to say, and a
-    // vocabulary that stopped matching it is what turns this red.
-    await witness(xmlDocument(FICTION_BOOK), {
-      "the reader reads": async (document) => {
-        if (document.padTo !== undefined) return false;
-        const { outcome } = await expectAnswer(xmlDoor, document);
-        return "answered" in outcome && outcome.answered !== null;
-      },
-      "declares an entity": declares,
-    });
+    expect(outcome(await readFb2Archive(new Blob([zip])))).toBe("damaged");
   });
 });

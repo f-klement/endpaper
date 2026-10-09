@@ -319,7 +319,7 @@ export const getPreviewMarcUrl = () => {
  * counts what it will match and `blocked` counts what it will refuse for an
  * ISBN this member cannot see, through `MarcIndex.holds` and
  * `MarcIndex.would_refuse`, which are the same index and the same predicates
- * `MarcImport` applies, over the same stored records. Counting only the
+ * `MarcImport` applies, over the same `bounded_fields`. Counting only the
  * first overstated what an import would add by exactly the number of records
  * another member holds privately.
  *

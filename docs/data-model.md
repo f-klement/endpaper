@@ -134,34 +134,12 @@ never be matched against any metadata source.
 and null while nobody has been asked. A third axis again, and not a fact about right now:
 see *Three axes, not one* below.
 
-Four columns are filled on demand from Google Books: `page_count`, `language`, `categories`
-and `google_books_id`. Three of them are empty otherwise. `categories` is the exception:
-`POST /api/books` accepts a list of subjects and writes the column directly, so it may hold
-whatever a client asserted rather than only what a catalogue supplied. Nothing is minted from
-it either way, and it is not the Tag system: see the three layer table under `classifications`
-below.
-
-`categories` is stored as one delimited string because SQLite has no array type, and served
-as a list.
+Four columns are filled on demand from Google Books and are empty otherwise: `page_count`,
+`language`, `categories` and `google_books_id`. `categories` is Google's own subject list,
+stored as one delimited string because SQLite has no array type, and served as a list.
 **The delimiter is a semicolon, not a comma**, and that is load bearing: Google's own
 category names contain commas ("Fiction, general"). `google_books.join_categories` and
-`split_categories` are the only two places on the server that know this.
-
-**A third place knows it, and it is in the browser.** `BookCreate` refuses an entry
-carrying the delimiter, and a `field_validator` raising refuses the whole request, so a
-subject with a semicolon in it costs a member the book rather than the subject. The file
-readers emit subjects a stranger's file wrote, so `frontend/src/lib/bookRequest.ts` drops
-such an entry before the request is built. It is a literal there, and the residue is
-stated at that site: the schema carries no `pattern` for the field, so nothing recomputes
-the character the way the width and the count are recomputed.
-
-**That residue is closed by behaviour rather than by spelling.**
-`conformance/cases/subject.json` carries two entries with the delimiter in them, one
-spaced and one bare, and records that the browser drops and the server refuses. Both
-runners read the file, so either side ceasing to refuse it is a failing test. What the
-cases cannot see is the server's constant changing value while the browser's literal does
-not, except through the behaviour on the bare character, which reddens on the server side
-first. A `pattern` on the field would close that too and costs a schema regeneration.
+`split_categories` are the only two places that know this.
 
 **`tags`.** 105 rows seeded at startup from `PREDEFINED_TAGS` in `main.py`, in three
 categories: `type` (10), `genre` (88) and `age` (7), plus a fourth category, `custom`, for
@@ -197,10 +175,8 @@ book drops its tag links without touching the tags themselves. That cascade did 
 until `PRAGMA foreign_keys` was turned on: it is off by default in SQLite, which made every
 `ForeignKey` in `models.py` a comment. See *Connection settings* below.
 
-**`collections`.** Named parts of the shelf, pointed at by `books.collection_id`. One per
-book or none, and never a privacy boundary: filing changes nothing about who can see a book.
-Which collections a member is told about is decided by the books in them. See *Collections*
-below.
+**`collections`.** Named parts of the shelf, pointed at by `books.collection_id`. Library
+wide, one per book or none, and never a privacy boundary. See *Collections* below.
 
 **`user_books`.** Per-person read status, rating, reading dates (`unread` / `want_to_read` /
 `reading` / `read` / `did_not_finish`) and the "ask me about this book" flag. This is the table
@@ -226,20 +202,15 @@ and the caption that scheme gave the number, as three columns rather than the on
 across languages and does not say which scheme it came from.
 
 **Tags, `books.categories` and this are one store with three jobs, not three vocabularies.**
-The difference is provenance. A tag is this library's own word. A category is uncontrolled free
-text somebody else supplied, whether a catalogue or a client asserting it at create time. A row
-here is somebody at a national library placing the book in a published schedule, and only that
-one means anything to another institution.
+The difference is provenance. A tag is this library's own word. A category is whatever the
+publisher claimed, uncontrolled. A row here is somebody at a national library placing the
+book in a published schedule, and only that one means anything to another institution.
 
 | Layer | What it is |
 |---|---|
 | `tags` | this library's own language, curated or invented |
-| `books.categories` | uncontrolled free text, from a catalogue or asserted on create |
+| `books.categories` | whatever the publisher claimed |
 | `classifications` | an assertion from a published scheme |
-
-**A client may assert the middle layer and nothing is minted from it.** `POST /api/books`
-accepts a list of subjects; no tag is created and no existing tag is matched. The uncontrolled
-layer stays uncontrolled, which is the whole reason it is separate from `tags`.
 
 **Four schemes, and `number` means the same thing in three of them.** DDC and LCC are shelf
 orders; GND is the German national subject authority file, and what the column holds for it
@@ -628,35 +599,14 @@ Whether a value renders as a **link** is decided on every read, not stored:
 no credentials and a parseable port. A `url` field whose value does not survive that is
 served as text. See [security.md](security.md).
 
-`custom_fields.created_by_user_id` is the member who defined the row, and it is **read**,
-which separates it from the three `created_by_user_id` columns described as provenance
-elsewhere on this page. **No module but `backend/fields.py` reads it, except the archive**,
-and that includes no schema: a Pydantic field named for a column is populated by reading the
-attribute off the row, so declaring one would publish the column to every client with no
-attribute access written anywhere. The API answers a derived `renamable` instead.
-
-**The archive is the exception and it is deliberate.** `backend/backup.py` selects every
-column of every table it archives and serialises the rows as they come, so it carries this
-value and the three provenance ones alike while naming none of them, which is why it is past
-both instruments. It is admin only for that reason, which [security.md](security.md) records.
-It answers two questions nothing else could: a definer is told
-their own field exists even when its only value sits on a book they cannot see, and a
-definer may rename it where another member may not. It is nullable and null is not an
-error: every row defined before the column has one, so does every row from an archive
-taken before it, and null means "no author to ask", which keeps the rule those rows
-already had. The rename is open to an admin for any field **they can address**, which is a
-weaker version of the asymmetry the delete carries rather than the same one: the delete is
-ungated, so a field whose every value sits on somebody's private book is deletable by an
-admin and a 404 to rename. `routers/books.rename_custom_field` carries the pair.
-
 **`catalogue_targets`.** One catalogue source as a row: its address, transport, which
 indexes it answers on, and the bounds a search is held to. The primary key holds a
 `CatalogueSource` value, and it is a `String(32)` with no CHECK: what closes the set is
 `sources.Plan.parse`, which validates a stored settings row against the enum, rather than
 anything in the column.
 
-**Seeded and read by nothing on any lookup path, and that is a security property rather
-than an oversight.** `main.seed_catalogue_targets` reconciles these rows against `targets.SEEDED`
+**Seeded and read by nothing at runtime, and that is a security property rather than an
+oversight.** `main.seed_catalogue_targets` reconciles these rows against `targets.SEEDED`
 on every start, so a corrected constant reaches the table instead of drifting from it; what
 the lookup path asks is the module constant, never the row. `fetch.py` and `z3950.py` both
 argue they need no host allowlist **because** a target's address is a constant, so
@@ -863,7 +813,7 @@ stopped being true when `author_identifiers` arrived.
 |---|---|
 | `alias_key` | the key of the spelling being folded away. **Unique**: a spelling means one person |
 | `canonical_name` | the name to show, as a member typed or picked it. Need not be a name any book carries |
-| `created_by_user_id` | provenance, read by nothing but the archive's whole table select, and named by no schema field, nullable so deleting an account keeps the library's decisions |
+| `created_by_user_id` | provenance, read by nothing, nullable so deleting an account keeps the library's decisions |
 
 Nothing in it is a foreign key, because there is no author row to point at, and that is what
 makes it survive: a spelling no book carries any more leaves an alias that matches nothing
@@ -880,7 +830,7 @@ means:
 | `scheme` | which file. The closed set is `enums.AuthorityScheme` and it is the only place that states how many there are: `gnd`, `isni`, `lcnaf`, `viaf`, `wikidata`, and one per national library for Brazil, Argentina, Spain, Portugal, Italy and Chile |
 | `identifier` | the number, stored bare without MARC's `(DE-588)` wrapper |
 | `provenance` | `catalogue` where a record for this book's own ISBN asserted it, `member` where a person confirmed a candidate |
-| `created_by_user_id` | set on a `member` row and null on a `catalogue` one, by check constraint. Provenance: read by nothing but the archive's whole table select, and named by no schema field |
+| `created_by_user_id` | set on a `member` row and null on a `catalogue` one, by check constraint |
 
 **Per spelling, not per person**, which is the same shape as the aliases and for a sharper
 reason: two spellings a member folded into one author may carry different numbers, and that
@@ -907,10 +857,9 @@ author whose every book is private therefore appears for nobody else: nothing th
 credited to a spelling that resolves to that person. Merging an author nobody can see is
 **404**, not 403.
 
-The **mapping** is library wide: every member resolves a spelling to the same person, so
-identity does not fork per reader and an old link resolves the same way for everybody. A
-collection's name is **not** the comparison it used to be here, because which collections a
-member is told about depends on the books in them. What is filtered beside the shelf is what a member has evidence for: a folded
+The **mapping** is library wide, like a collection's name: every member resolves a spelling
+to the same person, so identity does not fork per reader and an old link resolves the same way
+for everybody. What is filtered beside the shelf is what a member has evidence for: a folded
 spelling is listed, and its undo offered, only where it appears on a book they can see.
 
 ## Copies
@@ -973,27 +922,16 @@ for libraries that never asked for the feature, and renaming a seeded string lat
 migration. So "in no collection" is an ordinary permanent state, like a null `format` or
 `lending`, and the API names it: `GET /api/books?unfiled=true`.
 
-**Never a privacy boundary.** Any member may create one, rename it, and file any book they
-can write to. Filing changes nothing about who can see the book: a book's visibility is
-decided by `visible_to()` alone, which is not given a collection to consult.
-`Collection.created_by_user_id` is provenance: no query reads it except the archive, which
-selects every column of every table it takes and so reads this one while naming it nowhere,
-and no schema declares a field named for it. That is what keeps that true rather than merely
-intended, and it is why the rule below is written over books rather than over an owner. Both halves are enforced:
-a declaration is read off the row by Pydantic with nothing written in the source, so it takes
-an instrument of its own.
+**Library wide, and never a privacy boundary.** Any member may create one, rename it, and
+file any book they can write to. Filing changes nothing about who can see the book: a
+book's visibility is decided by `visible_to()` alone, which is not given a collection to
+consult. `Collection.created_by_user_id` is provenance and no query reads it, which is
+what keeps that true rather than merely intended.
 
-**A label is not library wide, and the count was never the only thing it could disclose.** A
-collection is named to a member when a book they can see is filed in it, when a book they can
-see in the trash is, or when no book at all is. The excluded case is the one that leaked: a shelf
-holding books none of which that member may see, whose name told them those books exist. Both
-the count and the row set apply the same question now; `backend/shelving.py` is the one place
-it is answered, for the list, for the rename and for every write that files a book.
-
-An empty collection is named to everybody, because it names no book and so discloses none.
-That is also what keeps a shelf a member just made on the page they made it on, and it makes a
-`book_count` of 0 mean empty, or holding only books you can see in the trash, rather than "or
-holding books you cannot see".
+The one thing a library wide label could disclose is a **count**, so every count is
+filtered: `routers/collections._counts` and the `by_collection` statistic both apply
+`visible_to`. A member filing a private book onto a shared shelf does not thereby tell
+everybody it exists.
 
 **Deleting a collection unfiles its books and destroys none.** `ON DELETE SET NULL` in the
 database rather than a loop in the handler, because a restore and a hand-edited row reach

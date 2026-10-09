@@ -31,7 +31,7 @@ function draw(members: unknown[], overrides: Record<string, unknown> = {}) {
       members={members as never}
       isLoading={false}
       error={null}
-      onConfirm={vi.fn<(userId: number) => void>()}
+      onConfirm={vi.fn()}
       isConfirming={false}
       confirmError={null}
       {...overrides}
@@ -41,7 +41,7 @@ function draw(members: unknown[], overrides: Record<string, unknown> = {}) {
 
 describe("MemberVerification", () => {
   it("offers the override for an account that is waiting", async () => {
-    const onConfirm = vi.fn<(userId: number) => void>();
+    const onConfirm = vi.fn();
     draw([waiting], { onConfirm });
 
     await userEvent
@@ -67,7 +67,7 @@ describe("MemberVerification", () => {
     draw([
       {
         ...waiting,
-        verified_at: "2026-09-06T10:00:00Z",
+        verified_at: "2026-09-06T10:00:00",
         verification_source: VerificationProvenance.admin,
         verified_by: "sam",
       },
@@ -80,7 +80,7 @@ describe("MemberVerification", () => {
     draw([
       {
         ...waiting,
-        verified_at: "2026-09-06T10:00:00Z",
+        verified_at: "2026-09-06T10:00:00",
         verification_source: VerificationProvenance.email,
       },
     ]);

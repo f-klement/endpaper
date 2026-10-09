@@ -147,8 +147,8 @@ class TestAddingABookWithHeadings:
 
         `str.split()` does not treat NUL as whitespace, so the whitespace
         collapse let it through. SQLite's string functions stop at one and
-        Python's do not, so a stored `A1B\\x00C` keyed as `A1B` in the database
-        and as `A1B\\x00C` in Python: a divergence in the one pair that has to
+        Python's do not, so a stored `A1B\x00C` keyed as `A1B` in the database
+        and as `A1B\x00C` in Python: a divergence in the one pair that has to
         agree. `ClassificationIn.tidy_number` carries the measurement.
         """
         res = client.post(

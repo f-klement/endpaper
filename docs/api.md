@@ -85,7 +85,7 @@ is discarded, and only a token naming a test account does. See [security.md](sec
 | GET | `/api/books` | user | Paginated. Filter with `q`, `status`, `ownership`, `format`, `lending`, `discuss`, `series`, `author`, `location`, `collection_id`, `unfiled`, `unrated`, `tags`, `sort` |
 | POST | `/api/books` | user | **409** on an ISBN already in the catalogue |
 | POST | `/api/books/scan` | user | Same, named for the scan flow |
-| GET | `/api/books/tags` | user | The seeded vocabulary plus the invented tags the caller can already see |
+| GET | `/api/books/tags` | user | The seeded vocabulary plus this library's own |
 | POST | `/api/books/tags` | user | Invent a tag. Returns the existing one on a name clash |
 | DELETE | `/api/books/tags/{id}` | user | Only a custom tag. **400** for a seeded one |
 | GET | `/api/books/lookup?isbn=` | user | Metadata lookup, **404** if unknown |
@@ -156,7 +156,7 @@ flow is built around.
 answered for: null is not one of the three.
 
 `collection_id` and `unfiled` are **two parameters for two questions**, and sending both is
-a **400** rather than one silently winning. "Books in collection 3" and "books in no
+a **422** rather than one silently winning. "Books in collection 3" and "books in no
 collection" are alternatives, and a caller that asked for both has made a mistake worth
 being told about: choosing one for them is how a filter quietly shows the wrong shelf. An
 id no collection has selects nothing, rather than answering 404: this is a filter, not a
@@ -171,10 +171,8 @@ against for the same reason `unrated` does.
 ### Editing, rating and reading dates
 
 `PATCH /{id}` is a partial update: an absent field is left alone and an explicit null
-clears where the column allows one. That distinction is the whole point, and it is why the
-handler uses `exclude_unset` rather than dumping the model. A null for a column the
-database will not leave empty, which is `title` and nothing else today, is a **422** from
-the body schema: it used to reach the flush and answer 500.
+clears. That distinction is the whole point, and it is why the handler uses
+`exclude_unset` rather than dumping the model.
 
 `PATCH /{id}/rating` needs only **read** access, like status, because a rating is one
 person's opinion and changes nothing for anyone else. It deliberately does not touch the
@@ -298,16 +296,6 @@ catch is the one it cannot see: a hardback and a paperback are the same book and
 legitimately different ISBNs. Matching is deliberately lossy, because this is a suggestion a
 person confirms.
 
-**The scan is unpaginated and the answer is capped**, which are two different statements.
-Grouping needs the whole catalogue, because a pair split across two pages is two singletons,
-so every request reads one row per visible book. What the cap cuts is the finished grouping:
-`{groups, total_groups}`, where `total_groups` is everything the scan found and `groups`
-carries at most 200 books in all. **It is a cap and not a page.** Nothing resumes, because
-the rows here are the ones the caller is there to delete, so an offset would name a
-different group on every request. A group is never split by the cap, and a group is shown
-with at most the 20 members `POST /merge` accepts, with `size` saying how many there really
-are: the card sends every id it renders, so showing more would be a button that cannot work.
-
 **Deliberate copies never appear here.** Each `copy_group` is collapsed to one row before
 the matching runs, so two paperbacks of one title are not offered for merge. They would
 otherwise be the strongest match this endpoint can produce, and merging them destroys a
@@ -381,9 +369,9 @@ and another's. A book is in **one** or in none.
 
 | Method | Path | Access | Notes |
 |---|---|---|---|
-| GET | `/api/collections` | user | Every collection the caller may be told about, with their own `book_count` |
+| GET | `/api/collections` | user | Every collection, with the caller's own `book_count` |
 | POST | `/api/collections` | user | **201**. A name that already exists returns that collection |
-| PATCH | `/api/collections/{id}` | user | Rename. **404** for an id the caller may not be told about, **409** if another collection has that name |
+| PATCH | `/api/collections/{id}` | user | Rename. **409** if another collection has that name |
 | DELETE | `/api/collections/{id}` | **admin** | 204. Its books are unfiled, never deleted |
 
 Names are unique **case insensitively** and outside ASCII too, enforced by a unique index on
@@ -398,29 +386,9 @@ reason: creating is additive and undone by deleting, while deleting strips a lab
 book in the house at once with no undo.
 
 **A collection is shelving, never permission.** Filing a book into one changes nothing about
-who can see it: a book's visibility is `is_private` and nothing else.
-
-**The label is filtered, not only the count.** A collection is listed to a member when a book
-they can see is filed in it, when a book they can see in the trash is, or when no book at all
-is:
-the name of a shelf holding only books you cannot see is the evidence that those books exist.
-The same question answers the rename and every write that files a book, so an id the caller
-may not be told about gets the answer an unused id gets. Deleting is the exception and stays
-open to any id: it is admin only, it returns no name, and refusing there would strand a
-collection holding only another member's private books with nobody able to remove it. A collection with nothing in it is listed
-to everybody, because it names no book and so discloses none, which is also what keeps the
-shelf you just made on the page you made it on. One consequence: a `book_count` of 0 now means
-empty or holding only books you can see in the trash, and no longer "or holding books you
-cannot see".
-
-A collection is hidden while it holds one book you cannot see and listed again once that book
-is destroyed. That reads backwards and is correct: the rule tracks what there is to disclose.
-
-Two things this does not close. A name that is already taken is still answered by the create
-with the existing row and by the rename with a 409, so a guessed **name** still confirms a
-collection exists; what it no longer buys is filing anything into it. And `id` is published
-and is a consecutive integer, so a filtered list reading 1, 2, 5, 9 still says rows exist
-between them or were deleted.
+who can see it: a book's visibility is `is_private` and nothing else. Every count here is
+filtered by the caller's visibility, because the count is the one thing a library wide
+label could otherwise disclose.
 
 `BookOut` carries `collection_id` and `collection_name`. The name is a projection of the row
 the id names, assembled per request in one statement for the whole page, so a rename is
@@ -653,7 +621,7 @@ whoever is on call looking at the wrong service.
 
 | Method | Path | Access | Notes |
 |---|---|---|---|
-| POST | `/api/imports/goodreads?create_missing=` | user | multipart CSV; **400** if it is not an export |
+| POST | `/api/imports/goodreads?create_missing=` | user | multipart CSV; **422** if it is not an export |
 
 There is no Goodreads API to connect to: they stopped issuing developer keys in December
 2020. A CSV export is the only route in, and linking out to their search is the only other
@@ -893,33 +861,6 @@ curate, and a vocabulary only an admin can extend is one nobody uses. A name
 that already exists returns that tag rather than a 409, because somebody typing
 a name that is already there wants that tag.
 
-**A custom tag is listed to a member only once a book they can see carries
-it.** A tag row carries no member, so what decides who may be told it exists is
-the books carrying it: without that rule, a name somebody typed against a
-private book, or that an import minted from one, reached every member on their
-next page load with a `book_count` of zero. The seeded group is exempt because
-its names are in the source. The same rule answers `POST
-/api/books/{id}/tags/{tag_id}` and the bulk tag verbs with a **404** for a tag
-whose every book is hidden from the caller, which is the answer an unused id
-already gets: attaching a guessed id to a book you own used to return the book
-with that tag's name on it.
-
-**What it does not close.** The name space is globally unique and a create
-answers a collision with the existing row, so guessing a **name** still
-confirms a tag exists. A tag no book carries is attachable by id, which is what
-lets a member put a tag they have just invented onto a book, so guessing the id
-of one confirms its name too.
-
-**And one thing it breaks.** Creating a tag whose name collides with one you
-cannot see answers **201** with that tag, as a collision always does, and
-attaching it then answers 404, because a colliding name is carried by a book
-you cannot see. The name is unusable through the picker and nothing says so.
-A CSV import still does the whole of it, and does more: it matches by folded
-name against every tag with no viewer, its per upload cap bounds **minting**
-and not matching, and it completes the attach. So the refusal withholds
-nothing it is protecting. This is a regression and it is recorded here rather
-than described as a narrowing.
-
 A seeded tag **cannot be deleted**. `seed_tags()` would put it back at the next
 restart, so the delete would appear to work and then quietly undo itself.
 
@@ -962,12 +903,10 @@ calibre-web instance.
 destroys, in one request with no undo, content every member typed by hand, on
 books the caller may not see.
 
-**No usage count is published.** A count of the books carrying a field is drawn
-across books the caller may not see, so it would have to be scoped to the viewer,
-and a viewer-scoped number in a delete confirmation would understate what is about
-to be destroyed. `TagOut.book_count` is not the exception this used to name it as:
-it is the reader's count, deleting a tag is library wide, and that confirmation
-says "every book" for the same reason this one does.
+**No usage count is published**, unlike `TagOut.book_count`. A count of the books
+carrying a field is drawn across books the caller may not see, so it would have to
+be scoped to the viewer, and a viewer-scoped number in a delete confirmation would
+understate what is about to be destroyed.
 
 **A field's `kind` is chosen once and never changed.** Changing it would
 reinterpret every value already under it in both directions. Delete and redefine
@@ -982,7 +921,7 @@ schema.
 `CustomFieldValueOut.href` is what a client points an `<a>` at, and it is decided
 on **this read** rather than trusted from storage: a `url` field whose value is
 not an `http` or `https` URL with a real host comes back with `href` null and is
-rendered as text. A write that fails the same test answers **400** rather than
+rendered as text. A write that fails the same test answers **422** rather than
 degrading silently, because a field somebody declared a link and cannot click,
 with nothing saying why, is worse than an error. See [security.md](security.md).
 
@@ -1111,15 +1050,12 @@ in three places from a lookup's:
   sends: they are the Library of Congress call number and subject heading, and
   both have columns here.
 
-**Matching is ISBN, then author and title together, never title alone.** It uses
-`identity.work_key`, which is also what the duplicate finder computes. The worst
-case for a catalogue transfer is two different books folded into one record, and
-every library holds more than one *Selected poems*.
-
-The CSV importer uses `identity.reading_history_title`, and it differs in two
-ways rather than one: no credit in the key, **and** the title is matched as
-written rather than folded. That is right for a reading history, where the worst
-case is a status on the wrong edition of a book somebody read.
+**Matching is ISBN, then author and title together, never title alone.** The CSV
+importer matches on title alone, which is right for a reading history: the worst
+case is a status on the wrong edition of a book somebody read. The worst case
+for a catalogue is two different books folded into one record, and every library
+holds more than one *Selected poems*. Both use `importing.identity_key`, which
+is also what the duplicate finder computes.
 
 **One unreadable record costs one record.** A catalogue export is the product of
 years and is not uniformly clean, so a record with no `245 $a` is counted in
@@ -1289,16 +1225,13 @@ because the switch is spelled "show overdue loans in the app" and this is what i
 The loans list is not affected: a list of the household's loans is not the reminder
 channel.
 
-`reason` is `disabled`, `no_url`, `nothing_due`, `unreachable`, `misconfigured`,
-`in_app_only` or `unexpected`, and is **null exactly when `sent` is true**. It is a closed
-set because a client has to render the difference and cannot branch on prose; `detail` is the
-same outcome as a sentence, for a log or a caller with no message catalogue. A 200 with
-`sent: false` is the ordinary answer for all seven: none of them is an error in the request.
-`in_app_only` is the run where the in app notice is the only channel on, so nothing was sent
-anywhere and nothing was meant to be. `unexpected` is a sender that failed in a way the code
-does not anticipate, neither refused nor unreachable: it is that channel's failure, the
-others still run, and the server log names the exception's type and where it was raised.
-Its `detail` is a fixed sentence, never the exception's message.
+`reason` is `disabled`, `no_url`, `nothing_due`, `unreachable`, `misconfigured` or
+`in_app_only`, and is **null exactly when `sent` is true**. It is a closed set because a
+client has to render the difference and cannot branch on prose; `detail` is the same outcome
+as a sentence, for a log or a caller with no message catalogue. A 200 with `sent: false` is
+the ordinary answer for all six: none of them is an error in the request. `in_app_only` is
+the run where the in app notice is the only channel on, so nothing was sent anywhere and
+nothing was meant to be.
 
 `senders` holds one `{sender, sent, loans, skipped_private, reason, detail}` per channel this
 run had something to report, in the order in app, webhook, email, Telegram. A pushing sender
@@ -1326,13 +1259,12 @@ that is switched on. Every run writes it, the manual one included, so a failure 
 run that produced it rather than living only in the container log. `sent` is null until the
 channel has run at all, because "not yet" and "fine" are different answers.
 
-`broken` is a judgement rather than a fact, and it is three rules. A refusal the app made
+`broken` is a judgement rather than a fact, and it is two rules. A refusal the app made
 itself (`no_url`, `misconfigured`) counts at once, since all of those are raised before a
-socket is opened and nothing will work until a setting changes. An `unexpected` failure
-counts at once too: it is a case the code does not anticipate, and nothing says it will pass.
-A destination that could not be reached counts only after **24 hours** and at least **two**
-consecutive failures: one failed send is a network, every send failing for a day is a
-configuration, and a design that cannot tell them apart is one a household switches off.
+socket is opened and nothing will work until a setting changes. A destination that could not
+be reached counts only after **24 hours** and at least **two** consecutive failures: one
+failed send is a network, every send failing for a day is a configuration, and a design that
+cannot tell them apart is one a household switches off.
 
 **Any write to a channel's own settings clears its record**, not the on/off switch alone.
 Replacing an expired bot token, or correcting a mail server, port or encryption choice, is
@@ -1576,7 +1508,7 @@ than the corner. A client should ask before removing one and should not promise 
 | GET | `/api/settings/sender-health` | **admin** | What each switched-on reminder channel last did. See the Loans section |
 | GET | `/api/settings/credential-key` | **admin** | Whether an encryption key is in place, and where from. Never the key |
 | POST | `/api/settings/credential-key` | **admin** | Makes one and returns the recovery phrase. **409** when one already exists |
-| PUT | `/api/settings/credential-key` | **admin** | Takes a recovery phrase back in. **400** on a phrase that fails its checksum |
+| PUT | `/api/settings/credential-key` | **admin** | Takes a recovery phrase back in. **422** on a phrase that fails its checksum |
 | DELETE | `/api/settings/credential-key` | **admin** | Discards the key, so a new one can be made. Reports how many logins it stranded |
 | PUT | `/api/settings/catalogue-sources/{source}/credential` | **admin** | Stores one catalogue's login, sealed |
 | DELETE | `/api/settings/catalogue-sources/{source}/credential` | **admin** | Drops it. Succeeds whether or not one was stored |
@@ -1604,14 +1536,8 @@ secrets and nothing about the catalogue. Since the public catalogue it also carr
 `public_catalogue_published`, which is what tells a browser holding no token whether there
 is a catalogue to offer. It is the **server's conjunction** of library mode and the publish
 switch, never either row, so a client cannot get the nesting rule wrong. `library_mode` is
-on it too, as the raw row rather than a conjunction, because the server gates every MARC
-route on that row and a client with no admin session still has to decide whether to offer a
-MARC control the server would answer 403 to.
-
-**Every field on this model has a reader in the client, and one with none is refused**,
-which is why the raw `google_books_enabled` toggle is not here and `google_books_ready`,
-that toggle conjoined with a stored key, is. Each field says at its own site in
-`backend/schemas/settings.py` what it discloses to a caller holding nothing.
+deliberately **not** on this model: the cataloguer column set it changes is a later ticket,
+so it would be an unread field on the one endpoint a stranger can call.
 
 #### The provider list
 
@@ -1736,11 +1662,11 @@ exist and no key does, which is a restore onto a new machine: ciphertext is proo
 existed, so the answer there is the phrase rather than a second key.
 
 `PUT` on the same path takes a phrase back in, absorbing capitals and stray whitespace, and
-answers **400** on one that fails its checksum rather than storing a key that would open
-nothing. 400 rather than 409 because a mistyped phrase is a bad request while a key the
+answers **422** on one that fails its checksum rather than storing a key that would open
+nothing. 422 rather than 409 because a mistyped phrase is a bad request while a key the
 deployment pinned elsewhere is a conflict with the deployment, and one status for both told
-a client nothing it could act on differently. **The refusal names a word position or a
-count and never the phrase**, so nothing is echoed back.
+a client nothing it could act on differently. **A 422 body carries no `input`**, so the
+rejected phrase is not echoed back.
 
 `DELETE` discards the key. It is the way back from closing the tab without writing the words
 down, and it strands whatever the key was opening, which the response names rather than
@@ -1896,8 +1822,8 @@ shelves, which the payload withholds.
 
 `sort` is a **subset** of the signed in listing's, so `sort=newest` is a **422**: it orders
 by `added_at`, a withheld column, and an ordering returns the whole ordering of its column
-in one request. `tags` is bounded at 400 characters and 32 ids: a longer string is a 422
-from the parameter's own bound and more than 32 ids is a 400, and neither is a truncation.
+in one request. `tags` is bounded at 400 characters and 32 ids, and a longer list is a 422
+rather than a truncation.
 
 **`id` is published and discloses more than an identifier.** It is the insert order, so the
 catalogue comes back in acquisition order with no `sort` at all, and `max(id)` against the
@@ -2045,13 +1971,13 @@ A browser navigating to a non-API path gets a styled HTML page instead; anything
 
 | Code | Means |
 |---|---|
-| 400 | Understood and refused: not allowed in this state (no ISBN to refresh, already returned), or a value the route itself judged (an ISBN that is not one, a filter asking two questions at once) |
+| 400 | Understood but not allowed in this state (no ISBN to refresh, already returned) |
 | 401 | No usable token, or from `/auth/login` wrong credentials |
 | 403 | Authenticated but not permitted (non-admin, non-owner) |
 | 404 | Absent, **or** invisible to this account |
 | 409 | Conflicts with existing data (duplicate ISBN, book already on loan) |
 | 413 | Upload over the size cap |
-| 422 | Request body or query failed validation. `detail` is the array of per-field objects, and this is the only status that sends one |
+| 422 | Request body or query failed validation |
 | 429 | Rate-limited; carries `Retry-After` |
 | 500 | A bug. Generic message only; the traceback is logged, never returned |
 

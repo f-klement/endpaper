@@ -6,10 +6,8 @@ two rows that merely name the same book are the second, and every test here is
 about keeping the app able to tell them apart.
 """
 
-import cover_store
 import covers
 from models import Book
-from tests.helpers import JPEG_BYTES
 
 
 def add_copy(client, headers, book_id, **fields):
@@ -106,72 +104,6 @@ class TestAddingACopy:
         res = add_copy(client, member["headers"], private["id"])
 
         assert res.status_code == 404
-
-
-class TestACopyHoldsItsOwnCover:
-    """A stored cover is a file named by the book's id, so two rows naming one
-    file would mean purging either copy blanked the other's cover."""
-
-    def _held_here(self, db, covers_dir, book_id: int) -> None:
-        (covers_dir / f"{book_id}.jpg").write_bytes(JPEG_BYTES)
-        db.get(Book, book_id).cover_url = covers.local_url(book_id, "jpg")
-        db.commit()
-
-    def test_a_cover_held_here_is_copied_to_a_file_of_the_copy_s_own(
-        self, client, admin, make_book, db, covers_dir
-    ):
-        book = make_book(admin["headers"], title="Dune", isbn="9780441013593")
-        self._held_here(db, covers_dir, book["id"])
-
-        copy = add_copy(client, admin["headers"], book["id"]).json()
-
-        assert copy["cover_url"].startswith(f"/covers/{copy['id']}.jpg")
-        assert (covers_dir / f"{copy['id']}.jpg").read_bytes() == JPEG_BYTES
-        assert (covers_dir / f"{book['id']}.jpg").read_bytes() == JPEG_BYTES
-
-    def test_a_cover_that_cannot_be_copied_leaves_the_copy_without_one(
-        self, client, admin, make_book, db, covers_dir, monkeypatch
-    ):
-        """Rather than pointing it at the first copy's file, which is the
-        sharing this exists to prevent. A full volume is the ordinary cause."""
-        book = make_book(admin["headers"], title="Dune", isbn="9780441013593")
-        self._held_here(db, covers_dir, book["id"])
-
-        def full(book_id, from_book_id):
-            raise OSError(28, "No space left on device")
-
-        monkeypatch.setattr(cover_store, "copy", full)
-
-        res = add_copy(client, admin["headers"], book["id"])
-
-        assert res.status_code == 201
-        assert res.json()["cover_url"] is None
-
-    def test_a_remote_cover_is_resolved_and_held_for_the_copy_as_for_any_add(
-        self, client, admin, make_book, covers_dir, monkeypatch
-    ):
-        book = make_book(
-            admin["headers"],
-            title="Dune",
-            isbn="9780441013593",
-            cover_url="https://covers.openlibrary.org/b/isbn/9780441013593-L.jpg",
-        )
-
-        def store_a_cover(book_id, isbn, supplied, budget=None):
-            (covers_dir / f"{book_id}.jpg").write_bytes(JPEG_BYTES)
-            return covers.local_url(book_id, "jpg")
-
-        # Over the top of the suite wide "no cover to be had" stub.
-        monkeypatch.setattr(covers, "resolve_and_store", store_a_cover)
-
-        copy = add_copy(client, admin["headers"], book["id"]).json()
-
-        assert copy["cover_url"].startswith(f"/covers/{copy['id']}.jpg")
-        assert (covers_dir / f"{copy['id']}.jpg").is_file()
-        # Read back, because the answer above is built from the object in hand
-        # and would carry the cover whether or not the row was committed.
-        stored = client.get(f"/api/books/{copy['id']}", headers=admin["headers"]).json()
-        assert stored["cover_url"].startswith(f"/covers/{copy['id']}.jpg")
 
 
 class TestPrivacy:
@@ -504,8 +436,7 @@ class TestDuplicatesLeaveCopiesAlone:
         book = make_book(admin["headers"], title="Dune", author="Frank Herbert")
         add_copy(client, admin["headers"], book["id"])
 
-        body = client.get("/api/books/duplicates", headers=admin["headers"]).json()
-        assert body["groups"] == []
+        assert client.get("/api/books/duplicates", headers=admin["headers"]).json() == []
 
     def test_a_real_duplicate_beside_a_copy_is_still_found(
         self, client, admin, make_book
@@ -514,8 +445,7 @@ class TestDuplicatesLeaveCopiesAlone:
         add_copy(client, admin["headers"], book["id"])
         stray = make_book(admin["headers"], title="dune", author="frank herbert")
 
-        body = client.get("/api/books/duplicates", headers=admin["headers"]).json()
-        [group] = body["groups"]
+        [group] = client.get("/api/books/duplicates", headers=admin["headers"]).json()
 
         ids = {row["id"] for row in group["books"]}
         assert stray["id"] in ids

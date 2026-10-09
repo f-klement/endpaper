@@ -15,18 +15,55 @@ import {
   type MessageKey,
   type Translate,
 } from "../../i18n";
-import { numericDate } from "../../lib/date";
 import { formatMinor } from "../../lib/money";
 import {
   CONDITION_LABELS,
   FORMAT_LABELS,
   LENDING_LABELS,
   STATUS_LABELS,
-  STATUS_STYLES,
   TAG_PILL_CLASSES,
 } from "../types";
 import { Icon } from "../../components";
 import CoverImage from "./CoverImage";
+
+// Exhaustive by type: adding a status to the backend enum makes this a
+// compile error until it is given a presentation here, which is how the
+// `want_to_read` status was caught rather than rendering as a blank pill.
+const STATUS_STYLES: Record<ReadStatus, string> = {
+  // **Below the floor, and pre-existing.** As it actually draws, the ink on
+  // this tint composited over the paper-0 card, it falls under the 4.5 every
+  // text pair in `tests/theme/palettes.test.ts` is held to, on palettes where
+  // the same ink on the card clears it. That is recomputed there by `the
+  // status pill's ink, as it draws`, over every palette and with the tint
+  // composited; `docs/decisions.md` carries the figures, and its table is held
+  // against the stylesheets by the same file. Not changed here, because a
+  // status pill's colour is a design decision across five values and this
+  // change owns one of them. The test added with `did_not_finish` pins that
+  // pill only.
+  [ReadStatus.unread]:
+    "bg-paper-200/70 text-paper-600 dark:bg-paper-800 dark:text-paper-300",
+  // Bloom, not danger. Wanting to read something is the pleased note, and the
+  // two were one rose until they were split: see --color-danger-* in index.css.
+  [ReadStatus.want_to_read]:
+    "bg-bloom-100 text-bloom-700 dark:bg-bloom-700/25 dark:text-bloom-300",
+  [ReadStatus.reading]:
+    "bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-300",
+  [ReadStatus.read]:
+    "bg-accent-100 text-accent-800 dark:bg-accent-500/15 dark:text-accent-200",
+  // The paper ramp, not a semantic one. Giving up on a book is neither an
+  // error nor an achievement, and a rose or an amber pill would make the shelf
+  // look like it was reporting a problem.
+  //
+  // `paper-800` on `paper-200`, not the `paper-600` the `unread` pill uses.
+  // Flat, because this pill is `bg-paper-200` at full opacity, and it is the
+  // only rung from the `unread` pill's ink up to this one that clears 4.5 on
+  // every palette: recomputed by `tests/theme/palettes.test.ts::the status
+  // pill's ink, as it draws`, which reads both ends off the two class strings
+  // here rather than restating them. The pair itself is in that file's
+  // contract, in both modes.
+  [ReadStatus.did_not_finish]:
+    "bg-paper-200 text-paper-800 dark:bg-paper-800 dark:text-paper-200",
+};
 
 /**
  * Tags shown on the face of the card. The rest are in the fold out.
@@ -100,18 +137,7 @@ function factsFor(
     ["field.pageCount", book.page_count],
     ["library.tags", hiddenTags.map((tag) => tagName(tag, locale)).join(", ")],
     ["copy.price", priceText(book)],
-    // **Through the date module, like every other rendered date.** This is the
-    // one `format: date` field the API sends, so it arrives as a bare
-    // `YYYY-MM-DD`; put straight into the list it reached `String(value)` below
-    // and the card printed the ISO text where the table beside it printed
-    // `1/5/2026`, in both locales. `numericDate` answers `""` for an absent
-    // value, which the filter below already drops, so a card with no purchase
-    // date is unchanged. It answers `""` for an **unparseable** one too, so
-    // where the raw string used to print its own text this row now disappears:
-    // that is the residual `render` already states for every other dated field
-    // here, and the field is validated as a date at the door, so the live
-    // population is zero.
-    ["copy.purchasedAt", numericDate(book.purchased_at, locale)],
+    ["copy.purchasedAt", book.purchased_at],
     ["copy.purchaseSource", book.purchase_source],
   ];
   return candidates
@@ -232,11 +258,7 @@ export default function BookCard({
               spare paperback is neither a warning nor an achievement.
               `paper-800` on `paper-200`, the pair the `did_not_finish` pill
               already uses and the only one of that ramp measured over 4.5:1 on
-              every palette. **That pair's home is the `did_not_finish` row of
-              `STATUS_STYLES` in `pages/types.ts`, and it is measured there
-              rather than here.** Borrowed and deliberately not imported: a
-              copy count is not a reading status, and importing one into the
-              other would join two surfaces that only happen to agree. */}
+              every palette. */}
           {(book.copy_count ?? 1) > 1 && (
             <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-paper-200 text-paper-800 dark:bg-paper-800 dark:text-paper-200">
               {t("copies.badge", { count: book.copy_count ?? 1 })}

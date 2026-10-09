@@ -10,24 +10,12 @@
  * What one run of the cover backfill managed.
  *
  * Numbers rather than one, because "fixed 12" on its own cannot be acted on.
- * `examined` is how many books the run has an outcome for, `stored` how many now
- * have a cover this app serves itself, `unreachable` how many resolved to a URL
- * this server could not download (so the remote link is kept and it is tried
- * again on the next pass through the library, not the next run, which starts past
- * it), `still_missing` how many no image service has one for, and `remaining` how
- * many candidates are left beyond what this run examined.
- *
- * **`examined` is not always the whole batch.** The run is bounded in wall clock,
- * so a slow or blackholing image service can leave it short; the counts then
- * describe the books it reached and `next_after_id` clears exactly those. A book
- * the run fetched after the cut is stored and counted in none of the three, so
- * this understates what the run did and never overstates it, and that book stops
- * being a candidate rather than being fetched twice.
- *
- * **Nothing here says whether a run was cut short**, for the reason
- * `IdentifierBackfillOut` gives at length: the client's action is to press again
- * while `remaining` is above zero, which is the same action either way, and the
- * cursor is what makes pressing again safe.
+ * `examined` is how many books the run looked at, `stored` how many now have a
+ * cover this app serves itself, `unreachable` how many resolved to a URL this
+ * server could not download (so the remote link is kept and it is tried again
+ * on the next pass through the library, not the next run, which starts past
+ * it), `still_missing` how many no image service has one for, and `remaining`
+ * how many are left beyond this batch.
  *
  * `next_after_id` is the cursor. **Without it the backfill cannot finish a
  * library**: the batch is chosen by book id and a book that could not be fixed
@@ -35,9 +23,7 @@
  * for ever. About 20% of ISBNs resolve to nothing (measured across ten), so on
  * a large import the counter stops moving after a few runs, and a pod with no
  * egress produces it on run one. The client sends the value back to carry on
- * past what it has already tried. It is the last book of the unbroken examined
- * run, so a short run skips nothing it never reached, and it comes back unchanged
- * where the run reached none of them.
+ * past what it has already tried.
  */
 export interface CoverBackfillOut {
   /** @minimum 0 */

@@ -49,19 +49,19 @@ function preview(overrides: Partial<MarcPreviewOut> = {}): MarcPreviewOut {
   };
 }
 
-type MarcProps = React.ComponentProps<typeof MarcImport>;
-
-function renderMarc(overrides: Partial<MarcProps> = {}) {
+function renderMarc(
+  overrides: Partial<React.ComponentProps<typeof MarcImport>> = {},
+) {
   const props = {
     isPreviewing: false,
     isImporting: false,
     preview: null,
     result: null,
     error: null,
-    onChoose: vi.fn<MarcProps["onChoose"]>(),
-    onConfirm: vi.fn<MarcProps["onConfirm"]>(),
-    onCancel: vi.fn<MarcProps["onCancel"]>(),
-    onReviewUnconfirmed: vi.fn<MarcProps["onReviewUnconfirmed"]>(),
+    onChoose: vi.fn(),
+    onConfirm: vi.fn(),
+    onCancel: vi.fn(),
+    onReviewUnconfirmed: vi.fn(),
     ...overrides,
   };
   renderLocalised(<MarcImport {...props} />);

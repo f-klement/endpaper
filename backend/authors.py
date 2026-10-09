@@ -23,7 +23,7 @@ The separator is a comma, and that is a different decision from the one
 `google_books.join_categories` made. Categories are joined with a semicolon
 *because* Google's own category names contain commas; author names contain
 commas too ("Le Guin, Ursula K."), and the field is nonetheless comma
-separated, because every writer of it says so: `marc_fields.Fields.authors`,
+separated, because every writer of it says so: `metadata._marc_authors`,
 `_bnf_authors` and `google_books` all join with `", "`, and every import path
 runs a name through `flip_catalogue_name` first so that a catalogue-order name
 arrives here already flipped. So a stored comma means "and", and the residue

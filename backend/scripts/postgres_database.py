@@ -65,10 +65,7 @@ def _safe_name(name: str) -> str:
     `stripped` and not one over `name` and one over `name.replace(...)`.
     """
     stripped = name.replace("_", "")
-    # No `name and` in front: `"".isalnum()` is false, so the empty name is
-    # refused by the last term, and a term its neighbour discharges is one no
-    # test can witness.
-    if not (stripped.isascii() and stripped.isalnum()):
+    if not (name and stripped.isascii() and stripped.isalnum()):
         raise ValueError(f"refusing a database name of {name!r}")
     return name
 
@@ -79,9 +76,7 @@ def create_if_absent(admin_url: str, name: str) -> None:
     `admin_url` names any database on the same server. AUTOCOMMIT because
     `CREATE DATABASE` cannot run inside a transaction block.
     """
-    # `hide_parameters` on every engine here, for the reason `database.engine`
-    # gives: a statement error otherwise renders what it bound.
-    engine = create_engine(admin_url, isolation_level="AUTOCOMMIT", hide_parameters=True)
+    engine = create_engine(admin_url, isolation_level="AUTOCOMMIT")
     with engine.connect() as connection:
         if connection.execute(_EXISTS, {"name": name}).scalar():
             return
@@ -94,7 +89,7 @@ def wrong_locale(url: str) -> str | None:
     A string rather than a raise, so a caller inside the suite can put it in an
     assertion message and a caller in a pipeline can print it and exit.
     """
-    with create_engine(url, hide_parameters=True).connect() as connection:
+    with create_engine(url).connect() as connection:
         collate, encoding = connection.execute(_LOCALE).one()
     wrong = []
     if collate != WANTED_COLLATE:

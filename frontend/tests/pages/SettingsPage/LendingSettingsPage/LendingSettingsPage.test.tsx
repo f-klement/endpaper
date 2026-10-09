@@ -33,6 +33,7 @@ beforeEach(() => {
   api = mockApi();
   api.on("/api/settings/features", {
     body: {
+      google_books_enabled: false,
       goodreads_lookup_enabled: false,
       default_locale: "en",
     },

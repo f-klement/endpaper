@@ -123,10 +123,8 @@ export function isAudioExtension(
  * the consequence rather than the multiple**: a file past the budget is
  * reported as unreadable and still becomes a candidate under its own name, so a
  * bound set too low costs a name instead of a tag, never the file.
- *
- * Exported, for `epub.MAX_PACKAGE_BYTES`'s reason.
  */
-export const MAX_READS = 128;
+const MAX_READS = 128;
 
 /** A budget exhausted, or a structure that contradicts itself. */
 class AudioError extends Error {
@@ -244,12 +242,8 @@ const ILST_PATH = ["moov", "udta", "meta", "ilst"] as const;
 const MAX_VALUE_POINTS = 1000;
 const MAX_VALUES = 32;
 
-/**
- * How much of one `ilst` entry is read, once its key is one that is wanted.
- *
- * Exported, for `epub.MAX_PACKAGE_BYTES`'s reason.
- */
-export const MAX_ENTRY_BYTES = 16 * 1024;
+/** How much of one `ilst` entry is read, once its key is one that is wanted. */
+const MAX_ENTRY_BYTES = 16 * 1024;
 
 /**
  * The iTunes keys read, and their four character names begin with U+00A9.
@@ -433,10 +427,8 @@ async function readEntryValue(read: Read, entry: Box): Promise<string | null> {
  * of JPEG. Measured over the corpus the largest real tag is 4,086 bytes, so
  * this is 256 times it and is a bound on a stranger's file rather than on any
  * of these.
- *
- * Exported, for `epub.MAX_PACKAGE_BYTES`'s reason.
  */
-export const MAX_ID3_BYTES = 1024 * 1024;
+const MAX_ID3_BYTES = 1024 * 1024;
 
 /** The last 128 bytes, which is the whole of an ID3v1 tag. */
 const ID3V1_BYTES = 128;

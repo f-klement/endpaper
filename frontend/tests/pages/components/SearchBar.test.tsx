@@ -16,8 +16,6 @@ import SearchBar, {
   MIN_QUERY_LENGTH,
 } from "../../../src/pages/components/SearchBar";
 
-type OnSearch = NonNullable<React.ComponentProps<typeof SearchBar>["onSearch"]>;
-
 beforeEach(() => {
   vi.useFakeTimers();
 });
@@ -38,26 +36,26 @@ function type(value: string) {
 
 describe("SearchBar", () => {
   it("renders the default placeholder", () => {
-    renderLocalised(<SearchBar onSearch={vi.fn<OnSearch>()} />);
+    renderLocalised(<SearchBar onSearch={vi.fn()} />);
     expect(screen.getByPlaceholderText("Search books...")).toBeInTheDocument();
   });
 
   it("accepts a custom placeholder", () => {
     renderLocalised(
-      <SearchBar onSearch={vi.fn<OnSearch>()} placeholder="Find a title" />,
+      <SearchBar onSearch={vi.fn()} placeholder="Find a title" />,
     );
     expect(screen.getByPlaceholderText("Find a title")).toBeInTheDocument();
   });
 
   it("is labelled for assistive tech", () => {
-    renderLocalised(<SearchBar onSearch={vi.fn<OnSearch>()} />);
+    renderLocalised(<SearchBar onSearch={vi.fn()} />);
     expect(screen.getByLabelText("Search books")).toBeInTheDocument();
   });
 
   it("does not fire on mount", () => {
     // Home has already loaded the unfiltered grid by the time this renders, so
     // firing here re-requests a list nobody asked to change.
-    const onSearch = vi.fn<OnSearch>();
+    const onSearch = vi.fn();
     renderLocalised(<SearchBar onSearch={onSearch} />);
     advance(DEBOUNCE_MS);
     expect(onSearch).not.toHaveBeenCalled();
@@ -66,7 +64,7 @@ describe("SearchBar", () => {
   it("ignores a query too short to mean anything", () => {
     // One letter matches most of a library: an expensive request for a useless
     // answer.
-    const onSearch = vi.fn<OnSearch>();
+    const onSearch = vi.fn();
     renderLocalised(<SearchBar onSearch={onSearch} />);
 
     type("d".repeat(MIN_QUERY_LENGTH - 1));
@@ -77,7 +75,7 @@ describe("SearchBar", () => {
 
   it("fires when the box is emptied again", () => {
     // Clearing is a real instruction: show me the whole shelf.
-    const onSearch = vi.fn<OnSearch>();
+    const onSearch = vi.fn();
     renderLocalised(<SearchBar onSearch={onSearch} />);
 
     type("dune");
@@ -91,7 +89,7 @@ describe("SearchBar", () => {
   });
 
   it("trims what it sends", () => {
-    const onSearch = vi.fn<OnSearch>();
+    const onSearch = vi.fn();
     renderLocalised(<SearchBar onSearch={onSearch} />);
 
     type("  dune  ");
@@ -108,7 +106,7 @@ describe("SearchBar", () => {
   });
 
   it("does not fire before the window elapses", () => {
-    const onSearch = vi.fn<OnSearch>();
+    const onSearch = vi.fn();
     renderLocalised(<SearchBar onSearch={onSearch} />);
 
     type("dune");
@@ -118,7 +116,7 @@ describe("SearchBar", () => {
   });
 
   it("fires with the typed value once the window elapses", () => {
-    const onSearch = vi.fn<OnSearch>();
+    const onSearch = vi.fn();
     renderLocalised(<SearchBar onSearch={onSearch} />);
 
     type("dune");
@@ -129,7 +127,7 @@ describe("SearchBar", () => {
 
   it("collapses a burst of keystrokes into one call", () => {
     // Four characters must not become four requests.
-    const onSearch = vi.fn<OnSearch>();
+    const onSearch = vi.fn();
     renderLocalised(<SearchBar onSearch={onSearch} />);
 
     for (const value of ["d", "du", "dun", "dune"]) {
@@ -142,7 +140,7 @@ describe("SearchBar", () => {
   });
 
   it("cancels a pending call when unmounted", () => {
-    const onSearch = vi.fn<OnSearch>();
+    const onSearch = vi.fn();
     const { unmount } = renderLocalised(<SearchBar onSearch={onSearch} />);
 
     type("du");

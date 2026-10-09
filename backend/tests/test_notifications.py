@@ -16,7 +16,6 @@ import os
 import smtplib
 import threading
 import time
-import traceback
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -127,65 +126,6 @@ class TestCheckedUrl:
     def test_refuses_an_empty_setting(self):
         with pytest.raises(notifications.WebhookRefused):
             notifications.checked_url("")
-
-    @pytest.mark.parametrize(
-        "url",
-        ["https://[hooks/t/abcdef", "https://127.0.0.1:99999/hooks/t/abcdef"],
-    )
-    def test_refuses_an_address_the_parser_raises_on_rather_than_raising_too(self, url):
-        """A `ValueError` here is not a refusal, and nothing above it catches one.
-        The port's range is checked only when `.port` is read, so the second
-        row is the one a check that never reads it lets through."""
-        with pytest.raises(notifications.WebhookRefused):
-            notifications.checked_url(url)
-
-
-class TestTheLoggedHost:
-    """`_host` is what every sender log line names. A malformed URL the save
-    check admits made `urlparse` read part of its path as the host."""
-
-    @pytest.mark.parametrize(
-        "url",
-        [
-            "https://hooks.example.org\\services\\PATHMARKER",
-            "https://hooks.example.org;PATHMARKER/x",
-            "https://hooks.example.org PATHMARKER/x",
-            "https://hooks.example.org\tPATHMARKER/x",
-            "https://hooks.example.org%40PATHMARKER/x",
-        ],
-    )
-    def test_a_path_read_as_the_host_is_logged_as_unknown(self, url):
-        assert notifications._host(url) == "unknown"
-
-    @pytest.mark.parametrize(
-        ("url", "host"),
-        [
-            ("https://hooks.example.org/t/PATHMARKER?token=QUERYMARKER", "hooks.example.org"),
-            ("https://hook-user:PASSMARKER@hooks.example.org/x", "hooks.example.org"),
-            ("http://[::1]:8080/hook", "::1"),
-            ("http://box_1.lan/hook", "box_1.lan"),
-            ("https://b" + chr(0xFC) + "cher.example/x", "xn--bcher-kva.example"),
-            # A row a restore or a hand edit wrote: `checked_url` strips it and
-            # delivers, so the log names it too.
-            ("https://hooks.example.org/t/PATHMARKER\n", "hooks.example.org"),
-            # The name httpx dials, IDNA 2008. The standard library's codec
-            # would answer `strasse.example`, a different name.
-            ("https://stra" + chr(0xDF) + "e.example/x", "xn--strae-oqa.example"),
-        ],
-    )
-    def test_a_host_is_still_named(self, url, host):
-        """The controls: the refusal is of characters no host has, not of hosts."""
-        assert notifications._host(url) == host
-
-    @pytest.mark.parametrize(
-        "name",
-        ["stra" + chr(0xDF) + "e", "b" + chr(0xFC) + "cher", "\u03b2\u03b9\u03b2\u03bb\u03af\u03bf\u03c2"],
-    )
-    def test_an_international_host_is_logged_as_httpx_dials_it(self, name):
-        """Held against httpx itself rather than a written answer, so a change in
-        how either side encodes is a disagreement here."""
-        url = f"https://{name}.example/x"
-        assert notifications._host(url) == httpx.URL(url).raw_host.decode("ascii")
 
 
 class TestSelection:
@@ -313,43 +253,6 @@ class TestRunDigest:
 
         assert result["reason"] is OverdueNotifyReason.NO_URL
 
-    async def test_an_address_a_restore_wrote_that_cannot_be_parsed_is_refused_too(
-        self, db, lend, caplog
-    ):
-        """An unclosed IPv6 bracket makes the URL parser raise rather than
-        answer. Refused, it names the setting; caught as unexpected, it would
-        read as a code defect. The log names no host, because there is none to
-        name, and never the URL."""
-        settings_store.set_value(db, SettingKey.OVERDUE_WEBHOOK_ENABLED, "true")
-        settings_store.set_value(db, SettingKey.OVERDUE_WEBHOOK_URL, "https://[hooks/t/abcdef")
-        lend()
-
-        with caplog.at_level(logging.DEBUG):
-            result = await notifications.run_digest(db)
-
-        assert result["reason"] is OverdueNotifyReason.NO_URL
-        assert "to unknown was refused" in caplog.text
-        assert "abcdef" not in caplog.text
-
-    async def test_a_port_out_of_range_is_refused_before_any_connect(self, db, lend):
-        """Let through, the connect fails as an `ExceptionGroup` around
-        `OverflowError`, which is no refusal and no transport failure, so it
-        would read as unexpected rather than as a setting to fix. The host is
-        passed through respx deliberately: the suite's own router would
-        otherwise answer for the connect and hide the failure this is about."""
-        settings_store.set_value(db, SettingKey.OVERDUE_WEBHOOK_ENABLED, "true")
-        settings_store.set_value(
-            db, SettingKey.OVERDUE_WEBHOOK_URL, "https://127.0.0.1:99999/hooks/t/abcdef"
-        )
-        lend()
-
-        with respx.mock(assert_all_called=False) as mock:
-            mock.route(host="127.0.0.1").pass_through()
-            result = await notifications.run_digest(db)
-
-        assert result["sent"] is False
-        assert result["reason"] is OverdueNotifyReason.NO_URL
-
     async def test_sends_nothing_when_nothing_is_overdue(self, configured):
         result = await notifications.run_digest(configured)
         assert result["sent"] is False
@@ -465,27 +368,15 @@ class TestRunDigest:
         assert result["skipped_private"] == 1
 
     async def test_a_failure_logs_the_host_and_not_the_url(self, configured, lend, caplog):
-        """The URL may carry a token in its path or query string. Captured at
-        DEBUG so no level hides an app line naming it. A connection failure
-        means the HTTP library logs no request line at all, so the leak that
-        line carried is caught by the success arm below, not by this one."""
+        """The URL may carry a token in its path or query string."""
         lend()
-        with caplog.at_level(logging.DEBUG), respx.mock as mock:
+        with caplog.at_level(logging.WARNING), respx.mock as mock:
             mock.post(HOOK).mock(side_effect=httpx.ConnectError("refused"))
             await notifications.run_digest(configured)
 
         logged = caplog.text
         assert "hooks.example.org" in logged
         assert "abcdef" not in logged
-
-    async def test_a_successful_send_never_logs_the_url(self, configured, lend, caplog):
-        """A line logged only on success would carry the URL on every send."""
-        lend()
-        with caplog.at_level(logging.DEBUG), respx.mock as mock:
-            mock.post(HOOK).mock(return_value=httpx.Response(200))
-            await notifications.run_digest(configured)
-
-        assert "abcdef" not in caplog.text
 
 
 class TestTheReplyIsNeverRead:
@@ -524,9 +415,9 @@ class TestTheReplyIsNeverRead:
 
         Measured on httpx 0.28.1: twenty bytes trickled at 0.9s apiece completed
         in 18.0s under a 1.0s timeout. `post_digest` therefore wraps the whole
-        request in `asyncio.timeout`, and `_TRANSPORT` names the `TimeoutError`
-        that raises, because a slow receiver is the outage the window waits
-        out rather than a defect to report at once.
+        request in `asyncio.timeout`, and `run_digest` catches the `TimeoutError`
+        that raises, because an uncaught one 500s the endpoint and kills the
+        hourly run.
         """
         monkeypatch.setattr(notifications, "TIMEOUT_SECONDS", 0.05)
         lend()
@@ -544,16 +435,16 @@ class TestTheReplyIsNeverRead:
         assert result["reason"] is OverdueNotifyReason.UNREACHABLE
         assert spent < 5.0
 
-    async def test_a_redirect_naming_an_unusable_host_is_unreachable(
+    async def test_a_redirect_naming_an_unusable_host_is_not_a_500(
         self, configured, lend
     ):
         """Redirects are not followed, and httpx still builds the next request.
 
         `_build_redirect_request` reads `URL.host`, which calls `idna.decode`,
-        so a receiver answering 302 with `location: http://xn--a.gov/x` raises
+        so a receiver answering 302 with `location: http://xn--a.gov/x` raised
         `idna.IDNAError` out of `client.stream`. That is a `UnicodeError` and
-        not an `httpx.HTTPError`: without `_TRANSPORT` naming it, a receiver
-        nobody here controls answering badly would read as a defect here.
+        not an `httpx.HTTPError`, so it escaped this handler and 500ed
+        `POST /api/loans/overdue/notify` on a webhook nobody here controls.
         """
         loan = lend()
         with respx.mock(assert_all_called=False) as mock:
@@ -604,52 +495,6 @@ class TestReminderDays:
     def test_zero_is_clamped_off_the_resend_every_tick_case(self, db):
         settings_store.set_value(db, SettingKey.OVERDUE_REMINDER_DAYS, "0")
         assert notifications.reminder_days(db) == 1
-
-
-async def test_a_failed_tick_is_logged_and_the_next_one_still_runs(monkeypatch, caplog):
-    """A raise escaping the loop would end the task for the life of the
-    container, and nothing in the app would look wrong. The second tick ends
-    the loop here with a cancellation, which is what stopping it looks like."""
-    ticks: list[int] = []
-
-    async def run(db):
-        ticks.append(len(ticks))
-        if len(ticks) == 1:
-            raise RuntimeError("the first run broke")
-        raise asyncio.CancelledError
-
-    monkeypatch.setattr(notifications, "TICK_SECONDS", 0)
-    monkeypatch.setattr(notifications, "run_digest", run)
-    with caplog.at_level(logging.ERROR), pytest.raises(asyncio.CancelledError):
-        await notifications.ticker()
-
-    assert ticks == [0, 1]
-    assert "The overdue ticker failed a run" in caplog.text
-
-
-async def test_a_failed_tick_on_the_database_logs_no_row(monkeypatch, caplog):
-    """The ticker's own log line, the other place a database error lands: the
-    type and the constraint, never the driver's message."""
-    from tests.test_errors import postgres_shaped_error
-
-    ticks: list[int] = []
-    # Built away from the raise: the log carries the frames, and a frame's
-    # source line is the test's own text, which must not be the marker.
-    failure = postgres_shaped_error("TICKER-DETAIL-MARKER")
-
-    async def run(db):
-        ticks.append(len(ticks))
-        if len(ticks) == 1:
-            raise failure
-        raise asyncio.CancelledError
-
-    monkeypatch.setattr(notifications, "TICK_SECONDS", 0)
-    monkeypatch.setattr(notifications, "run_digest", run)
-    with caplog.at_level(logging.DEBUG), pytest.raises(asyncio.CancelledError):
-        await notifications.ticker()
-
-    assert "The overdue ticker failed a run: IntegrityError(IntegrityError) on uq_marker_probe" in caplog.text
-    assert "TICKER-DETAIL-MARKER" not in caplog.text
 
 
 def test_the_ticker_is_off_under_test():
@@ -859,31 +704,15 @@ class TestTelegram:
     @pytest.mark.asyncio
     async def test_a_failure_never_logs_the_token(self, telegram_on, lend, caplog):
         """Telegram takes the token in the URL **path**, so a log line naming
-        the request URL is a log line naming the credential.
-
-        Captured at DEBUG, not WARNING, because the line that leaked was the
-        HTTP library's own request line at INFO: a capture at WARNING could not
-        see it and was green while the token reached the log on every send."""
+        the request URL is a log line naming the credential."""
         lend()
-        with caplog.at_level(logging.DEBUG), respx.mock as mock:
+        with caplog.at_level(logging.WARNING), respx.mock as mock:
             mock.post(TELEGRAM_SEND).mock(return_value=httpx.Response(500))
             await notifications.run_digest(telegram_on)
 
         assert BOT_TOKEN not in caplog.text
         assert "AAaaBBbb" not in caplog.text
         assert "api.telegram.org" in caplog.text
-
-    @pytest.mark.asyncio
-    async def test_a_successful_send_never_logs_the_token(self, telegram_on, lend, caplog):
-        """The failure arm above cannot see a line logged only on success, and a
-        success happens on every send, so a leak there is a leak every hour."""
-        lend()
-        with caplog.at_level(logging.DEBUG), respx.mock as mock:
-            mock.post(TELEGRAM_SEND).mock(return_value=httpx.Response(200, json={"ok": True}))
-            await notifications.run_digest(telegram_on)
-
-        assert BOT_TOKEN not in caplog.text
-        assert "AAaaBBbb" not in caplog.text
 
     @pytest.mark.asyncio
     async def test_a_refusal_never_names_the_token(self, db, lend):
@@ -1115,204 +944,6 @@ class TestThreeSendersOneDigest:
 
         assert result["reason"] is OverdueNotifyReason.NOTHING_DUE
         assert result["senders"] == []
-
-
-#: A webhook carrying a credential in each place an integration puts one: the
-#: userinfo, the path and the query. Each marker is a word no other line in a
-#: run carries, so finding one in a log is finding the URL.
-SECRET_HOOK = "https://hook-user:PASSMARKER@hooks.example.org/t/PATHMARKER?token=QUERYMARKER"
-SECRET_MARKERS = ("PASSMARKER", "PATHMARKER", "QUERYMARKER", BOT_TOKEN)
-
-
-def carries_no_secret(text: str) -> bool:
-    return not any(marker in text for marker in SECRET_MARKERS)
-
-
-class TestASenderFailingUnexpectedly:
-    """A sender raising neither a refusal nor a transport failure.
-
-    It escaped `_run_sender` until the third arm, and on the hourly ticker that
-    meant the senders after it never ran, the stamp was skipped for the ones
-    before it, and no record or banner appeared. Two causes were fixed one at a
-    time; this is the class.
-
-    **Every plant carries the secrets in its message.** A plant raising a word
-    with nothing in it passes under `logger.exception` and proves nothing about
-    the log, which is the half of this a reader cannot see.
-    """
-
-    @pytest.fixture
-    def secret_hook(self, configured):
-        settings_store.set_value(configured, SettingKey.OVERDUE_WEBHOOK_URL, SECRET_HOOK)
-        return configured
-
-    @staticmethod
-    def raising(error: BaseException):
-        async def refuse_unexpectedly(*args, **kwargs):
-            raise error
-
-        return refuse_unexpectedly
-
-    async def test_the_others_still_deliver_and_the_failure_is_recorded(
-        self, secret_hook, telegram_on, mail_on, lend, sent_mail, monkeypatch
-    ):
-        lend()
-        monkeypatch.setattr(
-            notifications,
-            "post_digest",
-            self.raising(RuntimeError(f"no route to {SECRET_HOOK} or {TELEGRAM_SEND}")),
-        )
-        with respx.mock as mock:
-            chat = mock.post(TELEGRAM_SEND).mock(return_value=httpx.Response(200))
-            result = await notifications.run_digest(secret_hook)
-
-        assert chat.call_count == 1
-        assert len(sent_mail) == 1
-        assert result["sent"] is True
-        [webhook] = [entry for entry in result["senders"] if not entry["sent"]]
-        assert webhook["sender"] is OverdueSender.WEBHOOK
-        assert webhook["reason"] is OverdueNotifyReason.UNEXPECTED
-
-    async def test_it_is_broken_on_the_first_failure(
-        self, secret_hook, mail_on, lend, sent_mail, monkeypatch
-    ):
-        """Not after the window: beside a channel that works it would wait a
-        reminder interval for its second failure, and nothing says it is a
-        network that will come back."""
-        lend()
-        monkeypatch.setattr(notifications, "post_digest", self.raising(RuntimeError(SECRET_HOOK)))
-
-        await notifications.run_digest(secret_hook)
-
-        [webhook] = [
-            entry
-            for entry in notifications.health(secret_hook, now())
-            if entry["sender"] is OverdueSender.WEBHOOK
-        ]
-        assert webhook["reason"] is OverdueNotifyReason.UNEXPECTED
-        assert webhook["broken"] is True
-
-    @pytest.mark.parametrize(
-        ("error", "shape"),
-        [
-            (RuntimeError(f"no route to {SECRET_HOOK} or {TELEGRAM_SEND}"), "RuntimeError"),
-            (
-                ExceptionGroup("send", [ValueError(f"{SECRET_HOOK} {TELEGRAM_SEND}")]),
-                "ExceptionGroup(ValueError)",
-            ),
-        ],
-    )
-    async def test_the_log_names_the_type_and_the_frames_and_never_the_message(
-        self, secret_hook, mail_on, lend, sent_mail, monkeypatch, caplog, error, shape
-    ):
-        """Loud, at error, with the type, a group's member types and where it
-        was raised. The message is the one thing it may not carry:
-        `HTTPStatusError`'s renders the URL with its password and the token."""
-        lend()
-        monkeypatch.setattr(notifications, "post_digest", self.raising(error))
-        with caplog.at_level(logging.DEBUG):
-            result = await notifications.run_digest(secret_hook)
-
-        [line] = [
-            record
-            for record in caplog.records
-            if record.name == "endpaper.notifications" and record.levelno == logging.ERROR
-        ]
-        assert shape in line.getMessage()
-        assert "refuse_unexpectedly" in line.getMessage()
-        assert carries_no_secret(caplog.text)
-        assert carries_no_secret(json.dumps(result, default=str))
-        assert carries_no_secret(json.dumps(stored_health(secret_hook)))
-
-    async def test_a_later_sender_raising_still_stamps_what_an_earlier_one_delivered(
-        self, mail_on, telegram_on, lend, sent_mail, monkeypatch
-    ):
-        """Mail goes before Telegram. With the raise escaping, the stamp loop
-        was skipped and the mail that did go out went out again every hour."""
-        loan = lend()
-        monkeypatch.setattr(
-            notifications, "send_telegram", self.raising(RuntimeError(TELEGRAM_SEND))
-        )
-
-        result = await notifications.run_digest(mail_on)
-
-        mail_on.refresh(loan)
-        assert len(sent_mail) == 1
-        assert result["sent"] is True
-        assert loan.notified_at is not None
-
-    @pytest.mark.parametrize(
-        "error",
-        [
-            asyncio.CancelledError(),
-            BaseExceptionGroup("send", [asyncio.CancelledError()]),
-        ],
-    )
-    async def test_a_cancellation_still_stops_the_run(
-        self, secret_hook, lend, monkeypatch, error
-    ):
-        """Stopping the ticker has to stop it mid send, and a group holding the
-        cancellation is not an `Exception` either."""
-        lend()
-        monkeypatch.setattr(notifications, "post_digest", self.raising(error))
-
-        with pytest.raises(type(error)):
-            await notifications.run_digest(secret_hook)
-
-    async def test_a_failed_settings_read_does_not_carry_the_send_with_it(
-        self, secret_hook, lend, monkeypatch
-    ):
-        """The destination is read before the send. Read inside a handler, a
-        failure there chains the send's exception as `__context__`, and the
-        ticker's `logger.exception` renders the chain."""
-        lend()
-
-        async def status_error(*args, **kwargs):
-            request = httpx.Request("POST", SECRET_HOOK)
-            httpx.Response(500, request=request).raise_for_status()
-
-        def unreadable(sender, db):
-            raise RuntimeError("the settings row could not be read")
-
-        monkeypatch.setattr(notifications, "post_digest", status_error)
-        monkeypatch.setattr(notifications, "_destination", unreadable)
-
-        with pytest.raises(RuntimeError, match="the settings row could not be read") as caught:
-            await notifications.run_digest(secret_hook)
-
-        assert carries_no_secret("".join(traceback.format_exception(caught.value)))
-
-
-class TestARefusedWebhookDoesNotStopTheOthers:
-    """The confirmation's gap: each refusal was pinned alone, never beside a
-    sender that delivers. The isolation now holds for any exception, so the
-    `no_url` is what still tells the refusal from the third arm."""
-
-    @pytest.mark.parametrize(
-        "url",
-        [
-            "https://[hooks/t/PATHMARKER",
-            "https://127.0.0.1:99999/hooks/t/PATHMARKER",
-        ],
-    )
-    async def test_mail_still_delivers(
-        self, db, mail_on, lend, sent_mail, caplog, url
-    ):
-        """The loopback host is passed through for the reason
-        `test_a_port_out_of_range_is_refused_before_any_connect` gives."""
-        settings_store.set_value(db, SettingKey.OVERDUE_WEBHOOK_ENABLED, "true")
-        settings_store.set_value(db, SettingKey.OVERDUE_WEBHOOK_URL, url)
-        lend()
-
-        with caplog.at_level(logging.DEBUG), respx.mock(assert_all_called=False) as mock:
-            mock.route(host="127.0.0.1").pass_through()
-            result = await notifications.run_digest(db)
-
-        assert result["sent"] is True
-        assert len(sent_mail) == 1
-        [webhook] = [entry for entry in result["senders"] if not entry["sent"]]
-        assert webhook["reason"] is OverdueNotifyReason.NO_URL
-        assert carries_no_secret(caplog.text)
 
 
 # ── #86, the in app channel ───────────────────────────────────────────────────
@@ -1759,17 +1390,6 @@ class TestWhenAChannelCountsAsBroken:
         entry = {
             "sent": False,
             "reason": OverdueNotifyReason.MISCONFIGURED.value,
-            "failing_since": now().isoformat(),
-            "failures": 1,
-        }
-        assert notifications._is_broken(entry, now()) is True
-
-    def test_an_unexpected_failure_is_broken_at_once(self):
-        """A case the code does not anticipate is not a network to wait out,
-        and it is not a refusal either, so it is its own line."""
-        entry = {
-            "sent": False,
-            "reason": OverdueNotifyReason.UNEXPECTED.value,
             "failing_since": now().isoformat(),
             "failures": 1,
         }

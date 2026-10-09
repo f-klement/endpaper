@@ -345,7 +345,7 @@ def approve_password_reset(
     code = accounts.approve_reset(db, request, current_user)
     # `code_expires_at` is set by the approval and is never None afterwards; the
     # narrowing is for the type checker rather than a case that can occur.
-    assert request.code_expires_at is not None  # noqa: S101  narrowing, not validation
+    assert request.code_expires_at is not None
     return ResetCodeOut(code=code, expires_at=request.code_expires_at)
 
 

@@ -13,12 +13,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import CopyPanel from "../../../../src/pages/BookDetail/components/CopyPanel";
 import { makeBook, resetIds } from "../../../factories";
 import { renderLocalised } from "../../../utils";
-import type { BookDetailsUpdate } from "../../../../src/api/generated/model";
 
 beforeEach(resetIds);
 
 function renderPanel(book = {}) {
-  const onSave = vi.fn<(fields: BookDetailsUpdate) => void>();
+  const onSave = vi.fn();
   renderLocalised(
     <CopyPanel book={makeBook(book)} isSaving={false} onSave={onSave} />,
   );
@@ -109,11 +108,7 @@ describe("CopyPanel", () => {
     // is announced as nothing, which would leave "Your copies" the one
     // section with no heading inside it at all.
     renderLocalised(
-      <CopyPanel
-        book={makeBook()}
-        isSaving={false}
-        onSave={vi.fn<(fields: BookDetailsUpdate) => void>()}
-      />,
+      <CopyPanel book={makeBook()} isSaving={false} onSave={vi.fn()} />,
     );
 
     expect(
@@ -131,7 +126,7 @@ describe("CopyPanel", () => {
       <CopyPanel
         book={makeBook({ format: "hardcover" })}
         isSaving={false}
-        onSave={vi.fn<(fields: BookDetailsUpdate) => void>()}
+        onSave={vi.fn()}
       />,
     );
 

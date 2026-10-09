@@ -84,8 +84,6 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.execute(
-        # The interpolated `_ADDED_LIST` is built from this module's own
-        # `_ADDED` constant. No request value reaches it.
-        sa.text(f"DELETE FROM author_identifiers WHERE scheme IN ({_ADDED_LIST})")  # noqa: S608
+        sa.text(f"DELETE FROM author_identifiers WHERE scheme IN ({_ADDED_LIST})")
     )
     _swap(_SCHEMES_BEFORE)

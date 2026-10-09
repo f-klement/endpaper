@@ -38,9 +38,9 @@ function outcome(overrides: Partial<CalibreResult> = {}): CalibreResult {
   return { added: 890, failures: [], stopped: false, ...overrides };
 }
 
-type Props = React.ComponentProps<typeof CalibreImport>;
-
-function renderCard(overrides: Partial<Props> = {}) {
+function renderCard(
+  overrides: Partial<React.ComponentProps<typeof CalibreImport>> = {},
+) {
   const props = {
     isReading: false,
     isImporting: false,
@@ -49,11 +49,11 @@ function renderCard(overrides: Partial<Props> = {}) {
     result: null,
     failure: null,
     error: null,
-    onChoose: vi.fn<Props["onChoose"]>(),
-    onCrossCheck: vi.fn<Props["onCrossCheck"]>(),
-    onConfirm: vi.fn<Props["onConfirm"]>(),
-    onStop: vi.fn<Props["onStop"]>(),
-    onCancel: vi.fn<Props["onCancel"]>(),
+    onChoose: vi.fn(),
+    onCrossCheck: vi.fn(),
+    onConfirm: vi.fn(),
+    onStop: vi.fn(),
+    onCancel: vi.fn(),
     ...overrides,
   };
   renderLocalised(<CalibreImport {...props} />);
@@ -222,11 +222,11 @@ describe("CalibreImport", () => {
           result={null}
           failure={failure}
           error={null}
-          onChoose={vi.fn<(file: File) => void>()}
-          onCrossCheck={vi.fn<(files: readonly File[]) => void>()}
-          onConfirm={vi.fn<() => void>()}
-          onStop={vi.fn<() => void>()}
-          onCancel={vi.fn<() => void>()}
+          onChoose={vi.fn()}
+          onCrossCheck={vi.fn()}
+          onConfirm={vi.fn()}
+          onStop={vi.fn()}
+          onCancel={vi.fn()}
         />,
       );
       expect(screen.getByRole("alert")).toHaveTextContent(expected);

@@ -21,10 +21,9 @@ import pytest
 import respx
 
 from enums import SettingKey
-from models import DESCRIPTION_MAX, TITLE_MAX, Classification
+from models import CATEGORIES_MAX, DESCRIPTION_MAX, TITLE_MAX, Classification
 from routers.books import _bounded_match
 from schemas import MAX_CLASSIFICATIONS_PER_BOOK
-from schemas.book import CATEGORIES_MAX
 from tests.helpers import GOOGLE_BOOKS, K10PLUS, silence_catalogues, sru_response
 
 
@@ -569,7 +568,7 @@ class TestACatalogueCannotWriteWhatTheColumnsRefuse:
 
         Reachable from a title alone: `_series_from_title` matches the shape
         below and calls `float()` on the digits, which is the same door
-        `marc_fields.Fields.title_statement` opens from `245 $n`.
+        `metadata._marc_title` opens from `245 $n`.
         """
         book = make_book(admin["headers"])
 

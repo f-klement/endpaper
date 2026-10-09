@@ -5,7 +5,6 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 import filing
 from enums import ClassificationScheme, HeadingKind
 from models import CLASSIFICATION_LABEL_MAX, CLASSIFICATION_NUMBER_MAX
-from schemas.common import one_line
 
 #: The most headings one book may carry, full stop.
 #:
@@ -23,7 +22,7 @@ from schemas.common import one_line
 #:
 #: **Both capped writers, and there are exactly two of those.**
 #: `classifications.add_headings` serves the create and selected enrichment paths.
-#: The merge transfer in `folding.py` serves a merge. `backup.restore` is a third writer of
+#: `_repoint_relations` serves a merge. `backup.restore` is a third writer of
 #: this table (`backup.py`, through `_TABLES`) and is deliberately uncapped: it
 #: reinstates a whole database rather than adding to one, it is admin only, and
 #: every other table is uncapped there for the same reason.
@@ -102,7 +101,7 @@ class ClassificationIn(BaseModel):
     @field_validator("number")
     @classmethod
     def tidy_number(cls, value: str) -> str:
-        r"""Collapse the whitespace a catalogue's own formatting leaves in.
+        """Collapse the whitespace a catalogue's own formatting leaves in.
 
         MARC pads subfields, so `"QA76.73.P98  V53 2021"` and
         `"QA76.73.P98 V53 2021"` arrive as two spellings of one call number and
@@ -144,7 +143,7 @@ class ClassificationIn(BaseModel):
         stored row is a catalogue assertion, and one this app has quietly
         rewritten is worse than one it declined.
         """
-        cleaned = one_line(value)
+        cleaned = " ".join(value.split())
         if not cleaned:
             raise ValueError("A classification needs a number.")
         if any(unicodedata.category(character) in _INVISIBLE for character in cleaned):
@@ -210,17 +209,10 @@ class ClassificationIn(BaseModel):
 
         Otherwise `null` and `""` are two spellings of "no caption" and every
         client has to test for both.
-
-        **The collapse and nothing else, unlike the number above.** A label is a
-        caption rendered as text: no key is taken from it, no uniqueness rule
-        names it, and it arrives with the number from a catalogue rather than
-        from a text box. Refusing an invisible character here would fail a whole
-        book over a soft hyphen a catalogue put in a heading, which is the cost
-        `tidy_number` accepted for a notation because a notation carries none.
         """
         if value is None:
             return None
-        return one_line(value) or None
+        return " ".join(value.split()) or None
 
 
 class ClassificationOut(BaseModel):

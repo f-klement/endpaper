@@ -21,11 +21,6 @@
  * wrong is exactly what a hostile file gets wrong on purpose.
  */
 
-import fc from "fast-check";
-
-import { MAX_RECORD_ZERO_BYTES } from "../src/lib/mobi";
-import { sometimes, type Total } from "./property";
-
 /** The fixed Palm Database header. */
 const PDB_HEADER_BYTES = 78;
 const PDB_ENTRY_BYTES = 8;
@@ -235,102 +230,4 @@ export function palmDatabase(typeAndCreator: string): Uint8Array<ArrayBuffer> {
     typeAndCreator,
     exth: [{ type: 503, value: "Not this" }],
   });
-}
-
-/**
- * Where record 0 begins in a file of `records` records, which is where
- * `mobiBytes` puts it: after the Palm header, the offset table and its gap.
- */
-export function recordZeroStart(records = 2): number {
-  return PDB_HEADER_BYTES + records * PDB_ENTRY_BYTES + TABLE_GAP_BYTES;
-}
-
-// --- arbitraries over the spec above -----------------------------------------
-
-const exthSpec = fc.record({
-  type: fc.constantFrom(100, 101, 104, 105, 106, 503, 524, 0xffffffff),
-  value: sometimes(
-    fc.oneof(fc.string({ maxLength: 16 }), fc.uint8Array({ maxLength: 16 })),
-  ),
-  declaredLength: sometimes(fc.constantFrom(0, 7, 8, 0xffffffff)),
-} satisfies Total<ExthSpec>);
-
-/**
- * Record 0 ending at its bound or one past it, in a file long enough to hold
- * it, so the only thing refusing the larger is the reader's own ceiling.
- *
- * **Composed, for the reason every bomb here is**: the offset, the file's
- * length and nothing else being wrong have to line up, and independent draws
- * of the three rarely do.
- */
-const recordZeroAtTheBound = fc.record({
-  typeAndCreator: fc.constant(undefined),
-  declaredRecords: fc.constant(undefined),
-  recordZeroAt: fc.constant(undefined),
-  recordOneAt: fc.constantFrom(
-    recordZeroStart() + MAX_RECORD_ZERO_BYTES,
-    recordZeroStart() + MAX_RECORD_ZERO_BYTES + 1,
-  ),
-  records: fc.constant(undefined),
-  encryption: fc.constant(undefined),
-  magic: fc.constant(undefined),
-  headerLength: fc.constant(undefined),
-  declaredHeaderLength: fc.constant(undefined),
-  codepage: fc.constant(undefined),
-  fullName: fc.constant(undefined),
-  fullNameAt: fc.constant(undefined),
-  fullNameLength: fc.constant(undefined),
-  exth: fc.constant(undefined),
-  exthMagic: fc.constant(undefined),
-  exthDeclaredLength: fc.constant(undefined),
-  exthDeclaredCount: fc.constant(undefined),
-  exthFlag: fc.constant(undefined),
-  trailingBytes: fc.constant(MAX_RECORD_ZERO_BYTES + 1),
-} satisfies Total<MobiSpec>);
-
-/**
- * A MOBI: any override drawn, or record 0 at its bound.
- *
- * **`headerLength` is drawn small because it is allocated**, which is the
- * reason `declaredHeaderLength` exists beside it: the claim may be anything, and
- * 24 is the least that leaves room for the fields `recordZero` writes.
- */
-export function mobiSpec(): fc.Arbitrary<MobiSpec> {
-  const any = fc.record({
-    typeAndCreator: sometimes(
-      fc.constantFrom("BOOKMOBI", "TEXtREAd", "BOOKMOB", ""),
-    ),
-    declaredRecords: sometimes(fc.constantFrom(0, 1, 2, 3, 0xffff)),
-    recordZeroAt: sometimes(fc.constantFrom(0, 1, 95, 96, 0xffffffff)),
-    recordOneAt: sometimes(fc.constantFrom(0, 96, 0xffffffff)),
-    records: sometimes(fc.constantFrom(0, 1, 2, 3, 100)),
-    encryption: sometimes(fc.constantFrom(1, 2, 0xffff)),
-    magic: sometimes(fc.constantFrom("MOBX", "", "MOBI")),
-    headerLength: sometimes(fc.constantFrom(24, 0x54, 0x84, 232)),
-    declaredHeaderLength: sometimes(
-      fc.constantFrom(0, 1, 0xffff, 0xfffffff0, 0xffffffff),
-    ),
-    codepage: sometimes(fc.constantFrom(0, 932, 1252, 65001, 0xffffffff)),
-    fullName: sometimes(
-      fc.oneof(fc.string({ maxLength: 16 }), fc.uint8Array({ maxLength: 16 })),
-    ),
-    fullNameAt: sometimes(fc.constantFrom(0, 0x7fffffff, 0xffffffff)),
-    fullNameLength: sometimes(
-      fc.constantFrom(0, MAX_RECORD_ZERO_BYTES + 1, 0xffffffff),
-    ),
-    exth: sometimes(
-      fc.oneof(fc.constant(null), fc.array(exthSpec, { maxLength: 6 })),
-    ),
-    exthMagic: sometimes(fc.constantFrom("EXTX", "")),
-    exthDeclaredLength: sometimes(fc.constantFrom(0, 12, 0xffffffff)),
-    exthDeclaredCount: sometimes(fc.constantFrom(0, 1, 0xffffffff)),
-    exthFlag: sometimes(fc.constantFrom(0, 0x40)),
-    trailingBytes: sometimes(fc.constantFrom(0, 1, 8)),
-  } satisfies Total<MobiSpec>);
-  return fc.oneof(
-    { arbitrary: any, weight: 5 },
-    // Two, so the half of it past the bound is a tenth of the draws and a run
-    // from any seed reaches it: at one it missed a few runs in a million.
-    { arbitrary: recordZeroAtTheBound, weight: 2 },
-  );
 }

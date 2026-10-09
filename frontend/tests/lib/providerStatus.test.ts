@@ -88,13 +88,10 @@ describe("the line under a catalogue", () => {
     // **The name states the invariant and the loop covers the messages that
     // interpolate it.** Those are the same set today and need not stay so; the
     // gap and what closes it are in `INTERPOLATES_THE_GROUPS`.
-    // Filtered first rather than branched on inside the loop, so the
-    // assertion always runs. Emptiness is the next test's job.
-    const interpolating = everyRow().filter((row) =>
-      INTERPOLATES_THE_GROUPS.has(statusOf(row)),
-    );
-    for (const row of interpolating) {
-      expect(isFiltered(row), JSON.stringify(row)).toBe(true);
+    for (const row of everyRow()) {
+      if (INTERPOLATES_THE_GROUPS.has(statusOf(row))) {
+        expect(isFiltered(row), JSON.stringify(row)).toBe(true);
+      }
     }
   });
 

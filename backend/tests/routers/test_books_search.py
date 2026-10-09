@@ -19,9 +19,8 @@ import respx
 
 import sources
 from enums import CatalogueSource
-from google_books import split_categories
+from models import CATEGORIES_MAX
 from schemas import MAX_CLASSIFICATIONS_PER_BOOK
-from schemas.book import CATEGORIES_MAX, MAX_CATEGORIES_PER_BOOK
 from tests.helpers import (
     BNF,
     DNB,
@@ -434,7 +433,7 @@ def nlg_record(title: str = "Ιστορία της Ευρώπης") -> str:
 
     **Its only 020 is qualified**, `$q (τ.1)` for volume one, which is what four
     fifths of that catalogue's records with an ISBN look like and what
-    `marc_fields.Fields.isbn` exists for. A search does not check an ISBN, so this
+    `metadata._isbn_entries` exists for. A search does not check an ISBN, so this
     is not what the assertion turns on; it is here because a fixture that
     quietly drops the one convention the source needed would pass while
     describing a record the catalogue does not write.
@@ -937,29 +936,6 @@ class TestSubjectHeadingsOnASearchRow:
                 headers=headers,
             ).json()["matches"]
         return match
-
-    def test_a_well_described_record_still_reaches_a_search_row(self, client, admin):
-        """A record carrying more uncontrolled subjects than a book may hold keeps
-        its row, with the subjects capped.
-
-        **This is the row that disappeared.** `BookMatch` refuses past
-        `MAX_CATEGORIES_PER_BOOK` and `_match_rows` builds it inside a `try` that
-        drops the row, so before `as_match` capped the count a record with 33 short
-        subjects answered **zero** rows: measured, they join to 493 characters, far
-        inside the field's own width bound, so nothing about the width was wrong.
-        The cap belongs to the shape, which is `match_headings`' argument one field
-        over.
-        """
-        topics = "".join(
-            f"<subject><topic>Sachgruppe {i:02d}</topic></subject>"
-            for i in range(MAX_CATEGORIES_PER_BOOK + 8)
-        )
-
-        match = self._search(client, admin["headers"], topics)
-
-        # A match serves this field joined, the way the column stores it, so the
-        # count is read off the split rather than off the payload.
-        assert len(split_categories(match["categories"])) == MAX_CATEGORIES_PER_BOOK
 
     def test_a_subject_heading_reaches_a_search_row(self, client, admin):
         match = self._search(

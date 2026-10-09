@@ -1,5 +1,4 @@
 from datetime import UTC, datetime, timedelta
-from typing import Annotated
 
 import bcrypt
 import jwt
@@ -223,8 +222,8 @@ def _switch_session(
 
 def get_current_user_for_cover(
     request: Request,
-    token: Annotated[str | None, Depends(oauth2_scheme)],
-    db: Annotated[Session, Depends(get_db)],
+    token: str | None = Depends(oauth2_scheme),
+    db: Session = Depends(get_db),
 ) -> User:
     """Identity for the cover route, and for nothing else.
 
@@ -276,8 +275,8 @@ def get_current_user_for_cover(
 
 def get_current_user(
     request: Request,
-    token: Annotated[str | None, Depends(oauth2_scheme)],
-    db: Annotated[Session, Depends(get_db)],
+    token: str | None = Depends(oauth2_scheme),
+    db: Session = Depends(get_db),
 ) -> User:
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -316,7 +315,7 @@ def get_current_user(
     return user
 
 
-def require_admin(current_user: Annotated[User, Depends(get_current_user)]) -> User:
+def require_admin(current_user: User = Depends(get_current_user)) -> User:
     if not current_user.is_admin:
         raise HTTPException(status_code=403, detail="Admin access required")
     return current_user

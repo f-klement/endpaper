@@ -14,12 +14,6 @@ import {
   type BookOut,
 } from "../../../src/api/generated/model";
 import BookCard from "../../../src/pages/components/BookCard";
-import { en } from "../../../src/i18n/en";
-import {
-  STATUS_LABELS,
-  STATUS_ORDER,
-  STATUS_STYLES,
-} from "../../../src/pages/types";
 import {
   makeBook,
   makeLoan,
@@ -35,7 +29,7 @@ function renderCard(book: BookOut) {
 }
 
 function renderSelectable(book: BookOut, isSelected = false) {
-  const onToggleSelect = vi.fn<(bookId: number) => void>();
+  const onToggleSelect = vi.fn();
   renderLocalised(
     <BookCard
       book={book}
@@ -118,84 +112,6 @@ describe("BookCard", () => {
       renderCard(makeBook({ my_status: undefined }));
       expect(screen.getByText("Unread")).toBeInTheDocument();
     });
-
-    /**
-     * The one thing importing the table cannot tell you.
-     *
-     * `tests/theme/palettes.test.ts::the status pill's ink, as it draws`
-     * imports `STATUS_STYLES` and measures two of its rows over every palette.
-     * If this card ever computed its pill per prop instead, the import would
-     * keep returning a table and those arms would keep measuring something
-     * nobody paints, with nothing red. This is the arm that reddens.
-     *
-     * **Every row, and not one of them.** An arm over a single status leaves
-     * the gap open for the rest, and the row somebody is likeliest to special
-     * case inline is `unread`: it is the one carrying the documented contrast
-     * debt, so it is the one a reader reaches for, and it is also one of the
-     * two the measurement depends on. A single row arm covering neither of
-     * those two is a green that means nothing, which is what this was.
-     *
-     * Driven off `STATUS_ORDER`, which is refused at compile when it is not
-     * every member, so a status added to the backend enum joins this without
-     * anybody remembering to. The label comes from the English catalogue for
-     * the same reason: writing it out here is a second list to keep in step.
-     *
-     * Found by its text rather than by a class match, so what fails here is
-     * the binding going dead and not the classes changing: a repaint inside
-     * the table moves the expectation with the source, which is the point of
-     * reading it from the table.
-     *
-     * **A repaint layered over the table is a different thing and the subset
-     * check cannot see it.** `toHaveClass` asks whether the tokens are
-     * present, so a card appending its own colours to the imported string
-     * satisfies every one of them while the stylesheet decides what actually
-     * paints, and the theme rule goes on measuring the table. So both halves
-     * are compared as sets: what the pill carries must be what the row says
-     * and nothing further.
-     *
-     * **Both halves, because the ink is the half that rule measures.** The
-     * first version of this compared backgrounds only, and a card appending
-     * its own text colour survived: the contrast arms went on measuring the
-     * table's ink while the card painted another. That pair is not a stranger
-     * to this tree, since the theme rule plants exactly it in the table and
-     * expects a refusal, and could not see it here.
-     *
-     * **A replacement rather than an addition is the weaker cousin** and is
-     * caught by the subset check above, which is what makes that check worth
-     * keeping beside these two.
-     *
-     * **Prefixed for the background, ramped for the ink**, which is the same
-     * asymmetry the theme rule carries and for the same reason: every `bg-`
-     * utility paints a background, while `text-` is sizing and alignment too,
-     * so `text-xs` and `font-medium` have to stay free. A rungless ink goes
-     * past this exactly as it goes past that rule.
-     */
-    const backgrounds = (classes: string) =>
-      classes
-        .split(/\s+/)
-        .filter((token) => /(?:^|:)bg-/.test(token))
-        .sort();
-
-    const inks = (classes: string) =>
-      classes
-        .split(/\s+/)
-        .filter((token) => /(?:^|:)text-[a-z]+-\d+(?:\/\d+)?$/.test(token))
-        .sort();
-
-    it.each(STATUS_ORDER)(
-      "draws the %s pill from the shared table",
-      (status) => {
-        renderCard(makeBook({ my_status: status }));
-        const pill = screen.getByText(en[STATUS_LABELS[status]]);
-
-        for (const token of STATUS_STYLES[status].split(" "))
-          expect(pill).toHaveClass(token);
-        expect(backgrounds(pill.className)).toEqual(
-          backgrounds(STATUS_STYLES[status]),
-        );
-        expect(inks(pill.className)).toEqual(inks(STATUS_STYLES[status]));
-      },
-    );
   });
 
   describe("loan indicator", () => {
@@ -330,38 +246,6 @@ describe("BookCard fold out", () => {
     await userEvent.setup().click(toggle);
 
     expect(toggle).toHaveAttribute("aria-expanded", "true");
-  });
-
-  it("spells the purchase date the way the rest of the app does", async () => {
-    // **The second surface of the same field.** `purchased_at` is the only
-    // `format: date` field the API sends, so it arrives as a bare
-    // `YYYY-MM-DD`. This list put it straight through `String(value)`, so the
-    // card printed `2026-01-05` where the table beside it on the same page
-    // printed `1/5/2026`, in both locales.
-    renderCard(makeBook({ title: "Dune", purchased_at: "2026-01-05" }));
-
-    await userEvent
-      .setup()
-      .click(screen.getByRole("button", { name: /Details for Dune/ }));
-
-    expect(screen.getByText("1/5/2026")).toBeInTheDocument();
-    expect(screen.queryByText("2026-01-05")).toBeNull();
-  });
-
-  it("spells the purchase date in the reader's own language", async () => {
-    // The locale arm, because the raw string this replaces was the same ten
-    // characters in every language: a German reader saw ISO on the card and
-    // `5.1.2026` everywhere else.
-    renderLocalised(
-      <BookCard
-        book={makeBook({ title: "Dune", purchased_at: "2026-01-05" })}
-      />,
-      { locale: Locale.de },
-    );
-
-    await userEvent.setup().click(screen.getByRole("button", { name: /Dune/ }));
-
-    expect(screen.getByText("5.1.2026")).toBeInTheDocument();
   });
 
   it("keeps the toggle out of the link", () => {

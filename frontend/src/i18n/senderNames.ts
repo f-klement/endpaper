@@ -54,5 +54,4 @@ export const SENDER_ROW_REASONS: Record<OverdueNotifyReason, MessageKey> = {
   [OverdueNotifyReason.unreachable]: "settings.overdueRowUnreachable",
   [OverdueNotifyReason.misconfigured]: "settings.overdueRowMisconfigured",
   [OverdueNotifyReason.in_app_only]: "settings.overdueRowInAppOnly",
-  [OverdueNotifyReason.unexpected]: "settings.overdueRowUnexpected",
 };

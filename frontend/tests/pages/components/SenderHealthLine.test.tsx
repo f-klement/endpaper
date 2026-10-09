@@ -38,15 +38,12 @@ describe("SenderHealthLine", () => {
   it("reports a working channel with the date it last ran", () => {
     renderLocalised(
       <SenderHealthLine
-        health={health({ sent: true, last_run_at: "2026-08-27T09:00:00Z" })}
+        health={health({ sent: true, last_run_at: "2026-08-27T09:00:00" })}
       />,
     );
 
-    // The 27th at 09:00 UTC is the 26th where the suite is, which is the
-    // rendering a member west of UTC gets and not a typo. The zone is pinned
-    // in `tests/setup.ts`.
     expect(
-      screen.getByText(/working\. last run on august 26, 2026/i),
+      screen.getByText(/working\. last run on august 27, 2026/i),
     ).toBeInTheDocument();
   });
 
@@ -80,18 +77,16 @@ describe("SenderHealthLine", () => {
           sent: false,
           broken: true,
           reason: OverdueNotifyReason.misconfigured,
-          failing_since: "2026-08-20T09:00:00Z",
-          last_run_at: "2026-08-27T09:00:00Z",
+          failing_since: "2026-08-20T09:00:00",
+          last_run_at: "2026-08-27T09:00:00",
           failures: 14,
         })}
       />,
     );
 
-    // Both stamps render a day earlier than they read, for the reason the
-    // working channel arm above gives.
     expect(
       screen.getByText(
-        /not working since august 19, 2026\. the last attempt was on august 26, 2026/i,
+        /not working since august 20, 2026\. the last attempt was on august 27, 2026/i,
       ),
     ).toBeInTheDocument();
   });

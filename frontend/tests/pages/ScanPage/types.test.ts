@@ -40,11 +40,6 @@ import { producedValue } from "../../../src/lib/stores";
 import { TEXT_CEILINGS } from "../../../src/lib/bookBounds";
 import type { FileMetadata } from "../../../src/lib/fileReaders";
 import { CARRIES_A_BOOK } from "../../carriesABook";
-// One module's text per tree, each from the armed corpus that refuses a name
-// its tree does not hold. The array glob this replaced read both with a
-// lookup defaulting to the empty string.
-import { sourceText } from "../../sourceModules";
-import { testText } from "../../testModules";
 
 /**
  * One value per draft field, all of them set.
@@ -71,7 +66,6 @@ const DRAFT: { [K in keyof BookDraft]-?: BookDraft[K] } = {
   ],
   suggested_tag_ids: [7],
   identifiers: [{ scheme: BookIdentifierScheme.asin, value: "B000R34YKC" }],
-  categories: ["Fiction"],
   notFound: false,
 };
 
@@ -83,7 +77,6 @@ const PENDING: { [K in keyof PendingBook]-?: PendingBook[K] } = {
   location: "Loft box 2",
   format: BookFormat.paperback,
   tagIds: [7, 9],
-  tagNames: ["Holiday reads"],
 };
 
 /** `PENDING` with one field changed, still carrying a draft. */
@@ -102,7 +95,6 @@ describe("blankPending", () => {
       location: "Loft box 2",
       format: "",
       tagIds: [],
-      tagNames: [],
     });
   });
 });
@@ -290,17 +282,6 @@ const NOT_SENT_BY_THE_SCAN_FLOW: Record<string, string> = {
   // send it is the store import, where a catalogue may be recording a library
   // loan, and `LibrarySettingsPage/types.ts` sends `unknown` there.
   ownership: "scanning a barcode means holding the book, which is the default",
-  // **`categories` used to be the third row and is now sent**, which is what
-  // deleted it: this table is only ever subtracted from the endpoint's names,
-  // so an excuse for a field the flow sends costs nothing and the third arm
-  // below is what refuses it.
-  //
-  // That row carried two claims and only one stopped being true. The other,
-  // that `draftFromMatch` does not read the joined column a match carries,
-  // moved to that function's own docstring in the same commit: deleting the
-  // row outright would have dropped a live refusal out of the tree, and
-  // nothing here would have said so, because a table this size going green is
-  // exactly what removing a row does.
 };
 
 /**
@@ -313,10 +294,6 @@ const NOT_SENT_BY_THE_SCAN_FLOW: Record<string, string> = {
 const NOT_IN_THE_BODY: Record<string, string> = {
   coverFile: "a multipart POST to /cover once the book exists",
   tagIds: "one POST to /tags/{id} each once the book exists",
-  // The names typed on the form, which no row exists for yet. They are not
-  // ids because this flow stopped asking the server to invent a tag while
-  // the book is still a draft: it left one behind on every cancelled scan.
-  tagNames: "one POST to /tags each once the book exists",
 };
 
 describe("the scan request agrees with the API", () => {
@@ -480,9 +457,6 @@ describe("the copy request agrees with the API", () => {
     tagIds:
       "a follow-up write that needs a book id, and the book being copied " +
       "already carries the tags.",
-    tagNames:
-      "the same, for a name typed on this form that no row exists for yet. " +
-      "A copy takes its filing from the book it copies.",
     isPrivate:
       "`CopyCreate` has no privacy field: a copy inherits it from the book it " +
       "copies. The tick above the button is inert for this press, which is why " +
@@ -548,7 +522,6 @@ const RECORD: { [K in keyof FileMetadata]-?: FileMetadata[K] } = {
   title: "Dune",
   subtitle: "A Novel",
   authors: ["Frank Herbert", "Brian Herbert"],
-  categories: ["Fiction", "Science Fiction"],
   identifiers: [{ scheme: "ISBN", value: "9780441013593" }],
   isbn: "9780441013593",
   publisher: "Chilton",
@@ -575,34 +548,6 @@ describe("draftFromFile", () => {
       series_name: "Dune",
       series_index: 1,
     });
-  });
-
-  it("carries the subjects the file stated, bounded on the way", () => {
-    // **The field the queue row then draws.** Which of them the endpoint
-    // will take is `lib/bookRequest.boundCategories`' rule and is guarded
-    // there; what this arm holds is that the draft carries the file's own
-    // subjects at all, which is the wiring a type cannot see.
-    expect(draftFromFile(record()).categories).toEqual([
-      "Fiction",
-      "Science Fiction",
-    ]);
-  });
-
-  it("sends an empty list rather than nothing for a file stating none", () => {
-    // **Always set, never conditionally.** `sentNames` reads key names off a
-    // draft, and a send conditioned on the list being non empty would be
-    // invisible to it: that helper's own docstring records both halves of such
-    // a condition passing against one fixture.
-    expect(draftFromFile(record({ categories: [] })).categories).toEqual([]);
-  });
-
-  it("drops a subject the endpoint refuses rather than the book", () => {
-    // The door is one rule and not a second copy of six, the same arrangement
-    // `identifiers` has: this asks that the draft passes through it at all.
-    expect(
-      draftFromFile(record({ categories: ["Fiction; General", "Fiction"] }))
-        .categories,
-    ).toEqual(["Fiction"]);
   });
 
   it("joins the authors with the separator the server splits on", () => {
@@ -878,7 +823,7 @@ describe("which of a file's labels reach the endpoint", () => {
 
   it("answers one entry a matching label, folding nothing", () => {
     // **The seam, asserted rather than assumed.** The fold and the ceiling are
-    // `lib/bookRequest.boundIdentifiers`', because both are
+    // `LibrarySettingsPage/types.boundIdentifiers`', because both are
     // properties of the scheme and every flow goes through that door; the arms
     // that pin them for this flow are in `draftFromFile` above.
     expect(
@@ -1037,18 +982,22 @@ describe("draftFromAudiobook", () => {
 });
 
 describe("this module names a File exactly once", () => {
+  const SOURCE = import.meta.glob(
+    ["../../../src/pages/ScanPage/types.ts", "../../lib/fileName.test.ts"],
+    { query: "?raw", import: "default", eager: true },
+  ) as Record<string, string>;
+
   /** The source with comments removed, so a rule cannot be satisfied by prose. */
   function withoutProse(source: string): string {
     return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*/g, "");
   }
 
-  // **Two armed corpora rather than one glob over both trees.** The pattern
-  // this replaced was an array naming a module and a sibling test, and both
-  // halves were read with a lookup defaulting to the empty string, which is
-  // what a rename turns the rules below into: a rule about nothing. Each tree
-  // has one enumeration that refuses a name it does not hold.
   function code(): string {
-    return withoutProse(sourceText("pages/ScanPage/types.ts"));
+    const source = SOURCE["../../../src/pages/ScanPage/types.ts"] ?? "";
+    // A glob that matched nothing would make the assertion below pass on an
+    // empty string, which names no File at all.
+    expect(source.length).toBeGreaterThan(1000);
+    return withoutProse(source);
   }
 
   it("is reading the module it claims to", () => {
@@ -1065,7 +1014,8 @@ describe("this module names a File exactly once", () => {
     // no cast. Two spellings of one rule is the defect `backend/targets.py`
     // records shipping once already, so this asserts that file carries this
     // exact source text rather than trusting that somebody kept them level.
-    const sibling = testText("./lib/fileName.test.ts");
+    const sibling = SOURCE["../../lib/fileName.test.ts"] ?? "";
+    expect(sibling.length).toBeGreaterThan(1000);
     // **Stripped, like every other reading here.** Against the raw source the
     // sibling satisfies this with a comment: narrow its pattern and leave the
     // full literal in a trailing comment on the same line, and the check passes

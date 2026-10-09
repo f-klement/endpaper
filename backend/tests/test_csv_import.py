@@ -345,8 +345,7 @@ class TestFieldParsing:
     )
     def test_date_shapes(self, raw):
         parsed = _parse_date(raw)
-        assert parsed is not None
-        assert parsed.year == 2021
+        assert parsed is not None and parsed.year == 2021
 
     def test_a_date_it_cannot_read_is_absent_rather_than_wrong(self):
         # A wrong date lands in "books finished in 2021" and nobody notices.
@@ -705,8 +704,7 @@ class TestBookWyrmExport:
         assert row.isbn == "9780156027601"
         assert row.status is ReadStatus.READ
         assert row.rating == 4
-        assert row.date_read is not None
-        assert row.date_read.month == 2
+        assert row.date_read is not None and row.date_read.month == 2
 
     def test_every_bookwyrm_shelf_is_recognised(self):
         """Completeness for this service. The vocabulary itself is tested once."""
@@ -785,8 +783,7 @@ class TestLibibsCurrentVocabulary:
 
     def test_the_completed_date_is_the_date_read(self):
         [row] = parse(LIBIB_TEMPLATE).rows
-        assert row.date_read is not None
-        assert row.date_read.year == 2026
+        assert row.date_read is not None and row.date_read.year == 2026
 
     def test_the_page_count_is_read(self):
         [row] = parse(LIBIB_TEMPLATE).rows
@@ -942,12 +939,6 @@ class TestOneCellCannotBuyUnboundedWork:
             `__hash__` is delegated because defining `__eq__` drops it, and the
             tally this guards is built by hashing the row.
             """
-
-            #: This arm builds 501 of these, so the per instance `__dict__` a
-            #: `str` subclass would otherwise get is the one thing in here
-            #: that scales with the row. Empty, because a variable length
-            #: built in refuses a non empty one.
-            __slots__ = ()
 
             def __eq__(self, other):
                 nonlocal compared
@@ -1700,7 +1691,9 @@ THE_PUBLIC_SURFACE = {
     "CLAIMS",
     "COLUMN_GUESSES",
     "FORMAT_GUESSES",
+    "MAX_NEW_TAGS_PER_IMPORT",
     "MAX_ROWS",
+    "MAX_TAGS_PER_BOOK",
     "MAX_TAGS_PER_ROW",
     "PREVIEW_ROWS",
     "READERS",

@@ -9,10 +9,10 @@ of them owns these.
 
 **The membership test is one sentence: a rule about what a bibliographic value
 means, independent of the serialisation it arrived in.** It admits everything
-here. It excludes `marc_fields.Subfields`, `marc_fields.Fields` and
-`marc_fields.Subfields.subject_vocabulary`, which are MARC subfield readers
-wearing generic names, and it excludes every refusal a single catalogue states
-for itself, such as `metadata._NKP_ONLINE`.
+here. It excludes `metadata._Subfields`, `metadata._marc_fields` and
+`metadata._subject_vocabulary`, which are MARC subfield readers wearing generic
+names, and it excludes every refusal a single catalogue states for itself, such
+as `metadata._NKP_ONLINE`.
 
 **Why it is one module rather than a helper beside each decoder.** Seven of the
 nine are not MARC helpers that other formats borrow. Counted by an `ast` pass
@@ -114,7 +114,7 @@ def split_title_statement(raw: str) -> tuple[str, str | None]:
     **Two serialisations reach this and that is why it is not called after
     either.** The BnF writes the statement of responsibility into `dc:title`,
     and a MARC record that did not subfield itself puts the whole statement in
-    `245 $a`, so `marc_fields.Fields.title_statement` falls back to this whenever `245`
+    `245 $a`, so `metadata._marc_title` falls back to this whenever `245`
     carries no `$b`. It was the DNB's Dublin Core parser until the DNB moved to
     MARC21; the example below is the DNB record it was written against.
 
@@ -238,7 +238,7 @@ def is_placeholder_title(title: str) -> bool:
 #: two that never ask it: the DNB, K10plus, the OENB, the NLG, the BNE, the NKP,
 #: the BNA, the BnF and the Library of Congress. Six of them state the carrier
 #: in codes and are asked those first, the five MARC ones through
-#: `marc_fields.Fields.describes_a_book` and the Library of Congress through
+#: `metadata._marc_is_physical_book` and the Library of Congress through
 #: `metadata._loc_carrier_is_book`. The three Dublin Core sources decide it from
 #: prose alone, and two of them state their own, `metadata._NKP_ONLINE` and
 #: `metadata._BNF_ONLINE`. **The BNA states none, deliberately**: none of the
@@ -269,10 +269,10 @@ def is_physical_book(extent: str | None, title: str | None) -> bool:
 
     **This is the fallback and no longer the whole rule.** A MARC record states
     its carrier in codes, so the five MARC sources ask
-    `marc_fields.Fields.describes_a_book` and reach this through it, and the Library
+    `metadata._marc_is_physical_book` and reach this through it, and the Library
     of Congress reads the MODS spelling of the same codes. What is left here is
     Dublin Core, which carries no such vocabulary at all, in two dialects across
-    three sources. `marc_fields._marc_carrier_is_book` says why.
+    three sources. `metadata._marc_carrier_is_book` says why.
     """
     if extent and _NOT_A_BOOK.search(extent):
         return False
@@ -296,93 +296,28 @@ def is_a_disc(extent: str | None) -> bool:
     return bool(extent and _IS_A_DISC.search(extent))
 
 
-#: The roles a catalogue hangs off a person's name, as the BnF writes them.
-#:
-#: **One home, and `_PERSON_NOISE` is built from it.** A role added here is
-#: stripped and generated against without a second edit, and the tuple is what
-#: a test can assert the shape of; a role spelled a second time inside the
-#: pattern could only be asserted by reading the pattern back.
-_PERSON_ROLES: Final = (
-    "Auteur",
-    "Autrice",
-    "Éditeur",
-    "Editeur",
-    "Traducteur",
-    "Traductrice",
-    "Illustrateur",
-    "Illustratrice",
-    "Préfacier",
-    "Compilateur",
+#: What a catalogue hangs off a person's name. The BnF writes
+#: `Zafón, Carlos (1964-2020). Auteur du texte`; MARC and MODS write
+#: `Melville, Herman, 1819-1891`. None of it is part of the name.
+_PERSON_NOISE: Final = re.compile(
+    r"\s*\(\s*\d{3,4}\s*[-–]?\s*\d{0,4}\s*\)"  # (1964-2020)
+    r"|\s*\.\s*(Auteur|Autrice|Éditeur|Editeur|Traducteur|Traductrice|"
+    r"Illustrateur|Illustratrice|Préfacier|Compilateur)[^.]*\.?\s*$"
+    # The `\.?` before the anchor is what lets this arm fire on its own.
+    # Without it `Melville, Herman, 1819-1891.` matches nothing, and the dates
+    # came off only because a caller removed the full stop first and ran the
+    # substitution again, which is a coupling that put the stop removal in the
+    # wrong function for six years.
+    r"|,\s*\d{4}\s*[-–]\s*\d{0,4}\s*\.?\s*$",  # , 1819-1891
+    re.IGNORECASE,
 )
-
-#: What an initial's full stop looks like: one ASCII letter, at the start of a
-#: cell or behind a space or another stop. The two spellings below are built
-#: from this.
-#:
-#: **The scoped flag is what keeps them one shape rather than two.** One of
-#: them compiles into `_PERSON_NOISE`, which carries `re.IGNORECASE`, and that
-#: flag widens a bare `[A-Za-z]` by the codepoints whose case folding lands
-#: inside it. Measured over every codepoint in Unicode against four preceding
-#: contexts: without `(?-i:...)` the two readers disagree on twelve pairs over
-#: four codepoints, U+0130, U+0131, U+017F and U+212A, and a cell built from
-#: one of them gets two answers, losing its terminal stop to one reader while
-#: keeping its surname from the other. With it, zero. `_TRAILING_INITIAL`
-#: carries no flag to scope out, so it is unchanged either way.
-#:
-#: **Those codepoints are named here and not pasted.** A linter calls them
-#: ambiguous and refuses the glyph in a comment, and a glyph is the wrong
-#: place to carry the set anyway: the arm that derives it is.
-#:
-#: **ASCII, and widening it is not the fix for what that leaves out.**
-#: `_drop_isbd_stop` reads the same shape, so a wider letter class changes
-#: which cells keep their terminal stop. What the narrowness costs is recorded
-#: at the arm that pins it.
-_AN_INITIAL: Final = "(?-i:[A-Za-z])"
-_BEFORE_AN_INITIAL: Final = ("^", r"[\s.]")
 
 #: A trailing initial, which is the one full stop in a name that is part of it.
 #: `Pohl, Robert O.` loses its meaning as `Robert O`, and the ISBD full stop
 #: `_drop_isbd_stop` takes off `Melville, Herman.` looks exactly the same to a
 #: regex.
 #: Measured: 2 of 53 live DNB records credit an author with a trailing initial.
-_TRAILING_INITIAL: Final = re.compile(
-    f"(?:{'|'.join(_BEFORE_AN_INITIAL)}){_AN_INITIAL}\\.$"
-)
-
-#: The same shape, as a refusal, for the one noise arm that must not anchor on
-#: a full stop the name owns.
-#:
-#: **An assertion, and a callback on the substitution is not the same thing.**
-#: A callback that returns its match consumes it, and this arm reaches the end
-#: of the cell, so it hides the life date arms behind it: refuse
-#: `A. Auteur, 1948-2020` that way and the dates stay, then the cell flips
-#: around the date's comma. A zero width refusal leaves the text for the arm
-#: that owns it.
-_NOT_AN_INITIALS_STOP: Final = "".join(
-    f"(?<!{before}{_AN_INITIAL})" for before in _BEFORE_AN_INITIAL
-)
-
-#: What a catalogue hangs off a person's name. The BnF writes
-#: `Zafón, Carlos (1964-2020). Auteur du texte`; MARC and MODS write
-#: `Melville, Herman, 1819-1891`. None of it is part of the name.
-_PERSON_NOISE: Final = re.compile(
-    r"\s*\(\s*\d{3,4}\s*[-–]?\s*\d{0,4}\s*\)"  # noqa: RUF001  (1964-2020)
-    # **The refusal in front of the stop is what stops this reading a name.**
-    # This arm needs a full stop before the role word, because that is how a
-    # catalogue separates an appended designation, and a flip manufactures one
-    # out of a trailing initial: `Autrice, A A.` becomes `A A. Autrice`, and
-    # without the refusal the next pass takes the surname off as noise.
-    r"|\s*" + _NOT_AN_INITIALS_STOP + r"\.\s*(?:"
-    + "|".join(re.escape(role) for role in _PERSON_ROLES)
-    + r")[^.]*\.?\s*$"
-    # The `\.?` before the anchor is what lets this arm fire on its own.
-    # Without it `Melville, Herman, 1819-1891.` matches nothing, and the dates
-    # came off only because a caller removed the full stop first and ran the
-    # substitution again, which is a coupling that put the stop removal in the
-    # wrong function for six years.
-    r"|,\s*\d{4}\s*[-–]\s*\d{0,4}\s*\.?\s*$",  # noqa: RUF001  1819-1891
-    re.IGNORECASE,
-)
+_TRAILING_INITIAL: Final = re.compile(r"(?:^|[\s.])[A-Za-z]\.$")
 
 
 def _strip_person_noise(raw: str) -> str:

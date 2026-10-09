@@ -84,9 +84,8 @@ those ten are correct indexes reported anyway, which is the cost of not guessing
 
 Which tables are children of `books` is derived from the foreign keys. Which of those
 children have a viewer of their own is pinned by hand, because a foreign key to `users` is
-not the answer: three tables in this schema carry a `created_by_user_id` no query consults,
-and a fourth, `custom_fields`, carries one that is read on purpose. A new child fails a test
-until somebody classifies it, so it cannot default to unguarded. Every read is
+not the answer: three tables here carry a `created_by_user_id` no query consults. A new child
+fails a test until somebody classifies it, so it cannot default to unguarded. Every read is
 counted, including the two written through the Shelf, so one more statement is a decision
 rather than an edit.
 
@@ -132,21 +131,13 @@ compile, run and answer with the values on every id passed.
 book's value for it, and the endpoint that lists definitions publishes **no usage count**:
 a count is drawn across books the caller may not see, so it would have to be scoped to the
 viewer, and a viewer-scoped number in a delete confirmation would understate what is about to
-be destroyed. The confirmation says "every book" instead. Which definitions that endpoint
-lists at all is the next section.
+be destroyed. The confirmation says "every book" instead.
 
 `backend/tests/test_custom_fields.py::TestOnlyABookReachesAValue` holds it in three passes. An
-**import** pass, so no module but `custom_fields.py`, `models.py`, `backup.py` and
-`fields.py` may hold `CustomFieldValue`. A **touch** pass over the module's own AST, reporting
-any public function whose body names the table and that takes no `Book`. And a **name** pass,
-so a parameter that mentions a book is annotated with `Book`.
-
-The fourth of those is the one that takes no `Book`, and it is a different question rather
-than an exemption. `backend/fields.py` asks which **definitions** a member may be told exist,
-which is the question in the section below; it reads `custom_field_values` three times and
-every one of them selects `field_id` and nothing else, so no value, no book and no count
-crosses out of it. Two of the three go through the Shelf. The third is unscoped on purpose
-and the module says why.
+**import** pass, so no module but `custom_fields.py`, `models.py` and `backup.py` may hold
+`CustomFieldValue`. A **touch** pass over the module's own AST, reporting any public function
+whose body names the table and that takes no `Book`. And a **name** pass, so a parameter that
+mentions a book is annotated with `Book`.
 
 The touch pass is written that way because the version it replaced was not enforcement: it
 enumerated the two functions that existed by hand, so adding `values_of(db, book_ids)` passed
@@ -161,65 +152,6 @@ are counted, so a third cannot appear inside a module already on the list.
 The blind spots are listed in that file's docstring, the sharpest being that a lazy read of
 `book.custom_field_values` is invisible to all three, which is the safe case because the book
 it hangs off has already been through the Shelf.
-
-### A custom field's name is a member's words, so who may be told it exists is a question
-
-A value is safe because it hangs off a book. A **definition** hangs off nothing: the row
-names at most one member, the one recorded as defining it, and it named none before that
-column existed. So for anybody else nothing in the row says who may be told about it. The
-name is free text somebody typed, and before this it was broadcast to every member on every
-page that drew the field picker.
-
-`backend/fields.py` answers it the way `backend/shelving.py` answers it for collections.
-`Fields.seen_by(db, viewer_id).listable()` admits a definition on four arms: a book the
-viewer can see holds a value in it, a book in the viewer's trash does, no book at all does, or
-**this member defined it**. That arm is one of the two things
-`custom_fields.created_by_user_id` was added for: a definer whose only value lands on somebody
-else's private book fails the other three and loses the field from their own settings page.
-The other is the refusal below. `Fields.addressable(field_id)` is the same predicate
-for an id the caller named, and it answers 404 from the rename and from the value write, which
-is the answer an id no row carries already gets.
-
-**The rename can also answer 403**, which is the one refusal here that is not about existence.
-`Fields.renamable` is asked only after `addressable` has admitted the id, so the row's
-existence is already disclosed and saying whose it is adds nothing: a definer may rename their
-own field, an admin may rename any field they can address, and a field with **no** recorded
-author is renamable by anybody, which is every field defined before the column existed and
-every field in an archive taken before it.
-
-**The value write is the door that makes the list worth scoping**, because its 200 returns the
-book's whole list and every entry carries `name`. Ungated, writing a guessed id on a book of
-your own reads any field's name straight off the response.
-
-**The admin delete is deliberately not gated.** An admin has no privilege over another member's
-private books, so gating it would leave a field whose every value sits on those books
-undeletable for good, and with a library-wide ceiling of 25 definitions the delete is the only
-verb that frees a slot.
-
-What stays open is stated rather than left to be found.
-
-| open | why it is open |
-|---|---|
-| defining a name that exists hands back the stored row | uniqueness is whole-table of necessity, so a scoped check would answer "free" for a name already taken. Whether the collision should still return the row is a ruling nobody has made |
-| refusal at `MAX_CUSTOM_FIELDS` | a member who lists three and is refused at the cap learns twenty-two exist. The oracle is the refusal event, so no wording closes it: a member who never reads this source defines until it fires and subtracts |
-| the ids are consecutive integers | a filtered list reading 1, 2, 5 says rows exist between them |
-| each listed row says whether you may rename it | `CustomFieldOut.renamable` is the answer the rename would give, so a control is drawn only where it works. On the **list** the other two causes cannot arise, so for a member who is not an admin a false flag reads exactly "somebody else defined this". That used to take a rename request and its 403; it is now on every page load. No application log records any of it, and the access log this project's own serving command produces records every request, so what the change removes is the one line that was distinctive: a refusal on a path normal use never produces, carrying the field id, becomes the request every settings page load makes |
-| for an admin, that flag on a **collision** names a hidden field | the admin arm means the author half never refuses, so retyping a name and getting a false flag tells an admin that a field by that exact name exists and every value in it sits on books they cannot see. One request, no write, and the same change of signal as the row above: a distinctive refusal becomes a request indistinguishable from a legitimate define. It took a define and then a rename before. **Nothing bounds the guessing**: no rate limiter on the route, no counter anywhere, so a dictionary of candidate names can be walked at one request each, which is what makes this enumeration rather than one bit about a name somebody already had. For everybody else the two causes collide, which is what keeps it quiet for them |
-
-**The first of those is not a way back, and this section said it was.** Retyping the name gives
-you the definition and nothing else: `define` writes no value and takes no authorship, so the
-arms answer exactly as before and the next write is still a 404. A loop, not a recovery, which
-is the same pair `backend/shelving.py` records for collections. The way back needs an admin,
-whose only verb destroys every value under the row.
-
-**Who is in that loop narrowed when the fourth arm arrived, and the loop did not.** A member
-recorded as the field's author is admitted by that arm whatever carries it, so they never
-enter it. Everybody else does, and **on the morning of the upgrade that is everybody**: the
-migration backfills no author, and the arm matches a recorded id rather than a definer in the
-abstract.
-
-The rename's 409 no longer names the field it clashed with, which did leak a hidden name to
-anybody who guessed it.
 
 ### A custom field that holds a link is re-checked on every read
 
@@ -348,9 +280,7 @@ CSP.
 The same split `delete_tag` makes, and the sharper case of it. Defining a field is additive,
 changes no book and is open to any member, exactly as inventing a tag is. Deleting one
 destroys, in one request with no undo, content every member typed by hand, on books the caller
-cannot necessarily see. The row records who **defined** it, which is who may rename it, and
-that is not an owner of the content under it: the values were typed by everybody, so there is
-still nobody to ask.
+cannot necessarily see, and a `CustomField` records nobody as its author.
 
 ## Authentication
 
@@ -728,11 +658,8 @@ unit made the **cheap** shape look like the worst case. Measured against 3,000 b
 | `dc.title="one phrase"` | 1 | 7 to 11 ms |
 
 The shape with **three times** the comparisons is a third of the cost, because `title`,
-`author` and `isbn` are short columns while `description` is bounded on the way in and not
-on the column, and `subject` is a correlated `EXISTS` over a join. **That partition is
-three ways and it matters twice below**: the column is `Text` and bounds nothing, every
-write through a schema is held to 10,000 characters, and a restore inserts through Core and
-is bounded by neither. Behind one 120 a minute counter this
+`author` and `isbn` are short columns while `description` has no length limit and
+`subject` is a correlated `EXISTS` over a join. Behind one 120 a minute counter this
 document itself describes as closer to a global cap than a per client one, the first row is
 about four minutes of work per one minute window from a single address.
 
@@ -758,32 +685,8 @@ change rather than a correction.
 All of it scales with the catalogue, which is why it is quoted against a named size rather
 than stated as a property of the server.
 
-**And once on what the answer costs to emit, which is the other half of the same budget.**
-The bounds above are all about what a query costs to compile and run. None of them says how
-many bytes leave, and the response is assembled as one string before it is sent, so the peak
-is the document plus the tree it was printed from. What a single request with no session can
-ask for is `maximumRecords` rows of whatever the MARCXML writer produces, and at the widest
-a write through the API can produce that is **5,117,485 bytes for a page of 50**, measured
-rather than estimated. Widest counts two things a member may legitimately post and an
-earlier version of this figure left out: a heading whose kind is declared, which lengthens
-the vocabulary code on every heading, and a page of rows declared to be copies of one
-title, which share an ISBN and so each carry one at its full length. The suite holds the
-figure to the byte and with no headroom, and reads it back out of this document, so
-widening a column bound or raising the page size fails a test before it reaches a
-deployment. A field added to the record fails a different test, which watches the fields the widest
-record carries rather than its size; a field fed by a relation that record does not carry
-renders nothing and is watched by neither.
-
-**Two things that number is not.** It is not a platform limit: nothing enforces it at
-runtime and no deployment was measured against it. And it is not a worst case, because the
-restore path is the third part of the partition above: a row inserted through Core is
-bounded by nothing, one description of 3,000,256 bytes is already recorded as having reached
-a table that way, and this door serves such a row to a stranger at the page size like any
-other. Rationing the surface is still the 120 a minute counter, which this document already
-describes as closer to a global cap than a per client one.
-
-**The comparison budget is applied on top of the parse bounds and never instead of them, so
-nothing it admits was previously refused**: it is strictly tighter, and what it now refuses that it used to
+**It is applied on top of the parse bounds and never instead of them, so nothing it admits
+was previously refused**: it is strictly tighter, and what it now refuses that it used to
 allow is the whole of rows one to three above. A query naming four indexes, or eight words
 anywhere, or a description phrase, is well inside it.
 
@@ -840,12 +743,8 @@ that property away and buy nothing, since a different host would not be Telegram
 The **bot token is a path segment** in every Telegram call, which makes the request URL a
 secret and makes a token containing `/` or `..` a way to choose the method being called.
 It is matched against `<digits>:<secret>` before it reaches a URL, and the failure log
-names `api.telegram.org` rather than the URL. No sender failure logs an exception's own
-message, except a refusal's, which is one of the app's own sentences naming a field and never
-its value: `httpx.HTTPStatusError` renders the request URL. The log gets the type and, for a
-failure the code does not anticipate, the frames where it was raised. A failure outside the
-senders belongs to no channel, and is still logged by the hourly ticker with its whole
-traceback.
+names `api.telegram.org` rather than the URL. Nothing logs the exception's own message
+either: `httpx.HTTPStatusError` renders the request URL.
 
 **The SMTP TLS context is built in `mailer.send` and takes no parameter.** There is no
 setting, no environment variable and no request field that relaxes certificate or hostname
@@ -863,37 +762,16 @@ test walks that set rather than naming fields, so a fifth is covered the moment 
 added. `MailConfig.password` is `repr=False` for the same reason: a frozen dataclass prints
 every field, so one `logger.exception` would put the mail password in a log.
 
-**A database error never names the parameters it bound.** Every engine the backend builds
-sets `hide_parameters`: the application's, the one migrations run on and the database setup
-script's, and a test refuses one that does not. A statement error otherwise renders every
-value it bound. Measured before it was set: a settings save that met a held lock logged the
-bot token, and two first writes of one key logged the mail password.
-
-**That does not reach the driver's own message**, and on Postgres the message can quote the
-data: a unique violation names the conflicting value ("Key (email)=(...) already exists"),
-and a CHECK or NOT NULL violation the whole failing row, which pg8000 renders. So the two
-places that log an unexpected database error, the 500 handler and the hourly ticker, log
-its types, the constraint it broke where the driver names one, and the frames, never the
-message. SQLite's messages name columns rather than values, and are left out the same way.
-An error that quotes one is treated the same: SQLAlchemy's `PendingRollbackError`, raised by
-the next use of a session after a failed flush, wraps no driver error and carries the flush
-error's whole text in its own message, so it is logged by its type alone. The cost is that a
-database error in the log no longer shows what it failed on. Two still reach the log whole:
-one that arrives chained to another exception, logged through that one's traceback, and one
-raised after a response has started, such as part way through a streamed export, which the
-server logs as well.
-
 **`MAIL_DEBUG` is deliberately not honoured**, though it is one of the eight standard
 `MAIL_*` names this app reuses. smtplib's debug output writes the AUTH exchange to stderr,
 so supporting it would be a supported way to print the mail password into the container
 log.
 
-### The database connection verifies nothing by default, and says so when it downgrades
+### The database connection is not certificate checked and can be cleartext
 
 **SQLite is the default and opens no socket at all**, so this is a property of choosing
 Postgres rather than of running Endpaper. It is written here because the section above
-offers the SMTP path as this project's standard, and the database URL's default does not
-hold to it.
+offers the SMTP path as this project's standard, and the database URL does not hold to it.
 
 **It is not the only outbound door that can be cleartext, and this is a pointer rather
 than a closed list.** The webhook's `http://` destination is beside the notification
@@ -903,46 +781,20 @@ under `## Catalogue requests`, which is the only one of the three whose host an 
 cannot move: the other two are addresses somebody chose, and a seeded catalogue's is a
 module constant.
 
-Pointed at a server, `DATABASE_URL` carries a password. **`DATABASE_SSL_MODE` decides how
-much is checked**, in libpq's own vocabulary, and `database.py` is the one place a name
-becomes a TLS context. Nothing in `DATABASE_URL` can reach it: `connect_args` is the only
+Pointed at a server, `DATABASE_URL` carries a password. `database.py` passes no
+`connect_args` on that path, so the connection takes `pg8000`'s defaults: a default TLS
+context with `check_hostname` set to `False` and `verify_mode` set to `CERT_NONE`, and, if
+the server does not answer the SSL request, **a session that continues in cleartext with
+nothing raised**. Neither is reachable from a `DATABASE_URL`: `connect_args` is the only
 channel an `SSLContext` arrives through, and SQLAlchemy's pg8000 dialect copies the URL's
-query string straight into the driver's keyword arguments. So an `?sslmode=` there is not
-ignored and is not honoured either: `pg8000.dbapi.connect` has no such parameter and raises
-`TypeError: connect() got an unexpected keyword argument 'sslmode'` on the first connection.
-Driven 2026-10-01. **That is the better outcome and it is why the wording matters**: a
-deployment that spells the mode in the URL finds out at the first connection rather than
-believing it took.
+query string in as strings. The reading of the driver's source that establishes this sits
+beside the dependency in `backend/pyproject.toml` and is not repeated here.
 
-| mode | TLS attempted | server declines | certificate | hostname |
-|---|---|---|---|---|
-| `disable` | no | n/a | n/a | n/a |
-| `prefer`, the default | yes | **cleartext, and a warning in the log** | not checked | not checked |
-| `require` | yes | connection refused | not checked | not checked |
-| `verify-ca` | yes | connection refused | checked | not checked |
-| `verify-full` | yes | connection refused | checked | checked |
-
-`allow` is libpq's sixth name and is deliberately absent rather than approximated: it means
-cleartext first and TLS only on insistence, and the driver sends the SSL request before
-anything else or not at all. An unrecognised name is a startup failure, as is either
-setting beside a URL that is not Postgres: a TLS setting that cannot be honoured is how a
-deployment comes to believe it is encrypted.
-
-**The default is weaker than this project's SMTP standard, and the gap is the owner's
-call rather than an implementation gap.** `prefer` is exactly what this connection did
-before the setting existed, so no deployment's posture moved on the upgrade that added it.
-A self hosted Postgres is overwhelmingly a container on the same network with no
-certificate at all, so the mail module's posture as a default would refuse the ordinary
-deployment. What the ruling closed is the silence: under `prefer` the server declining the
-upgrade is logged, once per connection the pool opens, naming the modes that would refuse
-it instead.
-
-So under the default the password is still exposed to anyone who can answer for the
-address, and the traffic to anyone on the path. **Set `DATABASE_SSL_MODE=verify-full`, or
-keep the server on a network you trust.** `verify-ca` and `verify-full` need the CA inside
-the container, at `DATABASE_SSL_ROOT_CERT`, and that file **replaces** the image's trust
-store rather than adding to it, which is libpq's behaviour for `sslrootcert` and the right
-one for a certificate you issued yourself.
+So the password is exposed to anyone who can answer for the address, and the traffic to
+anyone on the path. **Keep the server on a network you trust.** Making the connection
+verify is a change to `database.py` and is on the tracker; it needs a decision about what
+the default mode is, since matching this project's SMTP standard would refuse the self
+signed certificate most self hosted deployments have.
 
 ### The webhook URL is an admin-to-admin capability, and a blocklist would not fix it
 
@@ -970,10 +822,9 @@ is how a secret reaches a log aggregator.
 
 ## Rate limiting
 
-**Thirteen counters, for five different reasons.** The count is not read off this
-page: the names `backend/ratelimit.py` binds to a limiter are counted on every
-run, pinned against a parse of the limiters that module constructs, which is
-why no date is attached to it. The method was added on 2026-08-28,
+**Eleven counters, for five different reasons.** The count is not read off this
+page: `SlidingWindowLimiter(` in `backend/ratelimit.py` is counted on every run,
+which is why no date is attached to it. The method was added on 2026-08-28,
 after this table said five and listed four of them, omitting the authority and
 cover backfill limits entirely. The number is derived rather than written:
 `tests/test_ratelimit.py::TestTheRateLimitTableInTheDocsIsTheModule`
@@ -995,8 +846,6 @@ paragraph.
 | `/auth/reset/request`, `/auth/verify/request` | 5 / hour | address | The fifth reason, and both of these rows are it: getting back into an account, from a caller who by definition holds no session. One budget across both routes, because they are the same act (ask for a one time code to be produced) and splitting it would let a caller spend five of each. **Charged on the address so a botnet cannot queue a hundred requests against one member** |
 | `/auth/reset/request`, `/auth/verify/request` | 5 / hour | account | The other half of the same charge, and both halves are needed: an address limit alone leaves one address free to work through the roster slowly, one member at a time. **The key is caller chosen, so this is a denial of service on recovery**, stated rather than argued away. What bounds the damage is that the thing being rationed is already bounded: at most one live request exists per account however many times it is asked for. **The wider residual, stated because it is a property of this window rather than of the key**: the limiter refuses a key it has never seen once its table is full rather than evicting a live one, so 4,096 distinct account keys held live deny recovery to every account not already tracked, for an hour. Filling them takes 4,096 requests across about 820 addresses at five each. Refusing rather than evicting is still right, because every eviction policy lets an attacker choose which key leaves |
 | `/auth/reset/redeem`, `/auth/verify` | 10 / hour | username + address | Guessing a one time code. The code is 60 bits, so the keyspace is not what is doing the work here and this is: an approved reset code lives one hour. Keyed like a sign in rather than on the account alone, because an account-only key would let anybody lock a member out of the recovery they had just been granted |
-| `GET /api/books/export` | 5 / min | username | **The import row's reason, not a new one**: the cost lands on this deployment's own resources rather than on a credential, a supplier or a stranger, which is the cost the `/api/imports/*` row above states and measures. One call walks the whole of one member's visible shelf, `marc.EXPORT_PAGE_RECORDS` rows at a time, holding a worker thread and a database session for the life of the response. Five a minute because the menu offers three formats and a member comparing all three spends three. **It counts starts, not responses in flight**, so five concurrent walks by one member are inside it and nothing counts across members at all; bounding that is a concurrency limit, which this is not. Keyed on the authenticated username rather than the address, because behind a reverse proxy an address collapses a household into one bucket and the retry hint is computed from that bucket's first hit, so a shared bucket would tell one member when another last exported |
-| `GET /api/backup` | 3 / min | username | The same reason and a different unit, which is why it is a second counter rather than a share of the one above: this builds the whole database and every cover image in one pass and holds the result in memory before a byte is sent. Sharing a budget would let a member's exports ration the administrator's backup. Three a minute is the impatient second click plus one. **It bounds how often an archive is built and neither how large one is nor how many are built at once**: the archive byte ceiling is the restore upload's cap and is not read on the way out, so the download is capped by nothing |
 
 The last three of the first six are the ones that are not about this deployment: spending somebody else's
 quota is a way to get this deployment's address rate-limited upstream, which loses
@@ -1072,39 +921,6 @@ MARCXML records are small, so a body well inside the cap can still be tens of
 thousands of records, each of which costs a parse, a match against an in memory
 index and possibly an insert.
 
-**Nothing caps the MARCXML export, and what bounds it is the peak rather than the size.**
-A shelf of any size is exported in full: there is no cataloguer to split it and a short
-file is a silence. What is bounded is the server, which walks the shelf
-`marc.EXPORT_PAGE_RECORDS` rows at a time and writes one page of XML at a time, so one
-authenticated `GET /api/books/export?format=marcxml` costs a page of each rather than the
-whole catalogue in memory. Measured through the route with descriptions of 200 characters,
-`tracemalloc` peak above the baseline: 55.05 MiB against 1.02 at 10,000 books and 219.06
-against 1.05 at 40,000, where the first rises with the shelf and the second does not. The
-download and the wall clock are not bounded, and neither is the number of concurrent
-exports. **The CSV and txt arms of the same route walk the same pages**, and they had to:
-neither is gated by library mode, so any authenticated member reaches them, and the CSV
-arm carries the description column as well.
-
-**So the concurrency hazard is not behind a feature flag any more.** It is stated here
-rather than pointed at: nothing else in this document covers it. Each export holds its
-pooled connection for the whole download, and `database.py` passes no pool arguments, so
-the limit is the library default of five plus ten overflow: fifteen concurrent exports
-exhaust it. **That number did not move with the paging**: a
-streamed body held the connection under the old shape too. What moved is who can reach the
-shape, from an instance with library mode on to every authenticated account.
-
-**What a mid walk failure leaves is a truncated file rather than an error.** The status
-line goes out before the first page, so a failure at page k answers 200 and stops. For
-MARCXML the artefact self invalidates, because an unclosed `<collection>` is refused by
-every parser. **A short CSV is a valid CSV**, and it is the file `POST /api/imports/csv`
-reads back, so the same failure loses member data quietly on the backup path. It needs no
-privilege to induce: the work is spread across the download now, so a write holding the
-lock for longer than the five second `busy_timeout` raises under the walk instead of
-before it, and `database.py` names an import, a restore and emptying the trash as the
-writes that are not short. The chunked terminator is the
-signal that is left, and a buffering reverse proxy sits in front of many deployments;
-whether one erases or restores that signal here is unmeasured.
-
 **The writer drops what XML 1.0 cannot carry.** `ElementTree` serialises a
 control character verbatim, so one `\x0c` in a member typed description would
 produce an export no parser will read, this app's own included. Nothing upstream
@@ -1128,14 +944,9 @@ The sharper one is `series_index`, which the API bounds at 1000: a ten character
 `245 $n` stored `1e9`, and `GET /api/books/series` computes
 `set(range(1, max(held) + 1))`, which at a measured 70.5 bytes and 0.624 seconds
 per million elements is roughly 70 GB and ten minutes, again on every request
-until the row is found. `catalogue.Record` holds every incoming scalar to
-`catalogue._TEXT_CEILINGS` and `_NUMBER_RANGES`, which are imported from the
-declarations they mirror, `models` for the text ceilings and the request body's
-own `Ge` and `Le` for the numeric ranges, so a field added later inherits the
-bound once it is named in one of those two tables, and
-`tests/test_marc.py::TestEveryColumnTheImporterWritesIsBounded` is what requires
-it to be. `importing.within_bounds` is the belt behind that, and applies nothing
-the tables have not already applied.
+until the row is found. `importing.within_bounds` reads the bounds off
+`BookCreate.model_fields` and the column widths off `Book.__table__`, so a field
+added later inherits them.
 
 **The MARC preview publishes an ISBN existence oracle, and it is accepted
 rather than closed.** `MarcPreviewOut.blocked` counts records whose ISBN belongs
@@ -1197,19 +1008,12 @@ authenticated caller choosing which address the pod connects to, being redirecte
 private space and down to plain http, and reading an image-shaped answer back out.
 
 `covers.is_fetchable` is the gate, derived from `COVER_HOSTS`, applied in **both**
-`covers.download` and `covers._check` before every request. `follow_redirects=False` on the
-client both share: redirects are walked by hand with a limit of two hops and `is_fetchable`
-re-run on each `Location`, because a client that follows them turns one allowed host into a
-way to reach any other. A `Location` whose host cannot be decoded is refused with the rest,
-which it was not: httpx builds the redirect request even with redirects off, so an
-undecodable host raised a `UnicodeError` past a handler that catches `httpx.HTTPError` and
-out of `covers.resolve` into the metadata lookup that calls it. **The same refusal covers
-the first hop**, which is not a redirect at all: `is_fetchable` admits
-`https://xn--a.googleusercontent.com/x.jpg` through the `*.googleusercontent.com` wildcard
-and `httpx.URL()` raises on it before any transport runs, so a member's own `cover_url`
-reaches it. Refused with it: any scheme but https, any host not on the list, a non-default
-port, and a URL carrying credentials (`https://covers.openlibrary.org@evil.test/` reads
-as a listed host to a person and resolves to `evil.test` in every client).
+`covers.download` and `covers._check` before every request. `follow_redirects=False` in both
+clients: redirects are walked by hand with a limit of two hops and `is_fetchable` re-run on
+each `Location`, because a client that follows them turns one allowed host into a way to
+reach any other. Refused with it: any scheme but https, any host not on the list, a
+non-default port, and a URL carrying credentials (`https://covers.openlibrary.org@evil.test/`
+reads as a listed host to a person and resolves to `evil.test` in every client).
 
 **The blind version of this was open long before covers were stored.** `covers.resolve` has
 put a supplied URL at the front of its candidate list and called `_check` on it since the
@@ -1221,25 +1025,6 @@ newer one would have left the older hole open and looked closed.
 pointed at and must keep admitting any `https://` URL, because a hotlinked cover is the
 fallback when a download fails. What may be rendered and what this server may connect to are
 different questions with different answers.
-
-**The host rule says nothing about where that host answers, and the address policy is the
-second half.** `covers._client` builds both walks' client with
-`fetch.pinned_client(fetch.PUBLIC_ADDRESSES)`, which resolves the name once per request,
-refuses every class of address but public, and connects to the literal that passed: a listed
-host whose resolver answers inside this cluster used to be fetched. It is defence in depth
-rather than the primary control here, and stating which is which matters. The member picks
-the URL and `is_fetchable` is what refuses it; this refuses an address behind a host that
-rule already admitted, which is the residual a fixed allowlist still leaves: two of the six
-entries are wildcards, and DNS for any of them is answered by somebody else. `opds.py` takes
-the same policy under `HOUSEHOLD_ADDRESSES`, which admits private space because a
-household's own server is there; no image service is, so this door admits none.
-
-**One hop is bounded by wall clock, not by a read timeout.** A per read timeout bounds a
-read, so a service sending chunks just inside it holds the socket for as many reads as it
-cares to make. Measured, a 1.0 second budget bought 1.973s of `covers.download` and 7.900s
-of `covers._check`. Each hop now runs inside an `asyncio.timeout` of `min(TIMEOUT_SECONDS,
-what is left)`, so the interactive budget is the ceiling it claims to be and a walk with no
-budget is bounded per hop rather than not at all.
 
 `POST /api/books/covers/backfill` is scoped to the books the caller can see. It is not
 admin-only, because `visible_to()` has no admin bypass and an admin-only backfill could
@@ -1375,10 +1160,8 @@ one page and the next is refused on the page where it changed.
 household's own library server is on the household's own network. It refuses link local,
 which is never a household server and is where the cloud metadata endpoint sits, along with
 multicast, the unspecified address and every range nobody enumerated.
-`fetch.PUBLIC_ADDRESSES` admits public addresses only, which is strictly less than the
-household policy admits, and `covers._client` is its caller: every image service on
-`COVER_HOSTS` is on the internet. The catalogue host somebody types, which this constant
-was written ahead of, is still not built.
+`fetch.PUBLIC_ADDRESSES` admits public addresses only and has no caller in this build: it is
+for a catalogue host somebody types, which is not built.
 
 **What this is not.** Under the household policy this is not a request forgery control: an
 admin's address still reaches this pod's own loopback, every ClusterIP and the router, and
@@ -1386,9 +1169,11 @@ so does a name that resolves to any of them. **One range changed.** What limits 
 unchanged and is in Known limits below. A name at a public address that proxies inward is
 refused by nothing here, and no address policy anywhere can see it.
 
-**Three of the five outbound doors are not wired to it**, and the count is worth reading
+**Four of the five outbound doors are not wired to it**, and the count is worth reading
 against the list rather than past it. The eleven seeded catalogues are not, because their
-hosts are module constants. The webhook is not, because which policy fits it is undecided
+hosts are module constants. Covers is not, because it has a read loop of its own, so a listed
+image host whose resolver answers inside this cluster is still fetched, and it is the one door
+whose URL a **member** supplies. The webhook is not, because which policy fits it is undecided
 rather than known. Z39.50 cannot be, because pinning is done by rewriting an HTTP request and
 it speaks none: `fetch.classify` and `fetch.AddressPolicy` are reusable there, and the pin is
 not.
@@ -1412,7 +1197,7 @@ request against an arbitrary internal address is not.
 
 **The National Library of Greece answers on two paths and only one of them can check what
 comes back.** On an ISBN lookup a record has to name the ISBN that was scanned, because
-`marc_fields.Fields.claims_isbn` refuses one that does not, so a substituted record chooses the
+`metadata._marc_claims_isbn` refuses one that does not, so a substituted record chooses the
 metadata for the book in hand rather than the book. On a title search there is no
 identifier to check against, so a substituted body can offer any row it likes and a member
 picks one from a list. That second path is exactly the Library of Congress's exposure,
@@ -1756,12 +1541,7 @@ the internet** make authenticated calls to the API on a signed-in member's behal
 ## Errors
 
 A crash returns a generic 500 and **never** a traceback: a traceback names internal paths
-and can quote request data back to whoever triggered it. The detail is logged instead,
-once: the app answers a route that crashes before its response starts itself, so the server
-logs no second copy of the traceback. A crash once the response has started, or in the
-middleware around the routes, is left to the server, which logs it whole. A validation
-failure is logged by its type, where it failed and the frames, and never the value that
-failed, which is a member's data.
+and can quote request data back to whoever triggered it. The detail is logged instead.
 
 Error pages are content-negotiated (a browser gets HTML, a `fetch()` call gets
 `{"detail": ...}`) and the wording comes from a fixed table, so an internal exception
@@ -1816,7 +1596,7 @@ React Query's client is created once per page load and does not care who is sign
 
 | How | What happens in the browser |
 |---|---|
-| Signing out | the two session keys are removed and the app stays put. `localStorage` is **not** cleared, and what survives is deliberate: see `docs/decisions.md`, *`clearSession()` leaves the saved searches and the last location behind, and that is accepted*, which is where that list lives |
+| Signing out | `localStorage` is cleared and the app stays put |
 | "Switch account" | A router link to `/login`, deliberately reachable while signed in |
 | Switching into a test account | A button in Settings, then a router navigation home |
 | The proxy names somebody else | Nothing at all happens in this app |
@@ -1970,13 +1750,8 @@ Worth knowing before exposing this beyond a private network:
 - **Any member can exhaust the custom field allowance, and only an admin can undo it.**
   Defining a field is additive and open to everyone, deleting one is admin only, and there
   are 25 of them: 25 requests deny the whole feature library wide, the 26th answers 409, and
-  the member who made them gets 403 on the delete. Renaming no longer has that shape, and
-  **the admin is not the valve for it**: a member may rename their own fields, and the admin's
-  rename is gated on `Fields.addressable` where the delete is deliberately ungated. So a
-  grabber who defines 25 and keeps every value on their own private books holds every label
-  against everybody, an admin included, since the resolver answers 404 before the admin arm is
-  reached. The only verb that reaches such a field is the delete, which destroys every value
-  under it. That is **denial, not disclosure**, and it
+  the member who made them gets 403 on the delete. Renaming has the same shape without the
+  ceiling, since any member may rename any field. That is **denial, not disclosure**, and it
   is a different question from the define/delete asymmetry argued above, which is about who
   may destroy content. Anybody who would do it can also delete every book on the shelf, which
   is the bullet above; it is here because a reader auditing the asymmetry will ask.
@@ -1993,13 +1768,6 @@ Worth knowing before exposing this beyond a private network:
   is on by default and delivers nothing, so counting it would stamp every loan on every run
   and cut the three that do push from one attempt an hour to one per reminder interval,
   seven days by default.
-- **One channel failing, in any way, does not stop the others.** A sender's refusal, its
-  transport failure and any other exception it raises are all that channel's outcome: the
-  senders after it still run, the loans the earlier ones delivered are still stamped, and
-  the run is still recorded. The limit is everything outside a sender, which is selecting
-  the loans, building the digest, stamping and committing: a failure there belongs to no
-  channel, stops the run, records nothing, and on the hourly run reaches only the container
-  log. A cancellation is not caught, so stopping the app still stops a send.
 - **A channel that has been failing is reported, and the bar for interrupting somebody is
   deliberately high.** This used to be a gap and was the wrong disposition: for a household
   running the published image, "read the container log" is not a worse form of alerting, it
@@ -2008,11 +1776,10 @@ Worth knowing before exposing this beyond a private network:
   depend on an admin pressing "Send now" before the ticker gets there. What is still a
   judgement rather than a fact is when to say a channel is **broken**: a refusal the app
   decided itself (`NO_URL`, `MISCONFIGURED`, all raised before a socket is opened) is
-  reported at once, so is a failure the code does not anticipate (`UNEXPECTED`), and a
-  transport failure only after 24 hours and at least two consecutive failures. One failed
-  send is a network; every send failing for a day is a configuration, and a design that
-  cannot tell them apart is one a household switches off. A channel attempted once every
-  reminder interval therefore waits a whole interval, until its second failure, to be called
+  reported at once, and a transport failure only after 24 hours and at least two
+  consecutive failures. One failed send is a network; every send failing for a day is a
+  configuration, and a design that cannot tell them apart is one a household switches off.
+  A channel failing once every reminder interval therefore takes two intervals to be called
   broken, which is the price of not crying wolf.
 - **A channel's record is cleared by any write to that channel's settings.** Not by the
   on/off switch alone: `notifications._CONFIGURED_BY` owns every row that configures a
@@ -2036,10 +1803,10 @@ Worth knowing before exposing this beyond a private network:
   the channel's settings clears it; a later tick overwrites it only if that tick had
   something to send.
 - **The health record holds a failure's own sentence, and those sentences are curated.**
-  `detail` is either a fixed string, one per reason that is not a refusal ("The destination
-  could not be reached."), or the message from a refusal, and every refusal in `mailer.py`
-  and `notifications.py` names the shape of what is wrong rather than the value: "The
-  Telegram bot token is not a bot token", never the token. It is admin only regardless.
+  `detail` is either a fixed string ("The destination could not be reached.") or the message
+  from a refusal, and every refusal in `mailer.py` and `notifications.py` names the shape of
+  what is wrong rather than the value: "The Telegram bot token is not a bot token", never
+  the token. It is admin only regardless.
 - **The backup carries every stored secret in plaintext, except catalogue credentials.**
   `backup._TABLES` includes `settings`, so `endpaper.json` holds `mail_password`,
   `telegram_bot_token`, `overdue_webhook_secret` and `google_books_api_key` in full,

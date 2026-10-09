@@ -7,11 +7,6 @@ import { describe, expect, it, vi } from "vitest";
 import AuthorCard from "../../../../src/pages/AuthorsPage/components/AuthorCard";
 import { renderLocalised } from "../../../utils";
 
-type OnToggleSelect = NonNullable<
-  React.ComponentProps<typeof AuthorCard>["onToggleSelect"]
->;
-type OnUndo = NonNullable<React.ComponentProps<typeof AuthorCard>["onUndo"]>;
-
 function author(overrides: Record<string, unknown> = {}) {
   return {
     key: "frank herbert",
@@ -34,8 +29,8 @@ describe("AuthorCard", () => {
         author={author()}
         isBusy={false}
         isSelected={false}
-        onToggleSelect={vi.fn<OnToggleSelect>()}
-        onUndo={vi.fn<OnUndo>()}
+        onToggleSelect={vi.fn()}
+        onUndo={vi.fn()}
       />,
     );
 
@@ -50,8 +45,8 @@ describe("AuthorCard", () => {
         author={author({ spellings: ["Frank Herbert", "frank herbert"] })}
         isBusy={false}
         isSelected={false}
-        onToggleSelect={vi.fn<OnToggleSelect>()}
-        onUndo={vi.fn<OnUndo>()}
+        onToggleSelect={vi.fn()}
+        onUndo={vi.fn()}
       />,
     );
 
@@ -59,7 +54,7 @@ describe("AuthorCard", () => {
   });
 
   it("offers an undo per folded spelling, not one for the author", async () => {
-    const onUndo = vi.fn<OnUndo>();
+    const onUndo = vi.fn();
     renderLocalised(
       <AuthorCard
         author={author({
@@ -70,7 +65,7 @@ describe("AuthorCard", () => {
         })}
         isBusy={false}
         isSelected={false}
-        onToggleSelect={vi.fn<OnToggleSelect>()}
+        onToggleSelect={vi.fn()}
         onUndo={onUndo}
       />,
     );
@@ -91,8 +86,8 @@ describe("AuthorCard", () => {
         })}
         isBusy={false}
         isSelected={false}
-        onToggleSelect={vi.fn<OnToggleSelect>()}
-        onUndo={vi.fn<OnUndo>()}
+        onToggleSelect={vi.fn()}
+        onUndo={vi.fn()}
       />,
     );
 
@@ -117,8 +112,8 @@ describe("AuthorCard", () => {
           author={author()}
           isBusy={false}
           isSelected={false}
-          onToggleSelect={vi.fn<OnToggleSelect>()}
-          onUndo={vi.fn<OnUndo>()}
+          onToggleSelect={vi.fn()}
+          onUndo={vi.fn()}
           wikipedia={wikipedia}
         />,
       );

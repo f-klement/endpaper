@@ -73,6 +73,7 @@ beforeEach(() => {
   api.on("/api/books/tags", { body: [] });
   api.on("/api/settings/features", {
     body: {
+      google_books_enabled: true,
       google_books_ready: true,
       goodreads_lookup_enabled: false,
       default_locale: "en",
@@ -94,6 +95,7 @@ describe("useBookSearch", () => {
     // barcode or predates ISBNs.
     api.on("/api/settings/features", {
       body: {
+        google_books_enabled: false,
         google_books_ready: false,
         goodreads_lookup_enabled: false,
         default_locale: "en",
@@ -553,7 +555,6 @@ describe("useRapidIntake", () => {
         added: 0,
         failed: 1,
         unreferenced: 0,
-        stopped: false,
       }),
     );
   });
@@ -609,214 +610,6 @@ describe("useRapidIntake", () => {
       "9780262033848",
     ]);
     release();
-  });
-});
-
-describe("stopping a rapid add", () => {
-  function renderRapid() {
-    return renderHookWithProviders(() => useRapidIntake());
-  }
-
-  const LOOKUP = {
-    isbn: "9780441013593",
-    title: "Dune",
-    author: "Frank Herbert",
-    suggested_tag_ids: [],
-  };
-
-  /**
-   * Three scanned books, with one write held open until it is released.
-   *
-   * Which one is a parameter, because the two cases a stop has are not the
-   * same case: pressed while an early book is in flight it ends the run short,
-   * and pressed while the last one is it does not end it early at all.
-   */
-  async function threeQueued(holdAt = 1) {
-    let release = () => {};
-    const held = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    let writes = 0;
-    api.on("/api/books/lookup", { body: LOOKUP });
-    api.on(
-      "/api/books/scan",
-      async () => {
-        writes += 1;
-        if (writes === holdAt) await held;
-        return { body: makeBook() };
-      },
-      "POST",
-    );
-
-    const { result } = renderRapid();
-    act(() => result.current.capture("9780441013593"));
-    act(() => result.current.capture("9780262033848"));
-    act(() => result.current.capture("9780306406157"));
-    await waitFor(() => expect(result.current.entries).toHaveLength(3));
-    await waitFor(() =>
-      expect(
-        result.current.entries.every((entry) => entry.state === "found"),
-      ).toBe(true),
-    );
-
-    return { result, release: () => release(), writes: () => writes };
-  }
-
-  it("leaves every row it did not reach in the queue, untouched", async () => {
-    // **The diagonal rather than one case.** Stopped at the first of three:
-    // one book is written and pruned, and the two the run never attempted are
-    // still there in the state they were in, neither cleared nor marked
-    // failed. Pruning by the rows that were offered rather than by the rows
-    // that were walked clears exactly the books a member pressed stop to keep.
-    const { result, release, writes } = await threeQueued();
-
-    act(() => result.current.addAll());
-    await waitFor(() => expect(writes()).toBe(1));
-    act(() => result.current.stopAdding());
-    release();
-
-    await waitFor(() => expect(result.current.result).not.toBeNull());
-    expect(writes()).toBe(1);
-    expect(result.current.entries.map((entry) => entry.isbn)).toEqual([
-      "9780262033848",
-      "9780306406157",
-    ]);
-    expect(
-      result.current.entries.every((entry) => entry.state === "found"),
-    ).toBe(true);
-  });
-
-  it("says it was stopped, so a short count is not read as damage", async () => {
-    const { result, release, writes } = await threeQueued();
-
-    act(() => result.current.addAll());
-    await waitFor(() => expect(writes()).toBe(1));
-    act(() => result.current.stopAdding());
-    release();
-
-    await waitFor(() => expect(result.current.result).not.toBeNull());
-    expect(result.current.result).toEqual({
-      added: 1,
-      failed: 0,
-      unreferenced: 0,
-      stopped: true,
-    });
-  });
-
-  it("finishes the book it was in the middle of", async () => {
-    // Read between books rather than inside one. Abandoning the request in
-    // flight would leave a book written by the server and not recorded here,
-    // which is the row a member adds twice.
-    const { result, release, writes } = await threeQueued();
-
-    act(() => result.current.addAll());
-    await waitFor(() => expect(writes()).toBe(1));
-    act(() => result.current.stopAdding());
-    release();
-
-    await waitFor(() => expect(result.current.result?.added).toBe(1));
-  });
-
-  it("remembers the shelf a stopped run did file books on", async () => {
-    // **A behaviour the old code could not reach**, since a run that could not
-    // be stopped either filed everything or filed nothing. Decided rather than
-    // inherited: the shelf is where those books physically went, so the next
-    // run offers it. A member who stopped because the shelf was wrong edits one
-    // field.
-    const { result, release, writes } = await threeQueued();
-
-    act(() => result.current.setLocation("Loft box 2"));
-    act(() => result.current.addAll());
-    await waitFor(() => expect(writes()).toBe(1));
-    act(() => result.current.stopAdding());
-    release();
-
-    await waitFor(() => expect(result.current.result?.added).toBe(1));
-    expect(localStorage.getItem("lastLocation")).toBe("Loft box 2");
-  });
-
-  it("clears the last run's verdict when the next one starts", async () => {
-    // The stop keeps rows in order that they be added, so a second press is
-    // the ordinary path. A verdict left standing describes a queue that is
-    // being written while it says what was left of it.
-    const { result, release, writes } = await threeQueued();
-
-    act(() => result.current.addAll());
-    await waitFor(() => expect(writes()).toBe(1));
-    act(() => result.current.stopAdding());
-    release();
-    await waitFor(() => expect(result.current.result?.stopped).toBe(true));
-
-    // Held again, so the assertion below reads a run that is going rather
-    // than one that may already have finished.
-    let releaseSecond = () => {};
-    const second = new Promise<void>((resolve) => {
-      releaseSecond = resolve;
-    });
-    api.on(
-      "/api/books/scan",
-      async () => {
-        await second;
-        return { body: makeBook() };
-      },
-      "POST",
-    );
-
-    act(() => result.current.addAll());
-
-    await waitFor(() => expect(result.current.isAdding).toBe(true));
-    expect(result.current.result).toBeNull();
-    releaseSecond();
-    await waitFor(() => expect(result.current.result?.added).toBe(2));
-  });
-
-  it("does not call a run that wrote everything stopped", async () => {
-    // **A stop pressed while the last book is in flight.** Every book was
-    // written and every row pruned, so the count is not short and the queue is
-    // empty: the banner that says what it did not reach is still in the queue
-    // would be describing nothing.
-    const { result, release, writes } = await threeQueued(3);
-
-    act(() => result.current.addAll());
-    await waitFor(() => expect(writes()).toBe(3));
-    act(() => result.current.stopAdding());
-    release();
-
-    await waitFor(() => expect(result.current.result).not.toBeNull());
-    expect(result.current.result).toEqual({
-      added: 3,
-      failed: 0,
-      unreferenced: 0,
-      stopped: false,
-    });
-    expect(result.current.entries).toEqual([]);
-  });
-
-  it("says how far the batch has got while it is running", async () => {
-    // A stop with no figure beside it is a button pressed blind.
-    const { result, release } = await threeQueued();
-
-    act(() => result.current.addAll());
-    await waitFor(() =>
-      expect(result.current.addProgress).toEqual({ done: 0, total: 3 }),
-    );
-    release();
-
-    await waitFor(() => expect(result.current.result).not.toBeNull());
-    expect(result.current.addProgress).toBeNull();
-  });
-
-  it("writes the whole queue when nothing stopped it", async () => {
-    // The other end of the diagonal: the stop is a stop and not a cap.
-    const { result, release, writes } = await threeQueued();
-
-    act(() => result.current.addAll());
-    await waitFor(() => expect(writes()).toBe(1));
-    release();
-
-    await waitFor(() => expect(result.current.result?.added).toBe(3));
-    expect(result.current.result?.stopped).toBe(false);
-    expect(result.current.entries).toEqual([]);
   });
 });
 
@@ -876,10 +669,7 @@ describe("useRapidIntake and a picked file", () => {
       label: "broken.epub",
       draft: { title: "broken" },
     });
-    expect(result.current.entries[0]?.reason).toEqual({
-      kind: "file",
-      failure: "not-an-epub",
-    });
+    expect(result.current.entries[0]?.reason).toBe("Not an EPUB file.");
   });
 
   it("reads the rest of a batch after one file fails", async () => {
@@ -912,7 +702,9 @@ describe("useRapidIntake and a picked file", () => {
     await settled(result);
 
     expect(result.current.entries[0]?.state).toBe("failed");
-    expect(result.current.entries[0]?.reason).toEqual({ kind: "no-title" });
+    expect(result.current.entries[0]?.reason).toBe(
+      "This file carries no title.",
+    );
   });
 
   it("ignores the same file picked twice", async () => {
@@ -1044,7 +836,7 @@ describe("useScanFlow and a book already on the shelf", () => {
   });
 
   it("opens the new copy once it exists", async () => {
-    const onAdded = vi.fn<(bookId: number) => void>();
+    const onAdded = vi.fn();
     const { result } = await scanADuplicate(onAdded);
     api.on("/api/books/7/copies", { body: makeBook({ id: 99 }) }, "POST");
 
@@ -1305,31 +1097,8 @@ describe("useRapidIntake and a file with no usable metadata", () => {
       added: 1,
       failed: 0,
       unreferenced: 1,
-      stopped: false,
     });
     expect(result.current.entries).toHaveLength(0);
-  });
-
-  it("names an unreachable server rather than repeating the browser", async () => {
-    // The one failed add whose reason is a name: nothing answered, so there are
-    // no words of the server's to keep, and "Failed to fetch" is the browser's
-    // own phrase in its own language. Every other failure keeps what the server
-    // wrote, which is already a sentence for the reader.
-    api.on("/api/books/scan", () => {
-      throw new TypeError("Failed to fetch");
-    });
-    const { result } = renderRapid();
-
-    act(() => result.current.pickFiles([new File(["%PDF"], "Dune.pdf")]));
-    await settled(result);
-
-    act(() => result.current.addAll());
-    await waitFor(() => expect(result.current.result?.failed).toBe(1));
-
-    expect(result.current.entries[0]).toMatchObject({
-      state: "failed",
-      reason: { kind: "unreachable" },
-    });
   });
 
   const DUPLICATE = {
@@ -1475,7 +1244,7 @@ describe("useRapidIntake and a file with no usable metadata", () => {
     await settled(result);
 
     expect(searchCalls()).toBe(0);
-    expect(result.current.figures.waiting).toBe(1);
+    expect(result.current.waiting).toBe(1);
   });
 
   it("counts what the walk passed over rather than ignoring it", async () => {
@@ -1562,7 +1331,7 @@ describe("useRapidIntake and a file with no usable metadata", () => {
 
     expect(result.current.entries[0]).toMatchObject({
       state: "derived",
-      reason: { kind: "no-title" },
+      reason: "This file carries no title.",
       draft: { title: "Dune" },
     });
   });
@@ -1577,7 +1346,7 @@ describe("useRapidIntake and a file with no usable metadata", () => {
 
     expect(result.current.entries[0]).toMatchObject({
       state: "derived",
-      reason: { kind: "file", failure: "not-an-epub" },
+      reason: "Not an EPUB file.",
       draft: { title: "The Dispossessed" },
     });
   });
@@ -1708,42 +1477,6 @@ describe("useRapidIntake and a file with no usable metadata", () => {
     ]);
   });
 
-  it("hands each part of a split back what its own file said", async () => {
-    // The reasons are read once, at the pick, and the grouped row shows none of
-    // them: a note from one file of forty describes that file. A split makes
-    // each file a row that has to state its own, and by then there is nothing
-    // left to read it from but the row.
-    const { result } = renderRapid();
-    const files = [0, 1].map((index) => {
-      const file = new File([mp3()], `${index}.mp3`);
-      Object.defineProperty(file, "webkitRelativePath", {
-        value: `The Hobbit/${index}.mp3`,
-      });
-      return file;
-    });
-
-    act(() => result.current.pickFiles(files));
-    await settled(result);
-    expect(result.current.entries[0]?.reason).toBeUndefined();
-    const key = result.current.entries[0]!.key;
-
-    act(() => result.current.splitApart(key));
-    await waitFor(() => expect(result.current.entries).toHaveLength(2));
-
-    expect(result.current.entries.map((entry) => entry.reason)).toEqual([
-      { kind: "audio", failure: "no-tags" },
-      { kind: "audio", failure: "no-tags" },
-    ]);
-    // **And they carry no map of their own.** Each is one file, so nothing can
-    // split it again and the reason above is the only copy: a second one would
-    // be the same value stored twice, parting company the first time anything
-    // patched the row.
-    expect(result.current.entries.map((entry) => entry.fileReasons)).toEqual([
-      undefined,
-      undefined,
-    ]);
-  });
-
   it("queues nothing twice when the same folder is picked again", async () => {
     const chapters = [chapterFile(0, "Dune"), chapterFile(1, "Dune")];
     const { result } = renderRapid();
@@ -1846,9 +1579,9 @@ describe("useRapidIntake and a file with no usable metadata", () => {
     act(() => result.current.lookUpTheNames());
 
     await waitFor(() =>
-      expect(result.current.entries[0]?.reason).toEqual({
-        kind: "not-in-catalogues",
-      }),
+      expect(result.current.entries[0]?.reason).toBe(
+        "Not in the catalogues, kept under its file name.",
+      ),
     );
     expect(result.current.entries[0]).toMatchObject({
       state: "derived",
@@ -1868,7 +1601,7 @@ describe("useRapidIntake and a file with no usable metadata", () => {
 
     act(() => result.current.lookUpTheNames());
 
-    await waitFor(() => expect(result.current.figures.waiting).toBe(0));
+    await waitFor(() => expect(result.current.waiting).toBe(0));
   });
 
   it("takes a 404 from the ISBN lookup as an answer, not as a failure", async () => {
@@ -1885,11 +1618,11 @@ describe("useRapidIntake and a file with no usable metadata", () => {
     act(() => result.current.lookUpTheNames());
 
     await waitFor(() =>
-      expect(result.current.entries[0]?.reason).toEqual({
-        kind: "not-in-catalogues",
-      }),
+      expect(result.current.entries[0]?.reason).toBe(
+        "Not in the catalogues, kept under its file name.",
+      ),
     );
-    expect(result.current.figures.waiting).toBe(0);
+    expect(result.current.waiting).toBe(0);
   });
 
   it("offers a lookup again when the catalogues could not be reached", async () => {
@@ -1905,7 +1638,7 @@ describe("useRapidIntake and a file with no usable metadata", () => {
     await waitFor(() =>
       expect(result.current.entries[0]?.state).toBe("derived"),
     );
-    expect(result.current.figures.waiting).toBe(1);
+    expect(result.current.waiting).toBe(1);
   });
 
   it(
@@ -1938,7 +1671,7 @@ describe("useRapidIntake and a file with no usable metadata", () => {
       // it is 1, a constant 1 passes; asserted only where it is 0, a constant 0
       // does. The diagonal is what makes this a measurement of the predicate
       // rather than of the moment it was read.
-      expect(result.current.figures.deciding).toBe(0);
+      expect(result.current.deciding).toBe(0);
 
       act(() => result.current.lookUpTheNames());
       await waitFor(
@@ -1948,14 +1681,14 @@ describe("useRapidIntake and a file with no usable metadata", () => {
 
       // The number the queue says this out of, taken from the predicate the
       // batch excludes rather than from a second one spelled the same way.
-      expect(result.current.figures.deciding).toBe(1);
+      expect(result.current.deciding).toBe(1);
 
       act(() => result.current.addAll());
 
       await waitFor(() => expect(result.current.result?.added).toBe(1));
       expect(result.current.entries).toHaveLength(1);
       expect(result.current.entries[0]?.state).toBe("choosing");
-      expect(result.current.figures.deciding).toBe(1);
+      expect(result.current.deciding).toBe(1);
     },
     FALLBACK_INTERVAL_MS * 4,
   );
@@ -1970,11 +1703,11 @@ describe("useRapidIntake and a file with no usable metadata", () => {
     act(() => result.current.lookUpTheNames());
 
     await waitFor(() =>
-      expect(result.current.entries[0]?.reason).toEqual({
-        kind: "lookup-failed",
-      }),
+      expect(result.current.entries[0]?.reason).toBe(
+        "The catalogues could not be reached, kept under its file name.",
+      ),
     );
-    expect(result.current.figures.waiting).toBe(1);
+    expect(result.current.waiting).toBe(1);
   });
 
   it("takes the record a member chooses over the name", async () => {
@@ -2021,7 +1754,7 @@ describe("useRapidIntake and a file with no usable metadata", () => {
       state: "derived",
       draft: { title: "dispossessed" },
     });
-    expect(result.current.figures.waiting).toBe(0);
+    expect(result.current.waiting).toBe(0);
   });
 
   it("does not offer a lookup again for a name kept one row at a time", async () => {
@@ -2045,7 +1778,7 @@ describe("useRapidIntake and a file with no usable metadata", () => {
     act(() => result.current.keepTheName(result.current.entries[0]!.key));
 
     expect(result.current.entries[0]?.answered).toBe("records");
-    expect(result.current.figures.waiting).toBe(0);
+    expect(result.current.waiting).toBe(0);
   });
 
   it(
@@ -2066,13 +1799,13 @@ describe("useRapidIntake and a file with no usable metadata", () => {
       );
       await settled(result);
       act(() => result.current.lookUpTheNames());
-      await waitFor(() => expect(result.current.figures.deciding).toBe(2), {
+      await waitFor(() => expect(result.current.deciding).toBe(2), {
         timeout: FALLBACK_INTERVAL_MS * 2,
       });
 
       act(() => result.current.keepEveryNameForNow());
 
-      expect(result.current.figures.deciding).toBe(0);
+      expect(result.current.deciding).toBe(0);
       expect(result.current.entries.map((entry) => entry.state)).toEqual([
         "derived",
         "derived",
@@ -2105,18 +1838,14 @@ describe("useRapidIntake and a file with no usable metadata", () => {
       state: "derived",
       answered: "records-for-now",
       draft: { title: "dispossessed" },
-      reason: { kind: "kept-for-now" },
+      reason: "Kept under its file name for now, and can be looked up again.",
     });
     expect(result.current.entries[0]?.matches).toBeUndefined();
     // **Both counts, because either alone passes on a constant.** The row is
     // offered again by a press that names it, and not by the press that looks
     // up files nobody has asked about.
-    expect(result.current.figures.keptForNow).toBe(1);
-    expect(result.current.figures.waiting).toBe(0);
-    // **And not counted as a catalogue having had nothing**, which is the
-    // distinction the sentence on screen turns on: this member was offered
-    // records and kept the name for now.
-    expect(result.current.figures.emptyAnswers).toBe(0);
+    expect(result.current.keptForNow).toBe(1);
+    expect(result.current.waiting).toBe(0);
   });
 
   it("does not offer a second pass for a name the catalogues answered nothing about", async () => {
@@ -2136,11 +1865,7 @@ describe("useRapidIntake and a file with no usable metadata", () => {
     await waitFor(() =>
       expect(result.current.entries[0]?.answered).toBe("nothing"),
     );
-    expect(result.current.figures.keptForNow).toBe(0);
-    // **Counted here rather than by whoever draws the queue.** The screen says
-    // why a book kept its file name only once a catalogue has actually
-    // answered nothing, and the reading that decides it is this one.
-    expect(result.current.figures.emptyAnswers).toBe(1);
+    expect(result.current.keptForNow).toBe(0);
   });
 
   it("does not put a name kept in bulk back into the ordinary lookup", async () => {
@@ -2186,7 +1911,7 @@ describe("useRapidIntake and a file with no usable metadata", () => {
       );
       await settled(result);
       act(() => result.current.lookUpTheNames());
-      await waitFor(() => expect(result.current.figures.deciding).toBe(2), {
+      await waitFor(() => expect(result.current.deciding).toBe(2), {
         timeout: FALLBACK_INTERVAL_MS * 2,
       });
       act(() => result.current.keepTheName(result.current.entries[0]!.key));
@@ -2195,11 +1920,11 @@ describe("useRapidIntake and a file with no usable metadata", () => {
 
       expect(result.current.entries[0]).toMatchObject({
         answered: "records",
-        reason: { kind: "kept-the-name" },
+        reason: "Kept under its file name.",
       });
       expect(result.current.entries[1]?.answered).toBe("records-for-now");
       // One of the two, which is the count that says which row came back.
-      expect(result.current.figures.keptForNow).toBe(1);
+      expect(result.current.keptForNow).toBe(1);
     },
     FALLBACK_INTERVAL_MS * 4,
   );
@@ -2252,8 +1977,8 @@ describe("useRapidIntake and a file with no usable metadata", () => {
       act(() => result.current.keepEveryNameForNow());
       act(() => result.current.pickFiles([new File(["%PDF"], "Dune.pdf")]));
       await settled(result);
-      expect(result.current.figures.waiting).toBe(1);
-      expect(result.current.figures.keptForNow).toBe(1);
+      expect(result.current.waiting).toBe(1);
+      expect(result.current.keptForNow).toBe(1);
 
       act(() => result.current.lookUpTheKeptNames());
 
@@ -2296,7 +2021,7 @@ describe("useRapidIntake and a file with no usable metadata", () => {
     );
     expect(result.current.entries[0]?.reason).toBeUndefined();
     expect(result.current.entries[0]?.answered).toBeUndefined();
-    expect(result.current.figures.keptForNow).toBe(0);
+    expect(result.current.keptForNow).toBe(0);
   });
 
   it(
@@ -2364,7 +2089,7 @@ describe("useRapidIntake and a file with no usable metadata", () => {
       });
       expect(searchCalls()).toBe(1);
       // The two it never reached are still there to be asked about.
-      expect(result.current.figures.waiting).toBe(2);
+      expect(result.current.waiting).toBe(2);
     },
     FALLBACK_INTERVAL_MS * 4,
   );
@@ -2380,13 +2105,13 @@ describe("useRapidIntake and a file with no usable metadata", () => {
     await settled(result);
 
     // 45 files at one start per two seconds is 90 seconds.
-    expect(result.current.figures.waiting).toBe(45);
-    expect(result.current.figures.paceMinutes).toBe(2);
+    expect(result.current.waiting).toBe(45);
+    expect(result.current.paceMinutes).toBe(2);
     // **The diagonal, and the only count where the two figures can differ.**
     // A minute is the floor, so at any count under thirty one both figures read
     // the same and a second pass quoting the first run's wait passes unseen.
-    expect(result.current.figures.keptForNow).toBe(0);
-    expect(result.current.figures.keptPaceMinutes).toBe(1);
+    expect(result.current.keptForNow).toBe(0);
+    expect(result.current.keptPaceMinutes).toBe(1);
   });
 });
 

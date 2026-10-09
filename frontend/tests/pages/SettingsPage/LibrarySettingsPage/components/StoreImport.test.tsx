@@ -74,10 +74,10 @@ function renderCard(
     result: null,
     isReading: false,
     isImporting: false,
-    onChoose: vi.fn<React.ComponentProps<typeof StoreImport>["onChoose"]>(),
-    onConfirm: vi.fn<React.ComponentProps<typeof StoreImport>["onConfirm"]>(),
-    onStop: vi.fn<React.ComponentProps<typeof StoreImport>["onStop"]>(),
-    onCancel: vi.fn<React.ComponentProps<typeof StoreImport>["onCancel"]>(),
+    onChoose: vi.fn(),
+    onConfirm: vi.fn(),
+    onStop: vi.fn(),
+    onCancel: vi.fn(),
     ...overrides,
   };
   renderLocalised(<StoreImport {...props} />, { locale });

@@ -32,7 +32,7 @@ function state(
     isLoading: false,
     isForbidden: false,
     error: null,
-    save: vi.fn<(userId: number, email: string | null) => void>(),
+    save: vi.fn(),
     isSaving: false,
     saveError: null,
     isDirectoryOwned: false,

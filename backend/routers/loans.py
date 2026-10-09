@@ -3,7 +3,7 @@ from typing import Annotated, Final
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import func
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 import lending
 import notifications
@@ -86,34 +86,13 @@ def _to_out(loan: Loan, now: datetime) -> LoanOut:
     return out
 
 
-def _loan_with_relations(
-    loan_id: int, db: Session, viewer_id: int, now: datetime
-) -> LoanOut:
-    """One loan, scoped to the caller and loaded through the one plan.
-
-    **The scope is new and the answers are not.** This was `db.query(Loan)`
-    with no viewer on it, and it was safe because both callers resolved first:
-    `create_loan` fetches the Book through the Shelf and then creates the row,
-    and `return_loan` reads the loan through `Loans.seen_by`. Safe by the
-    callers is the shape every privacy pass in this tree is blind to by
-    construction, and `tests/test_shelf.py`'s own inventory of reads past a
-    viewer did not carry this one. A third caller would have inherited a
-    helper that reads any loan in the Library by id.
-
-    **`Loans.seen_by`, so the predicate is on the query**, which makes the 404
-    for a loan over a Book the caller cannot see a property of the statement
-    rather than of who happens to call this. `with_id` states why that is a
-    404 and never a 403.
-
-    **The door's plan, not a third copy of it.** This asked for the book and
-    the two people and stopped, so four nested relations of the book, its
-    uploader, its tags, its classifications and its identifiers, lazy loaded
-    one statement each on a response that renders all of them. The list routes
-    have used `lending.RENDERED` since the loan door landed; these two kept the
-    hand written trio they had before it, which is the divergence no guard on
-    the other side could see.
-    """
-    loan = Loans.seen_by(db, viewer_id).rendered().with_id(loan_id)
+def _loan_with_relations(loan_id: int, db: Session, now: datetime) -> LoanOut:
+    loan = (
+        db.query(Loan)
+        .options(joinedload(Loan.book), joinedload(Loan.loaned_to), joinedload(Loan.loaned_by))
+        .filter(Loan.id == loan_id)
+        .first()
+    )
     if loan is None:
         raise HTTPException(status_code=404, detail="Loan not found")
     return _to_out(loan, now)
@@ -255,7 +234,7 @@ def create_loan(payload: LoanCreate, db: DbSession, current_user: CurrentUser) -
     db.add(loan)
     db.commit()
     db.refresh(loan)
-    return _loan_with_relations(loan.id, db, current_user.id, _now())
+    return _loan_with_relations(loan.id, db, _now())
 
 
 @router.get("/overdue", response_model=Page[LoanOut])
@@ -428,4 +407,4 @@ def return_loan(loan_id: RowId, db: DbSession, current_user: CurrentUser) -> Loa
     # The same instant the return was stamped with, so `days_out` on the row
     # this answers with counts to the return rather than to a clock read a
     # moment later. One call per request, which `TestOneClockPerRequest` pins.
-    return _loan_with_relations(loan.id, db, current_user.id, now)
+    return _loan_with_relations(loan.id, db, now)

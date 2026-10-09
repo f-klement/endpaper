@@ -52,9 +52,9 @@
  * stripped, and anything else does.
  *
  * **The split is not clean, and the part that is not is the small part.** The
- * service worker precaches by the extensions `globPatterns` lists in
- * `vite.config.ts`, which has no `wasm` among them, so the 326.00 kB is
- * downloaded only by a session that opens this card. The 14.66 kB wrapper chunk is a `.js` and is precached like
+ * service worker precaches by `globPatterns: ["**​/*.{js,css,...}"]`, which
+ * has no `wasm` in it, so the 326.00 kB is downloaded only by a session that
+ * opens this card. The 14.66 kB wrapper chunk is a `.js` and is precached like
  * every other lazy chunk in this app, so every session pays that much.
  *
  * **`script-src` had to be relaxed for this and the relaxation is one token.**

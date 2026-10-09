@@ -43,27 +43,78 @@ import { describe, expect, it } from "vitest";
 
 import { ZipError, zipFailureAs, type ZipFailure } from "../src/lib/zip";
 
-// The one comment stripper. This file carried a second, hand written one until
-// it was measured against this one: over the 461 modules under `src/` it
-// refused nothing this accepts, and left prose standing in three of them. How
-// it missed them is at the home rather than restated here. What it was, rather
-// than what it got wrong, is the reason it is gone: a second instrument, with a
-// blind spot of its own, where the tree had just paid to fix this one's.
-import { langOf, withoutProse } from "./withoutProse";
-
-// The one enumeration of `src/`, which refuses a corpus that is no longer the
-// tree: the pattern this file used to write is there, where narrowing it is a
-// diff in a shared module rather than a character in the rule being disarmed.
-// It reads with `import.meta.glob` and not `node:fs`, and says there why.
-import {
-  directoriesIn,
-  sourceDirectories,
-  sourceEntries,
-  sourceText,
-} from "./sourceModules";
+// `import.meta.glob` and not `node:fs`, for the reason `houseRules.test.ts`
+// gives at its own: a guard test is a poor reason to add `@types/node` and
+// widen the global types.
+const SOURCES = import.meta.glob("../src/**/*.{ts,tsx}", {
+  query: "?raw",
+  import: "default",
+  eager: true,
+}) as Record<string, string>;
 
 const ZIP_MODULE = "lib/zip.ts";
 const GENERATED = "api/generated/";
+
+function entries(): [string, string][] {
+  return Object.entries(SOURCES).map(([path, source]) => [
+    path.replace("../src/", ""),
+    source,
+  ]);
+}
+
+/**
+ * The source with its comments removed, because the prose here quotes the
+ * vocabulary this file is about.
+ *
+ * A scanner rather than a regex pair: `//` inside a string literal is a URL and
+ * not a comment, and stripping from there would delete the rest of a line of
+ * code, which is a rule that quietly stops looking rather than one that fails.
+ *
+ * **The exclusion is a regular expression literal**, whose `\/\/` this reads as
+ * the start of a comment and skips the rest of the line for. `src/` holds none
+ * today, and what it would produce is a miss rather than a false report, so it
+ * is stated rather than defended against: the fix is a parser, and this rule is
+ * not worth a dependency.
+ */
+function withoutComments(source: string): string {
+  let out = "";
+  let at = 0;
+  while (at < source.length) {
+    const here = source[at]!;
+    const next = source[at + 1];
+    if (here === "/" && next === "*") {
+      const end = source.indexOf("*/", at + 2);
+      at = end === -1 ? source.length : end + 2;
+      out += " ";
+      continue;
+    }
+    if (here === "/" && next === "/") {
+      const end = source.indexOf("\n", at);
+      at = end === -1 ? source.length : end;
+      out += " ";
+      continue;
+    }
+    if (here === '"' || here === "'" || here === "`") {
+      out += here;
+      at += 1;
+      while (at < source.length) {
+        const inner = source[at]!;
+        out += inner;
+        at += 1;
+        if (inner === "\\") {
+          out += source[at] ?? "";
+          at += 1;
+          continue;
+        }
+        if (inner === here) break;
+      }
+      continue;
+    }
+    out += here;
+    at += 1;
+  }
+  return out;
+}
 
 /**
  * The union's declaration: the members read out of it, and what was left.
@@ -85,7 +136,7 @@ const GENERATED = "api/generated/";
  */
 function readZipFailureUnion(): { members: string[]; unread: string } {
   const declaration = /export type ZipFailure =([^;]*);/.exec(
-    withoutProse(sourceText(ZIP_MODULE), langOf(ZIP_MODULE)),
+    withoutComments(SOURCES[`../src/${ZIP_MODULE}`] ?? ""),
   );
   const body = declaration?.[1] ?? "";
   return {
@@ -170,12 +221,9 @@ describe("the names this rule is derived from", () => {
 });
 
 describe("a module that reads a zip does not map its failures itself", () => {
-  const readers = sourceEntries()
+  const readers = entries()
     .filter(([path]) => path !== ZIP_MODULE && !path.startsWith(GENERATED))
-    .map(([path, source]): [string, string] => [
-      path,
-      withoutProse(source, langOf(path)),
-    ]);
+    .map(([path, source]): [string, string] => [path, withoutComments(source)]);
 
   function naming(needle: string): string[] {
     return readers
@@ -203,15 +251,10 @@ describe("a module that reads a zip does not map its failures itself", () => {
     // opens two archives per book and has two sites where a `ZipError` becomes
     // a word for a member. Both go through the helper, which is what the
     // equality above asserts; this is the half that says it is here at all.
-    //
-    // **Nor is `lib/stores.ts`**: its Moon+ opener reads a backup that is a
-    // zip, and answers the seam's refusals through the helper rather than
-    // letting them reach the card as a bug in a reader.
     expect(naming("zipFailureAs(")).toEqual([
       "lib/cbz.ts",
       "lib/epub.ts",
       "lib/fb2.ts",
-      "lib/stores.ts",
       "lib/takeout.ts",
     ]);
   });
@@ -238,18 +281,27 @@ describe("a module that reads a zip does not map its failures itself", () => {
     expect(offenders).toEqual([]);
   });
 
-  it("reads every directory of the tree and not a corner of it", () => {
-    // **A floor of fifty used to stand here, over a population of 264.** An
-    // empty glob is no longer what can go wrong: the corpus is armed in
-    // `tests/sourceModules.ts` and throws rather than coming back short.
-    // What that arming cannot see is the two exclusions this block applies,
-    // the owning module and the generated client, and widening either is a
-    // narrowing by another route that a floor on the remainder does not see.
-    //
-    // So this asks the relationship rather than a size: whatever the
-    // exclusions remove, every directory of the tree is still read.
-    expect(directoriesIn(readers.map(([path]) => path))).toEqual(
-      sourceDirectories(),
-    );
+  it("reads the source tree at all", () => {
+    // A glob that matched nothing would make the scans above pass for ever.
+    expect(readers.length).toBeGreaterThan(50);
+  });
+});
+
+describe("the comment scanner", () => {
+  it("removes a comment", () => {
+    expect(withoutComments('a; // "zip64"\nb;')).not.toContain("zip64");
+  });
+
+  it("keeps the code after a string that holds the comment marker", () => {
+    // The line this exists for: stripping from the `//` inside a URL would
+    // delete the rest of that line, and a mapping written on it would go
+    // unread. A rule that stops looking passes, which is why it is asserted.
+    expect(
+      withoutComments('const at = "https://x/y"; const b = "zip64";'),
+    ).toContain('"zip64"');
+  });
+
+  it("keeps a string that is itself a comment", () => {
+    expect(withoutComments('const a = "// zip64";')).toContain("zip64");
   });
 });

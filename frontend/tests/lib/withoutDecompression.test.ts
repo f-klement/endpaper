@@ -20,18 +20,21 @@ import {
   hadDecompressionStream,
   withoutDecompressionStream,
 } from "./withoutDecompression";
-import { testText } from "../testModules";
 
 /**
  * `tests/setup.ts`, read as text.
  *
- * **Asked of the corpus rather than globbed here**, which is the half the
- * first version of this got wrong: one file is exactly the case where a glob
- * answers nothing on a rename and the non null assertion turns that into a
- * rule reading `undefined`. `tests/testModules.ts` refuses a name the tree
- * does not hold.
+ * `import.meta.glob` rather than `node:fs`, for the reason
+ * `tests/houseRules.test.ts` gives at its own copy: a guard test is a poor
+ * reason to add `@types/node` and widen the global types.
  */
-const SETUP_SOURCE = testText("./setup.ts");
+const SETUP_SOURCE = (
+  import.meta.glob("../setup.ts", {
+    query: "?raw",
+    import: "default",
+    eager: true,
+  }) as Record<string, string>
+)["../setup.ts"]!;
 
 describe("a runtime that cannot inflate, for one call", () => {
   it("takes the global away and puts it back", async () => {

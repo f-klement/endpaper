@@ -1,108 +1,46 @@
 /** Tests for src/pages/ScanPage/components/RapidQueue.tsx. */
 
-import { fireEvent, screen } from "@testing-library/react";
+import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import RapidQueue from "../../../../src/pages/ScanPage/components/RapidQueue";
-import { BookFormat, Locale } from "../../../../src/api/generated/model";
-import type {
-  QueueFigures,
-  ScannedEntry,
-} from "../../../../src/pages/ScanPage/hooks";
+import { BookFormat } from "../../../../src/api/generated/model";
+import type { ScannedEntry } from "../../../../src/pages/ScanPage/hooks";
 import { renderLocalised } from "../../../utils";
 
-/** The component's props, which it does not export. */
-type RapidQueueProps = Parameters<typeof RapidQueue>[0];
-
-/**
- * The queue, in a locale.
- *
- * **The locale is a parameter here and nowhere else on this page**, and that is
- * where the reasons moved to: a row carries the name of what happened, and the
- * sentence is chosen in the language being read. The hook's own tests need no
- * locale at all now, which is why `renderHookWithProviders` was never widened.
- */
-const FIGURES: QueueFigures = {
-  waiting: 0,
-  deciding: 0,
-  keptForNow: 0,
-  emptyAnswers: 0,
-  paceMinutes: 1,
-  keptPaceMinutes: 1,
-};
-
-/**
- * What a test may override, with the queue's figures written flat.
- *
- * The component takes them as one value, and a test that says `waiting: 1`
- * means one thing by it. Flat here and assembled below, so a test naming one
- * figure does not have to restate the rest.
- */
-type QueueOverrides = Partial<Omit<RapidQueueProps, "figures">> &
-  Partial<QueueFigures>;
-
-/** The figures an override names, over the ones already in force. */
-function splitFigures(overrides: QueueOverrides, base: QueueFigures) {
-  const {
-    waiting,
-    deciding,
-    keptForNow,
-    emptyAnswers,
-    paceMinutes,
-    keptPaceMinutes,
-    ...rest
-  } = overrides;
-  const figures: QueueFigures = {
-    waiting: waiting ?? base.waiting,
-    deciding: deciding ?? base.deciding,
-    keptForNow: keptForNow ?? base.keptForNow,
-    emptyAnswers: emptyAnswers ?? base.emptyAnswers,
-    paceMinutes: paceMinutes ?? base.paceMinutes,
-    keptPaceMinutes: keptPaceMinutes ?? base.keptPaceMinutes,
-  };
-  return { figures, rest };
-}
-
 function renderQueue(
-  overrides: QueueOverrides = {},
-  { locale = Locale.en }: { locale?: Locale } = {},
+  overrides: Partial<Parameters<typeof RapidQueue>[0]> = {},
 ) {
-  const { figures, rest } = splitFigures(overrides, FIGURES);
   const props = {
     entries: [] as ScannedEntry[],
     isAdding: false,
-    progress: null,
     result: null,
-    onRemove: vi.fn<RapidQueueProps["onRemove"]>(),
-    onAddAll: vi.fn<RapidQueueProps["onAddAll"]>(),
-    onDiscard: vi.fn<RapidQueueProps["onDiscard"]>(),
-    onStopAdding: vi.fn<RapidQueueProps["onStopAdding"]>(),
-    figures,
+    onRemove: vi.fn(),
+    onAddAll: vi.fn(),
+    onDiscard: vi.fn(),
+    waiting: 0,
+    deciding: 0,
+    keptForNow: 0,
+    paceMinutes: 1,
+    keptPaceMinutes: 1,
     isLookingUp: false,
-    onLookUp: vi.fn<RapidQueueProps["onLookUp"]>(),
-    onStopLookUp: vi.fn<RapidQueueProps["onStopLookUp"]>(),
-    onChoose: vi.fn<RapidQueueProps["onChoose"]>(),
-    onKeepName: vi.fn<RapidQueueProps["onKeepName"]>(),
-    onKeepAllForNow: vi.fn<RapidQueueProps["onKeepAllForNow"]>(),
-    onLookUpKept: vi.fn<RapidQueueProps["onLookUpKept"]>(),
-    onSplit: vi.fn<RapidQueueProps["onSplit"]>(),
-    onDropSubject: vi.fn<RapidQueueProps["onDropSubject"]>(),
-    ...rest,
+    onLookUp: vi.fn(),
+    onStopLookUp: vi.fn(),
+    onChoose: vi.fn(),
+    onKeepName: vi.fn(),
+    onKeepAllForNow: vi.fn(),
+    onLookUpKept: vi.fn(),
+    onSplit: vi.fn(),
+    ...overrides,
   };
-  const { container, rerender } = renderLocalised(<RapidQueue {...props} />, {
-    locale,
-  });
+  const { container, rerender } = renderLocalised(<RapidQueue {...props} />);
   return {
     ...props,
     container,
     /** Render again with some props changed, into the same mounted tree. */
-    again: (next: QueueOverrides) => {
-      const step = splitFigures(next, props.figures);
-      return rerender(
-        <RapidQueue {...props} {...step.rest} figures={step.figures} />,
-      );
-    },
+    again: (next: Partial<Parameters<typeof RapidQueue>[0]>) =>
+      rerender(<RapidQueue {...props} {...next} />),
   };
 }
 
@@ -222,107 +160,6 @@ describe("RapidQueue", () => {
     expect(props.onSplit).toHaveBeenCalledWith(props.entries[0]!.key);
   });
 
-  it("shows the subjects a picked file stated, and how many", () => {
-    // **The last moment a subject is reversible.** No route clears
-    // `books.categories` once the batch has written it: enrichment replaces
-    // the list and never empties it, and `BookDetailsUpdate` has no such
-    // field, so the remedy afterwards is deleting the book.
-    renderQueue({
-      entries: [
-        picked(
-          {
-            state: "found",
-            draft: {
-              isbn: "",
-              title: "Dune",
-              suggested_tag_ids: [],
-              categories: ["Fiction", "Science Fiction"],
-            },
-          },
-          "dune.epub",
-        ),
-      ],
-    });
-
-    expect(
-      screen.getByText("Subject words from the file: 2. Show them."),
-    ).toBeInTheDocument();
-    expect(screen.getByText("Fiction")).toBeInTheDocument();
-    expect(screen.getByText("Science Fiction")).toBeInTheDocument();
-  });
-
-  it("names the subject and the row it is on, not just Remove", () => {
-    // A folder pick draws several hundred of these, so an accessible name of
-    // "Remove" alone repeats across all of them and names nothing. The split
-    // control above carries the row for the same reason.
-    renderQueue({
-      entries: [
-        picked(
-          {
-            state: "found",
-            draft: {
-              isbn: "",
-              title: "Dune",
-              suggested_tag_ids: [],
-              categories: ["Fiction"],
-            },
-          },
-          "dune.epub",
-        ),
-      ],
-    });
-
-    expect(
-      screen.getByRole("button", {
-        name: "Remove the subject Fiction from dune.epub",
-      }),
-    ).toBeInTheDocument();
-  });
-
-  it("takes off the subject the member pressed, named by its value", () => {
-    const props = renderQueue({
-      entries: [
-        picked(
-          {
-            state: "found",
-            draft: {
-              isbn: "",
-              title: "Dune",
-              suggested_tag_ids: [],
-              categories: ["Fiction", "Science Fiction"],
-            },
-          },
-          "dune.epub",
-        ),
-      ],
-    });
-
-    return userEvent
-      .click(
-        screen.getByRole("button", {
-          name: "Remove the subject Fiction from dune.epub",
-        }),
-      )
-      .then(() => {
-        // The value and not an index: the row is rendered from the same list,
-        // so an index would remove the wrong subject after any reorder.
-        expect(props.onDropSubject).toHaveBeenCalledWith(
-          props.entries[0]!.key,
-          "Fiction",
-        );
-      });
-  });
-
-  it("says nothing of it for a row whose file stated none", () => {
-    // The other side, without which the arms above are satisfied by a queue
-    // that draws the block on every row. A barcode carries no subject at all.
-    renderQueue({ entries: [found] });
-
-    expect(
-      screen.queryByText(/Subject words from the file/),
-    ).not.toBeInTheDocument();
-  });
-
   it("says none of it for a row that is one file", () => {
     // One file is one book for every other format, and a row that says "1 file,
     // as one audiobook" is a screen explaining something that did not happen.
@@ -402,11 +239,7 @@ describe("RapidQueue", () => {
     renderQueue({
       entries: [
         picked(
-          {
-            state: "failed",
-            draft: null,
-            reason: { kind: "file", failure: "not-an-epub" },
-          },
+          { state: "failed", draft: null, reason: "Not an EPUB file." },
           "broken.epub",
         ),
       ],
@@ -429,9 +262,7 @@ describe("RapidQueue", () => {
   });
 
   it("reports the outcome, failures included", () => {
-    renderQueue({
-      result: { added: 12, failed: 2, unreferenced: 0, stopped: false },
-    });
+    renderQueue({ result: { added: 12, failed: 2, unreferenced: 0 } });
     expect(screen.getByRole("status")).toHaveTextContent("12 added");
   });
 
@@ -439,9 +270,7 @@ describe("RapidQueue", () => {
     // **The count and the sentence are two things and only one was covered.**
     // The hook's own arms drive the number; nothing rendered it, so the whole
     // block could be deleted with every test green.
-    renderQueue({
-      result: { added: 12, failed: 0, unreferenced: 2, stopped: false },
-    });
+    renderQueue({ result: { added: 12, failed: 0, unreferenced: 2 } });
 
     expect(
       screen.getByText(
@@ -453,9 +282,7 @@ describe("RapidQueue", () => {
   it("says nothing about locations for a batch that offered none", () => {
     // Every batch of barcodes, and every pick of single files. A sentence that
     // appeared at zero would report an absence as a loss.
-    renderQueue({
-      result: { added: 12, failed: 0, unreferenced: 0, stopped: false },
-    });
+    renderQueue({ result: { added: 12, failed: 0, unreferenced: 0 } });
 
     expect(screen.queryByText(/without where their file is/)).toBeNull();
   });
@@ -473,229 +300,27 @@ describe("RapidQueue", () => {
             title: "Dune",
             suggested_tag_ids: [],
           },
-          // The one arm that carries words rather than a name: the server's
-          // own `detail`, which nothing on this side can translate.
-          reason: {
-            kind: "server-said",
-            message: "Book with this ISBN already in catalog",
-          },
+          reason: "Book with this ISBN already in catalog",
         }),
       ],
-      result: { added: 12, failed: 1, unreferenced: 0, stopped: false },
+      result: { added: 12, failed: 1, unreferenced: 0 },
     });
 
     expect(screen.getByText(/Dune/)).toBeInTheDocument();
     expect(screen.getByText(/already in catalog/)).toBeInTheDocument();
   });
 
-  it("offers a way to stop the batch while it is running", async () => {
-    // The camera has a stop and the paced lookup has a stop; this run is up to
-    // six hundred sequential requests and had none.
-    const props = renderQueue({ entries: [found], isAdding: true });
-
-    await userEvent.setup().click(screen.getByRole("button", { name: "Stop" }));
-
-    expect(props.onStopAdding).toHaveBeenCalledOnce();
-    expect(props.onDiscard).not.toHaveBeenCalled();
-  });
-
-  it("keeps the discard out of reach while the batch runs", async () => {
-    // **The stop and the discard are two nodes and the discard is dead.** One
-    // node that is Stop for a round trip and Discard after it is a node a
-    // member taps twice at a shelf, and the second tap clears the queue the
-    // first tap was keeping. Asserted as both halves: a different node, and
-    // one that refuses a press.
-    const props = renderQueue({ entries: [found], isAdding: true });
-
-    const stop = screen.getByRole("button", { name: "Stop" });
-    const discard = screen.getByRole("button", { name: "Discard" });
-
-    expect(discard).not.toBe(stop);
-    expect(discard).toBeDisabled();
-
-    await userEvent.setup().click(discard);
-    expect(props.onDiscard).not.toHaveBeenCalled();
-  });
-
-  it("puts the verdict below the controls, where the stop was", () => {
-    // **The commit that ends a run may not move the discard toward the
-    // finger.** Everything that commit removes is above the row, so the region
-    // above it only shrinks; everything it mounts is below the row, so the
-    // space a finger is still tapping fills with text. Asserted as document
-    // order, which is the half of it that can be checked here: this
-    // environment has no layout engine.
-    renderQueue({
-      entries: [found],
-      result: { added: 1, failed: 0, unreferenced: 0, stopped: true },
-    });
-
-    const discard = screen.getByRole("button", { name: "Discard" });
-    const verdict = screen.getByRole("status");
-
-    expect(
-      discard.compareDocumentPosition(verdict) &
-        Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
-  });
-
-  it("puts nothing to press inside the verdict", () => {
-    // What arrives under a finger still tapping where the stop was has to be
-    // text.
-    //
-    // **Two assertions answering two questions, and neither subsumes the
-    // other.** The selector catches an inert control of a spelling it names:
-    // measured, a `<button type="button">` with no handler on it fails the
-    // selector and the click loop is green against it, because a control with
-    // no handler fires nothing. The click catches a live handler on anything
-    // at all, and the shape it is here for is
-    // `<span role="button" onClick={onDiscard}>`, which no selector this file
-    // could write would name and which a screen reader announces as a button.
-    // That spelling passed every arm while the selector stood alone.
-    //
-    // **The selector is not to be extended**, because an enumeration of
-    // interactive spellings is an open set and a further arm is what this
-    // repository keeps paying for.
-    //
-    // **So state what the pair misses rather than widen it.** An inert control
-    // of a spelling the selector does not name is caught by neither: measured
-    // with `<select>`, which passed both. So is a handler driven by anything
-    // but a click. The first of those cannot discard anything, since inert is
-    // what it means; the second can, and it is the one a reader of this file
-    // should be watching for.
-    const props = renderQueue({
-      entries: [found],
-      result: { added: 1, failed: 2, unreferenced: 1, stopped: true },
-    });
-
-    const verdict = screen.getByRole("status");
-
-    expect(verdict.querySelector("button, a, input, [tabindex]")).toBeNull();
-
-    // Taken off the rendered props rather than by name, so a handler added to
-    // this component is watched without this arm being edited, and counted
-    // against the props themselves rather than against a number written here:
-    // a floor that stopped matching would let the loop below pass on an empty
-    // list in silence.
-    const handlers = Object.values(props).filter(
-      (value) => typeof value === "function" && "mock" in value,
-    );
-    expect(handlers).toHaveLength(
-      Object.keys(props).filter((key) => key.startsWith("on")).length,
-    );
-    expect(handlers.length).toBeGreaterThan(0);
-
-    const inside = [verdict, ...verdict.querySelectorAll("*")];
-    // The verdict has a child in this fixture, so a subtree of one node is a
-    // render that stopped drawing rather than a clean pass.
-    expect(inside.length).toBeGreaterThan(1);
-    for (const node of inside) fireEvent.click(node);
-    for (const handler of handlers) expect(handler).not.toHaveBeenCalled();
-  });
-
-  it("puts the stop below the controls that outlive the run", () => {
-    // **What the end of a run removes must not sit above what writes or
-    // discards.** The stop unmounts at the flip; from above it, it would pull
-    // the discard up under a finger still tapping where it was, which is the
-    // same double tap one node would have been. Asserted as document order,
-    // which is the property that decides it: this environment has no layout
-    // engine to measure the reflow with.
-    renderQueue({ entries: [found], isAdding: true });
-
-    const stop = screen.getByRole("button", { name: "Stop" });
-    const discard = screen.getByRole("button", { name: "Discard" });
-
-    expect(
-      discard.compareDocumentPosition(stop) & Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
-  });
-
-  it("offers the discard once no run is going", async () => {
-    const props = renderQueue({ entries: [found], isAdding: false });
-
-    await userEvent
-      .setup()
-      .click(screen.getByRole("button", { name: "Discard" }));
-
-    expect(props.onDiscard).toHaveBeenCalledOnce();
-    expect(screen.queryByRole("button", { name: "Stop" })).toBeNull();
-  });
-
-  it("keeps the discard out of reach while the lookup runs too", () => {
-    // What it was before this page had a stop, restated because the stop is
-    // what took it away for one round: a run of either kind disables it.
-    renderQueue({ entries: [found], isLookingUp: true });
-
-    expect(screen.getByRole("button", { name: "Discard" })).toBeDisabled();
-  });
-
-  it("says how far the batch has got", () => {
-    // A stop with no figure beside it is a button pressed blind.
-    renderQueue({
-      entries: [found],
-      isAdding: true,
-      progress: { done: 12, total: 300 },
-    });
-
-    expect(screen.getByText("12 of 300")).toBeInTheDocument();
-  });
-
-  it("draws no verdict over a run that is going", () => {
-    // A stop keeps rows in order that they be added, so a second press is the
-    // ordinary path and the last run's amber sentence about what it did not
-    // reach would stand over those rows while they are written.
-    renderQueue({
-      entries: [found],
-      isAdding: true,
-      progress: { done: 1, total: 2 },
-      result: { added: 40, failed: 0, unreferenced: 0, stopped: true },
-    });
-
-    expect(screen.queryByRole("status")).toBeNull();
-    expect(screen.getByText("1 of 2")).toBeInTheDocument();
-  });
-
-  it("draws no figure once the run is over, whatever state it was left in", () => {
-    // **The pair is refused here rather than only avoided upstream.** The hook
-    // clears the figure in the same commit that sets the verdict, so this
-    // combination cannot be produced today; a clear deferred by one microtask
-    // would produce it, and no test above would name it. Refusing it at the
-    // render makes the banner and the figure mutually exclusive whatever the
-    // hook's state does.
-    renderQueue({
-      entries: [found],
-      isAdding: false,
-      progress: { done: 3, total: 3 },
-      result: { added: 3, failed: 0, unreferenced: 0, stopped: false },
-    });
-
-    expect(screen.getByRole("status")).toBeInTheDocument();
-    expect(screen.queryByText("3 of 3")).toBeNull();
-  });
-
-  it("says a batch the member stopped was stopped", () => {
-    // A count far short of the queue is not damage, and the rows it did not
-    // reach are still there: both halves in one sentence, because a member
-    // reading "40 added" over a queue of three hundred assumes the worst.
-    renderQueue({
-      result: { added: 40, failed: 0, unreferenced: 0, stopped: true },
-    });
-
-    expect(screen.getByRole("status")).toHaveTextContent(
-      "Stopped. 40 added, and 0 could not be. Everything it did not reach is still in the queue.",
-    );
-  });
-
-  it("keeps the banner beside whatever is left, rather than replacing it", () => {
+  it("keeps the banner above whatever is left, rather than replacing it", () => {
     renderQueue({
       entries: [
         scanned({
           isbn: "9780441013593",
           state: "failed",
           draft: null,
-          reason: { kind: "server-said", message: "Nope" },
+          reason: "Nope",
         }),
       ],
-      result: { added: 1, failed: 1, unreferenced: 0, stopped: false },
+      result: { added: 1, failed: 1, unreferenced: 0 },
     });
 
     expect(screen.getByRole("status")).toBeInTheDocument();
@@ -743,9 +368,7 @@ describe("RapidQueue and a book taken from its file name", () => {
 
   it("says what the file itself could not say, beside it", () => {
     renderQueue({
-      entries: [
-        { ...derived, reason: { kind: "file", failure: "not-an-epub" } },
-      ],
+      entries: [{ ...derived, reason: "Not an EPUB file." }],
     });
 
     expect(screen.getByText(/Not an EPUB file/)).toBeInTheDocument();
@@ -796,8 +419,8 @@ describe("RapidQueue and a book taken from its file name", () => {
   });
 
   it("offers each record, for one file, to be taken or left", () => {
-    const onChoose = vi.fn<RapidQueueProps["onChoose"]>();
-    const onKeepName = vi.fn<RapidQueueProps["onKeepName"]>();
+    const onChoose = vi.fn();
+    const onKeepName = vi.fn();
     renderQueue({
       entries: [{ ...derived, state: "choosing", matches: [MATCH] }],
       onChoose,
@@ -822,7 +445,7 @@ describe("RapidQueue and a book taken from its file name", () => {
 
   it("names the record a member takes", async () => {
     const user = userEvent.setup();
-    const onChoose = vi.fn<RapidQueueProps["onChoose"]>();
+    const onChoose = vi.fn();
     const entry = { ...derived, state: "choosing" as const, matches: [MATCH] };
     renderQueue({ entries: [entry], onChoose });
 
@@ -837,7 +460,7 @@ describe("RapidQueue and a book taken from its file name", () => {
 
   it("names the file whose records a member rejects", async () => {
     const user = userEvent.setup();
-    const onKeepName = vi.fn<RapidQueueProps["onKeepName"]>();
+    const onKeepName = vi.fn();
     const entry = { ...derived, state: "choosing" as const, matches: [MATCH] };
     renderQueue({ entries: [entry], onKeepName });
 
@@ -857,7 +480,7 @@ describe("RapidQueue and a book taken from its file name", () => {
     // member navigating by button list met thirty called "Keep this name and
     // stop asking" and could not tell which book each one answered.
     const user = userEvent.setup();
-    const onKeepName = vi.fn<RapidQueueProps["onKeepName"]>();
+    const onKeepName = vi.fn();
     const second: ScannedEntry = {
       ...derived,
       key: "file:The Left Hand of Darkness.epub:10:0",
@@ -946,15 +569,12 @@ describe("RapidQueue and a book taken from its file name", () => {
     // it is electronic, so this is the ordinary outcome for a title that only
     // exists as a file. Said once a catalogue has actually answered nothing:
     // explaining beforehand would apologise for something that may not happen.
-    // **Two such rows and one sentence**, which is the arm: the figure the hook
-    // hands over is a count, and a component reading it per row is what would
-    // print it twice.
     renderQueue({
       entries: [
         {
           ...derived,
           answered: "nothing" as const,
-          reason: { kind: "not-in-catalogues" },
+          reason: "Not in the catalogues.",
         },
         {
           ...derived,
@@ -962,7 +582,6 @@ describe("RapidQueue and a book taken from its file name", () => {
           answered: "nothing" as const,
         },
       ],
-      emptyAnswers: 2,
     });
 
     expect(
@@ -970,21 +589,17 @@ describe("RapidQueue and a book taken from its file name", () => {
     ).toHaveLength(1);
   });
 
-  it("does not say it where nothing on the queue was answered that way", () => {
-    // A member offered records and preferring the name is not a member the
-    // catalogues had nothing for, and telling them so describes something that
-    // did not happen. **Which rows those are is the hook's reading now**, so
-    // what this arm holds is that the component says nothing of its own accord:
-    // the row below is answered, and the figure is not.
+  it("does not say it to a member who was offered records and refused", () => {
+    // The catalogues answered, with records. Telling that member the catalogues
+    // do not list ebooks describes something that did not happen.
     renderQueue({
       entries: [
         {
           ...derived,
           answered: "records" as const,
-          reason: { kind: "kept-the-name" },
+          reason: "Kept under its file name.",
         },
       ],
-      emptyAnswers: 0,
     });
 
     expect(
@@ -1009,7 +624,7 @@ describe("RapidQueue and a book taken from its file name", () => {
     // 250 presses for a folder of 300 files that matched 250 is what this
     // replaces. The count beside it is the one the batch will leave.
     const user = userEvent.setup();
-    const onKeepAllForNow = vi.fn<RapidQueueProps["onKeepAllForNow"]>();
+    const onKeepAllForNow = vi.fn();
     renderQueue({
       entries: [{ ...derived, state: "choosing", matches: [MATCH] }],
       deciding: 1,
@@ -1092,7 +707,7 @@ describe("RapidQueue and a book taken from its file name", () => {
 
   it("offers a second pass over the names kept in bulk", async () => {
     const user = userEvent.setup();
-    const onLookUpKept = vi.fn<RapidQueueProps["onLookUpKept"]>();
+    const onLookUpKept = vi.fn();
     renderQueue({
       entries: [{ ...derived, answered: "records-for-now" as const }],
       keptForNow: 2,
@@ -1217,75 +832,20 @@ describe("RapidQueue and a book taken from its file name", () => {
         {
           ...derived,
           answered: "records" as const,
-          reason: { kind: "kept-the-name" },
+          reason: "Kept under its file name.",
         },
         {
           ...derived,
           key: "file:other.pdf:10:0",
           answered: "records-for-now" as const,
-          reason: { kind: "kept-for-now" },
+          reason:
+            "Kept under its file name for now, and can be looked up again.",
         },
       ],
     });
 
     expect(screen.getByText(/Kept under its file name\./)).toBeInTheDocument();
     expect(screen.getByText(/can be looked up again/)).toBeInTheDocument();
-  });
-
-  it("tells a member in German what the file itself could not say", () => {
-    // **The arm the old arrangement could not reach at all.** The sentence used
-    // to be chosen in the hook, at the moment the file failed, and the hook's
-    // tests render in English with no way past it: no test anywhere exercised a
-    // German reason. It is chosen here now, so this one does.
-    renderQueue(
-      {
-        entries: [
-          { ...derived, reason: { kind: "file", failure: "not-an-epub" } },
-        ],
-      },
-      { locale: Locale.de },
-    );
-
-    expect(screen.getByText(/Keine EPUB-Datei/)).toBeInTheDocument();
-  });
-
-  it("tells a member in German why a book kept its file name", () => {
-    renderQueue(
-      {
-        entries: [
-          {
-            ...derived,
-            answered: "nothing" as const,
-            reason: { kind: "not-in-catalogues" },
-          },
-        ],
-      },
-      { locale: Locale.de },
-    );
-
-    expect(
-      screen.getByText(/In keinem Katalog gefunden, bleibt unter dem/),
-    ).toBeInTheDocument();
-  });
-
-  it("leaves the server's own words alone in either language", () => {
-    // The one free text arm. A `detail` written by the server is already a
-    // sentence for the reader, and there is no catalogue on this side to look
-    // it up in: what a German reader sees is what the server said.
-    renderQueue(
-      {
-        entries: [
-          {
-            ...derived,
-            state: "failed" as const,
-            reason: { kind: "server-said", message: "Shelf is full" },
-          },
-        ],
-      },
-      { locale: Locale.de },
-    );
-
-    expect(screen.getByText(/Shelf is full/)).toBeInTheDocument();
   });
 
   it("says nothing about deciding when nothing is being decided", () => {

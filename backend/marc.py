@@ -1,10 +1,8 @@
 """MARC21 records in and out, as pure functions over bytes.
 
-**Field reading is not written here.** `marc_fields.py` already parses MARCXML
-for four catalogues, and a second parser would be a second set of field
-decisions to keep in step. This module reuses it, through the door rather than
-past it: what is left here is the upload's own policy, which refuses a record
-with no title and nothing else.
+**Reading is not written here.** `metadata.py` already parses MARCXML from four
+catalogues, and a second parser would be a second set of field decisions to keep
+in step. This module reuses it.
 
 **What the writer emits is deliberately narrow.** It carries the bibliographic
 fields this app stores and nothing about the copy: no shelf mark, no price, no
@@ -30,12 +28,9 @@ from typing import TYPE_CHECKING, Final
 from xml.etree import ElementTree
 
 import bibliographic
-import marc_fields
 import metadata
-import xml_parse
 from catalogue import Heading, Record
-from enums import ClassificationScheme, HeadingKind
-from marc_fields import Fields, Subfields
+from enums import ClassificationScheme
 
 if TYPE_CHECKING:  # pragma: no cover
     from models import Book
@@ -67,107 +62,6 @@ class MarcError(Exception):
 #: unbounded import by changing format.
 MAX_RECORDS: Final = 20_000
 
-#: This door's half of its allocation bound: a call of `read` peaks, by
-#: `tracemalloc`, under this times the bytes uploaded plus
-#: `xml_parse.ALLOCATION_FLOOR`, which says what the bound is and what holds it.
-#:
-#: Measured on CPython 3.14.0: a record of empty `datafield` elements back to
-#: back, the costliest shape per byte that is still a file to read, peaked at
-#: 25.7 times its size; ordinary records near 12. A nest past
-#: `xml_parse.MAX_DEPTH` is refused within one chunk, and what one costs
-#: unrefused is said there.
-ALLOCATION_FACTOR: Final = 32
-
-#: How many Books the export holds at once.
-#:
-#: **A bound on the server's memory, not on the size of the shelf**, and that
-#: is the whole difference between this and `MAX_RECORDS` above. An upload is
-#: volume a stranger chose and the cataloguer can split the file. A shelf is
-#: the member's own and there is nothing for them to split, so refusing past a
-#: count would take the export away from exactly the deployment library mode
-#: exists for: the library in library mode is the instance with the most
-#: books.
-#:
-#: **100 is a query page, and what it costs at the worst is measured rather
-#: than assumed.**
-#: `tests/routers/test_imports_marc.py::TestThePageSizeThatBoundsTheExport`
-#: builds the widest record a write through the API can produce, reading every
-#: bound off its declaration rather than retyping it, and pins the page to the
-#: byte:
-#:
-#: | a record of | one record | a page of 100 |
-#: |---|---|---|
-#: | `w`, one byte a character | 16,611 B | 1.58 MiB |
-#: | `ä`, two | 31,201 B | 2.98 MiB |
-#: | `&`, which `ElementTree` writes as five | 74,971 B | 7.15 MiB |
-#: | `&` and 250 credited names | 102,107 B | 9.74 MiB |
-#:
-#: **Widest is two questions, and the second is the one that bites.** How wide
-#: a field may be is a `max_length`, and a `max_length` counts characters
-#: where a page counts bytes, which is the first three rows. **How many fields
-#: a record has is not a length at all**: `700` repeats once per credited
-#: name, `_credited_names` splits `author` on commas, and nothing bounds the
-#: count inside `AUTHOR_LINE_MAX`, so 500 characters is up to 250 names and
-#: each one costs its scaffolding rather than its bytes. That is the last row,
-#: 36% over a ceiling taken on the third, and both critic seats found it
-#: independently in the round that had just fixed the first question.
-#:
-#: **The pin is on the record's shape, not a platform limit.** Nothing
-#: enforces it at runtime and no deployment was measured against it. What it
-#: does is fail when the widest record's bytes move, which is what a wider
-#: bound or a repeated field does, so that the numbers above stop being
-#: quietly wrong. **The arm beside it names a field added or removed, by its
-#: tag, and only that**: it compares a set, so a repetition and a widened
-#: bound move the figure and are named by nothing, measured on the SRU twin at
-#: 129,050 bytes moved with no arm red. A field fed by a relation this fixture
-#: leaves empty renders nothing and is outside both.
-#:
-#: **It leaves no room at all, and the room was the defect.** The ceiling read
-#: 12 MiB against a 10,210,803 byte page, and the arm was green on both a
-#: small field added to the writer and `SUBTITLE_MAX` widened tenfold, because
-#: 2,372,109 bytes of slack absorbed each of them. The pin is an equality now,
-#: at `TestThePageSizeThatBoundsTheExport.PAGE_BYTES`.
-#:
-#: **The page's bytes are not its peak.** Building it holds every record's
-#: string and the joined result at once, measured at 24.01 MiB for the 9.74
-#: MiB worst case, 2.47 times. The route table below is a typical page rather
-#: than this one, so the worst case for one export is of the order of 25 MB of
-#: strings plus its page of rows, and it does not move with the shelf, which
-#: is the property the paging is for.
-#:
-#: **A stored row beats all of it, and the bound is on writes.** Two of these
-#: numbers are ceilings the API applies and the restore path does not, because
-#: `backup.py` inserts through Core: `DESCRIPTION_MAX` is a `max_length` on
-#: the schema over a `Text` column, deliberately, so it needs no migration and
-#: cannot make a stored book uneditable, and `MAX_CLASSIFICATIONS_PER_BOOK` is
-#: checked on every API path and on no restored row. `models.py` records a
-#: 3,000,256 byte description that reached the table before its ceiling
-#: existed, and 32 classification rows on an otherwise widest record is 13.75
-#: MiB a page. Neither is a shape this number defends against, and no count
-#: would be.
-#:
-#: **What paging buys, measured through the route** on one node, single
-#: process, real ORM over SQLite, `Loading.PUBLISHED`, `tracemalloc` peak
-#: above the baseline, descriptions of 200 characters:
-#:
-#: | books | whole shelf | paged |
-#: |---|---|---|
-#: | 10,000 | 55.05 MiB | 1.02 MiB |
-#: | 20,000 | 109.67 MiB | 1.03 MiB |
-#: | 40,000 | 219.06 MiB | 1.05 MiB |
-#:
-#: One rises with the shelf and the other does not. **A smaller page costs
-#: queries and almost no wall clock**: over 40,000 books, database work only,
-#: the walk is 4.19 seconds in pages of 500 and 6.03 in pages of 100, against
-#: roughly 32 seconds of serialisation either way.
-#:
-#: **What it does not bound is the download and the time.** A shelf of any
-#: size still serialises in full, because the alternatives are a refusal and a
-#: silence. See `docs/decisions.md` §The MARCXML export is paged rather than
-#: capped for why that trade was taken and what each of the others would have
-#: cost.
-EXPORT_PAGE_RECORDS: Final = 100
-
 #: The leader every record this app writes carries, 24 characters.
 #:
 #: Positions, per the MARC21 Bibliographic specification, "Leader":
@@ -194,65 +88,30 @@ EXPORT_PAGE_RECORDS: Final = 100
 #: need not check it.
 LEADER: Final = "00000nam a22000003  4500"
 
-#: MARCXML's namespace, which `marc_fields` reads and this writes.
+#: MARCXML's namespace, which `metadata._MARC` reads and this writes.
 #:
 #: Written as the default namespace on `<collection>` so a record reads as the
-#: specification prints it. Taken from `marc_fields.NAMESPACE` rather than
-#: spelled again: a reader and a writer disagreeing about the namespace produce
-#: a file this app cannot read back, and the round trip test would be the only
-#: thing that noticed.
-NAMESPACE: Final = marc_fields.NAMESPACE
+#: specification prints it. Taken from `metadata._MARC` rather than spelled
+#: again: a reader and a writer disagreeing about the namespace produce a file
+#: this app cannot read back, and the round trip test would be the only thing
+#: that noticed.
+NAMESPACE: Final = metadata._MARC.strip("{}")
 
 #: How a GND number is written back into `$0`, and the scheme name for `$2`.
 #:
-#: `marc_fields.GND_PREFIX` is the reader's half. Stored bare in
+#: `metadata._GND_PREFIX` is the reader's half. Stored bare in
 #: `classifications.number`, so the prefix is put back on the way out: `$0`
 #: without it names no authority file and the reader drops it.
-_GND_PREFIX: Final = marc_fields.GND_PREFIX
+_GND_PREFIX: Final = metadata._GND_PREFIX
 
-#: `$2` values naming the vocabulary a heading came from.
+#: `$2` values naming the vocabulary a `650` heading came from.
 #:
 #: Required whenever the second indicator is `7`, which is what "source
 #: specified in subfield $2" means. Without it a receiving system has a heading
 #: string and no way to know which thesaurus authorised it.
-#:
-#: **This names the vocabulary and only the vocabulary.** What the citing record
-#: was asserting with the heading is `_HEADING_KIND_FIELD` below, because a
-#: vocabulary has a code for that only where its own publisher issued one.
 _SUBJECT_SOURCE: Final[dict[ClassificationScheme, str]] = {
     ClassificationScheme.GND: "gnd",
     ClassificationScheme.LCSH: "lcsh",
-}
-
-#: Which field a heading goes in and what its `$2` says, where the record
-#: declared what it was asserting.
-#:
-#: **The tag and the code are one decision, which is why they are one entry.**
-#: Choosing them separately is how a carrier comes to be written as a subject:
-#: `655 $2 gnd` loses the kind on the way back in, and `650 $2 gnd-carrier`
-#: keeps it while filing a disc under what the book is about. Both halves are
-#: read here or neither is.
-#:
-#: `655` is MARC's genre or form field, and it is where the GND's own two
-#: segments arrive rather than a choice made here: the captured DNB record in
-#: `tests/test_metadata.py` writes `655 #7 $a Fiktionale Darstellung $0
-#: (DE-588)1071854844 $2 gnd-content`, and `marc_fields` reads that tag back.
-#: **Not `338`**, which is RDA's carrier field and takes an RDA term. The row in
-#: hand holds a GND number and a GND caption, so naming the RDA word for it
-#: would be the crosswalk `marc_fields` refuses in as many words.
-#:
-#: **The absences are the rule rather than a short list.** A pair with no entry
-#: writes `650` and the vocabulary's plain code, which is what a record that
-#: declared nothing says and is the only thing available for a kind the
-#: vocabulary cannot spell: there is no `lcsh-carrier`, so an LCSH row carrying
-#: a kind exports without it and `tests/test_marc.py` pins that loss. The key
-#: admits a null kind so one lookup answers for every row; no entry carries one,
-#: because a record that declared nothing has nothing to spell.
-_HEADING_KIND_FIELD: Final[
-    dict[tuple[ClassificationScheme, HeadingKind | None], tuple[str, str]]
-] = {
-    (ClassificationScheme.GND, HeadingKind.CONTENT): ("655", "gnd-content"),
-    (ClassificationScheme.GND, HeadingKind.CARRIER): ("655", "gnd-carrier"),
 }
 
 
@@ -277,7 +136,7 @@ _ILLEGAL_XML: Final = re.compile(
 def _text(value: object) -> str:
     """One subfield's value, as MARCXML may carry it.
 
-    Normalised to NFC, because `marc_fields` normalises what it reads:
+    Normalised to NFC, because `metadata._marc_text` normalises what it reads:
     a round trip through two different normal forms compares unequal while
     rendering identically, which is the defect that measurement records for the
     DNB. Control characters dropped: see `_ILLEGAL_XML`.
@@ -314,7 +173,7 @@ def _datafield(
 def _credited_names(author: str | None) -> list[str]:
     """The `author` column split back into the people it names.
 
-    **The exact inverse of `Fields.authors`**, which joins the names it
+    **The exact inverse of `metadata._marc_authors`**, which joins the names it
     read with `", "`. So a record this app wrote, read back and written again
     names the same people in the same order.
 
@@ -326,13 +185,6 @@ def _credited_names(author: str | None) -> list[str]:
     author case for everything the app itself wrote. A member who typed a name
     in catalogue order is split, and that is the cost of the column being one
     string rather than a table.
-
-    **Duplicates are kept where `authors.split_authors` drops them**, so a
-    stored `"Tolkien, Tolkien"` is one author on a card and two `700` fields
-    here. Left as it is: this serialises the column and the column says what
-    it says, and a writer quietly disagreeing with the card would be a second
-    answer to who wrote the book. It is also what makes the repeated field
-    `EXPORT_PAGE_RECORDS` is measured against reachable.
     """
     return [name.strip() for name in (author or "").split(",") if name.strip()]
 
@@ -347,18 +199,17 @@ def _record_element(book: Book) -> ElementTree.Element:
     | Field | From | Read back by |
     |---|---|---|
     | `001` | `books.id` | nothing: it identifies the record in this system |
-    | `020 $a` | `isbn` | `Fields.isbn` |
-    | `041 0# $a` | `language` | `Fields.language` |
+    | `020 $a` | `isbn` | `metadata._marc_isbn` |
+    | `041 0# $a` | `language` | `metadata._marc_language` |
     | `050 #4 $a` | an `lcc` classification | this module's `_classifications` |
-    | `082 04 $a` | a `ddc` classification | `Fields.ddc_headings` |
-    | `100 0# $a` | the first credited name | `Fields.authors` |
-    | `245 10 $a $b $n $p` | `title`, `subtitle`, `series_index`, `series_name` | `Fields.title_statement` |
-    | `264 #1 $b $c` | `publisher`, `year` | `Fields.publisher`, `Fields.year` |
+    | `082 04 $a` | a `ddc` classification | `metadata._marc_ddc` |
+    | `100 0# $a` | the first credited name | `metadata._marc_authors` |
+    | `245 10 $a $b $n $p` | `title`, `subtitle`, `series_index`, `series_name` | `metadata._marc_title` |
+    | `264 #1 $b $c` | `publisher`, `year` | `metadata._marc_publisher`, `_marc_year` |
     | `300 ## $a` | `page_count` | `bibliographic.pages_from_extent` |
-    | `520 ## $a` | `description` | `Fields.description` |
-    | `650 #7 $a $0 $2` | a `gnd` or `lcsh` subject | `Fields.controlled_subjects`, this module |
-    | `655 #7 $a $0 $2` | a `gnd` content or carrier term | `Fields.controlled_subjects` |
-    | `700 0# $a $4` | every credited name after the first | `Fields.authors` |
+    | `520 ## $a` | `description` | `metadata._marc_description` |
+    | `650 #7 $a $0 $2` | a `gnd` or `lcsh` classification | `metadata._dnb_subjects`, this module |
+    | `700 0# $a $4` | every credited name after the first | `metadata._marc_authors` |
 
     **`100` and `700` carry first indicator `0`, "forename".** That is the
     specification's name for a personal name in direct order, which is what
@@ -369,20 +220,20 @@ def _record_element(book: Book) -> ElementTree.Element:
     is not, and their filing would be wrong for every author with more than one
     forename.
 
-    **`700` carries `$4 aut`.** `Fields` reads a `700`
+    **`700` carries `$4 aut`.** `metadata._marc_author_entries` reads a `700`
     only when its relator code says the person wrote the thing, since
     translators and editors arrive in the same field. Without `$4` every author
     after the first is dropped on the way back in, and the batch would look
     correct: one author instead of three, with nothing failing.
 
     **`245` uses `$n` and `$p` for a series, which is what the reader does.**
-    `Fields.title_statement` treats `$a` as the collective title and `$p` as the
+    `metadata._marc_title` treats `$a` as the collective title and `$p` as the
     part somebody is holding, so a Book with a series writes the series name in
     `$a` and its own title in `$p`. Writing the title in `$a` and the series
     somewhere else would read back as a book whose title is the series.
 
     **The second indicator of `245` is `0`, not the number of non-filing
-    characters.** `marc_fields` strips the non-sorting delimiters on the
+    characters.** `metadata._marc_text` strips the non-sorting delimiters on the
     way in, so a stored title begins at its first character and there is nothing
     for a receiving system to skip. A non-zero count here would make it skip
     real letters.
@@ -436,7 +287,7 @@ def _series_number(index: float | None) -> str | None:
     """A series index as `245 $n` writes it.
 
     Whole numbers without the decimal point, because `3.0` is not how a volume
-    is numbered and `Fields.title_statement` reads the first digit run anyway, so
+    is numbered and `metadata._marc_title` reads the first digit run anyway, so
     `3.5` reads back as 3. **A fractional index does not survive the round
     trip**, and that is a property of `$n` being free text rather than something
     this writer can fix: the field carries `Bd. 3` and `[1]` in real records.
@@ -481,60 +332,27 @@ def _classifications(book: Book) -> Iterator[ElementTree.Element | None]:
 
 
 def _subject_fields(book: Book) -> Iterator[ElementTree.Element | None]:
-    """The authority controlled headings, with `$2` naming the vocabulary.
-
-    **`650` for a subject and `655` for a content or carrier term**, which is
-    `_HEADING_KIND_FIELD` and not a rule of its own.
+    """The subject headings: `650`, with `$2` naming the vocabulary.
 
     **`$a` is the caption and `$0` is the identifier, which is the same split
     the table stores.** A GND row keeps its number in `$0` with the
     `(DE-588)` prefix put back on, because that prefix is how MARC says which
-    authority file a number belongs to and `Subfields.gnd_identifier` reads
+    authority file a number belongs to and `metadata._gnd_identifier` reads
     nothing without it.
 
-    **What the record was asserting is carried rather than flattened, and the
-    reader it goes back to is not the only one that matters.** `sru.py` serves
-    this same record to a stranger who sent no session, so a heading written as
-    a subject is this catalogue telling another institution that a disc is what
-    a book is about, and their ingest has no way to know otherwise.
-    `schemas/public.py` states the same choice for the JSON payload, which
-    already publishes the kind: these are the two halves of one public server
-    agreeing rather than a new position.
-
-    **A row with no caption still writes a field, and that field reaches a
-    stranger.** `_datafield` returns None only when *every* subfield is empty, so
-    a caption-less row emits the identifier and the vocabulary with no `$a`:
-    measured, `<datafield tag="655" ind1=" " ind2="7">` carrying `$0` and `$2`
-    alone. Every reader skips it, `Fields.controlled_subjects` included, so no
-    round trip can see it, which is why the arm pinning this asserts the bytes
-    rather than the parse.
-
-    **This paragraph used to claim such a row writes no field and cannot**, a
-    claim that was false of `650` before this and became false of `655` here,
-    which is the worse half: a genre or form field with no term is a stranger
-    receiving a vocabulary code and an identifier and nothing to print.
-    `Classification.label` is nullable and a MARC `082` supplies none, so it is
-    reachable rather than hypothetical. **Whether such a field should be emitted
-    at all is a behaviour question on a public path and has its own ticket**;
-    writing the number into `$a` instead is refused either way, because that puts
-    an identifier where a receiving catalogue prints a phrase.
+    **A GND row with no caption writes no field, and cannot.** `650` without
+    `$a` is a heading with no heading; `metadata._dnb_subjects` skips it, and so
+    does every other reader. `Classification.label` is nullable and a MARC `082`
+    supplies none, so this is reachable: a Book whose GND row arrived without a
+    caption exports without that subject. Writing the number into `$a` instead
+    would put an identifier where a receiving catalogue prints a phrase.
     """
     for entry in book.classifications:
         # Coerced for `_classifications`'s reason: a stored scheme is a `str`.
         scheme = ClassificationScheme(entry.scheme)
-        vocabulary = _SUBJECT_SOURCE.get(scheme)
-        if vocabulary is None:
+        source = _SUBJECT_SOURCE.get(scheme)
+        if source is None:
             continue
-        # **Coerced although the lookup below would match without it**, which is
-        # the opposite direction from `_classifications`'s trap and the reason to
-        # say so here: `HeadingKind` is a `StrEnum`, so a stored `"carrier"`
-        # hashes and compares equal to the member and the pair would answer
-        # correctly anyway. What the coercion buys is that the value is a member
-        # from this line on, so an `is` test somebody adds later is not silently
-        # False for every stored row, which is the failure the comment above
-        # records for `scheme`.
-        kind = HeadingKind(entry.kind) if entry.kind is not None else None
-        tag, source = _HEADING_KIND_FIELD.get((scheme, kind), ("650", vocabulary))
         # LCSH stores the authorised heading string itself as `number`, since
         # the record carries no identifier for one. So the caption is the
         # number there and the label everywhere else, which is
@@ -545,7 +363,7 @@ def _subject_fields(book: Book) -> Iterator[ElementTree.Element | None]:
         )
         # ind2 `7`: the source of the heading is named in `$2`.
         yield _datafield(
-            tag, " ", "7", [("a", caption), ("0", identifier), ("2", source)]
+            "650", " ", "7", [("a", caption), ("0", identifier), ("2", source)]
         )
 
 
@@ -571,107 +389,22 @@ def record_element(book: Book) -> ElementTree.Element:
     return record
 
 
-def _wrapper() -> tuple[str, str]:
-    """The two halves of the `<collection>` a streamed export is written into.
-
-    **Cut out of the empty document rather than spelled.** A streaming writer
-    never holds the whole element, which is the point of it, so the wrapper has
-    to be produced without one. Writing it as a literal would put the XML
-    declaration's quoting, the attribute's quoting and the namespace in a
-    second place to keep in step with `ElementTree`, and this repository has
-    paid repeatedly for a rule that lists the spellings of something it could
-    derive. So the empty collection is serialised once, at import, by the same
-    call that serialises every record, and split at its closing tag.
-
-    `short_empty_elements=False` is what makes that split exist: without it an
-    element with no children is written `<collection ... />` and there is no
-    closing tag to cut at. It is also why `write([])` now ends in an explicit
-    closing tag where it used to self close. The same document, and the only
-    difference this derivation makes to any output.
-    """
-    empty = ElementTree.tostring(
-        ElementTree.Element("collection", {"xmlns": NAMESPACE}),
-        encoding="unicode",
-        xml_declaration=True,
-        short_empty_elements=False,
-    )
-    cut = empty.rindex("</")
-    return empty[:cut], empty[cut:]
-
-
-_COLLECTION_OPEN, _COLLECTION_CLOSE = _wrapper()
-
-
-def stream(pages: Iterable[Iterable[Book]]) -> Iterator[str]:
-    """A shelf as one MARCXML `<collection>`, a page of Books at a time.
+def write(books: Iterable[Book]) -> str:
+    """A shelf as one MARCXML `<collection>`.
 
     Takes Books somebody else resolved, which for the export route means
     `Shelf.seen_by`. Nothing here filters, and nothing here may: a serialiser
     that decided visibility would be a second answer to the question
     `shelf.py` exists to answer once.
 
-    **No `<collection>` element is ever built**, so the peak is one page of
-    XML rather than a tree over the whole shelf, which was the other half of
-    the cost: an `Element` tree is several times the size of the string it
-    prints to.
-
-    **Pages rather than a flat sequence of Books, because the page is the
-    chunk.** One string is yielded per page and not one per record: a
-    `StreamingResponse` over a sync iterator hands every chunk to
-    `anyio.to_thread.run_sync`, one ASGI `send` and two more hops through this
-    app's `SecurityHeadersMiddleware`. Measured over 20,000 records, that
-    dispatch is 3,064 ms in total when the chunk is a record against 5.7 ms
-    when it is a page. **Nothing here reads a page's length**, so this
-    signature asks the caller to have chosen one rather than enforcing a size:
-    `write` below hands over the whole shelf as a single page and is right to.
-
-    **Any failure is loud at the receiver, and that is a property of writing
-    the closing tag last.** The opening tag is yielded before `pages` is
-    touched at all, and a `StreamingResponse` sends its status line before it
-    pulls a chunk, so **every** failure from here on answers 200: not only one
-    part way through, but the walk's very first query coming back an error.
-    What each leaves is a `<collection>` that is never closed, which no XML
-    parser accepts, so a half written catalogue exchange is a parse error on
-    the cataloguer's side rather than a short file that reads as complete.
-    That is the silence `docs/decisions.md` refuses for an oversized upload,
-    and it is the trade streaming makes: a clean 500 for a body that cannot be
-    mistaken for a whole one. Anything watching this route has to read the
-    body rather than the status.
-
-    A record's tags are unqualified and the namespace is declared once on the
-    wrapper, so a record serialised on its own here is correct only inside
-    that wrapper. `record_element` is the function for a caller that needs a
-    record to stand alone.
+    Written whole rather than streamed. The caller has the whole shelf in
+    memory already, since the query returned it, so an incremental writer would
+    save nothing and would put the namespace declaration in the caller.
     """
-    yield _COLLECTION_OPEN
-    for page in pages:
-        yield "".join(
-            ElementTree.tostring(_record_element(book), encoding="unicode")
-            for book in page
-        )
-    yield _COLLECTION_CLOSE
-
-
-def write(books: Iterable[Book]) -> str:
-    """A shelf as one MARCXML `<collection>`, whole.
-
-    **No production caller, and that is the state of it rather than an
-    omission.** The export route reached for this and was the defect: a
-    function that materialises a document has no bound, and the shelf it was
-    handed had none either. `sru.py` embeds one record at a time through
-    `record_element`. What is left is `tests/test_marc.py`, which exports a
-    Book and reads it back through the parser that reads live DNB and K10plus
-    answers, and needs a document to do it.
-
-    **A route wanting MARCXML wants `stream`.** That is not advice this
-    docstring can enforce, so it is enforced next to it:
-    `tests/routers/test_imports_marc.py::TestNoProductionModuleWritesAWholeCollection`
-    parses every module outside the tests and fails on a call to this.
-
-    One page handed to `stream`, so there is one serialisation of a collection
-    here and not two to keep in step.
-    """
-    return "".join(stream([books]))
+    collection = ElementTree.Element("collection", {"xmlns": NAMESPACE})
+    for book in books:
+        collection.append(_record_element(book))
+    return ElementTree.tostring(collection, encoding="unicode", xml_declaration=True)
 
 
 # ── Reading ───────────────────────────────────────────────────────────────────
@@ -744,23 +477,14 @@ def _parsed(content: bytes) -> ElementTree.Element:
     if _DOCTYPE_BYTES in content:
         raise MarcError("That file carries a document type declaration, which is refused.")
     try:
-        parser = ElementTree.XMLParser(target=xml_parse.DepthBoundedTree())  # noqa: S314  doctype refused above, bytes capped, depth bounded
-        return xml_parse.fed(parser, content)
-    except (ElementTree.ParseError, ValueError, LookupError) as error:
+        return ElementTree.fromstring(content)
+    except (ElementTree.ParseError, ValueError) as error:
         # **`ValueError` as well as `ParseError`, and it is not defensive.**
         # `ElementTree.fromstring` raises `ValueError("multi-byte encodings are
         # not supported")` for any XML declaration naming one, EUC-JP, Shift_JIS,
         # gb2312, big5 and UTF-7 among them. Measured through the route: without
         # this arm a 92 byte body is a **500** with a traceback, where the
         # documented answer to an encoding this reader refuses is a 400.
-        #
-        # **`LookupError` for the declaration naming an encoding Python has
-        # never heard of**, which is neither of the other two and was the same
-        # 500. Found by generating the declaration rather than listing it: the
-        # `ValueError` arm covered one member of the class, the multi-byte
-        # codecs, and nothing covered the rest. The upload is parsed from
-        # bytes, so the declaration is read; the catalogue and feed doors parse
-        # text, where a declaration names nothing and this cannot arise.
         raise MarcError(f"That file is not XML this reader can take: {error}") from error
 
 
@@ -774,7 +498,7 @@ def _parsed(content: bytes) -> ElementTree.Element:
 SOURCE: Final = "marc"
 
 
-def _call_number(entry: Subfields) -> str | None:
+def _call_number(entry: metadata._Subfields) -> str | None:
     """An `050` field as one Library of Congress call number.
 
     `$a` is the classification and `$b` the item number, and they are one
@@ -787,8 +511,8 @@ def _call_number(entry: Subfields) -> str | None:
     return " ".join(parts) or None
 
 
-def _extra_headings(fields: Fields) -> list[Heading]:
-    """The two schemes `marc_fields.py` has no reader for.
+def _extra_headings(fields: dict[str, list[metadata._Subfields]]) -> list[Heading]:
+    """The two schemes `metadata.py` has no MARC reader for.
 
     It reads Dewey from `082` and GND from the subject fields, because those are
     what the catalogues it queries send. A file a library hands over carries the
@@ -797,12 +521,12 @@ def _extra_headings(fields: Fields) -> list[Heading]:
     * `050` is the Library of Congress call number, which is the field a MARC
       export exists to carry: it is what the receiving library shelves by.
     * `650` with `$2 lcsh` and no `$0` is a Library of Congress subject
-      heading. `Fields.controlled_subjects` puts its `$a` in `subjects` and writes
+      heading. `metadata._dnb_subjects` puts its `$a` in `subjects` and writes
       no heading, because it looks for a GND number and there is none. The
       authorised string **is** the identifier for LCSH, which is
       `ClassificationScheme` saying so, so it goes in `number`.
 
-    **The `$2` reader is `Subfields.subject_vocabulary` since #134**, where this
+    **The `$2` reader is `metadata._subject_vocabulary` since #134**, where this
     module used to hold a second copy called `_uncontrolled_source`. Both lower
     cased and both existed to make one vocabulary one string; two copies of that
     is one rule that can drift, and the case folding is exactly the half a
@@ -814,26 +538,26 @@ def _extra_headings(fields: Fields) -> list[Heading]:
     """
     headings = [
         Heading(ClassificationScheme.LCC, number)
-        for entry in fields.get("050")
+        for entry in fields.get("050", [])
         for number in [_call_number(entry)]
         if number
     ]
     headings += [
         Heading(ClassificationScheme.LCSH, heading)
-        for entry in fields.get("650")
-        if entry.subject_vocabulary("650") == "lcsh"
-        and entry.gnd_identifier() is None
+        for entry in fields.get("650", [])
+        if metadata._subject_vocabulary("650", entry) == "lcsh"
+        and metadata._gnd_identifier(entry) is None
         for heading in [bibliographic.strip_isbd_punctuation(entry.get("a", ""))]
         if heading
     ]
     return headings
 
 
-def _record(fields: Fields) -> Record | None:
+def _record(fields: dict[str, list[metadata._Subfields]]) -> Record | None:
     """One MARC record as evidence about a book, or None if it names none.
 
-    **Every scalar is read by `marc_fields.py`**, so a record this app imports
-    is read exactly as a record this app looks up is. What is here
+    **Every scalar is read by `metadata.py`'s own reader**, so a record this
+    app imports is read exactly as a record this app looks up is. What is here
     rather than there is the policy that differs, and there are three pieces of
     it.
 
@@ -854,15 +578,28 @@ def _record(fields: Fields) -> Record | None:
     authority store where every other entry has been checked.
 
     **`700` needs `$4 aut` to count as an author**, which is
-    `marc_fields.Fields`'s rule and not this reader's. Where nothing
-    is credited with writing the book, `Fields.credited_names` names everybody
+    `metadata._marc_author_entries`'s rule and not this reader's. Where nothing
+    is credited with writing the book, `_marc_credited_names` names everybody
     the record names, which is what an edited volume looks like in MARC.
+
+    **A fourth divergence is known and not fixed here, because the fix is in
+    `metadata.py`.** `_marc_isbn` drops the commonest legacy `020 $a` spelling:
+    measured, `9783161484100`, `978-3-16-148410-0` and `9783161484100 :` all
+    parse, and `9783161484100 (pbk.)` returns None. The ISBD colon is stripped
+    and a parenthesised qualifier is not, because that parser was written
+    against the DNB and K10plus, which put the qualifier in `$q`. A file another
+    library hands over is exactly where the inline spelling lives, and the ISBN
+    is this importer's primary match key, so such a record silently falls back
+    to the weaker key. Raised as an issue rather than worked around here:
+    stripping the qualifier in `marc.py` would be a second notion of what an
+    `020` says, which is what this module exists not to build.
     """
-    title, subtitle, series_name, series_index = fields.title_statement()
+    title_entry = (fields.get("245") or [metadata._Subfields(())])[0]
+    title, subtitle, series_name, series_index = metadata._marc_title(title_entry)
     if not title:
         return None
 
-    subjects, gnd = fields.controlled_subjects()
+    subjects, gnd = metadata._dnb_subjects(fields)
 
     # `from_upload`, not `Record(...)`: an over-wide string in a file somebody
     # handed over is cut to the column rather than dropped, because
@@ -870,19 +607,19 @@ def _record(fields: Fields) -> Record | None:
     # full, and the network path it differs from, are on that classmethod.
     return Record.from_upload(
         source=SOURCE,
-        isbn=fields.isbn(),
+        isbn=metadata._marc_isbn(fields),
         title=title,
         subtitle=subtitle,
-        author=fields.authors() or fields.credited_names(),
-        publisher=fields.publisher(),
-        year=fields.year(),
-        description=fields.description(),
-        language=fields.language(),
-        page_count=bibliographic.pages_from_extent(fields.extent()),
+        author=metadata._marc_authors(fields) or metadata._marc_credited_names(fields),
+        publisher=metadata._marc_publisher(fields),
+        year=metadata._marc_year(fields),
+        description=metadata._marc_description(fields),
+        language=metadata._marc_language(fields),
+        page_count=bibliographic.pages_from_extent(metadata._marc_extent(fields)),
         series_name=series_name,
         series_index=series_index,
         subjects=tuple(subjects),
-        headings=tuple(fields.ddc_headings() + _extra_headings(fields) + gnd),
+        headings=tuple(metadata._marc_ddc(fields) + _extra_headings(fields) + gnd),
     )
 
 
@@ -914,7 +651,7 @@ def read(content: bytes) -> ParsedMarc:
     # `iter` rather than `findall`, so a `<record>` reached through a wrapper
     # is found: an SRU response nests them under `<recordData>`, and a
     # cataloguer exporting from their own system may hand over either shape.
-    nodes = list(root.iter(marc_fields.RECORD_TAG))
+    nodes = list(root.iter(f"{metadata._MARC}record"))
     if not nodes:
         # A bare `<record>` with no namespace is the other real shape, and it
         # is worth naming rather than reporting an empty file: several tools
@@ -938,7 +675,7 @@ def read(content: bytes) -> ParsedMarc:
     records = []
     skipped = 0
     for node in nodes:
-        record = _record(Fields(node))
+        record = _record(metadata._marc_fields(node))
         if record is None:
             skipped += 1
         else:

@@ -8,47 +8,10 @@
 import type { CustomFieldKind } from "./customFieldKind.ts";
 
 /**
- * A field this Library has defined, as it looks to the Member asking.
- *
- * **Not a row**, which is why there is no `from_attributes` here and the
- * three routes build this explicitly. `renamable` is an answer about the
- * caller, so a model that could be validated straight off a `CustomField`
- * would be one somebody can build without supplying it.
- *
- * **`renamable` rather than the author's member id, and the choice is a
- * containment rather than a disclosure.** `fields.Fields` is the only module
- * that reads `custom_fields.created_by_user_id`, with one stated exception:
- * `backup.py` selects every column of every table it archives, so it reads
- * the column while naming it nowhere, and it is admin only for that reason.
- * **The sites arguing the design from that containment are named and not
- * counted**, because the count that stood here said three and the list that
- * replaced it elsewhere named four and missed the register: `fields.py`,
- * `models.py`, this module, `docs/data-model.md` and `docs/decisions.md`.
- * `tests/test_fields.py::TestFieldsIsTheOnlyReaderOfTheAuthorColumn`
- * enforces it in two instruments, because a declaration is not a statement
- * and the source walk cannot see one. A
- * `created_by_user_id` field here would be read by Pydantic with no
- * attribute access anywhere in the source, so it would pass that guard while
- * falsifying what it guards, and every client would then hold its own copy
- * of the rule. `rename_custom_field` says what the server does with the
- * column; this says what the server would answer.
- *
- * **It is viewer scoped and therefore not cacheable across members.** The
- * same field answers differently to two Members and to the same Member
- * before and after an admin flag changes. A client that has gone stale is
- * refused at the route, which is why the refusal has to survive being shown:
- * the control is advice and the 403 is the guarantee.
- *
- * **Stale the other way is refused by nothing, and nothing here can refuse
- * it.** A client holding `false` where the server would now answer `true`
- * offers no control, so no request is made and the route never sees one.
- * That direction costs an affordance rather than a guarantee, and the
- * client names it at its own site because only the client knows its cache
- * went stale.
+ * A field this Library has defined.
  */
 export interface CustomFieldOut {
   id: number;
   kind: CustomFieldKind;
   name: string;
-  renamable: boolean;
 }

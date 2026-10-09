@@ -21,7 +21,6 @@ import logging
 import re
 from typing import TYPE_CHECKING, Any, Final
 
-import book_columns
 import covers
 import fetch
 import targets
@@ -55,57 +54,8 @@ class GoogleBooksError(Exception):
 CATEGORY_SEPARATOR: Final = "; "
 
 
-def join_categories(categories: list[str], *, limit: int | None = None) -> str | None:
-    """The stored form of a subject list, dropping one that carries the separator.
-
-    **Dropped here rather than at each producer, because this is the one place
-    that knows the separator and so reaches every writer of the column.** A
-    subject containing a bare `;` is not representable in this column:
-    `split_categories` below splits on that character, so storing one serves two
-    subjects to every reader and **manufactures** an assertion nobody made. Two
-    upstream joins build their value without looking inside a single subject
-    (`_volume_to_fields` here and `catalogue.Record.as_match`), which is what makes
-    that reachable. Dropping loses a subject, which asserts nothing false.
-
-    **Dropped and logged rather than raised**, which is
-    `classifications.bounded_headings`' arrangement for the same shape: this runs
-    inside a catalogue read, so raising would lose a whole record over one
-    subject. `schemas.book.normalised_subjects` is what refuses instead, at both
-    request bodies that carry this field, because there a caller chose the value
-    and there is somebody to tell.
-
-    **`limit` caps the count, and a caller that produces a value for `BookMatch`
-    has to pass it.** That model refuses past its own count, and
-    `routers/books._match_rows` builds it inside a `try` that drops the **row**,
-    so an unbounded producer costs a whole search result rather than a field.
-    `catalogue.Record.match_headings` carries the same rule for headings and the
-    incident that bought it. The number is not read here because it lives in
-    `schemas/book.py`, which imports this module.
-
-    **Dropped first and truncated second**, for `bounded_headings`' reason: slicing
-    to the limit before the drop would let the separator bearing entries at the
-    front hide good subjects behind them.
-    """
-    keepable = [
-        subject for subject in categories if CATEGORY_SEPARATOR.strip() not in subject
-    ]
-    if len(keepable) != len(categories):
-        logger.info(
-            "Dropped %d of %d subjects: this column stores them joined on %r, so "
-            "one carrying it would read back as two",
-            len(categories) - len(keepable),
-            len(categories),
-            CATEGORY_SEPARATOR.strip(),
-        )
-    if limit is not None and len(keepable) > limit:
-        logger.info(
-            "Kept the first %d of %d subjects: a producer's value may not exceed "
-            "what the request model accepts, or the model refuses the whole row",
-            limit,
-            len(keepable),
-        )
-        keepable = keepable[:limit]
-    return CATEGORY_SEPARATOR.join(keepable) or None
+def join_categories(categories: list[str]) -> str | None:
+    return CATEGORY_SEPARATOR.join(categories) or None
 
 
 def split_categories(value: str | None) -> list[str]:
@@ -279,21 +229,20 @@ def _series_from(info: dict[str, Any]) -> tuple[str | None, float | None]:
     return name, index
 
 
-#: "Dune, Book 1". The parenthesised shape is `_series_in_parentheses`, read
-#: without an expression for the reason it gives. The number is `[0-9]` for the
-#: reason it gives too: `\d` reads another script's digits as a number.
-_BOOK_SUFFIX: Final = re.compile(
-    r"^(?P<ignored>.*?),\s*book\s+([0-9]+(?:\.[0-9]+)?)\s*$", re.IGNORECASE
+_SERIES_PATTERNS = (
+    # "Dune (Dune Chronicles #1)" and "Dune (Dune Chronicles, Book 1)"
+    re.compile(r"\(([^)]+?)[,\s]+(?:#|book\s+|bk\.?\s*)(\d+(?:\.\d+)?)\)\s*$", re.I),
+    # "Dune, Book 1"
+    re.compile(r"^(?P<ignored>.*?),\s*book\s+(\d+(?:\.\d+)?)\s*$", re.I),
 )
 
 
 def _series_from_title(title: str) -> tuple[str | None, float | None]:
-    found = _series_in_parentheses(title)
-    if found is not None:
-        name, number = found
-        return name.strip(), _to_index(number)
+    match = _SERIES_PATTERNS[0].search(title)
+    if match:
+        return match.group(1).strip(), _to_index(match.group(2))
 
-    match = _BOOK_SUFFIX.match(title)
+    match = _SERIES_PATTERNS[1].match(title)
     if match:
         # This shape names no series, only a position in one. Reporting the
         # number without a name would put the book in a nameless series, so
@@ -301,103 +250,6 @@ def _series_from_title(title: str) -> tuple[str | None, float | None]:
         return None, _to_index(match.group(2))
 
     return None, None
-
-
-def _series_in_parentheses(title: str) -> tuple[str, str] | None:
-    """The series name and number in "Dune (Dune Chronicles #1)", raw, or None.
-
-    **The answer of the expression
-    `\\(([^)]+?)[,\\s]+(?:#|book\\s+|bk\\.?\\s*)([0-9]+(?:\\.[0-9]+)?)\\)\\s*$`,
-    case blind, searched, read in one pass rather than by backtracking.** That
-    expression tried every `(` and, from each, every length of the name, so a
-    title of 16,000 characters cost 5.06 seconds, measured on CPython 3.14.0,
-    on the event loop where a search's deadline cannot interrupt it. Google
-    writes the title, and nothing ahead of this bounds it.
-
-    Read from the close inwards, because the expression is anchored there: the
-    number, then the marker right before it, then the separators before that,
-    as many as there are, since the name is matched lazily. The name runs from
-    the first `(` after any earlier `)` to those separators. Held to the
-    expression's answer over generated titles in `tests/test_google_books.py`,
-    which keeps it as the oracle: `str.isspace` and `lower` are the classes
-    `\\s` and the case blind letters are, measured over every code point.
-
-    **The number is ASCII digits, where the expression it replaced said `\\d`**,
-    which admits every script's decimal digits and which `float` then accepts.
-    That is the quiet half of the defect `tests/test_house_rules.py` refuses an
-    unnarrowed digit predicate for, so a title numbering its series in another
-    script's digits now reads as no series rather than as a number nobody typed.
-    """
-    body = title.rstrip()
-    if not body.endswith(")"):
-        return None
-    close = len(body) - 1
-    # The number: digits, or digits, a point and digits, ending at the close.
-    end = close
-    start = end
-    while start > 0 and _is_ascii_digit(body[start - 1]):
-        start -= 1
-    if start == end:
-        return None
-    if start >= 2 and body[start - 1] == "." and _is_ascii_digit(body[start - 2]):
-        whole = start - 1
-        while whole > 0 and _is_ascii_digit(body[whole - 1]):
-            whole -= 1
-        start = whole
-    number = body[start:end]
-    # The marker right before it: `#`, `book` and whitespace, or `bk`, an
-    # optional point and optional whitespace.
-    at = start
-    if at >= 1 and body[at - 1] == "#":
-        marker = at - 1
-    else:
-        spaces = at
-        while spaces > 0 and body[spaces - 1].isspace():
-            spaces -= 1
-        if spaces < at and spaces >= 4 and _folds_to(body[spaces - 4 : spaces], "book"):
-            marker = spaces - 4
-        else:
-            point = spaces - 1 if spaces >= 1 and body[spaces - 1] == "." else spaces
-            if point >= 2 and _folds_to(body[point - 2 : point], "bk"):
-                marker = point - 2
-            else:
-                return None
-    # The separators before the marker, as many as there are.
-    run = marker
-    while run > 0 and _is_separator(body[run - 1]):
-        run -= 1
-    if run == marker:
-        return None
-    # The opening parenthesis: the first after the last `)` before the close.
-    opening = body.find("(", body.rfind(")", 0, close) + 1, run)
-    if opening == -1:
-        return None
-    if opening + 1 < run:
-        return body[opening + 1 : run], number
-    # The parenthesis opens straight onto the separators: the name is the
-    # first of them, if one is left over for the separator.
-    if marker - run >= 2:
-        return body[run], number
-    return None
-
-
-def _is_ascii_digit(character: str) -> bool:
-    """A character `[0-9]` matches."""
-    return character.isascii() and character.isdecimal()
-
-
-def _is_separator(character: str) -> bool:
-    """A character `[,\\s]` matches."""
-    return character == "," or character.isspace()
-
-
-def _folds_to(text: str, word: str) -> bool:
-    """Whether `text` is `word` with any letter in either case.
-
-    `lower` rather than a comparison of ASCII, because a case blind expression
-    also matches the Kelvin sign for `k`, and so does this.
-    """
-    return len(text) == len(word) and all(a.lower() == b for a, b in zip(text, word, strict=True))
 
 
 def _to_index(raw: str) -> float | None:
@@ -509,21 +361,20 @@ async def lookup_by_isbn(isbn: str, api_key: str) -> dict[str, Any] | None:
 #:
 #: **`\A` and `\Z`, not `^` and `$`.** Python's `$` also matches immediately
 #: before a trailing newline, so `^[A-Za-z0-9_-]{12}$` admits
-#: `"abcdefghijkl\n"`, which is a newline in a URL path. The browser spells the
+#: `"abcdefghijkl\n"`, which is a newline in a URL path. `takeout.ts` spells the
 #: same rule with `^...$` and is right to: JavaScript's `$` without the `m` flag
 #: is end of input. `tests/test_google_books.py::TestTheVolumeIdBound` pins the
 #: newline directly rather than leaving it to the anchors being read correctly.
 #:
-#: **One rule spelled once in each tree, and the drift is guarded rather than
-#: regretted.** The browser's `stores.PRODUCED_VALUE.google_books` keeps a
-#: plugin's invented value out of a stored row, and `takeout.ts` asks it to keep
-#: a sidecar line that is not an id out of the browser's parse; this one keeps a
+#: **Three spellings of one rule, and the drift is guarded rather than
+#: regretted.** `takeout.ts`'s `VOLUME_ID` keeps a sidecar line that is not an
+#: id out of the browser's parse, `calibre.ts`'s `PRODUCED_VALUE.google_books`
+#: keeps a plugin's invented value out of a stored row, and this one keeps a
 #: stored row out of a URL. Only this one is a security bound, because only this
 #: one is on the server: `backup.restore` writes `book_identifiers` through Core
 #: and runs no Pydantic model, so a restored row reaches here having passed
-#: neither. `tests/test_google_books.py::TestTheShapeIsSpelledOncePerTree` is a
-#: census over the browser's source rather than a map of files, so a rule that
-#: moves is not a failure and a second spelling of it is.
+#: neither of the others. `tests/test_google_books.py::TestTheThreeSpellings`
+#: reads the two frontend files and fails if either has moved.
 VOLUME_ID: Final = re.compile(r"\A[A-Za-z0-9_-]{12}\Z")
 
 
@@ -649,21 +500,23 @@ def merge_into(book: object, match: BookMatch, *, overwrite: bool) -> list[str]:
     dictionary without failing mypy, and at runtime a dictionary raises on the
     first `getattr` rather than writing twelve unchecked columns, so a third
     call site inherits the bound instead of having to remember it. Twelve, not
-    eleven: the loop walks `book_columns.WORK_DETAIL` and `cover_url` is
-    assigned below it.
-
-    **The loop's set is asked for, not written out.** These are the descriptive
-    facts about the work, which is the same set the merge absorbs off a losing
-    row and the same one the MARC importer narrows to what its records carry;
-    `book_columns` refuses to import when a column of `books` is classified
-    nowhere, so a column added to the schema cannot quietly miss all three. The
-    two work facts it leaves out are `isbn`, which is one printing rather than
-    this copy, and `title`, whose spelling in a catalogue is often not this
-    library's: both are `book_columns.WORK_IDENTITY`.
+    eleven: the loop names eleven and `cover_url` is assigned below it.
     """
     changed: list[str] = []
 
-    for name in book_columns.WORK_DETAIL:
+    for name in (
+        "subtitle",
+        "author",
+        "publisher",
+        "year",
+        "description",
+        "page_count",
+        "language",
+        "categories",
+        "google_books_id",
+        "series_name",
+        "series_index",
+    ):
         incoming = getattr(match, name)
         if incoming in (None, "", []):
             continue

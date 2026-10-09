@@ -6,26 +6,20 @@ alone, and every count served here applies it. The temptation this module
 exists to resist is treating the collection as a second scoping axis beside
 privacy, because the two look alike from a distance and only one of them is
 enforced everywhere. See `docs/decisions.md`.
-
-**A name is a disclosure, and that half of the doctrine was wrong.** The
-paragraph above is about books and stays true; what it never covered is the
-label. A collection whose every book is hidden from the caller used to be
-served to them by name on every page load, and filing a book into a guessed id
-then succeeded and handed the name back. Who may be told a collection exists is
-`shelving.Shelving`, asked here and at the book write doors and nowhere else.
 """
 
 import logging
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from auth import require_admin
 from dependencies import CurrentUser, DbSession, RowId
-from models import Collection, User, fold_collection_name
+from models import Book, Collection, User, fold_collection_name
 from schemas import CollectionCreate, CollectionOut, CollectionUpdate
-from shelving import Shelving
+from shelf import Shelf
 
 logger = logging.getLogger("endpaper.collections")
 
@@ -56,28 +50,48 @@ def _named(db: Session, name: str, *, other_than: int | None = None) -> Collecti
     return query.first()
 
 
+def _counts(db: Session, user_id: int) -> dict[int, int]:
+    """How many books each collection holds, for this caller, in one statement.
+
+    **Filtered by `visible_to`, and that is not decoration.** A raw count would
+    publish, on a label every member can read, that somebody's private books
+    exist and how many. It also excludes trashed rows, so deleting the last
+    book on a shelf leaves the shelf reading 0 rather than claiming a book in
+    the bin.
+
+    One grouped query rather than a count per collection: this list is fetched
+    by the library filter, the book detail picker and the collections page, so
+    an N+1 here would be an N+1 nearly everywhere.
+    """
+    rows = (
+        Shelf.seen_by(db, user_id)
+        .select(Book.collection_id, func.count(Book.id))
+        .filter(Book.collection_id.isnot(None))
+        .group_by(Book.collection_id)
+        .all()
+    )
+    return {collection_id: count for collection_id, count in rows if collection_id is not None}
+
+
 @router.get("", response_model=list[CollectionOut])
 def list_collections(db: DbSession, current_user: CurrentUser) -> list[CollectionOut]:
-    """Every collection the caller may be told about, with their own counts.
+    """Every collection in the library, with the caller's own counts.
 
-    **Not every collection in the library**, which is what this used to be. A
-    collection whose every book is hidden from the caller is absent, because
-    its name is the caller's first and only evidence that somebody's books are
-    filed somewhere. `shelving.Shelving` is the rule and carries the three arms,
-    what stays uncovered, and why a row that vanishes and returns is correct.
+    Ordered case insensitively by name: "ebooks" sorting after "Zola" because
+    of its first letter's byte value is the kind of ordering a reader reads as
+    a bug.
 
-    One consequence worth knowing at this site: a listed row reading
-    `book_count: 0` used to mean "empty, or holding books you cannot see", and
-    now means empty, or holding only books you can see in the trash. The count
-    stopped being readable as a hidden total because the rows it could be read
-    against are gone.
+    **Still `func.lower` here, deliberately.** The fold that decides uniqueness
+    moved into Python and into `name_folded`; this one only decides sort order,
+    and switching it would change nothing a reader notices: both orderings sort
+    by code point, so `Ästhetik` lands past `z` either way. Putting it where a
+    German reader expects needs a collation rather than a fold, which is a
+    different problem with a different owner. See `docs/decisions.md`.
     """
-    shelving = Shelving.seen_by(db, current_user.id)
+    counts = _counts(db, current_user.id)
     return [
-        CollectionOut(
-            id=row.id, name=row.name, book_count=shelving.counts.get(row.id, 0)
-        )
-        for row in shelving.listable()
+        CollectionOut(id=row.id, name=row.name, book_count=counts.get(row.id, 0))
+        for row in db.query(Collection).order_by(func.lower(Collection.name)).all()
     ]
 
 
@@ -95,22 +109,13 @@ def create_collection(
     and an error would send them off to find it by hand. Renaming is the
     opposite case and does answer 409, because a rename onto an occupied name
     would silently merge two shelves.
-
-    **So a guessed name still confirms a collection exists, and that is left
-    open deliberately.** `uq_collections_name_folded` is global, so the
-    collision check cannot take a viewer without racing the index it exists to
-    front, and answering a collision any other way is a new status code on a
-    route that declares 201. What the guess no longer buys is the write: the
-    caller gets the row and `shelving.Shelving` then refuses to file anything
-    into it, which is the answer an unused id gets. `Shelving`'s docstring
-    carries this under what is not closed.
     """
     existing = _named(db, payload.name)
     if existing is not None:
         return CollectionOut(
             id=existing.id,
             name=existing.name,
-            book_count=Shelving.seen_by(db, current_user.id).counts.get(existing.id, 0),
+            book_count=_counts(db, current_user.id).get(existing.id, 0),
         )
 
     collection = Collection(name=payload.name, created_by_user_id=current_user.id)
@@ -142,20 +147,9 @@ def rename_collection(
     409 to. So it merges the pair once, into the lower id, and logs what it
     moved. Here there is a caller, and a caller who typed a name has asked for
     that name and not for two shelves to become one.
-
-    **And the same 404 for a collection this caller may not be told about**,
-    which is `shelving.Shelving.assignable`. This route is open to every member
-    and answers over the whole id space, so before it the 404-or-200 was an
-    existence oracle by id on a table of consecutive integers: closing the list
-    and leaving this would have moved a broadcast to a poll. The two answers
-    are now one.
-
-    The 409 is the other half and is not closed: a taken name still answers
-    differently from a free one, for the reason `create_collection` gives.
     """
-    shelving = Shelving.seen_by(db, current_user.id)
     collection = db.get(Collection, collection_id)
-    if collection is None or not shelving.assignable(collection.id):
+    if collection is None:
         raise HTTPException(status_code=404, detail="Collection not found")
 
     clash = _named(db, payload.name, other_than=collection_id)
@@ -171,7 +165,7 @@ def rename_collection(
     return CollectionOut(
         id=collection.id,
         name=collection.name,
-        book_count=shelving.counts.get(collection.id, 0),
+        book_count=_counts(db, current_user.id).get(collection.id, 0),
     )
 
 
@@ -196,16 +190,6 @@ def delete_collection(
     The second is the one worth keeping: a row left pointing at a destroyed
     collection is a dangling foreign key, and it is also why
     `PRAGMA foreign_keys=ON` is load bearing here.
-
-    **Deliberately not gated on `shelving.Shelving`, unlike the rename beside
-    it, and the reason is what gating would cost.** An admin has no privilege
-    over another member's private books, so a collection holding only those is
-    one no admin may be told about; refusing the delete there would make it
-    permanently undeletable while it still holds its name against
-    `uq_collections_name_folded`, and the only symptom would be a 409 nobody
-    can explain. What the ungated 404-or-204 discloses is an id, to an admin,
-    with no name in the response. That is the smaller of the two, and it is a
-    choice rather than an oversight.
     """
     collection = db.get(Collection, collection_id)
     if collection is None:

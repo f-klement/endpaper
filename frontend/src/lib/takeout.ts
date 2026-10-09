@@ -101,7 +101,6 @@
 import { boundText } from "./bookBounds";
 import { readEpub, type EpubFailure } from "./epub";
 import type { FileMetadata } from "./fileReaders";
-import { producedValue } from "./stores";
 import {
   openZip,
   ZipError,
@@ -116,10 +115,8 @@ import {
  * Measured at 3,643 bytes over the 24 in that export, smallest 2,434. 256 KiB
  * is seventy times the largest, which leaves room for a member who highlighted
  * a great deal and still refuses a file that is not a page of metadata.
- *
- * Exported, for `epub.MAX_PACKAGE_BYTES`'s reason.
  */
-export const MAX_SIDECAR_BYTES = 256 * 1024;
+const MAX_SIDECAR_BYTES = 256 * 1024;
 
 /**
  * How much one book file may inflate to.
@@ -134,10 +131,8 @@ export const MAX_SIDECAR_BYTES = 256 * 1024;
  * inflates up to 4.06 MiB more inside. So one book at a time costs up to about
  * 68 MiB and is released before the next is touched. The whole file has to be
  * in hand because a zip is read from its end.
- *
- * Exported, for `epub.MAX_PACKAGE_BYTES`'s reason.
  */
-export const MAX_BOOK_BYTES = 32 * 1024 * 1024;
+const MAX_BOOK_BYTES = 32 * 1024 * 1024;
 
 /**
  * How much more than its own size the archive may inflate to, plus one file's
@@ -194,10 +189,8 @@ export const MAX_BOOK_BYTES = 32 * 1024 * 1024;
  * document. What it does not charge is the 20 byte signature read, and each
  * archive's central directory, which is stored rather than deflated and so is a
  * slice of bytes already paid for.
- *
- * Exported, for `epub.MAX_PACKAGE_BYTES`'s reason.
  */
-export const MAX_INFLATION_RATIO = 20;
+const MAX_INFLATION_RATIO = 20;
 
 /**
  * The OCF signature, and it is a signature rather than a name.
@@ -218,6 +211,17 @@ const EPUB_MIMETYPE = "application/epub+zip";
 
 /** Method 0, stored. Spelled here because the sniff is about the storage. */
 const METHOD_STORED = 0;
+
+/**
+ * A Google Books volume id: twelve characters of the URL safe alphabet.
+ *
+ * Measured over all 24, every one twelve characters and every one distinct,
+ * including the two pairs of titles that differ only by a `(1)` suffix. It is
+ * a bound rather than a list of spellings, and it is what tells the volume id
+ * line of the sidecar's metadata block from the reading state line beside it
+ * without matching an English label that a German export does not carry.
+ */
+const VOLUME_ID = /^[A-Za-z0-9_-]{12}$/;
 
 /**
  * The reading state, and this one is English only.
@@ -452,19 +456,7 @@ function readSidecar(html: string): Sidecar | null {
   for (const entry of document.querySelectorAll("div.meta-entry")) {
     const text = entry.textContent ?? "";
     const value = labelled(text);
-    // **What tells the volume id line from the reading state line beside it is
-    // the shape**, rather than an English label a German export does not carry.
-    // Which shape that is belongs to the scheme, so it is asked of
-    // `lib/stores.ts` beside `StoreIdentifierScheme` rather than written here.
-    //
-    // **That makes this read a second consumer of a rule written for the first,
-    // and the cost is one character.** One more character admitted there is one
-    // more line admitted here, and a line that is not the id is a book filed
-    // under the reading state. `tests/lib/takeout.test.ts > reads no volume id
-    // out of a thirteen character metadata line` is where that turns red;
-    // `tests/lib/stores.test.ts` sweeps candidate lines through this read, so
-    // what is guarded is the call rather than the import.
-    if (value !== null && producedValue("google_books", value)) {
+    if (value !== null && VOLUME_ID.test(value)) {
       volumeId ??= value;
       continue;
     }

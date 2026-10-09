@@ -55,19 +55,18 @@ export const getListCollectionsUrl = () => {
 };
 
 /**
- * Every collection the caller may be told about, with their own counts.
+ * Every collection in the library, with the caller's own counts.
  *
- * **Not every collection in the library**, which is what this used to be. A
- * collection whose every book is hidden from the caller is absent, because
- * its name is the caller's first and only evidence that somebody's books are
- * filed somewhere. `shelving.Shelving` is the rule and carries the three arms,
- * what stays uncovered, and why a row that vanishes and returns is correct.
+ * Ordered case insensitively by name: "ebooks" sorting after "Zola" because
+ * of its first letter's byte value is the kind of ordering a reader reads as
+ * a bug.
  *
- * One consequence worth knowing at this site: a listed row reading
- * `book_count: 0` used to mean "empty, or holding books you cannot see", and
- * now means empty, or holding only books you can see in the trash. The count
- * stopped being readable as a hidden total because the rows it could be read
- * against are gone.
+ * **Still `func.lower` here, deliberately.** The fold that decides uniqueness
+ * moved into Python and into `name_folded`; this one only decides sort order,
+ * and switching it would change nothing a reader notices: both orderings sort
+ * by code point, so `Ästhetik` lands past `z` either way. Putting it where a
+ * German reader expects needs a collation rather than a fold, which is a
+ * different problem with a different owner. See `docs/decisions.md`.
  * @summary List Collections
  */
 export const listCollections = async (
@@ -229,15 +228,6 @@ export const getCreateCollectionUrl = () => {
  * and an error would send them off to find it by hand. Renaming is the
  * opposite case and does answer 409, because a rename onto an occupied name
  * would silently merge two shelves.
- *
- * **So a guessed name still confirms a collection exists, and that is left
- * open deliberately.** `uq_collections_name_folded` is global, so the
- * collision check cannot take a viewer without racing the index it exists to
- * front, and answering a collision any other way is a new status code on a
- * route that declares 201. What the guess no longer buys is the write: the
- * caller gets the row and `shelving.Shelving` then refuses to file anything
- * into it, which is the answer an unused id gets. `Shelving`'s docstring
- * carries this under what is not closed.
  * @summary Create Collection
  */
 export const createCollection = async (
@@ -369,16 +359,6 @@ export const getDeleteCollectionUrl = (collectionId: number) => {
  * The second is the one worth keeping: a row left pointing at a destroyed
  * collection is a dangling foreign key, and it is also why
  * `PRAGMA foreign_keys=ON` is load bearing here.
- *
- * **Deliberately not gated on `shelving.Shelving`, unlike the rename beside
- * it, and the reason is what gating would cost.** An admin has no privilege
- * over another member's private books, so a collection holding only those is
- * one no admin may be told about; refusing the delete there would make it
- * permanently undeletable while it still holds its name against
- * `uq_collections_name_folded`, and the only symptom would be a 409 nobody
- * can explain. What the ungated 404-or-204 discloses is an id, to an admin,
- * with no name in the response. That is the smaller of the two, and it is a
- * choice rather than an oversight.
  * @summary Delete Collection
  */
 export const deleteCollection = async (
@@ -482,16 +462,6 @@ export const getRenameCollectionUrl = (collectionId: number) => {
  * 409 to. So it merges the pair once, into the lower id, and logs what it
  * moved. Here there is a caller, and a caller who typed a name has asked for
  * that name and not for two shelves to become one.
- *
- * **And the same 404 for a collection this caller may not be told about**,
- * which is `shelving.Shelving.assignable`. This route is open to every member
- * and answers over the whole id space, so before it the 404-or-200 was an
- * existence oracle by id on a table of consecutive integers: closing the list
- * and leaving this would have moved a broadcast to a poll. The two answers
- * are now one.
- *
- * The 409 is the other half and is not closed: a taken name still answers
- * differently from a free one, for the reason `create_collection` gives.
  * @summary Rename Collection
  */
 export const renameCollection = async (

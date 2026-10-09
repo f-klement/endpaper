@@ -440,7 +440,7 @@ class TestLoanCreate:
 
     def test_a_name_with_a_nul_after_its_first_character_is_kept(self):
         """The other side of it, because a rule that refused every NUL would be
-        a different rule from the constraint. `length('Ada\\x00Ada')` is 3, so
+        a different rule from the constraint. `length('Ada\x00Ada')` is 3, so
         the row is stored and this must accept it."""
         assert LoanCreate(book_id=1, loaned_to_name="Ada\x00Ada").loaned_to_name
 

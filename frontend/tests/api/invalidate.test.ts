@@ -261,12 +261,6 @@ describe("the catalogue is everything derived from the books table", () => {
       "listClassifications",
       "listCollections",
       "listCopies",
-      // The custom field definitions, and the one entry here that is not about
-      // a count: `CustomFieldOut` carries none. A definition is listed only
-      // when a book the viewer can see, or one in their trash, holds a value
-      // in it, or when no book does, so a book write moves which rows come
-      // back rather than what they say.
-      "listCustomFields",
       "listDuplicates",
       "listLoans",
       "listLocations",
@@ -357,16 +351,15 @@ describe("the catalogue is everything derived from the books table", () => {
     }
   });
 
-  it("counts the custom field definitions as part of the catalogue", () => {
-    // **This asserted the opposite until the definitions were scoped**, on the
-    // ground that adding or deleting a book changes nothing about which fields
-    // the household has defined. The definitions are unchanged; which of them
-    // the caller is told about is not. A field is listed only when a book the
-    // viewer can see, or one in their trash, holds a value in it, or when no
-    // book does, so trashing, restoring, purging or making a book private
-    // moves the list. It is the one entry here with no `book_count`, which is
-    // why the old comment read as settled.
-    expect(isCatalogueQuery(query(KEYS["listCustomFields"]!))).toBe(true);
+  it("leaves the custom field definitions alone", () => {
+    // The one library-wide list under `/api/books` that is **not** derived
+    // from the books table. Adding, deleting or editing a book changes nothing
+    // about which fields the household has defined, so it does not belong to
+    // any catalogue write; it changes only when a definition is written, and
+    // `useCustomFields` invalidates it there. `TagOut` is the contrast and is
+    // in `LIBRARY_WIDE` precisely because it carries a `book_count`, which
+    // `CustomFieldOut` deliberately does not.
+    expect(isCatalogueQuery(query(KEYS["listCustomFields"]!))).toBe(false);
   });
 
   it("leaves the accounts and the settings alone", () => {

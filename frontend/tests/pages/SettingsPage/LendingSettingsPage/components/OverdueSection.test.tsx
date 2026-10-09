@@ -11,7 +11,6 @@ import {
   OverdueSender,
   type SenderHealth,
   type SettingsOut,
-  type SettingsUpdate,
 } from "../../../../../src/api/generated/model";
 import OverdueSection from "../../../../../src/pages/SettingsPage/LendingSettingsPage/components/OverdueSection";
 import { renderLocalised } from "../../../../utils";
@@ -39,8 +38,8 @@ function renderSection(
     health?: SenderHealth;
   } = {},
 ) {
-  const onSave = vi.fn<(patch: SettingsUpdate) => void>();
-  const onSendNow = vi.fn<() => void>();
+  const onSave = vi.fn();
+  const onSendNow = vi.fn();
   const rendered = renderLocalised(
     <OverdueSection
       settings={makeSettings(settings)}
@@ -218,7 +217,6 @@ describe("OverdueSection", () => {
     [OverdueNotifyReason.no_url, "no webhook address is stored"],
     [OverdueNotifyReason.nothing_due, "nothing is overdue"],
     [OverdueNotifyReason.unreachable, "could not be reached"],
-    [OverdueNotifyReason.unexpected, "in a way the app did not expect"],
   ])("renders its own sentence for %s", (reason, fragment) => {
     renderSection(
       {},

@@ -32,42 +32,12 @@ function id(): number {
   return nextId++;
 }
 
-/**
- * The instant a picked day ends where the viewer is.
- *
- * **`due_at` is the one dated field a browser *derives*, which is why it is the
- * one a plain UTC stamp gets wrong.** Two fields are browser written, not one:
- * `LoanCreate.due_at` and `DigitalReferenceIn.file_modified_at` both carry
- * `UtcDateTimeIn`. The difference is where the value comes from.
- * `file_modified_at` is an instant the browser already had, a `File`'s own
- * modified time, and `toISOString()` just spells it; no local day is involved,
- * so no zone can put it on the wrong one. `due_at` is a **day somebody picked**
- * turned into the instant that day ends where they are, by
- * `src/lib/date.ts`'s `endOfDayInstant`.
- *
- * Every other stamp here is the server's, written in UTC and carrying `Z`. A
- * fixture spelling `due_at` as a plain midnight or midday UTC stamp is a value
- * that door cannot produce, and a midnight one renders as the 4th west of UTC
- * while the arm beside it talks about the 5th.
- *
- * **Built with the numeric constructor rather than by calling the module under
- * test**, which would make every assertion over it agree with the code by
- * construction. This is the same second expression `tests/lib/date.test.ts`
- * uses to state the same rule, and it is deliberately duplicated: a fixture
- * importing the thing it is a fixture for is how a test stops being able to
- * fail.
- */
-export function endOfDay(day: string): string {
-  const [year, month, date] = day.split("-").map(Number);
-  return new Date(year!, month! - 1, date!, 23, 59, 59).toISOString();
-}
-
 export function makeUser(overrides: Partial<UserOut> = {}): UserOut {
   return {
     id: id(),
     username: "reader",
     is_admin: false,
-    created_at: "2026-01-01T12:00:00Z",
+    created_at: "2026-01-01T00:00:00",
     ...overrides,
   };
 }
@@ -125,7 +95,7 @@ export function makeBook(overrides: Partial<BookOut> = {}): BookOut {
     year: 1965,
     description: null,
     cover_url: null,
-    added_at: "2026-01-01T12:00:00Z",
+    added_at: "2026-01-01T00:00:00",
     is_private: false,
     added_by: null,
     active_loan: null,
@@ -168,7 +138,7 @@ export function makeLoan(overrides: Partial<LoanOut> = {}): LoanOut {
     book_id: 1,
     loaned_to_user_id: 2,
     loaned_by_user_id: 1,
-    loaned_at: "2026-02-01T12:00:00Z",
+    loaned_at: "2026-02-01T00:00:00",
     returned_at: null,
     book: null,
     loaned_to: makeUser({ username: "borrower" }),
@@ -184,8 +154,8 @@ export function makeNote(overrides: Partial<NoteOut> = {}): NoteOut {
     user_id: 1,
     content: "A note",
     is_private: false,
-    created_at: "2026-03-01T12:00:00Z",
-    updated_at: "2026-03-01T12:00:00Z",
+    created_at: "2026-03-01T00:00:00",
+    updated_at: "2026-03-01T00:00:00",
     author: makeUser(),
     ...overrides,
   };
@@ -199,8 +169,8 @@ export function makeQuote(overrides: Partial<QuoteOut> = {}): QuoteOut {
     text: "A line worth keeping",
     page: null,
     note: null,
-    created_at: "2026-03-01T12:00:00Z",
-    updated_at: "2026-03-01T12:00:00Z",
+    created_at: "2026-03-01T00:00:00",
+    updated_at: "2026-03-01T00:00:00",
     author: makeUser(),
     ...overrides,
   };
@@ -237,7 +207,7 @@ export function makeProgress(
   return {
     id: id(),
     book_id: 1,
-    recorded_at: "2026-03-02T12:00:00Z",
+    recorded_at: "2026-03-02T10:00:00",
     page: 64,
     percent: null,
     minutes: null,

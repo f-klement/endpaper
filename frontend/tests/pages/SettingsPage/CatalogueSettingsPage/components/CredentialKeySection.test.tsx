@@ -317,7 +317,7 @@ describe("when the server refuses", () => {
     api.on(
       "/api/settings/credential-key",
       {
-        status: 400,
+        status: 422,
         body: { detail: "The recovery phrase failed its checksum." },
       },
       "PUT",

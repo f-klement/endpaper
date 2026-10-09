@@ -64,7 +64,7 @@ import type {
   CustomFieldValueUpdate,
   DigitalReferenceIn,
   DigitalReferenceOut,
-  DuplicateReport,
+  DuplicateGroup,
   EnrichBookParams,
   ExportBooksParams,
   HTTPValidationError,
@@ -1949,11 +1949,10 @@ export const getBulkActionUrl = () => {
 /**
  * Apply one verb to a selection of books.
  *
- * One endpoint rather than one per verb, because every verb shares the same
- * three steps: resolve the ids the caller may actually touch, apply, and
- * report updated/unchanged/skipped. A route per verb would be a copy of the
- * permission walk per verb, and the next one added would be the one that
- * forgot it.
+ * One endpoint rather than six, because every verb shares the same three
+ * steps: resolve the ids the caller may actually touch, apply, and report
+ * updated/unchanged/skipped. Six handlers would be six copies of the
+ * permission walk, and the fifth one added would be the one that forgot it.
  *
  * A separate `/bulk/ownership` used to sit beside this with the same body,
  * the same permission walk and an identical result shape. It was removed
@@ -2285,20 +2284,6 @@ export const getBackfillCoversUrl = (params?: BackfillCoversParams) => {
  * once the end is reached, so pressing again starts over and re-tries the ones
  * that failed, which may since have become fixable.
  *
- * **Bounded in wall clock as well as in books**, so a slow or blackholing image
- * service leaves the batch short rather than holding the request open. A short
- * run answers with whatever resolved, counts only the books it has an outcome
- * for, and moves the cursor over exactly those, so pressing again resumes at the
- * first book this one did not reach. The reply does not distinguish a short run
- * from a complete one and does not need to: press again while `remaining` is
- * above zero.
- *
- * **Each book is bounded too.** A cover is a candidate check and then a
- * download, each of which may follow redirects, and with no budget every hop of
- * both got a timeout of its own, so one unlucky book could spend what the whole
- * run was meant to. Past its budget a book keeps the remote URL, is counted
- * `unreachable`, and is a candidate again on the next pass through the library.
- *
  * Idempotent either way: a book with a file behind it is never a candidate, so
  * a second pass over the same range examines nothing it fixed.
  * @summary Backfill Covers
@@ -2390,13 +2375,7 @@ export const getListCustomFieldsUrl = () => {
 };
 
 /**
- * Every field this library may tell you about, in the order it defined them.
- *
- * **Not every field it keeps.** A field is listed when a book you can see
- * holds a value in it, when a book in your trash does, or when no book at all
- * does. A field whose every value sits on books you cannot see is absent, and
- * naming it by id is a 404. `fields.Fields` holds the three arms and what
- * they cost.
+ * Every field this library keeps, in the order it defined them.
  *
  * **No usage count**, unlike `GET /api/books/tags`. A count of the books
  * carrying a field is a disclosure: it is drawn from books the caller may not
@@ -2404,28 +2383,6 @@ export const getListCustomFieldsUrl = () => {
  * number in a confirmation dialog would then understate what deleting the
  * field is about to destroy. Neither number is worth having, so the
  * confirmation says "every book" instead. `docs/security.md` records it.
- *
- * **Each row says whether you may rename it.** Every field reaching this list
- * is addressable to you by construction, since `listable` and `addressable`
- * ask the same predicate, so what `renamable` adds is the author arm and the
- * admin one. `schemas/custom_field.CustomFieldOut` records why that is a
- * boolean rather than the author's member id.
- *
- * **On this list a false `renamable` is a fact about another Member**, and it
- * is a disclosure rather than a convenience. The other two causes cannot
- * reach here, since every listed row is addressable and an admin is never
- * refused the author arm, so for a Member who is not an admin the flag reads
- * exactly "somebody else defined this". Learning that used to take a rename
- * request and its 403; it is now on every page load.
- *
- * **No application log records any of it, and the access log this project's
- * own serving command produces records every request, so what the change
- * removes is the one line that was distinctive.** A refusal on a path normal
- * use never produces, carrying the field id, becomes the request every
- * settings page load makes. Observability is therefore **not** unchanged, and
- * a sentence saying nothing is logged reads as though it were. Nothing here
- * claims anything about what a deployment's ingress keeps, which a published
- * file cannot know. `docs/security.md` carries the row.
  * @summary List Custom Fields
  */
 export const listCustomFields = async (
@@ -2587,46 +2544,6 @@ export const getDefineCustomFieldUrl = () => {
  * A name that already exists, in any capitalisation, returns that field
  * rather than a 409: somebody typing a name that is already there wants that
  * field. Past `MAX_CUSTOM_FIELDS` it refuses with 409.
- *
- * **The caller is recorded as the definer**, and that is what makes two
- * other things work: the field stays on their own settings page whatever
- * carries it, and they may rename it. `fields.Fields` holds both. The
- * collision above takes no authorship: a second member typing an existing
- * name gets the row and not a stake in it.
- *
- * **So `renamable` on the answer is not always true**, and the collision is
- * the case that makes it worth computing rather than asserting: a member who
- * retypes somebody else's name is handed that row and may not rename it, and
- * a member who retypes the name of a field hidden from them is handed a row
- * they cannot address at all. Both are the open door
- * `fields.Fields` records under "uniqueness is whole table of necessity";
- * this reports them rather than closing them.
- *
- * **For an admin those two causes do not collide, and that is a disclosure
- * rather than a symmetry.** The sentence above reads as though the collision
- * kept both quiet, and it does keep them quiet for everybody else. The admin
- * arm means the author half never refuses, so a false `renamable` tells an
- * admin exactly one thing: a field by that name exists and every value in it
- * sits on Books they cannot see. One request and no write, where the same
- * conclusion used to take a define and then a rename.
- *
- * **And nothing bounds the guessing**: no rate limiter on this route, no
- * counter anywhere, so a dictionary of candidate names can be walked at one
- * request each. That is what makes it enumeration rather than one bit about
- * a name the caller already had.
- *
- * **No application log records any of it, and the access log this project's
- * own serving command produces records every request, so what the change
- * removes is the one line that was distinctive.** A distinctive refusal
- * becomes a request indistinguishable from a legitimate define. Nothing here
- * claims anything about what a deployment's ingress keeps.
- * `docs/security.md` carries the row.
- *
- * **Where the `Fields` is constructed is not load bearing**, which is worth
- * saying because it reads as though it were. Autoflush puts the pending row
- * in the table before any arm reads it, and the arm for a definition no Book
- * carries admits it either way, so warming every cache before the commit
- * answers the same. Driven both ways; nothing reds.
  * @summary Define Custom Field
  */
 export const defineCustomField = async (
@@ -2749,17 +2666,11 @@ export const getDeleteCustomFieldUrl = (fieldId: number) => {
  * same split `delete_tag` makes. Defining a field is additive and reversible
  * by deleting it. Deleting one destroys, in one request and with no undo,
  * something every member of the house typed by hand, on books the caller
- * cannot necessarily see. The row records who **defined** it, which is who
- * may rename it, and that is not an owner of the content under it: the
- * values were typed by everybody, so there is still nobody to ask.
+ * cannot necessarily see. A `CustomField` records nobody as its author, so
+ * there is no owner to ask.
  *
  * It is the sharper case of the two: deleting a tag takes a label off a book,
  * and deleting a field takes the **content** a member wrote.
- *
- * **The one door taking a field id that is not scoped to the caller**, and
- * deliberately: gating it would leave a field whose every value sits on books
- * the admin cannot see undeletable for good. `_any_custom_field` carries the
- * rest.
  *
  * 204, like `delete_tag`, and the number of values removed goes to the log
  * rather than to the caller. See `list_custom_fields` for why no count is
@@ -2859,40 +2770,6 @@ export const getRenameCustomFieldUrl = (fieldId: number) => {
  * That is the schema rather than this handler: values reference the
  * definition by id, so nothing about them mentions the name. `custom_fields.rename`
  * records why renaming onto an existing name is refused instead of merged.
- *
- * **404 for a field you may not be told about**, which is the answer an
- * absent id already gives: see `fields.Fields.addressable`.
- *
- * **403 for a field somebody else defined**, and the two refusals are
- * different on purpose. The 404 withholds that a row exists; by the time
- * this one can fire, `addressable` has already said it does, so saying
- * whose it is adds nothing the caller did not have. `fields.Fields.renamable`
- * holds the rule, including why a field with no author is renamable by
- * anybody: that is every field defined before the column existed, and a
- * refusal there would have taken the verb away from an entire existing
- * vocabulary on the morning of the upgrade.
- *
- * **An admin may rename any field they can address**, for the reason the
- * delete below is admin only: a Library wide vocabulary with a ceiling of 25
- * needs somebody who can repair a name whose author is unreachable.
- *
- * **It is not the same exemption, and calling it that overstates it.** The
- * delete is deliberately ungated, so it reaches a field whose every value
- * sits on Books the admin cannot see; this is gated on `addressable` like
- * every other id door here. So for a field hidden from every admin, the only
- * verb left is the delete, which destroys every value under the row. The
- * valve for a Member who has defined the whole vocabulary is therefore
- * repair where the field is visible and destruction where it is not.
- *
- * **Logged, like the delete beside it.** The log line predates the author
- * column and is not replaced by it: the column says who may rename, and the
- * line says who did, which for an admin rename is a different person.
- *
- * **The two refusals here are the whole of what `CustomFieldOut.renamable`
- * publishes**, and the client draws its control from that rather than
- * deriving one. A client that has gone stale still reaches them, which is
- * why the refusal is worded for a reader: hiding a control is advice and
- * this is the guarantee.
  * @summary Rename Custom Field
  */
 export const renameCustomField = async (
@@ -3274,20 +3151,12 @@ export const getListDuplicatesUrl = () => {
  * (casefold, strip punctuation, drop a leading article) is not something
  * SQLite can express, and the catalogue is small enough that scanning it is
  * cheaper than maintaining a normalised column.
- *
- * **The scan is unpaginated and the answer is capped, which are two
- * different statements.** Every request reads one row per visible Book,
- * because a page of the catalogue cannot be grouped on its own: a pair split
- * across two pages is two singletons. What the cap cuts is the finished
- * grouping, never the population it ran over, so a group is never split by
- * it and the answer never depends on a grouping computed in an earlier
- * request. The work is unbounded; the answer is not.
  * @summary List Duplicates
  */
 export const listDuplicates = async (
   options?: Parameters<typeof customFetch>[1],
-): Promise<DuplicateReport> => {
-  return customFetch<DuplicateReport>(getListDuplicatesUrl(), {
+): Promise<DuplicateGroup[]> => {
+  return customFetch<DuplicateGroup[]>(getListDuplicatesUrl(), {
     ...options,
     method: "GET",
   });
@@ -3430,24 +3299,6 @@ export const getExportBooksUrl = (params?: ExportBooksParams) => {
 
 /**
  * The shelf this member can see, as a file.
- *
- * **CSV is `text/csv`, plain text is `text/plain` and MARCXML is
- * `application/marcxml+xml`.** All three are declared for the 200 because the
- * document has no way to say which of them `?format=` selects.
- *
- * **Rationed, and the schema does not say so.** The refusal is a 429 carrying
- * `Retry-After`. It is not declared here because this document enumerates no
- * refusal on any operation: not a 401, which every secured operation can
- * answer, nor a 403, a 404 or a 429. So declaring one here would make this
- * refusal look deliberate and every other operation's look accidental, which
- * is a decision about the whole error surface rather than about this route.
- * `docs/decisions.md` records that reasoning, having refused the same move
- * once already, and
- * `tests/test_errors.py::TestTheDocumentEnumeratesNoRefusal` is what this
- * paragraph rests on rather than a reader's memory of it. The mechanism behind
- * the refusal is shared by every route in `ratelimit.py`, so what would make
- * declaring it honest is declaring it at all of them. The counter is not:
- * this route has its own, for the reason `ratelimit.EXPORT_LIMIT` gives.
  *
  * **MARCXML needs library mode and the other two do not.** A CSV export is a
  * household reading its own shelf in a spreadsheet. A MARC record is a
@@ -3644,20 +3495,13 @@ export const getBackfillFromIdentifiersUrl = (
  * operator action work.
  *
  * **Refuses with 409 when this library does not ask Google Books**, rather
- * than examining nothing and reporting a clean run. The cause is a switch and
- * a key in Settings, and the reply names both.
+ * than examining nothing and reporting a clean run. A source with no usable
+ * key must say so: the cause is a switch and a key in Settings, and a zero
+ * would send somebody hunting through their library instead.
  *
- * Batched and resumable. `next_after_id` carries on past what this run
- * examined, and comes back as 0 at the end of the library so pressing again
- * starts over and re-tries whatever has since become resolvable.
- *
- * **Bounded in wall clock as well as in books**, so a slow or busy Google
- * leaves the batch short rather than holding the request open. A short run
- * answers with whatever resolved, counts only the books it has an outcome for,
- * and moves the cursor over exactly those, so pressing again resumes at the
- * first book this one did not reach. The reply does not distinguish a short run
- * from a complete one and does not need to: press again while `remaining` is
- * above zero.
+ * Batched and resumable. `next_after_id` carries on past what this run tried,
+ * and comes back as 0 at the end of the library so pressing again starts over
+ * and re-tries whatever has since become resolvable.
  * @summary Backfill From Identifiers
  */
 export const backfillFromIdentifiers = async (
@@ -4786,14 +4630,7 @@ export const getListTagsUrl = () => {
 };
 
 /**
- * The curated vocabulary plus the invented tags this member can already see.
- *
- * **Not every tag the library holds.** A tag carries no member of its own, so
- * what decides who may be told it exists is the books carrying it: this
- * answers with the seeded vocabulary, which is published in the source, plus
- * every tag on a book the caller can see. An invented tag whose only books
- * are other people's private ones is absent, because listing it would publish
- * a name somebody typed against a book this caller may not read.
+ * The curated vocabulary plus whatever the library has invented.
  *
  * The **client** decides the order the groups appear in (`TAG_CATEGORY_ORDER`
  * in the frontend), because that is a presentation decision and it needs the
@@ -4804,8 +4641,7 @@ export const getListTagsUrl = () => {
  *
  * `book_count` is one grouped query for the whole list rather than one per
  * tag: this is fetched on nearly every page, so an N+1 here is an N+1
- * everywhere. It is the same query the row filter reads, so the number and
- * the presence of the row cannot disagree.
+ * everywhere.
  * @summary List Tags
  */
 export const listTags = async (
@@ -4951,13 +4787,6 @@ export const getCreateTagUrl = () => {
  * "cookbooks" cannot both appear. A collision returns the existing tag rather
  * than a 409: somebody typing a name that is already there wants that tag,
  * and an error would send them to find it by hand.
- *
- * **A tag invented here is not in `GET /api/books/tags` until a book the
- * caller can see carries it**, which is that route's rule and not an
- * omission: a tag on no book is a name and nothing else, and publishing it to
- * the whole library is the disclosure this route's two step use was part of.
- * Putting it on a book is what makes it part of the vocabulary, and the
- * clients do that in the same gesture.
  * @summary Create Tag
  */
 export const createTag = async (
@@ -5666,19 +5495,8 @@ export const getUpdateBookDetailsUrl = (bookId: number) => {
  * Correct the catalogue entry by hand.
  *
  * `exclude_unset` is what makes a partial update partial: an absent field is
- * left alone and an explicit null clears where the column allows one. Without
- * it every unsent field would arrive as None and wipe the record, which is the
- * classic PATCH bug. A null for a column the database will not leave empty is
- * refused by `BookDetailsUpdate` before it reaches here, because it used to
- * reach the flush and answer 500.
- *
- * **`categories` clears on an empty list rather than on a null**, because its
- * request shape is a list and its column is one joined string. This is the
- * only route that removes a subject: the create route writes them, the
- * catalogue gap fill and the merge's absorb add them, and an overwriting
- * enrich cannot empty the column because the merge skips an empty incoming
- * value. Before this the only removal was deleting the book, and the column
- * is served to readers with no account.
+ * left alone and an explicit null clears. Without it every unsent field would
+ * arrive as None and wipe the record, which is the classic PATCH bug.
  * @summary Update Book Details
  */
 export const updateBookDetails = async (
@@ -6494,12 +6312,7 @@ export const getSetCustomFieldUrl = (bookId: number, fieldId: number) => {
  * Returns the book's whole list rather than the one value, so a client that
  * has just written one is holding the same thing `GET` would give it.
  *
- * **404 for a field you may not be told about**, and this is the door that
- * makes the scoped list worth having: the response carries `name` on every
- * entry, so an ungated write would be a name oracle over a small integer id
- * space, reachable on a book of your own. See `fields.Fields.addressable`.
- *
- * 400 when the field holds a link and the value is not one: an address with
+ * 422 when the field holds a link and the value is not one: an address with
  * no scheme, a `javascript:` or `data:` URL, or a host that is missing. See
  * `custom_fields.link_target` for the whole list and why it is re-checked on
  * every read as well as here.
@@ -9969,146 +9782,6 @@ export const useUpdateStatus = <
   TContext
 > => {
   return useMutation(getUpdateStatusMutationOptions(options), queryClient);
-};
-export const getAddBookTagByNameUrl = (bookId: number) => {
-  return `/api/books/${bookId}/tags`;
-};
-
-/**
- * Put a tag with this name on this book, inventing it if it is new.
- *
- * One request where typing a name used to be two, and the two were a
- * different question each: inventing a tag hands back an id, and attaching
- * that id is asked of somebody who might have guessed it. Typing a name is
- * neither. Somebody typing a tag name while looking at a book means "this
- * book is that", so this is the one gesture and the one answer.
- *
- * **The book as it stands, always, and never a 409, a 201 or a 404 for the
- * name.** A status that told a minted name from a matched one would answer
- * "does this name already exist" in the status line, which is the question
- * a member may not have answered about a tag they cannot see. A name that
- * is not this member's to use is left off the book, in the same shape as a
- * name that is: `tags.Naming` decides it and carries what that does and does
- * not close.
- *
- * Refused only for what the caller can already see: a name that is not a
- * name, by `TagCreate`, and a book already carrying
- * `MAX_TAGS_PER_BOOK` tags, with the sentence and the reasoning of the
- * attach by id route beside this one.
- * @summary Add Book Tag By Name
- */
-export const addBookTagByName = async (
-  bookId: number,
-  tagCreate: TagCreate,
-  options?: Parameters<typeof customFetch>[1],
-): Promise<BookOut> => {
-  const getHeaders = (
-    h?: NonNullable<RequestInit["headers"]>,
-  ): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(
-          h as Iterable<Iterable<string>>,
-          (entry) => Array.from(entry) as [string, string],
-        ),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<
-      string | readonly string[] | undefined
-    >(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
-  return customFetch<BookOut>(getAddBookTagByNameUrl(bookId), {
-    ...options,
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...getHeaders(options?.headers),
-    },
-    body: JSON.stringify(tagCreate),
-  });
-};
-
-export const getAddBookTagByNameMutationKey = () =>
-  ["addBookTagByName"] as const;
-
-export const getAddBookTagByNameMutationOptions = <
-  TError = HTTPValidationError,
-  TContext = unknown,
->(options?: {
-  mutation?: UseMutationOptions<
-    Awaited<ReturnType<typeof addBookTagByName>>,
-    TError,
-    AddBookTagByNameMutationVariables,
-    TContext
-  >;
-  request?: SecondParameter<typeof customFetch>;
-}): UseMutationOptions<
-  Awaited<ReturnType<typeof addBookTagByName>>,
-  TError,
-  AddBookTagByNameMutationVariables,
-  TContext
-> => {
-  const mutationKey = getAddBookTagByNameMutationKey();
-  const { mutation: mutationOptions, request: requestOptions } = options
-    ? options.mutation &&
-      "mutationKey" in options.mutation &&
-      options.mutation.mutationKey
-      ? options
-      : { ...options, mutation: { ...options.mutation, mutationKey } }
-    : { mutation: { mutationKey }, request: undefined };
-
-  const mutationFn: MutationFunction<
-    Awaited<ReturnType<typeof addBookTagByName>>,
-    AddBookTagByNameMutationVariables
-  > = (props) => {
-    const { bookId, data } = props ?? {};
-
-    return addBookTagByName(bookId, data, requestOptions);
-  };
-
-  return { mutationFn, ...mutationOptions };
-};
-
-export type AddBookTagByNameMutationResult = NonNullable<
-  Awaited<ReturnType<typeof addBookTagByName>>
->;
-export type AddBookTagByNameMutationBody = TagCreate;
-export type AddBookTagByNameMutationError = HTTPValidationError;
-export type AddBookTagByNameMutationVariables = {
-  bookId: number;
-  data: TagCreate;
-};
-
-/**
- * @summary Add Book Tag By Name
- */
-export const useAddBookTagByName = <
-  TError = HTTPValidationError,
-  TContext = unknown,
->(
-  options?: {
-    mutation?: UseMutationOptions<
-      Awaited<ReturnType<typeof addBookTagByName>>,
-      TError,
-      AddBookTagByNameMutationVariables,
-      TContext
-    >;
-    request?: SecondParameter<typeof customFetch>;
-  },
-  queryClient?: QueryClient,
-): UseMutationResult<
-  Awaited<ReturnType<typeof addBookTagByName>>,
-  TError,
-  AddBookTagByNameMutationVariables,
-  TContext
-> => {
-  return useMutation(getAddBookTagByNameMutationOptions(options), queryClient);
 };
 export const getRemoveBookTagUrl = (bookId: number, tagId: number) => {
   return `/api/books/${bookId}/tags/${tagId}`;

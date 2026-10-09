@@ -6,9 +6,8 @@ none of them needs a session. What does need one, the matching and the writing,
 is `tests/test_importing.py` and `tests/routers/test_imports_marc.py`.
 
 **The round trip is the strongest assertion available and it is not a
-tautology.** The writer is this module's and the fields are read by
-`marc_fields.py`, the same reader that takes a live DNB or K10plus answer
-apart. So a record surviving the
+tautology.** The writer is this module's and the reader is `metadata.py`'s, the
+same one that parses a live DNB or K10plus answer. So a record surviving the
 trip is evidence that what this app exports is a record this app's catalogue
 parser accepts, rather than one that merely validates against a schema. The
 fields that cannot survive it are asserted too, with the reason, because an
@@ -17,45 +16,17 @@ not do.
 """
 
 import ast
-import dataclasses
 import pathlib
 import types
-from dataclasses import dataclass
-from typing import Final
 
 import pytest
-from hypothesis import given
-from hypothesis import strategies as st
 
 import marc
-import marc_fields
-import xml_parse
+import metadata
 from catalogue import Heading
-from enums import ClassificationScheme, HeadingKind
-from tests.strategies import (
-    FAR_PAST_ANY_DEPTH,
-    PATCHES,
-    WIDE,
-    Node,
-    answer_of,
-    declared_encodings,
-    depths,
-    marc_records,
-    patched,
-    widths,
-    witness,
-    xml_of,
-)
+from enums import ClassificationScheme
+from schemas.book import BookCreate
 from tests.test_house_rules import _is_vendored
-
-#: The kinds a stored row can actually declare, driven from the enum.
-#:
-#: **`SUBJECT` is excluded because the column refuses the word**, which is
-#: `models.ck_classifications_kind`: that state is the null, and the null is
-#: what every arm not naming a kind already exercises. Derived rather than
-#: listed, so a member added to `HeadingKind` arrives in the arm below in the
-#: same edit instead of being exported as an ordinary subject with nothing red.
-_DECLARABLE_KINDS = [kind for kind in HeadingKind if kind is not HeadingKind.SUBJECT]
 
 #: The application's own directory.
 #:
@@ -104,18 +75,8 @@ def a_book(**overrides):
     return types.SimpleNamespace(**fields)
 
 
-def a_heading(scheme, number, label=None, kind=None):
-    """A stand-in for a `Classification` row, carrying only what the writer reads.
-
-    `kind` defaults to the null the column holds for a record that declared
-    nothing, which is what every row written before `classifications.kind`
-    existed carries. Spelled as a parameter rather than left off the object:
-    the writer reads the attribute, so a stub without one would fail with an
-    `AttributeError` that says nothing about the record.
-    """
-    return types.SimpleNamespace(
-        scheme=scheme, number=number, label=label, kind=kind
-    )
+def a_heading(scheme, number, label=None):
+    return types.SimpleNamespace(scheme=scheme, number=number, label=label)
 
 
 def round_trip(**overrides):
@@ -138,56 +99,6 @@ def a_record(*fields: str, leader: str = marc.LEADER) -> bytes:
 def datafield(tag: str, *subfields: tuple[str, str], ind1: str = " ", ind2: str = " ") -> str:
     inner = "".join(f'<subfield code="{code}">{value}</subfield>' for code, value in subfields)
     return f'<datafield tag="{tag}" ind1="{ind1}" ind2="{ind2}">{inner}</datafield>'
-
-
-@dataclass(frozen=True)
-class MarcDocument:
-    """An upload as a spec: what it holds, how it declares itself, what is wrong.
-
-    Drawn by the property in `TestAnUploadIsReadOrRefusedByName` and rebuilt by
-    `marc_document` in every named case it printed, so a counterexample reads
-    as a structure rather than as bytes.
-    """
-
-    records: tuple[Node, ...]
-    #: The encoding the XML declaration names, or None for no declaration.
-    declaration: str | None
-    #: The prolog item a document type declaration is placed after, or None.
-    doctype_after: str | None
-    #: Written as UTF-16, the encoding the NUL sniff refuses.
-    utf16: bool
-    #: How deep a chain of elements inside one extra record goes, 0 for none.
-    nest_depth: int
-    patches: tuple[tuple[int, int], ...]
-    #: How many empty siblings the extra record carries, 0 for none.
-    width: int = 0
-
-
-#: What may stand in a prolog before the root, each a place a doctype can follow.
-#: **Varied, never only offset zero**: a refusal written as a prefix test would
-#: pass at the start and miss the rest.
-PROLOG: Final = {"comment": "<!-- a -->", "pi": "<?x y?>", "space": "\n  "}
-
-
-def marc_document(document: MarcDocument) -> bytes:
-    """The bytes of an upload the spec describes."""
-    records = list(document.records)
-    if document.nest_depth or document.width:
-        records.append(Node("record", nest=document.nest_depth, width=document.width))
-    body = (
-        f'<collection xmlns="{MARCXML}">'
-        + "".join(xml_of(record) for record in records)
-        + "</collection>"
-    )
-    prolog = ""
-    if document.declaration is not None:
-        prolog = f'<?xml version="1.0" encoding="{document.declaration}"?>'
-    misc = "".join(PROLOG.values())
-    if document.doctype_after is not None:
-        cut = misc.index(PROLOG[document.doctype_after]) + len(PROLOG[document.doctype_after])
-        misc = misc[:cut] + "<!DOCTYPE collection>" + misc[cut:]
-    text = prolog + misc + body
-    return patched(text.encode("utf-16" if document.utf16 else "utf-8"), document.patches)
 
 
 class TestEveryFieldMapsBothWays:
@@ -271,111 +182,6 @@ class TestEveryFieldMapsBothWays:
             Heading(ClassificationScheme.LCSH, "Treasure troves", None),
         )
 
-    #: What each declared kind writes: `(kind, tag, $2)`.
-    #:
-    #: **Spelled out rather than read off `marc._HEADING_KIND_FIELD`**, which
-    #: would make this assert that the table equals itself. The case is part of
-    #: the expectation and not incidental: `Subfields.subject_vocabulary` lower
-    #: cases what it reads, so a writer shouting `GND-CARRIER` round trips
-    #: perfectly through this application and hands every other one a code that
-    #: is not on MARC's list.
-    WRITTEN_AS = [
-        (HeadingKind.CONTENT, "655", "gnd-content"),
-        (HeadingKind.CARRIER, "655", "gnd-carrier"),
-    ]
-
-    #: What a row whose record declared nothing writes: `(scheme, number,
-    #: label, $2)`.
-    #:
-    #: **The ordinary path carries the same case hazard as `WRITTEN_AS` above,
-    #: and for longer.** A shouted `GND` or `LCSH` round trips through this
-    #: application intact, because `Subfields.subject_vocabulary` lower cases
-    #: what it reads, and hands every other one a code that is not on MARC's
-    #: published list. So the codes are spelled here too rather than read off
-    #: `marc._SUBJECT_SOURCE`.
-    #:
-    #: LCSH keeps the heading string in `number` and carries no label, which is
-    #: `ClassificationScheme` saying that the authorised string is the only
-    #: identifier that vocabulary supplies.
-    DECLARED_NOTHING = [
-        (ClassificationScheme.GND, "4203576-4", "Schatz", "gnd"),
-        (ClassificationScheme.LCSH, "Treasure troves", None, "lcsh"),
-    ]
-
-    @pytest.mark.parametrize(("scheme", "number", "label", "code"), DECLARED_NOTHING)
-    def test_a_row_declaring_no_kind_is_written_as_an_ordinary_subject(
-        self, scheme, number, label, code
-    ):
-        """`650`, its two indicators, and the vocabulary's plain code.
-
-        **The indicators are observed by this arm and by the one below, and by
-        nothing else in this file.** The reader ignores `ind1` and `ind2`
-        entirely, so every round trip arm on this path is blind to both. `ind2`
-        `7` is what tells a receiving catalogue that `$2` names the source of the
-        heading; without it the code beside it means nothing, and no round trip
-        can notice. The tag is a variable in the writer now, so this is also
-        what stops the ordinary path being given a field call of its own and
-        quietly losing them.
-        """
-        written = marc.write(
-            [a_book(classifications=[a_heading(scheme, number, label)])]
-        )
-        assert '<datafield tag="650" ind1=" " ind2="7">' in written
-        assert 'tag="655"' not in written
-        assert f">{code}<" in written
-
-    @pytest.mark.parametrize(("kind", "tag", "code"), WRITTEN_AS)
-    def test_a_declared_kind_is_written_as_its_own_field_and_code(
-        self, kind, tag, code
-    ):
-        """The field and the `$2` together, asserted against the bytes.
-
-        The round trip alone is satisfied by anything this application's own
-        reader happens to accept, and the reader accepts a `650` carrying
-        `$2 gnd-carrier` perfectly well. What a receiving catalogue does with the
-        two spellings is not the same: `650` is what the book is **about**, so a
-        disc written there is filed beside a place and a period. The same record
-        goes out over SRU to somebody who sent no session, which is why this is
-        asserted on what leaves rather than on what comes back.
-        """
-        written = marc.write(
-            [
-                a_book(
-                    classifications=[
-                        a_heading(
-                            ClassificationScheme.GND, "4139307-7", "CD-ROM", kind
-                        )
-                    ]
-                )
-            ]
-        )
-        assert f'<datafield tag="{tag}" ind1=" " ind2="7">' in written
-        assert 'tag="650"' not in written
-        assert f">{code}<" in written
-
-    @pytest.mark.parametrize("kind", _DECLARABLE_KINDS)
-    def test_every_kind_a_row_can_declare_survives(self, kind):
-        """One GND number, one caption, each kind the column can hold.
-
-        The number and the caption are the same in every case on purpose: the
-        kind is the only thing varying, so a failure names the kind rather than
-        the row.
-        """
-        record = round_trip(
-            classifications=[
-                a_heading(ClassificationScheme.GND, "4139307-7", "CD-ROM", kind)
-            ]
-        )
-        assert record.headings == (
-            Heading(ClassificationScheme.GND, "4139307-7", "CD-ROM", kind),
-        )
-
-    def test_there_are_kinds_for_the_arm_above_to_drive(self):
-        """A `parametrize` over an empty population collects nothing and reports
-        green, which is exactly what `_DECLARABLE_KINDS` deriving to nothing
-        would look like from the outside."""
-        assert len(_DECLARABLE_KINDS) >= 2
-
     def test_a_whole_record_survives_every_field_at_once(self):
         """The fat record too, because a field that only works alone is not a
         field that works: a writer emitting two `245` fields, or a reader taking
@@ -432,65 +238,13 @@ class TestWhatTheRoundTripCannotCarry:
         so the reader takes the first digit run."""
         assert round_trip(title="A", series_name="S", series_index=2.5).series_index == 2.0
 
-    def test_a_gnd_heading_with_no_caption_is_written_and_read_by_nobody(self):
-        """A heading with no heading: the field goes out, every reader skips it.
-
-        **Named for what happens rather than for what was claimed.** This arm
-        was called `..._is_not_written_at_all` and asserted only the parse, so
-        it was green on a field that is written and dropped, and its name
-        carried a prohibition the writer does not have. `_datafield` refuses
-        only when every subfield is empty.
-
-        So the bytes are pinned here and the parse below it: a round trip cannot
-        distinguish a field nobody reads from a field nobody wrote, which is
-        exactly the gap the old name papered over. Putting the identifier in
-        `$a` instead would print a number where a catalogue prints a phrase.
-        """
-        written = marc.write(
-            [a_book(classifications=[a_heading(ClassificationScheme.GND, "4203576-4")])]
-        )
-        # **The whole field, not a substring.** `code="a"` appears in the `245`
-        # of every record, so asserting its absence across the document is a
-        # test of the title rather than of this heading: it failed on the first
-        # run for exactly that reason. An exact field pins the tag, both
-        # indicators, both subfields and the absence of `$a` at once.
-        assert (
-            datafield("650", ("0", "(DE-588)4203576-4"), ("2", "gnd"), ind2="7")
-            in written
-        )
+    def test_a_gnd_heading_with_no_caption_is_not_written_at_all(self):
+        """`650` without `$a` is a heading with no heading. Putting the
+        identifier in `$a` instead would print a number where a catalogue
+        prints a phrase."""
         assert round_trip(
             classifications=[a_heading(ClassificationScheme.GND, "4203576-4")]
         ).headings == ()
-
-    def test_a_kind_on_a_vocabulary_that_cannot_spell_one_is_dropped(self):
-        """There is no `lcsh-carrier`, and inventing one would be worse.
-
-        `$2` carries a code from MARC's own published source list, and the GND
-        issued `gnd-content` and `gnd-carrier` where the Library of Congress
-        issued no counterpart for LCSH. So a kind on an LCSH row has nowhere to
-        go: writing the heading in `655` with a plain `$2 lcsh` would say
-        genre or form without saying which, and `marc._extra_headings` reads
-        LCSH out of `650` alone, so the whole heading would be lost rather than
-        just the kind. The heading is kept and the kind is not.
-
-        **Reachable rather than hypothetical**, and by one route only:
-        `ck_classifications_kind` and `schemas.classification.ClassificationIn`
-        both permit the pair, so a client can post it. Nothing in this app
-        produces one, because a kind is read from a `$2` and every code that
-        carries one is the GND's.
-        """
-        record = round_trip(
-            classifications=[
-                a_heading(
-                    ClassificationScheme.LCSH,
-                    "CD-ROM",
-                    kind=HeadingKind.CARRIER,
-                )
-            ]
-        )
-        assert record.headings == (
-            Heading(ClassificationScheme.LCSH, "CD-ROM", None, None),
-        )
 
     def test_a_name_typed_in_catalogue_order_becomes_two_people_in_the_record(self):
         """The cost of `author` being one free text column, and it is a cost to
@@ -512,7 +266,7 @@ class TestWhatTheRoundTripCannotCarry:
         """**The one entry here that is a rewrite rather than a loss**, and the
         worst of them.
 
-        `marc_fields.Fields.title_statement` falls back to
+        `metadata._marc_title` falls back to
         `bibliographic.split_title_statement` whenever
         `245` carries no `$b`, because a record that did not subfield itself
         puts the whole statement in `$a`. A record this app wrote always did
@@ -533,7 +287,7 @@ class TestWhatTheRoundTripCannotCarry:
         assert round_trip(title="Why:").title == "Why"
 
     def test_a_title_with_a_spaced_elided_article_is_closed_up(self):
-        """`marc_fields` closes the gap. MARC puts a space after an elided
+        """`metadata._fix_non_filing_space`. MARC puts a space after an elided
         article so sorting can skip it, and it is a filing device rather than
         how the title is printed. A repair rather than a loss, and here because
         the value does change."""
@@ -547,14 +301,14 @@ class TestWhatTheRoundTripCannotCarry:
         assert round_trip(title="A", series_index=3.0).series_index is None
 
     def test_a_carriage_return_comes_back_as_a_newline(self):
-        """XML 1.0 normalises `\\r` to `\\n` on parse and `ElementTree` does not
+        """XML 1.0 normalises `\r` to `\n` on parse and `ElementTree` does not
         write it as `&#13;`, so the character cannot survive. It is legal to
         carry and impossible to round trip, which is the format's rule rather
         than this writer's."""
         assert round_trip(description="One.\rTwo.").description == "One. Two."
 
     def test_a_description_written_over_several_lines_comes_back_on_one(self):
-        """`marc_fields` collapses whitespace, because MARC pads its
+        """`metadata._marc_text` collapses whitespace, because MARC pads its
         subfields. The words survive and the layout does not."""
         assert round_trip(description="One.\n\nTwo.").description == "One. Two."
 
@@ -587,7 +341,7 @@ class TestTheWriter:
     def test_the_namespace_is_the_one_the_reader_looks_for(self):
         """A reader and a writer disagreeing here produce a file this app
         cannot read back, and only a round trip would notice."""
-        assert marc_fields.NAMESPACE == marc.NAMESPACE
+        assert metadata._MARC.strip("{}") == marc.NAMESPACE
 
     def test_german_is_written_as_the_bibliographic_code_marc_uses(self):
         """ISO 639-2 has `ger` and `deu` for German and MARC takes the
@@ -597,8 +351,8 @@ class TestTheWriter:
 
     def test_an_added_author_is_marked_as_one_or_the_reader_drops_it(self):
         """`700` without `$4` is a translator or an editor as far as
-        `marc_fields.Fields` is concerned, so every author after the first would
-        vanish with nothing failing."""
+        `metadata._marc_author_entries` is concerned, so every author after the
+        first would vanish with nothing failing."""
         assert '<subfield code="4">aut</subfield>' in marc.write(
             [a_book(author="One Writer, Two Writer")]
         )
@@ -677,59 +431,6 @@ class TestTheReaderRefusesAWholeFile:
         with pytest.raises(marc.MarcError, match="multi-byte"):
             marc.read(body)
 
-    def test_a_declared_encoding_python_does_not_know_is_refused_rather_than_a_500(self):
-        """`LookupError`, which is neither of the two classes the arm above
-        catches, so it was a 500 through the route. The literal the property in
-        `TestAnUploadIsReadOrRefusedByName` printed against the tree before the
-        fix."""
-        document = MarcDocument(
-            records=(),
-            declaration="A",
-            doctype_after=None,
-            utf16=False,
-            nest_depth=0,
-            patches=(),
-        )
-        with pytest.raises(marc.MarcError, match="unknown encoding: A"):
-            marc.read(marc_document(document))
-
-    def test_a_nest_far_past_any_real_document_is_refused_inside_its_bound(self):
-        """Was read, at 39.7 times its own bytes by `tracemalloc`, because an
-        element costs memory and no character: no answer it gave showed it. The
-        literal the property in `TestAnUploadIsReadOrRefusedByName` printed
-        against the tree before the depth bound."""
-        document = MarcDocument(
-            records=(),
-            declaration=None,
-            doctype_after=None,
-            utf16=False,
-            nest_depth=FAR_PAST_ANY_DEPTH,
-            patches=(),
-        )
-        data = marc_document(document)
-        got = answer_of(marc.read, data, answers=marc.ParsedMarc, refuses=marc.MarcError)
-        assert got.refusal is not None
-        assert "nested more than" in str(got.refusal)
-        assert got.peak <= marc.ALLOCATION_FACTOR * len(data) + xml_parse.ALLOCATION_FLOOR
-
-    def test_a_record_at_the_depth_bound_is_read_and_one_deeper_is_refused(self):
-        """The positive control for `xml_parse.MAX_DEPTH` at this door, at the
-        bound and one past it. The collection and the record are two levels of
-        it, so the nest inside the record may be two fewer."""
-        at_the_bound = MarcDocument(
-            records=(),
-            declaration=None,
-            doctype_after=None,
-            utf16=False,
-            nest_depth=xml_parse.MAX_DEPTH - 2,
-            patches=(),
-        )
-        parsed = marc.read(marc_document(at_the_bound))
-        assert (parsed.records, parsed.skipped) == ((), 1)
-        one_deeper = dataclasses.replace(at_the_bound, nest_depth=xml_parse.MAX_DEPTH - 1)
-        with pytest.raises(marc.MarcError, match="nested more than"):
-            marc.read(marc_document(one_deeper))
-
     def test_something_that_is_not_xml_is_refused_with_a_reason(self):
         with pytest.raises(marc.MarcError, match="not XML"):
             marc.read(b"Title,Author\nStoner,John Williams\n")
@@ -757,141 +458,6 @@ class TestTheReaderRefusesAWholeFile:
         ).encode("utf-8")
         with pytest.raises(marc.MarcError, match="Split it"):
             marc.read(many)
-
-
-MARC_DOCUMENTS: Final = st.builds(
-    MarcDocument,
-    records=st.lists(marc_records(), max_size=4).map(tuple),
-    declaration=st.none() | declared_encodings(),
-    doctype_after=st.sampled_from([None, None, None, *sorted(PROLOG)]),
-    # Each refusal ahead of the parse is drawn one time in four, so the
-    # structure atoms behind it reach the parse on most draws rather than few.
-    utf16=st.sampled_from([False, False, False, True]),
-    nest_depth=depths(xml_parse.MAX_DEPTH - 2),
-    patches=st.just(()) | PATCHES,
-    width=widths(),
-)
-
-
-def _refusal_of(document: MarcDocument) -> marc.MarcError | None:
-    """What `marc.read` refused this upload with, or None if it read it."""
-    try:
-        marc.read(marc_document(document))
-    except marc.MarcError as refusal:
-        return refusal
-    return None
-
-
-@pytest.mark.property
-class TestAnUploadIsReadOrRefusedByName:
-    """`marc.read` answers what a file holds or a `MarcError`, and nothing else.
-
-    **The upload is drawn as a spec and built as bytes**: records over the tags
-    the readers name, a declaration drawn from the codec registry and from the
-    declaration's own grammar, a doctype after each thing a prolog may hold, the
-    UTF-16 the NUL sniff refuses, a nest at and around `xml_parse.MAX_DEPTH`
-    and far past it, `WIDE` empty siblings, and a few single byte patches. Raw
-    bytes reached nothing past the parse, measured in the design round.
-    """
-
-    @given(document=MARC_DOCUMENTS)
-    def test_it_answers_records_or_a_marc_error_inside_its_allocation_bound(
-        self, document
-    ):
-        """**Three oracles, because "it did not throw" is one of the defects.**
-        The type of the outcome; the record count, which is the spec's own,
-        since an unpatched file read whole holds every record placed in it,
-        read or skipped; and the traced peak, held to the door's declared
-        factor, which is the only one of the three a nest moves."""
-        data = marc_document(document)
-        got = answer_of(marc.read, data, answers=marc.ParsedMarc, refuses=marc.MarcError)
-        assert got.peak <= marc.ALLOCATION_FACTOR * len(data) + xml_parse.ALLOCATION_FLOOR
-        if document.doctype_after is not None or document.utf16:
-            assert got.refusal is not None
-        if document.nest_depth > xml_parse.MAX_DEPTH - 2:
-            assert got.refusal is not None
-        if got.value is not None and not document.patches:
-            extra = document.nest_depth or document.width
-            placed = len(document.records) + (1 if extra else 0)
-            assert got.value.total == placed
-
-    def test_the_generator_still_reaches_records_read(self):
-        witness(
-            MARC_DOCUMENTS,
-            lambda document: _refusal_of(document) is None
-            and bool(marc.read(marc_document(document)).records),
-            reaches="an upload read into records",
-        )
-
-    def test_the_generator_still_reaches_an_encoding_python_does_not_know(self):
-        witness(
-            MARC_DOCUMENTS,
-            lambda document: isinstance(
-                getattr(_refusal_of(document), "__cause__", None), LookupError
-            ),
-            reaches="a declaration naming an encoding Python has never heard of",
-        )
-
-    def test_the_generator_still_reaches_a_doctype_past_the_start(self):
-        witness(
-            MARC_DOCUMENTS,
-            lambda document: "document type declaration" in str(_refusal_of(document)),
-            reaches="a doctype after a comment, an instruction or whitespace",
-        )
-
-    def test_the_generator_still_reaches_the_nul_sniff(self):
-        witness(
-            MARC_DOCUMENTS,
-            lambda document: "UTF-8" in str(_refusal_of(document)),
-            reaches="a file in an encoding the doctype scan cannot read",
-        )
-
-    def test_the_generator_still_reaches_a_wide_record_read(self):
-        """The allocation factor's positive control is this shape reaching the
-        parse: asked of what the door answered, since a wide record behind a
-        doctype is refused before any element is built."""
-        witness(
-            MARC_DOCUMENTS,
-            lambda document: document.width > 0 and _refusal_of(document) is None,
-            reaches="a record of `WIDE` empty siblings, read",
-        )
-
-    def test_the_width_atom_is_wide_enough_that_the_builder_sets_the_peak(self):
-        """**What the witness above cannot see: how wide `WIDE` is.** It asks
-        only for a width above none, so lowering `WIDE` to speed the properties
-        up switches the builder's control off with every arm green: measured
-        through the runner, a builder retaining 100 bytes more per element reds
-        all three allocation properties at `WIDE`, and at `WIDE = 10` passes
-        them. So a record of `WIDE` empty siblings has to cost more than
-        `xml_parse.ALLOCATION_FLOOR` on its own, which is what puts the
-        builder's cost per element, and not the floor, in charge of the peak.
-
-        **It refuses one legitimate change, on purpose**: a faster builder that
-        makes such a record cheaper than the floor reds it too. That is the
-        control losing its power, and the answer is a wider `WIDE`, never a
-        lower bar here.
-        """
-        document = MarcDocument(
-            records=(),
-            declaration=None,
-            doctype_after=None,
-            utf16=False,
-            nest_depth=0,
-            patches=(),
-            width=WIDE,
-        )
-        got = answer_of(
-            marc.read, marc_document(document), answers=marc.ParsedMarc, refuses=marc.MarcError
-        )
-        assert got.value is not None
-        assert got.peak > xml_parse.ALLOCATION_FLOOR
-
-    def test_the_generator_still_reaches_the_depth_bound(self):
-        witness(
-            MARC_DOCUMENTS,
-            lambda document: "nested more than" in str(_refusal_of(document)),
-            reaches="a nest past the depth bound",
-        )
 
 
 class TestOneBadRecordCostsOneRecord:
@@ -946,7 +512,7 @@ class TestOneBadRecordCostsOneRecord:
 
 
 class TestReadingRealCatalogueShapes:
-    """Fields as a live catalogue writes them, which is what `marc_fields.py`'s
+    """Fields as a live catalogue writes them, which is what `metadata.py`'s
     readers were measured against and what this reader inherits."""
 
     def test_isbd_punctuation_introducing_the_next_subfield_is_stripped(self):
@@ -971,7 +537,7 @@ class TestReadingRealCatalogueShapes:
         """`020 $q` is a binding or a volume, not only a cross reference.
 
         A Greek or Spanish catalogue file imported by hand used to lose its
-        ISBNs here, because this reader shares `marc_fields.Fields.isbn` with the
+        ISBNs here, because this reader shares `metadata._marc_isbn` with the
         lookup path and that rule refused every qualified entry.
         """
         parsed = marc.read(
@@ -994,23 +560,6 @@ class TestReadingRealCatalogueShapes:
             )
         )
         assert parsed.records[0].isbn == "9789602118962"
-
-    def test_a_qualifier_printed_inside_the_number_still_leaves_the_isbn(self):
-        """The spelling a library that has not moved to `$q` hands over, and
-        the one an upload meets most: the ISBN is this importer's primary match
-        key, so losing it drops the record to the weaker key silently.
-
-        The rule is `marc_fields.Subfields.stated_isbn`, which
-        `tests/test_marc_fields.py` holds. This arm is here because the
-        importer is the caller that pays for it.
-        """
-        parsed = marc.read(
-            a_record(
-                datafield("245", ("a", "T")),
-                datafield("020", ("a", "9783161484100 (pbk.)")),
-            )
-        )
-        assert parsed.records[0].isbn == "9783161484100"
 
     def test_the_older_260_is_read_where_a_record_has_no_264(self):
         parsed = marc.read(
@@ -1050,7 +599,7 @@ class TestReadingRealCatalogueShapes:
     def test_a_subject_heading_naming_no_vocabulary_is_not_stored_as_one(self):
         """A `650` with no `$0` and no `$2 lcsh` is somebody's uncontrolled
         word. It feeds the tag suggestion and never the classifications table,
-        which is `Fields.controlled_subjects` structurally rather than by a filter."""
+        which is `_dnb_subjects` structurally rather than by a filter."""
         parsed = marc.read(
             a_record(datafield("245", ("a", "T")), datafield("650", ("a", "Cookery")))
         )
@@ -1063,8 +612,7 @@ class TestReadingRealCatalogueShapes:
         `_extra_headings` decides an LCSH row by `== "lcsh"`, so a file writing
         `$2 LCSH` loses every one of them, silently, with the record otherwise
         whole. **That, and not the catalogues, is why
-        `marc_fields.Subfields.subject_vocabulary` lower cases**: measured
-        2026-08-31, 0 of
+        `metadata._subject_vocabulary` lower cases**: measured 2026-08-31, 0 of
         the twelve `$2` codes seen live appeared in two cases, and the two upper
         case ones are each written by one catalogue only. So no served record
         motivates the folding and this one line does, which is a reason nothing
@@ -1093,41 +641,26 @@ class TestReadingRealCatalogueShapes:
         assert shouted.records[0].headings == quiet.records[0].headings
 
 
-class TestNoModuleReadsAnotherModulesPrivateNames:
-    """No module of ours reaches past another's door, with no exemption at all.
-
-    **`marc.py` was the one exemption and it is gone**, which is what
-    `marc_fields.py` was written for: this module composed `metadata.py`'s MARC
-    parser by name, 17 names at 21 sites, because an uploaded file is a third
-    MARC profile over the same fields and a second parser would be a second set
-    of field decisions to keep in step. It composes the same parser through a
-    door now, so there is nothing left to admit.
+class TestTheSeamIntoMetadataIsPinned:
+    """`marc.py` is the one module here that reads another's private names.
 
     **Derived with `ast`, never listed, and never counted here either.** A test
     naming the names would be the shape this repository records as wrong on
-    every first attempt, a guard that enumerates something open. `_private_reads`
-    below is the instrument and `_offenders` is the walk; run either for the set.
+    every first attempt, a guard that enumerates something open. So would a
+    number in this docstring: the set shrinks as rules leave `metadata.py` for
+    `bibliographic.py`, and a count written down is a count nobody re-derives.
+    `_private_reads` below is the instrument; run it for the set.
 
-    **The two halves are driven separately, because for one round only the
-    instrument was.** `_private_reads` answers about a string and `_offenders`
-    reads the tree, and an assertion that a set is empty observes neither: three
-    single anchor mutations of the walk left every test in this class green with
-    the rule reporting nothing. Half of that predates this module, so it is
-    stated rather than blamed on the change that found it: the version of this
-    class that admitted `marc.py` was disarmable the same way by dropping the
-    module stem half of its `ours` filter.
+    **What a rename actually breaks depends on where the name is read.**
+    `_MARC` and `_GND_PREFIX` are read at module scope, so renaming one stops
+    the application importing and every router test catches it. The rest are
+    read inside a function body, where nothing catches it until a request
+    arrives, and those are what this guard is for.
 
-    **The rule is ours and not the standard library's.** `shelf.py` reads
-    `sys._getframe`, which is a documented name, so the filter is that the module
-    reached into is one of this package's own files rather than a list of names
-    to forgive.
-
-    **`mypy` reports a reach in statically, and it now runs in the pipeline.**
-    Both halves of this paragraph were false by the time they were read: the type
-    check was added to the backend job on 2026-09-26, and the schema comparison
-    this sentence listed beside it moved into the suite on 2026-09-27, so the
-    build no longer has a step of that name. It is left recorded rather than
-    deleted because the reach it describes is still the subject of the arm below.
+    **`mypy` reports all of them statically and the CI pipeline does not run
+    it.** The build runs `ruff check`, the OpenAPI diff and `pytest`, and its
+    only mention of the type checker is a comment. That is a pipeline change and
+    is raised rather than made here.
 
     The pipeline definition is deliberately not named: it is stripped from the
     published tree, and a published file pointing at a stripped path is what the
@@ -1140,7 +673,7 @@ class TestNoModuleReadsAnotherModulesPrivateNames:
 
         **Two import shapes, because one of them was a hole.** The first version
         read only `import x` plus `x._y`, and
-        `from metadata import _parsed` walked straight past it: the guard
+        `from metadata import _marc_fields` walked straight past it: the guard
         could be evaded by changing an import style. That is the same blind spot
         `tests/test_shelf.py` records against its own first version, which
         caught a parenthesised list and sailed past a one line
@@ -1153,31 +686,7 @@ class TestNoModuleReadsAnotherModulesPrivateNames:
         reported `shelf.py` three times, because `shelf` is also an ordinary
         local variable there and `shelf._unrated` is a method on an instance.
 
-        **Three remaining blind spots, stated rather than left to be found.**
-
-        **A private member of a published class is invisible here**, and that is
-        new with `marc_fields.py`. This matches `<module>._x` and
-        `from X import _y`, so `Fields(node)._isbn_entries()` in another module
-        returns nothing: the receiver is a local, not an imported module name.
-        Reaching it means deciding whether an attribute chain ends in an
-        instance of a class of ours, which is the binding machinery the retired
-        `TestEveryBookQueryIsFiltered` was made of and was retired for, and any
-        cheaper rule is a list of receiver names, which is the enumeration this
-        file refuses everywhere else. Nothing stands in for it, and the
-        temptation is to claim something does. Published sites outside this
-        module name its private members: three in `test_metadata.py` are the
-        `Fields._isbn_entries` spelling this blind spot is about, and two in
-        `test_house_rules.py` are reads rather than prose. So neither "no
-        published prose points at one" nor "no module of ours reads one" is
-        true. What is true is narrower: this walk skips `tests/`, and no module
-        it does walk reads one.
-
-        **No total is given, deliberately.** Any total here has to exclude this
-        module's own test file and this sentence, which quotes the spelling and
-        so counts itself. `_is_vendored` in `test_house_rules.py` records the
-        same recursion: its first draft quoted both phrases and the census then
-        reported the comment. The narrow claim above is the part that guards; a
-        total is the part that rots.
+        **Two remaining blind spots, stated rather than left to be found.**
 
         A file that does `import shelf` *and* binds `shelf` to something else in
         a local scope is reported for the local. Closing that needs the scope
@@ -1213,7 +722,7 @@ class TestNoModuleReadsAnotherModulesPrivateNames:
                 and node.attr.startswith("_")
             ):
                 found.setdefault(imported[node.value.id], set()).add(node.attr)
-            # `from metadata import _parsed` reaches the same name by the
+            # `from metadata import _marc_fields` reaches the same name by the
             # other door and used to be invisible here.
             elif isinstance(node, ast.ImportFrom) and node.module:
                 private = {
@@ -1246,32 +755,30 @@ class TestNoModuleReadsAnotherModulesPrivateNames:
         assert (BACKEND / "tests").is_dir()
         assert (BACKEND / "pyproject.toml").is_file()
 
-    def test_the_instrument_reports_a_reach_in_it_is_shown(self):
-        """Both import spellings reach the same answer.
+    def test_every_private_name_marc_reads_still_exists_on_metadata(self):
+        """A rename in `metadata.py` fails here rather than inside a request."""
+        source = (BACKEND / "marc.py").read_text(encoding="utf-8")
+        names = self._private_reads(source).get("metadata", set())
 
-        This observes `_private_reads` and nothing else: it never touches the
-        walk, the file collection or the "one of ours" filter, which is why
-        `test_a_planted_reach_in_is_reported` exists beside it rather than
-        instead of it.
-        """
-        attribute = "import metadata\n\n\ndef _x(b):\n    return metadata._parsed(b)\n"
-        imported = "from metadata import _parsed\n"
+        assert names, (
+            "marc.py no longer reads metadata's MARC parser, so either this "
+            "guard is vacuous or the reader has been rewritten twice"
+        )
+        missing = sorted(name for name in names if not hasattr(metadata, name))
+        assert missing == [], (
+            f"marc.py reads {missing} on metadata and metadata no longer has "
+            "them. The MARC reader composes that parser rather than restating "
+            "it, so a rename there is a break here."
+        )
 
-        assert self._private_reads(attribute) == {"metadata": {"_parsed"}}
-        assert self._private_reads(imported) == {"metadata": {"_parsed"}}
+    def test_marc_is_the_only_module_reaching_into_another(self):
+        """The exception stays one exception.
 
-    @classmethod
-    def _offenders(cls, root: pathlib.Path) -> dict[str, list[str]]:
-        """Every module under `root` reading another's private names, by path.
-
-        **`root` is a parameter for the reason `_python_sources` and
-        `test_bibliographic._callers` take one**: a walk asserted only against
-        this checkout is a walk nobody has watched fail, and the assertion this
-        serves is that a set is empty. Three single anchor mutations of the body
-        below left every test in this class green while the rule reported
-        nothing, because the only test that touched the walk was the one
-        asserting the empty set. `test_a_planted_reach_in_is_reported` drives it
-        against a tree it builds.
+        Reading another module's private names is a boundary this tree has
+        nowhere else. It is defensible exactly once, because the MARC field
+        knowledge was measured against live catalogues and must not be written
+        twice; a second module doing it is a second copy of that argument, and
+        the argument does not hold twice.
         """
         # **A directory of ours is decided structurally, never by name**, and
         # that took two red pipelines to learn. The first version skipped a set
@@ -1299,7 +806,7 @@ class TestNoModuleReadsAnotherModulesPrivateNames:
                 and any(directory.rglob("*.py"))
             )
 
-        packages = sorted(d for d in root.iterdir() if is_ours(d))
+        packages = sorted(d for d in BACKEND.iterdir() if is_ours(d))
         def is_ours_file(f: pathlib.Path) -> bool:
             """Belt and braces under a package of ours: a nested environment or
             cache is excluded at any depth.
@@ -1313,14 +820,13 @@ class TestNoModuleReadsAnotherModulesPrivateNames:
             answers a question about the filesystem that a path predicate
             cannot.
             """
-            return not _is_vendored(f, root)
+            return not _is_vendored(f, BACKEND)
 
-        sources = sorted(root.glob("*.py")) + [
+        sources = sorted(BACKEND.glob("*.py")) + [
             f for d in packages for f in sorted(d.rglob("*.py")) if is_ours_file(f)
         ]
 
-        # Only this application's own modules, so `metadata._parsed` would count
-        # and a
+        # Only this application's own modules, so `metadata._MARC` counts and a
         # standard library private does not: `os._exit` is a documented name and
         # nothing here is arguing about the standard library's boundaries.
         #
@@ -1331,9 +837,11 @@ class TestNoModuleReadsAnotherModulesPrivateNames:
 
         offenders = {}
         for path in sources:
+            if path.name == "marc.py":
+                continue
             found = {
                 f"{module}.{attr}"
-                for module, attrs in cls._private_reads(
+                for module, attrs in self._private_reads(
                     path.read_text(encoding="utf-8")
                 ).items()
                 if module in ours
@@ -1345,178 +853,51 @@ class TestNoModuleReadsAnotherModulesPrivateNames:
                 # not be told from one naming an installed package's own
                 # `metadata.py`, and two pipelines were spent guessing where the
                 # reported files were.
-                offenders[str(path.relative_to(root))] = sorted(found)
-        return offenders
-
-    def test_no_module_reaches_into_another(self):
-        """Reading another module's private names is a boundary this tree has
-        nowhere.
-
-        It was defensible exactly once, for the MARC field knowledge that was
-        measured against live catalogues and must not be written twice. That is
-        `marc_fields.py` now and the exemption is gone: a second module doing it
-        is a second copy of an argument that did not hold twice.
-        """
-        offenders = self._offenders(BACKEND)
+                offenders[str(path.relative_to(BACKEND))] = sorted(found)
 
         assert offenders == {}, (
             f"These modules read another module's private names: {offenders}. "
-            "This tree admits none: publish what the caller needs, or move the "
-            "rule to a module both can read. `marc_fields.py` is the worked "
-            "example."
+            "marc.py is the only one this tree admits, and its reason is in its "
+            "own docstring."
         )
-
-    @staticmethod
-    def _plant(root: pathlib.Path, **modules: str) -> pathlib.Path:
-        """A tree of the shape the walk expects: top level modules, one package.
-
-        The package is what makes the diagonal below meaningful, since the
-        module stem half and the package name half of the "one of ours" filter
-        are two terms and a mutation can drop either.
-        """
-        root.mkdir(parents=True, exist_ok=True)
-        (root / "marc.py").write_text("# the anchor test looks for this\n")
-        (root / "pyproject.toml").write_text("")
-        (root / "tests").mkdir(exist_ok=True)
-        package = root / "routers"
-        package.mkdir(exist_ok=True)
-        (package / "books.py").write_text("import metadata\n")
-        for name, source in modules.items():
-            (root / f"{name}.py").write_text(source)
-        return root
-
-    def test_a_planted_reach_in_is_reported(self, tmp_path):
-        """The half this class was missing, and it was missing the whole rule.
-
-        Every other assertion here is that a set is empty or that
-        `_private_reads` answers about a string. Neither observes the walk that
-        builds the set, so mutating the file collection, the "one of ours"
-        filter or the report itself left all of them green with the rule
-        reporting nothing. Measured by a critic seat on three separate anchors.
-        """
-        root = self._plant(
-            tmp_path / "backend",
-            metadata="def _parsed(body):\n    return body\n",
-            intruder="import metadata\n\n\ndef read(b):\n    return metadata._parsed(b)\n",
-        )
-
-        assert self._offenders(root) == {"intruder.py": ["metadata._parsed"]}
-
-    def test_a_planted_reach_in_into_a_sub_package_is_reported(self, tmp_path):
-        """The other term of the filter, so dropping either half goes red.
-
-        `ours` is the module stems **plus** the package names, because
-        `import routers.books as b` then `b._x` keys under `routers`. Keyed on
-        stems alone this is invisible; keyed on packages alone the test above
-        is.
-        """
-        root = self._plant(
-            tmp_path / "backend",
-            intruder="import routers.books as b\n\n\ndef read():\n    return b._helper\n",
-        )
-
-        assert self._offenders(root) == {"intruder.py": ["routers._helper"]}
-
-    def test_a_standard_library_private_is_not_reported(self, tmp_path):
-        """The other half of the diagonal: it must not report everything.
-
-        `shelf.py` reads `sys._getframe`, which is documented, and a rule that
-        reported it would be about Python rather than about this application.
-        """
-        root = self._plant(
-            tmp_path / "backend",
-            intruder="import sys\n\n\ndef depth():\n    return sys._getframe(1)\n",
-        )
-
-        assert self._offenders(root) == {}
 
 
 class TestEveryColumnTheImporterWritesIsBounded:
-    """No field of a MARC record may be silently uncovered by the bound.
+    """No field of a MARC record may be silently uncovered by the guard.
 
-    **This exists because one was.** `description` sits in a `Text` column,
-    which reports no length, and carried no `max_length`, so the value came back
-    whole while the docstring said "strings truncate". Both critic seats found
-    it independently, from opposite ends.
+    **This exists because one was.** `within_bounds` reads the bound off
+    `BookCreate.model_fields` and the column width off `Book.__table__`, and
+    `description` had neither: a `Text` column reports no length and the field
+    carried no `max_length`, so the value came back whole while the docstring
+    said "strings truncate". Both critic seats found it independently, from
+    opposite ends.
 
     The lesson is not that `description` needed a bound, it is that **a field
     added later inherits the absence rather than the guard**. So the tuple the
-    importer walks is checked against the tables that decide, and every entry
-    has to appear in one of them.
-
-    **It asks `catalogue.py`, because that is what decides.** Every record the
-    importer applies has been bounded by `Record.__post_init__`, and every
-    uploaded one by `Record.from_upload` first (`marc.py` routes the upload
-    through it), both against `_TEXT_CEILINGS` and `_NUMBER_RANGES`. Asking
-    `importing.within_bounds` instead, which this did until 2026-09-18, is the
-    wrong question in both directions. It reddens for a field bounded at the
-    `Record` layer that carries no `BookCreate` `MaxLen` **and sits in a column
-    declaring no width**, which is `description`'s own shape: measured over the
-    seven text names the importer writes, by stripping each field's `MaxLen` in
-    turn, that is 1 of 7, because for the other six the column width is there to
-    be read. And it passes a field carrying a `BookCreate` bound that
-    `catalogue.py` does not name, measured on `location`, for which the old
-    assertion was green.
-
-    **Tested rung, and it stays there rather than becoming self enforcing.** Not
-    because the import direction forbids it: `importing.py` reads
-    `from catalogue import Record` and `catalogue.py` imports nothing back, so a
-    module scope assertion would sit the right way round. What stops it is that
-    both tables are private and `TestNoModuleReadsAnotherModulesPrivateNames`
-    above forbids a module that is not a test reading another module's private
-    name. So the rung is reachable, at the price of publishing the union from
-    `catalogue.py` first, and that is the change to argue rather than a fact of
-    the layout. It enumerates nothing either way: `_MARC_RECORD_FIELDS` comes
-    from the module under test and both tables are read from `catalogue.py`, so
-    no field name is written down here.
-
-    **What it still cannot see** is a name moved out of `_TEXT_CEILINGS` and
-    into `catalogue._UNBOUNDED` in one gesture, if the name is not one the
-    importer writes. `test_catalogue.py::TestWhichScalarsAreBoundedAndWhichAreNamedInstead`
-    is where that is pinned, in a literal, for the reason its own docstring
-    gives.
+    importer walks is enumerated here and every entry is required to derive one,
+    which is a rule rather than a list: adding a field to `_MARC_RECORD_FIELDS`
+    without giving it a bound reddens this.
     """
 
     def test_every_field_the_importer_writes_derives_a_bound(self):
-        import catalogue
-        from importing import _MARC_RECORD_FIELDS
+        from importing import _MARC_RECORD_FIELDS, within_bounds
 
-        bounded = set(catalogue._TEXT_CEILINGS) | set(catalogue._NUMBER_RANGES)
-        unbounded = [name for name in _MARC_RECORD_FIELDS if name not in bounded]
+        unbounded = []
+        for name in _MARC_RECORD_FIELDS:
+            # A value no bound could leave alone: past every string width in the
+            # schema and past every numeric ceiling.
+            probe: object = "x" * 100_000
+            if BookCreate.model_fields[name].annotation in (int | None, float | None):
+                probe = 10**9
+            if within_bounds(name, probe) == probe:
+                unbounded.append(name)
 
         assert unbounded == [], (
-            f"{unbounded} are written out of every record the importer applies "
-            "and nothing bounds them. `Record.__post_init__` bounds a scalar "
-            "only where `catalogue._TEXT_CEILINGS` or `catalogue._NUMBER_RANGES` "
-            "names it, so a column in neither table is stored at whatever width "
-            "a catalogue sent. Give the field an entry in one of those two "
-            "tables rather than adding an arm here."
-        )
-
-    def test_every_column_the_importer_writes_is_a_work_fact(self):
-        """The narrowing that feeds the gap filler has to be a narrowing.
-
-        `_MARC_GAP_FIELDS` is `_MARC_RECORD_FIELDS` filtered through
-        `book_columns.WORK_DETAIL`, so a name in the create tuple that is not a
-        work fact is written when a record creates a Book and silently skipped
-        when one matches an existing Book: `852 $c` is a shelving location and
-        adding it here is the plausible way in. Nothing else would notice,
-        because both writers would still be walking one list.
-
-        `WORK_FACTS` rather than `WORK_DETAIL`, because `title` is a work fact
-        the create path writes and the gap filler deliberately does not.
-        """
-        import book_columns
-        from importing import _MARC_RECORD_FIELDS
-
-        outside = [n for n in _MARC_RECORD_FIELDS if n not in book_columns.WORK_FACTS]
-
-        assert outside == [], (
-            f"{outside} are written out of every record the importer applies and "
-            "are not facts about the work, so a matched Book never gains them "
-            "while a created one does. Either the column is a work fact and "
-            "belongs in `book_columns.WORK_DETAIL`, or the importer should not "
-            "be writing it."
+            f"{unbounded} pass through `within_bounds` unchanged, so an uploaded "
+            "record can write whatever it likes into them. The guard reads the "
+            "bound off `BookCreate.model_fields` and the column width off "
+            "`Book.__table__`; give the field one of those rather than adding an "
+            "arm to the guard."
         )
 
     def test_the_tuple_the_importer_walks_is_the_one_the_book_has(self):

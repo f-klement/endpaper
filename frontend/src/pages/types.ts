@@ -7,13 +7,6 @@
  * tag editor through the one `TagPicker` all three draw, so it belongs at this
  * level rather than inside any of them.
  *
- * **A constant also lives here when a rule outside the page has to read it**,
- * which is the second criterion and the one `STATUS_STYLES` is here on: the
- * card is its only consumer, so the paragraph above would send it back down.
- * The paragraph at that constant says what reads it and why. Moving it back
- * is a compile error wherever those rules import it rather than a silent
- * regression, which is the property that makes this safe to state once.
- *
  * Wire types (BookOut, LoanOut, ...) are NOT redeclared here. They are
  * generated from the OpenAPI schema into `src/api/generated/model`.
  */
@@ -30,45 +23,6 @@ import type { Locale, TagOut } from "../api/generated/model";
 import { tagName, type MessageKey } from "../i18n";
 import { sortByName } from "../lib/nameOrder";
 import type { ThemePreference } from "../theme";
-
-/**
- * The list back, refused at compile time when it leaves a member out.
- *
- * A `readonly Union[]` cannot see a missing member, which is the hole every
- * `*_ORDER` list in this file sits in: a value in the enum and not in the order
- * is one nobody can choose and nobody can filter by, with nothing red anywhere.
- * The argument is intersected with an object type that exists only while
- * something is missing, so an incomplete list fails to typecheck and the error
- * names the value left out as the type of `missingFromThisOrder`.
- *
- * **A list this wraps carries no type annotation, and that is load bearing.**
- * Writing `: readonly Union[]` on the constant, which is the house style of the
- * lists below, throws the members away again: what the constant level witness
- * in `tests/pages/types.test.ts` reads is `typeof` the list, so an annotation
- * would leave it checking nothing. That witness refuses an annotated list by
- * name rather than trusting this sentence, and it stands whether or not a call
- * site still has the wrapper. The `@ts-expect-error` beside it pins this helper
- * and never a call of it.
- *
- * Curried because one type argument cannot be given while the other is
- * inferred: the union is named, the list is read. It does **not** refuse a
- * duplicate, since a list naming a member twice still excludes nothing, so that
- * property stays a test.
- *
- * Every `*_ORDER` list in this file is wrapped. The three that joined last,
- * `FORMAT_ORDER`, `LENDING_ORDER` and `MODE_ORDER`, each had a set equality test
- * first, so the wrap replaced an instrument rather than closing a gap: it takes
- * exhaustiveness, and what it cannot see stays a test beside it.
- */
-export const everyOneOf =
-  <Union extends string>() =>
-  <const Order extends readonly Union[]>(
-    order: Order &
-      ([Exclude<Union, Order[number]>] extends [never]
-        ? unknown
-        : { missingFromThisOrder: Exclude<Union, Order[number]> }),
-  ): Order =>
-    order;
 
 /**
  * The order tag categories are presented in, everywhere.
@@ -111,93 +65,6 @@ export const STATUS_LABELS: Record<ReadStatus, MessageKey> = {
 };
 
 /**
- * What each reading status looks like.
- *
- * Here for the reason `STATUS_LABELS` above is: the card drew it and nothing
- * else could see it, while its two siblings in this file were already the
- * house shape for a keyed table of classes.
- *
- * **A named export rather than inline JSX, and that is a constraint on this
- * file now.** `tests/theme/palettes.test.ts::the status pill's ink, as it
- * draws` imports this table and measures, over every palette, the two rows
- * whose pill sits on the paper ramp: `unread` and `did_not_finish`. The other
- * three are bloom, amber and accent and are not read at all: handed one, that
- * rule would refuse it, naming the role and the string, rather than measure
- * it, and no path hands it one. A class string folded into the card's markup
- * is a pairing that rule can no longer see, so it would go green on a pill
- * nobody checks. The constraint is written here because the alternative is
- * somebody simplifying the export away as unnecessary indirection: it is not
- * indirection, it is the seam the measurement reads. What holds the card to
- * actually drawing it is `tests/pages/components/BookCard.test.tsx::draws the
- * %s pill from the shared table`, which is the one thing an import cannot tell
- * you. The `%s` is the label that arm writes, not a placeholder for this
- * sentence: it is driven over every status and expands to one arm per row.
- *
- * The rule reads the classes as tokens, so on the two rows it reads the order
- * of the pair, a variant sitting between them and any further utility are
- * free. **One exception, and it is a refusal rather than a miss**: a second
- * unprefixed `bg-paper-*` or `text-paper-*` on either of those rows makes that
- * rule refuse, naming both tokens, because which of the two paints is decided
- * by stylesheet order and not by the string. A variant of the same utility is
- * not a second one.
- */
-export const STATUS_STYLES: Record<ReadStatus, string> = {
-  // **Below the floor, and pre-existing.** As it actually draws, the ink on
-  // this tint composited over the paper-0 card, it falls under the 4.5 every
-  // text pair in `tests/theme/palettes.test.ts` is held to, on palettes where
-  // the same ink on the card clears it. That is recomputed there by `the
-  // status pill's ink, as it draws`, over every palette and with the tint
-  // composited; `docs/decisions.md` carries the figures, and its table is held
-  // against the stylesheets by the same file. Not changed here, because a
-  // status pill's colour is a design decision across five values and this
-  // change owns one of them. The test added with `did_not_finish` pins that
-  // pill only.
-  [ReadStatus.unread]:
-    "bg-paper-200/70 text-paper-600 dark:bg-paper-800 dark:text-paper-300",
-  // Bloom, not danger. Wanting to read something is the pleased note, and the
-  // two were one rose until they were split: see --color-danger-* in index.css.
-  [ReadStatus.want_to_read]:
-    "bg-bloom-100 text-bloom-700 dark:bg-bloom-700/25 dark:text-bloom-300",
-  [ReadStatus.reading]:
-    "bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-300",
-  [ReadStatus.read]:
-    "bg-accent-100 text-accent-800 dark:bg-accent-500/15 dark:text-accent-200",
-  // The paper ramp, not a semantic one. Giving up on a book is neither an
-  // error nor an achievement, and a rose or an amber pill would make the shelf
-  // look like it was reporting a problem.
-  //
-  // `paper-800` on `paper-200`, not the `paper-600` the `unread` pill uses.
-  // Flat, because this pill is `bg-paper-200` at full opacity, and it is the
-  // only rung from the `unread` pill's ink up to this one that clears 4.5 on
-  // every palette: recomputed by `tests/theme/palettes.test.ts::the status
-  // pill's ink, as it draws`, which reads both ends off the two class strings
-  // here rather than restating them. The pair itself is in that file's
-  // contract, in both modes.
-  [ReadStatus.did_not_finish]:
-    "bg-paper-200 text-paper-800 dark:bg-paper-800 dark:text-paper-200",
-};
-
-/**
- * The order the statuses are offered in, everywhere they are offered.
- *
- * A reading lifecycle rather than an alphabet: not started, means to, in
- * progress, finished, gave up. The library filter strip and a book's own status
- * picker both render it, and each used to write it out again.
- *
- * A literal rather than `Object.values(ReadStatus)`, which cannot be incomplete
- * and is still the wrong source: the generated enum happens to declare these
- * five in this sequence today, so a regen after somebody reorders the backend
- * enum would reorder the strip and the picker with nothing red anywhere.
- */
-export const STATUS_ORDER = everyOneOf<ReadStatus>()([
-  ReadStatus.unread,
-  ReadStatus.want_to_read,
-  ReadStatus.reading,
-  ReadStatus.read,
-  ReadStatus.did_not_finish,
-]);
-
-/**
  * What each ownership is called. Same reason, same shape.
  */
 export const OWNERSHIP_LABELS: Record<OwnershipStatus, MessageKey> = {
@@ -231,20 +98,19 @@ export const FORMAT_LABELS: Record<BookFormat, MessageKey> = {
 /**
  * The order they are offered in, coarsest first.
  *
- * Every dropdown and filter in the app is built from it, so a format left out
- * is one a member can never choose and never filter by. The compiler refuses
- * that now, where a set equality test used to catch it. The test could not see
- * a duplicate and had no opinion on where the catch-all sits, so
- * `tests/pages/types.test.ts` still names both of those separately.
+ * **A list, so the type cannot see a missing value the way `FORMAT_LABELS`
+ * can**, and every dropdown and filter in the app is built from it: a format
+ * left out here is one a member can never choose and never filter by, with
+ * nothing red anywhere. `tests/pages/types.test.ts` asserts it covers the enum.
  */
-export const FORMAT_ORDER = everyOneOf<BookFormat>()([
+export const FORMAT_ORDER: readonly BookFormat[] = [
   BookFormat.hardcover,
   BookFormat.paperback,
   BookFormat.ebook,
   BookFormat.audiobook,
   BookFormat.comic,
   BookFormat.other,
-]);
+];
 
 export const CONDITION_LABELS: Record<BookCondition, MessageKey> = {
   [BookCondition.new]: "copy.condition.new",
@@ -254,23 +120,15 @@ export const CONDITION_LABELS: Record<BookCondition, MessageKey> = {
   [BookCondition.ex_library]: "copy.condition.ex_library",
 };
 
-/**
- * Best to worst, with the provenance category last: it is not a point on the
- * scale, so sorting it into the middle would imply it is one.
- *
- * Wrapped alongside `STATUS_ORDER` rather than left as it was, because it was
- * the one list here with no guard of any kind: the copy editor's condition
- * select is built from it and nothing else reads it, so a condition added to
- * the backend enum was unreachable in the editor with no compile error and no
- * red test. That is the same defect the two status tables had, one enum over.
- */
-export const CONDITION_ORDER = everyOneOf<BookCondition>()([
+/** Best to worst, with the provenance category last: it is not a point on the
+ * scale, so sorting it into the middle would imply it is one. */
+export const CONDITION_ORDER: readonly BookCondition[] = [
   BookCondition.new,
   BookCondition.good,
   BookCondition.fair,
   BookCondition.poor,
   BookCondition.ex_library,
-]);
+];
 
 /**
  * What each answer to "would you lend this" is called.
@@ -289,18 +147,12 @@ export const LENDING_LABELS: Record<LendingWillingness, MessageKey> = {
   [LendingWillingness.happy]: "lending.happy",
 };
 
-/**
- * Yes, later, no. Offered in the order somebody would say them.
- *
- * The sorted array comparison this replaced did three jobs in one expression,
- * and the wrap takes one of them. A duplicate is still a test's to catch: a
- * list naming an answer twice excludes nothing, so the type has no opinion.
- */
-export const LENDING_ORDER = everyOneOf<LendingWillingness>()([
+/** Yes, later, no. Offered in the order somebody would say them. */
+export const LENDING_ORDER: readonly LendingWillingness[] = [
   LendingWillingness.happy,
   LendingWillingness.in_use,
   LendingWillingness.never,
-]);
+];
 
 /** Type, genre and age. One value, written once. */
 const CURATED_PILL = "bg-paper-100 text-paper-700";
@@ -406,17 +258,9 @@ export const MODE_LABELS: Record<ThemePreference, MessageKey> = {
  *
  * `system` last rather than first: it is the default, and a default reads
  * better as the thing you return to than the thing you start at.
- *
- * `ThemePreference` is a bare string union with no runtime object to
- * enumerate, so what guarded this before the wrap was a **pair**: `MODE_LABELS`
- * is a total `Record` over the union, and the retired test compared this order
- * against its keys. Drop a mode from the table and `tsc` refuses it, TS2741,
- * measured 2026-09-25. The pair held, so the wrap closes no hole: what it buys
- * is one instrument at the declaration, which does not depend on that table
- * staying total.
  */
-export const MODE_ORDER = everyOneOf<ThemePreference>()([
+export const MODE_ORDER: readonly ThemePreference[] = [
   "light",
   "dark",
   "system",
-]);
+];

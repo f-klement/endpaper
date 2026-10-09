@@ -21,9 +21,9 @@ import { mockApi, renderWithProviders, type MockApi } from "../../../utils";
 
 let api: MockApi;
 
-type PageProps = React.ComponentProps<typeof DataSettingsPage>;
-
-function render(props: Partial<PageProps> = {}) {
+function render(
+  props: Partial<React.ComponentProps<typeof DataSettingsPage>> = {},
+) {
   return renderWithProviders(
     <DataSettingsPage mode={AuthMode.local} onSignIn={() => {}} {...props} />,
   );
@@ -42,6 +42,7 @@ beforeEach(() => {
   api = mockApi();
   api.on("/api/settings/features", {
     body: {
+      google_books_enabled: false,
       goodreads_lookup_enabled: false,
       default_locale: "en",
     },
@@ -70,7 +71,7 @@ describe("DataSettingsPage", () => {
       id: 7,
       username: "tester",
       is_admin: false,
-      created_at: "2026-01-01T12:00:00Z",
+      created_at: "2026-01-01T00:00:00",
     };
 
     it("lists them for an admin", async () => {
@@ -153,7 +154,7 @@ describe("DataSettingsPage", () => {
           user: TESTER,
         },
       });
-      const onSignIn = vi.fn<PageProps["onSignIn"]>();
+      const onSignIn = vi.fn();
       render({ onSignIn });
       const user = userEvent.setup();
 
@@ -180,7 +181,7 @@ describe("DataSettingsPage", () => {
         status: 401,
         body: { detail: "Incorrect password for that account" },
       });
-      const onSignIn = vi.fn<PageProps["onSignIn"]>();
+      const onSignIn = vi.fn();
       render({ onSignIn });
       const user = userEvent.setup();
 

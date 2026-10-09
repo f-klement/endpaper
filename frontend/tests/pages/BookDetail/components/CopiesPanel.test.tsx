@@ -14,7 +14,7 @@ function renderPanel(
   copies: BookOut[],
   listError: unknown = null,
 ) {
-  const onAdd = vi.fn<() => void>();
+  const onAdd = vi.fn();
   renderLocalised(
     <CopiesPanel
       book={book}

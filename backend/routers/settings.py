@@ -201,16 +201,7 @@ def _read_settings(db: DbSession) -> SettingsOut:
     # The one in force, which is the environment's when it has one. Showing the
     # stored key's preview while a different key is actually being used would
     # be worse than showing nothing.
-    #
-    # **Asked rather than spelled out.** `from_env or get_raw(...)` is
-    # `in_force`'s own body, so writing it here puts precedence in two places
-    # and makes this the one stored read of a key the environment can pin in the
-    # whole backend: the exemption
-    # `tests/test_settings_store.py::TestAnOverriddenSettingIsReadWhereItIsPinned`
-    # would then need. `from_env` stays because the response also reports
-    # **whether** the deployment supplied it, which is provenance rather than
-    # the value.
-    key = settings_store.in_force(db, SettingKey.GOOGLE_BOOKS_API_KEY)
+    key = from_env or settings_store.get_raw(db, SettingKey.GOOGLE_BOOKS_API_KEY)
     webhook_secret = settings_store.get_raw(db, SettingKey.OVERDUE_WEBHOOK_SECRET)
     # The one in force for both, for the reason the Google key's preview is:
     # showing a preview of a secret that is not the one being used is worse
@@ -312,8 +303,7 @@ def get_feature_flags(db: DbSession) -> FeatureFlagsOut:
     has_key = bool(settings_store.google_books_api_key(db))
 
     return FeatureFlagsOut(
-        # The conjunction alone. The raw toggle is admin-only on purpose: see
-        # `FeatureFlagsOut.google_books_ready`.
+        google_books_enabled=google_books_enabled,
         google_books_ready=google_books_enabled and has_key,
         goodreads_lookup_enabled=settings_store.get_bool(
             db, SettingKey.GOODREADS_LOOKUP_ENABLED
@@ -608,10 +598,10 @@ def restore_credential_key(
     try:
         credentials.store_key(payload.phrase)
     except credentials.BadRecoveryPhrase as refusal:
-        # 400 rather than 409: a phrase somebody mistyped is a bad request, and
+        # 422 rather than 409: a phrase somebody mistyped is a bad request, and
         # a key the deployment pinned elsewhere is a conflict with the
         # deployment. One status for both told a client nothing it could act on.
-        raise HTTPException(status_code=400, detail=str(refusal)) from None
+        raise HTTPException(status_code=422, detail=str(refusal)) from None
     except credentials.KeyConfigurationError as refusal:
         raise HTTPException(status_code=409, detail=str(refusal)) from None
     return _read_credential_key(db)

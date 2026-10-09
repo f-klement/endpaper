@@ -8,15 +8,9 @@ import { Locale } from "../../../../src/api/generated/model";
 import UnconfirmedBanner from "../../../../src/pages/Home/components/UnconfirmedBanner";
 import { renderLocalised } from "../../../utils";
 
-type OnReview = NonNullable<
-  React.ComponentProps<typeof UnconfirmedBanner>["onReview"]
->;
-
 describe("UnconfirmedBanner", () => {
   it("says how many books are unconfirmed", () => {
-    renderLocalised(
-      <UnconfirmedBanner count={12} onReview={vi.fn<OnReview>()} />,
-    );
+    renderLocalised(<UnconfirmedBanner count={12} onReview={vi.fn()} />);
     expect(screen.getByText(/12 books/)).toBeInTheDocument();
   });
 
@@ -24,13 +18,13 @@ describe("UnconfirmedBanner", () => {
     // Nothing to dismiss: it disappears on its own once the count reaches
     // zero, which is what makes it a nudge rather than a notification.
     const { container } = renderLocalised(
-      <UnconfirmedBanner count={0} onReview={vi.fn<OnReview>()} />,
+      <UnconfirmedBanner count={0} onReview={vi.fn()} />,
     );
     expect(container).toBeEmptyDOMElement();
   });
 
   it("offers a way to review them", async () => {
-    const onReview = vi.fn<OnReview>();
+    const onReview = vi.fn();
     renderLocalised(<UnconfirmedBanner count={3} onReview={onReview} />);
 
     await userEvent
@@ -41,12 +35,9 @@ describe("UnconfirmedBanner", () => {
   });
 
   it("translates", () => {
-    renderLocalised(
-      <UnconfirmedBanner count={3} onReview={vi.fn<OnReview>()} />,
-      {
-        locale: Locale.de,
-      },
-    );
+    renderLocalised(<UnconfirmedBanner count={3} onReview={vi.fn()} />, {
+      locale: Locale.de,
+    });
     expect(
       screen.getByRole("button", { name: "Jetzt prüfen" }),
     ).toBeInTheDocument();

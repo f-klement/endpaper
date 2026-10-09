@@ -114,20 +114,9 @@ BACKEND = Path(__file__).resolve().parent.parent
 #: `models.py` defines it. `custom_fields.py` owns it. `backup.py` names it in
 #: `_TABLES` so a restore cannot lose a table, which is the same third way past
 #: a viewer `test_shelf.py` documents. Nothing else: a router asks
-#: `custom_fields.py`, and it holds only `CustomField`, the definition.
-#:
-#: **`fields.py` is the fourth and it is a different question rather than an
-#: exemption**, which is why it needs saying here rather than being waved
-#: through. The three above read values; that module asks which **definitions**
-#: a Member may be told exist, and the only way to answer it is to ask which
-#: ones anything is filed under. Every one of its three reads selects
-#: `field_id` and nothing else, so no value, no `book_id` and no count crosses
-#: out of it, two of the three go through the Shelf, and
-#: `test_shelf.py::BOOK_OWNED_READERS` carries the statement and the reason for
-#: each. The sentence above that says a definition "says nothing about any
-#: Book" is what stopped being true: a definition carried only by Private Books
-#: says those Books exist, which is what `fields.Fields` closes.
-VALUE_READERS = {"models.py", "custom_fields.py", "backup.py", "fields.py"}
+#: `custom_fields.py`, and it holds only `CustomField`, the definition, which is
+#: Library wide and says nothing about any Book.
+VALUE_READERS = {"models.py", "custom_fields.py", "backup.py"}
 
 #: The modules a `from ... import *` can bind the name through. Derived from the
 #: allowlist rather than written out, for the reason `test_reading.py` derives
@@ -397,16 +386,16 @@ def other_book(db, member) -> Book:
 
 
 @pytest.fixture
-def link_field(db, member) -> CustomField:
-    field = define(db, "Calibre-web", CustomFieldKind.URL, member.id)
+def link_field(db) -> CustomField:
+    field = define(db, "Calibre-web", CustomFieldKind.URL)
     db.commit()
     db.refresh(field)
     return field
 
 
 @pytest.fixture
-def text_field(db, member) -> CustomField:
-    field = define(db, "Bought from", CustomFieldKind.TEXT, member.id)
+def text_field(db) -> CustomField:
+    field = define(db, "Bought from", CustomFieldKind.TEXT)
     db.commit()
     db.refresh(field)
     return field
@@ -513,8 +502,7 @@ class TestOnlyABookReachesAValue:
         node = ast.parse(source).body[0]
         assert isinstance(node, ast.FunctionDef)
         if reported_by == "touch":
-            assert _touches_the_table(node)
-            assert not _takes_a_book(node)
+            assert _touches_the_table(node) and not _takes_a_book(node)
         else:
             assert any(
                 "book" in parameter.lower() and "Book" not in annotation
@@ -829,53 +817,32 @@ class TestDefiningAField:
     def test_a_field_is_defined_once_for_the_library(self, db, text_field):
         assert [field.name for field in definitions(db)] == ["Bought from"]
 
-    def test_a_name_that_already_exists_returns_that_field(self, db, member, text_field):
-        again = define(db, "bought FROM", CustomFieldKind.URL, member.id)
+    def test_a_name_that_already_exists_returns_that_field(self, db, text_field):
+        again = define(db, "bought FROM", CustomFieldKind.URL)
 
         assert again.id == text_field.id
         assert again.kind == CustomFieldKind.TEXT
 
-    def test_the_definer_is_recorded(self, db, member, text_field):
-        """The column `fields.Fields` reads, and the only writer of it."""
-        assert text_field.created_by_user_id == member.id
-
-    def test_a_collision_does_not_re_author_the_row(self, db, member, text_field):
-        """Authorship is who defined the name, not who last asked for it.
-
-        If a collision transferred it, the rename rule built on the column
-        would be takeable by typing an existing name, which is a way round the
-        refusal rather than a recovery from it.
-        """
-        other = User(username="second", password_hash="x")
-        db.add(other)
-        db.commit()
-        db.refresh(other)
-
-        again = define(db, "bought FROM", CustomFieldKind.URL, other.id)
-
-        assert again.id == text_field.id
-        assert again.created_by_user_id == member.id
-
-    def test_the_fold_is_pythons_and_not_sqlites(self, db, member):
+    def test_the_fold_is_pythons_and_not_sqlites(self, db):
         """SQLite's `lower()` is ASCII only, so a name with a non-ASCII capital
         would never match and the insert would hit the binary unique index as a
         500. Measured on `create_tag` before it was fixed."""
-        first = define(db, "Ähnliches", CustomFieldKind.TEXT, member.id)
+        first = define(db, "Ähnliches", CustomFieldKind.TEXT)
         db.commit()
 
-        assert define(db, "ähnliches", CustomFieldKind.TEXT, member.id).id == first.id
+        assert define(db, "ähnliches", CustomFieldKind.TEXT).id == first.id
 
-    def test_the_library_is_capped(self, db, member):
+    def test_the_library_is_capped(self, db):
         for index in range(25):
-            define(db, f"Field {index}", CustomFieldKind.TEXT, member.id)
+            define(db, f"Field {index}", CustomFieldKind.TEXT)
         db.commit()
 
         with pytest.raises(Refused):
-            define(db, "One too many", CustomFieldKind.TEXT, member.id)
+            define(db, "One too many", CustomFieldKind.TEXT)
 
-    def test_they_are_listed_in_the_order_they_were_defined(self, db, member):
+    def test_they_are_listed_in_the_order_they_were_defined(self, db):
         for name in ("Zebra", "Aardvark", "Moose"):
-            define(db, name, CustomFieldKind.TEXT, member.id)
+            define(db, name, CustomFieldKind.TEXT)
         db.commit()
 
         assert [field.name for field in definitions(db)] == ["Zebra", "Aardvark", "Moose"]

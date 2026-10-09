@@ -8,19 +8,12 @@ import { OwnershipStatus } from "../../../../src/api/generated/model";
 import OwnershipPicker from "../../../../src/pages/BookDetail/components/OwnershipPicker";
 import { renderLocalised } from "../../../utils";
 
-type OnChange = NonNullable<
-  React.ComponentProps<typeof OwnershipPicker>["onChange"]
->;
-
 describe("OwnershipPicker", () => {
   it("offers all three states", () => {
     // Including "not confirmed": a Goodreads import cannot answer the
     // question, so it has to be expressible rather than guessed at.
     renderLocalised(
-      <OwnershipPicker
-        value={OwnershipStatus.owned}
-        onChange={vi.fn<OnChange>()}
-      />,
+      <OwnershipPicker value={OwnershipStatus.owned} onChange={vi.fn()} />,
     );
 
     expect(
@@ -36,10 +29,7 @@ describe("OwnershipPicker", () => {
 
   it("marks the current state as pressed", () => {
     renderLocalised(
-      <OwnershipPicker
-        value={OwnershipStatus.unknown}
-        onChange={vi.fn<OnChange>()}
-      />,
+      <OwnershipPicker value={OwnershipStatus.unknown} onChange={vi.fn()} />,
     );
 
     expect(
@@ -51,7 +41,7 @@ describe("OwnershipPicker", () => {
   });
 
   it("reports a change", async () => {
-    const onChange = vi.fn<OnChange>();
+    const onChange = vi.fn();
     renderLocalised(
       <OwnershipPicker value={OwnershipStatus.unknown} onChange={onChange} />,
     );
@@ -65,10 +55,7 @@ describe("OwnershipPicker", () => {
 
   it("explains that this is not the reading status", () => {
     renderLocalised(
-      <OwnershipPicker
-        value={OwnershipStatus.owned}
-        onChange={vi.fn<OnChange>()}
-      />,
+      <OwnershipPicker value={OwnershipStatus.owned} onChange={vi.fn()} />,
     );
     expect(
       screen.getByText(/Separate from whether you have read it/),
@@ -76,7 +63,7 @@ describe("OwnershipPicker", () => {
   });
 
   it("goes quiet while disabled", async () => {
-    const onChange = vi.fn<OnChange>();
+    const onChange = vi.fn();
     renderLocalised(
       <OwnershipPicker
         value={OwnershipStatus.owned}

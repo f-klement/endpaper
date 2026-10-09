@@ -15,9 +15,7 @@ import { renderLocalised } from "../../../utils";
 function renderChips(
   identifiers: BookIdentifierOut[],
   locale: Locale = Locale.en,
-  onRemove: (identifier: BookIdentifierOut) => void = vi.fn<
-    (identifier: BookIdentifierOut) => void
-  >(),
+  onRemove: (identifier: BookIdentifierOut) => void = vi.fn(),
 ) {
   return renderLocalised(
     <IdentifierChips identifiers={identifiers} onRemove={onRemove} />,
@@ -207,7 +205,7 @@ describe("removing one", () => {
   });
 
   it("hands back the whole row, so the caller can name it in the question", () => {
-    const onRemove = vi.fn<(identifier: BookIdentifierOut) => void>();
+    const onRemove = vi.fn();
     renderChips([anAsin, aVolumeId], Locale.en, onRemove);
 
     fireEvent.click(
@@ -289,7 +287,7 @@ describe("removing one", () => {
     // page. A component that asked as well would ask twice through the page
     // and not at all through a second caller.
     const asked = vi.spyOn(window, "confirm");
-    const onRemove = vi.fn<(identifier: BookIdentifierOut) => void>();
+    const onRemove = vi.fn();
     renderChips([anAsin], Locale.en, onRemove);
 
     fireEvent.click(screen.getAllByRole("button")[0]!);

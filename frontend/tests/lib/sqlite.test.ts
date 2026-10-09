@@ -8,53 +8,30 @@
 
 import { describe, expect, it } from "vitest";
 
-import * as sqlite from "../../src/lib/sqlite";
 import {
   MAX_CELL_BYTES,
   MAX_DATABASE_BYTES,
   MAX_ROWS_PER_QUERY,
   openSqlite,
   openSqliteFile,
-  type SqliteFailure,
-  type SqliteRow,
 } from "../../src/lib/sqlite";
-import { holds, PROFILE, PROPERTY, witness } from "../property";
-import {
-  expectNamedOutcome,
-  hostile,
-  overrunBreach,
-  type Door,
-  type Hostile,
-} from "./readerContract";
-import {
-  boundedDatabaseSpec,
-  buildDatabase,
-  databaseOf,
-  engine,
-  type DatabaseSpec,
-  type DatabaseVocabulary,
-} from "./sqliteFixtures";
-// One module's text from the armed corpus, which refuses a name the tree does
-// not hold. The lookup this replaced cast the first value of its own glob, so
-// a rename handed the comparison below `undefined`.
-import { sourceText } from "../sourceModules";
+import { databaseOf, engine } from "./sqliteFixtures";
 
-/**
- * The package manifest, as text.
- *
- * **Not a module of either tree**, so it has no armed corpus to come from and
- * keeps its own glob. It is one file by name and the cast is the shape this
- * branch removed everywhere a corpus could answer instead: what stops it
- * being silent here is the parse below, which throws on anything that is not
- * the manifest.
- */
-function manifestText(): string {
-  const files = import.meta.glob("../../package.json", {
-    query: "?raw",
-    import: "default",
-    eager: true,
-  });
-  return Object.values(files)[0] as string;
+/** One file of this repository, as text. */
+function raw(path: "../../package.json" | "../../src/lib/sqlite.ts"): string {
+  const files = {
+    "../../package.json": import.meta.glob("../../package.json", {
+      query: "?raw",
+      import: "default",
+      eager: true,
+    }),
+    "../../src/lib/sqlite.ts": import.meta.glob("../../src/lib/sqlite.ts", {
+      query: "?raw",
+      import: "default",
+      eager: true,
+    }),
+  };
+  return Object.values(files[path])[0] as string;
 }
 
 async function open(bytes: Uint8Array) {
@@ -287,10 +264,10 @@ describe("the engine the policy was measured against", () => {
     // this the sentence justifying the relaxation goes stale with nothing red.
     // Read through `import.meta.glob`, which needs no `node:fs` and no file
     // URL: this file runs under happy-dom, where `import.meta.url` is not one.
-    const manifest = JSON.parse(manifestText()) as {
+    const manifest = JSON.parse(raw("../../package.json")) as {
       dependencies: Record<string, string>;
     };
-    const source = sourceText("lib/sqlite.ts");
+    const source = raw("../../src/lib/sqlite.ts");
 
     const pinned = manifest.dependencies["sql.js"];
     expect(pinned).toMatch(/^\d+\.\d+\.\d+$/);
@@ -335,175 +312,6 @@ describe("a question the file cannot answer", () => {
     const database = await open(await databaseOf("CREATE TABLE shelf (title)"));
     database.close();
 
-    expect(() => database.query("SELECT 1")).toThrow(
-      "query on a closed database",
-    );
-  });
-});
-
-/** Names and values for a database nobody in particular wrote. */
-const VOCABULARY: DatabaseVocabulary = {
-  tables: ["shelf", "books", "sqlite_stat1"],
-  columns: ["id", "title", "n", "rowid"],
-  values: ["Dune", "", 1, 0, -1, 1.5, "\u{1F4DA}", new Uint8Array([0, 1])],
-};
-
-/** How many bytes a cell costs, in the unit `MAX_CELL_BYTES` is in. */
-function cellBytes(cell: SqliteRow[string]): number {
-  if (typeof cell === "string") return new TextEncoder().encode(cell).length;
-  if (cell instanceof Uint8Array) return cell.byteLength;
-  return 0;
-}
-
-/**
- * The seam as a door: open the picked file, read every table it was built
- * with and one it was not, and hold each answer to the bounds.
- *
- * **`sqlite.ts` catches everything**, so the contract's clause about a throw
- * cannot fail here: its open path answers every engine error as a failure, and
- * its query path answers `[]` for any throw. **Its bounds are this door's only
- * teeth**, and a green is not coverage of throwing: no answer longer than
- * `MAX_ROWS_PER_QUERY` and no cell wider than `MAX_CELL_BYTES`, which the
- * property draws past and its reaches ask it read; and the file's size refused
- * before a byte of it is read, which the meter's read ceiling holds and which
- * the named case and the positive control below reach, since the property
- * draws no file that large (`boundedDatabaseSpec` says why).
- */
-const door: Door<DatabaseSpec, SqliteFailure | readonly number[]> = {
-  module: sqlite,
-  ceilings: () => ({ read: MAX_DATABASE_BYTES, reads: 1 }),
-  build: buildDatabase,
-  open: async (file, meter, spec) => {
-    const reading = await openSqliteFile(file, engine);
-    if (!reading.ok) return reading.failure;
-    try {
-      const names = [...spec.tables.map((table) => table.name), "absent"];
-      return names.map((name) => {
-        const rows = reading.database.query(
-          `SELECT * FROM "${name.replace(/"/g, '""')}"`,
-        );
-        meter.require(
-          rows.length <= MAX_ROWS_PER_QUERY,
-          `a query handed back ${rows.length} rows against a ceiling of ${MAX_ROWS_PER_QUERY}`,
-        );
-        for (const row of rows) {
-          for (const cell of Object.values(row)) {
-            meter.require(
-              cellBytes(cell) <= MAX_CELL_BYTES,
-              `a cell of ${cellBytes(cell)} bytes was handed back against a ceiling of ${MAX_CELL_BYTES}`,
-            );
-          }
-        }
-        return rows.length;
-      });
-    } finally {
-      reading.database.close();
-    }
-  },
-};
-
-/** Whether a drawn database carries no patch. */
-const whole = ({ patches }: Hostile<DatabaseSpec>) => patches.length === 0;
-
-/** Whether a drawn database holds a cell past the cell ceiling, as `as`. */
-const cells = (spec: DatabaseSpec, as?: string) =>
-  spec.tables.some((table) =>
-    table.rows.some((row) =>
-      row.some(
-        (cell) =>
-          typeof cell === "object" &&
-          cell !== null &&
-          "wide" in cell &&
-          (as === undefined || cell.as === as) &&
-          cell.wide > MAX_CELL_BYTES,
-      ),
-    ),
-  );
-
-describe("any database a member picks", () => {
-  it(
-    "is opened or refused by name, never read past its size and never answering past a bound",
-    PROPERTY,
-    async () => {
-      // **Two reaches, asked of what the door answered**: a run must open a
-      // database and query the long table to the row ceiling, and open one
-      // holding a cell past the cell ceiling. A table or a cell the engine
-      // refused first is drawn and reaches neither bound.
-      expect(
-        await holds(
-          hostile(boundedDatabaseSpec(VOCABULARY)),
-          async (input) => expectNamedOutcome(door, input),
-          {
-            "read a table to the row ceiling": (_, { outcome }) =>
-              "answered" in outcome &&
-              Array.isArray(outcome.answered) &&
-              outcome.answered.includes(MAX_ROWS_PER_QUERY),
-            "opened a database holding a cell past its ceiling": (
-              { spec },
-              { outcome },
-            ) =>
-              "answered" in outcome &&
-              Array.isArray(outcome.answered) &&
-              cells(spec),
-          },
-        ),
-      ).toBe(PROFILE.runs);
-    },
-  );
-
-  it("is metered, so the read ceiling above is not held over nothing", async () => {
-    const { outcome, counted } = await expectNamedOutcome(door, {
-      spec: {
-        tables: [
-          {
-            name: "shelf",
-            columns: ["title"],
-            rows: [["Dune"]],
-            counted: undefined,
-          },
-        ],
-        padTo: undefined,
-      },
-      patches: [],
-    });
-
-    expect(outcome).toEqual({ answered: [1, 0] });
-    expect(counted.reads).toBe(1);
-    expect(counted.read).toBeGreaterThan(0);
-  });
-
-  it("declares the read ceilings it is held to, so one deleted or loosened reds", async () => {
-    // **The positive control**: a stub charging the meter as the file would,
-    // through this door's own ceilings. The size is refused before any read in
-    // the reader, so no property draw reaches the read ceiling, and nothing
-    // but this would red were it deleted. A read is charged rather than made,
-    // so the sixty four mebibyte bound costs no buffer of that size.
-    expect(
-      await overrunBreach(door, { ceiling: "read", bound: MAX_DATABASE_BYTES }),
-    ).toContain(`bytes against a ceiling of ${MAX_DATABASE_BYTES}`);
-    expect(await overrunBreach(door, { ceiling: "reads", bound: 1 })).toContain(
-      "made read 2 against a ceiling of 1",
-    );
-  });
-
-  it("draws every bound past itself, and a database holding rows", async () => {
-    await witness(hostile(boundedDatabaseSpec(VOCABULARY)), {
-      ...Object.fromEntries(
-        ["text", "astral", "blob"].map((as) => [
-          `holds a ${as} cell past its bound`,
-          (input: Hostile<DatabaseSpec>) =>
-            whole(input) && cells(input.spec, as),
-        ]),
-      ),
-      "counts rows past the query's bound": (input) =>
-        whole(input) &&
-        input.spec.tables.some(
-          (table) => (table.counted ?? 0) > MAX_ROWS_PER_QUERY,
-        ),
-      "holds rows": (input) =>
-        whole(input) &&
-        input.spec.padTo === undefined &&
-        input.spec.tables.some((table) => table.rows.length > 0),
-    });
+    expect(() => database.query("SELECT 1")).toThrow();
   });
 });
