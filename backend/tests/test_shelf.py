@@ -13,7 +13,9 @@ exceptions.
 **This rule is smaller for one structural reason, not because it is cleverer.**
 Outside `shelf.py` the correct number of Book queries is zero, so there is
 nothing to decide: no predicate to find, no binding to follow, no scope to
-resolve. Four `ast` passes ask four flat questions.
+resolve. Five `ast` passes ask five flat questions. `_predicate_calls` is the
+companion of `_imported_predicates`, so this file counts the two as one and calls
+`_book_owned_offences` the fourth pass.
 
 | Pass | Question | Allowed in |
 |---|---|---|
@@ -25,8 +27,8 @@ resolve. Four `ast` passes ask four flat questions.
 
 `_entity_aliases` resolves which local names mean the guarded entity first, so
 an import alias, a rebinding or an `aliased()` entity is caught rather than
-looked past. The first three passes hand it `Book`; the fourth hands it
-`BOOK_OWNED`.
+looked past. `_query_offences` and `_join_offences` hand it `Book`; the fourth
+hands it `BOOK_OWNED`.
 
 **The fourth pass is the newest and asks a blunter question than the other
 three.** They ask whether a statement names `Book`, so a query over

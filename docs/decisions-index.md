@@ -723,7 +723,7 @@ repeat the argument.
 |  | [The tooling tree's disciplines run in the backend suite, not in a job step](decisions.md#the-tooling-trees-disciplines-run-in-the-backend-suite-not-in-a-job-step) | 250 |
 |  | [Turning a linter on is not the same as fixing what it finds](decisions.md#turning-a-linter-on-is-not-the-same-as-fixing-what-it-finds) | 282 |
 |  | [A floor that nothing drives is not a floor](decisions.md#a-floor-that-nothing-drives-is-not-a-floor) | 164 |
-|  | [The working notes are split by how often a rule fires, not by how important it is](decisions.md#the-working-notes-are-split-by-how-often-a-rule-fires-not-by-how-important-it-is) | 543 |
+|  | [The working notes are split by how often a rule fires, not by how important it is](decisions.md#the-working-notes-are-split-by-how-often-a-rule-fires-not-by-how-important-it-is) | 540 |
 |  | [A claim about a file is verified by reading the file back, in the call that makes it](decisions.md#a-claim-about-a-file-is-verified-by-reading-the-file-back-in-the-call-that-makes-it) | 231 |
 |  | [The container rule took five review rounds, and four of them were one defect](decisions.md#the-container-rule-took-five-review-rounds-and-four-of-them-were-one-defect) | 466 |
 | The container rule took five review rounds, and four of them were one defect | [Two findings answered rather than fixed, with the reason](decisions.md#two-findings-answered-rather-than-fixed-with-the-reason) | 234 |

@@ -17077,7 +17077,7 @@ rule is among the most important things in the repository and stays in the alway
 because any query can break it. The mutation harness rules are just as hard won and moved to
 a skill because most turns never mutate anything. Importance would have kept both.
 
-**Five rules keep their whole text resident even though they fire rarely**, because the cost
+**Five rules stay resident even though they fire rarely**, because the cost
 of missing one is paid before a pointer could load. A suite run on the control plane machine
 has already raised an alert; the public mirror does not unpublish; a missed page is silent on
 both sides; a live change to the security tooling that watches these machines is how an alert

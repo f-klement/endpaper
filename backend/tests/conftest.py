@@ -169,9 +169,10 @@ def _database_url() -> str:
     **`ENDPAPER_TEST_DATABASE_URL` and not `DATABASE_URL`**, which is the same
     rule the `_ENV_OVERRIDES` loop below applies to every other setting: a value
     in the shell that happens to run the suite must not silently decide what the
-    suite runs against. This name exists for one caller, the pipeline's
-    `test:postgres` job, and a developer who exports it has said which engine
-    they meant.
+    suite runs against. This name exists for two callers, the pipeline's
+    `test:postgres` job and the suite runner's Postgres mode, which runs that
+    job's selection against a server started inside the suite's own container.
+    A developer who exports it has said which engine they meant.
 
     **One database per xdist worker.** The workers share nothing else: each gets
     its own `mkdtemp` directory and, on SQLite, its own file. Against one server

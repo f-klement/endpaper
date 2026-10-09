@@ -1150,9 +1150,10 @@ class TestTheInstalledCheckIsTheModelsCheck:
     **It runs on both engines and skips on neither**, which is not an accident
     of where it was put. On SQLite the round trip is the identity, because
     SQLite stores a CHECK's source text, so here the comparison degenerates to
-    the equality the schema tests already make. Nothing in this test tree skips
-    on a dialect today, and a skip is how a test stops running without anybody
-    being told; the first one should not arrive as a side effect of this.
+    the equality the schema tests already make. Outside the files that exist to
+    run against a live server, nothing in this test tree skips on a dialect,
+    and a skip is how a test stops running without anybody being told; another
+    should not arrive as a side effect of this.
 
     **The cheap engine's half is already owned elsewhere, and this does not
     claim it.** `test_schema.py::TestTheMigrationsAndTheModelsAgree` compares

@@ -2,10 +2,10 @@
 
 <!-- measured: begin -->
 
-**10448 tests, in 148 files**, counted by the run that reads this line.
-**The 128 rows below sum to 9273.**
-The other 1175 tests are in 21 files this register may not name.
-The table also carries 1 file this engine does not run, stated as 0.
+**10455 tests, in 148 files**, counted by the run that reads this line.
+**The 129 rows below sum to 9273.**
+The other 1182 tests are in 21 files this register may not name.
+The table also carries 2 files this engine does not run, stated as 0.
 <!-- measured: end -->
 
 **Those figures are generated and nothing here is recounted by hand.**
@@ -152,6 +152,7 @@ why the helper uses regexes.
 | `test_database.py` | 90 | Engine setup, the session dependency, and the TLS posture every `DATABASE_SSL_MODE` resolves to, read off the context before any socket exists, and that the application's own engine is built from the setting, that a statement error names no bound value, and that every engine says so |
 | `scripts/test_postgres_database.py` | 11 | The database name rule, the only thing between a name and DDL that takes no bind parameter. The server half runs against Postgres only and is not reached here |
 | `test_database_tls_on_a_real_server.py` | 0 | That the modes refusing a downgrade refuse a server with no TLS, that the tolerant two reach it, and that the cleartext probe can still see the driver's socket. Skipped off Postgres, so this run collects none of it |
+| `test_errors_on_a_real_server.py` | 0 | That a unique violation on a live server, reaching the 500 handler through a route, is logged with the constraint and without the value the server quotes, beside a witness that the server did quote it. Skipped off Postgres, so this run collects none of it |
 | `test_fetch.py` | 137 | **The only door outwards.** That the body cap counts raw wire bytes and compression is never requested, and that neither the text seam nor the JSON seam hands a caller a lone surrogate |
 | `test_xml_parse.py` | 10 | **What parsing a stranger's XML may cost.** The depth bound at the builder, a refused nest costing one chunk at ten times the size, and the chunked feed raising what one feed raises |
 | `test_deadline.py` | 38 | How much of a deadline is left, and which clock answers: that the two names are the whole door, that neither grows a parameter, and that the module imports nothing but the standard library |

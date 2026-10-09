@@ -648,7 +648,7 @@ async def test_a_failed_tick_on_the_database_logs_no_row(monkeypatch, caplog):
     with caplog.at_level(logging.DEBUG), pytest.raises(asyncio.CancelledError):
         await notifications.ticker()
 
-    assert "The overdue ticker failed a run: IntegrityError(DatabaseError) on uq_marker_probe" in caplog.text
+    assert "The overdue ticker failed a run: IntegrityError(IntegrityError) on uq_marker_probe" in caplog.text
     assert "TICKER-DETAIL-MARKER" not in caplog.text
 
 

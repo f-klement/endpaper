@@ -72,6 +72,15 @@
 - **The coverage registers' generated write arrives whole at any length.** Nothing a member
   sees moves.
 
+- **A test run before a push can be bounded in time**, and is by default on a copy of the tree
+  with no git history, where a planted defect may never end. Nothing a member sees moves.
+
+- **A test run before a push refuses to start where its verdict could not be written.**
+  Nothing a member sees moves.
+
+- **The pipeline's Postgres test selection can be run before a push**, against a Postgres of
+  its own. Nothing a member sees moves.
+
 - **Tests reach the complex functions a coverage measurement ranked first**, on both sides.
   Nothing a member sees moves.
 

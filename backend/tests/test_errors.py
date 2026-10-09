@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import httpx
-import pg8000.exceptions
+import pg8000
 import pytest
 import respx
 from fastapi import HTTPException
@@ -249,12 +249,14 @@ class TestAValidationErrorLogsNoValue:
 def postgres_shaped_error(marker: str) -> IntegrityError:
     """A unique violation as pg8000 hands one over: the server's fields as a dict.
 
-    Built from pg8000's own exception class with the field codes its
-    `handle_ERROR_RESPONSE` keys them by, `D` the detail and `n` the
-    constraint, because no Postgres is reachable from this suite: Postgres puts
-    the conflicting value in the detail, and pg8000 renders the dict whole.
+    Built from `pg8000.IntegrityError`, the class pg8000 raises for SQLSTATE
+    23505, with the field codes its `handle_ERROR_RESPONSE` keys them by, `D`
+    the detail and `n` the constraint, because this suite runs on SQLite:
+    Postgres puts the conflicting value in the detail, and pg8000 renders the
+    dict whole. `test_errors_on_a_real_server.py` drives the same path against
+    a live one.
     """
-    original = pg8000.exceptions.DatabaseError(
+    original = pg8000.IntegrityError(
         {
             "S": "ERROR",
             "C": "23505",
@@ -322,7 +324,7 @@ class TestADatabaseErrorLogsNoRow:
 
         assert res.status_code == 500
         [line] = [r for r in caplog.records if r.getMessage().startswith("Unhandled error")]
-        assert "IntegrityError(DatabaseError) on uq_marker_probe" in line.getMessage()
+        assert "IntegrityError(IntegrityError) on uq_marker_probe" in line.getMessage()
         assert self.MARKER not in caplog.text
 
     def test_an_error_quoting_a_flush_error_never_reaches_the_log(

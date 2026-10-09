@@ -60,3 +60,6 @@ session/
 # backstop, and it is the one that matters: the two incidents this file already records
 # were both a bare `git add -A`, which is exactly what would sweep these in.
 scratchpad/
+
+# Claude Code per user permissions; the project settings beside it are tracked.
+.claude/settings.local.json
