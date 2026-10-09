@@ -24,6 +24,17 @@
 import { describe, expect, it } from "vitest";
 
 import { readOpf } from "../../src/lib/opf";
+import type { FileMetadata } from "../../src/lib/fileReaders";
+import * as opf from "../../src/lib/opf";
+import { holds, PROFILE, PROPERTY, witness } from "../property";
+import { expectAnswer, overrunBreach, type ValueDoor } from "./readerContract";
+import {
+  declares,
+  OPF,
+  render,
+  xmlDocument,
+  type XmlDocument,
+} from "./xmlArbitrary";
 
 function epub2(metadata: string): string {
   return `<?xml version="1.0" encoding="utf-8"?>
@@ -387,6 +398,48 @@ describe("the year", () => {
   });
 });
 
+describe("the subjects", () => {
+  it("reads every dc:subject the file declared, in its own order", () => {
+    const record = readOpf(
+      epub3(
+        `<dc:subject>Fiction</dc:subject>` +
+          `<dc:subject>Science Fiction</dc:subject>` +
+          `<dc:subject>Fiction</dc:subject>`,
+      ),
+    );
+
+    expect(record?.categories).toEqual([
+      "Fiction",
+      "Science Fiction",
+      "Fiction",
+    ]);
+  });
+
+  it("reads them the same way out of an EPUB 2 package", () => {
+    // The pairing this file is structured around: the failure this module
+    // exists to avoid is reading one spelling and quietly not the other.
+    expect(
+      readOpf(epub2(`<dc:subject>Fiction</dc:subject>`))?.categories,
+    ).toEqual(["Fiction"]);
+  });
+
+  it("leaves an empty element out rather than sending a blank subject", () => {
+    // `FileMetadata` says an absent value is absent and never `""`, and the
+    // list half of that rule is that an entry with nothing in it is no entry.
+    const record = readOpf(
+      epub3(`<dc:subject>   </dc:subject><dc:subject>Fiction</dc:subject>`),
+    );
+
+    expect(record?.categories).toEqual(["Fiction"]);
+  });
+
+  it("states no subject for a package that declared none", () => {
+    // The other side, without which the arms above are satisfied by a reader
+    // that answers the empty list to everything.
+    expect(readOpf(epub3(`<dc:title>Dune</dc:title>`))?.categories).toEqual([]);
+  });
+});
+
 describe("the rest of the record", () => {
   it("reads publisher, language and description", () => {
     const record = readOpf(
@@ -463,5 +516,67 @@ describe("a file that names very many authors", () => {
       ),
     );
     expect(record?.authors).toEqual(["Ursula K. Le Guin", "Joanna Russ"]);
+  });
+});
+
+/**
+ * `readOpf` as a door: a document in, a record or `null` out.
+ *
+ * **Held at the parser door the meter counts**: no XML parse is handed a
+ * declaration. What the property draws is a tree over this reader's own
+ * names, mostly grafted into one it accepts, so its walk behind the root is
+ * reached, and damage no tree can express inserted on top.
+ */
+const xmlDoor: ValueDoor<XmlDocument, FileMetadata | null> = {
+  module: opf,
+  ceilings: () => ({ refusesEntities: true }),
+  open: (document) => readOpf(render(document)),
+};
+
+describe("any package document an EPUB carries", () => {
+  it(
+    "is read or refused, and never parsed while it declares an entity",
+    PROPERTY,
+    async () => {
+      expect(
+        await holds(xmlDocument(OPF), async (document) => {
+          await expectAnswer(xmlDoor, document);
+        }),
+      ).toBe(PROFILE.runs);
+    },
+  );
+
+  it("is metered, so the parse ceilings above are not held over nothing", async () => {
+    const { outcome, counted } = await expectAnswer(xmlDoor, {
+      declaration: "none",
+      root: OPF.accepted,
+      insertions: [],
+      padTo: undefined,
+    });
+
+    expect(outcome).toMatchObject({ answered: { title: "Dune" } });
+    expect(counted.parses).toBe(1);
+  });
+
+  it("declares the parse ceiling it is held to, so deleting it reds", async () => {
+    // **The positive control for a door handed a value**: a stub hands the
+    // meter's parser a declaring document through this door's own ceilings.
+    expect(
+      await overrunBreach(xmlDoor, { ceiling: "refusesEntities" }),
+    ).toContain("declaring an entity");
+  });
+
+  it("draws documents it reads, and documents that declare", async () => {
+    // **Asked of the reader rather than of the tree**: whether a drawn
+    // document is one this reader reads is the reader's to say, and a
+    // vocabulary that stopped matching it is what turns this red.
+    await witness(xmlDocument(OPF), {
+      "the reader reads": async (document) => {
+        if (document.padTo !== undefined) return false;
+        const { outcome } = await expectAnswer(xmlDoor, document);
+        return "answered" in outcome && outcome.answered !== null;
+      },
+      "declares an entity": declares,
+    });
   });
 });

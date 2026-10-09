@@ -12,6 +12,7 @@ import io
 from datetime import UTC, datetime
 
 import csv_import
+import tags
 from enums import BookFormat, ReadStatus
 from models import Book, UserBook
 from tests.helpers import items
@@ -584,7 +585,7 @@ class TestTagLimits:
 
         db.expire_all()
         invented = db.query(Tag).count() - before
-        assert invented <= csv_import.MAX_NEW_TAGS_PER_IMPORT
+        assert invented <= tags.MAX_NEW_TAGS_PER_IMPORT
 
     def test_the_books_still_arrive_when_the_cap_is_reached(self, client, admin):
         """The cap stops inventing rather than failing: the books are the point."""
@@ -610,7 +611,7 @@ class TestTagLimits:
         )
 
         [book] = items(client.get("/api/books", headers=admin["headers"]))
-        assert len(book["tags"]) <= csv_import.MAX_TAGS_PER_BOOK
+        assert len(book["tags"]) <= tags.MAX_TAGS_PER_BOOK
 
     def test_two_tags_sharing_a_long_prefix_do_not_collide(self, client, admin):
         """Truncating at the insert but not at the lookup violated the unique

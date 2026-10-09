@@ -1,24 +1,25 @@
 /**
- * Writing a shelf somebody already had, one book at a time.
+ * What an import on this page makes of the shared write.
  *
- * The step every import on this page shares once its file has been read and
- * reported on: a Calibre library and a store's are the same nine hundred
- * requests, and the reasoning below was written for the first of them and holds
- * for every other. A second copy of it would be a second place for the
- * concurrency rule and the 409 rule to drift.
+ * The loop itself is `lib/bulkWrite.ts`, which the rapid scanner walks too.
+ * What is left here is this page's own vocabulary: a failure is a title and the
+ * status the server answered, because that is what an import card lists, and
+ * `DUPLICATE_STATUS` is the one status worth its own sentence.
  *
  * **What it deliberately does not own** is what to write. Each hook maps its
  * own records to `BookCreate` through `./types`, so the reader's shape stays
  * the reader's and this walks bodies.
  */
 
+import {
+  writeOneAtATime,
+  type BulkHooks,
+  type BulkProgress,
+} from "../../../lib/bulkWrite";
 import type { BookCreate } from "../../../api/generated/model";
 
 /** How far through a step that walks nine hundred things this one is. */
-export interface ImportProgress {
-  readonly done: number;
-  readonly total: number;
-}
+export type ImportProgress = BulkProgress;
 
 /** What one book that could not be added was, and what the server answered. */
 export interface ImportFailureRow {
@@ -34,51 +35,34 @@ export interface ImportOutcome {
   readonly stopped: boolean;
 }
 
-export interface WriteHooks {
-  /** One request. Rejects for anything the server refused. */
-  post: (body: BookCreate) => Promise<unknown>;
-  onProgress: (progress: ImportProgress) => void;
-  /**
-   * Whether the member has pressed stop, asked between requests.
-   *
-   * A function rather than a value: the loop reads it after every request, and
-   * a boolean captured when the loop started would say `false` for ever.
-   */
-  stopped: () => boolean;
-}
+/** The shared loop's hooks, over the bodies this page sends. */
+export type WriteHooks = BulkHooks<BookCreate>;
 
 /**
  * Add them, one request each.
  *
- * **Sequential rather than `Promise.all`**, for the reason the rapid queue
- * states: nine hundred concurrent requests against one SQLite writer is not a
- * faster import, and a duplicate ISBN answering 409 has to be attributable to a
- * book.
- *
  * **A failure is kept with its reason rather than counted.** "Sixty could not
  * be added" after a nine hundred book import is unrecoverable: nothing says
  * which sixty.
+ *
+ * **The items it reached are dropped here rather than carried on.** A stopped
+ * import sends every book again on the next press and the ones already there
+ * answer 409, which `hooks.ts` records as the decision it is; the queue that
+ * has to prune by what was walked is the scanner's.
  */
 export async function writeBooks(
   bodies: readonly BookCreate[],
   hooks: WriteHooks,
 ): Promise<ImportOutcome> {
-  const failures: ImportFailureRow[] = [];
-  let added = 0;
-
-  hooks.onProgress({ done: 0, total: bodies.length });
-  for (const [position, body] of bodies.entries()) {
-    if (hooks.stopped()) break;
-    try {
-      await hooks.post(body);
-      added += 1;
-    } catch (thrown) {
-      failures.push({ title: body.title, status: statusOf(thrown) });
-    }
-    hooks.onProgress({ done: position + 1, total: bodies.length });
-  }
-
-  return { added, failures, stopped: hooks.stopped() };
+  const outcome = await writeOneAtATime(bodies, hooks);
+  return {
+    added: outcome.added,
+    failures: outcome.failures.map(({ item, thrown }) => ({
+      title: item.title,
+      status: statusOf(thrown),
+    })),
+    stopped: outcome.stopped,
+  };
 }
 
 /**

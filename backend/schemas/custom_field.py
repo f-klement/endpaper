@@ -2,57 +2,56 @@ from pydantic import BaseModel, Field, field_validator
 
 from enums import CustomFieldKind
 from models import CUSTOM_FIELD_NAME_MAX, CUSTOM_FIELD_VALUE_MAX
-
-#: Every code point removed before a value or a name is stored.
-#:
-#: C0 (0x00 to 0x1F), DEL, and C1 (0x80 to 0x9F). None of them is visible in a
-#: text box and all of them survive a paste.
-#:
-#: **`str.split()` does not do this, which is what the paragraph here used to
-#: claim.** It splits on whitespace, and NUL is not whitespace: measured
-#: 2026-08-27, `"a\x00b"` survived unchanged through both fields, as did
-#: `\x01`, `\x07`, `\x08`, `\x1b` and `\x7f`. A NUL is stored by SQLite,
-#: serialised by JSON as `\\u0000`, and invisible everywhere a person could
-#: notice it.
-_CONTROL_CHARACTERS = dict.fromkeys(
-    [*range(0x00, 0x20), 0x7F, *range(0x80, 0xA0)]
+from schemas.common import (
+    one_line_without_any_control_character,
+    one_line_without_invisible_characters,
 )
 
 
-def _one_line(value: str) -> str:
-    """Whatever somebody pasted in, as the one line this is.
-
-    Both of these are fields on a single line beside a label, and both accept a
-    paste. Two things arrive that way and neither is visible in a text box.
-
-    **Control characters are removed**, not collapsed: see
-    `_CONTROL_CHARACTERS`, which also records why the sentence that used to be
-    here was wrong.
-
-    **A run of whitespace becomes one space**, for the reason `TagCreate.tidy`
-    collapses it: a name of nothing but spaces passes `min_length` and then
-    renders as an invisible row nobody can select or find again.
-
-    **A tab is a control character here and therefore vanishes rather than
-    becoming a space**, and that ordering is load bearing for a URL. Collapsing
-    first turned `https://a.example\t/x` into `https://a.example /x`, which
-    `urlsplit` accepts as a host of `"a.example "` while `new URL()` throws, so
-    the API answered **200 with an href no browser can follow**. Measured on
-    the live route before this changed. `custom_fields.link_target` refuses
-    whitespace outright as the second half of the same fix, because it also
-    sees values this function never touched: `backup.restore` writes through
-    Core.
-    """
-    return " ".join(value.translate(_CONTROL_CHARACTERS).split())
-
-
 class CustomFieldOut(BaseModel):
-    """A field this Library has defined."""
+    """A field this Library has defined, as it looks to the Member asking.
+
+    **Not a row**, which is why there is no `from_attributes` here and the
+    three routes build this explicitly. `renamable` is an answer about the
+    caller, so a model that could be validated straight off a `CustomField`
+    would be one somebody can build without supplying it.
+
+    **`renamable` rather than the author's member id, and the choice is a
+    containment rather than a disclosure.** `fields.Fields` is the only module
+    that reads `custom_fields.created_by_user_id`, with one stated exception:
+    `backup.py` selects every column of every table it archives, so it reads
+    the column while naming it nowhere, and it is admin only for that reason.
+    **The sites arguing the design from that containment are named and not
+    counted**, because the count that stood here said three and the list that
+    replaced it elsewhere named four and missed the register: `fields.py`,
+    `models.py`, this module, `docs/data-model.md` and `docs/decisions.md`.
+    `tests/test_fields.py::TestFieldsIsTheOnlyReaderOfTheAuthorColumn`
+    enforces it in two instruments, because a declaration is not a statement
+    and the source walk cannot see one. A
+    `created_by_user_id` field here would be read by Pydantic with no
+    attribute access anywhere in the source, so it would pass that guard while
+    falsifying what it guards, and every client would then hold its own copy
+    of the rule. `rename_custom_field` says what the server does with the
+    column; this says what the server would answer.
+
+    **It is viewer scoped and therefore not cacheable across members.** The
+    same field answers differently to two Members and to the same Member
+    before and after an admin flag changes. A client that has gone stale is
+    refused at the route, which is why the refusal has to survive being shown:
+    the control is advice and the 403 is the guarantee.
+
+    **Stale the other way is refused by nothing, and nothing here can refuse
+    it.** A client holding `false` where the server would now answer `true`
+    offers no control, so no request is made and the route never sees one.
+    That direction costs an affordance rather than a guarantee, and the
+    client names it at its own site because only the client knows its cache
+    went stale.
+    """
 
     id: int
     name: str
     kind: CustomFieldKind
-    model_config = {"from_attributes": True}
+    renamable: bool
 
 
 class CustomFieldCreate(BaseModel):
@@ -71,7 +70,16 @@ class CustomFieldCreate(BaseModel):
     @field_validator("name")
     @classmethod
     def tidy(cls, value: str) -> str:
-        cleaned = _one_line(value)
+        """A name is one line, and a name of nothing is refused.
+
+        The invisible characters go as well as the whitespace, because this is
+        a label beside a value and it accepts a paste: a name of only invisible
+        characters passes `min_length` and then renders as a row nobody can
+        pick out of the list. **Not the value's rule**, which deletes a tab as
+        well: a name is read rather than followed, so a tab in one separates
+        two words like the space it is.
+        """
+        cleaned = one_line_without_invisible_characters(value)
         if not cleaned:
             raise ValueError("A custom field needs a name.")
         return cleaned
@@ -86,7 +94,8 @@ class CustomFieldRename(BaseModel):
     @field_validator("name")
     @classmethod
     def tidy(cls, value: str) -> str:
-        cleaned = _one_line(value)
+        """The same rule and the same reason as `CustomFieldCreate.tidy`."""
+        cleaned = one_line_without_invisible_characters(value)
         if not cleaned:
             raise ValueError("A custom field needs a name.")
         return cleaned
@@ -127,4 +136,16 @@ class CustomFieldValueUpdate(BaseModel):
     @field_validator("value")
     @classmethod
     def tidy(cls, value: str) -> str:
-        return _one_line(value)
+        r"""One line, with the control characters removed **before** the
+        collapse rather than after, which is load bearing here.
+
+        A tab is a control character, so it vanishes rather than becoming a
+        space. Collapsing first turned `https://a.example\t/x` into
+        `https://a.example /x`, which `urlsplit` accepts as a host of
+        `"a.example "` while `new URL()` throws, so the API answered **200 with
+        an href no browser can follow**. Measured on the live route before this
+        changed. `custom_fields.link_target` refuses whitespace outright as the
+        second half of the same fix, because it also sees values this validator
+        never touched: `backup.restore` writes through Core.
+        """
+        return one_line_without_any_control_character(value)

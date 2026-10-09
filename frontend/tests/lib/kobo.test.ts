@@ -47,8 +47,7 @@ import { databaseOf, engine } from "./sqliteFixtures";
  * **The stated version is a parameter and the columns do not move with it.**
  * That is what a device does: `dbversion` is a number the file writes about
  * itself, and no firmware removes a column to match a lower one. `null` builds
- * the table away entirely, which is the only thing this reader treats as the
- * absence of a version.
+ * the table away entirely, which is the device calibre substitutes `0` for.
  */
 function schemaAt(version: number | null): string[] {
   const stated =
@@ -174,10 +173,6 @@ describe("reading a device", () => {
     const [book] = await booksOn(PURCHASED);
 
     expect(book).toEqual(DUNE);
-  });
-
-  it("reports the device's own schema version", async () => {
-    expect((await libraryOn(PURCHASED)).schemaVersion).toBe(170);
   });
 
   it("reads a chapter row as part of its book rather than as a book", async () => {
@@ -348,6 +343,46 @@ describe("what the member owns", () => {
 
 describe("the version the device states about itself", () => {
   /**
+   * The parameter reaches the file, which the eight arms below cannot say.
+   *
+   * **They assert one library whatever the device states, and not one of them
+   * reads the version.** `readKoboLibrary` issues two statements,
+   * `PRAGMA table_info(content)` and one `SELECT` over `content`, and neither
+   * names `dbversion`, so deleting both `dbversion` lines from `schemaAt`
+   * leaves all eight green and the `it.each` label the only thing claiming a
+   * version was written at all. That is a claim on the stated rung, and these
+   * two arms are what put it back on the tested one.
+   *
+   * **`sqlite_master` and not `SELECT version FROM dbversion` for the absent
+   * case**: `sqlite.query` answers `[]` for a table that is not there, which is
+   * the same answer as a table that is empty, so the discriminating question is
+   * asked of the schema. The present case asks both, because a `dbversion`
+   * table carrying the wrong number would satisfy the first alone.
+   */
+  it.each([
+    { states: "a version", version: 188 as number | null, named: 1 },
+    { states: "no version", version: null, named: 0 },
+  ])("builds a device stating $states", async ({ version, named }) => {
+    const reading = await openSqlite(
+      await databaseOf(...schemaAt(version)),
+      engine,
+    );
+    if (!reading.ok) throw new Error(`expected a database: ${reading.failure}`);
+    try {
+      expect(
+        reading.database.query(
+          "SELECT name FROM sqlite_master WHERE name = 'dbversion'",
+        ),
+      ).toHaveLength(named);
+      expect(reading.database.query("SELECT version FROM dbversion")).toEqual(
+        version === null ? [] : [{ version }],
+      );
+    } finally {
+      reading.database.close();
+    }
+  });
+
+  /**
    * A row whose two series columns disagree, so that the later of them is
    * visible.
    *
@@ -364,9 +399,10 @@ describe("the version the device states about itself", () => {
   /**
    * One whole library, read off devices differing only in what they state.
    *
-   * **This is the enforcement for `schemaVersionOf`'s claim that the number is
-   * read and never acted on**, which was a sentence in a docstring and nothing
-   * else until this test.
+   * **This is the enforcement for the reader taking every decision from the
+   * columns that are there and none from `dbversion`**, which the module states
+   * and which nothing else holds. Each arm writes a different version into the
+   * file and the library may not move.
    *
    * **Every `dbversion` threshold in calibre's driver has an arm below it and
    * an arm at or above it**, which is the bound rather than a round set.
@@ -380,16 +416,16 @@ describe("the version the device states about itself", () => {
    * Three arms are there because a mutation ran green without them. `188` is
    * the version `isTrue` names, and a boolean gated there was invisible while
    * the list stopped at 170. `55` against `56` are the two calibre's own
-   * firmware comment separates. And no version table at all is what this reader
-   * answers `null` for where calibre substitutes `0`, so a gate spelled against
-   * a missing version lands on that arm and nowhere else.
+   * firmware comment separates. And no version table at all is the device
+   * calibre substitutes `0` for, so a gate spelled against a missing version
+   * lands on that arm and nowhere else.
    *
    * **A whole library and not a list of names**, because a gate can move a
    * column rather than a value: the header's list of five is the one to recount
    * from, and the warning on it is there too. So every field of a filled book
-   * is asserted, with `missing` and the refused count beside it. A draft
-   * asserting the names alone was green against a reader that dropped the
-   * series on a device stating less than 65.
+   * is asserted, with the refused count beside it. A draft asserting the names
+   * alone was green against a reader that dropped the series on a device
+   * stating less than 65.
    *
    * **And every refusal this reader makes, because whole in its fields is not
    * whole in its paths.** A library asserting each field of each book it kept
@@ -409,10 +445,6 @@ describe("the version the device states about itself", () => {
    * list nor count and is here for the one thing a refusal row cannot cover:
    * `WHERE BookID IS NULL` is gateable too, and a version gate on it was green
    * across all eight arms without it.
-   *
-   * The version is asserted back as well: read and reported is the whole of
-   * what this module does with it, and a reader that stopped reading it would
-   * satisfy the first half of that alone.
    */
   it.each([
     { states: "no version at all", version: null },
@@ -458,8 +490,6 @@ describe("the version the device states about itself", () => {
       const books = read.library.books;
 
       expect({
-        schemaVersion: read.library.schemaVersion,
-        missing: read.library.missing,
         skipped: read.library.skipped,
         // Name and id together: a version gate that renamed a row without
         // dropping it is the outcome this ticket was about, and a list of ids
@@ -472,8 +502,6 @@ describe("the version the device states about itself", () => {
           books.find((book) => book.contentId === "series-float")
             ?.seriesIndex ?? null,
       }).toEqual({
-        schemaVersion: version,
-        missing: [],
         skipped: 5,
         kept: [
           "a1b2c3d4-0000-4000-8000-000000000001 purchase",
@@ -586,31 +614,23 @@ describe("a schema this reader does not have all of", () => {
     expect(read.ok && read.library.books[0]?.acquisition).toBe("unrecorded");
   });
 
-  it("names the fields no column on this device could fill", async () => {
+  it("leaves every field a column that is not there would have filled", async () => {
+    // **A column costs its field and never the book**, which is the rule the
+    // module states. The four below have no column on this firmware and the
+    // book is shelved with the answers that says.
     const read = await device(
       OLD_KOBO_SCHEMA,
       `INSERT INTO content (ContentID, Title) VALUES ('1', 'Dune')`,
     );
 
-    expect(read.ok && read.library.missing).toEqual([
-      "isbn",
-      "language",
-      "publisher",
-      "series",
-    ]);
-  });
-
-  it("has nothing missing on a device carrying every column", async () => {
-    expect((await libraryOn(PURCHASED)).missing).toEqual([]);
-  });
-
-  it("says a device with no version table has no version", async () => {
-    const read = await device(
-      OLD_KOBO_SCHEMA,
-      `INSERT INTO content (ContentID, Title) VALUES ('1', 'Dune')`,
-    );
-
-    expect(read.ok && read.library.schemaVersion).toBeNull();
+    expect(read.ok && read.library.books[0]).toMatchObject({
+      title: "Dune",
+      isbn: null,
+      publisher: null,
+      language: null,
+      seriesName: null,
+      seriesIndex: null,
+    });
   });
 });
 

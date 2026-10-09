@@ -12,6 +12,8 @@ import respx
 from fastapi import HTTPException
 
 from ratelimit import (
+    BACKUP_LIMIT,
+    EXPORT_LIMIT,
     LOGIN_LIMIT,
     MAX_TRACKED_KEYS,
     METADATA_LIMIT,
@@ -22,6 +24,62 @@ from ratelimit import (
     register_limiter,
 )
 from tests.helpers import silence_catalogues
+
+
+def _limiters_ratelimit_declares() -> dict[str, SlidingWindowLimiter]:
+    """Every **name** `ratelimit` binds to a limiter, and the object it binds.
+
+    Membership is a property of the object rather than of the text that built
+    it, which is what the three rules below need: the fixture between tests can
+    only reach a limiter it can name. One derivation rather than three, because
+    three spellings of one question drift into three answers.
+
+    **Names bound is not limiters constructed, and the two part in both
+    directions.** A limiter held inside a container is constructed and bound to
+    no name, so it is missing here; a name bound to a limiter the parse did not
+    see built here, an alias, an import, or a subclass whose callee it does not
+    recognise, is counted here and not there.
+    `_limiters_ratelimit_constructs` is the other
+    instrument, and
+    `TestTheRateLimitTableInTheDocsIsTheModule::test_the_two_derivations_agree`
+    is what makes either case loud rather than a number nobody re-derives.
+
+    Neither sees a limiter another module constructs and this one never binds.
+    """
+    import ratelimit
+
+    return {
+        name: value
+        for name, value in vars(ratelimit).items()
+        if isinstance(value, SlidingWindowLimiter)
+    }
+
+
+def _limiters_ratelimit_constructs() -> int:
+    """How many limiters the module's source **constructs**, parsed not matched.
+
+    The second instrument, and its whole job is to degrade differently from the
+    one above so that a disagreement is visible: it reads calls out of the
+    syntax tree, so it sees a construction whatever it is assigned to, and
+    sees neither an alias nor a construction whose callee is spelled otherwise,
+    a subclass being the example. Parsed rather than counted as text because a pattern
+    over source is the shape this repository has measured wrong every time,
+    once by a line break the formatter itself mandates.
+
+    It counts every construction in the module, including any inside a
+    function, which the namespace walk would also miss.
+    """
+    import ast
+    from pathlib import Path
+
+    source = (Path(__file__).resolve().parents[1] / "ratelimit.py").read_text()
+    return sum(
+        1
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "SlidingWindowLimiter"
+    )
 
 
 class TestSlidingWindowLimiter:
@@ -247,6 +305,100 @@ class TestTheMetadataLimit:
         assert res.status_code == 429
 
 
+class TestTheExportDoorIsRationed:
+    """Two counters over two routes, and they are not one counter.
+
+    A member walking their own shelf and an administrator building the whole
+    database are different units, so sharing a budget would let the first
+    ration the second. `test_a_members_exports_do_not_ration_the_backup` is
+    that claim rather than a description of it, and it is the arm that fails
+    if somebody merges the two to save a row in the documentation table.
+    """
+
+    @staticmethod
+    def _export(client, account):
+        return client.get("/api/books/export", headers=account["headers"])
+
+    def test_a_burst_of_exports_is_cut_off(self, client, admin):
+        codes = [
+            self._export(client, admin).status_code
+            for _ in range(EXPORT_LIMIT.max_attempts + 1)
+        ]
+
+        assert codes[-1] == 429
+        assert 429 not in codes[:-1]
+
+    def test_the_refusal_says_how_long_to_wait(self, client, admin):
+        """`Retry-After` is what a caller acts on, and it is stripped by any
+        handler that rebuilds the response rather than passing it through."""
+        for _ in range(EXPORT_LIMIT.max_attempts):
+            self._export(client, admin)
+
+        res = self._export(client, admin)
+
+        assert res.status_code == 429
+        assert int(res.headers["Retry-After"]) > 0
+
+    def test_one_member_burning_the_budget_does_not_ration_another(
+        self, client, admin, member
+    ):
+        """Keyed on the authenticated username, so the counter is the member's
+        own. An address key would collapse a household into one bucket behind
+        the reverse proxy this app is documented to sit behind, and the retry
+        hint would then tell one member when another last exported."""
+        for _ in range(EXPORT_LIMIT.max_attempts + 1):
+            self._export(client, admin)
+
+        assert self._export(client, member).status_code != 429
+
+    def test_a_caller_with_no_session_is_401_and_spends_nothing(self, client, admin):
+        """**The reason the check is in the handler body and not in
+        `dependencies=[...]`.** A limiter declared there is inserted ahead of
+        the route's own dependencies and answers 429 before anything
+        authenticates, which tells a stranger that a username exists and has
+        been active inside the window, and lets them spend that member's
+        budget. Both halves are asserted: the stranger gets 401, and the member
+        still has a full budget afterwards."""
+        for _ in range(EXPORT_LIMIT.max_attempts + 1):
+            assert client.get("/api/books/export").status_code == 401
+
+        assert self._export(client, admin).status_code == 200
+
+    def test_a_burst_of_backups_is_cut_off(self, client, admin):
+        codes = [
+            client.get("/api/backup", headers=admin["headers"]).status_code
+            for _ in range(BACKUP_LIMIT.max_attempts + 1)
+        ]
+
+        assert codes[-1] == 429
+        assert 429 not in codes[:-1]
+
+    def test_a_member_is_403_on_the_backup_and_spends_nothing(self, client, admin, member):
+        """The same ordering claim one gate further in: `require_admin` is a
+        parameter dependency, so it has already refused by the time the handler
+        body charges anything. A member hammering the backup cannot ration the
+        administrator."""
+        for _ in range(BACKUP_LIMIT.max_attempts + 1):
+            assert client.get("/api/backup", headers=member["headers"]).status_code == 403
+
+        assert client.get("/api/backup", headers=admin["headers"]).status_code == 200
+
+    def test_a_members_exports_do_not_ration_the_backup(self, client, admin):
+        """One counter over both routes was the cheap answer, and this is what
+        it would cost: the same account spending its exports would take the
+        administrator's backup with it."""
+        for _ in range(EXPORT_LIMIT.max_attempts + 1):
+            self._export(client, admin)
+
+        assert client.get("/api/backup", headers=admin["headers"]).status_code == 200
+
+    def test_the_backup_does_not_ration_the_export(self, client, admin):
+        for _ in range(BACKUP_LIMIT.max_attempts + 1):
+            client.get("/api/backup", headers=admin["headers"])
+
+        assert self._export(client, admin).status_code == 200
+
+
 class TestTheRateLimitTableInTheDocsIsTheModule:
     """`docs/security.md` states how many counters there are and lists them.
 
@@ -259,6 +411,12 @@ class TestTheRateLimitTableInTheDocsIsTheModule:
 
     #: The heading the table sits under, and the row separator that follows it.
     _SECTION = "## Rate limiting"
+    #: **Deliberately further than the module reaches**, because the counter
+    #: this map has no word for is the one nobody is looking at: a missing key
+    #: used to be a bare `KeyError` inside a guard about documentation, raised
+    #: at whoever added an unrelated limiter. The arm below now says what is
+    #: wrong instead, and this runs ahead of the module so the ordinary case
+    #: is one row rather than two edits.
     _WORDS = {
         4: "Four",
         5: "Five",
@@ -269,6 +427,12 @@ class TestTheRateLimitTableInTheDocsIsTheModule:
         10: "Ten",
         11: "Eleven",
         12: "Twelve",
+        13: "Thirteen",
+        14: "Fourteen",
+        15: "Fifteen",
+        16: "Sixteen",
+        17: "Seventeen",
+        18: "Eighteen",
     }
 
     @staticmethod
@@ -279,23 +443,69 @@ class TestTheRateLimitTableInTheDocsIsTheModule:
 
     @staticmethod
     def _counters() -> int:
-        from pathlib import Path
-
-        source = (Path(__file__).resolve().parents[1] / "ratelimit.py").read_text()
-        return source.count("SlidingWindowLimiter(") - source.count(
-            "class SlidingWindowLimiter("
-        )
+        return len(_limiters_ratelimit_declares())
 
     def test_the_module_defines_the_counters_this_rule_counts(self):
         """A guard that inspects nothing reads as coverage. If the module stops
         constructing limiters this way, everything below goes vacuous."""
         assert self._counters() >= 1
 
+    def test_this_rule_has_a_word_for_the_number_of_counters(self):
+        """A guard that raises rather than failing has stopped being a guard.
+
+        The arm below reads `_WORDS[count]`, so a counter past the end of that
+        map used to abort with a bare `KeyError` under a class about the
+        documentation table, which says nothing about what to do about it."""
+        count = self._counters()
+        assert count in self._WORDS, (
+            f"backend/ratelimit.py binds {count} counters and `_WORDS` stops at "
+            f"{max(self._WORDS)}. Extend it, and with it the count word and the "
+            "row in docs/security.md that the arms below are about."
+        )
+
     def test_the_stated_number_is_the_number_of_counters(self):
         count = self._counters()
         assert f"**{self._WORDS[count]} counters," in self._security_doc(), (
-            f"backend/ratelimit.py constructs {count} limiters. docs/security.md "
-            "opens its rate limiting section with a different number."
+            f"backend/ratelimit.py binds {count} names to a limiter. "
+            "docs/security.md opens its rate limiting section with a different "
+            "number."
+        )
+
+    def test_the_two_derivations_agree(self):
+        """Names bound against limiters constructed, pinned to each other.
+
+        Neither is the number on its own. They part in opposite directions and
+        the arms above read only one of them, so without this a drift is a
+        smaller number nobody sees: a limiter held in a container is
+        constructed and bound to no name, and a name bound to a limiter the
+        parse did not see built here is the reverse. **The shape is what is
+        checked, not the cause**: an alias, an import and a subclass instance
+        all produce it, and they do not want the same fix, since the first two
+        are one counter twice over and a subclass is a real further counter the
+        fixture does reset.
+
+        **Both directions re-planted on 2026-09-29**, after the export and
+        backup counters took the module from eleven to thirteen: a verdict
+        recorded against one population is not a verdict about another. A
+        container leaves the walk **one under** the parse and an alias leaves
+        it one over, and this arm reddened by name on each. The counts those
+        plants produced are deliberately not written here, because they are a
+        spelling of however many counters the module happens to have; the
+        relationship is the thing that is true.
+        """
+        bound = self._counters()
+        constructed = _limiters_ratelimit_constructs()
+        assert bound == constructed, (
+            f"backend/ratelimit.py binds {bound} names to a limiter and "
+            f"constructs {constructed}. Fewer names than constructions is a "
+            "limiter nothing can reach by name, which the reset fixture "
+            "between tests cannot touch. More names than constructions is a "
+            "name bound to a limiter the parse did not see built here, and "
+            "the two cases want opposite fixes: one this module never "
+            "constructed, an alias or an import, is one counter under two "
+            "names and this table would count it twice; one built by a call "
+            "the parse does not recognise, a subclass being the example, is a "
+            "real further counter and wants a row."
         )
 
     def test_the_table_has_a_row_for_every_counter(self):
@@ -318,34 +528,68 @@ class TestTheRateLimitTableInTheDocsIsTheModule:
         )
 
 
-def test_every_limiter_in_the_module_is_reset_between_tests():
-    """The suite's `reset_rate_limits` fixture has to know about all of them.
+class TestEveryLimiterIsResetBetweenTests:
+    """The suite's `reset_rate_limits` fixture has to reach all of them.
 
-    Its own docstring records what happens when it does not: the import limiter
-    was added later, and its absence turned twelve unrelated import tests red,
-    every one of them passing on its own. That is a whole afternoon, and it is
-    detectable in four lines.
+    The limiters are process global, so one test spending a budget rations
+    every later test that shares it, and which test fails then depends on
+    ordering. The import limiter was added after the fixture and its absence
+    turned twelve unrelated import tests red, every one of them passing on its
+    own.
 
-    Derived from the module rather than compared against a list, so a limiter
-    added tomorrow is caught rather than a list somebody remembered to extend.
+    **Run, not read.** The fixture used to name its limiters and this rule used
+    to look for `<name>.reset()` in its source; both were enumerations, and the
+    second could be beaten by a spelling as ordinary as a line break. The
+    fixture derives its limiters from `ratelimit`'s namespace, and this dirties
+    every limiter that namespace holds, runs the fixture, and asks which came
+    back dirty.
+
+    **What it does not reach, stated rather than bounded.** It shares the
+    fixture's definition of membership, so a limiter the fixture cannot see is
+    one this cannot see either: one another module constructs for itself, or
+    one held inside a container rather than bound to a name. The second is
+    caught a rule away, by the two derivations disagreeing; the first is
+    caught nowhere. It reads `_hits`, so a `reset` that empties the hits and
+    leaves state added to the limiter later would pass here.
     """
-    import ratelimit
-    from tests import conftest
 
-    limiters = {
-        name
-        for name, value in vars(ratelimit).items()
-        if isinstance(value, ratelimit.SlidingWindowLimiter)
-    }
-    assert limiters, "No limiters found; this rule now inspects nothing."
+    def test_the_module_declares_limiters_for_this_rule_to_find(self):
+        """A guard that inspects nothing reads as coverage."""
+        assert _limiters_ratelimit_declares()
 
-    source = inspect.getsource(conftest.reset_rate_limits)
-    missing = sorted(name for name in limiters if f"{name}.reset()" not in source)
-    assert missing == [], (
-        f"These limiters are never reset between tests: {missing}. They are "
-        "process global, so one test spending a budget rations every later test "
-        "that shares it, and which test fails then depends on ordering."
-    )
+    def test_running_the_fixture_clears_every_limiter_the_module_declares(self):
+        from tests import conftest
+
+        limiters = _limiters_ratelimit_declares()
+        for limiter in limiters.values():
+            limiter.check("a key this test invented")
+        # Asserted, because an empty table satisfies the assertion below just
+        # as well as a reset does: without this the arm passes when the
+        # dirtying stops happening at all.
+        clean = sorted(name for name, limiter in limiters.items() if not limiter._hits)
+        assert clean == [], (
+            f"These limiters were not dirtied: {clean}. The assertion below "
+            "would then be met by an empty table rather than by a reset."
+        )
+
+        # `@pytest.fixture` returns a wrapper that refuses to be called and
+        # carries the function it wrapped on `__wrapped__`. Should that stop
+        # being true, `unwrap` hands back the wrapper and pytest fails the call
+        # by name, which is the outcome this wants rather than a quiet pass.
+        inspect.unwrap(conftest.reset_rate_limits)()
+
+        dirty = sorted(name for name, limiter in limiters.items() if limiter._hits)
+        assert dirty == [], (
+            f"These limiters still hold state after the fixture ran: {dirty}. "
+            "They are process global, so one test spending a budget rations "
+            "every later test that shares it."
+        )
+
+    def test_the_fixture_runs_without_a_test_asking_for_it(self, request):
+        """Autouse is what makes it run between tests at all, and the arm above
+        cannot see it: that one calls the fixture by hand. This test requests
+        nothing, so the name appearing here is the fixture being applied."""
+        assert "reset_rate_limits" in request.fixturenames
 
 
 class TestTheKeyTableIsBounded:
@@ -538,12 +782,9 @@ class TestTheKeyTableIsBounded:
         """Derived from the module rather than asserted on one of them: a
         limiter constructed with a different cap by a later edit would be
         unbounded again, and nothing else would notice."""
-        import ratelimit
-
         unbounded = sorted(
             name
-            for name, value in vars(ratelimit).items()
-            if isinstance(value, SlidingWindowLimiter)
-            and value._max_keys != MAX_TRACKED_KEYS
+            for name, value in _limiters_ratelimit_declares().items()
+            if value._max_keys != MAX_TRACKED_KEYS
         )
         assert unbounded == [], f"These limiters do not carry the ceiling: {unbounded}"

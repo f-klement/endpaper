@@ -55,7 +55,6 @@ const MOON_READER_SCHEMA = [
   `CREATE TABLE statistics (
      filename TEXT, usedTime INTEGER, readWords INTEGER, dates TEXT
    )`,
-  `PRAGMA user_version = 21`,
 ];
 
 /** A backup holding whatever these statements put in it. */
@@ -223,28 +222,11 @@ describe("a row that is not a book", () => {
   });
 });
 
-describe("what the backup says about itself", () => {
-  it("reports the version the app set", async () => {
-    expect((await libraryOn(IN_BOOKS)).schemaVersion).toBe(21);
-  });
-
-  it("reports no version where nothing set one", async () => {
-    const read = await backup(
-      [
-        `CREATE TABLE books (filename TEXT, book TEXT, author TEXT)`,
-        `CREATE TABLE tmpbooks (filename TEXT, book TEXT, author TEXT)`,
-      ],
-      IN_BOOKS,
-    );
-    if (!read.ok) throw new Error(`expected a library: ${read.failure}`);
-    expect(read.library.schemaVersion).toBeNull();
-  });
-
-  it("names no missing field where every column is there", async () => {
-    expect((await libraryOn(IN_BOOKS)).missing).toEqual([]);
-  });
-
-  it("names the field a column that is not there would have filled", async () => {
+describe("a column this backup does not have", () => {
+  it("keeps the book and leaves the field that column would have filled", async () => {
+    // **A column costs its field and never the book**, `kobo.ts`'s rule. The
+    // signature is `filename` and `book`, so a table may lose `author` and
+    // still be one of these.
     const read = await backup(
       [
         `CREATE TABLE books (filename TEXT, book TEXT)`,
@@ -253,7 +235,6 @@ describe("what the backup says about itself", () => {
       `INSERT INTO books (filename, book) VALUES ('/Books/dune.epub', 'Dune')`,
     );
     if (!read.ok) throw new Error(`expected a library: ${read.failure}`);
-    expect(read.library.missing).toEqual(["authors"]);
     expect(read.library.books[0]?.title).toBe("Dune");
     expect(read.library.books[0]?.authors).toEqual([]);
   });

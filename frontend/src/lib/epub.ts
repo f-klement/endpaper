@@ -47,8 +47,10 @@ import {
  * Measured at 269 bytes over 79 real files, median 252. 64 KiB is 243 times the
  * largest seen, which leaves room for a producer that indents strangely and
  * still refuses anything that is not a container document.
+ *
+ * Exported, for `epub.MAX_PACKAGE_BYTES`'s reason.
  */
-const MAX_CONTAINER_BYTES = 64 * 1024;
+export const MAX_CONTAINER_BYTES = 64 * 1024;
 
 /**
  * How much the package document may inflate to.
@@ -57,8 +59,14 @@ const MAX_CONTAINER_BYTES = 64 * 1024;
  * a 2,020 entry Mahabharata whose manifest is most of it. 4 MiB is sixteen times
  * that, and it is a bound on **output**, so a package document claiming to be
  * small and inflating to gigabytes is stopped by this rather than by the claim.
+ *
+ * **Exported so a guard can derive an element count from it rather than quote
+ * one.** `tests/lib/bookRequest.test.ts` divides it by the width of a minimal
+ * `dc:subject` element to get the number of subjects one package may declare,
+ * which is what `boundCategories` has to stay cheap over. A number written into
+ * that test instead would stop being this cap the day this cap moved.
  */
-const MAX_PACKAGE_BYTES = 4 * 1024 * 1024;
+export const MAX_PACKAGE_BYTES = 4 * 1024 * 1024;
 
 const CONTAINER_PATH = "META-INF/container.xml";
 const CONTAINER_NAMESPACE = "urn:oasis:names:tc:opendocument:xmlns:container";
@@ -99,7 +107,14 @@ function packagePath(xml: string): string | null {
   // The container is parsed by the same engine and is the same exposure. See
   // `declaresEntities`.
   if (declaresEntities(xml)) return null;
-  const document = new DOMParser().parseFromString(xml, "application/xml");
+  // Caught for `fb2.ts::readFb2Description`'s reason: a parser this reader
+  // does not choose may throw where the specification answers `parsererror`.
+  let document: Document;
+  try {
+    document = new DOMParser().parseFromString(xml, "application/xml");
+  } catch {
+    return null;
+  }
   const root = document.documentElement;
   if (!root || root.localName !== "container") return null;
 

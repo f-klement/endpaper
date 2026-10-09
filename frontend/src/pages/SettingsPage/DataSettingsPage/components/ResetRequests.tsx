@@ -1,6 +1,7 @@
 import type { ResetRequestOut } from "../../../../api/generated/model";
 import { Button, ErrorState, Spinner } from "../../../../components";
 import { useTranslation } from "../../../../i18n";
+import { clockTime, numericDate } from "../../../../lib/date";
 import type { ApprovedCode } from "../hooks";
 
 interface ResetRequestsProps {
@@ -39,7 +40,10 @@ export default function ResetRequests({
   isWorking,
   actionError,
 }: ResetRequestsProps) {
-  const { t } = useTranslation();
+  // Three timestamps here rendered in the browser's locale rather than the
+  // app's, one date and two times, so this queue disagreed with every other
+  // screen for a member whose browser and app languages differ.
+  const { t, locale } = useTranslation();
 
   return (
     <div className="space-y-4">
@@ -77,7 +81,7 @@ export default function ResetRequests({
               </p>
               <p className="text-xs text-paper-600 dark:text-paper-400">
                 {t("settings.resetRequestsAsked", {
-                  date: new Date(request.requested_at).toLocaleDateString(),
+                  date: numericDate(request.requested_at, locale),
                 })}
               </p>
               {request.approved_by && (
@@ -96,9 +100,7 @@ export default function ResetRequests({
               {request.code_expires_at && !approved && (
                 <p className="text-xs text-paper-600 dark:text-paper-400">
                   {t("settings.resetRequestsCodeExpires", {
-                    time: new Date(
-                      request.code_expires_at,
-                    ).toLocaleTimeString(),
+                    time: clockTime(request.code_expires_at, locale),
                   })}
                 </p>
               )}
@@ -115,7 +117,7 @@ export default function ResetRequests({
                       true when the constant moves. */}
                     {t("settings.resetRequestsCodeFor", {
                       name: request.username,
-                      time: new Date(approved.expiresAt).toLocaleTimeString(),
+                      time: clockTime(approved.expiresAt, locale),
                     })}
                   </p>
                 </div>

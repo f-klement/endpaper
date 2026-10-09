@@ -9,30 +9,38 @@ again".
 import ast
 import copy
 import dataclasses
+import functools
 import importlib
 import inspect
 import os
 import re
+import sys
 import tomllib
+import unicodedata
 import warnings
+from collections import Counter
+from collections.abc import Container, Iterable, Sequence
 from enum import StrEnum
 from fnmatch import fnmatch
 from pathlib import Path
-from typing import Final, get_args
+from typing import Any, Final, get_args
 
 import httpx
+import pydantic
 import pytest
 import respx
-from pydantic import BaseModel
+from pydantic import AliasChoices, AliasPath, BaseModel
 from sqlalchemy import CheckConstraint
 
+import marc_fields
 import metadata
-import models as orm  # noqa: F401  (registers the tables on Base.metadata)
+import models as orm  # registers the tables on Base.metadata
 import sources
 import targets
 from database import Base
 from enums import CatalogueSource
 from tests.helpers import silence_catalogues
+from tests.ignorefile import ignore_patterns, is_ignored
 
 BACKEND = Path(__file__).resolve().parent.parent
 
@@ -110,9 +118,206 @@ def _python_sources(root: Path = BACKEND) -> list[Path]:
     ]
 
 
+class TestTheApplicationCorpusIsStillTheApplication:
+    """`_python_sources()` returns every top level directory the backend has.
+
+    **Beside the reader rather than inside any one rule**, because this corpus
+    is walked from test classes across many files and a narrowing takes every
+    one of them at once. **No count of them is written here**: the figure that
+    stood in this sentence was never derived before it was written, and two
+    derivations of it afterwards disagreed on both halves. The argument does
+    not need a number, only that the readers are more than one and are not all
+    in this file.
+
+    **It is here because the walk had no arming of its own and the nearest
+    thing to one is blind to half the class.**
+    `test_the_walk_reaches_every_group_and_leaves_no_remainder` compares
+    `_python_sources()` against `_every_python_file()`, so it reds on a filter
+    added inside `_python_sources` and **not** on the identical filter added
+    inside `_is_vendored`, which both instruments call: the two degrade
+    together, so there is no disagreement left to see.
+
+    Driven, 2026-10-01, with a real provenance violation planted and 156 arms
+    run per column. A narrowing written in `_is_vendored` to drop `routers/`
+    leaves the violation unreported and reds 11 unrelated guards that happen to
+    pin exact populations over this corpus; dropping `schemas/` reds 6; **and
+    dropping `scripts/` reds nothing at all**, corpus 96 of 98, every arm green,
+    the violation invisible. Which directory the token names decided whether
+    anything went red. This arm reds by name on all three.
+
+    **It reds on a legitimate new directory too, and that is wanted**: a new
+    package under `backend/` is a decision about what every one of those rules
+    reads, and one line here is where it is taken.
+    """
+
+    def test_the_walk_returns_every_package_the_backend_has(self) -> None:
+        directories = sorted(
+            {
+                path.relative_to(BACKEND).parts[0]
+                for path in _python_sources()
+                if len(path.relative_to(BACKEND).parts) > 1
+            }
+        )
+
+        assert directories == ["routers", "schemas", "scripts"], (
+            "the application corpus lost or gained a top level directory. Every "
+            "rule reading `_python_sources()` now reads a different tree: either "
+            "the walk was narrowed, or `backend/` grew a package and this line "
+            "is where somebody decides the rules should see it."
+        )
+
+    def test_the_modules_at_the_root_are_still_there(self) -> None:
+        """The other half, since the arm above is satisfied by a walk that
+        returns the three directories and nothing else.
+
+        **An equality against a second derivation**, and the arm this replaced
+        was a membership test on three names with a justification that
+        inverted its own comparison: it said a floor leaves room to decay,
+        where three names out of the root's modules leave far more room than a
+        floor would. What actually made it adequate is that the quiet route
+        cannot express the attack, since `_is_vendored` tests **part names**
+        and no part name drops the root of a tree. That is a property of the
+        helper rather than of the arm, so the arm is strengthened instead of
+        the sentence being rewritten.
+
+        **The glob does not route through `_is_vendored`**, which is what
+        makes it a second instrument rather than the same reading twice: the
+        walk under test prunes a dotted part and this does not, so the guard
+        below is what keeps the two comparable. Measured: the root holds no
+        dotted module today, so that guard is not what makes the equality
+        hold, and it is what stops the day one arrives being a failure of this
+        arm rather than a decision.
+        """
+        roots = {
+            path.name
+            for path in _python_sources()
+            if len(path.relative_to(BACKEND).parts) == 1
+        }
+        globbed = {
+            path.name for path in BACKEND.glob("*.py") if not path.name.startswith(".")
+        }
+
+        assert roots == globbed
+        assert {"models.py", "shelf.py", "main.py"} <= roots
+
+
 def _test_sources(root: Path = BACKEND) -> list[Path]:
     """Every file in the test tree. `_python_sources` deliberately excludes it."""
     return [path for path in (root / "tests").rglob("*.py") if not _is_vendored(path, root)]
+
+
+class TestTheTestTreeIsStillTheTestTree:
+    """`_test_sources()` returns every Python file under `backend/tests`.
+
+    **Beside the shared reader rather than inside any one rule**, for the
+    reason the class above `_test_sources` gives: this walk is read at many
+    sites across many files, and a narrowing takes every one of them at once.
+
+    **It is here because the one instrument that reads this walk's population
+    goes quiet rather than red when the walk narrows.** The coverage register
+    compares pytest's own collection against this walk and hands the
+    disagreement to `pytest.skip`, so a narrowing is not a wrong answer there,
+    it is no answer.
+
+    Driven, 2026-10-01 by a review seat, with the register's three count arms
+    as the subject: a narrowing in `_test_sources` dropping `*_guard.py`, none
+    of which carries a register row, left **no arm in that file red** and all
+    three count arms skipping; the identical narrowing written one function up
+    in `_is_vendored` did the same. The only reds either way were collateral,
+    in files the narrowing was not written in, and which arm fired moved with
+    where it was written.
+
+    **A top level directory arm does not close it**, which is the difference
+    from the class above: that narrowing left every directory in place. So
+    this is an equality against the glob, less an exclusion set stated by
+    equality rather than by a count.
+
+    **It reds on a new directory or a new file under `tests/` only if the walk
+    stops returning one**, since both sides see a legitimate addition.
+    """
+
+    def test_the_walk_returns_every_python_file_the_test_tree_has(self) -> None:
+        walked = {path.relative_to(BACKEND) for path in _test_sources()}
+        # The second derivation. It shares this walk's `rglob` and not its
+        # filter, so a narrowing written in `_test_sources` or in
+        # `_is_vendored` is a disagreement here rather than a smaller corpus
+        # nobody sees. What it cannot see is an edit to both at once.
+        globbed = {
+            path.relative_to(BACKEND) for path in (BACKEND / "tests").rglob("*.py")
+        }
+        excluded = sorted(str(path) for path in globbed - walked)
+
+        # **The exclusion stated by equality, and it is empty.** `_is_vendored`
+        # prunes a dotted part and the tool directory names beside it, and
+        # under `backend/tests` none of them holds a `.py` file: the bytecode
+        # cache
+        # holds `.pyc` only, and the virtualenv and the pipeline's cache sit
+        # beside `tests/` rather than inside it. A member arriving here is a
+        # decision about what every rule reading this walk sees, and this line
+        # is where somebody takes it.
+        assert excluded == [], (
+            "the test tree corpus lost files to an exclusion. Every rule "
+            f"reading `_test_sources()` now reads a different tree: {excluded}"
+        )
+        assert walked == globbed
+
+        # Vacuity. Every assertion above holds over an empty tree, and this
+        # file is in the walk it is asserting about.
+        assert Path(__file__).resolve() in {
+            path.resolve() for path in _test_sources()
+        }
+
+    def test_a_vendored_file_under_the_test_tree_is_the_difference(
+        self, tmp_path: Path
+    ) -> None:
+        """What the exclusion asserted above is an exclusion of, and anti
+        vacuity for it.
+
+        The two readings share an `rglob` on the real tree and the equality
+        alone cannot say the filter is doing anything, because the exclusion
+        there is empty. Planted rather than asserted of this checkout, since
+        an exclusion nobody has seen produce a member is a rule stated and not
+        measured.
+        """
+        (tmp_path / "tests" / ".tool").mkdir(parents=True)
+        (tmp_path / "tests" / "test_real.py").write_text("")
+        (tmp_path / "tests" / ".tool" / "vendored.py").write_text("")
+
+        walked = {path.name for path in _test_sources(tmp_path)}
+        globbed = {path.name for path in (tmp_path / "tests").rglob("*.py")}
+
+        assert walked == {"test_real.py"}
+        assert globbed - walked == {"vendored.py"}
+
+
+def _every_module_but_the_tests(root: Path = BACKEND) -> list[Path]:
+    """The application and its migrations, excluding the tests and anything vendored.
+
+    Wider than `_python_sources` by the migrations and narrower than
+    `_every_python_file` by the test tree. The rules that use it are about what
+    ships in the image, where a generated revision ships and a test does not.
+
+    **It exists because two rules that needed this walk each wrote their own**,
+    one a method on its test class and one inline in its loop, spelled
+    `"tests" not in path.parts and ".venv" not in path.parts` and its negation.
+    That is the enumeration the module level walks here replaced, one name short
+    in the same direction: it read the cache the pipeline creates under
+    `backend/` and reported `jeepney/bindgen.py` for parsing XML. Green on every
+    developer checkout and red in CI, which is the environment difference
+    `_python_sources` already records. The second copy held the `S101` census
+    and was latent rather than red, because nothing vendored here carries that
+    suppression; it was found by reading for the shape rather than by a failure.
+
+    **A method could not be reached by `_walk_names`**, which reads module
+    level functions, so the diagonal that drives every walk against a
+    constructed tree never saw it. Being a module level walk that reaches
+    `_is_vendored` is what puts it under that guard rather than beside it.
+    """
+    return [
+        path
+        for path in root.rglob("*.py")
+        if "tests" not in path.relative_to(root).parts and not _is_vendored(path, root)
+    ]
 
 
 def _every_python_file(root: Path = BACKEND) -> list[Path]:
@@ -130,14 +335,16 @@ def _every_python_file(root: Path = BACKEND) -> list[Path]:
     _test_sources() + something for the migrations`, which is a list of three
     directory names whose fourth member nobody would remember to add.
 
-    **The boundary is `backend/` rather than the repository.** Eleven tracked
-    `.py` files live outside it, one under `frontend/scripts/` and ten under
-    tooling directories this suite does not own. All eleven compile clean,
-    measured 2026-09-02 on CPython 3.14.0, so the gap is worth knowing about
-    rather than urgent. It is deliberately not closed from here: `BACKEND`
-    anchors every walk in this file, and a rule reaching out of its own tree
-    would report against code this suite has no claim on, in a checkout that may
-    not even contain it.
+    **The boundary is `backend/` rather than the repository, and no count of
+    what lies outside it belongs here.** The one that stood in this paragraph
+    was measured once and was short by five the next time anybody counted,
+    which is the failure the class at the foot of this file already records
+    against its own corpus. Tracked Python outside `backend/` is compiled by a
+    guard of its own, which this file may not name: that guard is stripped from
+    the public mirror and this one publishes. The boundary stays here because
+    `BACKEND` anchors every walk in this file, and a rule reaching out of its
+    own tree would report against code this suite has no claim on, in a
+    checkout that may not even contain it.
 
     **`rglob`, so this is the working tree and not what git tracks.** An
     untracked file under `backend/` is compiled and reported, which is wanted:
@@ -184,10 +391,22 @@ def _every_file_a_tool_does_not_own(root: Path = BACKEND) -> list[Path]:
     restating the filter it is testing.
 
     `os.walk` and a pruned `dirnames`, where the walk above is an `rglob` and a
-    per path predicate. Same exclusion, different traversal, so a filter added
-    to that function shows up here as a difference. Pruning is also what keeps
-    this affordable: a `.venv` holds tens of thousands of files and neither walk
+    per path predicate. Different traversals, so a filter added to that
+    function shows up here as a difference. Pruning is also what keeps this
+    affordable: a `.venv` holds tens of thousands of files and neither walk
     should descend one.
+
+    **It is NOT the same exclusion, and the difference is load bearing.** The
+    pruning asks `_is_vendored` about **directory names** and every filename
+    is then taken unfiltered. So the two instruments degrade **identically**
+    when a directory token is added to that helper, which is why the corpus
+    the application rules walk needed an arm of its own, and they degrade
+    **differently** when a **filename** token is added: the file leaves the
+    walk above and stays in this one, so it lands in the complement and reds
+    by name. **Making this walk ask `_is_vendored` about filenames too is six
+    words, reads as a consistency fix, and takes a live filename narrowing to
+    every arm green.** That is what the sentence this paragraph replaced
+    invited, by calling the two exclusions the same.
     """
     found: list[Path] = []
     for directory, dirnames, filenames in os.walk(root):
@@ -236,9 +455,24 @@ VENDORED_KINDS: Final = {
 FIRST_PARTY: Final = (
     "shelf.py",
     "routers/loans.py",
+    # **Two packages and not one**, because four of the driven walks end in a
+    # floor asserting they reached `routers` and `schemas` rather than asserting
+    # a count: a count is satisfied by a walk that lost a whole directory. With
+    # one package planted those walks fail their own floor on this tree and
+    # cannot be driven at all, which would have left them out of the diagonal
+    # for a reason that reads as a property of the walk rather than of the
+    # fixture. See `test_accounts._sources` for the mutation behind the floor.
+    "schemas/book.py",
     "tests/test_shelf.py",
     "migrations/versions/a1.py",
     "README.md",
+    # **A repository has one, and two of the driven walks refuse a tree with no
+    # ignore rule at all** rather than reading "no file" as "nothing ignored".
+    # It is a member here rather than a file the fixture plants quietly, because
+    # a walk reaching it is reaching something this tree owns: the refusal below
+    # reports anything outside this tuple, so a file the fixture creates and the
+    # tuple omits is reported as vendored code.
+    ".gitignore",
 )
 
 #: What each walk must reach out of that, keyed by the name it is called here.
@@ -248,18 +482,83 @@ FIRST_PARTY: Final = (
 #: refusal test was written to avoid, and a vacuity check that quietly skipped the new
 #: walk would leave the refusal above as the only thing driving it, which is the half
 #: that a walk returning nothing passes.
+_THE_APP: Final = {"shelf.py", "routers/loans.py", "schemas/book.py"}
+
 WHAT_EACH_WALK_REACHES: Final = {
-    "_python_sources": {"shelf.py", "routers/loans.py"},
-    "_source_modules": {"shelf.py", "routers/loans.py"},
-    "_test_sources": {"tests/test_shelf.py"},
-    "_every_python_file": {
-        "shelf.py",
-        "routers/loans.py",
-        "tests/test_shelf.py",
-        "migrations/versions/a1.py",
-    },
-    "_every_file_a_tool_does_not_own": set(FIRST_PARTY),
+    "test_house_rules::_python_sources": _THE_APP,
+    "test_house_rules::_source_modules": _THE_APP,
+    "test_house_rules::_test_sources": {"tests/test_shelf.py"},
+    "test_house_rules::_every_module_but_the_tests": _THE_APP
+    | {"migrations/versions/a1.py"},
+    "test_house_rules::_every_python_file": _THE_APP
+    | {"tests/test_shelf.py", "migrations/versions/a1.py"},
+    "test_house_rules::_every_file_a_tool_does_not_own": set(FIRST_PARTY),
+    # The four modules that own a walk of their own. Each reaches the shared
+    # predicate and none of them could be driven against a constructed tree
+    # until they took a root, which is what this table now says out loud: two
+    # of them answer exactly what `_python_sources` answers and are a second
+    # walk over one corpus, and that is visible here rather than only to
+    # somebody reading four files.
+    "test_accounts::_sources": _THE_APP,
+    "test_covers::_our_modules": _THE_APP,
+    "test_classifications::_modules": _THE_APP,
+    "test_decoders::_production_sources": _THE_APP | {"migrations/versions/a1.py"},
+    # The census's two, which walk the repository rather than `backend/` and are
+    # driven here for the same reason as the rest: `.uv-cache` is under
+    # `backend/` and the census reaches it. They answer alike on this tree
+    # because `scope` is `candidates` minus what declares itself internal, and
+    # nothing the fixture plants declares anything. The ignore file is out
+    # because its suffix is not one the census reads, which is that walk's own
+    # filter running before the predicate rather than the dot rule answering.
+    # The dot rule is still driven for these two by the planted environment and
+    # dependency directories, which they do reach.
+    "test_roster_counts::candidates": set(FIRST_PARTY) - {".gitignore"},
+    "test_roster_counts::scope": set(FIRST_PARTY) - {".gitignore"},
 }
+
+
+#: The sentence the publish gate demands of a file it strips. Spelled here as a
+#: cross check on the partition below and not as a second home for that rule,
+#: which is the gate's: a match broader than the gate's is the safe direction.
+INTERNAL_DECLARATION: Final = "**This file is internal.**"
+
+
+def _declares_itself_internal(module: str) -> bool:
+    source = (BACKEND / "tests" / f"{module.replace('.', '/')}.py").read_text(encoding="utf-8")
+    return INTERNAL_DECLARATION in (ast.get_docstring(ast.parse(source)) or "")
+
+
+def _the_whole_table(walks: frozenset[str]) -> dict[str, set[str]]:
+    """The table above, plus the row an internal module states about its own walk.
+
+    **This file publishes and a published file may not name a stripped one.** A
+    row keyed on an internal module's name fails in a mirror clone, printing a
+    path the mirror does not carry, and the publish gate cannot catch it: its
+    pointer arm matches path spellings and this is a bare stem. So an internal
+    module states what its own walk reaches, under this attribute name, and the
+    row is collected here rather than written here. The next internal guard
+    with a walk then needs no edit to a published file.
+
+    **Which modules those are is read off the declaration they already carry**
+    for the gate, never off a list, which is the coverage register's own answer
+    to the same question: a file earns a row or declares itself internal.
+
+    **The module states the expectation and this drives it**, which is weaker
+    than a published row and is not nothing. A walk that lost a group or
+    answered with nothing still fails here, and a module that states no row
+    fails the set comparison by name rather than dropping out of the diagonal.
+    """
+    table = dict(WHAT_EACH_WALK_REACHES)
+    for qualified in walks:
+        module, _, _ = qualified.partition("::")
+        if qualified in table or not _declares_itself_internal(module):
+            continue
+        stated = getattr(
+            importlib.import_module(f"tests.{module}"), "WHAT_MY_WALKS_REACH", {}
+        )
+        if qualified in stated:
+            table[qualified] = stated[qualified]
+    return table
 
 
 #: Both ways a module defines a function, because a rule reading one of them reads a
@@ -273,6 +572,96 @@ WHAT_EACH_WALK_REACHES: Final = {
 _A_FUNCTION: Final = (ast.FunctionDef, ast.AsyncFunctionDef)
 
 
+def _names_for_the_tree(tree: ast.Module) -> set[str]:
+    """Every module level name in one module that holds a path.
+
+    A default of one of these is what says a function takes the tree even where
+    the parameter is not called `root`, which is the second half of the rule
+    `_walk_names` documents.
+
+    **Read off the module, never listed.** The first version of this was a
+    frozenset of the five spellings somebody had seen, and it was short on the
+    day it was written: `_REPO` is the tree constant in five guard modules and
+    was not in it. A helper there spelling its parameter `base` and defaulting
+    it to `_REPO` matched neither arm of the closure, so it never entered
+    `reaches` and was neither driven nor reported as undrivable. That is
+    verbatim the silent drop the default name clause exists to stop, one
+    spelling further out, and an inclusion list is what goes stale when the
+    repository grows a directory.
+
+    **Two passes, because one tree constant is derived from another and the
+    first pass could not see it.** `test_roster_counts.REPO` is `BACKEND.parent`
+    and holds no `Path(` call at all, so the `Path(` pass alone reported that
+    module's `BACKEND` and not its repository root, which is the root its two
+    driven walks default to. Both review seats found this independently, on a
+    rule whose whole subject is that a list goes stale: the same failure one
+    derivation out rather than one spelling out. So a name whose value is built
+    from a name already found joins it, to a fixed point.
+
+    **Over matching is the safe direction and is deliberate.** A name bound to
+    anything containing a `Path(` call counts, and so does anything derived
+    from one, so a constant that is not the tree still counts. The cost is that
+    a function defaulting to it joins `reaches` and must then be drivable or be
+    reported, which is louder than the rule needs rather than quieter.
+
+    **This whole function is stated rather than driven, and that is measured
+    rather than assumed.** Killing the `pathlib.Path` arm outright, so that
+    `test_decoders.BACKEND` is not found, leaves the suite green: every
+    function that reaches the predicate today spells its parameter `root`, so
+    the first arm of the closure carries all of them and the default name arm
+    decides nothing. It is here for the helper spelled `base`, which the tree
+    does not contain yet and has contained before. **Do not read a green run
+    over this as evidence it works**; the arm that has evidence behind it is
+    the parameter name.
+    """
+    bindings: list[tuple[set[str], ast.expr]] = []
+    for node in tree.body:
+        if not isinstance(node, ast.Assign | ast.AnnAssign) or node.value is None:
+            continue
+        targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+        bindings.append(
+            ({one.id for one in targets if isinstance(one, ast.Name)}, node.value)
+        )
+
+    found: set[str] = set()
+    for names, value in bindings:
+        if any(
+            isinstance(call, ast.Call)
+            and (
+                (isinstance(call.func, ast.Name) and call.func.id == "Path")
+                or (isinstance(call.func, ast.Attribute) and call.func.attr == "Path")
+            )
+            for call in ast.walk(value)
+        ):
+            found |= names
+
+    growing = True
+    while growing:
+        growing = False
+        for names, value in bindings:
+            if names <= found:
+                continue
+            if any(
+                isinstance(inner, ast.Name) and inner.id in found
+                for inner in ast.walk(value)
+            ):
+                found |= names
+                growing = True
+    return found
+
+
+def _defines_walk(tree: ast.Module) -> bool:
+    """Whether this module defines a `walk` of its own, which is never the filesystem's.
+
+    One home, because the change that widened the diagonal across the test tree
+    wrote the same four line expression beside the one that was already here.
+    `_is_a_walk` takes the answer as a parameter, so the seam already existed.
+    """
+    return any(
+        isinstance(node, _A_FUNCTION) and node.name == "walk" for node in ast.walk(tree)
+    )
+
+
 def _a_backend_with_vendored_code_in_it(root: Path, vendored: str) -> None:
     """Write a tree shaped like `backend/`, with one kind of vendored code in it.
 
@@ -284,6 +673,11 @@ def _a_backend_with_vendored_code_in_it(root: Path, vendored: str) -> None:
         path = root / relative
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("x = 1\n")
+    # **Emptied after the loop above wrote `x = 1` into it.** The fixture is
+    # about vendored directories a walk has to refuse on its own, and an ignore
+    # file with entries in it would let a walk pass by reading the file instead
+    # of by applying the rule.
+    (root / ".gitignore").write_text("")
     for directory in (root / vendored, root / "tests" / vendored):
         for name in ("mod.py", "notes.md"):
             path = directory / name
@@ -291,7 +685,8 @@ def _a_backend_with_vendored_code_in_it(root: Path, vendored: str) -> None:
             path.write_text("x = 1\n")
 
 
-def _walk_names() -> tuple[set[str], set[str]]:
+@functools.cache
+def _walk_names() -> tuple[frozenset[str], frozenset[str]]:
     """The names in this module that decide what a walk reaches, as `(walks, all)`.
 
     **Read off this file rather than listed**, which is the same rule the walks
@@ -322,24 +717,51 @@ def _walk_names() -> tuple[set[str], set[str]]:
     never driving it. In it, that walk reads this checkout instead of the
     constructed tree and every kind is reported against it.
 
-    **Taking the tree is a parameter called `root` or a default of `BACKEND`,
-    and the second is there because the first is one spelling.** The parameter
-    name is the caller's choice and open, so a helper spelling it `base` and
-    calling a walk with no argument satisfied neither arm and dropped out
-    silently, which is the failure this clause exists to stop, one name over.
-    `BACKEND` is this module's only name for the tree under test: measured on
-    this file, it is the only path constant at module level and exactly the
-    functions here that decide vendored code carry it as a default.
+    **Taking the tree is a parameter called `root` or a default that names the
+    tree, and the second is there because the first is one spelling.** The
+    parameter name is the caller's choice and open, so a helper spelling it
+    `base` and calling a walk with no argument satisfied neither arm and
+    dropped out silently, which is the failure this clause exists to stop, one
+    name over. Which names mean the tree is `_names_for_the_tree`, read off the
+    module rather than listed here: this file calls it `BACKEND` and is the
+    only module this function is asked about, but the same closure serves the
+    whole test tree, where five guard modules call it `_REPO`.
 
     The cost is stated rather than discovered: a helper taking the tree and only
     reading a corpus fires too. That is the same side as the rest of this rule,
     and being told about it is cheaper than the walk nothing drives.
     """
-    reaches: set[str] = {"_is_vendored"}
+    walks, reaches = _walks_reaching(
+        ast.parse(Path(__file__).read_text()), {"_is_vendored"}
+    )
+    assert walks == reaches, (
+        "these reach the vendored rule and cannot be driven against a tree, so "
+        f"nothing below covers them: {sorted(reaches - walks)}"
+    )
+    # **Frozen because this is cached**, so every caller holds the same object.
+    # Both review seats raised it on the same round: one `|=` or `discard` on a
+    # returned value would shrink the walk set for every later test in the run,
+    # silently, which is the failure this whole file exists to prevent. Nothing
+    # mutates them today and a word is cheaper than noticing when something does.
+    return frozenset(walks), frozenset(reaches | {"_is_vendored"})
+
+
+def _walks_reaching(tree: ast.Module, seed: set[str]) -> tuple[set[str], set[str]]:
+    """The closure of `seed` over one module, as `(drivable, all)`.
+
+    The body of `_walk_names` lifted so the same rule can be asked of a module
+    that is not this one. What counts as reaching is documented there. **What
+    counts as taking the tree is the one thing the lift changed**: the name a
+    module gives the tree is read off that module by `_names_for_the_tree`
+    rather than compared against `BACKEND`, which was this file's only spelling
+    and is not the test tree's.
+    """
+    for_the_tree = _names_for_the_tree(tree)
+    reaches = set(seed)
     growing = True
     while growing:
         growing = False
-        for node in ast.parse(Path(__file__).read_text()).body:
+        for node in tree.body:
             if not isinstance(node, _A_FUNCTION) or node.name in reaches:
                 continue
             parameters = [
@@ -350,7 +772,7 @@ def _walk_names() -> tuple[set[str], set[str]]:
             takes_the_tree = any(
                 argument.arg == "root" for argument in parameters
             ) or any(
-                isinstance(default, ast.Name) and default.id == "BACKEND"
+                isinstance(default, ast.Name) and default.id in for_the_tree
                 for default in [
                     *node.args.defaults,
                     *(one for one in node.args.kw_defaults if one is not None),
@@ -372,18 +794,123 @@ def _walk_names() -> tuple[set[str], set[str]]:
             ):
                 reaches.add(node.name)
                 growing = True
-    walks = {
+    drivable = {
         node.name
-        for node in ast.parse(Path(__file__).read_text()).body
+        for node in tree.body
         if isinstance(node, _A_FUNCTION)
         and node.name in reaches
         and [argument.arg for argument in node.args.args] == ["root"]
     }
-    assert walks | {"_is_vendored"} == reaches, (
-        "these reach the vendored rule and cannot be driven against a tree, so "
-        f"nothing below covers them: {sorted(reaches - walks - {'_is_vendored'})}"
+    return drivable, reaches - set(seed)
+
+
+def _module_of(path: Path) -> str:
+    """One test module's import name under `tests`, dotted, `.py` dropped.
+
+    **The key is the path and not the basename.** Spelled `path.stem` this
+    collapsed a nested module into its top level namesake: seven stems are
+    duplicated under `backend/tests/` today, one of them `test_covers`, whose
+    top level module owns the walk behind "only `covers.py` may know an image
+    host". `found` is a set, so a walk of the same name in `routers/` would
+    have collapsed into that key, left the expectation table matching, and gone
+    undriven, which is the state this whole rule exists to end.
+    """
+    return ".".join(path.resolve().relative_to(BACKEND / "tests").with_suffix("").parts)
+
+
+@functools.cache
+def _every_walk() -> frozenset[str]:
+    """Every walk in the **test tree** that reaches the vendored rule, `module::name`.
+
+    **The diagonal below drove one file, and the class it is for has gone red in
+    five.** `_walk_names` reads `Path(__file__)`, so a walk written in any other
+    test module was covered by its author calling `_is_vendored` and by nothing
+    that checks the call. Measured 2026-09-21 across the last 300 pipelines: of
+    37 failures, 13 were this class, repaired once per file over five separate
+    days, and 5 walks in 4 modules were structurally right and undriven at the
+    end of it.
+
+    **A module joins by importing from this file**, which is the same convention
+    the walks already follow and is what the two rules below, on a copy of a
+    walk and on a module walking without the shared rule, already enforce from the other
+    side. So the seed is what a module imports, and the closure from there is
+    this file's own rule asked of that module.
+
+    **A name that reaches the rule, walks, and takes no root is reported by
+    name** rather than being the quiet reason a walk is missing from the
+    diagonal. Undrivable is the state that produced the residue this was
+    written for.
+
+    **The rule here is not the rule this file applies to itself, and the
+    difference is stated rather than left to be found.** `_walk_names` asserts
+    that everything reaching the predicate is drivable, with no exemption. Here
+    a name that reaches it and contains no walk call is treated as a predicate:
+    neither driven nor reported, and covered only where a drivable walk in the
+    same module calls it. `test_classifications._is_this_app` is that shape and
+    is covered, because `_modules` calls it. **A predicate no drivable walk
+    calls is covered by nothing**, and deciding what vendored means against the
+    wrong root inside one is exactly the family this change claims to buy.
+    Separated by `_is_a_walk` rather than by a list, so the line is the one the
+    rest of this file draws between walking and deciding.
+
+    **Three things it does not see, none of which is loud.** A module reaching
+    this file by `import tests.test_house_rules` and attribute access yields an
+    empty seed and is skipped in silence, because the seed is read off
+    `ImportFrom` alone. A walk written as a method or inside another function
+    is invisible, because the closure reads `tree.body`: that is the same
+    limitation `_every_module_but_the_tests` records for this file, widened
+    here to every module. And a module that walks the tree without importing
+    from this file at all is out of scope by construction, which is what
+    `test_no_other_test_module_walks_a_tree_of_python_without_the_shared_rule`
+    covers from the other side for a walk that could yield a `.py` file, and
+    what nothing covers for one that could not.
+    """
+    mine = Path(__file__).resolve()
+    drivable, _ = _walk_names()
+    found = {f"{_module_of(mine)}::{name}" for name in drivable}
+
+    undrivable: list[str] = []
+    for path in sorted(_test_sources()):
+        if path.resolve() == mine:
+            continue
+        tree = ast.parse(path.read_text())
+        seed = {
+            alias.asname or alias.name
+            for node in ast.walk(tree)
+            if isinstance(node, ast.ImportFrom)
+            and node.module == f"tests.{_module_of(mine)}"
+            for alias in node.names
+        } & (drivable | {"_is_vendored"})
+        if not seed:
+            continue
+        theirs, reaches = _walks_reaching(tree, seed)
+        found |= {f"{_module_of(path)}::{name}" for name in theirs}
+        bodies = {
+            node.name: node
+            for node in tree.body
+            if isinstance(node, _A_FUNCTION) and node.name in reaches - theirs
+        }
+        # Hoisted, because it walks the whole module: asked inside the
+        # comprehension below it ran once per node of each body examined rather
+        # than once per module, which measured 0.134s on the one module with an
+        # undrivable body today and is quadratic in the next one.
+        defines = _defines_walk(tree)
+        undrivable += [
+            f"{_module_of(path)}::{name}"
+            for name, node in sorted(bodies.items())
+            if any(
+                isinstance(inner, ast.Call) and _is_a_walk(inner, defines)
+                for inner in ast.walk(node)
+            )
+        ]
+
+    assert not undrivable, (
+        "these reach the vendored rule and take no root, so the diagonal cannot "
+        f"drive them against a constructed tree: {sorted(undrivable)}"
     )
-    return walks, reaches
+    # Frozen for the reason `_walk_names` gives: this is cached, so the caller
+    # that mutates it mutates every later caller's answer.
+    return frozenset(found)
 
 
 def _is_a_walk(node: ast.AST, defines_walk: bool = False) -> bool:
@@ -458,14 +985,20 @@ def _is_a_walk(node: ast.AST, defines_walk: bool = False) -> bool:
     return could_be_python and (name == "rglob" or "**" in pattern.value)
 
 
-def _reached(name: str, root: Path) -> set[str]:
+def _reached(qualified: str, root: Path) -> set[str]:
     """One walk's answer over `root`, as paths relative to it.
 
     `_source_modules` hands back its corpus keyed by that same relative path and
     the rest hand back paths, so the two shapes are levelled here rather than in
     the caller, where levelling them would mean naming which walk is which.
+
+    **Keyed `module::name` because the walks are no longer all in this file.**
+    Resolved through `importlib` rather than through `globals()`, which reaches
+    this module and nothing else: a walk in `test_covers.py` was structurally
+    right and driven by nothing, because the diagonal could not name it.
     """
-    found = globals()[name](root)
+    module, _, name = qualified.partition("::")
+    found = getattr(importlib.import_module(f"tests.{module}"), name)(root)
     if isinstance(found, dict):
         return set(found)
     return {str(path.relative_to(root)) for path in found}
@@ -489,6 +1022,34 @@ def _docstring_nodes(tree: ast.Module) -> set[ast.AST]:
     return found
 
 
+def _docstrings_carrying_a_control_character(source: str) -> list[int]:
+    """The lines of `source` whose docstring holds a control character.
+
+    Holds one rather than names one: a docstring that is not raw interprets its
+    own escapes, so a sentence about an invisible character ships the character.
+    A newline is not counted, since a docstring is made of them.
+
+    **Its home moved here from the one line normalisation tests** when the rule
+    widened from the API layer to the tree. It stays one function because two
+    spellings of this predicate would agree on any tree, and it is driven by
+    `TestNoDocstringCarriesTheCharacterItDescribes` rather than only asserted
+    over this checkout.
+    """
+    return sorted(
+        # A module carries no line number and its docstring opens the file.
+        getattr(node, "lineno", 1)
+        for node in ast.walk(ast.parse(source))
+        if isinstance(
+            node, ast.Module | ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef
+        )
+        for text in [ast.get_docstring(node, clean=False) or ""]
+        if any(
+            unicodedata.category(character) == "Cc" and character != "\n"
+            for character in text
+        )
+    )
+
+
 #: The one helper allowed to turn foreign keys off, and the reason there is one.
 #:
 #: `database.py` sets its pragmas on the `connect` event, which SQLAlchemy fires
@@ -510,6 +1071,31 @@ BOUNDING_CALLS = frozenset(
 LOWER_BOUNDS = frozenset({"ge", "gt"})
 UPPER_BOUNDS = frozenset({"le", "lt"})
 ROUTE_METHODS = frozenset({"get", "post", "put", "patch", "delete"})
+
+#: The decorators that register a handler, which is not the same set as the
+#: methods. `api_route` carries its methods in a `methods=` keyword instead of in
+#: the attribute name, so a handler registered that way is a route handler whose
+#: attribute is in neither set above. It was invisible to every rule below until
+#: 2026-09-26, found by planting a bound inside one: two live routes use it.
+ROUTE_DECORATORS = ROUTE_METHODS | frozenset({"api_route"})
+
+#: Names in `ROUTE_DECORATORS` deliberately carried ahead of the handler that will
+#: need them, each to the reason. **Empty, and that is the state to keep it in.**
+#:
+#: A name here is a name `test_every_decorator_the_tuple_names_is_carried_here`
+#: cannot hold, so the cost of widening the tuple early is one line rather than the
+#: guard's own subject. It exists because the exemption used to be implicit: the
+#: arm read the names the corpus uses and said nothing about the rest, and "a name
+#: added ahead of its handler" and "a name whose last handler changed shape" are
+#: one state with two histories. Rewriting `main.api_not_found`'s two `api_route`
+#: decorators as two `get` decorators, which breaks nothing, then deleting
+#: `api_route`, put the whole `api_route` hole back with no arm red.
+#:
+#: **A row that is in use is refused too**, by the same arm, because a row whose
+#: handler has arrived is a row that outlived its reason and the neighbouring
+#: `EXCLUDED` in `tests/routers/test_concurrency_bounds.py` records what an
+#: unpoliced one costs.
+DECORATORS_CARRIED_AHEAD: Final[dict[str, str]] = {}
 
 
 def _is_bounding_call(node: ast.AST) -> bool:
@@ -557,13 +1143,360 @@ def _preceding_comment_block(lines: list[str], lineno: int) -> str:
     return "\n".join(lines[start:lineno])
 
 
-def _is_route_handler(node: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
-    """Decorated `@<something>.get/post/put/patch/delete(...)`."""
+def _decorator_attributes(node: ast.FunctionDef | ast.AsyncFunctionDef) -> frozenset[str]:
+    """The attribute of every decorator on this function, `@a.b(...)` and `@a.b` alike.
+
+    Lifted out of `_is_route_handler` because the cross check below needs what a
+    handler **carries** and not only whether it is one: the arm that shows each
+    decorator name load bearing asks which names this corpus uses, rather than
+    reading the tuple it is testing.
+    """
+    found: set[str] = set()
     for decorator in node.decorator_list:
         call = decorator.func if isinstance(decorator, ast.Call) else decorator
-        if isinstance(call, ast.Attribute) and call.attr in ROUTE_METHODS:
-            return True
-    return False
+        if isinstance(call, ast.Attribute):
+            found.add(call.attr)
+    return frozenset(found)
+
+
+def _is_route_handler(
+    node: ast.FunctionDef | ast.AsyncFunctionDef,
+    decorators: frozenset[str] = ROUTE_DECORATORS,
+) -> bool:
+    """Decorated with anything that registers a handler, `ROUTE_DECORATORS`.
+
+    **Not only the five method names.** `api_route` names its methods in a
+    keyword, so keying on the attribute alone missed it, and a bound planted
+    inside such a handler was green on every arm that reads this.
+
+    `decorators` is a parameter so `_declared_route_handlers` can be asked of a
+    weakened tuple and the answer put against the population the framework
+    serves. Every other caller takes the default, which is the one tuple.
+    """
+    return bool(_decorator_attributes(node) & decorators)
+
+
+def _route_handlers_declared_in(
+    paths: Iterable[Path], root: Path
+) -> dict[tuple[str, str], frozenset[str]]:
+    """The parse and the collision refusal, over the modules handed to it.
+
+    **`paths` rather than a root to walk**, because a walk of a tree of Python
+    here has to be one of the shared ones above and carry a row in
+    `WHAT_EACH_WALK_REACHES`. This is the consumer of one, lifted out so the
+    refusal below can be driven against a tree a test builds: asserted over this
+    checkout alone it was at the "measured once" rung, green on 142 handlers over
+    142 names and never shown to fire.
+
+    **Two handlers of one name in one module collapse to one key, and so do their
+    routes on the other side**, which makes a collision invisible to the arms
+    below rather than a disagreement they report. So it is refused rather than
+    stated. `main.assert_unique_operation_ids()` is not what covers it: since
+    2026-09-26 it runs below every router this app includes, so it refuses a name
+    two **published** handlers share, and it reads the published routes alone
+    because `main.api_not_found` is one handler under one name answering two
+    prefixes. Two unpublished handlers of one name still collapse to one key here
+    with nothing else to report them.
+    """
+    declared: dict[tuple[str, str], frozenset[str]] = {}
+    handlers = 0
+    for path in paths:
+        for node in ast.walk(ast.parse(path.read_text())):
+            if not isinstance(node, _A_FUNCTION) or not _is_route_handler(node):
+                continue
+            handlers += 1
+            declared[str(path.relative_to(root)), node.name] = (
+                _decorator_attributes(node) & ROUTE_DECORATORS
+            )
+    assert len(declared) == handlers, (
+        f"{handlers} route handlers occupy {len(declared)} names, so two of them "
+        "share a module and a name and this population cannot tell them apart"
+    )
+    return declared
+
+
+def _declared_route_handlers() -> dict[tuple[str, str], frozenset[str]]:
+    """Every handler this tree declares, `(module, function)` to its route decorators.
+
+    **Over `_python_sources()` and not `backend/routers/`.** `main.py` declares
+    two handlers and is not in the route layer, so a population stopping at that
+    directory cannot see `api_route` used at all and therefore cannot hold the
+    member of `ROUTE_DECORATORS` that exists for it. Measured 2026-09-26:
+    dropping `api_route` leaves `backend/routers/` at 140 of 140 and this corpus
+    at 141 of 142.
+
+    **Which of the shared walks is chosen changes nothing today, and that is a
+    fact about the tree rather than about the choice.** `_python_sources` differs
+    from `_every_module_but_the_tests` by the migrations, and a generated revision
+    declares no route, so the two answer alike here. Swapping them is a survivor
+    of any sweep for that reason and not because the corpus is unimportant.
+
+    **Membership is `_is_route_handler` and the value is the attributes**, so a
+    weakened tuple's population is set arithmetic over one parse rather than one
+    parse of every module this backend ships per name in the tuple, which is what
+    the minimality arm below would otherwise cost. A clause that function grows is
+    already applied here, because every key is one it accepted under the whole
+    tuple; a clause reading `decorators` itself is the one change that would have
+    to move this with it.
+    """
+    return _route_handlers_declared_in(_python_sources(), BACKEND)
+
+
+def _registered_route_handlers() -> dict[tuple[str, str], list[str]]:
+    """Every handler this application has a route for, `(module, function)` to paths.
+
+    The second derivation, and it reads neither tuple: it asks the app what it
+    registered, which is the population the framework itself serves.
+    `main.iter_api_routes` is the walk, because `include_router` appends a wrapper
+    around the child router rather than splicing that router's routes in.
+
+    **Deduplicated by function**, since one function carrying two decorators holds
+    two routes: `main.api_not_found` carries two `api_route` calls and is one
+    handler answering two paths.
+
+    **It cannot come back empty**, which is why nothing here is a floor.
+    `main.assert_unique_operation_ids()` runs at import and raises when this walk
+    finds no published route, so an app it has stopped understanding fails the
+    import of everything that reaches it rather than reading as a population that
+    shrank. An empty walk leaves nothing published either, so the implication holds
+    in the direction this needs it;
+    `test_main.py::TestTheOperationIdCheckReachesEveryPublishedRoute` is what keeps
+    that refusal from being a claim about unexecuted code.
+
+    **`main` is imported here and not at module scope.** Every other rule in this
+    file is a parse and owes nothing to a built app or to a database.
+
+    **And this reads `main.app` as the run left it**, which is the one input here
+    that is not the source. A fixture registering a route on the real app and
+    removing it again leaks one into this population if its cleanup is skipped, so
+    `tests/test_errors.py::exploding_route` holds its removal in a `try/finally`
+    for that reason and not for tidiness. `--dist loadfile` is not protection: it
+    keeps one file's tests together, it does not keep two files apart.
+
+    **Keyed on `__name__` rather than `__qualname__`**, because the other side of
+    the comparison is an `ast` node's `name` and a qualified key would never match
+    it. That makes a handler defined inside another function invisible to both
+    sides rather than a disagreement; none exists here, measured 2026-09-26, no
+    endpoint whose `__qualname__` differs from its `__name__`.
+
+    A handler whose module is outside `backend/` is keyed by that module's name in
+    angle brackets rather than dropped, so it lands in the disagreement below
+    instead of being filtered out by an inclusion rule nobody revisits.
+    """
+    main = importlib.import_module("main")
+    found: dict[tuple[str, str], list[str]] = {}
+    for route in main.iter_api_routes(main.app.routes):
+        endpoint: object = route.endpoint
+        module = getattr(endpoint, "__module__", "")
+        file = getattr(sys.modules.get(module), "__file__", None)
+        resolved = Path(file).resolve() if file else None
+        where = (
+            str(resolved.relative_to(BACKEND))
+            if resolved is not None and resolved.is_relative_to(BACKEND)
+            else f"<{module}>"
+        )
+        # `repr` rather than a blank, so a callable carrying no `__name__` is
+        # named in the disagreement instead of colliding with every other one.
+        name = getattr(endpoint, "__name__", repr(endpoint))
+        found.setdefault((where, name), []).append(route.path)
+    return found
+
+
+def _a_route_module_declaring(path: Path, *handlers: str) -> None:
+    """Write a module registering one route handler per name given.
+
+    Repeat a name to plant the collision `_route_handlers_declared_in` refuses.
+    `get` for all of them, because the arms this feeds are about the key rather
+    than about which decorator produced it.
+    """
+    path.write_text(
+        "from fastapi import APIRouter\n\nrouter = APIRouter()\n\n"
+        + "\n".join(
+            f'@router.get("/{index}")\ndef {name}() -> None: ...\n'
+            for index, name in enumerate(handlers)
+        )
+    )
+
+
+class TestTheRouteHandlerPopulationIsDerivedTwice:
+    """`ROUTE_DECORATORS` decides what every rule reading `_is_route_handler`
+    examines, so weakening it has to be a disagreement rather than a smaller
+    number nobody sees.
+
+    Measured 2026-09-26, before this existed: dropping `delete` from
+    `ROUTE_METHODS` left 121 of the 140 handlers in `backend/routers/` in the
+    population and every arm of `tests/routers/test_concurrency_bounds.py` green,
+    against a floor of 100 there. The two handlers that guard names are both POST
+    handlers, so the methods nobody would miss were exactly the ones free to
+    leave.
+
+    **A second derivation and not another floor.** A literal beside a number that
+    grows every month is a weaker inequality every month; a second derivation of
+    the same population is the same strength whatever the number does. The floors
+    that used to stand for this in `tests/routers/test_concurrency_bounds.py` are
+    retired: `>= 12` against 13 modules passed while one router module left, and
+    `>= 100` against 140 handlers passed while forty did, where the mutation that
+    raised all this cost nineteen.
+
+    **Only the first arm is a cross check, and the rest are not.** It asks the
+    application which routes it registered, so the two sides can only agree while
+    the tuple names every decorator this tree uses. The two after it read the
+    declared side alone: one holds that the tuple names nothing decorative, the
+    other that no name in it is covered by another. They are worth having and they
+    are not a second instrument, and saying otherwise cost a round: arm two's right
+    hand side was a subset of the declared population, so substituting the declared
+    side for the registered one inside it survived.
+
+    **What goes past every arm here**, the mechanism and no claim about how much:
+    a handler registered with `@router.websocket(...)`. The name is in neither
+    tuple, and FastAPI builds an `APIWebSocketRoute`, which is not an `APIRoute`
+    and carries no nested `routes`, so `main.iter_api_routes` filters it out of the
+    other side too. Both populations stay blind and every arm stays green. Nothing
+    in this tree declares one.
+    """
+
+    def test_the_two_derivations_name_the_same_handlers(self) -> None:
+        declared = _declared_route_handlers()
+        registered = _registered_route_handlers()
+
+        # **The causes it cannot tell apart, all of them.** Naming only the
+        # weakened tuple sends a reader to widen `ROUTE_DECORATORS` for four
+        # states that widening cannot fix, which is the failure the message on
+        # the other side already avoids by listing its own two.
+        assert set(registered) - set(declared) == set(), (
+            "this application serves routes whose handlers no rule in this file "
+            "examines. Any of five: `ROUTE_DECORATORS` no longer names the "
+            "decorator one is registered with; the route is registered by "
+            "`add_api_route` rather than by a decorator; a test registered it on "
+            "the real app and did not remove it; a decorator wrapped the handler "
+            "without `functools.wraps`, so it reports the wrapper's name; or the "
+            "endpoint comes from a module outside this tree, which is the key in "
+            f"angle brackets: {sorted(set(registered) - set(declared))}"
+        )
+        assert set(declared) - set(registered) == set(), (
+            "these carry a route decorator and this application registers no "
+            "route for them, so either a router is never included or one of "
+            "these decorators belongs to something that is not a router: "
+            f"{sorted(set(declared) - set(registered))}"
+        )
+
+    def test_every_decorator_the_tuple_names_is_carried_here(self) -> None:
+        """The tuple names nothing decorative, so no member is free to leave.
+
+        **Both directions, against `DECORATORS_CARRIED_AHEAD`.** A name in the
+        tuple that nothing carries goes unheld by the arm below, and a row in the
+        exemption whose handler has arrived is a row that outlived its reason.
+
+        The arm above cannot stand in for this: the two populations agree on a
+        tuple member nothing uses, because a name no handler carries changes
+        neither side.
+        """
+        declared = _declared_route_handlers()
+        used = frozenset(
+            attribute for attributes in declared.values() for attribute in attributes
+        )
+        carried_ahead = frozenset(DECORATORS_CARRIED_AHEAD)
+
+        assert ROUTE_DECORATORS - used - carried_ahead == set(), (
+            "these are in `ROUTE_DECORATORS` and no handler in this tree carries "
+            "one, so the arm below holds nothing about them and deleting one is "
+            "green: give each a `DECORATORS_CARRIED_AHEAD` row saying which "
+            "handler it is waiting for, or take it out of the tuple: "
+            f"{sorted(ROUTE_DECORATORS - used - carried_ahead)}"
+        )
+        assert carried_ahead & used == set(), (
+            "these are excused as carried ahead of their handler and the handler "
+            "has arrived, so the row outlived its reason and is now hiding the "
+            f"name from the arm below: {sorted(carried_ahead & used)}"
+        )
+
+    def test_no_decorator_the_tuple_names_is_covered_by_another(self) -> None:
+        """Each name is the only route decorator on at least one handler.
+
+        **A minimality check over the declared side alone, and not a second
+        cross check.** Given the arm above, the population under a weakened tuple
+        is a subset of the population under the whole one, so this compares one
+        derivation against itself: it says the tuple carries no name whose every
+        handler would still be found without it. Written with the registered side
+        on the right it looked like an instrument and was not, since that side
+        cancelled out of the inequality.
+
+        What it buys: a name is held by the arm above only while some handler
+        depends on it alone. `api_route` has exactly one such handler,
+        `main.api_not_found`, measured 2026-09-26, so giving that handler a second
+        decorator would make `api_route` deletable with nothing red, which is the
+        two step evasion this arm closes.
+        """
+        declared = _declared_route_handlers()
+        whole = set(declared)
+        used = frozenset(
+            attribute for attributes in declared.values() for attribute in attributes
+        )
+
+        assert used, (
+            "no handler in this corpus carries a route decorator, so this arm has "
+            f"no subject: {len(declared)} handlers declared"
+        )
+
+        # `attributes - {one}` is `attributes & (ROUTE_DECORATORS - {one})`,
+        # because every value here is already inside the tuple.
+        covered = sorted(
+            one
+            for one in used
+            if {handler for handler, attributes in declared.items() if attributes - {one}}
+            == whole
+        )
+        assert covered == [], (
+            "every handler carrying each of these carries another route decorator "
+            "too, so dropping the name from `ROUTE_DECORATORS` loses no handler "
+            "and nothing above goes red. Either the tuple no longer needs it, or "
+            f"the handler that depended on it alone changed shape: {covered}"
+        )
+
+    def test_two_handlers_of_one_name_in_one_module_are_refused(
+        self, tmp_path: Path
+    ) -> None:
+        """The collision the population cannot represent, driven rather than measured.
+
+        Both handlers take the same key, here and on the framework's side, so a
+        collision is a handler silently absent from the population instead of a
+        disagreement either arm reports.
+
+        **Against a tree this builds.** Over this checkout the refusal is green on
+        142 handlers holding 142 names and had never been shown to fire, which is
+        the "measured once" rung and not a tested one.
+        """
+        root = tmp_path / "backend"
+        (root / "routers").mkdir(parents=True)
+        _a_route_module_declaring(root / "routers" / "one.py", "list_books", "list_books")
+        _a_route_module_declaring(root / "routers" / "two.py", "trash_book")
+
+        with pytest.raises(AssertionError, match="share a module and a name"):
+            _route_handlers_declared_in(
+                [root / "routers" / "one.py", root / "routers" / "two.py"], root
+            )
+
+    def test_the_same_tree_without_the_collision_is_read(self, tmp_path: Path) -> None:
+        """The other half, without which a refusal of everything passes the arm above.
+
+        It also pins the key, which is what the arm comparing the two populations
+        matches on: the module's path relative to the root, and the function's own
+        name.
+        """
+        root = tmp_path / "backend"
+        (root / "routers").mkdir(parents=True)
+        _a_route_module_declaring(root / "routers" / "one.py", "list_books", "get_book")
+        _a_route_module_declaring(root / "routers" / "two.py", "trash_book")
+
+        declared = _route_handlers_declared_in(
+            [root / "routers" / "one.py", root / "routers" / "two.py"], root
+        )
+
+        assert set(declared) == {
+            ("routers/one.py", "list_books"),
+            ("routers/one.py", "get_book"),
+            ("routers/two.py", "trash_book"),
+        }
 
 
 class TestTheSourceWalkSeesOnlyThisProject:
@@ -619,7 +1552,7 @@ class TestTheSourceWalkSeesOnlyThisProject:
         assert _is_vendored(BACKEND / ".uv-cache" / "pygments" / "lexers.py", repo)
         assert not _is_vendored(BACKEND / "shelf.py", repo)
         assert not _is_vendored(repo / "frontend" / "src" / "main.tsx", repo)
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="is not in the subpath of"):
             _is_vendored(repo / "frontend" / "src" / "main.tsx")
 
     @pytest.mark.parametrize("kind", sorted(VENDORED_KINDS))
@@ -642,8 +1575,10 @@ class TestTheSourceWalkSeesOnlyThisProject:
         """
         root = tmp_path / "tests" / "backend"
         _a_backend_with_vendored_code_in_it(root, VENDORED_KINDS[kind])
-        walks, _ = _walk_names()
-        assert len(walks) >= 5, f"the walks went missing from this file: {walks}"
+        walks = _every_walk()
+        assert len(walks) >= len(WHAT_EACH_WALK_REACHES), (
+            f"the walks went missing from the tests: {walks}"
+        )
 
         # Stated as "anything that is not one of ours", so a walk reaching a
         # second file in that directory, or a directory above it, is reported
@@ -675,13 +1610,16 @@ class TestTheSourceWalkSeesOnlyThisProject:
         root = tmp_path / "tests" / "backend"
         for vendored in VENDORED_KINDS.values():
             _a_backend_with_vendored_code_in_it(root, vendored)
-        walks, _ = _walk_names()
+        walks = _every_walk()
+        table = _the_whole_table(walks)
 
-        assert walks == set(WHAT_EACH_WALK_REACHES), (
-            "a walk was added or renamed and nothing here says what it is for: "
-            f"{sorted(walks ^ set(WHAT_EACH_WALK_REACHES))}"
+        assert walks == set(table), (
+            "a walk was added or renamed and nothing says what it is for: "
+            f"{sorted(walks ^ set(table))}. A walk in a module that declares "
+            "itself internal says so in that module, under WHAT_MY_WALKS_REACH, "
+            "and not in the table here, which is published and may not name it."
         )
-        assert {name: _reached(name, root) for name in walks} == WHAT_EACH_WALK_REACHES
+        assert {name: _reached(name, root) for name in walks} == table
 
     def test_no_other_test_module_defines_one_of_these_walks(self) -> None:
         """The next copy of this walk is what the diagonal cannot be run against.
@@ -700,11 +1638,11 @@ class TestTheSourceWalkSeesOnlyThisProject:
         that produced the defect, where the offending function in all three
         cases carried the name it was copied from. It makes that paste expensive
         rather than free, and
-        `test_no_other_test_module_walks_the_backend_without_the_shared_rule`
+        `test_no_other_test_module_walks_a_tree_of_python_without_the_shared_rule`
         catches the class it cannot see.
         """
         _, names = _walk_names()
-        assert len(names) >= 6, f"the walks went missing from this file: {names}"
+        assert len(names) >= 7, f"the walks went missing from this file: {names}"
         mine = Path(__file__).resolve()
 
         copies = sorted(
@@ -719,11 +1657,23 @@ class TestTheSourceWalkSeesOnlyThisProject:
             f"as vendored is decided twice: {copies}"
         )
 
-    def test_no_other_test_module_walks_the_backend_without_the_shared_rule(
+    def test_no_other_test_module_walks_a_tree_of_python_without_the_shared_rule(
         self,
     ) -> None:
         """The rule the test above cannot state, which is about the shape rather
         than the name.
+
+        **The subject is a walk of any tree, not of `backend/`.** `_is_a_walk`
+        reads the pattern and the name `walk` and never the receiver, so a module
+        recursing `frontend/`, `docs/` or the repository root for Python is
+        reported exactly as one recursing `backend/`. That is the live case and
+        not a spare one: `test_google_books.py` walks `frontend/src` for the
+        browser's own source, and it is out of this rule because it asks
+        `_is_vendored` rather than because of the tree it picked. **Naming one
+        tree in this rule is what invites a receiver check**, and a receiver
+        check drops that walk out of the population while every assertion here
+        stays green, which is the failure a stated reason narrower than the code
+        produces rather than prevents.
 
         Nine test modules recursed `backend/` for `*.py` under names of their
         own, each excluding a list of directory names it had heard of and **none
@@ -743,8 +1693,10 @@ class TestTheSourceWalkSeesOnlyThisProject:
         three evasions clean. So a call is a walk when its pattern carries `**`,
         or when it is `rglob`, or when anything at all is called `walk`. What is
         genuinely out is a `glob` whose pattern has no `**`, which reads one
-        directory and cannot enter a vendored tree at all; five sites here are
-        that shape.
+        directory and cannot enter a vendored tree at all. **How many sites are
+        that shape is deliberately not written here.** Nothing in this rule
+        asserts it, so a figure beside it is one nobody recomputes and the next
+        reader takes as current.
 
         **Asked of the module rather than of the function**, and the cost is
         stated rather than discovered: a module that walks in one place and asks
@@ -762,10 +1714,7 @@ class TestTheSourceWalkSeesOnlyThisProject:
             if path.resolve() == mine:
                 continue
             tree = ast.parse(path.read_text())
-            defines_walk = any(
-                isinstance(node, _A_FUNCTION) and node.name == "walk"
-                for node in ast.walk(tree)
-            )
+            defines_walk = _defines_walk(tree)
             walks = [
                 node.lineno
                 for node in ast.walk(tree)
@@ -793,7 +1742,7 @@ class TestTheSourceWalkSeesOnlyThisProject:
         # the population rather than the verdict.
         assert len(checked) >= 8, f"the walks went missing from the tests: {checked}"
         assert not offenders, (
-            "these recurse `backend/` and decide what vendored means for "
+            "these recurse a tree of Python and decide what vendored means for "
             f"themselves, so the pipeline's cache is read as ours: {offenders}"
         )
 
@@ -1224,10 +2173,8 @@ class TestEveryRequestBodyRowIdIsBounded:
     Only int-shaped fields are the question. A `str` bound by `max_length` is a
     different rule, and a `float` cannot overflow the driver.
 
-    Measured on the tree as it stands: **120** models under `schemas/`, **43** of
-    them reachable from a request. The two added are `BookColumns` and
-    `ViewerFields`, which are the halves `BookOut` was split into and neither is
-    a request body.
+    Measured on the tree as it stands: **122** models under `schemas/`, **43** of
+    them reachable from a request.
 
     **What those two numbers count, because a bare number is what rots.** The
     first is `_schema_models`: every class under `schemas/` that reaches
@@ -1542,11 +2489,1319 @@ class TestEveryRequestBodyRowIdIsBounded:
         assert "Page" not in in_scope
 
 
+def _declared_provenance() -> tuple[dict[str, dict[str, str]], dict[str, set[str]]]:
+    """Which columns a model declares as provenance, and which share the name.
+
+    Returns `{column: {model: where the promise is written}}` and
+    `{column: {models declaring the same name without the marker}}`. The rule
+    needs both halves: what may not be read, and which receivers are a
+    different column that happens to be spelled the same way.
+
+    **Membership is derived from the declaration, never from a list of
+    names.** The previous version was a literal keyed on `created_by_user_id`,
+    which was evadable by renaming a column and short at the same time: its one
+    entry named `models.Collection` while two other models carry the identical
+    promise and were covered only by sharing a spelling.
+
+    **The matching half is still a name**, and that is a property of the
+    question rather than a shortcut: an instance read has no statically
+    resolvable owner, so `_provenance_reads` compares the attribute against
+    these keys and uses the second half only to clear a receiver it can
+    resolve. What the derivation buys is that the keys are whatever the models
+    say and are asserted, not that a read is attributed to a model.
+    """
+    marked: dict[str, dict[str, str]] = {}
+    unmarked: dict[str, set[str]] = {}
+    for mapper in Base.registry.mappers:
+        model = mapper.class_.__name__
+        for prop in mapper.column_attrs:
+            reason = prop.columns[0].info.get("provenance")
+            if reason:
+                marked.setdefault(prop.key, {})[model] = reason
+            else:
+                unmarked.setdefault(prop.key, set()).add(model)
+    return marked, unmarked
+
+
+#: What `_model_names_safe_to_resolve` maps the name of the `models` module to,
+#: where every other entry maps to a class in it.
+#:
+#: **A sentinel rather than a list of spellings.** The first version matched
+#: the dotted receiver against `{"models", "orm"}`, which is an inclusion list
+#: and goes stale the day somebody writes a third alias. The import already
+#: says which local name is the module, so the resolver asks the map.
+_THE_MODELS_MODULE: Final = object()
+
+
+def _names_bound_by(node: ast.AST) -> list[str]:
+    """Every name this node binds, imports excepted.
+
+    **One list rather than a chain of branches**, because the chain is what
+    went short: the first version read `ast.Name` in a `Store` context plus
+    arguments, functions and classes, and **every binder below that carries
+    its name as a plain string was invisible to it**. Each of those puts an
+    arbitrary object under a name a resolver then treats as a model.
+    """
+    if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+        return [node.id]
+    if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+        arguments = node.args
+        return [
+            node.name,
+            *(
+                arg.arg
+                for arg in [
+                    *arguments.posonlyargs,
+                    *arguments.args,
+                    *arguments.kwonlyargs,
+                    *([arguments.vararg] if arguments.vararg else []),
+                    *([arguments.kwarg] if arguments.kwarg else []),
+                ]
+            ),
+        ]
+    if isinstance(node, ast.Lambda):
+        # **The member this list was short by**, and it is the one that makes
+        # the family a family: a lambda's parameters are plain strings, it is
+        # not a `FunctionDef`, and nothing else here reaches it. Bound once as
+        # far as a counter can see, so a marked read through a lambda
+        # parameter named after an unmarked model was cleared.
+        arguments = node.args
+        return [
+            arg.arg
+            for arg in [
+                *arguments.posonlyargs,
+                *arguments.args,
+                *arguments.kwonlyargs,
+                *([arguments.vararg] if arguments.vararg else []),
+                *([arguments.kwarg] if arguments.kwarg else []),
+            ]
+        ]
+    if isinstance(node, ast.TypeVar | ast.ParamSpec | ast.TypeVarTuple):
+        # The same shape one more time, and the only one in this list that is
+        # not a plausible receiver. Here because the family is what was short,
+        # not the instance: a reader completing it later would have to find it
+        # again.
+        return [node.name]
+    if isinstance(node, ast.ClassDef):
+        return [node.name]
+    if isinstance(node, ast.ExceptHandler | ast.MatchAs | ast.MatchStar):
+        return [node.name] if node.name is not None else []
+    if isinstance(node, ast.MatchMapping):
+        return [node.rest] if node.rest is not None else []
+    if isinstance(node, ast.Global | ast.Nonlocal):
+        return list(node.names)
+    return []
+
+
+def _model_names_safe_to_resolve(tree: ast.Module) -> dict[str, object]:
+    """Local name to the thing in `models` it certainly means, in this module.
+
+    A class name maps to the **class's own name**, which is what the receiver
+    has to be looked up by: `from models import Collection as CustomField`
+    binds a local name that is a member of the unmarked set and a class that
+    is a member of the marked one, so a resolver returning the local name
+    reads the marked column off an unmarked model and clears it. **One line of
+    import laundered the rule** before this returned the real name. The module
+    itself maps to `_THE_MODELS_MODULE`.
+
+    **Bound exactly once in this file, by that import, and never again.**
+    Counted rather than subtracted, which is the second half: a second
+    `import ... as X` rebinds the name without being a `Store` of it, so a
+    subtraction cannot see it. `_names_bound_by` holds the rest.
+
+    **A name bound twice is dropped whichever binding came second**, because
+    this walk tracks no scopes and no order. That refuses some correct code
+    loudly and no incorrect code quietly, which is the direction this whole
+    rule is written in.
+    """
+    from_models: dict[str, object] = {}
+    bindings: Counter[str] = Counter()
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            for alias in node.names:
+                local = alias.asname or alias.name
+                bindings[local] += 1
+                if node.module == "models" and node.level == 0:
+                    from_models[local] = alias.name
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                # `import a.b` binds `a`, and `import a.b as c` binds `c`.
+                local = alias.asname or alias.name.split(".")[0]
+                bindings[local] += 1
+                if alias.name == "models":
+                    from_models[local] = _THE_MODELS_MODULE
+        else:
+            bindings.update(_names_bound_by(node))
+
+    return {local: real for local, real in from_models.items() if bindings[local] == 1}
+
+
+def _receiver_model(node: ast.expr, names: dict[str, object]) -> str | None:
+    """Which model class a receiver names, or `None` when it cannot be known.
+
+    Two shapes and no more: a name bound by `from models import ...`, and an
+    attribute of the `models` module under whatever local name the import gave
+    it. Both resolve to the **class's own name**, never the local one.
+    Everything else, and that includes **every instance read**, is `None`.
+    """
+    if isinstance(node, ast.Name):
+        real = names.get(node.id)
+        return real if isinstance(real, str) else None
+    if (
+        isinstance(node, ast.Attribute)
+        and isinstance(node.value, ast.Name)
+        and names.get(node.value.id) is _THE_MODELS_MODULE
+    ):
+        return node.attr
+    return None
+
+
+@dataclasses.dataclass(frozen=True)
+class ColumnMention:
+    """One place a module's source names a column, and what it names it on.
+
+    `receiver` is the expression the column hangs off, for a caller that wants
+    to resolve which model it is. `builds_a_row` separates the write from
+    every other spelling.
+    """
+
+    line: int
+    column: str
+    receiver: ast.expr
+    builds_a_row: bool
+
+
+def column_mentions(tree: ast.Module, columns: Container[str]) -> list[ColumnMention]:
+    """Every place this source names one of these columns, in three spellings.
+
+    **Shared rather than copied, and that is the point of it.** Two rules ask
+    this question, `TestProvenanceColumnsAreNeverRead` here and
+    `tests/test_fields.py::TestFieldsIsTheOnlyReaderOfTheAuthorColumn`, and
+    the second was written as an attribute walk and was blind to the
+    authorization clause the first had just learned to see, one file away.
+    A second walk is a second thing to keep in step.
+
+    The three spellings, and the first version of the rule above had only the
+    first:
+
+    * an attribute, `row.column` or `Model.column`;
+    * `getattr(x, "column")` and `setattr(x, "column", v)` with a **constant**
+      name, which an attribute walk cannot see and which are live spellings in
+      this backend rather than hypothetical ones. **No figure for how live.**
+      The one that stood here was a line count relayed as a site count, and
+      two derivations of the real thing then disagreed on how many files hold
+      it. A number two careful readings disagree about is not a number yet,
+      and the claim this sentence has to carry is that the spelling occurs at
+      all. **`setattr` arrived a round after `getattr` and the gap is the
+      lesson**: the walk had the read side twin and not the write side one, so
+      the rule that only asks about reads could never have surfaced it and the
+      rule next door that asks about writes inherited the hole;
+    * a keyword argument, `f(column=...)`, which names no attribute at all and
+      is how an authorization clause is written as `filter_by`.
+
+    **`builds_a_row` is true when the callee is a bare name**, and that is the
+    whole of what the callee shape separates. It is **not** "a constructor":
+    a module qualified constructor, `models.Collection(column=...)`, has an
+    attribute callee and arrives here as an ordinary keyword mention. The case
+    is latent rather than absent: `test_no_module_reads_a_provenance_column`
+    returning nothing is what says no call of that shape in this corpus
+    carries a marked column, and no separate count is taken for it. It is
+    latent in the **loud** direction, since a caller refusing what it cannot
+    resolve refuses that one too. Named as a refusal rather than left as an
+    impossibility, because the first version of this comment called the bare
+    name callee "the constructor", which is the sentence somebody reasons
+    from.
+
+    A `getattr` whose name is a variable is outside this walk, deliberately
+    and with nothing claimed about it: there is no constant to match.
+    """
+    found: list[ColumnMention] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Attribute) and node.attr in columns:
+            found.append(ColumnMention(node.lineno, node.attr, node.value, False))
+        elif isinstance(node, ast.Call):
+            if (
+                isinstance(node.func, ast.Name)
+                # `setattr` beside `getattr`, taking the same constant name
+                # and the same string test. One of the two is a write, and
+                # this walk reports mentions rather than classifying them:
+                # which of them a caller cares about is the caller's question.
+                and node.func.id in {"getattr", "setattr"}
+                and len(node.args) >= 2
+                and isinstance(node.args[1], ast.Constant)
+                # The name has to be a string before it can be a column, and
+                # `ast.Constant` holds anything a literal can be.
+                and isinstance(node.args[1].value, str)
+                and node.args[1].value in columns
+            ):
+                found.append(
+                    ColumnMention(node.lineno, node.args[1].value, node.args[0], False)
+                )
+            receiver = node.func.value if isinstance(node.func, ast.Attribute) else node.func
+            for keyword in node.keywords:
+                if keyword.arg is not None and keyword.arg in columns:
+                    found.append(
+                        ColumnMention(
+                            node.lineno,
+                            keyword.arg,
+                            receiver,
+                            isinstance(node.func, ast.Name),
+                        )
+                    )
+    return found
+
+
+def _application_module_names() -> list[str]:
+    """`_source_modules()` keys as dotted module names.
+
+    The same corpus every rule here walks, said the way `importlib` takes it,
+    so a narrowing of **that** walk narrows this and reds in
+    `TestTheApplicationCorpusIsStillTheApplication` by name.
+
+    **This function is a third corpus layer and needs arming of its own**,
+    which the sentence here used to deny. A skip written inside this loop
+    drops a module from the population, nothing imports it, and no model it
+    declares is in the registry: every reading downstream starts here, so
+    they all shrink together and no equality between them can see it. Driven
+    2026-10-02 with a live declaration planted: **one skip line here took the
+    two rules and 504 arms to green.** `test_the_renaming_is_rebuilt_from_the_corpus`
+    is what reds on it, by rebuilding this answer from `_source_modules()`
+    rather than asserting anything about it.
+
+    **It takes no tree, deliberately**, which is what keeps it out of
+    `_walk_names`. A walk is driven against a constructed directory and this
+    one **imports** what it names: driven against a tmp tree it would reach
+    for modules that do not exist. It is a renaming of the corpus rather than
+    a reading of the disk.
+    """
+    names: list[str] = []
+    for relative in _source_modules():
+        parts = Path(relative).parts
+        stem = parts[-1].removesuffix(".py")
+        dotted = ".".join(parts[:-1] + ((stem,) if stem != "__init__" else ()))
+        if dotted:
+            names.append(dotted)
+    return sorted(set(names))
+
+
+def _every_subclass(root: type) -> set[type]:
+    """Transitive, because a model whose base is another model is still one.
+
+    Models with a model for a base are live in this corpus, so stopping at
+    `__subclasses__()` would drop every one of them.
+    `test_an_indirect_subclass_is_in_the_population` is the witness, and it
+    asserts the property rather than how many there are.
+    """
+    seen: set[type] = set()
+    stack = [root]
+    while stack:
+        for sub in stack.pop().__subclasses__():
+            if sub not in seen:
+                seen.add(sub)
+                stack.append(sub)
+    return seen
+
+
+@functools.cache
+def application_models() -> tuple[type[BaseModel], ...]:
+    """Every Pydantic model this backend defines, off Python's own registry.
+
+    **The population is the class registry and not a glob of `schemas/`**,
+    which is the directory narrowing this repository meets first in every
+    guard it writes: a response model declared in a router would be outside a
+    directory walk and is inside this one. Nothing declares one outside
+    `schemas/` today, so that is latent in the loud direction.
+
+    **Imported rather than parsed, and the first reason written here did not
+    hold.** It said a walk over class bodies would miss the inheriting models
+    and the generic parametrisations. Measured 2026-10-02: a walk over
+    annotated assignments under `schemas/` misses **none** of the names this
+    reader produces, and by construction rather than by luck, since a
+    parametrisation introduces no field its origin's body lacks and every
+    inheriting model has its base's class statement in the same corpus, with
+    no model taking a base from outside it.
+
+    **What the registry buys that no class body can have is two other
+    things.** A **config level alias generator** renames every field of a
+    model with no literal appearing in any class body anywhere, and it drives
+    the attribute lookup: measured, a model whose generator returns the
+    guarded name reads that attribute off the row while no class body
+    contains the string. And a model built by `pydantic.create_model` has no
+    class statement at all, while recording the calling module, so it is
+    inside this population and outside any parse.
+
+    **What is past it, stated as conditions rather than bounded.** The
+    largest is not a narrowing of this population at all: **this population
+    is models, and a response body need not be one.** A route that builds its
+    body outside the model layer declares nothing for any reader to walk, and
+    two operations in the committed document do exactly that. The archive is
+    one: `backup.build_archive` selects every column of every table it lists
+    and serialises the rows, so it carries the guarded columns and is past
+    **both** instruments, naming no column and declaring no field. It is
+    admin only for that reason, which `docs/security.md` records. No arming
+    of this population reaches that, because there is no model to walk, and
+    that is a different condition from the directory narrowing the paragraph
+    above is written against.
+
+    Three smaller ones, all harmless today and none of them a count.
+    Membership is `cls.__module__`, so a model built by a bare
+    `type(name, (BaseModel,), ...)` is outside, because the three argument
+    form takes `__module__` from the metaclass's frame and records `abc`:
+    measured, and it is why the plants below set `__module__` themselves.
+    `pydantic.create_model` records the caller's module and is inside. And
+    the corpus excludes the test tree and the migrations, so a model declared
+    in either is outside this population.
+
+    **A model whose validator is not built yet is rebuilt here**, because
+    `declared_schema_fields` reads the compiled schema and an unbuilt model
+    carries a mock in its place. Rebuilding is what Pydantic does itself on
+    first use, so this only brings that forward, and it happens after every
+    corpus module is imported, which is the widest namespace the rebuild can
+    be attempted in. `test_every_model_carries_a_schema_this_rule_can_read`
+    is what stops a model that cannot be rebuilt being skipped in silence.
+    """
+    for module in _application_module_names():
+        importlib.import_module(module)
+    corpus = set(_application_module_names())
+    found: list[type[BaseModel]] = sorted(
+        (
+            cls
+            for cls in _every_subclass(BaseModel)
+            if cls.__module__ in corpus and issubclass(cls, BaseModel)
+        ),
+        key=lambda cls: (cls.__module__, cls.__name__),
+    )
+    for cls in found:
+        if not isinstance(cls.__pydantic_core_schema__, dict):
+            cls.model_rebuild()
+    return tuple(found)
+
+
+def _lookup_names(cls: type[BaseModel]) -> dict[str, set[str]]:
+    """Each field of this model, against the attribute names it can read.
+
+    **Read off Pydantic's own compiled schema, which is why no alias shape is
+    named here.** `cls.__pydantic_core_schema__` is what the validator was
+    built from, and it carries each field's resolved `validation_alias`
+    already flattened into strings and lists of them. A shape the library
+    grows next compiles into the same node, so this closes the question
+    rather than bounding it.
+
+    **The version this replaced enumerated `str`, `AliasPath` and
+    `AliasChoices` off `FieldInfo` and raised on a fourth.** That was the
+    loud direction and it was still an enumeration, and it could not see an
+    alias injected by a custom `__get_pydantic_core_schema__`, which leaves
+    no trace on `FieldInfo` at all. Measured 2026-10-02 over every model this
+    backend defines: the two agree on all 126 that carry a built schema, and
+    the compiled key additionally catches a config level alias generator and
+    every shape probed.
+
+    **The field's own name is kept even where an alias replaces it**, which
+    is a superset of what one validation reads: with an alias set, Pydantic
+    looks up the alias alone, measured both with and without
+    `populate_by_name`. The superset refuses loudly where the exact set would
+    rest on one version's precedence rule, and it is what the reader this
+    replaced already did, so the key changed and the extent did not.
+    """
+    found: dict[str, set[str]] = {}
+    for name, field in _compiled_node(cls, "model-fields")["fields"].items():
+        reads = {name}
+        pending = [field.get("validation_alias")]
+        while pending:
+            alias = pending.pop()
+            if isinstance(alias, str):
+                reads.add(alias)
+            elif isinstance(alias, list):
+                pending.extend(alias)
+        found[name] = reads
+    return found
+
+
+def _compiled_node(cls: type[BaseModel], kind: str) -> dict[str, Any]:
+    """This model's own compiled node of that kind, or a refusal.
+
+    **Shared by both readers of the compiled schema, and it was not.** The
+    extras reader had a private walk of the same shape that **returned false
+    silently** where this one raises, so a narrowing written in it answered
+    "no model admits extras" rather than failing. That is exactly the
+    behaviour the refusal below exists to prevent, one function over.
+    `test_every_model_carries_a_schema_this_rule_can_read` drives both kinds
+    for that reason: a narrowing here has to red by name rather than by
+    whichever rule happens to ask first.
+
+    **The two kinds sit at different depths and both are live.** Measured
+    over this population: the `model` node at 0, 1 or 2, and `model-fields`
+    at 1, 2 or 3, through four distinct chains, because a validator
+    decorator and a recursive reference each add a wrapper. So a bound that
+    looks generous still answers for the plain majority and misses the rest,
+    which is why the refusal matters more than the bound.
+
+    **The descent step is `schema` alone.** It was `schema` or `cls_schema`,
+    and that second member is not a key of any core schema type the installed
+    library defines: no file of `pydantic` or of `pydantic_core` mentions the
+    string at all.
+
+    ```bash
+    grep -rl cls_schema "$(python -c 'import pydantic,pathlib;print(pathlib.Path(pydantic.__file__).parent)')"
+    ```
+
+    **That is why it is dropped rather than noted.** A count of how often this
+    population needed it would be a measurement over a population and would
+    go stale as the population moved; the library's own definition does not,
+    and a shape that somehow needs it meets the refusal below.
+
+    **The node is checked to belong to the class it was asked about.** The
+    descent returns the first node of its kind on the chain, and without this
+    that is correct by accident: a root model whose root is a model would
+    hand back the inner one. There are none, so it reds nothing today, and
+    one condition turns a property that happens to hold into one that is
+    asserted.
+    """
+    node: object = cls.__pydantic_core_schema__
+    its_own = False
+    for _ in range(_SCHEMA_DEPTH):
+        if not isinstance(node, dict):
+            break
+        if node.get("type") == "model":
+            if node.get("cls") is not cls:
+                raise LookupError(
+                    f"the first model node under {cls.__module__}.{cls.__name__} "
+                    f"belongs to {node.get('cls')!r}, so reading it would "
+                    "describe another class."
+                )
+            its_own = True
+        if node.get("type") == kind:
+            if not its_own:
+                raise LookupError(
+                    f"a {kind} node was reached under "
+                    f"{cls.__module__}.{cls.__name__} before its own model "
+                    "node, so it cannot be attributed to this class."
+                )
+            return node
+        node = node.get("schema")
+    raise LookupError(
+        f"{cls.__module__}.{cls.__name__} carries no compiled {kind} node this "
+        "rule can read, so what it declares is unknown rather than empty. A "
+        "model whose validator is unbuilt is rebuilt in `application_models`; "
+        "this is a model that could not be."
+    )
+
+
+#: How far down the compiled schema a model's own nodes may sit.
+#:
+#: A model schema wraps its fields in `definitions` and in a `function-*`
+#: validator per decorator, so the depth is a property of the model rather
+#: than a constant. The bound is here only to stop a cycle spinning: reaching
+#: it raises, which is the loud direction, and the deepest node this corpus
+#: takes sits well inside it.
+_SCHEMA_DEPTH: Final = 50
+
+
+def declared_schema_fields(
+    columns: Container[str], models: Iterable[type[BaseModel]] | None = None
+) -> list[str]:
+    """Every Pydantic field in this backend that a column name reaches.
+
+    **A declaration is a read, and it is the read no source walk can see.**
+    A field named for a column, on a model validated off an ORM row, is
+    populated by Pydantic reading that attribute: there is no `ast.Attribute`,
+    no `getattr` and no keyword anywhere in the source, so `column_mentions`
+    is satisfied and the column's value reaches a client. That is the whole
+    reason this reader exists beside that walk rather than inside it.
+
+    **It does not ask whether the model carries `from_attributes`, and that is
+    not laziness.** `model_validate(row, from_attributes=True)` turns it on
+    **at the call site**, measured 2026-10-02 against a model whose own
+    `model_config` sets nothing, so no property of the class can decide
+    whether the attribute will be read. Keying on the config would have been a
+    guard that a caller one file away disarms.
+
+    **And it has no clearing, where `_provenance_reads` has one.** That half
+    clears a read whose receiver resolves to a model not marking the column.
+    A declaration has no receiver: which rows this model will be validated
+    from is a property of its call sites. So an unmarked owner's column is
+    reported here and allowed there, which is a false refusal in the loud
+    direction and the only answer that does not rest on guessing.
+
+    **Two more false refusals it takes, and they are accepted rather than
+    unnoticed.** A model that is never validated from a row at all, such as
+    one built only from a request body, is reported the same way, because
+    nothing on the class says which it is. And a request model naming the
+    column, a filter say, is reported, which is wanted: that is a second
+    place the question of who may relabel a name would be answered. The exit
+    from all three is to publish a derived answer, which is what
+    `CustomFieldOut.renamable` is.
+    """
+    return sorted(
+        {
+            f"{cls.__module__}.{cls.__name__}.{name} ({column})"
+            for cls, name, column in _declared_rows(columns, models)
+        }
+    )
+
+
+def _declared_rows(
+    columns: Container[str], models: Iterable[type[BaseModel]] | None = None
+) -> list[tuple[type[BaseModel], str, str]]:
+    """The reader's own loop, as rows rather than as rendered strings.
+
+    **Lifted so something can be held against it.** Every plant hands the
+    reader a population, so a narrowing written in this loop is invisible to
+    all of them, and an arm comparing the reader to `_lookup_names` is
+    invisible to one written in **that**, because both its sides go through
+    it. `test_the_reader_reaches_every_field_the_models_declare` compares
+    these rows against `model_fields`, which reaches neither.
+    """
+    rows: list[tuple[type[BaseModel], str, str]] = []
+    for cls in application_models() if models is None else models:
+        for name, reads in _lookup_names(cls).items():
+            for column in sorted(read for read in reads if read in columns):
+                rows.append((cls, name, column))
+    return rows
+
+
+def _admits_extras(cls: type[BaseModel]) -> tuple[bool, bool]:
+    """Whether this model passes an undeclared key through, read two ways.
+
+    `(by the config, by the compiled schema)`. The first is what Pydantic
+    resolves through inheritance and exposes; the second is the setting the
+    validator was actually built with, which is the one a custom
+    `__get_pydantic_core_schema__` could move without touching the config.
+
+    **Both, because the first version of this read one key and read the wrong
+    one.** It asked `model-fields` for `extra_behavior`, where the setting
+    sits on the enclosing `model` node's `config` as
+    `extra_fields_behavior`. That spelling is accepted by nobody and raised
+    nothing: the function returned False for every model including a planted
+    one, so the rule was **permanently inert** and green. It was caught by
+    the plant below and by nothing else, which is why that plant asserts each
+    reading separately rather than their union.
+
+    **The descent is `_compiled_node` and it used to be a private copy.**
+    That copy answered False where the shared one raises, so narrowing its
+    depth left this rule answering for the plain majority of models and
+    missing every one whose node sits deeper, with no arm red: a planted
+    model's node is at depth zero, so no plant could see it.
+    """
+    config = _compiled_node(cls, "model").get("config") or {}
+    return (
+        cls.model_config.get("extra") == "allow",
+        config.get("extra_fields_behavior") == "allow",
+    )
+
+
+def models_admitting_extras(
+    models: Iterable[type[BaseModel]] | None = None,
+) -> list[str]:
+    """Every model that would carry an undeclared key into its response.
+
+    **This is the precondition that makes `declared_schema_fields` an
+    answer.** That reader enumerates what a model declares, and a model
+    opting into extras carries keys it declares nowhere: `Model(**vars(row))`
+    then puts every attribute of the row into the body. Driven 2026-10-02
+    against the splat spelling already live in this backend: with extras
+    allowed the guarded column reaches `model_dump` **with no declaration and
+    no attribute access**, so both halves of the rule are satisfied and the
+    value reaches the client.
+
+    **Only `allow` leaks.** `ignore` drops the key and `forbid` raises, so
+    both are safe and neither is refused here; what is refused is the one
+    setting that passes an undeclared key through.
+
+    **It refuses a model that opts in for a reason having nothing to do with
+    a row**, a passthrough payload say, and that is the loud direction rather
+    than an oversight: nothing on the class says where its keys come from, so
+    the alternative is deciding by guess. The exit is to declare the fields.
+
+    **The union of two readings**, for the reason `_admits_extras` gives: one
+    of them was wrong on its own and silently reported nothing.
+    """
+    return sorted(name for name, admits in _extras_rows(models) if admits)
+
+
+def _extras_rows(
+    models: Iterable[type[BaseModel]] | None = None,
+) -> list[tuple[str, bool]]:
+    """The extras reader's own loop, as rows rather than as a filtered list.
+
+    **The same door `_declared_rows` has, and it is here because the lesson
+    did not travel.** This rule was written in the same commit as the
+    declaration reader and inherited the identical hole: both its plants hand
+    it a population, so one line in its comprehension hid a live opt in with
+    nothing red. `test_the_extras_reader_reaches_every_model` is its arm.
+
+    **It yields the rendered name rather than the class, and that is
+    structural rather than tidy.** The public function above has no class to
+    key a predicate on, so the one line form of that narrowing cannot be
+    written there at all. **It does not close the class, and that is driven
+    rather than conceded**: a predicate on the rendered string is still
+    available, and with a live opt in behind one every arm passes at exit
+    zero. Nothing here refuses it and nothing can. The
+    declaration reader does not need this, because an arm entering at its
+    door covers the same layer; this rule has no such arm available, since
+    its output over a clean tree is empty and any equality between its layers
+    would be a must green over nothing.
+    """
+    return [
+        (f"{cls.__module__}.{cls.__name__}", any(_admits_extras(cls)))
+        for cls in (application_models() if models is None else models)
+    ]
+
+
+class _EveryName:
+    """A `Container` holding every name, so the reader reports every field.
+
+    **This is how the reader's own loop is armed.** Every plant hands
+    `declared_schema_fields` a population of its own, so a filter written
+    inside its loop is invisible to all of them: the narrowing is in the
+    consumer rather than in the population, and no arming of the population
+    can see it. Asking it for everything makes its output a statement about
+    which models it reached.
+    """
+
+    def __contains__(self, _name: object) -> bool:
+        return True
+
+
+class TestTheDeclarationReaderAndThePopulationItWalks:
+    """`declared_schema_fields` and the population it is asked over.
+
+    **Named for both, because it arms both and they fail differently.** The
+    population half says `application_models()` is every Pydantic model the
+    backend defines; the reader half says each one's declared lookup names
+    are the ones its compiled validator carries. A plant through the reader
+    with a population handed to it certifies the reader and says nothing
+    about the population, which is why the first arms exist at all.
+
+    **Beside the reader rather than inside the two rules that use it**, for
+    the reason `TestTheApplicationCorpusIsStillTheApplication` gives one rung
+    down: a narrowing here takes both rules at once, and an arm living in
+    either of them leaves the other inheriting the hole.
+
+    ## Every link under these two rules, and what reads each one
+
+    **Named rather than counted, because the count was wrong twice and the
+    list that replaced it was short once, all three times by the same
+    mechanism.** The count said three layers over a chain of nine. The list
+    that replaced it was then taken over the functions **that round** had
+    touched and omitted three it had not, two of them unarmed at the time.
+    That is a census over a corpus holding the work it describes, which is
+    the defect this branch has paid for in a figure, in a list of published
+    sites and now in a list of links.
+
+    **So the question to ask of this list is not whether it is right, it is
+    what was touched last.** A round that lifts a helper adds a link above
+    it; a round that reads only what it edited will not see it. The two
+    unarmed omissions were found by a reader asking what sits between two
+    named links, which is the pass this list cannot perform on itself.
+
+    Each link, and what reads it **without passing through it**:
+
+    * `_is_vendored`, by `TestTheSourceWalkSeesOnlyThisProject`, one rung
+      down, which this class does not restate.
+    * `_python_sources`, by `TestTheApplicationCorpusIsStillTheApplication`
+      and the complement walk beside it.
+    * `_source_modules`, by `test_the_renaming_is_rebuilt_from_the_corpus`,
+      whose other side reads `_python_sources` and so does not pass through
+      it. **It was omitted, and while it was the arm went through it on both
+      sides**, which is the condition that arm exists to avoid one function
+      up: one line in it took a live declaration to a whole file green.
+    * `_application_module_names`, by
+      `test_the_renaming_is_rebuilt_from_the_corpus`, which rebuilds the
+      renaming by string surgery where the helper uses path parts.
+    * `_every_subclass`, by `test_an_indirect_subclass_is_in_the_population`,
+      which was already written and already named below. A naming gap in
+      this list rather than a gap in the arming.
+    * `application_models`, by the three arms below it: the import loop, the
+      registry against the namespaces, and the indirect subclass.
+    * `declared_schema_fields`, by
+      `test_the_reader_reaches_every_field_the_models_declare`, which enters
+      at this door rather than below it.
+    * `_declared_rows` and `_lookup_names`, by that same arm, which passes
+      through both and whose other side is `model_fields`, reaching no
+      compiled schema at all.
+    * `_compiled_node`, by `test_every_model_carries_a_schema_this_rule_can_read`
+      and by the refusal arm, both driven over both kinds.
+    * the compiled schema itself, by nothing here, and nothing should: it is
+      the library's rather than this repository's.
+
+    **The sibling rule has the same chain with `models_admitting_extras`,
+    `_extras_rows` and `_admits_extras` in place of the middle three.**
+    `test_the_extras_reader_reaches_every_model` enters at its door, and its
+    public function takes no class, deliberately: see `_extras_rows`.
+    `_admits_extras` was the second unarmed omission and is read by
+    `test_the_extras_rows_are_what_the_configs_say`, which that arm's own
+    docstring is honest about the worth of.
+
+    **The chain terminates because its last link is the library's.** That is
+    what makes this a closure rather than a longer list, and it closes the
+    chain under the population of Pydantic models and nothing wider: a
+    response body built without a model is outside it, which
+    `application_models` states as a condition with the live instance named.
+    """
+
+    def test_every_application_module_is_imported(self) -> None:
+        """The reader's import loop against the corpus it claims to cover.
+
+        A module the loop skips contributes no model and nothing else notices,
+        because the population would simply be smaller.
+
+        **`application_models()` is called first and that is the arm**, not
+        setup: it is what performs the import, and asking `sys.modules`
+        without it reports on whatever the rest of the run happened to
+        import. The first version of this arm omitted the call and was red
+        for the right reason: modules of this corpus are reached by nothing
+        else. **No count of them**, because two static derivations and the
+        runtime reading disagree, over populations that move with the test
+        distribution and with any new import anywhere.
+        """
+        application_models()
+        names = _application_module_names()
+
+        assert names, "the corpus is empty, so every rule reading it is vacuous"
+        assert [name for name in names if name not in sys.modules] == []
+
+    def test_the_renaming_is_rebuilt_from_the_corpus(self) -> None:
+        """The layer this branch added, armed where it is written.
+
+        **Rebuilt rather than asserted about.** `_application_module_names`
+        turns the corpus into dotted names, and every reading downstream
+        starts from its answer, so an equality between any two of them moves
+        together under a skip written inside it. This rebuilds the renaming
+        from `_source_modules()` by string surgery where the helper uses path
+        parts: the two degrade differently, so a skip is a disagreement.
+
+        **The other side reads `_python_sources`, not `_source_modules`.**
+        It read the latter, which the helper under test also reads, so the
+        arm passed through it on both sides: exactly the condition it exists
+        to avoid one function up, and one line in it took a live declaration
+        to a whole file green. Reading the walk below instead is green on a
+        clean tree and red under that skip.
+
+        **Correctly silent on a narrowing one rung down.** A token added to
+        `_is_vendored` shrinks both sides equally and reds in
+        `TestTheApplicationCorpusIsStillTheApplication` instead, which is
+        where that decision belongs.
+        """
+        rebuilt = set()
+        for path in _python_sources():
+            dotted = (
+                str(path.relative_to(BACKEND))
+                .removesuffix(".py")
+                .replace("/", ".")
+                .removesuffix(".__init__")
+            )
+            if dotted != "__init__":
+                rebuilt.add(dotted)
+
+        assert set(_application_module_names()) == rebuilt
+
+    def test_the_rebuild_exercises_both_module_shapes(self) -> None:
+        """Anti vacuity for the arm above, as a property and not a count.
+
+        The equality holds over an empty corpus and over one where every
+        module sits at the root, and in the second the package branch of the
+        renaming is never taken. A corpus with both shapes is what makes the
+        comparison about the transformation rather than about the suffix.
+        """
+        names = _application_module_names()
+
+        assert [name for name in names if "." not in name], "no module at the root"
+        assert [name for name in names if "." in name], "no module inside a package"
+
+    def test_every_model_carries_a_schema_this_rule_can_read(self) -> None:
+        """A model whose validator is unbuilt carries a mock in place of its
+        compiled schema, and reading one raises rather than answering empty.
+
+        **`application_models` rebuilds those, and this says the rebuild
+        worked.** Measured 2026-10-02: one model in this corpus is unbuilt
+        until something uses it, because it names another through a forward
+        reference. Without the rebuild its declarations are unknown; without
+        this arm a model that could not be rebuilt would be a `LookupError`
+        inside whichever rule happened to ask, rather than a failure naming
+        the model.
+        """
+        unreadable = []
+        for cls in application_models():
+            for kind in ("model", "model-fields"):
+                try:
+                    _compiled_node(cls, kind)
+                except LookupError as exc:
+                    unreadable.append(str(exc))
+
+        assert not unreadable, unreadable
+
+    def test_the_reader_reaches_every_field_the_models_declare(self) -> None:
+        """The reader's loop and the lookup reader under it, against a
+        reading that goes through neither.
+
+        **The first version of this arm was circular and its own docstring
+        said otherwise.** It compared the reader against `_lookup_names`,
+        which both of its sides called, so three lines inside that function
+        took a live declaration to a whole file green. The right hand side
+        is now `model_fields`, which Pydantic builds from the class rather
+        than from the compiled schema, so neither the loop nor the compiled
+        reader is on it.
+
+        **Field names only, and deliberately.** The alias axis is the one
+        the compiled key exists to absorb, so comparing it here would red on
+        a legitimate new alias shape, which is the opposite of what that key
+        was chosen for. What this holds is that every declared field is
+        reached, which is the axis that was never measured: the refusal to
+        ship an equality was right about aliases, where no field in this
+        backend carries one, and that cleared the axis that happened to be
+        measured rather than the one the guard needed.
+
+        **It enters at the public function, not at the row helper below
+        it.** Lifting that helper so this arm could read it created a link
+        above it, the comprehension in `declared_schema_fields`, and an arm
+        reading the helper cannot see a predicate written there. Driven: two
+        lines in that comprehension with a live declaration gave a whole file
+        green. Entering at the door costs nothing and covers the loop, the
+        row helper and the lookup reader together.
+
+        **The comparison is on the field, with whatever column follows
+        dropped**, which is what keeps it field names only while reading the
+        rendered output: a field carrying an alias renders twice and both
+        entries carry the same prefix.
+
+        **Non empty by a wide margin**, so it is not an equality over
+        nothing: the population declares hundreds of fields and the figure is
+        deliberately not written here, because it moves whenever somebody
+        adds a field.
+        """
+        reached = {entry.split(" (")[0] for entry in declared_schema_fields(_EveryName())}
+        declared = {
+            f"{cls.__module__}.{cls.__name__}.{name}"
+            for cls in application_models()
+            for name in cls.model_fields
+        }
+
+        assert declared, "the population declares nothing, so this measures nothing"
+        assert reached == declared
+
+    def test_the_extras_reader_reaches_every_model(self) -> None:
+        """The sibling rule's loop, which had the identical hole.
+
+        **Written in the same commit as the declaration reader and short in
+        the same way**, which is the thing to notice rather than the
+        mechanic: both its plants hand it a population, so one line in its
+        comprehension hid a live opt in with nothing red. The right hand side
+        is the population, which that comprehension does not own.
+        """
+        reached = {name for name, _ in _extras_rows()}
+        population = {
+            f"{cls.__module__}.{cls.__name__}" for cls in application_models()
+        }
+
+        assert reached, "the population is empty, so the extras rule is vacuous"
+        assert reached == population
+
+    def test_the_extras_rows_are_what_the_configs_say(self) -> None:
+        """`_admits_extras`, which sits inside both rules and which nothing
+        else read.
+
+        **Worth stating precisely rather than overselling.** The keys half of
+        this equality duplicates `test_the_extras_reader_reaches_every_model`
+        and adds nothing. The **flags** half is the arm: it is green on a
+        clean tree, where every flag is false on both sides, and it reds only
+        when something is live behind a filter written in `_admits_extras`,
+        which is the only circumstance in which that filter matters.
+
+        **It has a mutant no other arm answers**, which is this file's test
+        for an arm against decoration: two lines in `_admits_extras` with a
+        live opt in behind them leave the reach arm green, because that one
+        compares names, and both plants green, because each hands its own
+        class.
+
+        **The earlier reason for not arming here was right about the output
+        and did not cover the inputs.** An equality over what that rule
+        *reports* is a must green over nothing, because it reports nothing on
+        a clean tree. This is an equality over what it was *told*, which is
+        non empty at every model in the population.
+        """
+        rows = dict(_extras_rows())
+        configured = {
+            f"{cls.__module__}.{cls.__name__}": cls.model_config.get("extra") == "allow"
+            for cls in application_models()
+        }
+
+        assert configured, "the population is empty, so this measures nothing"
+        assert rows == configured
+
+    def test_no_model_admits_an_undeclared_key_into_its_response(self) -> None:
+        """What keeps the declaration reader's answer complete.
+
+        A model opting into extras publishes keys it declares nowhere, so
+        every rule over declarations is silently narrower than it reads. The
+        splat spelling that would carry one is already live in this backend,
+        which makes the single config line the only thing in the way.
+        """
+        offenders = models_admitting_extras()
+
+        assert not offenders, (
+            "These models pass undeclared keys through into their response:\n  "
+            + "\n  ".join(offenders)
+            + "\nA `Model(**vars(row))` then publishes every attribute of the "
+            "row, which no rule over declared fields can see. Declare the "
+            "fields; or drop the setting, since the default already ignores "
+            "an undeclared key and is what a splat usually wanted; or use "
+            "`forbid`, which raises on one instead."
+        )
+
+    def test_a_model_admitting_extras_is_reported(self) -> None:
+        """Anti vacuity for the arm above, which holds over a tree where
+        nothing opts in and would hold over a reader that answers nothing.
+
+        **Each reading is asserted separately, not their union.** The first
+        version of `_admits_extras` read one key, read the wrong one, and
+        returned False for everything; a union would have gone green here as
+        soon as the other reading was added, leaving the broken half in the
+        tree. This is also what reds if Pydantic renames the compiled key.
+        """
+        leaky: type[BaseModel] = type(
+            "Leaky",
+            (BaseModel,),
+            {
+                "__module__": __name__,
+                "model_config": pydantic.ConfigDict(extra="allow"),
+                "__annotations__": {"name": str},
+                "name": "",
+            },
+        )
+
+        assert _admits_extras(leaky) == (True, True)
+        assert models_admitting_extras([leaky]) == [f"{__name__}.Leaky"]
+
+    def test_an_undeclared_key_really_does_reach_the_body(self) -> None:
+        """What the arm above is about, driven rather than asserted of
+        Pydantic.
+
+        Without this the rule rests on a belief about what `extra="allow"`
+        does, and the splat spelling it is written against is live in this
+        backend.
+        """
+        leaky: type[BaseModel] = type(
+            "Leaky",
+            (BaseModel,),
+            {
+                "__module__": __name__,
+                "model_config": pydantic.ConfigDict(extra="allow"),
+                "__annotations__": {"source": str},
+                "source": "",
+            },
+        )
+
+        class Row:
+            def __init__(self) -> None:
+                self.source = "a source"
+                self.created_by_user_id = 7
+
+        assert leaky(**vars(Row())).model_dump() == {
+            "source": "a source",
+            "created_by_user_id": 7,
+        }
+        assert declared_schema_fields({"created_by_user_id"}, [leaky]) == []
+
+    #: The two settings that do not publish an undeclared key.
+    #:
+    #: **The whole of the safe half that is written down, not a sample.**
+    #: Pydantic's own `ExtraValues` is `allow`, `ignore` and `forbid`, so
+    #: this is a closed set completed rather than enumerated: the member
+    #: left out of the walk is the member left out of the experiment.
+    #:
+    #: **The state space is four and not three**, because unset is a state
+    #: of its own and is the one every model in this corpus is in. It is
+    #: exercised by the live rule over the whole population rather than
+    #: here, which is why these are two arms rather than four.
+    SAFE_EXTRAS: Final = ("ignore", "forbid")
+
+    @pytest.mark.parametrize("setting", SAFE_EXTRAS)
+    def test_a_model_not_admitting_extras_is_not_reported(self, setting: str) -> None:
+        """The diagonal, over both safe values.
+
+        `ignore` drops the key and `forbid` raises, so neither publishes one
+        and neither is refused here.
+        """
+        strict: type[BaseModel] = type(
+            "Strict",
+            (BaseModel,),
+            {
+                "__module__": __name__,
+                "model_config": pydantic.ConfigDict(extra=setting),  # type: ignore[typeddict-item]
+                "__annotations__": {"name": str},
+                "name": "",
+            },
+        )
+
+        assert _admits_extras(strict) == (False, False)
+        assert models_admitting_extras([strict]) == []
+
+    def test_the_registry_and_the_module_namespaces_agree(self) -> None:
+        """Two derivations that degrade differently.
+
+        The registry is `BaseModel.__subclasses__()` walked transitively; the
+        second reading is what the corpus modules **bind**. Driven
+        2026-10-02: narrowing the first to direct subclasses leaves the second
+        whole and reds this arm by name, so a narrowing is a disagreement
+        rather than a smaller population nobody sees.
+
+        **No count is written in the assertion**, because both sides move
+        together whenever somebody adds a model and a figure beside a rule
+        goes stale against the rule.
+
+        **What it cannot see is a model bound nowhere**, which is in the
+        registry and not in the namespaces. None exists today, so the
+        equality holds; the day one arrives it reds and somebody decides,
+        which is the direction this file prefers.
+        """
+        models = application_models()
+        corpus = set(_application_module_names())
+        bound = {
+            attribute
+            for name in corpus
+            for attribute in vars(sys.modules[name]).values()
+            if isinstance(attribute, type)
+            and issubclass(attribute, BaseModel)
+            and attribute.__module__ in corpus
+        }
+
+        assert set(models) == bound
+
+    def test_an_indirect_subclass_is_in_the_population(self) -> None:
+        """Anti vacuity for the transitive walk, as a property and not a count.
+
+        Stopping at `BaseModel.__subclasses__()` is one token and reds here.
+        """
+        indirect = [
+            cls for cls in application_models() if BaseModel not in cls.__bases__
+        ]
+
+        assert indirect, (
+            "no model in this corpus inherits from another, so nothing here "
+            "says `_every_subclass` still recurses"
+        )
+
+    #: Each spelling that reads a guarded column off a row while naming it
+    #: nowhere a reader of the source would look.
+    #:
+    #: **Witnesses rather than the coverage.** `_lookup_names` reads the
+    #: compiled schema and names no shape, so a spelling the library grows
+    #: next is caught without an edit here. What this list is for is to stop
+    #: the reader going quietly inert: each of these reds on its own.
+    #:
+    #: **Found by probing the installed Pydantic rather than by choosing**,
+    #: which is the half the author of a matcher gets wrong: the plain field
+    #: is the only one the ticket names, and every shape after it came out of
+    #: asking what actually drives the lookup. The generator is the one worth
+    #: reading twice: it renames every field of a model from the config, so
+    #: the guarded name appears in no class body anywhere, which is what no
+    #: walk over source can see.
+    DECLARATIONS: Final = (
+        "a plain field",
+        "a validation alias",
+        "an alias",
+        "an alias path",
+        "an alias choice",
+        "a config level alias generator",
+    )
+
+    def _planted(self, shape: str) -> type[BaseModel]:
+        guarded = "created_by_user_id"
+        match shape:
+            case "a plain field":
+                return type(
+                    "Planted",
+                    (BaseModel,),
+                    {
+                        "__module__": __name__,
+                        "__annotations__": {guarded: int | None},
+                        guarded: None,
+                    },
+                )
+            case "a validation alias":
+                field = pydantic.Field(default=None, validation_alias=guarded)
+            case "an alias":
+                field = pydantic.Field(default=None, alias=guarded)
+            case "an alias path":
+                field = pydantic.Field(default=None, validation_alias=AliasPath(guarded))
+            case "a config level alias generator":
+                return type(
+                    "Planted",
+                    (BaseModel,),
+                    {
+                        "__module__": __name__,
+                        "model_config": pydantic.ConfigDict(
+                            alias_generator=lambda _name: guarded
+                        ),
+                        "__annotations__": {"definer": int | None},
+                        "definer": None,
+                    },
+                )
+            case _:
+                field = pydantic.Field(
+                    default=None, validation_alias=AliasChoices("definer", guarded)
+                )
+        return type(
+            "Planted",
+            (BaseModel,),
+            {
+                "__module__": __name__,
+                "__annotations__": {"definer": int | None},
+                "definer": field,
+            },
+        )
+
+    @pytest.mark.parametrize("shape", DECLARATIONS)
+    def test_a_planted_declaration_is_reported(self, shape: str) -> None:
+        planted = self._planted(shape)
+
+        assert declared_schema_fields({"created_by_user_id"}, [planted]), shape
+
+    def test_a_model_naming_no_guarded_column_is_clean(self) -> None:
+        """The diagonal. Without it every arm above is satisfied by a reader
+        that reports every field it meets."""
+        innocent = type(
+            "Innocent",
+            (BaseModel,),
+            {"__module__": __name__, "__annotations__": {"name": str}, "name": ""},
+        )
+
+        assert declared_schema_fields({"created_by_user_id"}, [innocent]) == []
+
+    def test_a_model_with_no_compiled_fields_raises_rather_than_answering_empty(
+        self,
+    ) -> None:
+        """The refusal `_lookup_names` promises.
+
+        A model whose schema this walk cannot reach declares something
+        unknown, and answering the empty set there is a guard that stops
+        guarding without ever failing. Driven against a class whose compiled
+        schema has been replaced by one carrying no field node.
+        """
+        opaque: type[BaseModel] = type(
+            "Opaque",
+            (BaseModel,),
+            {"__module__": __name__, "__annotations__": {"name": str}, "name": ""},
+        )
+        opaque.__pydantic_core_schema__ = {"type": "any"}
+
+        # Both kinds, because both readers descend through this one function
+        # and the extras half is the one that used to answer False here.
+        with pytest.raises(LookupError, match="no compiled model-fields node"):
+            _compiled_node(opaque, "model-fields")
+        with pytest.raises(LookupError, match="no compiled model node"):
+            _compiled_node(opaque, "model")
+        with pytest.raises(LookupError, match="no compiled model-fields node"):
+            _lookup_names(opaque)
+        with pytest.raises(LookupError, match="no compiled model node"):
+            _admits_extras(opaque)
+
+    def test_a_node_belonging_to_another_class_is_refused(self) -> None:
+        """The belonging check, and it is load bearing rather than tidy.
+
+        **Driven both ways.** Given another model's compiled schema, the
+        walk without this check reaches that model's fields and would report
+        them under this class's name, which for a guarded column is the
+        wrong class accused or the right one missed. With it, the read is
+        refused and names both classes.
+        """
+        borrower: type[BaseModel] = type(
+            "Borrower",
+            (BaseModel,),
+            {"__module__": __name__, "__annotations__": {"harmless": int}, "harmless": 0},
+        )
+        lender: type[BaseModel] = type(
+            "Lender",
+            (BaseModel,),
+            {
+                "__module__": __name__,
+                "__annotations__": {"created_by_user_id": int},
+                "created_by_user_id": 0,
+            },
+        )
+        borrower.__pydantic_core_schema__ = lender.__pydantic_core_schema__
+
+        # What the walk would hand back without the check, which is the
+        # reason it is here rather than a tidiness.
+        assert set(_compiled_node(lender, "model-fields")["fields"]) == {
+            "created_by_user_id"
+        }
+        assert set(borrower.model_fields) == {"harmless"}
+
+        with pytest.raises(LookupError, match="belongs to"):
+            _compiled_node(borrower, "model")
+
+    def test_a_field_node_reached_before_its_model_node_is_refused(self) -> None:
+        """The second refusal, which a reader called unreachable and is not.
+
+        **No class Pydantic builds gets there**, because it always wraps a
+        field node in a model node, and that is the half the reader was
+        right about. **A spliced schema does**, by exactly the technique the
+        two arms above use, and the fields it carries then belong to no
+        class this walk can name. So it is armed rather than deleted, which
+        is the opposite call from the unexercised descent step: that one was
+        a key the library defines nowhere, and this one fires here.
+        """
+        donor: type[BaseModel] = type(
+            "Donor",
+            (BaseModel,),
+            {
+                "__module__": __name__,
+                "__annotations__": {"created_by_user_id": int},
+                "created_by_user_id": 0,
+            },
+        )
+        headless: type[BaseModel] = type(
+            "Headless",
+            (BaseModel,),
+            {"__module__": __name__, "__annotations__": {"harmless": int}, "harmless": 0},
+        )
+        headless.__pydantic_core_schema__ = donor.__pydantic_core_schema__["schema"]
+        assert headless.__pydantic_core_schema__["type"] == "model-fields"
+
+        with pytest.raises(LookupError, match="before its own model node"):
+            _compiled_node(headless, "model-fields")
+
+
+def _provenance_reads(source: str, label: str = "probe.py") -> list[str]:
+    """Every read of a declared provenance column in one module's source.
+
+    **The three spellings are `column_mentions`', and what this adds is the
+    clearing.** A mention is a read unless it builds a row, and it is reported
+    unless its receiver resolves to a model that declares the column
+    **without** the marker: that is a different column sharing a conventional
+    name, decided rather than reported. Everything else, a receiver that
+    resolves to a marked model and a receiver that resolves to nothing alike,
+    is reported.
+
+    **So a method call whose receiver is a query is reported**, because a call
+    expression resolves to no model. That is this rule's stated loudness
+    arriving at a new spelling rather than a new defect: the one legitimate
+    reader writes the column into a `query()` argument list, not into a
+    `filter_by`.
+    """
+    marked, unmarked = _declared_provenance()
+    tree = ast.parse(source)
+    names = _model_names_safe_to_resolve(tree)
+
+    found: list[str] = []
+    for mention in column_mentions(tree, marked):
+        if mention.builds_a_row:
+            continue
+        owner = _receiver_model(mention.receiver, names)
+        if owner is not None and owner in unmarked.get(mention.column, set()):
+            continue
+        found.append(f"{label}:{mention.line} ({mention.column})")
+    return sorted(set(found), key=found.index)
+
+
 class TestProvenanceColumnsAreNeverRead:
     """A column recorded only so somebody can be asked later is never consulted
     by code.
 
-    One entry, and it is here because three places in the tree say of
+    It is here because three places in the tree say of
     `collections.created_by_user_id` that "no query consults it, which is what
     keeps that true rather than merely intended" while nothing kept it true. A
     claim of mechanism with no mechanism is worse than no claim: the next reader
@@ -1558,53 +3813,544 @@ class TestProvenanceColumnsAreNeverRead:
     rule itself is pinned by `tests/test_models.py`; this pins the weaker
     promise beside it.
 
-    **Attribute access is the test**, not the name. Writing the column is a
-    keyword argument (`Collection(created_by_user_id=...)`) and declaring it is
-    an assignment target, so neither is an `ast.Attribute`; every read of it,
-    whether `row.created_by_user_id` or `Collection.created_by_user_id` in a
-    filter, is one. If a genuine reason to read one ever arrives, delete the
-    entry here and the three sentences it stands for, in the same commit.
+    ## It keys on the declaration, and it used to key on one column name
+
+    **The old version was evadable and short at the same time.** `PROVENANCE_COLUMNS`
+    was a literal mapping `created_by_user_id` to a sentence naming
+    `models.Collection`. Renaming the column slipped past it entirely, which
+    makes it a rule about a spelling rather than about a property; and
+    `AuthorAlias` and `AuthorIdentifier` carry the identical promise and were
+    covered only because they happen to use the same name, which the one
+    entry's own text did not say.
+
+    **It had no exemption slot**, and its own comment prescribed the two things
+    to do about a fourth model with a conventional column name: rename the
+    column, or add an entry here. The first is the evasion the rule exists to
+    refuse and the second declares the new column unread, which is the opposite
+    of the truth when the new column is read on purpose.
+    `custom_fields.created_by_user_id` is exactly that case: a member axis
+    added so a definer can be told their own field exists and can rename it.
+
+    **So membership is now the declaration.** `info={"provenance": ...}` at the
+    column's own site puts it in, `_declared_provenance` reads it off the
+    mapper, and `test_the_declarations_are_the_ones_the_models_make` asserts
+    the result, so a marker added or dropped reddens by name.
+
+    ## What it refuses
+
+    **Three spellings**, and `_provenance_reads` says why each is there and
+    what separates the query clause from the constructor write. An attribute
+    walk alone was the first version and two live shapes went past it.
+
+    **The archive is the exception the published prose names, and it is not
+    the only one.** Every spelling here is syntax, so a read written as a
+    **string** is past all three: raw SQL, a `_mapping` subscript, a plain
+    dict subscript and a column allowlist each return nothing, driven, where
+    the plain attribute is reported. There is no live instance of any of
+    them for a guarded column, so this is a condition rather than a hole, and
+    it is stated here rather than at the six published sites because those
+    say what is true of the design and this says what the instrument sees.
+
+    **And a fourth thing, which is not a spelling and needs its own
+    instrument.** A Pydantic field named for one of these columns is read by
+    the validator Pydantic builds from the annotation, so the column's value
+    reaches a client with no attribute access, no `getattr` and no keyword
+    anywhere in the source. Every arm of the source walk is satisfied and the
+    promise is false. `declared_schema_fields` is that instrument and
+    `test_no_schema_declares_a_provenance_column` is the arm;
+    `TestTheDeclarationReaderAndThePopulationItWalks` is what keeps its population
+    the whole application.
+
+    **The two halves answer the same question about different things**, which
+    is why neither subsumes the other: the source walk reads statements and
+    cannot see a declaration, and the declaration reader reads classes and
+    cannot see a statement. **A narrowing of either is invisible to the
+    other**, so each carries its own arming.
+
+    ## What it accepts, which is one spelling and not a remedy
+
+    **A read is cleared only where the receiver resolves to a model that does
+    not mark the column**: a class imported with `from models import ...`, or
+    an attribute of the `models` module, in a file that binds that local name
+    exactly once. Nothing else.
+
+    **Everything else is reported, and "everything else" is wider than it
+    reads.** `REFUSED` below is the list, each one driven, and it is a list
+    rather than a count on purpose: the figure that stood here was measured
+    against the rule **before** the resolver fix and was written into prose
+    describing the rule after it, which is this wave's own recurring defect
+    arriving in the sentence written to correct one.
+
+    **This docstring used to call that cost "ask the class instead", and that
+    is not a remedy that exists.** It exists for `ACCEPTED` below and for
+    nothing else: there is no class to ask when the receiver is not a models
+    class, and **inside `models.py` itself there is no accepted spelling at
+    all**, because that file imports nothing from `models`. What is being
+    claimed is only that the refusals are **loud** and the misses would be
+    silent, so the rule fails in the direction somebody notices. A reader who
+    meets one is meeting the limit of the rule, and the answer is a decision
+    here rather than a workaround there.
+
+    An exemption keyed on the file or the function was the alternative and it
+    would have accepted every read inside it.
+
+    If a genuine reason to read a marked one ever arrives, delete the marker and
+    the sentences it stands for, in the same commit.
     """
 
-    #: Column, and where the promise about it is written down.
-    #: The match is by **name, across the whole tree**, and deliberately so: an
-    #: instance read (`row.created_by_user_id`) has no statically resolvable
-    #: owner, so keying on the model would miss the dominant shape. The cost is
-    #: that a second model given this conventional column name inherits the rule
-    #: and fails with a message pointing at `Collection`. That is a rename or an
-    #: entry here, not a bug, and knowing it is the difference between a
-    #: two-minute fix and an afternoon.
-    PROVENANCE_COLUMNS = {
-        "created_by_user_id": "models.Collection, docs/decisions.md, docs/data-model.md",
-    }
+    def test_the_declarations_are_the_ones_the_models_make(self) -> None:
+        """Derive it and assert it, so a widening is noticed rather than
+        automatic.
+
+        **Both directions.** A marker added to a fourth column widens what the
+        rule refuses across the whole tree, and a marker deleted narrows it to
+        nothing with no other failure. Either is a decision and reds here.
+        """
+        marked, unmarked = _declared_provenance()
+        declared = sorted(
+            (column, owner) for column, owners in marked.items() for owner in owners
+        )
+
+        assert declared == [
+            ("created_by_user_id", "AuthorAlias"),
+            ("created_by_user_id", "AuthorIdentifier"),
+            ("created_by_user_id", "Collection"),
+        ]
+
+        # **The half that decides every ALLOW, and nothing named a member of
+        # it.** `marked` is what the rule refuses; `unmarked` is the only
+        # reason any read is cleared, and it has exactly one member. A second
+        # model given this conventional column name would silently gain the
+        # exemption, which is the direction an exemption must never move in on
+        # its own. Narrowed to the marked names, since the whole set is every
+        # column of every model.
+        sharing = sorted(
+            (column, owner)
+            for column in marked
+            for owner in unmarked.get(column, set())
+        )
+
+        assert sharing == [("created_by_user_id", "CustomField")]
+
+    def test_the_marked_columns_are_still_there_to_be_unread(self) -> None:
+        """The rule passes just as well if somebody deletes a column, so this
+        says which absence would be the wrong one.
+
+        Over every declaration rather than over `Collection` alone, which is
+        what the literal version could not do.
+
+        **Keyed by the column's own name and not by the ORM attribute.**
+        `marked` is keyed on the attribute, so a column whose attribute and
+        database name differ would have reddened this while nothing was wrong.
+        None do today, which is why it was latent rather than red.
+
+        **It is one clause and it used to be two.** The second re read the
+        marker back off `__table__.columns` and was called a second source;
+        it is not one. The mapper's column, the attribute's first column and
+        the table's column are **the same object**, verified by identity on
+        all three marked columns, and the `info` dict is the same dict, so
+        that conjunct could never be False while the pair was in `marked`. A
+        vacuous conjunct beside a real one reads as strengthening and is the
+        thing a later reader trusts. What this arm is worth is entirely the
+        question the first clause asks: does the table still have the column.
+        """
+        marked, _unmarked = _declared_provenance()
+        mappers = {mapper.class_.__name__: mapper for mapper in Base.registry.mappers}
+
+        missing = [
+            f"{owner}.{column}"
+            for column, owners in marked.items()
+            for owner in owners
+            if mappers[owner].columns[column].name
+            not in mappers[owner].class_.__table__.columns
+        ]
+        assert not missing, missing
 
     def test_no_module_reads_a_provenance_column(self) -> None:
+        marked, _unmarked = _declared_provenance()
         offenders: list[str] = []
-
         for path in _python_sources():
-            tree = ast.parse(path.read_text())
-            for node in ast.walk(tree):
-                if not isinstance(node, ast.Attribute):
-                    continue
-                if node.attr not in self.PROVENANCE_COLUMNS:
-                    continue
-                offenders.append(f"{path.relative_to(BACKEND)}:{node.lineno} ({node.attr})")
+            offenders += _provenance_reads(
+                path.read_text(), str(path.relative_to(BACKEND))
+            )
 
         assert not offenders, (
-            "These read a column recorded as provenance only, and something in the tree "
-            "promises nothing does:\n  "
+            "These read a column a model declares as provenance only, and something "
+            "in the tree promises nothing does:\n  "
             + "\n  ".join(sorted(offenders))
             + "\nEither stop reading it, or delete the promise where "
-            + "; ".join(f"{column}: {where}" for column, where in self.PROVENANCE_COLUMNS.items())
+            + "; ".join(
+                f"{column}: {', '.join(sorted(owners.values()))}"
+                for column, owners in sorted(marked.items())
+            )
             + "."
         )
 
-    def test_the_column_is_still_there_to_be_unread(self) -> None:
-        """The rule above passes just as well if somebody deletes the column, so
-        this says which absence would be the wrong one."""
-        from models import Collection
+    def test_no_schema_declares_a_provenance_column(self) -> None:
+        """The half no source walk can see.
 
-        assert "created_by_user_id" in Collection.__table__.columns
+        **Free on this tree and that is what settled the ruling.** Measured
+        2026-10-02 over every Pydantic model the backend defines: nothing
+        declares a marked column under any name Pydantic would look up. The
+        sentences in `models.py`, `shelving.py` and `docs/data-model.md` claim
+        more than the source walk alone enforces, and closing a hole that
+        costs nothing is better than narrowing them to match.
+        """
+        marked, _unmarked = _declared_provenance()
+        offenders = declared_schema_fields(marked)
+
+        assert not offenders, (
+            "These Pydantic fields are named for a column a model declares as "
+            "provenance only, and something in the tree promises nothing reads "
+            "it:\n  "
+            + "\n  ".join(offenders)
+            + "\nA field named for a column is read off the row by the "
+            "validator, with no attribute access anywhere in the source. "
+            "Publish a derived answer instead, or delete the promise."
+        )
+
+    def test_a_planted_declaration_of_a_marked_column_is_reported(self) -> None:
+        """The arm above holds over a tree where nothing declares anything, so
+        this is what says it would notice one.
+
+        **The planted model is not in the live population**, because
+        `__module__` is set to this test module and `application_models()`
+        keeps the corpus only. Set rather than inherited: the three argument
+        `type` records `abc`, which would also be outside, but for a reason
+        that has nothing to do with this file.
+        """
+        marked, _unmarked = _declared_provenance()
+        planted = type(
+            "CollectionOutWithItsAuthor",
+            (BaseModel,),
+            {
+                "__module__": __name__,
+                "__annotations__": {"created_by_user_id": int | None},
+                "created_by_user_id": None,
+            },
+        )
+
+        assert declared_schema_fields(marked, [planted]) == [
+            f"{__name__}.CollectionOutWithItsAuthor.created_by_user_id "
+            "(created_by_user_id)"
+        ]
+
+    def test_a_declaration_is_reported_for_the_owner_the_source_half_clears(
+        self,
+    ) -> None:
+        """The stated false refusal of the declaration half, pinned the way
+        `test_an_instance_read_is_reported_whatever_the_row_is` pins the
+        source half's. **Named for the one owner it drives**, not for every
+        row: it holds the hard case and claims no extent past it.
+
+        `CustomField` carries this column name and does not mark it, so a read
+        naming that class is cleared above. A **declaration** names no class:
+        which rows a model is validated from is a property of its call sites,
+        so the unmarked owner's column is refused here and allowed there. The
+        one legitimate reader pays for it by publishing `renamable` instead of
+        the member id, which is the choice `schemas/custom_field.py` records.
+        """
+        _marked, unmarked = _declared_provenance()
+        assert unmarked.get("created_by_user_id") == {"CustomField"}
+
+        planted = type(
+            "CustomFieldOutWithItsAuthor",
+            (BaseModel,),
+            {
+                "__module__": __name__,
+                "__annotations__": {"created_by_user_id": int | None},
+                "created_by_user_id": None,
+            },
+        )
+
+        assert declared_schema_fields({"created_by_user_id"}, [planted])
+
+    def test_a_read_on_the_model_that_marks_it_is_reported(self) -> None:
+        assert _provenance_reads(
+            "from models import Collection\n"
+            "rows = db.query(Collection).filter(Collection.created_by_user_id == 1)\n"
+        ) == ["probe.py:2 (created_by_user_id)"]
+
+    def test_a_read_on_a_model_that_does_not_mark_it_is_allowed(self) -> None:
+        """The case the rule had no way to express. `CustomField` carries this
+        column because it is read: see `fields.Fields._author_of`."""
+        assert (
+            _provenance_reads(
+                "from models import CustomField\n"
+                "rows = db.query(CustomField.id, CustomField.created_by_user_id).all()\n"
+            )
+            == []
+        )
+
+    def test_a_dotted_read_through_the_models_module_resolves_too(self) -> None:
+        assert _provenance_reads(
+            "import models\n"
+            "a = models.CustomField.created_by_user_id\n"
+            "b = models.Collection.created_by_user_id\n"
+        ) == ["probe.py:3 (created_by_user_id)"]
+
+    def test_an_instance_read_is_reported_whatever_the_row_is(self) -> None:
+        """The stated false refusal, pinned so nobody relaxes it by accident.
+
+        A row has no statically resolvable owner, so an unmarked model's row is
+        indistinguishable from a marked one's and both are reported. The one
+        legitimate reader pays for this by asking the class instead."""
+        assert _provenance_reads(
+            "from models import CustomField\n"
+            "def f(row: CustomField) -> int | None:\n"
+            "    return row.created_by_user_id\n"
+        ) == ["probe.py:3 (created_by_user_id)"]
+
+    def test_a_rebound_model_name_does_not_launder_a_read(self) -> None:
+        """The evasion the resolution half creates, and the reason
+        `_model_names_safe_to_resolve` subtracts every assigned name."""
+        assert _provenance_reads(
+            "from models import Collection, CustomField\n"
+            "CustomField = Collection\n"
+            "x = CustomField.created_by_user_id\n"
+        ) == ["probe.py:3 (created_by_user_id)"]
+
+    def test_a_local_shadowing_a_model_name_does_not_launder_a_read(self) -> None:
+        """A rebinding inside a function body is still a rebinding: this walk
+        tracks no scopes, so any `Store` of the name anywhere drops it."""
+        assert _provenance_reads(
+            "from models import CustomField\n"
+            "def f(rows):\n"
+            "    CustomField = rows[0]\n"
+            "    return CustomField.created_by_user_id\n"
+        ) == ["probe.py:4 (created_by_user_id)"]
+
+    def test_a_write_and_a_declaration_are_not_reads(self) -> None:
+        """Both are how the column gets its value, and neither is an
+        `ast.Attribute`."""
+        assert (
+            _provenance_reads(
+                "from models import Collection\n"
+                "row = Collection(name='x', created_by_user_id=7)\n"
+                "created_by_user_id = 7\n"
+            )
+            == []
+        )
+
+    def test_a_name_no_model_declares_at_all_is_not_resolvable(self) -> None:
+        """A receiver that is not a model name resolves to nothing, so the read
+        is reported. `Loan` carries no such column, and a reader cannot know
+        that from the attribute alone."""
+        assert _provenance_reads(
+            "from models import Loan\n" "x = Loan.created_by_user_id\n"
+        ) == ["probe.py:2 (created_by_user_id)"]
+
+    #: Receivers this rule refuses, each one driven rather than reasoned.
+    #:
+    #: **A list and not a count.** The figure that used to stand in the class
+    #: docstring was measured before the resolver fix and written into prose
+    #: describing the code after it. A list cannot go stale that way: a member
+    #: that stops being refused reds here by name.
+    REFUSED = (
+        (
+            "an aliased entity",
+            "from models import CustomField\n"
+            "from sqlalchemy.orm import aliased\n"
+            "V = aliased(CustomField)\n"
+            "x = V.created_by_user_id\n"
+        ),
+        (
+            "the table columns accessor",
+            "from models import CustomField\n"
+            "x = CustomField.__table__.c.created_by_user_id\n"
+        ),
+        ("a relative models import", "from .models import CustomField\nx = CustomField.created_by_user_id\n"),
+        ("a row", "def f(row):\n    return row.created_by_user_id\n"),
+        ("a schema object", "def f(payload):\n    return payload.created_by_user_id\n"),
+        ("a schema class", "from schemas import CustomFieldOut\nx = CustomFieldOut.created_by_user_id\n"),
+        (
+            "a dataclass",
+            "import dataclasses\n"
+            "@dataclasses.dataclass\n"
+            "class Row:\n"
+            "    created_by_user_id: int\n"
+            "x = Row.created_by_user_id\n"
+        ),
+        (
+            "models.py itself, which imports nothing from models",
+            "class CustomField:\n"
+            "    pass\n"
+            "x = CustomField.created_by_user_id\n"
+        ),
+        (
+            "the module shadowed by a parameter",
+            "import models\n"
+            "def f(models):\n"
+            "    return models.CustomField.created_by_user_id\n"
+        ),
+        (
+            "a class name rebound as a local",
+            "from models import CustomField\n"
+            "CustomField = fetch()\n"
+            "x = CustomField.created_by_user_id\n"
+        ),
+        (
+            "a lambda parameter",
+            "from models import CustomField\n"
+            "f = lambda CustomField: CustomField.created_by_user_id\n"
+        ),
+        (
+            "a star import, which binds no name this walk can see",
+            "from models import *\n"
+            "x = CustomField.created_by_user_id\n"
+        ),
+        # **The two spellings where binding twice is deliberate**, and the
+        # ones a reader is least likely to expect from a rule that drops a
+        # name bound more than once. Both are ordinary Python and both are
+        # refused, which is the loud direction and is still a cost somebody
+        # meeting it should find written down rather than discover.
+        (
+            "a type checking import beside the runtime one",
+            "from typing import TYPE_CHECKING\n"
+            "if TYPE_CHECKING:\n"
+            "    from models import CustomField\n"
+            "from models import CustomField\n"
+            "x = CustomField.created_by_user_id\n"
+        ),
+        (
+            "a try and except import pair",
+            "try:\n"
+            "    from models import CustomField\n"
+            "except ImportError:\n"
+            "    from models import CustomField\n"
+            "x = CustomField.created_by_user_id\n"
+        ),
+    )
+
+    #: Every receiver that has an accepted spelling. There are no others.
+    ACCEPTED = (
+        ("a plain models import", "from models import CustomField\nx = CustomField.created_by_user_id\n"),
+        ("an aliased models import", "from models import CustomField as CF\nx = CF.created_by_user_id\n"),
+        ("the module route", "import models\nx = models.CustomField.created_by_user_id\n"),
+        ("the module route, aliased", "import models as m\nx = m.CustomField.created_by_user_id\n"),
+    )
+
+    @pytest.mark.parametrize(("shape", "source"), REFUSED, ids=[name for name, _ in REFUSED])
+    def test_a_receiver_this_rule_cannot_resolve_is_refused(
+        self, shape: str, source: str
+    ) -> None:
+        """What the class docstring says the cost is, written down as the
+        members rather than as a number. Every one reads a column no model in
+        the source marks, and every one is reported, because the rule refuses
+        what it cannot attribute."""
+        assert _provenance_reads(source), shape
+
+    @pytest.mark.parametrize(("shape", "source"), ACCEPTED, ids=[name for name, _ in ACCEPTED])
+    def test_the_accepted_spellings_are_these_and_no_others(
+        self, shape: str, source: str
+    ) -> None:
+        """The other side of the list above, so "there is one accepted
+        spelling" is checkable rather than asserted in prose."""
+        assert _provenance_reads(source) == [], shape
+
+    def test_an_import_alias_does_not_launder_the_marked_column(self) -> None:
+        """One line of import, and the whole rule was cleared.
+
+        `Collection` bound under an unmarked model's name is bound **once**, by
+        the import, so no binding count can see it. What sees it is the
+        resolver returning the class's own name rather than the local one.
+        """
+        assert _provenance_reads(
+            "from models import Collection as CustomField\n"
+            "x = CustomField.created_by_user_id\n"
+        ) == ["probe.py:2 (created_by_user_id)"]
+
+    def test_the_one_reader_may_alias_its_own_import(self) -> None:
+        """The other direction of the same line, and it was a false refusal:
+        the legitimate reader was reported for aliasing an import."""
+        assert (
+            _provenance_reads(
+                "from models import CustomField as CF\n"
+                "x = CF.created_by_user_id\n"
+            )
+            == []
+        )
+
+    def test_the_models_module_is_resolved_under_any_alias(self) -> None:
+        """No inclusion list of spellings: the import says which local name is
+        the module, so a third alias is resolved the day it is written."""
+        assert _provenance_reads(
+            "import models as schema\n"
+            "a = schema.CustomField.created_by_user_id\n"
+            "b = schema.Collection.created_by_user_id\n"
+        ) == ["probe.py:3 (created_by_user_id)"]
+
+    def test_a_name_bound_twice_is_not_resolved_however_it_was_bound(self) -> None:
+        """Three binders that carry their name as a string rather than as a
+        `Name` node, so the first version's subtraction could not see any of
+        them and each put an arbitrary object under a model's name."""
+        shapes = (
+            "from models import CustomField\n"
+            "try:\n    pass\nexcept ValueError as CustomField:\n"
+            "    x = CustomField.created_by_user_id\n",
+            "from models import CustomField\n"
+            "def f(value):\n    match value:\n        case [CustomField]:\n"
+            "            return CustomField.created_by_user_id\n",
+            "from models import CustomField\n"
+            "import json as CustomField\n"
+            "x = CustomField.created_by_user_id\n",
+        )
+
+        assert [len(_provenance_reads(shape)) for shape in shapes] == [1, 1, 1]
+
+    def test_a_filter_by_keyword_is_a_read(self) -> None:
+        """The authorization clause this rule exists to refuse, which named no
+        attribute at all. `tests/test_folding.py` records the same blind spot
+        in its own narrowing set and the lesson did not travel one file."""
+        assert _provenance_reads(
+            "from models import Collection\n"
+            "rows = db.query(Collection).filter_by(created_by_user_id=1).all()\n"
+        ) == ["probe.py:2 (created_by_user_id)"]
+
+    def test_the_constructor_write_is_still_not_a_read(self) -> None:
+        """What separates the clause from the write is the callee: a
+        constructor's `func` is a bare name, a query method's is an attribute.
+        Both live write sites are constructors."""
+        assert (
+            _provenance_reads(
+                "from models import Collection\n"
+                "row = Collection(name='x', created_by_user_id=7)\n"
+            )
+            == []
+        )
+
+    def test_a_getattr_with_a_constant_name_is_a_read(self) -> None:
+        """A live spelling in this backend under other column names, and
+        invisible to an attribute walk. `column_mentions` says why no count
+        of how live is written anywhere."""
+        assert _provenance_reads(
+            "from models import Collection\n"
+            "a = getattr(Collection, 'created_by_user_id')\n"
+            "b = getattr(row, 'created_by_user_id')\n"
+        ) == [
+            "probe.py:2 (created_by_user_id)",
+            "probe.py:3 (created_by_user_id)",
+        ]
+
+    def test_the_one_reader_may_getattr_its_own_model(self) -> None:
+        assert (
+            _provenance_reads(
+                "from models import CustomField\n"
+                "x = getattr(CustomField, 'created_by_user_id')\n"
+            )
+            == []
+        )
+
+    def test_a_keyword_on_a_call_the_rule_cannot_resolve_is_reported(self) -> None:
+        """The loudness arriving at the new spelling, pinned so nobody reads it
+        as a defect. A call expression resolves to no model, so a `filter_by`
+        chained onto a query over an **unmarked** model is reported too. The
+        one legitimate reader writes the column into a `query()` argument list
+        and never into a `filter_by`, so nothing live meets it."""
+        assert _provenance_reads(
+            "from models import CustomField\n"
+            "rows = db.query(CustomField).filter_by(created_by_user_id=1).all()\n"
+        ) == ["probe.py:2 (created_by_user_id)"]
 
 
 class TestTheBoundsActuallyRefuse:
@@ -2030,7 +4776,8 @@ class TestNoDatabaseFoldIsComparedAgainstAPythonFold:
 
         comparisons = [node for node in ast.walk(tree) if isinstance(node, ast.Compare)]
 
-        assert comparisons and self._folds_in_sql(comparisons[0].left)
+        assert comparisons
+        assert self._folds_in_sql(comparisons[0].left)
 
 
 class TestOnlyOneHelperTurnsForeignKeysOff:
@@ -2574,9 +5321,11 @@ class TestEveryEnumColumnIsConstrainedOrExemptWithAReason:
         construction. A guard whose premise is prose is a guard at the weakest
         rung this repository has a name for.
 
-        One of three arms, and the one that sees the database at run time. The
-        other two are the assertion in `conftest._schema_once` and the test
-        below.
+        One of four arms, and the one that sees the database at run time. The
+        others are the assertion in `conftest._schema_once`, the test below, and
+        `tests/test_schema.py::TestTheSchemaTheApplicationBootsIsTheRevisions`,
+        which compares the schema two boots end up with and is the arm a module
+        executing its own DDL was outside.
         """
         _require_a_migrated_database()
 
@@ -3499,7 +6248,7 @@ class TestAnAddressIsServedOnlyWhereItIsNamed:
                     model.model_json_schema(mode=mode)
                     for mode in ("validation", "serialization")
                 ]
-            except Exception as error:  # noqa: BLE001  (reported, never skipped)
+            except Exception as error:  # noqa: BLE001  reported, never skipped
                 unreadable.append(f"{name}: {type(error).__name__}: {error}")
                 continue
             if any(self._serves_an_address(schema) for schema in schemas):
@@ -3666,12 +6415,12 @@ class TestEveryTargetResolvesToADoorAndAReader:
         function knows.
         """
         readable = targets.SEEDED[CatalogueSource.LOC]
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="answers a search and open_library reads none"):
             metadata.resolve(
                 dataclasses.replace(readable, reader=targets.Reader.OPEN_LIBRARY)
             )
         bespoke = targets.SEEDED[CatalogueSource.OPEN_LIBRARY]
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="answers a lookup and marc_gnd reads none"):
             metadata.resolve(
                 dataclasses.replace(bespoke, reader=targets.Reader.MARC_GND)
             )
@@ -3784,7 +6533,7 @@ def test_every_seeded_source_is_covered_by_a_silencer():
                 continue
             try:
                 httpx.get(target.base_url, params={"probe": "1"})
-            except Exception as error:  # respx raises its own assertion type
+            except Exception as error:  # noqa: BLE001  respx raises its own assertion type
                 unanswered.append(f"{target.source.value}: {error!r}"[:120])
     assert not unanswered, (
         "these seeded sources are not answered by `silence_catalogues`, so a "
@@ -3814,16 +6563,20 @@ class TestNoModuleHardCodesASourceOrder:
     exemption: it is a `frozenset` and says which sources are docked a point,
     not in what order.
 
-    Five exemptions over six names, each a deliberate table that something
-    else pins. The counts differ because one bullet covers the two dispatch
-    tables together:
+    Five exemptions over five names, each a deliberate table that something
+    else pins. One name each, and the bullets are the list:
 
     * `sources.DEFAULT_ORDER`, the seeded order itself.
     * `metadata._MATCH_PRECEDENCE`, which source is believed about a shared
-      field, deliberately not reachable from the settings list, and
-      `metadata._BESPOKE_LOOKUPS` beside it. This is the bullet the count below
-      means by covering two names, and naming the second is what stops the
-      sentence explaining an arithmetic nobody can check against it.
+      field, deliberately not reachable from the settings list.
+
+      **The bespoke lookup table was exempted here and its entry is gone
+      because the table is**, which is recorded rather than quietly dropped
+      because the reason is the same one `_METERED_SEARCHES` is unexempted for.
+      It split into `_FREE_LOOKUPS` and `_KEYED_LOOKUPS`, one entry each, so
+      neither is ever two or more sources and neither is reported.
+      `test_dropping_an_exemption_surfaces_only_its_own_literal` is what said
+      so: with the entry kept, dropping it surfaced nothing.
     * `targets.SEEDED`, the eleven catalogue rows. **A mapping consulted by key**,
       the narrower claim `SERVES_GROUPS` makes: `metadata` reaches it with
       `SEEDED[name]`, and the four derivations in `sources.py` build
@@ -3900,7 +6653,7 @@ class TestNoModuleHardCodesASourceOrder:
     #: Where an ordered literal of sources is still allowed, by module and name.
     ALLOWED = {
         "sources.py": {"DEFAULT_ORDER", "MEASURED", "TAIL_MARGINAL"},
-        "metadata.py": {"_MATCH_PRECEDENCE", "_BESPOKE_LOOKUPS"},
+        "metadata.py": {"_MATCH_PRECEDENCE"},
         # The literal is inline in the `MappingProxyType` call, so the exempt
         # name and the literal are the same assignment again. Naming the view
         # when it wrapped a separate private dict exempted nothing, because a
@@ -4116,13 +6869,18 @@ def _source_named(
     both were invisible. The first is the aliased-import shape this repository
     has already been caught by once.
 
-    **The cost is a false positive, and it stopped being latent.** Any attribute
-    whose name is a member counts, so an unrelated enum with a colliding member
-    is reported. This paragraph used to say no enum collided and that the cost
-    was therefore hypothetical; `targets.Reader` collides on `OPEN_LIBRARY` and
-    `GOOGLE_BOOKS`, because a reader is named after the one catalogue it reads,
-    and `metadata._BESPOKE_LOOKUPS` is reported for it. That is the exemption in
-    `ALLOWED` and it is a false positive rather than an order.
+    **The cost is a false positive, and it is real rather than hypothetical
+    whether or not anything is currently reported.** Any attribute whose name is
+    a member counts, so an unrelated enum with a colliding member is reported.
+    `targets.Reader` collides on `OPEN_LIBRARY` and `GOOGLE_BOOKS`, because a
+    reader is named after the one catalogue it reads, and a literal naming two
+    of those readers in order is reported as an order of two sources.
+
+    **No literal in the tree is one today, and that is weaker than it reads
+    as**: the cost is unobserved rather than absent, and `ALLOWED` holds nothing
+    for it. Every reader keyed table is below the two source floor. The next one
+    that is not is reported, and whoever writes it meets this paragraph rather
+    than a surprise.
 
     It is still the right trade, because the alternative is resolving aliases by
     following imports, and because a false positive fails loudly and is cleared
@@ -4557,16 +7315,17 @@ class TestOneReaderPerAmbiguousSubfield:
     **This class no longer guards which field is passed, and that is the
     correction rather than a narrowing.** Its first version counted **readers of
     the subfield** while its docstring claimed to enforce "a subject field
-    only", so `_subject_vocabulary(fields["082"][0])` was legal, was the exact
+    only", so `fields["082"][0].subject_vocabulary()` with no tag was legal, was the exact
     failure described, and left this green. That half is now the signature:
-    `metadata._subject_vocabulary` takes the tag and raises outside
+    `marc_fields.Subfields.subject_vocabulary` takes the tag and raises outside
     `_DNB_SUBJECT_TAGS`, which no source scan can be evaded past. What is left
     here is the half a scan can do, which is that nothing else reads the
     subfield at all.
 
     **It matches the constant, not a list of spellings.** The first version
     enumerated `get`, `all` and a subscript, "three spellings because
-    `_Subfields` offers three". `_Subfields` subclasses `dict`, so it offers
+    `Subfields` offers three". `marc_fields.Subfields` subclasses `dict`, so it
+    offers
     every dict reader: measured against that version, **8 of 10** shapes
     carrying a literal `"2"` went unreported, including `e.pop("2", None)`,
     `e.setdefault("2", None)`, `dict.get(e, "2")`, `getattr(e, "get")("2")`,
@@ -4584,9 +7343,9 @@ class TestOneReaderPerAmbiguousSubfield:
     set cannot see a second site that reports the same qualified name, and a
     method sharing a module level function's name is the ordinary shape of that,
     not a contrived one. Measured by appending a `class _Reader` with its own
-    `_subject_vocabulary` to `metadata.py` in memory: the set form compared equal
+    `subject_vocabulary` to `marc_fields.py` in memory: the set form compared equal
     to `SITES` with the second reader present, and the list form reported
-    `metadata._subject_vocabulary` twice. So the count is load bearing and the
+    `marc_fields.subject_vocabulary` twice. So the count is load bearing and the
     comparison is on sorted **lists**.
 
     **Identity is the path, not `path.stem`.** That is the same defect one level
@@ -4622,7 +7381,7 @@ class TestOneReaderPerAmbiguousSubfield:
     #: stems.
     SITES = (
         ("marc.py", "_subject_fields"),
-        ("metadata.py", "_subject_vocabulary"),
+        ("marc_fields.py", "subject_vocabulary"),
     )
 
     #: The subfield whose meaning depends on the field it sits in.
@@ -4821,33 +7580,33 @@ class TestTheVocabularyReaderRefusesTheWrongField:
     """The half a source scan cannot do, asserted on the function itself.
 
     `TestOneReaderPerAmbiguousSubfield` used to claim this and could not deliver
-    it. `metadata._subject_vocabulary` takes the tag, so the check runs on every
-    call and no spelling gets past it.
+    it. `marc_fields.Subfields.subject_vocabulary` takes the tag, so the check
+    runs on every call and no spelling gets past it.
     """
 
-    ENTRY = metadata._Subfields((("a", "Ancient history"), ("2", "21")))
+    ENTRY = marc_fields.Subfields((("a", "Ancient history"), ("2", "21")))
 
     def test_a_subject_tag_is_read(self):
-        assert metadata._subject_vocabulary("650", self.ENTRY) == "21"
+        assert self.ENTRY.subject_vocabulary("650") == "21"
 
     def test_a_dewey_field_raises_rather_than_answering(self):
         """`082 $2` is the Dewey edition. This is the call the old docstring
         described as impossible while nothing stopped it."""
         with pytest.raises(ValueError, match="082"):
-            metadata._subject_vocabulary("082", self.ENTRY)
+            self.ENTRY.subject_vocabulary("082")
 
     def test_every_subject_tag_this_app_reads_is_accepted(self):
         """Membership is `_DNB_SUBJECT_TAGS` rather than a second list, so a tag
         added there is admitted here in the same edit. Asserted over the whole
         tuple, so a divergence cannot hide in the one tag nobody tried."""
-        for tag in metadata._DNB_SUBJECT_TAGS:
-            assert metadata._subject_vocabulary(tag, self.ENTRY) == "21", tag
+        for tag in marc_fields._DNB_SUBJECT_TAGS:
+            assert self.ENTRY.subject_vocabulary(tag) == "21", tag
 
     def test_the_two_other_callers_pass_a_tag_this_accepts(self):
-        """`_k10plus_record` and `marc._extra_headings` both pass `650` as a
+        """`metadata._k10plus_record` and `marc._extra_headings` both pass `650` as a
         literal. If that stops being a member, both raise on every record, and
         this says so at the rule rather than in a traceback."""
-        assert "650" in metadata._DNB_SUBJECT_TAGS
+        assert "650" in marc_fields._DNB_SUBJECT_TAGS
 
 
 class TestEveryPythonFileCompilesWithoutAWarning:
@@ -5030,7 +7789,8 @@ class TestEveryPythonFileCompilesWithoutAWarning:
         # group non empty, plus the file making the assertion, rather than a
         # floor: a literal count here is the defect this class's docstring
         # records, and one that has drifted low never fails.
-        assert set(_python_sources()) and set(_test_sources())
+        assert set(_python_sources())
+        assert set(_test_sources())
         assert Path(__file__).resolve() in {path.resolve() for path in walked}
 
     @pytest.mark.parametrize(
@@ -5149,60 +7909,6 @@ class TestEveryPythonFileCompilesWithoutAWarning:
             fixture.read_text(encoding="utf-8")
 
 
-#: The patterns in `.gitignore`, each with whether it is anchored to the root.
-#:
-#: **This file is the repository's own statement of what is not source**, it is
-#: what `git` itself consults, and it is versioned, so a rule derived from it
-#: moves when the repository does. That is the property a list of directory
-#: names beside a walk cannot have.
-#:
-#: **Asking `git` would be better and is not available.** Measured 2026-09-06 in
-#: the pod the suites actually run in: no `git` binary, and no `.git`, because
-#: the runner ships a tar that excludes it. A rule calling `git ls-files` there
-#: is a rule that fails or, worse, quietly answers nothing.
-#:
-#: **A pattern this cannot evaluate exactly raises, rather than being
-#: approximated in either direction.** Approximating it wide drops a versioned
-#: file from the walk, which is the defect the walk exists to stop. Approximating
-#: it narrow walks a directory the repository ignores, which is how the publish
-#: tooling's own output came to be read as source. So the refusal is a class and
-#: not a list of forms: anything the two arms below cannot decide, which today
-#: means a negation, a `**`, and a wildcard in an anchored pattern, because that
-#: arm compares text rather than matching.
-def _ignore_patterns(root: Path) -> list[tuple[str, bool]]:
-    ignore_file = root / ".gitignore"
-    assert ignore_file.is_file(), f"no .gitignore at {root}, so the walk has no rule"
-    patterns: list[tuple[str, bool]] = []
-    for line in ignore_file.read_text(encoding="utf-8").splitlines():
-        entry = line.strip()
-        if not entry or entry.startswith("#"):
-            continue
-        # A pattern with a slash left in it after the markers come off is
-        # anchored to the root, which is git's own rule and the difference
-        # between `backend/data/` meaning that one directory and meaning any
-        # `data` anywhere.
-        anchored = entry.startswith("/")
-        entry = entry.strip("/")
-        anchored = anchored or "/" in entry
-        # The anchored arm compares text rather than matching, so a wildcard
-        # there would read as "never matches" instead of raising. Refused as a
-        # class, by the characters, rather than as two more names beside `!` and
-        # `**`: naming forms one at a time is the shape this whole walk replaced.
-        assert "!" not in entry and "**" not in entry and not (
-            anchored and set(entry) & set("*?[")
-        ), f"unsupported .gitignore form, teach this walk about it: {entry}"
-        patterns.append((entry, anchored))
-    return patterns
-
-
-def _is_ignored(relative: Path, patterns: list[tuple[str, bool]]) -> bool:
-    text = str(relative)
-    return any(
-        (text == pattern or text.startswith(f"{pattern}/"))
-        if anchored
-        else any(fnmatch(part, pattern) for part in relative.parts)
-        for pattern, anchored in patterns
-    )
 
 
 #: Every Markdown file this repository versions.
@@ -5246,7 +7952,7 @@ def _is_ignored(relative: Path, patterns: list[tuple[str, bool]]) -> bool:
 #: rather than only over this one.
 def _markdown_sources(root: Path | None = None) -> list[Path]:
     root = BACKEND.parent if root is None else root
-    patterns = _ignore_patterns(root)
+    patterns = ignore_patterns(root / ".gitignore", refuse_empty=False)
     found: list[Path] = []
     for directory, subdirectories, files in os.walk(root):
         here = Path(directory)
@@ -5254,15 +7960,76 @@ def _markdown_sources(root: Path | None = None) -> list[Path]:
             name
             for name in subdirectories
             if not name.startswith(".")
-            and not _is_ignored((here / name).relative_to(root), patterns)
+            and not is_ignored((here / name).relative_to(root), patterns, is_dir=True)
         ]
         found += [
             here / name
             for name in files
             if name.endswith(".md")
-            and not _is_ignored((here / name).relative_to(root), patterns)
+            and not is_ignored((here / name).relative_to(root), patterns, is_dir=False)
         ]
     return sorted(found)
+
+
+def _floor_from_a_constructed_parse(root: Path, scratch: Path) -> set[Path]:
+    """The two globs the Markdown walk replaced, minus the members an ignore entry
+    that names a **file** in them excludes, read through a parse built here.
+
+    **Why the floor may not come from the parse the walk uses.** A ratchet whose
+    floor and subject are one parse cannot see an ignore file the walk stopped
+    understanding: the floor is subtracted away with the walk and the inequality
+    holds over nothing. Built here, the floor survives its subject.
+
+    **Entries are selected by what the parsed entry matches, never by how the line
+    is spelled.** Keeping the lines that end in `.md` looked equivalent and is a
+    false refusal: `notes-*` is an entry this walk honours correctly, it is not
+    spelled `.md`, and dropping it from the floor reddens the ratchet while the
+    walk is right. So a line is kept when its own parse matches a member as a file
+    and matches no directory on the way to it.
+
+    **The directory test is what keeps the rework worth having.** An entry naming a
+    directory, `docs/`, matches every document under it as a file too, by the
+    subtree branch of the matcher. Admitting it would subtract the whole
+    documentation tree from the floor, which is exactly the shrink this function
+    exists to refuse, so an entry that matches a directory on the path is left
+    outside the filter and the members it took stay in the floor.
+
+    **What it leaves out, stated rather than bounded.** Both sides still share the
+    matcher, so a defect in the matcher moves floor and walk together and is caught
+    by the fixture arms over `_markdown_sources`, not here. A line this walk
+    refuses outright names nothing in the floor, because the walk cannot honour it
+    either. And an entry that ignores a member as a genuine file leaves with the
+    walk, which is a correct green: the member is ignored and is not walked.
+
+    `scratch` is a directory this function may write one ignore file into, per
+    line. It is a parameter so the whole thing can be driven over a fixture tree,
+    which is what the two arms below do: a floor that cannot be driven over a
+    fixture is on the measured once rung, whatever its docstring says.
+    """
+    region = {
+        path.relative_to(root)
+        for path in [*root.glob("*.md"), *root.glob("docs/*.md")]
+    }
+    one_line = scratch / "one-line" / ".gitignore"
+    one_line.parent.mkdir(parents=True, exist_ok=True)
+    excluded: set[Path] = set()
+    for line in (root / ".gitignore").read_text(encoding="utf-8-sig").splitlines():
+        one_line.write_text(f"{line}\n", encoding="utf-8")
+        try:
+            parsed = ignore_patterns(one_line, refuse_empty=False)
+        except SystemExit:
+            continue
+        if not parsed:
+            continue
+        for member in region:
+            names_a_directory = any(
+                is_ignored(parent, parsed, is_dir=True)
+                for parent in member.parents
+                if parent != Path(".")
+            )
+            if is_ignored(member, parsed, is_dir=False) and not names_a_directory:
+                excluded.add(member)
+    return region - excluded
 
 
 def _fence_lines(text: str) -> list[int]:
@@ -5305,7 +8072,9 @@ class TestEveryMarkdownFileHasBalancedCodeFences:
         odd = {name: n for name, n in counts.items() if n % 2}
         assert odd == {}, f"{odd}, of {len(counts)} files walked"
 
-    def test_the_walk_never_narrows_below_the_globs_it_replaced(self) -> None:
+    def test_the_walk_never_narrows_below_the_globs_it_replaced(
+        self, tmp_path: Path
+    ) -> None:
         """Anti vacuity, as a ratchet. A walk that returned nothing would pass
         the rule above in silence, which is the shape this repository calls an
         instrument that cannot see the failure reporting its absence, and the
@@ -5318,22 +8087,107 @@ class TestEveryMarkdownFileHasBalancedCodeFences:
 
         **The floor is the old globs minus what the repository ignores**, and
         leaving that out made this test green only while a checkout happened to
-        hold no ignored root document. The wave plan and the technology
-        evaluation beside it are both root Markdown, so they sat inside the old
-        globs and are deliberately outside the walk now: on a checkout carrying
-        either, this failed while nothing was wrong.
+        hold no ignored root document. A wave's own working documents are root
+        Markdown, so they sat inside the old globs and are deliberately outside
+        the walk now: on a checkout carrying one, this failed while nothing was
+        wrong.
+
+        **That exclusion comes from a parse this arm constructs, and it used to
+        come from the one under test.** The comment here said refusing an empty
+        parse armed the comparison. It does not: an ignore file this walk stopped
+        understanding subtracts the floor away with the walk, and a floor that
+        shrank with its subject bounds nothing. Measured: a parse weakened rather
+        than emptied walked 54 files against a floor that stayed at 22 and passed.
+
+        **The construction, what it selects and what it leaves out, are at
+        `_floor_from_a_constructed_parse`**, and so is the reason it is a function
+        taking a root rather than a few lines here: a floor nothing can drive over a
+        fixture is a floor nothing observes. The two arms under this one are what
+        observe it, over the one shape where the two floors differ.
+
+        **What this arm still cannot see is a walk that grew.** Containment does not
+        look for it, and no second instrument for what the repository versions
+        exists in the pod the suites run in.
         """
         repo = BACKEND.parent
-        patterns = _ignore_patterns(repo)
+        # The repository's own ignore file still parses to something. This used to
+        # be described as what armed the comparison below, which it never was; it
+        # is kept because nothing else asserts it over that file, `_markdown_sources`
+        # passing `refuse_empty=False` so a fixture may hand it a silent one.
+        assert ignore_patterns(repo / ".gitignore", refuse_empty=True)
+        replaced = _floor_from_a_constructed_parse(repo, tmp_path)
         walked = {path.relative_to(repo) for path in _markdown_sources()}
-        replaced = {
-            path.relative_to(repo)
-            for path in [*repo.glob("*.md"), *repo.glob("docs/*.md")]
-            if not _is_ignored(path.relative_to(repo), patterns)
-        }
+        assert replaced, "the floor is empty, so this compares nothing"
         assert replaced <= walked, sorted(str(p) for p in replaced - walked)
         assert Path("CHANGELOG.md") in walked
         assert Path("docs/decisions.md") in walked
+
+    def test_the_floor_is_the_parse_this_arm_builds_and_not_the_one_under_test(
+        self, tmp_path: Path
+    ) -> None:
+        """The one shape where the two floors differ, so the construction is
+        observed rather than asserted.
+
+        An entry naming a directory takes every document under it out of a floor
+        computed from the walk's own parse, which is the inequality holding over a
+        population the parse had just emptied. The constructed floor keeps them, so
+        it is red and names them. On every live shape of this tree the two floors
+        are identical, which is why a mutant reverting the construction is invisible
+        without this arm.
+        """
+        root = tmp_path / "tree"
+        (root / "docs").mkdir(parents=True)
+        (root / ".gitignore").write_text("docs/\n", encoding="utf-8")
+        (root / "CHANGELOG.md").write_text("# a register\n", encoding="utf-8")
+        (root / "docs" / "decisions.md").write_text("# the other one\n", encoding="utf-8")
+
+        region = {
+            path.relative_to(root)
+            for path in [*root.glob("*.md"), *root.glob("docs/*.md")]
+        }
+        constructed = _floor_from_a_constructed_parse(root, tmp_path / "scratch")
+        shared = {
+            member
+            for member in region
+            if not is_ignored(
+                member,
+                ignore_patterns(root / ".gitignore", refuse_empty=True),
+                is_dir=False,
+            )
+        }
+        walked = {path.relative_to(root) for path in _markdown_sources(root)}
+
+        assert Path("docs/decisions.md") in constructed
+        assert Path("docs/decisions.md") not in shared
+        assert not constructed <= walked, "the constructed floor stopped ratcheting"
+        assert shared <= walked, (
+            "the floor taken from the parse under test no longer passes here, so "
+            "this arm has stopped showing the two apart"
+        )
+
+    def test_a_file_shaped_glob_the_walk_honours_does_not_move_the_floor(
+        self, tmp_path: Path
+    ) -> None:
+        """The false refusal the first version of that construction had.
+
+        Selecting the floor's lines by the spelling `.md` dropped `notes-*`, an
+        entry this walk honours exactly right, so the floor kept a document the walk
+        correctly does not and the ratchet was red over a tree with nothing wrong
+        with it. Both spellings are here because one ends in the suffix and one does
+        not, and only the second was caught by reading.
+        """
+        root = tmp_path / "tree"
+        root.mkdir()
+        (root / ".gitignore").write_text("notes-*\nscratch-*.md\n", encoding="utf-8")
+        (root / "CHANGELOG.md").write_text("# a register\n", encoding="utf-8")
+        (root / "notes-draft.md").write_text("# ignored, no suffix on the entry\n", encoding="utf-8")
+        (root / "scratch-two.md").write_text("# ignored, suffix on the entry\n", encoding="utf-8")
+
+        floor = _floor_from_a_constructed_parse(root, tmp_path / "scratch")
+        walked = {path.relative_to(root) for path in _markdown_sources(root)}
+
+        assert floor == {Path("CHANGELOG.md")}, sorted(str(p) for p in floor)
+        assert floor <= walked, sorted(str(p) for p in floor - walked)
 
     def test_a_file_the_repository_does_not_version_is_not_walked(
         self, tmp_path: Path
@@ -5369,10 +8223,76 @@ class TestEveryMarkdownFileHasBalancedCodeFences:
         # text equality lets them all through unchanged: measured, that mutation
         # was invisible to the entire suite. This one is ignored because an
         # unanchored pattern matches a name at any depth, which is git's rule and
-        # the only thing the segment walk in `_is_ignored` buys.
+        # the only thing the segment walk in the shared matcher buys.
         (tmp_path / "docs" / "scratch.md").write_text("# deeper than the pattern\n")
         walked = {str(path.relative_to(tmp_path)) for path in _markdown_sources(tmp_path)}
         assert walked == {"docs/real.md"}
+
+    def test_a_directory_only_rule_does_not_drop_a_versioned_file_of_that_name(
+        self, tmp_path: Path
+    ) -> None:
+        """git's trailing slash says directory, and throwing it away hides a
+        **file** of that name as well: `data/` is an unanchored directory only
+        entry in this repository's own ignore file, and a versioned file called
+        `data` would have gone with it. The wave's scratch directory is another,
+        named here by description because it is on the publish gate's strip list
+        and this file is published.
+
+        **The fixture's pattern carries a `.md` suffix because this walk collects
+        only `.md`**, which is also why the live defect is latent: every
+        unanchored directory only entry in this repository's ignore file is
+        suffix-less, so no file this walk can collect is named for one. A
+        consumer that stopped filtering by suffix would reach it.
+        """
+        (tmp_path / ".gitignore").write_text("notes.md/\n")
+        (tmp_path / "notes.md").mkdir()
+        (tmp_path / "notes.md" / "inner.md").write_text("# inside the ignored directory\n")
+        (tmp_path / "docs").mkdir()
+        (tmp_path / "docs" / "notes.md").write_text("# a file, and this pattern says directory\n")
+        walked = {str(path.relative_to(tmp_path)) for path in _markdown_sources(tmp_path)}
+        assert walked == {"docs/notes.md"}
+
+    def test_an_anchored_directory_only_rule_spares_a_file_at_that_path(
+        self, tmp_path: Path
+    ) -> None:
+        """The marker has two branches and the arm above reaches one. Discarding
+        it in the anchored branch survives that arm, and the anchored directory
+        only entries here include the backend data directory and the agent
+        worktrees.
+
+        **One path and one file, not the two the arm above uses**, because a
+        directory and a file cannot share a path: a `build/out.md/` holding
+        something, beside a file called `build/out.md`, cannot be built.
+        """
+        (tmp_path / ".gitignore").write_text("build/out.md/\n")
+        (tmp_path / "build").mkdir()
+        (tmp_path / "build" / "out.md").write_text("# a file where a directory is ignored\n")
+        (tmp_path / "docs").mkdir()
+        (tmp_path / "docs" / "real.md").write_text("# real\n")
+        walked = {str(path.relative_to(tmp_path)) for path in _markdown_sources(tmp_path)}
+        assert walked == {"build/out.md", "docs/real.md"}
+
+    def test_an_anchored_rule_stops_at_the_separator_rather_than_the_prefix(
+        self, tmp_path: Path
+    ) -> None:
+        """Written `startswith(pattern)` the anchored arm takes every sibling
+        whose name begins with the same characters, and it drops them **from the
+        walk**, silently. `backend/data` is an anchored entry in this
+        repository's own ignore file and `backend/database.py` is a versioned
+        module, so the consequence is live here rather than latent, which is why
+        this one is an arm where the shared matcher's other blind spots are a
+        paragraph.
+
+        The ignored directory's own file is beside the sibling so the fixture
+        also shows the prune still happening: without the separator the walk
+        returns nothing at all, not the two files.
+        """
+        (tmp_path / ".gitignore").write_text("docs/note/\n")
+        (tmp_path / "docs" / "note").mkdir(parents=True)
+        (tmp_path / "docs" / "note" / "inner.md").write_text("# inside the ignored directory\n")
+        (tmp_path / "docs" / "notes.md").write_text("# a sibling sharing the first characters\n")
+        walked = {str(path.relative_to(tmp_path)) for path in _markdown_sources(tmp_path)}
+        assert walked == {"docs/notes.md"}
 
     def test_a_hidden_directory_is_not_walked_even_where_the_ignore_file_is_silent(
         self, tmp_path: Path
@@ -5387,13 +8307,177 @@ class TestEveryMarkdownFileHasBalancedCodeFences:
         walked = {str(path.relative_to(tmp_path)) for path in _markdown_sources(tmp_path)}
         assert walked == {"README.md"}
 
-    def test_an_ignore_form_this_cannot_honour_is_refused(self, tmp_path: Path) -> None:
+    @pytest.mark.parametrize(
+        ("form", "term"),
+        [
+            ("!docs/keep.md", "a negation"),
+            ("build/**/out", "a `**`"),
+            ("build-*/out", "a wildcard inside an anchored pattern"),
+            ("a**b", "a `**`"),
+            ("\\!docs/keep.md", "a backslash"),
+            ("a\\*b", "a backslash"),
+            ("*", "a bare `*`"),
+            ("*/", "a bare `*`"),
+            ("/*", "a bare `*`"),
+        ],
+    )
+    def test_an_ignore_form_this_cannot_honour_is_refused(
+        self, tmp_path: Path, form: str, term: str
+    ) -> None:
         """Under-excluding walks something extra and says so; over-excluding
-        drops a versioned file in silence. A negation is the form that would do
-        the second, so it raises rather than being approximated."""
-        (tmp_path / ".gitignore").write_text("docs/\n!docs/keep.md\n")
-        with pytest.raises(AssertionError, match="unsupported .gitignore form"):
+        drops a versioned file in silence. These are the forms that would do the
+        second, so they raise rather than being approximated.
+
+        **Every term of the refusal, not the negation alone.** Two of them were
+        reachable only from the pipeline selftest, which the backend gate does not
+        collect because `testpaths` names this tree, so an edit dropping either
+        passed here and failed on a push. `a**b` is in the set because without it
+        one term is credited and never exercised: the anchored wildcard clause
+        refuses `build/**/out` and `build-*/out` on its own, so deleting the `**`
+        term leaves both still refused.
+
+        **The backslash forms are here because the negation term is a position
+        test**, and the two cases are not interchangeable. `\\!docs/keep.md` is
+        git's escape for a literal name and is what a containment test on `!` used
+        to refuse as a side effect; `a\\*b` carries no marker at all and reaches
+        the backslash term alone. Both fail narrow through `fnmatch`, which reads
+        the character as ordinary.
+
+        **The three spellings of a bare star are one term and three parses.** The
+        refusal tests the entry after the markers come off, so `*/` and `/*` arrive
+        at it as `*` by two different routes and neither is credited to the
+        anchored wildcard clause: `/*` reaches that clause too, `*/` does not, and
+        `*` reaches neither. What a star costs is at the refusal's own site.
+
+        **The message has to name the term, not only the entry.** Eight of these
+        nine came back in identical words, so the one a contributor is likeliest to
+        meet, a path spelled with backslashes, was told to teach the walk about a
+        form when the answer is a character. Asserted here rather than left to the
+        refusal's own comment, because a message nothing reads is prose.
+        """
+        (tmp_path / ".gitignore").write_text(f"docs/\n{form}\n")
+        with pytest.raises(SystemExit, match=re.escape("unsupported .gitignore form")) as refusal:
             _markdown_sources(tmp_path)
+        assert term in str(refusal.value), str(refusal.value)
+
+    @pytest.mark.parametrize(
+        ("entry", "parsed"),
+        [
+            ("notes!draft.md", ("notes!draft.md", False, False)),
+            ("/!draft.md", ("!draft.md", True, False)),
+            ("*.md.bak", ("*.md.bak", False, False)),
+            ("junit-*.xml", ("junit-*.xml", False, False)),
+        ],
+    )
+    def test_a_marker_character_away_from_its_position_is_a_literal(
+        self, tmp_path: Path, entry: str, parsed: tuple[str, bool, bool]
+    ) -> None:
+        """The other half of the refusal above, and the half an author does not
+        hunt for: what it must **not** refuse.
+
+        **The negation marker is the first character of a line and nowhere else.**
+        By containment, `notes!draft.md` is a hard failure over a file git
+        versions, which is the refusal's own failure direction inverted. `/!draft.md`
+        is the same rule read after the markers come off: git reads it as an
+        anchored literal, and a position test asked one line later sees the `!`
+        that the anchor strip has just moved into first place.
+
+        **A star away from being the whole entry is a literal too**, and by
+        containment three of this repository's own entries would refuse. Compared
+        against the parse's own output rather than through the matcher, because a
+        refusal that fired and a matcher that returned the same answer are
+        indistinguishable from a walk.
+        """
+        (tmp_path / ".gitignore").write_text(f"{entry}\n")
+        assert ignore_patterns(tmp_path / ".gitignore", refuse_empty=True) == [parsed]
+
+    def test_a_byte_order_mark_does_not_disarm_the_entry_behind_it(
+        self, tmp_path: Path
+    ) -> None:
+        """Read as plain `utf-8` the mark stays on the text, so the first entry
+        becomes a pattern beginning with a character no path holds. It matches
+        nothing, it is still counted, so the parse is non-empty and the empty
+        parse refusal never fires: whichever entry is on line 1 stops being
+        honoured in silence.
+
+        **Driven over a file this arm writes, and the mark is asserted to be in
+        it.** Latent in this repository today, so an arm reading the repository's
+        own ignore file would take its subject from that file's line order, which
+        is the arming-by-data shape this tree has already paid for twice. Two
+        entries, so the arm also says which of them the mark was in front of.
+        """
+        ignore_file = tmp_path / ".gitignore"
+        ignore_file.write_bytes("\ufeffnotes/\nkept.md\n".encode())
+        assert ignore_file.read_bytes().startswith(b"\xef\xbb\xbf"), (
+            "the fixture no longer carries a byte order mark, so it no longer "
+            "tells the two encodings apart"
+        )
+        assert ignore_patterns(ignore_file, refuse_empty=True) == [
+            ("notes", False, True),
+            ("kept.md", False, False),
+        ]
+
+    def test_an_anchored_entry_loses_its_marker_characters_and_keeps_its_anchor(
+        self, tmp_path: Path
+    ) -> None:
+        """The parse's own output, compared against a value rather than fed back
+        into the matcher.
+
+        **Every other arm over this rule reads the parse through the matcher**, so
+        a parse that mangles an entry and a matcher that mis-reads a sound one are
+        indistinguishable, and one normalisation had no pin at all: stripping only
+        the trailing slash leaves the leading one on the pattern, every arm and
+        every population stays green, and the entry stops being honoured.
+
+        **Its live subject is the publish gate's own output directory**, the one
+        entry in this repository's ignore file written with a leading slash. Losing
+        it puts the stripped tree that gate materialises into the corpus and into
+        both walks, which is the failure the shared rule's own docstring names. It
+        goes red only on a checkout where somebody has run the gate, so its arming
+        would otherwise be whether that happened.
+        """
+        (tmp_path / ".gitignore").write_text("/out/\ndeep/kept/\nplain\n")
+        assert ignore_patterns(tmp_path / ".gitignore", refuse_empty=True) == [
+            ("out", True, True),
+            ("deep/kept", True, True),
+            ("plain", False, False),
+        ]
+
+    def test_the_shared_rule_lets_no_call_site_answer_by_accident(self) -> None:
+        """`is_dir` and `refuse_empty` are keyword-only and have no default, and
+        the module's docstrings give both the same reason: a default is the answer
+        a call site forgets to give, a positional is the answer it gives without
+        reading, and either way a wrong answer drops a versioned file or leaves a
+        population unbounded, silently.
+
+        **The reason was written down and nothing enforced it.** A default added
+        to either failed nothing, and an arm asserting only that no default exists
+        stays green on a positional argument, which is the same hole one step over.
+        """
+        # Read off the function this asserts about rather than off a module
+        # name, so the arm cannot end up parsing a file the callers do not use.
+        source = inspect.getsourcefile(ignore_patterns)
+        assert source is not None
+        module = ast.parse(Path(source).read_text(encoding="utf-8"))
+        checked = {}
+        for node in module.body:
+            if not isinstance(node, ast.FunctionDef) or node.name.startswith("_"):
+                continue
+            checked[node.name] = sorted(
+                argument.arg for argument in node.args.kwonlyargs
+            )
+            assert not node.args.defaults, (
+                f"{node.name} carries a default, so a call site can leave the "
+                "answer to it"
+            )
+            assert not any(node.args.kw_defaults), (
+                f"{node.name} carries a default, so a call site can leave the "
+                "answer to it"
+            )
+        assert checked == {
+            "ignore_patterns": ["refuse_empty"],
+            "is_ignored": ["is_dir"],
+        }, checked
 
     def test_an_unbalanced_fence_is_reported(self, tmp_path: Path) -> None:
         fixture = tmp_path / "broken.md"
@@ -5467,7 +8551,7 @@ class TestAOneTimeCodeIsServedOnlyWhereItIsNamed:
                     model.model_json_schema(mode=mode)
                     for mode in ("validation", "serialization")
                 ]
-            except Exception as error:  # noqa: BLE001  (reported, never skipped)
+            except Exception as error:  # noqa: BLE001  reported, never skipped
                 unreadable.append(f"{name}: {type(error).__name__}: {error}")
                 continue
             if any(self._serves_a_code(schema) for schema in schemas):
@@ -6113,7 +9197,8 @@ class TestEverySchemeCheckListsItsOwnEnum:
         # rewritten to close. Those two are loud anyway, in
         # `test_each_one_lists_exactly_its_own_enum`, which is what makes the
         # pair sound rather than this assertion alone.
-        assert reported is not None and "permits" in reported
+        assert reported is not None
+        assert "permits" in reported
 
     def test_it_reads_the_clause_that_bounds_the_column(self):
         """Collection and extraction have to select the **same** clause.
@@ -6134,7 +9219,8 @@ class TestEverySchemeCheckListsItsOwnEnum:
 
         reported = self._disagreement("book_identifiers", decoy, "ck")
 
-        assert reported is not None and "permits" in reported
+        assert reported is not None
+        assert "permits" in reported
         # The clause that bounds the column, not the one that merely ends in
         # its name. Asserting the **values** rather than only that something
         # was reported: reading the decoy also reports, for the wrong reason,
@@ -6211,11 +9297,20 @@ class TestEveryTextCeilingBindsOnBytesToo:
     no Pydantic model, and that is exactly the path where the character
     inequality does not bind.
 
-    **Two arms close it and this accepts either.** A byte budget of four times
-    the character budget, four bytes being UTF-8's widest character. Or a clause
-    refusing a NUL outright, `instr(col, char(0)) = 0`, which
-    `catalogue_credentials` and `opds_servers` already carry beside a charset
-    rule. Naming one of the two would have made the other a violation.
+    **Two arms close it and a NUL refusal on its own is neither.** A byte
+    budget of four times the character budget, four bytes being UTF-8's widest
+    character. Or `instr(col, char(0)) = 0` **beside a charset rule confining
+    the value to characters SQLite stores in one byte**, which is the pair
+    `catalogue_credentials.source` and `opds_servers.credential_key` carry and
+    the reason `models.py` records those two as needing no budget.
+
+    **The NUL clause alone closes one of the two leaks and reads as though it
+    closed both.** It shuts the tail a NUL hides. It says nothing about a lead
+    byte, which `length()` counts as one character before skipping continuation
+    bytes without limit, so a single counted character carries as many bytes as
+    somebody writes and there is no NUL in the value for `instr` to find.
+    `test_a_lead_byte_carries_unbounded_bytes_into_one_character` measures that
+    on the engine this suite runs, rather than a figure here that nobody re-runs.
 
     **Floors are not in the class.** A NUL shortens the count, so `length(x) > 0`
     and `length(x) >= 40` become stricter on the same value rather than weaker,
@@ -6232,12 +9327,13 @@ class TestEveryTextCeilingBindsOnBytesToo:
     than passed over. The operator list is still here and is now load bearing in
     the other direction: getting it wrong fails loudly.
 
-    **`GLOB` charset rules are a different class and are deliberately outside
-    this rule**, stated so the boundary is a decision rather than a gap: GLOB is
-    a C string operation and stops at the first NUL too, but the threat is a
-    smuggled suffix in a value that reaches a query or a URL rather than an
-    unbounded write, and the arm is the `instr` one rather than a budget. The
-    ones that carry it bare are in the tracker.
+    **A `GLOB` charset rule is read here, and only as half of that second
+    arm.** What it contributes is that every character is one byte. What it
+    cannot contribute is anything past a NUL, `GLOB` being a C string operation
+    that stops at one exactly as `length()` does, which is why the pair is the
+    arm and neither half is. The other thing a NUL does to a `GLOB` rule, cut a
+    claim about the whole value down to a claim about a prefix, is a different
+    rule and is `TestEveryGlobRuleIsToldAboutTheNul`.
 
     **A ceiling written as a negated floor is outside it too, and that one is a
     gap rather than a class.** `NOT (length(a) > 60)` is a real ceiling and this
@@ -6463,6 +9559,51 @@ class TestEveryTextCeilingBindsOnBytesToo:
         terms = " + ".join(f"length(CAST({column} AS BLOB))" for column in columns)
         return f"{terms} <= {4 * ceiling}"
 
+    #: A charset rule that admits only characters SQLite stores in one byte.
+    #:
+    #: **Read rather than listed**, so the next column confined this way clears
+    #: without an edit here. Every property below is load bearing and each has
+    #: its own row in `CLEARANCES`: it is this **column**; the rule is a
+    #: **refusal**, so what it admits is the class it names; the class is
+    #: non empty and is **one** class and nothing else, which is what excluding
+    #: a bracket from the body buys; it is anchored at neither end,
+    #: `*[^...]*`, so it is about every character rather than the first or the
+    #: last; and **every character the class names is ASCII**, because a class
+    #: naming one wider character admits one and the bytes stop equalling the
+    #: characters.
+    #:
+    #: **The bracket exclusion is the whole of the soundness argument.** With a
+    #: greedy body, `*[^a-z]x[^a-z]*` reads as a single class: measured, one
+    #: counted character at 1,001 bytes with no NUL cleared its ceiling, which
+    #: is the defect this arm exists to refuse.
+    #:
+    #: **Asking the engine instead is unsound and is why the class text is read
+    #: rather than probed.** No finite set of wide probe characters separates
+    #: `[^a-z]` from a class naming one two byte character: that class refuses
+    #: every probe and admits the character it names. Reading the text is what
+    #: makes `.isascii()` a proof rather than a sample.
+    #:
+    #: **There is no third answer here and the default is the safe one**: a
+    #: conjunct this cannot read is not a confinement, so the ceiling is
+    #: reported, wanting the byte arm.
+    AN_ASCII_CONFINEMENT: Final = re.compile(
+        r"^(\w+) NOT GLOB '\*\[\^([^'\[\]]+)\]\*'$", re.IGNORECASE
+    )
+
+    @classmethod
+    def _confined_to_single_bytes(cls, column: str, conjuncts: list[str]) -> bool:
+        """Whether a conjunct here bounds this column's bytes by its characters.
+
+        **A conjunct, for the reason the NUL clause is one**: a charset rule
+        inside a disjunction binds on some rows and would clear a ceiling that
+        binds on all of them.
+        """
+        for conjunct in conjuncts:
+            read = cls.AN_ASCII_CONFINEMENT.match(conjunct.strip())
+            if read and read.group(1) == column and read.group(2).isascii():
+                return True
+        return False
+
     @staticmethod
     def _declared() -> dict[str, str]:
         constraints: dict[str, str] = {}
@@ -6503,10 +9644,15 @@ class TestEveryTextCeilingBindsOnBytesToo:
             ]
         conjuncts = cls._conjuncts(declared)
         for columns, ceiling in ceilings:
-            # **A conjunct, not a substring.** A NUL clause inside a disjunction
+            # **A conjunct, not a substring.** A clause inside a disjunction
             # binds on some rows and reads as a rule about all of them.
+            #
+            # **Both clauses, because each closes one leak and neither
+            # closes the other.** See this class's docstring.
             if all(
-                f"instr({column}, char(0)) = 0" in conjuncts for column in columns
+                f"instr({column}, char(0)) = 0" in conjuncts
+                and cls._confined_to_single_bytes(column, conjuncts)
+                for column in columns
             ):
                 continue
             # **`(?!\d)`, because containment prefix matches a number.**
@@ -6530,7 +9676,87 @@ class TestEveryTextCeilingBindsOnBytesToo:
     #: clean there for ever.
     CLEARANCES: Final = (
         ("length(text) <= 500", True),
-        ("length(text) <= 500 AND instr(text, char(0)) = 0", False),
+        # The NUL clause shuts the tail and leaves the lead byte, so on its
+        # own it clears nothing.
+        ("length(text) <= 500 AND instr(text, char(0)) = 0", True),
+        (
+            "length(text) <= 500 AND instr(text, char(0)) = 0 "
+            "AND text NOT GLOB '*[^a-z0-9_-]*'",
+            False,
+        ),
+        # The charset rule without the NUL clause: `GLOB` stops at the first
+        # NUL, so it is a rule about a prefix and the bytes past it are free.
+        ("length(text) <= 500 AND text NOT GLOB '*[^a-z0-9_-]*'", True),
+        # A class naming one character wider than ASCII admits one, and the
+        # bytes stop equalling the characters.
+        (
+            "length(text) <= 500 AND instr(text, char(0)) = 0 "
+            "AND text NOT GLOB '*[^a-z\u00e4]*'",
+            True,
+        ),
+        # Anchored at the start, so it is a rule about the first character
+        # rather than about every one.
+        (
+            "length(text) <= 500 AND instr(text, char(0)) = 0 "
+            "AND text NOT GLOB '[^a-z]*'",
+            True,
+        ),
+        # Inside a disjunction, so it binds on some rows and clears none.
+        (
+            "length(text) <= 500 AND instr(text, char(0)) = 0 "
+            "AND (page IS NULL OR text NOT GLOB '*[^a-z]*')",
+            True,
+        ),
+        # Two classes with pattern between them, which a greedy body read as
+        # one class. Measured on the engine: one counted character at 1,001
+        # bytes satisfies it, so it confines nothing.
+        (
+            "length(text) <= 500 AND instr(text, char(0)) = 0 "
+            "AND text NOT GLOB '*[^a-z]x[^a-z]*'",
+            True,
+        ),
+        # A positive rule admits what it matches rather than what it names, so
+        # the class says nothing about what the column may hold.
+        (
+            "length(text) <= 500 AND instr(text, char(0)) = 0 "
+            "AND text GLOB '*[^a-z]*'",
+            True,
+        ),
+        # A confinement on some other column.
+        (
+            "length(text) <= 500 AND instr(text, char(0)) = 0 "
+            "AND other NOT GLOB '*[^a-z]*'",
+            True,
+        ),
+        # Anchored at the end, so it is a rule about the last character.
+        (
+            "length(text) <= 500 AND instr(text, char(0)) = 0 "
+            "AND text NOT GLOB '*[^a-z]'",
+            True,
+        ),
+        # There is no empty class in GLOB: a `]` straight after the `^` is a
+        # literal member and the class is then unterminated, so the pattern
+        # matches nothing and the refusal admits every value. Either way this
+        # is not a confinement, and the reader must not take it for one.
+        (
+            "length(text) <= 500 AND instr(text, char(0)) = 0 "
+            "AND text NOT GLOB '*[^]*'",
+            True,
+        ),
+        # A bound on a **pair** wants both halves confined, the shape
+        # `digital_references` has. Only one of these is.
+        (
+            "length(a) + length(b) <= 100 "
+            "AND instr(a, char(0)) = 0 AND instr(b, char(0)) = 0 "
+            "AND a NOT GLOB '*[^a-z]*'",
+            True,
+        ),
+        (
+            "length(a) + length(b) <= 100 "
+            "AND instr(a, char(0)) = 0 AND instr(b, char(0)) = 0 "
+            "AND a NOT GLOB '*[^a-z]*' AND b NOT GLOB '*[^a-z]*'",
+            False,
+        ),
         # Binds on no row carrying a page, and cleared the ceiling anyway.
         ("length(text) <= 500 AND (page IS NULL OR instr(text, char(0)) = 0)", True),
         ("length(text) <= 500 AND length(CAST(text AS BLOB)) <= 2000", False),
@@ -6614,17 +9840,111 @@ class TestEveryTextCeilingBindsOnBytesToo:
         assert not self._has_a_top_level_or("(a = 1 OR b = 2) AND c = 3")
         assert not self._has_a_top_level_or("length(a) <= 60")
 
-    def test_every_character_ceiling_carries_a_byte_arm_or_refuses_a_nul(self) -> None:
-        offenders: list[str] = []
+    #: What this rule reports today, written out as it reports it.
+    #:
+    #: **A register of open defects, not an exemption list**, and the equality
+    #: below is the difference: a constraint given its arm fails this until its
+    #: row is deleted, and a constraint that starts offending fails on arrival.
+    #: Nothing here is skipped, and the offence is compared rather than the
+    #: name, so a second defect on the same constraint fails too.
+    #:
+    #: **Empty, which is the state it is meant to reach.** The rule is
+    #: unconditional while it stays that way, and a constraint that starts
+    #: offending fails on arrival rather than being added here: a row is written
+    #: only where the defect is understood and the fix has an owner.
+    STILL_OPEN: Final[dict[str, list[str]]] = {}
 
-        for name, raw in self._declared().items():
-            offenders += self._offences(name, raw)
+    def test_every_character_ceiling_binds_on_bytes(self) -> None:
+        offences = {
+            name: found
+            for name, raw in self._declared().items()
+            if (found := self._offences(name, raw))
+        }
 
-        assert not offenders, (
-            "these bound a text column by characters, which SQLite counts only "
-            "up to the first NUL, so a Core insert walks past them: "
-            + "; ".join(offenders)
+        assert offences == self.STILL_OPEN, (
+            "these bound a text column by characters, which SQLite counts one "
+            "per lead byte and only as far as the first NUL, so a Core insert "
+            "walks past them. A constraint here and not in STILL_OPEN is new; "
+            "one in STILL_OPEN and not here is fixed and loses its row: "
+            + "; ".join(one for found in offences.values() for one in found)
         )
+
+    def test_a_lead_byte_carries_unbounded_bytes_into_one_character(self) -> None:
+        """Why a NUL clause is not a byte arm, asked of the engine.
+
+        `length()` counts the lead byte and then skips continuation bytes with
+        no limit, so the character count is 9 whatever follows and `instr` has
+        no NUL to find. The value is built as bytes and cast, because this one
+        cannot be written as a Python string: it is not valid UTF-8, which is
+        the whole of the point.
+
+        **Measured here rather than written into a docstring**, the form this
+        claim took while it was the opposite of true.
+        """
+        import sqlite3
+
+        smuggled = b"http://x" + b"\xc0" + b"\xbf" * 10000
+        value = f"CAST(x'{smuggled.hex()}' AS TEXT)"
+        connection = sqlite3.connect(":memory:")
+
+        try:
+            counted, stored, nul = connection.execute(
+                f"SELECT length({value}), length(CAST({value} AS BLOB)), "
+                f"instr({value}, char(0))"
+            ).fetchone()
+        finally:
+            connection.close()
+
+        assert (counted, stored, nul) == (9, 10009, 0)
+
+    #: One character each, and each **decoding** to a codepoint at or above
+    #: 0x80: a two, three and four byte character, an overlong sequence, and a
+    #: stray continuation byte.
+    #:
+    #: **The last is one byte on disk and is here for the decode rather than
+    #: for its width**, which is the property an ASCII class actually refuses.
+    #: Naming the tuple for the width would have made one of its five rows a
+    #: lie.
+    DECODING_ABOVE_ASCII: Final = (
+        b"\xc3\xa4",
+        b"\xe2\x82\xac",
+        b"\xf0\x9f\x98\x80",
+        b"\xc0\xbf",
+        b"\xbf",
+    )
+
+    def test_an_ascii_charset_rule_refuses_what_decodes_above_ascii(self) -> None:
+        """The engine end of the second arm, under the reader's own argument.
+
+        **This is a sanity check and not the proof**, and saying so is the
+        point: a finite set of characters cannot stand in for every value,
+        which is the same reason `AN_ASCII_CONFINEMENT` reads the class text
+        rather than probing it. What this pins is the decode a byte bound rests
+        on, that a wide character, an overlong sequence and a stray
+        continuation byte alike land at or above 0x80 and so outside an ASCII
+        class.
+
+        **The admitted case is what stops it passing against a rule that
+        refuses everything**, `NOT GLOB '*'` included.
+        """
+        import sqlite3
+
+        def admits(raw: bytes) -> bool:
+            return bool(
+                connection.execute(
+                    f"SELECT CAST(x'{raw.hex()}' AS TEXT) NOT GLOB '*[^a-z0-9_-]*'"
+                ).fetchone()[0]
+            )
+
+        connection = sqlite3.connect(":memory:")
+
+        try:
+            admitted = [raw for raw in self.DECODING_ABOVE_ASCII if admits(raw)]
+            ascii_passes = admits(b"abc-9_")
+        finally:
+            connection.close()
+
+        assert (admitted, ascii_passes) == ([], True)
 
     #: One spelling per row, and what this rule must make of it.
     #:
@@ -6681,9 +10001,11 @@ class TestEveryTextCeilingBindsOnBytesToo:
         if expected is None:
             assert (ceilings, unreadable) == ([], [])
         elif expected == self.UNREADABLE:
-            assert unreadable and not ceilings
+            assert unreadable
+            assert not ceilings
         else:
-            assert ceilings == [expected] and not unreadable
+            assert ceilings == [expected]
+            assert not unreadable
 
     def test_the_rule_is_reading_the_constraints_it_thinks_it_is(self) -> None:
         """A matcher that stopped matching would retire the rule above in silence.
@@ -6701,6 +10023,212 @@ class TestEveryTextCeilingBindsOnBytesToo:
         assert self._wanted(["a", "b"], 10) == (
             "length(CAST(a AS BLOB)) + length(CAST(b AS BLOB)) <= 40"
         )
+
+
+class TestEveryGlobRuleIsToldAboutTheNul:
+    """`GLOB` reads a value as far as its first NUL, so a rule resting on one
+    may be a rule about a prefix.
+
+    Measured in `test_a_smuggled_suffix_satisfies_a_charset_rule`: `'abc'`, a
+    NUL and `'ZZZ!!'` satisfies `NOT GLOB '*[^a-z0-9_-]*'`, and what lands on
+    disk carries the exclamation marks. `ck_catalogue_targets_indexes` was
+    defeated exactly that way, and `ck_opds_servers_credential_key` records the
+    same value reaching a URL path a client builds.
+
+    **What is defeated is derived from the pattern rather than listed, and the
+    property is a trailing `*` rather than a prefix.** A trailing `*` absorbs
+    any suffix, so a positive pattern carrying one matches the whole value
+    whenever it matches a prefix of it: truncation can only make such a clause
+    fail, never pass. `*.pdf*` is a containment claim rather than a prefix claim
+    and is exempt for that same reason, which is why the rule is written on the
+    `*` and not on the word prefix. Anything else, a refusal above all, claims
+    something about the whole value that a NUL falsifies in silence, so it needs
+    `instr(col, char(0)) = 0` as a top level conjunct of the same constraint.
+
+    **A clause that wants a NUL clause and sits in a constraint with a top
+    level `OR` is reported and cannot be cleared**, because no clause in such a
+    constraint binds on every row, the NUL clause included. The answer is to
+    parenthesise it, which is what makes it readable to a person too. **An
+    exempt clause stays exempt there**, claiming nothing a NUL can falsify
+    whichever rows it binds on, which is why the exemption is read first.
+
+    **A clause this cannot read is reported**, which is the armour
+    `TestEveryTextCeilingBindsOnBytesToo` has for the same reason: without a
+    third answer, the next spelling of a `GLOB` clause is a silent pass. The
+    count is taken off the word rather than off the parse, so a clause the
+    pattern misses is a clause this knows it missed. Counting the word also
+    finds one inside a string literal and reports it, which is loud rather than
+    wrong. The one mis reading left errs towards reporting: a qualified column
+    name reads as its last segment and asks for a NUL clause on that.
+
+    **`LIKE` is the same C string operation with the same truncation and is
+    outside this rule**, stated so the boundary is a decision rather than a
+    gap. Nothing in this schema uses it, and neither the word count nor the
+    clause pattern would see one if it did.
+
+    **This is about what a `GLOB` rule claims. Whether it bounds bytes is the
+    other rule**, which reads the same clauses for a different property and is
+    the one that clears a ceiling.
+    """
+
+    #: `<column> [NOT] GLOB '<pattern>'`, the only shape this schema writes.
+    #:
+    #: **A doubled quote is read rather than stopped at**, and the difference
+    #: was a silent clearance: with the body `[^']*`, `col GLOB 'a*''b'`
+    #: captured `a*`, which ends in `*` and was exempted, while the real
+    #: pattern ends in `b` and is exactly the shape a NUL can smuggle past.
+    #: That was the one mis reading that erred towards clearing.
+    A_GLOB_CLAUSE: Final = re.compile(
+        r"(\w+)\s+(NOT\s+)?GLOB\s+'((?:[^']|'')*)'", re.IGNORECASE
+    )
+
+    #: The word itself, which is how many clauses there are to read.
+    THE_WORD: Final = re.compile(r"\bGLOB\b", re.IGNORECASE)
+
+    @classmethod
+    def _offences(cls, name: str, raw: str) -> list[str]:
+        """What one constraint's text is doing wrong, if anything.
+
+        Driven against text rather than only over `Base.metadata`, for the
+        reason the ceiling rule is: every constraint in the tree passes, so a
+        branch that cleared too readily would read clean there for ever.
+        """
+        declared = TestEveryTextCeilingBindsOnBytesToo._canonical(raw)
+        clauses = cls.A_GLOB_CLAUSE.findall(declared)
+        unread = len(cls.THE_WORD.findall(declared)) - len(clauses)
+        offences: list[str] = []
+        if unread:
+            offences.append(
+                f"{name}: this rule cannot read {unread} of its GLOB clauses, so "
+                "it is skipping them rather than clearing them"
+            )
+
+        conjuncts = TestEveryTextCeilingBindsOnBytesToo._conjuncts(declared)
+        conditional = TestEveryTextCeilingBindsOnBytesToo._has_a_top_level_or(declared)
+        for column, negated, quoted in clauses:
+            pattern = quoted.replace("''", "'")
+            if not negated and pattern.endswith("*"):
+                continue
+            if conditional:
+                # Nothing in such a constraint is a rule about every row, so no
+                # clause in it can be the NUL clause this one wants.
+                offences.append(
+                    f"{name}: `{column}` is bounded by a GLOB rule sharing a "
+                    "constraint with a top level OR, so nothing in it binds on "
+                    "every row"
+                )
+                continue
+            if f"instr({column}, char(0)) = 0" in conjuncts:
+                continue
+            # **The clause is quoted back as it is written**, doubled quote and
+            # all, rather than as this rule read it: a reader pastes that back
+            # into a constraint, and `'a*'b'` is not SQL.
+            offences.append(
+                f"{name}: `{column} {'NOT ' if negated else ''}GLOB '{quoted}'` "
+                "claims something a NUL cuts short, so it wants "
+                f"`instr({column}, char(0)) = 0`"
+            )
+        return offences
+
+    #: One constraint's text, and whether this rule must object to it.
+    CLAUSES: Final = (
+        ("source NOT GLOB '*[^a-z]*'", True),
+        ("source NOT GLOB '*[^a-z]*' AND instr(source, char(0)) = 0", False),
+        # A prefix claim, which truncation can only make fail.
+        ("base_url GLOB 'http://?*'", False),
+        # Positive and anchored at the end, so a NUL smuggles the suffix past
+        # it. Nothing in this schema is spelled this way yet.
+        ("name GLOB '*.pdf'", True),
+        ("name GLOB '*.pdf' AND instr(name, char(0)) = 0", False),
+        # The NUL clause inside a disjunction binds on some rows only.
+        (
+            "name NOT GLOB '*[^a-z]*' AND (page IS NULL OR instr(name, char(0)) = 0)",
+            True,
+        ),
+        # `AND` binds tighter than `OR`, so neither clause is about every row.
+        ("page = 1 OR name NOT GLOB '*[^a-z]*' AND instr(name, char(0)) = 0", True),
+        # The shape this cannot read. Reported rather than passed over.
+        ("name NOT GLOB other_column", True),
+        # A doubled quote inside the pattern. The real pattern ends in `b`, so
+        # a NUL can smuggle a suffix past it; reading the capture short made it
+        # end in `*` and exempted it.
+        ("name GLOB 'a*''b'", True),
+        ("name GLOB 'a*''b' AND instr(name, char(0)) = 0", False),
+        # An exempt clause in a constraint with a top level OR. The exemption
+        # is about the pattern rather than about which rows it binds on, so
+        # reading the OR first would report this.
+        ("page = 1 OR base_url GLOB 'http://?*'", False),
+        # Two clauses, one of them a prefix claim: the refusal still wants one.
+        (
+            "name GLOB 'opds-*' AND name NOT GLOB '*[^a-z]*'",
+            True,
+        ),
+    )
+
+    @pytest.mark.parametrize(("declared", "objects"), CLAUSES)
+    def test_what_a_glob_rule_needs_beside_it(
+        self, declared: str, objects: bool
+    ) -> None:
+        """Both answers and the third one, against text this builds.
+
+        Over `Base.metadata` every constraint passes, so a branch that exempted
+        too readily would read clean there for ever. Two of these shapes are
+        ones this schema does not hold: an end anchored positive pattern, and a
+        clause naming a column where a pattern should be.
+        """
+        assert bool(self._offences("ck_under_test", declared)) is objects
+
+    def test_every_glob_rule_reads_the_whole_value_it_claims_to(self) -> None:
+        """The sweep, and it cannot go vacuous in silence.
+
+        A pattern that stopped matching does not empty this: the unread counter
+        is taken off the word, so every clause it stopped reading is reported
+        here instead. Both detectors failing at once is what `CLAUSES` holds,
+        where one row needs the count and the rest need the parse. **A literal
+        floor over the live constraints is deliberately not the instrument**:
+        `docs/decisions.md` records one going stale in the direction that still
+        passes.
+
+        **What neither covers is `_declared()` going empty**, which would empty
+        this and every rule in both classes. The ceiling floor in
+        `test_the_rule_is_reading_the_constraints_it_thinks_it_is` is what fails
+        then, and it is the only thing that does.
+        `test_every_character_ceiling_binds_on_bytes` compares against
+        `STILL_OPEN`, which is empty now that the last open constraint was
+        closed, so an empty `_declared()` satisfies it rather than failing it.
+        """
+        offenders: list[str] = []
+
+        for name, raw in TestEveryTextCeilingBindsOnBytesToo._declared().items():
+            offenders += self._offences(name, raw)
+
+        assert not offenders, (
+            "SQLite's GLOB stops at the first NUL, so these claim something "
+            "about a value that a Core insert can make false past the NUL: "
+            + "; ".join(offenders)
+        )
+
+    def test_a_smuggled_suffix_satisfies_a_charset_rule(self) -> None:
+        """The measurement the rule rests on, asked of the engine.
+
+        A refusal of every character outside a set is satisfied by a value
+        carrying two of them, because the rule never reads that far.
+        """
+        import sqlite3
+
+        smuggled = b"abc\x00ZZZ!!"
+        value = f"CAST(x'{smuggled.hex()}' AS TEXT)"
+        connection = sqlite3.connect(":memory:")
+
+        try:
+            passes, counted, stored = connection.execute(
+                f"SELECT {value} NOT GLOB '*[^a-z0-9_-]*', length({value}), "
+                f"length(CAST({value} AS BLOB))"
+            ).fetchone()
+        finally:
+            connection.close()
+
+        assert (passes, counted, stored) == (1, 3, 9)
 
 
 class TestEveryTableIsInTheDataModelDocument:
@@ -6868,7 +10396,13 @@ class TestOneDoorParsesAResponseBody:
         The companion above is an assertion that a set is empty, so it is also
         green when the walk finds nothing to look at: a renamed module, a
         changed import spelling, or a `_python_sources` that stopped returning
-        the modules that fetch. This names the four that do.
+        the modules that fetch. This names every module that does.
+
+        **`covers.py` is here for its client and not for its bodies**, which is
+        the distinction the companion rule turns on. It imports `fetch` for
+        `pinned_client` and the address policy, keeps its own read loop, and
+        parses nothing: an image is bytes. So it belongs in this set and has
+        nothing to be exempted from in the rule above.
         """
         fetchers = {
             path.name for path in _python_sources() if _imports_fetch(ast.parse(path.read_text()))
@@ -6879,6 +10413,7 @@ class TestOneDoorParsesAResponseBody:
             "authority.py",
             "google_books.py",
             "opds.py",
+            "covers.py",
         }
 
 
@@ -6901,6 +10436,52 @@ class TestEveryTextCeilingComesFromTheColumn:
 
     **Read off the mapper and off `model_fields`**, never off the source text, so
     a literal reintroduced in any spelling fails.
+
+    **Two rules over two different populations, and they are different on
+    purpose.** The equality rule below reads `Book` alone. The named constant
+    rule reads every column in `Base.metadata` that bounds a length, which on
+    2026-09-25 is 70 columns over 19 of the 22 tables: `books` carries 17 and the
+    other 18 tables carry 53 between them, measured by walking
+    `Base.metadata.sorted_tables` for a `length` on the column type.
+
+    **The equality rule does not widen with it, and that is measured rather than
+    assumed.** Its premise is that a field named after a column is that column's
+    width, which holds for `books` because those names are the domain's own
+    words. Elsewhere the names are ordinary words and the premise fails in both
+    directions at once. Run over every table it judges 28 fields it does not
+    judge today, 57 against 29, and **every report it makes of the 28 is a false
+    one**: 17 agree with their column and are silent, three are a different fact
+    wearing the same word, `BookMatch.source` at 120 against
+    `catalogue_targets.source` at 32 and `OpdsCredentialIn.username` at 255 and
+    `SourceCredentialIn.username` at 320 against `users.username` at 50, each of
+    them a login somewhere else; and the remaining eight land on `name`, `key`
+    or `value`, which several tables carry at different widths, so there is no
+    single width for the rule to compare against at all. **Eleven is the
+    classification, eight is what a concrete widening prints**, and the two are
+    different numbers of different things: a map built last wins over
+    `sorted_tables` happens to agree with three of the eight ambiguous fields,
+    so it reports the three different facts plus five. Eleven cannot be a
+    defect; eight is what the reader would see. Every one of the eight agrees
+    with its own table's column, so nothing hides behind the ambiguity either.
+
+    **And the 17 that agree buy nothing either**, which is the other half of the
+    argument: each of them names its column's constant, so the equality is held
+    by Python rather than by a comparison, and the rule below would be checking
+    that a constant equals itself. It is the named constant rule that puts them
+    in that position, which is why that is the half that widens.
+
+    **The named constant rule widens because it asks for a name and not for a
+    value.** A field whose bound is genuinely not that column's fact satisfies it
+    by naming its own constant, which is what `OpdsCredentialIn` now does, so the
+    collisions that defeat the equality rule cost it nothing. Widening it
+    reported seven sites the narrow population walked past, every one of them a
+    number copied from a column: six in `schemas/user.py` and one in
+    `schemas/opds.py`.
+
+    **What the wider population admits is a name this repository uses for two
+    things**, and the rule's answer to that is in its own docstring below. It is
+    not a hypothetical: `username` is both `users.username` and the login at
+    somebody else's server, and both are now in scope.
     """
 
     #: Fields whose name matches a Book column and whose ceiling is deliberately
@@ -6931,6 +10512,39 @@ class TestEveryTextCeilingComesFromTheColumn:
             for column in Book.__table__.columns
             if (length := getattr(column.type, "length", None))
         }
+
+    @staticmethod
+    def _column_names() -> frozenset[str]:
+        """Every column name in the schema that bounds a length, any table.
+
+        **A set of names and deliberately not a map of widths.** Three names are
+        carried by columns of different widths, `name` at 60, 80 and 100, `key`
+        at 50 and 64 and `value` at 60 and 500, so a map would have to pick one
+        and would pick whichever table `sorted_tables` yielded last. The rule
+        that reads this asks for a constant to be named rather than for a value
+        to match, so it needs the name and never the width, and building a set
+        is what makes that structural rather than a thing to remember.
+
+        **Derived from the type, not from the source and not from a list of
+        tables.** `Base.metadata` is what `--autogenerate` and `create_all` work
+        from, so a table added anywhere joins this on the commit that declares
+        it.
+
+        **What it leaves out is a column whose type carries no `length`**, which
+        is `Text` here: five columns on four tables, `books.description`,
+        `books.categories`, `notes.content`, `settings.value` and
+        `catalogue_credentials.envelope`. They bound nothing to copy, so there
+        is no drift for this rule to catch on them. It is `Text` that is left
+        out rather than "the unbounded ones": whether a `Text` column is bounded
+        some other way is `TestEveryTextCeilingBindsOnBytesToo`'s subject and
+        not this one's.
+        """
+        return frozenset(
+            column.name
+            for table in Base.metadata.sorted_tables
+            for column in table.columns
+            if getattr(column.type, "length", None) is not None
+        )
 
     def _ceilings(self) -> list[tuple[str, str, int]]:
         """Every `(model, field, max_length)` under `schemas/`.
@@ -6984,14 +10598,15 @@ class TestEveryTextCeilingComesFromTheColumn:
         )
 
     def test_the_widths_are_the_columns_named_constants(self) -> None:
-        """The other half of the pair's tripwire, and it had none.
+        """The width rule's tripwire, and it had none.
 
-        **Both rules go vacuous together if this map empties**: the width rule
-        is keyed `if field in widths` and the literal rule on
-        `name not in widths`, so an empty map reports nothing from either and
-        the three diagonals above never touch it, because they build their own.
-        It shrank by a fifth without a word when `DegradingEnum` arrived, which
-        is what that looks like from here.
+        **That rule goes vacuous if this map empties**: it is keyed
+        `if field in widths`, so an empty map reports nothing and the diagonals
+        above never touch it, because they build their own. It shrank by a fifth
+        without a word when `DegradingEnum` arrived, which is what that looks
+        like from here. The named constant rule has its own subject, and
+        `test_the_wider_population_holds_columns_only_other_tables_have` is what
+        stands here for it.
 
         **Against the constants rather than against a count.** A count fails
         when the map empties and passes when a column and its constant part
@@ -7007,6 +10622,82 @@ class TestEveryTextCeilingComesFromTheColumn:
         # The three the `isinstance(type, String)` test used to drop, named so
         # the fix does not quietly come undone.
         assert {"format", "condition", "lending"} <= set(widths)
+
+    #: One bounded column on each of five tables that are not `books`, named as
+    #: `(table, column)` so a rename of either end reddens the arm below by
+    #: `KeyError` rather than passing over nothing.
+    #:
+    #: **Five tables rather than five columns**, because the failure this
+    #: catches is a walk that reached one table and stopped, and five columns of
+    #: one table would not see it. Each is a name `books` does not carry, so the
+    #: arm cannot be satisfied by a walk that fell back to `Book`.
+    ELSEWHERE_IN_THE_SCHEMA: Final = (
+        ("users", "username"),
+        ("opds_servers", "credential_key"),
+        ("classifications", "sort_key"),
+        ("digital_references", "relative_path"),
+        ("author_aliases", "canonical_name"),
+    )
+
+    def test_the_wider_population_holds_columns_only_other_tables_have(self) -> None:
+        """The named constant rule's subject, which is the schema and not `Book`.
+
+        **A walk that quietly narrowed back to one model is the failure**, and
+        it is silent: the rule reports nothing either way on a clean tree, so
+        the population is the only thing that can be checked. It is checked
+        against columns named in the schema, so a table or a column that is
+        renamed fails here rather than dropping out of scope.
+
+        **The floor is stated as a strict superset, not as a count.** A count
+        moves every time somebody adds a column and stops being re-derived; the
+        superset says the one thing that has to stay true, that widening added
+        members and lost none.
+        """
+        names = self._column_names()
+
+        for table, column in self.ELSEWHERE_IN_THE_SCHEMA:
+            declared = Base.metadata.tables[table].columns[column]
+            assert getattr(declared.type, "length", None) is not None, (table, column)
+            assert column in names
+
+        book = set(self._book_widths())
+        assert book < names, sorted(book - names)
+        # Not every string: a name no column carries stays out, which is what
+        # keeps the rule from reporting `book_ids` and its kind.
+        assert "book_ids" not in names
+        # And not every column either. A `Text` column carries no length, so a
+        # walk that dropped that filter would put `content` in scope and start
+        # asking for a constant to be named for a bound no column has. The
+        # second line is why the first one is still about `Text`: give
+        # `notes.content` a length and this reddens, rather than agreeing with
+        # itself about an example that has moved.
+        assert "content" not in names
+        content = Base.metadata.tables["notes"].columns["content"]
+        assert getattr(content.type, "length", None) is None
+
+    def test_the_wider_population_is_what_reports_a_column_outside_books(self) -> None:
+        """The diagonal for the widening itself, on constructed source.
+
+        Against the tree it is vacuous in both directions: every site names a
+        constant now, so the narrow population and the wide one both answer
+        `[]`. This plants the offence the widening exists to catch and shows
+        which population sees it.
+
+        **Driven through `_offenders`, which is what the rule above calls**, so
+        the population the shipped rule uses is the population under test. The
+        two `_bare_ceilings` calls below say the checker can tell the two
+        populations apart; only the `_offenders` call says the rule is handed
+        the wide one, and narrowing that line reddens here by name.
+        """
+        offence = "username: str = Field(min_length=1, max_length=50)\n"
+
+        assert self._offenders([("planted.py", offence)]) == [
+            "planted.py: username bounds a bare 50"
+        ]
+        assert self._bare_ceilings(offence, set(self._book_widths())) == []
+        assert self._bare_ceilings(offence, self._column_names()) == [
+            "username bounds a bare 50"
+        ]
 
     def test_every_deliberately_different_field_carries_a_reason(self) -> None:
         """Empty today. An exemption with an empty string beside it is an
@@ -7031,8 +10722,13 @@ class TestEveryTextCeilingComesFromTheColumn:
         assert ("OpdsCredentialIn", "username") in found
 
     @staticmethod
-    def _bare_ceilings(source: str, widths: dict[str, int]) -> list[str]:
-        """Every `max_length=<number>` beside a name a Book column also has.
+    def _bare_ceilings(source: str, names: Container[str]) -> list[str]:
+        """Every `max_length=<number>` beside a name some column also has.
+
+        **Takes the names and never the widths**, which is what lets the
+        population be every table: it reports the spelling and says nothing
+        about the value, so a name two tables carry at two widths costs it
+        nothing to judge.
 
         **A function over a string rather than a loop over the tree**, because a
         rule that only ever runs on this checkout is a rule whose arms cannot be
@@ -7109,7 +10805,7 @@ class TestEveryTextCeilingComesFromTheColumn:
                 annotated.append((node.arg, node.annotation))
 
         for name, expression in annotated:
-            if name not in widths:
+            if name not in names:
                 continue
             for node in ast.walk(expression):
                 if isinstance(node, ast.Name) and node.id in bare_aliases:
@@ -7126,6 +10822,54 @@ class TestEveryTextCeilingComesFromTheColumn:
                         found.append(f"{name} bounds a bare {keyword.value.value!r}")
         return found
 
+    @staticmethod
+    def _module_sources() -> list[tuple[str, str]]:
+        """Every backend module, as its path relative to `backend/` and its text.
+
+        **Pairs and never a mapping, because a mapping deduplicates.** Keyed on
+        the basename this dropped ten of the 94 modules, nine basenames being
+        carried twice or three times: five routers, `schemas/public.py` and four
+        more. Which of a colliding pair survived was filesystem order, so the
+        population was not even the same on two machines. The path relative to
+        the root is what distinguishes `opds.py` from `routers/opds.py` and
+        `schemas/opds.py`, and it is what the report names.
+        """
+        return [
+            (str(path.relative_to(BACKEND)), path.read_text())
+            for path in _python_sources()
+        ]
+
+    def _offenders(
+        self, sources: Sequence[tuple[str, str]] | None = None
+    ) -> list[str]:
+        """What the shipped rule reports, over the sources and the population it
+        actually ships with.
+
+        **This exists so the one line joining the two can be driven.** Both
+        halves were reachable on their own, the walk by calling it and the
+        checker by handing it a population built in the test, and the line that
+        hands the checker the *wide* population was not: narrowing it back to
+        the `Book` widths left the whole file green, because the tree reports
+        nothing either way. A seam the diagonal below can drive with a planted
+        offence is what makes that narrowing red.
+
+        **The default is the half a driven arm cannot see**, since every arm
+        that drives this supplies its own sources, and the shipped rule, which
+        is the only caller taking the default, asserts an empty list. So the
+        module walk is guarded beside the multi file arm rather than here: one
+        entry per module walked, which is the property, not a count.
+        """
+        if sources is None:
+            sources = self._module_sources()
+
+        names = self._column_names()
+
+        return sorted(
+            f"{where}: {offender}"
+            for where, text in sources
+            for offender in self._bare_ceilings(text, names)
+        )
+
     def test_the_ceilings_are_the_named_constants_and_not_their_values(
         self,
     ) -> None:
@@ -7133,8 +10877,14 @@ class TestEveryTextCeilingComesFromTheColumn:
 
         A literal equal to the constant passes every assertion here, which is
         the whole defect: it is only wrong on the commit that widens the column.
-        So this reads the source and refuses a bare number beside a name that is
-        a Book column's.
+        So this reads the source and refuses a bare number beside a name that
+        some column in the schema has.
+
+        **Every table, and the population is the schema rather than one model.**
+        `_column_names` is where that is derived and where what it leaves out is
+        stated. Widened from `Book` alone it reported seven sites: six in
+        `schemas/user.py`, all of them `users.username`'s 50 with no constant to
+        name until this change added one, and one in `schemas/opds.py`.
 
         **Refused on the name, not on the number**, because the numbers collide:
         `max_length=500` is `TITLE_MAX` on `title` and a bulk request's row cap
@@ -7156,17 +10906,18 @@ class TestEveryTextCeilingComesFromTheColumn:
         is the width rule's escape hatch and is not consulted here: a ceiling
         this rule reports is satisfied by naming any constant, so there is
         nothing for an exemption to carry.
-        """
-        widths = self._book_widths()
 
-        offenders = sorted(
-            f"{path.name}: {offender}"
-            for path in _python_sources()
-            for offender in self._bare_ceilings(path.read_text(), widths)
-        )
+        **That is also what the wider population costs, and it is a real cost.**
+        `username` is a column here and is also a login at somebody else's
+        server, so `schemas/opds.py` is now judged for a fact that is not
+        `users.username`'s at all. The answer it gets is the same one a search
+        term gets, name your own constant, and `OPDS_CREDENTIAL_FIELD_MAX` is
+        that name. A rule keyed on the value could not have offered it one.
+        """
+        offenders = self._offenders()
 
         assert offenders == [], (
-            "these write a bound as a number beside a name a Book column also "
+            "these write a bound as a number beside a name some column also "
             "has. Name the column's constant where it is that column's fact, "
             "and the bound's own constant where it is not: a literal is only "
             "wrong on the commit that moves what it copied, and nothing goes "
@@ -7185,7 +10936,7 @@ class TestEveryTextCeilingComesFromTheColumn:
         Each shape is dropped in turn and each is reported for its own, so one
         arm cannot be covering for the other.
         """
-        widths = {"location": 120, "title": 500}
+        names = {"location", "title"}
 
         field = "location: str | None = Field(default=None, max_length=120)\n"
         parameter = (
@@ -7199,16 +10950,16 @@ class TestEveryTextCeilingComesFromTheColumn:
         )
         no_default = "location: Annotated[str, Field(max_length=120)]\n"
 
-        assert self._bare_ceilings(field, widths) == ["location bounds a bare 120"]
-        assert self._bare_ceilings(parameter, widths) == ["title bounds a bare 500"]
+        assert self._bare_ceilings(field, names) == ["location bounds a bare 120"]
+        assert self._bare_ceilings(parameter, names) == ["title bounds a bare 500"]
         # The two the first version walked past. `Annotated[...]` on an
         # assignment puts the bound in the annotation rather than the default,
         # which is the spelling `routers/books.py` already uses, and a field
         # with no default was skipped before its annotation was read at all.
-        assert self._bare_ceilings(annotated, widths) == [
+        assert self._bare_ceilings(annotated, names) == [
             "location bounds a bare 120"
         ]
-        assert self._bare_ceilings(no_default, widths) == [
+        assert self._bare_ceilings(no_default, names) == [
             "location bounds a bare 120"
         ]
 
@@ -7218,7 +10969,7 @@ class TestEveryTextCeilingComesFromTheColumn:
             "LocationField = Annotated[str | None, Field(max_length=120)]\n"
             "location: LocationField = None\n"
         )
-        assert self._bare_ceilings(alias, widths) == [
+        assert self._bare_ceilings(alias, names) == [
             "location bounds a bare 120 through LocationField"
         ]
 
@@ -7233,31 +10984,31 @@ class TestEveryTextCeilingComesFromTheColumn:
         where it is declared refuses those. The rule stays keyed on the name a
         Book column has, which is the property every other arm rests on too.
         """
-        widths = {"location": 120}
+        names = {"location"}
         declared_only = "RowIds = Annotated[list[int], Field(max_length=500)]\n"
         used_by_another_name = (
             "RowIds = Annotated[list[int], Field(max_length=500)]\n"
             "book_ids: RowIds = []\n"
         )
 
-        assert self._bare_ceilings(declared_only, widths) == []
-        assert self._bare_ceilings(used_by_another_name, widths) == []
+        assert self._bare_ceilings(declared_only, names) == []
+        assert self._bare_ceilings(used_by_another_name, names) == []
 
     def test_a_named_constant_in_an_alias_is_not_reported(self) -> None:
         """The other half of the alias diagonal, so the arm cannot be satisfied
         by refusing every alias."""
-        widths = {"location": 120}
+        names = {"location"}
         named = (
             "LocationField = Annotated[str | None, Field(max_length=LOCATION_MAX)]\n"
             "location: LocationField = None\n"
         )
 
-        assert self._bare_ceilings(named, widths) == []
+        assert self._bare_ceilings(named, names) == []
 
     def test_it_reports_neither_shape_once_the_constant_is_named(self) -> None:
         """The other half of the diagonal: a rule refusing everything would pass
         the two arms above and fail the tree for the wrong reason."""
-        widths = {"location": 120, "title": 500}
+        names = {"location", "title"}
 
         field = "location: str | None = Field(default=None, max_length=LOCATION_MAX)\n"
         parameter = (
@@ -7266,17 +11017,17 @@ class TestEveryTextCeilingComesFromTheColumn:
             ") -> None: ...\n"
         )
 
-        assert self._bare_ceilings(field, widths) == []
-        assert self._bare_ceilings(parameter, widths) == []
+        assert self._bare_ceilings(field, names) == []
+        assert self._bare_ceilings(parameter, names) == []
 
-    def test_it_ignores_a_name_no_book_column_has(self) -> None:
+    def test_it_ignores_a_name_no_column_has(self) -> None:
         """`book_ids` carries `max_length=500`, which is a row cap rather than
         `TITLE_MAX` wearing its value. A rule keyed on the number would have to
         exempt it by hand."""
-        widths = {"title": 500}
+        names = {"title"}
 
         assert self._bare_ceilings(
-            "book_ids: list[int] = Field(min_length=2, max_length=500)\n", widths
+            "book_ids: list[int] = Field(min_length=2, max_length=500)\n", names
         ) == []
 
     def test_the_bare_literal_rule_reads_more_than_one_file(self) -> None:
@@ -7285,6 +11036,34 @@ class TestEveryTextCeilingComesFromTheColumn:
         names = {path.name for path in _python_sources()}
 
         assert {"book.py", "books.py", "public.py"} <= names
+
+    def test_the_rule_reads_one_entry_per_module_the_walk_returns(self) -> None:
+        """The arm the basename key defeated, and it is the one nothing had.
+
+        **Every arm that drives `_offenders` supplies its own sources**, and the
+        only caller taking the default asserts an empty list, so a default that
+        quietly lost a tenth of the tree was untested by construction. Keying
+        the sources on the basename did exactly that: nine basenames are carried
+        twice or three times here, so ten modules never reached the checker, and
+        which of a pair survived was filesystem order rather than anything this
+        repository decides.
+
+        **Stated as one entry per module walked, not as a number.** A count goes
+        stale the next time somebody adds a file; the equality says the thing
+        that has to stay true. The distinctness assertion is why: it names
+        deduplication as the failure rather than leaving the reader to infer it
+        from a length.
+        """
+        walked = _python_sources()
+        sources = self._module_sources()
+
+        assert len(sources) == len(walked)
+        assert len({where for where, _ in sources}) == len(walked)
+        # The basename collision this was written for, named so the arm cannot
+        # be satisfied by a tree that happens to have none.
+        assert {"opds.py", "routers/opds.py", "schemas/opds.py"} <= {
+            where for where, _ in sources
+        }
 
 
 class TestTheShippedImageCarriesThePostgresDriver:
@@ -7327,6 +11106,1087 @@ class TestTheShippedImageCarriesThePostgresDriver:
         )
         assert not any(spec.startswith("pg8000") for spec in dev), (
             "pg8000 is declared twice; the runtime entry already covers the suite."
+        )
+
+
+#: Directives naming the process a container runs. Lowercased on both sides:
+#: Dockerfile instructions are case insensitive, and `entrypoint` in lower case
+#: beside an upper case `CMD` was one of the four evasions that got past the
+#: first draft of this rule.
+_START_DIRECTIVES = ("cmd", "entrypoint", "command:", "entrypoint:")
+
+#: Compose keys naming a file this rule never opens. Refused outright.
+#:
+#: Spelled once because it was spelled three times for one round and one of the
+#: three was already stale: a key added to the production arm went untested until
+#: somebody also found the diagonal.
+_KEYS_REACHING_ANOTHER_FILE = ("env_file:", "extends:", "include:")
+
+#: What a compose `build:` block may say, and it is an allowlist because every
+#: other shape of this rule has been evaded by naming a key it did not know.
+#:
+#: **Four rounds went `env_file:`, then `extends:` and `include:`, then
+#: `dockerfile:`, then `context:`**, each one a real escape and each fix an arm
+#: rather than a shape. `context: ./deploy` with `dockerfile: Dockerfile`
+#: unchanged reaches `deploy/Dockerfile`, because compose resolves the second
+#: against the first, so even a value check on `dockerfile:` alone reads clean.
+#: The Compose Specification decides that key set and can grow it, so a list of
+#: keys to refuse is an enumeration over something somebody else controls.
+#:
+#: So the block is read the other way round: **a key inside `build:` that is not
+#: in here fails**, and the two that are in here are checked on their values.
+#: `_container_surfaces` reads one directory and never descends, so a context
+#: other than this directory puts the image somewhere this rule cannot see.
+_BUILD_KEYS_UNDERSTOOD = {
+    "context": {".", "./"},
+    # The value is checked against the surfaces actually read, rather than
+    # against a literal, so renaming the image file does not silently pass.
+    "dockerfile": None,
+}
+
+
+def _build_entry_is_readable(key: str, value: str, readable: set[str]) -> bool:
+    """Whether one `build:` entry keeps the image inside what this rule reads.
+
+    Fails shut on an unknown key: `additional_contexts:` and `ssh:` are real
+    Compose keys nobody here has thought about, and the day one appears it goes
+    red rather than passing because it was not on a list of things to refuse.
+    """
+    if key not in _BUILD_KEYS_UNDERSTOOD:
+        return False
+    allowed = _BUILD_KEYS_UNDERSTOOD[key]
+    if allowed is not None:
+        return value in allowed
+    # `dockerfile:`, checked against the files actually globbed rather than
+    # against a literal, so renaming the image file cannot silently pass.
+    return "/" not in value.removeprefix("./") and Path(value).name in readable
+
+
+def _build_block(text: str) -> list[tuple[int, str, str]]:
+    """`(line, key, value)` for every entry inside a compose `build:` block.
+
+    Indentation delimits the block, which is what YAML gives without a parser:
+    the entries are the lines more deeply indented than the `build:` that opened
+    it. Comments and surrounding quotes come off the value here, because parsing
+    it back out of a formatted site string put three ordinary spellings of the
+    image file, `./Dockerfile`, `"Dockerfile"` and one with a trailing comment,
+    into the failure list.
+
+    **The bound, stated rather than left to be discovered.** This is a line
+    oriented reader, so it sees `build` only where that key opens a line. Two
+    Compose styles put it elsewhere and evade every arm here: a flow style
+    service, `api: {build: ./deploy}`, and the same nested,
+    `services: {api: {build: ./deploy}}`. The block form, the flow **mapping**
+    form, the shorthand, and an anchor merge are all covered.
+
+    **A quoted key, `"build": ./deploy`, is caught, and by the floor rather
+    than here**: the floor strips quotes before comparing and this does not, so
+    the key is seen, no entries come back, and the arm fails on the parser
+    rather than on the value. Said explicitly because an earlier draft of this
+    paragraph listed it as evading, and a reader trusts the sentence over the
+    code.
+
+    **Why that is stated and not fixed.** Closing it means parsing the file as
+    YAML, and PyYAML is not declared in `backend/pyproject.toml`: it is present
+    only transitively, so a guard resting on it is its own trap. Measured across
+    four review rounds on this one rule, the shapes are getting rarer and the
+    arms are not getting cheaper. A known bound beats an unknown one.
+    """
+    def clean(value: str) -> str:
+        return value.split("#")[0].strip().strip("\"'")
+
+    found: list[tuple[int, str, str]] = []
+    depth: int | None = None
+    for number, raw in enumerate(text.splitlines(), 1):
+        if not raw.strip() or raw.lstrip().startswith("#"):
+            continue
+        indent = len(raw) - len(raw.lstrip())
+        if depth is not None and indent <= depth:
+            depth = None
+        key, _, rest = raw.strip().partition(":")
+        if key.strip() == "build":
+            inline = clean(rest)
+            if not inline:
+                depth = indent          # the block form, entries follow below
+            elif inline.startswith("{"):
+                # The flow mapping. `build: {context: ., dockerfile: x}` starts
+                # the line with `build:`, so a rule reading keys never sees one.
+                for pair in inline.strip("{}").split(","):
+                    k, _, v = pair.partition(":")
+                    if k.strip():
+                        found.append((number, k.strip(), clean(v)))
+            else:
+                # The shorthand. `build: ./deploy` is a context and no key at
+                # all, and compose then implies `<context>/Dockerfile`.
+                found.append((number, "context", inline))
+            continue
+        if depth is None:
+            continue
+        found.append((number, key.strip(), clean(rest)))
+    return found
+
+#: Programs this rule can reason about, as the first word of a start command.
+#:
+#: **A closed set on purpose, and it fails shut.** `CMD ["/app/start.sh"]` moves
+#: the question into a file this rule does not open, and a start command naming
+#: anything else does the same. Refusing the unknown shape is what keeps the
+#: scan below complete; enumerating the ways a script could reach `-O` would
+#: not, and could not.
+_PROGRAMS_THIS_RULE_CAN_READ = frozenset({"uvicorn", "python", "python3"})
+
+
+def _container_surfaces(root: Path) -> list[Path]:
+    """Every file in a tree that says how the container is started.
+
+    **Takes the tree as an argument** so the arms below can drive it against one
+    they build. A rule that only ever runs against the real repository is one
+    nobody can plant a counterexample for.
+
+    Matched by shape rather than by name: anything beginning `Dockerfile`, and
+    any YAML carrying `compose`. The Compose Specification's own default is
+    `compose.yaml`, and `compose.yml` and `docker-compose.yaml` are read too, so
+    a list of filenames here is an enumeration over something the tool's authors
+    control rather than this repository. The first draft of this rule globbed
+    `docker-compose*.yml` and was blind to the other three spellings.
+
+    What it reads is those files, line by line. It does not read the cluster
+    manifests that run the published image, a file a start command names, or an
+    environment an operator exports by hand.
+    """
+    return sorted(
+        path
+        for path in root.iterdir()
+        if path.is_file()
+        and (
+            path.name.startswith("Dockerfile")
+            or (path.suffix in {".yml", ".yaml"} and "compose" in path.name)
+        )
+    )
+
+
+def _logical_lines(text: str) -> list[tuple[int, str]]:
+    """Physical lines joined across a trailing backslash, keyed by the first one.
+
+    A `CMD` continued onto the next line is one instruction to Docker and two
+    lines to a scanner reading physically, which is how `-O` on a continuation
+    got past the first draft.
+    """
+    joined: list[tuple[int, str]] = []
+    buffer, first = "", 0
+    for number, line in enumerate(text.splitlines(), 1):
+        stripped = line.rstrip()
+        if not buffer:
+            first = number
+        if stripped.endswith("\\"):
+            buffer += stripped[:-1] + " "
+            continue
+        joined.append((first, (buffer + stripped).strip()))
+        buffer = ""
+    if buffer:
+        joined.append((first, buffer.strip()))
+    return joined
+
+
+def _sites(root: Path, predicate) -> list[str]:
+    """`file:line: text` for every logical line of every surface the predicate takes."""
+    return [
+        f"{path.name}:{number}: {line}"
+        for path in _container_surfaces(root)
+        for number, line in _logical_lines(path.read_text())
+        if predicate(line)
+    ]
+
+
+def _has_optimise_flag(line: str) -> bool:
+    return any(re.fullmatch(r"-O+", token) for token in re.findall(r"[-\w./:@+]+", line))
+
+
+def _start_commands(root: Path) -> list[tuple[str, str]]:
+    """`(site, program)` for the program each surface actually starts.
+
+    **An exec form `CMD` beside an `ENTRYPOINT` is arguments, not a program.**
+    Docker appends the one to the other, so `ENTRYPOINT ["uvicorn"]` with
+    `CMD ["main:app", "--port", "8000"]` starts `uvicorn` and the `CMD` line
+    names nothing. Reading each directive as its own start command failed that
+    idiom with "runs something this rule cannot read", which is a false refusal
+    on a shape the previous version accepted correctly.
+
+    So the entrypoint wins per file where there is one. An empty argument list,
+    which is how `CMD []` resets an inherited entrypoint, names no program and
+    is skipped; the floor arm is what stops a file naming nothing at all from
+    passing quietly.
+    """
+    found: list[tuple[str, str]] = []
+    for path in _container_surfaces(root):
+        entrypoints: list[tuple[str, str]] = []
+        commands: list[tuple[str, str]] = []
+        for number, line in _logical_lines(path.read_text()):
+            lowered = line.lower()
+            if not lowered.startswith(_START_DIRECTIVES):
+                continue
+            words = re.findall(r"[-\w./:@+]+", line)
+            argv = [word for word in words[1:] if not word.startswith("-")]
+            if not argv:
+                continue
+            entry = (f"{path.name}:{number}", argv[0].rsplit("/", 1)[-1])
+            (entrypoints if lowered.startswith("entrypoint") else commands).append(entry)
+        found.extend(entrypoints or commands)
+    return found
+
+
+#: `ElementTree` entry points that turn bytes into a tree.
+#:
+#: `fromstring`, `parse` and `iterparse` are the three `S314` reports. `XML`,
+#: `XMLID` and `fromstringlist` are documented aliases of them that it does not,
+#: measured on ruff 0.16.7 with a six line probe, and `XML` is CPython's own
+#: documented alias of `fromstring`.
+_XML_PARSERS = frozenset(
+    {
+        "fromstring",
+        "parse",
+        "iterparse",
+        "XML",
+        "XMLID",
+        "fromstringlist",
+        # Three more routes to the same expat, all public and documented, added
+        # after a seat probed them: a parser object fed bytes and its pull
+        # variant, both of which reach expat with identical entity expansion.
+        #
+        # **`ElementTree` is the class, and this matches its construction rather
+        # than the `.parse` on the instance that actually reads.** Say that
+        # rather than the other thing: a comment naming one rule where the code
+        # implements another is the tell this repository keeps paying for, and a
+        # reader who checks the comment agrees with the wrong half.
+        #
+        # Matching the construction costs a false refusal on
+        # `ElementTree.ElementTree(root).write(f)`, the serialisation idiom,
+        # which nothing in the tree uses. That is deliberate, and the narrower
+        # alternative was measured and refused: matching `.parse` on a
+        # constructed instance sees `ElementTree.ElementTree().parse(f)` and
+        # misses both spellings somebody actually writes, `t = ElementTree()`
+        # with `t.parse(f)` a statement later, and `ElementTree(file=f)`, which
+        # parses inside the constructor. One false refusal on a spelling nobody
+        # uses beats two silent misses on the two that get written.
+        #
+        # A module that wraps an Element only to `.write()` it is therefore red
+        # here, and should say so at its own site.
+        "XMLParser",
+        "XMLPullParser",
+        "ElementTree",
+    }
+)
+
+#: What `S314` reports, so the rest is what this file adds. Four, not three:
+#: ruff reports `XMLParser` as well, which a first draft of this constant missed.
+_PARSERS_THE_LINTER_SEES = frozenset({"fromstring", "parse", "iterparse", "XMLParser"})
+
+#: The modules allowed to turn outside XML into a tree, each refusing a document
+#: type declaration first and capped on the bytes it reads. Every one says why in
+#: its own docstring.
+_MODULES_THAT_PARSE_XML = ("marc.py", "metadata.py", "opds.py")
+
+
+#: The module whose parse entry points this rule is about.
+_ELEMENTTREE = ("xml", "etree", "ElementTree")
+
+
+def _elementtree_names(tree: ast.Module) -> tuple[set[str], set[str]]:
+    """`(receivers, bare)`: every expression in one file that denotes `ElementTree`.
+
+    **Resolved by prefix rather than enumerated.** A first draft asked whether
+    `"ElementTree"` appeared in the unparsed receiver, which is false of `ET.XML`
+    after `import xml.etree.ElementTree as ET`, the form CPython's own
+    documentation uses; a second listed four import spellings and called that all
+    of them, and missed `from xml import etree` reaching `etree.ElementTree.XML`.
+    Both rounds were the same defect, which is the one this whole file exists to
+    stop: **a rule that enumerates the ways a thing can be written.**
+
+    So an import is read as the pair (the name it binds, the module that name
+    denotes), and any import binding a **prefix** of `xml.etree.ElementTree`
+    yields a receiver: the bound name plus whatever segments are left. That
+    covers every spelling at once, including ones nobody has written here.
+
+    `from xml.etree.ElementTree import fromstring` binds the function rather than
+    the module, which is the second return value.
+    """
+    receivers: set[str] = set()
+    bare: set[str] = set()
+
+    def offer(bound: str, denotes: tuple[str, ...]) -> None:
+        if _ELEMENTTREE[: len(denotes)] == denotes:
+            receivers.add(".".join((bound, *_ELEMENTTREE[len(denotes) :])).rstrip("."))
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                parts = tuple(alias.name.split("."))
+                if alias.asname:
+                    offer(alias.asname, parts)
+                else:
+                    # `import a.b.c` binds `a`, and the usable expression is the
+                    # whole dotted path.
+                    offer(parts[0], parts[:1])
+        elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
+            module = tuple(node.module.split("."))
+            for alias in node.names:
+                if module == _ELEMENTTREE and alias.name in _XML_PARSERS:
+                    bare.add(alias.asname or alias.name)
+                else:
+                    offer(alias.asname or alias.name, (*module, alias.name))
+    return receivers, bare
+
+
+def _xml_parse_calls(source: str) -> list[tuple[int, str]]:
+    """`(line, name)` for every call of an `ElementTree` parse entry point.
+
+    Both shapes a call can take, with the receiver resolved by
+    `_elementtree_names` rather than spelled: `<receiver>.fromstring(b)`, and a
+    bare `fromstring(b)` where the file imported the function itself.
+    """
+    tree = ast.parse(source)
+    receivers, bare = _elementtree_names(tree)
+    found = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        if isinstance(func, ast.Attribute) and func.attr in _XML_PARSERS:
+            if ast.unparse(func.value) in receivers:
+                found.append((node.lineno, func.attr))
+        elif isinstance(func, ast.Name) and func.id in bare:
+            found.append((node.lineno, func.id))
+    return sorted(found)
+
+
+class TestOnlyThreeModulesTurnOutsideXmlIntoATree:
+    """`S314` is suppressed at three sites, and this is what makes that honest.
+
+    Each of the three refuses a document type declaration before parsing and is
+    capped on the bytes it reads, which is the work `defusedxml` would have been
+    adopted for. The suppression is per site rather than per family so that a
+    **fourth** parse written without that refusal is loud: in any other module
+    the first arm below names it, and inside one of the three the linter
+    reports it, while a site waiver copied onto it passes the linter and fails
+    the hold the header of the lint configuration in `backend/pyproject.toml`
+    describes.
+
+    **That holds only while `S314` sees every spelling, and it does not.** So the
+    first arm asks which modules parse, over every spelling including the three
+    the linter is blind to, and the second keeps the three honest modules using
+    only spellings it can report.
+
+    **Importing `ElementTree` is not parsing, and is not what this reads.**
+    `marc_fields.py` imports it for the `Element` annotation and `sru.py` to
+    build and serialise the SRU response; neither turns a stranger's bytes into
+    a tree. An import based version of this rule named both and was wrong.
+    """
+
+    def test_the_corpus_it_walks_is_present(self) -> None:
+        """The floor. An empty corpus, or a walk that reads no parse, passes below."""
+        modules = _every_module_but_the_tests()
+        assert len(modules) > 50, f"walked {len(modules)} application modules, expected many"
+        parsing = sorted(
+            path.name
+            for path in modules
+            if path.name in _MODULES_THAT_PARSE_XML and _xml_parse_calls(path.read_text())
+        )
+        assert parsing == sorted(_MODULES_THAT_PARSE_XML), (
+            f"the walk found parses in {parsing}, so it is not reading the three "
+            "modules this rule is about and would pass on a fourth."
+        )
+
+    def test_no_other_module_parses_xml_by_any_spelling(self) -> None:
+        parsing = sorted(
+            {
+                str(path.relative_to(BACKEND))
+                for path in _every_module_but_the_tests()
+                if _xml_parse_calls(path.read_text())
+            }
+        )
+        assert parsing == sorted(_MODULES_THAT_PARSE_XML), (
+            f"the set of modules parsing XML moved to {parsing}. Each one has to refuse "
+            "a doctype before it parses and cap the bytes it reads, and say so at its "
+            "own site; that is what the S314 suppressions there stand on."
+        )
+
+    def test_it_resolves_every_way_a_file_can_reach_the_parser(self) -> None:
+        """The diagonal, and the reason the resolver is a prefix walk.
+
+        Two rounds of this rule enumerated import spellings and two rounds
+        missed one. Each row is a whole file, so a miss names the spelling that
+        was missed rather than reporting a count.
+        """
+        seen = {
+            "import ... as ET": "import xml.etree.ElementTree as ET\nET.XML(b)\n",
+            "import ..., dotted call": (
+                "import xml.etree.ElementTree\nxml.etree.ElementTree.XML(b)\n"
+            ),
+            "from xml.etree import ElementTree as ET": (
+                "from xml.etree import ElementTree as ET\nET.XML(b)\n"
+            ),
+            "from xml.etree import ElementTree": (
+                "from xml.etree import ElementTree\nElementTree.XML(b)\n"
+            ),
+            "from xml import etree": "from xml import etree\netree.ElementTree.XML(b)\n",
+            "import xml.etree": "import xml.etree\nxml.etree.ElementTree.XML(b)\n",
+            "import xml.etree as e": "import xml.etree as e\ne.ElementTree.XML(b)\n",
+            "the function imported directly": (
+                "from xml.etree.ElementTree import XML\nXML(b)\n"
+            ),
+        }
+        missed = [name for name, source in seen.items() if not _xml_parse_calls(source)]
+        assert not missed, f"a spelling of the parser is invisible to this rule: {missed}"
+
+        # The other direction. A module of somebody else's that happens to export
+        # the same name is not this one, and a rule that matched the name alone
+        # would say it was.
+        assert not _xml_parse_calls("from other import ElementTree\nElementTree.XML(b)\n")
+
+    #: One literal call per member of `_XML_PARSERS`, keyed by the member.
+    #:
+    #: **Literal rows and not a loop over the set**, because a loop over the set
+    #: drops a row with its member and stays green: since the three modules
+    #: moved from `fromstring` to `XMLParser`, nothing in the tree calls
+    #: `fromstring`, so pruning it from the set reads as a tidy up, and a fourth
+    #: module calling it unrefused then passed this rule and the byte door
+    #: census together, measured. Each row now reds by name when its member goes.
+    _ONE_CALL_PER_PARSER: Final = {
+        "fromstring": "ET.fromstring(b)",
+        "parse": "ET.parse(f)",
+        "iterparse": "ET.iterparse(f)",
+        "XML": "ET.XML(b)",
+        "XMLID": "ET.XMLID(b)",
+        "fromstringlist": "ET.fromstringlist([b])",
+        "XMLParser": "ET.XMLParser()",
+        "XMLPullParser": "ET.XMLPullParser()",
+        "ElementTree": "ET.ElementTree(file=f)",
+    }
+
+    def test_each_parser_it_names_is_seen_when_called(self) -> None:
+        missed = [
+            name
+            for name, call in self._ONE_CALL_PER_PARSER.items()
+            if _xml_parse_calls(f"import xml.etree.ElementTree as ET\n{call}\n")
+            != [(2, name)]
+        ]
+        assert not missed, f"a parse entry point is not seen when called: {missed}"
+
+    def test_the_rows_are_the_parsers_it_names(self) -> None:
+        """A member added to the set without a row, or a row whose member left
+        it, is a disagreement here rather than a row that tests nothing."""
+        assert sorted(self._ONE_CALL_PER_PARSER) == sorted(_XML_PARSERS)
+
+    def test_the_three_use_only_spellings_the_linter_can_report(self) -> None:
+        """The alias arm, which is the one `S314` does not give you."""
+        offenders = [
+            f"{path.relative_to(BACKEND)}:{line}: {name}"
+            for path in _every_module_but_the_tests()
+            for line, name in _xml_parse_calls(path.read_text())
+            if name not in _PARSERS_THE_LINTER_SEES
+        ]
+        assert not offenders, (
+            f"an XML parse is spelled so that S314 cannot report it: {offenders}. Use "
+            f"one of {sorted(_PARSERS_THE_LINTER_SEES)}, which ruff sees, so the "
+            "suppression at that site stays the thing a reader is told to check."
+        )
+
+
+#: The standard library entry points that turn bytes or text into a structure,
+#: by the module that defines them. **The census of byte doors starts from here.**
+#:
+#: XML is `_XML_PARSERS`, the set the rule above holds against the linter.
+#: **Shared, and so is the corpus walk and the module tuple**: a member dropped
+#: from that set is dropped from both rules at once, which is why the XML rule
+#: holds one literal call per member. Beside it, the JSON, zip and CSV readers.
+#: **This is a census of four modules' entry points and not of every parse**:
+#: `urllib.parse.parse_qs` in the SRU request reader and the hand written CQL
+#: parser behind it are byte doors outside it, each with properties in
+#: `tests/test_sru.py`, and so is a third party's parser, one reached through a
+#: variable bound elsewhere, and `bytes.decode`.
+_PARSE_ENTRY_POINTS: Final[dict[tuple[str, ...], frozenset[str]]] = {
+    _ELEMENTTREE: _XML_PARSERS,
+    ("json",): frozenset({"loads", "load"}),
+    ("zipfile",): frozenset({"ZipFile"}),
+    ("csv",): frozenset({"reader", "DictReader"}),
+}
+
+
+def _parse_sites(source: str) -> list[tuple[str, tuple[str, ...]]]:
+    """`(enclosing function, parser module)` for every parse entry point called.
+
+    **Resolved by import prefix, as `_elementtree_names` resolves XML**, but
+    written again here for any module rather than calling it, so the XML rows of
+    this census and the XML rule above are two derivations of one fact and
+    `TestEveryByteDoorIsRegistered` asserts them against each other.
+
+    The enclosing function is the innermost `def` around the call, qualified by
+    its class: the door a register row is about. A call at module level is
+    named `<module>`.
+    """
+    tree = ast.parse(source)
+    receivers: dict[str, tuple[str, ...]] = {}
+    bare: dict[str, tuple[str, ...]] = {}
+
+    def offer(bound: str, denotes: tuple[str, ...]) -> None:
+        for module in _PARSE_ENTRY_POINTS:
+            if module[: len(denotes)] == denotes:
+                receivers[".".join((bound, *module[len(denotes) :]))] = module
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                parts = tuple(alias.name.split("."))
+                if alias.asname:
+                    offer(alias.asname, parts)
+                else:
+                    offer(parts[0], parts[:1])
+        elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
+            module = tuple(node.module.split("."))
+            for alias in node.names:
+                if alias.name in _PARSE_ENTRY_POINTS.get(module, frozenset()):
+                    bare[alias.asname or alias.name] = module
+                else:
+                    offer(alias.asname or alias.name, (*module, alias.name))
+
+    found: list[tuple[str, tuple[str, ...]]] = []
+
+    def visit(node: ast.AST, scope: str) -> None:
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, ast.ClassDef):
+                visit(child, f"{scope}.{child.name}" if scope != "<module>" else child.name)
+                continue
+            if isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef):
+                inner = child.name if scope == "<module>" else f"{scope}.{child.name}"
+                visit(child, inner)
+                continue
+            if isinstance(child, ast.Call):
+                func = child.func
+                if isinstance(func, ast.Attribute):
+                    module = receivers.get(ast.unparse(func.value))
+                    if module is not None and func.attr in _PARSE_ENTRY_POINTS[module]:
+                        found.append((scope, module))
+                elif isinstance(func, ast.Name) and func.id in bare:
+                    found.append((scope, bare[func.id]))
+            visit(child, scope)
+
+    visit(tree, "<module>")
+    return found
+
+
+#: Every function in the application that calls a parse entry point, and what
+#: answers for it: the generated property that reaches it, or why none does.
+#:
+#: **Derived from the tree and held to it by equality both ways**, so a new
+#: parse reds until it is placed here and a row whose parse went away reds
+#: until it is removed. A value naming a test is resolved to a class holding a
+#: generated test, so a renamed property reds too. What a register cannot know
+#: is who wrote the bytes, which is the whole of the judgement in each reason.
+_BYTE_DOORS: Final[dict[str, str]] = {
+    "marc.py::_parsed": "tests/test_marc.py::TestAnUploadIsReadOrRefusedByName",
+    "metadata.py::_parsed": (
+        "tests/test_metadata.py::TestACatalogueAnswerIsReadOrRefusedByName"
+    ),
+    "opds.py::read_page": "tests/test_opds.py::TestAPageIsReadOrRefusedByName",
+    "backup.py::read_manifest": "tests/test_backup.py::TestAnArchiveIsReadOrRefusedByName",
+    "backup.py::restore": (
+        "second round: reopens what `read_manifest` read, then reads each cover "
+        "after the commit, where one it cannot read is declined alone"
+    ),
+    "backup.py::build_archive": "writes an archive, reads none",
+    "fetch.py::Fetched.json": (
+        "second round: generated at this seam with the JSON lookups behind "
+        "`metadata.NOT_DECODERS`; `RecursionError` is converted and a lone "
+        "surrogate repaired, each a named case"
+    ),
+    "csv_import.py::_read_table": (
+        "second round: any member's upload, hardened by named cases, with a "
+        "decode of its own"
+    ),
+    "csv_import.py::_headers_of": "second round, with `_read_table`",
+    "settings_store.py::get_json": (
+        "second round: a stored row, which a restore can carry, degraded to an "
+        "empty object on `ValueError` and `RecursionError`, each a named case"
+    ),
+}
+
+
+def _xml_modules_of_the_census() -> list[str]:
+    """The modules the byte door census finds parsing XML."""
+    return sorted(
+        {
+            str(path.relative_to(BACKEND))
+            for path in _every_module_but_the_tests()
+            for _, module in _parse_sites(path.read_text())
+            if module == _ELEMENTTREE
+        }
+    )
+
+
+class TestEveryByteDoorIsRegistered:
+    """A byte door is a function turning bytes or text somebody else wrote into
+    a value of this application; `docs/testing.md` holds what each must answer.
+    This keeps the population of them derived rather than remembered."""
+
+    def _found(self) -> set[str]:
+        return {
+            f"{path.relative_to(BACKEND)}::{scope}"
+            for path in _every_module_but_the_tests()
+            for scope, _ in _parse_sites(path.read_text())
+        }
+
+    def test_the_register_is_the_tree(self):
+        found = self._found()
+        assert sorted(found) == sorted(_BYTE_DOORS), (
+            f"unregistered: {sorted(found - set(_BYTE_DOORS))}; "
+            f"no longer a door: {sorted(set(_BYTE_DOORS) - found)}"
+        )
+
+    def test_its_xml_half_is_the_xml_rules_population(self):
+        """**Two resolvers of one fact**, asserted against each other: this
+        census's own and the one `TestOnlyThreeModulesTurnOutsideXmlIntoATree`
+        holds. A narrowing in either **resolver** reds here. The name set, the
+        corpus walk and the module tuple are shared, so a narrowing in any of
+        those shrinks both sides together; the name set is held by that rule's
+        literal call per member, the walk by `WHAT_EACH_WALK_REACHES`."""
+        assert _xml_modules_of_the_census() == sorted(_MODULES_THAT_PARSE_XML)
+
+    def test_it_resolves_each_parser_by_any_import_spelling(self):
+        """The diagonal: each row is a whole file and must be found."""
+        seen = {
+            "json as an alias": "import json as j\ndef f(b):\n    return j.loads(b)\n",
+            "loads imported": "from json import loads\ndef f(b):\n    return loads(b)\n",
+            "zipfile": "import zipfile\ndef f(b):\n    return zipfile.ZipFile(b)\n",
+            "csv": "import csv\ndef f(t):\n    return csv.DictReader(t)\n",
+            "a method": (
+                "import json\nclass C:\n    def f(self, b):\n        return json.load(b)\n"
+            ),
+        }
+        missed = [name for name, source in seen.items() if not _parse_sites(source)]
+        assert not missed, f"a parse is invisible to the census: {missed}"
+        assert not _parse_sites("from other import json\ndef f(b):\n    return json.loads(b)\n")
+
+    def test_every_property_it_names_exists_and_generates(self):
+        """A register row pointing at a property that was renamed or lost its
+        `@given` is a door with no property, reading as one with."""
+        named = [value for value in _BYTE_DOORS.values() if value.startswith("tests/")]
+        assert named, "the register names no property, so this arm is vacuous"
+        missing = []
+        for reference in named:
+            path, cls = reference.split("::")
+            tree = ast.parse((BACKEND / path).read_text())
+            classes = [
+                node for node in ast.walk(tree)
+                if isinstance(node, ast.ClassDef) and node.name == cls
+            ]
+            generates = any(
+                isinstance(item, ast.FunctionDef)
+                and any("given" in ast.unparse(d) for d in item.decorator_list)
+                for node in classes
+                for item in node.body
+            )
+            if not generates:
+                missing.append(reference)
+        assert not missing, f"named as a door's property and holding none: {missing}"
+
+
+#: The process starters ruff 0.16.7 reports under no rule, measured with the
+#: command taken from a request: where `subprocess.run(command, shell=True)` is
+#: a security finding, these are silent. `asyncio`'s two module functions and
+#: two event loop methods are silent under every rule ruff ships, preview
+#: included; `os.posix_spawn` and `os.posix_spawnp` under this application's
+#: configuration. `os.spawnv` and `os.execv` are reported, so they are not here.
+_UNREPORTED_PROCESS_CALLS: Final = frozenset(
+    {
+        "create_subprocess_shell", "create_subprocess_exec", "subprocess_shell",
+        "subprocess_exec", "posix_spawn", "posix_spawnp",
+    }
+)
+
+#: Modules refused whole, because the call they offer has a name too common to
+#: refuse: `pty.spawn` starts a process and reports no rule, and `spawn` alone
+#: would refuse every method of that name.
+_UNREPORTED_PROCESS_MODULES: Final = frozenset({"pty"})
+
+
+def _names_an_unreported_process_call(source: str) -> list[int]:
+    """The lines naming one of `_UNREPORTED_PROCESS_CALLS` or importing one of
+    `_UNREPORTED_PROCESS_MODULES`, by any reference: an attribute, a bare
+    name, an imported name and a string, the last because
+    `getattr(asyncio, "create_subprocess_shell")` reaches the call with no
+    attribute in sight."""
+    names = _UNREPORTED_PROCESS_CALLS | _UNREPORTED_PROCESS_MODULES
+    return sorted(
+        node.lineno
+        for node in ast.walk(ast.parse(source))
+        if (isinstance(node, ast.Attribute) and node.attr in _UNREPORTED_PROCESS_CALLS)
+        or (isinstance(node, ast.Name) and node.id in _UNREPORTED_PROCESS_CALLS)
+        or (isinstance(node, ast.Import) and any(a.name in names for a in node.names))
+        or (
+            isinstance(node, ast.ImportFrom)
+            and (node.module in names or any(a.name in names for a in node.names))
+        )
+        or (isinstance(node, ast.Constant) and node.value in names)
+    )
+
+
+class TestNoModuleStartsAProcessTheLinterCannotSee:
+    """**Some ways of starting a process are invisible to the linter.** The
+    `S6` rules report a shell started through `subprocess` or `os`, so such a
+    call needs a waiver at its site, and the lint configuration's header says
+    what holds those. `asyncio.create_subprocess_shell(command)`,
+    `os.posix_spawn` and `pty.spawn` report nothing at all, so each would need
+    no waiver and nothing would read it. No application module starts a
+    process today, so the rule refuses the name rather than judging the call:
+    one that is needed is a decision written here first.
+
+    **What it does not see**: a process started through a name this module
+    does not list, such as a third party library's own wrapper; and a name
+    computed at run time, `"create_subprocess_" + "shell"` or an f-string
+    handed to `getattr`, which is deliberate obfuscation rather than a
+    spelling, and is left to review.
+    """
+
+    def test_no_application_module_names_one(self) -> None:
+        found = [
+            f"{path.relative_to(BACKEND)}:{line}"
+            for path in _every_module_but_the_tests()
+            for line in _names_an_unreported_process_call(path.read_text())
+        ]
+        assert found == [], (
+            f"{found} start a process in a way no lint rule reports. Start it "
+            "through `subprocess`, where the linter sees it, or write the decision here."
+        )
+
+    def test_every_spelling_it_names_is_read(self) -> None:
+        """The diagonal: each row is a whole module, so a miss names the
+        spelling it missed."""
+        spellings = {
+            "the module function": "import asyncio\nasyncio.create_subprocess_shell(c)\n",
+            "the exec function": "import asyncio\nasyncio.create_subprocess_exec(c)\n",
+            "imported by name": "from asyncio import create_subprocess_shell\n",
+            "imported under an alias": "from asyncio import create_subprocess_exec as run\n",
+            "the loop's shell method": "loop.subprocess_shell(p, c)\n",
+            "the loop's exec method": "loop.subprocess_exec(p, c)\n",
+            "reached by getattr": 'getattr(asyncio, "create_subprocess_shell")(c)\n',
+            "posix_spawn": "import os\nos.posix_spawn(c, [], {})\n",
+            "posix_spawnp imported by name": "from os import posix_spawnp\n",
+            "the pty module": "import pty\npty.spawn(c)\n",
+            "spawn from the pty module": "from pty import spawn\n",
+            "the pty module by string": 'importlib.import_module("pty")\n',
+        }
+        missed = [
+            name for name, source in spellings.items() if not _names_an_unreported_process_call(source)
+        ]
+        assert missed == [], f"a spelling of an unreported process call is invisible: {missed}"
+        assert _names_an_unreported_process_call(
+            "import subprocess\nsubprocess.run(c)\nworker.spawn()\n"
+        ) == []
+
+
+class TestNothingStripsAnAssertOutOfTheImage:
+    """The narrowing asserts in application code are narrowing only if they run.
+
+    Eight `assert` statements in `errors.py`, `routers/books.py`,
+    `routers/users.py` and `targets.py` carry `# noqa: S101  narrowing, not
+    validation`. Each restates a condition the branch above it already
+    established, so that the type checker can see it; none is a check on a value
+    from outside.
+
+    **`python -O` and the `PYTHONOPTIMIZE` environment variable both delete
+    them**, and that is what makes the eight suppressions a claim rather than a
+    note. Under either, `assert result.record is not None` compiles away and the
+    `None` the branch above ruled out reaches `.as_match()` instead: an
+    `AttributeError`, and a 500 on a lookup that succeeded. The annotation still
+    says the value is there, so mypy reports nothing either.
+
+    **The first draft of this rule was wrong in four ways and passed**, which is
+    why the shape below is what it is. It globbed one compose spelling of four,
+    read physical lines so a continuation hid the flag, matched `CMD` case
+    sensitively so a lower case `entrypoint` beside it was invisible, and let a
+    start command name a shell script it never opened. Three of the four were
+    found by a second seat writing the mutation the author had not.
+
+    So this does not enumerate the ways a flag can be written. It reads every
+    line of every surface, and **refuses any start command or environment it
+    cannot read**, which is the half that closes rather than widens.
+    """
+
+    def test_the_surfaces_it_reads_are_present(self) -> None:
+        """The floor. A rule over an empty file set passes for the wrong reason."""
+        surfaces = _container_surfaces(BACKEND.parent)
+        names = [path.name for path in surfaces]
+        assert "Dockerfile" in names, (
+            f"no file named Dockerfile among {names}, so the two arms below read "
+            "nothing about the image and pass."
+        )
+        assert any("compose" in name for name in names), (
+            f"no compose file among {names}, so an environment set there is unread."
+        )
+
+    def test_no_container_surface_asks_for_optimised_bytecode(self) -> None:
+        offenders = _sites(BACKEND.parent, lambda line: "PYTHONOPTIMIZE" in line)
+        assert not offenders, (
+            f"PYTHONOPTIMIZE is set at {offenders}. It strips every `assert`, and the "
+            "eight in application code are the narrowings the type checker reads."
+        )
+
+    def test_no_line_of_a_container_surface_carries_an_optimise_flag(self) -> None:
+        """Every line, not only the start commands.
+
+        The first draft scoped this to `CMD` and `ENTRYPOINT` on the stated
+        ground that `-O` is also `curl`'s remote-name flag. That reason is false
+        of this tree: there is no `curl` in the Dockerfile and no `-O` token in
+        any surface, so the narrowing bought nothing and cost two evasions.
+        """
+        offenders = _sites(BACKEND.parent, _has_optimise_flag)
+        assert not offenders, (
+            f"a container surface carries a bare -O token: {offenders}. If it is Python's "
+            "optimise flag, every `assert` in application code disappears and the "
+            "narrowings go with them; `RUN PYTHONOPTIMIZE=1 uv sync` bakes the same thing "
+            "into the compiled bytecode. If it is a fetch tool's output flag, move it into "
+            "a script under the build directory, which this rule does not read, and say so "
+            "here."
+        )
+
+    def test_every_start_command_names_a_program_this_rule_can_read(self) -> None:
+        """The arm that keeps the two above complete.
+
+        A start command naming a script moves the question into a file this rule
+        does not open. It fails here rather than passing quietly, so whoever
+        changes the shape has to come back and say how the property still holds.
+        """
+        commands = _start_commands(BACKEND.parent)
+        assert commands, (
+            "found no start command in any container surface, so this rule read "
+            "nothing and would pass on an image that runs optimised."
+        )
+        unreadable = [
+            site for site, program in commands if program not in _PROGRAMS_THIS_RULE_CAN_READ
+        ]
+        assert not unreadable, (
+            f"a start command runs something this rule cannot read: {unreadable}. "
+            f"It knows {sorted(_PROGRAMS_THIS_RULE_CAN_READ)}; anything else may reach "
+            "`python -O` in a file nothing here opens."
+        )
+
+    def test_no_compose_file_reaches_a_file_this_rule_cannot_read(self) -> None:
+        """The three keys refused outright, and `dockerfile:` judged on its value."""
+        offenders = _sites(
+            BACKEND.parent,
+            lambda line: line.lower().startswith(_KEYS_REACHING_ANOTHER_FILE),
+        )
+        assert not offenders, (
+            f"a compose file takes configuration from a file this rule does not open: "
+            f"{offenders}. PYTHONOPTIMIZE set there is invisible to every arm here."
+        )
+        readable = {path.name for path in _container_surfaces(BACKEND.parent)}
+        # **The floor, and this arm is the one that went four rounds without
+        # one.** A `build:` the reader failed to parse yields no entries and
+        # reports clean, which is "nothing to refuse" and "read nothing" wearing
+        # the same verdict. Every other arm in this class has a floor; this is
+        # where four rounds of findings landed.
+        # **Per build key, not per file.** The first draft asked whether the
+        # file yielded anything, so a second service whose block the reader
+        # cannot parse rode in on the first service's entries and passed.
+        blind = []
+        for path in _container_surfaces(BACKEND.parent):
+            text = path.read_text()
+            keys = [
+                line
+                for line, logical in _logical_lines(text)
+                if logical.partition(":")[0].strip().strip('"\'') == "build"
+            ]
+            entries = [line for line, _, _ in _build_block(text)]
+            for position, line in enumerate(keys):
+                nextkey = keys[position + 1] if position + 1 < len(keys) else None
+                own = [
+                    entry
+                    for entry in entries
+                    if entry >= line and (nextkey is None or entry < nextkey)
+                ]
+                if not own:
+                    blind.append(f"{path.name}:{line}")
+        assert not blind, (
+            f"a build key is there and the reader produced no entries for it: {blind}. "
+            "That is the parser failing, not the file being clean."
+        )
+        built = [
+            f"{path.name}:{line}: {key}: {value}"
+            for path in _container_surfaces(BACKEND.parent)
+            for line, key, value in _build_block(path.read_text())
+            if not _build_entry_is_readable(key, value, readable)
+        ]
+        assert not built, (
+            f"a compose build block says something this rule cannot verify: {built}. "
+            f"It understands {sorted(_BUILD_KEYS_UNDERSTOOD)} and reads {sorted(readable)}, "
+            "one directory, never descending."
+        )
+
+    def test_it_reads_every_spelling_of_a_compose_file(self, tmp_path: Path) -> None:
+        """The diagonal. Each name in turn, and a decoy that must not be read."""
+        carried = [
+            "Dockerfile",
+            "Dockerfile.dev",
+            "compose.yaml",
+            "compose.yml",
+            "docker-compose.yml",
+            "docker-compose.yaml",
+        ]
+        for name in [*carried, "compose-notes.md", "README.md"]:
+            (tmp_path / name).write_text("")
+        assert [path.name for path in _container_surfaces(tmp_path)] == sorted(carried)
+
+    def test_it_finds_the_flag_wherever_a_start_command_can_hide_it(
+        self, tmp_path: Path
+    ) -> None:
+        """One spelling per file, so a miss names the spelling that was missed."""
+        written = {
+            "Dockerfile": 'CMD ["uvicorn", \\\n  "-O", "main:app"]',
+            "Dockerfile.lower": 'entrypoint ["python", "-O", "-m", "uvicorn"]',
+            "compose.yaml": '    command: ["python", "-OO", "-m", "uvicorn"]',
+            "docker-compose.env.yml": "    env_file: ./optimise.env",
+
+            "compose.override.yml": "    environment:\n      PYTHONOPTIMIZE: 1",
+        }
+        for name, body in written.items():
+            (tmp_path / name).write_text(body + "\n")
+
+        seen = {
+            site.split(":", 1)[0]
+            for site in _sites(tmp_path, _has_optimise_flag)
+            + _sites(tmp_path, lambda line: "PYTHONOPTIMIZE" in line)
+            + _sites(
+                tmp_path, lambda line: line.lower().startswith(_KEYS_REACHING_ANOTHER_FILE)
+            )
+        }
+        assert seen == set(written), f"unseen: {sorted(set(written) - seen)}"
+
+    def test_an_entrypoint_takes_its_arguments_from_the_cmd_beside_it(
+        self, tmp_path: Path
+    ) -> None:
+        """The idiom the first refusal arm failed, so it stays accepted.
+
+        Docker appends an exec form `CMD` to an exec form `ENTRYPOINT`, so the
+        `CMD` line names arguments rather than a program.
+        """
+        (tmp_path / "Dockerfile").write_text(
+            'ENTRYPOINT ["uvicorn"]\nCMD ["main:app", "--host", "0.0.0.0"]\n'
+        )
+        assert [program for _, program in _start_commands(tmp_path)] == ["uvicorn"]
+
+    def test_a_compose_file_reaching_another_file_is_refused(self, tmp_path: Path) -> None:
+        """Every key, one per file, so a miss names the key that was missed."""
+        written = {
+            "compose.env.yml": "    env_file: ./optimise.env",
+            "compose.extends.yml": "    extends:\n      file: ./base.yml",
+            "compose.include.yml": "include:\n  - path: ./base.yml",
+        }
+        for name, body in written.items():
+            (tmp_path / name).write_text(body + "\n")
+        seen = {
+            site.split(":", 1)[0]
+            for site in _sites(
+                tmp_path, lambda line: line.lower().startswith(_KEYS_REACHING_ANOTHER_FILE)
+            )
+        }
+        assert seen == set(written), f"unseen: {sorted(set(written) - seen)}"
+
+    def test_a_build_block_is_refused_unless_every_entry_is_understood(
+        self, tmp_path: Path
+    ) -> None:
+        """One row per escape four rounds of this rule were opened by."""
+        readable = {"Dockerfile"}
+        accepted = [("context", "."), ("context", "./"), ("dockerfile", "Dockerfile"),
+                    ("dockerfile", "./Dockerfile"), ("dockerfile", '"Dockerfile"')]
+        refused = [("context", "./deploy"), ("dockerfile", "deploy/Dockerfile.prod"),
+                   ("additional_contexts", "base=../base"), ("ssh", "default")]
+        # The two shapes that carry no key for a rule to read. `_build_block`
+        # turns both into entries; this asserts it does.
+        shapes = {
+            "shorthand": "services:\n  a:\n    build: ./deploy\n",
+            "flow mapping": (
+                "services:\n  a:\n    build: {context: ., dockerfile: deploy/D.prod}\n"
+            ),
+        }
+        for label, text in shapes.items():
+            entries = _build_block(text)
+            assert entries, f"{label}: no build entry seen at all"
+            assert any(
+                not _build_entry_is_readable(k, v, readable) for _, k, v in entries
+            ), f"{label}: every entry read as safe, {entries}"
+        wrong = [f"{k}: {v}" for k, v in accepted
+                 if not _build_entry_is_readable(k, v.strip('"'), readable)]
+        assert not wrong, f"refused a build entry it reads perfectly well: {wrong}"
+        wrong = [f"{k}: {v}" for k, v in refused
+                 if _build_entry_is_readable(k, v, readable)]
+        assert not wrong, f"accepted a build entry reaching outside what it reads: {wrong}"
+
+    def test_the_build_block_is_read_by_indentation(self, tmp_path: Path) -> None:
+        """The block ends where the indentation does, so a sibling key is not in it."""
+        (tmp_path / "compose.yaml").write_text(
+            "services:\n"
+            "  api:\n"
+            "    build:\n"
+            "      context: .\n"
+            "      dockerfile: Dockerfile  # the only one\n"
+            "    ports:\n"
+            '      - "8000:8000"\n'
+        )
+        entries = _build_block((tmp_path / "compose.yaml").read_text())
+        assert [(key, value) for _, key, value in entries] == [
+            ("context", "."),
+            ("dockerfile", "Dockerfile"),
+        ], entries
+
+    def test_a_start_command_naming_a_script_is_refused(self, tmp_path: Path) -> None:
+        (tmp_path / "Dockerfile").write_text('CMD ["/app/start.sh"]\n')
+        commands = _start_commands(tmp_path)
+        assert commands, "the scanner did not see the start command at all"
+        assert all(
+            program not in _PROGRAMS_THIS_RULE_CAN_READ for _, program in commands
+        ), f"a shell script was accepted as readable: {commands}"
+
+    def test_the_suppressed_asserts_are_the_eight_this_rule_was_written_for(self) -> None:
+        """The arm the others do not give you, and it counts rather than names.
+
+        Nothing above looks at an `assert`. This counts the text `# noqa: S101`
+        exactly as written there, so a ninth `assert user.is_admin  # noqa: S101
+        narrowing, not validation` reds here by its file. **It is narrower than
+        what ruff honours**: `# NOQA: S101` and `#noqa:S101` waive the same
+        rule and are not counted. The stricter hold reads what ruff waived
+        rather than the comment, and the header of the lint configuration in
+        `backend/pyproject.toml` says what it holds.
+
+        **A set of file names was the first draft and it was the covered case.**
+        A ninth suppression in a fifth module failed it; a ninth inside
+        `routers/books.py`, which already carries four and is exactly where the
+        next lookup handler would add one, passed. Counts per file rather than
+        names, so a suppression added anywhere has to be read first. The eight
+        this comment and `docs/decisions.md` both cite is asserted against the
+        tree below rather than against the table above it.
+        """
+        expected = {
+            "errors.py": 2,
+            "routers/books.py": 4,
+            "routers/users.py": 1,
+            "targets.py": 1,
+        }
+        counted: dict[str, int] = {}
+        for path in _every_module_but_the_tests():
+            hits = sum(1 for line in path.read_text().splitlines() if "# noqa: S101" in line)
+            if hits:
+                counted[str(path.relative_to(BACKEND))] = hits
+        assert counted == expected, (
+            f"the S101 suppressions moved to {counted}, from {expected}. Each one claims "
+            "its assert narrows a type the branch above already established, and that "
+            "claim is read by a person rather than checked by anything."
+        )
+        # Read off the tree, never off `expected`: comparing the literal to a
+        # literal can only fail on the same edit that changes the number, which
+        # is a stated bound wearing a measurement's clothes.
+        assert sum(counted.values()) == 8, (
+            f"the prose in this docstring and in `docs/decisions.md` says eight, and the "
+            f"tree carries {sum(counted.values())}."
         )
 
 def _names_returned_at(source: str) -> list[int]:
@@ -7576,3 +12436,271 @@ class TestTheLendingCycleStaysPlain:
                 f"{name} no longer imports {other} at module level, so the "
                 "cycle the rule above is about is not the one in the tree"
             )
+
+
+class TestNoDocstringCarriesTheCharacterItDescribes:
+    r"""A docstring about an invisible character must name it, never hold it.
+
+    **A docstring that is not raw interprets its own escapes**, so a sentence
+    explaining why some code handles a NUL ships a NUL. In the API layer that
+    reaches further than the file, because a docstring there is also the
+    description the OpenAPI document and the generated client are handed; but the
+    reason the rule is the whole tree is the next reader, who copies the line.
+
+    **Measured 2026-09-26 over `_every_python_file`, which is the only walk that
+    sees all of it**: nine sites, seven test modules and two generated
+    revisions. `_python_sources` drops the migrations and two of the nine were
+    there, which is why the arm below does not use the walk the layer's own rule
+    used.
+
+    **The fix was not the one the finding proposed.** Making the string raw is
+    wrong for a docstring carrying another escape for its own reasons, and two of
+    the nine did: one already spelled `\\x00` correctly on one line and `\x00` on
+    two others, and one wrote `\\u0000` deliberately beside a real NUL. Raw
+    ifying either would have changed a second thing silently. Doubling the
+    offending backslash renders as the author meant and touches nothing else.
+    """
+
+    def test_no_docstring_in_the_tree_carries_one(self) -> None:
+        carried = [
+            f"{path.relative_to(BACKEND)}:{line}"
+            for path in _every_python_file()
+            for line in _docstrings_carrying_a_control_character(
+                path.read_text(encoding="utf-8")
+            )
+        ]
+        assert carried == [], (
+            f"{carried} hold a control character in a docstring rather than an "
+            "escape naming one. Double the backslash, which renders as the "
+            "sentence meant; making the whole string raw changes any other "
+            "escape it carries."
+        )
+
+    def test_the_matcher_can_be_driven(self) -> None:
+        """A rule that only ever runs on this checkout is one whose arms cannot fire.
+
+        The third case is the one the tree needed: a doubled escape is what the
+        fix produces, so a matcher that flagged it would refuse every repaired
+        site.
+        """
+        assert _docstrings_carrying_a_control_character(
+            'def f():\n    """a\\x00b"""'
+        ) == [1]
+        assert _docstrings_carrying_a_control_character(
+            'def f():\n    r"""a\\x00b"""'
+        ) == []
+        assert _docstrings_carrying_a_control_character(
+            'def f():\n    """a\\\\x00b"""'
+        ) == []
+        # A tab counts, and that is not incidental: it was the character two of
+        # the eleven sites carried, in docstrings about a spreadsheet reading a
+        # tab as padding before a formula. A first sweep of this tree excluded
+        # tabs and reported nine.
+        assert _docstrings_carrying_a_control_character(
+            'def f():\n    """a\\tb"""'
+        ) == [1]
+        # A string that is not a docstring is not the subject.
+        assert _docstrings_carrying_a_control_character('x = "a\\x00b"') == []
+
+    def test_the_walk_it_uses_reaches_a_generated_revision(self) -> None:
+        """The arm above is only as wide as its walk, and the narrower walk misses.
+
+        Stated as the difference between the two walks rather than as a count of
+        revisions, which moves with every migration anybody writes.
+        """
+        migrations = {
+            path
+            for path in _every_python_file()
+            if "migrations" in path.relative_to(BACKEND).parts
+        }
+        assert migrations, "no generated revision in the walk, so this arm reads nothing"
+        assert not migrations & set(_python_sources()), (
+            "`_python_sources` now reaches the migrations, so the reason this rule "
+            "uses the wider walk no longer holds and the comment above is stale"
+        )
+
+
+def _user_construction_sites(sources: Iterable[Path]) -> dict[Path, list[int]]:
+    """Where the given modules build a `models.User` row, keyed by the path given.
+
+    **The population is a call to the model class, derived from the source, not
+    a grep for `username=`.** A door added tomorrow is in it the moment the call
+    is written.
+
+    **It takes the corpus rather than a root**, so it decides nothing about what
+    a walk reaches and the caller says which modules are in scope. The rule
+    below hands it `_python_sources()`, which drops two things its own
+    docstring names: the test tree, where the fixtures build `User` rows
+    constantly, and the migrations, which call the model class nowhere.
+
+    **What it does not reach, stated rather than left to be found.** It reads
+    the callee's spelling, `User(...)` or `<anything>.User(...)`, so a row built
+    through a name this cannot see, an alias, a `getattr`, or a Core
+    `insert()`, is outside it. The live example is `backup.restore`, which
+    writes `users` through `table.insert()`: the rule below carries that as an
+    open hole rather than as something this helper covers.
+
+    **It reports how many sites each module holds, not merely which modules
+    hold one.** A door added to a module that already has one moves the count
+    and nothing else, so a caller comparing paths alone cannot see it.
+    """
+    found: dict[Path, list[int]] = {}
+    for path in sources:
+        for node in ast.walk(ast.parse(path.read_text())):
+            if not isinstance(node, ast.Call):
+                continue
+            callee = node.func
+            if (isinstance(callee, ast.Name) and callee.id == "User") or (
+                isinstance(callee, ast.Attribute) and callee.attr == "User"
+            ):
+                found.setdefault(path, []).append(node.lineno)
+    return found
+
+
+@dataclasses.dataclass(frozen=True)
+class _Door:
+    """One module that builds `User` rows.
+
+    `sites` is how many calls it holds, carried beside the note rather than in
+    a second mapping: two structures keyed the same way drift, and the count is
+    the half a comparison of paths alone cannot see.
+    """
+
+    sites: int
+    bound: str
+
+
+class TestEveryDirectoryDoorWritesThroughOneFunnel:
+    """Every site that **calls the model class** to build a `User` row is one
+    of three, each with its username bounded, and the bound is written down
+    beside the site here.
+
+    **It does not prove any of the three bounds**, and saying so is the point.
+    What it proves is that a site cannot be added or removed without this list
+    moving, which is the failure that produced the defect this class was
+    written for: the LDAP door resolved a name from a directory attribute and
+    handed it to a write with nothing between, and SQLite does not enforce
+    `String(USERNAME_MAX)`, so the row was written at whatever width the
+    directory returned.
+
+    **The census is per site, not per module.** It compares how many calls each
+    module holds, because a fourth door added to a module that already has one
+    moves no path: a rule comparing the set of paths is green on it, and the
+    arm below plants exactly that.
+
+    **A row can still arrive without calling the class at all**, and that is an
+    open hole rather than a narrowing: `backup.restore` writes `users` through
+    `table.insert()`, which no spelling of this census reads. Only a column
+    constraint would bound that one, and `docs/decisions.md` records why this
+    branch declined it.
+
+    **The bound each note records is per auth mode.** Local mode never reaches
+    the funnel, so a stored row wider than the column signs in through the
+    local door and is served in full, while the directory modes refuse the same
+    row. The three notes say what bounds each door, not that every row in
+    `users` is bounded.
+
+    **Not an arm of `TestEveryTextCeilingComesFromTheColumn`.** That class is
+    about a Pydantic `max_length` deriving from a column constant and carries a
+    careful argument about which populations it may widen over. This rule adds
+    no Pydantic field and would break that argument.
+
+    **The notes below are judged by a reader and not by this class**, which is
+    the residue rather than an omission: a rule matching words in them would
+    pass on a sentence that says nothing and fail on one that says the right
+    thing in other words. It was written the second way first and reddened on a
+    healthy note. What is mechanical here is that a site cannot appear without
+    somebody writing one.
+    """
+
+    #: Each module that builds a `User` row, how many sites it holds, and how
+    #: each one's `username` is bounded. A new entry, or a moved count, is the
+    #: whole point of the rule: either is the moment somebody has to write down
+    #: what bounds the name their door lets in.
+    EXPECTED: dict[str, _Door] = {
+        "auth_backends.py": _Door(
+            sites=1,
+            bound=(
+                "the directory funnel. `upsert_directory_user` refuses a name "
+                "longer than `USERNAME_MAX` and returns None. That is the LDAP "
+                "door's bound, where the name is a directory attribute nothing "
+                "checked. The proxy door had it already, in `_PROXY_USERNAME`, "
+                "whose repeat derives from the same constant; the funnel is its "
+                "backstop rather than its bound. Neither door is on the local "
+                "mode's path, so this bounds what a directory writes and says "
+                "nothing about a row already in the table."
+            ),
+        ),
+        "routers/auth.py": _Door(
+            sites=1,
+            bound=(
+                "local registration. `schemas.user.UserCreate` carries "
+                "`max_length=USERNAME_MAX`, so Pydantic answers 422 to a wider one."
+            ),
+        ),
+        "routers/users.py": _Door(
+            sites=1,
+            bound=(
+                "an admin creating an account. The same model, the same ceiling, "
+                "the same 422."
+            ),
+        ),
+    }
+
+    def test_the_three_doors_are_the_only_ones(self) -> None:
+        """Counted per site, so a door appended to a module already holding one
+        moves the census rather than hiding inside its path."""
+        census = {
+            path.relative_to(BACKEND).as_posix(): len(lines)
+            for path, lines in _user_construction_sites(_python_sources()).items()
+        }
+        expected = {path: door.sites for path, door in self.EXPECTED.items()}
+
+        assert census == expected, (
+            "a `User(...)` site appeared, moved or went. Bound its username, "
+            "then record here what bounds it and how many sites the module "
+            "holds: the rule is that nobody adds a door without writing that "
+            f"down. walked {census}, expected {expected}"
+        )
+
+    def test_every_door_carries_a_note(self) -> None:
+        """The half that is mechanical. What the note says is a reader's."""
+        assert all(door.bound.strip() for door in self.EXPECTED.values())
+
+    def test_a_fourth_door_in_a_new_module_is_reported(self, tmp_path: Path) -> None:
+        """The diagonal. A census is worth what it sees when the thing it
+        exists to catch is there, and this tree has three sites whether the
+        census works or not."""
+        planted = tmp_path / "doorman.py"
+        planted.write_text(
+            "from models import User\n\n\ndef make(name):\n    return User(username=name)\n"
+        )
+
+        assert _user_construction_sites([planted]) == {planted: [5]}
+
+    def test_a_fourth_door_in_a_module_that_already_has_one_is_reported(
+        self, tmp_path: Path
+    ) -> None:
+        """The other diagonal, and the one that decides whether this is a
+        census.
+
+        Planting the new door in a new file exercises the easy case: the path
+        is new either way, so a rule reading paths alone is red on it. The
+        case that separates the two is a second call appended to a module
+        already in the list, which moves the count and nothing else.
+        """
+        planted = tmp_path / "doorman.py"
+        planted.write_text(
+            "from models import User\n\n\n"
+            "def make(name):\n    return User(username=name)\n\n\n"
+            "def make_again(name):\n    return User(username=name)\n"
+        )
+
+        assert _user_construction_sites([planted]) == {planted: [5, 9]}
+
+    def test_a_module_building_no_row_is_not_a_door(self, tmp_path: Path) -> None:
+        """Without this the census above is satisfied by reporting every file."""
+        quiet = tmp_path / "quiet.py"
+        quiet.write_text("from models import User\n\n\ndef read(db):\n    return db.query(User)\n")
+
+        assert _user_construction_sites([quiet]) == {}

@@ -55,24 +55,27 @@ dependencies = [
     # be: it needs libpq and a compiler. The published tables say the full scheme
     # for that reason.
     #
-    # **The connection is not certificate checked, and drops to cleartext
-    # silently if the server declines TLS.** It is authenticated, by the
-    # password in the URL; what nothing authenticates is the server.
-    # With no `ssl_context`, `pg8000.core._make_socket` builds a default context
-    # and then sets `check_hostname = False` and `verify_mode = CERT_NONE`; if
-    # the server does not answer the SSLRequest with `S`, the `elif
-    # orig_ssl_context is not None` arm is false and the session **continues in
-    # cleartext** with nothing raised. `database.py` passes `connect_args={}` for
-    # every non SQLite URL and SQLAlchemy's pg8000 dialect copies `url.query` in
-    # as strings, so no `DATABASE_URL` can supply an `SSLContext`. Verified
-    # against pg8000 1.31.5's own source, 2026-09-17. Honouring an `sslmode` is a
-    # change to `database.py` and is in the tracker.
+    # **How much of the connection is verified is `DATABASE_SSL_MODE`, and
+    # `database.py` is its one home.** `ssl_context` in `connect_args` is the
+    # only channel a context reaches this driver through, which is why that
+    # decision sits where the engine is built rather than in a URL: SQLAlchemy's
+    # pg8000 dialect copies `url.query` straight into the driver's keyword
+    # arguments, so an `?sslmode=` there reaches `pg8000.dbapi.connect`, which has
+    # no such parameter and raises `TypeError` on the first connection. Driven
+    # 2026-10-01, and it is worth stating accurately rather than as "ignored":
+    # a deployment that spells it there finds out immediately. The reading of
+    # `pg8000.core._make_socket` that each mode name rests on is in that module,
+    # beside the table it justifies.
     #
     # Its paramstyle is `format`, the same `%` hazard psycopg2 has, so
     # `database.MonthBucket`'s note about choosing a `to_char` pattern with no `%`
     # in it still holds under this driver rather than being a claim about a
     # different one.
     "pg8000>=1.31.5",
+    # Imported by `notifications._host`, to encode a host the way httpx's own
+    # `encode_host` does. It arrives through httpx anyway; declared because the
+    # import is this project's, not only httpx's.
+    "idna>=3.19",
 ]
 
 [project.optional-dependencies]
@@ -90,12 +93,16 @@ dev = [
     "pytest-cov>=6.0.0",
     "pytest-asyncio>=0.25.2",
     "pytest-xdist>=3.6.1",
+    "pytest-timeout>=2.4.0",
     "respx>=0.22.0",
+    "schemathesis>=4.27.5",
     "ruff>=0.9.4",
     "mypy>=1.14.1",
     "pip-audit>=2.9.0",
     "jsonschema>=4.23.0",
     "keyring>=25.7.0",
+    "hypothesis>=6.168.0",
+    "mutmut>=3.8.0",
 ]
 
 [tool.pytest.ini_options]
@@ -119,29 +126,237 @@ pythonpath = ["."]
 # every xdist worker is a separate process with its own directory, its own
 # test.db and its own COVERS_DIR. Nothing is shared to race over.
 #
-# Measured: 22m50s serial, 11m50s at -n 2, same 1634 tests. Not the full 2x,
-# because the suite is closer to I/O bound than CPU bound: it drops and
-# recreates every table between tests, and two workers were observed using
-# 0.68 cores between them. That is also why the old 3500m CI limit was
-# unjustified even before this: the serial run was never short of cores.
+# **No duration is written here, and that is the correction rather than an
+# omission.** This paragraph carried a serial duration, a two worker duration and
+# a test count, for long enough that the suite grew past five times that count. A
+# figure nobody re-derives is read as current for exactly as long as it sits
+# there, so restating the old ones here would keep them copyable in the one home
+# that publishes. They are not restated anywhere that publishes, which the
+# decision register says of itself too: the one attributed reading is in a
+# document the gate strips.
+# `tests/COVERAGE.md` recomputes the test count on every run, which is what a
+# number that has to stay true looks like.
+#
+# **A duration is a fact about a machine and a worker count, not about this
+# line.** Recorded readings of this suite are far apart, and they differ in the
+# machine and in the worker count at once, so nothing on record separates the
+# two effects. Neither was taken at the number here either: a command line `-n`
+# wins over the one in `addopts`, so a harness that passes its own worker count
+# is not measuring this setting at all. Read the current duration off the
+# pipeline's own job report, and take your own with `--durations`, saying which
+# machine and which worker count produced it.
+#
+# **What carries this setting was never the durations.** The suite is closer to
+# I/O bound than CPU bound: it drops and recreates every table between tests,
+# and two workers were measured using 0.68 cores between them. So more workers
+# buy wall clock by overlapping waiting rather than by using more CPU, which is
+# why the ratio was never the full 2x, and why the old 3500m CI limit was
+# unjustified even before this: the serial run was never short of cores. None of
+# that depends on how many tests the suite holds, which is why it stays and the
+# figures went.
 #
 # `--dist loadfile` keeps a file's tests on one worker. `load` scatters them,
 # and this suite has files whose tests share a module-level counter
 # (covers.reset_counts) or build on one another within the file.
-addopts = "-q --strict-markers --import-mode=importlib -n 2 --dist loadfile"
+#
+# ── A hung test fails as a named test ────────────────────────────────────────
+#
+# `--timeout` bounds every test, so a hang arrives as a named failure rather than
+# as a job timeout naming nothing. Nothing here bounded a wait before it:
+# measured 2026-09-26, a worker parked nine minutes with no verdict, and
+# `-o faulthandler_timeout=60` dumped tracebacks without aborting the run.
+#
+# **The value has a floor derived from what this test tree declares, rather than
+# a number chosen from what it has been observed to take.** Durations alone
+# would put it near 60: the
+# worst reading over five recent backend jobs is a 28s stall on a test that costs
+# 0.05s on every other run. But the tree declares its own ceilings, and measured
+# on this base the largest is 300, at twelve subprocess waits. A global below
+# that silently overrides a declared ceiling at exactly the sites whose subject
+# is a process that will not stop. So the rule is: **strictly above the largest
+# ceiling the test tree declares.** `tests/test_a_hung_test_is_named.py` asserts
+# that relation by walking the tree, so a test that later declares a longer wait
+# reddens a guard and forces a decision instead of being halved by a line nobody
+# re-read. The floor is a fact about the tree rather than somebody's judgement
+# about a distribution, which is why no duration is written beside it.
+#
+# **What that guard does not hold, said here rather than left to be found.** It
+# is a floor with no upper term: nothing in it stops this value being raised
+# until the ceiling never fires, and 36000 would be as green as 360. What makes
+# a high ceiling safe is not that guard, it is the reconciliation named below,
+# which refuses a session that lost a test to anything at all, a bound that
+# never fired included. And the floor is necessary rather than sufficient: a
+# test that legitimately spends its declared 300 seconds and then does anything
+# else is still cut by a global one second above it, and its escape is the
+# marker at its own site like any other long test's.
+#
+# **`--timeout-method=signal`, pinned rather than left to the plugin default.**
+# Measured: the signal method fails the hanging test by name and the worker
+# survives, so the rest of the run completes. The thread method calls `os._exit`,
+# which is indistinguishable from a crash: nine restarts, the same test reported
+# failed nine times, 20 report entries for 13 collected tests. The default
+# behaves like the first of those today, which is exactly why leaving it implicit
+# is wrong: it is one command line flag, or one platform without SIGALRM, away
+# from the second, and the second looks like a crash rather than like a
+# configuration mistake.
+#
+# **`--max-worker-restart=0`, and it is not belt and braces.** xdist defaults to
+# `numprocesses * 4`, so 8 here, and under `--dist loadfile` a dead worker hands
+# its item to the replacement, which dies on it too. Measured at the default: ten
+# workers consumed, one test reported failed ten times, 35 report entries for 31
+# collected tests, five tests never run, and a reader who checks the count sees
+# it go **up**. Deleting this line does not restore a tolerant run, it restores
+# that.
+#
+# **All three here rather than as ini keys, because that is what keeps them
+# armed.** With the plugin absent, `--timeout` on the command line is a usage
+# error and the run refuses; an unknown ini key is a warning and the run proceeds
+# unbounded. `--max-worker-restart` has no ini key at all.
+#
+# What restarts off costs is a louder failure after a genuine one off worker
+# death, against an old behaviour that was longer and more misleading. What makes
+# that trade safe is the reconciliation in `tests/conftest.py`, which turns a
+# short session into a named refusal. A test that legitimately needs longer takes
+# `@pytest.mark.timeout(n)` at its own site, which is a change to that test
+# rather than to this line.
+addopts = "-q --strict-markers --import-mode=importlib -n 2 --dist loadfile --max-worker-restart=0 --timeout=360 --timeout-method=signal"
+# `--strict-markers` is on, so a marker exists here or it is an error rather
+# than a silent typo that deselects nothing.
+#
+# `property` marks a test whose inputs hypothesis generates. It is not a way to
+# skip them: they run in the default suite, because a property nobody runs is a
+# property nobody knows the truth of. What the marker buys is a measurement,
+# `-m property` being how the budget below is costed, and one line of escape for
+# somebody chasing an unrelated failure.
+# `tests/test_property_budget.py` refuses a generated test that does not carry
+# it, so the two cannot drift.
+markers = [
+    "property: inputs generated by hypothesis rather than written out",
+    "answers_500(raises=types): makes a route crash on purpose with these exception types and asserts on the 500, so the crash net in conftest.py excuses those and no other",
+]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 
+[tool.mutmut]
+# **mutmut is used as a mutant GENERATOR here and never as a sweep engine.** The
+# wrapper asks it for the mutations of one file and applies them one at a time; it
+# never runs `mutmut run`, so nothing below selects tests or writes a `mutants/` tree.
+#
+# This section has to exist even so. mutmut loads its config from the pyproject.toml
+# in the CURRENT directory at first use, and with no `[tool.mutmut]` it falls back to
+# guessing a source directory from the directory's own name, which for `backend` is a
+# guess that misses and raises. So the section is what makes generation start at all.
+source_paths = ["."]
+
 [tool.coverage.run]
 source = ["."]
-omit = ["tests/*", ".venv/*"]
+# **What a coverage run cannot see, said where it is left out.** Nothing gates on
+# a coverage figure here, so this list exists to keep a gap that is a fact about
+# the instrument from reading as a test somebody forgot.
+#
+# Measured and not listed, deliberately: `migrations/`, whose upgrades build the
+# schema every run uses, so a downgrade no test drives shows as unreached rather
+# than vanishing; and `scripts/postgres_database.py`, whose server half runs only
+# against Postgres, which its test file's docstring states.
+omit = [
+    "tests/*",
+    ".venv/*",
+    # Executed on every backend run, as a child process: `tests/test_openapi_drift.py`
+    # compares what it prints with the committed schema byte for byte. This
+    # configuration measures this process and not its children, so it would read
+    # as never run. That is a choice and not the tool's limit: `patch =
+    # ["subprocess"]` follows a child, and is not switched on suite wide here.
+    "scripts/dump_openapi.py",
+]
 
 [tool.ruff]
 line-length = 110
 target-version = "py314"
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B", "SIM", "C4"]
+# **Selecting by family is the thing this list is for, and it is also its one
+# gap.** A rule ruff adds INSIDE a named family arrives enforced; a family
+# nobody names is off forever and nothing ever reports it. So the question a
+# reader should be able to answer from here is not "why is each of these on"
+# but "what is deliberately off", and the answer is: the families listed below
+# as not selected, the rules `lint.ignore` refuses, and the per-file table at
+# the end, each with its reason.
+#
+# **`lint.ignore` is the refusal over the whole application**, with its reasons
+# beside the key. It is read by selecting it again: no inline override clears
+# that key, but a later selection re-enables an ignored rule while the per-file
+# table and the site directives stay in force. So each entry is asked to still
+# fire and to be selected at all, and must expand under ruff to the one rule it
+# names, never to a `flake8-bandit` rule, and never to one ruff describes as
+# checking a suppression comment. That is what is held, and it is not every rule
+# that guards against hostile input: the confusable character rules are outside
+# bandit and admissible, and review is what stops them. The per-file table can
+# be cleared, and each of its entries is asked whether it still suppresses
+# something and refused a suppression rule as this key is. So is a suppression
+# comment that names one or names no rule at all, at a line, over a range or
+# over a file, in any module either configuration lints, and a notebook, whose
+# comments that check cannot read, is refused outright. A suppression comment
+# in an application module waiving a finding ruff reports under a
+# `flake8-bandit` code must sit on the line it waives, and a test holds every
+# such waiver by its file, its code and every row of the statement or header it
+# sits in, so a new one fails until the test is edited beside the reason at its
+# site.
+#
+# **B008 is on**: FastAPI's dependency idiom is written as
+# `Annotated[..., Depends(...)]` throughout, which the rule does not read as a
+# call in a default, so a real one, a value built once at import and shared by
+# every call, is still reported, unless the parameter is annotated with an
+# immutable type.
+#
+# The second group was added 2026-10-02. What each one buys, in the order a
+# reader cares about rather than alphabetically:
+#
+#   DTZ   a datetime with no zone. The register already argues that a calendar
+#         date is not an instant and that a naive stored value is the ambiguous
+#         one; this is that argument enforced instead of restated.
+#   BLE   a blind `except Exception`. A swallowed error surfaces as something
+#         not happening rather than as an error, which is the failure nobody
+#         reports because nobody sees it.
+#   LOG G the logging call is an operator's only view of a running container.
+#   PGH   a BLANKET `# noqa` or `# type: ignore`. Worth naming on its own: a
+#         comment starting `# noqa` suppresses every rule on its line whatever
+#         follows it, and this tree has shipped that twice, silently both times.
+#   T10   a committed `breakpoint()`.
+#   SLOT EXE YTT RSE PIE FURB ICN RET   small, mostly autofixable.
+#
+# **Four of them report nothing anywhere and are a pure ratchet**: T10, YTT,
+# RSE and PGH. Two more look like that from here and are not, and the
+# difference is the population: `SLOT` and `EXE` report nothing in
+# application code and each reported on the day they were added, `SLOT` once
+# in the test tree and `EXE` five times over the scripts outside this
+# directory. Both were taken in the change that selected them, a `__slots__`
+# on a `str` subclass built five hundred times a run and five scripts whose
+# shebang was a claim their mode did not support.
+#
+# **`T20`** is a committed `print`. Selected, with per-file refusals in the
+# table at the end and the reason at each key.
+#
+# **One more was considered and refused rather than exempted**, `PERF`. It is
+# below with the rest of the refusals, and it is the one worth reading, because
+# it was not refused for its size.
+#
+# **This list is a superset constraint and not only a choice.** A second lint
+# configuration covers the Python this repository versions outside this
+# directory, its command line scripts, and a test requires every family named
+# here to be named there too: a family list is what enrols a rule ruff has not
+# shipped yet, so a split list leaves one tree silently behind. So a family is
+# added here only if it is also right over those scripts, or that
+# configuration can refuse the rule over all of them, which it can for one rule
+# at a time and never for a `flake8-bandit` one.
+#
+# **`TRY` is selected**, with two of its rules refused in `lint.ignore` below for
+# the reasons there and the rest enforced.
+select = [
+    "E", "F", "I", "UP", "B", "SIM", "C4", "S", "ASYNC", "RUF",
+    "DTZ", "BLE", "LOG", "G", "PGH",
+    "T10", "T20", "SLOT", "EXE", "YTT", "RSE", "PIE", "FURB", "ICN", "RET",
+    "PT", "TRY",
+]
 # W605 is an invalid escape sequence, `\d` in a non raw string. CPython warns
 # about it today and has it scheduled to become a SyntaxError, at which point the
 # file stops importing. This is the fast path: a column and an autofix, in a job
@@ -153,12 +368,297 @@ select = ["E", "F", "I", "UP", "B", "SIM", "C4"]
 # Measured 2026-09-02: `--select W` reports one further finding, W291 trailing
 # whitespace in a generated Alembic header, which is a tidiness preference nobody
 # asked for. W605 alone reports nothing today.
-extend-select = ["W605"]
-ignore = [
-    # FastAPI's dependency-injection idiom is a function call in a default
-    # argument, which B008 exists to forbid.
-    "B008",
+#
+# **`PT` is selected above for one rule and kept for the rest.** PT011 is a
+# `pytest.raises` on a broad exception with no `match`, which passes when the
+# code under test refuses for a different reason than the test names. Not
+# hypothetical: one test here asserted two arms of one function, and its
+# lookup case still passed with the lookup arm deleted, because the search arm
+# refused the same row with the same bare `ValueError`. The rest of the family
+# is mostly style, and it was cleared rather than left out so that a rule ruff
+# ships next arrives enforced; the tooling tree refuses the family per file
+# for its unittest scripts, which is that tree's own business.
+#
+# **Broad is ruff's default set plus the six below** in
+# `[tool.ruff.lint.flake8-pytest-style]`, each one this tree's tests raise.
+# The default alone missed 16 more unmatched raises on 2026-10-07, several
+# over a function that raises the same type for more than one reason.
+# `TimeoutError` is left out because asyncio raises it with an empty
+# message, so there is nothing to match.
+#
+# Measured 2026-10-07 before any rule of the family was cleared, PT011
+# included, with suppressions cleared:
+#
+#   ruff check --config 'lint.per-file-ignores = {}' --select PT --statistics .
+#
+#   183 findings, now 0 with six directives. PT018 composite assertions 103,
+#   split, each half keeping the message the whole carried where it was true of
+#   that half; PT006 and PT007, 35, parametrise spellings; PT019 3, a fixture
+#   with a value named as if it had none, renamed; PT022 1; PT011 34. PT012 4:
+#   one hid which of two mechanisms refused and was split, and three carry a
+#   directive, a round trip asserted whole and two deadline tests whose `async
+#   with` is what is under test. PT017 3, all directives: property tests where
+#   raising is optional.
+#
+# **`PLE2502` is a bidirectional control character in source**, the class
+# that makes a line render as one thing and parse as another, which nobody
+# reading a diff can see. One rule rather than the `PL` family, which is a
+# rewrite of the tree; it reports nothing here or over the scripts, so it
+# arrives as a ratchet.
+extend-select = ["W605", "PLE2502"]
+
+# ── `lint.ignore`, the rules wrong about the whole application ───────────────
+#
+# **An entry here says why a rule is wrong about this code, never that the work
+# is large.** This side has no backlog, so this and the test tree's per-file
+# key are the two slots that can take hundreds of findings in a line, and
+# filing unpaid work in either as a refusal would be the cheapest way to land a
+# family. The rule holds at both. No arm can tell the two apart; a test holds
+# this list by value, so each entry arrives in a diff beside its reason, which
+# is where a reviewer reads which it is.
+#
+# **`TRY003`, a style opinion at any size.** Satisfying it means an exception
+# class per raise site, trading a sentence a reader sees at the `raise` for a
+# name they have to look up. The second configuration refuses it over its
+# scripts for this reason.
+#
+# **`TRY400`, because its remedy is the leak.** It asks for `.exception` where a
+# handler logs `.error`, and a traceback writes the exception's own message to
+# the log, which this tree already treats as a route for a caller's value and
+# for a credential. ruff's own fix at the directory login refusal writes the
+# caller's forged line past the clipping that call applies, and a test of that
+# refusal reds on it. A messaging transport failure logged at `.error` would
+# have the rule demand a traceback whose message carries the bot token in its
+# URL. None of the handlers it reported on the day it was selected took its
+# advice, each for the reason at its site. It reports nothing over the scripts
+# the second configuration covers, so it stays on there. **The reason outlives
+# the entry**: a test keeps an entry only while its rule reports, so once no
+# handler here logs `.error` the entry has to go, and the next one that does
+# answers the rule at its own site, with a directive under this reason, rather
+# than by taking the traceback.
+#
+# **Every other rule in the family is enforced.** The `TRY004` sites keep
+# `ValueError` on a type test, each with a directive under its reason.
+ignore = ["TRY003", "TRY400"]
+#
+# ── The families deliberately NOT selected ──────────────────────────────────
+#
+# **Written down so the refusal is a fact somebody can disagree with rather
+# than an opinion they have to take on trust.** Each is a rewrite of the tree
+# rather than a ratchet over it: turning one on means either several hundred
+# edits or an exemption that reads as a decision and binds nothing.
+#
+# **The command counts over the whole backend tree**, this directory and its
+# test tree together, this configuration plus the one family. **The population
+# is named because it is where these go wrong**: the same command with
+# `--exclude tests` counts a different and equally correct set, and a figure
+# quoted without the population it was taken over has already been read as the
+# other one.
+#
+# **One class of figure below cannot be re-derived from a published copy of
+# this repository at all**, and it is the exception to the discipline this
+# block otherwise keeps: the readings over the Python outside this directory,
+# which the published tree does not carry. They are stated here because the
+# decision they support was taken over both corpora, and a reader who has
+# only this half should treat them as unverifiable rather than as measured.
+#
+#   ruff check --extend-select <family> --statistics .
+#
+#   PLR2004  a literal in a comparison. Almost all of it is test arms.
+#   ARG      an unused argument, most of them method arguments, and a
+#            signature a framework calls is not ours to narrow.
+#   SLF001   a private member read from outside. The test tree's whole
+#            job here is to read the thing under test.
+#   Q000     single quotes, every one of them a rewrite of a line that is
+#            correct today. Nothing here reformats Python, so there is no
+#            tool to hand the work to.
+#   EM       an exception message as a literal rather than a name.
+#   TC       an import that could move under `TYPE_CHECKING`. Part of it is
+#            TC006, a cast's first argument, which is a different thing
+#            wearing the same prefix.
+#   INP001   a package with no `__init__.py`, over a test tree that is
+#            deliberately a mirror of flat modules.
+#
+# **No row carries a figure, on purpose.** Each counts over a corpus that
+# grows with the test tree, including in the very commit that writes the
+# figure: the first draft of this block went stale inside its own commit, 937
+# against 943 and 214 against 215. A number that cannot be kept true is worse
+# than none, because it is read as current. The command stays and the figure
+# goes.
+#
+# ── The one refused on its merits rather than its size ──────────────────────
+#
+# **`PERF`**. **Four sites in application code were read, every one there
+# was when this was refused, and the test tree's were not.** The refusal is
+# stated over the four: application code is where the rule's premise is
+# strongest, and all four were kept. A loop whose body carries the comment explaining its own condition; a loop
+# that binds a value once and reuses it per inner item; a loop whose elements
+# a named guard reads by their shape; and **one the rule is simply right
+# about**, a plain filtered append, kept for a reason outside itself: it is
+# the first of a pair appending to one list, the second cannot be rewritten
+# because its condition carries the comment explaining it, and the order the
+# two build is load bearing, so rewriting the half that can be rewritten would
+# spell one sequence two ways and hide that it is one.
+#
+# **Nobody has read the test tree's**, so no rate is claimed over the family.
+# What the four support is the kind of thing the rule reports here: an
+# **idiom** rather than a risk, where four sites in the half that matters most
+# were all answerable and one of them was answered by a coupling rather than
+# by the rule being wrong. Selecting a family is a tree wide decision, so a
+# reader who wants the extent has to read the test tree's; the command above
+# without `--statistics` lists them.
+#
+# Compare `BLE`, which **is** selected and is exempted at every one of its
+# live sites, each with its reason: that one reports a risk, and the places
+# somebody has already thought about say nothing about the next one. This one
+# is refused on the application's side alone; over the scripts outside this
+# directory it reports three, a size that goes in their backlog.
+#
+# **A family total is not the sum of the codes somebody happens to name**,
+# which is why the command names the selector: `TC` as a family counts a
+# fourth code past `TC001..TC003`, with the same prefix and a different
+# subject, and `ARG` two further codes past the two anybody quotes. A figure
+# quoted without its selector is not re-derivable, and one quoted without its
+# population has already been read as the other one.
+
+[tool.ruff.lint.flake8-import-conventions.extend-aliases]
+# **This tree spells it `ElementTree`, and ICN001's default map says `ET`.**
+# The spelling here is the one the code already had in all but one module, so
+# this records a convention rather than inventing one; the odd module was
+# changed to match. No count: the population is the tree and moves with it.
+#
+#   ruff check --select ICN --statistics .
+#
+# Written as the convention and NOT as a suppression, because a suppression
+# would also stop the rule noticing the next module that spells it a third
+# way, which is the only thing ICN is for.
+#
+# **`extend-aliases` and NOT `aliases`, and the difference is silent.**
+# `aliases` REPLACES ruff's whole default map rather than adding to it, so
+# spelling it that way would quietly drop every other convention the rule
+# knows. Driven 2026-10-02 against a file importing `numpy as nmpy` and
+# `pandas as pnds`: the default map reports both, `extend-aliases` reports
+# both, and `aliases` reports **nothing at all** and exits clean. Nothing
+# warns. Re-derive with that two line file before changing this key.
+"xml.etree.ElementTree" = "ElementTree"
+
+[tool.ruff.lint.flake8-pytest-style]
+# Why, beside `extend-select` above. Not mirrored in the tooling tree's
+# configuration: no script there raises inside `pytest.raises`.
+raises-extend-require-match-for = [
+    "AssertionError", "AttributeError", "KeyError", "LookupError", "RuntimeError", "TypeError",
 ]
+
+[tool.ruff.lint.per-file-ignores]
+# ── The whole `S` family, off in the test tree ───────────────────────────────
+#
+# Its premise is production code handling a stranger's input, and a test tree is
+# neither. **Stated as the family, which is the exclusion**, rather than as the
+# codes it happens to fire today: a code list is an enumeration over something
+# the tool's authors control, so the next `S` rule ruff ships would arrive
+# loudly wrong here and somebody would add a thirteenth entry. `select` still
+# names `"S"`, so a new rule is on in application code either way.
+#
+# **What it silences is a command, not a number.** The figure was written here
+# three times and was stale all three, inside the single change that introduced
+# it, because every test arm added anywhere in the tree is another `assert` and
+# the count moves under its own feet. A number that cannot be kept true is worse
+# than no number: it is read as current. Run this, which is the instrument
+# because the ignore hides its own subject:
+#
+#   ruff check --config 'lint.per-file-ignores = {}' --select S --statistics tests
+#
+# Twelve codes fire, and essentially all of it is `S101`: the assertion each
+# test exists to make. The rest are fixture passwords, fixture XML, and the
+# subprocess calls that run the suite runner and the publish gate.
+#
+# **What still covers these files, stated as what it does rather than as a
+# ranking.** `TestNoFixtureLooksLikeACredential` catches a realistic Telegram
+# bot token and an address outside reserved space; the publish gate's own
+# forbidden string scan catches the GitLab and GitHub access token prefixes and
+# the private key header. Neither
+# is a superset of `S105`/`S106`: a plausible API key spelled `api_key = "..."`
+# fires the rule and matches neither. There is no such value in the tree today.
+#
+# ── RUF012, mutable class default ────────────────────────────────────────────
+#
+# In a test tree that is a table of cases hanging off the class that reads it.
+# 45 sites, no defect in any, and a `ClassVar` on each buys a reader nothing.
+#
+# ── RUF001, ambiguous unicode in a string ────────────────────────────────────
+#
+# A confusable here is the input under test: a fullwidth `c` in a Calibre host
+# name, Arabic-Indic digits against the ISBN reader, a Greek sigma in a MARC
+# extent field as the catalogue sends it. 7 sites in 5 files.
+#
+# **`RUF002` and `RUF003` stay on**, over docstrings and comments, because those
+# are prose. The one docstring that legitimately quotes a confusable carries a
+# file level directive at its own head, where a reader of that file sees it.
+# ── `DTZ`, off in the test tree ─────────────────────────────────────────────
+#
+# Added 2026-10-02, and **it is the only one of the families added with it
+# that is scoped**: every other one runs over the test tree too, because its
+# premise holds there. A family turned on tree wide and then exempted a dozen
+# times is worse than one scoped on purpose, and a family scoped without a
+# premise is worse than both.
+#
+# **Stated as the family rather than as the codes it fires today**, for the
+# reason the `S` block above gives: a code list is an enumeration over
+# something ruff's authors control.
+#
+# `DTZ` asks whether a value will be compared against a real clock or stored.
+# A test's datetime is neither: it is a literal chosen so the answer is fixed,
+# and `datetime(2024, 1, 1)` with a zone bolted on is noise at best and a
+# different assertion at worst. One of its live sites is a test **of** the
+# naive calendar date parser `csv_import` keeps naive on purpose, so the rule
+# fires on a test for a decision that was taken.
+#
+# **What this costs, which is the half an exemption never states.** A real
+# naive datetime bug written into a test fixture is not reported. What bounds
+# that is the fixtures being literals: a wrong literal fails its own arm.
+#
+# **And that bound does not reach the whole key, which is the part worth
+# writing down.** It covers two of the three sites firing today, both
+# literal constructors; the third is a `strptime` in a test of the parser
+# this directory keeps naive on purpose, which is answered by that decision
+# rather than by the literal argument. Neither covers `DTZ005`, a
+# `datetime.now()` with no zone,
+# which is not a literal and is the one shape here that would read the host's
+# clock and pass on a machine set to UTC while failing anywhere else. There
+# is no such call in the test tree today and the key would not report the
+# first one. **Not a reason to narrow the key to a code list**: the block
+# above gives the standing reason, that a code list enumerates something
+# ruff's authors control. It is a reason to know which case the literal
+# argument is not making.
+#
+# Verify by removing the entry and watching the count move, never by reading
+# this line: a per-file key that binds nothing reads exactly like a decision.
+# A test asks each entry, alone against the cleared table, whether it still
+# suppresses something; an entry another key already covers passes it.
+#
+#   ruff check --statistics tests
+#   ruff check --config 'lint.per-file-ignores = {}' --statistics tests
+#
+# **An entry under this key says why a rule is wrong about the test tree, never
+# that the work there is large**, the rule `lint.ignore` states, for the same
+# reason: this key can take a family's test tree half in one line.
+"tests/**" = ["S", "RUF012", "RUF001", "DTZ"]
+
+# ── `T20`, off in the three files whose output is their interface ────────────
+#
+# Two command line tools, run by an operator who reads what they print, and
+# the suite's own refusal of a short session, which prints only where no
+# terminal reporter exists and says so in its docstring. Stated as the
+# family, for the reason the `S` block gives.
+#
+# **Every key outside the test tree is a path with a `/`, and the `./` is load
+# bearing.** A key with no separator is matched against every basename, so
+# `recover.py` would refuse the rule in any file of that name anywhere in this
+# tree; `./recover.py` names this one. A test refuses a key without one.
+"./recover.py" = ["T20"]
+"scripts/postgres_database.py" = ["T20"]
+"tests/conftest.py" = ["T20"]
+
 
 [tool.mypy]
 python_version = "3.14"
@@ -176,6 +676,18 @@ mypy_path = "."
 [[tool.mypy.overrides]]
 # Tests assert on loosely-typed response bodies and deliberately pass invalid
 # values to check validation. Full strictness there costs more than it catches.
+#
+# **Measured rather than assumed, because an earlier probe of this was void.**
+# A command line `--strict` cannot answer the question: a per module override
+# beats a flag, so the flag reports a tree this block is still relaxing. The
+# instrument is removing the block itself and running the type check over
+# this directory, on a worker node rather than here.
+#
+# On 2026-10-02, over 297 source files, that reports 8,215 errors in 129 of
+# them, by code 6,970 `no-untyped-def`, 1,106 `no-untyped-call`, 78 `type-arg`,
+# 60 `no-any-return` and one `misc`. The first maps to the two `*_defs` flags
+# together and cannot be split between them by code. So this is a relaxation
+# with a live reason, not a suppression nobody has rechecked.
 module = "tests.*"
 disallow_untyped_defs = false
 disallow_untyped_calls = false

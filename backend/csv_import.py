@@ -78,15 +78,9 @@ PREVIEW_ROWS: Final = 5
 #: shelf list and is occasionally enormous.
 MAX_TAGS_PER_ROW: Final = 20
 
-#: Tags one book may end up with. Past this the picker on that book is unusable
-#: and the extra names are somebody else's filing system, not this shelf's.
-MAX_TAGS_PER_BOOK: Final = 50
-
-#: Distinct tags one import may invent. Measured: a 12 KB file of 200 rows
-#: created 4032 tags, which are library wide, unpaginated and permanent. The
-#: cap stops creating rather than failing the import: the books are still worth
-#: having.
-MAX_NEW_TAGS_PER_IMPORT: Final = 200
+# The per Book and per import caps are `tags.py`'s. This module reads a file and
+# writes no tag, and a cap stated beside a parser binds whoever happens to read
+# it rather than whoever writes.
 
 #: Candidate headers per field, in priority order.
 #:
@@ -628,9 +622,16 @@ def _parse_date(raw: str) -> date | None:
     # A bare year is deliberately NOT accepted. "1998" in a Date Read column
     # would become 1998-01-01, and a date is enough to infer that the book was
     # read, so a year alone would fabricate both a finish date and a status.
+    #
+    # **No `%z`, which DTZ007 asks for, because this is a calendar date and
+    # not an instant.** The cell says `03/06/2014`; a spreadsheet column has
+    # no zone to parse and adding the directive would make every pattern fail
+    # on every real input. The `datetime` here never leaves the expression:
+    # `.date()` takes the day out of it, and a day is what the column means
+    # and what the caller stores.
     for pattern in ("%Y/%m/%d", "%Y-%m-%d", "%d/%m/%Y", "%m/%d/%Y", "%d.%m.%Y"):
         try:
-            return datetime.strptime(text, pattern).date()
+            return datetime.strptime(text, pattern).date()  # noqa: DTZ007  a day, not an instant
         except ValueError:
             continue
     return None

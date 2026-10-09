@@ -47,15 +47,12 @@
  * `ScanPage/types.ts`, because both are about the destination rather than about
  * the file.
  *
- * **`dc:subject` is read by nothing here, and it is a destination problem
- * rather than a reading one.** `fb2.ts`, `mobi.ts` and `cbz.ts` each write the
- * same sentence about their own format's spelling of a subject, and this reader
- * was the fourth with the same wall and no sentence. `FileMetadata` has no
- * field for one, and no request body this app sends has anywhere to put it:
- * `BookCreate` takes no `categories` and no free text tag, so a subject read
- * here would reach a screen and no column.
+ * **`dc:subject` is read, and it is reported rather than bounded.** What the
+ * endpoint will take is `lib/bookRequest.boundCategories`' question, for the
+ * reason above: this module may not name the API.
  */
 
+import { childrenNamed } from "./elementChildren";
 import { leadingYear } from "./year";
 import { type FileIdentifier, type FileMetadata } from "./fileReaders";
 import { declaresEntities } from "./xmlEntities";
@@ -63,27 +60,6 @@ import { parseIsbn } from "./isbn";
 import { stripIsbnPrefix } from "./isbnLabel";
 
 const OPF_NAMESPACE = "http://www.idpf.org/2007/opf";
-
-/** Children of `parent` whose local name matches, in document order. */
-function childrenNamed(parent: Element, local: string): Element[] {
-  // **A sibling walk, not a spread of `parent.children`.** That collection is
-  // live, and indexing one is not required to be constant time: spreading it
-  // costs whatever the host's implementation charges per index, which for a
-  // list the file's own length decides is a cost the file chooses. Measured
-  // 2026-09-07 under this file's jsdom: 4 times the creators took 14.8 times
-  // the wall clock, which is the quadratic signature, and the walk below took
-  // it to linear. A browser may charge less; the point is that this does not
-  // depend on which.
-  const found: Element[] = [];
-  for (
-    let child = parent.firstElementChild;
-    child !== null;
-    child = child.nextElementSibling
-  ) {
-    if (child.localName === local) found.push(child);
-  }
-  return found;
-}
 
 /**
  * Dublin Core children of `<metadata>`, by local name and **not by namespace**.
@@ -180,6 +156,34 @@ function readTitles(
     title: text(main ?? titles[0]),
     subtitle: text(byType("subtitle")),
   };
+}
+
+/**
+ * The subjects, in the file's own order and with nothing folded.
+ *
+ * **No `Set` here, where `readAuthors` below needs one, and the difference is
+ * the destination rather than the loop.** Two `dc:creator` elements naming one
+ * person are one author, so this module is the only place that can tell; two
+ * `dc:subject` elements are two assertions a producer made, and folding a
+ * repeat is a property of what the request may carry.
+ * `lib/bookRequest.boundCategories` folds, and it breaks out of its own loop
+ * before it does, which is what keeps the count below off the main thread's
+ * budget: a minimal `<dc:subject>x</dc:subject>` is 26 bytes and
+ * `epub.MAX_PACKAGE_BYTES` is 4 MiB, so 161,319 of them fit inside every bound
+ * the EPUB reader declares. The same arithmetic as `readAuthors`, and the same
+ * number, because the two elements are the same width.
+ *
+ * **This walk is linear and the array it builds is transient.**
+ * `ScanPage/hooks.readFiles` drafts each file and drops its record, so a folder
+ * pick holds one file's subjects at a time rather than three hundred files'.
+ */
+function readSubjects(metadata: Element): string[] {
+  const subjects: string[] = [];
+  for (const element of dcChildren(metadata, "subject")) {
+    const subject = text(element);
+    if (subject !== null) subjects.push(subject);
+  }
+  return subjects;
 }
 
 /**
@@ -387,7 +391,14 @@ function readSeries(
  */
 export function readOpf(xml: string): FileMetadata | null {
   if (declaresEntities(xml)) return null;
-  const document = new DOMParser().parseFromString(xml, "application/xml");
+  // Caught for `fb2.ts::readFb2Description`'s reason: a parser this reader
+  // does not choose may throw where the specification answers `parsererror`.
+  let document: Document;
+  try {
+    document = new DOMParser().parseFromString(xml, "application/xml");
+  } catch {
+    return null;
+  }
   // Both halves are needed. A parse error yields a document whose root is
   // `parsererror`, and a well formed document that is not an OPF yields a root
   // that is simply something else.
@@ -407,6 +418,7 @@ export function readOpf(xml: string): FileMetadata | null {
     title,
     subtitle,
     authors: readAuthors(metadata, index),
+    categories: readSubjects(metadata),
     identifiers,
     isbn: readIsbn(identifiers),
     publisher: text(dcChildren(metadata, "publisher")[0]),

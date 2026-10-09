@@ -34,6 +34,26 @@
  * **`examined` is the sum of the four and not a fifth outcome**, so a client
  * can check the arithmetic rather than trust it.
  *
+ * **`examined` counts the books this run has an outcome for, which is not
+ * always every book it looked at.** The run is bounded in wall clock, so a slow
+ * or busy catalogue can leave it short. The counts then describe the books it
+ * reached, and `next_after_id` clears exactly those.
+ *
+ * **Nothing here says whether a run was cut short, and that is deliberate.** An
+ * earlier version of this paragraph told a client to compare `examined` against
+ * the batch size, which this reply does not carry and no request sets, so the
+ * comparison was not one a client could make. There is no flag either: a
+ * client's action is to press again while `remaining` is above zero, which is
+ * the same action whether the run was cut short or finished its batch, and the
+ * cursor is what makes pressing again safe. A field would also make this diverge
+ * from `CoverBackfillOut`, which is bounded in wall clock the same way and says
+ * the same nothing about it.
+ *
+ * A book the run resolved after the cut is stored and counted in neither
+ * number, so this understates what the run did and never overstates it; that
+ * book stops being a candidate, so the next press does not spend another
+ * metered request on it.
+ *
  * **`remaining` counts candidates, not books this will fix.** The candidate
  * query narrows on carrying a `google_books` identifier and cannot narrow on
  * the identifier being shaped like one, so a library whose rows are all
@@ -44,7 +64,10 @@
  * `next_after_id` is the cursor, and it is here for exactly the reason
  * `CoverBackfillOut` carries one: a book that could not be resolved stays a
  * candidate, so without a cursor it sits at the front of every subsequent run
- * for ever. 0 means this run reached the end.
+ * for ever. 0 means this run reached the end. It is the last book of the
+ * unbroken examined run rather than the last book of the batch, so a run cut
+ * short cannot skip the books it never reached, and it comes back unchanged
+ * where the run reached none of them.
  */
 export interface IdentifierBackfillOut {
   /** @minimum 0 */

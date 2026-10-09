@@ -9,16 +9,28 @@ import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { LendingWillingness } from "../../../../src/api/generated/model";
-import LoanPanel from "../../../../src/pages/BookDetail/components/LoanPanel";
+import {
+  type BookDetailsUpdate,
+  LendingWillingness,
+} from "../../../../src/api/generated/model";
+import LoanPanel, {
+  type Borrower,
+} from "../../../../src/pages/BookDetail/components/LoanPanel";
 import { makeBook, makeUser, resetIds } from "../../../factories";
 import { renderLocalised } from "../../../utils";
 
 beforeEach(resetIds);
 
 function renderPanel(overrides = {}, props = {}) {
-  const onLend = vi.fn();
-  const onSaveLending = vi.fn();
+  const onLend =
+    vi.fn<
+      (
+        borrower: Borrower,
+        dueAt: string | null,
+        acknowledgeNotLendable: boolean,
+      ) => void
+    >();
+  const onSaveLending = vi.fn<(fields: BookDetailsUpdate) => void>();
   const member = makeUser({ id: 9, username: "ana" });
   renderLocalised(
     <LoanPanel
@@ -28,7 +40,7 @@ function renderPanel(overrides = {}, props = {}) {
       isSavingDetails={false}
       onSaveLending={onSaveLending}
       onLend={onLend}
-      onMarkReturned={vi.fn()}
+      onMarkReturned={vi.fn<(loanId: number) => void>()}
       {...props}
     />,
   );

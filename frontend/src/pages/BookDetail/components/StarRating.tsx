@@ -1,5 +1,5 @@
-import { useTranslation } from "../i18n";
-import Icon from "./Icon";
+import { Icon } from "../../../components";
+import { useTranslation } from "../../../i18n";
 
 const STARS = [1, 2, 3, 4, 5] as const;
 
@@ -13,7 +13,7 @@ interface StarRatingProps {
 /**
  * Five stars, personal to whoever is signed in.
  *
- * Read-only without `onChange`, which is how the grid uses it. Interactive it
+ * Read-only without `onChange`; no caller omits it today. Interactive it
  * is a radio group rather than five buttons: the values are mutually exclusive
  * and a screen reader should hear one control with five options, not five
  * unrelated ones.

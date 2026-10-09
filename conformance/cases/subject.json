@@ -1,0 +1,139 @@
+{
+  "$schema": "../schema/subject.schema.json",
+  "domain": "subject",
+  "cases": [
+    {
+      "id": "a-plain-subject-is-unchanged-on-both-sides",
+      "input": "Fiction",
+      "browser": { "kind": "kept", "value": "Fiction" },
+      "server": { "kind": "kept", "value": "Fiction" },
+      "why": "The base case a specification needs in order to be one. An ordinary subject reaches storage as the file stated it, and every other case here is a departure from this row."
+    },
+    {
+      "id": "a-wrapped-subject-collapses-to-one-line-on-both-sides",
+      "input": "Juvenile\n    Fiction",
+      "browser": { "kind": "kept", "value": "Juvenile Fiction" },
+      "server": { "kind": "kept", "value": "Juvenile Fiction" },
+      "why": "No file reader collapses, so a pretty printed package document hands the browser a subject carrying the newline and the indentation it was wrapped on. The browser collapses because the server does: trimming alone leaves the break and the indentation in, so the browser would measure 20 characters here against the server's 16, and at a subject near the width bound that difference drops it with nothing said."
+    },
+    {
+      "id": "padding-is-trimmed-on-both-sides",
+      "input": "  Fiction  ",
+      "browser": { "kind": "kept", "value": "Fiction" },
+      "server": { "kind": "kept", "value": "Fiction" },
+      "why": "A collapse leaves any leading or trailing run as one space, so the trim is part of the same rule rather than a second one. Both sides trim, so the stored subject does not depend on which side got there first."
+    },
+    {
+      "id": "a-tab-run-becomes-one-space-on-both-sides",
+      "input": "Science\t\tFiction",
+      "browser": { "kind": "kept", "value": "Science Fiction" },
+      "server": { "kind": "kept", "value": "Science Fiction" },
+      "why": "A tab is whitespace to both engines, so it is a word break and not a deletion. That is the line the server draws deliberately: deleting a tab welds the two words either side of it together, which is wrong for a name somebody pasted out of a two line cell."
+    },
+    {
+      "id": "u-001c-is-a-word-break-for-the-server-and-not-for-the-browser",
+      "input": "Body\u001cMind",
+      "browser": { "kind": "kept", "value": "Body\u001cMind" },
+      "server": { "kind": "kept", "value": "Body Mind" },
+      "why": "Measured 2026-09-30, against both implementations in this tree. U+001C is whitespace to Python's str.split and is not in JavaScript's \\s, so the two answers differ and the invariant still holds: the server's rule over what the browser sends gives the server's own answer about the file. A case where the two values differ and the case is still green is what tells a reader this file pins an equality rather than a sameness."
+    },
+    {
+      "id": "u-0085-is-a-word-break-for-the-server-and-not-for-the-browser",
+      "input": "Body\u0085Mind",
+      "browser": { "kind": "kept", "value": "Body\u0085Mind" },
+      "server": { "kind": "kept", "value": "Body Mind" },
+      "why": "Measured 2026-09-30, against both implementations in this tree. NEXT LINE is whitespace to Python and is not in JavaScript's \\s. It is a second member of the class above rather than a repeat: U+001C is C0 and this is C1, and the server keeps both only because each is whitespace, which is decided by a predicate rather than by a range."
+    },
+    {
+      "id": "a-nul-is-deleted-by-the-server-and-kept-by-the-browser",
+      "input": "Body\u0000Mind",
+      "browser": { "kind": "kept", "value": "Body\u0000Mind" },
+      "server": { "kind": "kept", "value": "BodyMind" },
+      "why": "Measured 2026-09-30, against both implementations in this tree. NUL is a control character that is not whitespace, so the server deletes it and the two words weld together. The browser deletes nothing at all, on purpose: a rule wider than the server's does not let a bad value through, it invents a value. This is the case that reddens when the server's deletion goes."
+    },
+    {
+      "id": "a-deleted-control-between-two-spaces-pins-the-order-of-the-two-steps",
+      "input": "Science \u0000 Fiction",
+      "browser": { "kind": "kept", "value": "Science \u0000 Fiction" },
+      "server": { "kind": "kept", "value": "Science Fiction" },
+      "why": "Measured 2026-09-30, against both implementations in this tree. This case is here for the ORDER of the server's two steps rather than for either of them, which two rows of the guard dropping table already name one at a time. The server deletes the control first and collapses second, so the spaces either side of it become one. Swap the two steps and the collapse runs while the control still separates them, leaving two spaces, and both backend arms redden. Every other case in this file is green under that swap, so without this one the order is a rule nothing observes."
+    },
+    {
+      "id": "an-entry-of-nothing-but-spaces-is-dropped-by-both",
+      "input": "   ",
+      "browser": { "kind": "dropped", "value": null },
+      "server": { "kind": "dropped", "value": null },
+      "why": "There is no assertion in it to lose, so both sides drop rather than refuse. A value of only spaces that reached the column would render as a subject nobody can select or find again."
+    },
+    {
+      "id": "an-entry-of-nothing-but-deleted-controls-is-kept-by-the-browser-and-dropped-by-the-server",
+      "input": "\u0000\u0001",
+      "browser": { "kind": "kept", "value": "\u0000\u0001" },
+      "server": { "kind": "dropped", "value": null },
+      "why": "Measured 2026-09-30, against both implementations in this tree. The documented narrowing, written down as data rather than as prose. The browser spends a slot on an entry the server then drops, which costs one of the thirty two slots and never the book. It is here to hold the asymmetry open: the schema refuses the mirror image of this pair, where the browser drops what the server would have stored, and that refusal is only honest while this direction stays expressible."
+    },
+    {
+      "id": "a-separator-between-two-subjects-is-refused",
+      "input": "Juvenile Fiction; General",
+      "browser": { "kind": "dropped", "value": null },
+      "server": { "kind": "refused", "value": null },
+      "why": "Measured 2026-09-30, against both implementations in this tree. The column joins subjects with this character, so the value is unrepresentable rather than risky: stored, it would be served back as two subjects to every reader of the column. The server refuses the whole request over it, so the browser drops the entry before the request is built, and the two together are why one such subject costs a subject instead of a book."
+    },
+    {
+      "id": "a-bare-separator-with-no-spacing-is-refused",
+      "input": "a;b",
+      "browser": { "kind": "dropped", "value": null },
+      "server": { "kind": "refused", "value": null },
+      "why": "Measured 2026-09-30, against both implementations in this tree. The refusal is on the bare character and not on the two character joined form, so a rule written against the joined form would refuse nothing. This case is what pins the character itself: the browser holds it as a hand written literal that nothing recomputes, and before this file a change to it on one side was silent."
+    },
+    {
+      "id": "a-mark-at-the-start-is-kept-on-both-sides",
+      "input": "\ufeffFiction",
+      "browser": { "kind": "kept", "value": "\ufeffFiction" },
+      "server": { "kind": "kept", "value": "\ufeffFiction" },
+      "why": "Measured 2026-09-30, against both implementations in this tree. JavaScript's \\s holds U+FEFF and Python's str.split does not, so the browser's collapse excludes it by hand and its trim is spelled against a literal space. Position is the axis here rather than presence: this is one of the four shapes with the mark at an edge, and the edge shapes are the only ones a widened trim reddens."
+    },
+    {
+      "id": "a-mark-at-the-end-is-kept-on-both-sides",
+      "input": "Fiction\ufeff",
+      "browser": { "kind": "kept", "value": "Fiction\ufeff" },
+      "server": { "kind": "kept", "value": "Fiction\ufeff" },
+      "why": "Measured 2026-09-30, against both implementations in this tree. The trailing edge, which a trim anchored at one end alone would leave. Kept as a separate case from the leading one because the two anchors of a trim are two rules and a mutation can widen either."
+    },
+    {
+      "id": "a-mark-at-both-ends-is-kept-on-both-sides",
+      "input": "\ufeffFiction\ufeff",
+      "browser": { "kind": "kept", "value": "\ufeffFiction\ufeff" },
+      "server": { "kind": "kept", "value": "\ufeffFiction\ufeff" },
+      "why": "Measured 2026-09-30, against both implementations in this tree. Both edges at once. It is the shape a reader would write first and it is the weakest of the four edge cases, because either anchor widening reddens it and it therefore cannot say which one did."
+    },
+    {
+      "id": "a-mark-followed-by-a-space-is-kept-on-both-sides",
+      "input": "\ufeff Fiction",
+      "browser": { "kind": "kept", "value": "\ufeff Fiction" },
+      "server": { "kind": "kept", "value": "\ufeff Fiction" },
+      "why": "Measured 2026-09-30, against both implementations in this tree. A mark sitting at the edge with real whitespace behind it. The server splits on the space and rejoins with one, so its answer is the input back; the browser must reach the same value without its trim eating the pair. This is the edge shape a trim widened to JavaScript whitespace swallows whole."
+    },
+    {
+      "id": "a-mark-mid-word-is-kept-on-both-sides",
+      "input": "Fic\ufefftion",
+      "browser": { "kind": "kept", "value": "Fic\ufefftion" },
+      "server": { "kind": "kept", "value": "Fic\ufefftion" },
+      "why": "Measured 2026-09-30, against both implementations in this tree. The intuitive case, and the measurement worth having is that it is not sufficient on its own: a widened collapse reddens it and a widened trim does not, because a trim never reaches the middle of a value. A file carrying this shape alone would miss half of what the four edge shapes catch."
+    },
+    {
+      "id": "a-run-of-marks-mid-word-is-kept-on-both-sides",
+      "input": "Fic\ufeff\ufefftion",
+      "browser": { "kind": "kept", "value": "Fic\ufeff\ufefftion" },
+      "server": { "kind": "kept", "value": "Fic\ufeff\ufefftion" },
+      "why": "Measured 2026-09-30, against both implementations in this tree. A run rather than one mark, because a collapse operates on runs: a widened collapse turns this into one space where it turns the single mark into one space too, so the two shapes fail differently and only the run shows that the rewrite is a collapse rather than a substitution."
+    },
+    {
+      "id": "a-mark-standing-between-two-spaces-is-kept-on-both-sides",
+      "input": "Science \ufeff Fiction",
+      "browser": { "kind": "kept", "value": "Science \ufeff Fiction" },
+      "server": { "kind": "kept", "value": "Science \ufeff Fiction" },
+      "why": "Measured 2026-09-30, against both implementations in this tree. The mark is interior and has whitespace on both sides, so a widened collapse reads all three as one run and deletes the mark by merging. The server splits into three words and rejoins, which is why its answer is the input back. Interior, so a widened trim leaves it alone."
+    }
+  ]
+}

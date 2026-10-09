@@ -20,16 +20,31 @@
  * a new door is a bound gone rather than moved.
  */
 
+import fc from "fast-check";
 import { describe, expect, it, vi } from "vitest";
 
+import * as zip from "../../src/lib/zip";
 import { openZip, ZipError, zipFailureAs } from "../../src/lib/zip";
+import { holds, PROFILE, PROPERTY, witness, type Total } from "../property";
 import {
+  aimedArchive,
+  archiveSpec,
   buildZip,
   bytes,
   DEFLATED,
+  entrySpec,
+  isBomb,
   STORED,
+  zeroesAt,
   type ArchiveSpec,
 } from "../zipFixtures";
+import {
+  expectNamedOutcome,
+  hostile,
+  stoppedAt,
+  type Door,
+  type Hostile,
+} from "./readerContract";
 import { withoutDecompressionStream } from "./withoutDecompression";
 
 async function open(spec: ArchiveSpec) {
@@ -814,5 +829,216 @@ describe("a runtime that cannot inflate", () => {
     expect((refusal as ZipError).message).toBe(
       "this browser cannot inflate raw deflate",
     );
+  });
+});
+
+/**
+ * The limits a property reads with: the edges, and sizes either side of a
+ * deflate stream's first chunk. The seam has no bound of its own, so the bound
+ * a bomb is aimed at is one of these.
+ */
+const LIMITS = [0, 1, 64, 4096, 65_536];
+
+/** One read the property makes of an opened archive. */
+interface SeamRead {
+  /** Which entry, modulo however many the archive turned out to hold. */
+  readonly entry: number;
+  readonly limit: number;
+  /** Absent for `read`, present for `readPrefix`. */
+  readonly prefix: number | undefined;
+}
+
+/** An archive, and the reads made of it. The calls are drawn as well. */
+interface SeamSpec {
+  readonly archive: ArchiveSpec;
+  readonly reads: readonly SeamRead[];
+}
+
+type SeamAnswer = {
+  readonly entries: number;
+  readonly reads: readonly (
+    | { readonly length: number; readonly partial?: boolean }
+    | { readonly refused: zip.ZipFailure }
+  )[];
+};
+
+/**
+ * A limit, mostly a real one. Not a number, infinite and negative are the
+ * bounds `readEntry` refuses or clamps before it reads, so they are drawn too.
+ */
+const limit = fc.oneof(
+  { arbitrary: fc.constantFrom(...LIMITS), weight: 8 },
+  { arbitrary: fc.constantFrom(Number.NaN, Infinity, -1), weight: 1 },
+);
+
+const anySeam: fc.Arbitrary<SeamSpec> = fc.record({
+  archive: archiveSpec(
+    entrySpec(
+      fc.oneof(
+        fc.constantFrom("a.txt", "b/c.bin"),
+        fc.string({ maxLength: 8 }),
+      ),
+      fc.oneof(
+        fc.string({ maxLength: 64 }),
+        fc.uint8Array({ maxLength: 64 }),
+        zeroesAt(LIMITS),
+      ),
+      LIMITS,
+    ),
+    LIMITS,
+  ),
+  reads: fc.array(
+    fc.record({
+      entry: fc.nat({ max: 7 }),
+      limit,
+      prefix: fc.option(limit, { nil: undefined }),
+    }),
+    { minLength: 1, maxLength: 3 },
+  ),
+});
+
+/**
+ * One bomb, read with the limit it is aimed past: the class the witness asks
+ * for, weighted so a run from any seed draws it. Independent draws reach it
+ * on a few runs in a hundred, measured, because the entry, its size and the
+ * read's limit have to agree.
+ */
+const aimedSeam: fc.Arbitrary<SeamSpec> = fc
+  .constantFrom(64, 4096, 65_536)
+  .chain((bound) =>
+    fc.record({
+      archive: aimedArchive("a.txt", bound),
+      reads: fc
+        .option(fc.constantFrom(bound, bound * 2), { nil: undefined })
+        .map((prefix) => [{ entry: 0, limit: bound, prefix }]),
+    } satisfies Total<SeamSpec>),
+  );
+
+const seamSpec = fc.oneof(
+  { arbitrary: anySeam, weight: 3 },
+  { arbitrary: aimedSeam, weight: 1 },
+);
+
+/**
+ * The bounds a drawn input reads a bomb past: for each read of a bomb aimed
+ * beyond where that read stops, the stop. Empty for a patched file, whose
+ * entries are not the ones the spec describes.
+ */
+function aimedAt({ spec, patches }: Hostile<SeamSpec>): number[] {
+  if (patches.length > 0) return [];
+  return spec.reads.flatMap((read) => {
+    const entry =
+      spec.archive.entries[read.entry % spec.archive.entries.length];
+    const stop = Math.min(read.prefix ?? read.limit, read.limit);
+    return entry !== undefined && Number.isFinite(stop) && isBomb(entry, stop)
+      ? [stop]
+      : [];
+  });
+}
+
+/**
+ * The seam as a door: open the archive, then make every drawn read.
+ *
+ * **The only door whose refusal is a rejection by design**, so a `ZipError`
+ * out of `openZip` is a named outcome and a read's own `ZipError` is recorded
+ * beside the reads that worked rather than ending the call. Anything else
+ * thrown is a failure of the contract.
+ */
+const seam: Door<SeamSpec, SeamAnswer> = {
+  module: zip,
+  ceilings: () => ({}),
+  build: (spec) => buildZip(spec.archive),
+  open: async (file, meter, spec) => {
+    const archive = await zip.openZip(file);
+    const reads: SeamAnswer["reads"][number][] = [];
+    for (const read of spec.reads) {
+      const entry = archive.entries[read.entry % archive.entries.length];
+      if (entry === undefined) break;
+      const stop =
+        read.prefix === undefined
+          ? read.limit
+          : Math.min(read.prefix, read.limit);
+      // The bound is the caller's argument, so it moves between reads: the
+      // one door that sets it, from the value it hands the reader.
+      meter.boundEachInflater(Number.isFinite(stop) ? Math.max(0, stop) : 0);
+      try {
+        if (read.prefix === undefined) {
+          const got = await archive.read(entry, read.limit);
+          meter.require(
+            got.length <= read.limit,
+            `read returned ${got.length} bytes against a limit of ${read.limit}`,
+          );
+          reads.push({ length: got.length });
+        } else {
+          const got = await archive.readPrefix(entry, {
+            prefix: read.prefix,
+            limit: read.limit,
+          });
+          meter.require(
+            got.bytes.length <= Math.max(0, stop),
+            `readPrefix returned ${got.bytes.length} bytes against a stop of ${stop}`,
+          );
+          reads.push({ length: got.bytes.length, partial: got.partial });
+        }
+      } catch (error) {
+        if (!(error instanceof zip.ZipError)) throw error;
+        reads.push({ refused: error.failure });
+      }
+    }
+    return { entries: archive.entries.length, reads };
+  },
+};
+
+describe("any archive the seam is handed", () => {
+  it(
+    "is read or refused with a ZipError, inflating no chunk past its caller's bound",
+    PROPERTY,
+    async () => {
+      // **The reach is what holds the bound when the reader is the defect**:
+      // the meter refuses a chunk past the bound this door hands it, and the
+      // reach requires a bomb seen stopped within a chunk of the bound the
+      // read was made with, which a reader ignoring its limit never is.
+      expect(
+        await holds(
+          hostile(seamSpec),
+          async (input) => expectNamedOutcome(seam, input),
+          {
+            "stopped a bomb at the bound it was read with": (
+              input,
+              { counted },
+            ) => aimedAt(input).some((stop) => stoppedAt(counted, stop)),
+          },
+        ),
+      ).toBe(PROFILE.runs);
+    },
+  );
+
+  it("is metered, so the bound above is not held over nothing", async () => {
+    // **The control arm**: a reader that captured the inflater at module scope
+    // would bypass the counting one, count zero, and pass every ceiling.
+    const { outcome, counted } = await expectNamedOutcome(seam, {
+      spec: {
+        archive: HELLO,
+        reads: [{ entry: 1, limit: 64, prefix: undefined }],
+      },
+      patches: [],
+    });
+
+    expect(outcome).toEqual({
+      answered: { entries: 2, reads: [{ length: 7 }] },
+    });
+    expect(counted.inflaters).toBe(1);
+    expect(counted.inflated).toBe(7);
+    expect(counted.read).toBeGreaterThan(0);
+  });
+
+  it("draws a bomb past the limit it is then read with", async () => {
+    // **The witness**: green above says nothing about a generator that never
+    // built the shape the property is about. Drawn at a fresh seed, so this
+    // asserts any run draws one, not that one run did.
+    await witness(hostile(seamSpec), {
+      "aims a bomb past the limit it is then read with": (input) =>
+        aimedAt(input).length > 0,
+    });
   });
 });

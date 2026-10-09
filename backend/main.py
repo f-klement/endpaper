@@ -36,7 +36,7 @@ from config import (
 from database import engine
 from dependencies import DbSession
 from enums import TagCategory, TagKey
-from errors import register_error_handlers, wants_html
+from errors import AnswerUnhandledErrors, register_error_handlers, wants_html
 from middleware import BodySizeLimitMiddleware, SecurityHeadersMiddleware
 from models import CatalogueTarget, Tag
 
@@ -61,6 +61,18 @@ from routers import (
 from schema import upgrade_to_head
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+# httpx logs every request at INFO with its full URL, and three of this app's URLs carry a
+# secret: the Telegram bot token is a path segment, the Google Books key is a query
+# parameter, and a webhook URL may carry one in its path or query. At INFO each reached
+# the log verbatim on every request, success included. In the installed versions httpx
+# logs nothing but that request line and httpcore nothing above DEBUG, failures arriving
+# as exceptions, so WARNING switches both off entirely. What that costs is the one record
+# of every outbound request, and raising the root to DEBUG no longer brings it back; the
+# app's own lines name the host for Telegram and the webhook, and a URL without its
+# query for Google Books. Removing this puts the secrets back in the log, which the token
+# tests in test_notifications.py and test_google_books.py read at DEBUG.
+for _library in ("httpx", "httpcore"):
+    logging.getLogger(_library).setLevel(logging.WARNING)
 logger = logging.getLogger("endpaper")
 
 
@@ -387,9 +399,16 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Added first, so it sits innermost: the refusal still happens before anything
-# reads the body, and it picks up the security and CORS headers of the layers
-# around it rather than answering bare.
+# Added first of all, so it sits innermost: a route's unhandled exception is
+# answered here and never reaches Starlette's last resort, which would re-raise
+# it to the server. See `errors.AnswerUnhandledErrors`. **Every middleware added
+# below is outside it**, so that middleware's own crash takes the old path and
+# is logged twice, once by the handler and once whole by the server.
+app.add_middleware(AnswerUnhandledErrors)
+
+# Added next, so it sits inside everything but that: the refusal still happens
+# before anything reads the body, and it picks up the security and CORS headers
+# of the layers around it rather than answering bare.
 app.add_middleware(BodySizeLimitMiddleware)
 app.add_middleware(SecurityHeadersMiddleware)
 
@@ -451,16 +470,40 @@ def iter_api_routes(routes: Iterable[BaseRoute]) -> Iterator[APIRoute]:
             yield from iter_api_routes(getattr(nested, "routes", nested))
 
 
-def assert_unique_operation_ids() -> None:
-    """Fail at startup if two handlers share a name.
+def schema_routes(routes: Iterable[BaseRoute] | None = None) -> list[APIRoute]:
+    """The routes an operationId can collide in, which is the published ones.
+
+    A route with `include_in_schema=False` contributes no operation to the
+    document, so two of them under one name cannot produce two operations with
+    one id. `api_not_found` is exactly that: registered twice on purpose, one
+    handler under one name answering the two API prefixes, invisible to the
+    schema both times.
+
+    **That narrowing is what lets the check below run where it has to run**,
+    which is under every `include_router`. Registered above `healthz`, the API
+    fallbacks and the cover router, it read 138 of this app's 143 routes, and
+    three of the five it never reached are in the published schema. Moved down
+    without this narrowing it refuses `api_not_found`'s deliberate pair and the
+    app does not start. Measured 2026-09-26.
+    """
+    walked = app.routes if routes is None else routes
+    return [route for route in iter_api_routes(walked) if route.include_in_schema]
+
+
+def assert_unique_operation_ids(routes: Iterable[BaseRoute] | None = None) -> None:
+    """Fail at startup if two published handlers share a name.
 
     custom_operation_id() drops the path from the id, so a duplicate name would
     produce two operations with the same id, and a generated client where one
     endpoint silently overwrites the other.
+
+    **`routes` is a seam for the tests and nothing calls it with one.** The
+    refusal cannot be driven over this app, which has no duplicate to offer, and
+    an app asserted to be clean is not the same claim as a check that refuses.
     """
     seen: dict[str, str] = {}
     checked = 0
-    for route in iter_api_routes(app.routes):
+    for route in schema_routes(routes):
         checked += 1
         if route.name in seen:
             raise RuntimeError(
@@ -473,12 +516,10 @@ def assert_unique_operation_ids() -> None:
     # as coverage. If the route layout changes again, fail loudly here.
     if checked == 0:
         raise RuntimeError(
-            "assert_unique_operation_ids() found no routes to check. "
-            "iter_api_routes() no longer understands this FastAPI's route layout."
+            "assert_unique_operation_ids() found no published routes to check. "
+            "iter_api_routes() no longer understands this FastAPI's route layout, "
+            "or include_in_schema no longer means what schema_routes() reads it to."
         )
-
-
-assert_unique_operation_ids()
 
 
 # ── Health ────────────────────────────────────────────────────────────────────
@@ -528,6 +569,12 @@ def storage_is_reachable() -> bool:
     _pending_stat = _storage_probe.submit(os.stat, DATA_DIR)
     try:
         _pending_stat.result(timeout=STORAGE_TIMEOUT_SECONDS)
+    # **`.error` and not `.exception` in both arms.** Each is an expected
+    # operating state rather than a bug, and this runs on every health check,
+    # so a traceback would be one per probe for as long as the mount stays
+    # hung. Neither carries anything either: the first exception is a bare
+    # timeout raised inside `concurrent.futures`, and the second is already
+    # interpolated into its own message.
     except FutureTimeoutError:
         logger.error("Data directory did not answer within %ds", STORAGE_TIMEOUT_SECONDS)
         return False
@@ -621,6 +668,14 @@ app.include_router(_fallback)
 # routers/covers.py. Registered before the SPA mount, which would otherwise
 # answer a missing cover with the shell: see `CachePolicyStaticFiles`.
 app.include_router(covers.router)
+
+# **Below every `include_router` above, and that placement is the rule.** This ran
+# from where `custom_operation_id` is defined until 2026-09-26, so it examined the
+# twelve routers included there and none of `healthz`, the API fallbacks or the
+# cover routes, three of which the schema publishes. A router included after this
+# line is unchecked, which is why the test tree holds the ordering rather than
+# trusting this comment.
+assert_unique_operation_ids()
 
 # Vite's `build.assetsDir`. Every filename it emits there carries a content
 # hash, so the name changes whenever the bytes do.

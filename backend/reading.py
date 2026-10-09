@@ -39,6 +39,15 @@ from enums import ReadStatus
 from models import Book, User, UserBook
 from shelf import Shelf
 
+#: The name of the table this module owns.
+#:
+#: Published so `folding.TRANSFERS` can declare a merge policy for it without
+#: importing `UserBook`, which is the import
+#: `TestReadingIsTheOnlyWayIn::test_no_module_but_the_reading_record_imports_user_book`
+#: refuses to every other module. A merge needs this table's identity, not its
+#: rows, and `resolve_merge` below is still the only thing that touches them.
+RECORDS_TABLE = UserBook.__tablename__
+
 #: The statuses that mean a Book has not been picked up yet, so recording a
 #: position in one is news rather than a correction.
 #:
@@ -178,29 +187,66 @@ class Reading:
         from and the reason a debugging session on a developer's machine can
         raise `OperationalError` where CI and production would not.
 
-        Four callers, and two of them are the size of the library rather than
-        of a page, which is worth naming because the sentence that used to be
-        here claimed otherwise:
+        **5** callers, and **none** of them is the size of the library:
 
         | Caller | Bounded by |
         |---|---|
-        | `_records_for` | one id |
-        | `mark_each` | `BulkRequest.book_ids`, 500 by its schema |
+        | `reading.Reading._records_for` | one id |
+        | `reading.Reading.mark_each` | `BulkRequest.book_ids`, by its schema |
         | `serialisation.books_to_out` | its own caller: see below |
-        | `routers/books.py` `export_books` | **the visible library** |
+        | `routers.books._csv_chunks` | `marc.EXPORT_PAGE_RECORDS`, one page |
+        | `routers.books._text_chunks` | `marc.EXPORT_PAGE_RECORDS`, one page |
 
-        `books_to_out` is a page for `list_books`, `list_trash` and the loans
-        list, and a copy group for `list_copies`, which is one row for almost
-        every Book. It is every Book in a duplicate **group** for
-        `list_duplicates`, which is unpaginated and backs a UI page: its own
-        comment records 2,000 Books scanned, and what reaches here is the
-        subset that grouped.
+        **The names are qualified through the class**, because the pass that
+        derives them keys on the whole enclosing path: two methods of that
+        name in one module are two callers, and keying on the function name
+        alone silently made them one.
 
-        So the real ceiling is a catalogue of 32,766 Books, and reaching it
-        needs a developer running the suite outside its container against a
-        library **sixteen times** the largest this endpoint has been measured
-        against. If that stops being true the fix is a temporary table, not a
-        bigger IN, which is the same answer `Shelf.matching` gives.
+        **The table is derived rather than maintained.**
+        `tests/test_reading.py::TestEveryCallerOfOf` re-reads the calls out of
+        the source and fails when this list disagrees with them, which is what
+        stops it going stale the way its two predecessors did, one counting
+        two library sized callers and one claiming none.
+
+        **A caller is a function, not a call**, which is why the count above
+        says callers. The pass keys a row on the enclosing function, so two
+        calls in one body are one row. **The two numbers coincide today**,
+        because each of the five bodies calls once; the word is what stays
+        right when one of them calls twice.
+
+        **What that pass checks is the first column and the count above it.**
+        The bound in the second column is prose, except for the one figure the
+        concluding paragraph turns on, which is pinned below. A caller that
+        keeps its row while quietly losing its bound is outside what any test
+        here sees.
+
+        **The export was the second library sized caller and is not any
+        more.** It resolved the whole visible shelf and asked here for a
+        status per row; both arms now walk the shelf a page at a time and ask
+        per page, and `export_books` itself makes no call here at all.
+
+        **`list_duplicates` was the last one and is not any more.** It is
+        still unpaginated and still scans the whole catalogue, but it scans it
+        as columns and serialises nothing, so it no longer reaches
+        `books_to_out` at all. What is left of `books_to_out` is a page for
+        `list_books`, `list_trash` and the loans list, bounded by
+        `MAX_PAGE_SIZE`, and a copy group for `list_copies`, which is one row
+        for almost every Book.
+
+        So the ceiling of 32,766 is no longer reachable from any route: the
+        largest call here is a bulk mark of **500** ids. **That figure is
+        `BulkRequest.book_ids`'s own maximum and is read back off the schema**
+        by the same test, because both of this analysis's historical failures
+        were in the conclusion under the table rather than in the roster, and
+        a conclusion whose only number is unpinned is the shape that failed
+        twice. **It appears once in this docstring and the test holds it to
+        once**, since the table cell above used to carry a second copy that
+        the pin did not reach: the bound belongs in one sentence and the cell
+        names the schema instead. It is written
+        down because the bound is real and a future caller could walk into it,
+        not because anything is near it. If one does, the fix is a temporary
+        table, not a bigger IN, which is the same answer `Shelf.matching`
+        gives.
         """
         ids = frozenset(book_ids)
         rows: dict[int, UserBook] = {}

@@ -37,7 +37,6 @@ beforeEach(() => {
   api = mockApi();
   api.on("/api/settings/features", {
     body: {
-      google_books_enabled: false,
       goodreads_lookup_enabled: false,
       default_locale: "en",
     },
@@ -51,7 +50,6 @@ describe("LibrarySettingsPage", () => {
   function stubLibraryMode(on: boolean) {
     api.on("/api/settings/features", {
       body: {
-        google_books_enabled: false,
         goodreads_lookup_enabled: false,
         default_locale: "en",
         library_mode: on,

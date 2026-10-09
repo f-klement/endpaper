@@ -43,6 +43,21 @@ export default function DuplicatesPage() {
           <p className="text-sm text-paper-600 leading-relaxed dark:text-paper-400">
             {t("duplicates.explain")}
           </p>
+          {/* The server caps how many books one answer carries, so the list
+              can end while there is still work. Without this line a member
+              who clears what is shown reads an empty page as "done", which
+              is a claim the server never made. */}
+          {duplicates.totalGroups > duplicates.groups.length && (
+            <p
+              role="status"
+              className="text-sm text-paper-600 dark:text-paper-400"
+            >
+              {t("duplicates.capped", {
+                shown: duplicates.groups.length,
+                total: duplicates.totalGroups,
+              })}
+            </p>
+          )}
           {duplicates.mergeError != null && (
             <ErrorState error={duplicates.mergeError} />
           )}

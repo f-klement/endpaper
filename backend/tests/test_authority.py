@@ -74,7 +74,7 @@ _NATIONAL_CODES = ("BLBNB", "ARBABN", "BNE", "PTBNP", "ICCU", "BNCHL")
 #: embedded separator live. Production's narrower set is what
 #: `TestTheParserIsAskedForABoundedSetOfCodes` is for.
 _CODES_THE_FIXTURES_CARRY = frozenset(
-    _NATIONAL_CODES + ("DNB", "LC", "SUDOC", "WKP", "ISNI", "LNL", "EGAXA", "LIH")
+    (*_NATIONAL_CODES, "DNB", "LC", "SUDOC", "WKP", "ISNI", "LNL", "EGAXA", "LIH")
 )
 
 
@@ -2462,7 +2462,8 @@ class TestTheOutwardWikipediaLink:
         assert found["Q251"] == authority.WikipediaArticle(
             url="https://www.wikidata.org/wiki/Q251", language=None
         )
-        assert "Q250" in asked and "Q251" not in asked
+        assert "Q250" in asked
+        assert "Q251" not in asked
 
     @pytest.mark.asyncio
     async def test_the_unfiltered_pass_asks_for_far_fewer_people_at_a_time(self):
@@ -2933,7 +2934,8 @@ class TestTheViafResponseBoundIsSeparateAndLargerThanTheOthers:
         with _patched_fetch_get(record):
             await authority.national_identifiers(_certain_candidate())
 
-        assert seen and set(seen) == {authority._VIAF_LIMIT}
+        assert seen
+        assert set(seen) == {authority._VIAF_LIMIT}
 
 
 class TestOneDeadlineCoversTheViafCallsToo:
@@ -3324,4 +3326,5 @@ class TestTheCrossReferencesThatArriveWithTheRecord:
 
         assert found
         assert all(row.disagreements == () for row in found)
-        assert asked and "wbgetclaims" not in asked
+        assert asked
+        assert "wbgetclaims" not in asked

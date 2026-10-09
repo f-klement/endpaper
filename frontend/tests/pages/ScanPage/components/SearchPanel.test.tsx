@@ -22,23 +22,23 @@ function match(overrides: Partial<BookMatch> = {}): BookMatch {
   };
 }
 
-function renderPanel(
-  overrides: Partial<Parameters<typeof SearchPanel>[0]> = {},
-) {
+type PanelProps = Parameters<typeof SearchPanel>[0];
+
+function renderPanel(overrides: Partial<PanelProps> = {}) {
   const props = {
     isConfigured: true,
-    onOpenHelp: vi.fn(),
+    onOpenHelp: vi.fn<PanelProps["onOpenHelp"]>(),
     query: "",
     matches: [] as BookMatch[],
     isSearching: false,
     isEmpty: false,
     error: null,
-    onQueryChange: vi.fn(),
-    onSubmit: vi.fn(),
-    onChoose: vi.fn(),
+    onQueryChange: vi.fn<PanelProps["onQueryChange"]>(),
+    onSubmit: vi.fn<PanelProps["onSubmit"]>(),
+    onChoose: vi.fn<PanelProps["onChoose"]>(),
     unasked: [] as CatalogueSource[],
     askedNothing: false,
-    onSearchHarder: vi.fn(),
+    onSearchHarder: vi.fn<PanelProps["onSearchHarder"]>(),
     isSearchingHarder: false,
     hasSearchedHarder: false,
     ...overrides,

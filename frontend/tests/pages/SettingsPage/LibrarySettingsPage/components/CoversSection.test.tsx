@@ -32,7 +32,7 @@ describe("CoversSection", () => {
   });
 
   it("runs on a click", async () => {
-    const onRun = vi.fn();
+    const onRun = vi.fn<() => void>();
     renderLocalised(
       <CoversSection
         result={null}

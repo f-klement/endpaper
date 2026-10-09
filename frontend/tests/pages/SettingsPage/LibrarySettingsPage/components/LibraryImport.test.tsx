@@ -52,19 +52,19 @@ function preview(overrides: Partial<ImportPreviewOut> = {}): ImportPreviewOut {
   };
 }
 
-function renderImport(
-  overrides: Partial<React.ComponentProps<typeof LibraryImport>> = {},
-) {
+type Props = React.ComponentProps<typeof LibraryImport>;
+
+function renderImport(overrides: Partial<Props> = {}) {
   const props = {
     isPreviewing: false,
     isImporting: false,
     preview: null,
     result: null,
     error: null,
-    onChoose: vi.fn(),
-    onConfirm: vi.fn(),
-    onCancel: vi.fn(),
-    onReviewUnconfirmed: vi.fn(),
+    onChoose: vi.fn<Props["onChoose"]>(),
+    onConfirm: vi.fn<Props["onConfirm"]>(),
+    onCancel: vi.fn<Props["onCancel"]>(),
+    onReviewUnconfirmed: vi.fn<Props["onReviewUnconfirmed"]>(),
     ...overrides,
   };
   renderLocalised(<LibraryImport {...props} />);

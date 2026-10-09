@@ -1,8 +1,10 @@
 /**
- * @vitest-environment node
+ * @vitest-environment jsdom
  *
- * A substring test over a string. No DOM, and building one would cost more than
- * this file spends running.
+ * **jsdom, for the one property at the foot of this file**, which drives every
+ * reader that refuses a declaration and needs a parser to confirm the document
+ * it starts from is one the reader accepts. jsdom rather than the suite's
+ * happy-dom, because that is where four of those readers' own tests run.
  */
 /**
  * Tests for src/lib/xmlEntities.ts.
@@ -18,20 +20,35 @@
 
 import { describe, expect, it } from "vitest";
 
-import { MAX_OPF_BYTES } from "../../src/lib/calibre";
-import { MAX_CACHE_BYTES } from "../../src/lib/kindle";
-import { declaresEntities } from "../../src/lib/xmlEntities";
+import fc from "fast-check";
 
-/**
- * Every module under `src/lib/`, as source, for the derivation at the foot of
- * this file. Read with `import.meta.glob` rather than `node:fs` so this needs
- * no `@types/node`, which is `houseRules.test.ts`'s reason and the same one.
- */
-const SOURCES = import.meta.glob("../../src/lib/*.ts", {
-  query: "?raw",
-  import: "default",
-  eager: true,
-}) as Record<string, string>;
+import { readDigitalEditionsLibrary } from "../../src/lib/adobeDigitalEditions";
+import { MAX_OPF_BYTES } from "../../src/lib/calibre";
+import { readComicInfo } from "../../src/lib/cbz";
+import { readEpub } from "../../src/lib/epub";
+import { readFb2Description } from "../../src/lib/fb2";
+import { MAX_CACHE_BYTES, readKindleLibrary } from "../../src/lib/kindle";
+import { readOpf } from "../../src/lib/opf";
+import * as xmlEntities from "../../src/lib/xmlEntities";
+import { declaresEntities } from "../../src/lib/xmlEntities";
+import { holds, PROFILE, PROPERTY, witness } from "../property";
+import { buildEpub } from "../zipFixtures";
+import { expectAnswer, overrunBreach, type ValueDoor } from "./readerContract";
+import {
+  COMIC_INFO,
+  DECLARING,
+  DIGITAL_EDITIONS,
+  FICTION_BOOK,
+  KINDLE,
+  OPF,
+  renderNode,
+  type Vocabulary,
+} from "./xmlArbitrary";
+// Every module under `src/lib/`, for the derivation at the foot of this file.
+// Taken from the one enumeration of `src/` rather than from a pattern of this
+// file's own: a directory corpus is a partition of the armed tree, so it
+// cannot be narrowed by editing a glob here.
+import { modulesUnder } from "../sourceModules";
 
 describe("a document that declares its own entities", () => {
   it("is refused for a declaration in the internal subset", () => {
@@ -220,8 +237,8 @@ describe("a reader that parses a whole document refuses a declaration first", ()
   const RULE = "lib/xmlEntities.ts";
 
   function modules(): [string, string][] {
-    return Object.entries(SOURCES).map(([path, source]) => [
-      path.replace("../../src/", ""),
+    return modulesUnder("lib").map(([path, source]) => [
+      path,
       withoutProse(source),
     ]);
   }
@@ -239,6 +256,15 @@ describe("a reader that parses a whole document refuses a declaration first", ()
 
   it("is every module that builds one, and only those", () => {
     expect(parses()).toEqual([...refuses(), ...EXEMPT].sort());
+  });
+
+  it("is every reader the cross door property below drives", () => {
+    // **The property's doors against this derivation**, so a reader that
+    // starts refusing a declaration is a red here until the property drives
+    // it, and a door the property names that stopped refusing is one too.
+    const driven = Object.keys(ENTITY_DOORS);
+    driven.sort();
+    expect(driven).toEqual(refuses());
   });
 
   /**
@@ -451,5 +477,176 @@ describe("a reader that parses a whole document refuses a declaration first", ()
     // closes. It is also the only arm that notices every caller dropping the
     // rule at once while the exempt three keep parsing.
     expect(refuses().length).toBeGreaterThan(1);
+  });
+});
+
+/** A reader that refuses a declaration, by the module the derivation names. */
+interface EntityDoor {
+  /** The document it accepts, which a declaration is put into. */
+  readonly accepted: string;
+  /** Whether it accepted `xml`, which a declaration must turn into a no. */
+  readonly accepts: (xml: string) => Promise<boolean>;
+}
+
+/** A string door's answer, as accepted or not. */
+function read(vocabulary: Vocabulary, accepts: (xml: string) => boolean) {
+  return {
+    accepted: renderNode(vocabulary.accepted),
+    accepts: async (xml: string) => accepts(xml),
+  };
+}
+
+/**
+ * Every reader that refuses a declaration, keyed by its module, and held to
+ * the derivation above by equality.
+ *
+ * **`epub.ts` through its file door**, because the parse it guards is of a
+ * document inside a zip: the declaration goes into the package document, and
+ * the container is the reader's own and stays whole.
+ */
+const ENTITY_DOORS: Readonly<Record<string, EntityDoor>> = {
+  "lib/adobeDigitalEditions.ts": read(
+    DIGITAL_EDITIONS,
+    (xml) => readDigitalEditionsLibrary(xml).ok,
+  ),
+  "lib/cbz.ts": read(COMIC_INFO, (xml) => readComicInfo(xml) !== null),
+  "lib/epub.ts": {
+    accepted: renderNode(OPF.accepted),
+    accepts: async (xml) =>
+      (await readEpub(new Blob([await buildEpub({ opf: xml })]))).ok,
+  },
+  "lib/fb2.ts": read(FICTION_BOOK, (xml) => readFb2Description(xml) !== null),
+  "lib/kindle.ts": read(KINDLE, (xml) => readKindleLibrary(xml).ok),
+  "lib/opf.ts": read(OPF, (xml) => readOpf(xml) !== null),
+};
+
+/** One reader, one declaration, and where in its document it goes. */
+interface Placed {
+  readonly door: string;
+  readonly declaration: string;
+  /** An index into the document, modulo its length plus one. */
+  readonly at: number;
+}
+
+const placed: fc.Arbitrary<Placed> = fc.record({
+  door: fc.constantFrom(...Object.keys(ENTITY_DOORS)),
+  declaration: fc.constantFrom(...DECLARING),
+  // Mostly anywhere, and a quarter of the time at the very front, which is
+  // where a declaration belongs and where a uniform index almost never lands.
+  at: fc.oneof(
+    { arbitrary: fc.constant(0), weight: 1 },
+    { arbitrary: fc.nat(), weight: 3 },
+  ),
+});
+
+/** The accepted document with the declaration put into it. */
+function inserted({ door, declaration, at }: Placed): string {
+  const accepted = ENTITY_DOORS[door]!.accepted;
+  const index = at % (accepted.length + 1);
+  return accepted.slice(0, index) + declaration + accepted.slice(index);
+}
+
+/**
+ * The rule as a door: the reader's accepted document, then that document with
+ * a declaration put anywhere in it.
+ *
+ * **Two halves, each an arm the other cannot be**: the document is accepted
+ * whole, which is what makes a refusal of it mean the declaration; and with
+ * the declaration in, it is refused and **no XML parse is handed it**, which
+ * the meter's parser door sees whatever the reader answered. A declaration in
+ * a comment or a `CDATA` section is refused too, on purpose:
+ * `xmlEntities.ts` states that over refusal, so the property expects it.
+ */
+const crossDoor: ValueDoor<Placed, boolean> = {
+  module: xmlEntities,
+  ceilings: () => ({ refusesEntities: true }),
+  open: async (where, meter) => {
+    const door = ENTITY_DOORS[where.door]!;
+    meter.require(
+      await acceptedWhole(door),
+      `${where.door} refused the document it accepts, with nothing put in it`,
+    );
+    const accepted = await door.accepts(inserted(where));
+    meter.require(
+      !accepted,
+      `${where.door} accepted a document declaring an entity`,
+    );
+    return accepted;
+  },
+};
+
+/** Whether a reader accepts its own document, asked outside any meter. */
+const ACCEPTED_WHOLE = new Map<EntityDoor, Promise<boolean>>();
+function acceptedWhole(door: EntityDoor): Promise<boolean> {
+  let known = ACCEPTED_WHOLE.get(door);
+  if (known === undefined) {
+    known = door.accepts(door.accepted);
+    ACCEPTED_WHOLE.set(door, known);
+  }
+  return known;
+}
+
+describe("a declaration put anywhere into a document a reader accepts", () => {
+  it(
+    "is refused by every reader that applies the rule, before any XML parse sees it",
+    PROPERTY,
+    async () => {
+      expect(
+        await holds(placed, async (where) => {
+          await expectAnswer(crossDoor, where);
+        }),
+      ).toBe(PROFILE.runs);
+    },
+  );
+
+  it("is metered, so the parser door above is not held over nothing", async () => {
+    // **Each reader parses its own document**, counted through the same door
+    // the property reads, so a reader that stopped parsing through the global
+    // would count nothing and refuse nothing the meter could see.
+    for (const [name, door] of Object.entries(ENTITY_DOORS)) {
+      const { outcome, counted } = await expectAnswer(
+        {
+          module: xmlEntities,
+          ceilings: () => ({}),
+          open: () => door.accepts(door.accepted),
+        },
+        undefined,
+      );
+
+      expect(outcome, name).toEqual({ answered: true });
+      expect(counted.parses, name).toBeGreaterThan(0);
+    }
+  });
+
+  it("declares the parse ceiling it is held to, so deleting it reds", async () => {
+    // **The positive control for a door handed a value**: a stub hands the
+    // meter's parser a declaring document through this door's own ceilings.
+    expect(
+      await overrunBreach(crossDoor, { ceiling: "refusesEntities" }),
+    ).toContain("declaring an entity");
+  });
+
+  it("draws every reader, and every place a declaration can sit", async () => {
+    // Before the root, where a declaration belongs, and inside it, where it
+    // does not and is refused all the same.
+    const index = ({ door, at }: Placed) =>
+      at % (ENTITY_DOORS[door]!.accepted.length + 1);
+    await witness(placed, {
+      ...Object.fromEntries(
+        Object.keys(ENTITY_DOORS).map((door) => [
+          `is handed to ${door}`,
+          (where: Placed) => where.door === door,
+        ]),
+      ),
+      ...Object.fromEntries(
+        DECLARING.map((declaration) => [
+          `carries ${declaration}`,
+          (where: Placed) => where.declaration === declaration,
+        ]),
+      ),
+      "puts it before the root": (where) => index(where) === 0,
+      "puts it inside the root": (where) =>
+        index(where) > ENTITY_DOORS[where.door]!.accepted.indexOf(">"),
+    });
   });
 });

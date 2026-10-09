@@ -9,6 +9,12 @@ import {
   BookFormat,
   BookIdentifierScheme,
 } from "../../src/api/generated/model";
+// Every module, read as text, because the rules below are about the import
+// graph and a module's own exports, neither of which is visible from a value.
+// The one enumeration of `src/` refuses a corpus that is no longer the tree;
+// the pattern used to be written here, where narrowing it was one edit in the
+// file holding the rules it disarmed.
+import { sourceEntries as modules } from "../sourceModules";
 
 /**
  * Every registered extension and the export its module answers with.
@@ -160,56 +166,55 @@ describe("which reader opens a picked file", () => {
   });
 });
 
-/**
- * Every module, read as text, because the rules below are about the import
- * graph and a module's own exports, neither of which is visible from a value.
- *
- * `import.meta.glob` rather than `node:fs`, for the reason
- * `tests/houseRules.test.ts` gives at its own copy: a guard test is a poor
- * reason to add `@types/node` and widen the global types.
- *
- * **Here rather than beside that copy**, which is where a tree wide rule
- * belongs, because this one is about a single seam and this is that seam's test
- * file. `houseRules.test.ts` is also owned by another change this wave, and a
- * rule about `fileReaders.ts` should not need an edit there to be added.
- */
-const SOURCES = import.meta.glob("../../src/**/*.{ts,tsx}", {
-  query: "?raw",
-  import: "default",
-  eager: true,
-}) as Record<string, string>;
-
 const SEAM = "lib/fileReaders.ts";
 const ENTITY_GUARD = "lib/xmlEntities.ts";
 const YEAR_RULES = "lib/year.ts";
+const SOURCE_RECORD = "lib/sourceRecord.ts";
 
 /**
  * The family's shared vocabulary, and which module declares each part of it.
  *
- * **Three homes rather than one, because the family shares three different
- * kinds of thing.** The seam says what a reader is and what it answers with,
- * which every reader produces; the entity refusal is a rule about handing a
- * member's document to a parser, which four readers apply and which nothing in
- * the contract consults; the year rules say what a number has to be to be a
+ * **Four homes rather than one, because the family shares four different kinds
+ * of thing.** The seam says what a reader is and what it answers with, which
+ * every reader produces; the entity refusal is a rule about handing a member's
+ * document to a parser, which four readers apply and which nothing in the
+ * contract consults; the year rules say what a number has to be to be a
  * publication year, which eight readers reach for and which is neither the seam
- * nor a bound on a request body. A `FileReading` is the same shape whether or
- * not the bytes went through a parser at all, so the second was moved out, and
- * the third for the same reason one module over.
+ * nor a bound on a request body; and the source record says what any source
+ * states about a book, which is not this family's at all, a store's catalogue
+ * and a Calibre index stating the same ones. A `FileReading` is the same
+ * shape whether or not the bytes went through a parser at all, so the second
+ * was moved out, and the third and fourth for the same reason one module over.
  *
- * **The rules below are the same for all three and are written once**, which is
- * what makes a fourth home a row here rather than a fourth arm: whatever a home
+ * **The rules below are the same for all four and are written once**, which is
+ * what makes a fifth home a row here rather than a fifth arm: whatever a home
  * declares, it declares under no second name, and every module using one of
  * those names takes it from that home.
  */
 const SHARED_HOMES = [
   {
     path: SEAM,
-    /** Spelled with the opening brace, so a re-export cannot satisfy it. */
+    /**
+     * Spelled with the opening brace, so a re-export cannot satisfy it.
+     *
+     * `FileMetadata` carries its `extends` clause here for the same reason the
+     * brace is here: dropping the clause is what would move the shared fields
+     * back into this module, and a declaration string stopping at the name
+     * would not see it.
+     */
     declarations: [
-      "export interface FileMetadata {",
+      "export interface FileMetadata extends SourceRecord {",
       "export interface FileIdentifier {",
     ],
     names: ["FileMetadata", "FileIdentifier"],
+  },
+  {
+    // What every source states about a book, which three families declared
+    // separately: a picked file, a store's catalogue and a Calibre index. A row
+    // rather than a fifth arm, which is what this table is for.
+    path: SOURCE_RECORD,
+    declarations: ["export interface SourceRecord {"],
+    names: ["SourceRecord"],
   },
   {
     path: ENTITY_GUARD,
@@ -241,13 +246,6 @@ function bindings(source: string): [string, string, string][] {
 /** Whether a clause names one of the vocabulary a home declares. */
 function names(clause: string, home: readonly string[]): boolean {
   return home.some((name) => new RegExp(`\\b${name}\\b`).test(clause));
-}
-
-function modules(): [string, string][] {
-  return Object.entries(SOURCES).map(([path, source]) => [
-    path.replace("../../src/", ""),
-    source,
-  ]);
 }
 
 /**
@@ -1121,5 +1119,182 @@ describe("what may name a scheme this app stores", () => {
       .sort();
 
     expect(computed).toEqual(Object.keys(COMPUTES_ITS_SCHEME).sort());
+  });
+});
+
+const SCHEMA = import.meta.glob("../../openapi.json", {
+  query: "?raw",
+  import: "default",
+  eager: true,
+}) as Record<string, string>;
+
+/**
+ * A module's prose with every line break and comment marker flattened away.
+ *
+ * **Without this the arms below are beaten by the wrap, which is how the first
+ * version of them failed.** Three of the four readers carry the phrase across two
+ * lines because it runs past eighty columns, and prettier is what puts it there, so
+ * the blind spot would have been the one spelling the gate mandates rather than one
+ * anybody chooses. Measured: matching the raw source found the phrase in one of the
+ * four modules that carry it.
+ *
+ * **Both comment markers, because stripping one and not the other moved the blind
+ * spot rather than closing it.** The first fix removed the block continuation `*`
+ * only, so a phrase wrapped across `//` lines was still missed: measured, found in
+ * both block styles and not in line comments, over a population of 123 modules
+ * carrying three or more consecutive `//` lines. The arm that went **silently**
+ * wrong is the one asserting a claim appears nowhere, which is the one whose whole
+ * job is catching a regression.
+ */
+function flattenedProse(source: string): string {
+  return source
+    .replace(/^\s*\*/gm, " ")
+    .replace(/^\s*\/\//gm, " ")
+    .replace(/\s+/g, " ");
+}
+
+/**
+ * The two sentences the field's arrival made false.
+ *
+ * **Both are asserted absent rather than deleted, which is the whole point of
+ * this pair.** Until the readers started emitting a subject, one arm here
+ * required all four of them to carry `THE_POINTER` and another required
+ * `THE_REASON` to appear exactly once. Correcting the readers turns both of
+ * those from a passing arm into a **passing arm about nothing**, and deleting
+ * them is indistinguishable in a diff from correcting them: a plant that
+ * starts passing is invisible where a plant that breaks is not. So they are
+ * inverted instead, and the arms below fail the day either sentence comes
+ * back.
+ */
+const THE_REASON = "the wall is this type rather than the server";
+const THE_POINTER = "`FileMetadata` declares no field for a subject";
+
+/**
+ * The distinction that decides what the field means, which lives once.
+ *
+ * It is the sentence the ticket was written about: four modules had written
+ * one reason nearly verbatim, and one home is what stopped a fifth copy.
+ *
+ * **The distinguishing clause and not a fragment of it.** The arm this file
+ * lost carried this tree's own record of what a short anchor costs, and the
+ * first version of this constant was three words, `never a tag`, which any
+ * module could write while saying something else entirely and which the seam
+ * could stop saying while still matching. A clause names the sentence.
+ */
+const THE_DISTINCTION = "The file's own words and never a tag";
+
+/** The half of the old sentence that went stale when the server grew the field. */
+const STALE_CLAIM = "takes no `categories`";
+
+function modulesCarrying(phrase: string): string[] {
+  return modules()
+    .filter(([, source]) => flattenedProse(source).includes(phrase))
+    .map(([path]) => path)
+    .sort();
+}
+
+describe("what a reader says about a subject, and where it says it", () => {
+  /**
+   * Arms over phrases, and the blind spot is stated rather than left to be found.
+   *
+   * **These match a phrase and not a claim, so a paraphrase evades them.** What
+   * makes that affordable is the denominator: four modules wrote one sentence
+   * nearly verbatim, so phrase matching would have caught every instance that has
+   * ever existed. The duplication is what produced the ticket, not the wording.
+   *
+   * **What no arm here reaches is whether a reader actually emits what its
+   * format states**, which is a property of the code and is held where the code
+   * can be driven: `tests/lib/opf.test.ts`, `fb2.test.ts`, `cbz.test.ts` and
+   * `mobi.test.ts` each drive their own reader with a document stating a subject
+   * and assert it arrives. A reader that quietly stopped reading its element
+   * would be green here and red there, which is the direction that matters and is
+   * the reason these arms are about prose only.
+   */
+  it("says the server takes no categories in no module at all", () => {
+    // A machine oracle for the only checkable half of the old sentence, which is
+    // whether the endpoint has the field. It does, so the claim may appear nowhere.
+    const raw = SCHEMA["../../openapi.json"] ?? "";
+    expect(
+      raw,
+      "openapi.json was not read, so this arm proves nothing",
+    ).not.toBe("");
+    // Named rather than indexed, because an index signature is possibly
+    // undefined under this tsconfig and the arm is about one known body.
+    const schema = JSON.parse(raw) as {
+      components: { schemas: { BookCreate: { properties?: unknown } } };
+    };
+
+    expect(
+      schema.components.schemas.BookCreate.properties,
+      "the create body no longer carries the field, so this arm is about nothing",
+    ).toHaveProperty("categories");
+    expect(modulesCarrying(STALE_CLAIM)).toEqual([]);
+  });
+
+  it("keeps the distinction between a subject and a tag in one module", () => {
+    // The arm that stops a sixth copy of the reasoning, which is the duplication
+    // that produced the ticket. It was the same arm before the field existed,
+    // over the sentence that said the field did not: what a reader must not
+    // restate moved with the field rather than going away.
+    expect(modulesCarrying(THE_DISTINCTION)).toEqual([SEAM]);
+  });
+
+  it("has no module still saying the record declares no field for one", () => {
+    // **The inversion of the arm this replaces, and the reason it is an arm at
+    // all.** Four readers carried that sentence and it is now false in all four.
+    // An arm requiring them to carry it would pass over nothing once they were
+    // corrected, and deleting it looks identical in a diff. This one fails the
+    // day the sentence comes back, which is the direction a reader going stale
+    // actually takes.
+    //
+    // Both halves, because the seam's own reason went with them: the sentence a
+    // reader wrote, and the sentence the seam wrote for it to point at.
+    expect(modulesCarrying(THE_POINTER)).toEqual([]);
+    expect(modulesCarrying(THE_REASON)).toEqual([]);
+  });
+
+  it("finds a phrase wrapped across line comments too", () => {
+    // The probe for the normaliser, driven rather than asserted about. Without the
+    // `//` arm of the chain this passes only for the block styles, which is how the
+    // stale-claim arm above could go silently green.
+    const wrapped = [
+      "// something before",
+      "// `FileMetadata` declares no",
+      "// field for a subject: see that type.",
+    ].join("\n");
+    const block = [
+      "/**",
+      " * `FileMetadata` declares no",
+      " * field for a subject.",
+      " */",
+    ].join("\n");
+
+    expect(flattenedProse(wrapped)).toContain(THE_POINTER);
+    expect(flattenedProse(block)).toContain(THE_POINTER);
+  });
+
+  it("matches each phrase it looks for against the sentence it came from", () => {
+    // **Every constant this file searches by, driven through the searcher.**
+    // The arms above assert two of them appear nowhere, which is satisfied by
+    // a typo as happily as by a corrected tree: a constant nothing can match
+    // is an arm about nothing, and only `THE_POINTER` had a probe. These are
+    // the sentences as their own sites spelled them, wrapped the way prettier
+    // wraps them, so the flattener is exercised rather than trusted.
+    const pointer = [
+      " * **`Genre`.** Read by nothing, because `FileMetadata` declares no",
+      " * field for a subject: see that type for the reason.",
+    ].join("\n");
+    const reason = [
+      " * **No field here holds a subject, and the wall is this type rather",
+      " * than the server.** Every format in the family states one.",
+    ].join("\n");
+    const distinction = [
+      "   * **The file's own words and never a tag**, which is the",
+      "   * distinction that decides what this field means.",
+    ].join("\n");
+
+    expect(flattenedProse(pointer)).toContain(THE_POINTER);
+    expect(flattenedProse(reason)).toContain(THE_REASON);
+    expect(flattenedProse(distinction)).toContain(THE_DISTINCTION);
   });
 });

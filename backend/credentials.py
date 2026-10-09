@@ -147,7 +147,7 @@ class BadRecoveryPhrase(KeyConfigurationError):
     """The words are not a phrase: wrong count, unknown word, failed checksum.
 
     **A subclass, so every existing handler still catches it**, and separate so
-    a route can answer 422 rather than 409. They are different things: a phrase
+    a route can answer 400 rather than 409. They are different things: a phrase
     somebody mistyped is a bad request, and a key the deployment pinned
     elsewhere is a conflict with the deployment. One status for both told a
     client nothing it could act on differently.
@@ -255,7 +255,7 @@ def _keyring() -> Any | None:
     """
     try:
         import keyring
-        import keyring.errors  # noqa: F401  bound for `module.errors` below
+        import keyring.errors  # bound for `module.errors` below
     except ImportError:
         return None
     return keyring
@@ -1141,12 +1141,19 @@ def origin_of(url: str) -> str:
         host = (parsed.host or "").lower()
         scheme = parsed.scheme.lower()
         port = parsed.port
-    except Exception:
+    except Exception:  # noqa: BLE001  the breadth is the point, see below
         # `httpx.URL` raises `InvalidURL`, and an unusable IDN host surfaces as
         # a `UnicodeError` from idna, which is neither. `fetch._walk_hops`
         # carries the measurement for that second one. Both mean the same thing
         # here and both must fail closed rather than produce a comparable
         # origin.
+        #
+        # **Naming those two is what BLE001 asks for and is the wrong fix.**
+        # They have no common base, so the narrow spelling is a list of two,
+        # and a third parser failure nobody has met yet would then propagate
+        # out of a function whose whole contract is to answer "" when it cannot
+        # tell. That turns a sealed envelope's origin check into a 500. The
+        # breadth here is the fail closed, not an oversight.
         return ""
     if not host or not scheme:
         return ""

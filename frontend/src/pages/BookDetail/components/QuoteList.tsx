@@ -6,7 +6,7 @@ import type {
   UserOut,
 } from "../../../api/generated/model";
 import { useTranslation } from "../../../i18n";
-import { formatDate } from "./NoteList";
+import { shortMonthDate } from "../../../lib/date";
 
 /** Matches `QUOTE_TEXT_MAX` and `QUOTE_NOTE_MAX` in the backend's models.py.
  *
@@ -199,7 +199,7 @@ export default function QuoteList({
                         <>{t("quotes.onPage", { page: quote.page })} · </>
                       )}
                       {quote.author?.username} ·{" "}
-                      {formatDate(quote.created_at, locale)}
+                      {shortMonthDate(quote.created_at, locale)}
                     </span>
                     {canDelete && (
                       <div className="flex gap-2">

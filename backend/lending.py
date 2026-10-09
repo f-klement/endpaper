@@ -28,6 +28,16 @@ cosmetic: `visible_to` admits the viewer's **own** private Books, so a digest
 running as an admin would post that admin's private titles to a Telegram
 channel. The refusal is in the query rather than in a count downstream.
 
+**Small by ADR 0008's depth instrument, and that is a fact about size rather than about the
+door.** That ratio is statements behind each public name, and this module sits below
+`dependencies.py`, the floor that document's central comparison is proved against, while
+`Loans` is the arrangement `Shelf` is. It is named there as the module that stops the
+comparison reading as a claim about shape. Nothing follows for the door: what a caller stops
+knowing is the four facts above, which is `dependencies.py`'s own argument at a ratio of the
+same kind. **The figure is deliberately not written here**, because nothing here would
+recompute it and a number that is copied rather than derived is what that document exists to
+refuse.
+
 ## What this module does not own
 
 **The overdue predicate**, which is `notifications.overdue_clauses`: one
@@ -300,6 +310,24 @@ class Loans:
         return Loans(self._query.filter(*notifications.overdue_clauses(now)))
 
     # ── Reading ───────────────────────────────────────────────────────────────
+
+    def rendered(self) -> Loans:
+        """This scope with the one load plan on it. See `RENDERED`.
+
+        **For a single loan, which `page` cannot serve.** That method applies
+        the plan itself and has to: it counts from the query **without** the
+        options, so a `selectinload` does not issue its statement for a count
+        that discards the rows. A single loan has nothing to count, so the two
+        cannot share a call site and the plan is named in two places instead
+        of being written out in two places.
+
+        **One caller**, `routers/loans._loan_with_relations`, which is both
+        single loan routes. A second caller is a decision about where the plan
+        is applied rather than an edit: the drift this closed was two routes
+        carrying a hand written trio of joins while the list routes used
+        `RENDERED`, and that is exactly what a third spelling restarts.
+        """
+        return Loans(self._query.options(*RENDERED))
 
     def with_id(self, loan_id: int) -> Loan | None:
         """One loan from this scope, or None.

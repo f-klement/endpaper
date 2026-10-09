@@ -22,7 +22,7 @@ import respx
 import cover_store
 import covers
 from config import COVERS_DIR
-from tests.helpers import JPEG_BYTES
+from tests.helpers import AT_DNB_COVERS, AT_OPEN_LIBRARY_COVERS, JPEG_BYTES
 
 
 def store_locally(monkeypatch) -> list[int]:
@@ -431,12 +431,12 @@ class TestAMemberCannotChooseWhereTheServerConnects:
         self, client, admin, covers_dir
     ):
         with respx.mock(assert_all_called=False) as mock:
-            mock.get(url__startswith="https://covers.openlibrary.org/").mock(
+            mock.get(url__startswith=AT_OPEN_LIBRARY_COVERS).mock(
                 return_value=httpx.Response(
                     302, headers={"location": "http://10.0.0.1/x.jpg"}
                 )
             )
-            mock.get(url__startswith="https://portal.dnb.de/").mock(
+            mock.get(url__startswith=AT_DNB_COVERS).mock(
                 return_value=httpx.Response(404)
             )
             res = client.post(

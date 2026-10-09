@@ -10,6 +10,39 @@ interface ErrorStateProps {
 }
 
 /**
+ * What a thrown value turns out to be, before anything decides what to show.
+ *
+ * Two answers and an absence. `unreachable` is the one this side has words
+ * for; `said` is words somebody else wrote, the server's own `detail` through
+ * `ApiError` or a string that was thrown, which nothing here can translate.
+ */
+export type RequestFailure =
+  { kind: "unreachable" } | { kind: "said"; message: string };
+
+/**
+ * Which of those a thrown value is.
+ *
+ * **The classification is here and the wording is not**, because two callers
+ * want different things from the same four branches and used to hold their own
+ * copy of them: this renders a sentence for a reader, and `ScanPage`'s queue
+ * keeps the answer as a name it can render later, in whatever language is being
+ * read by then. A branch added to one copy diverged the other silently.
+ *
+ * `undefined` where nothing usable was thrown, which is the caller's fallback
+ * rather than a third answer: what to say instead is the caller's to choose.
+ */
+export function classifyError(error: unknown): RequestFailure | undefined {
+  // Before the generic Error branch below, which would otherwise print the
+  // browser's own "Failed to fetch" to somebody on a phone.
+  if (error instanceof NetworkError) return { kind: "unreachable" };
+  if (error instanceof Error && error.message)
+    return { kind: "said", message: error.message };
+  if (typeof error === "string" && error)
+    return { kind: "said", message: error };
+  return undefined;
+}
+
+/**
  * Turn an unknown thrown value into something displayable.
  *
  * `t` is required rather than optional, and that is the enforcement: one of
@@ -25,12 +58,11 @@ export function errorText(
   fallback: string,
   t: Translate,
 ): string {
-  // Before the generic Error branch below, which would otherwise print the
-  // browser's own "Failed to fetch" to somebody on a phone.
-  if (error instanceof NetworkError) return t("common.cannotReachServer");
-  if (error instanceof Error && error.message) return error.message;
-  if (typeof error === "string" && error) return error;
-  return fallback;
+  const failure = classifyError(error);
+  if (failure === undefined) return fallback;
+  return failure.kind === "unreachable"
+    ? t("common.cannotReachServer")
+    : failure.message;
 }
 
 /**

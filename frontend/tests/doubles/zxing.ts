@@ -24,16 +24,25 @@
  * worth testing is the ISBN filter, what the reader is asked for, and the
  * lifecycle, all of which are observed through the three spies below.
  */
+import type { BrowserMultiFormatReader as RealReader } from "@zxing/library";
 import { vi } from "vitest";
 
 /** The reader's `decodeFromStream`. Its third argument is the frame callback. */
-export const decodeFromStream = vi.fn();
+export const decodeFromStream = vi.fn<RealReader["decodeFromStream"]>();
 
 /** The reader's `reset`, which is how the component releases ZXing's track. */
-export const reset = vi.fn();
+export const reset = vi.fn<RealReader["reset"]>();
 
-/** The constructor's arguments: the decode hints, then the frame interval. */
-export const readerArgs = vi.fn();
+/**
+ * The constructor's arguments: the decode hints, then the frame interval.
+ *
+ * The hints are `unknown` rather than the library's `Map<DecodeHintType, any>`
+ * because that is not what arrives: the enums below are strings here, so a
+ * test reads the map with string keys, and the real type would make every such
+ * read a cast between types that do not overlap.
+ */
+export const readerArgs =
+  vi.fn<(hints: unknown, interval: number | undefined) => void>();
 
 /**
  * Thrown by the real library on every frame that holds no barcode.

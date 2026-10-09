@@ -4,7 +4,7 @@ import { screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import LoanRow from "../../../src/pages/components/LoanRow";
-import { makeBook, makeLoan, resetIds } from "../../factories";
+import { endOfDay, makeBook, makeLoan, resetIds } from "../../factories";
 import { renderLocalised } from "../../utils";
 
 function row(overrides = {}) {
@@ -13,7 +13,7 @@ function row(overrides = {}) {
     <LoanRow
       loan={makeLoan({ book: makeBook({ title: "Piranesi" }), ...overrides })}
       isReturning={false}
-      onMarkReturned={vi.fn()}
+      onMarkReturned={vi.fn<(loanId: number) => void>()}
     />,
   );
 }
@@ -60,7 +60,7 @@ describe("an overdue row is marked twice, and neither mark is colour alone", () 
     // The mark a reader who cannot separate the two frames still gets. If this
     // ever becomes the border alone, the page is telling colour-blind readers
     // nothing.
-    row({ is_overdue: true, due_at: "2026-01-05T00:00:00" });
+    row({ is_overdue: true, due_at: endOfDay("2026-01-05") });
 
     expect(screen.getByText(/Overdue since/)).toBeInTheDocument();
   });
@@ -96,10 +96,73 @@ describe("an overdue row is marked twice, and neither mark is colour alone", () 
     // edge on the history.
     const { container } = row({
       is_overdue: false,
-      returned_at: "2026-02-20T00:00:00",
+      returned_at: "2026-02-20T12:00:00Z",
     });
 
     expect(dangerClasses(container)).toEqual([]);
+  });
+});
+
+describe("whether the book is back is read once", () => {
+  // `src/lib/loanState.ts` answers it, and these are the sites that used to
+  // each ask the column for themselves. `tests/lib/loanState.test.ts` holds
+  // the rule that nothing under `src` reads the column but that module; these
+  // arms hold what the card does with the answer, which no rule about a
+  // spelling can see.
+
+  it("prints the date the book came back", () => {
+    row({ returned_at: "2026-02-20T12:00:00Z" });
+
+    expect(
+      screen.getByText(
+        new RegExp(
+          `Returned ${new Date("2026-02-20T12:00:00Z").toLocaleDateString("en")}`,
+        ),
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("takes the deadline line off a loan that is already back", () => {
+    // The deadline on a book on the shelf is history, and the row reports the
+    // date it came back one line below. This gate read the raw column while
+    // the dimming beside it read a separate derivation of the same rule.
+    row({
+      is_overdue: false,
+      due_at: endOfDay("2026-03-05"),
+      returned_at: "2026-02-20T12:00:00Z",
+    });
+
+    expect(screen.queryByText(/^Due /)).not.toBeInTheDocument();
+  });
+
+  it("keeps the deadline line on a loan still out", () => {
+    // The arm above is satisfied by a card that never draws the line at all,
+    // which is what a mistaken gate produces.
+    row({
+      is_overdue: false,
+      due_at: endOfDay("2026-03-05"),
+      returned_at: null,
+    });
+
+    expect(screen.getByText(/^Due /)).toBeInTheDocument();
+  });
+
+  it("dims the card and drops the return button once the book is back", () => {
+    const { container } = row({ returned_at: "2026-02-20T12:00:00Z" });
+
+    expect(card(container).className.split(/\s+/)).toContain("opacity-60");
+    expect(
+      screen.queryByRole("button", { name: "Mark Returned" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("offers the return button while the book is still out", () => {
+    const { container } = row({ returned_at: null });
+
+    expect(card(container).className.split(/\s+/)).not.toContain("opacity-60");
+    expect(
+      screen.getByRole("button", { name: "Mark Returned" }),
+    ).toBeInTheDocument();
   });
 });
 
@@ -108,7 +171,7 @@ describe("how long the book has been out", () => {
     // The whole point of the field. `loaned_at` is right there in the payload
     // and a browser could subtract it, which is what would put a second
     // definition of a whole day in a second timezone.
-    row({ loaned_at: "2026-02-01T00:00:00", days_out: 9 });
+    row({ loaned_at: "2026-02-01T12:00:00Z", days_out: 9 });
 
     expect(screen.getByText("Out for 9 days")).toBeInTheDocument();
   });
@@ -134,7 +197,7 @@ describe("how long the book has been out", () => {
   it("says nothing once the book is back", () => {
     // The row reports the date it came back instead. A closed loan that went
     // on counting would be a lie about a book on the shelf.
-    row({ days_out: 3, returned_at: "2026-02-20T00:00:00" });
+    row({ days_out: 3, returned_at: "2026-02-20T12:00:00Z" });
 
     expect(screen.queryByText(/Out for/)).not.toBeInTheDocument();
   });
@@ -144,7 +207,7 @@ describe("how far past its deadline a loan is", () => {
   it("puts the day count in the badge, ahead of the date", () => {
     // What tells a week from a year at a glance, which the date alone does
     // not: a reader has to know today's date to read "Overdue since 5 Jan".
-    row({ is_overdue: true, days_overdue: 14, due_at: "2026-01-05T00:00:00" });
+    row({ is_overdue: true, days_overdue: 14, due_at: endOfDay("2026-01-05") });
 
     expect(screen.getByText(/^14 days overdue, since/)).toBeInTheDocument();
   });
@@ -155,16 +218,18 @@ describe("how far past its deadline a loan is", () => {
     // badge carrying the count alone takes the date off every overdue row past
     // its first day, which is what the first version of this did. The count is
     // for triage and the date is what somebody writes to a borrower.
-    row({ is_overdue: true, days_overdue: 14, due_at: "2026-01-05T00:00:00" });
+    row({ is_overdue: true, days_overdue: 14, due_at: endOfDay("2026-01-05") });
 
     const badge = screen.getByText(/days overdue/);
     expect(badge.textContent).toContain(
-      new Date("2026-01-05T00:00:00").toLocaleDateString("en"),
+      // The day the deadline falls on where the viewer is, derived from the
+      // same picked day the fixture was built from rather than written out.
+      new Date(endOfDay("2026-01-05")).toLocaleDateString("en"),
     );
   });
 
   it("says one day in the singular", () => {
-    row({ is_overdue: true, days_overdue: 1, due_at: "2026-01-05T00:00:00" });
+    row({ is_overdue: true, days_overdue: 1, due_at: endOfDay("2026-01-05") });
 
     expect(screen.getByText(/^1 day overdue, since/)).toBeInTheDocument();
   });
@@ -172,7 +237,7 @@ describe("how far past its deadline a loan is", () => {
   it("falls back to the date alone within the first day", () => {
     // `days_overdue` is 0 for a loan that went overdue this morning, and 0
     // says nothing. The date carries that case on its own.
-    row({ is_overdue: true, days_overdue: 0, due_at: "2026-01-05T00:00:00" });
+    row({ is_overdue: true, days_overdue: 0, due_at: endOfDay("2026-01-05") });
 
     expect(screen.getByText(/^Overdue since/)).toBeInTheDocument();
   });

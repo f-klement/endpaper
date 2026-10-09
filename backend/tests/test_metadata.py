@@ -30,31 +30,37 @@ import ast
 import asyncio
 import dataclasses
 import inspect
+import itertools
 import logging
 import math
 import random
 import re
-import symtable
-import textwrap
 from base64 import b64encode
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Final, Literal
+from unittest import mock
 from xml.etree import ElementTree
 
 import httpx
 import pytest
 import respx
+from hypothesis import given
+from hypothesis import strategies as st
 
 import bibliographic
 import covers
 import credentials
+import decoders
 import fetch
 import google_books
+import marc_fields
 import metadata
 import sources
 import targets
+import xml_parse
 import z3950
-from catalogue import AuthorityAssertion, Heading, Record, Subject
+from catalogue import AuthorityAssertion, Heading, Record, Subject, uncontrolled
 from enums import (
     AuthorityScheme,
     Capability,
@@ -63,18 +69,12 @@ from enums import (
     HeadingKind,
 )
 from isbn import registration_group
+from marc_fields import Fields
 from metadata import (
     Outcome,
-    _dnb_subjects,
     _loc_record,
     _loc_subjects,
-    _marc_author_identifiers,
-    _marc_authors,
-    _marc_fields,
     _parsed,
-    _subject_identifier,
-    _subject_kind,
-    _subject_vocabulary,
 )
 from schemas import MAX_CLASSIFICATIONS_PER_BOOK
 from schemas.book import BookLookup
@@ -86,6 +86,20 @@ from tests.helpers import (
     silence_sru_catalogues,
     sru_response,
 )
+from tests.strategies import (
+    Node,
+    answer_of,
+    charsets,
+    depths,
+    encoded,
+    marc_records,
+    text_around,
+    widths,
+    witness,
+    xml_characters,
+    xml_of,
+)
+from tests.test_house_rules import _python_sources
 
 #: The `backend/` directory, so a doc guard can reach the repository root.
 BACKEND = Path(__file__).resolve().parent.parent
@@ -148,14 +162,14 @@ def access(
 ) -> metadata.Access:
     """One `metadata.Access`, with the roster defaulted the way `ALL_SOURCES` is.
 
-    `logins` is `None` rather than an empty mapping so this never restates the
-    module's own default: a test that passes nothing gets whatever
-    `metadata.Access` ships, which is what the routes get for a library holding
-    no credential.
+    **`logins` has no module level default any more, so this helper supplies the
+    empty mapping rather than omitting the argument.** The default was what let a
+    hand assembled access type check and send nothing, which is the hole the
+    router walk existed to report; `metadata.Access` now refuses the omission at
+    the call site. An empty mapping here is a test saying "this library holds no
+    credential", which is a claim rather than a silence.
     """
-    if logins is None:
-        return metadata.Access(plan=plan, api_key=api_key)
-    return metadata.Access(plan=plan, api_key=api_key, logins=logins)
+    return metadata.Access(plan=plan, api_key=api_key, logins=logins or {})
 
 
 async def lookup(
@@ -415,7 +429,8 @@ NLG = "http://catalogue.nlg.gr:210/biblios"
 #:
 #: Captured live 2026-08-30 from `dc.title=ιστορία`, control number 434736.
 #: **Its only 020 is qualified**, `$q (τ.1)`, which is the case the whole source
-#: turns on: under the rule before `_isbn_entries` this record answered nothing.
+#: turns on: under the rule before `Fields._isbn_entries` this record answered
+#: nothing.
 #: Its `$0` values are `urn:nbn:gr:nlg:` rather than `(DE-588)`, which is why the
 #: headings below are subjects and not GND rows.
 NLG_RECORD = _marc(
@@ -722,7 +737,8 @@ OENB_SEARCH = _oenb_envelope(OENB_ARTICLE, OENB_MONOGRAPH)
 #: A whole publication by its leader, and an **online resource** by its extent.
 #:
 #: The leader test passes it, so this is the record that shows `bibliographic.is_physical_book`
-#: is doing separate work from `_is_component_part`. Deleting either refusal
+#: is doing separate work from `marc_fields.is_component_part`. Deleting either
+#: refusal
 #: leaves the other in place and this row reaching the picker.
 OENB_ONLINE = (
     '<record xmlns="http://www.loc.gov/MARC21/slim">'
@@ -762,7 +778,7 @@ OENB_DIAGNOSTIC = """<?xml version="1.0" encoding="UTF-8" standalone="no"?>
 """
 
 #: What a **mistyped index name** answers, and the reason this source needs
-#: `_marc_claims_isbn` more than any other here.
+#: `Fields.claims_isbn` more than any other here.
 #:
 #: Measured live 2026-08-27: `alma.isbn=9783825354077` returns 1 record and both
 #: `alma.isbn13=9783825354077` and `zzz.qqq=9783825354077` return **7,793,152**,
@@ -816,7 +832,7 @@ class TestTheSilencerNamesTheSourcesATestAnswers:
     def test_a_url_that_is_not_a_lookup_row_is_refused(self):
         with (
             respx.mock(assert_all_called=False) as mock,
-            pytest.raises(AssertionError),
+            pytest.raises(AssertionError, match="not the base URL of an SRU lookup target"),
         ):
             silence_other_lookup_catalogues(mock, "https://catalogue.bnf.fr")
 
@@ -1493,17 +1509,30 @@ class TestSearchMatches:
 class TestCatalogueXml:
     """Every catalogue response goes through one reader."""
 
+    #: A well formed document that declares an entity. It parses cleanly when
+    #: nothing refuses it, which is what makes it a witness for the refusal.
+    HOSTILE = (
+        '<?xml version="1.0"?>'
+        '<!DOCTYPE searchRetrieveResponse [<!ENTITY a "aaaaaaaaaa">]>'
+        '<searchRetrieveResponse xmlns="http://www.loc.gov/zing/srw/">'
+        "<records/></searchRetrieveResponse>"
+    )
+
+    def test_the_reader_refuses_a_doctype_before_parsing(self):
+        """The refusal itself, which the arm below cannot see: its body holds
+        no record, so a lookup that parsed it would find nothing either way,
+        and deleting the refusal left that arm green, measured. Matched on the
+        refusal's own message, since a parser error would also be a
+        `ParseError`."""
+        with pytest.raises(ElementTree.ParseError, match="carrying a doctype"):
+            _parsed(self.HOSTILE)
+
     @pytest.mark.asyncio
     async def test_a_response_carrying_a_doctype_is_refused(self):
         """`xml.etree` expands internal entities, so a doctype is a body whose
         size says nothing about what it costs to parse: ten characters nested
         three deep expand to 1,000. It degrades to "unavailable", not a 500."""
-        hostile = (
-            '<?xml version="1.0"?>'
-            '<!DOCTYPE searchRetrieveResponse [<!ENTITY a "aaaaaaaaaa">]>'
-            '<searchRetrieveResponse xmlns="http://www.loc.gov/zing/srw/">'
-            "<records/></searchRetrieveResponse>"
-        )
+        hostile = self.HOSTILE
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
             silence_other_lookup_catalogues(mock, K10PLUS, DNB)
@@ -1637,10 +1666,13 @@ class TestTheResponseSizeCap:
         """
         # Bound and narrowed before the call: `find` answers `Element | None`,
         # and passing that straight in is a type error rather than a check.
-        marc_record = _parsed(self._marc_over_cap()).find(f".//{metadata._MARC}record")
+        marc_record = _parsed(self._marc_over_cap()).find(f".//{marc_fields.RECORD_TAG}")
         assert marc_record is not None
-        assert _marc_fields(marc_record)
-        assert _parsed(self._oenb_over_cap()).find(f".//{metadata._MARC}record") is not None
+        assert Fields(marc_record).get("245")
+        assert (
+            _parsed(self._oenb_over_cap()).find(f".//{marc_fields.RECORD_TAG}")
+            is not None
+        )
         assert (
             _parsed(self._dublincore_over_cap()).find(f".//{metadata._DC}title")
             is not None
@@ -1650,7 +1682,7 @@ class TestTheResponseSizeCap:
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
-        "host, body, isbn",
+        ("host", "body", "isbn"),
         [
             (DNB, "_marc_over_cap", ENGLISH_ISBN),
             (K10PLUS, "_marc_over_cap", ENGLISH_ISBN),
@@ -1696,7 +1728,7 @@ class TestTheResponseSizeCap:
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
-        "host, body",
+        ("host", "body"),
         [
             (DNB, "_marc_over_cap"),
             (K10PLUS, "_marc_over_cap"),
@@ -1768,61 +1800,6 @@ class TestTheResponseSizeCap:
         assert result.source == "k10plus"
 
 
-class TestMarcSubfields:
-    """What a MARC record carries that a Dublin Core crosswalk had cleaned up."""
-
-    def test_a_repeated_subfield_keeps_every_value(self):
-        """082 holds `$a=830 $a=B`, and the letter is not a Dewey number."""
-        fields = _marc_fields(_marc_element('''
-          <datafield tag="082" ind1="7" ind2="4">
-           <subfield code="a">830</subfield><subfield code="a">B</subfield>
-          </datafield>'''))
-        assert fields["082"][0].all("a") == ["830", "B"]
-
-    def test_indexing_a_repeated_subfield_gives_the_first_value(self):
-        """`$0` arrives as the GND number, then two URIs for the same thing."""
-        fields = _marc_fields(_marc_element('''
-          <datafield tag="100" ind1="1" ind2=" ">
-           <subfield code="0">(DE-588)118181505</subfield>
-           <subfield code="0">https://d-nb.info/gnd/118181505</subfield>
-           <subfield code="a">Capus, Alex</subfield>
-          </datafield>'''))
-        assert fields["100"][0]["0"] == "(DE-588)118181505"
-
-    def test_the_non_sorting_delimiters_are_stripped(self):
-        """MARC brackets a leading article so it can be skipped when filing.
-
-        They are invisible in a terminal, and 28 of 85 live records hold one.
-        """
-        fields = _marc_fields(_marc_element(
-            '<datafield tag="245" ind1="1" ind2="0">'
-            '<subfield code="a">\x98Die\x9c Deutschen</subfield></datafield>'
-        ))
-        assert fields["245"][0]["a"] == "Die Deutschen"
-
-    def test_padding_inside_a_subfield_is_collapsed(self):
-        """MARC pads subfields. `245 $a` on the live record 9783446249974 reads
-        `Reisen im  Licht der Sterne`, where that record's own `776 $t` spells
-        it with one space."""
-        fields = _marc_fields(_marc_element(
-            '<datafield tag="245" ind1="1" ind2="0">'
-            '<subfield code="a">Reisen im  Licht der Sterne</subfield>'
-            "</datafield>"
-        ))
-        assert fields["245"][0]["a"] == "Reisen im Licht der Sterne"
-
-    def test_decomposed_text_is_normalised(self):
-        """The DNB serves MARC21 decomposed and Dublin Core composed.
-
-        Two spellings of one author is enough to store the same person twice.
-        """
-        fields = _marc_fields(_marc_element(
-            '<datafield tag="100" ind1="1" ind2=" ">'
-            '<subfield code="a">Mu\u0308ller, Hans</subfield></datafield>'
-        ))
-        assert fields["100"][0]["a"] == "M\u00fcller, Hans"
-
-
 class TestASubjectCarriesTheVocabularyTheRecordDeclared:
     """#134: the `$2` and the `$0`, which were both discarded before it.
 
@@ -1835,7 +1812,7 @@ class TestASubjectCarriesTheVocabularyTheRecordDeclared:
 
     @staticmethod
     def _subjects(datafields: str) -> list[Subject]:
-        subjects, _ = _dnb_subjects(_marc_fields(_marc_element(datafields)))
+        subjects, _ = Fields(_marc_element(datafields)).controlled_subjects()
         return subjects
 
     def test_the_declared_vocabulary_and_the_identifier_are_both_kept(self):
@@ -1848,7 +1825,7 @@ class TestASubjectCarriesTheVocabularyTheRecordDeclared:
         ) == [Subject("Informatik", "gnd", "(DE-588)4026894-9")]
 
     def test_the_greek_authority_identifier_is_kept_whole(self):
-        """The field the ticket was written around. `_gnd_identifier` drops
+        """The field the ticket was written around. `Subfields.gnd_identifier` drops
         this, and measured 2026-08-31 it drops **11 of 11** of the National
         Library of Greece's identifiers, because none is a `(DE-588)`."""
         assert self._subjects(
@@ -1907,39 +1884,39 @@ class TestASubjectCarriesTheVocabularyTheRecordDeclared:
 
     def test_an_empty_leading_dollar_zero_does_not_lose_the_identifier(self):
         """The shape the live measurement could not see, because no catalogue
-        writes it: `_marc_text` turns `<subfield code="0"/>` into `""`, so the
+        writes it: `marc_fields` turns `<subfield code="0"/>` into `""`, so the
         first value is empty and the number sits behind it. 0 of the 718 live
         fields carry an empty `$0` anywhere, which is exactly why "the first
         `$0`" read as safe.
 
         **The two readers disagreeing is the defect, not the None.**
-        `_gnd_identifier` scans every `$0`, so it found the number and wrote a
+        `Subfields.gnd_identifier` scans every `$0`, so it found the number and wrote a
         classification row, while the subject beside it carried no identifier at
         all off the same field.
         """
-        entry = _marc_fields(_marc_element(
+        entry = Fields(_marc_element(
             '<datafield tag="650" ind1=" " ind2="7">'
             '<subfield code="a">Informatik</subfield>'
             '<subfield code="0"/>'
             '<subfield code="0">(DE-588)4026894-9</subfield>'
             '<subfield code="2">gnd</subfield></datafield>'
-        ))["650"][0]
+        )).get("650")[0]
 
         assert entry.all("0") == ["", "(DE-588)4026894-9"]
-        assert _subject_identifier(entry) == "(DE-588)4026894-9"
-        assert metadata._gnd_identifier(entry) == "4026894-9"
+        assert entry.subject_identifier() == "(DE-588)4026894-9"
+        assert entry.gnd_identifier() == "4026894-9"
 
     def test_a_field_whose_only_identifier_is_empty_has_none(self):
         """The diagonal for the test above: skipping empties must not invent
         one. Without this, a reader returning the last value would pass the
         test above and fail here."""
-        entry = _marc_fields(_marc_element(
+        entry = Fields(_marc_element(
             '<datafield tag="650" ind1=" " ind2="7">'
             '<subfield code="a">Informatik</subfield>'
             '<subfield code="0"/></datafield>'
-        ))["650"][0]
+        )).get("650")[0]
 
-        assert _subject_identifier(entry) is None
+        assert entry.subject_identifier() is None
 
     def test_the_first_identifier_is_the_one_taken(self):
         """Where a live subject field carries a `(DE-588)` it is the first of
@@ -1960,26 +1937,27 @@ class TestASubjectCarriesTheVocabularyTheRecordDeclared:
         the three fixtures in this file spell it `23sdnb`, `22/ger` and `21`.
 
         **This test used to assert the trap open.** It read
-        `_subject_vocabulary(fields["082"][0]) == "21"` to show the field really
-        carries a readable `$2`, which was true and was also the call the
-        docstring claimed was impossible. The reader now takes the tag and
-        raises, so the same demonstration is a `pytest.raises`, and the
+        a no argument `$2` read off `fields["082"][0]` and asserted `"21"`, to
+        show the field really carries a readable `$2`. That was true and was also
+        the call the docstring claimed was impossible. The reader takes the tag
+        now and raises, and cannot be spelled without one, so the same
+        demonstration is a `pytest.raises`, and the
         anti vacuity it was there for is unchanged: without it the two
         assertions below pass on a record with no subject field, which is every
         record.
         """
-        fields = _marc_fields(_marc_element(
+        fields = Fields(_marc_element(
             '<datafield tag="082" ind1="0" ind2="4">'
             '<subfield code="a">940</subfield>'
             '<subfield code="2">21</subfield></datafield>'
         ))
-        subjects, headings = _dnb_subjects(fields)
+        subjects, headings = fields.controlled_subjects()
 
         with pytest.raises(ValueError, match="082"):
-            _subject_vocabulary("082", fields["082"][0])
+            fields.get("082")[0].subject_vocabulary("082")
         assert subjects == []
         assert headings == []
-        assert [heading.number for heading in metadata._marc_ddc(fields)] == ["940"]
+        assert [heading.number for heading in fields.ddc_headings()] == ["940"]
 
     def test_a_classification_row_is_still_written_for_the_gnd_alone(self):
         """The half that deliberately did not change. A `classifications` row
@@ -1997,7 +1975,7 @@ class TestASubjectCarriesTheVocabularyTheRecordDeclared:
             '<subfield code="a">Informatik</subfield>'
             '<subfield code="2">gnd</subfield></datafield>'
         )
-        _, headings = _dnb_subjects(_marc_fields(_marc_element(greek + german)))
+        _, headings = Fields(_marc_element(greek + german)).controlled_subjects()
 
         assert headings == [
             Heading(ClassificationScheme.GND, "4026894-9", "Informatik")
@@ -2007,309 +1985,13 @@ class TestASubjectCarriesTheVocabularyTheRecordDeclared:
         """A whole DNB record, through the parser and the seam. `650` declares
         `gnd` and `689` restates the same words declaring nothing, on 199 of 199
         live fields, and the record must carry the heading once."""
-        node = next(_parsed(DNB_RECORD).iter(f"{metadata._MARC}record"))
-        record = metadata._dnb_record(_marc_fields(node), "9783960092353")
+        node = next(_parsed(DNB_RECORD).iter(marc_fields.RECORD_TAG))
+        record = metadata._dnb_record(Fields(node), "9783960092353")
 
         assert record is not None
         assert record.subjects == (
             Subject("Informatik", "gnd", "(DE-588)4026894-9"),
         )
-
-
-class TestTheVocabularyDecidesWhatAHeadingAsserts:
-    """`#162`: the DNB writes a content type and a carrier into the same subject
-    fields as a subject, each with a `(DE-588)` number on it, so before this a
-    disc was stored as an assertion about what the book is about.
-
-    The measurement that made it a defect rather than a curiosity: `gnd-content`
-    carries a `(DE-588)` on 34 of 34 fields at the DNB, 26 of 26 at the OeNB and
-    27 of 27 at K10plus, and `_gnd_identifier` accepts every one of them.
-    """
-
-    def _headings(self, datafields):
-        return _dnb_subjects(_marc_fields(_marc_element(datafields)))[1]
-
-    def test_a_carrier_is_still_a_heading_and_says_it_is_a_carrier(self):
-        """Still `scheme=gnd`, because `(DE-588)4139307-7` is a GND record and
-        resolves as one whichever `$2` cites it. What changed is the kind."""
-        assert self._headings(
-            '<datafield tag="655" ind1=" " ind2="7">'
-            '<subfield code="a">CD-ROM</subfield>'
-            '<subfield code="0">(DE-588)4139307-7</subfield>'
-            '<subfield code="2">gnd-carrier</subfield></datafield>'
-        ) == [
-            Heading(
-                ClassificationScheme.GND, "4139307-7", "CD-ROM", HeadingKind.CARRIER
-            )
-        ]
-
-    def test_a_content_type_is_kept_rather_than_refused(self):
-        """The reason the fix is not a filter on the vocabulary code. Refusing
-        `gnd-content` outright would drop this heading, which is a content type
-        worth keeping and is why `655` is on `_DNB_SUBJECT_TAGS` at all."""
-        assert self._headings(
-            '<datafield tag="655" ind1=" " ind2="7">'
-            '<subfield code="a">Fiktionale Darstellung</subfield>'
-            '<subfield code="0">(DE-588)1071854844</subfield>'
-            '<subfield code="2">gnd-content</subfield></datafield>'
-        ) == [
-            Heading(
-                ClassificationScheme.GND,
-                "1071854844",
-                "Fiktionale Darstellung",
-                HeadingKind.CONTENT,
-            )
-        ]
-
-    def test_a_plain_gnd_subject_is_left_undeclared(self):
-        """`subject` is never written to the column: it is what
-        `classifications.kind_of` answers for a null. Storing it would put the
-        fallback's own answer in the row, and a stored value cannot be filled in
-        later by the record that names the heading properly."""
-        assert self._headings(
-            '<datafield tag="650" ind1=" " ind2="7">'
-            '<subfield code="a">Informatik</subfield>'
-            '<subfield code="0">(DE-588)4026894-9</subfield>'
-            '<subfield code="2">gnd</subfield></datafield>'
-        ) == [Heading(ClassificationScheme.GND, "4026894-9", "Informatik", None)]
-
-    @pytest.mark.parametrize("code", ["nlgaf", "gatbeg", "bisacsh", "local", "sswd"])
-    def test_a_vocabulary_this_app_has_no_reading_for_declares_no_kind(self, code):
-        """Twelve distinct `$2` codes turned up in one day's sampling of four
-        catalogues, against a MARC source code list holding hundreds. Reading
-        any of the rest as a kind is the crosswalk #134 refuses."""
-        assert _subject_kind(code) is None
-
-    def test_the_reader_is_asked_the_folded_code_and_not_the_field(self):
-        """`$2` is the Dewey **edition** on `082`, which is why
-        `_subject_vocabulary` takes a tag and raises. This takes the code that
-        reader already folded, so the case rule is not spelled twice."""
-        assert _subject_kind("GND-CARRIER".lower()) is HeadingKind.CARRIER
-        assert _subject_kind(None) is None
-
-
-class TestASubfieldReaderIsNotTwoReaders:
-    """The two `$0` questions, which look like one rule and are not."""
-
-    def test_the_vocabulary_reader_answers_none_where_there_is_no_dollar_two(self):
-        entry = _marc_fields(_marc_element(
-            '<datafield tag="650"><subfield code="a">X</subfield></datafield>'
-        ))["650"][0]
-
-        assert _subject_vocabulary("650", entry) is None
-
-    def test_the_identifier_reader_answers_none_where_there_is_no_dollar_zero(self):
-        entry = _marc_fields(_marc_element(
-            '<datafield tag="650"><subfield code="a">X</subfield></datafield>'
-        ))["650"][0]
-
-        assert _subject_identifier(entry) is None
-
-    def test_the_gnd_reader_still_searches_past_a_leading_house_number(self):
-        """`_gnd_identifier` asks whether the field names a GND record, so it
-        looks at every `$0`. `_subject_identifier` asks what the record led
-        with, so it looks at one. A field written in the other order separates
-        them, and no live catalogue writes that order: this pins the difference
-        rather than the data."""
-        entry = _marc_fields(_marc_element(
-            '<datafield tag="650" ind1=" " ind2="7">'
-            '<subfield code="0">(DE-101)1010836315</subfield>'
-            '<subfield code="0">(DE-588)4026894-9</subfield>'
-            '<subfield code="a">Informatik</subfield></datafield>'
-        ))["650"][0]
-
-        assert metadata._gnd_identifier(entry) == "4026894-9"
-        assert _subject_identifier(entry) == "(DE-101)1010836315"
-
-
-class TestTheAuthorsAuthorityIdentifier:
-    """`100 $0` and `700 $0`, which say which GND record wrote this book.
-
-    The subject fields carry the identical subfield and go somewhere else: 600
-    says a person is what the book is *about*. That split is
-    `enums.AuthorityScheme`.
-    """
-
-    @staticmethod
-    def _fields(*datafields: str):
-        return _marc_fields(_marc_element("".join(datafields)))
-
-    MAIN = (
-        '<datafield tag="100" ind1="1" ind2=" ">'
-        '<subfield code="0">(DE-588)1042243212</subfield>'
-        '<subfield code="a">Kane, Sean P.</subfield>'
-        '<subfield code="4">aut</subfield></datafield>'
-    )
-
-    def test_the_main_entry_identifier_is_stored_bare(self):
-        """Without `(DE-588)`: the scheme is a column, and keeping the prefix
-        would let one identifier arrive under two spellings the unique index
-        cannot collapse. The same rule `_gnd_identifier` states for a heading."""
-        assert _marc_author_identifiers(self._fields(self.MAIN)) == [
-            AuthorityAssertion("Sean P. Kane", AuthorityScheme.GND, "1042243212")
-        ]
-
-    def test_a_record_with_no_identifier_produces_none(self):
-        """21 of 73 live 100 fields carry no `(DE-588)` at all, measured over 85
-        records on 2026-08-24. Ordinary, not broken."""
-        fields = self._fields(
-            '<datafield tag="100" ind1="1" ind2=" ">'
-            '<subfield code="a">Kane, Sean P.</subfield></datafield>'
-        )
-
-        assert _marc_author_identifiers(fields) == []
-
-    def test_a_700_that_wrote_the_book_is_read(self):
-        fields = self._fields(
-            self.MAIN,
-            '<datafield tag="700" ind1="1" ind2=" ">'
-            '<subfield code="0">(DE-588)1042243213</subfield>'
-            '<subfield code="a">Matthias, Karl</subfield>'
-            '<subfield code="4">aut</subfield></datafield>',
-        )
-
-        assert _marc_author_identifiers(fields) == [
-            AuthorityAssertion("Sean P. Kane", AuthorityScheme.GND, "1042243212"),
-            AuthorityAssertion("Karl Matthias", AuthorityScheme.GND, "1042243213"),
-        ]
-
-    def test_a_700_that_only_translated_it_is_not(self):
-        """`$4=trl` is a translator. Reading it would file a translator's GND
-        under a name that is not in this Book's credit line at all."""
-        fields = self._fields(
-            self.MAIN,
-            '<datafield tag="700" ind1="1" ind2=" ">'
-            '<subfield code="0">(DE-588)9999</subfield>'
-            '<subfield code="a">Meier, Eva</subfield>'
-            '<subfield code="4">trl</subfield></datafield>',
-        )
-
-        assert [row.identifier for row in _marc_author_identifiers(fields)] == [
-            "1042243212"
-        ]
-
-    def test_an_added_entry_for_a_work_is_not_a_person_here(self):
-        """`$t` links the original title, and the name beside it is that work's
-        author rather than a second author of this book."""
-        fields = self._fields(
-            self.MAIN,
-            '<datafield tag="700" ind1="1" ind2=" ">'
-            '<subfield code="0">(DE-588)9999</subfield>'
-            '<subfield code="a">Melville, Herman</subfield>'
-            '<subfield code="t">Moby Dick</subfield>'
-            '<subfield code="4">aut</subfield></datafield>',
-        )
-
-        assert [row.identifier for row in _marc_author_identifiers(fields)] == [
-            "1042243212"
-        ]
-
-    def test_every_identifier_is_filed_under_a_name_in_the_credit_line(self):
-        """The property `_marc_author_entries` exists to make structural.
-
-        Two loops testing the same three conditions would let the credit line
-        and the identifiers drift apart, and the symptom would be a row filed
-        under a spelling no Book carries: invisible, undeletable through the UI,
-        and never matched by anything.
-        """
-        fields = self._fields(
-            self.MAIN,
-            '<datafield tag="700" ind1="1" ind2=" ">'
-            '<subfield code="0">(DE-588)1042243213</subfield>'
-            '<subfield code="a">Matthias, Karl</subfield>'
-            '<subfield code="4">aut</subfield></datafield>',
-            '<datafield tag="700" ind1="1" ind2=" ">'
-            '<subfield code="0">(DE-588)9999</subfield>'
-            '<subfield code="a">Meier, Eva</subfield>'
-            '<subfield code="4">trl</subfield></datafield>',
-        )
-
-        credited = _marc_authors(fields) or ""
-        for row in _marc_author_identifiers(fields):
-            assert row.name in credited
-
-    def test_one_person_named_by_both_100_and_700_is_asserted_once(self):
-        fields = self._fields(
-            self.MAIN,
-            '<datafield tag="700" ind1="1" ind2=" ">'
-            '<subfield code="0">(DE-588)1042243212</subfield>'
-            '<subfield code="a">Kane, Sean P.</subfield>'
-            '<subfield code="4">aut</subfield></datafield>',
-        )
-
-        assert len(_marc_author_identifiers(fields)) == 1
-
-
-class TestWhichAddedEntryWroteTheBook:
-    """What `700 $4` has to say before a name joins the credit line.
-
-    The rule is `metadata._AUTHOR_RELATORS` and the measurement behind it is
-    there too. These pin the three answers it gives, because the interesting one
-    is a refusal: a `700` that states no role is refused even where the credit
-    line would otherwise be one name long, and a reader looking at that record
-    alone sees a co-author being dropped.
-    """
-
-    @staticmethod
-    def _fields(*datafields: str):
-        return _marc_fields(_marc_element("".join(datafields)))
-
-    MAIN = (
-        '<datafield tag="100" ind1="1" ind2=" ">'
-        '<subfield code="a">Ferrante, Elena</subfield></datafield>'
-    )
-
-    @staticmethod
-    def _added(name: str, *relators: str) -> str:
-        roles = "".join(f'<subfield code="4">{value}</subfield>' for value in relators)
-        return (
-            '<datafield tag="700" ind1="1" ind2=" ">'
-            f'<subfield code="a">{name}</subfield>{roles}</datafield>'
-        )
-
-    def test_a_700_stating_no_role_stays_out_of_the_credit_line(self):
-        """The record names the illustrator and the translator in the same
-        field as a co-author, and nothing in it says which is which."""
-        fields = self._fields(
-            self.MAIN,
-            self._added("Goldstein, Ann"),
-            self._added("Rossi, Marco"),
-        )
-
-        assert _marc_authors(fields) == "Elena Ferrante"
-
-    def test_a_record_crediting_nobody_still_names_everybody_it_names(self):
-        """The other half of the same rule: refusing the bare `700` costs a name
-        only where some other field supplied one."""
-        fields = self._fields(self._added("Goldstein, Ann"), self._added("Rossi, Marco"))
-
-        assert _marc_authors(fields) is None
-        assert metadata._marc_credited_names(fields) == "Ann Goldstein, Marco Rossi"
-
-    def test_a_second_relator_naming_an_author_is_read(self):
-        """`$4=edt $4=aut` is an editor who wrote a chapter too. Reading the
-        first `$4` alone dropped them."""
-        fields = self._fields(self.MAIN, self._added("Sokolicek, Alexander", "edt", "aut"))
-
-        assert _marc_authors(fields) == "Elena Ferrante, Alexander Sokolicek"
-
-    def test_a_relator_written_as_a_uri_says_the_same_thing(self):
-        fields = self._fields(
-            self.MAIN,
-            self._added("Goldstein, Ann", "http://id.loc.gov/vocabulary/relators/aut"),
-        )
-
-        assert _marc_authors(fields) == "Elena Ferrante, Ann Goldstein"
-
-    def test_a_uri_naming_a_translator_is_still_refused(self):
-        """The arm that says the URI is read for what it means rather than
-        refused for how it is spelled."""
-        fields = self._fields(
-            self.MAIN,
-            self._added("Goldstein, Ann", "http://id.loc.gov/vocabulary/relators/trl"),
-        )
-
-        assert _marc_authors(fields) == "Elena Ferrante"
 
 
 class TestK10plusIdentity:
@@ -2326,7 +2008,7 @@ class TestK10plusIdentity:
         out.** Re-read live on 2026-08-30, `pica.isb=9780441013593` returns two
         records: the translation, `9786171276895` with the American ISBN beside
         it as `$q amerik. Original`, and the American edition itself, both of
-        whose entries read `$q : pbk.`. Both halves of `_isbn_entries` are in
+        whose entries read `$q : pbk.`. Both halves of `Fields._isbn_entries` are in
         that one answer, which is why the two tests here are its two arms: the
         translation is refused because it names its own ISBN plainly, and the
         edition below is taken because it names nothing else.
@@ -2375,10 +2057,10 @@ class TestK10plusIdentity:
         an unrelated record on a shelf from a barcode scan.
 
         **`$a` and `$z` in one entry, deliberately, and that is what makes this
-        a guard rather than a restatement.** `_marc_claims_isbn` reading `$z`
+        a guard rather than a restatement.** `Fields.claims_isbn` reading `$z`
         is a one expression change and this fails on it. The other shape, an
-        020 carrying `$z` alone, is refused twice over, by `_isbn_entries`
-        dropping the entry and by `_marc_claims_isbn` reading `$a`, so no single
+        020 carrying `$z` alone, is refused twice over, by the `020` filter
+        dropping the entry and by `Fields.claims_isbn` reading `$a`, so no single
         expression change can reach it and the test below pins the behaviour
         without pinning either mechanism.
         """
@@ -2431,8 +2113,8 @@ class TestK10plusIdentity:
 
         **Behaviour, not mechanism.** Two things refuse this independently and
         neither can be removed alone to make this fail, which is stated rather
-        than left for whoever tries: `_isbn_entries` keeps only entries carrying
-        `$a`, and `_marc_claims_isbn` reads `$a`. Measured by mutation on
+        than left for whoever tries: the `020` filter keeps only entries carrying
+        `$a`, and `Fields.claims_isbn` reads `$a`. Measured by mutation on
         2026-09-05: widening either one on its own leaves the whole suite green.
         """
         with respx.mock(assert_all_called=False) as mock:
@@ -2918,12 +2600,13 @@ class TestRanking:
         return Record(**overrides)
 
     def rank(self, matches, query, prefer_language=None):
-        terms = metadata._search_terms(query)
-        return sorted(
-            matches,
-            key=lambda match: metadata._relevance(match, terms, prefer_language),
-            reverse=True,
-        )
+        """Through `_ranked`, which is the ordering `search` ships.
+
+        This used to be its own `sorted` over `_relevance`. That pinned the key
+        and nothing about the ordering: `reverse=True` could be dropped from the
+        real call and every arm below stayed green.
+        """
+        return metadata._ranked(matches, metadata._search_terms(query), prefer_language)
 
     def test_the_novel_outranks_a_book_about_it(self):
         """The study guide carries the author's name inside its own title.
@@ -2959,7 +2642,7 @@ class TestRanking:
         ranked = self.rank([unrelated, matching], "harry potter philosopher stone")
         assert ranked[0] is matching
 
-    def test_completeness_breaks_a_tie_between_equal_matches(self):
+    def test_a_more_pickable_row_breaks_a_tie_between_equal_matches(self):
         sparse = self.match(title="Dune", author="Frank Herbert")
         full = self.match(
             title="Dune",
@@ -3019,6 +2702,455 @@ class TestRanking:
     def test_a_row_matching_nothing_scores_zero(self):
         unrelated = self.match(title="Something else", author="Nobody")
         assert metadata._relevance(unrelated, ["dune"], None)[0] == 0
+
+
+class TestPickabilityIsNotRecordCompleteness:
+    """`_PICKABLE_FIELDS` and `Record.completeness` are two scores, not one.
+
+    They share four field names and differ on five, and the standing proposal
+    is to fold them. Each arm here holds one of the five differences by its own
+    reason, so a fold in either direction goes red by name rather than by a
+    count somebody has to interpret.
+
+    **What these do not hold is the ordering of whole live result sets.** They
+    are written over constructed rows, so they say which field moves which part
+    of the tuple and nothing about how often it decides a real search.
+
+    **Nor do they hold the arity of the key.** Shrinking `_relevance`'s tuple
+    passes every arm here and is caught by mypy, at the annotated `return` in
+    `metadata.py`, because the type is declared. Stated rather than armed: a
+    second instrument already refuses it.
+    """
+
+    def match(self, **overrides: Any) -> Record:
+        """One row, defaulting to a primary source so the penalty is opt in."""
+        overrides.setdefault("source", "open_library")
+        return Record(**overrides)
+
+    def relevance(
+        self, match: Record, query: str, prefer_language: str | None = None
+    ) -> tuple[int, int, int]:
+        return metadata._relevance(
+            match, metadata._search_terms(query), prefer_language
+        )
+
+    def test_a_row_carrying_an_isbn_outranks_an_identical_row_without_one(self):
+        """A title query supplies no ISBN, so carrying one is the row's own.
+
+        **This row shape does not occur on the SRU search door.** An ISBN with
+        no cover beside it is unreachable there, because each of those readers
+        derives the cover from the ISBN it just read: see
+        `TestASearchRowsCoverIsDerivedFromItsOwnIsbn`. What this arm holds is
+        what the field is worth in the tuple, not what a live row looks like.
+        """
+        scannable = self.match(
+            title="Dune", author="Frank Herbert", isbn="9780441013593"
+        )
+        bare = self.match(title="Dune", author="Frank Herbert")
+        assert self.relevance(scannable, "dune herbert")[1] > self.relevance(
+            bare, "dune herbert"
+        )[1]
+
+    def test_a_row_carrying_a_cover_outranks_an_identical_row_without_one(self):
+        """The picker shows the cover, so a row without one is harder to pick.
+
+        **The mirrored shape, and it is reachable on two doors only.** A cover
+        with no ISBN beside it comes from Open Library's own cover id or
+        Google's thumbnail; on the SRU door the pair moves together. Same
+        reading as the arm above.
+        """
+        illustrated = self.match(
+            title="Dune",
+            author="Frank Herbert",
+            cover_url="https://example.com/cover.jpg",
+        )
+        bare = self.match(title="Dune", author="Frank Herbert")
+        assert self.relevance(illustrated, "dune herbert")[1] > self.relevance(
+            bare, "dune herbert"
+        )[1]
+
+    def test_a_blurb_does_not_lift_a_row_above_an_identical_one(self):
+        """Which rows carry one is a fact about the catalogue, not the book.
+
+        `_open_library_search` writes no description at all and the DNB carries
+        a 520 on 1 of 85 live records, so scoring it ranks by source.
+        """
+        blurbed = self.match(
+            title="Dune", author="Frank Herbert", description="A desert planet."
+        )
+        bare = self.match(title="Dune", author="Frank Herbert")
+        assert self.relevance(blurbed, "dune herbert") == self.relevance(
+            bare, "dune herbert"
+        )
+
+    def test_subjects_do_not_lift_a_row_above_an_identical_one(self):
+        """The same source signal: an Open Library search row carries none."""
+        classified = self.match(
+            title="Dune",
+            author="Frank Herbert",
+            subjects=uncontrolled(("Science fiction",)),
+        )
+        bare = self.match(title="Dune", author="Frank Herbert")
+        assert self.relevance(classified, "dune herbert") == self.relevance(
+            bare, "dune herbert"
+        )
+
+    def test_a_series_name_is_worth_its_weight_once(self):
+        """It is already scored in the matching term, which is the stronger one."""
+        in_series = self.match(
+            title="Dune", author="Frank Herbert", series_name="Dune Chronicles"
+        )
+        bare = self.match(title="Dune", author="Frank Herbert")
+        scored = self.relevance(in_series, "dune chronicles")
+        unscored = self.relevance(bare, "dune chronicles")
+        # **The inequality is not the equality restated.** The equality compares
+        # `score += _SERIES_WEIGHT` against `_SERIES_WEIGHT` and so cannot fail
+        # under any value of it: measured, `_SERIES_WEIGHT = 0` left this arm
+        # green, and at zero the claim this arm exists for, that a series name is
+        # already scored in the first element, is false.
+        assert scored[0] > unscored[0]
+        assert scored[0] - unscored[0] == metadata._SERIES_WEIGHT
+        assert scored[1] == unscored[1]
+
+    def test_the_readers_language_is_worth_its_weight_once(self):
+        """Also already scored in the matching term, by `_LANGUAGE_WEIGHT`.
+
+        **The row without a language declares none, rather than declaring a
+        different one.** Two rows that both name a language move the pickability
+        term together, so that pair cannot see `language` being added to
+        `_PICKABLE_FIELDS`: measured, the mutation passed this arm before it was
+        written this way.
+        """
+        wanted = self.match(title="Dune", author="Frank Herbert", language="de")
+        silent = self.match(title="Dune", author="Frank Herbert")
+        scored = self.relevance(wanted, "dune herbert", "de")
+        unscored = self.relevance(silent, "dune herbert", "de")
+        # The same floor, for the same reason, against `_LANGUAGE_WEIGHT`. See
+        # the series arm above.
+        assert scored[0] > unscored[0]
+        assert scored[0] - unscored[0] == metadata._LANGUAGE_WEIGHT
+        assert scored[1] == unscored[1]
+
+    def test_every_pickable_name_is_readable_off_a_record(self):
+        """A name left behind by a rename raises on a live search, not here.
+
+        `hasattr` and not `dataclasses.fields`, for the reason
+        `test_catalogue.py::TestHowCompleteARecordIs` states at its twin: the
+        score reads with `getattr`, so a field test refuses a derived name that
+        works.
+        """
+        record = Record()
+        assert [
+            name for name in metadata._PICKABLE_FIELDS if not hasattr(record, name)
+        ] == []
+
+
+#: One record per SRU serialisation, with a slot for its identifier, beside the
+#: element that fills the slot.
+#:
+#: **Each body carries more than the minimum, and that is the arm's reach.**
+#: `TestASearchRowsCoverIsDerivedFromItsOwnIsbn` compares a record carrying an
+#: identifier against the same record without one, so it can only observe a
+#: cover keyed on an element the record carries: a cover built from a
+#: description was measured passing a minimal body of this shape. Every field
+#: in that class's `ALSO_READ` comes out of each of these, and is asserted, so
+#: cutting a body back reddens an arm rather than narrowing it in silence.
+#:
+#: **The electronic location is here for the element a real cover would come
+#: from, and it is the one worth not tidying away.** No reader reads `856 $u`
+#: or a MODS `location/url` today, so a cover keyed on either passed the
+#: enriched bodies before this line: closing the element a plant happened to
+#: use and leaving the element an implementation would use is the same
+#: mistake one level down. Carrying it costs nothing, measured: a record with
+#: it still decodes on both readers and is not refused as an online resource,
+#: which `marc_fields.Fields.describes_a_book` decides off the carrier codes
+#: rather than off this field. Dublin Core has no standard equivalent and its
+#: body is unchanged.
+#:
+#: **Keyed on the reader, because a body is a serialisation.** Which row runs
+#: which body is the roster's business and is derived below.
+SRU_PROBE_MARC = (
+    '<record xmlns="http://www.loc.gov/MARC21/slim">'
+    "<leader>01533nam a2200505 c 4500</leader>"
+    "{identifier}"
+    '<datafield tag="041" ind1=" " ind2=" ">'
+    '<subfield code="a">ger</subfield></datafield>'
+    '<datafield tag="100" ind1="1" ind2=" ">'
+    '<subfield code="a">Muster, Anna</subfield>'
+    '<subfield code="4">aut</subfield></datafield>'
+    '<datafield tag="245" ind1="1" ind2="0">'
+    '<subfield code="a">Ein Probeband</subfield></datafield>'
+    '<datafield tag="264" ind1=" " ind2="1">'
+    '<subfield code="b">Ein Verlag</subfield>'
+    '<subfield code="c">2021</subfield></datafield>'
+    '<datafield tag="300" ind1=" " ind2=" ">'
+    '<subfield code="a">237 Seiten</subfield></datafield>'
+    '<datafield tag="520" ind1=" " ind2=" ">'
+    '<subfield code="a">Eine kurze Inhaltsangabe.</subfield></datafield>'
+    '<datafield tag="650" ind1=" " ind2="7">'
+    '<subfield code="a">Roman</subfield></datafield>'
+    '<datafield tag="856" ind1="4" ind2="0">'
+    '<subfield code="u">https://example.com/probe</subfield></datafield>'
+    "</record>"
+)
+SRU_PROBE_MARC_IDENTIFIER = (
+    '<datafield tag="020" ind1=" " ind2=" ">'
+    '<subfield code="a">9783161484100</subfield></datafield>'
+)
+
+#: The BnF's shape. `dc:type` and `dc:format` are its printed book gate.
+SRU_PROBE_DUBLIN_CORE = (
+    '<record xmlns:dc="http://purl.org/dc/elements/1.1/">'
+    "<dc:title>Un livre</dc:title>"
+    "<dc:creator>Muster, Anne</dc:creator>"
+    "<dc:type>text</dc:type>"
+    "<dc:format>200 p.</dc:format>"
+    "<dc:publisher>Un editeur</dc:publisher>"
+    "<dc:date>2021</dc:date>"
+    "<dc:language>fre</dc:language>"
+    '<dc:subject xml:lang="fre">Roman</dc:subject>'
+    "{identifier}"
+    "</record>"
+)
+SRU_PROBE_DUBLIN_CORE_IDENTIFIER = "<dc:identifier>ISBN 9783161484100</dc:identifier>"
+
+#: The Library of Congress's shape. `typeOfResource` and the extent are its gate.
+SRU_PROBE_MODS = (
+    '<mods xmlns="http://www.loc.gov/mods/v3">'
+    "<typeOfResource>text</typeOfResource>"
+    "<titleInfo><title>A Probe</title></titleInfo>"
+    "<name><namePart>Muster, Anna</namePart>"
+    "<role><roleTerm>author</roleTerm></role></name>"
+    "<originInfo><publisher>A Publisher</publisher>"
+    "<dateIssued>2021</dateIssued></originInfo>"
+    "<language><languageTerm>eng</languageTerm></language>"
+    "<physicalDescription><extent>464 p.</extent></physicalDescription>"
+    '<subject authority="lcsh"><topic>Fiction</topic></subject>'
+    '<classification authority="ddc" edition="23">005.133</classification>'
+    "<location><url>https://example.com/probe</url></location>"
+    "{identifier}"
+    "</mods>"
+)
+SRU_PROBE_MODS_IDENTIFIER = '<identifier type="isbn">9783161484100</identifier>'
+
+SRU_PROBE_BODIES = {
+    decoders.Reader.MARC_GND: (SRU_PROBE_MARC, SRU_PROBE_MARC_IDENTIFIER),
+    decoders.Reader.MARC_PLAIN: (SRU_PROBE_MARC, SRU_PROBE_MARC_IDENTIFIER),
+    decoders.Reader.DUBLIN_CORE: (
+        SRU_PROBE_DUBLIN_CORE,
+        SRU_PROBE_DUBLIN_CORE_IDENTIFIER,
+    ),
+    decoders.Reader.MODS: (SRU_PROBE_MODS, SRU_PROBE_MODS_IDENTIFIER),
+}
+
+#: Every seeded row that answers a title search.
+#:
+#: **The roster and the capability, rather than a set of dispatch table
+#: names.** A table name set closes over the tables that exist today: the
+#: Z39.50 transport is declared and ticketed, and the day its rows land they
+#: carry a search capability and appear here, where an arm reading three named
+#: tables would not see a fourth at all.
+SEEDED_SEARCH_ROWS = tuple(
+    target
+    for target in targets.SEEDED.values()
+    if target.can(Capability.ANSWERS_TITLE_SEARCH)
+)
+
+#: The seeded search rows whose answer is an element a reader here can drive.
+SEEDED_ELEMENT_SEARCH_SOURCES = tuple(
+    sorted(
+        target.source
+        for target in SEEDED_SEARCH_ROWS
+        if target.reader in SRU_PROBE_BODIES
+    )
+)
+
+
+class TestASearchRowsCoverIsDerivedFromItsOwnIsbn:
+    """A reader that parses an identifier out of a record builds its cover from it.
+
+    `metadata._PICKABLE_FIELDS` scores `isbn` and `cover_url` separately, so on
+    a row one of these readers built, a single parse moves two of six terms.
+    This class holds that derivation at the reader, where it is a property of
+    the code rather than a sentence beside it.
+
+    **Driven by the seeded row, not by the reader alone.** A `decoders.Decoding`
+    carries three per source knobs beside the reader, and three seeded rows
+    name `MARC_GND`: the OeNB and the NLG run it refusing component parts and
+    reading no author identifiers, which is a configuration a decoding built
+    from the reader alone never has. So each arm takes the row's own
+    `Target.decoding` and asserts the row's own label came back out. Nothing in
+    a cover expression reads a knob today, and that is measured here rather
+    than assumed.
+
+    **What goes past it.** An arm compares one record against the same record
+    without its identifier, so it observes a cover keyed on an element those
+    records carry and not one keyed on an element they do not: a cover built
+    from a description was measured passing a minimal body. `SRU_PROBE_BODIES`
+    therefore carries more than the minimum and `ALSO_READ` pins that. The
+    residual blind spot is open by construction and **is not bounded here**,
+    because an arm's job is to fail on a change rather than to quantify what it
+    cannot see.
+
+    **Asserting the cover equals the derivation of the identifier is refused**,
+    and for a false refusal rather than for a miss: it would miss that same
+    plant, and `covers.candidates` already builds a DNB cover URL from a German
+    identifier, so an equality against one service's builder would redden a
+    reader that legitimately derived through the other.
+
+    **What this does not hold is the row that is actually scored.**
+    `_merge_matches` runs before `_ranked` and Open Library leads
+    `_MATCH_PRECEDENCE`, so a merged row can carry its identifier from one door
+    and its cover from another and score both on two facts. The derivation here
+    is the reader's. Whether the scored row double counts is a question about
+    the merge, and nothing in this tree observes the ordering.
+    """
+
+    #: Fields every body above is read for, beside the identifier and the
+    #: cover. Asserted on the bare row, so a body cut back to the minimum
+    #: reddens an arm instead of shrinking what it can see.
+    ALSO_READ = ("author", "publisher", "year", "language", "page_count")
+
+    #: The two search doors that take no element, named because each has its
+    #: own arm below rather than a record body.
+    BESPOKE_SEARCH_SOURCES = frozenset(
+        {CatalogueSource.OPEN_LIBRARY, CatalogueSource.GOOGLE_BOOKS}
+    )
+
+    GOOGLE_VOLUMES = targets.SEEDED[CatalogueSource.GOOGLE_BOOKS].base_url
+
+    def _element_row(self, target: targets.Target, identifier: str) -> Record:
+        """One row through `metadata.READERS`, the dispatch `_records` uses on
+        the search path, driven by this row's own decoding."""
+        body, _ = SRU_PROBE_BODIES[target.reader]
+        record = metadata.READERS[target.reader](
+            ElementTree.fromstring(body.format(identifier=identifier)),
+            target.decoding,
+        )
+        assert record is not None, target.source
+        return record
+
+    async def _open_library_row(self, doc: dict[str, Any]) -> Record:
+        """One row through the adapter `_FREE_SEARCHES` dispatches to, so a
+        change to how it builds a cover is visible here."""
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(url__startswith="https://openlibrary.org/search.json").mock(
+                return_value=httpx.Response(200, json={"docs": [doc]})
+            )
+            rows = await metadata._open_library_search("a probe", 1)
+        assert len(rows) == 1, rows
+        return rows[0]
+
+    async def _google_row(self, volume: dict[str, Any]) -> Record:
+        """One row through the adapter `_METERED_SEARCHES` dispatches to.
+
+        Through `_google_search` and not `_google_record`, so both bespoke arms
+        drive the same layer as each other and as the door the dispatch names.
+        """
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(url__startswith=self.GOOGLE_VOLUMES).mock(
+                return_value=httpx.Response(200, json={"items": [{"volumeInfo": volume}]})
+            )
+            rows = await metadata._google_search("a probe", 1, "a-key")
+        assert len(rows) == 1, rows
+        return rows[0]
+
+    def test_every_seeded_row_that_answers_a_search_is_graded_here(self):
+        """A catalogue that answers a title search and is measured nowhere here.
+
+        This is the door population. It is derived from the roster and the
+        capability rather than from the dispatch tables, so a row arriving over
+        a transport nothing here names still has to be placed.
+        """
+        graded = set(SEEDED_ELEMENT_SEARCH_SOURCES) | self.BESPOKE_SEARCH_SOURCES
+        seeded = {target.source for target in SEEDED_SEARCH_ROWS}
+
+        assert graded == seeded, sorted(graded ^ seeded)
+
+    def test_the_three_search_dispatch_tables_hold_no_reader_this_ignores(self):
+        """The reader half, because a reader can be in a table before a row names it.
+
+        **It reads exactly `_SEARCH_READERS`, `_FREE_SEARCHES` and
+        `_METERED_SEARCHES`, and it cannot see a fourth table.** That is what
+        the roster arm above is for, and saying so here is what stops this one
+        being read as covering every door.
+        """
+        dispatched = (
+            set(metadata._SEARCH_READERS)
+            | set(metadata._FREE_SEARCHES)
+            | set(metadata._METERED_SEARCHES)
+        )
+        graded = set(SRU_PROBE_BODIES) | {
+            decoders.Reader.OPEN_LIBRARY,
+            decoders.Reader.GOOGLE_BOOKS,
+        }
+
+        assert dispatched == graded, sorted(dispatched ^ graded)
+
+    @pytest.mark.parametrize("source", SEEDED_ELEMENT_SEARCH_SOURCES)
+    def test_a_row_read_from_an_element_carries_a_cover_where_it_carries_an_isbn(
+        self, source: CatalogueSource
+    ):
+        """One parse of the identifier moves both fields, on every row that
+        reads an element."""
+        target = targets.SEEDED[source]
+        carried = self._element_row(target, SRU_PROBE_BODIES[target.reader][1])
+        bare = self._element_row(target, "")
+
+        # **The row's own decoding reached the reader**, rather than a default
+        # built from the reader alone. The label is the one field of a
+        # `Decoding` that comes back out on the record.
+        assert carried.source == source.value
+        assert bare.source == source.value
+        # **Emptiness, and not `is None`.** `metadata.READERS` records
+        # `DUBLIN_CORE_BARE` as the reader that would decode to `isbn=""`, so a
+        # null check would report a promoted reader as carrying an identifier
+        # it does not have.
+        assert not bare.isbn, bare
+        assert not bare.cover_url, bare
+        assert carried.isbn
+        assert carried.cover_url
+        # **The body is not minimal, and the arm's reach is why.** See
+        # `SRU_PROBE_BODIES`.
+        assert [name for name in self.ALSO_READ if not getattr(bare, name)] == []
+
+    @pytest.mark.asyncio
+    async def test_an_open_library_row_carries_either_field_without_the_other(self):
+        """Its search index answers with its own `cover_i`, which resolves for
+        editions the cover service has no ISBN mapping for, so here the pair is
+        two facts and the score counts nothing twice."""
+        carried = await self._open_library_row(
+            {"title": "A Probe", "isbn": ["9783161484100"]}
+        )
+        covered = await self._open_library_row({"title": "A Probe", "cover_i": 12345})
+
+        assert carried.isbn
+        assert not carried.cover_url
+        assert covered.cover_url
+        assert not covered.isbn
+
+    @pytest.mark.asyncio
+    async def test_a_google_row_carries_either_field_without_the_other(self):
+        """Google supplies its own thumbnail, so the pair is two facts there too."""
+        carried = await self._google_row(
+            {
+                "title": "A Probe",
+                "industryIdentifiers": [
+                    {"type": "ISBN_13", "identifier": "9783161484100"}
+                ],
+            }
+        )
+        covered = await self._google_row(
+            {
+                "title": "A Probe",
+                "imageLinks": {"thumbnail": "https://books.google.com/probe.jpg"},
+            }
+        )
+
+        assert carried.isbn
+        assert not carried.cover_url
+        assert covered.cover_url
+        assert not covered.isbn
 
 
 class TestAHostileSourceCostsItsOwnRows:
@@ -3200,6 +3332,90 @@ class TestSearchDeadline:
         results = await metadata._within_deadline([quick(), slow()], 0.05)
 
         assert results == [[Record(title="Fast")]]
+
+    @pytest.mark.asyncio
+    async def test_the_budget_reaches_the_wait_and_not_only_the_call(self, monkeypatch):
+        """Every other arm reads the budget at the call boundary.
+
+        `TestSearchingHarder` spies on `_within_deadline` itself, so it records
+        the value handed in and any scaling applied inside the function is
+        behind its instrument. Measured: a timeout divided by a hundred inside
+        the fan out passes that class, and passes the slow ÖNB test with its
+        rows intact, because a deadline below the call's own cost is hidden
+        behind it. So the value is read here at the only place that consumes it.
+
+        **It reads what reached the wait and never a literal**, which is the
+        false refusal half: an arm written against the module constant would
+        redden on every test that patches it, the slow ÖNB one included.
+
+        **One source is still pending when the budget runs out, and without it
+        this arm is blind.** The fan out reaches a second wait only inside its
+        `if pending:` branch, so a roster that all answers at once leaves that
+        branch unrun and the sequence compared below can never hold more than
+        one element. Measured: a second wait on the pending set, which in
+        production turns the 4.0s deadline into 8.0s, is green against a roster
+        with nothing pending and red against this one.
+
+        **Named and refused.** This cannot see a mutant that hands the wait a
+        correct timeout and then defeats the deadline without calling the wait
+        again: not cancelling what came back pending, or dropping the split.
+        Those are other arms' subjects and nothing here reaches them.
+
+        **The cost is that the deadline's mechanism is pinned**, so moving the
+        fan out to a different timeout primitive reddens this while nothing is
+        broken. That is acceptable because `_within_deadline`'s own docstring
+        commits to this mechanism in writing, so the red reads as "update both"
+        rather than as a false alarm. **The cleanup's primitive is not pinned
+        and must not be**, which is why the spy below records only a wait
+        carrying a timeout: see the comment there.
+
+        **The residue that leaves.** A second wait added with **no** timeout is
+        invisible here, because it never enters the sequence. What it costs is
+        latency, which is the elapsed bound's subject in
+        `TestTheAustrianNationalLibrarySearch` and not this arm's.
+        """
+        seen: list[object] = []
+        real = asyncio.wait
+
+        async def spy(tasks, **kwargs):
+            # Only a wait that was handed a timeout, which is what this arm is
+            # about. Recording every wait pins the **cleanup's** primitive as
+            # well: with something pending, `asyncio.wait(pending)` in place of
+            # the fan out's gather is a legitimate refactor and would redden
+            # here, and nothing in the tree commits to a primitive for the
+            # cleanup the way `_within_deadline`'s docstring does for the
+            # deadline.
+            if "timeout" in kwargs:
+                seen.append(kwargs["timeout"])
+            return await real(tasks, **kwargs)
+
+        monkeypatch.setattr(asyncio, "wait", spy)
+
+        budget = 0.25
+
+        async def quick() -> list[Record]:
+            return [Record(title="Fast")]
+
+        async def pending_at_the_budget() -> list[Record]:
+            # Still unanswered when the budget runs out, so the fan out has
+            # something to cancel and every path after the wait runs. Delete it
+            # and a wait added in that branch is invisible here.
+            #
+            # **Finite, and not an `Event` that never fires.** Under the mutant
+            # this arm exists to catch, the budget dropped, a source that never
+            # answers makes the fan out wait for ever: measured, that plant hung
+            # the run and was killed with no test report, which is no verdict at
+            # all. Four times the budget is past it by more than any scheduling
+            # noise and still returns.
+            await asyncio.sleep(budget * 4)
+            return []
+
+        await metadata._within_deadline([quick(), pending_at_the_budget()], budget)
+
+        assert seen == [budget], (
+            f"the wait was given {seen} against a budget of {budget}: a timeout "
+            "scaled or dropped inside the fan out is invisible to a spy on the call"
+        )
 
     @pytest.mark.asyncio
     async def test_everything_that_answers_in_time_is_kept_in_order(self):
@@ -3573,7 +3789,7 @@ class TestWhatEachReaderCanSupply:
         a reader that is correct only while a catalogue's habits hold is the
         thing #134 exists to stop."""
         record = metadata._k10plus_record(
-            _marc_fields(_marc_element(
+            Fields(_marc_element(
                 '<datafield tag="650" ind1=" " ind2="7">'
                 "<subfield code=\"a\">Psychology</subfield>"
                 '<subfield code="0">(OCoLC)fst01081447</subfield>'
@@ -3589,7 +3805,7 @@ class TestWhatEachReaderCanSupply:
         """`$x` subdivides the `$a` above it rather than being a heading of its
         own, so the joined string takes the field's one `$2`."""
         record = metadata._k10plus_record(
-            _marc_fields(_marc_element(
+            Fields(_marc_element(
                 '<datafield tag="650" ind1=" " ind2="7">'
                 "<subfield code=\"a\">Frankreich</subfield>"
                 "<subfield code=\"x\">Geschichte</subfield>"
@@ -3626,6 +3842,33 @@ def _open_library_routes(mock: respx.Router, **parts: httpx.Response) -> None:
 
 class TestMergingTwoSearchRows:
     """`_merge_matches` when one row has headings and the other does not."""
+
+    def test_two_answers_differing_by_a_leading_article_are_one_row(self):
+        """The picker got looser when it took `identity.printing_key`.
+
+        Its former key stripped no article, so `The Hobbit` and `Hobbit` were two
+        rows. Written down as an arm because the module that owns the key names
+        this site as one where looser is the dangerous direction, and a
+        loosening nothing asserts is one the next reader tightens back by
+        accident. What bounds it is that the year still discriminates and that
+        merging fills gaps rather than overwriting.
+        """
+        leading = Record(source="bnf", title="The Hobbit", author="Tolkien", year=1937)
+        following = Record(
+            source="loc", title="Hobbit", author="Tolkien", year=1937, publisher="Allen"
+        )
+
+        merged = metadata._merge_matches([leading, following])
+
+        assert len(merged) == 1
+        assert merged[0].publisher == "Allen"
+
+    def test_two_printings_of_one_work_stay_two_rows(self):
+        """The bound on the arm above, so it cannot read as a general fold."""
+        leading = Record(source="bnf", title="The Hobbit", author="Tolkien", year=1937)
+        following = Record(source="loc", title="Hobbit", author="Tolkien", year=1966)
+
+        assert len(metadata._merge_matches([leading, following])) == 2
 
     def test_a_populated_list_beats_an_empty_one(self):
         """The regression this was written for, measured live before fixing.
@@ -3699,7 +3942,7 @@ class TestTheOpenLibraryLookup:
 
     @staticmethod
     async def _lookup(mock: respx.Router) -> metadata.Lookup:
-        return await metadata._open_library(ENGLISH_ISBN, "")
+        return await metadata._open_library(ENGLISH_ISBN)
 
     @pytest.mark.asyncio
     async def test_the_work_record_supplies_the_subjects_the_edition_lacks(self):
@@ -4248,9 +4491,9 @@ class TestTheCandidates:
 
     @pytest.mark.asyncio
     async def test_a_search_row_sharing_a_title_and_an_author_is_still_a_row(self):
-        """The bug a live run found. `_match_key` is title plus author, and
-        every row on this page shares both by construction, so deduplicating on
-        it collapsed a five row answer to one. Two printings of one book are
+        """The bug a live run found. `identity.work_key` is title plus author,
+        and every row on this page shares both by construction, so deduplicating
+        on it collapsed a five row answer to one. Two printings of one book are
         exactly what this endpoint exists to show."""
         with respx.mock(assert_all_called=False) as mock:
             self._routes(mock)
@@ -4507,7 +4750,8 @@ class TestTheAustrianNationalLibrary:
     async def test_a_heading_naming_another_vocabulary_is_not_a_classification(self):
         """`655 $a Roman $2 bellobv` has no `(DE-588)`, so it is a subject only.
 
-        Same rule `_dnb_subjects` applies to the DNB: a value with no GND number
+        Same rule `Fields.controlled_subjects` applies to the DNB: a value with no GND
+        number
         cannot become a classification row, and reaches `subjects`, which is the
         field documented as weak evidence.
         """
@@ -4573,7 +4817,7 @@ class TestTheAustrianNationalLibrary:
         putting it back through this index. The alternatives do not fail
         visibly: `alma.isbn13` and `zzz.qqq` both answer 200 with all 7,793,152
         records and no diagnostic, so a wrong value here is caught by
-        `_marc_claims_isbn` turning every lookup into a miss rather than by
+        `Fields.claims_isbn` turning every lookup into a miss rather than by
         anything raising. This says which index, so that the day it changes it
         changes here and not by accident.
         """
@@ -4776,13 +5020,14 @@ class TestTheAustrianNationalLibrarySearch:
     async def test_an_online_resource_is_not_offered_as_a_book(self):
         """`bibliographic.is_physical_book` is a second refusal, not a spare one.
 
-        This record's leader says monograph, so `_is_component_part` passes it,
-        and it carries no control field at all, so `_marc_carrier_is_book` passes
+        This record's leader says monograph, so `marc_fields.is_component_part` passes
+        it, and it carries no control field at all, so the carrier codes pass
         it too. Only the extent refuses it.
 
         That makes it the row proving the **prose half is not dead code at a MARC
         source** now that the carrier codes stand in front of it. It was written
-        to show `bibliographic.is_physical_book` doing separate work from `_is_component_part`
+        to show `bibliographic.is_physical_book` doing separate work from
+        `marc_fields.is_component_part`
         and it is a third refusal in that path rather than a second, so the job it
         is named for is the one it still does and the ordinal was the stale part.
         """
@@ -4842,10 +5087,38 @@ class TestTheAustrianNationalLibrarySearch:
 
     #: The deadline this test patches in, and the sleep it puts behind one source.
     #:
-    #: **Both are scaled down from 4.0 and 5, and the ratio is what matters rather than
-    #: the values.** The sleep must outlast the deadline by enough that a broken deadline
-    #: misses the bound by a wide margin, and the deadline must be long enough that the
-    #: five other mocked sources finish inside it.
+    #: **Neither is a scaling of anything and the ratio between them is chosen here.**
+    #: `_DEADLINE` stands in for `metadata.SEARCH_DEADLINE_SECONDS`, which is 4.0; the
+    #: sleep stands in for nothing in the application, because no production value says
+    #: how slow a slow source is. The deadline is small so the suite does not pay for it.
+    #: The sleep is set so a deadline that stopped working misses the bound by seconds
+    #: rather than by scheduler noise; it is not the real sleep reduced by the same
+    #: factor. The other constraint is that the deadline is long enough for the rest of
+    #: the roster to finish inside it, and the headroom is **about sixfold**: measured
+    #: 2026-09-29 on builder at four workers over five samples, the fan out runs eight
+    #: tasks and the last of the seven that answer is done **0.0711s to 0.0797s** after
+    #: `asyncio.wait` starts its timer, against `_DEADLINE` of 0.5s. **That is
+    #: builder's headroom and the suite takes whichever node is free**, so it is the
+    #: wider of the two readings available and not a floor.
+    #:
+    #: **The `_DEADLINE / 100` diagonal reads as a hundredfold and cannot support it.**
+    #: With the fan out's timeout divided by a hundred the rows are still right, which
+    #: reads as the fan out finishing inside five milliseconds; the figures above refute
+    #: that, and the mechanism is that nothing in the fan out yields to the event loop
+    #: before about 0.07s, so a 5ms timer cannot fire until every source has already
+    #: answered. Measured on the same tree at a timeout of 0.005s: the slow source's
+    #: handler is still entered at 0.0503s to 0.0576s and all eight tasks still finish.
+    #: **And the row assertion is sensitive to one source**: one of the eight returns
+    #: the record whose title it checks and the rest answer empty, answer 500 or are
+    #: silenced, so it cannot tell whether any of them finished.
+    #:
+    #: **The control figure below is not that number either**, because it times the
+    #: whole call, of which the merge, the ranking and the surrounding work are most.
+    #:
+    #: **The sleep's size is free in wall clock, and that is what refuses lowering it to
+    #: make the suite faster.** It is abandoned rather than awaited whenever the deadline
+    #: works, so the three seconds are spent only by a run that is already red. Shortening
+    #: it buys nothing and moves the detection threshold, which the margin below prices.
     #:
     #: **The old numbers made this test nearly unable to fail.** It slept 5 against the
     #: real 4.0 deadline and asserted `elapsed < 5`. A working deadline returns at about
@@ -4859,36 +5132,184 @@ class TestTheAustrianNationalLibrarySearch:
     #:
     #: It also spent four seconds of real wall clock on every suite run.
     _DEADLINE = 0.5
-    _SLOWER_THAN_THE_DEADLINE = 2.0
+    _SLOWER_THAN_THE_DEADLINE = 3.0
 
-    #: What the five mocked sources, the merge and the ranking are allowed on top of the
-    #: deadline.
+    #: The slack the elapsed bound allows on top of the deadline. **It is an inherited
+    #: constant with a corrected justification, not a new one**, and keeping those two
+    #: apart is the whole reason this block is long.
     #:
-    #: **Chosen so the two failure directions have the same slack**, which is what the old
-    #: bound did not have. A working deadline returns at about `_DEADLINE` and has this
-    #: much room before the bound; a broken one returns at about
-    #: `_SLOWER_THAN_THE_DEADLINE` and misses the bound by 1.05s, measured. Every source
-    #: here is a mock that answers instantly, so this is slack against a loaded worker
-    #: rather than against any real work.
-    _MARGIN = 0.5
+    #: **The overhead it used to budget for does not land on top of the deadline.** The
+    #: five mocked sources run inside the deadline's own window, so their cost is hidden
+    #: by the wait rather than added to it, and only the merge and the ranking land after
+    #: it. Measured 2026-09-29 on builder at four workers over **75 pairs in three runs**,
+    #: one targeted, one inside a whole backend suite and one re-taken: the same call
+    #: with the slow source answering instantly takes **0.0691s to 0.1079s**, while the
+    #: slow case's elapsed exceeds `_DEADLINE` by **0.0013s to 0.0042s**.
+    #:
+    #: **So the control case was built, measured and refused.** The smallest control
+    #: drawn is sixteen times the largest excess drawn, so subtracting it moves the bound
+    #: by more than an order of magnitude more than the signal it would isolate, and the
+    #: difference is negative at all 75 samples: the subtraction loosens the bound by the
+    #: whole control rather than tightening it.
+    #:
+    #: **That argument is stated on magnitudes because the variance ratio will not carry
+    #: it.** Two seats measured that ratio on this node at this worker count and came out
+    #: ten times apart, sd of the difference 0.0142 against 0.0015, the difference being
+    #: whether the pairs include the process's first search, which is cold. Their excess
+    #: figures agreed within 1.5x. A control case is itself timing, and the quantity it
+    #: would cancel here is smaller than the disagreement between two measurements of the
+    #: instrument.
+    #:
+    #: **1.25 did not move and is not derived from the stall.** It is the leftover of the
+    #: midpoint construction this block used to carry, 1.75 minus `_DEADLINE`. It happens
+    #: to be 2.2x the only recorded stall, the 1.0589s red of 2026-09-18, itself 0.5589s
+    #: past `_DEADLINE` and 133 times the worst excess above. Work that small cannot
+    #: produce that red; a pod losing the CPU for half a second can, and the mechanism is
+    #: recorded rather than assumed. **That red is a pipeline backend job's, which is not
+    #: the pod the figures above were taken in**: this block carries readings from both,
+    #: so each names its own. The pipeline's job pod is quota bound at 2 CPUs and
+    #: throttled in a third to a half of all periods, read from its own cgroup on
+    #: 2026-09-20, so a burst loses up to a full 100ms period at a time and 0.5589s is
+    #: about six such periods. **That is the ceiling and not the average**: the same
+    #: reading's throttled time over its throttled periods is 4.5ms and 7.1ms in the two
+    #: jobs, so the figure needs six consecutive worst cases and the mechanism bounds it
+    #: rather than predicting it. The suite pod is sized per node instead and has not been
+    #: that shape since 2026-08-29, which is why the pod is named rather than implied:
+    #: read as the suite pod, this evidence dates itself three weeks before the red it
+    #: explains. One draw bounds nothing, so the
+    #: number stays where it was rather than being re-derived from it, and lowering it
+    #: on the fixture measurement would buy detection with flakes.
+    #:
+    #: **What that costs is wider than it reads, and it is the second line now rather
+    #: than the only one.** A bound catches an overrun past itself and nothing under
+    #: itself, so this one is green **at least from about 0.01x, and up to 3.49x
+    #: `_DEADLINE`**, not from 1x: elapsed is floored at the call's own cost, the 0.0691s
+    #: to 0.1079s above, which every deadline below that is hidden behind. **At least
+    #: from**, because 0.01x is the one point drawn, `_DEADLINE / 100`: it says the band
+    #: includes 0.01x, not that the band begins there. Nothing below it was drawn.
+    #: The mutant living down there is concrete rather than hypothetical: a timeout
+    #: divided inside `_within_deadline`,
+    #: which in production cuts 4.0s to a fraction of it and drops healthy catalogues.
+    #: Measured at `/ 100`, it passes all three assertions here with the rows intact,
+    #: **and passes `TestSearchingHarder`'s budget assertion too**, because that records
+    #: the argument handed in rather than the timeout used. **It is invisible to this
+    #: bound rather than uncovered**: re-measured with the arms this block now carries,
+    #: the only thing that reddens on it is
+    #: `TestSearchDeadline::test_the_budget_reaches_the_wait_and_not_only_the_call`.
+    #: **Closing the low end was
+    #: tried and collapsed**: a second slow source sitting in the band would have to
+    #: sleep above the stall tail to be safe, which is where the elapsed bound already
+    #: is. Against the production `metadata.SEARCH_DEADLINE_SECONDS` of 4.0 this bound
+    #: is 0.44x.
+    _MARGIN = 1.25
 
     @pytest.mark.asyncio
     async def test_a_slow_oenb_does_not_extend_the_shared_deadline(self, monkeypatch):
         """User story 5. The deadline degrades the results, never the latency.
 
-        **Bounded against the deadline, not against the sleep.** A broken deadline now
-        misses by 1.05s rather than by microseconds, and the number in the assertion says
-        what is being tested. `_MARGIN` is the slack for five mocked sources and the
-        merge, and it is far below the 1.5s a regression would cost.
+        **Two arms, and only one of them is a duration.** The slow source records how
+        its own task ended, so a deadline that waits for it is caught by a fact rather
+        than by a clock: the sleep runs to completion and `outcome` reads `answered`,
+        with no clock consulted to say so. **That reading is load independent between
+        two edges and not outside them, and both edges are named below.** A stall before
+        the source is asked empties the list; a stall past
+        `_SLOWER_THAN_THE_DEADLINE` completes the sleep, so the arm reads `answered` for
+        a deadline that never waited. The elapsed figure in the message is what
+        separates either from the thing it imitates, and how often either happens is
+        deliberately not stated.
+
+        **`entered` is what tells this arm's own target from the environment.** `_crawl`
+        records it as its first statement, so a leak reads `['entered']` where a source
+        that was never asked, or one cancelled before its handler was entered, reads
+        `[]`. Without that first statement the two families differ only in when they
+        return, which is a clock, and not being one is this arm's whole purpose.
+        Measured: the cancellation dropped from
+        `_within_deadline` and the pending set discarded records `['entered']` at
+        0.502s, against `[]` at 0.070s for a roster that never asks the source.
+
+        **What the arm holds is that the cancellation was delivered and awaited to the
+        end.** The case earning the first half is a leak rather than a latency defect:
+        drop the cancellation and discard the pending set, and every assertion this test
+        carried before this arm existed passes, the rows right and the call returning at
+        the deadline. No clock here can see that.
+
+        **`unwound` is the second half, and it is why the fixture's handler yields once
+        before re-raising.** One event loop tick in place of the gather is enough for the
+        sleep to raise, so a source whose own cleanup awaits is left unfinished against a
+        closing transport, which is the leak the gather's comment exists to stop. The
+        gather resumes the handler past that yield and `unwound` is appended; one tick
+        does not. Measured with the gather replaced by a single tick: this test fails on
+        `['entered', 'cancelled']`, and reads no clock to do it.
+
+        **What that second half costs, in both directions.** It pins the depth of the
+        unwinding rather than the primitive: `asyncio.wait(pending)` in place of the
+        gather stays green, and so does a pending task cancelled twice, both measured.
+        What it does not survive is a yield between the fan out's cleanup and this
+        assertion, because the leftover task would then be resumed by something other
+        than the gather. There is none today: `_merge_matches` and `_ranked` are both
+        synchronous, `search()` awaits nothing after `_within_deadline` returns, and this
+        test awaits nothing after `search()` returns. **If that changes this arm goes
+        green rather than red**, which is the direction nobody notices. Two of the three
+        places such a yield would go are in `metadata.py` rather than here, so the
+        constraint is written at each of them as well: a reader adding one sees it
+        where they are typing, which this paragraph cannot do.
+
+        **An empty `outcome` has two causes now that a leak has its own reading, and the
+        message carries the elapsed time to tell them apart.** The source may never have
+        been asked, which is what moving it into the slow set does, and that returns in
+        milliseconds. **The other is load dependent**: if the process loses the CPU
+        between the wait starting its timer and the request being issued, for longer
+        than `_DEADLINE`, the task is cancelled before the handler is entered, the
+        handler never runs, and the list is empty for a working deadline. A stall of
+        that magnitude is the 1.0589s red recorded above. **How often is deliberately
+        not stated**: every attempt in this repository to bound a blind spot has
+        measured something adjacent and written it down as the bound.
+
+        **The arm is not purely additive, and how much it newly refuses is refused
+        rather than stated.** Before it existed, the elapsed bound passed any run
+        returning inside `_DEADLINE` plus `_MARGIN`, so a run that cancelled the source
+        before its handler was entered was tolerated. That run is red now and the
+        refusal is wanted, because a run that never asked the source never exercised
+        the deadline.
+
+        **The band this used to name was reasoned and is not reproducible.** It said
+        every stall from `_DEADLINE` to about 1.68s had changed verdict. Planted inside
+        it, the mechanism named here is **green**: a 0.7s blocking stall in the fan
+        out's first task holds the loop well past the deadline, and the handler is still
+        entered and the full outcome still recorded, because the mock reaches its side
+        effect before the cancellation is honoured. The only thing measured to produce
+        an empty list is a roster that never asks the source, which is a configuration
+        and not a stall. So the cost is stated as a mechanism and `['entered']` against
+        `[]` in the message is what says which one arrived.
+
+        **The elapsed bound is the user story's other half**, and it is about the caller
+        rather than the source: a deadline is worth nothing if the fan out drops the slow
+        catalogue on time and then spends seconds merging. It is loose on purpose, and
+        `_MARGIN` says what it covers and what it therefore cannot see.
 
         **Proved to discriminate rather than asserted to**: with the deadline raised
-        above the sleep, this test is the one that fails, and it fails on the elapsed
-        bound rather than on the row assertion.
+        above the sleep, this test is the one that fails, and it fails on the
+        cancellation arm rather than on the row assertion.
         """
         monkeypatch.setattr(metadata, "SEARCH_DEADLINE_SECONDS", self._DEADLINE)
+        outcome: list[str] = []
 
         async def _crawl(request):
-            await asyncio.sleep(self._SLOWER_THAN_THE_DEADLINE)
+            # First statement, so an empty `outcome` means this handler never ran.
+            # Without it a leak and a stall before the request is issued both record
+            # `[]` and the arm cannot tell its own target from the environment.
+            outcome.append("entered")
+            try:
+                await asyncio.sleep(self._SLOWER_THAN_THE_DEADLINE)
+            except asyncio.CancelledError:
+                outcome.append("cancelled")
+                # A cleanup that awaits. Delete this yield and one event loop tick in
+                # place of the fan out's gather passes the arm, which is the leak the
+                # gather exists to stop.
+                await asyncio.sleep(0)
+                outcome.append("unwound")
+                raise
+            outcome.append("answered")
             return _xml(OENB_SEARCH)
 
         with respx.mock(assert_all_called=False) as mock:
@@ -4912,9 +5333,19 @@ class TestTheAustrianNationalLibrarySearch:
             rows = await search("great gatsby")
             elapsed = asyncio.get_running_loop().time() - started
 
+        assert outcome == ["entered", "cancelled", "unwound"], (
+            f"the slow source ended as {outcome} rather than entered, cancelled and "
+            f"unwound, after {elapsed:.3f}s against a deadline of "
+            f"{self._DEADLINE}s: `answered` is a deadline that waited, or a stall past "
+            f"{self._SLOWER_THAN_THE_DEADLINE}s; `['entered']` is a task left running; "
+            "`['entered', 'cancelled']` is a cancellation delivered but not awaited to "
+            "the end; an empty list is a source that was never asked, or one cancelled "
+            "before its handler was entered, which a stall past the deadline does"
+        )
         assert elapsed < self._DEADLINE + self._MARGIN, (
-            f"the search took {elapsed:.3f}s against a deadline of {self._DEADLINE}s; "
-            f"a source sleeping {self._SLOWER_THAN_THE_DEADLINE}s was waited for"
+            f"the search took {elapsed:.3f}s against a deadline of {self._DEADLINE}s "
+            f"and a margin of {self._MARGIN}s; the fan out returned late even though "
+            "the slow source was dropped on time"
         )
         assert [row.title for row in rows] == ["The Great Gatsby"]
 
@@ -4932,8 +5363,8 @@ class TestTheNationalLibraryOfGreece:
     p90 lookup is a fifth of a second.
 
     **One thing made it not cheap**, and it is the reason this class exists
-    rather than a line in the ÖNB's: `_marc_claims_isbn` refused the records
-    that prove it works. See `_isbn_entries`.
+    rather than a line in the ÖNB's: `Fields.claims_isbn` refused the records
+    that prove it works. See `Fields._isbn_entries`.
 
     **A wrong index name is diagnosed here**, unlike at the ÖNB, and the identity
     check is kept regardless: this is a plaintext connection, so the record that
@@ -5574,190 +6005,6 @@ class TestTheBibliotecaNacionalArgentina:
         assert CatalogueSource.BNA not in sources.METERED
 
 
-class TestTheComponentPartRefusal:
-    """The leader test, alone, so its edges are visible.
-
-    Measured over the same 280 live records: the leader catches 155 of 155
-    component parts and loses 0 of 122 monographs, where refusing anything
-    carrying a 773 catches the same 155 and loses 3 monographs.
-    """
-
-    @pytest.mark.parametrize(
-        "leader, expected",
-        [
-            ("00733naa a2200229zc 4500", True),
-            ("00733nab a2200229zc 4500", True),
-            ("01533nam a2200505 c 4500", False),
-            ("01533nac a2200505 c 4500", False),
-            # A truncated leader is a broken record rather than an article, and
-            # the fields decide it on their own merits.
-            ("00733n", False),
-            ("", False),
-        ],
-    )
-    def test_the_bibliographic_level_decides(self, leader, expected):
-        record = ElementTree.fromstring(
-            '<record xmlns="http://www.loc.gov/MARC21/slim">'
-            f"<leader>{leader}</leader></record>"
-        )
-        assert metadata._is_component_part(record) is expected
-
-
-def _carrier_record(leader: str = "01533nam a2200505 c 4500", **fields: str) -> Any:
-    """One MARC record node from a leader and any control fields it needs.
-
-    Named for what it carries rather than for the schema: `_marc_record` above
-    is a different thing, a whole record body, and defining a second function of
-    that name here shadowed it and broke a size cap fixture two hundred lines
-    away. The suite caught it; nothing else would have.
-    """
-    controls = "".join(
-        f'<controlfield tag="{tag[:3]}">{value}</controlfield>'
-        for tag, value in fields.items()
-    )
-    return ElementTree.fromstring(
-        '<record xmlns="http://www.loc.gov/MARC21/slim">'
-        f"<leader>{leader}</leader>{controls}</record>"
-    )
-
-
-class TestTheCarrierDecides:
-    """The MARC codes, alone, so their edges are visible.
-
-    **A diagonal, verified by deleting each code rather than by claiming it.**
-    Every one of the ten codes in the three frozensets is pinned: drop any one
-    and a row goes red. That is the whole point of the block and the first
-    version of it did not have the property, while saying it did. A critic
-    measured it: **7 of the 10 survived deletion with all 14 rows green**, since
-    the two disc rows each carried two refusing features at once, `sd` on a `njm`
-    leader and `vd` on a `ngm` leader, so each covered for the other and neither
-    name was load bearing.
-
-    **So the rows are of three kinds, and 9 plus 7 plus 5 is 21.** Both critics
-    found the previous sentence separately: it said two kinds and accounted for
-    16 of the rows, which is the shape CLAUDE.md predicts for a fix round, a
-    corrected partition that does not sum. It replaced a claim that every row was
-    live, which was false but at least total, so the correction was weaker in the
-    dimension nobody re-checked.
-
-    **9 live**, shapes seen in a catalogue during the September 2026 roster
-    measurement. **7 constructed**, one per code that no live record refuses on
-    its own, and they have to exist: over 2,605 records only two of the ten codes
-    ever refuse a record by themselves, `007 c` on exactly one and leader/06 `m`
-    on exactly one, so a table drawn only from live shapes cannot pin this rule.
-    **5 edge**, none of them a live shape, which was checked rather than assumed:
-    of those 2,605, none carries a leader under 8 characters, an 008 under 24, an
-    empty `007`, or no control field at all.
-
-    The 5 are not decoration, and they do **three** jobs rather than one. Strip
-    the two length tests and **3 of them raise `IndexError`** where the other 18
-    rows do not: the truncated leader, the empty leader and the 11 character 008.
-    Change `value[:1]` to `value[0]` and leave both length tests alone and the
-    empty `007` row is the **only** one of the 21 that goes red, so it is the
-    sole pin for reading the carrier by prefix. The fifth, a record declaring
-    nothing at all, pins that silence decides nothing. No row is idle, which is a
-    better argument against trimming the table than a count of edges.
-
-    **This paragraph has now been wrong twice, and the second time it said 4.**
-    That 4 was a true measurement of the wrong thing: the script behind it
-    stripped the length tests **and** changed the slice in one pass, so it
-    counted a mutation nobody was describing. CLAUDE.md's line for it is that a
-    measurement is only evidence about the configuration it was taken under, and
-    the tell was available in the file: the row comment below already says an
-    empty `007` matches nothing rather than raising, so the sentence contradicted
-    a comment eleven lines away.
-
-    Its remaining blind spot: it pins codes, not the vocabulary. A carrier code
-    no catalogue here has written yet is invisible to it, and `008/23 s` is
-    pinned only by a constructed row because it has never been observed, sitting
-    in the constant on MARC's definition as `b` does in `_COMPONENT_PART_LEVELS`.
-    """
-
-    @pytest.mark.parametrize(
-        "leader, controls, expected",
-        [
-            # An online resource: one electronic carrier and nothing else.
-            ("01533nam a2200505 c 4500", {"007": "cr#|||||||||||"}, False),
-            # An audiobook and a videodisc, by their carrier.
-            ("01533njm a2200505 c 4500", {"007": "sd f||||||||||"}, False),
-            ("01533ngm a2200505 c 4500", {"007": "vd |||||||||||"}, False),
-            # A computer file, the NLG's `E-BOOK`, which carries no 007 at all.
-            ("01533nmm a2200505 c 4500", {}, False),
-            # ── Constructed, one per code no live record refuses alone ───────
-            # The two live disc rows above carry a refusing carrier **and** a
-            # refusing leader, so without these seven, seven of the ten codes
-            # could be deleted with this table still green.
-            ("01533nam a2200505 c 4500", {"007": "sd f||||||||||"}, False),
-            ("01533nam a2200505 c 4500", {"007": "vd |||||||||||"}, False),
-            ("01533ngm a2200505 c 4500", {}, False),
-            ("01533nim a2200505 c 4500", {}, False),
-            ("01533njm a2200505 c 4500", {}, False),
-            (
-                "01533nam a2200505 c 4500",
-                {"008": "210224s2020    gw |||||q|||| 00||||ger  "},
-                False,
-            ),
-            (
-                "01533nam a2200505 c 4500",
-                {"008": "210224s2020    gw |||||s|||| 00||||ger  "},
-                False,
-            ),
-            # Form of item, where the carrier is absent. 195 of the 2,605
-            # records measured carry no 007, so this is not a hypothetical.
-            ("01533nam a2200505 c 4500", {"008": "210224s2020    gw |||||o|||| 00||||ger  "}, False),
-            # A plain printed book: the text carrier, and a blank form of item.
-            (
-                "01533nam a2200505 c 4500",
-                {"007": "tu", "008": "210224s2020    gw ||||| |||| 00||||ger  "},
-                True,
-            ),
-            # **A text carrier beside an electronic one is a text.** 48 of those
-            # 2,605 are Austrian Books Online records for real 19th century
-            # prints, with the print's collation in the 300 and the scan in an
-            # 856. Refusing on any electronic 007 refuses all 48.
-            ("00796nam a2200265 cc4500", {"007": "cr#|||||||||||", "007a": "tu"}, True),
-            # Nothing declared at all decides nothing, which is the common case:
-            # a thin record is not a disc.
-            ("01533nam a2200505 c 4500", {}, True),
-            # A leader too short to index, and an 008 too short to reach 23.
-            ("00733n", {}, True),
-            ("", {}, True),
-            ("01533nam a2200505 c 4500", {"008": "210224s2020"}, True),
-            # An empty 007 is read by prefix and matches nothing rather than
-            # raising, which is why the carrier is not read positionally.
-            ("01533nam a2200505 c 4500", {"007": ""}, True),
-            # The ÖNB writes `#` where the DNB writes a space, and `|` means no
-            # attempt to code. 560 ÖNB **records** carry `#` here and the shipped
-            # rule keeps **556** of them, so a rule testing "not blank" would
-            # refuse 556 books outright.
-            ("01533nam a2200505 c 4500", {"008": "000101|1568    |||           ||| | lat c"}, True),
-            ("01533nam a2200505 c 4500", {"008": "210224s2020    gw ||||||||||| 00||||ger  "}, True),
-        ],
-    )
-    def test_the_record_states_its_own_carrier(self, leader, controls, expected):
-        assert metadata._marc_carrier_is_book(_carrier_record(leader, **controls)) is expected
-
-    def test_a_control_field_is_read_raw_and_never_through_marc_text(self):
-        """The blanks in an 008 are data, and collapsing them moves position 23.
-
-        Measured over 2,605 live records, and counted in **records**: `_marc_text`
-        alters the 008 of 2,043 of them and changes what sits at position 23 on
-        1,859. 847 records carry `o` there and 817 of those lose it, this 008
-        being one, so routing the control field through the shared subfield
-        reader turns this refusal into a pass with nothing failing anywhere.
-
-        **608 is what this paragraph said, and it is the count of distinct 008
-        values among those 817 records rather than a count of records.** A
-        critic caught it. The instrument had answered a narrower question than
-        the prose asked, which is the failure CLAUDE.md names, and it sat here
-        beside a comment in `metadata.py` that had the same slip twice over.
-        """
-        raw = "210224s2020    gw |||||o|||| 00||||ger  "
-        assert raw[23] == "o"
-        assert metadata._marc_text(raw)[23] != "o"
-        assert metadata._marc_carrier_is_book(_carrier_record(**{"008": raw})) is False
-
-
 class TestTheCarrierTestIsTheOnlyWayIn:
     """One door in front of every MARC parse path, enforced rather than asked.
 
@@ -5774,81 +6021,189 @@ class TestTheCarrierTestIsTheOnlyWayIn:
     `tests/test_bibliographic.py::TestTheProseRuleIsReachedOnlyThroughACarrierAwareDoor`
     asks the same question of every module of ours and of both call spellings.
 
-    **What it cannot see**, listed here rather than left to be discovered. Both
-    checks read plain `Name` calls, so an aliased call (`fields = _marc_fields`
-    then `fields(node)`) and an attribute call (`metadata._marc_fields(node)`)
-    are invisible to them; `_marc_fields` is private, so the second spelling is
-    refused outside `marc.py` by `tests/test_marc.py` rather than seen here.
-    `_fullest_physical`
-    satisfies the first check for the three lookups that name it, and it only
-    **ranks**, so a search path that ranked where it should refuse would pass
-    while refusing nothing; that is not true of any path today. A path that calls
-    the door and **discards the answer** satisfies both checks; that is the cheapest
-    evasion of the four and it is not detectable by any guard keyed on call
-    names, which is the same limit `TestTheShelfIsTheOnlyWayIn` lives with. And a
-    source that parses MARC datafields without calling `_marc_fields` at all is
-    outside the first check entirely: it would be a second reader of one format,
-    which is a finding on its own before it is a hole here.
+    **The walk is every module of ours, for the same reason and after the same
+    event.** While the parser was a private name in `metadata.py` a second module
+    building one had to spell a private name, which
+    `tests/test_marc.py::TestNoModuleReadsAnotherModulesPrivateNames` refuses, so
+    reading `metadata.py` alone was sound and that compensating control was
+    written into this class's blind spot list. `marc_fields.Fields` is public, so
+    any module can build one and no other guard refuses it: `marc.py` already
+    does. A check over one file would have been green on the whole class of
+    evasion it exists for.
+
+    **Both call spellings are collected.** The door is
+    `marc_fields.Fields.describes_a_book`, so every call to it is an
+    `ast.Attribute` and a walk keyed on `ast.Name` would see none of them. A call
+    is collected by the attribute's own name and never by its receiver's, so
+    binding a `Fields` to any name whatever does not hide the question it is then
+    asked.
+
+    **What it still cannot see**, listed here rather than left to be discovered.
+    A **rebinding** inside the module (`build = Fields` then `build(node)`) and a
+    call built by `getattr`. An **aliased import** (`from marc_fields import
+    Fields as F`) is the ordinary shape of the same evasion and is closed rather
+    than listed: `_functions` collects a call under the name it was imported as,
+    which is `test_marc.py::_private_reads`' rule and its reason.
+
+    `_fullest_physical` satisfies the first check for the lookup that names it,
+    and it only **ranks**, so a search path that ranked where it should
+    refuse would pass while refusing nothing; that is not true of any path today.
+    A path that calls the door and **discards the answer** satisfies both checks;
+    that is the cheapest evasion and it is not detectable by any guard keyed on
+    call names, which is the same limit `TestTheShelfIsTheOnlyWayIn` lives with.
+    And a source that parses MARC datafields without building a `Fields` at all
+    is outside the first check entirely: it would be a second reader of one
+    format, which is a finding on its own before it is a hole here.
     """
 
+    #: The one parse path that builds a `Fields` and asks nothing, by
+    #: `<path>::<function>`, with the reason it is not the defect this class
+    #: hunts.
+    #:
+    #: An upload is a cataloguer handing over their own file, so `marc.read`
+    #: refuses a record with no title and nothing else: `marc._record`'s
+    #: docstring carries the three divergences in full. A catalogue answered
+    #: about an object this app did not ask for, which is what the carrier test
+    #: is for; a file was chosen by the person importing it.
+    #:
+    #: `test_the_exemption_still_exists_to_be_exempted` is what stops this
+    #: outliving its subject.
+    EXEMPT = frozenset({"marc.py::read"})
+
     @staticmethod
-    def _functions() -> dict[str, set[str]]:
-        """Every function in `metadata.py`, by the plain names it calls."""
-        tree = ast.parse((Path(metadata.__file__)).read_text(encoding="utf-8"))
-        return {
-            node.name: {
-                call.func.id
-                for call in ast.walk(node)
-                if isinstance(call, ast.Call) and isinstance(call.func, ast.Name)
-            }
-            for node in ast.walk(tree)
-            if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
-        }
+    def _functions(root: Path = BACKEND) -> dict[str, set[str]]:
+        """Every function under `root`, as `<path>::<name>`, by the names it calls.
+
+        **`root` is a parameter for the reason `_python_sources` takes one**: a
+        walk asserted only against this checkout is a walk nobody has watched
+        fail. `test_a_planted_parse_path_that_asks_nothing_is_reported` drives
+        this one against a tree it builds, through this function rather than
+        through a second copy of it.
+
+        A plain call contributes its own name and a method or module attribute
+        call contributes the attribute's, so `Fields(node)`,
+        `marc_fields.Fields(node)` and `fields.describes_a_book(t)` are all
+        visible and none of them depends on what the receiver is called.
+
+        **A call is collected under the name it was imported as, not the name it
+        was bound to**, so `from marc_fields import Fields as F` then `F(node)`
+        is a reader. `test_marc.py::_private_reads` bought this same distinction
+        one file over and records what it cost: keying on the local binding made
+        an aliased import a clean evasion. Keyed on the binding here, a parse
+        path could import the door under any letter and this walk would report a
+        function that calls nothing it recognises.
+
+        **It over reports where a local shadows an alias**, which is the safe
+        direction and the same trade that guard takes: a module importing
+        `Fields as F` and separately calling some other local `F` is credited
+        with building one.
+
+        **Qualified by path and by enclosing scope**, which is
+        `test_bibliographic._callers`' rule and its reason: this package holds
+        more than one `covers.py`, and a `def` nested inside another function
+        takes the name of whatever encloses it.
+        """
+
+        def called(call: ast.Call, aliases: dict[str, str]) -> str | None:
+            if isinstance(call.func, ast.Name):
+                return aliases.get(call.func.id, call.func.id)
+            if isinstance(call.func, ast.Attribute):
+                return call.func.attr
+            return None
+
+        found: dict[str, set[str]] = {}
+
+        def visit(
+            node: ast.AST, path: str, qualified: str, aliases: dict[str, str]
+        ) -> None:
+            for child in ast.iter_child_nodes(node):
+                if isinstance(
+                    child, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef
+                ):
+                    inner = (
+                        child.name
+                        if qualified == "<module>"
+                        else f"{qualified}.{child.name}"
+                    )
+                    if not isinstance(child, ast.ClassDef):
+                        found.setdefault(f"{path}::{inner}", set())
+                    visit(child, path, inner, aliases)
+                    continue
+                if isinstance(child, ast.Call) and qualified != "<module>":
+                    name = called(child, aliases)
+                    if name is not None:
+                        found.setdefault(f"{path}::{qualified}", set()).add(name)
+                visit(child, path, qualified, aliases)
+
+        for source in _python_sources(root):
+            tree = ast.parse(source.read_text(encoding="utf-8"))
+            visit(
+                tree,
+                str(source.relative_to(root)),
+                "<module>",
+                {
+                    alias.asname or alias.name: alias.name
+                    for node in ast.walk(tree)
+                    if isinstance(node, ast.ImportFrom)
+                    for alias in node.names
+                },
+            )
+        return found
+
+    @staticmethod
+    def _readers(functions: dict[str, set[str]]) -> dict[str, set[str]]:
+        """Every function that builds a `Fields`, by the names it calls."""
+        return {name: calls for name, calls in functions.items() if "Fields" in calls}
+
+    def test_the_exemption_still_exists_to_be_exempted(self):
+        """An allowlist entry for a path that no longer parses guards nothing.
+
+        `test_house_rules` states the rule this follows: twice in this
+        repository a guard went green with its own subject gone.
+        """
+        readers = set(self._readers(self._functions()))
+
+        assert not self.EXEMPT - readers, sorted(self.EXEMPT - readers)
 
     def test_a_marc_parse_path_cannot_skip_the_carrier_test(self):
         """Reading a MARC record's fields obliges you to ask about its carrier.
 
-        No allowlist, because outside these the correct answer is zero:
-        `_marc_fields` exists to turn one record into book fields, and a caller
-        doing that without asking whether it is a book is the defect.
+        One exemption, `EXEMPT` above, and outside it the correct answer is zero:
+        `Fields` exists to turn one record into book fields, and a caller doing
+        that without asking whether it is a book is the defect.
 
-        **Two, where this said eight, and the drop is the ticket rather than a
-        weakening.** The eight were five per source lookups and three per source
-        searches, each reading `_marc_fields` in its own copy of the same four
-        lines. They are `_marc_lookup` and `_marc_search`, driven by a row, so
-        the surface a new source can get wrong went from eight hand written paths
-        to none: a tenth catalogue that reads MARC adds a row and reaches these
-        two. A number that fell because its subject was deleted is the shape this
-        repository asks to be stated rather than quietly edited, so it is stated:
-        nothing was exempted and nothing stopped being checked, there are two
-        readers where there were eight.
+        **Three readers across the tree, where this counted two in one file, and
+        the third was always there.** `marc.read` has parsed uploads since before
+        this class was written; it was invisible while the parser was private to
+        `metadata.py` and this walked that file alone. So the number went up
+        because the walk widened, not because a path was added, and the number
+        that matters is that one of the three is exempt and two are not.
         """
-        readers = {
-            name: calls
-            for name, calls in self._functions().items()
-            if "_marc_fields" in calls
-        }
-        assert len(readers) == 2, sorted(readers)
+        functions = self._functions()
+        readers = self._readers(functions)
+        assert len(readers) == 3, sorted(readers)
         # **`_marc_lookup` needs both names and not either, and that is a
-        # regression this guard shipped for one round.** A critic deleted
-        # `_marc_is_physical_book` from its ranking arm and all three checks in
-        # this class stayed green: one function holds two policies now, so the
-        # filtering arm's `_fullest_physical` satisfied an "either" test on the
-        # ranking arm's behalf. Under the old shape the DNB lookup was its own function
+        # regression this guard shipped for one round.** A critic deleted the
+        # carrier door from its ranking arm and all three checks in this class
+        # stayed green: one function holds two policies now, so the filtering
+        # arm's `_fullest_physical` satisfied an "either" test on the ranking
+        # arm's behalf. Under the old shape the DNB lookup was its own function
         # naming only the door, so the same deletion failed. The mutation is a
         # live defect and not a cosmetic one: a DNB response holding a
         # digitisation and a printed record that both claim the ISBN answered
         # with the digitisation, `page_count` None against 300.
         required = {
-            "_marc_lookup": {"_marc_is_physical_book", "_fullest_physical"},
+            "metadata.py::_marc_lookup": {"describes_a_book", "_fullest_physical"},
         }
         assert not [
             name
             for name, calls in readers.items()
-            if not calls
-            >= required.get(name, set())
-            or not calls & {"_marc_is_physical_book", "_fullest_physical"}
-        ]
+            if name not in self.EXEMPT
+            and (
+                not calls >= required.get(name, set())
+                or not calls & {"describes_a_book", "_fullest_physical"}
+            )
+        ], sorted(readers)
 
     def test_the_lookup_ranking_helper_is_itself_inside_the_door(self):
         """The check above is satisfied one hop early by the filtering arm.
@@ -5856,13 +6211,96 @@ class TestTheCarrierTestIsTheOnlyWayIn:
         `_marc_lookup`'s filtering arm names `_fullest_physical` and not the
         door, so removing the carrier term from that helper's sort key would
         leave the checks above green for that arm. A critic measured it under the
-        old shape, where the K10plus lookup, the ÖNB lookup and the NLG lookup were three functions doing
-        it; the three are one arm of one function now and the hole is the same
-        one. It is scope rather than a hole, because the ranking has tests of its
-        own, and this closes it so the class docstring's claim is true of both
-        arms.
+        old shape, where the K10plus lookup, the ÖNB lookup and the NLG lookup
+        were three functions doing it; the three are one arm of one function now
+        and the hole is the same one. It is scope rather than a hole, because the
+        ranking has tests of its own, and this closes it so the class
+        docstring's claim is true of both arms.
         """
-        assert "_marc_is_physical_book" in self._functions()["_fullest_physical"]
+        assert (
+            "describes_a_book"
+            in self._functions()["metadata.py::_fullest_physical"]
+        )
+
+    @staticmethod
+    def _plant(root: Path, **modules: str) -> Path:
+        """A tree `_python_sources` will walk, holding the modules given."""
+        root.mkdir(parents=True, exist_ok=True)
+        for name, source in modules.items():
+            (root / f"{name}.py").write_text(source)
+        return root
+
+    #: A parse path spelled the way `metadata.py` spells it, with the door left
+    #: out. The receiver is deliberately not called `fields`: a walk keyed on the
+    #: receiver's name rather than the attribute's would pass this.
+    SKIPS_THE_DOOR = (
+        "import marc_fields\n\n\n"
+        "def _read(node):\n"
+        "    whatever = marc_fields.Fields(node)\n"
+        "    return whatever.isbn()\n"
+    )
+
+    def test_a_planted_parse_path_that_asks_nothing_is_reported(self, tmp_path):
+        """The evasion this class exists for, driven through its own instrument.
+
+        The version this replaced asserted a comprehension it had written
+        itself, so it could not fail for any change to `_functions`: reverting
+        the collector to its `ast.Name` arm alone left it green while two other
+        tests in this class went red. A test that re-implements the thing it is
+        testing observes nothing.
+        """
+        root = self._plant(tmp_path / "backend", intruder=self.SKIPS_THE_DOOR)
+        readers = self._readers(self._functions(root))
+
+        assert set(readers) == {"intruder.py::_read"}
+        assert not readers["intruder.py::_read"] & {
+            "describes_a_book",
+            "_fullest_physical",
+        }
+
+    def test_a_parse_path_that_imports_the_door_under_another_name_is_reported(
+        self, tmp_path
+    ):
+        """The ordinary spelling of the evasion, which is the import and not a
+        rebinding inside the module.
+
+        Keyed on the local binding this reader contributes the name `F`, so it
+        is not a reader, the count stays at its expected value and every other
+        test in this class stays green while the intruder asks nothing.
+        Measured by a critic seat against the real file list.
+        """
+        root = self._plant(
+            tmp_path / "backend",
+            intruder=(
+                "from marc_fields import Fields as F\n\n\n"
+                "def _read(node):\n"
+                "    return F(node).isbn()\n"
+            ),
+        )
+        readers = self._readers(self._functions(root))
+
+        assert set(readers) == {"intruder.py::_read"}
+        assert not readers["intruder.py::_read"] & {
+            "describes_a_book",
+            "_fullest_physical",
+        }
+
+    def test_a_planted_parse_path_that_asks_is_not_reported(self, tmp_path):
+        """The other half of the diagonal: it must not report every reader.
+
+        One line apart from the fixture above, so what separates them is the
+        call to the door and nothing else.
+        """
+        root = self._plant(
+            tmp_path / "backend",
+            intruder=self.SKIPS_THE_DOOR.replace(
+                "return whatever.isbn()", "return whatever.describes_a_book(None)"
+            ),
+        )
+        readers = self._readers(self._functions(root))
+
+        assert set(readers) == {"intruder.py::_read"}
+        assert "describes_a_book" in readers["intruder.py::_read"]
 
 
 class TestTheLookupsRankAPhysicalRecordFirst:
@@ -5886,8 +6324,8 @@ class TestTheLookupsRankAPhysicalRecordFirst:
             f'<subfield code="a">{pages}</subfield></datafield>'
             f"{extra}</record>"
         )
-        fields = _marc_fields(node)
-        return node, fields, metadata._k10plus_record(fields, "9783442267743")
+        fields = Fields(node)
+        return fields, metadata._k10plus_record(fields, "9783442267743")
 
     def _pair(self) -> Any:
         """A digitisation that is the fuller record, and a thinner printed one.
@@ -5919,7 +6357,7 @@ class TestTheLookupsRankAPhysicalRecordFirst:
         """
         online, printed = self._pair()
 
-        assert online[2].completeness > printed[2].completeness
+        assert online[1].completeness > printed[1].completeness
 
     def test_the_printed_edition_wins_over_the_fuller_digitisation(self):
         online, printed = self._pair()
@@ -5978,7 +6416,7 @@ class TestTheDublinCoreAndModsSourcesRefuseInTheirOwnTerms:
         assert bibliographic.is_physical_book("1 ressource dematerialisee", "Clean Code")
 
     @pytest.mark.parametrize(
-        "form, expected",
+        ("form", "expected"),
         [
             ('<form authority="marcform">print</form>', True),
             ('<form authority="rdamedia">unmediated</form>', True),
@@ -6024,6 +6462,273 @@ class TestTheDublinCoreAndModsSourcesRefuseInTheirOwnTerms:
         assert _loc_record(mods, source="loc") is None
 
 
+#: The expression the BnF publisher rule used to be, kept as the oracle the
+#: linear rule is held to. **Here and nowhere in the application**, which is the
+#: point: it is quadratic on a run of `(` or of spaces.
+_BNF_PLACE: Final = re.compile(r"\s*\([^)]*\)\s*$")
+
+
+class TestTheBnfPublisherRuleIsLinear:
+    """`metadata._without_trailing_place`, which replaced a quadratic expression.
+
+    **No property sees time**, and none is built: `docs/decisions.md` refuses a
+    wall clock deadline. So the two halves are held separately. The generated
+    one holds the answer to the old expression's on every value; the named one
+    is sized so the old form cannot finish inside the suite's per test ceiling,
+    which is how it was red before the fix and is not a timing assertion.
+    """
+
+    @pytest.mark.property
+    @given(
+        publisher=st.text(
+            st.sampled_from(["(", ")", " ", "\t", "\n", "\u00a0", "a", "Z", ","]),
+            max_size=24,
+        )
+        | st.text(max_size=24)
+    )
+    def test_it_answers_what_the_expression_answered(self, publisher):
+        """Drawn over the expression's own units, the characters it treats
+        differently, plus anything, so a disagreement is reachable rather than
+        sampled for. Exact, never a predicate: the rule's whole job is one
+        string."""
+        assert metadata._without_trailing_place(publisher) == (
+            _BNF_PLACE.sub("", publisher).strip()
+        )
+
+    def test_the_leftmost_parenthesis_after_the_last_closed_one_is_where_it_cuts(self):
+        """The input on which the obvious linear form, the last `(`, differs
+        from the expression. The expression's leftmost match wins."""
+        assert metadata._without_trailing_place("Z ((a)") == "Z"
+        assert metadata._without_trailing_place("Minard, Lettres modernes (Paris)") == (
+            "Minard, Lettres modernes"
+        )
+
+    @pytest.mark.parametrize("unit", ["(", " "])
+    def test_a_publisher_as_long_as_a_response_is_read_in_one_pass(self, unit):
+        """A run of one unit filling a whole response, through the decoder.
+
+        The two shapes the old expression backtracked on, each followed by the
+        one character that keeps its match alive longest. At this length it
+        cost of the order of an hour on the event loop; the publisher is then
+        too wide for its column, so the record keeps its title and drops it.
+        """
+        run = unit * (fetch.MAX_RESPONSE_BYTES - 400)
+        element = ElementTree.fromstring(
+            '<record xmlns:dc="http://purl.org/dc/elements/1.1/">'
+            "<dc:title>Un livre</dc:title>"
+            f"<dc:publisher>Z{run}(x</dc:publisher></record>"
+        )
+        record = metadata.READERS[decoders.Reader.DUBLIN_CORE](
+            element, decoders.Decoding(source="bnf", reader=decoders.Reader.DUBLIN_CORE)
+        )
+        assert record is not None
+        assert record.title == "Un livre"
+        assert record.publisher is None
+
+
+@dataclass(frozen=True)
+class CatalogueAnswer:
+    """An SRU response as a spec: its records, some free text, and its charset.
+
+    Drawn by the property in `TestACatalogueAnswerIsReadOrRefusedByName` and
+    rebuilt by `a_catalogue_answer` in every named case it printed.
+    """
+
+    records: tuple[Node, ...]
+    #: Text placed in the envelope outside any record, where a surrogate is drawn.
+    extra: str
+    #: The charset the response is labelled with and written in.
+    charset: str
+    #: How deep a chain of elements inside the free text's element goes.
+    nest: int = 0
+    #: How many empty siblings that element carries.
+    width: int = 0
+
+
+def a_catalogue_answer(answer: CatalogueAnswer) -> fetch.Fetched:
+    """The response the spec describes, as the transport hands it to a lookup.
+
+    **Built at the `fetch.Fetched` seam and never as a `str`**: a door reading
+    `.text` can only ever see what that decoding produces, and a string drawn
+    directly reaches values it cannot, which would be counterexamples to
+    nothing.
+    """
+    inner = "".join(
+        "<record><recordData>"
+        f'<collection xmlns="{marc_fields.NAMESPACE}">{xml_of(record)}</collection>'
+        "</recordData></record>"
+        for record in answer.records
+    )
+    text = (
+        '<searchRetrieveResponse xmlns="http://www.loc.gov/zing/srw/">'
+        f"<numberOfRecords>{len(answer.records)}</numberOfRecords>"
+        f"<records>{inner}</records>"
+        + xml_of(
+            Node("extraResponseData", text=answer.extra, nest=answer.nest, width=answer.width)
+        )
+        + "</searchRetrieveResponse>"
+    )
+    return fetch.Fetched(200, encoded(text, answer.charset), answer.charset)
+
+
+#: The Unicode category of a surrogate, named as a category for the reason
+#: `strategies.INVISIBLE_CATEGORIES` gives.
+SURROGATES: Final[tuple[Literal["Cs"]]] = ("Cs",)
+
+#: A catalogue's answer, drawn: MARC records, free text that sometimes carries
+#: a surrogate, and a charset.
+#:
+#: **The surrogate is drawn around ordinary text rather than as one more
+#: character of it.** Alternated with `xml_characters` inside one `text`, it was
+#: never drawn: measured, none in 400 draws. Hypothesis merges a union of
+#: character strategies, and the UTF-8 filter on one side reaching the other is
+#: the likely reason; it was not traced further.
+CATALOGUE_ANSWERS: Final = st.builds(
+    CatalogueAnswer,
+    records=st.lists(marc_records(), max_size=2).map(tuple),
+    extra=st.text(xml_characters(), max_size=8)
+    | text_around(st.text(st.characters(categories=SURROGATES), min_size=1, max_size=2), padding=4),
+    charset=charsets(),
+    # The envelope and the free text's element are two levels of the bound.
+    nest=depths(xml_parse.MAX_DEPTH - 2),
+    width=widths(),
+)
+
+#: Every seeded SRU target that answers a lookup, and every one that answers a
+#: search, in a fixed order so a printed counterexample names the same row.
+_SRU_LOOKUPS: Final = sorted(
+    (
+        target
+        for target in targets.SEEDED.values()
+        if target.transport is targets.Transport.SRU and target.can(Capability.ANSWERS_ISBN)
+    ),
+    key=lambda target: target.source,
+)
+_SRU_SEARCHES: Final = sorted(
+    (
+        target
+        for target in targets.SEEDED.values()
+        if target.transport is targets.Transport.SRU
+        and target.can(Capability.ANSWERS_TITLE_SEARCH)
+    ),
+    key=lambda target: target.source,
+)
+
+
+def _parses(response: fetch.Fetched) -> bool:
+    """Whether the catalogue parse builds a tree from this response's text."""
+    try:
+        _parsed(response.text)
+    except ElementTree.ParseError:
+        return False
+    return True
+
+
+def asked(
+    response: fetch.Fetched, looked_up: targets.Target, searched: targets.Target
+) -> tuple[metadata.Lookup, list[Record]]:
+    """What one SRU lookup and one SRU search answer when this is the response.
+
+    Patched with `mock` rather than `monkeypatch` because a generated test may
+    not take a function scoped fixture: every example would share one.
+    """
+
+    async def get_once(*_args: object, **_kwargs: object) -> fetch.Fetched:
+        return response
+
+    with mock.patch.object(fetch, "get_once", get_once):
+        lookup = asyncio.run(metadata._sru_lookup(looked_up, "9783161484100", None))
+        found = asyncio.run(metadata._sru_search(searched, "der zauberberg", 5, None))
+    return lookup, found
+
+
+class TestACatalogueAnswerIsReadOrRefusedByName:
+    """The catalogue response path: an SRU lookup and an SRU search, which
+    declare no refusal at all. Any exception out of either is a 500 that, through
+    the fan out's `gather`, costs every other source's answer too."""
+
+    @pytest.mark.property
+    @given(
+        answer=CATALOGUE_ANSWERS,
+        looked_up=st.sampled_from(_SRU_LOOKUPS),
+        searched=st.sampled_from(_SRU_SEARCHES),
+    )
+    def test_both_answer_and_neither_raises_inside_the_allocation_bound(
+        self, answer, looked_up, searched
+    ):
+        """**Generated at the `fetch.Fetched` seam, as `(bytes, charset)`**: the
+        charset from the codec registry, weighted to the ones that decode to a
+        lone surrogate, and the text built with one in it, which is the only
+        way the class is reached. The value is the spec's: a search cannot
+        answer more books than the response held."""
+        response = a_catalogue_answer(answer)
+        got = answer_of(asked, response, looked_up, searched, answers=tuple, refuses=None)
+        assert got.value is not None
+        lookup, found = got.value
+        assert isinstance(lookup, metadata.Lookup)
+        assert len(found) <= len(answer.records)
+        assert got.peak <= (
+            metadata.ALLOCATION_FACTOR * len(response.content) + xml_parse.ALLOCATION_FLOOR
+        )
+
+    def test_the_generator_still_reaches_a_charset_that_yields_a_lone_surrogate(self):
+        """Asked of the raw decode the seam repairs, which is the input the class
+        is about; after the repair no `.text` carries one, by construction."""
+        witness(
+            CATALOGUE_ANSWERS,
+            lambda answer: any(
+                0xD800 <= ord(character) <= 0xDFFF
+                for character in a_catalogue_answer(answer).content.decode(
+                    answer.charset, "replace"
+                )
+            )
+            if answer.charset != "idna"
+            else False,
+            reaches="a response whose charset decodes to a lone surrogate",
+        )
+
+    def test_the_generator_still_reaches_a_wide_response_parsed(self):
+        """The builder's positive control at this door is a wide element
+        reaching the parse, asked of what the parse did: a wide response the
+        charset garbles is refused before any element is built."""
+        witness(
+            CATALOGUE_ANSWERS,
+            lambda answer: answer.width > 0 and _parses(a_catalogue_answer(answer)),
+            reaches="a response carrying `WIDE` empty siblings, parsed",
+        )
+
+    def test_the_generator_still_reaches_a_book_found_by_a_search(self):
+        witness(
+            st.tuples(CATALOGUE_ANSWERS, st.sampled_from(_SRU_SEARCHES)),
+            lambda pair: bool(
+                asked(a_catalogue_answer(pair[0]), _SRU_LOOKUPS[0], pair[1])[1]
+            ),
+            reaches="a record a search reader accepts",
+        )
+
+    def test_a_charset_decoding_to_a_lone_surrogate_costs_one_source_nothing(self):
+        """Was `UnicodeEncodeError` out of both functions. The literal the
+        property printed against the tree before the fix: one surrogate, and a
+        charset whose decoding hands it to the parser unpaired."""
+        answer = CatalogueAnswer(records=(), extra="\ud800", charset="punycode")
+        lookup, found = asked(
+            a_catalogue_answer(answer),
+            targets.SEEDED[CatalogueSource.BNA],
+            targets.SEEDED[CatalogueSource.BNF],
+        )
+        assert lookup.outcome is Outcome.NOT_FOUND
+        assert found == []
+
+    def test_a_response_at_the_depth_bound_parses_and_one_deeper_is_refused(self):
+        """The positive control for `xml_parse.MAX_DEPTH` at the catalogue parse,
+        as a `ParseError`, which both SRU functions turn into an unavailable
+        source rather than a 500."""
+        depth = xml_parse.MAX_DEPTH
+        assert _parsed("<a>" * depth + "</a>" * depth).tag == "a"
+        with pytest.raises(ElementTree.ParseError, match="nested more than"):
+            _parsed("<a>" * (depth + 1) + "</a>" * (depth + 1))
+
+
 class TestEverySourceSetsTheIsbnItWasAskedFor:
     """`catalogue.Record.as_lookup()`'s guarantee, as a test rather than a docstring.
 
@@ -6056,11 +6761,11 @@ class TestEverySourceSetsTheIsbnItWasAskedFor:
     so does registering a sixth source with no body. Making the **MARC**
     adapters pass `None` instead of the argument does **not**, and that is
     correct rather than a hole: all three MARC lookups filter their candidates
-    through `_marc_claims_isbn` first, so a record that reaches the parser is
-    guaranteed to carry a matching 020, and `_dnb_record`'s
-    `isbn = isbn or _marc_isbn(fields)` then supplies the same canonical value
-    from the record. Two independent mechanisms satisfy the invariant on those
-    paths, and the invariant is what `as_lookup()` needs. A test that failed
+    through `Fields.claims_isbn` first, so a record that reaches the parser is
+    guaranteed to carry a matching 020, and `_dnb_record` falls back to the
+    record's own `Fields.isbn`, which supplies the same canonical value. Two
+    independent mechanisms satisfy the invariant on those paths, and the
+    invariant is what `as_lookup()` needs. A test that failed
     there would be pinning which of the two ran, which is not the guarantee and
     would break on a legitimate refactor.
     """
@@ -6076,7 +6781,7 @@ class TestEverySourceSetsTheIsbnItWasAskedFor:
     #: **No body carries the canonical ISBN-13 anywhere**, which is what makes
     #: the assertion discriminating rather than circular. The JSON sources carry
     #: no identifier at all. The MARC sources cannot do that, because
-    #: `_marc_claims_isbn` refuses a record whose own 020 does not name the ISBN
+    #: `Fields.claims_isbn` refuses a record whose own 020 does not name the ISBN
     #: asked for, so their 020 carries the **ISBN-10** form, `0743273567`. That
     #: satisfies the identity check, which canonicalises both sides, while
     #: leaving `9780743273565` obtainable only from the argument. A first draft
@@ -6515,7 +7220,7 @@ class TestNoOrderOfTheRosterFindsMoreBooks:
         beside: set[tuple[CatalogueSource, CatalogueSource]] = set()
         for order in _rotations(sources.DEFAULT_ORDER):
             chain = self._plan(order).lookup_chain
-            beside.update(zip(chain, chain[1:], strict=False))
+            beside.update(itertools.pairwise(chain))
         assert len(beside) == len(sources.LOOKUP_SOURCES)
         assert beside < self._every_ordered_pair()
 
@@ -6539,7 +7244,7 @@ class TestNoOrderOfTheRosterFindsMoreBooks:
         beside: set[tuple[CatalogueSource, CatalogueSource]] = set()
         for order in ORDERS_UNDER_TEST:
             chain = self._plan(order).lookup_chain
-            beside.update(zip(chain, chain[1:], strict=False))
+            beside.update(itertools.pairwise(chain))
         assert beside == self._every_ordered_pair()
 
     def test_the_orders_asked_hold_every_rotation(self):
@@ -7334,9 +8039,9 @@ class TestSearchingHarder:
 
     @pytest.fixture
     def fan_out(self, monkeypatch):
-        """Records which catalogues were asked and under what deadline."""
+        """Records which catalogues were asked and under what budget."""
         asked: list[CatalogueSource] = []
-        deadlines: list[float] = []
+        budgets: list[float] = []
 
         def recorder(name: CatalogueSource):
             async def adapter(query: str, limit: int, *rest: str) -> list[Record]:
@@ -7357,12 +8062,12 @@ class TestSearchingHarder:
 
         real = metadata._within_deadline
 
-        async def spy(searches, deadline):
-            deadlines.append(deadline)
-            return await real(searches, deadline)
+        async def spy(searches, deadline_seconds):
+            budgets.append(deadline_seconds)
+            return await real(searches, deadline_seconds)
 
         monkeypatch.setattr(metadata, "_within_deadline", spy)
-        return asked, deadlines
+        return asked, budgets
 
     @pytest.fixture
     def slow_oenb(self, monkeypatch):
@@ -7374,25 +8079,25 @@ class TestSearchingHarder:
     async def test_the_default_search_asks_the_fast_roster_on_the_short_deadline(
         self, fan_out, slow_oenb
     ):
-        asked, deadlines = fan_out
+        asked, budgets = fan_out
         await metadata.search("moby dick", access=access(sources.DEFAULT_PLAN, "key"))
 
         assert CatalogueSource.OENB not in asked
         assert set(asked) == set(sources.DEFAULT_PLAN.searched)
-        assert deadlines == [metadata.SEARCH_DEADLINE_SECONDS]
+        assert budgets == [metadata.SEARCH_DEADLINE_SECONDS]
 
     @pytest.mark.asyncio
     async def test_searching_harder_asks_the_slow_one_on_the_long_deadline(
         self, fan_out, slow_oenb
     ):
-        asked, deadlines = fan_out
+        asked, budgets = fan_out
         await metadata.search(
             "moby dick", access=access(sources.DEFAULT_PLAN, "key"), harder=True
         )
 
         assert CatalogueSource.OENB in asked
         assert set(asked) == set(sources.DEFAULT_PLAN.searched_harder)
-        assert deadlines == [metadata.SEARCH_HARDER_DEADLINE_SECONDS]
+        assert budgets == [metadata.SEARCH_HARDER_DEADLINE_SECONDS]
 
     @pytest.mark.asyncio
     async def test_the_two_deadlines_are_not_the_same_number(self):
@@ -7413,13 +8118,13 @@ class TestSearchingHarder:
         identical fan out is a cost with no benefit on every install that has no
         slow catalogue, which is every install today.
         """
-        asked, deadlines = fan_out
+        asked, budgets = fan_out
         await metadata.search(
             "moby dick", access=access(sources.DEFAULT_PLAN, "key"), harder=True
         )
 
         assert set(asked) == set(sources.DEFAULT_PLAN.searched)
-        assert deadlines == [metadata.SEARCH_DEADLINE_SECONDS]
+        assert budgets == [metadata.SEARCH_DEADLINE_SECONDS]
 
     @pytest.mark.asyncio
     async def test_a_second_harder_search_runs_the_ordinary_one_instead(
@@ -7431,16 +8136,16 @@ class TestSearchingHarder:
         wait, so the second caller gets a true fast answer rather than a slow
         turn in a line.
         """
-        asked, deadlines = fan_out
+        asked, budgets = fan_out
         released = asyncio.Event()
         first_is_in = asyncio.Event()
         real = metadata._within_deadline
 
-        async def hold(searches, deadline):
-            deadlines.append(deadline)
+        async def hold(searches, deadline_seconds):
+            budgets.append(deadline_seconds)
             first_is_in.set()
             await released.wait()
-            return await real(searches, deadline)
+            return await real(searches, deadline_seconds)
 
         monkeypatch.setattr(metadata, "_within_deadline", hold)
         holding = asyncio.ensure_future(
@@ -7459,7 +8164,7 @@ class TestSearchingHarder:
         await second
 
         assert CatalogueSource.OENB not in asked
-        assert deadlines[-1] == metadata.SEARCH_DEADLINE_SECONDS
+        assert budgets[-1] == metadata.SEARCH_DEADLINE_SECONDS
 
         released.set()
         await holding
@@ -7475,13 +8180,13 @@ class TestSearchingHarder:
         a `finally` nothing exercises is a `finally` a later edit can drop.
         """
 
-        async def boom(searches, deadline):
+        async def boom(searches, deadline_seconds):
             for coroutine in searches:
                 coroutine.close()
             raise RuntimeError("the fan out fell over")
 
         monkeypatch.setattr(metadata, "_within_deadline", boom)
-        with pytest.raises(RuntimeError):
+        with pytest.raises(RuntimeError, match="the fan out fell over"):
             await metadata.search(
                 "moby dick", access=access(sources.DEFAULT_PLAN, "key"), harder=True
             )
@@ -7649,7 +8354,8 @@ class TestACatalogueLoginReachesTheRequestItWasStoredFor:
                 access=access(logins={CatalogueSource.DNB: self._login(DNB)}),
             )
 
-        assert dnb.called and k10plus.called
+        assert dnb.called
+        assert k10plus.called
         assert dnb.calls.last.request.headers["authorization"] == self.SENT
         assert "authorization" not in k10plus.calls.last.request.headers
 
@@ -7666,336 +8372,55 @@ class TestACatalogueLoginReachesTheRequestItWasStoredFor:
                 access=access(logins={CatalogueSource.DNB: self._login(DNB)}),
             )
 
-        assert dnb.called and k10plus.called
+        assert dnb.called
+        assert k10plus.called
         assert dnb.calls.last.request.headers["authorization"] == self.SENT
         assert "authorization" not in k10plus.calls.last.request.headers
 
 
-#: The one resolver that opens the keychain, spelled as the walk below finds it.
-_RESOLVER = "library_access"
+class TestOnlyTheKeysOwnerIsHandedIt:
+    """`metadata.Access.api_key` reaches the one source it belongs to.
 
-#: The throwaway function `_bound_names` asks `symtable` about, named so the
-#: block can be found by name rather than by position.
-_SCOPE = "_scope"
+    **The key is not "a credential".** It is Google Books' own, this
+    deployment's quota, and it travels in a query string. So the question the
+    dispatch has to answer is which secret a row's adapter takes, not whether
+    the row is metered and not whether it needs a credential: several sources
+    can answer yes to either, and the first bespoke credentialled non Google
+    source to arrive under one of those predicates would be handed Google's key
+    and would send it wherever its own adapter sends things.
 
+    **Asked of what `_lookup_one` passes, not of what the adapter does with
+    it.** Open Library's used to open with `del api_key`, so a test through the
+    wire passed whether the door was narrow or not. It has no such parameter
+    now, which is the fix rather than a convenience: `_FREE_LOOKUPS` values take
+    an ISBN and there is nothing a secret could arrive in.
 
-def _is_resolver(called: ast.expr) -> bool:
-    """`settings_store.library_access` however the module was named, or bare.
+    **The seeded roster cannot separate the candidate predicates, so two arms
+    construct rows it has not got.** Its two bespoke lookup rows agree on
+    `metered`, on `needs_key` and on `secret`: Open Library is no to all three,
+    Google Books is yes to all three. An expectation computed from any of them
+    would therefore be right on this roster whichever one it read, which is what
+    the previous version of this class was and why it pinned the defect as
+    correct. The literal table below is written out for the same reason.
 
-    The attribute arm does not check what it hangs off, so any
-    `something.library_access(...)` counts. Lenient in the direction of a missed
-    report rather than a false one, which is the direction every blind spot in
-    this file is written to fail in.
-    """
-    if isinstance(called, ast.Attribute):
-        return called.attr == _RESOLVER
-    return isinstance(called, ast.Name) and called.id == _RESOLVER
-
-
-def _bindings_in(scope: ast.AST) -> tuple[set[str], set[str]]:
-    """Names bound in this scope's own body, split by whether a resolver bound them.
-
-    **Stops at a nested function**, so one handler's resolved local is never read
-    as another's. `routers/books.py` binds the name `access` in six handlers and
-    one of them binds it from `_google_books_in_force`, which resolves no
-    keychain: a walk collecting names across the whole module would report that
-    one as carrying the deployment's logins.
-
-    **Both halves, because a rebind is the cheap evasion.** `access =
-    library_access(db)` followed by `access = metadata.Access(plan=access.plan,
-    api_key=access.api_key)` sends no login and reads, to anything watching only
-    the first line, exactly like the handler that does. `frozen=True` does not
-    stand in the way: it refuses mutation of the object and not rebinding of the
-    name. Found by the security seat on 2026-09-17, one line inserted into
-    `enrich_book`, whole suite green.
-    """
-    resolved: set[str] = set()
-    rebound: set[str] = set()
-    stack: list[ast.AST] = list(ast.iter_child_nodes(scope))
-    while stack:
-        node = stack.pop()
-        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
-            # **A `def` is a statement and it binds its own name**, which the
-            # skip below used to take with the body. `class` was caught and
-            # `def` was not, and that asymmetry was the tell. Asked of
-            # `_bound_names` like any other statement rather than reading
-            # `node.name`, so the answer stays the compiler's. Both seats
-            # reached this independently, 2026-09-17.
-            rebound.update(_bound_names(node))
-            continue
-        if isinstance(node, ast.Lambda):
-            continue
-        # **Statements classify, expressions do not.** An assignment's own
-        # target is an `ast.Name` child, and a walk classifying every node put
-        # that name in both halves at once.
-        if isinstance(node, ast.stmt):
-            targets = _bound_names(node)
-            if targets:
-                by_resolver = (
-                    isinstance(node, ast.Assign | ast.AnnAssign)
-                    and isinstance(node.value, ast.Call)
-                    and _is_resolver(node.value.func)
-                )
-                (resolved if by_resolver else rebound).update(targets)
-        stack.extend(ast.iter_child_nodes(node))
-    return resolved, rebound
-
-
-def _bound_names(node: ast.stmt) -> set[str]:
-    """Every name this statement binds, asked of CPython's own symbol table.
-
-    **Not a list of binding spellings, because that list is open.** Three
-    versions of this enumerated: the first read `ast.Store`, which misses
-    `except ... as`; the second added that one field and called it the only
-    exception, which was false by six, since `ast.MatchAs.name`,
-    `ast.MatchStar.name`, `ast.MatchMapping.rest` and `ast.alias`'s two are
-    plain strings as well. Each round was caught by the other seat and each fix
-    was one further arm, which is the shape `CLAUDE.md` names as structural or
-    nothing. `symtable` answers for every spelling the grammar has and for the
-    ones it grows, because it is the compiler's own answer to this question.
-
-    **Imported counts as bound.** `import os as access` reports `is_imported`
-    and not `is_assigned`, so a walk reading only the second called it resolved.
-
-    **Nested statements are replaced by `pass` before the question is asked**, so
-    a compound statement claims only what it binds itself: a `for` loop holding
-    a resolution would otherwise own that name and lose it to the rebind set.
-    The replacement is generic, every field that is a list of statements, so a
-    statement kind added to the grammar shallows itself.
-    """
-    body = textwrap.indent(ast.unparse(_shallowed(node)), "    ")
-    try:
-        # **Asked inside an `async def`, which is the scope these statements
-        # really live in.** At module level `await` is a `SyntaxError`, and half
-        # the statements this walks are inside a coroutine.
-        #
-        # **Found by name and never by position.** Under PEP 649 a module's
-        # first child block is `__annotate__`, so `get_children()[0]` is an
-        # annotation scope holding one symbol called `.format`, and every
-        # binding looked like a rebind. It reproduced only in the suite pod,
-        # because the control plane runs 3.13 and the pod runs 3.14.7.
-        blocks = symtable.symtable(
-            f"async def {_SCOPE}():\n{body}\n", "<statement>", "exec"
-        ).get_children()
-        table = next(block for block in blocks if block.get_name() == _SCOPE)
-    except SyntaxError:
-        # The case this is for is `from x import *`, legal at module level and
-        # not inside a function, which binds no name this walk can name.
-        # **It does not claim to be the only one**, which is the claim this
-        # function has now made wrongly three times: a `nonlocal` is legal in
-        # neither scope and raises straight out of here. That is the right
-        # direction for a statement this cannot classify, loud rather than
-        # absorbed, and it is why the fallback catches rather than returns.
-        table = symtable.symtable(ast.unparse(_shallowed(node)), "<statement>", "exec")
-    return {
-        symbol.get_name()
-        for symbol in table.get_symbols()
-        if symbol.is_assigned() or symbol.is_imported()
-    }
-
-
-def _shallowed(node: ast.stmt) -> ast.stmt:
-    """A copy of this statement whose nested statement lists are a bare `pass`.
-
-    Copied through `ast.unparse` rather than mutated, because the node belongs to
-    the caller's tree and the walk reads it again.
-    """
-    clone = ast.parse(ast.unparse(node)).body[0]
-
-    def strip(inner: ast.AST) -> None:
-        for field, value in ast.iter_fields(inner):
-            if isinstance(value, list) and value and all(
-                isinstance(item, ast.stmt) for item in value
-            ):
-                setattr(inner, field, [ast.Pass()])
-            elif isinstance(value, list):
-                for item in value:
-                    if isinstance(item, ast.AST):
-                        strip(item)
-            elif isinstance(value, ast.AST):
-                strip(value)
-
-    strip(clone)
-    return clone
-
-
-def _own_names(node: ast.AST) -> set[str]:
-    """What this child scope binds for itself, which its parent must not read.
-
-    **Asked of the child rather than of the spelling, which is why this one is
-    not a fourth enumeration.** Python's scope opening nodes are a closed set:
-    a module, a function, a lambda, a class and the four comprehensions. The
-    grammar keeps growing ways to bind a name and has not grown a way to hold
-    one. A module is absent here because the walk starts at one, and a class
-    because its body is statements, which `_bindings_in` classifies where they
-    stand.
-
-    A parameter and a comprehension target are the two kinds of name a child
-    scope binds without a statement, so nothing in `_bindings_in` sees either.
-    Both shadow: an inner `def inner(access)` and a `(x for access in rows)`
-    each take the name over for the length of their own scope, and a parent
-    still calling it resolved is reporting a login that will not be sent.
-
-    **Three of the four comprehensions were caught before this existed, and for
-    a reason nothing here controls.** PEP 709 inlined a list, set and dict
-    comprehension into the enclosing scope in 3.12, so their target reaches the
-    symbol table `_bound_names` asks. A generator expression kept its own scope
-    and did not, which left the family covered by a language change rather than
-    by a rule. Measured by the design seat on 3.14.7, 2026-09-17: the three
-    reported and the generator did not.
-
-    `ast.walk` over the whole `arguments` node, the form
-    `TestNoDoorTakesTheKeyAndThePlanApart._doors` uses, so positional only,
-    `*args` and `**kwargs` are parameters too.
-    """
-    if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda):
-        return {
-            argument.arg
-            for argument in ast.walk(node.args)
-            if isinstance(argument, ast.arg)
-        }
-    if isinstance(node, ast.ListComp | ast.SetComp | ast.DictComp | ast.GeneratorExp):
-        return {
-            name.id
-            for generator in node.generators
-            for name in ast.walk(generator.target)
-            if isinstance(name, ast.Name) and isinstance(name.ctx, ast.Store)
-        }
-    return set()
-
-
-def _metadata_calls(source: str, doors: frozenset[str]) -> list[tuple[str, int, bool]]:
-    """Every call to one of `doors` here, and whether its access was resolved.
-
-    **Resolved means `settings_store.library_access`**, which is the one thing
-    that opens the keychain. An `Access` built by hand carries `_NO_LOGINS` by
-    default and the door cannot tell: `metadata.Access` makes the three values
-    one, and it deliberately does not make the logins compulsory, because
-    `routers/books.py::_google_books_in_force` builds one for a door that sends
-    none. So the door being handed an access at all is mypy's job, and which
-    access it was handed is this walk's.
-
-    **Keyed on the module, never on the local binding.** `import metadata as m`
-    binds `m`, and a walk testing the spelling `metadata` walks past it. Same
-    reasoning, and the same recorded evasion, as `test_marc.py::_private_reads`.
-
-    **`from metadata import lookup` reaches the same door by the other route**,
-    where the call is a bare `ast.Name` and there is no attribute to match at
-    all. The first version of this saw neither shape.
-
-    `doors` is passed in rather than derived here, so this answers about a
-    subject somebody else pinned. Deriving it from the entry points that already
-    take the access is what made the first version green under the evasion it
-    exists to catch.
-    """
-    tree = ast.parse(source)
-    aliases = {
-        (alias.asname or alias.name.split(".")[0])
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Import)
-        for alias in node.names
-        if alias.name.split(".")[0] == "metadata"
-    }
-    bound = {
-        (alias.asname or alias.name): alias.name
-        for node in ast.walk(tree)
-        if isinstance(node, ast.ImportFrom)
-        and node.module
-        and node.module.split(".")[0] == "metadata"
-        for alias in node.names
-        if alias.name in doors
-    }
-
-    def door_of(node: ast.Call) -> str | None:
-        called = node.func
-        if (
-            isinstance(called, ast.Attribute)
-            and isinstance(called.value, ast.Name)
-            and called.value.id in aliases
-            and called.attr in doors
-        ):
-            return called.attr
-        if isinstance(called, ast.Name) and called.id in bound:
-            return bound[called.id]
-        return None
-
-    def carries(node: ast.Call, resolved: set[str]) -> bool:
-        return any(
-            word.arg == "access"
-            and (
-                (isinstance(word.value, ast.Name) and word.value.id in resolved)
-                or (isinstance(word.value, ast.Call) and _is_resolver(word.value.func))
-            )
-            for word in node.keywords
-        )
-
-    found: list[tuple[str, int, bool]] = []
-
-    def visit(node: ast.AST, resolved: set[str]) -> None:
-        # The set grows on the way down, so a nested function reads the local
-        # its enclosing handler resolved. `resolve` inside
-        # `backfill_from_identifiers` is the shape that needs it.
-        #
-        # **The rebinds come off before the resolutions go on**, so a name bound
-        # twice in one scope is resolved only if nothing else bound it. That is
-        # blunter than following the order of the statements and it is blunt in
-        # the safe direction: it reports rather than excuses.
-        if isinstance(node, ast.Module | ast.FunctionDef | ast.AsyncFunctionDef):
-            here, rebound = _bindings_in(node)
-            resolved = (resolved - rebound) | (here - rebound)
-        for child in ast.iter_child_nodes(node):
-            if isinstance(child, ast.Call):
-                door = door_of(child)
-                if door is not None:
-                    found.append((door, child.lineno, carries(child, resolved)))
-            # **A child scope's own bindings shadow what the enclosing one
-            # resolved.** Not fixable by refusing to descend, because descending
-            # is what `resolve` inside `backfill_from_identifiers` relies on, so
-            # the inherited set loses the names the child names itself.
-            visit(child, resolved - _own_names(child))
-
-    visit(tree, set())
-    return sorted(found, key=lambda row: row[1])
-
-
-def _wrapped(body: str) -> str:
-    """An evasion as a module the parser accepts: `await` needs a coroutine."""
-    imports, _, call = body.partition("\n")
-    return f"{imports}\n\n\nasync def route(i, a, db):\n    {call.strip()}\n"
-
-
-class TestTheKeyReachesAMeteredDoorAndNoOther:
-    """The API key is metered quota, so an unmetered door is handed nothing.
-
-    **The evasion this closes was recorded rather than fixed** when the outbound
-    request became one value: add a row to `_BESPOKE_LOOKUPS` whose adapter takes
-    the key and sends it somewhere that is not Google, and `_lookup_one` hands it
-    over by the row merely existing. `_search_one` already asked
-    `Capability.METERED` before reaching for it; this is the lookup half of the
-    same question.
-
-    **Asked of what `_lookup_one` passes, not of what the adapter does with it.**
-    Open Library's adapter opens with `del api_key`, so a test through the wire
-    passes whether the door is narrow or not.
+    **What the old rule refused and this one must go on refusing**: Open
+    Library receives nothing. `test_a_free_door_is_handed_no_secret` is that
+    arm, and it is the one to break first when attacking this class.
     """
 
     ISBN = "9780743273565"
     KEY = "a-metered-key"
+    QUERY = "the great gatsby"
+    LIMIT = 5
 
-    def _captured(self, monkeypatch) -> list[str]:
-        """What each bespoke adapter was handed, in call order."""
-        seen: list[str] = []
-
-        async def adapter(isbn: str, api_key: str) -> metadata.Lookup:
-            seen.append(api_key)
-            return metadata.Lookup(Outcome.NOT_FOUND, source="")
-
-        monkeypatch.setattr(
-            metadata,
-            "_BESPOKE_LOOKUPS",
-            dict.fromkeys(metadata._BESPOKE_LOOKUPS, adapter),
-        )
-        return seen
+    #: What each seeded bespoke lookup row's adapter is handed, written out
+    #: rather than computed. A tuple, because its **length** is which of the two
+    #: tables the dispatch chose, so a wrong table is visible here rather than
+    #: inferred from a `KeyError`.
+    EXPECTED = {
+        CatalogueSource.OPEN_LIBRARY: (ISBN,),
+        CatalogueSource.GOOGLE_BOOKS: (ISBN, KEY),
+    }
 
     BESPOKE = sorted(
         (
@@ -8006,28 +8431,312 @@ class TestTheKeyReachesAMeteredDoorAndNoOther:
         key=lambda name: name.value,
     )
 
+    def _captured(self, monkeypatch) -> list[tuple[str, ...]]:
+        """What each bespoke adapter was handed, in call order.
+
+        Both tables are replaced, each recorder keeping its own table's arity,
+        so which door was reached is part of what is recorded.
+        """
+        seen: list[tuple[str, ...]] = []
+
+        async def free(isbn: str) -> metadata.Lookup:
+            seen.append((isbn,))
+            return metadata.Lookup(Outcome.NOT_FOUND, source="")
+
+        async def keyed(isbn: str, api_key: str) -> metadata.Lookup:
+            seen.append((isbn, api_key))
+            return metadata.Lookup(Outcome.NOT_FOUND, source="")
+
+        monkeypatch.setattr(
+            metadata, "_FREE_LOOKUPS", dict.fromkeys(metadata._FREE_LOOKUPS, free)
+        )
+        monkeypatch.setattr(
+            metadata, "_KEYED_LOOKUPS", dict.fromkeys(metadata._KEYED_LOOKUPS, keyed)
+        )
+        return seen
+
+    def test_the_table_covers_every_bespoke_lookup_row(self):
+        """A row added to the roster and not to `EXPECTED` would be uncovered by
+        an arm that only walks what it finds."""
+        assert sorted(self.EXPECTED, key=lambda name: name.value) == self.BESPOKE
+
     @pytest.mark.parametrize("source", BESPOKE, ids=lambda source: source.value)
-    async def test_a_bespoke_door_is_handed_the_key_only_if_it_is_metered(
+    async def test_a_seeded_door_is_handed_what_the_table_says(
         self, source, monkeypatch
     ):
-        target = targets.SEEDED[source]
         seen = self._captured(monkeypatch)
 
-        await metadata._lookup_one(target, self.ISBN, self.KEY, credential=None)
+        await metadata._lookup_one(
+            targets.SEEDED[source], self.ISBN, self.KEY, credential=None
+        )
 
-        expected = self.KEY if target.can(Capability.METERED) else ""
-        assert seen == [expected]
+        assert seen == [self.EXPECTED[source]]
+
+    async def test_a_free_door_is_handed_no_secret(self, monkeypatch):
+        """The rule the old version got right, kept and strengthened.
+
+        It is now a statement about the argument list rather than about the
+        value: the free door receives one argument, and no spelling of an empty
+        secret is available to be passed.
+        """
+        seen = self._captured(monkeypatch)
+
+        await metadata._lookup_one(
+            targets.SEEDED[CatalogueSource.OPEN_LIBRARY],
+            self.ISBN,
+            self.KEY,
+            credential=None,
+        )
+
+        assert seen == [(self.ISBN,)]
+
+    async def test_being_metered_does_not_entitle_a_row_to_the_key(
+        self, monkeypatch
+    ):
+        """The first row the roster has not got, and the one that separates
+        `metered` from the secret's owner.
+
+        Being billed per request and being entitled to one named source's key
+        are different facts, and no seeded row holds one without the other.
+        """
+        row = dataclasses.replace(
+            targets.SEEDED[CatalogueSource.OPEN_LIBRARY], metered=True
+        )
+        seen = self._captured(monkeypatch)
+
+        await metadata._lookup_one(row, self.ISBN, self.KEY, credential=None)
+
+        assert seen == [(self.ISBN,)]
+
+    async def test_needing_a_credential_does_not_entitle_a_row_to_the_key(
+        self, monkeypatch
+    ):
+        """The second, and the one the plan's own remedy would have failed.
+
+        Substituting `Capability.NEEDS_A_CREDENTIAL` for the metered test was
+        the proposed fix. It is a leak where the defect it replaced was a drop:
+        this row needs a credential, owns no key, and under that predicate is
+        handed Google's.
+        """
+        row = dataclasses.replace(
+            targets.SEEDED[CatalogueSource.OPEN_LIBRARY], needs_key=True
+        )
+        seen = self._captured(monkeypatch)
+
+        await metadata._lookup_one(row, self.ISBN, self.KEY, credential=None)
+
+        assert seen == [(self.ISBN,)]
+
+    def test_such_a_row_never_reaches_the_dispatch_at_all(self):
+        """And the arm above is the second of two checks rather than the only
+        one.
+
+        A bespoke row needing a credential and naming no secret has nothing that
+        can supply one: a sealed login goes out of the SRU door and no other.
+        `resolve` refuses it at boot, so the author of the next catalogue learns
+        it while writing the row rather than reading a miss in production.
+
+        **This arm holds two facts the pair below cannot see, so it is not a
+        weaker version of either.** Their rows are Google Books', which is
+        metered **and** needs a credential, so a refusal asking `metered` where
+        it should ask `needs_key`, the exact confusion this whole rule exists to
+        kill, is invisible to both. This row is Open Library's with a credential
+        added, metered False, and it is the only one that separates them. And it
+        carries a shipped credential, which is the one field a constructible row
+        can differ on while answering both doors: without it, a refusal narrowed
+        to rows shipping no login would let a row whose login is dropped
+        silently walk past, which is the drop this rule turns into a loud boot
+        failure.
+
+        **The transport half of the refusal is untestable today** and is stated
+        rather than left to be found: `Target` refuses the other bespoke
+        transport at construction, so no constructible row separates "not SRU"
+        from "is bespoke", and no arm here or anywhere can.
+        """
+        row = dataclasses.replace(
+            targets.SEEDED[CatalogueSource.OPEN_LIBRARY],
+            needs_key=True,
+            shipped_credential=targets.ShippedCredential("u", "p"),
+        )
+
+        with pytest.raises(ValueError, match="no bespoke door carries one"):
+            metadata.resolve(row)
+
+    async def test_the_row_is_read_and_not_the_tables_key_set(self, monkeypatch):
+        """Selecting on `target.reader in _KEYED_LOOKUPS` is the same defect.
+
+        It agrees with the row on every seeded target, because
+        `main.seed_catalogue_targets` runs `resolve` over the roster at boot and
+        a row whose reader is in no matching table fails there. So the agreement
+        is a property of the roster and not of the dispatch, and a table's key
+        set standing in for a rule about the row is what this function was fixed
+        for.
+
+        **The row that separates them owns the key's reader and names no
+        secret.** The shipped dispatch reads the row, reaches the free table and
+        finds no Google Books entry in it; a reader keyed test reaches the keyed
+        table and answers. `KeyError` is the shape of the refusal because this
+        row cannot reach `resolve`'s roster, which is where a named refusal
+        lives.
+
+        **It separates for the right reason, which is not automatic**: every
+        other fact the dispatch could have read still answers "keyed" on this
+        row, so the arm fails on a reader keyed test and on nothing incidental.
+        The one fact that agrees with the row here, `shipped_credential is
+        None`, reddens a different named arm of this class, so a dispatch
+        reading that instead is covered without a second arm here.
+        """
+        row = dataclasses.replace(
+            targets.SEEDED[CatalogueSource.GOOGLE_BOOKS], secret=targets.Secret.NONE
+        )
+        seen = self._captured(monkeypatch)
+
+        with pytest.raises(KeyError, match=r"Reader\.GOOGLE_BOOKS"):
+            await metadata._lookup_one(row, self.ISBN, self.KEY, credential=None)
+
+        assert seen == []
+
+    #: The same oracle for the search door, written out for the same reason.
+    #: The tuple's length is which of the two search tables was reached.
+    EXPECTED_SEARCH = {
+        CatalogueSource.OPEN_LIBRARY: (QUERY, LIMIT),
+        CatalogueSource.GOOGLE_BOOKS: (QUERY, LIMIT, KEY),
+    }
+
+    BESPOKE_SEARCH = sorted(
+        (
+            name
+            for name, row in targets.SEEDED.items()
+            if row.answers_search and row.transport is not targets.Transport.SRU
+        ),
+        key=lambda name: name.value,
+    )
+
+    def _captured_search(self, monkeypatch) -> list[tuple[object, ...]]:
+        """What each bespoke search adapter was handed, in call order."""
+        seen: list[tuple[object, ...]] = []
+
+        async def free(query: str, limit: int) -> list[Record]:
+            seen.append((query, limit))
+            return []
+
+        async def keyed(query: str, limit: int, api_key: str) -> list[Record]:
+            seen.append((query, limit, api_key))
+            return []
+
+        monkeypatch.setattr(
+            metadata, "_FREE_SEARCHES", dict.fromkeys(metadata._FREE_SEARCHES, free)
+        )
+        monkeypatch.setattr(
+            metadata,
+            "_METERED_SEARCHES",
+            dict.fromkeys(metadata._METERED_SEARCHES, keyed),
+        )
+        return seen
+
+    def test_the_search_table_covers_every_bespoke_search_row(self):
+        assert (
+            sorted(self.EXPECTED_SEARCH, key=lambda name: name.value)
+            == self.BESPOKE_SEARCH
+        )
+
+    @pytest.mark.parametrize(
+        "source", BESPOKE_SEARCH, ids=lambda source: source.value
+    )
+    async def test_a_seeded_search_door_is_handed_what_the_table_says(
+        self, source, monkeypatch
+    ):
+        seen = self._captured_search(monkeypatch)
+
+        await metadata._search_one(
+            targets.SEEDED[source], self.QUERY, self.LIMIT, self.KEY, credential=None
+        )
+
+        assert seen == [self.EXPECTED_SEARCH[source]]
+
+    async def test_being_metered_does_not_entitle_a_search_door_to_the_key(
+        self, monkeypatch
+    ):
+        """The search door reads the row, and it used to read `METERED`.
+
+        **The same latent leak, one screen from the lookup door.** The two
+        search tables differ by arity, so the old test read as a signature
+        selector; it was also the credential gate, and a second metered bespoke
+        source added to the keyed table would have been handed Google's key by
+        arriving. Whose key it is has nothing to do with which question is being
+        asked, so both doors read the same field.
+        """
+        row = dataclasses.replace(
+            targets.SEEDED[CatalogueSource.OPEN_LIBRARY], metered=True
+        )
+        seen = self._captured_search(monkeypatch)
+
+        await metadata._search_one(
+            row, self.QUERY, self.LIMIT, self.KEY, credential=None
+        )
+
+        assert seen == [(self.QUERY, self.LIMIT)]
+
+    def test_a_search_only_row_is_refused_by_the_same_rule(self):
+        """The reason that refusal sits above both arms and not inside one.
+
+        A row whose only door is the search door needs the same refusal: a
+        sealed login goes out of the SRU door and no other, whichever question
+        is being asked. Written into the lookup arm, where it began, this row
+        walked past it.
+
+        **This arm and the lookup only one below are a pair, and neither is
+        redundant**, which is not obvious and is the sentence that stops one of
+        them being deleted. **Both seeded bespoke rows answer both doors**, each
+        `answers_lookup=True, answers_search=True`, so no row on the roster
+        separates the two sides and every arm using one pins neither. Each of
+        the pair therefore constructs a row the roster has not got, and each is
+        the only thing that sees its own half of the refusal narrowed away.
+
+        **The `match` is the load bearing half of both.** With the refusal
+        narrowed to the lookup arm, this row still raises, from the search arm's
+        reader check and with a different message, so a `raises` with no `match`
+        would be green against the one change it exists to catch.
+        """
+        row = dataclasses.replace(
+            targets.SEEDED[CatalogueSource.GOOGLE_BOOKS],
+            answers_lookup=False,
+            secret=targets.Secret.NONE,
+        )
+
+        with pytest.raises(ValueError, match="no bespoke door carries one"):
+            metadata.resolve(row)
+
+    def test_a_lookup_only_row_is_refused_by_the_same_rule(self):
+        """The other half of the diagonal. See the arm above for why both.
+
+        Narrowed to the search arm instead, this row resolves, reaches the free
+        door and sends a request without the credential it declares, which is
+        the drop the refusal exists to turn into a loud boot failure.
+
+        The `match` is load bearing here for the mirror of the reason above:
+        under that narrowing the row still raises, from the lookup arm's reader
+        check and with a different message.
+        """
+        row = dataclasses.replace(
+            targets.SEEDED[CatalogueSource.GOOGLE_BOOKS],
+            answers_search=False,
+            secret=targets.Secret.NONE,
+        )
+
+        with pytest.raises(ValueError, match="no bespoke door carries one"):
+            metadata.resolve(row)
 
     def test_the_roster_holds_a_door_of_each_kind(self):
-        """Or the arm above is parametrised over one answer and proves half of it."""
-        bespoke = [
-            row
-            for row in targets.SEEDED.values()
-            if row.answers_lookup and row.transport is not targets.Transport.SRU
+        """Or the parametrised arm is over one answer and proves half of it."""
+        owners = [
+            source
+            for source in self.BESPOKE
+            if targets.SEEDED[source].secret is not targets.Secret.NONE
         ]
-        metered = [row for row in bespoke if row.can(Capability.METERED)]
 
-        assert metered and len(metered) < len(bespoke)
+        assert owners
+        assert len(owners) < len(self.BESPOKE)
 
 
 class TestWhichDoorCarriesALogin:
@@ -8086,19 +8795,28 @@ class TestWhichDoorCarriesALogin:
 class TestEveryDoorThatNeedsALoginDeclaresOneAndEveryRouteSuppliesIt:
     """A login cannot be forgotten at a door or at a call site.
 
-    **The access is compulsory and its logins are not, which is why this
-    exists.** `test_house_rules.py::TestEveryOutboundEntryPointTakesTheProviderList`
-    can lean on mypy: `access` is keyword only with no default, so a call site
-    that forgets it does not compile. What mypy cannot see is **which** access:
-    `metadata.Access` defaults `logins` to `_NO_LOGINS`, deliberately, because
-    `routers/books.py::_google_books_in_force` builds one for a door that sends
-    none. So a handler that built its own would type check and send nothing.
+    **Both halves are compulsory now, and that is what retired the walk.** The
+    access is keyword only with no default, so a call site that forgets it does
+    not compile, which is
+    `test_house_rules.py::TestEveryOutboundEntryPointTakesTheProviderList`. The
+    part mypy could not see used to be **which** access, because
+    `metadata.Access` defaulted `logins` to an empty mapping: a handler that
+    assembled its own type checked and sent nothing. That was checked by an `ast`
+    and `symtable` walk over the router, tracking which local a resolver had
+    bound and whether anything had rebound it. `logins` is compulsory, so the
+    same question is now a `mypy` error, and
+    `test_the_logins_cannot_become_optional_again` below is what keeps it one.
 
-    **The walk is not the only thing standing here, and this class used to read
-    as though it were.** `tests/routers/test_books.py::TestACatalogueLoginLeavesTheDeploymentWithItsRequest`
+    **Neither half would have been enough alone.** Compulsory logins stop a
+    silent hand built access; they do not stop a handler resolving a correct one
+    and reaching a door by a route nothing watches. That is
+    `TestOnlyTheAccessDoorAsksACatalogue`, and the two together are what let the
+    walk go.
+
+    **They are not the only thing standing here.**
+    `tests/routers/test_books.py::TestACatalogueLoginLeavesTheDeploymentWithItsRequest`
     puts a real login on the wire through `/lookup`, so a resolver gutted at its
-    own site fails by name. It covers that one route; the walk is what covers the
-    other four.
+    own site fails by name.
 
     **The subject is pinned, not derived from the fix.** The first version of
     this asked which entry points already take `logins` and checked those, which
@@ -8131,8 +8849,6 @@ class TestEveryDoorThatNeedsALoginDeclaresOneAndEveryRouteSuppliesIt:
         ),
     }
 
-    ROUTER = BACKEND / "routers" / "books.py"
-
     def _public_coroutines(self) -> set[str]:
         return {
             name
@@ -8160,281 +8876,28 @@ class TestEveryDoorThatNeedsALoginDeclaresOneAndEveryRouteSuppliesIt:
             parameter = inspect.signature(getattr(metadata, name)).parameters["access"]
             assert parameter.kind is inspect.Parameter.KEYWORD_ONLY, name
 
-    def test_no_route_asks_a_catalogue_without_them(self):
-        found = _metadata_calls(self.ROUTER.read_text(), self.DOORS)
+    def test_the_logins_cannot_become_optional_again(self):
+        """A default on `logins` is what a hand built access used to hide behind.
 
-        # **Before the verdict, not after it.** Measured 2026-09-06: pointing
-        # this at a module that asks no catalogue passed green, because an empty
-        # walk has nothing to report. A guard that reads the wrong file has to
-        # fail, not abstain.
-        assert found, f"{self.ROUTER.name} asks no catalogue: the walk read nothing"
-
-        missing = [
-            f"metadata.{door} at line {line}" for door, line, carried in found if not carried
-        ]
-        assert not missing, (
-            f"{missing} ask a catalogue with an access nothing resolved the "
-            "deployment's logins into, so a stored login is never sent there"
-        )
-
-
-#: A call shape per import spelling, each carrying an access nothing resolved.
-#:
-#: **Parametrised so a shape is reported by name.** A single sample carrying every
-#: shape at once cannot say which of them a change stopped seeing, and dropping
-#: support for a shape is exactly the evasion this walk shipped with.
-_EVASIONS = {
-    "a plain module import": "import metadata\nawait metadata.lookup(i, access=a)\n",
-    "an aliased module import": "import metadata as m\nawait m.lookup(i, access=a)\n",
-    "a name imported directly": (
-        "from metadata import lookup as _lookup\nawait _lookup(i, access=a)\n"
-    ),
-}
-
-
-class TestTheWalkSeesEveryWayADoorIsReached:
-    """The walk finds a call however the module was imported.
-
-    **Found by attacking it, not by reading it.** The first version matched
-    `ast.Attribute` whose value was the bare name `metadata`, so rewriting any
-    one of the router's call sites as `import metadata as m` or as
-    `from metadata import title_search` walked straight past it and the guard
-    stayed green. That is the same blind spot `test_marc.py::_private_reads` and
-    `test_shelf.py` each record against their own first versions.
-
-    **The blind spots left, stated rather than left to be found.** A door reached
-    through a variable holding the function, or through `getattr`, is invisible;
-    so is a door re-exported by some other module and called through that. Each
-    fails in the direction of a missed report rather than a false one, which is
-    why they are written down. No such shape appears in this package.
-    """
-
-    DOORS = TestEveryDoorThatNeedsALoginDeclaresOneAndEveryRouteSuppliesIt.DOORS
-
-    @pytest.mark.parametrize("shape", sorted(_EVASIONS), ids=lambda shape: shape)
-    def test_a_call_omitting_them_is_reported(self, shape):
-        found = _metadata_calls(_wrapped(_EVASIONS[shape]), self.DOORS)
-
-        assert [(door, carried) for door, _, carried in found] == [("lookup", False)]
-
-    @pytest.mark.parametrize("shape", sorted(_EVASIONS), ids=lambda shape: shape)
-    def test_the_same_call_carrying_a_resolved_access_is_not(self, shape):
-        """The diagonal: an arm that reported everything would pass the one above."""
-        supplied = _EVASIONS[shape].replace(
-            "access=a)", "access=settings_store.library_access(db))"
-        )
-        found = _metadata_calls(_wrapped(supplied), self.DOORS)
-
-        assert [(door, carried) for door, _, carried in found] == [("lookup", True)]
-
-    @pytest.mark.parametrize("shape", sorted(_EVASIONS), ids=lambda shape: shape)
-    def test_an_access_resolved_into_a_local_first_is_seen(self, shape):
-        """Which is how five of the six handlers are written: resolve, then pass.
-
-        The diagonal above proves only the call shape. A walk that matched the
-        resolver at the call site alone would report every one of those handlers
-        as unresolved, and a reviewer reading a wall of red finds nothing.
+        The evasion itself is a `mypy` error, loudly, at every call site that
+        omits the argument. This arm is what stops somebody quieting those
+        errors by restoring the default, which is the one edit that would put
+        the walk's whole job back with nothing else going red.
         """
-        supplied = _EVASIONS[shape].replace(
-            "await", "a = settings_store.library_access(db)\n    await"
-        )
-        found = _metadata_calls(_wrapped(supplied), self.DOORS)
-
-        assert [(door, carried) for door, _, carried in found] == [("lookup", True)]
-
-    @pytest.mark.parametrize("shape", sorted(_EVASIONS), ids=lambda shape: shape)
-    def test_an_access_rebuilt_over_a_resolved_one_is_reported(self, shape):
-        """The evasion `frozen=True` does not reach, because it rebinds the name
-        rather than mutating the object.
-
-        Found by the security seat on 2026-09-17: one line inserted into
-        `enrich_book` made the route send no `Authorization` to any SRU
-        catalogue, and every guard in this file stayed green.
-        """
-        supplied = _EVASIONS[shape].replace(
-            "await",
-            "a = settings_store.library_access(db)\n"
-            "    a = metadata.Access(plan=a.plan, api_key=a.api_key)\n"
-            "    await",
-        )
-        found = _metadata_calls(_wrapped(supplied), self.DOORS)
-
-        assert [(door, carried) for door, _, carried in found] == [("lookup", False)]
-
-    def test_a_resolved_access_in_another_function_is_not_borrowed(self):
-        """Which is what the router looks like: six handlers, one name.
-
-        `backfill_from_identifiers` binds `access` from a resolver that opens no
-        keychain, and a walk collecting names module wide reports it as carrying
-        the deployment's logins.
-        """
-        source = (
-            "import metadata\n\n\n"
-            "async def resolved(db):\n"
-            "    access = settings_store.library_access(db)\n"
-            "    return access\n\n\n"
-            "async def borrowing(db):\n"
-            "    access = _google_books_in_force(db)\n"
-            "    await metadata.lookup(i, access=access)\n"
-        )
-        found = _metadata_calls(source, self.DOORS)
-
-        assert [(door, carried) for door, _, carried in found] == [("lookup", False)]
-
-    def test_a_call_on_something_that_is_not_a_door_is_ignored(self):
-        """Or the walk reports every attribute call and its verdict means nothing."""
-        source = _wrapped("import metadata\nawait metadata.clear_cache()\n")
-
-        assert _metadata_calls(source, self.DOORS) == []
-
-
-#: One rebind per spelling the grammar has for binding a name, each one line.
-#:
-#: **The list is the diagonal and not the rule.** `_bound_names` asks
-#: `symtable`, so it answers for spellings nobody wrote down; these arms say
-#: that it does, one per spelling so a regression is reported by name. Six of
-#: them were reported as carrying a login until 2026-09-17, when the walk read
-#: `ast.Store` plus one hand added field.
-_REBINDS = {
-    "an assignment": "access = metadata.Access(plan=p, api_key=k)",
-    "an annotated assignment": "access: object = metadata.Access(plan=p, api_key=k)",
-    "an augmented assignment": "access += 1",
-    "a walrus": "print(access := build())",
-    "a for target": "for access in rows:\n        pass",
-    "a with clause": "with build() as access:\n        pass",
-    "an except clause": "try:\n        pass\n    except Exception as access:\n        pass",
-    "a match capture": "match v:\n        case access:\n            pass",
-    "a match as pattern": "match v:\n        case _ as access:\n            pass",
-    "a match star pattern": "match v:\n        case [1, *access]:\n            pass",
-    "a match rest pattern": "match v:\n        case {'a': 1, **access}:\n            pass",
-    "an aliased import": "import os as access",
-    "an aliased from import": "from os import path as access",
-    "a plain import": "import access",
-    "a def": "def access():\n        pass",
-    "an async def": "async def access():\n        pass",
-    "a class": "class access:\n        pass",
-    "a del": "del access",
-    "a type alias": "type access = int",
-}
-
-
-class TestEverySpellingThatRebindsAResolvedAccessIsReported:
-    """A name resolved once and bound again reaches a door carrying nothing.
-
-    **`_bound_names` asks `symtable` rather than naming the spellings**, because
-    the set is open: three drafts of that helper enumerated, and each was one
-    grammar feature short. What is enumerated here is the **diagonal**, which is
-    a list of samples rather than the rule, and its job is to report by name
-    when the rule stops covering one.
-    """
-
-    DOORS = TestEveryDoorThatNeedsALoginDeclaresOneAndEveryRouteSuppliesIt.DOORS
-
-    def _scope(self, rebind: str) -> str:
-        return (
-            "import metadata\n\n\n"
-            "async def route(db, v, rows, p, k):\n"
-            "    access = settings_store.library_access(db)\n"
-            f"    {rebind}\n"
-            "    await metadata.lookup(i, access=access)\n"
+        logins = next(
+            field
+            for field in dataclasses.fields(metadata.Access)
+            if field.name == "logins"
         )
 
-    @pytest.mark.parametrize("spelling", sorted(_REBINDS), ids=lambda name: name)
-    def test_a_rebound_access_is_not_called_resolved(self, spelling):
-        found = _metadata_calls(self._scope(_REBINDS[spelling]), self.DOORS)
-
-        assert [(door, carried) for door, _, carried in found] == [("lookup", False)]
-
-    def test_the_same_scope_with_nothing_in_between_is_resolved(self):
-        """The diagonal's own diagonal: an arm reporting everything would pass
-        every case above and mean nothing."""
-        found = _metadata_calls(self._scope("pass"), self.DOORS)
-
-        assert [(door, carried) for door, _, carried in found] == [("lookup", True)]
-
-    def test_a_nested_function_does_not_inherit_a_name_it_shadows(self):
-        """A parameter is not a statement, so nothing in the scope walk sees it.
-
-        It cannot be fixed by refusing to descend: `backfill_from_identifiers`
-        wraps its outbound call in a nested `resolve` that reads the enclosing
-        handler's value, so descending is the behaviour, and what has to narrow
-        is the set that descends.
-        """
-        scope = (
-            "import metadata\n\n\n"
-            "async def route(i, db):\n"
-            "    access = settings_store.library_access(db)\n"
-            "    async def inner(access):\n"
-            "        return await metadata.lookup(i, access=access)\n"
-            "    return inner\n"
+        assert logins.default is dataclasses.MISSING, (
+            "metadata.Access.logins has a default again, so an access assembled "
+            "by hand type checks and sends no login"
         )
-        found = _metadata_calls(scope, self.DOORS)
-
-        assert [(door, carried) for door, _, carried in found] == [("lookup", False)]
-
-    def test_a_nested_function_naming_no_such_parameter_still_inherits(self):
-        """The diagonal, and it is the router's own shape: `resolve` inside
-        `backfill_from_identifiers` takes a volume id and reads the access its
-        handler resolved."""
-        scope = (
-            "import metadata\n\n\n"
-            "async def route(i, db):\n"
-            "    access = settings_store.library_access(db)\n"
-            "    async def inner(volume_id):\n"
-            "        return await metadata.lookup(volume_id, access=access)\n"
-            "    return inner\n"
+        assert logins.default_factory is dataclasses.MISSING, (
+            "metadata.Access.logins has a default factory, which is the same "
+            "hole spelled differently"
         )
-        found = _metadata_calls(scope, self.DOORS)
-
-        assert [(door, carried) for door, _, carried in found] == [("lookup", True)]
-
-    #: One scope opening child per kind, each binding `access` for itself and
-    #: calling a door with it from inside.
-    #:
-    #: **The generator expression is why this exists.** PEP 709 inlined the
-    #: other three into the enclosing scope in 3.12, so their target reaches the
-    #: symbol table and they were reported before anything here handled them:
-    #: the family was covered by a language change rather than by a rule, and
-    #: the one member that kept its own scope was the one left open. Measured by
-    #: the design seat on 3.14.7, 2026-09-17.
-    CHILD_SCOPES = {
-        "a list comprehension": "[metadata.lookup(i, access=access) for access in rows]",
-        "a set comprehension": "{metadata.lookup(i, access=access) for access in rows}",
-        "a dict comprehension": "{metadata.lookup(i, access=access): 1 for access in rows}",
-        "a generator expression": "(metadata.lookup(i, access=access) for access in rows)",
-        "a lambda parameter": "lambda access: metadata.lookup(i, access=access)",
-    }
-
-    @pytest.mark.parametrize("kind", sorted(CHILD_SCOPES), ids=lambda name: name)
-    def test_a_child_scope_binding_the_name_does_not_read_the_resolved_one(self, kind):
-        """Called from inside the child, which is where its own binding wins.
-
-        After the child the enclosing resolution is what the name means again,
-        and there the answer should be, and is, the other one. That half is
-        `test_the_same_scope_with_nothing_in_between_is_resolved`.
-        """
-        scope = (
-            "import metadata\n\n\n"
-            "async def route(i, db, rows):\n"
-            "    access = settings_store.library_access(db)\n"
-            f"    result = {self.CHILD_SCOPES[kind]}\n"
-        )
-        found = _metadata_calls(scope, self.DOORS)
-
-        assert [(door, carried) for door, _, carried in found] == [("lookup", False)]
-
-    def test_a_resolution_inside_a_compound_statement_still_counts(self):
-        """Or the shallowing in `_shallowed` would cost the name it protects."""
-        scope = (
-            "import metadata\n\n\n"
-            "async def route(db, rows):\n"
-            "    for row in rows:\n"
-            "        access = settings_store.library_access(db)\n"
-            "        await metadata.lookup(row, access=access)\n"
-        )
-        found = _metadata_calls(scope, self.DOORS)
-
-        assert [(door, carried) for door, _, carried in found] == [("lookup", True)]
 
 
 class TestNoDoorTakesTheKeyAndThePlanApart:
@@ -8561,7 +9024,7 @@ class TestAResolvedAccessCannotBeChanged:
 
     @pytest.mark.parametrize("field", ["plan", "api_key", "logins"])
     def test_no_field_can_be_reassigned_after_it_is_resolved(self, field):
-        resolved = metadata.Access(plan=ALL_SOURCES, api_key="a-key")
+        resolved = metadata.Access(plan=ALL_SOURCES, api_key="a-key", logins={})
 
         with pytest.raises(dataclasses.FrozenInstanceError):
             setattr(resolved, field, getattr(resolved, field))

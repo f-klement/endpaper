@@ -6,6 +6,9 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import respx
+from fastapi import HTTPException
+from sqlalchemy import event
 from sqlalchemy.exc import IntegrityError
 
 import lending
@@ -490,7 +493,7 @@ class TestTheNestedBook:
         assert "cover_url" in loan["book"]
 
     def test_a_page_of_loans_costs_the_same_whatever_its_length(
-        self, client, admin, make_book, _password_hash
+        self, client, admin, make_book, password_hash
     ):
         """It was 53 statements for 25 loans: the N+1 the docs say was fixed.
 
@@ -530,11 +533,11 @@ class TestTheNestedBook:
         10 at three loans and 17 at ten, against the 7 below at both lengths.
         """
         for index in range(3):
-            lend_between_strangers(client, make_book, _password_hash, index)
+            lend_between_strangers(client, make_book, password_hash, index)
         short_cost, short_total = selects_for(client, admin["headers"], "/api/loans")
 
         for index in range(3, 10):
-            lend_between_strangers(client, make_book, _password_hash, index)
+            lend_between_strangers(client, make_book, password_hash, index)
         long_cost, long_total = selects_for(client, admin["headers"], "/api/loans")
 
         # The rows really were built, so a cost met by returning nothing cannot
@@ -556,7 +559,7 @@ class TestTheNestedBook:
         assert long_cost == 7, f"{long_cost} selects for 10 loans"
 
     def test_a_page_of_returned_loans_costs_the_same_whatever_its_length(
-        self, client, admin, make_book, _password_hash
+        self, client, admin, make_book, password_hash
     ):
         """A page of returned loans costs what a page of open ones costs.
 
@@ -573,7 +576,7 @@ class TestTheNestedBook:
         itself: a returned loan is in no such fetch by anybody.
         """
         for index in range(10):
-            row = lend_between_strangers(client, make_book, _password_hash, index)
+            row = lend_between_strangers(client, make_book, password_hash, index)
             client.put(f"/api/loans/{row['id']}/return", headers=admin["headers"])
             if index == 2:
                 short_cost, short_total = selects_for(
@@ -777,6 +780,37 @@ class TestOverdueNotify:
         matched against `{loan_id}`."""
         res = client.post("/api/loans/overdue/notify", headers=admin["headers"])
         assert res.status_code == 200
+
+
+    def test_a_webhook_port_out_of_range_is_refused_at_the_endpoint(self, client, admin, db):
+        """Written by a restore, past the settings check: the send refuses it
+        rather than failing inside the connect. The host is passed through so
+        the suite's own router cannot answer for the connect. The reason is
+        what pins the refusal: any failure inside a sender answers 200 now."""
+        settings_store.set_value(db, SettingKey.OVERDUE_WEBHOOK_ENABLED, "true")
+        settings_store.set_value(
+            db, SettingKey.OVERDUE_WEBHOOK_URL, "https://127.0.0.1:99999/hooks/t/abcdef"
+        )
+        book = Book(title="Dune", is_private=False, added_by_user_id=admin["user"]["id"])
+        db.add(book)
+        db.flush()
+        db.add(
+            Loan(
+                book_id=book.id,
+                loaned_to_name="Kim",
+                loaned_by_user_id=admin["user"]["id"],
+                due_at=(datetime.now(UTC) - timedelta(days=3)).replace(tzinfo=None),
+            )
+        )
+        db.commit()
+
+        with respx.mock(assert_all_called=False) as mock:
+            mock.route(host="127.0.0.1").pass_through()
+            res = client.post("/api/loans/overdue/notify", headers=admin["headers"])
+
+        assert res.status_code == 200
+        assert res.json()["reason"] == "no_url"
+        assert res.json()["sent"] is False
 
 
 class TestMyOverdue:
@@ -1023,7 +1057,7 @@ class TestListOverdue:
         assert body["total"] == 0
 
     def test_the_overdue_page_costs_the_same_whatever_its_length(
-        self, client, admin, make_book, _password_hash
+        self, client, admin, make_book, password_hash
     ):
         """The eager loads were copied from `list_loans`; this is the test that
         makes them mean something.
@@ -1064,13 +1098,13 @@ class TestListOverdue:
         read which loan is pinned in `tests/test_notifications.py`.
         """
         for index in range(3):
-            lend_between_strangers(client, make_book, _password_hash, index)
+            lend_between_strangers(client, make_book, password_hash, index)
         short_cost, short_total = selects_for(
             client, admin["headers"], "/api/loans/overdue"
         )
 
         for index in range(3, 10):
-            lend_between_strangers(client, make_book, _password_hash, index)
+            lend_between_strangers(client, make_book, password_hash, index)
         long_cost, long_total = selects_for(
             client, admin["headers"], "/api/loans/overdue"
         )
@@ -1533,4 +1567,119 @@ class TestEveryClockInThisFileGoesThroughNow:
             "routers/loans.py reads the wall clock outside `_now`, in "
             f"{sorted(readers - {'_now'})}. One site wrote an aware datetime "
             "into a naive column that way, and the suite stayed green."
+        )
+
+
+class TestTheSingleLoanHelperIsScoped:
+    """`_loan_with_relations` applies the privacy rule itself.
+
+    **The two routes that call it cannot reach a loan it would refuse**, which
+    is why this drives the helper directly rather than a route. `create_loan`
+    resolves the book through the Shelf and then creates the row, and
+    `return_loan` reads the loan through `Loans.seen_by` before it gets here,
+    so a route level arm can only assert what the callers already decided and
+    would stay green with the scope taken off.
+
+    **That is also what made the defect invisible.** The helper was
+    `db.query(Loan)` keyed on an id, safe by its callers, and no pass in
+    `tests/test_shelf.py` can see it: `loans` carries a user, so the fourth
+    pass does not walk it, and the other three ask about `Book`. The register
+    those passes stand in front of is prose, and prose reds on nothing.
+
+    A third caller is the case this exists for, and it is the one nobody
+    writes a test for when they add it.
+    """
+
+    def _private_loan(self, client, make_book, owner, borrower) -> dict:
+        """A loan over a book only `owner` can see."""
+        book = make_book(owner["headers"], title="A diary")
+        assert (
+            client.patch(
+                f"/api/books/{book['id']}/privacy",
+                json={"is_private": True},
+                headers=owner["headers"],
+            ).status_code
+            == 200
+        )
+        res = client.post(
+            "/api/loans",
+            json={"book_id": book["id"], "loaned_to_user_id": borrower["user"]["id"]},
+            headers=owner["headers"],
+        )
+        assert res.status_code == 201, res.text
+        return res.json()
+
+    def test_it_refuses_a_loan_over_a_book_the_viewer_cannot_see(
+        self, client, db, admin, member, other_user, make_book
+    ):
+        loan = self._private_loan(client, make_book, member, other_user)
+
+        with pytest.raises(HTTPException) as refusal:
+            loans_module._loan_with_relations(
+                loan["id"], db, admin["user"]["id"], datetime.now(UTC).replace(tzinfo=None)
+            )
+
+        assert refusal.value.status_code == 404
+
+    def test_it_answers_for_a_viewer_who_can_see_the_book(
+        self, client, db, member, other_user, make_book
+    ):
+        """The other direction, so the arm above cannot be met by refusing
+        everybody."""
+        loan = self._private_loan(client, make_book, member, other_user)
+
+        out = loans_module._loan_with_relations(
+            loan["id"], db, member["user"]["id"], datetime.now(UTC).replace(tzinfo=None)
+        )
+
+        assert out.id == loan["id"]
+        assert out.book is not None
+        assert out.book.title == "A diary"
+
+    def test_an_absent_loan_id_is_the_same_404(self, client, db, admin):
+        """A loan the viewer may not see and a loan that never existed answer
+        alike, which is `Loans.with_id`'s rule and is what keeps the refusal
+        from confirming the id."""
+        with pytest.raises(HTTPException) as refusal:
+            loans_module._loan_with_relations(
+                999999, db, admin["user"]["id"], datetime.now(UTC).replace(tzinfo=None)
+            )
+
+        assert refusal.value.status_code == 404
+
+    def test_it_loads_through_the_one_plan(self, client, db, member, other_user, make_book):
+        """The scope and the load plan are one call, so a refactor that keeps
+        the viewer and drops `rendered()` is caught here rather than by a page
+        cost test that does not run this route.
+
+        **Four, and it is exact rather than a ceiling**, for the reason the two
+        page costs in this file are: a smaller count is a weaker inequality, so
+        a bound stops guarding without ever failing. Measured on builder,
+        2026-10-01: the loan with its book, uploader and both people joined,
+        and one `selectinload` each for the book's tags, classifications and
+        identifiers. What a dropped `rendered()` costs on this route is
+        deliberately not stated: it is a lazy load per relation `LoanOut`
+        reaches and nobody has measured it here, so the arm is the equality
+        rather than a comparison with a figure somebody reasoned to.
+        """
+        loan = self._private_loan(client, make_book, member, other_user)
+        db.expire_all()
+        now = datetime.now(UTC).replace(tzinfo=None)
+
+        engine = db.get_bind()
+        seen: list[str] = []
+
+        def record(conn, cursor, statement, *rest):
+            seen.append(statement)
+
+        event.listen(engine, "before_cursor_execute", record)
+        try:
+            loans_module._loan_with_relations(loan["id"], db, member["user"]["id"], now)
+        finally:
+            event.remove(engine, "before_cursor_execute", record)
+
+        assert seen, "nothing was counted, so this arm measured nothing"
+        assert len(seen) == 4, (
+            f"{len(seen)} statements for one loan: the single loan helper is "
+            "lazy loading what `lending.RENDERED` is for"
         )

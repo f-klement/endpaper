@@ -31,9 +31,26 @@
  * there is for a rule no schema states.
  */
 
+import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 
-import { PATH_BUDGET, referenceFor } from "../../src/lib/digitalReference";
+import type { DigitalReferenceIn } from "../../src/api/generated/model";
+import * as digitalReference from "../../src/lib/digitalReference";
+import {
+  PATH_BUDGET,
+  referenceFor,
+  type PickedEntry,
+} from "../../src/lib/digitalReference";
+import {
+  holds,
+  PROFILE,
+  PROPERTY,
+  spelled,
+  witness,
+  type Repeated,
+} from "../property";
+import { expectAnswer, type ValueDoor } from "./readerContract";
+import { boundedText, codePoint, points, repeatedTo } from "./textArbitrary";
 
 const SCHEMA = import.meta.glob("../../openapi.json", {
   query: "?raw",
@@ -266,5 +283,136 @@ describe("the bounds, read off the committed schema", () => {
     // server chose the bound as. Written as the computation rather than as the
     // digits, so this cannot agree with a wrong literal.
     expect(size.maximum).toBe(Number.MAX_SAFE_INTEGER);
+  });
+});
+
+/**
+ * What a browser says about a picked file, with the path as drawn: a run at
+ * the budget is a `Repeated`, so a counterexample prints as its parts.
+ */
+type Picked = Omit<PickedEntry, "webkitRelativePath"> & {
+  readonly webkitRelativePath: string | Repeated;
+};
+
+/**
+ * `referenceFor` as a door: whatever a browser says about a picked file, held
+ * to what the server takes. **Nothing is metered** because nothing is read;
+ * the value is the whole of it.
+ */
+const door: ValueDoor<Picked, DigitalReferenceIn | null> = {
+  module: digitalReference,
+  ceilings: () => ({}),
+  open: (entry, meter) => {
+    const reference = referenceFor({
+      ...entry,
+      webkitRelativePath: spelled(entry.webkitRelativePath),
+    });
+    if (reference === null) return null;
+    const { root_label: root, relative_path: beneath } = reference;
+    meter.require(
+      points(root) >= 1 && points(beneath) >= 1,
+      `an empty half: ${JSON.stringify(reference)}`,
+    );
+    meter.require(
+      points(root) + points(beneath) <= PATH_BUDGET,
+      `a pair of ${points(root) + points(beneath)} code points against ${PATH_BUDGET}`,
+    );
+    meter.require(
+      !root.includes("\0") && !beneath.includes("\0"),
+      "a NUL the server refuses",
+    );
+    meter.require(
+      reference.size_bytes === null ||
+        (reference.size_bytes !== undefined &&
+          Number.isSafeInteger(reference.size_bytes) &&
+          reference.size_bytes >= 0),
+      `a size the wire cannot carry: ${reference.size_bytes}`,
+    );
+    const modified = reference.file_modified_at ?? null;
+    const year = Number(modified?.slice(0, 4));
+    meter.require(
+      modified === null ||
+        (/^\d{4}-\d\d-\d\dT/.test(modified) && year >= 1 && year <= 9999),
+      `a timestamp the server refuses: ${reference.file_modified_at}`,
+    );
+    return reference;
+  },
+};
+
+/**
+ * A browser's path: a root and what is beneath it, short, or a pair at the
+ * budget and one past it.
+ *
+ * **The pair is composed, under a root that splits it**, so the two lengths
+ * at the edge are each a tenth or more of what a run draws from any seed.
+ */
+const pathText: fc.Arbitrary<string | Repeated> = fc.oneof(
+  {
+    arbitrary: fc
+      .tuple(boundedText(12), boundedText(12))
+      .map(([root, beneath]) => `${spelled(root)}/${spelled(beneath)}`),
+    weight: 2,
+  },
+  {
+    arbitrary: fc
+      .tuple(
+        fc.array(codePoint, { minLength: 1, maxLength: 6 }),
+        fc.constantFrom(PATH_BUDGET, PATH_BUDGET + 1),
+      )
+      .map(([run, both]) => repeatedTo(run, both - "Books".length, "Books/")),
+    weight: 2,
+  },
+  { arbitrary: boundedText(PATH_BUDGET), weight: 1 },
+  {
+    arbitrary: fc.constantFrom("", "/", "a/", "/a", "a/b", "a\0/b"),
+    weight: 1,
+  },
+);
+
+const pickedEntry: fc.Arbitrary<Picked> = fc.record({
+  webkitRelativePath: pathText,
+  size: fc.constantFrom(
+    0,
+    1,
+    -1,
+    1.5,
+    Number.NaN,
+    Number.MAX_SAFE_INTEGER,
+    2 ** 53,
+  ),
+  lastModified: fc.constantFrom(
+    0,
+    Date.UTC(1965, 7, 1),
+    Number.NaN,
+    Number.POSITIVE_INFINITY,
+    Date.UTC(10_000, 0, 1),
+    // The first instant of year 0, spelled as a number: `Date.UTC` reads a
+    // year under 100 as the twentieth century's.
+    -62_167_219_200_000,
+    -8.64e15,
+  ),
+});
+
+/** How many code points the two halves of a drawn path are together. */
+function pair({ webkitRelativePath: drawn }: Picked): number {
+  const path = spelled(drawn);
+  const cut = path.indexOf("/");
+  return cut <= 0 ? 0 : points(path) - 1;
+}
+
+describe("anything a browser says about a picked file", () => {
+  it("becomes a reference the server takes, or none", PROPERTY, async () => {
+    expect(
+      await holds(pickedEntry, async (entry) => {
+        await expectAnswer(door, entry);
+      }),
+    ).toBe(PROFILE.runs);
+  });
+
+  it("draws a pair at the budget and one past it", async () => {
+    await witness(pickedEntry, {
+      "names a pair at the budget": (entry) => pair(entry) === PATH_BUDGET,
+      "names a pair one past it": (entry) => pair(entry) === PATH_BUDGET + 1,
+    });
   });
 });

@@ -3,6 +3,7 @@ from typing import Annotated, Any
 from pydantic import BaseModel, BeforeValidator, Field, field_validator
 
 from enums import TagCategory, TagKey
+from schemas.common import one_line_without_invisible_characters
 
 MAX_TAG_NAME = 100
 
@@ -47,9 +48,12 @@ class TagOut(BaseModel):
     #: offer a delete, since deleting a seeded tag would only bring it back at
     #: the next restart.
     is_predefined: bool = False
-    #: How many books carry it. Present so the confirmation can say what is
-    #: about to happen: "delete this tag" and "take this off 214 books" are
-    #: different decisions and only one of them is obvious from the name.
+    #: How many books carry it, **as this reader may see them**, which is what
+    #: stops it counting other members' private books. Not what the delete
+    #: confirmation says: deleting is library wide, so a reader scoped number
+    #: understates it by exactly the books they cannot see, and that
+    #: confirmation says "every book". What this is for is the picker, which
+    #: shows how used a tag is on the shelf the reader has.
     book_count: int = 0
     model_config = {"from_attributes": True}
 
@@ -68,12 +72,16 @@ class TagCreate(BaseModel):
     @field_validator("name")
     @classmethod
     def tidy(cls, value: str) -> str:
-        """Collapse the whitespace somebody pasted in.
+        r"""One line, and a name that normalises to nothing is refused.
 
         A name of only spaces passes `min_length` and then renders as an
-        invisible tag nobody can select or find again.
+        invisible tag nobody can select or find again. **A character with no
+        width goes for that same reason rather than a second one**: `name` is
+        unique, and `"Fiction\x00"` beside `"Fiction"` is two rows a member
+        reads as one. A tab is left to the collapse, which makes it the space
+        it looks like.
         """
-        cleaned = " ".join(value.split())
+        cleaned = one_line_without_invisible_characters(value)
         if not cleaned:
             raise ValueError("A tag needs a name.")
         return cleaned

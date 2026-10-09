@@ -219,7 +219,7 @@ class TestFilteringTheLibrary:
             headers=admin["headers"],
         )
 
-        assert res.status_code == 422
+        assert res.status_code == 400
 
     def test_the_filter_still_hides_private_books(self, client, admin, member, make_book):
         """A collection filter that forgot `visible_to` would be the same leak
@@ -262,6 +262,102 @@ class TestFilteringTheLibrary:
         client.delete(f"/api/books/{book['id']}", headers=admin["headers"])
 
         assert listed(client, admin["headers"], collection_id=shelf["id"]) == []
+
+
+class TestAShelfOnlyYourOwnPrivateBooksAreOnStaysWritable:
+    """The viewer the write gate is handed, observed at all four doors.
+
+    **Four call sites hand `_checked_collection` a viewer**: the create door,
+    the bulk door, the assign door and the copy door, and there is an arm for
+    each. **The population is the call sites and not a sweep's survivor
+    list.** Two of the four are route handlers, and a mutation sweep cannot
+    enter a decorated body, so it reported survivors only in the two
+    undecorated ones. Built from those, this class was one door short and
+    nothing said so: planting the viewer to nothing in `add_copy` left all
+    four collection test files green, measured 2026-09-30.
+
+    **What these arms buy is a wrong viewer of the right type, not `None`.**
+    Mypy refuses `None` at every one of these call sites, by the line, so the
+    sweep's three survivors were never shippable and this class must not be
+    read as having caught them. What no checker can see is a viewer that type
+    checks and names the wrong person: another member's id, the book's owner,
+    a literal. Measured with `viewer_id + 1` at the gate, which these arms
+    catch and no other test in the four files does.
+
+    The behaviour pinned: under a wrong viewer `visible_to` stops seeing the
+    caller's own private books, so a shelf carrying one private book of the
+    caller's own falls out of arm 1, arm 3 does not hold because a book
+    carries it, and every write into it is refused as an unknown id. **It
+    fails closed rather than open, so it is a false refusal and not a
+    disclosure**, which is the half a sweep is least likely to be written
+    against and this repository has paid for twice.
+    """
+
+    @staticmethod
+    def _shelf_holding_only_my_private_book(client, headers, make_book):
+        shelf = make_collection(client, headers, "Divorce paperwork")
+        secret = make_book(headers, title="Secret", is_private=True)
+        assert file_book(client, headers, secret["id"], shelf["id"]).status_code == 200
+        return shelf
+
+    def test_the_assign_door_still_takes_it(self, client, member, make_book):
+        shelf = self._shelf_holding_only_my_private_book(
+            client, member["headers"], make_book
+        )
+        book = make_book(member["headers"], title="Dune")
+
+        res = file_book(client, member["headers"], book["id"], shelf["id"])
+
+        assert res.status_code == 200, res.text
+        assert res.json()["collection_name"] == "Divorce paperwork"
+
+    def test_the_create_door_still_takes_it(self, client, member, make_book):
+        shelf = self._shelf_holding_only_my_private_book(
+            client, member["headers"], make_book
+        )
+
+        res = client.post(
+            "/api/books",
+            json={"title": "Dune", "collection_id": shelf["id"]},
+            headers=member["headers"],
+        )
+
+        assert res.status_code == 201, res.text
+        assert res.json()["collection_id"] == shelf["id"]
+
+    def test_the_bulk_door_still_takes_it(self, client, member, make_book):
+        shelf = self._shelf_holding_only_my_private_book(
+            client, member["headers"], make_book
+        )
+        book = make_book(member["headers"], title="Dune")
+
+        res = client.post(
+            "/api/books/bulk",
+            json={
+                "book_ids": [book["id"]],
+                "action": "set_collection",
+                "value": shelf["id"],
+            },
+            headers=member["headers"],
+        )
+
+        assert res.status_code == 200, res.text
+        assert res.json()["updated"] == 1
+
+    def test_the_copy_door_still_takes_it(self, client, member, make_book):
+        shelf = self._shelf_holding_only_my_private_book(
+            client, member["headers"], make_book
+        )
+        book = make_book(member["headers"], title="Dune", isbn="9780441013593")
+
+        res = client.post(
+            f"/api/books/{book['id']}/copies",
+            json={"collection_id": shelf["id"]},
+            headers=member["headers"],
+        )
+
+        assert res.status_code == 201, res.text
+        assert res.json()["collection_id"] == shelf["id"]
 
 
 class TestTheBulkVerb:
@@ -352,7 +448,7 @@ class TestTheBulkVerb:
             headers=admin["headers"],
         )
 
-        assert res.status_code == 422
+        assert res.status_code == 400
 
     def test_somebody_elses_private_book_is_skipped(self, client, admin, member, make_book):
         shelf = make_collection(client, admin["headers"], "Ebooks")
@@ -422,8 +518,13 @@ class TestTheExport:
         assert "Dune" in body
 
     def test_a_name_that_looks_like_a_formula_is_neutralised(self, client, admin, make_book):
-        """Collection names are member supplied and library wide, so one
-        reaches everybody's export. Same guard as tag names."""
+        """Collection names are member supplied, so one reaches a CSV cell
+        nobody wrote by hand. Same guard as tag names.
+
+        **Not "library wide", which is what this said.** An export is the
+        caller's own shelf, so the name reaches an export only where a book
+        the caller can see is filed under it. The guard's reason is the cell,
+        not the audience."""
         shelf = make_collection(client, admin["headers"], "=HYPERLINK(1)")
         book = make_book(admin["headers"], title="Dune")
         file_book(client, admin["headers"], book["id"], shelf["id"])
@@ -431,3 +532,133 @@ class TestTheExport:
         body = client.get("/api/books/export", headers=admin["headers"]).text
 
         assert "'=HYPERLINK(1)" in body
+
+
+class TestAGuessedIdIsNoLongerAnOracle:
+    """Every door a caller can name a collection id at answers the same for an
+    id that is hidden and an id that is unused.
+
+    **One arm over all five doors, because an arm checking one certifies one.**
+    Four of them file a book and are why this class lives in this file; the
+    fifth is the rename, which is in the collections router and is the same
+    question asked at a different verb. A per door arm would have been five
+    chances to close four of them.
+
+    **Byte identical, not merely both refusals.** Two doors answering 400 with
+    different bodies, or the same body with a different status, is the oracle
+    with an extra step: the caller still learns which of the two ids is real.
+    So the differential compares the status and the body as they leave.
+
+    **And a control, because a differential over two refusals nothing produced
+    is green on a door that was never reached.** Each door is exercised once
+    against a collection the caller may be told about, and that answer has to
+    differ from the refusal, or the arm is comparing a route's 404 for
+    something else against itself.
+
+    A **sixth** door has its own arm here for the opposite reason. The library
+    filter takes a collection id, validates nothing, and answers an empty page
+    either way, so it is already not an oracle and adding a refusal to make it
+    match the others would create one.
+    """
+
+    @staticmethod
+    def _doors(client, headers, book_id, collection_id):
+        """Every request that names a collection id, as (name, response).
+
+        Built per collection id so the same five requests run against the
+        hidden one, the unused one and the visible one.
+        """
+        return {
+            "create a book into it": client.post(
+                "/api/books",
+                json={"title": "New", "collection_id": collection_id},
+                headers=headers,
+            ),
+            "file a book into it": client.patch(
+                f"/api/books/{book_id}/collection",
+                json={"collection_id": collection_id},
+                headers=headers,
+            ),
+            "add a copy into it": client.post(
+                f"/api/books/{book_id}/copies",
+                json={"collection_id": collection_id},
+                headers=headers,
+            ),
+            "file a selection into it": client.post(
+                "/api/books/bulk",
+                json={
+                    "book_ids": [book_id],
+                    "action": "set_collection",
+                    "value": collection_id,
+                },
+                headers=headers,
+            ),
+            "rename it": client.patch(
+                f"/api/collections/{collection_id}",
+                json={"name": "Renamed"},
+                headers=headers,
+            ),
+        }
+
+    def test_the_library_filter_stays_the_one_door_that_is_not_a_gate(
+        self, client, admin, member, make_book
+    ):
+        """`?collection_id=` validates nothing and must go on validating nothing.
+
+        An unknown id and a real one holding only books the caller cannot see
+        both answer with an empty page, so the filter confirms nothing. It is
+        the door this branch had to leave alone: adding a refusal here to match
+        the others would **create** an oracle where there is none, which is the
+        false refusal shape a sweep cannot see.
+        """
+        hidden = make_collection(client, admin["headers"], "Divorce paperwork")
+        secret = make_book(admin["headers"], title="Secret", is_private=True)
+        file_book(client, admin["headers"], secret["id"], hidden["id"])
+        unused = hidden["id"] + 1000
+
+        withheld = client.get(
+            "/api/books", params={"collection_id": hidden["id"]}, headers=member["headers"]
+        )
+        absent = client.get(
+            "/api/books", params={"collection_id": unused}, headers=member["headers"]
+        )
+
+        assert (withheld.status_code, withheld.json()["total"]) == (200, 0)
+        assert (withheld.status_code, withheld.text) == (absent.status_code, absent.text)
+
+    def test_a_hidden_collection_answers_exactly_as_an_unused_id(
+        self, client, admin, member, make_book
+    ):
+        hidden = make_collection(client, admin["headers"], "Divorce paperwork")
+        secret = make_book(admin["headers"], title="Secret", is_private=True)
+        file_book(client, admin["headers"], secret["id"], hidden["id"])
+        mine = make_book(member["headers"], title="Mine")
+        unused = hidden["id"] + 1000
+
+        withheld = self._doors(client, member["headers"], mine["id"], hidden["id"])
+        absent = self._doors(client, member["headers"], mine["id"], unused)
+
+        assert [(name, res.status_code, res.text) for name, res in withheld.items()] == [
+            (name, res.status_code, res.text) for name, res in absent.items()
+        ]
+
+    def test_and_a_collection_the_caller_may_be_told_about_answers_differently(
+        self, client, admin, member, make_book
+    ):
+        """The control. Without it the arm above passes on five doors that all
+        answer 404 for a reason of their own."""
+        visible = make_collection(client, admin["headers"], "Ebooks")
+        shared = make_book(admin["headers"], title="Dune")
+        file_book(client, admin["headers"], shared["id"], visible["id"])
+        mine = make_book(member["headers"], title="Mine")
+        unused = visible["id"] + 1000
+
+        allowed = self._doors(client, member["headers"], mine["id"], visible["id"])
+        absent = self._doors(client, member["headers"], mine["id"], unused)
+
+        assert [res.status_code for res in allowed.values()] != [
+            res.status_code for res in absent.values()
+        ]
+        assert all(res.status_code < 400 for res in allowed.values()), {
+            name: (res.status_code, res.text) for name, res in allowed.items()
+        }

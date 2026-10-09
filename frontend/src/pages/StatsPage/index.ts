@@ -1,2 +1,2 @@
-export { default, formatMonth } from "./StatsPage";
+export { default } from "./StatsPage";
 export { useStats } from "./hooks";

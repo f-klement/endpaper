@@ -135,15 +135,13 @@ export default function ScanPage() {
           <RapidQueue
             entries={rapid.entries}
             isAdding={rapid.isAdding}
+            progress={rapid.addProgress}
             result={rapid.result}
             onRemove={rapid.remove}
             onAddAll={rapid.addAll}
             onDiscard={rapid.clear}
-            waiting={rapid.waiting}
-            deciding={rapid.deciding}
-            keptForNow={rapid.keptForNow}
-            paceMinutes={rapid.paceMinutes}
-            keptPaceMinutes={rapid.keptPaceMinutes}
+            onStopAdding={rapid.stopAdding}
+            figures={rapid.figures}
             isLookingUp={rapid.isLookingUp}
             onLookUp={rapid.lookUpTheNames}
             onStopLookUp={rapid.stopLookingUp}
@@ -152,6 +150,7 @@ export default function ScanPage() {
             onKeepAllForNow={rapid.keepEveryNameForNow}
             onLookUpKept={rapid.lookUpTheKeptNames}
             onSplit={rapid.splitApart}
+            onDropSubject={rapid.dropSubject}
           />
         </>
       )}
@@ -286,7 +285,7 @@ export default function ScanPage() {
           error={scan.error}
           onToggleTag={scan.toggleTag}
           onCreateTag={scan.createTag}
-          isCreatingTag={scan.isCreatingTag}
+          onForgetTagName={scan.forgetTagName}
           onConfirm={scan.confirm}
           onCancel={handleCancel}
           onAddCopy={scan.addCopy}

@@ -17,13 +17,15 @@ beforeEach(() => {
   vi.spyOn(window, "confirm").mockReturnValue(true);
 });
 
-function renderBar(selected = TWO, onMerge = vi.fn()) {
+type Props = React.ComponentProps<typeof MergeBar>;
+
+function renderBar(selected = TWO, onMerge = vi.fn<Props["onMerge"]>()) {
   renderLocalised(
     <MergeBar
       selected={selected}
       isMerging={false}
       onMerge={onMerge}
-      onClear={vi.fn()}
+      onClear={vi.fn<() => void>()}
     />,
   );
   return onMerge;

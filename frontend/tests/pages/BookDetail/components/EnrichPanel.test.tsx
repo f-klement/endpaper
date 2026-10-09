@@ -13,17 +13,17 @@ function result(overrides: Partial<BookEnrichmentOut>): BookEnrichmentOut {
   return { book: makeBook(), found: true, updated_fields: [], ...overrides };
 }
 
-function renderPanel(
-  overrides: Partial<Parameters<typeof EnrichPanel>[0]> = {},
-) {
+type Props = Parameters<typeof EnrichPanel>[0];
+
+function renderPanel(overrides: Partial<Props> = {}) {
   const props = {
     isConfigured: true,
-    onOpenHelp: vi.fn(),
+    onOpenHelp: vi.fn<Props["onOpenHelp"]>(),
     isWorking: false,
     result: null,
     error: null,
-    onBrowse: vi.fn(),
-    onDismiss: vi.fn(),
+    onBrowse: vi.fn<Props["onBrowse"]>(),
+    onDismiss: vi.fn<Props["onDismiss"]>(),
     ...overrides,
   };
   renderLocalised(<EnrichPanel {...props} />);

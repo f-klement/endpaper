@@ -1025,6 +1025,16 @@
             ],
             "title": "Author"
           },
+          "categories": {
+            "default": [],
+            "items": {
+              "maxLength": 120,
+              "type": "string"
+            },
+            "maxItems": 32,
+            "title": "Categories",
+            "type": "array"
+          },
           "classifications": {
             "default": [],
             "items": {
@@ -1224,7 +1234,7 @@
         "type": "object"
       },
       "BookDetailsUpdate": {
-        "description": "The fields a person edits by hand after a book exists.\n\nEvery field is optional and absent means \"leave alone\", so the form can\nsend only what changed. An explicit `null` clears, which is how a series is\nunset; the two cases are distinguished with `model_fields_set`.",
+        "description": "The fields a person edits by hand after a book exists.\n\nEvery field is optional and absent means \"leave alone\", so the form can\nsend only what changed. An explicit `null` clears, which is how a series is\nunset; the two cases are distinguished with `model_fields_set`. A column\nthat refuses null refuses the clear too: see the validator at the foot.\n\n**`categories` is the one field whose clear is not a null**, for the reason\nwritten at it, and it is the one field whose request shape is not the\nstored shape.",
         "properties": {
           "author": {
             "anyOf": [
@@ -1237,6 +1247,16 @@
               }
             ],
             "title": "Author"
+          },
+          "categories": {
+            "default": [],
+            "items": {
+              "maxLength": 120,
+              "type": "string"
+            },
+            "maxItems": 32,
+            "title": "Categories",
+            "type": "array"
           },
           "condition": {
             "anyOf": [
@@ -2417,7 +2437,7 @@
         "type": "object"
       },
       "BulkAction": {
-        "description": "What a bulk selection does to the books in it.\n\nOne endpoint per verb would be four near-identical handlers sharing the\nsame permission walk and the same three-way result. The verb is a field\ninstead.",
+        "description": "What a bulk selection does to the books in it.\n\nOne endpoint per verb would be a near-identical handler per member below,\neach repeating the same permission walk and the same three-way result. The\nverb is a field instead.",
         "enum": [
           "add_tag",
           "remove_tag",
@@ -2431,7 +2451,7 @@
         "type": "string"
       },
       "BulkRequest": {
-        "description": "One verb applied to a selection.\n\n`value` is deliberately loose: which field it fills depends on the action,\nand the handler validates it against that action rather than the schema\ncarrying six mutually exclusive optional fields.",
+        "description": "One verb applied to a selection.\n\n`value` is deliberately loose: which field it fills depends on the action,\nand the handler validates it against that action rather than the schema\ncarrying one mutually exclusive optional field per verb.",
         "properties": {
           "action": {
             "$ref": "#/components/schemas/BulkAction"
@@ -2760,7 +2780,7 @@
         "type": "object"
       },
       "CollectionOut": {
-        "description": "A named part of the shelf, and how much of it the caller can see.\n\n`book_count` is filtered by `visible_to`, like every other count this API\nserves. An unfiltered one would announce, on a label everybody can read,\nthat somebody's private books exist and how many of them there are.",
+        "description": "A named part of the shelf, and how much of it the caller can see.\n\n**Both fields are the caller's view, and the row set is too.** `book_count`\nis filtered by `visible_to`, like every other count this API serves; an\nunfiltered one would announce that somebody's private books exist and how\nmany. The rows this appears in are filtered by the same question one level\nout, so a collection nothing the caller may see is filed in is absent\nrather than present with a zero. `shelving.Shelving` decides both.\n\nOne consequence for a reader of the wire: a `book_count` of 0 means the\ncollection is empty, or holds only books the caller can see in the trash.\nIt no longer means \"or holds books you cannot see\".",
         "properties": {
           "book_count": {
             "default": 0,
@@ -2960,7 +2980,7 @@
         "type": "object"
       },
       "CoverBackfillOut": {
-        "description": "What one run of the cover backfill managed.\n\nNumbers rather than one, because \"fixed 12\" on its own cannot be acted on.\n`examined` is how many books the run looked at, `stored` how many now have a\ncover this app serves itself, `unreachable` how many resolved to a URL this\nserver could not download (so the remote link is kept and it is tried again\non the next pass through the library, not the next run, which starts past\nit), `still_missing` how many no image service has one for, and `remaining`\nhow many are left beyond this batch.\n\n`next_after_id` is the cursor. **Without it the backfill cannot finish a\nlibrary**: the batch is chosen by book id and a book that could not be fixed\nstays in the candidate set, so it sits at the front of every subsequent run\nfor ever. About 20% of ISBNs resolve to nothing (measured across ten), so on\na large import the counter stops moving after a few runs, and a pod with no\negress produces it on run one. The client sends the value back to carry on\npast what it has already tried.",
+        "description": "What one run of the cover backfill managed.\n\nNumbers rather than one, because \"fixed 12\" on its own cannot be acted on.\n`examined` is how many books the run has an outcome for, `stored` how many now\nhave a cover this app serves itself, `unreachable` how many resolved to a URL\nthis server could not download (so the remote link is kept and it is tried\nagain on the next pass through the library, not the next run, which starts past\nit), `still_missing` how many no image service has one for, and `remaining` how\nmany candidates are left beyond what this run examined.\n\n**`examined` is not always the whole batch.** The run is bounded in wall clock,\nso a slow or blackholing image service can leave it short; the counts then\ndescribe the books it reached and `next_after_id` clears exactly those. A book\nthe run fetched after the cut is stored and counted in none of the three, so\nthis understates what the run did and never overstates it, and that book stops\nbeing a candidate rather than being fetched twice.\n\n**Nothing here says whether a run was cut short**, for the reason\n`IdentifierBackfillOut` gives at length: the client's action is to press again\nwhile `remaining` is above zero, which is the same action either way, and the\ncursor is what makes pressing again safe.\n\n`next_after_id` is the cursor. **Without it the backfill cannot finish a\nlibrary**: the batch is chosen by book id and a book that could not be fixed\nstays in the candidate set, so it sits at the front of every subsequent run\nfor ever. About 20% of ISBNs resolve to nothing (measured across ten), so on\na large import the counter stops moving after a few runs, and a pod with no\negress produces it on run one. The client sends the value back to carry on\npast what it has already tried. It is the last book of the unbroken examined\nrun, so a short run skips nothing it never reached, and it comes back unchanged\nwhere the run reached none of them.",
         "properties": {
           "examined": {
             "minimum": 0.0,
@@ -3079,7 +3099,7 @@
         "type": "string"
       },
       "CustomFieldOut": {
-        "description": "A field this Library has defined.",
+        "description": "A field this Library has defined, as it looks to the Member asking.\n\n**Not a row**, which is why there is no `from_attributes` here and the\nthree routes build this explicitly. `renamable` is an answer about the\ncaller, so a model that could be validated straight off a `CustomField`\nwould be one somebody can build without supplying it.\n\n**`renamable` rather than the author's member id, and the choice is a\ncontainment rather than a disclosure.** `fields.Fields` is the only module\nthat reads `custom_fields.created_by_user_id`, with one stated exception:\n`backup.py` selects every column of every table it archives, so it reads\nthe column while naming it nowhere, and it is admin only for that reason.\n**The sites arguing the design from that containment are named and not\ncounted**, because the count that stood here said three and the list that\nreplaced it elsewhere named four and missed the register: `fields.py`,\n`models.py`, this module, `docs/data-model.md` and `docs/decisions.md`.\n`tests/test_fields.py::TestFieldsIsTheOnlyReaderOfTheAuthorColumn`\nenforces it in two instruments, because a declaration is not a statement\nand the source walk cannot see one. A\n`created_by_user_id` field here would be read by Pydantic with no\nattribute access anywhere in the source, so it would pass that guard while\nfalsifying what it guards, and every client would then hold its own copy\nof the rule. `rename_custom_field` says what the server does with the\ncolumn; this says what the server would answer.\n\n**It is viewer scoped and therefore not cacheable across members.** The\nsame field answers differently to two Members and to the same Member\nbefore and after an admin flag changes. A client that has gone stale is\nrefused at the route, which is why the refusal has to survive being shown:\nthe control is advice and the 403 is the guarantee.\n\n**Stale the other way is refused by nothing, and nothing here can refuse\nit.** A client holding `false` where the server would now answer `true`\noffers no control, so no request is made and the route never sees one.\nThat direction costs an affordance rather than a guarantee, and the\nclient names it at its own site because only the client knows its cache\nwent stale.",
         "properties": {
           "id": {
             "title": "Id",
@@ -3091,12 +3111,17 @@
           "name": {
             "title": "Name",
             "type": "string"
+          },
+          "renamable": {
+            "title": "Renamable",
+            "type": "boolean"
           }
         },
         "required": [
           "id",
           "name",
-          "kind"
+          "kind",
+          "renamable"
         ],
         "title": "CustomFieldOut",
         "type": "object"
@@ -3339,25 +3364,129 @@
         "type": "object"
       },
       "DuplicateGroup": {
-        "description": "Books that look like the same work.\n\nMatched on normalised title plus author rather than ISBN: an accidental\nexact repeat is already refused by `uq_books_isbn_single_copy`, and the\ncase worth catching is a hardback and a paperback, which are legitimately\ntwo different ISBNs.\n\n**Deliberate copies are not duplicates and never appear here.** They share\na `copy_group`, and the endpoint collapses each group to one row before\ndeciding whether anything is left over.",
+        "description": "Books that look like the same work.\n\nMatched on normalised title plus author rather than ISBN: an accidental\nexact repeat is already refused by `uq_books_isbn_single_copy`, and the\ncase worth catching is a hardback and a paperback, which are legitimately\ntwo different ISBNs.\n\n**Deliberate copies are not duplicates and never appear here.** They share\na `copy_group`, and the endpoint collapses each group to one row before\ndeciding whether anything is left over.\n\n**`books` carries at least two members, refused here rather than trusted.**\n`key` is readable plaintext of the form `dune|frank herbert`, so a group\nstanding on one visible row plus one the viewer cannot see would publish\nthat row's title and author. The route builds groups only out of a shelf,\nwhich is what makes that impossible. `min_length` is the second latch:\nit fires when the group is **built**, so a future route that grouped\nbefore it filtered would raise here rather than answer 200.",
         "properties": {
           "books": {
             "items": {
-              "$ref": "#/components/schemas/BookOut"
+              "$ref": "#/components/schemas/DuplicateMember"
             },
+            "maxItems": 20,
+            "minItems": 2,
             "title": "Books",
             "type": "array"
           },
           "key": {
             "title": "Key",
             "type": "string"
+          },
+          "size": {
+            "minimum": 2.0,
+            "title": "Size",
+            "type": "integer"
           }
         },
         "required": [
           "key",
+          "size",
           "books"
         ],
         "title": "DuplicateGroup",
+        "type": "object"
+      },
+      "DuplicateMember": {
+        "description": "One entry in a duplicate group: what the card shows and nothing else.\n\n**Not a `BookOut`.** A person choosing which of two rows survives reads the\ncover, the title and what tells the two apart, which is the format, the\npublisher, the year and the ISBN. Carrying the rest cost this route a\nhydration of the whole visible shelf and a serialisation pass over every\nduplicate in it, for fields nothing rendered.\n\nThe trade, stated so the next reader sees a decision rather than an\nomission: the card can no longer grow a field without a column here and a\nclient regeneration. The fields it would want are small scalars and adding\none is two lines.\n\n`copy_group` is read by the collapse and is deliberately absent: a group\ntoken on a payload is a fact about another member's copies.",
+        "properties": {
+          "cover_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cover Url"
+          },
+          "format": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BookFormat"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "isbn": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Isbn"
+          },
+          "publisher": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Publisher"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "year": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Year"
+          }
+        },
+        "required": [
+          "id",
+          "title"
+        ],
+        "title": "DuplicateMember",
+        "type": "object"
+      },
+      "DuplicateReport": {
+        "description": "The duplicates worth working on, and how many there are in all.\n\n`groups` is capped by `DUPLICATE_BOOKS_SHOWN`. `total_groups` is not: it is\nwhat the scan found, so a member whose import ran twice is told the size of\nwhat happened instead of being handed it.\n\n**A count is a disclosure, and this route had never carried one.** Both\nnumbers count the groups this viewer **can see**, so neither can be moved\nby a Book the viewer cannot see.\n\n**Can see, not owns**, and the two are separate in this data model on\npurpose. A member looking at two public Books somebody else added is\ncounted one group and is offered the merge, which is intended and is what\n`merge_books` reasons about: `visible_to` yields exactly the set a caller\nmay write, because a public Book is a shared shelf. This sentence used to\nsay the viewer's own shelf, which reads as ownership and is the opposite\nof the rule.",
+        "properties": {
+          "groups": {
+            "items": {
+              "$ref": "#/components/schemas/DuplicateGroup"
+            },
+            "title": "Groups",
+            "type": "array"
+          },
+          "total_groups": {
+            "minimum": 0.0,
+            "title": "Total Groups",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "groups",
+          "total_groups"
+        ],
+        "title": "DuplicateReport",
         "type": "object"
       },
       "EmailUpdate": {
@@ -3390,17 +3519,13 @@
         "type": "string"
       },
       "FeatureFlagsOut": {
-        "description": "What the frontend needs in order to decide what to render.\n\nReadable by anyone, deliberately: the login page is localised, so the\ndefault language has to be known before a token exists. It carries no\nsecrets and nothing about the catalogue.",
+        "description": "What the frontend needs in order to decide what to render.\n\nReadable by anyone, deliberately: the login page is localised, so the\ndefault language has to be known before a token exists. It carries no\nsecrets and nothing about the catalogue.\n\n**Two of these are read before a token exists and three are not.** The\nother three are read behind a session and are here because the shell takes\none query for every flag it renders, and because a member holds no admin\ntoken to read `SettingsOut` with. So the test a field passes is that\nsomething reads it, never that nothing else could serve it, and each says\nbelow what it tells a caller holding nothing.\n\n**Every field here has a reader in the client, and one with none is\nrefused.** An unread field on the one endpoint a stranger can call is\ndisclosure with nothing on the other end of it. Two guards hold it, because\nneither is enough alone: `frontend/tests/houseRules.test.ts`, \"every feature\nflag has a reader\", derives the readers and carries what it cannot see, and\n`tests/routers/test_settings.py::TestFeatureFlags` pins what the route\nactually sends, which no regeneration can talk out of.",
         "properties": {
           "default_locale": {
             "$ref": "#/components/schemas/Locale"
           },
           "goodreads_lookup_enabled": {
             "title": "Goodreads Lookup Enabled",
-            "type": "boolean"
-          },
-          "google_books_enabled": {
-            "title": "Google Books Enabled",
             "type": "boolean"
           },
           "google_books_ready": {
@@ -3420,7 +3545,6 @@
           }
         },
         "required": [
-          "google_books_enabled",
           "goodreads_lookup_enabled",
           "default_locale"
         ],
@@ -3495,7 +3619,7 @@
         "type": "string"
       },
       "IdentifierBackfillOut": {
-        "description": "What one run of the store identifier backfill managed.\n\nThe same shape as `CoverBackfillOut` above, and deliberately so: it is the\nsame job on a different column, so a member who has run one knows how to\nread the other and the screen draws them the same way.\n\n**The four outcomes are four different things to do next**, which is the\nwhole reason this is not one number. `enriched` is books that gained at\nleast one field. `not_found` is Google saying it has no such volume, which\nis permanent and means the identifier is stale or the book was delisted.\n`unavailable` is Google not answering, which is transient and worth pressing\nagain. `unresolvable` is a stored value that is not a volume id and so was\nnever asked about at all: also permanent, and **not** Google's answer, which\nis why it is not folded into `not_found`. `remaining` is how many candidates\nare left beyond this batch.\n\n**There is no `unchanged`, and a design critic is why.** One was declared,\nfor books whose record answered and carried nothing new. It could not\nhappen: a candidate is a Book with no `google_books_id`, every volume\nresource carries one, and `merge_into` writes it, so every answered book\ngains at least that field. The only body that reached it was a 200 with no\n`id`, which `google_books.lookup_by_volume_id` now refuses as not a volume.\nA count that cannot be non zero is a fact about the code stated on the wire.\n\n**`examined` is the sum of the four and not a fifth outcome**, so a client\ncan check the arithmetic rather than trust it.\n\n**`remaining` counts candidates, not books this will fix.** The candidate\nquery narrows on carrying a `google_books` identifier and cannot narrow on\nthe identifier being shaped like one, so a library whose rows are all\nunresolvable reports them here and then reports them as `unresolvable` as\nthe cursor clears them. Honest either way, and worth saying: the number is\nhow much work is left, not how many books will improve.\n\n`next_after_id` is the cursor, and it is here for exactly the reason\n`CoverBackfillOut` carries one: a book that could not be resolved stays a\ncandidate, so without a cursor it sits at the front of every subsequent run\nfor ever. 0 means this run reached the end.",
+        "description": "What one run of the store identifier backfill managed.\n\nThe same shape as `CoverBackfillOut` above, and deliberately so: it is the\nsame job on a different column, so a member who has run one knows how to\nread the other and the screen draws them the same way.\n\n**The four outcomes are four different things to do next**, which is the\nwhole reason this is not one number. `enriched` is books that gained at\nleast one field. `not_found` is Google saying it has no such volume, which\nis permanent and means the identifier is stale or the book was delisted.\n`unavailable` is Google not answering, which is transient and worth pressing\nagain. `unresolvable` is a stored value that is not a volume id and so was\nnever asked about at all: also permanent, and **not** Google's answer, which\nis why it is not folded into `not_found`. `remaining` is how many candidates\nare left beyond this batch.\n\n**There is no `unchanged`, and a design critic is why.** One was declared,\nfor books whose record answered and carried nothing new. It could not\nhappen: a candidate is a Book with no `google_books_id`, every volume\nresource carries one, and `merge_into` writes it, so every answered book\ngains at least that field. The only body that reached it was a 200 with no\n`id`, which `google_books.lookup_by_volume_id` now refuses as not a volume.\nA count that cannot be non zero is a fact about the code stated on the wire.\n\n**`examined` is the sum of the four and not a fifth outcome**, so a client\ncan check the arithmetic rather than trust it.\n\n**`examined` counts the books this run has an outcome for, which is not\nalways every book it looked at.** The run is bounded in wall clock, so a slow\nor busy catalogue can leave it short. The counts then describe the books it\nreached, and `next_after_id` clears exactly those.\n\n**Nothing here says whether a run was cut short, and that is deliberate.** An\nearlier version of this paragraph told a client to compare `examined` against\nthe batch size, which this reply does not carry and no request sets, so the\ncomparison was not one a client could make. There is no flag either: a\nclient's action is to press again while `remaining` is above zero, which is\nthe same action whether the run was cut short or finished its batch, and the\ncursor is what makes pressing again safe. A field would also make this diverge\nfrom `CoverBackfillOut`, which is bounded in wall clock the same way and says\nthe same nothing about it.\n\nA book the run resolved after the cut is stored and counted in neither\nnumber, so this understates what the run did and never overstates it; that\nbook stops being a candidate, so the next press does not spend another\nmetered request on it.\n\n**`remaining` counts candidates, not books this will fix.** The candidate\nquery narrows on carrying a `google_books` identifier and cannot narrow on\nthe identifier being shaped like one, so a library whose rows are all\nunresolvable reports them here and then reports them as `unresolvable` as\nthe cursor clears them. Honest either way, and worth saying: the number is\nhow much work is left, not how many books will improve.\n\n`next_after_id` is the cursor, and it is here for exactly the reason\n`CoverBackfillOut` carries one: a book that could not be resolved stays a\ncandidate, so without a cursor it sits at the front of every subsequent run\nfor ever. 0 means this run reached the end. It is the last book of the\nunbroken examined run rather than the last book of the batch, so a run cut\nshort cannot skip the books it never reached, and it comes back unchanged\nwhere the run reached none of them.",
         "properties": {
           "enriched": {
             "minimum": 0.0,
@@ -3726,6 +3850,13 @@
             "description": "Statuses actually changed",
             "minimum": 0.0,
             "title": "Statuses Updated",
+            "type": "integer"
+          },
+          "tags_dropped": {
+            "default": 0,
+            "description": "Tag names this run tried to put on a book and did not: the name was empty, the book was already full, the run had invented all the tags it may, or the name is not one this member may use. Not a count of what the source held: a reader caps how many tag names it takes from one record, and a record acted on in no other way is not reached at all, so both lose names upstream of this number",
+            "minimum": 0.0,
+            "title": "Tags Dropped",
             "type": "integer"
           },
           "unmatched_titles": {
@@ -4239,7 +4370,7 @@
         "type": "object"
       },
       "MissingDigitalReferenceOut": {
-        "description": "One flagged reference, with enough of its book to render a row.\n\nThe shape `QuoteWithBookOut` already has, for the same reason: a listing\nspanning the shelf renders a title and a cover per row, and fetching the\nBook per row is the N+1 `serialisation.books_to_out` exists to avoid. Three\nscalars rather than a nested `BookOut`, which carries tags, the adder, the\nactive loan and the caller's own reading state, none of which a row shows.\n\n**`missing_since` is narrowed to non-null**, which is the only field this\ntype narrows rather than adds. Every row is here *because* the column is\nset, so the base's `datetime | None` would make every client branch on a\nnull the route's WHERE clause has already excluded. The guarantee lives in\nthat clause; if it ever loosens, this narrowing turns a row into a 500\nrather than into a client rendering \"missing since never\", and loud is the\nfailure to prefer.",
+        "description": "One flagged reference, with enough of its book to render a row.\n\nThe shape `QuoteWithBookOut` already has, for the same reason: a listing\nspanning the shelf renders a title and a cover per row, and fetching the\nBook per row is the N+1 `serialisation.books_to_out` exists to avoid. Three\nscalars rather than a nested `BookOut`, which carries tags, the adder, the\nactive loan and the caller's own reading state, none of which a row shows.\n\n**`missing_since` is narrowed to non-null**, which is the only field this\ntype narrows rather than adds. Every row is here *because* the column is\nset, so the base's `UtcDateTime | None` would make every client branch on a\nnull the route's WHERE clause has already excluded. The guarantee lives in\nthat clause; if it ever loosens, this narrowing turns a row into a 500\nrather than into a client rendering \"missing since never\", and loud is the\nfailure to prefer.",
         "properties": {
           "book_author": {
             "anyOf": [
@@ -4670,6 +4801,13 @@
             "title": "Statuses Updated",
             "type": "integer"
           },
+          "tags_dropped": {
+            "default": 0,
+            "description": "Tag names this run tried to put on a book and did not: the name was empty, the book was already full, the run had invented all the tags it may, or the name is not one this member may use. Not a count of what the source held: a reader caps how many tag names it takes from one record, and a record acted on in no other way is not reached at all, so both lose names upstream of this number",
+            "minimum": 0.0,
+            "title": "Tags Dropped",
+            "type": "integer"
+          },
           "truncated": {
             "default": false,
             "description": "A cap or the deadline stopped the walk before the feed ended",
@@ -4705,7 +4843,8 @@
           "nothing_due",
           "unreachable",
           "misconfigured",
-          "in_app_only"
+          "in_app_only",
+          "unexpected"
         ],
         "title": "OverdueNotifyReason",
         "type": "string"
@@ -7102,16 +7241,22 @@
   "paths": {
     "/api/backup": {
       "get": {
-        "description": "The whole database and every cover, as a zip.\n\nNot paginated and not streamed row by row: the archive has to be internally\nconsistent, so it is built in one pass from one session and then sent.\nA library is megabytes, not gigabytes.",
+        "description": "The whole database and every cover, as a zip.\n\nNot paginated and not streamed row by row: the archive has to be internally\nconsistent, so it is built in one pass from one session and then sent.\nA library is megabytes, not gigabytes.\n\n**Rationed, and the schema does not say so.** The refusal is a 429 carrying\n`Retry-After`, undeclared for the reason `routers/books.export_books`\nstates: this document enumerates no refusal on any of its operations, so\ndeclaring one here would make it look deliberate and every other\noperation's look accidental.\n`tests/test_errors.py::TestTheDocumentEnumeratesNoRefusal` holds that fact,\nbecause a reason described in prose rots silently where an asserted one\nreddens.\n\n**The limit bounds how often an archive is built and nothing else.** It\ndoes not bound how large one is: `MAX_ARCHIVE_BYTES` is the *restore*\nupload cap and the body size middleware's, both on `/backup/restore`, and\nthe download reads neither, so `build_archive` returns the whole library as\n`bytes` with nothing above it. Nor does it bound how many are built at\nonce: a sliding window counts starts, not responses in flight, so three\nconcurrent builds are inside it. Both of those are a concurrency bound,\nwhich is a different instrument.",
         "operationId": "download_backup",
         "responses": {
           "200": {
             "content": {
-              "application/json": {
-                "schema": {}
-              }
+              "application/zip": {}
             },
-            "description": "Successful Response"
+            "description": "Successful Response",
+            "headers": {
+              "Content-Disposition": {
+                "description": "Names the saved file: `attachment; filename=\"...\"`.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -7995,7 +8140,7 @@
     },
     "/api/books/bulk": {
       "post": {
-        "description": "Apply one verb to a selection of books.\n\nOne endpoint rather than six, because every verb shares the same three\nsteps: resolve the ids the caller may actually touch, apply, and report\nupdated/unchanged/skipped. Six handlers would be six copies of the\npermission walk, and the fifth one added would be the one that forgot it.\n\nA separate `/bulk/ownership` used to sit beside this with the same body,\nthe same permission walk and an identical result shape. It was removed\nrather than carried into the first tagged release: two endpoints for one\naction is two places for the next change to have to land, and dropping one\nafter a release is a breaking change rather than a tidy-up.",
+        "description": "Apply one verb to a selection of books.\n\nOne endpoint rather than one per verb, because every verb shares the same\nthree steps: resolve the ids the caller may actually touch, apply, and\nreport updated/unchanged/skipped. A route per verb would be a copy of the\npermission walk per verb, and the next one added would be the one that\nforgot it.\n\nA separate `/bulk/ownership` used to sit beside this with the same body,\nthe same permission walk and an identical result shape. It was removed\nrather than carried into the first tagged release: two endpoints for one\naction is two places for the next change to have to land, and dropping one\nafter a release is a breaking change rather than a tidy-up.",
         "operationId": "bulk_action",
         "requestBody": {
           "content": {
@@ -8069,7 +8214,7 @@
     },
     "/api/books/covers/backfill": {
       "post": {
-        "description": "Fetch and store the covers of books that are missing one.\n\nThis is what repairs a library that already exists. Storing covers on the\nway in only helps books added afterwards, and the books that need it most\nare the thousands that arrived through a CSV import, which never resolved a\ncover at all.\n\n**Scoped to the books the caller can see**, like every other query here. An\nadmin-only backfill would be worse, not better: `visible_to` has no admin\nbypass, so an admin running it could never repair another member's private\nbooks, and those books would have no way to be repaired at all. Each member\nrepairs their own shelf instead, and the privacy rule is not bent to make an\noperator action work.\n\nTargets every book with **no cover file behind its id**, which is the set\nthat needs one: a book that never had a cover, a book whose `cover_url`\npoints at a third party (that is what rots, a file on this volume is not),\nand a book whose column claims a local cover the directory does not have.\nThe last case is why this reads the directory rather than the column: they\ncan drift, files being the one thing a database row does not carry with it.\n\n**`after_id` is a cursor, and it is what lets this finish.** Without it the\nbatch is the first hundred candidates by id, and a book that cannot be fixed\nstays a candidate, so it sits at the front of every subsequent run for ever.\nMeasured across ten ISBNs, only eight resolved to an image, so roughly a\nfifth of any batch is permanently unfixable and accumulates; a pod with no\negress produces the same shape on the first run. With the cursor each run\nstarts past what the last one tried, and `next_after_id` comes back as 0\nonce the end is reached, so pressing again starts over and re-tries the ones\nthat failed, which may since have become fixable.\n\nIdempotent either way: a book with a file behind it is never a candidate, so\na second pass over the same range examines nothing it fixed.",
+        "description": "Fetch and store the covers of books that are missing one.\n\nThis is what repairs a library that already exists. Storing covers on the\nway in only helps books added afterwards, and the books that need it most\nare the thousands that arrived through a CSV import, which never resolved a\ncover at all.\n\n**Scoped to the books the caller can see**, like every other query here. An\nadmin-only backfill would be worse, not better: `visible_to` has no admin\nbypass, so an admin running it could never repair another member's private\nbooks, and those books would have no way to be repaired at all. Each member\nrepairs their own shelf instead, and the privacy rule is not bent to make an\noperator action work.\n\nTargets every book with **no cover file behind its id**, which is the set\nthat needs one: a book that never had a cover, a book whose `cover_url`\npoints at a third party (that is what rots, a file on this volume is not),\nand a book whose column claims a local cover the directory does not have.\nThe last case is why this reads the directory rather than the column: they\ncan drift, files being the one thing a database row does not carry with it.\n\n**`after_id` is a cursor, and it is what lets this finish.** Without it the\nbatch is the first hundred candidates by id, and a book that cannot be fixed\nstays a candidate, so it sits at the front of every subsequent run for ever.\nMeasured across ten ISBNs, only eight resolved to an image, so roughly a\nfifth of any batch is permanently unfixable and accumulates; a pod with no\negress produces the same shape on the first run. With the cursor each run\nstarts past what the last one tried, and `next_after_id` comes back as 0\nonce the end is reached, so pressing again starts over and re-tries the ones\nthat failed, which may since have become fixable.\n\n**Bounded in wall clock as well as in books**, so a slow or blackholing image\nservice leaves the batch short rather than holding the request open. A short\nrun answers with whatever resolved, counts only the books it has an outcome\nfor, and moves the cursor over exactly those, so pressing again resumes at the\nfirst book this one did not reach. The reply does not distinguish a short run\nfrom a complete one and does not need to: press again while `remaining` is\nabove zero.\n\n**Each book is bounded too.** A cover is a candidate check and then a\ndownload, each of which may follow redirects, and with no budget every hop of\nboth got a timeout of its own, so one unlucky book could spend what the whole\nrun was meant to. Past its budget a book keeps the remote URL, is counted\n`unreachable`, and is a candidate again on the next pass through the library.\n\nIdempotent either way: a book with a file behind it is never a candidate, so\na second pass over the same range examines nothing it fixed.",
         "operationId": "backfill_covers",
         "parameters": [
           {
@@ -8122,7 +8267,7 @@
     },
     "/api/books/custom-fields": {
       "get": {
-        "description": "Every field this library keeps, in the order it defined them.\n\n**No usage count**, unlike `GET /api/books/tags`. A count of the books\ncarrying a field is a disclosure: it is drawn from books the caller may not\nsee, so it would have to be scoped to the viewer, and a viewer scoped\nnumber in a confirmation dialog would then understate what deleting the\nfield is about to destroy. Neither number is worth having, so the\nconfirmation says \"every book\" instead. `docs/security.md` records it.",
+        "description": "Every field this library may tell you about, in the order it defined them.\n\n**Not every field it keeps.** A field is listed when a book you can see\nholds a value in it, when a book in your trash does, or when no book at all\ndoes. A field whose every value sits on books you cannot see is absent, and\nnaming it by id is a 404. `fields.Fields` holds the three arms and what\nthey cost.\n\n**No usage count**, unlike `GET /api/books/tags`. A count of the books\ncarrying a field is a disclosure: it is drawn from books the caller may not\nsee, so it would have to be scoped to the viewer, and a viewer scoped\nnumber in a confirmation dialog would then understate what deleting the\nfield is about to destroy. Neither number is worth having, so the\nconfirmation says \"every book\" instead. `docs/security.md` records it.\n\n**Each row says whether you may rename it.** Every field reaching this list\nis addressable to you by construction, since `listable` and `addressable`\nask the same predicate, so what `renamable` adds is the author arm and the\nadmin one. `schemas/custom_field.CustomFieldOut` records why that is a\nboolean rather than the author's member id.\n\n**On this list a false `renamable` is a fact about another Member**, and it\nis a disclosure rather than a convenience. The other two causes cannot\nreach here, since every listed row is addressable and an admin is never\nrefused the author arm, so for a Member who is not an admin the flag reads\nexactly \"somebody else defined this\". Learning that used to take a rename\nrequest and its 403; it is now on every page load.\n\n**No application log records any of it, and the access log this project's\nown serving command produces records every request, so what the change\nremoves is the one line that was distinctive.** A refusal on a path normal\nuse never produces, carrying the field id, becomes the request every\nsettings page load makes. Observability is therefore **not** unchanged, and\na sentence saying nothing is logged reads as though it were. Nothing here\nclaims anything about what a deployment's ingress keeps, which a published\nfile cannot know. `docs/security.md` carries the row.",
         "operationId": "list_custom_fields",
         "responses": {
           "200": {
@@ -8151,7 +8296,7 @@
         ]
       },
       "post": {
-        "description": "Define a field for the whole library.\n\nAny member, like `create_tag` and for the same reason: public books are a\nshared shelf that anyone may curate, and a vocabulary only an admin can\nextend is a vocabulary nobody uses. Defining one is additive and changes no\nbook.\n\nA name that already exists, in any capitalisation, returns that field\nrather than a 409: somebody typing a name that is already there wants that\nfield. Past `MAX_CUSTOM_FIELDS` it refuses with 409.",
+        "description": "Define a field for the whole library.\n\nAny member, like `create_tag` and for the same reason: public books are a\nshared shelf that anyone may curate, and a vocabulary only an admin can\nextend is a vocabulary nobody uses. Defining one is additive and changes no\nbook.\n\nA name that already exists, in any capitalisation, returns that field\nrather than a 409: somebody typing a name that is already there wants that\nfield. Past `MAX_CUSTOM_FIELDS` it refuses with 409.\n\n**The caller is recorded as the definer**, and that is what makes two\nother things work: the field stays on their own settings page whatever\ncarries it, and they may rename it. `fields.Fields` holds both. The\ncollision above takes no authorship: a second member typing an existing\nname gets the row and not a stake in it.\n\n**So `renamable` on the answer is not always true**, and the collision is\nthe case that makes it worth computing rather than asserting: a member who\nretypes somebody else's name is handed that row and may not rename it, and\na member who retypes the name of a field hidden from them is handed a row\nthey cannot address at all. Both are the open door\n`fields.Fields` records under \"uniqueness is whole table of necessity\";\nthis reports them rather than closing them.\n\n**For an admin those two causes do not collide, and that is a disclosure\nrather than a symmetry.** The sentence above reads as though the collision\nkept both quiet, and it does keep them quiet for everybody else. The admin\narm means the author half never refuses, so a false `renamable` tells an\nadmin exactly one thing: a field by that name exists and every value in it\nsits on Books they cannot see. One request and no write, where the same\nconclusion used to take a define and then a rename.\n\n**And nothing bounds the guessing**: no rate limiter on this route, no\ncounter anywhere, so a dictionary of candidate names can be walked at one\nrequest each. That is what makes it enumeration rather than one bit about\na name the caller already had.\n\n**No application log records any of it, and the access log this project's\nown serving command produces records every request, so what the change\nremoves is the one line that was distinctive.** A distinctive refusal\nbecomes a request indistinguishable from a legitimate define. Nothing here\nclaims anything about what a deployment's ingress keeps.\n`docs/security.md` carries the row.\n\n**Where the `Fields` is constructed is not load bearing**, which is worth\nsaying because it reads as though it were. Autoflush puts the pending row\nin the table before any arm reads it, and the arm for a definition no Book\ncarries admits it either way, so warming every cache before the commit\nanswers the same. Driven both ways; nothing reds.",
         "operationId": "define_custom_field",
         "requestBody": {
           "content": {
@@ -8198,7 +8343,7 @@
     },
     "/api/books/custom-fields/{field_id}": {
       "delete": {
-        "description": "Remove a field, and its value on every book.\n\n**Admin only, and deliberately asymmetric with defining one**, which is the\nsame split `delete_tag` makes. Defining a field is additive and reversible\nby deleting it. Deleting one destroys, in one request and with no undo,\nsomething every member of the house typed by hand, on books the caller\ncannot necessarily see. A `CustomField` records nobody as its author, so\nthere is no owner to ask.\n\nIt is the sharper case of the two: deleting a tag takes a label off a book,\nand deleting a field takes the **content** a member wrote.\n\n204, like `delete_tag`, and the number of values removed goes to the log\nrather than to the caller. See `list_custom_fields` for why no count is\npublished.",
+        "description": "Remove a field, and its value on every book.\n\n**Admin only, and deliberately asymmetric with defining one**, which is the\nsame split `delete_tag` makes. Defining a field is additive and reversible\nby deleting it. Deleting one destroys, in one request and with no undo,\nsomething every member of the house typed by hand, on books the caller\ncannot necessarily see. The row records who **defined** it, which is who\nmay rename it, and that is not an owner of the content under it: the\nvalues were typed by everybody, so there is still nobody to ask.\n\nIt is the sharper case of the two: deleting a tag takes a label off a book,\nand deleting a field takes the **content** a member wrote.\n\n**The one door taking a field id that is not scoped to the caller**, and\ndeliberately: gating it would leave a field whose every value sits on books\nthe admin cannot see undeletable for good. `_any_custom_field` carries the\nrest.\n\n204, like `delete_tag`, and the number of values removed goes to the log\nrather than to the caller. See `list_custom_fields` for why no count is\npublished.",
         "operationId": "delete_custom_field",
         "parameters": [
           {
@@ -8239,7 +8384,7 @@
         ]
       },
       "patch": {
-        "description": "Rename a field. Every value under it is kept.\n\nThat is the schema rather than this handler: values reference the\ndefinition by id, so nothing about them mentions the name. `custom_fields.rename`\nrecords why renaming onto an existing name is refused instead of merged.",
+        "description": "Rename a field. Every value under it is kept.\n\nThat is the schema rather than this handler: values reference the\ndefinition by id, so nothing about them mentions the name. `custom_fields.rename`\nrecords why renaming onto an existing name is refused instead of merged.\n\n**404 for a field you may not be told about**, which is the answer an\nabsent id already gives: see `fields.Fields.addressable`.\n\n**403 for a field somebody else defined**, and the two refusals are\ndifferent on purpose. The 404 withholds that a row exists; by the time\nthis one can fire, `addressable` has already said it does, so saying\nwhose it is adds nothing the caller did not have. `fields.Fields.renamable`\nholds the rule, including why a field with no author is renamable by\nanybody: that is every field defined before the column existed, and a\nrefusal there would have taken the verb away from an entire existing\nvocabulary on the morning of the upgrade.\n\n**An admin may rename any field they can address**, for the reason the\ndelete below is admin only: a Library wide vocabulary with a ceiling of 25\nneeds somebody who can repair a name whose author is unreachable.\n\n**It is not the same exemption, and calling it that overstates it.** The\ndelete is deliberately ungated, so it reaches a field whose every value\nsits on Books the admin cannot see; this is gated on `addressable` like\nevery other id door here. So for a field hidden from every admin, the only\nverb left is the delete, which destroys every value under the row. The\nvalve for a Member who has defined the whole vocabulary is therefore\nrepair where the field is visible and destruction where it is not.\n\n**Logged, like the delete beside it.** The log line predates the author\ncolumn and is not replaced by it: the column says who may rename, and the\nline says who did, which for an admin rename is a different person.\n\n**The two refusals here are the whole of what `CustomFieldOut.renamable`\npublishes**, and the client draws its control from that rather than\nderiving one. A client that has gone stale still reaches them, which is\nwhy the refusal is worded for a reader: hiding a control is advice and\nthis is the guarantee.",
         "operationId": "rename_custom_field",
         "parameters": [
           {
@@ -8366,18 +8511,14 @@
     },
     "/api/books/duplicates": {
       "get": {
-        "description": "Books that look like the same work under different ids.\n\nMatched on normalised title plus author, NOT on ISBN. An accidental exact\nrepeat is already refused by `uq_books_isbn_single_copy`, so the case left\nto catch is the one it cannot see: a hardback and a paperback are the same\nbook and two legitimately different ISBNs.\n\n**A deliberate copy is not a duplicate, and this is where the two are told\napart.** Two paperbacks of one title are two rows sharing a `copy_group`\nand would otherwise be the strongest match this endpoint can produce: same\ntitle, same author, same everything. Offering them for merge would invite\nsomebody to destroy a book they own, so each group is collapsed to one row\nbefore the grouping runs. What survives is what the collapse could not\nexplain, which is exactly the accidental case.\n\nGrouping happens in Python rather than SQL because the normalisation\n(casefold, strip punctuation, drop a leading article) is not something\nSQLite can express, and the catalogue is small enough that scanning it is\ncheaper than maintaining a normalised column.",
+        "description": "Books that look like the same work under different ids.\n\nMatched on normalised title plus author, NOT on ISBN. An accidental exact\nrepeat is already refused by `uq_books_isbn_single_copy`, so the case left\nto catch is the one it cannot see: a hardback and a paperback are the same\nbook and two legitimately different ISBNs.\n\n**A deliberate copy is not a duplicate, and this is where the two are told\napart.** Two paperbacks of one title are two rows sharing a `copy_group`\nand would otherwise be the strongest match this endpoint can produce: same\ntitle, same author, same everything. Offering them for merge would invite\nsomebody to destroy a book they own, so each group is collapsed to one row\nbefore the grouping runs. What survives is what the collapse could not\nexplain, which is exactly the accidental case.\n\nGrouping happens in Python rather than SQL because the normalisation\n(casefold, strip punctuation, drop a leading article) is not something\nSQLite can express, and the catalogue is small enough that scanning it is\ncheaper than maintaining a normalised column.\n\n**The scan is unpaginated and the answer is capped, which are two\ndifferent statements.** Every request reads one row per visible Book,\nbecause a page of the catalogue cannot be grouped on its own: a pair split\nacross two pages is two singletons. What the cap cuts is the finished\ngrouping, never the population it ran over, so a group is never split by\nit and the answer never depends on a grouping computed in an earlier\nrequest. The work is unbounded; the answer is not.",
         "operationId": "list_duplicates",
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/DuplicateGroup"
-                  },
-                  "title": "Response List Duplicates",
-                  "type": "array"
+                  "$ref": "#/components/schemas/DuplicateReport"
                 }
               }
             },
@@ -8397,7 +8538,7 @@
     },
     "/api/books/export": {
       "get": {
-        "description": "The shelf this member can see, as a file.\n\n**MARCXML needs library mode and the other two do not.** A CSV export is a\nhousehold reading its own shelf in a spreadsheet. A MARC record is a\ncatalogue record handed to another institution, which is what library mode\nis for, and offering it everywhere would put a format nobody in a household\ncan use in front of everybody. Enforced here rather than by hiding the menu\nentry: disabling a control in the browser is advice to one client, which is\nthe sentence `routers/public.py` already states about the public catalogue.\n\n**403, not 404.** The route exists and the member may call it; the format\nis switched off. That is the same answer registration gives when it is\nclosed, and there is nothing to conceal: `GET /api/settings/features`\nalready tells any caller whether library mode is on.",
+        "description": "The shelf this member can see, as a file.\n\n**CSV is `text/csv`, plain text is `text/plain` and MARCXML is\n`application/marcxml+xml`.** All three are declared for the 200 because the\ndocument has no way to say which of them `?format=` selects.\n\n**Rationed, and the schema does not say so.** The refusal is a 429 carrying\n`Retry-After`. It is not declared here because this document enumerates no\nrefusal on any operation: not a 401, which every secured operation can\nanswer, nor a 403, a 404 or a 429. So declaring one here would make this\nrefusal look deliberate and every other operation's look accidental, which\nis a decision about the whole error surface rather than about this route.\n`docs/decisions.md` records that reasoning, having refused the same move\nonce already, and\n`tests/test_errors.py::TestTheDocumentEnumeratesNoRefusal` is what this\nparagraph rests on rather than a reader's memory of it. The mechanism behind\nthe refusal is shared by every route in `ratelimit.py`, so what would make\ndeclaring it honest is declaring it at all of them. The counter is not:\nthis route has its own, for the reason `ratelimit.EXPORT_LIMIT` gives.\n\n**MARCXML needs library mode and the other two do not.** A CSV export is a\nhousehold reading its own shelf in a spreadsheet. A MARC record is a\ncatalogue record handed to another institution, which is what library mode\nis for, and offering it everywhere would put a format nobody in a household\ncan use in front of everybody. Enforced here rather than by hiding the menu\nentry: disabling a control in the browser is advice to one client, which is\nthe sentence `routers/public.py` already states about the public catalogue.\n\n**403, not 404.** The route exists and the member may call it; the format\nis switched off. That is the same answer registration gives when it is\nclosed, and there is nothing to conceal: `GET /api/settings/features`\nalready tells any caller whether library mode is on.",
         "operationId": "export_books",
         "parameters": [
           {
@@ -8413,11 +8554,19 @@
         "responses": {
           "200": {
             "content": {
-              "application/json": {
-                "schema": {}
-              }
+              "application/marcxml+xml": {},
+              "text/csv": {},
+              "text/plain": {}
             },
-            "description": "Successful Response"
+            "description": "Successful Response",
+            "headers": {
+              "Content-Disposition": {
+                "description": "Names the saved file: `attachment; filename=\"...\"`.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "422": {
             "content": {
@@ -8443,7 +8592,7 @@
     },
     "/api/books/identifiers/backfill": {
       "post": {
-        "description": "Fill in books that carry a store's own identifier and no ISBN.\n\n**This is what a Google Play Books import needs, and nothing else supplies\nit.** That export carries a Google Books volume id for every book and no\nISBN anywhere, so a book arrives with a title, an author and an exact key,\nand the only enrichment available to it was a search by that title. One\nvolume id resolves to one record, with no ranking and no guess.\n\n**Amazon is deliberately absent.** Amazon publishes no catalogue API, so\nthere is no request an ASIN could become. A book carrying only an ASIN is\nnot a candidate here and is not reported as one.\n\n**Candidates are books with no ISBN, no Google volume already recorded, and\na Google Books identifier.** No ISBN, because an ISBN\nis an exact key the free catalogues answer to, and spending a metered\nrequest on one would be the bill for nothing that\n`sources.Plan.lookup_together` refuses. No volume recorded, because that\ncolumn is what enrichment from Google writes, so a book that has been\nenriched stops being a candidate and this is safe to run twice.\n\n**Scoped to the books the caller can see**, like the cover backfill and for\nthat route's stated reason: `visible_to` has no admin bypass, so each member\nrepairs their own shelf rather than the privacy rule being bent to make an\noperator action work.\n\n**Refuses with 409 when this library does not ask Google Books**, rather\nthan examining nothing and reporting a clean run. A source with no usable\nkey must say so: the cause is a switch and a key in Settings, and a zero\nwould send somebody hunting through their library instead.\n\nBatched and resumable. `next_after_id` carries on past what this run tried,\nand comes back as 0 at the end of the library so pressing again starts over\nand re-tries whatever has since become resolvable.",
+        "description": "Fill in books that carry a store's own identifier and no ISBN.\n\n**This is what a Google Play Books import needs, and nothing else supplies\nit.** That export carries a Google Books volume id for every book and no\nISBN anywhere, so a book arrives with a title, an author and an exact key,\nand the only enrichment available to it was a search by that title. One\nvolume id resolves to one record, with no ranking and no guess.\n\n**Amazon is deliberately absent.** Amazon publishes no catalogue API, so\nthere is no request an ASIN could become. A book carrying only an ASIN is\nnot a candidate here and is not reported as one.\n\n**Candidates are books with no ISBN, no Google volume already recorded, and\na Google Books identifier.** No ISBN, because an ISBN\nis an exact key the free catalogues answer to, and spending a metered\nrequest on one would be the bill for nothing that\n`sources.Plan.lookup_together` refuses. No volume recorded, because that\ncolumn is what enrichment from Google writes, so a book that has been\nenriched stops being a candidate and this is safe to run twice.\n\n**Scoped to the books the caller can see**, like the cover backfill and for\nthat route's stated reason: `visible_to` has no admin bypass, so each member\nrepairs their own shelf rather than the privacy rule being bent to make an\noperator action work.\n\n**Refuses with 409 when this library does not ask Google Books**, rather\nthan examining nothing and reporting a clean run. The cause is a switch and\na key in Settings, and the reply names both.\n\nBatched and resumable. `next_after_id` carries on past what this run\nexamined, and comes back as 0 at the end of the library so pressing again\nstarts over and re-tries whatever has since become resolvable.\n\n**Bounded in wall clock as well as in books**, so a slow or busy Google\nleaves the batch short rather than holding the request open. A short run\nanswers with whatever resolved, counts only the books it has an outcome for,\nand moves the cursor over exactly those, so pressing again resumes at the\nfirst book this one did not reach. The reply does not distinguish a short run\nfrom a complete one and does not need to: press again while `remaining` is\nabove zero.",
         "operationId": "backfill_from_identifiers",
         "parameters": [
           {
@@ -8862,7 +9011,7 @@
     },
     "/api/books/tags": {
       "get": {
-        "description": "The curated vocabulary plus whatever the library has invented.\n\nThe **client** decides the order the groups appear in (`TAG_CATEGORY_ORDER`\nin the frontend), because that is a presentation decision and it needs the\nsame order in three places. This orders by name within the group so the\nresponse is deterministic. The order a reader sees is the client's too:\n`frontend/src/lib/nameOrder.ts` re-sorts with a collator, because no SQL\nfold moves `\u00c4`.\n\n`book_count` is one grouped query for the whole list rather than one per\ntag: this is fetched on nearly every page, so an N+1 here is an N+1\neverywhere.",
+        "description": "The curated vocabulary plus the invented tags this member can already see.\n\n**Not every tag the library holds.** A tag carries no member of its own, so\nwhat decides who may be told it exists is the books carrying it: this\nanswers with the seeded vocabulary, which is published in the source, plus\nevery tag on a book the caller can see. An invented tag whose only books\nare other people's private ones is absent, because listing it would publish\na name somebody typed against a book this caller may not read.\n\nThe **client** decides the order the groups appear in (`TAG_CATEGORY_ORDER`\nin the frontend), because that is a presentation decision and it needs the\nsame order in three places. This orders by name within the group so the\nresponse is deterministic. The order a reader sees is the client's too:\n`frontend/src/lib/nameOrder.ts` re-sorts with a collator, because no SQL\nfold moves `\u00c4`.\n\n`book_count` is one grouped query for the whole list rather than one per\ntag: this is fetched on nearly every page, so an N+1 here is an N+1\neverywhere. It is the same query the row filter reads, so the number and\nthe presence of the row cannot disagree.",
         "operationId": "list_tags",
         "responses": {
           "200": {
@@ -8891,7 +9040,7 @@
         ]
       },
       "post": {
-        "description": "Invent a tag.\n\nAny member, not just an admin. Public books are a shared shelf that anyone\nmay curate, and a vocabulary only an admin can extend is a vocabulary\nnobody uses.\n\nMatched case-insensitively against what already exists, so \"Cookbooks\" and\n\"cookbooks\" cannot both appear. A collision returns the existing tag rather\nthan a 409: somebody typing a name that is already there wants that tag,\nand an error would send them to find it by hand.",
+        "description": "Invent a tag.\n\nAny member, not just an admin. Public books are a shared shelf that anyone\nmay curate, and a vocabulary only an admin can extend is a vocabulary\nnobody uses.\n\nMatched case-insensitively against what already exists, so \"Cookbooks\" and\n\"cookbooks\" cannot both appear. A collision returns the existing tag rather\nthan a 409: somebody typing a name that is already there wants that tag,\nand an error would send them to find it by hand.\n\n**A tag invented here is not in `GET /api/books/tags` until a book the\ncaller can see carries it**, which is that route's rule and not an\nomission: a tag on no book is a name and nothing else, and publishing it to\nthe whole library is the disclosure this route's two step use was part of.\nPutting it on a book is what makes it part of the vocabulary, and the\nclients do that in the same gesture.",
         "operationId": "create_tag",
         "requestBody": {
           "content": {
@@ -9161,7 +9310,7 @@
         ]
       },
       "patch": {
-        "description": "Correct the catalogue entry by hand.\n\n`exclude_unset` is what makes a partial update partial: an absent field is\nleft alone and an explicit null clears. Without it every unsent field would\narrive as None and wipe the record, which is the classic PATCH bug.",
+        "description": "Correct the catalogue entry by hand.\n\n`exclude_unset` is what makes a partial update partial: an absent field is\nleft alone and an explicit null clears where the column allows one. Without\nit every unsent field would arrive as None and wipe the record, which is the\nclassic PATCH bug. A null for a column the database will not leave empty is\nrefused by `BookDetailsUpdate` before it reaches here, because it used to\nreach the flush and answer 500.\n\n**`categories` clears on an empty list rather than on a null**, because its\nrequest shape is a list and its column is one joined string. This is the\nonly route that removes a subject: the create route writes them, the\ncatalogue gap fill and the merge's absorb add them, and an overwriting\nenrich cannot empty the column because the merge skips an empty incoming\nvalue. Before this the only removal was deleting the book, and the column\nis served to readers with no account.",
         "operationId": "update_book_details",
         "parameters": [
           {
@@ -9506,7 +9655,7 @@
     },
     "/api/books/{book_id}/custom-fields/{field_id}": {
       "put": {
-        "description": "Fill in a field on this book, or clear it with an empty value.\n\nOne verb for both, because emptying the box and saving is what a person\ndoes and a client should not have to decide which of two verbs that means.\n\nReturns the book's whole list rather than the one value, so a client that\nhas just written one is holding the same thing `GET` would give it.\n\n422 when the field holds a link and the value is not one: an address with\nno scheme, a `javascript:` or `data:` URL, or a host that is missing. See\n`custom_fields.link_target` for the whole list and why it is re-checked on\nevery read as well as here.",
+        "description": "Fill in a field on this book, or clear it with an empty value.\n\nOne verb for both, because emptying the box and saving is what a person\ndoes and a client should not have to decide which of two verbs that means.\n\nReturns the book's whole list rather than the one value, so a client that\nhas just written one is holding the same thing `GET` would give it.\n\n**404 for a field you may not be told about**, and this is the door that\nmakes the scoped list worth having: the response carries `name` on every\nentry, so an ungated write would be a name oracle over a small integer id\nspace, reachable on a book of your own. See `fields.Fields.addressable`.\n\n400 when the field holds a link and the value is not one: an address with\nno scheme, a `javascript:` or `data:` URL, or a host that is missing. See\n`custom_fields.link_target` for the whole list and why it is re-checked on\nevery read as well as here.",
         "operationId": "set_custom_field",
         "parameters": [
           {
@@ -11118,6 +11267,66 @@
         ]
       }
     },
+    "/api/books/{book_id}/tags": {
+      "post": {
+        "description": "Put a tag with this name on this book, inventing it if it is new.\n\nOne request where typing a name used to be two, and the two were a\ndifferent question each: inventing a tag hands back an id, and attaching\nthat id is asked of somebody who might have guessed it. Typing a name is\nneither. Somebody typing a tag name while looking at a book means \"this\nbook is that\", so this is the one gesture and the one answer.\n\n**The book as it stands, always, and never a 409, a 201 or a 404 for the\nname.** A status that told a minted name from a matched one would answer\n\"does this name already exist\" in the status line, which is the question\na member may not have answered about a tag they cannot see. A name that\nis not this member's to use is left off the book, in the same shape as a\nname that is: `tags.Naming` decides it and carries what that does and does\nnot close.\n\nRefused only for what the caller can already see: a name that is not a\nname, by `TagCreate`, and a book already carrying\n`MAX_TAGS_PER_BOOK` tags, with the sentence and the reasoning of the\nattach by id route beside this one.",
+        "operationId": "add_book_tag_by_name",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "book_id",
+            "required": true,
+            "schema": {
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "title": "Book Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TagCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BookOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Add Book Tag By Name",
+        "tags": [
+          "books"
+        ]
+      }
+    },
     "/api/books/{book_id}/tags/{tag_id}": {
       "delete": {
         "operationId": "remove_book_tag",
@@ -11238,7 +11447,7 @@
     },
     "/api/collections": {
       "get": {
-        "description": "Every collection in the library, with the caller's own counts.\n\nOrdered case insensitively by name: \"ebooks\" sorting after \"Zola\" because\nof its first letter's byte value is the kind of ordering a reader reads as\na bug.\n\n**Still `func.lower` here, deliberately.** The fold that decides uniqueness\nmoved into Python and into `name_folded`; this one only decides sort order,\nand switching it would change nothing a reader notices: both orderings sort\nby code point, so `\u00c4sthetik` lands past `z` either way. Putting it where a\nGerman reader expects needs a collation rather than a fold, which is a\ndifferent problem with a different owner. See `docs/decisions.md`.",
+        "description": "Every collection the caller may be told about, with their own counts.\n\n**Not every collection in the library**, which is what this used to be. A\ncollection whose every book is hidden from the caller is absent, because\nits name is the caller's first and only evidence that somebody's books are\nfiled somewhere. `shelving.Shelving` is the rule and carries the three arms,\nwhat stays uncovered, and why a row that vanishes and returns is correct.\n\nOne consequence worth knowing at this site: a listed row reading\n`book_count: 0` used to mean \"empty, or holding books you cannot see\", and\nnow means empty, or holding only books you can see in the trash. The count\nstopped being readable as a hidden total because the rows it could be read\nagainst are gone.",
         "operationId": "list_collections",
         "responses": {
           "200": {
@@ -11267,7 +11476,7 @@
         ]
       },
       "post": {
-        "description": "Invent a collection.\n\nAny member, like `POST /api/books/tags` and for the same reason: a shelf\nonly an admin can divide up is one nobody divides up.\n\nA name that already exists returns the existing collection rather than a\n409. Somebody typing a name that is already there means that collection,\nand an error would send them off to find it by hand. Renaming is the\nopposite case and does answer 409, because a rename onto an occupied name\nwould silently merge two shelves.",
+        "description": "Invent a collection.\n\nAny member, like `POST /api/books/tags` and for the same reason: a shelf\nonly an admin can divide up is one nobody divides up.\n\nA name that already exists returns the existing collection rather than a\n409. Somebody typing a name that is already there means that collection,\nand an error would send them off to find it by hand. Renaming is the\nopposite case and does answer 409, because a rename onto an occupied name\nwould silently merge two shelves.\n\n**So a guessed name still confirms a collection exists, and that is left\nopen deliberately.** `uq_collections_name_folded` is global, so the\ncollision check cannot take a viewer without racing the index it exists to\nfront, and answering a collision any other way is a new status code on a\nroute that declares 201. What the guess no longer buys is the write: the\ncaller gets the row and `shelving.Shelving` then refuses to file anything\ninto it, which is the answer an unused id gets. `Shelving`'s docstring\ncarries this under what is not closed.",
         "operationId": "create_collection",
         "requestBody": {
           "content": {
@@ -11314,7 +11523,7 @@
     },
     "/api/collections/{collection_id}": {
       "delete": {
-        "description": "Remove a collection. Its books are unfiled, never deleted.\n\n**Admin only, and deliberately asymmetric with creating one**, exactly like\n`DELETE /api/books/tags/{id}`. Creating is additive and undone by deleting;\ndeleting empties a shelf label off every book in the house at once, with no\nundo, and one member should not be able to unpick the library's filing on\ntheir own.\n\nNothing here nulls the column by hand, and two things do it instead. The\nORM nulls the loaded children, which is what this delete actually emits;\n`books.collection_id` is also `ON DELETE SET NULL`, which is what covers a\nrestore or a statement run by hand, neither of which passes through here.\nThe second is the one worth keeping: a row left pointing at a destroyed\ncollection is a dangling foreign key, and it is also why\n`PRAGMA foreign_keys=ON` is load bearing here.",
+        "description": "Remove a collection. Its books are unfiled, never deleted.\n\n**Admin only, and deliberately asymmetric with creating one**, exactly like\n`DELETE /api/books/tags/{id}`. Creating is additive and undone by deleting;\ndeleting empties a shelf label off every book in the house at once, with no\nundo, and one member should not be able to unpick the library's filing on\ntheir own.\n\nNothing here nulls the column by hand, and two things do it instead. The\nORM nulls the loaded children, which is what this delete actually emits;\n`books.collection_id` is also `ON DELETE SET NULL`, which is what covers a\nrestore or a statement run by hand, neither of which passes through here.\nThe second is the one worth keeping: a row left pointing at a destroyed\ncollection is a dangling foreign key, and it is also why\n`PRAGMA foreign_keys=ON` is load bearing here.\n\n**Deliberately not gated on `shelving.Shelving`, unlike the rename beside\nit, and the reason is what gating would cost.** An admin has no privilege\nover another member's private books, so a collection holding only those is\none no admin may be told about; refusing the delete there would make it\npermanently undeletable while it still holds its name against\n`uq_collections_name_folded`, and the only symptom would be a 409 nobody\ncan explain. What the ungated 404-or-204 discloses is an id, to an admin,\nwith no name in the response. That is the smaller of the two, and it is a\nchoice rather than an oversight.",
         "operationId": "delete_collection",
         "parameters": [
           {
@@ -11355,7 +11564,7 @@
         ]
       },
       "patch": {
-        "description": "Rename one. Any member: a rename moves no book and is undone by another.\n\nRefuses a name another collection already holds. The alternative is a merge\nof two shelves, which is a different operation with different consequences\nfor the books in both, and nobody asked for it by typing a name.\n\n**One migration does merge, and it is not this rule being bent.** The\nrevision that made the name fold outside ASCII found libraries already\nholding a pair like `\u00c4sthetik` and `\u00e4sthetik`, which the new index cannot\nboth keep, and there was nobody to ask: an upgrade has no caller to answer\n409 to. So it merges the pair once, into the lower id, and logs what it\nmoved. Here there is a caller, and a caller who typed a name has asked for\nthat name and not for two shelves to become one.",
+        "description": "Rename one. Any member: a rename moves no book and is undone by another.\n\nRefuses a name another collection already holds. The alternative is a merge\nof two shelves, which is a different operation with different consequences\nfor the books in both, and nobody asked for it by typing a name.\n\n**One migration does merge, and it is not this rule being bent.** The\nrevision that made the name fold outside ASCII found libraries already\nholding a pair like `\u00c4sthetik` and `\u00e4sthetik`, which the new index cannot\nboth keep, and there was nobody to ask: an upgrade has no caller to answer\n409 to. So it merges the pair once, into the lower id, and logs what it\nmoved. Here there is a caller, and a caller who typed a name has asked for\nthat name and not for two shelves to become one.\n\n**And the same 404 for a collection this caller may not be told about**,\nwhich is `shelving.Shelving.assignable`. This route is open to every member\nand answers over the whole id space, so before it the 404-or-200 was an\nexistence oracle by id on a table of consecutive integers: closing the list\nand leaving this would have moved a broadcast to a poll. The two answers\nare now one.\n\nThe 409 is the other half and is not closed: a taken name still answers\ndifferently from a free one, for the reason `create_collection` gives.",
         "operationId": "rename_collection",
         "parameters": [
           {
@@ -11611,7 +11820,7 @@
     },
     "/api/imports/marc/preview": {
       "post": {
-        "description": "Read a MARC file and report what it holds, writing nothing.\n\n**`already_held` is the number this exists for.** Importing the same file\ntwice is the ordinary accident in a catalogue transfer, and \"will this\ndouble my catalogue\" has to be answerable before the write.\n\n**Both of the import's refusals are modelled, not one.** `already_held`\ncounts what it will match and `blocked` counts what it will refuse for an\nISBN this member cannot see, through `MarcIndex.holds` and\n`MarcIndex.would_refuse`, which are the same index and the same predicates\n`MarcImport` applies, over the same `bounded_fields`. Counting only the\nfirst overstated what an import would add by exactly the number of records\nanother member holds privately.\n\n**What is left is an upper bound rather than an equality, and it errs\ntowards promising less.** The index is read once here and mutated during an\nimport: `MarcIndex.remember` makes a freshly created Book findable, so a\nwork listed twice in one file is created once and matched once, while this\ncounts both as additions. Measured, two identical records: the preview would\nadd 2 and the import created 1 and matched 1.\n\n**`blocked` describes the default.** `would_refuse` is the refusal\n`create_missing` reaches, and this endpoint takes no `create_missing`\nbecause the import defaults it true. With it off nothing is created, so\nnothing can be refused for a collision.\n\n**And it under-counts** where a record's ISBN is held invisibly but its\ntitle and author match a visible Book: that is a match, not a refusal. See\n`MarcPreviewOut`.\n\nRate limited together with the import, so a preview and the import that\nfollows it spend two of the three a minute allows. Parsing is the expensive\nhalf and `_read_upload` caps the body without capping the rate.",
+        "description": "Read a MARC file and report what it holds, writing nothing.\n\n**`already_held` is the number this exists for.** Importing the same file\ntwice is the ordinary accident in a catalogue transfer, and \"will this\ndouble my catalogue\" has to be answerable before the write.\n\n**Both of the import's refusals are modelled, not one.** `already_held`\ncounts what it will match and `blocked` counts what it will refuse for an\nISBN this member cannot see, through `MarcIndex.holds` and\n`MarcIndex.would_refuse`, which are the same index and the same predicates\n`MarcImport` applies, over the same stored records. Counting only the\nfirst overstated what an import would add by exactly the number of records\nanother member holds privately.\n\n**What is left is an upper bound rather than an equality, and it errs\ntowards promising less.** The index is read once here and mutated during an\nimport: `MarcIndex.remember` makes a freshly created Book findable, so a\nwork listed twice in one file is created once and matched once, while this\ncounts both as additions. Measured, two identical records: the preview would\nadd 2 and the import created 1 and matched 1.\n\n**`blocked` describes the default.** `would_refuse` is the refusal\n`create_missing` reaches, and this endpoint takes no `create_missing`\nbecause the import defaults it true. With it off nothing is created, so\nnothing can be refused for a collision.\n\n**And it under-counts** where a record's ISBN is held invisibly but its\ntitle and author match a visible Book: that is a match, not a refusal. See\n`MarcPreviewOut`.\n\nRate limited together with the import, so a preview and the import that\nfollows it spend two of the three a minute allows. Parsing is the expensive\nhalf and `_read_upload` caps the body without capping the rate.",
         "operationId": "preview_marc",
         "requestBody": {
           "content": {
@@ -13821,11 +14030,6 @@
         },
         "responses": {
           "202": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
             "description": "Successful Response"
           },
           "422": {
@@ -13943,11 +14147,6 @@
         },
         "responses": {
           "202": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
             "description": "Successful Response"
           },
           "422": {
@@ -13986,11 +14185,20 @@
         "responses": {
           "200": {
             "content": {
-              "application/json": {
-                "schema": {}
-              }
+              "image/jpeg": {},
+              "image/png": {},
+              "image/webp": {}
             },
             "description": "Successful Response"
+          },
+          "206": {
+            "content": {
+              "image/jpeg": {},
+              "image/png": {},
+              "image/webp": {},
+              "multipart/byteranges": {}
+            },
+            "description": "Partial Content"
           },
           "422": {
             "content": {
@@ -14039,11 +14247,20 @@
         "responses": {
           "200": {
             "content": {
-              "application/json": {
-                "schema": {}
-              }
+              "image/jpeg": {},
+              "image/png": {},
+              "image/webp": {}
             },
             "description": "Successful Response"
+          },
+          "206": {
+            "content": {
+              "image/jpeg": {},
+              "image/png": {},
+              "image/webp": {},
+              "multipart/byteranges": {}
+            },
+            "description": "Partial Content"
           },
           "422": {
             "content": {

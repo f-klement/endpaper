@@ -22,7 +22,7 @@ megabyte; `backup.restore` is that path and it sees no Pydantic model.
 
 **And it carries a byte arm as well as a character one.** SQLite's `length()`
 counts characters up to the first NUL, so on a Core insert the character
-inequality alone passes on a value nothing bounded: measured, `"a\x00" + "x" *
+inequality alone passes on a value nothing bounded: measured, `"a\\x00" + "x" *
 10000` reports a length of 1 and stores 10,002 bytes. Four bytes is UTF-8's
 widest character, so the byte arm never refuses a **NUL free** value the
 character arm admits. It **caps** a NUL carrying one at four times the budget

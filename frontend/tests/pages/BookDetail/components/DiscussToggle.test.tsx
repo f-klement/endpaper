@@ -8,12 +8,20 @@ import DiscussToggle from "../../../../src/pages/BookDetail/components/DiscussTo
 import { makeBook, makeUser, resetIds } from "../../../factories";
 import { renderLocalised } from "../../../utils";
 
+type OnChange = NonNullable<
+  React.ComponentProps<typeof DiscussToggle>["onChange"]
+>;
+
 beforeEach(resetIds);
 
 describe("DiscussToggle", () => {
   it("asks in the reader's own words", () => {
     renderLocalised(
-      <DiscussToggle book={makeBook()} currentUserId={1} onChange={vi.fn()} />,
+      <DiscussToggle
+        book={makeBook()}
+        currentUserId={1}
+        onChange={vi.fn<OnChange>()}
+      />,
     );
 
     expect(
@@ -25,7 +33,11 @@ describe("DiscussToggle", () => {
 
   it("is off on a book nobody has offered", () => {
     renderLocalised(
-      <DiscussToggle book={makeBook()} currentUserId={1} onChange={vi.fn()} />,
+      <DiscussToggle
+        book={makeBook()}
+        currentUserId={1}
+        onChange={vi.fn<OnChange>()}
+      />,
     );
 
     expect(screen.getByRole("checkbox")).not.toBeChecked();
@@ -36,7 +48,7 @@ describe("DiscussToggle", () => {
       <DiscussToggle
         book={makeBook({ my_wants_to_discuss: true })}
         currentUserId={1}
-        onChange={vi.fn()}
+        onChange={vi.fn<OnChange>()}
       />,
     );
 
@@ -44,7 +56,7 @@ describe("DiscussToggle", () => {
   });
 
   it("reports being ticked", async () => {
-    const onChange = vi.fn();
+    const onChange = vi.fn<OnChange>();
     renderLocalised(
       <DiscussToggle book={makeBook()} currentUserId={1} onChange={onChange} />,
     );
@@ -55,7 +67,7 @@ describe("DiscussToggle", () => {
   });
 
   it("reports being unticked", async () => {
-    const onChange = vi.fn();
+    const onChange = vi.fn<OnChange>();
     renderLocalised(
       <DiscussToggle
         book={makeBook({ my_wants_to_discuss: true })}
@@ -77,7 +89,7 @@ describe("DiscussToggle", () => {
       <DiscussToggle
         book={makeBook({ discuss_with: [ana] })}
         currentUserId={1}
-        onChange={vi.fn()}
+        onChange={vi.fn<OnChange>()}
       />,
     );
 
@@ -92,7 +104,7 @@ describe("DiscussToggle", () => {
       <DiscussToggle
         book={makeBook({ my_wants_to_discuss: true, discuss_with: [me] })}
         currentUserId={1}
-        onChange={vi.fn()}
+        onChange={vi.fn<OnChange>()}
       />,
     );
 
@@ -106,7 +118,7 @@ describe("DiscussToggle", () => {
       <DiscussToggle
         book={makeBook({ my_wants_to_discuss: true, discuss_with: [me, ben] })}
         currentUserId={1}
-        onChange={vi.fn()}
+        onChange={vi.fn<OnChange>()}
       />,
     );
 

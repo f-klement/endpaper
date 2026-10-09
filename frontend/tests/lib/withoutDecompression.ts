@@ -81,3 +81,25 @@ export function hadDecompressionStream(): boolean {
   return (store.__endpaperHadDecompression__ ??=
     typeof DecompressionStream !== "undefined");
 }
+
+/**
+ * The inflater this worker's environment shipped with, or `undefined`.
+ *
+ * **The identity half of the backstop above, which presence alone cannot
+ * give.** `tests/lib/meter.ts` replaces the global with a counting one for one
+ * call, and a counting one left installed is present, so the presence check
+ * passes it and every later file inflates through a meter nobody reads.
+ * Memoised on `globalThis` in a box, for `hadDecompressionStream`'s reason:
+ * the first file in the worker records it and no later file can record a
+ * replacement as the original.
+ */
+export function realDecompressionStream(): unknown {
+  const store = globalThis as {
+    endpaperRealDecompression?: { readonly value: unknown };
+  };
+  store.endpaperRealDecompression ??= {
+    value: (globalThis as { DecompressionStream?: unknown })
+      .DecompressionStream,
+  };
+  return store.endpaperRealDecompression.value;
+}

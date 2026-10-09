@@ -6,13 +6,20 @@
  * and destroying it asks first, because that one really is final.
  */
 
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { Locale } from "../../../src/api/generated/model";
+import { ToastProvider } from "../../../src/app/toast";
 import TrashPage from "../../../src/pages/TrashPage";
 import { makeBook, resetIds } from "../../factories";
-import { mockApi, renderWithProviders, type MockApi } from "../../utils";
+import {
+  mockApi,
+  renderWithProviders,
+  type MockApi,
+  type StubResponse,
+} from "../../utils";
 
 let api: MockApi;
 
@@ -21,13 +28,39 @@ beforeEach(() => {
   api = mockApi();
   api.on("/api/settings/features", {
     body: {
-      google_books_enabled: false,
       google_books_ready: false,
       goodreads_lookup_enabled: false,
       default_locale: "en",
     },
   });
 });
+
+/**
+ * A reply the test sends when it chooses, so the page can be looked at while
+ * the request is still out.
+ */
+function heldOpen(): {
+  respond: () => Promise<StubResponse>;
+  release: (reply: StubResponse) => void;
+} {
+  let release!: (reply: StubResponse) => void;
+  const pending = new Promise<StubResponse>((resolve) => {
+    release = resolve;
+  });
+  return { respond: () => pending, release: (reply) => release(reply) };
+}
+
+/** The list row holding a title. */
+function rowOf(title: string): HTMLElement {
+  return screen.getByText(title).closest("li")!;
+}
+
+function twoBooks() {
+  stubTrash([
+    makeBook({ id: 7, title: "Dune", deleted_at: "2026-08-19T10:00:00Z" }),
+    makeBook({ id: 8, title: "Emma", deleted_at: "2026-08-19T10:00:00Z" }),
+  ]);
+}
 
 function stubTrash(items: ReturnType<typeof makeBook>[]) {
   api.on("/api/books/trash", {
@@ -41,7 +74,7 @@ describe("TrashPage", () => {
       makeBook({
         id: 7,
         title: "Deleted Book",
-        deleted_at: "2026-08-19T10:00:00",
+        deleted_at: "2026-08-19T10:00:00Z",
       }),
     ]);
     renderWithProviders(<TrashPage />);
@@ -54,15 +87,31 @@ describe("TrashPage", () => {
     // books wait here", so a looser pattern matches two elements and
     // findByText refuses to choose between them.
     stubTrash([
-      makeBook({ id: 7, title: "Dune", deleted_at: "2026-08-19T10:00:00" }),
+      makeBook({ id: 7, title: "Dune", deleted_at: "2026-08-19T10:00:00Z" }),
     ]);
     renderWithProviders(<TrashPage />);
 
     expect(await screen.findByText(/^Deleted \d/)).toBeInTheDocument();
   });
 
+  it("says when in the app's locale, not the browser's", async () => {
+    // **The arm the defect survived.** This page rendered the date with a bare
+    // `toLocaleDateString()`, so it took whatever locale the host had rather
+    // than the one the member chose, and every existing assertion here was
+    // anchored loosely enough not to notice. The two locales spell this date
+    // differently, so asserting both is what observes it: `19.8.2026` against
+    // `8/19/2026`.
+    stubTrash([
+      makeBook({ id: 7, title: "Dune", deleted_at: "2026-08-19T10:00:00Z" }),
+    ]);
+    renderWithProviders(<TrashPage />, { locale: Locale.de });
+
+    expect(await screen.findByText(/19\.8\.2026/)).toBeInTheDocument();
+    expect(screen.queryByText(/8\/19\/2026/)).not.toBeInTheDocument();
+  });
+
   it("says the trash does not empty itself", async () => {
-    stubTrash([makeBook({ id: 7, deleted_at: "2026-08-19T10:00:00" })]);
+    stubTrash([makeBook({ id: 7, deleted_at: "2026-08-19T10:00:00Z" })]);
     renderWithProviders(<TrashPage />);
 
     expect(await screen.findByText(/until you empty it/)).toBeInTheDocument();
@@ -91,7 +140,7 @@ describe("TrashPage", () => {
         makeBook({
           id: 7,
           title: "Deleted Book",
-          deleted_at: "2026-08-19T10:00:00",
+          deleted_at: "2026-08-19T10:00:00Z",
         }),
       ]);
       api.on("/api/books/7/restore", { body: makeBook({ id: 7 }) });
@@ -109,13 +158,74 @@ describe("TrashPage", () => {
     });
   });
 
+  describe("a book mid request", () => {
+    // The page shows which row is waiting on the server, and only that row:
+    // the busy marker is a book id, so a second row must stay pressable.
+    it("marks the row being put back, and only that row", async () => {
+      twoBooks();
+      const reply = heldOpen();
+      api.on("/api/books/7/restore", reply.respond, "POST");
+      renderWithProviders(
+        <ToastProvider>
+          <TrashPage />
+        </ToastProvider>,
+      );
+      await screen.findByText("Dune");
+
+      await userEvent
+        .setup()
+        .click(within(rowOf("Dune")).getByRole("button", { name: /Put back/ }));
+
+      await waitFor(() =>
+        expect(
+          within(rowOf("Dune")).getByRole("button", {
+            name: "Delete for good",
+          }),
+        ).toBeDisabled(),
+      );
+      expect(
+        within(rowOf("Emma")).getByRole("button", { name: "Delete for good" }),
+      ).toBeEnabled();
+
+      reply.release({ body: makeBook({ id: 7 }) });
+
+      expect(await screen.findByText("Back on the shelf.")).toBeInTheDocument();
+    });
+
+    it("marks the row being deleted for good, and only that row", async () => {
+      twoBooks();
+      const reply = heldOpen();
+      api.on("/api/books/8/permanent", reply.respond, "DELETE");
+      vi.spyOn(window, "confirm").mockReturnValue(true);
+      renderWithProviders(<TrashPage />);
+      await screen.findByText("Emma");
+
+      await userEvent.setup().click(
+        within(rowOf("Emma")).getByRole("button", {
+          name: "Delete for good",
+        }),
+      );
+
+      await waitFor(() =>
+        expect(
+          within(rowOf("Emma")).getByRole("button", { name: /Put back/ }),
+        ).toBeDisabled(),
+      );
+      expect(
+        within(rowOf("Dune")).getByRole("button", { name: /Put back/ }),
+      ).toBeEnabled();
+
+      reply.release({ status: 204 });
+    });
+  });
+
   describe("deleting for good", () => {
     it("asks first, because this one cannot be undone", async () => {
       stubTrash([
         makeBook({
           id: 7,
           title: "Deleted Book",
-          deleted_at: "2026-08-19T10:00:00",
+          deleted_at: "2026-08-19T10:00:00Z",
         }),
       ]);
       const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
@@ -134,7 +244,7 @@ describe("TrashPage", () => {
         makeBook({
           id: 7,
           title: "Deleted Book",
-          deleted_at: "2026-08-19T10:00:00",
+          deleted_at: "2026-08-19T10:00:00Z",
         }),
       ]);
       api.on("/api/books/7/permanent", { status: 204 }, "DELETE");
@@ -151,7 +261,7 @@ describe("TrashPage", () => {
     });
 
     it("asks before emptying the whole trash", async () => {
-      stubTrash([makeBook({ id: 7, deleted_at: "2026-08-19T10:00:00" })]);
+      stubTrash([makeBook({ id: 7, deleted_at: "2026-08-19T10:00:00Z" })]);
       const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
       renderWithProviders(<TrashPage />);
 
@@ -164,7 +274,7 @@ describe("TrashPage", () => {
     });
 
     it("empties it once confirmed", async () => {
-      stubTrash([makeBook({ id: 7, deleted_at: "2026-08-19T10:00:00" })]);
+      stubTrash([makeBook({ id: 7, deleted_at: "2026-08-19T10:00:00Z" })]);
       api.on("/api/books/trash", { body: { purged: 1 } }, "DELETE");
       vi.spyOn(window, "confirm").mockReturnValue(true);
       renderWithProviders(<TrashPage />);
@@ -176,6 +286,26 @@ describe("TrashPage", () => {
       await waitFor(() =>
         expect(api.lastCall("/api/books/trash", "DELETE")).toBeDefined(),
       );
+    });
+
+    it("says how many books emptying deleted, as the server counted them", async () => {
+      // One row on screen and three in the reply: the toast reads the reply.
+      stubTrash([makeBook({ id: 7, deleted_at: "2026-08-19T10:00:00Z" })]);
+      api.on("/api/books/trash", { body: { purged: 3 } }, "DELETE");
+      vi.spyOn(window, "confirm").mockReturnValue(true);
+      renderWithProviders(
+        <ToastProvider>
+          <TrashPage />
+        </ToastProvider>,
+      );
+
+      await userEvent
+        .setup()
+        .click(await screen.findByRole("button", { name: "Empty the trash" }));
+
+      expect(
+        await screen.findByText("3 books deleted for good."),
+      ).toBeInTheDocument();
     });
   });
 

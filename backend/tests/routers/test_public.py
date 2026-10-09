@@ -321,7 +321,8 @@ class TestCrawlersAreNotInvitedUntilSomebodySaysSo:
 
     def test_robots_disallows_everything_on_a_private_deployment(self, client):
         body = client.get("/robots.txt").text
-        assert "Disallow: /" in body and "Allow:" not in body
+        assert "Disallow: /" in body
+        assert "Allow:" not in body
 
     def test_robots_still_disallows_a_published_but_unindexed_catalogue(
         self, client, db
@@ -518,7 +519,7 @@ class TestTheTagFilterCannotBeUsedToBreakOrStallTheApp:
         _publish(db)
         ids = ",".join(str(n) for n in range(1, MAX_IDS_IN_A_FILTER + 2))
         response = client.get(f"{PUBLIC_PREFIX}/books?tags={ids}")
-        assert response.status_code == 422
+        assert response.status_code == 400
         assert str(MAX_IDS_IN_A_FILTER) in response.text
 
     def test_the_ceiling_itself_is_accepted(self, client, db, shelf):

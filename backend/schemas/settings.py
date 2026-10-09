@@ -1,4 +1,3 @@
-from datetime import datetime
 from urllib.parse import urlparse
 
 from pydantic import BaseModel, Field, field_validator
@@ -10,6 +9,7 @@ from enums import (
     OverdueNotifyReason,
     OverdueSender,
 )
+from schemas.common import UtcDateTime
 
 #: How far apart two reminders for the same loan may be, in days. The floor is
 #: 1 rather than 0: a zero would mean "resend on every tick", which is an hourly
@@ -216,16 +216,51 @@ class FeatureFlagsOut(BaseModel):
     Readable by anyone, deliberately: the login page is localised, so the
     default language has to be known before a token exists. It carries no
     secrets and nothing about the catalogue.
+
+    **Two of these are read before a token exists and three are not.** The
+    other three are read behind a session and are here because the shell takes
+    one query for every flag it renders, and because a member holds no admin
+    token to read `SettingsOut` with. So the test a field passes is that
+    something reads it, never that nothing else could serve it, and each says
+    below what it tells a caller holding nothing.
+
+    **Every field here has a reader in the client, and one with none is
+    refused.** An unread field on the one endpoint a stranger can call is
+    disclosure with nothing on the other end of it. Two guards hold it, because
+    neither is enough alone: `frontend/tests/houseRules.test.ts`, "every feature
+    flag has a reader", derives the readers and carries what it cannot see, and
+    `tests/routers/test_settings.py::TestFeatureFlags` pins what the route
+    actually sends, which no regeneration can talk out of.
     """
 
-    google_books_enabled: bool
-    # Whether the lookup will actually work: the toggle is on AND a key is
-    # stored. `google_books_enabled` alone is not enough to decide what to
-    # render, because a toggle with no key behind it produces a button that
-    # can only ever 400. Not a secret: any member could learn the same thing
-    # by pressing that button once.
+    #: Whether the lookup will actually work: the toggle is on AND a key is
+    #: stored. Not a secret: any member could learn the same thing by pressing
+    #: that button once.
+    #:
+    #: **The conjunction, and the raw toggle is not published beside it.** The
+    #: pair let a caller with no token read `enabled and not ready`, which says
+    #: the toggle is on and no key is stored, and is strictly more than this
+    #: field alone says. Nothing in the client asks the toggle, and it lives on
+    #: `SettingsOut`, behind an admin token, which is where the screen that
+    #: edits it reads it.
     google_books_ready: bool = False
+    #: Whether a book page offers a Goodreads lookup link. Read behind a
+    #: session, at `pages/BookDetail/BookDetail.tsx`, and one of the three that
+    #: is: a member cannot read `SettingsOut`, so there is no other endpoint
+    #: this answer could come from.
+    #:
+    #: What it tells a caller with no token is that this library offers links
+    #: to Goodreads. That is a preference about an outbound link: it names no
+    #: book, no member and no catalogue, and nothing else on this model
+    #: sharpens it.
     goodreads_lookup_enabled: bool
+    #: The language a browser falls back to when its own is not one this app
+    #: speaks. **The field this endpoint is public for**: the login page is
+    #: localised, so it has to be readable before a token exists.
+    #:
+    #: It tells a caller with no token which language this library chose, and
+    #: the login page is drawn in that language, so asking for the page
+    #: discloses the same thing.
     default_locale: Locale
 
     # ── Library mode ─────────────────────────────────────────────────────
@@ -598,7 +633,15 @@ class SettingsUpdate(BaseModel):
         trimmed = value.strip()
         if not trimmed:
             return ""
-        parsed = urlparse(trimmed)
+        try:
+            parsed = urlparse(trimmed)
+            # Read for its check: `urlparse` defers the port's range until asked,
+            # and `notifications.checked_url` refuses at send what this lets in.
+            _ = parsed.port
+        except ValueError:
+            # A constant sentence, so the 422 never echoes the URL, which may
+            # carry a token.
+            raise ValueError("The webhook URL could not be read as a URL.") from None
         if parsed.scheme not in ("http", "https") or not parsed.netloc:
             raise ValueError("The webhook URL must start with http:// or https://")
         return trimmed
@@ -644,7 +687,7 @@ class OverdueNotifyResult(BaseModel):
     loans: int = Field(default=0, ge=0)
     #: Overdue loans left out because the book is private. See decisions.md.
     skipped_private: int = Field(default=0, ge=0)
-    #: Which of the four ways nothing was sent. **Null exactly when `sent` is
+    #: Which way nothing was sent. **Null exactly when `sent` is
     #: true**, and set in every other case: `_outcome` in `notifications.py` is
     #: the only thing that builds a not-sent result, so a new exit cannot omit
     #: it.
@@ -693,7 +736,7 @@ class SenderHealth(BaseModel):
     #: Null until this channel has run at all, which is what a household sees
     #: on the day they configure one. "Not yet" and "fine" are the two answers
     #: they most need to tell apart, so they are not the same value here.
-    last_run_at: datetime | None = None
+    last_run_at: UtcDateTime | None = None
     #: Null for the same reason as `last_run_at`.
     sent: bool | None = None
     #: The failure, if the last run was one. Null on a success.
@@ -702,14 +745,13 @@ class SenderHealth(BaseModel):
     #: The first failure of the current unbroken run of them, so a channel that
     #: failed once at 3am reads differently from one failing every hour since
     #: Tuesday. Null whenever the last run succeeded.
-    failing_since: datetime | None = None
+    failing_since: UtcDateTime | None = None
     #: How many consecutive failures. Zero on a success and on a channel that
     #: has never run.
     failures: int = Field(default=0, ge=0)
     #: Whether this is worth interrupting somebody about, which is a decision
-    #: rather than a fact and is made by `notifications._is_broken`: a refusal
-    #: at once, a transport failure only after it has persisted. **One failed
-    #: send is a network, every send failing for a day is a configuration.**
+    #: rather than a fact. `notifications._is_broken` makes it and states the
+    #: rules; they are not restated here, where a copy would drift.
     broken: bool = False
 
 

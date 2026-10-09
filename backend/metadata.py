@@ -40,8 +40,7 @@ import unicodedata
 from collections.abc import Awaitable, Callable, Collection, Coroutine, Iterable, Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum, auto
-from types import MappingProxyType
-from typing import Any, Final
+from typing import Any, Final, assert_never
 from xml.etree import ElementTree
 
 import httpx
@@ -52,8 +51,11 @@ import ddc
 import decoders
 import fetch
 import google_books
+import identity
+import marc_fields
 import sources
 import targets
+import xml_parse
 import z3950
 from bibliographic import (
     LANGUAGES,
@@ -65,13 +67,11 @@ from bibliographic import (
     split_title_statement,
     strip_isbd_punctuation,
 )
-from catalogue import AuthorityAssertion, Heading, Record, Subject, uncontrolled
+from catalogue import Heading, Record, Subject, uncontrolled
 from enums import (
-    AuthorityScheme,
     Capability,
     CatalogueSource,
     ClassificationScheme,
-    HeadingKind,
 )
 from isbn import parse as parse_isbn
 from isbn import registration_group
@@ -91,13 +91,6 @@ logger = logging.getLogger("endpaper.metadata")
 #: A source absent from the mapping sends nothing, which is what every free
 #: catalogue does.
 Logins = Mapping[CatalogueSource, fetch.Credential]
-
-#: No login for any catalogue, and the default everywhere one is optional.
-#:
-#: A `MappingProxyType` rather than a literal, so a caller cannot mutate the
-#: shared default and leave another library's login on it for the next request.
-_NO_LOGINS: Final[Logins] = MappingProxyType({})
-
 
 @dataclass(frozen=True, slots=True)
 class Access:
@@ -120,7 +113,7 @@ class Access:
     restated here. Every `logins` value already prints under that same rule, so
     without it the aggregate would be the one thing here that leaks.
 
-    **Resolved by `settings_store.library_access`, which lives there and not
+    **Resolved by `catalogue_access._resolved_access`, which lives there and not
     here.** This module makes every outbound catalogue request and reaches no
     database; the resolver reads settings and opens the keychain. That invariant
     is the reason, and it is the whole of it: a module level import the other
@@ -135,7 +128,20 @@ class Access:
     #: whether Google is asked at all.
     api_key: str = field(repr=False)
     #: The login each catalogue's request carries. See `Logins`.
-    logins: Logins = _NO_LOGINS
+    #:
+    #: **No default, and what that buys is the reason to keep it that way.** An
+    #: empty default made a hand assembled `Access` type check and then send
+    #: nothing, so "these logins were really resolved" was a fact about where the
+    #: value came from rather than about the value. It was checked by an `ast` and
+    #: `symtable` walk over the router, tracking which local a resolver had bound
+    #: and whether anything had rebound it since. Compulsory, the same question is
+    #: a `mypy` error at the call site, and a caller that genuinely sends none
+    #: says so in a word.
+    #:
+    #: `catalogue_access.GoogleVolumes` is the one path that sends no login, and
+    #: it does not reach this type at all: it holds a plan and a key, because the
+    #: door behind it takes those two apart.
+    logins: Logins
 
     def __str__(self) -> str:
         return f"<access to {len(self.plan.asked)} catalogue(s)>"
@@ -539,7 +545,7 @@ async def _open_library_work(
         return {}
 
 
-async def _open_library(isbn: str, api_key: str) -> Lookup:
+async def _open_library(isbn: str) -> Lookup:
     """The edition record, its work, and one call for the author's name.
 
     `?default=false` on the cover URL matters: without it Open Library answers
@@ -551,8 +557,6 @@ async def _open_library(isbn: str, api_key: str) -> Lookup:
     lookups that were going to be slow anyway. A failure in either of the two
     extra calls costs that field and not the record.
     """
-    del api_key  # Open Library needs none.
-
     try:
         async with fetch.catalogue_client() as client:
             response = await fetch.get(client, f"{_OPEN_LIBRARY}/isbn/{isbn}.json")
@@ -811,10 +815,20 @@ def _google_record(fields: dict[str, Any], isbn: str | None = None) -> Record:
 #: both from this constant rather than a second spelling, because two spellings
 #: let one be tightened while the other stays as it was. A name read across the
 #: tree is public by behaviour, and spelling it private made `opds.py` an
-#: offender under `tests/test_marc.py::TestTheSeamIntoMetadataIsPinned`, whose
-#: single admitted module is `marc.py` and whose reason is that module's own
-#: seam rather than this one constant.
+#: offender under
+#: `tests/test_marc.py::TestNoModuleReadsAnotherModulesPrivateNames`, which
+#: admits no module at all.
 DOCTYPE: Final = "<!DOCTYPE"
+
+#: The catalogue response path's half of its allocation bound: see
+#: `xml_parse.ALLOCATION_FLOOR`.
+#:
+#: Measured by `tracemalloc` on CPython 3.14.0 through the MARC lookup reader,
+#: whose per field structures are the costliest a catalogue can make it build:
+#: empty `datafield` elements back to back peaked at 25.7 times their bytes,
+#: text bearing records near 11, and a nest past `xml_parse.MAX_DEPTH` is
+#: refused within one chunk.
+ALLOCATION_FACTOR: Final = 32
 
 
 def _parsed(body: str) -> ElementTree.Element:
@@ -833,7 +847,7 @@ def _parsed(body: str) -> ElementTree.Element:
     substituted response `docs/decisions.md` records the Library of Congress as
     reachable for, over plaintext HTTP.
 
-    Raised as `ParseError` because all eleven callers already catch it: a catalogue
+    Raised as `ParseError` because both callers already catch it: a catalogue
     that starts sending a doctype degrades to "this source is unavailable"
     rather than to a 500.
 
@@ -844,279 +858,17 @@ def _parsed(body: str) -> ElementTree.Element:
     """
     if DOCTYPE in body:
         raise ElementTree.ParseError("Refused a catalogue response carrying a doctype.")
-    return ElementTree.fromstring(body)
+    parser = ElementTree.XMLParser(target=xml_parse.DepthBoundedTree())  # noqa: S314  doctype refused above, bytes capped, depth bounded
+    return xml_parse.fed(parser, body)
 
 
 # ── MARC21, shared ────────────────────────────────────────────────────────────
 #
-# Every source whose reader is in `decoders.MARC_READERS` speaks MARC21. The
-# primitives that take a record apart live here because all of them read the
-# same subfields. What differs is which fields a catalogue fills in and how it
-# marks a role, and that stays in each source's own section below.
-
-
-class _Subfields(dict[str, str]):
-    """One MARC field's subfields: the first value per code, repeats kept.
-
-    Indexing gives the first occurrence, because a scalar read wants one value
-    and MARC writes the primary one first. `all()` gives every occurrence, and
-    the reads below need it. **Remove it and every one of them goes quiet rather
-    than failing**, which is why it is a type rather than a call at each site.
-
-    * `082 $a` repeats. The DNB puts the Dewey number and its own Sachgruppe
-      letter in one field, `$a=830 $a=B`, in 10 of 85 live records measured
-      2026-08-24. Keeping the last value reads the number as `B`,
-      `ddc.notation` refuses it, and the record stores no classification at all.
-    * `$0` repeats wherever a heading is authority controlled. The DNB writes
-      `(DE-588)118181505`, then `https://d-nb.info/gnd/118181505`, then
-      `(DE-101)118181505`, so keeping the last takes one library's house number
-      where the GND identifier is the point.
-    * `$4` repeats where one person had two roles: `$4=edt $4=aut` is an editor
-      who also wrote a chapter, and keeping the first drops them from the credit
-      line. `_relator_codes` carries the count.
-
-    A `dict[str, str]` subclass rather than `dict[str, list[str]]`, so the
-    scalar reads elsewhere in this file keep working unchanged: repeats are the
-    exception and `entry.get("a")` is the rule.
-    """
-
-    def __init__(self, pairs: Iterable[tuple[str, str]]) -> None:
-        repeats: dict[str, list[str]] = {}
-        for code, value in pairs:
-            repeats.setdefault(code, []).append(value)
-        super().__init__({code: values[0] for code, values in repeats.items()})
-        self._repeats = repeats
-
-    def all(self, code: str) -> list[str]:
-        """Every value under one code, in the order the record wrote them."""
-        return self._repeats.get(code, [])
-
-
-_MARC: Final = "{http://www.loc.gov/MARC21/slim}"
-
-#: MARC's non-sorting delimiters. A record brackets a leading article with
-#: these so a catalogue can file `Die Deutschen und die USA` under D.
-#:
-#: **Two spellings of one convention, because the catalogues do not agree on
-#: which characters to use.** The DNB writes U+0098 and U+009C, which is what
-#: MARC21 specifies. ÖNB writes `<<` and `>>`, and writes U+0098 nowhere at
-#: all. Measured over live 245 `$a` values on 2026-08-27: 21 of 189 DNB carry
-#: U+0098 and 0 carry `<<`; 21 of 150 ÖNB carry `<<` and 0 carry U+0098;
-#: K10plus carries neither in 200.
-#:
-#: **Stripped wherever they appear rather than only at the front**, which is
-#: how the MARC characters were already treated and is also what the data
-#: needs: 28 of the 111 bracketed runs in 21,760 live ÖNB subfields are not at
-#: the start, because the same device marks a nobiliary particle inside a
-#: personal name (`Einem, Gottfried <<von>>`). So this reaches `100 $a`, 21
-#: occurrences, as well as `245 $a`, 52.
-#:
-#: **Safe to apply to every source rather than to ÖNB alone**, and that is a
-#: measurement rather than a hope: `<<` and `>>` appear in 0 of 32,038 live DNB
-#: subfields and 0 of 45,710 K10plus subfields. Scoping it to one parser would
-#: mean `_marc_text` doing different things depending on who called it, which
-#: is the invisible kind of rule this function exists to avoid.
-_NON_SORTING: Final = ("\x98", "\x9c", "<<", ">>")
-
-
-def _marc_text(raw: str | None) -> str:
-    """One subfield's text, as a person would write it.
-
-    Three repairs, all measured against the live DNB on 2026-08-24, and none
-    needed under Dublin Core because that crosswalk had already done them.
-    **All three are invisible in a terminal**, which is why they are done here
-    for every subfield rather than field by field where somebody would
-    eventually read a diff and see nothing wrong.
-
-    * **The non-sorting delimiters are stripped**, in both the spellings
-      `_NON_SORTING` lists. They are a filing device and not part of the title,
-      and they carry through into whatever is stored: 28 of 85 live DNB records
-      hold at least one, and one live ÖNB title in seven.
-    * **Internal whitespace is collapsed.** MARC pads subfields, which
-      `ClassificationIn.tidy_number` already says and already fixes for one
-      column. `245 $a` on the reference record 9783446249974 reads
-      `Reisen im  Licht der Sterne`, a real double space, where that record's
-      own `776 $t` spells it with one.
-    * **The text is normalised to NFC.** The DNB serves MARC21 decomposed and
-      Dublin Core composed, so `Müller` arrives as `u` plus a combining
-      diaeresis: 83 of the same 85 records are affected. It renders identically
-      and compares unequal, which is enough to store two spellings of one
-      author and to defeat `_duplicate_key`, which casefolds and collapses
-      whitespace and does not normalise. Not enough to duplicate a
-      classification: `uq_classifications_book_scheme_number` is on `number`,
-      which is digits in DDC and digits and hyphens in GND.
-    """
-    text = raw or ""
-    for delimiter in _NON_SORTING:
-        text = text.replace(delimiter, "")
-    return " ".join(unicodedata.normalize("NFC", text).split())
-
-
-def _marc_fields(record: ElementTree.Element) -> dict[str, list[_Subfields]]:
-    """One MARC record as `{tag: [subfields]}`."""
-    fields: dict[str, list[_Subfields]] = {}
-    for datafield in record.findall(f"{_MARC}datafield"):
-        tag = datafield.get("tag")
-        if tag is None:
-            continue
-        fields.setdefault(tag, []).append(
-            _Subfields(
-                (subfield.get("code") or "", _marc_text(subfield.text))
-                for subfield in datafield.findall(f"{_MARC}subfield")
-            )
-        )
-    return fields
-
-
-#: The GND's code in MARC's `$0`, which is what says the identifier beside it
-#: is a GND number rather than some other authority file's.
-_GND_PREFIX: Final = "(DE-588)"
-
-
-def _gnd_identifier(entry: _Subfields) -> str | None:
-    """The GND number a field's `$0` carries, or None if it carries none.
-
-    Stored bare. `(DE-588)` is MARC naming the scheme, the scheme is already a
-    column of its own, and keeping the prefix would let one heading arrive
-    under two spellings that `uq_classifications_book_scheme_number` cannot
-    collapse.
-
-    A record without one is ordinary rather than broken: 33 of 70 live 655
-    fields and 21 of 73 live 100 fields carry no `(DE-588)` at all, measured
-    over 85 records on 2026-08-24.
-
-    **This searches every `$0` where `_subject_identifier` takes the first, and
-    the two are different questions rather than one rule spelled twice.** This
-    one asks whether the field names a record in the GND, because the answer
-    decides whether a `classifications` row is written and that row's `scheme`
-    column is a closed four member set: a `(DE-101)` number filed under `gnd`
-    would be an identifier that resolves to nothing. That one asks what the
-    record gave as this heading's identifier, whatever file it is in, and takes
-    the first because that is where every catalogue measured puts the authority
-    file's own number.
-
-    **It no longer discards what it refuses.** Before #134 a `$0` this returned
-    None for was the end of that identifier: measured 2026-08-31, 27 of the 718
-    live subject fields carrying a `$0` have no `(DE-588)`, and **11 of 11** on
-    the National Library of Greece, whose every identifier is a
-    `urn:nbn:gr:nlg:`. Those now reach `Subject.identifier` and only the
-    classification row is still GND only.
-    """
-    for value in entry.all("0"):
-        if value.startswith(_GND_PREFIX):
-            return value[len(_GND_PREFIX) :].strip() or None
-    return None
-
-
-def _subject_vocabulary(tag: str, entry: _Subfields) -> str | None:
-    """The vocabulary a subject field's `$2` names, lower cased, or None.
-
-    **`tag` is taken and checked, and that is the rule rather than a
-    parameter.** `$2` does not mean the same thing on every field: on `082` it
-    is the Dewey **edition**, which the three MARC fixtures in
-    `tests/test_metadata.py` spell `23sdnb`, `22/ger` and `21`, so a caller
-    handing this an `082` would record a vocabulary called "21". Nothing about
-    the subfield says which it is; only the field does.
-
-    **This used to be enforced by a comment and it was not enforced.** The
-    docstring said "read on a subject field only" and cited a house rule as the
-    pin, but that rule counted **readers of the subfield** and never saw which
-    field was passed, so `_subject_vocabulary(fields["082"][0])` was legal, was
-    exactly the failure described, and left the guard green. The check is now
-    the signature, which no source scan can be evaded past, and the house rule
-    is left the one job it can actually do: see
-    `test_house_rules.py::TestOneReaderPerAmbiguousSubfield`.
-
-    `_DNB_SUBJECT_TAGS` is the membership test rather than a second list, so
-    adding a tag there admits it here in the same edit. A tag outside it raises,
-    because no live path can reach that: `_dnb_subjects` iterates that tuple and
-    the other two callers pass `"650"` as a literal. It is a guard against the
-    next edit, not against a record.
-
-    **Lower cased, and the reason is `marc._extra_headings` rather than the
-    catalogues.** That function tests `== "lcsh"` to decide whether an uploaded
-    `650` becomes an LCSH heading, so an uploaded file writing `$2 LCSH` loses
-    every one of them, silently, with the record otherwise intact. The
-    catalogues measured do **not** motivate it: 0 of the twelve codes seen on
-    2026-08-31 appeared in two cases, and the two upper case ones are each
-    written by one catalogue only, `VLK` by the OENB and `DLC` by K10plus. So
-    the folding is protecting an equality comparison in this repository, not
-    reconciling two spellings anybody has served.
-    """
-    if tag not in _DNB_SUBJECT_TAGS:
-        raise ValueError(f"$2 is not a subject vocabulary on MARC {tag}")
-    value = entry.get("2")
-    return value.lower() if value else None
-
-
-#: The `$2` codes that say a field is asserting something other than a subject.
-#:
-#: **Only those two, and the omissions are the rule rather than a short list.**
-#: A code this map does not name leaves `Heading.kind` null, and a null reads as
-#: a subject, so `gnd` and `lcsh` are deliberately absent. `enums.HeadingKind`
-#: says why writing the word costs something rather than merely being
-#: redundant; `ck_classifications_kind` is what refuses it.
-#:
-#: **This is not a second `ClassificationScheme`.** It maps a code onto what the
-#: record was doing, never onto a vocabulary: `gnd`, `gnd-content` and
-#: `gnd-carrier` are all the GND, so all three still write `scheme=gnd`. Twelve
-#: distinct `$2` codes turned up in one day's sampling of four catalogues
-#: against a MARC source code list holding hundreds, and reading any of the rest
-#: as a kind would be the crosswalk #134 refuses. `catalogue.Subject` carries
-#: the code itself for anybody who wants to read it.
-_KIND_BY_VOCABULARY: Final[dict[str, HeadingKind]] = {
-    "gnd-content": HeadingKind.CONTENT,
-    "gnd-carrier": HeadingKind.CARRIER,
-}
-
-
-def _subject_kind(vocabulary: str | None) -> HeadingKind | None:
-    """What a `$2` says the field asserts, or None where it says nothing this reads.
-
-    Takes the lower cased code `_subject_vocabulary` already produced rather
-    than the field, so the case folding is not spelled twice and this cannot be
-    handed an `082` whose `$2` is a Dewey edition.
-    """
-    return _KIND_BY_VOCABULARY.get(vocabulary) if vocabulary else None
-
-
-def _subject_identifier(entry: _Subfields) -> str | None:
-    """The identifier a subject field's `$0` carries, whole, or None.
-
-    **The first `$0` that has a value**, which is a measurement plus one shape
-    the measurement could not see. Measured 2026-08-31 over 718 live subject
-    fields carrying a `$0`, across the DNB, the OENB, the NLG and K10plus.
-
-    Where a field carries a `(DE-588)` at all, it is the **first** of that
-    field's `$0` values, **691 of 691**: the DNB writes `(DE-588)`, then a
-    `d-nb.info` URL, then its own `(DE-101)` house number, and K10plus writes
-    `(DE-588)`, then `(DE-627)`, then `(DE-576)`. The house numbers and the URL
-    always follow, so taking the first never takes a duplicate standing in front
-    of the authority number. The other **27** fields carry exactly one `$0` each
-    and no `(DE-588)`: `(DE-101)` beside `$2 gatbeg` on the DNB, `(AT-FHV)` and
-    `(AT-VLB)` on the OENB, `urn:nbn:gr:nlg:` on the NLG, `(OCoLC)fst` on
-    K10plus. So a prefix list has nothing to do here, and it would be the
-    enumerating guard this repository keeps paying for.
-
-    **An empty value is skipped, and "691 of 691" is not the reason.** That
-    figure counts values **as served**, and says nothing about an element with
-    no text standing in front of them, because an empty `$0` is not something a
-    catalogue writes: it is what `_marc_text` makes of `<subfield code="0"/>`,
-    turning a childless element into `""`. Recounted on the same sample for
-    this: **0 of the 718** fields carry an empty `$0` anywhere, so the
-    measurement could not have shown the trap and did not.
-
-    `values[0] or None` therefore answered None on a field whose second `$0`
-    held the number, where `_gnd_identifier` scanned past the empty one and
-    found it. Two readers of one subfield disagreeing about whether the field
-    has an identifier at all is worse than either answer alone.
-
-    **Whole, prefix included, where `_gnd_identifier` strips it.** The prefix is
-    not a duplicate of `$2`: `$2 gatbeg` arrives with `$0 (DE-101)1010008188`,
-    naming the DNB's genre list and the DNB's own file, which are two answers.
-    Strip it and the number resolves to nothing.
-    """
-    return next((value for value in entry.all("0") if value), None)
+# Every source whose reader is in `decoders.MARC_READERS` speaks MARC21, and
+# `marc_fields.py` is where a record is taken apart, because the upload reader
+# in `marc.py` is a third profile over the same fields. What is left here is
+# which fields a catalogue fills in and how it marks a role, in each source's
+# own section below.
 
 
 # ── Deutsche Nationalbibliothek ───────────────────────────────────────────────
@@ -1164,108 +916,9 @@ def _subject_identifier(entry: _Subfields) -> str | None:
 #: Kept because the BnF parser reads Dublin Core. The DNB no longer does.
 _DC: Final = "{http://purl.org/dc/elements/1.1/}"
 
-#: Subject fields whose headings are authority controlled, in the order they
-#: are read.
-#:
-#: **689 is the RSWK chain and restates what the others said**, so reading all
-#: five double counts by design and the repeats are folded by `catalogue.Record`
-#: rather than chosen between. Choosing would lose headings either way: measured
-#: over 85 live records, 10 of the 13 600 fields carry a heading no other field
-#: carries, and 3 of the 13 689 chains do.
-_DNB_SUBJECT_TAGS: Final = ("650", "651", "655", "689", "600")
-
-
-def _dnb_subjects(
-    fields: dict[str, list[_Subfields]],
-) -> tuple[list[Subject], list[Heading]]:
-    """The controlled subject headings, as plain subjects and as GND rows.
-
-    **A subject heading never enters the DDC path**, and that is load bearing
-    rather than tidy. `ddc.parse_heading` accepts any three digit token, so
-    "100 Jahre Bauhaus" as a 650 heading would be stored as DDC 100 and
-    suggest the Philosophy tag. Dublin Core made that unreachable by accident,
-    because `dc:subject` carried only Sachgruppen; MARC puts free text and
-    Dewey in different fields, so the rule is now structural: 082 is the only
-    field this module hands to `ddc`, and the headings here are GND or nothing.
-
-    **The GND number is the half that does not move**, the way a Dewey number
-    is: `(DE-588)4203576-4` names one heading whatever a record captions it.
-    Unlike Dewey that is untested here rather than measured, the DNB being the
-    only supplier and every caption German. It is stored bare, under its own
-    scheme, with the heading text as the caption.
-
-    **Repeats are not folded here, and they used to be.** A record restates
-    itself: 689 repeats the 600, 650 and 651 headings it was built from, so the
-    reference record 9783446249974 names Stevenson, Samoainseln and Schatz
-    twice each. `Record` folds both collections at construction, keeping the
-    first of each, which is what this function used to do with two dictionaries
-    of its own. Deleting them is the point of the seam being typed: the rule has
-    one owner, and the next source added inherits it rather than copying it.
-
-    **`$2` and `$0` are read since #134. What a `$2` decides is the kind, never
-    the scheme.** A subject carries the vocabulary the record declared and the
-    identifier it gave, whatever file that identifier is in. What decides
-    whether a `classifications` row is written at all is still `_gnd_identifier`
-    alone, because that table's `scheme` is a closed four member set and a `$2`
-    naming the Greek national authority file is not one of its members. So the
-    Greek `651` that prompted the ticket keeps its label **and** its
-    `urn:nbn:gr:nlg:` identifier, and still writes no heading. Storing it is
-    #143.
-
-    **The `$2` does decide `Heading.kind`, and that is what stops a disc being
-    a subject.** `655 $2 gnd-carrier $0 (DE-588)4139307-7 $a CD-ROM` carries a
-    GND number like any other, so it became a heading about what the book is
-    about. It is still a heading and still `scheme=gnd`, because the number is
-    a GND number and resolves as one; what changed is that it now says it is a
-    carrier. Refusing the field instead was the obvious fix and is wrong: the
-    same vocabulary carries `Fiktionale Darstellung`, which is why `655` is on
-    the tag list at all, and it is stored nowhere else.
-
-    **Which is why nothing here maps a `$2` onto a scheme.** Twelve distinct
-    codes turned up in one day's sampling of four catalogues and the MARC source
-    code list holds hundreds; a table from those to `ClassificationScheme` is a
-    crosswalk, and #134 refuses one in as many words. `catalogue.Subject` lists
-    the twelve.
-
-    **Two catalogues through this one parser disagree about which tag
-    declares.** Measured 2026-08-31: the DNB's `650` declares `gnd` on 130 of
-    134 while the OENB's declares nothing on 17 of 29, and both arrive here
-    through `_dnb_record`. That is the whole argument for reading the subfield
-    rather than inferring from the tag, and it is made entirely of fields this
-    function actually sees.
-
-    **K10plus is the sharper illustration and is not the evidence.** Its `689`
-    declares `gnd` on all 113 and its `650` on 3 of 133, an exact mirror of the
-    DNB. But `_k10plus_record` reads `650` alone and never calls this, so those
-    113 fields reach no reader in this app: quoting them here would rest a rule
-    on data nothing reads.
-    """
-    subjects: list[Subject] = []
-    headings: list[Heading] = []
-    for tag in _DNB_SUBJECT_TAGS:
-        for entry in fields.get(tag, []):
-            heading = strip_isbd_punctuation(entry.get("a", ""))
-            if not heading:
-                continue
-            vocabulary = _subject_vocabulary(tag, entry)
-            subjects.append(
-                Subject(heading, vocabulary, _subject_identifier(entry))
-            )
-            number = _gnd_identifier(entry)
-            if number is not None:
-                headings.append(
-                    Heading(
-                        ClassificationScheme.GND,
-                        number,
-                        heading,
-                        _subject_kind(vocabulary),
-                    )
-                )
-    return subjects, headings
-
 
 def _dnb_record(
-    fields: dict[str, list[_Subfields]],
+    fields: marc_fields.Fields,
     isbn: str | None,
     *,
     source: str = "dnb",
@@ -1288,8 +941,7 @@ def _dnb_record(
     **The Dewey number is first in `headings`**, which costs nothing and makes the
     common case the first thing a reader sees.
     """
-    title_entry = (fields.get("245") or [_Subfields(())])[0]
-    title, subtitle, series_name, series_index = _marc_title(title_entry)
+    title, subtitle, series_name, series_index = fields.title_statement()
     if not title:
         return None
     # A cross-referenced ISBN matched a volume slot, not this book. Reporting a
@@ -1315,34 +967,35 @@ def _dnb_record(
     #
     # So this is not a language gap, it is a vocabulary gap that English shares,
     # and #124's answer covers it: every caller now applies
-    # `_marc_is_physical_book`, which refuses all 91 on `007/00` and leader/06.
+    # `marc_fields.Fields.describes_a_book`, which refuses all 91 on `007/00`
+    # and leader/06.
     # What is left here is one asymmetry worth naming rather than half fixing:
     # this refuses outright and the caller only ranks, so a disc this misses is
     # ranked down at a lookup where one it names is a miss. Closing that means
     # giving this function the record node, a four call site signature change,
     # and it changes an answer rather than correcting one.
-    if is_a_disc(_marc_extent(fields)):
+    if is_a_disc(fields.extent()):
         return None
 
-    isbn = isbn or _marc_isbn(fields)
-    subjects, gnd = _dnb_subjects(fields)
+    isbn = isbn or fields.isbn()
+    subjects, gnd = fields.controlled_subjects()
 
     return Record(
         source=source,
         isbn=isbn,
         title=title,
         subtitle=subtitle,
-        author=_marc_authors(fields) or _marc_credited_names(fields),
-        publisher=_marc_publisher(fields),
-        year=_marc_year(fields),
+        author=fields.authors() or fields.credited_names(),
+        publisher=fields.publisher(),
+        year=fields.year(),
         # Through the shared reader rather than hardcoded to None, which is
         # what this was under Dublin Core. The DNB catalogues books rather than
         # blurbs and it shows: 520 appears on 1 of 85 live records measured
         # 2026-08-24. Reading it costs a function call and stops being a
         # special case that has to be remembered.
-        description=_marc_description(fields),
-        language=_marc_language(fields),
-        page_count=pages_from_extent(_marc_extent(fields)),
+        description=fields.description(),
+        language=fields.language(),
+        page_count=pages_from_extent(fields.extent()),
         # No cover in a MARC record. Open Library serves one by ISBN for a good
         # number of German books even where it has no edition record, so it is
         # worth the guess. Built by covers.py, which is the only module allowed
@@ -1355,13 +1008,13 @@ def _dnb_record(
         series_name=series_name,
         series_index=series_index,
         subjects=tuple(subjects),
-        headings=tuple(_marc_ddc(fields) + gnd),
+        headings=tuple(fields.ddc_headings() + gnd),
         # The one catalogue here that supplies a person's identifier. K10plus
         # writes the same subfield and is deliberately not read for it: see
         # `_k10plus_record`. The ÖNB writes it too and is held to the same
         # rule: see `read_author_identifiers`.
         author_identifiers=(
-            tuple(_marc_author_identifiers(fields)) if read_author_identifiers else ()
+            tuple(fields.author_identifiers()) if read_author_identifiers else ()
         ),
     )
 
@@ -1408,78 +1061,6 @@ def _dnb_record(
 # The value is `targets.SEEDED[CatalogueSource.K10PLUS].lookup_records`. It became a row on the
 # catalogue targets table, and what is left here is the measurement.
 
-#: MARC relator codes for somebody who wrote the thing. Translators (`trl`) and
-#: editors (`edt`) arrive in the same field and must not become the author.
-#:
-#: **A `700` stating no role at all is not an author either, and that is a
-#: measurement rather than a default.** 28 of 581 live `700` fields carry no
-#: `$4`, measured 2026-09-06 over 624 records from the five MARC sources. The 9
-#: distinct records pairing such a field with a `100` name an illustrator, a
-#: translator or an editor in 7 of them and a co-author in 2, so admitting a
-#: bare `700` trades a credit line that is short for one that is wrong. Where a
-#: record credits nobody with writing it, `_marc_credited_names` still names
-#: everybody the record names, which is the case that fallback exists for.
-_AUTHOR_RELATORS: Final = ("aut", "cre")
-
-
-def _relator_codes(entry: _Subfields) -> list[str]:
-    """Every role one `100` or `700` states, as bare relator codes.
-
-    **Every `$4` rather than the first, because one field states more than one
-    role.** 2 of the same 581 live `700` fields read `$4=edt $4=aut`, and the
-    first value is the one that is not an author, so reading `entry["4"]` alone
-    dropped somebody the record credits with writing the book.
-
-    **A relator URI is the same statement in a different spelling.** The NLG and
-    the ÖNB write `http://id.loc.gov/vocabulary/relators/aut` where the rest
-    write `aut`: 19 of the 581 `700` fields carry one. **The last path segment
-    of any `$4` is taken, whatever vocabulary it names**, rather than one stem
-    matched: `$4` is defined as a relator, so its final segment is a relator
-    code, and a list of stems is the enumeration this would otherwise become.
-
-    **That arm moved no credit line in the sample, and it is not decoration.**
-    Every ÖNB `700` spelling a relator as a URI writes the bare code beside it,
-    and the one `700` whose only relator is a URI says `trl`, which is still
-    refused. What it changes is why: without it a URI is refused for not being
-    in `_AUTHOR_RELATORS` rather than for what it says, so the rule reads as a
-    role test and behaves as a spelling test. The NLG writes a URI as the only
-    relator on a `100` in 2 of the 44 records read from it, and which tag that
-    lands on is a matter of which record was asked for.
-    """
-    return [value.rsplit("/", 1)[-1].strip().lower() for value in entry.all("4")]
-
-
-def _isbn_entries(fields: dict[str, list[_Subfields]]) -> list[_Subfields]:
-    """The 020 entries that identify this record's own book.
-
-    **Unqualified entries where a record has any, and all of them where it has
-    none.** One rule, read by `_marc_claims_isbn` and `_marc_isbn`, so "which
-    ISBN is this record's" has one answer.
-
-    **A subfield `q` is a qualifier**, such as "amerik. Original" or "Hardback".
-    The first is a cross reference to a different edition, and taking it as
-    identity is how a scan of one printing answers with another. The second is
-    harmless. **Nothing distinguishes them by shape**, so the rule is positional
-    rather than lexical: prefer what is unqualified, and fall back to everything
-    only when there is nothing else, because a record whose every ISBN is
-    qualified is still a record about a book.
-    """
-    entries = [entry for entry in fields.get("020", []) if "a" in entry]
-    unqualified = [entry for entry in entries if "q" not in entry]
-    return unqualified or entries
-
-
-def _marc_claims_isbn(fields: dict[str, list[_Subfields]], isbn: str) -> bool:
-    """Whether 020 names this book, rather than merely mentioning it.
-
-    Which entries count is `_isbn_entries`. The other trap is here: 020 often
-    holds the **ISBN-10** even when the search was by ISBN-13, so both sides are
-    canonicalised rather than compared as strings.
-    """
-    return any(
-        parse_isbn(entry.get("a", "")) == isbn for entry in _isbn_entries(fields)
-    )
-
 
 #: BnF role markers for somebody who wrote the thing. A record with no marker
 #: at all is the main entry and is kept.
@@ -1494,273 +1075,8 @@ _BNF_ANY_ROLE: Final = re.compile(
 )
 
 
-def _marc_author_entries(
-    fields: dict[str, list[_Subfields]],
-) -> list[tuple[str, _Subfields]]:
-    """The 100 main entry plus any 700 that actually wrote something, with its field.
-
-    **The field is returned beside the name so that the credit line and the
-    authority identifiers cannot be built from two different sets of people.**
-    `_marc_authors` joins the names and `_marc_author_identifiers` reads `$0`
-    off the same entries, so every identifier this module produces is filed
-    under a spelling that is in this record's own `author` string. Two loops
-    testing the same three conditions would make that alignment a comment, and a
-    comment is what would drift the day a relator code is added to one of them.
-
-    **Which `700` counts is `_AUTHOR_RELATORS`, and a field stating no role at
-    all does not**, which is the answer to a `700` beside a `100` losing a
-    co-author. The measurement that settles it, and the fallback that covers the
-    record crediting nobody, are on that constant.
-
-    Order preserved, repeats dropped: 100 and 700 can name the same person, and
-    the first field naming them is the one whose `$0` is read.
-    """
-    entries: list[tuple[str, _Subfields]] = []
-    for entry in fields.get("100", []):
-        if entry.get("a"):
-            entries.append((flip_catalogue_name(entry["a"]), entry))
-    for entry in fields.get("700", []):
-        # `t` marks an added entry for a *work*, not a person: the row exists
-        # to link the original title, and its name is the original author's.
-        if (
-            entry.get("a")
-            and "t" not in entry
-            and any(code in _AUTHOR_RELATORS for code in _relator_codes(entry))
-        ):
-            entries.append((flip_catalogue_name(entry["a"]), entry))
-    seen: dict[str, _Subfields] = {}
-    for name, entry in entries:
-        seen.setdefault(name, entry)
-    return list(seen.items())
-
-
-def _marc_authors(fields: dict[str, list[_Subfields]]) -> str | None:
-    """The 100 main entry plus any 700 that actually wrote something."""
-    return ", ".join(name for name, _ in _marc_author_entries(fields)) or None
-
-
-def _marc_author_identifiers(
-    fields: dict[str, list[_Subfields]],
-) -> list[AuthorityAssertion]:
-    """Which GND record each credited author is, where the record says so.
-
-    **The same `$0` `_gnd_identifier` reads for a subject heading, in a field
-    that means something else.** 600 says a person is what the book is *about*
-    and 100 says they wrote it, so the identifier is the same kind of string
-    with a different subject, and the two go to different stores. See
-    `enums.AuthorityScheme`.
-
-    **A record with no `$0` is ordinary rather than broken**: 21 of 73 live 100
-    fields carry no `(DE-588)` at all, measured over 85 records on 2026-08-24,
-    which is the same measurement `_gnd_identifier` records.
-
-    Nothing here decides whether the assertion is trustworthy. That is the
-    path's question and not the parser's, and `catalogue.AuthorityAssertion`
-    says why it cannot be answered here.
-    """
-    return [
-        AuthorityAssertion(name, AuthorityScheme.GND, number)
-        for name, entry in _marc_author_entries(fields)
-        if (number := _gnd_identifier(entry)) is not None
-    ]
-
-
-def _marc_credited_names(fields: dict[str, list[_Subfields]]) -> str | None:
-    """Every person the record names, whatever role it gives them.
-
-    **The fallback for a record that credits nobody with writing the book**,
-    which is what an edited volume looks like in MARC: no 100 at all, and the
-    editors in 700 with `$4=edt`. `_marc_authors` answers None there, and
-    naming the editors beats naming nobody, which is the same call the Dublin
-    Core parser made when no `dc:creator` carried `[Verfasser]`.
-
-    Measured over 74 live DNB lookups on 2026-08-24: without this, 8 of the 53
-    that still return a record lose an author the Dublin Core path answers with
-    today.
-
-    Used only where `_marc_authors` came back empty. Reading it first would put
-    a translator in the credit line of every book that has one.
-    """
-    names: dict[str, None] = {}
-    for tag in ("100", "700"):
-        for entry in fields.get(tag, []):
-            # `$t` marks an added entry for a *work* rather than a person: the
-            # row links the original title and carries its author's name.
-            if entry.get("a") and "t" not in entry:
-                names.setdefault(flip_catalogue_name(entry["a"]), None)
-    return ", ".join(names) or None
-
-
-def _marc_title(entry: _Subfields) -> tuple[str, str | None, str | None, float | None]:
-    """A 245 field as title, subtitle, series name and series number.
-
-    `$n` and `$p` are the part designation and part title, which is how a
-    catalogue records a numbered volume: `$a=Harry Potter`, `$n=[1]`,
-    `$p=Harry Potter and the philosopher's stone`. The part title is the book
-    somebody is holding, so it becomes the title, and the collective title
-    becomes the series. Without this the whole series is catalogued seven times
-    under one name.
-
-    **A subfield that was never split gets split here.** An older record puts
-    the whole statement in one subfield, subtitle and statement of
-    responsibility and all: DNB record 900329866 (ISBN 9783442002009) reads
-    `$p=Der Zinker : Kriminalroman / [aus d. Engl. übertr. von Gregor Müller]`.
-    Taking it whole puts a translator credit in the title, which is what the
-    Dublin Core parser existed to prevent, so where MARC supplied no `$b` the
-    title goes through the same splitter. Only where there is no `$b`: a record
-    that did subfield itself has already answered this question, and a title
-    with a colon in it is then the title.
-    """
-    main = strip_isbd_punctuation(entry.get("a", ""))
-    part_title = strip_isbd_punctuation(entry.get("p", ""))
-    subtitle = strip_isbd_punctuation(entry.get("b", "")) or None
-
-    series_name: str | None = None
-    series_index: float | None = None
-    if part_title:
-        series_name = main or None
-        number = re.search(r"\d+", entry.get("n", ""))
-        series_index = float(number.group()) if number else None
-        title = part_title
-    else:
-        title = main
-
-    if subtitle is None:
-        title, subtitle = split_title_statement(title)
-
-    return _fix_non_filing_space(title), subtitle, series_name, series_index
-
-
-def _fix_non_filing_space(title: str) -> str:
-    """`L' étranger` becomes `L'étranger`.
-
-    MARC records put the space after an elided article so that sorting can skip
-    it. It is a filing device, not how the title is printed.
-    """
-    return re.sub(r"(\w')\s+(\w)", r"\1\2", title)
-
-
-def _marc_year(fields: dict[str, list[_Subfields]]) -> int | None:
-    """The publication year, from 264 or the older 260.
-
-    `$c` is free text and really does arrive as `2000 (copyright)`, so the
-    first four-digit run is taken rather than the whole field.
-    """
-    for tag in ("264", "260"):
-        for entry in fields.get(tag, []):
-            match = re.search(r"\d{4}", entry.get("c", ""))
-            if match:
-                return int(match.group())
-    return None
-
-
-def _marc_publisher(fields: dict[str, list[_Subfields]]) -> str | None:
-    """The publisher, from the RDA 264 or the older 260."""
-    return next(
-        (
-            entry["b"].rstrip(",")
-            for tag in ("264", "260")
-            for entry in fields.get(tag, [])
-            if entry.get("b")
-        ),
-        None,
-    )
-
-
-def _marc_language(fields: dict[str, list[_Subfields]]) -> str | None:
-    """The first 041 code this app has a two letter equivalent for."""
-    for entry in fields.get("041", []):
-        language = LANGUAGES.get(entry.get("a", "").lower())
-        if language:
-            return language
-    return None
-
-
-def _marc_extent(fields: dict[str, list[_Subfields]]) -> str | None:
-    """300 `$a`: the page count, and whether this is a book at all.
-
-    Two readers, and they are not the same question: `pages_from_extent`
-    wants the number, `is_physical_book` wants to know whether the string
-    says "Online-Ressource".
-    """
-    return next((entry.get("a") for entry in fields.get("300", [])), None)
-
-
-def _marc_description(fields: dict[str, list[_Subfields]]) -> str | None:
-    """520 `$a`, the summary note, on the rare record that carries one."""
-    return next((entry["a"] for entry in fields.get("520", []) if entry.get("a")), None)
-
-
-def _marc_ddc(fields: dict[str, list[_Subfields]]) -> list[Heading]:
-    """082 as Dewey headings, and the one field this module hands to `ddc`.
-
-    082 is the Dewey number and normally nothing else: MARC carries the
-    notation and the printed schedule carries the caption, so the label is
-    usually null rather than filled in from our own mapping. A record often
-    holds two numbers at different precisions (`005.133` and `004`, measured
-    2026-08-23), and both are kept: they are two catalogues' answers, not a
-    duplicate.
-
-    Through `ddc.parse_heading` like every other source path, which is what
-    strips MARC's segmentation prime: 53 of 463 live K10plus `$a` values
-    (11.4%, measured 2026-08-23) arrive as `005.13/3` where the DNB stores
-    `005.133`, and storing both spellings makes two rows out of one heading
-    that `uq_classifications_book_scheme_number` cannot collapse.
-
-    **Every `$a` in the field, not the first.** The DNB writes the Dewey
-    number and its own Sachgruppe letter into one 082 (`$a=830 $a=B`, 10 of 85
-    live records measured 2026-08-24). The letter is not a Dewey number and
-    `parse_heading` drops it; reading a single `$a` would drop the number
-    instead on whichever of the two came second.
-    """
-    return [
-        Heading(ClassificationScheme.DDC, number, label)
-        for entry in fields.get("082", [])
-        for value in entry.all("a")
-        for heading in [ddc.parse_heading(value)]
-        if heading is not None
-        for number, label in [heading]
-    ]
-
-
-def _marc_isbn(fields: dict[str, list[_Subfields]]) -> str | None:
-    """The record's own ISBN, ignoring cross references to other editions.
-
-    Which entries are the record's own is `_isbn_entries`, and this is the
-    second reader of that rule: the first decides whether a record answers a
-    lookup, this decides what is stored on it. They were one rule spelled twice
-    until 2026-08-30, and the copy here was the one the MARC importer reads
-    through `marc.py`, so a Greek or Spanish file imported by hand lost its ISBN
-    for the same reason a lookup missed it.
-
-    **The two readers ask different questions and only one of them can be
-    wrong here.** `_marc_claims_isbn` matches against an ISBN somebody already
-    holds. This one **chooses**, and where a record has no unqualified entry
-    there is nothing to choose on but catalogue order. On a K10plus record whose
-    three entries are `ePUB`, `PDF` and `Broschur` this returns the ePUB's, and
-    that is the ambiguity of the record rather than of the rule: one record
-    describes three saleable forms and MARC gives no field saying which the
-    record is *for*.
-
-    **Refused rather than fixed, and the reason is worth more than the fix would
-    be.** Separating them means a list of format words, `ePUB` and `PDF` and
-    `e-book` and `EPUB`, which is the enumerating guard this repository has paid
-    for several times: it goes stale without failing, in a language nobody here
-    reads, on a catalogue that adds a spelling. What this replaced stored
-    **no ISBN at all** for such a record, so an ambiguous identifier is the
-    improvement over none, and the lookup path is unaffected because
-    `_dnb_record` is handed the ISBN that was asked for. A design critic raised
-    it; `docs/decisions.md` carries the decision.
-    """
-    for entry in _isbn_entries(fields):
-        parsed = parse_isbn(entry.get("a", ""))
-        if parsed is not None:
-            return parsed
-    return None
-
-
 def _k10plus_record(
-    fields: dict[str, list[_Subfields]],
+    fields: marc_fields.Fields,
     isbn: str | None = None,
     *,
     source: str = CatalogueSource.K10PLUS.value,
@@ -1770,9 +1086,8 @@ def _k10plus_record(
     `isbn` is passed by the lookup path, where it is already known and already
     verified. The search path has none, so it is read off 020 instead.
     """
-    isbn = isbn or _marc_isbn(fields)
-    title_entry = (fields.get("245") or [_Subfields(())])[0]
-    title, subtitle, series_name, series_index = _marc_title(title_entry)
+    isbn = isbn or fields.isbn()
+    title, subtitle, series_name, series_index = fields.title_statement()
 
     # `$2` and `$0` off the same field, which this catalogue fills in far less
     # often than the DNB does: measured 2026-08-31 over 133 live `650` fields
@@ -1786,10 +1101,10 @@ def _k10plus_record(
     subjects = [
         Subject(
             " ".join(part for part in (entry.get("a"), entry.get("x")) if part),
-            _subject_vocabulary("650", entry),
-            _subject_identifier(entry),
+            entry.subject_vocabulary("650"),
+            entry.subject_identifier(),
         )
-        for entry in fields.get("650", [])
+        for entry in fields.get("650")
         if entry.get("a")
     ]
 
@@ -1798,12 +1113,12 @@ def _k10plus_record(
         isbn=isbn,
         title=title,
         subtitle=subtitle,
-        author=_marc_authors(fields),
-        publisher=_marc_publisher(fields),
-        year=_marc_year(fields),
-        description=_marc_description(fields),
-        language=_marc_language(fields),
-        page_count=pages_from_extent(_marc_extent(fields)),
+        author=fields.authors(),
+        publisher=fields.publisher(),
+        year=fields.year(),
+        description=fields.description(),
+        language=fields.language(),
+        page_count=pages_from_extent(fields.extent()),
         series_name=series_name,
         series_index=series_index,
         # No cover in a MARC record. The Open Library cover service answers by
@@ -1818,7 +1133,7 @@ def _k10plus_record(
         # this record sets no `author_identifiers`: the same subfield on `100`
         # would file an author under a GND number nothing here has checked
         # against a live K10plus record.
-        headings=tuple(_marc_ddc(fields)),
+        headings=tuple(fields.ddc_headings()),
     )
 
 
@@ -1883,7 +1198,7 @@ def _k10plus_record(
 # entire catalogue in catalogue order, of which `maximumRecords` arbitrary
 # records come back. So a typo here ships plausible MARC for an unrelated
 # book rather than an empty result somebody would notice, and the only thing
-# standing between that and a member's shelf is `_marc_claims_isbn` below.
+# standing between that and a member's shelf is `marc_fields.Fields.claims_isbn`.
 #
 # Confirmed the only way it can be: an ISBN was read off a live ÖNB record's
 # own 020 and put back through this index, returning exactly that record.
@@ -1908,51 +1223,6 @@ def _k10plus_record(
 # The value is `targets.SEEDED[CatalogueSource.OENB].lookup_records`. It became a row on the
 # catalogue targets table, and what is left here is the measurement.
 
-#: MARC leader/07, the bibliographic level, for a record that is part of
-#: something else rather than a thing on a shelf: `a` is a monographic
-#: component part and `b` a serial component part.
-#:
-#: **These two, because these are the levels the sample actually held.** The 280
-#: records measured on 2026-08-27 carried `a` (155), `m` (122) and `c` (3), so
-#: `b` is here on the MARC definition rather than on evidence and nothing else
-#: is here at all. A later live page turned up one `s`, a serial, which is
-#: neither a component part nor a book: it is **not** refused, because refusing
-#: serials is a decision about what this app catalogues rather than a correction
-#: to this one, and widening a frozenset is the quietest possible place to take
-#: a decision like that.
-#:
-#: **Over half of what an ÖNB title search returns is one of these**, and
-#: nothing already here catches them. Measured over 8 title searches on
-#: 2026-08-27, 280 records: 155 (55.4%) are level `a`, journal articles and
-#: book chapters with a 773 host item entry and usually no 300 extent at all.
-#: `is_physical_book` tests the extent for an online form and the title for a
-#: volume slot, and an absent extent passes both, so every one of the 155 would
-#: have reached the picker as a book.
-#:
-#: **The leader decides rather than the 773**, and the difference was measured
-#: on the same 280 records: the leader catches 155 of 155 and loses **0** of
-#: the 122 monographs, where refusing anything carrying a 773 catches the same
-#: 155 and loses 3 monographs that carry a host entry legitimately.
-_COMPONENT_PART_LEVELS: Final = frozenset({"a", "b"})
-
-
-def _is_component_part(record: ElementTree.Element) -> bool:
-    """Whether this MARC record describes an article or a chapter.
-
-    Reads the leader off the record node, because `_marc_fields` maps
-    `datafield` only and the leader is neither a datafield nor a controlfield.
-    Kept here rather than added to that map: one source needs it, and widening
-    the shared shape for one caller is how a field map grows keys nobody reads.
-
-    A leader shorter than eight characters is not a component part. A truncated
-    leader is a broken record rather than an article, and the fields below
-    decide it on their own merits.
-    """
-    leader = record.findtext(f"{_MARC}leader") or ""
-    return len(leader) > 7 and leader[7] in _COMPONENT_PART_LEVELS
-
-
-
 
 # ── The National Library of Greece ────────────────────────────────────────────
 
@@ -1973,7 +1243,7 @@ def _is_component_part(record: ElementTree.Element) -> bool:
 #
 # **The identity check covers one of the two paths and not the other, and the
 # difference is worth stating rather than leaving to be inferred.** the NLG lookup
-# filters through `_marc_claims_isbn`, so a forged body has to be a plausible
+# filters through `Fields.claims_isbn`, so a forged body has to be a plausible
 # MARC record for the book the member scanned rather than for any book.
 # the NLG title search has no identifier to check against, exactly as the Library of Congress title search
 # has none, so a forged body there can offer any row it likes. What stands
@@ -2040,7 +1310,7 @@ def _is_component_part(record: ElementTree.Element) -> bool:
 # **The component part filter is here on the concept, not on a measurement
 # that needs it.** Measured over 400 live records on 2026-08-30, drawn from
 # eight title searches and not the same sample as the 500 record probe behind
-# `_isbn_entries`' table, the leader bibliographic level is `m` 371 times and
+# `Fields.isbn`'s own 020 table, the leader bibliographic level is `m` 371 times and
 # `s` 29 times, and a component part appears **zero** times, where the same
 # measurement at the ÖNB found 55.4%.
 # It is kept because an article is never a book in any MARC21 catalogue and
@@ -2173,7 +1443,7 @@ def _nkp_text(record: ElementTree.Element, tag: str) -> list[str]:
 def _nkp_claims_isbn(record: ElementTree.Element, isbn: str) -> bool:
     """Whether this record names the ISBN that was asked for.
 
-    The same defence `_marc_claims_isbn` is for the MARC sources, in the one
+    The same defence `marc_fields.Fields.claims_isbn` is for the MARC sources, in the one
     shape Dublin Core offers: `identifier` carries the ISBN, hyphenated as the
     catalogue prints it, and `isbn.parse` folds both sides to one form. A
     plaintext connection is the reason it is here even though this target
@@ -2200,7 +1470,7 @@ def _nkp_claims_isbn(record: ElementTree.Element, isbn: str) -> bool:
 #:
 #: **#124 asked whether the rule should be per source everywhere and the answer
 #: was no**: it is per source exactly where the record carries no code, which is
-#: the two Dublin Core sources and nowhere else. `_NOT_A_BOOK_CARRIERS` holds
+#: the two Dublin Core sources and nowhere else. `marc_fields` holds
 #: the reasoning and `_BNF_ONLINE` is the other half of the pair.
 #:
 #: **This source is the harder of the two and is why the pair exists.** Its
@@ -2332,11 +1602,11 @@ def _nkp_record(
 # `targets.SEEDED[CatalogueSource.BNE].requires_isbn_claim` is not a preference:
 # a mistyped index here ships well formed MARC for an arbitrary book. The index
 # name is pinned by `targets._INDEX` and the identity check by
-# `_marc_claims_isbn`, and both have to fail before that reaches a shelf.
+# `Fields.claims_isbn`, and both have to fail before that reaches a shelf.
 #
 # **The `020 $z` trap the NLG documents reproduces here too.**
 # `alma.isbn=0000000000000` returns one record whose only match is `$z`, the
-# cancelled ISBN subfield. `_marc_claims_isbn` reads `$a` only and already
+# cancelled ISBN subfield. `Fields.claims_isbn` reads `$a` only and already
 # refuses it, so this is recorded rather than guarded a second time.
 #
 # ISBN forms normalise, which the two Spanish ministry catalogues notably do
@@ -2361,12 +1631,12 @@ def _nkp_record(
 # What they do describe is what Spanish cataloguing practice supplies today.
 # Measured over 400 live records on 2026-09-05:
 #
-#   * `082`, which is all `_marc_ddc` reads: **0 of 400**. Classification here
+#   * `082`, which is all `Fields.ddc_headings` reads: **0 of 400**. Classification here
 #     is `080`, UDC, on 272 of the 400, and nothing in this tree reads UDC.
-#   * the subject tags `_dnb_subjects` walks, `650 651 655 689 600`: **459**
+#   * the subject tags `Fields.controlled_subjects` walks, `650 651 655 689 600`: **459**
 #     datafields across the 400 records, carrying **0** `$0` subfields of any
 #     kind, so **0** begin with `(DE-588)` and none becomes a `Heading`.
-#     `_dnb_subjects` appends only where `_gnd_identifier` answers.
+#     it appends only where `Subfields.gnd_identifier` answers.
 #
 # **Neither figure is the count in `classifications.bounded_headings`**, and
 # both wrong readings of that were made here before the right one. Raising it on
@@ -2610,17 +1880,26 @@ def _nkp_record(
 # measurement and is not re-derived here**, because the seat that wrote this had
 # no key. The per source figures and the frames: `sources.MEASURED`.
 
-#: The ISBN lookup adapter for a transport that is neither SRU nor Z39.50.
+#: The ISBN lookup adapter for a bespoke door that is handed no secret.
 #:
-#: **Two entries where there used to be seven**, and the five that left are the
-#: whole ticket: every SRU source now shares `_sru_lookup`, driven by its row.
-#: What is left is the two catalogues with a JSON API of their own, and they are
-#: keyed on the reader rather than on the source for the same reason the search
-#: tables are: a reader is what a row names.
+#: **One table where there used to be seven entries in one**, and the split from
+#: `_KEYED_LOOKUPS` below is the whole of it: every SRU source shares
+#: `_sru_lookup`, driven by its row, and what is left is the two catalogues with
+#: a JSON API of their own. They are keyed on the reader rather than on the
+#: source for the same reason the search tables are: a reader is what a row
+#: names. The bespoke lookup **adapters**, by `decoders.Reader`, and the word is
+#: not decoration.
+#:
+#: **The signature is the enforcement, which is why this is two tables and not
+#: one with a branch.** A value here is handed an ISBN and has no parameter a
+#: secret could arrive in, so a free door being handed a key is not a case that
+#: is refused at runtime: it cannot be written. Held in one table the two shared
+#: a `(isbn, key)` signature, the key was chosen by asking whether the row was
+#: metered, and Open Library's adapter opened with `del api_key`, which is a
+#: statement about that one adapter rather than about the dispatch. See
+#: `_lookup_one`.
 #:
 #: `metadata.resolve` is what stops a row naming a reader that is not in here.
-#: The bespoke lookup **adapters**, by `decoders.Reader`, and the word is not
-#: decoration.
 #:
 #: **These fetch as well as decode, and they are the one place in the roster
 #: where the two are still welded.** Splitting them is a rewrite of two JSON
@@ -2628,10 +1907,24 @@ def _nkp_record(
 #: scope. The decoder is already separate inside each: `_open_library_edition`
 #: and `_google_record` take parsed JSON and return a `Record`, and neither
 #: mentions a request. What is missing is only the registry entry for them.
-_BESPOKE_LOOKUPS: Final[
-    dict[decoders.Reader, Callable[[str, str], Awaitable[Lookup]]]
+_FREE_LOOKUPS: Final[
+    dict[decoders.Reader, Callable[[str], Awaitable[Lookup]]]
 ] = {
     decoders.Reader.OPEN_LIBRARY: _open_library,
+}
+
+#: The ISBN lookup adapter for a bespoke door that is handed a deployment secret.
+#:
+#: **Named for what its values take and not for what the row costs.** Being
+#: billed per request and being entitled to one named source's key are different
+#: facts about a row, and "metered" was the question this dispatch asked and the
+#: wrong one. `targets.Secret` is the fact, and both `_lookup_one` and
+#: `_search_one` read it. **`_METERED_SEARCHES` one screen down still carries
+#: the older word in its name** and is selected on this same fact; the name is
+#: the last of that spelling and is not what anything asks.
+_KEYED_LOOKUPS: Final[
+    dict[decoders.Reader, Callable[[str, str], Awaitable[Lookup]]]
+] = {
     decoders.Reader.GOOGLE_BOOKS: _google_books,
 }
 
@@ -2836,186 +2129,8 @@ def _search_terms(query: str) -> list[str]:
     return terms
 
 
-#: MARC's own codes for the two things `bibliographic._NOT_A_BOOK` refuses in prose, so that
-#: no MARC source needs prose in any language.
-#:
-#: **The languages are an open set and the schemas are not**, which is the whole
-#: argument. `bibliographic._NOT_A_BOOK` is written in German and English, so a Czech online
-#: resource reached a shelf (#124) and a French one would have. Lengthening the
-#: alternation buys one language at a time forever; these three sets are closed,
-#: published, and say the same two things the alternation says.
-#:
-#: Measured over 2,605 live MARC records on 2026-09-03, from ISBN lookups and
-#: title searches across the four MARC sources `targets.SEEDED` held that day,
-#: which is five now: **65 describe something that is
-#: not a physical book and `bibliographic._NOT_A_BOOK` passes every one**, and **0** are
-#: refused by `bibliographic._NOT_A_BOOK` and passed here, so nothing the prose caught is
-#: given up.
-#:
-#: **The language framing predicts 20 of that 65 and no more.** 43 carry no
-#: `300 $a` at all, so no extent rule in any language reaches them. 2 carry an
-#: extent that counts pages, `XVIII, 222 Seiten` and `24, 358 Seiten, 5
-#: ungezählte Seiten Tafeln`, because they are online resources quoting the
-#: **printed original's** collation, and an extent rule cannot refuse those
-#: without refusing books. The remaining **20** are the ones a longer alternation
-#: could have caught, and catching them would have needed `CD-ROM`, `Track`,
-#: `Schallplatte`, `Tonie-Figur` and `E-BOOK`, none of which is a language this
-#: rule was missing: `CD-ROM` is absent from `bibliographic._DISC_FORMS` in English too.
-#:
-#: Each code is one of the two halves rather than a widening:
-#:
-#: | set | codes | what it is the code for |
-#: |---|---|---|
-#: | 007/00 | `c` | an electronic resource, `bibliographic._ONLINE_FORMS` |
-#: | 007/00 | `s`, `v` | a sound recording and a videorecording, `bibliographic._DISC_FORMS` |
-#: | leader/06 | `m` | a computer file, `bibliographic._ONLINE_FORMS` |
-#: | leader/06 | `i`, `j`, `g` | sound recordings and projected media, `bibliographic._DISC_FORMS` |
-#: | 008/23 | `o`, `q`, `s` | online, direct electronic and electronic |
-#:
-#: **The 008/23 row is not load bearing today and is kept anyway**, which is the
-#: reason `metadata._marc_nodes` gives for keeping a component part filter that catches
-#: nothing at that source: measured over the same 2,605 records, it refuses **0**
-#: that the 007 and the leader do not already refuse. It stays because `007` is
-#: optional and 195 of those 2,605 carry none, so a catalogue that codes the form
-#: of item and omits the carrier is ordinary MARC that this sample happens not to
-#: hold. `s` has never been observed here at all and is in the set on MARC's
-#: definition, like `b` at `_COMPONENT_PART_LEVELS`.
-#:
-#: **What is deliberately not here**: every other leader/06. Refusing them would
-#: catch 35 more of those 2,605, of which 20 are graphics, **12 are notated
-#: music**, 2 are maps and 1 is a three dimensional object. The music is why it
-#: is not one decision: `Gabriel Fauré, Catalogue des œuvres`, `LII, 496 Seiten`,
-#: is a book K10plus files as music, and `1 Partitur (101 Seiten)` is a printed
-#: score somebody may well shelve. Whether this app takes printed scores, maps or
-#: photographs is a decision about what it catalogues rather than a correction to
-#: this rule, which is the reason `_COMPONENT_PART_LEVELS` gives for not refusing
-#: serials, and widening a frozenset is the quietest possible place to take one.
-_NOT_A_BOOK_CARRIERS: Final = frozenset({"c", "s", "v"})
-_NOT_A_BOOK_RECORD_TYPES: Final = frozenset({"g", "i", "j", "m"})
-_NOT_A_BOOK_FORMS_OF_ITEM: Final = frozenset({"o", "q", "s"})
-
-#: MARC 007/00 for text. A record carrying one is a text whatever else it also
-#: carries, which is the clause the ÖNB's digitisations turn on.
-_TEXT_CARRIER: Final = "t"
-
-#: leader/06 and 008/23, the two fixed positions read below. Named because a
-#: bare `6` and `23` in an index expression say nothing about which of MARC's
-#: forty positions is meant.
-_RECORD_TYPE_POSITION: Final = 6
-_FORM_OF_ITEM_POSITION: Final = 23
-
-
-def _marc_carrier_is_book(record: ElementTree.Element) -> bool:
-    """Whether this record's own codes say it is a thing on a shelf.
-
-    Reads the leader and the control fields off the record node, because
-    `_marc_fields` maps `datafield` only and neither of these is one. That is
-    `_is_component_part`'s reason and it now has seven callers rather than the
-    one that argued against widening the field map; see that function.
-
-    **A field too short to index decides nothing**, which is the rule
-    `_is_component_part` already applies to the leader, and a stronger one here
-    because two of the three fields are read at a fixed offset. A truncated
-    leader or a short `008` is a broken record rather than a disc, and the
-    prose test and the fields below decide it on their own merits. `007` is
-    read by prefix rather than by offset, so an empty one yields `""` and
-    matches nothing.
-
-    **Every `007`, and a text one wins.** The field is repeatable, one per
-    carrier, and 48 of the 2,605 records measured carry two: `cr` beside `tu`.
-    Refusing on any electronic `007` refuses all 48, and they are **real books**:
-    every one is an Austrian Books Online record (`856 $x ONB-ABO $3 Volltext`)
-    for a 19th century print the ÖNB holds, with the print's imprint in the 264
-    and its collation in the 300. Their `008/23` is blank or `#` on all 48, which
-    is MARC's own answer that the **item** is not electronic; the `cr` describes
-    the scan beside it. So a `tu` is decisive and this reads all of them rather
-    than the first, which would have passed or refused whichever the cataloguer
-    happened to write first.
-
-    **It rescues from the 007 test only**, which the shape of this function
-    states and its prose did not: the leader and the 008 have returned already,
-    so a `tu` does not outrank either. That is deliberate rather than
-    incidental, because a text carrier beside a projected medium leader is a
-    record contradicting itself, where a text carrier beside an electronic one
-    is a digitisation describing two things truthfully. It also costs nothing on
-    the evidence: all 48 carry leader/06 `a` and an 008/23 that is blank or `#`,
-    so none of them reaches the question.
-
-    That was the first draft of this function and a critic caught it. It is the
-    shape CLAUDE.md names: a replacement better in the dimension it was designed
-    for and silently weaker in one nobody re-checked.
-
-    The other worry, a printed book with an accompanying CD-ROM, does not need
-    this clause and would not have been saved by it: accompanying material goes
-    in `300 $e`, and both records in the sample that carry one (`1 CD`,
-    `Zsfassung + 1 CD-ROM`) carry `007 tu` and nothing else.
-    """
-    leader = record.findtext(f"{_MARC}leader") or ""
-    if (
-        len(leader) > _RECORD_TYPE_POSITION
-        and leader[_RECORD_TYPE_POSITION] in _NOT_A_BOOK_RECORD_TYPES
-    ):
-        return False
-
-    carriers: list[str] = []
-    for control in record.findall(f"{_MARC}controlfield"):
-        # `control.text` and never `_marc_text`, which collapses whitespace.
-        # A control field is fixed length and its blanks are data. Measured over
-        # 2,605 live records, every one of which carries an 008, and counted in
-        # **records** rather than in distinct values, which is where the first
-        # three versions of this comment went wrong: `_marc_text` alters the 008
-        # of 2,043 of them (78.4%) and moves what sits at position 23 on 1,859.
-        # So a rule reading this field through the subfield reader refuses 31
-        # records where it should refuse 854, and says nothing about it. 5 more
-        # collapse below 24 characters, which the length test below turns into a
-        # pass rather than an `IndexError`.
-        value = control.text or ""
-        tag = control.get("tag")
-        if tag == "007":
-            carriers.append(value[:1])
-        elif (
-            tag == "008"
-            and len(value) > _FORM_OF_ITEM_POSITION
-            and value[_FORM_OF_ITEM_POSITION] in _NOT_A_BOOK_FORMS_OF_ITEM
-        ):
-            return False
-
-    # **A record that declares a text carrier is a text**, whatever other `007`
-    # it also carries. Not whatever else it declares: the 008 and the leader have
-    # returned already, above, and a `tu` does not outrank either. See the two
-    # 007 note in the docstring for why that asymmetry is deliberate, and for the
-    # measurement that it costs nothing, 0 of the 1,484 records carrying a text
-    # 007 also carry a refusing leader/06 or 008/23. Without this clause the 48
-    # Austrian Books Online records are refused, and they are real prints.
-    return _TEXT_CARRIER in carriers or not any(
-        carrier in _NOT_A_BOOK_CARRIERS for carrier in carriers
-    )
-
-
-def _marc_is_physical_book(
-    record: ElementTree.Element,
-    fields: dict[str, list[_Subfields]],
-    title: str | None,
-) -> bool:
-    """The whole refusal for a MARC source: the codes, then the prose.
-
-    **The one door.** Every MARC parse path asks this and none asks
-    `is_physical_book` directly, so a source added later gets the carrier test
-    by construction rather than by remembering to add it.
-    `test_metadata.py::TestTheCarrierTestIsTheOnlyWayIn` is what keeps that true.
-
-    Both halves, because neither subsumes the other. The codes reach the 43
-    records that state no extent; the prose reaches a record whose catalogue
-    coded it wrongly, which the DNB does, writing `338 $a Band` on three records
-    whose 007, 008 and extent all say online.
-    """
-    return _marc_carrier_is_book(record) and is_physical_book(
-        _marc_extent(fields), title
-    )
-
-
 def _fullest_physical(
-    books: list[tuple[ElementTree.Element, dict[str, list[_Subfields]], Record]],
+    books: list[tuple[marc_fields.Fields, Record]],
 ) -> Record:
     """The fullest of several records for one ISBN, a book before a digitisation.
 
@@ -3043,10 +2158,10 @@ def _fullest_physical(
     return max(
         books,
         key=lambda book: (
-            _marc_is_physical_book(book[0], book[1], book[2].title),
-            book[2].completeness,
+            book[0].describes_a_book(book[1].title),
+            book[1].completeness,
         ),
-    )[2]
+    )[1]
 
 
 # ── The regional catalogues ───────────────────────────────────────────────────
@@ -3170,7 +2285,7 @@ def _bnf_record(record: ElementTree.Element, *, source: str) -> Record | None:
     # "M. J. Minard, Lettres modernes (Paris)" is publisher then place.
     publisher = next((value for value in texts("publisher")), None)
     if publisher:
-        publisher = re.sub(r"\s*\([^)]*\)\s*$", "", publisher).strip()
+        publisher = _without_trailing_place(publisher)
 
     year_match = re.search(r"\d{4}", " ".join(texts("date")))
 
@@ -3189,6 +2304,34 @@ def _bnf_record(record: ElementTree.Element, *, source: str) -> Record | None:
         # dialect: see `catalogue.uncontrolled`.
         subjects=uncontrolled(texts("subject")),
     )
+
+
+def _without_trailing_place(publisher: str) -> str:
+    """A BnF publisher with its trailing parenthesised place removed, stripped.
+
+    **The answer the regular expression it replaced gave, computed in time
+    linear in the value rather than quadratic.** That expression backtracked
+    from every `(` and every space to the end of the value, and nothing ahead
+    of it bounds the field: `texts` strips only the ends. Measured on CPython
+    3.14, a 32,150 byte body decoded in 1.26 seconds and each doubling of the
+    length cost about four times the time, on the event loop, where a search's
+    deadline cannot interrupt it. `tests/test_metadata.py` keeps the expression
+    as the oracle this is held to.
+
+    **Equal to that pattern on every input, not only the real ones**, which is
+    why it reads the previous `)` rather than the last `(`. The leftmost match
+    starts at the first `(` after the last `)` that is not the final one, so
+    `Z ((a)` loses `((a)` here as it did there. **The obvious repair is not
+    this**: narrowing the class to `[^()]` is linear on a run of `(` and was
+    measured slower than the original on a run of spaces before one `(`.
+    """
+    body = publisher.rstrip()
+    if not body.endswith(")"):
+        return publisher.strip()
+    opening = body.find("(", body.rfind(")", 0, len(body) - 1) + 1)
+    if opening == -1:
+        return publisher.strip()
+    return body[:opening].strip()
 
 
 def _bnf_authors(creators: list[str]) -> str | None:
@@ -3230,7 +2373,7 @@ def _bnf_authors(creators: list[str]) -> str | None:
 #: today, which is a fact about this sample rather than about the catalogue.
 #:
 #: Microform is deliberately absent. 17 of the 322 are microfilm, and whether
-#: this app shelves one is the decision `_COMPONENT_PART_LEVELS` declines to
+#: this app shelves one is the decision `marc_fields._COMPONENT_PART_LEVELS` declines to
 #: take about serials.
 _LOC_NOT_A_BOOK_FORMS: Final = {
     "marcform": frozenset({"electronic"}),
@@ -3242,7 +2385,7 @@ _LOC_NOT_A_BOOK_FORMS: Final = {
 def _loc_carrier_is_book(record: ElementTree.Element) -> bool:
     """Whether this MODS record's own form codes say it is a thing on a shelf.
 
-    `_marc_carrier_is_book` for the one source that answers MODS. A record with
+    the MARC carrier test for the one source that answers MODS. A record with
     no `form` at all decides nothing here: 1 of the 391 measured carries none,
     and an absent code is a thin record rather than a disc.
     """
@@ -3260,6 +2403,74 @@ def _loc_record(record: ElementTree.Element, *, source: str) -> Record | None:
     if not _loc_carrier_is_book(record):
         return None
 
+    titled = _loc_title(record)
+    if titled is None:
+        return None
+    title, subtitle = titled
+
+    extent_element = record.find(f"{_MODS}physicalDescription/{_MODS}extent")
+    extent = extent_element.text.strip() if extent_element is not None and extent_element.text else None
+    if not is_physical_book(extent, title):
+        return None
+
+    isbn = next(
+        (
+            parsed
+            for element in record.findall(f"{_MODS}identifier")
+            if element.text
+            for parsed in [parse_isbn(element.text)]
+            if parsed is not None
+        ),
+        None,
+    )
+
+    years = [
+        element.text
+        for element in record.findall(f"{_MODS}originInfo/{_MODS}dateIssued")
+        if element.text
+    ]
+    year_match = re.search(r"\d{4}", " ".join(years))
+
+    language_element = record.find(
+        f"{_MODS}language/{_MODS}languageTerm"
+    )
+    language = (
+        LANGUAGES.get((language_element.text or "").strip().lower())
+        if language_element is not None
+        else None
+    )
+
+    return Record(
+        source=source,
+        isbn=isbn,
+        title=title,
+        subtitle=subtitle,
+        author=_loc_authors(record),
+        publisher=_loc_publisher(record),
+        year=int(year_match.group()) if year_match else None,
+        language=language,
+        page_count=pages_from_extent(extent),
+        cover_url=covers.open_library_url(isbn) if isbn else None,
+        subjects=_loc_subjects(record),
+        # The shelf classifications first and the subject headings after,
+        # which is load bearing rather than tidy. `Record.match_headings`
+        # slices to `MAX_CLASSIFICATIONS_PER_BOOK` and
+        # `routers/books._headings` applies `_SCHEME_ORDER` only afterwards, so
+        # on the search path a record's own order decides what survives. One
+        # live record carries 14 LCSH headings (measured over 900 records,
+        # 2026-08-24); putting them in front would cost this record its Dewey
+        # number and its call number, which are the two schemes nothing else in
+        # the chain supplies together.
+        headings=tuple(_loc_classifications(record) + _loc_subject_headings(record)),
+    )
+
+
+def _loc_title(record: ElementTree.Element) -> tuple[str, str | None] | None:
+    """A MODS record's title and subtitle, or None where it has no usable title.
+
+    None for no `titleInfo`, an empty `title` and a placeholder, which are the
+    three ways `_loc_record` refuses a record for its title.
+    """
     title_info = record.find(f"{_MODS}titleInfo")
     if title_info is None:
         return None
@@ -3286,9 +2497,15 @@ def _loc_record(record: ElementTree.Element, *, source: str) -> Record | None:
         if subtitle_element is not None and subtitle_element.text
         else None
     )
+    return title, subtitle
 
-    # A `name` with no role is the main entry. Roles are spelled out in MODS
-    # ("author", "editor"), so a translator can be dropped by name.
+
+def _loc_authors(record: ElementTree.Element) -> str | None:
+    """The people a MODS record credits with writing it, as one credit line.
+
+    A `name` with no role is the main entry. Roles are spelled out in MODS
+    ("author", "editor"), so a translator can be dropped by name.
+    """
     authors: list[str] = []
     for name in record.findall(f"{_MODS}name"):
         roles = " ".join(
@@ -3300,72 +2517,20 @@ def _loc_record(record: ElementTree.Element, *, source: str) -> Record | None:
         part = name.find(f"{_MODS}namePart")
         if part is not None and part.text:
             authors.append(flip_catalogue_name(part.text.strip().rstrip(",.")))
+    return ", ".join(authors) or None
 
-    extent_element = record.find(f"{_MODS}physicalDescription/{_MODS}extent")
-    extent = extent_element.text.strip() if extent_element is not None and extent_element.text else None
-    if not is_physical_book(extent, title):
-        return None
 
-    isbn = next(
-        (
-            parsed
-            for element in record.findall(f"{_MODS}identifier")
-            if element.text
-            for parsed in [parse_isbn(element.text)]
-            if parsed is not None
-        ),
-        None,
-    )
-
+def _loc_publisher(record: ElementTree.Element) -> str | None:
+    """A MODS record's publisher, from `originInfo` or, failing that, its agent."""
     publisher_element = record.find(f"{_MODS}originInfo/{_MODS}publisher")
     if publisher_element is None:
         publisher_element = record.find(
             f"{_MODS}originInfo/{_MODS}agent/{_MODS}namePart"
         )
-    publisher = (
+    return (
         publisher_element.text.strip()
         if publisher_element is not None and publisher_element.text
         else None
-    )
-
-    years = [
-        element.text
-        for element in record.findall(f"{_MODS}originInfo/{_MODS}dateIssued")
-        if element.text
-    ]
-    year_match = re.search(r"\d{4}", " ".join(years))
-
-    language_element = record.find(
-        f"{_MODS}language/{_MODS}languageTerm"
-    )
-    language = (
-        LANGUAGES.get((language_element.text or "").strip().lower())
-        if language_element is not None
-        else None
-    )
-
-    return Record(
-        source=source,
-        isbn=isbn,
-        title=title,
-        subtitle=subtitle,
-        author=", ".join(authors) or None,
-        publisher=publisher,
-        year=int(year_match.group()) if year_match else None,
-        language=language,
-        page_count=pages_from_extent(extent),
-        cover_url=covers.open_library_url(isbn) if isbn else None,
-        subjects=_loc_subjects(record),
-        # The shelf classifications first and the subject headings after,
-        # which is load bearing rather than tidy. `Record.match_headings`
-        # slices to `MAX_CLASSIFICATIONS_PER_BOOK` and
-        # `routers/books._headings` applies `_SCHEME_ORDER` only afterwards, so
-        # on the search path a record's own order decides what survives. One
-        # live record carries 14 LCSH headings (measured over 900 records,
-        # 2026-08-24); putting them in front would cost this record its Dewey
-        # number and its call number, which are the two schemes nothing else in
-        # the chain supplies together.
-        headings=tuple(_loc_classifications(record) + _loc_subject_headings(record)),
     )
 
 
@@ -3395,7 +2560,7 @@ def _loc_subjects(record: ElementTree.Element) -> tuple[Subject, ...]:
     reader did before.
 
     Lower cased here, which is `catalogue.Subject`'s rule and the same one
-    `_subject_vocabulary` applies to a `$2`. **Case is the whole of the tidying
+    `marc_fields.Subfields.subject_vocabulary` applies to a `$2`. **Case is the whole of the tidying
     and punctuation is not**: `_LOC_SUBJECT_AUTHORITY` records a stray
     `bisacsh.` beside `bisacsh` over 900 records, and the trailing full stop is
     left on, because guessing at punctuation inside somebody else's code is how
@@ -3576,8 +2741,8 @@ def _loc_subject_headings(record: ElementTree.Element) -> list[Heading]:
 #
 # **What did not move.** The parsers, and every refusal in them. A row picks a
 # reader; it cannot say what a reader accepts. That is the line the ticket drew
-# against Koha's `add_xslt`, and `_marc_claims_isbn`, `is_placeholder_title`,
-# `is_physical_book` and `_isbn_entries` are what sit on our side of it.
+# against Koha's `add_xslt`, and `Fields.claims_isbn`, `is_placeholder_title`,
+# `is_physical_book` and `Fields.isbn` are what sit on our side of it.
 
 
 def _marc_nodes(
@@ -3603,15 +2768,15 @@ def _marc_nodes(
     what it does not is on `targets.Target.refuses_component_parts`, and the two
     measurements behind it are in those sources' blocks above.
     """
-    nodes = root.iter(f"{_MARC}record")
+    nodes = root.iter(marc_fields.RECORD_TAG)
     if decoding.refuses_component_parts:
-        return [node for node in nodes if not _is_component_part(node)]
+        return [node for node in nodes if not marc_fields.is_component_part(node)]
     return list(nodes)
 
 
 def _marc_build(
     decoding: decoders.Decoding,
-    fields: dict[str, list[_Subfields]],
+    fields: marc_fields.Fields,
     isbn: str | None,
 ) -> Record | None:
     """One MARC record as book fields, through the reader the decoding names.
@@ -3654,9 +2819,9 @@ def _marc_lookup(
     """
     name = decoding.source
     books = [
-        (node, fields, record)
+        (fields, record)
         for node in _marc_nodes(root, decoding)
-        for fields in [_marc_fields(node)]
+        for fields in [marc_fields.Fields(node)]
         for record in [_marc_build(decoding, fields, isbn)]
         if record is not None
     ]
@@ -3665,7 +2830,7 @@ def _marc_lookup(
         return Lookup(Outcome.NOT_FOUND, source=name)
 
     if decoding.requires_isbn_claim:
-        claimed = [book for book in books if _marc_claims_isbn(book[1], isbn)]
+        claimed = [book for book in books if book[0].claims_isbn(isbn)]
         if not claimed:
             return Lookup(Outcome.NOT_FOUND, source=name)
         return Lookup(Outcome.FOUND, source=name, record=_fullest_physical(claimed))
@@ -3673,13 +2838,13 @@ def _marc_lookup(
     ranked = sorted(
         books,
         key=lambda book: (
-            _marc_claims_isbn(book[1], isbn),
-            _marc_is_physical_book(book[0], book[1], book[2].title),
-            book[2].completeness,
+            book[0].claims_isbn(isbn),
+            book[0].describes_a_book(book[1].title),
+            book[1].completeness,
         ),
         reverse=True,
     )
-    return Lookup(Outcome.FOUND, source=name, record=ranked[0][2])
+    return Lookup(Outcome.FOUND, source=name, record=ranked[0][1])
 
 
 def _dublin_core_bare_lookup(
@@ -3689,7 +2854,7 @@ def _dublin_core_bare_lookup(
 
     The Czech National Library's shape, and the Biblioteca Nacional Argentina's,
     which is this reader's whole roster. `_nkp_claims_isbn` is this format's
-    `_marc_claims_isbn`: it has no 020 to read and tests the record's own
+    `Fields.claims_isbn`: it has no 020 to read and tests the record's own
     identifier elements instead.
 
     **`decoding.source` labels the record as well as the lookup.** It labelled
@@ -3720,7 +2885,7 @@ def _marc_record(
 
     **The refusals are here and not in the caller**, which is what makes this a
     decoder rather than a step of one: a file has no caller to add them.
-    `_marc_is_physical_book` is the carrier door and `record.title` is the
+    `Fields.describes_a_book` is the carrier door and `record.title` is the
     thinness test.
 
     **An online resource is refused here and only ranked down at a lookup**, and
@@ -3728,11 +2893,11 @@ def _marc_record(
     tell an edition of this book from a digitisation of another one, and neither
     has a file. `_marc_lookup` therefore does not build on this.
     """
-    fields = _marc_fields(record)
+    fields = marc_fields.Fields(record)
     built = _marc_build(decoding, fields, None)
     if built is None or not built.title:
         return None
-    if not _marc_is_physical_book(record, fields, built.title):
+    if not fields.describes_a_book(built.title):
         return None
     return built
 
@@ -4078,13 +3243,34 @@ def resolve(target: targets.Target) -> None:
     the invariants it can see on one row on its own. This is the half that needs
     to know what code exists.
     """
-    if target.can(Capability.ANSWERS_ISBN):
-        table = (
-            _LOOKUP_READERS
-            if target.transport is targets.Transport.SRU
-            else _BESPOKE_LOOKUPS
+    if (
+        target.transport is not targets.Transport.SRU
+        and target.needs_key
+        and target.secret is targets.Secret.NONE
+    ):
+        # **The refusal the bespoke path did not have, and it is about the row
+        # rather than about either door**, which is why it is hoisted above both
+        # arms instead of written into one. A bespoke row needing a credential
+        # and naming no secret has nothing that can supply one: a sealed login
+        # goes out of the SRU door and no other, which `carries_a_credential`
+        # states and `tests/test_metadata.py::TestWhichDoorCarriesALogin`
+        # measures at the wire. Before this, such a row resolved, reached
+        # `_lookup_one` and was handed `""`, and the request went out
+        # unauthenticated and came back as an ordinary miss. Written into the
+        # lookup arm alone it would have missed a row whose only door is the
+        # search door.
+        raise ValueError(
+            f"{target.source}: needs a credential and no bespoke door carries one"
         )
-        if target.reader not in table:
+    if target.can(Capability.ANSWERS_ISBN):
+        lookup_readers: Collection[decoders.Reader]
+        if target.transport is targets.Transport.SRU:
+            lookup_readers = _LOOKUP_READERS.keys()
+        elif target.secret is targets.Secret.GOOGLE_BOOKS_KEY:
+            lookup_readers = _KEYED_LOOKUPS.keys()
+        else:
+            lookup_readers = _FREE_LOOKUPS.keys()
+        if target.reader not in lookup_readers:
             raise ValueError(
                 f"{target.source}: answers a lookup and {target.reader} reads none"
             )
@@ -4092,7 +3278,14 @@ def resolve(target: targets.Target) -> None:
         readers: Collection[decoders.Reader]
         if target.transport is targets.Transport.SRU:
             readers = _SEARCH_READERS.keys()
-        elif target.can(Capability.METERED):
+        elif target.secret is targets.Secret.GOOGLE_BOOKS_KEY:
+            # **The same fact as the lookup arm above, and not
+            # `Capability.METERED`.** The two agree on the seeded roster and are
+            # different questions: being billed per request is not being
+            # entitled to one named source's key, and a second metered bespoke
+            # source added to the table below would have been handed Google's by
+            # arriving. That is the defect this commit closes at the lookup
+            # door, one screen away.
             readers = _METERED_SEARCHES.keys()
         else:
             readers = _FREE_SEARCHES.keys()
@@ -4163,18 +3356,51 @@ async def _lookup_one(
     `tests/test_credentials.py::TestASealedLoginNeedsATransportThatCarriesIt` is
     the tripwire that asks it of the roster.
 
-    **Only a metered one, which is the same test `_search_one` already applies.**
-    The key is this deployment's own and it is metered quota: a bespoke target
-    that is not metered has no use for it and must not be handed it, because a
-    row added to `_BESPOKE_LOOKUPS` would otherwise receive it by arriving. That
-    is the evasion the security seat recorded against this rule on 2026-09-17,
-    and it costs nothing today: Open Library is the other bespoke door and its
-    adapter opens with `del api_key`.
+    **Only the source the key belongs to, which is a narrower question than the
+    one this used to ask.** `api_key` is Google Books' key, this deployment's
+    own, and the predicate here was `target.can(METERED)`: several rows can
+    answer yes to that, so the first bespoke credentialled non Google source to
+    arrive would have been handed Google's key and would have sent it wherever
+    its own adapter sends things. `targets.Secret` names the owner instead, so a
+    row can claim only a secret that exists for it.
+
+    **And the free door is a different table with a different signature, so the
+    empty string is gone rather than guarded.** Passing `""` was what made the
+    old shape silent: it is a valid argument to every adapter and means "send it
+    without a key" to one of them, and `_google_books` had no line refusing it
+    where `_google_search` did. A `_FREE_LOOKUPS` value has no parameter a
+    secret could arrive in, so there is nothing left to pass.
+
+    **A `match` over every member with an `assert_never` tail, not a test and a
+    fallthrough**, in the shape `notifications.py` already uses. A third secret
+    is then a mypy error at this line rather than a row quietly routed to the
+    free door, and the predicate cannot be widened to "names any secret" without
+    deleting a branch the type checker is holding. A guard arm would have
+    checked the same thing one member late.
+
+    **What makes that safe is a refusal in `targets.Target.__post_init__` and
+    not anything here, and `_search_one` rests on the same one.** `Secret` is a
+    `StrEnum`, so a `match` compares by equality and a bare `"google_books_key"`
+    would route to the keyed door where an `is` test refused it. The field is
+    refused by type at the one site that writes it, which is why both dispatches
+    can match rather than each carrying its own narrower test.
+
+    **The row is what is read, never the table's key set.** Selecting on
+    `target.reader in _KEYED_LOOKUPS` is equivalent on the seeded roster,
+    because `main.seed_catalogue_targets` runs `resolve` over it at boot, and it
+    is the defect this function was fixed for wearing a different spelling: a
+    table's accident standing in for a rule about the row.
+    `tests/test_metadata.py::TestOnlyTheKeysOwnerIsHandedIt::test_the_row_is_read_and_not_the_tables_key_set`
+    is what separates them.
     """
     if target.transport is targets.Transport.SRU:
         return await _sru_lookup(target, isbn, credential)
-    metered = api_key if target.can(Capability.METERED) else ""
-    return await _BESPOKE_LOOKUPS[target.reader](isbn, metered)
+    match target.secret:
+        case targets.Secret.GOOGLE_BOOKS_KEY:
+            return await _KEYED_LOOKUPS[target.reader](isbn, api_key)
+        case targets.Secret.NONE:
+            return await _FREE_LOOKUPS[target.reader](isbn)
+    assert_never(target.secret)
 
 
 async def _search_one(
@@ -4188,13 +3414,24 @@ async def _search_one(
     """Ask one target for title matches, through whichever door its row names.
 
     `credential` carries the rule `_lookup_one` states, including which doors
-    take one.
+    take one, and so does the fact the `match` below reads: the search door is
+    handed the same secret on the same terms as the lookup door, because whose
+    key it is has nothing to do with which question is being asked.
+
+    **`Capability.METERED` is what this used to select on**, and the two tables
+    below differ by arity, so it read as a signature selector rather than as the
+    credential gate it also was. It was both: a second metered bespoke source
+    would have been handed Google's key by arriving, exactly as at the lookup
+    door.
     """
     if target.transport is targets.Transport.SRU:
         return await _sru_search(target, query, limit, credential)
-    if target.can(Capability.METERED):
-        return await _METERED_SEARCHES[target.reader](query, limit, api_key)
-    return await _FREE_SEARCHES[target.reader](query, limit)
+    match target.secret:
+        case targets.Secret.GOOGLE_BOOKS_KEY:
+            return await _METERED_SEARCHES[target.reader](query, limit, api_key)
+        case targets.Secret.NONE:
+            return await _FREE_SEARCHES[target.reader](query, limit)
+    assert_never(target.secret)
 
 
 # ── Ranking ───────────────────────────────────────────────────────────────────
@@ -4295,12 +3532,55 @@ _SECONDARY_SOURCES: Final = frozenset(
 )
 _SECONDARY_PENALTY: Final = 1
 
-#: Fields that make a row pickable rather than a stub. Scored **separately**
-#: from matching and only ever as a tiebreaker: a fully populated record that
-#: answers nothing must never outrank a sparse one that answers the question.
-#: It did, and "Christmas at Hogwarts" came second for "harry potter
+#: Fields that make a search row pickable rather than a stub. Scored
+#: **separately** from matching and only ever as a tiebreaker: a fully populated
+#: record that answers nothing must never outrank a sparse one that answers the
+#: question. It did, and "Christmas at Hogwarts" came second for "harry potter
 #: philosopher's stone".
-_COMPLETENESS_FIELDS: Final = (
+#:
+#: **`catalogue.Record.completeness` is the other completeness score and is not
+#: this one.** It ranks records already known to describe one book; this ranks
+#: rows that may not be the same book at all, and that is what puts the five
+#: differing fields where they are. Three are absent from here:
+#:
+#: * `language` and `series_name` are already scored, in `_relevance`'s **first**
+#:   element, by `_LANGUAGE_WEIGHT` and `_SERIES_WEIGHT`. Repeating them here
+#:   counts one fact twice in one comparison, in the weaker of the two places.
+#: * `description`, and the subjects bonus `completeness` adds, say which
+#:   catalogue answered rather than what the book is. `_open_library_search`
+#:   writes neither field at all, and the DNB carries a 520 on 1 of 85 live
+#:   records; see `_dnb_record`. Scoring them would rank by source under a name
+#:   promising to rank by the row.
+#:
+#: **What this list costs is a double count, and `isbn` and `cover_url` are
+#: where it is.** A title search asks no ISBN, so `_marc_build` is handed `None`
+#: and both MARC readers fall back to the record's own 020; `_bnf_record` and
+#: `_loc_record` take no ISBN at any time and parse one out of the record. None
+#: of the three SRU serialisations is read for a cover, so every reader on that
+#: door then builds `cover_url` from the ISBN it just read and from nothing
+#: else, and on such a row the two fields are one fact scored twice. That is the
+#: objection this comment already makes for `language` and `series_name`, and
+#: the ground `catalogue._SCORED` excludes `cover_url` on. The two bespoke
+#: search doors carry a cover of their own, and there the pair is two facts.
+#:
+#: **The derivation is the reader's row and the score reads a merged one, so
+#: the two are not the same row.** `_merge_matches` runs before `_ranked` and
+#: Open Library leads `_MATCH_PRECEDENCE`, so a book it holds with a cover id
+#: of its own, folded with an SRU row that carries the identifier, scores both
+#: fields off two different doors and counts nothing twice. Measured in
+#: process, both input orders. **How much of a live ranking the double count
+#: reaches is therefore not claimed here**, and nothing in this tree observes
+#: the ordering that would answer it.
+#:
+#: **Said by the door rather than by a list of source names**, which is what
+#: goes stale the day a fifth MARC catalogue is added, and held by
+#: `tests/test_metadata.py::TestASearchRowsCoverIsDerivedFromItsOwnIsbn` rather
+#: than by this sentence. A member reading a list of results is choosing
+#: something to scan and something with a cover, which is the answer the product
+#: wants; that the pair is also a source signal is the price.
+#: `docs/decisions.md` holds the argument, under *The two completeness scores
+#: are two questions, not one list*.
+_PICKABLE_FIELDS: Final = (
     "author",
     "year",
     "publisher",
@@ -4321,7 +3601,7 @@ def _relevance(
     publication year.
 
       1. how much of the query this row accounts for
-      2. how complete the row is
+      2. how pickable the row is, by `_PICKABLE_FIELDS`
       3. how recent the printing is
 
     Needed at all because the catalogues return **catalogue order**, which for
@@ -4375,21 +3655,25 @@ def _relevance(
     if sources and sources <= _SECONDARY_SOURCES:
         score -= _SECONDARY_PENALTY
 
-    completeness = sum(1 for name in _COMPLETENESS_FIELDS if getattr(match, name))
-    return (score, completeness, match.year or 0)
+    pickable = sum(1 for name in _PICKABLE_FIELDS if getattr(match, name))
+    return (score, pickable, match.year or 0)
 
 
-def _match_key(match: Record) -> str:
-    """What makes two results from different sources the same book.
+def _ranked(
+    matches: list[Record], terms: list[str], prefer_language: str | None
+) -> list[Record]:
+    """Every match, best answer first. The ordering a search actually returns.
 
-    Deliberately lossy, and it only has to be good enough to stop the picker
-    showing the same book twice. `_duplicate_key` in the books router does the
-    same job for stored books and does it more carefully, because a wrong
-    answer there merges two records rather than hiding one row.
+    **A function rather than the `sorted` that was written at its one call
+    site**, because the tests had written their own copy of that `sorted` and so
+    pinned `_relevance` while pinning nothing about the ordering: `reverse=True`
+    could be dropped, or an element taken off the key, and every arm stayed
+    green. The fixtures call this, so the ordering under test is the ordering
+    that ships.
     """
-    title = re.sub(r"[^\w\s]", "", (match.title or "").casefold()).strip()
-    author = (match.author or "").casefold().split(",")[0].strip()
-    return f"{title}|{author}"
+    return sorted(
+        matches, key=lambda match: _relevance(match, terms, prefer_language), reverse=True
+    )
 
 
 @dataclass(frozen=True)
@@ -4546,13 +3830,13 @@ async def title_search(
         harder_now = False
 
     try:
-        # **The roster and its deadline move together, in one branch.** Two
+        # **The roster and its budget move together, in one branch.** Two
         # conditionals on the same flag would admit the combination nothing
         # wants: the long roster under the short deadline, which asks the slow
         # catalogues and then cancels every one of them, spending the requests
         # and returning the same rows as before with nothing to say what
         # happened.
-        roster, deadline = (
+        roster, deadline_seconds = (
             (access.plan.searched_harder, SEARCH_HARDER_DEADLINE_SECONDS)
             if harder_now
             else (access.plan.searched, SEARCH_DEADLINE_SECONDS)
@@ -4568,17 +3852,19 @@ async def title_search(
                 )
                 for name in roster
             ],
-            deadline,
+            deadline_seconds,
         )
     finally:
         if harder_now:
             _HARDER_AT_ONCE.release()
 
+    # No await between the fan out above and the return below: the deadline
+    # test reads the slow source's unwinding and a yield here would resume the
+    # leftover task in the gather's place, sending that arm green. The gather in
+    # `_within_deadline` carries why.
     merged = _merge_matches([row for tier in tiers for row in tier])
 
-    ranked = sorted(
-        merged, key=lambda match: _relevance(match, terms, prefer_language), reverse=True
-    )
+    ranked = _ranked(merged, terms, prefer_language)
     asked = frozenset(roster)
     return Search(
         ranked[:limit],
@@ -4587,12 +3873,17 @@ async def title_search(
     )
 
 
-#: The title search adapter for a bespoke transport that needs no credential.
+#: The title search adapter for a bespoke door that is handed no secret.
+#:
+#: **The door, not the row**, which is the distinction the credential dispatch
+#: was fixed for: "needs a credential" is a fact about a source and several can
+#: answer yes to it, where what decides this table is what the adapter takes.
+#: The Argentine row needs a credential and belongs to neither search table.
 #:
 #: **One entry, where this held seven.** Six of those were SRU sources that now
 #: share `_sru_search`, driven by a row, and the seventh is Google Books, which
-#: needs a key and so cannot share this signature: `_METERED_SEARCHES` below
-#: holds it.
+#: takes a deployment secret and so cannot share this signature:
+#: `_METERED_SEARCHES` below holds it.
 #:
 #: **Keyed on the reader and not on the source**, which is what makes the
 #: sharing possible: three sources name `MARC_GND` and a fourth would add no
@@ -4638,12 +3929,18 @@ async def _google_search(query: str, limit: int, api_key: str) -> list[Record]:
     return [_google_record(item) for item in found]
 
 
-#: The title search adapter for every source that needs a credential.
+#: The title search adapter for a bespoke door that is handed a deployment secret.
 #:
 #: Separate from `_FREE_SEARCHES` because the signature differs, and a table
 #: rather than a branch on one name because a branch is only correct while there
-#: is exactly one of them. `resolve` is what stops a metered row naming a reader
-#: that is not in here.
+#: is exactly one of them. `resolve` is what stops a row naming a secret from
+#: naming a reader that is not in here.
+#:
+#: **The name is the last of an older spelling and is not what anything asks.**
+#: `_search_one` and `resolve` both select on `targets.Secret`, because being
+#: billed per request and being entitled to one named source's key are different
+#: facts about a row, and the second is the one that decides who is handed
+#: `Access.api_key`. See `_KEYED_LOOKUPS`.
 _METERED_SEARCHES: Final[
     dict[decoders.Reader, Callable[[str, int, str], Coroutine[Any, Any, list[Record]]]]
 ] = {
@@ -4722,15 +4019,32 @@ SEARCH_HARDER_DEADLINE_SECONDS: Final = 12.0
 #: caller that cannot have the slot runs the ordinary search instead, and the
 #: answer says which catalogues were asked, so it is a true answer rather than a
 #: slow one.
+#:
+#: **The identifier backfill takes the opposite policy, and the difference is the
+#: caller rather than the resource.** It has nothing cheaper to do with a refusal,
+#: so it waits, and what makes waiting safe there is a deadline on the slot itself.
+#: `docs/decisions.md` carries both, one after the other, so neither reads as the
+#: rule for the other.
 _HARDER_AT_ONCE: Final = asyncio.Semaphore(1)
 
 
 async def _within_deadline(
-    searches: list[Coroutine[Any, Any, list[Record]]], deadline: float
+    searches: list[Coroutine[Any, Any, list[Record]]], deadline_seconds: float
 ) -> list[list[Record]]:
     """Run every search, keep what answers in time, drop the rest.
 
-    **The deadline is an argument and has no default**, which is what stops the
+    **A duration, and the name has to say so**, because `deadline.py` spends the
+    word on the other thing: a deadline there is an absolute `time.monotonic()`
+    moment, and this is how long from now. Both are `float` and this one goes
+    straight into `asyncio.wait(timeout=)`, so shortening the name to `deadline`
+    is not a typo anything reports: a real deadline handed here is read as its
+    own magnitude, the bound quietly becomes whatever the transports concede,
+    and the log line below stops firing. `opds.holdings` spells the same
+    argument the same way, and
+    `tests/test_deadline.py::TestTheTwoWordsDoNotMix` holds the measurement and
+    keeps the two names agreeing.
+
+    **The budget is an argument and has no default**, which is what stops the
     two from silently becoming one. A default would be whichever of them was
     written here, and the other would then be reached only by a caller that
     remembered to pass it; the failure mode is the long roster run under the
@@ -4746,13 +4060,26 @@ async def _within_deadline(
     if not searches:
         return []
     tasks = [asyncio.ensure_future(search) for search in searches]
-    done, pending = await asyncio.wait(tasks, timeout=deadline)
+    done, pending = await asyncio.wait(tasks, timeout=deadline_seconds)
 
     for task in pending:
         task.cancel()
     if pending:
         # Awaited so the cancellations are actually delivered rather than left
         # to be reported later as "task was destroyed but it is pending".
+        #
+        # **Nothing may await between this gather and the caller's next
+        # assertion**, which is a live constraint and not a style note.
+        # `tests/test_metadata.py::TestTheAustrianNationalLibrarySearch
+        # ::test_a_slow_oenb_does_not_extend_the_shared_deadline` holds the
+        # awaiting half by reading the slow source's own cleanup: that cleanup
+        # yields once, and on a healthy tree only this gather resumes it. Any
+        # later yield resumes it too, so adding one sends that arm green with the
+        # leak in place. Measured: this gather replaced by a single event loop
+        # tick is red, and the same tick with one `await asyncio.sleep(0)` after
+        # the fan out is green. The guard behind that pointer resolves its last
+        # segment alone, so renaming the test reddens it and renaming the class,
+        # or moving the file, does not.
         await asyncio.gather(*pending, return_exceptions=True)
         logger.info("%d catalogue(s) missed the search deadline", len(pending))
 
@@ -4830,7 +4157,7 @@ def _merge_matches(matches: list[Record]) -> list[Record]:
     by_work: dict[str, int] = {}
 
     def work_of(row: Record) -> str:
-        return f"{_match_key(row)}:{row.year or ''}"
+        return identity.printing_key(row.title, row.author, row.year)
 
     def register(slot: int) -> None:
         row = rows[slot]
@@ -5151,11 +4478,11 @@ async def candidates(
     )
     rows = list(cluster)
     # **Deduplicated on the ISBN and on nothing else**, which is the one thing
-    # that identifies a printing. `_match_key` is title plus author, and every
-    # row on this page shares both by construction: using it here collapsed a
-    # five row answer to one, live, because five printings of one book are
-    # five rows the picker exists to show. A row with no ISBN is always kept,
-    # for the same reason.
+    # that identifies a printing. `identity.work_key` is title plus author, and
+    # every row on this page shares both by construction: using it here
+    # collapsed a five row answer to one, live, because five printings of one
+    # book are five rows the picker exists to show. A row with no ISBN is
+    # always kept, for the same reason.
     seen = {row.isbn for row in rows if row.isbn}
     for row in searched:
         found = row.isbn

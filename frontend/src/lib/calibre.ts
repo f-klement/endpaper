@@ -31,10 +31,32 @@
  *   nothing to be stored as and a row claiming one would lie.
  *   `identifiersWithScheme` is where a type becomes a scheme, and it states
  *   what each decline was measured against.
- * - **Tags, ratings and the book files themselves.** Each is a second request a
- *   book, and whether an import should make one is a decision about the import
- *   flow rather than about this reader. The `data` table is still read, for the
- *   one fact it settles that the OPF cannot: whether a book has a file at all.
+ * - **Tags, ratings and the book files themselves.** The reason is scope
+ *   rather than cost: this module returns records, and what an import writes is
+ *   the import flow's decision. **Measured 2026-09-25**, the cost a tag puts on
+ *   that flow is not one extra request a book. The import is one
+ *   `POST /api/books/scan` per book it can build a body for, and a rating is
+ *   one `PATCH` a book on top of that. A tag is neither:
+ *   `POST /api/books/{book_id}/tags/{tag_id}` costs one request per book
+ *   **and** tag, while `POST /api/books/bulk` carries `add_tag` over 500 book
+ *   ids at a time, so the same work is one request per distinct tag per 500
+ *   books carrying it, plus one listing of the tags that exist and one
+ *   `POST /api/books/tags` per distinct name, which creates it or returns the
+ *   one already there. On a library of this size that is at most three requests
+ *   a tag, so it passes the book count only past about three hundred distinct
+ *   names, and it grows with the vocabulary rather than with the shelf. What
+ *   that route needs and the write loop discards is the id each scan answered.
+ *   **Reading the names here costs no request at all**, a ninth `db.query` in
+ *   `readCalibreLibrary`, once for the whole file rather than once a book,
+ *   which is why the surviving reason is the scope one. The loop those imports
+ *   share owns no request and runs one item at a time, by its own docstring,
+ *   so it moves none of this. **Not the file readers' reason either**: those
+ *   decline a subject because no field of their own record holds one, and a
+ *   file's genre is uncontrolled free text either way, where a `tags` row is the
+ *   vocabulary the member curated in their own library and the two routes above
+ *   take it, so what is declined here is the writing rather than the names. The
+ *   `data` table is still read, for the one fact it settles that the OPF cannot:
+ *   whether a book has a file at all.
  * - **Custom columns.** They live in tables named per library
  *   (`custom_column_3`), so reading them means reading `custom_columns` first
  *   and mapping names a household invented onto fields this one defines.
@@ -67,10 +89,11 @@ import { leadingYear } from "./year";
 import { parseIsbn } from "./isbn";
 import { stripIsbnPrefix } from "./isbnLabel";
 import type { FileMetadata } from "./fileReaders";
+import type { SourceRecord } from "./sourceRecord";
 import type { SqliteDatabase, SqliteRow } from "./sqlite";
 // The vocabulary of schemes a reader in this directory can produce, and the
 // record a request builder takes. Borrowed rather than restated: it is the
-// one list `LibrarySettingsPage/types.ts` holds a total `Record` over, so a
+// one list `lib/bookRequest.STORE_SCHEMES` holds a total `Record` over, so a
 // second spelling of it here would be a scheme this reader could name and
 // that builder could not send.
 //
@@ -157,8 +180,14 @@ export interface CalibreIdentifier {
   readonly value: string;
 }
 
-/** What one row of `books` and everything linked to it asserts. */
-export interface CalibreBook {
+/**
+ * What one row of `books` and everything linked to it asserts.
+ *
+ * The `SourceRecord` fields are the ones a picked file and a store's catalogue
+ * also state, so they are declared once there. What is below is what only a
+ * library index can say.
+ */
+export interface CalibreBook extends SourceRecord {
   readonly id: number;
   /**
    * The book's directory, relative to the library root: `Author/Title (id)`.
@@ -167,18 +196,7 @@ export interface CalibreBook {
    * one thing the OPF cannot supply about itself.
    */
   readonly path: string;
-  readonly title: string | null;
-  /** Separate values, in link order. Joining them is the request's business. */
-  readonly authors: readonly string[];
   readonly identifiers: readonly CalibreIdentifier[];
-  /** Canonical ISBN-13, from whichever identifier carried a real one. */
-  readonly isbn: string | null;
-  readonly publisher: string | null;
-  readonly year: number | null;
-  readonly language: string | null;
-  readonly description: string | null;
-  readonly seriesName: string | null;
-  readonly seriesIndex: number | null;
   /**
    * The formats `data` names for this book, upper case as Calibre writes them.
    *
@@ -346,7 +364,7 @@ function readIsbn(identifiers: readonly CalibreIdentifier[]): string | null {
  * What Calibre's `identifiers.type` calls each scheme this app stores.
  *
  * **Total over the schemes a reader here can produce**, which is
- * `LibrarySettingsPage/types.STORE_SCHEMES`' discipline and its reason: a
+ * `lib/bookRequest.STORE_SCHEMES`' discipline and its reason: a
  * scheme added with nothing written here is a compile error, so what Calibre
  * calls it is answered when the scheme is added rather than by a library that
  * turns out to carry it. An empty list is a real answer and says Calibre has no
@@ -432,12 +450,12 @@ const MARKETPLACE_SUFFIX = /_[a-z]{2,3}$/;
  * - Everything a plugin invented, by the same rule and without naming any.
  *
  * **A value the scheme's readers would not produce is dropped and the book is
- * not**, `LibrarySettingsPage/types.boundIdentifiers`' rule: an import of nine
+ * not**, `lib/bookRequest.boundIdentifiers`' rule: an import of nine
  * hundred books must not turn on one library's odd row.
  *
  * **One entry a matching row, and nothing here is folded or capped.** Two
  * marketplaces naming one book both arrive, and so does a library that put one
- * ASIN under fifteen of them: `LibrarySettingsPage/types.boundIdentifiers` is
+ * ASIN under fifteen of them: `lib/bookRequest.boundIdentifiers` is
  * where a repeat is folded and where the request's ceiling is, and the two
  * belong together, because what the fold buys is a slot the ceiling would
  * otherwise have spent on a spelling. Measured by the security seat,

@@ -53,9 +53,9 @@ function render(
       notes={notes}
       currentUser={READER}
       isAdding={false}
-      onAdd={vi.fn()}
-      onEdit={vi.fn()}
-      onRemove={vi.fn()}
+      onAdd={vi.fn<(content: string) => void>()}
+      onEdit={vi.fn<(noteId: number, content: string) => void>()}
+      onRemove={vi.fn<(noteId: number) => void>()}
     />,
     { locale },
   );
@@ -197,17 +197,17 @@ describe("the default a member writes under", () => {
           notes={[]}
           currentUser={READER}
           isAdding={false}
-          onAdd={vi.fn()}
-          onEdit={vi.fn()}
-          onRemove={vi.fn()}
+          onAdd={vi.fn<(content: string) => void>()}
+          onEdit={vi.fn<(noteId: number, content: string) => void>()}
+          onRemove={vi.fn<(noteId: number) => void>()}
         />
         <NoteList
           notes={[]}
           currentUser={READER}
           isAdding={false}
-          onAdd={vi.fn()}
-          onEdit={vi.fn()}
-          onRemove={vi.fn()}
+          onAdd={vi.fn<(content: string) => void>()}
+          onEdit={vi.fn<(noteId: number, content: string) => void>()}
+          onRemove={vi.fn<(noteId: number) => void>()}
         />
       </div>,
     );

@@ -1,26 +1,24 @@
 import { ReadStatus } from "../../../api/generated/model";
 import { Icon, type IconName } from "../../../components";
-import { useTranslation, type MessageKey } from "../../../i18n";
+import { useTranslation } from "../../../i18n";
+import { STATUS_LABELS, STATUS_ORDER } from "../../types";
 
-const STATUS_OPTIONS: {
-  value: ReadStatus;
-  label: MessageKey;
-  icon: IconName;
-}[] = [
-  { value: ReadStatus.unread, label: "status.unread", icon: "list" },
-  {
-    value: ReadStatus.want_to_read,
-    label: "status.want_to_read",
-    icon: "bookmark",
-  },
-  { value: ReadStatus.reading, label: "status.reading", icon: "book" },
-  { value: ReadStatus.read, label: "status.read", icon: "check" },
-  {
-    value: ReadStatus.did_not_finish,
-    label: "status.did_not_finish",
-    icon: "ban",
-  },
-];
+/**
+ * A glyph per status, and the only fact about a status this file still owns.
+ *
+ * The names and the order come from `pages/types.ts`: this used to be one array
+ * carrying all three, which made it a second copy of a table that is exhaustive
+ * by type inside a list that was not. A `Record` and not a lookup with a
+ * default, so a status added to the backend enum is a compile error here rather
+ * than a button with a blank square where its glyph goes.
+ */
+const STATUS_ICONS: Record<ReadStatus, IconName> = {
+  [ReadStatus.unread]: "list",
+  [ReadStatus.want_to_read]: "bookmark",
+  [ReadStatus.reading]: "book",
+  [ReadStatus.read]: "check",
+  [ReadStatus.did_not_finish]: "ban",
+};
 
 interface StatusPickerProps {
   current: ReadStatus;
@@ -40,24 +38,28 @@ export default function StatusPicker({ current, onChange }: StatusPickerProps) {
       <p className="text-sm font-semibold text-paper-700 mb-2 dark:text-paper-200">
         {t("status.mine")}
       </p>
-      {/* Five options, so the wide row is a five column grid. At four it wrapped
-          the fifth onto a line of its own, which read as a different kind of
-          control rather than the last of a set. */}
+      {/* One column per status on a wide row: a column short of that wrapped the
+          last one onto a line of its own, which read as a different kind of
+          control rather than the last of a set. The count is written out because
+          Tailwind extracts class names statically and cannot see a computed one,
+          so a status added to `STATUS_ORDER` has to be added here too. The
+          picker's own test asserts the two agree, since nothing else would. */}
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
-        {STATUS_OPTIONS.map((option) => (
+        {STATUS_ORDER.map((status) => (
           <button
-            key={option.value}
-            onClick={() => onChange(option.value)}
-            aria-pressed={current === option.value}
+            key={status}
+            onClick={() => onChange(status)}
+            aria-pressed={current === status}
             className={`py-2 rounded-lg text-sm font-medium border transition-colors ${
-              current === option.value
+              current === status
                 ? "bg-accent-fill border-accent-fill text-on-accent"
                 : "border-paper-200 text-paper-600 hover:border-accent-300 bg-paper-0 " +
                   "dark:bg-paper-900 dark:border-paper-700 dark:text-paper-300 " +
                   "dark:hover:border-accent-700"
             }`}
           >
-            <Icon name={option.icon} className="w-4 h-4" /> {t(option.label)}
+            <Icon name={STATUS_ICONS[status]} className="w-4 h-4" />{" "}
+            {t(STATUS_LABELS[status])}
           </button>
         ))}
       </div>

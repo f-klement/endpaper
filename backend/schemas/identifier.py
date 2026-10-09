@@ -27,8 +27,8 @@ from models import BOOK_IDENTIFIER_MAX
 #: writers are additive across them, so the per Book total is unbounded and
 #: `books_to_out` selectin-loads this relationship onto every row of every page.
 #:
-#: **The two capped writers are `identifiers.add_identifiers` and
-#: `_repoint_relations`**, exactly as for the headings. `backup.restore` is the
+#: **The two capped writers are `identifiers.add_identifiers` and the merge
+#: transfer in `folding.py`**, exactly as for the headings. `backup.restore` is the
 #: third and is deliberately uncapped: it reinstates a whole database rather
 #: than adding to one, and every other table is uncapped there for that reason.
 #:

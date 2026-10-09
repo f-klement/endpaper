@@ -88,8 +88,6 @@ export interface AudioFileNaming {
   tags: AudioTags | null;
   /** True when one file of this kind is a whole book, which is `.m4b`. */
   whole: boolean;
-  /** Why this one file said nothing, if it said nothing. */
-  note?: string;
 }
 
 /** Which of the three rules put a group together, so the member can be told. */

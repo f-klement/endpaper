@@ -12,10 +12,14 @@ directory being written to.
 
 import json
 import zipfile
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from io import BytesIO
-from typing import Any, NamedTuple
+from typing import Any, Final, NamedTuple
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 from sqlalchemy import func, select
 from sqlalchemy.exc import DBAPIError
 
@@ -49,6 +53,7 @@ from tests.helpers import (
     WEBP_BYTES,
     sealed_before_the_origin_was_bound,
 )
+from tests.strategies import PATCHES, answer_of, patched, witness
 from uploads import SNIFF_BYTES
 
 #: The roster's address for the source these tests seal a login for.
@@ -180,6 +185,45 @@ class TestTheArchive:
             "the archive and the schema disagree about which tables exist: "
             f"missing {sorted(set(Base.metadata.tables) - tables)}, "
             f"unexpected {sorted(tables - set(Base.metadata.tables))}"
+        )
+
+    def test_records_when_it_was_taken_in_the_frame_its_rows_are_in(
+        self, client, admin, library, east_of_greenwich
+    ):
+        """`created_at` is naive UTC, which is what every `DateTime` column in
+        the same manifest holds.
+
+        It was the host's local wall clock, so an archive taken late in the
+        evening east of Greenwich carried a header hours ahead of every row it
+        describes, in a file that says nothing about which zone either meant.
+        Nothing reads this value back, which is why the defect was silent and
+        why the arm asserts the frame rather than a consumer.
+
+        **`east_of_greenwich`, and without it this arm is inert.** A local
+        frame value and a UTC value are the **same string** on a process at
+        UTC, and the pod this suite runs in sets no zone. Driven: the defect
+        of record planted back into `build_archive` reddened **nothing** here
+        until the fixture was requested, while an offset keeping plant beside
+        it reddened by name, so the green was inertness rather than absence.
+        The linter does not cover the gap either, because the rule fires on
+        the bare call and not on the converted one.
+
+        **Naive and recent, not equal to a clock read here.** An equality
+        would be a race; the window is wide enough that a loaded worker cannot
+        fail it and narrow enough that a value nine hours out cannot pass.
+        """
+        data = client.get("/api/backup", headers=admin["headers"]).content
+        created_at = read_manifest(data)["created_at"]
+
+        parsed = datetime.fromisoformat(created_at)
+        assert parsed.tzinfo is None, (
+            f"the manifest timestamp carries an offset, {created_at!r}, where every "
+            "row beside it is naive: the two are now in frames a reader cannot compare"
+        )
+        drift = abs(parsed - datetime.now(UTC).replace(tzinfo=None))
+        assert drift < timedelta(minutes=1), (
+            f"the manifest says {created_at!r}, which is {drift} from UTC now. A whole "
+            "number of hours here is the host's local clock rather than UTC"
         )
 
     def test_holds_the_book_tag_links(self, client, admin, library):
@@ -754,6 +798,285 @@ class TestReadManifest:
             backup.read_manifest(b"not a zip at all")
 
 
+@dataclass(frozen=True)
+class ArchiveSpec:
+    """A backup archive as a spec: its manifest, how it is written, what is wrong.
+
+    Drawn by `TestAnArchiveIsReadOrRefusedByName` and rebuilt by `an_archive`
+    in every named case it printed.
+    """
+
+    #: The manifest's JSON value. A manifest shaped like a backup's, or anything.
+    manifest: object
+    #: How many arrays the manifest is wrapped in, 0 for none: the depth atom.
+    depth: int
+    #: The entry's compression method, one of the four `zipfile` writes.
+    method: int
+    patches: tuple[tuple[int, int], ...]
+
+
+#: Every entry's timestamp, so the same spec is the same bytes on every run and a
+#: patch printed against one run lands on the same byte in the next.
+_EPOCH: Final = (1980, 1, 1, 0, 0, 0)
+
+
+def an_archive(spec: ArchiveSpec) -> bytes:
+    """The bytes of a backup the spec describes, with a cover beside the manifest."""
+    body = json.dumps(spec.manifest)
+    manifest = ("[" * spec.depth + body + "]" * spec.depth).encode()
+    buffer = BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        for name, data in ((backup.MANIFEST_NAME, manifest), ("covers/1.jpg", JPEG_BYTES)):
+            entry = zipfile.ZipInfo(name, date_time=_EPOCH)
+            # What `writestr` sets for a name given as a string, so the only
+            # difference from the archive the property was first run over is
+            # the timestamp.
+            entry.external_attr = 0o600 << 16
+            archive.writestr(entry, data, compress_type=spec.method)
+    return patched(buffer.getvalue(), spec.patches)
+
+
+#: A manifest a backup could have written, with every required table empty and
+#: nobody in it, which the shape checks pass and the account check refuses.
+_EMPTY_LIBRARY: Final[dict[str, Any]] = {
+    "format_version": 1,
+    "tables": {
+        "books": [],
+        "loans": [],
+        "notes": [],
+        "settings": [],
+        "tags": [],
+        "user_books": [],
+        "users": [],
+    },
+}
+
+
+#: A manifest nested this deep, as one named value rather than a drawn integer.
+#:
+#: **An atom, so a counterexample prints as this number**, and deep enough to
+#: pass the parser's stack on any interpreter this runs on: the suite pod's
+#: overflowed at under a megabyte of stack, this machine's at about eight. A
+#: drawn depth would shrink to wherever one host's stack ends, and the named
+#: case would stop reaching the class on the other.
+MANIFEST_DEPTH: Final = 400_000
+
+#: A JSON value of any shape, small.
+_JSON: Final = st.recursive(
+    st.none() | st.booleans() | st.integers() | st.text(max_size=8),
+    lambda inner: st.lists(inner, max_size=3)
+    | st.dictionaries(st.text(max_size=6), inner, max_size=3),
+    max_leaves=6,
+)
+
+#: A manifest as a backup writes one, with every required table and an account
+#: or none, plus tables nobody requires; or any JSON value at all.
+_MANIFESTS: Final = st.one_of(
+    st.builds(
+        lambda users, extra: {
+            "format_version": backup.FORMAT_VERSION,
+            "tables": {**_EMPTY_LIBRARY["tables"], "users": users, **extra},
+        },
+        st.lists(st.fixed_dictionaries({"id": st.integers(1, 9)}), max_size=2),
+        st.dictionaries(st.text(max_size=6), _JSON, max_size=2),
+    ),
+    _JSON,
+)
+
+ARCHIVES: Final = st.builds(
+    ArchiveSpec,
+    manifest=_MANIFESTS,
+    depth=st.just(0) | st.just(MANIFEST_DEPTH),
+    method=st.sampled_from(
+        [zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED, zipfile.ZIP_BZIP2, zipfile.ZIP_LZMA]
+    ),
+    patches=st.just(()) | PATCHES,
+)
+
+
+def _refusal_of(spec: ArchiveSpec) -> RestoreError | None:
+    """What `read_manifest` refused this archive with, or None if it answered."""
+    try:
+        backup.read_manifest(an_archive(spec))
+    except RestoreError as refusal:
+        return refusal
+    return None
+
+
+@pytest.mark.property
+class TestAnArchiveIsReadOrRefusedByName:
+    """`backup.read_manifest` answers a manifest or a `RestoreError`, and nothing
+    else, for any archive drawn from a spec.
+
+    **Generated at the upload's seam, as the archive's bytes**, with the
+    structure drawn and a few single byte patches beside it: the structure
+    reaches the manifest, the patches reach every header and stream no spec
+    spells. Thirteen kinds of damage escaped as a 500 the first time this ran;
+    they are the named cases in
+    `TestAnArchiveTheReaderCannotReadIsRefusedRatherThanA500`.
+    """
+
+    @given(spec=ARCHIVES)
+    def test_it_answers_the_manifest_or_refuses_by_name(self, spec):
+        """**The value is the spec's own**: an undamaged archive answers the
+        very manifest written into it, or is refused because that manifest is
+        not one a backup writes. "It did not throw" passes a reader that
+        returned an empty dict."""
+        got = answer_of(
+            backup.read_manifest, an_archive(spec), answers=dict, refuses=RestoreError
+        )
+        if spec.patches:
+            return
+        if got.value is not None:
+            assert got.value == spec.manifest
+            assert spec.depth == 0
+        else:
+            assert spec.depth or not _is_a_library(spec.manifest)
+
+    def test_the_generator_still_reaches_an_answer(self):
+        witness(ARCHIVES, lambda spec: _refusal_of(spec) is None, reaches="a manifest read")
+
+    def test_the_generator_still_reaches_damage_in_the_entry(self):
+        witness(
+            ARCHIVES,
+            lambda spec: (refusal := _refusal_of(spec)) is not None
+            and "could not be read" in str(refusal)
+            and not isinstance(refusal.__cause__, json.JSONDecodeError | RecursionError),
+            reaches="an entry the zip reader cannot read",
+        )
+
+    def test_the_generator_still_reaches_a_manifest_that_is_not_an_object(self):
+        witness(
+            ARCHIVES,
+            lambda spec: "not the shape" in str(_refusal_of(spec)),
+            reaches="valid JSON that is not an object, refused at the manifest step",
+        )
+
+    def test_the_generator_still_reaches_a_manifest_past_the_parsers_stack(self):
+        """Asked of the refusal's cause, never of the spec: the depth atom
+        deflated is refused by the compression ratio before the parser runs,
+        and a witness over the spec would call that the class reached."""
+        witness(
+            ARCHIVES,
+            lambda spec: isinstance(getattr(_refusal_of(spec), "__cause__", None), RecursionError),
+            reaches="a stored manifest nested past the parser's stack",
+        )
+
+
+def _is_a_library(manifest: object) -> bool:
+    """Whether every check after the parse passes this manifest."""
+    if not isinstance(manifest, dict) or manifest.get("format_version") != backup.FORMAT_VERSION:
+        return False
+    tables = manifest.get("tables")
+    return (
+        isinstance(tables, dict)
+        and all(name in tables for name in _EMPTY_LIBRARY["tables"])
+        and bool(tables.get("users"))
+    )
+
+
+class TestAnArchiveTheReaderCannotReadIsRefusedRatherThanA500:
+    """Every case is a literal the property in `TestAnArchiveIsReadOrRefusedByName`
+    printed against the tree before the fix, rebuilt by `an_archive`.
+
+    **Each was a 500 through the restore route**, which says the archive is the
+    caller's and so a 400. They are one defect, an enumeration of what reading
+    a zip raises that was short by every member it was tested against, and
+    `read_manifest` now catches the class rather than a longer list.
+    """
+
+    @pytest.mark.parametrize(
+        ("spec", "refusal"),
+        [
+            pytest.param(
+                ArchiveSpec(manifest=[], depth=0, method=0, patches=((80925, 1),)),
+                "could not be read",
+                id="NotImplementedError, an unknown compression method",
+            ),
+            pytest.param(
+                ArchiveSpec(manifest=[], depth=0, method=0, patches=((80923, 64),)),
+                "could not be read",
+                id="NotImplementedError, strong encryption",
+            ),
+            pytest.param(
+                ArchiveSpec(manifest=[], depth=0, method=0, patches=((80923, 32),)),
+                "could not be read",
+                id="NotImplementedError, patched data",
+            ),
+            pytest.param(
+                ArchiveSpec(manifest=[], depth=0, method=0, patches=((80923, 1),)),
+                "could not be read",
+                id="RuntimeError, an entry flagged encrypted",
+            ),
+            pytest.param(
+                ArchiveSpec(manifest=[], depth=0, method=0, patches=((80921, 64),)),
+                "not an Endpaper backup",
+                id="NotImplementedError on open, a zip version from the future",
+            ),
+            pytest.param(
+                ArchiveSpec(manifest=None, depth=0, method=0, patches=((80925, 1),)),
+                "could not be read",
+                id="BadZipFile, a truncated header",
+            ),
+            pytest.param(
+                ArchiveSpec(manifest=_EMPTY_LIBRARY, depth=0, method=14, patches=((52, 1),)),
+                "could not be read",
+                id="LZMAError, a corrupt LZMA stream",
+            ),
+            pytest.param(
+                ArchiveSpec(manifest=_EMPTY_LIBRARY, depth=0, method=12, patches=((43, 0),)),
+                "could not be read",
+                id="OSError, a corrupt bzip2 stream",
+            ),
+            pytest.param(
+                ArchiveSpec(manifest=_EMPTY_LIBRARY, depth=0, method=8, patches=((43, 0),)),
+                "could not be read",
+                id="zlib.error, a corrupt deflate stream",
+            ),
+            pytest.param(
+                ArchiveSpec(manifest=_EMPTY_LIBRARY, depth=0, method=0, patches=((43, 0),)),
+                "could not be read",
+                id="BadZipFile, a bad checksum",
+            ),
+            pytest.param(
+                ArchiveSpec(manifest=_EMPTY_LIBRARY, depth=0, method=0, patches=((28, 1),)),
+                "could not be read",
+                id="BadZipFile, overlapped entries",
+            ),
+            pytest.param(
+                ArchiveSpec(manifest=_EMPTY_LIBRARY, depth=0, method=0, patches=((26, 0),)),
+                "could not be read",
+                id="BadZipFile, a header naming another file",
+            ),
+            pytest.param(
+                ArchiveSpec(manifest=_EMPTY_LIBRARY, depth=0, method=0, patches=((0, 0),)),
+                "could not be read",
+                id="BadZipFile, a bad magic number",
+            ),
+        ],
+    )
+    def test_a_damaged_archive_is_refused_by_name(self, spec, refusal):
+        """Each id names what the case raised before, so a reader can tell
+        them apart; the assertion is the refusal it is now."""
+        with pytest.raises(RestoreError, match=refusal):
+            backup.read_manifest(an_archive(spec))
+
+    def test_a_manifest_that_is_valid_json_and_not_an_object_is_refused(self):
+        """Was `AttributeError` on the first `.get`."""
+        spec = ArchiveSpec(manifest=None, depth=0, method=0, patches=())
+        with pytest.raises(RestoreError, match="not the shape a backup writes"):
+            backup.read_manifest(an_archive(spec))
+
+    def test_a_manifest_nested_past_the_parsers_stack_is_refused(self):
+        """Was `RecursionError`. **Stored, so its compression ratio is one**:
+        deflated, the same manifest is refused earlier by `_reject_a_bomb` and
+        never reaches the parser, which is how a first probe missed it."""
+        spec = ArchiveSpec(manifest=_EMPTY_LIBRARY, depth=400_000, method=0, patches=())
+        with pytest.raises(RestoreError, match="could not be read") as refusal:
+            backup.read_manifest(an_archive(spec))
+        assert isinstance(refusal.value.__cause__, RecursionError)
+
+
 class TestRestoringAnOlderArchive:
     """A backup taken before a migration must still restore.
 
@@ -1314,7 +1637,8 @@ class TestRestoringTheCollectionFold:
 
         assert res.status_code == 400, res.text
         detail = res.json()["detail"]
-        assert "Ästhetik" in detail and "ästhetik" in detail
+        assert "Ästhetik" in detail
+        assert "ästhetik" in detail
 
     def test_two_collections_spelled_identically_are_refused(
         self, client, admin, library, db
@@ -1871,6 +2195,40 @@ class TestARestoreWritesOnlyAnImage:
         assert response.status_code == 200, response.text
         return response.json()
 
+    def test_a_damaged_cover_entry_is_declined_and_the_rest_restore(
+        self, client, admin, library, covers_dir
+    ):
+        """**The cover loop runs after the commit and after the directory was
+        emptied**, so a raise there is a 500 on a library whose rows are
+        restored and whose covers are gone. The loop declined what it wrote and
+        not what it read: one byte of a stored cover's data flipped fails its
+        checksum inside `_cover_bytes`, which sat outside the arm. Found while
+        registering `backup.py::restore` as a byte door, by reading rather than
+        by a property: none reaches past the manifest yet."""
+        marker = JPEG_BYTES + b"damaged-cover-marker"
+        data = client.get("/api/backup", headers=admin["headers"]).content
+        source = zipfile.ZipFile(BytesIO(data))
+        buffer = BytesIO()
+        with zipfile.ZipFile(buffer, "w") as archive:
+            for entry in source.namelist():
+                if not entry.startswith(backup.COVERS_PREFIX):
+                    archive.writestr(entry, source.read(entry))
+            archive.writestr("covers/1.jpg", marker)
+            archive.writestr("covers/2.jpg", JPEG_BYTES)
+        damaged = bytearray(buffer.getvalue())
+        damaged[damaged.index(b"damaged-cover-marker")] ^= 0xFF
+
+        response = client.post(
+            "/api/backup/restore",
+            params={"confirm": True},
+            files={"file": ("backup.zip", bytes(damaged), "application/zip")},
+            headers=admin["headers"],
+        )
+
+        assert response.status_code == 200, response.text
+        assert [path.name for path in COVERS_DIR.glob("*")] == ["2.jpg"]
+        assert response.json()["covers"] == 1
+
     @pytest.mark.parametrize(
         ("name", "body"),
         [
@@ -2091,7 +2449,7 @@ class TestARestoreWritesOnlyAnImage:
         `ValueError` at the same site. Measured on CPython 3.14: `zipfile`
         truncates a member name at the first NUL on the way in, both through
         `writestr` and through a hand patched central directory, so
-        `covers/1\x00.jpg` reaches this code as `covers/1` and is refused for
+        `covers/1\\x00.jpg` reaches this code as `covers/1` and is refused for
         having no suffix. A test written for it passes without ever reaching the
         guard.
         """

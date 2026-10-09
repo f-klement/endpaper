@@ -539,6 +539,15 @@ class AuthorityScheme(StrEnum):
     BNCHL = "bnchl"
 
 
+# **The inference the docstring sets aside is not available anyway**, and this
+# is a comment for the reason `BookFormat`'s own comment gives: a docstring here
+# is copied into `frontend/openapi.json`, so a maintenance note in one moves a
+# committed document for no reader's benefit. `created_by_user_id` is provenance
+# on both tables named below: no query may consult it and no schema may declare
+# a field named for it, which `models.py` states at each column and
+# `tests/test_house_rules.py::TestProvenanceColumnsAreNeverRead` enforces with
+# one instrument per half. So this value is the only route to the question
+# rather than the cheaper of two.
 class AuthorityProvenance(StrEnum):
     """Who said an author's identifier is that author's.
 
@@ -583,6 +592,41 @@ class ExportFormat(StrEnum):
     #: needs a directory of byte offsets that has to agree with the field data
     #: after every change, and every system that reads it reads this too.
     MARCXML = "marcxml"
+
+
+#: What each export format is sent as, and the **only** home for these strings.
+#:
+#: Read twice and that is the whole reason it exists: `routers/books.export_books`
+#: puts one of them on the `StreamingResponse`, and the same route's `responses`
+#: declares all of them so the published schema says what the route sends rather
+#: than `application/json`. A literal at each site is one promise and one delivery
+#: that can disagree, which is the defect the declaration was added to close.
+#:
+#: The charset rides along, because it is part of what the route actually sends
+#: and a declaration that dropped it would be a second, smaller version of the
+#: same disagreement.
+#:
+#: `application/marcxml+xml` is the registered type for MARC21 in XML, per the
+#: Library of Congress: a cataloguer's tools dispatch on it.
+EXPORT_MEDIA_TYPES: dict[ExportFormat, str] = {
+    ExportFormat.CSV: "text/csv; charset=utf-8",
+    ExportFormat.TXT: "text/plain; charset=utf-8",
+    ExportFormat.MARCXML: "application/marcxml+xml; charset=utf-8",
+}
+
+#: Refused at import rather than covered by a test, for `book_columns._MISFILED`'s
+#: reason and one of its own: the route reads this map with `[]`, so a format added
+#: without an entry is a `KeyError` on somebody's export, and the declaration would
+#: quietly be short by one media type with nothing raising at all.
+_FORMATS_WITHOUT_A_MEDIA_TYPE = set(ExportFormat) - set(EXPORT_MEDIA_TYPES)
+if _FORMATS_WITHOUT_A_MEDIA_TYPE:
+    raise RuntimeError(
+        "Every member of ExportFormat is sent under a media type and these have "
+        f"none: {sorted(_FORMATS_WITHOUT_A_MEDIA_TYPE)}. The export route reads "
+        "this map to set the response's type and the same route declares its "
+        "values in the published schema, so a missing entry is both a failed "
+        "export and a document that is short a promise."
+    )
 
 
 class BookSort(StrEnum):
@@ -660,7 +704,7 @@ class SettingKey(StrEnum):
     GOOGLE_BOOKS_ENABLED = "google_books_enabled"
     GOODREADS_LOOKUP_ENABLED = "goodreads_lookup_enabled"
     DEFAULT_LOCALE = "default_locale"
-    TOKEN_EPOCH = "token_epoch"
+    TOKEN_EPOCH = "token_epoch"  # noqa: S105  a settings key name, not a secret
 
     # Where overdue reminders go, and how often. Settings rather than
     # environment variables because the library changes them: which channel
@@ -668,7 +712,7 @@ class SettingKey(StrEnum):
     # the container is running.
     OVERDUE_WEBHOOK_ENABLED = "overdue_webhook_enabled"
     OVERDUE_WEBHOOK_URL = "overdue_webhook_url"
-    OVERDUE_WEBHOOK_SECRET = "overdue_webhook_secret"
+    OVERDUE_WEBHOOK_SECRET = "overdue_webhook_secret"  # noqa: S105  a settings key name, not a secret
     OVERDUE_REMINDER_DAYS = "overdue_reminder_days"
 
     # Mail. The seven names match the standard `MAIL_*` environment variables a
@@ -682,7 +726,7 @@ class SettingKey(StrEnum):
     MAIL_SERVER = "mail_server"
     MAIL_PORT = "mail_port"
     MAIL_USERNAME = "mail_username"
-    MAIL_PASSWORD = "mail_password"
+    MAIL_PASSWORD = "mail_password"  # noqa: S105  a settings key name, not a secret
     MAIL_USE_TLS = "mail_use_tls"
     MAIL_USE_SSL = "mail_use_ssl"
     MAIL_DEFAULT_SENDER = "mail_default_sender"
@@ -691,7 +735,7 @@ class SettingKey(StrEnum):
     # `notifications.TELEGRAM_API` for why making it configurable would give
     # away the one property this sender has that the webhook does not.
     OVERDUE_TELEGRAM_ENABLED = "overdue_telegram_enabled"
-    TELEGRAM_BOT_TOKEN = "telegram_bot_token"
+    TELEGRAM_BOT_TOKEN = "telegram_bot_token"  # noqa: S105  a settings key name, not a secret
     TELEGRAM_CHAT_ID = "telegram_chat_id"
 
     # The in app notice. One toggle and nothing else: the channel is the app,
@@ -822,6 +866,14 @@ class OverdueNotifyReason(StrEnum):
     #: the app. It is also the reason `notified_at` is not stamped on such a
     #: run, because no reminder went out to be stamped for.
     IN_APP_ONLY = "in_app_only"
+    #: A sender raised something that is neither a refusal nor a transport
+    #: failure: a case the code does not anticipate. Distinct from
+    #: `UNREACHABLE`, because nothing says a request was made, and from
+    #: `MISCONFIGURED`, because nothing says a setting is wrong. It is that
+    #: channel's failure, so the others still run, and it is broken at once,
+    #: because nothing says it is transient either. The server log names the
+    #: exception's type and where it was raised; the loans are left to retry.
+    UNEXPECTED = "unexpected"
 
 
 class Locale(StrEnum):
@@ -846,11 +898,13 @@ class ThemeMode(StrEnum):
 class BulkAction(StrEnum):
     """What a bulk selection does to the books in it.
 
-    One endpoint per verb would be four near-identical handlers sharing the
-    same permission walk and the same three-way result. The verb is a field
-    instead.
+    One endpoint per verb would be a near-identical handler per member below,
+    each repeating the same permission walk and the same three-way result. The
+    verb is a field instead.
     """
 
+    # No count in the docstring above, deliberately: a number beside the list it
+    # counts goes stale in silence, and this one did.
     ADD_TAG = "add_tag"
     REMOVE_TAG = "remove_tag"
     SET_STATUS = "set_status"

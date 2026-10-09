@@ -92,7 +92,7 @@ describe("ErrorState", () => {
   });
 
   it("calls onRetry when offered and clicked", async () => {
-    const onRetry = vi.fn();
+    const onRetry = vi.fn<() => void>();
     renderLocalised(<ErrorState error={new Error("boom")} onRetry={onRetry} />);
 
     await userEvent

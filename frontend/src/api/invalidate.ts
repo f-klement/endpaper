@@ -42,6 +42,7 @@ import {
   getListBooksInfiniteQueryKey,
   getListBooksQueryKey,
   getListCopiesQueryKey,
+  getListCustomFieldsQueryKey,
   getListDuplicatesQueryKey,
   getListLocationsQueryKey,
   getListQuotesQueryKey,
@@ -87,7 +88,10 @@ const BOOKS = getListBooksQueryKey()[0];
  * Every one of these is a list or a count over books, so adding, removing or
  * editing a book changes it. `TagOut`, `LocationOut` and `CollectionOut` all
  * carry a `book_count`, which is why the tag, shelf and collection lists are
- * here rather than treated as separate vocabularies.
+ * here rather than treated as separate vocabularies. A count is the commonest
+ * reason to be here and not the rule: the custom field definitions carry none
+ * and are here because a book write changes which of them the caller is told
+ * about at all.
  *
  * Paths only, so a key carrying paging or filter parameters matches the same
  * way a bare one does.
@@ -108,6 +112,16 @@ const LIBRARY_WIDE: ReadonlySet<unknown> = new Set([
   // would not offer it until the cache aged out.
   getListClassificationsQueryKey()[0],
   getListTrashQueryKey()[0],
+  // The custom field definitions. **Here for a different reason from every
+  // other entry, and it is the one entry that is not about a count.** The
+  // others carry a `book_count`; `CustomFieldOut` deliberately carries none.
+  // What makes this list derived from the books table is which rows it
+  // returns: a definition is listed only when a book the viewer can see, or
+  // one in their trash, holds a value in it, or when no book does. So
+  // trashing, restoring, purging or making a book private moves it, and
+  // clearing the last value a viewer can see on a field whose other carriers
+  // are hidden takes the row away. `backend/fields.py` holds the three arms.
+  getListCustomFieldsQueryKey()[0],
   getListQuotesQueryKey()[0],
   getListCollectionsQueryKey()[0],
   getGetStatsQueryKey()[0],

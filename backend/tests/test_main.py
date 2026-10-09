@@ -10,6 +10,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
+import errors
 import main
 from database import Base, engine
 from enums import TagKey
@@ -207,7 +208,8 @@ class TestHealthz:
         assert "authorization" not in client.headers
         assert client.get("/api/healthz").status_code == 200
 
-    def test_it_touches_the_database(self, client, monkeypatch):
+    @pytest.mark.answers_500(raises=(OperationalError,))
+    def test_it_touches_the_database(self, client, monkeypatch, caplog):
         """Otherwise it answers 200 for a pod whose volume never mounted, which
         is exactly the failure the probes exist to catch."""
 
@@ -216,8 +218,12 @@ class TestHealthz:
 
         monkeypatch.setattr(Session, "execute", broken)
 
-        with pytest.raises(OperationalError):
-            client.get("/api/healthz")
+        # A 500 rather than the raise: the app answers a route's crash itself,
+        # so the exception no longer reaches the server, or this client. The
+        # logged record is what still names the cause.
+        assert client.get("/api/healthz").status_code == 500
+        [crash] = [r for r in caplog.records if r.getMessage().startswith("Unhandled error")]
+        assert isinstance(getattr(crash, errors.UNHANDLED), OperationalError)
 
     def test_it_reaches_the_storage_as_well_as_the_database(self, client, monkeypatch):
         """Measured during a total NFS outage: this endpoint answered 200 for 39
@@ -587,3 +593,126 @@ class TestTheFrontendCanBeSwitchedOff:
             main.mount_frontend_if_enabled(FastAPI(), tmp_path / "nothing")
         assert "SERVE_FRONTEND=false" in caplog.text
         assert "No ./static directory" in caplog.text
+
+
+class TestTheOperationIdCheckReachesEveryPublishedRoute:
+    """What the collision check reads, and where it has to run to read it.
+
+    **The check had outrun the app.** It ran from where `custom_operation_id` is
+    defined, above `healthz`, the API fallbacks and the cover router, so it read
+    138 of the 143 routes this app registers and none of the three published ones
+    below it. Measured 2026-09-26. Moving it down needs the narrowing in
+    `schema_routes`, because `api_not_found` is one handler under one name
+    answering two prefixes and a check over every route refuses that pair.
+
+    **Two of these four arms are about a refusal and two are about its extent.**
+    The refusal cannot be driven over this app, which has no published duplicate
+    to offer, so it is driven over constructed routes; the extent is held against
+    the document FastAPI renders, which is a derivation neither the check nor the
+    walk takes part in.
+    """
+
+    def test_the_population_is_every_operation_the_document_publishes(self):
+        """The check's subject, against the only other list of it there is.
+
+        **This arm calls `schema_routes()` with no argument**, so it holds the
+        default rather than the seam: a narrowing that dropped a real route would
+        pass every arm below it and fail here.
+        """
+        published = {
+            operation["operationId"]
+            for path in main.app.openapi()["paths"].values()
+            for operation in path.values()
+            if "operationId" in operation
+        }
+        assert {route.name for route in main.schema_routes()} == published
+
+    def test_the_check_runs_below_every_router_this_module_includes(self):
+        """A router included after the call is unchecked, and nothing would say so.
+
+        Held over the source rather than over a runtime observation, because by
+        the time a test imports `main` the call has already happened and its
+        position is exactly what is no longer visible.
+        """
+        import ast
+
+        module = ast.parse(Path(main.__file__).read_text())
+        included = [
+            node.lineno
+            for node in module.body
+            if isinstance(node, ast.Expr)
+            and isinstance(node.value, ast.Call)
+            and isinstance(node.value.func, ast.Attribute)
+            and node.value.func.attr == "include_router"
+        ]
+        checks = [
+            node.lineno
+            for node in module.body
+            if isinstance(node, ast.Expr)
+            and isinstance(node.value, ast.Call)
+            and isinstance(node.value.func, ast.Name)
+            and node.value.func.id == "assert_unique_operation_ids"
+        ]
+        assert included, "no `include_router` call at module level, so this arm reads nothing"
+        assert len(checks) == 1, f"the check is called {len(checks)} times at module level"
+        assert checks[0] > max(included), (
+            f"assert_unique_operation_ids() is called at line {checks[0]}, above the "
+            f"include_router at line {max(included)}, whose routes it therefore never sees"
+        )
+
+    def test_two_published_handlers_of_one_name_are_refused(self):
+        assert_raises = pytest.raises(RuntimeError, match="Duplicate operationId 'clash'")
+        with assert_raises:
+            main.assert_unique_operation_ids(_routes(("clash", True), ("clash", True)))
+
+    def test_a_name_two_unpublished_routes_share_is_not_refused(self):
+        """`api_not_found` is this rule's live instance, so both halves are held.
+
+        A published operation is what an id can collide in, so the constructed
+        pair is accepted; and the app carries a real name on two routes, which is
+        what makes the acceptance about this application rather than about the
+        fixture.
+
+        **The constructed set carries a published route as well**, and not for
+        realism: two unpublished routes alone leave nothing published, which the
+        anti-vacuity refusal is right to reject. The first version of this arm was
+        red for that reason, which is a false refusal the check is entitled to.
+        """
+        main.assert_unique_operation_ids(
+            _routes(("published", True), ("hidden", False), ("hidden", False))
+        )
+
+        registered = [route.name for route in main.iter_api_routes(main.app.routes)]
+        assert registered.count("api_not_found") == 2
+        main.assert_unique_operation_ids()
+
+    def test_a_walk_that_finds_nothing_published_is_refused(self):
+        """The claim that makes every population derived from this walk a floorless one.
+
+        `test_house_rules.py` rests on it by name: the registered handler
+        population cannot come back empty, because an app this walk has stopped
+        understanding fails the import of everything that reaches it.
+        """
+        with pytest.raises(RuntimeError, match="found no published routes"):
+            main.assert_unique_operation_ids([])
+
+
+def _routes(*named: tuple[str, bool]) -> list:
+    """APIRoutes carrying the given names and schema visibility, and nothing else.
+
+    Built through `add_api_route` with an explicit `name`, because a route takes
+    its name from its endpoint's `__name__` and two handlers of one name cannot
+    be written in one module.
+    """
+    from fastapi import APIRouter
+
+    router = APIRouter()
+
+    async def endpoint() -> None:
+        return None
+
+    for index, (name, published) in enumerate(named):
+        router.add_api_route(
+            f"/{index}", endpoint, name=name, include_in_schema=published, methods=["GET"]
+        )
+    return list(router.routes)

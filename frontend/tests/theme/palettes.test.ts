@@ -14,6 +14,9 @@
 
 import { describe, expect, it } from "vitest";
 
+import { ReadStatus } from "../../src/api/generated/model";
+import { STATUS_STYLES } from "../../src/pages/types";
+
 import {
   PALETTES,
   isConstructed,
@@ -22,17 +25,18 @@ import {
   withPalette,
   type PaletteId,
 } from "../../src/theme/palettes";
-
-const CSS = import.meta.glob("../../src/**/*.css", {
-  query: "?raw",
-  import: "default",
-  eager: true,
-}) as Record<string, string>;
+import { stylesheetText } from "../sourceModules";
 
 // Import order, which is also cascade order: `index.css` pulls the palettes in
 // first, so its own `:root.dark` sits after every palette block.
-const PALETTES_CSS = CSS["../../src/theme/palettes.css"] ?? "";
-const INDEX_CSS = CSS["../../src/index.css"] ?? "";
+//
+// **Asked for by name from the one enumeration of `src/`**, which holds the
+// stylesheets as the half of the tree that is not a module and refuses the
+// pair when it is not what the tree carries. A lookup defaulting to the empty
+// string used to stand here, and an empty stylesheet satisfies most of the
+// rules below.
+const PALETTES_CSS = stylesheetText("theme/palettes.css");
+const INDEX_CSS = stylesheetText("index.css");
 
 // ── Reading the stylesheets ──────────────────────────────────────────────────
 
@@ -805,8 +809,8 @@ describe("the rungs a delete control cannot rest on", () => {
  * `unread` pill is `bg-paper-200/70` with `text-paper-600`, so the ink sits on
  * a tint composited over the card rather than on either token, and the pairs
  * above cannot see it. `Home/components/BookList.tsx` takes plain muted text
- * instead of the pill for the same reason, and `components/BookCard.tsx`
- * records the pill as pre-existing and unchanged.
+ * instead of the pill for the same reason, and `pages/types.ts` records the
+ * pill as pre-existing and unchanged.
  *
  * Computed rather than quoted, for the reason the rest of this file is: the
  * figures were written into three comments and copied forward past the palette
@@ -814,11 +818,86 @@ describe("the rungs a delete control cannot rest on", () => {
  * table it carries them in is held against this file by
  * `the contrast table in docs/decisions.md` above.
  *
- * **The pill's shape is read out of the component, not copied from it.** The
- * two ink rungs, the tint and the opacity all come from `BookCard.tsx`'s own
- * class strings, so a pill respelled there is measured rather than leaving this
- * describe's name true of nothing. It was a copy until both critic seats found
- * it independently: at `/40` instead of `/70` every arm below stayed green.
+ * **The pill's shape is imported, not read out of a module's text.**
+ * `STATUS_STYLES` is exported from `src/pages/types.ts`, and the two rungs, the
+ * tint and the opacity are read off the value, so a pill respelled in any way
+ * that paints the same thing is still measured rather than leaving this
+ * describe's name true of nothing. It was a copy of a class string until both
+ * critic seats found it independently: at `/40` instead of `/70` every arm
+ * below stayed green. Replacing that copy with a pair of patterns over the
+ * module's text was the same reading one level down, and every spelling those
+ * patterns refused was an artefact of reading text rather than a value.
+ *
+ * **What an import cannot see is whether the table is still what draws.** A
+ * card computing its pill per prop would leave every arm here measuring
+ * something nobody paints. `tests/pages/components/BookCard.test.tsx::draws the
+ * %s pill from the shared table` is what closes that, and it is the only
+ * reason this rule can be an import at all.
+ *
+ * ## What this rule sees, and what goes past it
+ *
+ * Written down because it was argued to here over several rounds and the
+ * arguments are worth more than the conclusion. **A narrowing is a decision;
+ * a hole is a thing nobody has closed.** They are separated on purpose: the
+ * first list is not work waiting to be done and the second is.
+ *
+ * **Seen.** The two rows of the table whose pill is on the paper ramp, read
+ * by import from `src/pages/types.ts` and not out of any module's text, so
+ * the order of the pair, a variant between them and any further utility are
+ * all free. Exactly one background utility and exactly one ramped ink, or a
+ * refusal naming both. The tint's opacity, absent meaning 1, which is the
+ * direction that cannot read the contrast higher than it draws.
+ *
+ * **Narrowed on purpose.**
+ *
+ * - **Light mode only.** Every ratio here reads `tokensFor(palette, "light")`,
+ *   so the `dark:` half of each pill is measured by nothing. Pre-existing,
+ *   and named here rather than left for a reader to infer from the code.
+ * - **Two rows of five.** The other three are bloom, amber and accent. They
+ *   are not read, and handed to the reader one is refused by name rather
+ *   than measured as if it were paper.
+ * - **The floor arm is an existence claim.** A repaint that lightens the tint
+ *   and still fails on some palette leaves it green; the crossing is between
+ *   `/40` and `/10`. Pinning it tighter puts the class string in a second
+ *   place, which is what moving the table removed.
+ * - **A `bg-` utility that paints nothing counts as a background.** The
+ *   gradient is the live member of that family here and it is not the only
+ *   member: the same prefix carries layout utilities that set a size, a
+ *   position or a repeat rather than a colour, and any of them beside a
+ *   colour would be refused as a second background. None is written on a
+ *   pill today. Taken anyway on the direction rather than the count, and
+ *   that is the argument that carries it: a refused legitimate pair is loud,
+ *   an uncounted second background is silent, and three gradient sites would
+ *   not justify the narrowing on their own.
+ *
+ * **Open, and these are holes rather than decisions.**
+ *
+ * - **A rungless ink is counted as nothing.** `text-` is sizing and alignment
+ *   as well as colour, so no rule over the prefix separates them, and
+ *   `text-white` or `text-on-accent` beside the paper ink is not seen. The
+ *   background side has no such problem and was widened; this side could not
+ *   be. It is armed as what happens, not as what should.
+ * - **Only the class list is read, by both this rule and the card's arm.**
+ *   The strongest shape that hides in there is an **inline style** on the
+ *   pill, which beats every class unconditionally rather than by stylesheet
+ *   order, so it is worse than the second background this round was spent
+ *   on and neither guard would see it. A colour reaching the pill from a
+ *   parent, or from CSS that is not one of these utilities, is the same hole
+ *   one step weaker.
+ * - **The card's arm compares variant prefixed tokens** where this rule
+ *   discards them, so a `hover:` or `focus:` colour added to the card and
+ *   not to the table would redden there although this rule would ignore it.
+ *   Stricter than the rule it serves, in the refusing direction, and zero
+ *   cost today because no pill carries one. The `%s` is in the label that arm
+ * writes, which is driven over every status.
+ *
+ * **That pointer was wrong for one round, and it is the same shape as the copy
+ * two paragraphs up.** The arm was renamed when it grew from one status to all
+ * of them, and the two sentences citing it by name, here and at the table in
+ * `src/pages/types.ts`, did not move: a name in a second place goes stale the
+ * round somebody changes the first. Spelled with the `%s` it is greppable
+ * against the source rather than against one expansion of it, which is the
+ * cheapest form of not having a second home.
  *
  * **There is deliberately no arm for "the pill reads worse than the ink on the
  * card".** The tint is a lighter rung of the same ramp, so the blend lands
@@ -831,53 +910,363 @@ describe("the rungs a delete control cannot rest on", () => {
 describe("the status pill's ink, as it draws", () => {
   const FLOOR = 4.5;
 
-  // Read the same way this file reads the stylesheets, for the same reason.
-  const COMPONENTS = import.meta.glob("../../src/pages/components/*.tsx", {
-    query: "?raw",
-    import: "default",
-    eager: true,
-  }) as Record<string, string>;
-  const BOOK_CARD = COMPONENTS["../../src/pages/components/BookCard.tsx"] ?? "";
+  /**
+   * A Tailwind variant, which is a token carrying a `:` outside brackets.
+   *
+   * **The property, not a list of variant names.** `dark:`, `hover:` and
+   * `focus:` are three members of an open set, and a rule naming them goes
+   * quiet on the fourth. What closes the set is the grammar: a variant is a
+   * prefix ended by a colon, and the only colon that is not one sits inside an
+   * arbitrary value.
+   *
+   * **The bracket exclusion is a fence here and not a live case**, which is
+   * the part worth writing down. Arbitrary values are live in this tree,
+   * `aspect-[2/3]` on the card and `shadow-[var(--shadow-soft)]` on the
+   * button, and neither carries a colon: no token under `src/` does. So
+   * dropping the exclusion would regress nothing today. What it buys is that
+   * the first `bg-[color:var(--x)]` anybody writes reads as a base token
+   * rather than being silently discarded as a variant.
+   */
+  const isVariant = (token: string): boolean => {
+    let depth = 0;
+    for (const character of token) {
+      if (character === "[") depth += 1;
+      else if (character === "]") depth -= 1;
+      else if (character === ":" && depth === 0) return true;
+    }
+    return false;
+  };
 
-  const UNREAD =
-    /\[ReadStatus\.unread\]:\s*"bg-paper-(\d+)\/(\d+) text-paper-(\d+)\b/.exec(
-      BOOK_CARD,
-    );
-  const FINISHED =
-    /\[ReadStatus\.did_not_finish\]:\s*"bg-paper-(\d+) text-paper-(\d+)\b/.exec(
-      BOOK_CARD,
-    );
+  /**
+   * What counts as painting the pill's background, and what as inking it.
+   *
+   * **The refusal is about the utility, the read is about the ramp**, and the
+   * two are separate questions: these decide how many things paint, `TINT`
+   * and `INK` below decide whether the one that does is on the ramp this rule
+   * can measure. Keyed on the ramp, the count saw a second background as
+   * nothing and went on measuring the paper half while the stylesheet decided
+   * what actually painted.
+   *
+   * **The two sides are not symmetrical and that is the honest shape of it.**
+   *
+   * `bg-` is unambiguous: every utility spelled that way paints the
+   * background, so the count takes the prefix and a rung is not required.
+   * Requiring one was the second version of this hole: `bg-accent-fill` is
+   * this app's own primary fill, counted at 55 occurrences under `src/` with
+   * 40 more of its hover, and beside a paper background it was invisible.
+   *
+   * `text-` cannot be widened the same way, because it is overloaded with
+   * sizing and alignment: `text-xs` and `text-sm` alone are 666 occurrences,
+   * counted the same way, and no rule over the prefix separates a colour from
+   * a size. So the ink count requires a rung, and **a rungless ink goes
+   * past it**: `text-white` and `text-on-accent` are counted as nothing, and
+   * one beside the paper ink is not seen. That is an unclosed hole rather
+   * than a narrowing, and the arm below states it rather than the docstring
+   * implying both halves are held.
+   *
+   * **A gradient is counted as a background, deliberately and at a price.**
+   * `bg-gradient-to-br` sets a background image rather than a colour, so a
+   * gradient laid over a colour is a legitimate pair that this would refuse.
+   * Measured: the three gradient sites in `src/` carry no background colour
+   * beside them, so nothing here is refused today; and the failure direction
+   * matters more than the count, because a refusal is loud and an uncounted
+   * second background is silent, which is the whole of this finding.
+   */
+  const FILL = /^bg-/;
+  const TEXT = /^text-[a-z]+-\d+(?:\/\d+)?$/;
 
-  const SURFACE = `--color-paper-${UNREAD?.[1] ?? ""}`;
-  const TINT = Number(UNREAD?.[2] ?? 0) / 100;
-  const INK = `--color-paper-${UNREAD?.[3] ?? ""}`;
-  const CHOSEN = Number(FINISHED?.[2] ?? 0);
+  /** The paper ramp, which is the only pair the contrast arms can measure. */
+  const TINT = /^bg-paper-(\d+)(?:\/(\d+))?$/;
+  const INK = /^text-paper-(\d+)$/;
+
+  interface Pill {
+    surface: string;
+    ink: string;
+    surfaceStep: number;
+    inkStep: number;
+    opacity: number;
+  }
+
+  /**
+   * The light mode paper pair a pill paints, read as a set of tokens.
+   *
+   * **Tokens rather than adjacency**, which is the half of this rule that
+   * survives however the string reaches it. Two patterns used to want the tint
+   * and the ink adjacent, in that order, double quoted and with the key beside
+   * them, so the same pill written the other way round, or with a `dark:`
+   * variant between the two, matched nothing while every arm below stayed
+   * green on a stale read. Nothing imposes an order on a class string here:
+   * there is no Tailwind ordering plugin in this project's dependencies.
+   *
+   * **Exactly one background and exactly one ink, or refuse, naming the count
+   * and what was found.** Taking the first is what the patterns this replaced
+   * did, and it asserts something the string cannot say: two unprefixed
+   * background utilities are resolved by stylesheet order rather than by the
+   * order somebody typed them in, so either choice is a guess dressed as a
+   * reading.
+   *
+   * **Read lazily, and that is not a detail.** This used to run while the
+   * describe was collected, which made a refusal a collection error: measured,
+   * repainting the unread row onto another ramp gave one failure and **every
+   * arm in this file gone**, including the floors for links, buttons, badges
+   * and delete controls that have nothing to do with a pill. One repaint
+   * silenced the whole theme rule. Behind a memoised call it reddens the arms
+   * that read it, by name, and the rest still run.
+   *
+   * **An absent opacity is 1, recorded rather than assumed.** The
+   * `did_not_finish` pill has none. Which way that default errs is what
+   * matters and it is measured by `defaults an absent opacity low, never high`
+   * below: in light mode the card is the lightest rung, so compositing
+   * lightens the surface and raises the ratio, and reading a missing opacity
+   * as 1 reports the lowest of that family. A false pass is the one thing this
+   * default cannot produce.
+   */
+  const pillOf = (classes: string): Pill => {
+    const base = classes
+      .split(/\s+/)
+      .filter((token) => token !== "" && !isVariant(token));
+    const only = (pattern: RegExp, role: string): string => {
+      const found = base.filter((token) => pattern.test(token));
+      if (found.length !== 1)
+        throw new Error(
+          `expected exactly one ${role} token, found ${found.length}: ` +
+            `[${found.join(", ")}] in "${classes}"`,
+        );
+      return found[0]!;
+    };
+    // Two questions, deliberately answered apart: how many utilities of this
+    // family paint, and whether the one that does is on the ramp this rule
+    // reads. A pill moved onto another ramp is a design change and is refused
+    // here rather than measured as if it were paper.
+    const onRamp = (
+      token: string,
+      ramp: RegExp,
+      role: string,
+    ): RegExpExecArray => {
+      const read = ramp.exec(token);
+      if (read === null)
+        throw new Error(
+          `the ${role} is "${token}", which is not on the paper ramp ` +
+            `this rule measures, in "${classes}"`,
+        );
+      return read;
+    };
+    const tint = onRamp(only(FILL, "background"), TINT, "background");
+    const ink = onRamp(only(TEXT, "ink"), INK, "ink");
+    return {
+      surface: `--color-paper-${tint[1]}`,
+      ink: `--color-paper-${ink[1]}`,
+      surfaceStep: Number(tint[1]),
+      inkStep: Number(ink[1]),
+      opacity: tint[2] === undefined ? 1 : Number(tint[2]) / 100,
+    };
+  };
+
+  const READ_ONCE = new Map<ReadStatus, Pill>();
+
+  /** The pill a status paints, read on first ask and kept. */
+  const pill = (status: ReadStatus): Pill => {
+    const had = READ_ONCE.get(status);
+    if (had !== undefined) return had;
+    const made = pillOf(STATUS_STYLES[status]);
+    READ_ONCE.set(status, made);
+    return made;
+  };
+
+  const UNREAD = () => pill(ReadStatus.unread);
+  const FINISHED = () => pill(ReadStatus.did_not_finish);
+
+  /**
+   * A whole pill, written out in a string literal in this very module.
+   *
+   * Under the reader this replaced, a copy of the shape sitting earlier in the
+   * text than the real declaration became the subject of every arm below with
+   * nothing red anywhere. Under import it is a string and nothing else. It is
+   * kept and asserted for that reason: an instrument that goes back to reading
+   * text reddens here by name instead of quietly measuring this.
+   */
+  const A_COPY_OF_A_PILL =
+    '[ReadStatus.unread]: "bg-paper-900/10 text-paper-100"';
+
+  /** A paper token the palettes declare, or the name of the one that is not. */
+  const paperToken = (tokens: Tokens, name: string): string => {
+    const value = tokens[name];
+    if (value === undefined)
+      throw new Error(`the pill paints ${name}, which no palette declares`);
+    return value;
+  };
 
   const pillRatio = (palette: PaletteId): number => {
     const light = tokensFor(palette, "light");
     return contrast(
-      light[INK]!,
-      blend(light[SURFACE]!, light["--color-paper-0"]!, TINT),
+      paperToken(light, UNREAD().ink),
+      blend(
+        paperToken(light, UNREAD().surface),
+        light["--color-paper-0"]!,
+        UNREAD().opacity,
+      ),
     );
   };
 
   const mutedRatio = (palette: PaletteId): number => {
     const light = tokensFor(palette, "light");
-    return contrast(light[INK]!, light["--color-paper-0"]!);
+    return contrast(paperToken(light, UNREAD().ink), light["--color-paper-0"]!);
   };
 
-  it("is reading the pill the component draws", () => {
-    // Without this the tokens and the opacity below are a copy of a class
-    // string in another file, and the arms are then measuring a pill nobody
-    // paints. Both halves of the pattern are asserted, because a capture that
-    // stopped matching would leave every arm reading `--color-paper-` and
-    // failing somewhere less legible than here.
-    expect(UNREAD).not.toBeNull();
-    expect(FINISHED).not.toBeNull();
-    expect(TINT).toBeGreaterThan(0);
-    expect(TINT).toBeLessThan(1);
-    expect(PAPER_STEPS).toContain(Number(UNREAD?.[3]));
-    expect(PAPER_STEPS).toContain(CHOSEN);
+  it("is reading the table the card draws", () => {
+    // The pairing below is the pill's only if both rungs are rungs. A step no
+    // palette declares used to surface as a `TypeError` inside `luminance`; it
+    // surfaces in `paperToken` by name instead.
+    expect(PAPER_STEPS).toContain(UNREAD().surfaceStep);
+    expect(PAPER_STEPS).toContain(UNREAD().inkStep);
+    expect(PAPER_STEPS).toContain(FINISHED().surfaceStep);
+    expect(PAPER_STEPS).toContain(FINISHED().inkStep);
+    // Not `< 1`, which the ordered pair required of the unread pill. A pill
+    // painted flat is a repaint these arms measure correctly, and refusing it
+    // would be this rule holding a design decision nobody gave it. Zero is the
+    // one value that makes the blend return the card and the arms vacuous.
+    expect(UNREAD().opacity).toBeGreaterThan(0);
+    expect(UNREAD().opacity).toBeLessThanOrEqual(1);
+    expect(FINISHED().opacity).toBeGreaterThan(0);
+    expect(FINISHED().opacity).toBeLessThanOrEqual(1);
+  });
+
+  it("reads the pill as tokens, in any order and past any variant", () => {
+    const drawn = {
+      surface: "--color-paper-200",
+      ink: "--color-paper-600",
+      surfaceStep: 200,
+      inkStep: 600,
+      opacity: 0.7,
+    };
+
+    expect(pillOf("bg-paper-200/70 text-paper-600")).toEqual(drawn);
+    // The ink first, which paints the same pill and matched nothing before.
+    expect(pillOf("text-paper-600 bg-paper-200/70")).toEqual(drawn);
+    // A variant between the two, then variants the rule has never been told
+    // about, which is what makes the exclusion a property rather than a list.
+    expect(pillOf("bg-paper-200/70 dark:bg-paper-800 text-paper-600")).toEqual(
+      drawn,
+    );
+    expect(
+      pillOf(
+        "hover:bg-paper-300 bg-paper-200/70 focus:text-paper-900 text-paper-600",
+      ),
+    ).toEqual(drawn);
+    // Utilities that are neither, which is most of what a pill carries.
+    expect(
+      pillOf("text-xs rounded-full bg-paper-200/70 font-medium text-paper-600"),
+    ).toEqual(drawn);
+  });
+
+  it("tells a colon inside an arbitrary value from a variant prefix", () => {
+    // The property the reading is derived from, armed directly, because no
+    // token in this tree exercises it: stating it as a fence and arming it as
+    // one is the honest pair. `[&:hover]:` is a variant whose own brackets
+    // carry a colon, and the colon that makes it one is after the bracket.
+    expect(isVariant("dark:bg-paper-800")).toBe(true);
+    expect(isVariant("[&:hover]:bg-paper-300")).toBe(true);
+    expect(isVariant("bg-[color:var(--x)]")).toBe(false);
+    expect(isVariant("aspect-[2/3]")).toBe(false);
+    expect(isVariant("shadow-[var(--shadow-soft)]")).toBe(false);
+  });
+
+  it("refuses two of either, rather than picking one of them", () => {
+    expect(() => pillOf("bg-paper-100 bg-paper-200/70 text-paper-600")).toThrow(
+      "found 2: [bg-paper-100, bg-paper-200/70]",
+    );
+    expect(() =>
+      pillOf("bg-paper-200/70 text-paper-600 text-paper-800"),
+    ).toThrow("found 2: [text-paper-600, text-paper-800]");
+    // **The one the ramp keyed count could not see.** A background from
+    // another ramp beside the paper one paints the pill, and which of the two
+    // wins is stylesheet order, which is the reason the refusal exists. Keyed
+    // on `bg-paper-*` this survived with every arm green while the rule went
+    // on measuring the paper half.
+    expect(() => pillOf("bg-bloom-100 bg-paper-200/70 text-paper-600")).toThrow(
+      "found 2: [bg-bloom-100, bg-paper-200/70]",
+    );
+    expect(() =>
+      pillOf("bg-paper-200/70 text-bloom-700 text-paper-600"),
+    ).toThrow("found 2: [text-bloom-700, text-paper-600]");
+    // Absence, which the type checker reaches for the table but not for what
+    // any one of its strings says.
+    expect(() => pillOf("text-paper-600")).toThrow("background token, found 0");
+    expect(() => pillOf("bg-paper-200/70")).toThrow("ink token, found 0");
+    // **A background carrying no rung is still a background.** This app's own
+    // primary fill is one, and beside the paper background it used to be
+    // counted as nothing while the rule measured the paper half. Refused now,
+    // for being a second background.
+    expect(() =>
+      pillOf("bg-accent-fill bg-paper-200/70 text-paper-600"),
+    ).toThrow("found 2: [bg-accent-fill, bg-paper-200/70]");
+    expect(() => pillOf("bg-black/50 bg-paper-200/70 text-paper-600")).toThrow(
+      "found 2: [bg-black/50, bg-paper-200/70]",
+    );
+    // **And the ink cannot be widened to match, which is the asymmetry.**
+    // `text-` is sizing and alignment as well as colour, so a rungless ink is
+    // counted as nothing and a second one is not seen. Asserted as what
+    // happens rather than as what should: this is an unclosed hole, written
+    // into the rule's residue, not a refusal being claimed.
+    expect(() =>
+      pillOf("bg-paper-200/70 text-white text-paper-600"),
+    ).not.toThrow();
+    expect(pillOf("bg-paper-200/70 text-white text-paper-600").inkStep).toBe(
+      600,
+    );
+    // One of the family, on a ramp this rule cannot measure. Refused for what
+    // it is rather than counted as absent, because the two want different
+    // fixes: this one is a design change, and the one above is a typo.
+    expect(() => pillOf("bg-bloom-100 text-paper-600")).toThrow(
+      'the background is "bg-bloom-100", which is not on the paper ramp',
+    );
+    expect(() => pillOf("bg-paper-200/70 text-bloom-700")).toThrow(
+      'the ink is "text-bloom-700", which is not on the paper ramp',
+    );
+    // A variant of the same utility is not a second one.
+    expect(() =>
+      pillOf("dark:bg-paper-800 bg-paper-200/70 text-paper-600"),
+    ).not.toThrow();
+    // And a utility that is not a colour is not one either, which is what
+    // keeps every other class on a real pill free.
+    expect(() =>
+      pillOf("text-xs rounded-full bg-paper-200/70 font-medium text-paper-600"),
+    ).not.toThrow();
+  });
+
+  it("defaults an absent opacity low, never high", () => {
+    expect(FINISHED().opacity).toBe(1);
+    expect(pillOf("bg-paper-200/100 text-paper-800").opacity).toBe(1);
+    // The direction, measured over every palette rather than reasoned off the
+    // ramp. A palette whose card stopped being the lighter of the two reddens
+    // here, which is the condition the default rests on and the only one.
+    const at = (palette: PaletteId, alpha: number): number => {
+      const light = tokensFor(palette, "light");
+      return contrast(
+        paperToken(light, FINISHED().ink),
+        blend(
+          paperToken(light, FINISHED().surface),
+          light["--color-paper-0"]!,
+          alpha,
+        ),
+      );
+    };
+    const readsHigher = THEMES.flatMap((palette) =>
+      [0.25, 0.5, 0.75]
+        .filter((alpha) => at(palette, 1) > at(palette, alpha))
+        .map((alpha) => `${palette} at ${alpha}`),
+    );
+
+    expect(readsHigher).toEqual([]);
+  });
+
+  it("is not read from a copy of the pill sitting in this module", () => {
+    // Free under import, asserted anyway. The rungs in the copy are ones no
+    // pill paints, so this can only pass by having read the table.
+    expect(A_COPY_OF_A_PILL).toContain("bg-paper-900/10");
+    expect(UNREAD().surfaceStep).not.toBe(900);
+    expect(UNREAD().inkStep).not.toBe(100);
+    expect(UNREAD().opacity).not.toBe(0.1);
   });
 
   it("falls below the text floor where plain muted text does not", () => {
@@ -887,6 +1276,17 @@ describe("the status pill's ink, as it draws", () => {
     // and must never stop clearing the floor; the pill arm is the existence of
     // one failure, because the number of them is not what either component
     // reasons from.
+    // **The extent, because the sentence above reads wider than this half.**
+    // The pill half is an existence claim, so a repaint that lightens the tint
+    // and still fails somewhere leaves it green. Measured 2026-09-28 at the
+    // ink this pill draws: a `/40` repaint still fails on a palette and leaves
+    // this green, and the crossing where every palette clears and this reddens
+    // is between `/40` and `/10`. **How many fail today is deliberately not
+    // written here**, for the reason the paragraph directly above gives: it
+    // would age against the palettes and nothing recomputes a number in prose.
+    // Not pinned tighter either, because every arm that would redden on `/40`
+    // restates the class string here, and holding it in one place is what
+    // moving the table to `src/pages/types.ts` bought.
     const mutedClears = THEMES.filter(
       (palette) => mutedRatio(palette) >= FLOOR,
     );
@@ -897,23 +1297,29 @@ describe("the status pill's ink, as it draws", () => {
   });
 
   it("clears the floor only at the rung the finished pill takes", () => {
-    // Flat, because that pill is `bg-paper-200` at full opacity, and over the
-    // rungs from the one the `unread` pill inks with to the one
-    // `did_not_finish` was moved to. Both ends come out of the component, so
-    // this says "the rung it picked is the only one of them that works" rather
-    // than restating three numbers.
-    const tint = `--color-paper-${FINISHED?.[1] ?? ""}`;
+    // Over the rungs from the one the `unread` pill inks with to the one
+    // `did_not_finish` was moved to. Both ends come out of the table, so this
+    // says "the rung it picked is the only one of them that works" rather than
+    // restating three numbers. Composited at that pill's own opacity, which is
+    // 1 today and so paints the flat tint: written as a blend rather than as a
+    // token lookup because the flatness is the pill's choice and not this
+    // arm's, and `blend` at 1 returns its first argument.
     const rungs = PAPER_STEPS.filter(
-      (step) => step >= Number(UNREAD?.[3] ?? 0) && step <= CHOSEN,
+      (step) => step >= UNREAD().inkStep && step <= FINISHED().inkStep,
     );
     const clearsEverywhere = (step: number): boolean =>
       THEMES.every((palette) => {
         const light = tokensFor(palette, "light");
-        return contrast(light[`--color-paper-${step}`]!, light[tint]!) >= FLOOR;
+        const tint = blend(
+          paperToken(light, FINISHED().surface),
+          light["--color-paper-0"]!,
+          FINISHED().opacity,
+        );
+        return contrast(light[`--color-paper-${step}`]!, tint) >= FLOOR;
       });
 
     expect(rungs.length).toBeGreaterThan(1);
-    expect(rungs.filter(clearsEverywhere)).toEqual([CHOSEN]);
+    expect(rungs.filter(clearsEverywhere)).toEqual([FINISHED().inkStep]);
   });
 
   it("is compositing, rather than reading one of its two arguments", () => {
@@ -922,7 +1328,11 @@ describe("the status pill's ink, as it draws", () => {
     const light = tokensFor("endpaper", "light");
     const tint = light["--color-paper-200"]!;
     const card = light["--color-paper-0"]!;
-    const mixed = blend(tint, card, TINT);
+    // Half, chosen by this arm rather than taken from the pill. What is under
+    // test is the instrument, and an alpha borrowed from the pill would redden
+    // this arm on the day somebody repaints the pill flat, which is a change
+    // the arms above are built to measure rather than to refuse.
+    const mixed = blend(tint, card, 0.5);
 
     expect(mixed).toMatch(/^#[0-9a-f]{6}$/i);
     expect(mixed).not.toBe(tint);
@@ -1037,7 +1447,7 @@ describe("withPalette", () => {
       withPalette("nord", () => {
         throw new Error("no");
       }),
-    ).toThrow();
+    ).toThrow(/^no$/);
 
     expect(document.documentElement.dataset.theme).toBe("gruvbox");
   });

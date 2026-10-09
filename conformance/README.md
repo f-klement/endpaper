@@ -5,13 +5,28 @@ no language owns.
 
 ```
 conformance/
-  cases/isbn.json          the cases
-  schema/isbn.schema.json  the shape a case file has to have
+  cases/<domain>.json          the cases
+  schema/<domain>.schema.json  the shape that domain's case file has to have
+  <domain>.md                  what a case is in that domain, and what each one pins
 ```
 
-Two implementations run this file today: `backend/tests/conformance/test_isbn.py`
-and `frontend/tests/conformance/isbn.test.ts`. A disagreement between them is a
-failing test on the side that is wrong.
+| domain | cases | schema | runners | document |
+|---|---|---|---|---|
+| ISBN | `cases/isbn.json` | `schema/isbn.schema.json` | `backend/tests/conformance/test_isbn.py`, `frontend/tests/conformance/isbn.test.ts` | [`isbn.md`](isbn.md) |
+| subject | `cases/subject.json` | `schema/subject.schema.json` | `backend/tests/conformance/test_subject.py`, `frontend/tests/conformance/subject.test.ts` | [`subject.md`](subject.md) |
+
+A disagreement between two implementations of one domain is a failing test on
+the side that is wrong.
+
+**One document per domain, and it is not tidiness.** Each runner reads its own
+document to find its guard dropping table, and it finds it by matching a header.
+Two such tables in one file means the first match wins: adding the second domain
+here would have made the ISBN runner read the subject table, which either fails
+on the row count or, worse, passes against the wrong rows while the table it was
+written to guard goes unchecked. That is a guard disarmed by a data change with
+no diff to the guard, which this repository has already paid for once. A
+document per domain makes each anchor unique by construction rather than by two
+authors agreeing to differ.
 
 ## Why this exists, with the measurement
 
@@ -45,29 +60,22 @@ failure is silent, and the repair a year later is a data migration.
 
 ## What a case is
 
-Input, expected output, and a `why`. Nothing else.
-
-```json
-{
-  "id": "parse-rejects-a-non-bookland-ean13",
-  "op": "parse",
-  "input": "4006381333931",
-  "expect": null,
-  "why": "A real EAN-13 that passes the modulus 10 check and is not a book..."
-}
-```
+An `id`, a `why`, and whatever the domain's own invariant needs in between.
 
 | field | what |
 |---|---|
 | `id` | Lowercase and hyphens, unique in the file. It is what a failure is named after. |
-| `op` | The operation, in the specification's spelling. Each runner maps it onto its own naming in an explicit table. |
-| `input` | A string, or null for the two operations that are null safe. |
-| `expect` | What every implementation must answer. |
 | `why` | Why the case is here. A measurement or a rule, never an opinion. |
 
-**`schema/isbn.schema.json` is the enforceable version of that table**, and both
-runners validate the case file against it before running a single case. A
-renamed field, a missing `why`, a `parse` case expecting a boolean: each fails
+**The rest is the domain's**, and it is set by what the invariant is rather than
+by symmetry with a neighbour. ISBN pins one function's answer, so a case is an
+operation, an input and an expectation. Subject pins an equality across two
+different functions, so a case is an input and both implementations' answers.
+Each domain's document holds its own field table.
+
+**`schema/<domain>.schema.json` is the enforceable version of that table**, and
+both runners validate the case file against it before running a single case. A
+renamed field, a missing `why`, an expectation of the wrong type: each fails
 loudly rather than being read as something it is not, or skipped.
 
 Uniqueness of `id` is asserted by the runners instead, because JSON Schema
@@ -75,7 +83,7 @@ cannot express uniqueness across a property of array items.
 
 ## Adding a case
 
-1. Add it to `cases/isbn.json`, with a `why` that says what was measured.
+1. Add it to `cases/<domain>.json`, with a `why` that says what was measured.
 2. Run both suites. They read the same file, so a case that only one side
    satisfies is a divergence, and the divergence is the finding.
 3. Fix the implementation that is wrong.
@@ -88,24 +96,42 @@ does not, and it is greppable. `"978\u0660"` says which character it is; the
 rendered form does not, and it is indistinguishable on screen from three other
 digit zeros.
 
+**An escape typed into a file through a tool that rewrites it is the trap the
+rule guards against, one layer up.** Where a case turns on a character with no
+width, get the escape onto disk by serialising the real character with a JSON
+writer rather than by typing the six characters of the escape: a transport that
+decodes `\u` on the way past leaves a file that reads correctly and pins the
+wrong thing. The ASCII refusal above catches that, at import, by naming the
+offending byte values.
+
 ## Rules
 
 **The cases worth arguing about are added when a bug is found, not when a
 function is written.** The value is in the edge cases nobody would invent, and
 every non-ASCII case in `isbn.json` came out of one night's findings, each
-carrying what was measured. The file also holds the ordinary cases a
-specification needs in order to be one: a canonical ISBN-13, the ISBN-10
-conversion, an X check digit, hyphens in the wrong places. Those are the base
-rather than the reason this directory exists, and the rule above is about the
-second kind.
+carrying what was measured. Each file also holds the ordinary cases a
+specification needs in order to be one. Those are the base rather than the
+reason this directory exists, and the rule above is about the second kind.
 
 **No case may reference a database.** These are pure functions of their input or
 they are not conformance material. That is also what keeps the runners small
 enough to be obviously correct.
 
+**A case whose assertion can be made in one suite alone does not belong here.**
+A rule with one implementation is tested where it lives; putting it here makes
+this directory a second home for it and buys nothing, since no disagreement is
+possible. Each domain's schema enforces this by requiring both sides' answers on
+every case, so a case about one implementation cannot be expressed rather than
+being refused by a reviewer who noticed.
+
 **A case may not be edited to make a test pass.** Changing an expectation is
 changing the protocol. It belongs in a commit that says so and that lands on
-every implementation together.
+every implementation together. **This stays a rule rather than a mechanism**,
+and a domain's shape can only ever close part of it: `subject.md` closes two of
+the three repairs somebody reaches for and says which one it does not. **Both
+runners read a case's input; what no guard over a case file does is hold an
+expectation about it**, so a case rewritten under its own id is an edit no arm
+can see.
 
 **There is no per implementation opt out, and that is a deliberate refusal.**
 Matrix's `complement` has exactly this problem at a much larger scale and solves
@@ -121,50 +147,24 @@ and the Python side is deleted, the cases stay. They are the only artefact of
 this that outlives the migration, which is also why this directory is published
 rather than kept internal.
 
-## What each case pins, and the asymmetry underneath it
-
-Both implementations now guard ASCII twice: at the door (`normalise`) and in the
-checksum predicates. Dropping each guard in turn, re-derived 2026-09-06 against
-this tree rather than carried over, and recording which cases notice:
-
-| guard dropped | cases that catch it |
-|---|---|
-| server `normalise` | `normalise-strips-non-ascii-digits`, `parse-strips-a-trailing-non-ascii-digit` |
-| server `is_valid_isbn13` | `is-valid-isbn13-rejects-arabic-indic-digits`, `is-valid-isbn13-rejects-superscript-twos` |
-| server `is_valid_isbn10` body | `is-valid-isbn10-rejects-a-non-ascii-body` |
-| server `is_valid_isbn10` check character | `is-valid-isbn10-rejects-a-non-ascii-check-digit` |
-| browser `normalise` | `normalise-strips-non-ascii-digits`, `parse-strips-a-trailing-non-ascii-digit` |
-| browser `isValidIsbn13`, and both ISBN-10 regexes | **nothing, and it cannot** |
-
-**The last row is a property of JavaScript, not a hole in the cases.** Widening
-those regexes to `\p{Nd}` lets a non-ASCII digit through the shape test, and the
-arithmetic then rejects it anyway: `Number("\u0660")` is `NaN`, and `NaN % 10 === 0`
-is false. Python does not get that for free. `int("\u0660")` is `0` and
-`int("\uff17")` is `7`, so a checksum computed over them passes.
-
-**That asymmetry is the whole reason the two drifted.** The browser was correct by
-accident of `Number()` while the server needed an explicit guard and did not have
-one. Which is also why the four rows above that name only the server are not a
-sign the cases are server biased: they are the rows where a guard can be removed
-and the answer still change.
-
-**The `parse` cases cannot substitute for the predicate cases.** Once the door is
-closed, a non-ASCII string never reaches a checksum function through `parse`, so
-dropping `is_valid_isbn10`'s body guard leaves every other case in the file
-passing, and only `is-valid-isbn10-rejects-a-non-ascii-body` red. Stated as
-every other case rather than as a count, because a count stops being re-derived
-the moment a case is added. A case per layer, because a
-layer with no case is a layer that can be deleted in silence.
-
 ## The floor
 
-Each runner asserts the file holds at least twenty cases, on top of the schema
-rejecting an empty array. A conformance suite that silently runs zero cases is
-the failure mode that makes the whole idea theatre, and a loader that quietly
-matched nothing would leave every assertion vacuous with the suite still green.
-The same guard, for the same reason, is in `frontend/tests/theme/palettes.test.ts`
-as "has rows this test can actually see".
+Each runner asserts its file holds at least a stated number of cases, on top of
+the schema rejecting an empty array. A conformance suite that silently runs zero
+cases is the failure mode that makes the whole idea theatre, and a loader that
+quietly matched nothing would leave every assertion vacuous with the suite still
+green. The same guard, for the same reason, is in
+`frontend/tests/theme/palettes.test.ts` as "has rows this test can actually see".
 
-Each runner also compares its own dispatch table against the list of operations
-in the schema, so an operation added to the specification and not wired into an
+**A floor is not what protects the cases that carry a reason.** It leaves the
+difference between itself and the file's size deletable, and the cases worth
+deleting to make a failure go away are exactly the ones this directory exists
+for. Each domain's document names those by id in a guard dropping table, and
+each runner binds its own document's table to its own case file, so deleting one
+of them fails rather than passing.
+
+Each runner also cross checks itself against its schema: the ISBN runner
+compares its dispatch table against the schema's list of operations, and the
+subject runner compares its outcome classifier against the schema's list of
+outcome classes. An entry added to a specification and not wired into an
 implementation fails there rather than going unexercised.

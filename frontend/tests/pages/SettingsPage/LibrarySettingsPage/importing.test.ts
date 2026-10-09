@@ -8,8 +8,15 @@
  *
  * The write every import card on that page shares. Both hooks are exercised
  * against a real server stub in `hooks.test.tsx`, which is where the ordering
- * matters to a member; what is here is the property that has no card in it: a
- * request is never in flight beside another, whatever the caller does.
+ * matters to a member.
+ *
+ * **The loop itself is `lib/bulkWrite.ts` and is tested there.** What is
+ * asserted here is this adapter: the failure row it builds, which is this
+ * page's own vocabulary, and that `writeBooks` still has the two properties its
+ * callers depend on, sequencing and the stop. Those two overlap with the loop's
+ * own tests deliberately: they are what a caller of `writeBooks` may assume,
+ * and a `writeBooks` that stopped delegating would keep passing everything else
+ * in this file.
  */
 
 import { describe, expect, it, vi } from "vitest";
@@ -19,6 +26,7 @@ import {
   statusOf,
   writeBooks,
   type ImportProgress,
+  type WriteHooks,
 } from "../../../../src/pages/SettingsPage/LibrarySettingsPage/importing";
 
 function bodies(count: number): BookCreate[] {
@@ -90,7 +98,7 @@ describe("writing a shelf somebody already had", () => {
   it("asks between every request whether it was stopped", async () => {
     // A function rather than a value, and this is why: the answer changes
     // while the loop runs, and a boolean read once says `false` for ever.
-    const post = vi.fn(async () => {});
+    const post = vi.fn<WriteHooks["post"]>(async () => {});
     let done = 0;
 
     const outcome = await writeBooks(bodies(5), {
@@ -106,7 +114,7 @@ describe("writing a shelf somebody already had", () => {
   });
 
   it("does nothing at all for a pick with nothing importable in it", async () => {
-    const post = vi.fn(async () => {});
+    const post = vi.fn<WriteHooks["post"]>(async () => {});
 
     const outcome = await writeBooks([], {
       post,

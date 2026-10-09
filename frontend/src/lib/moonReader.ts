@@ -99,7 +99,7 @@ import {
   type SupportedExtension,
 } from "./fileName";
 import type { SqliteDatabase, SqliteRow } from "./sqlite";
-import { columnsIn, integer, text } from "./sqliteRow";
+import { columnsIn, text } from "./sqliteRow";
 
 /** One book the backup says is on the member's device. */
 export interface MoonReaderBook {
@@ -138,15 +138,6 @@ export type MoonReaderFormat = Exclude<
   ""
 >;
 
-/**
- * A field this backup's schema could not fill.
- *
- * **There is no arm for the title, and `SIGNATURE` is why**: a table with no
- * `book` column is not one of these tables at all, so a readable backup always
- * has one and a missing title is unreachable rather than merely unobserved.
- */
-export type MoonReaderField = "authors";
-
 /** Why a database yielded no library. Closed, one sentence each on screen. */
 export type MoonReaderFailure =
   /** Opens as SQLite, and is not a Moon+ Reader backup's database. */
@@ -171,23 +162,6 @@ export interface MoonReaderLibrary {
    * exists so a member can be told the backup held rows this could not place.
    */
   readonly skipped: number;
-  /**
-   * The app's own version for this database, where it set one.
-   *
-   * `PRAGMA user_version` is where Android's `SQLiteOpenHelper` keeps the
-   * version it migrates from, so an app built on it states its schema version
-   * here whether or not it meant to publish one. Informational, and read rather
-   * than acted on: every decision below is taken from the columns that are
-   * actually there, which is the same question asked of the file rather than of
-   * a number the file states about itself.
-   *
-   * **Zero is the unset default and is reported as no version**, because a
-   * database nobody versioned and a database at version zero are not
-   * distinguishable here and only one of them is a claim.
-   */
-  readonly schemaVersion: number | null;
-  /** Fields no column in this backup could fill. Sorted, so it compares. */
-  readonly missing: readonly MoonReaderField[];
 }
 
 export type MoonReaderReading =
@@ -231,31 +205,11 @@ const WANTED = ["filename", "book", "author"] as const;
  * carry a `filename` and a `book`, the second of which is the title under a
  * name almost nothing else uses.
  *
- * **Requiring `book` is what makes a missing title unreachable**, which is the
- * reason `MoonReaderField` has one arm. Dropping either name from here would
- * grow that type rather than only loosen this check.
+ * **Requiring `book` is what makes a book with no title unreachable**: a table
+ * without that column is not one of these, so a readable backup always has it.
+ * Dropping either name from here loosens more than this check.
  */
 const SIGNATURE = ["filename", "book"] as const;
-
-/** Which of `WANTED` no readable table has, as the fields they fill. */
-function missingFields(present: Set<string>): MoonReaderField[] {
-  const fields = new Map<MoonReaderField, string>([["authors", "author"]]);
-  return [...fields]
-    .filter(([, column]) => !present.has(column))
-    .map(([field]) => field)
-    .sort();
-}
-
-/**
- * The app's own version for this database, where it set one.
- *
- * `PRAGMA user_version` answers 0 on a database that never set it, which is
- * every database and not a version, so 0 is reported as none.
- */
-function schemaVersionOf(db: SqliteDatabase): number | null {
-  const version = integer(db.query("PRAGMA user_version")[0]?.["user_version"]);
-  return version === null || version === 0 ? null : version;
-}
 
 /** What the file's own name settles about the object it holds. */
 function readFormat(path: string): MoonReaderFormat | null {
@@ -349,18 +303,7 @@ export function readMoonReaderLibrary(db: SqliteDatabase): MoonReaderReading {
   }
   if (rows === 0) return { ok: false, failure: "empty" };
 
-  const present = new Set(
-    readable.flatMap((table) => [...(columns.get(table) ?? [])]),
-  );
-  return {
-    ok: true,
-    library: {
-      books: [...books.values()],
-      skipped,
-      schemaVersion: schemaVersionOf(db),
-      missing: missingFields(present),
-    },
-  };
+  return { ok: true, library: { books: [...books.values()], skipped } };
 }
 
 /**

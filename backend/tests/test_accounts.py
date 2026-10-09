@@ -20,8 +20,14 @@ from tests.test_house_rules import _is_vendored
 BACKEND = Path(__file__).resolve().parent.parent
 
 
-def _sources() -> list[Path]:
+def _sources(root: Path = BACKEND) -> list[Path]:
     """Every module of this app's own, migrations and the test tree excluded.
+
+    **`root` is what lets the diagonal in `test_house_rules.py` drive this.**
+    Calling the shared predicate is what makes this walk right; taking the tree
+    is what lets something check that it does, against a tree with vendored code
+    planted in it. Without it this walk was correct and exercised by nothing but
+    a pipeline, which is how the class it belongs to went red five times.
 
     **Stated as an exclusion.** An inclusion list is what goes stale the next
     time the backend grows a directory, which is the shape of guard defect this
@@ -41,9 +47,9 @@ def _sources() -> list[Path]:
     """
     found = [
         path
-        for path in BACKEND.rglob("*.py")
-        if not {"tests", "migrations"} & set(path.relative_to(BACKEND).parts)
-        and not _is_vendored(path, BACKEND)
+        for path in root.rglob("*.py")
+        if not {"tests", "migrations"} & set(path.relative_to(root).parts)
+        and not _is_vendored(path, root)
     ]
     # **The packages it must cover, not a number.** A floor of `> 30` does not
     # bind on a walk that reads 124 files: a mutation marking `routers` and
@@ -401,6 +407,38 @@ class TestResetIsRefusedWhereTheAppDoesNotHoldThePassword:
         assert res.status_code == 403
         assert fragment in res.json()["detail"]
 
+    @pytest.mark.parametrize(
+        ("mode", "fragment"),
+        [("ldap", "directory"), ("proxy", "signs you in")],
+    )
+    def test_the_redeem_route_refuses_too_before_a_code_is_looked_at(
+        self, client, admin, member, monkeypatch, mode, fragment
+    ) -> None:
+        """A code an admin approved while the mode was local must not set a
+        password the app no longer checks: the refusal comes first."""
+        client.post("/auth/reset/request", json={"username": "member"})
+        code = client.post(
+            f"/api/users/password-resets/{member['user']['id']}/approve",
+            headers=admin["headers"],
+        ).json()["code"]
+        monkeypatch.setenv("AUTH_MODE", mode)
+        res = client.post(
+            "/auth/reset/redeem",
+            json={"username": "member", "code": code, "new_password": "brandnew123"},
+        )
+        assert res.status_code == 403
+        assert fragment in res.json()["detail"]
+
+        # **The order, and not only the status.** A refusal checked after the
+        # redeem would spend the code and set the password, then answer the
+        # same 403. Unspent, the code still works once the mode is local again.
+        monkeypatch.setenv("AUTH_MODE", "local")
+        again = client.post(
+            "/auth/reset/redeem",
+            json={"username": "member", "code": code, "new_password": "brandnew123"},
+        )
+        assert again.status_code == 204, again.text
+
     def test_the_login_page_is_told_not_to_offer_it(
         self, client, monkeypatch
     ) -> None:
@@ -456,13 +494,13 @@ class TestOnlyAnAdminAssertionNamesAnAdmin:
         assert user.email_verification_source == source.value
 
     def test_an_admin_assertion_without_an_admin_is_refused(self) -> None:
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="admin with by=None"):
             accounts.record_verification(User(username="x"), VerificationProvenance.ADMIN)
 
     def test_another_provenance_with_an_admin_is_refused(self) -> None:
         admin = User(username="a")
         admin.id = 1
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match=r"email with by=(?!None)"):
             accounts.record_verification(
                 User(username="x"), VerificationProvenance.EMAIL, by=admin
             )
@@ -625,6 +663,7 @@ class TestConfirmationDoesNotApplyToADirectoryAccount:
         user = upsert_directory_user(
             db, "kim", is_admin=False, source=AuthMode.LDAP
         )
+        assert user is not None
         assert user.email_verification_source == VerificationProvenance.DIRECTORY.value
 
 

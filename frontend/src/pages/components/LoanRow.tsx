@@ -2,6 +2,8 @@ import { Link } from "react-router-dom";
 
 import type { LoanOut } from "../../api/generated/model";
 import { useTranslation } from "../../i18n";
+import { numericDate } from "../../lib/date";
+import { loanState } from "../../lib/loanState";
 import { Button } from "../../components";
 import CoverImage from "./CoverImage";
 
@@ -33,6 +35,9 @@ interface LoanRowProps {
  * column, so the worst case is a pill on two lines and never a card that
  * scrolls.
  *
+ * **Whether the book is back comes from `lib/loanState.ts`.** Every branch on
+ * this card that turns on it reads the one answer, rather than the column.
+ *
  * **The two day counts come from the server, not from the dates beside them.**
  * `days_out` and `days_overdue` are computed in `backend/lending.py`, which is
  * also what the overdue digest reads, so a row here and a reminder sent to a
@@ -57,7 +62,10 @@ export default function LoanRow({
   onMarkReturned,
 }: LoanRowProps) {
   const { t, locale } = useTranslation();
-  const isReturned = Boolean(loan.returned_at);
+  // The one read of the return stamp this component makes. Both facts come out
+  // of `loanState` together, so no two of the places below can disagree about
+  // the same row.
+  const { isOpen, returnedOn } = loanState(loan);
   // Defaulted because both fields are optional in the generated type: they
   // carry a server side default, so orval emits them as `number | undefined`
   // and TypeScript will not let either be compared without this.
@@ -73,7 +81,7 @@ export default function LoanRow({
   return (
     <div
       className={`card p-4 ${
-        isReturned
+        !isOpen
           ? "opacity-60"
           : loan.is_overdue
             ? "border-l-4 border-danger-500 dark:border-danger-500"
@@ -138,20 +146,23 @@ export default function LoanRow({
                       : "loans.overdueByDaysSince",
                     {
                       days: daysOverdue,
-                      date: new Date(loan.due_at).toLocaleDateString(locale),
+                      date: numericDate(loan.due_at, locale),
                     },
                   )
                 : loan.due_at
                   ? t("loans.overdueSince", {
-                      date: new Date(loan.due_at).toLocaleDateString(locale),
+                      date: numericDate(loan.due_at, locale),
                     })
                   : t("loans.overdue")}
             </span>
           )}
-          {!loan.is_overdue && loan.due_at && !loan.returned_at && (
+          {/* `isOpen` rather than the column: a deadline on a book already
+              back is history, and whether it is back is `lib/loanState.ts`'s
+              answer for every branch on this card. */}
+          {!loan.is_overdue && loan.due_at && isOpen && (
             <p className="text-xs text-paper-600 mt-1 dark:text-paper-400">
               {t("loans.dueOn", {
-                date: new Date(loan.due_at).toLocaleDateString(locale),
+                date: numericDate(loan.due_at, locale),
               })}
             </p>
           )}
@@ -165,7 +176,7 @@ export default function LoanRow({
               below. Zero is also what a loan read off a book payload carries,
               because `loan_summary` fills nothing dated, so the same guard
               keeps a defaulted field from rendering as a measurement. */}
-          {!isReturned && daysOut > 0 && (
+          {isOpen && daysOut > 0 && (
             <p className="text-xs text-paper-600 mt-1 dark:text-paper-400">
               {t(daysOut === 1 ? "loans.outForOne" : "loans.outFor", {
                 days: daysOut,
@@ -173,11 +184,16 @@ export default function LoanRow({
             </p>
           )}
           <p className="text-xs text-paper-600 dark:text-paper-400">
-            {new Date(loan.loaned_at).toLocaleDateString(locale)}
-            {loan.returned_at && (
+            {numericDate(loan.loaned_at, locale)}
+            {/* The date out of `lib/loanState.ts`, which is also what the rest
+                of the card branches on, so this line cannot name a return the
+                card is still drawing as open. It is null or a printable date
+                and never anything else falsy, which is what makes the `&&`
+                safe: React prints a falsy number as text. */}
+            {returnedOn && (
               <span className="ml-2 text-green-800 dark:text-green-400">
                 {t("loans.returnedOn", {
-                  date: new Date(loan.returned_at).toLocaleDateString(locale),
+                  date: numericDate(returnedOn, locale),
                 })}
               </span>
             )}
@@ -185,7 +201,7 @@ export default function LoanRow({
         </div>
       </div>
 
-      {!isReturned && (
+      {isOpen && (
         <Button
           variant="secondary"
           fullWidth

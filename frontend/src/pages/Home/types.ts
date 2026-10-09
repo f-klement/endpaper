@@ -9,7 +9,12 @@ import {
 import type { BookFormat } from "../../api/generated/model";
 import type { MessageKey } from "../../i18n";
 import type { LibraryView } from "../../lib/libraryView";
-import { FORMAT_LABELS, FORMAT_ORDER } from "../types";
+import {
+  FORMAT_LABELS,
+  FORMAT_ORDER,
+  STATUS_LABELS,
+  STATUS_ORDER,
+} from "../types";
 
 // `BookFilters` and `DEFAULT_FILTERS` live in `lib/bookFilters.ts` and are
 // re-exported here. The shape moved because nothing in it is view state: the
@@ -50,14 +55,19 @@ export function isWishlist(filters: BookFilters): boolean {
   );
 }
 
+/**
+ * **Built from `pages/types.ts` rather than written out again**, for the reason
+ * `FORMAT_FILTERS` below is, and with one more: the five written here were a
+ * copy of `STATUS_LABELS`, which is exhaustive by type, in a list that was not,
+ * so a status added to the backend enum reached the card and the table by the
+ * type and reached this strip only if somebody remembered. `STATUS_ORDER` keeps
+ * the order the strip renders; `All` leads it, being the absence of a filter
+ * rather than a member of the set.
+ */
 export const STATUS_FILTERS: { label: MessageKey; value: ReadStatus | null }[] =
   [
     { label: "status.all", value: null },
-    { label: "status.unread", value: ReadStatus.unread },
-    { label: "status.want_to_read", value: ReadStatus.want_to_read },
-    { label: "status.reading", value: ReadStatus.reading },
-    { label: "status.read", value: ReadStatus.read },
-    { label: "status.did_not_finish", value: ReadStatus.did_not_finish },
+    ...STATUS_ORDER.map((value) => ({ label: STATUS_LABELS[value], value })),
   ];
 
 /**

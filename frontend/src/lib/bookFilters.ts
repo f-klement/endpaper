@@ -91,7 +91,29 @@ export interface BookFilters {
   ddcDivisions: string[];
 }
 
-export const DEFAULT_FILTERS: BookFilters = {
+/**
+ * The whole library, unnarrowed.
+ *
+ * **Frozen, and so are its three lists.** It is exported, spread into every
+ * rebuilt filter set and handed out as the fallback for a field a stored search
+ * does not carry, so a caller that pushed into one of those lists would edit the
+ * default for every later reader in the document. Nothing does today, and a
+ * frozen list refuses it rather than leaving that resting on nobody trying: a
+ * saved search's filters reach a component through a shared snapshot, and the
+ * type carries no `readonly` to refuse it there.
+ */
+const NO_TAG_IDS: number[] = [];
+const NO_HEADINGS: string[] = [];
+const NO_DIVISIONS: string[] = [];
+
+// Declared and then frozen, rather than frozen in place: `Object.freeze([])` is
+// a `readonly never[]`, which the field types refuse, and casting it back would
+// be claiming the opposite of what this is for.
+Object.freeze(NO_TAG_IDS);
+Object.freeze(NO_HEADINGS);
+Object.freeze(NO_DIVISIONS);
+
+export const DEFAULT_FILTERS: BookFilters = Object.freeze({
   query: "",
   status: null,
   ownership: null,
@@ -103,10 +125,10 @@ export const DEFAULT_FILTERS: BookFilters = {
   collection: null,
   discuss: false,
   sort: BookSort.title_asc,
-  tagIds: [],
-  headings: [],
-  ddcDivisions: [],
-};
+  tagIds: NO_TAG_IDS,
+  headings: NO_HEADINGS,
+  ddcDivisions: NO_DIVISIONS,
+});
 
 /**
  * A filter whose value is a list.
@@ -149,6 +171,80 @@ export function toggledFilter<K extends ListFilterKey>(
   // checked by the signature. Widening the return instead would let a caller
   // spread a patch that names no field at all.
   return { [field]: next } as Pick<BookFilters, K>;
+}
+
+/**
+ * A filter set rebuilt from something stored, field by field.
+ *
+ * **A rebuild, never a cast.** A saved search is JSON a browser has been
+ * holding since whichever version wrote it, and `JSON.parse` narrowed by a type
+ * assertion is a promise about a string nobody checked. A stored `tagIds` that
+ * is a string rather than a list passes such an assertion, then reaches
+ * `toParams`, where its `length` is truthy and its `join` is not a function, so
+ * applying that saved search throws while the page is drawing. That is the
+ * class this closes, and it closes it for every list filter at once rather than
+ * for the one that was found.
+ *
+ * **The fields are read off `DEFAULT_FILTERS` rather than written out**, so a
+ * thirteenth filter is covered by existing, and an unknown key in the stored
+ * object is dropped rather than carried into a request.
+ *
+ * **What this checks is the shape that would break the browser, not the value.**
+ * A list has to be a list of strings or numbers, a string a string, a boolean a
+ * boolean, and a field whose default is null may also carry a string or a
+ * number, because three of those hold an identifier or one of `collection`'s
+ * three states. Whether `status` names a reading status this API knows is the
+ * API's question and it answers 422; whether `tagIds` can be joined is this
+ * browser's, and nothing else was asking it.
+ */
+export function sanitiseFilters(value: unknown): BookFilters {
+  // **Built from the defaults outwards rather than from the stored object
+  // inwards.** Every field is present and of the right kind before anything
+  // stored is looked at, so a missing field is the default by construction and a
+  // key the shape does not have is never carried into a request.
+  const rebuilt: BookFilters = { ...DEFAULT_FILTERS };
+  if (value === null || typeof value !== "object") return rebuilt;
+  const stored = value as Record<string, unknown>;
+  const defaults: Record<string, unknown> = { ...DEFAULT_FILTERS };
+  for (const key of Object.keys(defaults)) {
+    const given = stored[key];
+    // `Object.assign` rather than an indexed write, so nothing here is cast to
+    // a shape it does not have. What is checked is the kind, one field at a
+    // time, against the default that field already holds.
+    //
+    // **A list taken from storage is frozen as it is accepted**, because the
+    // whole set is about to be shared: a saved search's filters are handed to a
+    // component through one snapshot, and the caller that pushed into a list
+    // would edit it for every later reader. Frozen here rather than by a walk
+    // afterwards, so a thirteenth list filter is covered by existing, which is
+    // the property the field walk above already has.
+    if (keepsShape(given, defaults[key]))
+      Object.assign(rebuilt, {
+        // **Copied before it is frozen.** Freezing the argument's own list in
+        // place would be a side effect on the caller's graph, in a function
+        // whose whole claim is that it builds outwards from the defaults and
+        // touches nothing it was handed. One caller passes a `JSON.parse` graph
+        // nobody else holds, so it is latent; the signature takes `unknown` and
+        // invites the caller that makes it real.
+        [key]: Array.isArray(given) ? Object.freeze([...given]) : given,
+      });
+  }
+  return rebuilt;
+}
+
+function keepsShape(given: unknown, fallback: unknown): boolean {
+  if (Array.isArray(fallback))
+    return (
+      Array.isArray(given) &&
+      given.every(
+        (item) => typeof item === "string" || typeof item === "number",
+      )
+    );
+  if (fallback === null)
+    return (
+      given === null || typeof given === "string" || typeof given === "number"
+    );
+  return typeof given === typeof fallback;
 }
 
 function isStatus(value: string | null): value is ReadStatus {

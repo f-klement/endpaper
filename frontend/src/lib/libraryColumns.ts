@@ -30,6 +30,7 @@
 
 import type { MessageKey } from "../i18n/en";
 import { CATALOGUE_MODES, type CatalogueMode } from "./catalogueMode";
+import { declareScopedPreference } from "./preference";
 
 /**
  * Every column the table can draw, in the order it draws them.
@@ -207,7 +208,8 @@ function normalise(mode: CatalogueMode, chosen: Iterable<string>): ColumnKey[] {
  *
  * Both sides are in `COLUMN_KEYS` order by construction, so comparing the
  * joined strings compares the sets. One door, because two callers ask this and
- * the second is `writeColumns` refusing to store a copy of the default.
+ * the second is this preference's encode refusing to store a copy of the
+ * default.
  */
 export function isDefaultColumns(
   mode: CatalogueMode,
@@ -217,76 +219,59 @@ export function isDefaultColumns(
 }
 
 /**
- * This mode's remembered columns, or its default.
+ * This mode's remembered columns, behind the door every stored choice goes
+ * through.
  *
- * Every failure path returns the default rather than throwing, for the reasons
- * `readLibraryView` lists: a private window that refuses to answer, a value
- * written by a version that had other columns, storage that has been cleared.
- * A column choice is not worth failing to render a library over.
+ * What the door supplies, so it is not restated here: neither reading nor
+ * writing throws, and absence means this mode's default. A column choice is not
+ * worth failing to draw a library over.
  *
  * A stored key this mode does not offer is dropped rather than honoured, which
- * is what keeps a hand-edited `libraryColumns.household` from producing a call
+ * is what keeps a hand edited `libraryColumns.household` from producing a call
  * number column in a household.
- */
-export function readColumns(mode: CatalogueMode): ColumnKey[] {
-  try {
-    const stored = localStorage.getItem(STORAGE_KEYS[mode]);
-    if (stored === null) return [...DEFAULT_COLUMNS[mode]];
-
-    // **Decided on the stored tokens, never on the result.** The result always
-    // carries the forced title, so a length test on it cannot tell a reader who
-    // turned every other column off from a value naming nothing this version
-    // knows. Testing the tokens keeps a title-only table storable, which is a
-    // choice the picker can produce, while a set written by a version whose
-    // columns were all called something else still falls back.
-    const known = new Set<string>(AVAILABLE_COLUMNS[mode]);
-    const tokens = stored.split(",").filter((token) => known.has(token));
-    return tokens.length > 0
-      ? normalise(mode, tokens)
-      : [...DEFAULT_COLUMNS[mode]];
-  } catch {
-    return [...DEFAULT_COLUMNS[mode]];
-  }
-}
-
-/**
- * Remember this mode's columns. Silent on failure, for the reason above.
  *
- * **Storing the default clears the key instead.** A stored copy of the default
- * stops following the default the moment a later version changes it, which is
- * the one thing "back to the usual columns" must not do, and a reader who turns
- * a column off and straight back on would otherwise be left holding a frozen
- * copy with no control offered to clear it. Here rather than at the call site,
- * so the invariant is one nobody has to remember.
+ * **`decode` decides on the stored tokens, never on the result.** The result
+ * always carries the forced title, so a length test on it cannot tell a reader
+ * who turned every other column off from a value naming nothing this version
+ * knows. Testing the tokens keeps a title only table storable, which is a
+ * choice the picker can produce, while a set written by a version whose columns
+ * were all called something else still falls back. **This is why the door's
+ * generic "unreadable means the default" cannot do the job alone**: it would
+ * have to ask the question of the decoded value, which is the exact confusion
+ * this rule exists to prevent.
+ *
+ * **`encode` normalises first, so the rule below holds for any input.**
+ * `isDefaultColumns` compares joined strings, so a set equal to the default in
+ * another order, or carrying a key this mode does not offer, would slip past it
+ * and be stored raw: the key would then hold a frozen copy of the default while
+ * `isDefault`, which asks the same question about the already normalised set on
+ * screen, answered false and hid the control that clears it.
+ *
+ * **`encode` returns null on the default, which clears the key.** A stored copy
+ * of the default stops following the default the moment a later version changes
+ * it, which is the one thing "back to the usual columns" must not do. Here
+ * rather than at the call site, so the invariant is one nobody has to remember,
+ * and **here rather than in the door**, because `libraryViewPreference`
+ * deliberately does the opposite and a shared rule would reverse it.
+ *
+ * It also means resetting is writing the default rather than a second call that
+ * removes a key: the two were the same operation spelled twice.
  */
-export function writeColumns(mode: CatalogueMode, keys: ColumnKey[]): void {
-  try {
-    // **Normalised first, so the guard below holds for any input.**
-    // `isDefaultColumns` compares joined strings, so a set equal to the
-    // default in another order, or carrying a key this mode does not offer,
-    // would slip past it and be stored raw: the key would then hold a frozen
-    // copy of the default while `canResetColumns`, which asks the same
-    // question about the already-normalised set on screen, answered false and
-    // hid the control that clears it. Only `toggleColumn` calls this today and
-    // it passes a normalised set, so the sentence below was true only because
-    // the one call site remembered. Now it is true because the function does.
+export const libraryColumnsPreference = declareScopedPreference<
+  CatalogueMode,
+  readonly ColumnKey[]
+>(STORAGE_KEYS, "household", {
+  decode: (raw, mode) => {
+    const known = new Set<string>(AVAILABLE_COLUMNS[mode]);
+    const tokens = raw.split(",").filter((token) => known.has(token));
+    return tokens.length > 0 ? normalise(mode, tokens) : undefined;
+  },
+  encode: (keys, mode) => {
     const canonical = normalise(mode, keys);
-    if (isDefaultColumns(mode, canonical)) {
-      localStorage.removeItem(STORAGE_KEYS[mode]);
-      return;
-    }
-    localStorage.setItem(STORAGE_KEYS[mode], canonical.join(","));
-  } catch {
-    // Storage refused, and the choice goes with it, for the reason
-    // `writeLibraryView` states: the columns are derived from storage rather
-    // than held in state, so a pick that did not land re-reads as the previous
-    // set.
-    //
-    // This said the opposite from the commit that wrote it, 410ab30, which
-    // introduced the derived read in the same change. Never true here, unlike
-    // the view's copy of it, which was.
-  }
-}
+    return isDefaultColumns(mode, canonical) ? null : canonical.join(",");
+  },
+  fallback: (mode) => [...DEFAULT_COLUMNS[mode]],
+});
 
 /**
  * The set after turning one column on or off.
@@ -303,13 +288,4 @@ export function toggledColumns(
   const wanted = new Set<string>(current);
   if (!wanted.delete(key)) wanted.add(key);
   return normalise(mode, wanted);
-}
-
-/** Forget this mode's choice, so it draws its default again. */
-export function clearColumns(mode: CatalogueMode): void {
-  try {
-    localStorage.removeItem(STORAGE_KEYS[mode]);
-  } catch {
-    // As above.
-  }
 }

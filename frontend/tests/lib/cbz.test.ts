@@ -18,10 +18,47 @@
  * assert an empty record are the common path rather than the edge.
  */
 
+import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 
-import { readCbz, readComicInfo } from "../../src/lib/cbz";
-import { buildZip, bytes, STORED, type EntrySpec } from "../zipFixtures";
+import * as cbz from "../../src/lib/cbz";
+import {
+  MAX_COMIC_INFO_BYTES,
+  readCbz,
+  readComicInfo,
+  type CbzReading,
+} from "../../src/lib/cbz";
+import { holds, PROFILE, PROPERTY, witness, type Repeated } from "../property";
+import {
+  aimedArchive,
+  archiveSpec,
+  buildZip,
+  bytes,
+  entrySpec,
+  isBomb,
+  STORED,
+  zeroesAt,
+  type ArchiveSpec,
+  type EntrySpec,
+  type Payload,
+} from "../zipFixtures";
+import {
+  expectAnswer,
+  expectNamedOutcome,
+  hostile,
+  overrunBreach,
+  stoppedAt,
+  type Door,
+  type ValueDoor,
+} from "./readerContract";
+import {
+  declares,
+  COMIC_INFO,
+  render as renderXml,
+  xmlDocument,
+  type XmlDocument,
+} from "./xmlArbitrary";
+import type { FileMetadata } from "../../src/lib/fileReaders";
 
 /** A ComicInfo document holding whatever elements a case needs. */
 function comicInfo(elements: string): string {
@@ -62,13 +99,22 @@ async function buildCbz(
  * bound would be indistinguishable from a document that is not a ComicInfo.
  * This one reads as `read: Saga #12`, which names itself.
  */
-const OVER_THE_CAP = comicInfo(
-  `<Series>Saga</Series><Number>12</Number>` +
-    `<Summary>${" ".repeat(1024 * 1024)}</Summary>`,
-);
+const OVER_THE_CAP: Repeated = (() => {
+  const [before, after] = comicInfo(
+    "<Series>Saga</Series><Number>12</Number><Summary>\u0000</Summary>",
+  ).split("\u0000");
+  // A spec rather than the string, so a counterexample carrying it prints as
+  // four fields and not as a mebibyte of spaces.
+  return {
+    before: before!,
+    unit: " ",
+    times: MAX_COMIC_INFO_BYTES,
+    after: after!,
+  };
+})();
 
 /** The failure, or the title, so one assertion covers both arms. */
-function outcome(reading: Awaited<ReturnType<typeof readCbz>>): string {
+function verdict(reading: Awaited<ReturnType<typeof readCbz>>): string {
   return reading.ok ? `read: ${reading.metadata.title}` : reading.failure;
 }
 
@@ -110,7 +156,7 @@ describe("reading a whole comic archive", () => {
       }),
     );
 
-    expect(outcome(reading)).toBe("read: Saga #12");
+    expect(verdict(reading)).toBe("read: Saga #12");
   });
 
   it("gives a collected volume exactly the same shape as an issue", async () => {
@@ -139,7 +185,7 @@ describe("reading a whole comic archive", () => {
       await buildCbz({ info: comicInfo(`<Title>Maus</Title>`) }),
     );
 
-    expect(outcome(reading)).toBe("read: Maus");
+    expect(verdict(reading)).toBe("read: Maus");
     expect(reading.ok && reading.metadata.seriesName).toBeNull();
   });
 
@@ -148,7 +194,7 @@ describe("reading a whole comic archive", () => {
       await buildCbz({ info: comicInfo(`<Series>Sandman</Series>`) }),
     );
 
-    expect(outcome(reading)).toBe("read: Sandman");
+    expect(verdict(reading)).toBe("read: Sandman");
   });
 
   it("keeps an issue number that is not a number in the title only", async () => {
@@ -161,7 +207,7 @@ describe("reading a whole comic archive", () => {
       }),
     );
 
-    expect(outcome(reading)).toBe("read: Saga #Annual 1");
+    expect(verdict(reading)).toBe("read: Saga #Annual 1");
     expect(reading.ok && reading.metadata.seriesIndex).toBeNull();
   });
 });
@@ -175,7 +221,7 @@ describe("finding the metadata entry", () => {
       await buildCbz({ info: WHOLE, infoAt: "Saga 012/ComicInfo.xml" }),
     );
 
-    expect(outcome(reading)).toBe("read: The Will");
+    expect(verdict(reading)).toBe("read: The Will");
   });
 
   it("does not mind how the entry is cased", async () => {
@@ -183,7 +229,7 @@ describe("finding the metadata entry", () => {
       await buildCbz({ info: WHOLE, infoAt: "comicinfo.xml" }),
     );
 
-    expect(outcome(reading)).toBe("read: The Will");
+    expect(verdict(reading)).toBe("read: The Will");
   });
 
   it("takes the first of two in central directory order", async () => {
@@ -201,7 +247,7 @@ describe("finding the metadata entry", () => {
       }),
     );
 
-    expect(outcome(reading)).toBe("read: The Will");
+    expect(verdict(reading)).toBe("read: The Will");
   });
 
   it("is not answered by an entry that merely ends in the name", async () => {
@@ -211,7 +257,7 @@ describe("finding the metadata entry", () => {
       await buildCbz({ info: WHOLE, infoAt: "not-ComicInfo.xml" }),
     );
 
-    expect(outcome(reading)).toBe("read: null");
+    expect(verdict(reading)).toBe("read: null");
   });
 });
 
@@ -238,7 +284,7 @@ describe("an archive that says nothing about itself", () => {
       await buildZip({ entries: [{ name: "notes.txt", data: "hello" }] }),
     ]);
 
-    expect(outcome(await readCbz(zip))).toBe("read: null");
+    expect(verdict(await readCbz(zip))).toBe("read: null");
   });
 
   it("answers the same way for a document that is not a ComicInfo", async () => {
@@ -246,19 +292,19 @@ describe("an archive that says nothing about itself", () => {
       await buildCbz({ info: "<html><body>nope</body></html>" }),
     );
 
-    expect(outcome(reading)).toBe("read: null");
+    expect(verdict(reading)).toBe("read: null");
   });
 
   it("answers the same way for a document that will not parse", async () => {
     const reading = await readCbz(await buildCbz({ info: "<ComicInfo>" }));
 
-    expect(outcome(reading)).toBe("read: null");
+    expect(verdict(reading)).toBe("read: null");
   });
 });
 
 describe("a file that is not an archive", () => {
   it("is the one thing this reader calls a failure", async () => {
-    expect(outcome(await readCbz(new Blob([bytes("just some text")])))).toBe(
+    expect(verdict(await readCbz(new Blob([bytes("just some text")])))).toBe(
       "not-a-comic",
     );
   });
@@ -272,7 +318,7 @@ describe("a file that is not an archive", () => {
       }),
     ]);
 
-    expect(outcome(await readCbz(zip))).toBe("protected");
+    expect(verdict(await readCbz(zip))).toBe("protected");
   });
 
   it("reports a truncated archive as damaged", async () => {
@@ -291,7 +337,7 @@ describe("a file that is not an archive", () => {
       }),
     ]);
 
-    expect(outcome(await readCbz(zip))).toBe("damaged");
+    expect(verdict(await readCbz(zip))).toBe("damaged");
   });
 
   it("reports a compression method it cannot read as unsupported", async () => {
@@ -308,7 +354,7 @@ describe("a file that is not an archive", () => {
       }),
     ]);
 
-    expect(outcome(await readCbz(zip))).toBe("unsupported");
+    expect(verdict(await readCbz(zip))).toBe("unsupported");
   });
 
   it("refuses a metadata entry that declares more than it will read", async () => {
@@ -328,7 +374,7 @@ describe("a file that is not an archive", () => {
       }),
     );
 
-    expect(outcome(reading)).toBe("too-large");
+    expect(verdict(reading)).toBe("too-large");
   });
 
   it("refuses one that lies about its size and inflates past it anyway", async () => {
@@ -349,7 +395,7 @@ describe("a file that is not an archive", () => {
       }),
     );
 
-    expect(outcome(reading)).toBe("too-large");
+    expect(verdict(reading)).toBe("too-large");
   });
 });
 
@@ -358,11 +404,11 @@ describe("the document itself", () => {
     // The same exposure the package document has and the same refusal, through
     // `xmlEntities.declaresEntities`: expansion happens inside the engine's
     // parser, before any code here has a node to bound.
-    const hostile = `<?xml version="1.0"?>
+    const declaring = `<?xml version="1.0"?>
 <!DOCTYPE ComicInfo [<!ENTITY s "Saga">]>
 <ComicInfo><Series>&s;</Series><Number>12</Number></ComicInfo>`;
 
-    expect(readComicInfo(hostile)).toBeNull();
+    expect(readComicInfo(declaring)).toBeNull();
   });
 
   it("does not read a year the schema means as unknown", () => {
@@ -440,6 +486,28 @@ describe("the document itself", () => {
     ]);
   });
 
+  it("reads the genre whole and never splits it on its comma", () => {
+    // **The decision this reader had to take and the one a tidy up would
+    // reverse**, `Writer` two arms above being split on exactly that comma.
+    // The destination decides it: `books.categories` holds values that
+    // routinely contain a comma, Google's own subjects being "Fiction,
+    // general", which is why the column joins on a semicolon at all. A
+    // splitter here would cut the one shape the column exists to hold whole.
+    const record = readComicInfo(
+      comicInfo(`<Genre>Science Fiction, Space Opera</Genre>`),
+    );
+
+    expect(record?.categories).toEqual(["Science Fiction, Space Opera"]);
+  });
+
+  it("states no genre for a comic that declared none", () => {
+    // The other side, without which the arm above is satisfied by a reader
+    // that answers the empty list to everything.
+    expect(
+      readComicInfo(comicInfo(`<Series>Saga</Series>`))?.categories,
+    ).toEqual([]);
+  });
+
   it("is not answered from inside the page list", () => {
     // The page block holds one element per page and a reader searching the
     // whole subtree would let a crafted one answer for a field it does not
@@ -450,12 +518,213 @@ describe("the document itself", () => {
     const record = readComicInfo(
       comicInfo(
         `<Pages><Page Image="0"/><Series>Not Saga</Series>` +
-          `<Writer>Nobody</Writer></Pages>` +
+          `<Writer>Nobody</Writer><Genre>Not A Genre</Genre></Pages>` +
           `<Series>Saga</Series>`,
       ),
     );
 
     expect(record?.seriesName).toBe("Saga");
     expect(record?.authors).toEqual([]);
+    // The field added last, asked the same question: a subtree search would
+    // let a crafted page element assert a subject on somebody's book.
+    expect(record?.categories).toEqual([]);
+  });
+});
+
+/** Names a comic archive's entries go by, the ones this reader looks for first. */
+const COMIC_NAMES = fc.oneof(
+  fc.constantFrom(
+    "ComicInfo.xml",
+    "Saga 012/comicinfo.XML",
+    "page-001.jpg",
+    "comicinfo.xml/",
+  ),
+  fc.string({ maxLength: 10 }),
+);
+
+/** Documents the entry holds: whole, over the cap, refusing, and not XML. */
+const COMIC_DOCUMENTS: fc.Arbitrary<Payload> = fc.oneof(
+  {
+    arbitrary: fc.constantFrom<Payload>(WHOLE, OVER_THE_CAP, comicInfo("")),
+    weight: 2,
+  },
+  {
+    arbitrary: fc.constantFrom<Payload>(
+      `<?xml version="1.0"?><!DOCTYPE c [<!ENTITY e "x">]><ComicInfo>&e;</ComicInfo>`,
+      "<ComicInfo",
+      "",
+    ),
+    weight: 1,
+  },
+  { arbitrary: zeroesAt([MAX_COMIC_INFO_BYTES]), weight: 1 },
+);
+
+/**
+ * Any archive, or one whose document is a bomb aimed at its ceiling: weighted
+ * so a run from any seed draws the bomb, which independent draws reach on a
+ * few runs in a hundred.
+ */
+const comicArchive = fc.oneof(
+  {
+    arbitrary: archiveSpec(
+      entrySpec(COMIC_NAMES, COMIC_DOCUMENTS, [MAX_COMIC_INFO_BYTES]),
+    ),
+    weight: 3,
+  },
+  { arbitrary: aimedArchive("ComicInfo.xml", MAX_COMIC_INFO_BYTES), weight: 1 },
+);
+
+/**
+ * `readCbz` as a door. **The aggregate beside the per inflater bound**,
+ * because the PDF defect was a bound on each step and none on the sum: the
+ * reader reads one entry today, and a change reading a second matching entry,
+ * or falling back to the next on an unreadable one, multiplies what it spends
+ * by the entries an archive holds. One inflater costs a correct reader nothing
+ * under it.
+ */
+const door: Door<ArchiveSpec, CbzReading> = {
+  module: cbz,
+  ceilings: () => ({
+    perInflate: MAX_COMIC_INFO_BYTES,
+    inflated: MAX_COMIC_INFO_BYTES,
+    refusesEntities: true,
+  }),
+  build: buildZip,
+  open: (file) => readCbz(file),
+};
+
+/** The entry `readCbz` reads: the first whose basename is the document's. */
+function comicInfoEntry(spec: ArchiveSpec): EntrySpec | undefined {
+  return spec.entries.find(
+    (entry) => entry.name.toLowerCase().split("/").pop() === "comicinfo.xml",
+  );
+}
+
+describe("any comic archive a member picks", () => {
+  it(
+    "is read or refused by name, inflating no chunk past the document's ceiling",
+    PROPERTY,
+    async () => {
+      expect(
+        await holds(
+          hostile(comicArchive),
+          async (input) => expectNamedOutcome(door, input),
+          {
+            "stopped a bomb at the document's ceiling": (_, { counted }) =>
+              stoppedAt(counted, MAX_COMIC_INFO_BYTES),
+          },
+        ),
+      ).toBe(PROFILE.runs);
+    },
+  );
+
+  it("is metered, so the ceiling above is not held over nothing", async () => {
+    const { outcome, counted } = await expectNamedOutcome(door, {
+      spec: { entries: [{ name: "ComicInfo.xml", data: WHOLE }] },
+      patches: [],
+    });
+
+    expect(outcome).toMatchObject({
+      answered: { ok: true, metadata: { title: "The Will" } },
+    });
+    expect(counted.inflaters).toBe(1);
+    expect(counted.inflated).toBeGreaterThan(0);
+  });
+
+  it("declares the ceilings it is held to, so one deleted or loosened reds", async () => {
+    expect(
+      await overrunBreach(door, {
+        ceiling: "perInflate",
+        bound: MAX_COMIC_INFO_BYTES,
+      }),
+    ).toContain(`against a bound of ${MAX_COMIC_INFO_BYTES}`);
+    expect(
+      await overrunBreach(door, {
+        ceiling: "inflated",
+        bound: MAX_COMIC_INFO_BYTES,
+        each: MAX_COMIC_INFO_BYTES,
+      }),
+    ).toContain(`inflated against a ceiling of ${MAX_COMIC_INFO_BYTES}`);
+    expect(await overrunBreach(door, { ceiling: "refusesEntities" })).toContain(
+      "declaring an entity",
+    );
+  });
+
+  it("draws a bomb where the reader looks for the document", async () => {
+    await witness(hostile(comicArchive), {
+      "puts a bomb where the reader looks for the document": ({
+        spec,
+        patches,
+      }) => {
+        const entry = comicInfoEntry(spec);
+        return (
+          patches.length === 0 &&
+          entry !== undefined &&
+          isBomb(entry, MAX_COMIC_INFO_BYTES)
+        );
+      },
+    });
+  });
+});
+
+/**
+ * `readComicInfo` as a door: a document in, a record or `null` out.
+ *
+ * **Held at the parser door the meter counts**: no XML parse is handed a
+ * declaration. What the property draws is a tree over this reader's own
+ * names, mostly grafted into one it accepts, so its walk behind the root is
+ * reached, and damage no tree can express inserted on top.
+ */
+const xmlDoor: ValueDoor<XmlDocument, FileMetadata | null> = {
+  module: cbz,
+  ceilings: () => ({ refusesEntities: true }),
+  open: (document) => readComicInfo(renderXml(document)),
+};
+
+describe("any ComicInfo document a comic carries", () => {
+  it(
+    "is read or refused, and never parsed while it declares an entity",
+    PROPERTY,
+    async () => {
+      expect(
+        await holds(xmlDocument(COMIC_INFO), async (document) => {
+          await expectAnswer(xmlDoor, document);
+        }),
+      ).toBe(PROFILE.runs);
+    },
+  );
+
+  it("is metered, so the parse ceilings above are not held over nothing", async () => {
+    const { outcome, counted } = await expectAnswer(xmlDoor, {
+      declaration: "none",
+      root: COMIC_INFO.accepted,
+      insertions: [],
+      padTo: undefined,
+    });
+
+    expect(outcome).toMatchObject({ answered: { title: "Saga #1" } });
+    expect(counted.parses).toBe(1);
+  });
+
+  it("declares the parse ceiling it is held to, so deleting it reds", async () => {
+    // **The positive control for a door handed a value**: a stub hands the
+    // meter's parser a declaring document through this door's own ceilings.
+    expect(
+      await overrunBreach(xmlDoor, { ceiling: "refusesEntities" }),
+    ).toContain("declaring an entity");
+  });
+
+  it("draws documents it reads, and documents that declare", async () => {
+    // **Asked of the reader rather than of the tree**: whether a drawn
+    // document is one this reader reads is the reader's to say, and a
+    // vocabulary that stopped matching it is what turns this red.
+    await witness(xmlDocument(COMIC_INFO), {
+      "the reader reads": async (document) => {
+        if (document.padTo !== undefined) return false;
+        const { outcome } = await expectAnswer(xmlDoor, document);
+        return "answered" in outcome && outcome.answered !== null;
+      },
+      "declares an entity": declares,
+    });
   });
 });

@@ -1,6 +1,7 @@
 import type { BookOut } from "../../../api/generated/model";
 import { Button, Icon } from "../../../components";
 import { useTranslation } from "../../../i18n";
+import { numericDate } from "../../../lib/date";
 
 interface TrashRowProps {
   book: BookOut;
@@ -23,9 +24,12 @@ export default function TrashRow({
   onRestore,
   onPurge,
 }: TrashRowProps) {
-  const { t } = useTranslation();
+  const { t, locale } = useTranslation();
+  // The date was rendered in the browser's locale here, not the app's, so a
+  // German reader with an English browser saw one format on this page and
+  // another everywhere else.
   const deletedOn = book.deleted_at
-    ? new Date(book.deleted_at).toLocaleDateString()
+    ? numericDate(book.deleted_at, locale)
     : null;
 
   return (

@@ -5,28 +5,37 @@ is worth pinning is the field mapping and, above all, the merge rule:
 enrichment adds what is missing and does not overrule what a member typed.
 """
 
+import logging
+import re
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 import httpx
 import pytest
 import respx
+from hypothesis import given
+from hypothesis import strategies as st
 
 import covers
 import fetch
 from google_books import (
+    CATEGORY_SEPARATOR,
     VOLUME_ID,
     GoogleBooksError,
     _series_from_title,
+    _series_in_parentheses,
     _volume_to_fields,
     is_a_volume_id,
+    join_categories,
     lookup_by_isbn,
     lookup_by_volume_id,
     merge_into,
     search,
+    split_categories,
 )
 from models import Book
 from schemas import BookMatch
+from tests.test_house_rules import _is_vendored
 
 VOLUMES = "https://www.googleapis.com/books/v1/volumes"
 
@@ -120,7 +129,8 @@ class TestLookupByIsbn:
             return_value=httpx.Response(200, json={"items": [VOLUME]})
         )
         fields = await lookup_by_isbn("9780441013593", "key")
-        assert fields is not None and fields["title"] == "Dune"
+        assert fields is not None
+        assert fields["title"] == "Dune"
 
     async def test_returns_none_when_google_has_nothing(self, google):
         google.get(url__startswith=VOLUMES).mock(
@@ -141,6 +151,17 @@ class TestLookupByIsbn:
         )
         await lookup_by_isbn("9780441013593", "secret-key")
         assert "key=secret-key" in str(route.calls[0].request.url)
+
+    async def test_the_key_never_reaches_the_log(self, google, caplog):
+        """The key rides in the query string, so the HTTP library's own request
+        line names it. Captured at DEBUG because that line is logged at INFO,
+        which a capture at WARNING cannot see."""
+        google.get(url__startswith=VOLUMES).mock(
+            return_value=httpx.Response(200, json={"items": [VOLUME]})
+        )
+        with caplog.at_level(logging.DEBUG):
+            await lookup_by_isbn("9780441013593", "secret-key")
+        assert "secret-key" not in caplog.text
 
 
 class TestErrors:
@@ -327,10 +348,20 @@ class TestTheSignatureIsTheBound:
     def _names_read_off_the_match(self) -> set[str]:
         """Every field name `merge_into` takes off its argument, from the source.
 
-        Two shapes, because the function uses two: a `getattr` over a tuple of
-        literal names, and a direct attribute access for the cover. Reading
-        both is what makes this a second derivation rather than a re-reading of
-        the tuple, and the cover is the name only the second shape sees.
+        Two shapes, because the function uses two: a `getattr` over whatever the
+        loop walks, and a direct attribute access for the cover. Reading both is
+        what makes this a second derivation rather than a re-reading of the set,
+        and the cover is the name only the second shape sees.
+
+        **The loop's iterator is evaluated, not pattern matched.** A walk that
+        reads `loop.iter.elts` sees a literal and nothing else, so it returns the
+        empty set the moment the loop names a constant instead: the partition
+        below then goes short and fails, which is the right direction, but it
+        makes this a question about a spelling rather than about the columns.
+        Evaluating the expression in the module's own namespace follows any
+        spelling there is, for `test_the_model_is_the_only_channel_into_it`'s
+        reason about `ast.unparse`: enumerating the kinds is the shape this
+        repository keeps paying for.
         """
         import ast
         import inspect
@@ -351,11 +382,8 @@ class TestTheSignatureIsTheBound:
             and node.value.id == "match"
         }
         for loop in (node for node in ast.walk(fn) if isinstance(node, ast.For)):
-            names |= {
-                element.value
-                for element in getattr(loop.iter, "elts", [])
-                if isinstance(element, ast.Constant) and isinstance(element.value, str)
-            }
+            walked = eval(ast.unparse(loop.iter), vars(google_books))
+            names |= {name for name in walked if isinstance(name, str)}
         return names
 
     def test_every_column_it_writes_is_a_field_the_model_bounds(self):
@@ -418,10 +446,72 @@ class TestTheSignatureIsTheBound:
         """
         book = Book(title="Dune", page_count=None)
 
-        with pytest.raises(AttributeError):
+        with pytest.raises(AttributeError, match="'dict' object has no attribute"):
             merge_into(book, _volume_to_fields(VOLUME), overwrite=False)  # type: ignore[arg-type]
 
         assert book.page_count is None
+
+
+#: The expression the parenthesised series rule used to be, its `\d` narrowed to
+#: ASCII digits as the reader's number is, kept as the oracle the linear reader is
+#: held to. **Here and nowhere in the application**: it is quadratic on a run of `(`.
+_SERIES_IN_PARENTHESES: Final = re.compile(
+    r"\(([^)]+?)[,\s]+(?:#|book\s+|bk\.?\s*)([0-9]+(?:\.[0-9]+)?)\)\s*$", re.IGNORECASE
+)
+
+#: The units the expression treats differently, plus the words it looks for and
+#: the characters whose class is not obvious: a Kelvin sign is a case blind `k`,
+#: an Arabic-Indic three is a `\d`, U+001C and U+00A0 are `\s`.
+_SERIES_UNITS: Final = [
+    "(", ")", " ", ",", "#", ".", "1", "2", "\u0663", "b", "o", "k", "B", "K",
+    "\N{KELVIN SIGN}", "\n", "\x1c", "\u00a0", "a", "book", "bk", " #", "1.5",
+]
+
+
+class TestTheParenthesisedSeriesIsReadInOnePass:
+    """`google_books._series_in_parentheses`, which replaced a quadratic expression.
+
+    **No property sees time**, so the halves are held apart, as the BnF
+    publisher rule's are: the generated one holds the answer to the old
+    expression's, and the named one is sized so the old form cannot finish
+    inside the per test ceiling. Neither is a timing assertion.
+    """
+
+    @pytest.mark.property
+    @given(
+        title=st.lists(st.sampled_from(_SERIES_UNITS), max_size=14).map("".join)
+        | st.text(max_size=24)
+    )
+    def test_it_answers_what_the_expression_answered(self, title):
+        match = _SERIES_IN_PARENTHESES.search(title)
+        expected = (match.group(1), match.group(2)) if match else None
+        assert _series_in_parentheses(title) == expected
+
+    @pytest.mark.parametrize(
+        "digit",
+        [
+            pytest.param("\N{ARABIC-INDIC DIGIT THREE}", id="Arabic-Indic"),
+            pytest.param("\N{FULLWIDTH DIGIT THREE}", id="fullwidth"),
+        ],
+    )
+    @pytest.mark.parametrize(
+        "shape", ["Dune (Dune Chronicles #{})", "Dune, Book {}"], ids=["parenthesised", "suffix"]
+    )
+    def test_a_series_numbered_in_another_scripts_digits_is_no_series(self, digit, shape):
+        """`\\d` admitted them and `float` read them, which is the quiet half of
+        the unnarrowed digit predicate this tree refuses. Both shapes the title
+        is read in, each script a separate case: the suffix shape kept `\\d`
+        after the parenthesised one was narrowed, and read both as 3.0."""
+        assert _series_from_title(shape.format(digit)) == (None, None)
+
+    @pytest.mark.parametrize("close", ["", ")"])
+    def test_a_title_as_long_as_a_response_is_read_in_one_pass(self, close):
+        """A run of `(` filling a whole response, with and without a closing
+        parenthesis. Measured at 5.06 seconds for 16,000 characters on the old
+        form, quadratic; this is a hundred and thirty times longer."""
+        title = "Z" + "(" * (fetch.MAX_RESPONSE_BYTES - 400) + close
+        fields = _volume_to_fields({"id": "x", "volumeInfo": {"title": title}})
+        assert (fields["series_name"], fields["series_index"]) == (None, None)
 
 
 class TestSeriesParsing:
@@ -540,7 +630,7 @@ class TestTheVolumeIdBound:
 
         Python's `$` also matches immediately before a trailing newline, so
         `^[A-Za-z0-9_-]{12}$` would admit this and put a newline in a URL path.
-        `takeout.ts` spells the same rule with `^...$` and is right to, because
+        The browser spells the same rule with `^...$` and is right to, because
         JavaScript's `$` without the `m` flag is end of input.
         """
         assert not is_a_volume_id("abcdefghijkl\n")
@@ -553,79 +643,193 @@ class TestTheVolumeIdBound:
         assert route.call_count == 0
 
 
-class TestTheThreeSpellings:
-    """One rule, spelled in three files, and only this one is a security bound.
+class TestTheShapeIsSpelledOncePerTree:
+    """One rule, spelled once in each tree, and only the server's is a bound.
 
-    `takeout.ts` keeps a sidecar line that is not an id out of the browser's
-    parse and `stores.ts` keeps a plugin's invented value out of a stored row.
-    Neither runs on the server: `backup.restore` writes `book_identifiers`
-    through Core and runs no Pydantic model, so a restored row reaches
-    `lookup_by_volume_id` having passed neither. This test is what stops the
-    three drifting apart silently.
+    The browser's keeps a plugin's invented value out of a stored row, and
+    `takeout.ts` borrows the same rule to tell a sidecar's volume id line from
+    the lines beside it. Neither runs on the server: `backup.restore` writes
+    `book_identifiers` through Core and runs no Pydantic model, so a restored
+    row reaches `lookup_by_volume_id` having passed neither. This test is what
+    stops the two drifting apart silently.
+
+    **The browser half is a census and names no path.** What it replaced was a
+    map from file to the assignment that file had to contain, and a map of files
+    goes stale when one moves: the rule lived in `calibre.ts` and
+    `ScanPage/types.ts` before it was folded into `stores.ts`, and that fold was
+    a frontend change no frontend run could notice, since this is a backend test
+    reading frontend source. It failed on the merge instead, which is the
+    arrangement working and is not free. A census is indifferent to where the
+    rule lives and refuses what the map could not: a **second** spelling
+    arriving anywhere under `src`.
+
+    **What it reads is the literal a browser writes, so a second spelling that
+    is not that literal is outside it.** `new RegExp("^" + CLASS + "$")` builds
+    the same rule out of pieces this never sees, and no matcher closes that set:
+    the map it replaced had the same hole and covered two files as well.
+    Measured 2026-09-20 over the 461 modules under `src`, 200 of them
+    generated: one expression in that tree is built rather than written,
+    `fileName.ts`'s edge debris class, and it is built out of a character set
+    rather than a shape.
+
+    **The direction it is wrong in, written down rather than left to be met.**
+    It requires the literal to be bound inline, so
+    `const VOLUME_SHAPE = /.../;` with `google_books: VOLUME_SHAPE,` beside it is
+    one spelling in one module and fails this by name. That is a loud wrong
+    failure and it is a visit: the answer is to widen what this counts as a
+    binding, with the reason written here, rather than to spell the rule twice
+    to satisfy it. Found by the design seat.
+
+    **What no census can say is that the rule is reached.** A binding kept and
+    no longer consulted passes this, which is the half that was missing when
+    this was a map and is missing now. Two frontend arms ask the reader instead,
+    `tests/lib/stores.test.ts > the Takeout reader asks the value rule rather
+    than one of its own` and `tests/lib/takeout.test.ts > reads no volume id out
+    of a thirteen character metadata line`; only a frontend run sees them. What
+    this contributes is that there is exactly one rule for them to reach.
     """
 
     #: The character class and length.
     SHAPE = "[A-Za-z0-9_-]{12}"
 
-    #: The **assignment** each browser module makes, not the shape it mentions.
+    #: The rule as a browser writes it, anchors included.
+    #:
+    #: **Anchors are part of the shape, and JavaScript is where they can be.**
+    #: They were left out of the first version of this guard on an argument
+    #: about Python's `$` that is about the **server** pattern and was applied
+    #: to the wrong side: the browser spells `^...$`, where JavaScript's `$`
+    #: without the `m` flag is end of input.
+    LITERAL = f"/^{SHAPE}$/"
+
+    #: The **assignment** the browser makes, not the shape it mentions.
     #:
     #: **Both critic seats evaded the weaker version of this, independently,
     #: which is the strongest signal this process produces.** It asserted that
     #: `SHAPE` appeared anywhere in the file, so every widening that kept those
-    #: characters somewhere passed. The design seat rewrote `takeout.ts` to
+    #: characters somewhere passed. The design seat rewrote the browser rule to
     #: `/^([A-Za-z0-9_-]{12})+$/`, admitting any multiple of twelve; the
     #: security seat rewrote it to `/^[A-Za-z0-9_.~%-]{1,60}$/` and left the old
     #: class in a trailing comment. Backend 77 passed and frontend `tests/lib/`
     #: 1,185 passed in 42 files under the first; 3 passed under the second.
-    #:
-    #: **Anchors included, and matching where the value is bound.** A comment
-    #: cannot satisfy `const VOLUME_ID = ...`, and the anchors were left out of
-    #: the first version on an argument about Python's `$` that is about the
-    #: **backend** pattern and was applied to the wrong side: both browser
-    #: modules spell `^...$`, where JavaScript's `$` is end of input.
-    #: **This map names files, so it goes stale when one moves, and it did.**
-    #: The browser's half of the rule lived in `calibre.ts` and
-    #: `ScanPage/types.ts` until they were folded into `stores.ts`, beside the
-    #: type whose property the rule is. Nothing on the frontend broke and
-    #: nothing on the frontend could notice: this is a backend test reading
-    #: frontend source, so only a backend run sees it, and the branch that moved
-    #: the literal had no reason to make one. It failed loudly on the merge,
-    #: which is the arrangement working rather than a near miss.
-    ASSIGNMENTS = {
-        "frontend/src/lib/takeout.ts": f"const VOLUME_ID = /^{SHAPE}$/",
-        "frontend/src/lib/stores.ts": f"google_books: /^{SHAPE}$/",
-    }
+    BINDING = f"google_books: {LITERAL}"
 
-    @pytest.mark.parametrize("relative", sorted(ASSIGNMENTS))
-    def test_the_browser_spells_the_same_shape(self, relative):
-        source = (REPOSITORY / relative).read_text()
-        expected = self.ASSIGNMENTS[relative]
-        assert expected in source, (
-            f"{relative} no longer binds the volume id rule as `{expected}`, "
-            f"which is the literal this backend bound was derived from. Either "
-            f"all three move or none does: widening one alone files a row "
-            f"another refuses, and narrowing one alone drops an identifier "
-            f"another stores. Only the backend one is a security bound, because "
-            f"only it is between a stored value and a URL."
+    #: What counts as the browser's own source, and what that leaves out.
+    #:
+    #: `src` rather than the whole frontend: a test may quote a rule in order to
+    #: assert it, and `tests/lib/stores.test.ts` does, so a census over both
+    #: would count the guard as a second spelling. **The bound is stated rather
+    #: than left to be rediscovered**: a rule written in a `.mts`, `.cts`, `.js`
+    #: or `.jsx` under `src`, or in `frontend/public/`, is outside this. Neither
+    #: exists today, measured 2026-09-20: the only other files under `src` are
+    #: two stylesheets, and the only shipped script outside it is
+    #: `public/sw-cleanup.js`. Found by the security seat.
+    SUFFIXES = {".ts", ".tsx"}
+
+    @classmethod
+    def _browser_sources(cls) -> dict[str, str]:
+        """Every module of the browser's own source, keyed by path from here.
+
+        **`_is_vendored` decides what is ours, rather than a second answer
+        written here.** It is `test_house_rules.py`'s shared predicate and its
+        set already names `node_modules`, which is the one directory this walk
+        would have to learn about the day somebody points the root a level up at
+        `frontend/`. A walk that decides that for itself is what the rule
+        `test_no_other_test_module_walks_a_tree_of_python_without_the_shared_rule`
+        refuses, and it refuses it by shape rather than by which tree is walked.
+
+        **It narrows this corpus by nothing today**, measured 2026-09-20: 461
+        modules before the filter and 461 after. What it would narrow by is a
+        dot directory or a `node_modules` under `src`, and it is here for the
+        day the root moves rather than for a file it drops now.
+        """
+        root = REPOSITORY / "frontend" / "src"
+        return {
+            path.relative_to(REPOSITORY).as_posix(): path.read_text(encoding="utf-8")
+            for path in sorted(root.rglob("*"))
+            if path.suffix in cls.SUFFIXES and not _is_vendored(path, REPOSITORY)
+        }
+
+    def test_the_browser_binds_the_shape_in_one_module(self):
+        sources = self._browser_sources()
+        # **A named member and not a count**, which is the anchor
+        # `tests/lib/fileReaders.test.ts` uses for its own derivation: a corpus
+        # that failed to resolve reports nothing carrying the rule, and
+        # "nothing" is what a wrong root answers too. A count drifts against a
+        # tree that is 43% generated; this module is the reader that asks the
+        # rule, so it is in any corpus this test could be reading.
+        assert "frontend/src/lib/takeout.ts" in sources, (
+            f"read {len(sources)} browser modules and the Takeout reader was "
+            f"not among them, so this is not the browser's source tree"
+        )
+
+        carrying = {
+            path: source.count(self.LITERAL)
+            for path, source in sources.items()
+            if self.LITERAL in source
+        }
+        # **Three outcomes and three sentences**, because the message is what a
+        # person meets: gone, written twice, and written twice in one file are
+        # different things somebody did, and one sentence covering all three
+        # describes none of them. Found by the security seat.
+        if not carrying:
+            raise AssertionError(
+                f"The volume id rule `{self.LITERAL}` is written nowhere under "
+                f"`frontend/src`. The browser's copy is one half of a rule the "
+                f"server also spells, and the server's is a security bound "
+                f"between a stored value and a URL, so the two move together or "
+                f"neither does. Widening it here alone files a row the server "
+                f"refuses; narrowing it alone drops an identifier the server "
+                f"would take."
+            )
+        assert list(carrying.values()) == [1], (
+            f"The volume id rule `{self.LITERAL}` is written in "
+            f"{sorted(carrying)}, {sum(carrying.values())} times, rather than "
+            f"once in one browser module. A second copy is a second place it "
+            f"can be widened alone, which is what this guard exists for, and a "
+            f"prose mention of the literal counts as one: say what the rule is "
+            f"rather than writing it again. The reader that needs it asks "
+            f"`producedValue`."
+        )
+
+        [(path, _)] = carrying.items()
+        source = sources[path]
+        assert self.BINDING in source, (
+            f"{path} carries the volume id rule but does not bind it as "
+            f"`{self.BINDING}`, so what this guard compared may be a mention "
+            f"rather than the rule the browser runs."
         )
 
     def test_the_guard_is_not_satisfied_by_a_mention(self):
         """The evasion both critic seats found, pinned so it cannot return.
 
-        A file that spells a wider rule and names the old one in a comment must
-        fail. Asserted against the matcher rather than by editing a file,
-        because the thing under test is the string this class compares.
-        """
-        widened = (
-            "const VOLUME_ID = /^[A-Za-z0-9_.~%-]{1,60}$/; "
-            f"// was {self.SHAPE}\n"
-        )
-        assert self.ASSIGNMENTS["frontend/src/lib/takeout.ts"] not in widened
+        A module that spells a wider rule and names the old one beside it must
+        fail. Asserted against the matchers rather than by editing a file,
+        because the thing under test is what this class compares.
 
-    def test_the_backend_pattern_is_that_shape(self):
+        **Two fixtures, because `BINDING` contains `LITERAL` and one fixture
+        cannot tell the two matchers apart.** A mention of the shape leaves both
+        absent, so only the census speaks; a mention of the **literal** beside a
+        widened binding passes the census's count and is caught by the binding
+        alone, which is the arm that would otherwise never fail on its own.
+        Found by the design seat.
+        """
+        mentions_the_shape = (
+            f"  google_books: /^[A-Za-z0-9_.~%-]{{1,60}}$/, // was {self.SHAPE}\n"
+        )
+        assert self.LITERAL not in mentions_the_shape
+        assert self.BINDING not in mentions_the_shape
+
+        mentions_the_literal = (
+            f"  // the rule was {self.LITERAL}\n"
+            "  google_books: /^[A-Za-z0-9_.~%-]{1,60}$/,\n"
+        )
+        assert mentions_the_literal.count(self.LITERAL) == 1
+        assert self.BINDING not in mentions_the_literal
+
+    def test_the_server_pattern_is_that_shape(self):
         """`\\A` and `\\Z` where the browser has `^` and `$`, and that is the one
-        difference the comparison above may not make: Python's `$` also matches
-        before a trailing newline."""
+        difference the census may not make: Python's `$` also matches before a
+        trailing newline."""
         assert VOLUME_ID.pattern == rf"\A{self.SHAPE}\Z"
 
 
@@ -894,7 +1098,7 @@ class TestAHostileVolumePayload:
         assert len(body) < fetch.MAX_RESPONSE_BYTES
         google.get(VOLUME_URL).mock(return_value=httpx.Response(200, content=body))
 
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="nested too deeply"):
             await lookup_by_volume_id("gbid00000001", "key")
 
     async def test_categories_of_mixed_types(self, google):
@@ -903,3 +1107,102 @@ class TestAHostileVolumePayload:
         )
         assert fields is not None
         assert fields["categories"] == "Fiction"
+
+
+class TestTheJoinRefusesToStoreASubjectThatWouldReadBackAsTwo:
+    """`join_categories` drops a subject carrying the separator.
+
+    **The one place that knows the separator, so it reaches every producer.** Two
+    upstream joins build their value without looking inside a single subject,
+    `_volume_to_fields` here and `catalogue.Record.as_match`, and a subject holding
+    a bare separator is not representable in this column: `split_categories` splits
+    on that character, so storing one serves two subjects to every reader and
+    manufactures an assertion nobody made.
+
+    Dropped rather than raised, because this runs inside a catalogue read and
+    raising would lose a record over one subject.
+    `schemas.book.normalised_subjects` is what refuses, at both request bodies
+    carrying this field.
+    """
+
+    def test_a_clean_list_is_joined_whole(self) -> None:
+        """The baseline. A join that dropped everything would pass every arm
+        below."""
+        assert join_categories(["Fiction", "Science Fiction"]) == (
+            f"Fiction{CATEGORY_SEPARATOR}Science Fiction"
+        )
+
+    def test_a_subject_carrying_the_separator_is_dropped(self) -> None:
+        """The arm. Before this, `["Fiction; general"]` stored whole and read back
+        as two subjects, measured."""
+        assert join_categories(["Fiction; general", "Horror"]) == "Horror"
+
+    def test_a_list_of_nothing_but_such_subjects_stores_a_null(self) -> None:
+        """The column is nullable and an empty join answers None, so dropping the
+        only subject leaves no row claiming an empty string."""
+        assert join_categories(["A;B"]) is None
+
+    def test_no_value_this_join_produces_reads_back_as_more_subjects(self) -> None:
+        """The property the drop buys, over inputs that can break it.
+
+        The list here carries two separator bearing subjects, so a join that kept
+        them would answer four subjects for a list of four.
+        """
+        supplied = ["Fiction", "Fiction; general", "Horror", "A;B"]
+        assert any(CATEGORY_SEPARATOR.strip() in subject for subject in supplied)
+
+        stored = join_categories(supplied)
+
+        assert split_categories(stored) == ["Fiction", "Horror"]
+
+    def test_a_volume_whose_category_carries_the_separator_stores_neither_half(
+        self,
+    ) -> None:
+        """Through the producer rather than the helper, since that is the path that
+        built such a value."""
+        fields = _volume_to_fields(
+            {"volumeInfo": {"title": "T", "categories": ["Fiction; general"]}}
+        )
+
+        assert fields["categories"] is None
+
+
+class TestTheJoinCapsTheCountForAProducer:
+    """`join_categories(..., limit=)` caps what a producer hands `BookMatch`.
+
+    **The cap belongs to the producer because the model refuses**, and
+    `routers/books._match_rows` builds that model inside a `try` that drops the
+    **row**. So an uncapped producer costs a whole search result for a record that
+    is merely well described. `catalogue.Record.match_headings` carries the same
+    rule one field over, and the incident that bought it.
+    """
+
+    def test_without_a_limit_nothing_is_truncated(self) -> None:
+        """The baseline, and the create route depends on it: that caller is already
+        bounded by the request schema and passes no limit."""
+        assert join_categories(["a"] * 40) == CATEGORY_SEPARATOR.join(["a"] * 40)
+
+    def test_a_list_past_the_limit_is_truncated_to_it(self) -> None:
+        assert join_categories(["a"] * 40, limit=32) == CATEGORY_SEPARATOR.join(
+            ["a"] * 32
+        )
+
+    def test_a_list_inside_the_limit_is_untouched(self) -> None:
+        """The false refusal the cap could have bought."""
+        assert join_categories(["a"] * 32, limit=32) == CATEGORY_SEPARATOR.join(
+            ["a"] * 32
+        )
+
+    def test_the_drop_runs_before_the_truncation(self) -> None:
+        """`bounded_headings`' rule, and the arm that separates the two orders.
+
+        The separator bearing subjects are at the **front**, so truncating first
+        would keep them, watch the join drop them, and answer **30** against a limit
+        of 32, having discarded the two good subjects that sat behind them. Measured
+        both ways. Dropping first answers the limit exactly.
+        """
+        supplied = ["bad;one", "bad;two"] + [f"good {i}" for i in range(32)]
+
+        stored = join_categories(supplied, limit=32)
+
+        assert split_categories(stored) == [f"good {i}" for i in range(32)]

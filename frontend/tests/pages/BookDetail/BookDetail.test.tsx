@@ -9,6 +9,7 @@ import {
   BookIdentifierScheme,
   OwnershipStatus,
   ReadStatus,
+  type CustomFieldOut,
   type UserOut,
 } from "../../../src/api/generated/model";
 import BookDetail from "../../../src/pages/BookDetail";
@@ -28,19 +29,19 @@ const OWNER: UserOut = {
   id: 1,
   username: "owner",
   is_admin: false,
-  created_at: "2026-01-01T00:00:00",
+  created_at: "2026-01-01T12:00:00Z",
 };
 const OTHER: UserOut = {
   id: 2,
   username: "other",
   is_admin: false,
-  created_at: "2026-01-01T00:00:00",
+  created_at: "2026-01-01T12:00:00Z",
 };
 const ADMIN: UserOut = {
   id: 3,
   username: "admin",
   is_admin: true,
-  created_at: "2026-01-01T00:00:00",
+  created_at: "2026-01-01T12:00:00Z",
 };
 
 let api: MockApi;
@@ -60,7 +61,10 @@ function stubLoad({
   users = [OWNER, OTHER],
   googleBooks = false,
   goodreads = false,
-  customFields = [] as { id: number; name: string; kind: string }[],
+  // **The generated model, not a shape written here.** A mock body typed
+  // loosely is a stub that cannot be wrong: a field the model requires can go
+  // missing from it with nothing to report that.
+  customFields = [] as CustomFieldOut[],
   customFieldValues = [] as {
     field_id: number;
     name: string;
@@ -85,9 +89,9 @@ function stubLoad({
   api.on("/api/users", { body: users });
   api.on("/api/settings/features", {
     body: {
-      google_books_enabled: googleBooks,
-      // Toggled on and a key stored. The two are separate flags because a
-      // toggle with no key produces a button that can only ever 400.
+      // Toggled on and a key stored, which is the conjunction the server
+      // sends: a toggle with no key produces a button that can only ever 400,
+      // so the client is told the answer rather than the two rows.
       google_books_ready: googleBooks,
       goodreads_lookup_enabled: goodreads,
       default_locale: "en",
@@ -295,6 +299,29 @@ describe("BookDetail", () => {
       );
     });
 
+    it("invents a tag and puts it on the book in one request", async () => {
+      const tags = makeTagSet();
+      stubLoad({ book: makeBook({ id: 1, tags: [], added_by: OWNER }), tags });
+      api.on("/api/books/1/tags", { body: makeBook({ id: 1 }) });
+      renderDetail();
+
+      const user = userEvent.setup();
+      await user.click(await screen.findByRole("button", { name: "+ Add" }));
+      await user.type(screen.getByLabelText("New tag"), "Loft finds");
+      await user.click(screen.getByRole("button", { name: "Create" }));
+
+      await waitFor(() =>
+        expect(api.lastCall("/api/books/1/tags", "POST")?.body).toEqual({
+          name: "Loft finds",
+        }),
+      );
+      // **The create that used to come first is gone**, not merely reordered:
+      // it answered with a tag id the attach then had to be trusted with, and
+      // a name colliding with a tag on a book this reader cannot see made the
+      // second request 404 after the first had answered 201.
+      expect(api.lastCall("/api/books/tags", "POST")).toBeUndefined();
+    });
+
     it("removes a tag", async () => {
       const tags = makeTagSet();
       stubLoad({
@@ -347,7 +374,9 @@ describe("BookDetail", () => {
       // field is this library's own filing of a fact about the book, beside
       // its tags, its shelf and its collection.
       stubLoad({
-        customFields: [{ id: 1, name: "Calibre-web", kind: "url" }],
+        customFields: [
+          { id: 1, name: "Calibre-web", kind: "url", renamable: true },
+        ],
         customFieldValues: [
           {
             field_id: 1,
@@ -1170,9 +1199,12 @@ describe("BookDetail enrichment fields", () => {
 });
 
 describe("BookDetail lending with a due date", () => {
-  it("sends the chosen date as the end of that day", async () => {
+  it("sends the chosen date as the end of that day where the member is", async () => {
     // Midnight would make a book due "today" overdue from the moment it was
-    // lent, which is not what anyone means by a return date.
+    // lent, which is not what anyone means by a return date. The offset is the
+    // other half, and the larger one: without it the server reads this wall
+    // clock as a UTC clock, so the overdue predicate fired seven hours early
+    // in Los Angeles. `lib/date.ts::endOfDayInstant` carries the rest.
     stubLoad();
     api.on(/\/api\/loans$/, { body: makeLoan() });
     renderDetail(OWNER);
@@ -1188,9 +1220,22 @@ describe("BookDetail lending with a due date", () => {
     });
     await user.click(screen.getByRole("button", { name: "Loan" }));
 
+    // **A literal is not available here and that is the point.** The correct
+    // body differs between the suite container, which runs UTC, and a
+    // developer machine: measured, `2026-09-01T23:59:59.000Z` against
+    // `2026-09-01T21:59:59.000Z` in `Europe/Berlin`. A literal pins whichever
+    // zone the run happened to be in and reddens everywhere else.
+    //
+    // **Built from parts rather than from the string the component parses**,
+    // so this states the intent in a second expression instead of calling the
+    // component's own. Month 8 is September. It is still an equality, so a
+    // dropped offset fails on the string rather than passing on an instant
+    // that happens to match.
+    const endOfThePickedDay = new Date(2026, 8, 1, 23, 59, 59);
+
     await waitFor(() =>
       expect(api.lastCall(/\/api\/loans$/, "POST")?.body).toMatchObject({
-        due_at: "2026-09-01T23:59:59",
+        due_at: endOfThePickedDay.toISOString(),
       }),
     );
   });

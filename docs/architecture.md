@@ -342,11 +342,15 @@ right before the app can serve a request: the secret key, the auth mode, the dat
 localised and needs the default language before anyone has a token. The full record,
 including the masked API key, is admin-only.
 
-Two flags describe Google Books rather than one. `google_books_enabled` is the admin's
-toggle; `google_books_ready` is whether it will actually work, meaning the toggle is on
-**and** a key exists. The UI needs the second to decide between offering a control and
-greying it out, because a toggle with no key behind it produces a button that can only ever
-400. Neither reveals the key.
+`GET /api/settings/features` sends `google_books_ready`, which is whether Google Books will
+actually work: the admin's toggle is on **and** a key exists. The UI needs it to decide
+between offering a control and greying it out, because a toggle with no key behind it
+produces a button that can only ever 400. It does not reveal the key.
+
+**The raw toggle is not sent beside it**, and lives on the admin record instead: sent
+together the two say more than the conjunction alone does. The rule that came out of it,
+every field on this endpoint has a reader and one with none is refused, is stated on
+`FeatureFlagsOut` with the argument, and held by a test on each side.
 
 **The key has two possible homes, and the environment wins.** `GOOGLE_BOOKS_API_KEY` in the
 environment overrides anything stored, cannot be edited through the app, and causes a write

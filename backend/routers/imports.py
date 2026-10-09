@@ -37,7 +37,7 @@ from classifications import bounded_headings
 from config import MAX_UPLOAD_BYTES
 from dependencies import CurrentUser, DbSession
 from import_readers import ImportReader
-from importing import Import, MarcImport, MarcIndex, bounded_fields
+from importing import Import, MarcImport, MarcIndex, stored_record
 from ratelimit import import_limiter
 from schemas import (
     ImportPreviewOut,
@@ -300,7 +300,7 @@ def preview_marc(
     counts what it will match and `blocked` counts what it will refuse for an
     ISBN this member cannot see, through `MarcIndex.holds` and
     `MarcIndex.would_refuse`, which are the same index and the same predicates
-    `MarcImport` applies, over the same `bounded_fields`. Counting only the
+    `MarcImport` applies, over the same stored records. Counting only the
     first overstated what an import would add by exactly the number of records
     another member holds privately.
 
@@ -329,10 +329,15 @@ def preview_marc(
 
     parsed = _read_marc(_read_upload(file))
     index = MarcIndex.build(db, current_user.id)
-    # The same bounded view the import matches on. Matching the raw record here
+    # The same stored view the import matches on. Matching the raw record here
     # and the truncated one there would make the two screens disagree about the
     # records the bound acts on, which is exactly what the counts are for.
-    bounded = [bounded_fields(record) for record in parsed.records]
+    #
+    # **One list, and the rows below read it too.** They used to read
+    # `parsed.records` while the counts read the projection, which is the two
+    # views of one value the comment above says must not happen; it was invisible
+    # only because the projection is the identity on every reachable path.
+    stored = [stored_record(record) for record in parsed.records]
 
     return MarcPreviewOut(
         total_records=parsed.total,
@@ -340,8 +345,8 @@ def preview_marc(
         skipped=parsed.skipped,
         # `holds`, never `find`: this is a count, and `find` loads a Book that
         # would be thrown away. See `MarcIndex.holds` for the measurement.
-        already_held=sum(1 for fields in bounded if index.holds(fields)),
-        blocked=sum(1 for fields in bounded if index.would_refuse(fields)),
+        already_held=sum(1 for record in stored if index.holds(record)),
+        blocked=sum(1 for record in stored if index.would_refuse(record)),
         rows=[
             MarcPreviewRow(
                 title=record.title or "",
@@ -352,7 +357,7 @@ def preview_marc(
                     for heading in bounded_headings(record.headings)
                 ],
             )
-            for record in parsed.records[:_PREVIEW_RECORDS]
+            for record in stored[:_PREVIEW_RECORDS]
         ],
     )
 

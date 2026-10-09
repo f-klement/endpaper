@@ -8,6 +8,8 @@ ordinary round trips.
 """
 
 import dataclasses
+import hashlib
+import sys
 from pathlib import Path
 from types import MappingProxyType
 
@@ -16,12 +18,14 @@ import keyring
 import keyring.backend
 import keyring.errors
 import pytest
+from sqlalchemy.exc import OperationalError
 
 import credentials
 import targets
 from database import Base
 from enums import CatalogueSource, CredentialProvenance
 from models import CatalogueCredential
+from tests.conftest import forget_any_encryption_key
 from tests.helpers import sealed_before_the_origin_was_bound
 from tests.test_house_rules import _is_vendored
 
@@ -82,6 +86,30 @@ def keychain():
     keyring.set_keyring(previous)
 
 
+class _LockedKeyring(keyring.backend.KeyringBackend):
+    """A keychain that exists and refuses, as a locked one does."""
+
+    priority = 1
+
+    def get_password(self, service: str, username: str) -> str | None:
+        raise keyring.errors.KeyringLocked("locked")
+
+    def set_password(self, service: str, username: str, password: str) -> None:
+        raise keyring.errors.PasswordSetError("locked")
+
+    def delete_password(self, service: str, username: str) -> None:
+        raise keyring.errors.PasswordDeleteError("locked")
+
+
+@pytest.fixture
+def locked_keychain():
+    """A keychain that refuses for the length of one test, then the failing one back."""
+    previous = keyring.get_keyring()
+    keyring.set_keyring(_LockedKeyring())
+    yield
+    keyring.set_keyring(previous)
+
+
 @pytest.fixture
 def key() -> bytes:
     """32 bytes of key material, without configuring anything."""
@@ -106,7 +134,25 @@ class TestAKeyIsNeverInvented:
         assert "CREDENTIAL_ENCRYPTION_KEY" in str(refusal.value)
 
 
+#: BIP-39's own SHA-256 of `english.txt`, as the specification publishes it.
+#:
+#: **The anchor is the standard rather than the package this build installed**,
+#: so this pins the list against being wrong as well as against changing.
+ENGLISH_WORDLIST_DIGEST = "2f5eed53a4727b4bf8880d8f3f199efc90e58503646d9ff8eff3a2ed3b24dbda"
+
+
 class TestARecoveryPhraseIsTheOnlyFormOfAKey:
+    def test_the_wordlist_is_the_one_the_standard_publishes(self):
+        """A permuted list is the silent failure nothing else here can see.
+
+        Every checksum stays self consistent under it, every word stays in the
+        list, and every phrase already written down derives a different key.
+        The membership check is word by word and the checksum arithmetic holds
+        for any 2,048 words in any order, so neither notices.
+        """
+        listed = "\n".join(credentials._WORDS.wordlist) + "\n"
+        assert hashlib.sha256(listed.encode()).hexdigest() == ENGLISH_WORDLIST_DIGEST
+
     def test_a_generated_phrase_is_twenty_four_words(self):
         assert len(credentials.generate_phrase().split()) == credentials.PHRASE_WORDS
 
@@ -130,6 +176,78 @@ class TestARecoveryPhraseIsTheOnlyFormOfAKey:
     def test_only_a_whole_key_can_be_written_as_a_phrase(self):
         with pytest.raises(credentials.KeyConfigurationError):
             credentials.key_to_phrase(b"too short")
+
+
+#: What a failed checksum says, whatever phrase produced it.
+#:
+#: **Asserted whole rather than by substring.** A fixed string cannot carry any
+#: part of the input, which is a stronger guarantee than any assertion about
+#: which words are absent from it.
+CHECKSUM_REFUSAL = (
+    "The recovery phrase failed its checksum, so at least one word is "
+    "wrong or two are swapped. Check it against what you wrote down."
+)
+
+
+def _the_checksum_holds(words: list[str]) -> bool:
+    """BIP-39's own rule, written out rather than asked of the module under test.
+
+    24 words are 264 bits: 256 of entropy, then the first 8 bits of that
+    entropy's SHA-256. **A test that asks `phrase_to_key` which inputs it
+    refuses agrees with it by construction**, so it cannot notice the function
+    refusing the wrong set. The swaps below are chosen against this instead.
+
+    The wordlist is the module's own deliberately. The disagreement this exists
+    to find is about the checksum, and a second list from elsewhere would
+    surface a changed wordlist as a checksum failure, which reads as a bug in
+    the wrong place. Sharing it leaves this blind to the list itself, which is
+    why `test_the_wordlist_is_the_one_the_standard_publishes` pins that
+    separately: word by word membership does not, and neither does any checksum.
+    """
+    bits = "".join(f"{credentials._WORDS.wordlist.index(word):011b}" for word in words)
+    entropy_bits = credentials.KEY_BYTES * 8
+    material = int(bits[:entropy_bits], 2).to_bytes(credentials.KEY_BYTES, "big")
+    return hashlib.sha256(material).digest()[0] == int(bits[entropy_bits:], 2)
+
+
+def _a_swap_the_checksum_rejects(
+    words: list[str], pairs: list[tuple[int, int]], *, among: str
+) -> list[str]:
+    """The first of `pairs` whose swap BIP-39 refuses, as the swapped words.
+
+    **Derived rather than drawn.** Swapping two words of a valid phrase leaves a
+    valid phrase about 1 time in 226, measured on 2026-09-20 over 200,000
+    generated phrases, against 1 in 228 derived: 1 in 256 that the moved bits
+    still match the checksum, plus 1 in 2,048 that the two words are the same
+    word and the swap does nothing. So a test that swapped one pair and asserted
+    a refusal was a claim about its draw rather than about the checksum, and it
+    reddened the pipeline at random with a failure reading as a regression in
+    recovery phrase validation. Asking the rule which pairs it rejects makes the
+    assertion true of every phrase without pinning the phrase.
+
+    **Both directions of the rule going wrong are refused here**, and only one
+    of them is loud on its own. A rule that accepted everything would exhaust
+    `pairs`, which takes about `228 ** len(pairs)` draws to happen honestly. A
+    rule that refused everything would hand back the first candidate with no
+    signal at all, and for the test below that candidate is the last two words:
+    the flake this replaced, restored in silence. So the phrase is put to the
+    rule first, where the answer is known.
+    """
+    if not _the_checksum_holds(words):
+        raise AssertionError(
+            "the rule above refuses a phrase this build generated, so the "
+            "search below would hand back its first candidate and assert "
+            "nothing about the checksum"
+        )
+    for first, second in pairs:
+        swapped = list(words)
+        swapped[first], swapped[second] = swapped[second], swapped[first]
+        if not _the_checksum_holds(swapped):
+            return swapped
+    raise AssertionError(
+        f"no swap {among} is refused by the checksum, so the assertion beside "
+        f"this one would hold for a reason that is not the one it names"
+    )
 
 
 class TestAMistypedPhraseFailsAtInput:
@@ -160,18 +278,82 @@ class TestAMistypedPhraseFailsAtInput:
             credentials.phrase_to_key(" ".join([*words[:-1], "endpaper"]))
         assert "endpaper" not in str(refusal.value)
 
+    #: The sentence the fixture's entropy is the digest of.
+    #:
+    #: **A label and not a key.** Anybody can recompute the phrase from it, and
+    #: that is the property being bought: there is nothing here to leak.
+    #: Writing the 32 bytes out as hex instead was considered and refused,
+    #: because the hex **is** the entropy: `key_to_phrase` turns it straight
+    #: back into the phrase, so hex obscures the exposure rather than removing
+    #: it.
+    SWAP_FIXTURE_LABEL = b"endpaper: the swap fixture, not a key"
+
+    #: A phrase whose last two words, swapped, fail the checksum. It opens
+    #: nothing, and it exists only while this file is running.
+    #:
+    #: **Fixed, so that one case of this is reproducible.** Swapping two words
+    #: breaks the checksum for most phrases and not for all, at the rate
+    #: `_a_swap_the_checksum_rejects` records, so asking `generate_phrase()`
+    #: for one asserted something untrue of 1 draw in 226. The two tests after
+    #: this one keep the fresh phrase and derive the swap from the rule.
+    #:
+    #: **Never spell a phrase here.** Any phrase this fixture can use is
+    #: checksum valid by definition, so written out it is indistinguishable
+    #: from a leaked key to any scanner and to any reader. Deriving it keeps
+    #: both properties the literal was bought for, one phrase and one pair,
+    #: and puts neither in the tree.
+    #:
+    #: **Nothing asserts the derived phrase is valid or that its last two words
+    #: differ**, and neither wants an assertion. `key_to_phrase` refuses
+    #: anything but a whole key, and `test_the_round_trip_is_exact` is what
+    #: says its output reads back; an unlucky label would make the swap below a
+    #: no op, which fails the test after this one by name on its first run.
+    SWAP_BREAKS_THE_CHECKSUM = credentials.key_to_phrase(
+        hashlib.sha256(SWAP_FIXTURE_LABEL).digest()
+    )
+
     def test_two_swapped_words_fail_the_checksum(self):
-        words = credentials.generate_phrase().split()
+        words = self.SWAP_BREAKS_THE_CHECKSUM.split()
         swapped = [*words[:22], words[23], words[22]]
         with pytest.raises(credentials.BadRecoveryPhrase) as refusal:
             credentials.phrase_to_key(" ".join(swapped))
-        # The whole message, not a substring: a fixed string cannot carry any
-        # part of the input, which is a stronger guarantee than any assertion
-        # about which words are absent from it.
-        assert str(refusal.value) == (
-            "The recovery phrase failed its checksum, so at least one word is "
-            "wrong or two are swapped. Check it against what you wrote down."
+        assert str(refusal.value) == CHECKSUM_REFUSAL
+
+    def test_a_swap_that_moves_the_checksum_bearing_word_is_refused(self):
+        """The fixed phrase's class again, over a phrase drawn fresh each run.
+
+        The last word carries the 8 checksum bits as well as 3 of entropy, so a
+        swap touching it moves bits across that boundary. The last two words
+        are the first pair offered, which is the case the fixture above pins.
+        """
+        words = credentials.generate_phrase().split()
+        last = credentials.PHRASE_WORDS - 1
+        swapped = _a_swap_the_checksum_rejects(
+            words,
+            [(position, last) for position in reversed(range(last))],
+            among="of the last word with an earlier one",
         )
+        with pytest.raises(credentials.BadRecoveryPhrase) as refusal:
+            credentials.phrase_to_key(" ".join(swapped))
+        assert str(refusal.value) == CHECKSUM_REFUSAL
+
+    def test_a_swap_before_the_last_word_is_refused_too(self):
+        """The class no test here reached, fixed phrase or generated.
+
+        Every pair before the last leaves the checksum byte exactly where it
+        is and changes only the entropy it is computed over, which is the other
+        side of the boundary the test above crosses.
+        """
+        words = credentials.generate_phrase().split()
+        last = credentials.PHRASE_WORDS - 1
+        swapped = _a_swap_the_checksum_rejects(
+            words,
+            [(first, second) for first in range(last) for second in range(first + 1, last)],
+            among="of two words before the last",
+        )
+        with pytest.raises(credentials.BadRecoveryPhrase) as refusal:
+            credentials.phrase_to_key(" ".join(swapped))
+        assert str(refusal.value) == CHECKSUM_REFUSAL
 
 
 class TestOneKeyInTwoStoresIsFineAndTwoKeysIsNot:
@@ -233,6 +415,17 @@ class TestAKeyIsKeptWhereTheMachineCanKeepIt:
             credentials.store_key(credentials.generate_phrase())
         assert "CREDENTIAL_ENCRYPTION_KEY" in str(refusal.value)
 
+    def test_forgetting_a_key_kept_in_the_keychain_takes_it_out_of_the_keychain(
+        self, keychain
+    ):
+        """`forget_key` clears every store it reads a key from, and on a desktop
+        that is the keychain. Answering one store cleared while the key stayed
+        in force is the silent success the function exists to refuse."""
+        credentials.store_key(credentials.generate_phrase())
+
+        assert credentials.forget_key() == 1
+        assert credentials.key_material() is None
+
     def test_a_named_key_file_is_read_where_one_is_named(self, monkeypatch, tmp_path):
         phrase = credentials.generate_phrase()
         named = tmp_path / "somewhere" / "key"
@@ -240,6 +433,49 @@ class TestAKeyIsKeptWhereTheMachineCanKeepIt:
         named.write_text(phrase)
         monkeypatch.setenv("CREDENTIAL_ENCRYPTION_KEY_FILE", str(named))
         assert credentials.key_material() == credentials.phrase_to_key(phrase)
+
+
+class TestAStoreThatCannotAnswerIsNeverReadAsEmpty:
+    """Empty means "no key here", and the sentence that follows it on a screen
+    is "generate one", which replaces the key that opens every stored login.
+    So a store that exists and refused says so, and only a store that is not
+    there at all answers empty."""
+
+    def test_a_build_without_the_keychain_package_keeps_its_key_in_a_file(
+        self, db, monkeypatch
+    ):
+        """The published image, which leaves the package out on purpose. The
+        suite installs it, so this is the one arm that runs the image's path."""
+        monkeypatch.setitem(sys.modules, "keyring", None)
+
+        phrase, where = credentials.generate_key(db)
+
+        assert where == "file"
+        assert credentials.key_material() == credentials.phrase_to_key(phrase)
+
+    def test_a_locked_keychain_is_reported_rather_than_read_as_no_key(
+        self, locked_keychain
+    ):
+        with pytest.raises(credentials.KeyConfigurationError, match="Unlock it"):
+            credentials.key_material()
+
+    def test_a_locked_keychain_refuses_a_new_key_rather_than_passing_it_to_a_file(
+        self, locked_keychain
+    ):
+        """It exists, so it is where the key belongs: a file written instead
+        would be found beside whatever the keychain holds once it unlocks."""
+        with pytest.raises(credentials.KeyConfigurationError, match="refused to store"):
+            credentials.store_key(credentials.generate_phrase())
+        assert not credentials.key_file().exists()
+
+    def test_a_key_file_that_exists_and_cannot_be_read_is_reported(
+        self, monkeypatch, tmp_path
+    ):
+        """A directory where the file should be is the read error every
+        account can produce, root included."""
+        monkeypatch.setenv("CREDENTIAL_ENCRYPTION_KEY_FILE", str(tmp_path))
+        with pytest.raises(credentials.KeyConfigurationError, match="could not be read"):
+            credentials.key_material()
 
 
 class TestAKeyIsShownOnceAndNeverAgain:
@@ -388,7 +624,7 @@ class TestAnEnvelopeIsBoundToTheAddressItIsFor:
         url"` and opening over `"file:///etc/passwd"` then round trips, because
         `origin_of` answers `""` for both and two empty origins compare equal.
         """
-        with pytest.raises(credentials.CredentialError):
+        with pytest.raises(credentials.CredentialError):  # noqa: PT012  the round trip, as the docstring says
             envelope = credentials.seal(key, "bne", "not a url", "alice:hunter2")
             credentials.unseal(key, "bne", "file:///etc/passwd", envelope)
 
@@ -510,6 +746,24 @@ class TestAnEnvelopeSealedBeforeTheBindingIsOpenedAndCarriedForward:
         after = credentials.stored_envelope(db, "bne")
         assert after.split(".")[0] == credentials.VERSION
         assert credentials.stored(db, "bne", BNE_URL) == ("a", "b")
+
+    def test_a_re_seal_that_cannot_be_written_still_answers_the_read(
+        self, db, key: bytes, monkeypatch
+    ):
+        """A failure to write is not a failure to read: the old envelope stays,
+        and the next read tries again."""
+        credentials.store_key(credentials.key_to_phrase(key))
+        old = sealed_before_the_origin_was_bound(key, "bne", "a:b")
+        db.add(CatalogueCredential(source="bne", envelope=old))
+        db.commit()
+
+        def locked():
+            raise OperationalError("SAVEPOINT", {}, Exception("database is locked"))
+
+        monkeypatch.setattr(db, "begin_nested", locked)
+
+        assert credentials.stored(db, "bne", BNE_URL) == ("a", "b")
+        assert credentials.stored_envelope(db, "bne") == old
 
     def test_and_the_carried_forward_envelope_is_bound_to_the_address(self, db, key: bytes):
         """Which is the whole point of carrying it forward rather than keeping it."""
@@ -976,13 +1230,15 @@ class TestTheSupersededSchemeIsSafeOnlyWhileARosterAddressIsCode:
         from collections.abc import Mapping
         from types import MappingProxyType
 
-        assert isinstance(targets.SEEDED, Mapping) and targets.SEEDED
+        assert isinstance(targets.SEEDED, Mapping)
+        assert targets.SEEDED
         assert isinstance(targets.SEEDED, MappingProxyType), (
             "the roster is writable, so an edited row moves the address a "
             "superseded envelope opens at"
         )
         for target in targets.SEEDED.values():
-            assert isinstance(target.base_url, str) and target.base_url
+            assert isinstance(target.base_url, str)
+            assert target.base_url
 
     def test_and_no_write_to_it_is_accepted(self):
         """The three shapes, two of which every ast walk here missed."""
@@ -1329,6 +1585,23 @@ class TestTheStoreSealsWhatItIsGiven:
         credentials.put(db, "bne", BNE_URL, "bob", "correcthorse")
         assert credentials.stored(db, "bne", BNE_URL) == ("bob", "correcthorse")
 
+    def test_reading_a_source_nothing_was_stored_for_says_so(self, db):
+        credentials.generate_key(db)
+        with pytest.raises(credentials.UnreadableCredential, match="No credential is stored"):
+            credentials.stored(db, "bne", BNE_URL)
+
+    def test_a_state_resolved_over_two_disagreeing_stores_refuses_naming_them(
+        self, db, monkeypatch
+    ):
+        """Not as "no key", which tells an admin to type the login in again when
+        the thing to fix is the second store."""
+        credentials.generate_key(db)
+        monkeypatch.setenv("CREDENTIAL_ENCRYPTION_KEY", credentials.generate_phrase())
+        state = credentials.key_state()
+        assert state.material is None
+        with pytest.raises(credentials.KeyConfigurationError, match="Different encryption keys"):
+            credentials.stored(db, "bne", BNE_URL, state)
+
     def test_a_username_with_a_colon_is_refused(self, db):
         credentials.generate_key(db)
         with pytest.raises(credentials.CredentialError):
@@ -1494,13 +1767,18 @@ class TestThisBuildShipsExactlyTheDefaultsItSaysItDoes:
             )
 
     @pytest.mark.parametrize(
-        "username, password", [("", "p"), ("u", ""), ("a:b", "p")]
+        ("username", "password", "refusal"),
+        [
+            ("", "p", "needs both a username and a password"),
+            ("u", "", "needs both a username and a password"),
+            ("a:b", "p", "may not contain a colon"),
+        ],
     )
     def test_a_shipped_pair_follows_the_rule_every_other_pair_follows(
-        self, username, password
+        self, username, password, refusal
     ):
         """One representation for the shipped, sealed and pinned spellings."""
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match=refusal):
             targets.ShippedCredential(username, password)
 
     def test_every_shipped_pair_would_be_accepted_by_the_store(self, db):
@@ -1876,7 +2154,8 @@ class TestAKeyIsNotMintedOverLoginsItCannotOpen:
 
         said = str(refusal.value)
         assert "recovery phrase" in said
-        assert "bne" in said and "dnb" in said
+        assert "bne" in said
+        assert "dnb" in said
 
     def test_the_phrase_opens_them_again(self, db):
         phrase, _ = credentials.generate_key(db)
@@ -1911,6 +2190,50 @@ class TestThereIsAWayBackFromNotWritingTheWordsDown:
 
     def test_discarding_nothing_clears_nothing(self):
         assert credentials.forget_key() == 0
+
+
+class TestTheSuiteCanForgetAKeyItCannotReach:
+    """`forget_the_encryption_key` runs for every test in the suite, and what it
+    is given is whatever `CREDENTIAL_ENCRYPTION_KEY_FILE` points at when it runs.
+
+    **`missing_ok=True` is not "do not raise".** It swallows `FileNotFoundError`
+    and nothing else, so a path whose parent is a regular file raises
+    `NotADirectoryError` out of an autouse fixture, which pytest reports as an
+    error at teardown on a test that passed.
+
+    **This is a property of the path, not of fixture ordering**, which is why
+    this test calls the work directly rather than arranging one. The ordering is
+    only how it was found: an unrelated autouse fixture in `tests/conftest.py`
+    took `monkeypatch`, which moved when the shared undo ran, and that fixture
+    then read a key path still pointing under the regular file the class below
+    creates.
+    """
+
+    def test_a_key_path_under_a_regular_file_is_forgotten_without_raising(
+        self, monkeypatch, tmp_path
+    ):
+        blocked = tmp_path / "not-a-directory"
+        blocked.write_text("")
+        monkeypatch.setenv("CREDENTIAL_ENCRYPTION_KEY_FILE", str(blocked / "key"))
+
+        # Raises `NotADirectoryError` without the suppression, from a fixture
+        # every test in the suite runs.
+        forget_any_encryption_key()
+
+    def test_a_key_that_is_there_is_still_removed(self, tmp_path, monkeypatch):
+        """The half the suppression must not have cost.
+
+        A guard that only proves nothing raises is satisfied by a function that
+        does nothing, and this fixture's whole job is that no key survives a
+        test.
+        """
+        key = tmp_path / "key"
+        key.write_text("phrase")
+        monkeypatch.setenv("CREDENTIAL_ENCRYPTION_KEY_FILE", str(key))
+
+        forget_any_encryption_key()
+
+        assert not key.exists()
 
 
 class TestTheKeyFileIsWrittenSafelyOrNotAtAll:
@@ -2313,7 +2636,7 @@ class TestTheSourceRuleAndItsConstraintAgree:
     That omission is the whole lesson here: the two agreed on every printable
     input, including all three path traversal payloads, and parted on an
     embedded NUL, because SQLite's `length` and `GLOB` are C string operations
-    that stop at the first one. `bne\0../../books/5?` read as `bne` in SQL and
+    that stop at the first one. `bne\\0../../books/5?` read as `bne` in SQL and
     was refused in Python, so the constraint the comments called "the last line"
     was not there for exactly the value that needed it. A differential test
     whose inputs are all drawn from the class where two implementations agree

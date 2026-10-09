@@ -1,5 +1,1445 @@
 # Changelog
 
+## Unreleased
+
+- **One reminder channel failing in a way the app did not anticipate no longer stops the
+  others.** The overdue digest goes out on the webhook, then mail, then Telegram, and a
+  failure that was neither a refused setting nor an unreachable destination used to end the
+  whole run: the channels after it sent nothing, the ones before it sent the same digest
+  again every hour, and no channel showed as broken. Such a failure is now that channel's
+  own, reported with a new reason, `unexpected`, and shown as broken at once; the server log
+  names the error's type and where it was raised, and never its message, which can carry a
+  webhook's address or a bot token. API callers reading `reason` can meet the new value.
+
+- **A mail username or password with a character outside ASCII is refused as a setting**,
+  because the mail library can send no such credential to any server. It used to read as an
+  unreachable server and reach the banner after a day at the soonest.
+
+- **A webhook address with an unclosed IPv6 bracket or a port outside 0 to 65535 is refused,
+  at save and at send.** The port used to save, and either, which a restore can also write,
+  answered 500 on the manual send and stopped the hourly digest before mail, Telegram and the
+  health record. The refusal never echoes the address. A port written with an underscore, such as `8_080`, is refused too. Separately, a
+  malformed address no longer has part of its path logged as its host, and an
+  internationalised one is logged as the name actually dialled.
+
+- **A database error no longer writes stored values to the server log.** Every engine now
+  hides the values a statement bound, so a failed write no longer logs a setting's value, a
+  bot token or the mail password among them, or a member's text. An unexpected database error
+  is logged by the app by its types and the constraint it broke, never the database's own
+  message, which on Postgres can quote the conflicting value or the whole row; that includes
+  the error a session raises after a failed write, which quotes the first one.
+
+- **A route's crash before its response starts is logged once, by the app, and a validation
+  failure without the data that failed.** The server used to log a second copy of every such
+  crash with its whole traceback, which for a validation failure carried a member's data. A
+  route's error response now also carries the same security headers as every other
+  response. A crash after the response has started is still logged by the server.
+
+- **A failed confirmation code mail is logged by its error type alone**, no longer with a
+  message that could carry the member's address or a character of the mail password.
+
+- **A damaged upload or backup is answered with its refusal rather than a 500.** A MARC upload
+  declaring an encoding Python does not know is refused as the 400 the route documents. A
+  backup whose manifest cannot be read, is not a JSON object, or nests past the parser's
+  stack is refused before anything is deleted. A cover the restore cannot read is declined
+  like a cover it cannot write, where it used to answer 500 on a library whose rows were
+  already restored. A stored setting nested past the parser's stack, which a restore can
+  write, is read as empty rather than failing every ISBN lookup and the hourly ticker.
+
+- **One catalogue's answer can no longer fail a whole lookup or stall the server.** A response
+  whose declared charset decodes to a lone surrogate, or whose JSON carries an escaped one,
+  used to answer 500 and drop every other source's answer with it; the surrogate is now
+  replaced. The BnF publisher reader and the Google Books reader of a parenthesised series
+  took time growing with the square of the field's length on the server's only event loop, a
+  32 KB answer costing over a second; both now read in one pass. A parsed XML document may
+  nest 32 elements deep at most, in an upload, a catalogue answer and an OPDS page: a deep nest
+  cost its parser about forty times its size, and three MARC uploads of it at once grew one
+  process past the 512 MiB its container is allowed.
+
+- **A series number written in another script's digits is no longer read from a Google
+  Books title**, in either the parenthesised shape or the trailing one.
+
+- **Every backend door a stranger's bytes reach is tested over generated input**, its answer
+  held to what it declares and its memory to a factor it declares; the defects above are what
+  it found. Nothing else a member sees moves.
+
+- **A suppression comment is read the way ruff reads it, and may not name a rule that polices
+  suppression comments.** Nothing a member sees moves.
+
+- **A security finding the backend waives is held by the statement it waives**, and process
+  starters no lint rule reports are refused in application code. Nothing a member sees moves.
+
+- **The coverage registers' generated write arrives whole at any length.** Nothing a member
+  sees moves.
+
+- **A test run before a push can be bounded in time**, and is by default on a copy of the tree
+  with no git history, where a planted defect may never end. Nothing a member sees moves.
+
+- **A test run before a push refuses to start where its verdict could not be written.**
+  Nothing a member sees moves.
+
+- **The pipeline's Postgres test selection can be run before a push**, against a Postgres of
+  its own. Nothing a member sees moves.
+
+- **Tests reach the complex functions a coverage measurement ranked first**, on both sides.
+  Nothing a member sees moves.
+
+- **The exception rules family is now enforced on the backend and the tooling scripts, with two
+  of its rules refused for reasons written beside them.** A rule ruff adds to the family later
+  arrives enforced. The one asking for an exception class per raise site is refused as a style
+  opinion, and the one asking every error log in a handler to carry a traceback is refused on the
+  backend because here the traceback is how a caller's value or a credential would reach the log.
+  The list that holds such refusals over the whole backend is now asked, like the scripts' one,
+  whether each entry still fires, and no list or per file entry on either side may switch off a
+  rule that polices a suppression comment. Bidirectional control characters in Python source,
+  which make a line read differently from how it runs, are now refused on both sides. Nothing a
+  member sees moves.
+
+- **The readers that parse a file a member picks are tested over generated files.** Every reader
+  a stranger's file reaches has a property: the zip seam, EPUB, comic archives, both FictionBook
+  doors, Google Takeout archives, PDF, MOBI and both audiobook formats, every store's import
+  opener, the SQLite seam, the Calibre intake and its description cleaner, the XML catalogue and
+  metadata readers, and the name, query and path doors. The oracle is the bounds each reader
+  itself declares, held by counting what it reads, inflates and parses rather than by asking
+  whether it threw: against the PDF reader from before its inflation budget, which answered a
+  decompression bomb with no error, the property fails on the first run. Every bound a reader
+  declares has a control that reads past it and must be refused, and a test file whose reader
+  declares a bound no control overran fails. Each run draws a fresh seed and writes where it is
+  before each example, so a run that hangs names its input. `fast-check` is added as a
+  development dependency, pinned exactly, and the build refuses a bundle that loads or emits it,
+  in the page and in every worker.
+
+- **A Moon+ Reader pick that is not a zip, or whose database inflates past its limit, is
+  reported as one skipped source rather than as a bug in a reader.** Separately, every reader that
+  parses an XML document answers a parser that throws on it the way it answers a document that
+  does not parse, rather than rejecting. Browsers answer such a document with a parse error; the
+  test DOM threw, and the new properties found it in the FictionBook, Kindle and Digital Editions
+  readers.
+
+- **The release pipeline refuses a vulnerability scan that could not see.** A scan report that is
+  not a report, that has no result for a lockfile the tree owns, or in which an advisory vanished
+  from a package that did not move now fails the night rather than reading as clean, and every
+  scan of a release reads the ignore file of the tag it starts from.
+
+- **The Telegram bot token and the Google Books key no longer reach the server log.** The HTTP
+  client library logs every request it sends at INFO with its full address, the bot token is part
+  of the Telegram address and the Books key is a query parameter, so both were written to the log
+  on every send and every lookup, successful or not, and a webhook address carrying a token went
+  the same way. Those request lines are now off, and a refused catalogue redirect is logged
+  without its query. **If you keep this server's logs, treat the bot token and the Books key as
+  exposed and replace them.** The price is that the log no longer has a line per outbound
+  request, and setting the server's log level to DEBUG does not bring it back.
+
+- **An automatic patch release now carries every fixable advisory, not only the one that
+  triggered it.** What starts an unattended release is unchanged, a fixable advisory scored HIGH
+  or worse; once one does, every fixable advisory the Python and JavaScript dependency audits
+  report goes into the same release. A Python advisory with no fix, rechecked that night and
+  established as MEDIUM or LOW, is recorded against that release and package in the tagged commit
+  and the release goes ahead; any other unfixable Python advisory, one whose severity could not be
+  established included, blocks the release and pages once with the reason. A release the pipeline
+  refuses deletes the branch it cut and only that one, and a release is tagged at the commit its
+  verification proved green. Every call carrying the pipeline's credentials now goes to a fixed
+  host over verified TLS and follows no redirect, where a redirect could previously carry a token
+  elsewhere.
+
+- **Every lint suppression list is read, and every backlog count is the linter's own.** Both
+  ruff configurations are pinned key by key and value by value, so narrowing a family or
+  lengthening a line can no longer switch a check off with every test green, and a second
+  configuration file or an ignore file on the lint walk is refused. A rule wrong about every
+  tooling script has a list of its own, read by selecting it again, and no list covering a whole
+  tree may hold a bandit rule. Every backlog entry, in both ruff configurations and in the
+  frontend linter's, states its count and is held equal to what the linter finds with every
+  inline directive ignored, so a fix and a new site each move the number in the commit that makes
+  it; twelve of the frontend's seventeen counts were wrong when this landed. Nothing a member sees
+  moves.
+
+- **The whole pytest style family and the frontend's typed mocks are now enforced, and the
+  last test rule in the frontend's lint backlog is gone.** On the backend every rule of the
+  family is selected, so one ruff adds later arrives enforced: 148 findings were cleared,
+  mostly composite assertions split so a failure names which half failed, and six deliberate
+  exceptions carry their reason at the site. On the frontend all 401 test mocks name the
+  signature they stand in for, and where one signature repeated through a file it is now
+  derived from the component prop itself, so that prop changing shape reddens the test rather
+  than leaving its mocks recording the old one; typing them exposed two tests reading a call
+  that might not have happened, which now refuse by name. Two ways of switching a lint rule
+  off that nothing checked are refused, and the tooling scripts' own refusal assertions now
+  name their message. Nothing a member sees moves.
+
+- **A test asserting that something refuses now has to say which refusal it means.** Sixty
+  eight assertions across both trees passed on any error of a broad type, so a test named for
+  one rule went on passing when a different rule refused first. Each now names the message or
+  type it expects, measured from what the code under test actually raised rather than read
+  from it, and the linters refuse a new one in either tree. Six assertions that ran only on
+  some branches now always run. Two real gaps surfaced: one test of two arms passed with one
+  of them deleted, and the cover restore gave two different refusals one message, so no test
+  could tell them apart. They now read differently, and a NUL in a restored cover's name is
+  refused by the name check rather than by the containment check's fallback. Nothing a member
+  sees moves.
+
+- **A book's purchase date no longer shows the day before, and the card and the table now
+  spell it the same way.** The Bought on column of the library table rendered the date a copy
+  was bought a day early for every member west of Greenwich, and correctly for everyone east
+  of it. A purchase date is a calendar date rather than a moment, so it arrives as a bare day
+  with no clock and no offset, and the renderer was reading that as midnight UTC and then
+  showing it in the reader's own zone, which lands on the previous evening. It is now read as
+  the day it names, wherever the reader is. Separately, the card in the grid printed the same
+  date as raw ISO text in every language, because it never went through the date formatter at
+  all; it now reads like every other date. Nothing else dated moves: every other dated field
+  carries the moment it happened.
+
+- **A schema field named for a guarded column is now refused, and no response may carry an
+  undeclared key.** The rule that one module alone reads who defined a custom field walked
+  the source for the column's name, and a Pydantic field declared with that name is populated
+  by reading the row with nothing written in the source to match, so it would have passed the
+  rule while making it false. Both halves are closed, including a field renamed onto the
+  column by an alias or by a model's alias generator. Nothing in the tree did either, so no
+  behaviour changes and nothing a member sees moves.
+
+- **Automated dependency updates can land again, and a generated file stops shadowing the
+  lockfile.** `backend/requirements.txt` was an export of `backend/uv.lock` that nothing
+  installed from, kept so the source vulnerability scan had a familiar Python lockfile to
+  read. The scan already reads the lock itself, and covers every package the export named at
+  the same version plus nine more, so the export was a duplicate that three separate
+  automated paths kept disagreeing with: one edited the export and never the lock, two moved
+  the lock and never the export. A guard comparing the two landed on 2026-09-26 and five
+  dependency merge requests failed against it; the other two paths run weekly or on demand
+  and had not yet had the occasion to fail, but would have. The export is deleted, so there
+  is nothing left to drift.
+
+- **A store identifier backfill no longer lets one library's own presses exhaust the pod.**
+  The limit on how many volume lookups it runs at once was justified from a figure about
+  one pod's memory and enforced once per request, so nine runs inside the route's own rate
+  limit ran fifty four lookups against a pod priced at sixteen. It is one limit for the
+  process now. A run that cannot get a slot waits, under a whole batch deadline instead of
+  for as long as somebody else's batch takes, and answers with whatever it resolved: the
+  counts cover only the books it reached, and the cursor moves over exactly those, so a
+  short run cannot skip the books it never looked at. Pressing again resumes there.
+
+- **A catalogue's own punctuation no longer creates a second copy of a book.** A reading
+  history import and an OPDS sync fall back to matching on the title when there is no ISBN,
+  and they matched it exactly as the feed spelled it, so `Ulysses :` and `[Hamlet]`, which are
+  how MARC 245 and a cataloguer write `Ulysses` and `Hamlet`, each arrived as a new book
+  beside the one already on the shelf. The marks a catalogue puts at the edge of a title are
+  now ignored there, along with case, accent composition and spacing. Punctuation **inside** a
+  title is not: `C++` and `C#` are different books, and so are `The Hobbit` and `Hobbit`, so a
+  leading article is still kept. Measured over eleven spellings of one book and six pairs of
+  genuinely different ones; the wider rules that were considered merged four and five of those
+  six.
+
+- **Whether this library may ask an outside catalogue is now one module rather than six hand
+  written decisions in the book routes.** A rate limit is charged by the same thing that
+  resolves the access, so a route cannot be added with one and not the other, and a request
+  refused locally no longer spends a member's catalogue allowance.
+
+- **A stored preference has one owner.** The five browser preferences, the library view, the
+  table's column set, the saved searches, which sections a reader folded away and the last
+  shelf used, each carried their own key, their own failure handling and their own rule that
+  absence means the default; none of them told a reader when it changed, so the library page
+  kept a counter to make its own next render re-read what it had just written. They are
+  declared through one door now, a write reaches every reader, and the counter is gone.
+
+- **A saved search is applied as the view it names.** Its stored filters are rebuilt field by
+  field rather than trusted, which fixes applying one throwing while the page was drawing when
+  a stored list filter was not a list, and means a search saved before a filter existed now
+  sets that filter to its default instead of leaving whatever the reader happened to have.
+
+- **A single interrupt to the mutation sweep did nothing, and the reason was that the signal
+  had no handler to run.** An ignored SIGINT survives `exec` and CPython installs its own
+  handler only over `SIG_DFL`, so a sweep launched from a parent that ignores SIGINT, which is
+  what POSIX has a shell do to a background job, discarded every interrupt with nothing to
+  see: not blocked, not slow, not mishandled. Measured on one node, the same scenario twice
+  differing only in the spawning parent: 3.01s to unwind from the default disposition against
+  121.10s from an ignoring one, where 121s is the stub arm's own sleep finishing. The tool
+  takes SIGINT back at startup, from an inherited ignore and from an inherited block, and says
+  which it found. A second stop can no longer unwind the escalation between the TERM and the
+  KILL. **The window that left, a stop arriving before the escalation is entered, is closed
+  further down this section**, by giving the two stops that had no handler a disposition of
+  their own; `docs/decisions.md` records what is covered and what still is not.
+
+- **The rule deciding what a test walk may read is driven over every walk in the test tree,
+  not over the six in the file that owns it.** A walk that recurses `backend/` reads the cache
+  the pipeline creates there and reports third party code for breaking a rule it has never
+  heard of, green on a developer checkout and red only in CI. Of 37 failed pipelines in the
+  300 to 2026-09-21, 13 were that one class, repaired once per file across five days. Five
+  walks in four modules reached the shared decision and were exercised by nothing; they take
+  the tree as a parameter now and are driven against one with each kind of vendored directory
+  planted in it, which catches a walk that asks the rule and asks it wrongly. No behaviour
+  changes and no test is added: `docs/decisions.md` records what the driving buys and what it
+  still does not see.
+
+- **Every operation in the committed schema is now askable by a generator, not only the
+  one route a hand written class covers.** `tests/routers/test_books_bulk.py::TestNoVerb
+  TurnsAValueIntoA500` crosses every bulk verb with five hostile values and asserts none
+  of them is a 500; the same sentence is true of every route that parses a value, and
+  there are 139. `backend/tests/api_contract.py` drives `schemathesis` over the committed
+  `frontend/openapi.json` and asserts two properties and no third: no generated request is
+  a server error, and every response matches the schema that declares it.
+  `status_code_conformance` is deliberately not among them, because it would accept either
+  a 404 or a 403 for an invisible book and read as though that rule were covered. It runs
+  as an ordinary member rather than as an admin, because an admin token answers 200 where
+  a member is refused. It is a tool rather than a gate: the collector takes `test_*.py`
+  and this is `api_contract.py`, so it runs when somebody names it. What it finds today,
+  one server error and thirty operations across three divergence classes, is recorded in
+  `docs/decisions.md` rather than fixed here.
+- **The first findings of the run above, fixed: one server error and six operations whose
+  responses contradicted the schema that declares them.** `PATCH /api/books/{book_id}` with
+  `{"title": null}` reached `UPDATE books SET title=NULL`, SQLite refused on the NOT NULL
+  constraint, and the unhandled exception handler turned the `IntegrityError` into a **500**
+  over a value the edit form lets somebody type. **The defect is the pair and not either
+  half**, so the fix is derived from both: `BookDetailsUpdate` reads the NOT NULL columns
+  off `Book.__table__` and refuses an explicit null for any field naming one, which is
+  `title` and nothing else of its sixteen today. The answer is now a 422 naming the field
+  and the row is untouched. `tests/schemas/test_book.py` holds the rule over every request
+  body a route writes onto a row, found by the write rather than by the model's name, so
+  the next such field is covered on the day it is added rather than on the day somebody
+  sends it a null.
+- **Fourteen refusals moved off 422, which is the one status this schema declares with a
+  body they do not send.** `HTTPValidationError.detail` is an array of validation entries,
+  because that is what FastAPI's own body validation sends, and a hand raised
+  `HTTPException(detail="...")` sends a sentence: a client generated from the published
+  schema was told the wrong shape. The refusals themselves, their wording and what they
+  disclose are unchanged, and nothing in the browser reads either status. **The whole class
+  moved rather than the four the generator happened to reach**, ten sites in the books
+  routes, three in the shared filter parameters and one in the credential key route, and
+  `tests/test_errors.py` now refuses the next one: which status is typed as an array is read
+  off the schema, and which number a call was given is resolved in the module that wrote it,
+  so a rename of the envelope and a new spelling of the constant both fail rather than slip
+  past.
+- **Two routes that answer with nothing now say so.** `POST /auth/reset/request` and
+  `POST /auth/verify/request` answer 202 with an empty body, and the schema documented that
+  202 as `application/json`. **The fix is a declaration and not a body**, which is what
+  keeps the property those routes exist for: both still answer identically whether or not
+  the account exists, and not one byte on the wire moved.
+- **The one line a member types has one home, and the two rules it was spelled under are now
+  three named ones.** A whitespace collapse written as a join over a split appeared at nine
+  sites across seven modules of the API layer, two of them the bodies of private functions
+  both called `_one_line` with different post conditions: the custom field one removed every
+  control character before collapsing, because a tab inside a stored URL had produced a 200
+  with an href no browser can follow, and the export one collapsed alone. Three validators
+  cited a sibling's docstring for the rule rather than sharing it. `schemas/common.py` now
+  holds `one_line`, `one_line_without_invisible_characters` and
+  `one_line_without_any_control_character`, and which one a field takes is stated at the
+  field as a decision about what the API accepts.
+  **Four fields accept less than they did, all four in the same direction**: a tag name, a
+  collection name, the name an author merge keeps and a confirmed authority identifier now
+  have the characters that have no width removed before the value is stored, so a name of
+  nothing but those is refused with a 422 where it used to be stored as a row nobody could
+  see or select. The identifier arm closes a 500: `ck_author_identifiers_bounds` is
+  `length(identifier) > 0` and SQLite's `length()` counts up to the first NUL, so an
+  identifier led by one was a value to look at and no value to the check, and it reached the
+  client as a 500 rather than the 422 that validator exists to answer.
+  **A tab is still a word break in all six name fields**, which is the half a single rule
+  would have taken silently: only a value that may be rendered as a link wants a tab deleted
+  rather than collapsed, and the two sets are derived from `str.isspace`, the predicate the
+  collapse itself breaks on, so they cannot overlap or leave a gap. What the custom field
+  value accepts is unchanged, measured over the whole C0, DEL and C1 range plus eight
+  whitespace and invisible code points outside it, at zero differences against the code this
+  replaced. The classification number keeps its own wider refusal at its own site, the
+  heading query filter and the `txt` export keep the collapse alone, and each of those three
+  carries the reason it is not the others.
+- **A CHECK's expression was compared for two tables, and every enum list in the schema was
+  outside every rule that reads one.** `TestTheMigrationsAndTheModelsAgree` compared columns,
+  nullability and type; the expression, which is what decides whether a row is refused, was
+  compared where somebody had written a class for the table or where a token scan picked the
+  constraint up on `AS BLOB` or `char(0)`. Measured on the head schema: 30 named CHECKs
+  across 14 of the 22 tables, of which those four rules read 14. The house rule on enum
+  columns asks only whether both copies bound the column, so a member added to
+  `ck_books_ownership` with no revision behind it left all 12 of that class's tests green.
+  Both copies are now read in the shape `_declared_checks` already had, the installed one by
+  reflection, and compared as an equality in both directions over every named CHECK there is.
+  It enumerates nothing, so a constraint added to a model is compared the day it exists, and
+  an unnamed one, which neither copy could address, is refused where the schema is read. No
+  behaviour changed.
+- **The premise under every comparison between `models.py` and a database had three arms and
+  a module writing its own DDL was outside all three.** A table count either side of one
+  `create_all` call, a stamp against the script directory's head, and a source walk for a
+  call named `create_all`: none watches for a raw `execute` of a `CREATE`. The fourth arm
+  asks the artefact rather than the source, because a scan for a statement has to enumerate
+  what one looks like. Two children report the schema they end up with, one importing the
+  application the way uvicorn does and one running the revisions alone, and the two are
+  compared as reflected objects. Measured: `init_db` executing
+  `CREATE INDEX IF NOT EXISTS ix_books_probe ON books(title)` after the chain reddens the new
+  arm alone, with the other three and every column comparison green. No behaviour changed.
+- **The MARCXML export stopped loading the whole shelf into memory.** The route resolved
+  every visible book at once and handed the list to a writer that built one XML tree over
+  all of it, with no cap, no page and no test saying otherwise, while every stated MARC
+  bound in the tree was on the import side. The library in library mode is the deployment
+  with the most books and this arm materialised all of them for an ordinary account. The
+  shelf is now walked 100 rows at a time and written one page at a time: measured through
+  the route with descriptions of 200 characters, the peak goes from 55.05 MiB to 1.02 MiB
+  at 10,000 books and from 219.06 MiB to 1.05 MiB at 40,000, where the first figure rises
+  with the shelf and the second does not, and the wall clock is unchanged to within a few
+  percent.
+  **The file is complete and its records are unchanged**, which is why paging was taken
+  over the cap the import side carries: a cataloguer can split an oversized upload and
+  nobody can split their own shelf. **What a page costs at the worst is measured**, with
+  every bound read off its declaration rather than guessed, and the worst case is not the
+  long description anybody pictures: `ElementTree` writes `&` as `&amp;`, and the `700`
+  field repeats once per credited name with nothing bounding the count inside the author
+  column's 500 characters, so the same declared maximums are 16,611 bytes a record in ASCII
+  and 102,107 with escaping and 250 names. The walk
+  resumes on the primary key, because pages of one export are separate reads and both an
+  offset and a title lose a book silently when the shelf moves behind the walk; the file
+  is therefore in catalogued order where it was in title order. The one thing given up is
+  that no failure can be a 500 any more: the opening tag is written before the walk is
+  touched, so every failure from there answers 200, the walk's first query included, and
+  what it leaves is an unclosed `<collection>` that no parser accepts. Both halves are
+  pinned by a test, so a half written exchange is an error at the receiver rather than a
+  short file that reads as complete. The guard is what
+  reaches the writer, watched at the seam, plus a parse of every production module that
+  fails on a call to the whole document writer at all.
+- **The Google volume id rule has one home in the browser, and the second job it does is
+  pinned where that job is.** `lib/takeout.ts` bound the same twelve character rule as
+  `lib/stores.ts` and used it to tell a Play Books sidecar's volume id line from the lines
+  beside it; it asks `stores.producedValue` now. The duplicate was deliberate, on the
+  argument that folding it would let a widening of the identifier rule widen a line
+  discriminator with nothing red. That argument is answered rather than ignored: an arm in
+  `tests/lib/takeout.test.ts` says a thirteen character metadata line yields no volume id,
+  and widening the rule to thirteen characters now fails 2 of 106 arms, the table's own
+  length arm and that one, where the agreement sweep between the two modules stays green.
+  The backend guard that held the browser's spelling in step with the server's stopped
+  naming files: it censuses every module under `frontend/src` and requires the rule to be
+  written in exactly one of them, so a fold is not a failure and a second spelling is. No
+  behaviour changed: the two regular expressions were identical.
+- **The allowlist for every query reading a table that belongs only to a Book is keyed on
+  the statement rather than on a fragment of it.** `BOOK_OWNED_READERS` entries paired a
+  substring with the reason that statement is safe, checked with `in` in line order, so an
+  edit that kept the substring and dropped the narrowing the reason rests on passed. 1 of
+  the 17 entries was ambiguous on the day it was changed, `func.count(DigitalReference.id)`
+  in `routers/books.py`, which also matches the flagged reference count four statements
+  above it. Entries now carry the whole statement and are compared by equality, which is
+  what the folding rules' own table already did.
+- **A NUL refusal was accepted as a byte bound and is not one.** Every character ceiling in
+  the schema exists for a restore, which inserts through Core and runs no validation, and the
+  house rule holding those ceilings cleared one on `instr(col, char(0)) = 0` alone. SQLite's
+  `length()` stops at the first NUL, which that clause closes, and also counts one character
+  per UTF-8 lead byte while skipping continuation bytes without limit, which it does not:
+  measured, `'http://x'` followed by one `0xC0` and a million continuation bytes reports nine
+  characters, stores 1,000,009 bytes and carries no NUL at all. The rule now clears a ceiling
+  on a byte budget, or on the NUL clause **beside** a charset rule confining the value to one
+  byte per character, which is the pair two credential columns already carry and the reason
+  `models.py` records for them needing no budget. Three comments stating the old belief are
+  corrected at their sites, and four more, in a revision and two test modules this change did
+  not own, are recorded in `docs/decisions.md` instead. **One constraint is reported rather
+  than cleared and the rule carries it**: `book_identifiers.value` is bounded at sixty
+  characters with a NUL clause and no charset rule, so the constraint admits 60 counted
+  characters at 1,000,020 bytes. No writer reaches that, an archive's manifest being JSON and
+  every value it inserts a string of at most four bytes per character, so the reachable
+  maximum is 240 and the gap is what the constraint promises rather than what it lets
+  through. Closing it is a schema revision. No behaviour changed.
+- **Three text columns had no bound on what reaches the disk, and one address column had no
+  rule at all.** `length()` counts one character per UTF-8 lead byte and skips continuation
+  bytes without limit, so a character ceiling bounds no bytes and a charset rule bounds no
+  size. `book_identifiers.value` admitted 60 counted characters at 1,000,020 bytes;
+  `catalogue_targets.isbn_index` and `title_index` were confined to `[A-Za-z0-9._]` with no
+  bound of any kind, so the same trick stored a megabyte in either; and
+  `catalogue_credentials.envelope` was `Text` with a shape and a floor, which is the ceiling
+  the revision before this one recorded as somebody else's question. Each now carries a byte
+  bound: 240 on an identifier, 64 on an index name, and **2,825** on an envelope, derived from
+  what the two routes that can fill one are allowed to hand `credentials.seal`. That figure is
+  recomputed by a test rather than written down twice, and the routes it reads are **found**
+  rather than listed: an `ast` pass over the routers takes every handler that calls
+  `credentials.put` and reads its own annotated body, so a third route widens the ceiling
+  instead of overflowing it. A second case holds the arithmetic against a real `seal` call, so
+  a field added to an envelope cannot leave the derivation and the constant agreeing with each
+  other and both wrong. **`catalogue_targets.base_url`
+  gains the four arms its sibling `opds_servers.base_url` has carried since `b7d4e6f01a95`**,
+  where it had none: an archive could put a `file://` address, an address of unbounded length
+  or a megabyte behind one lead byte in the column a sync reads. **None of it was reachable
+  today** and the revision says so rather than implying otherwise: every writer but
+  `backup.restore` binds a Python string, an archive's manifest is JSON, and
+  `main.seed_catalogue_targets` overwrites every seeded row on every boot. **No row this
+  application could have written can fail the upgrade**, checked per bound rather than
+  assumed. The two columns holding a sealed credential's key gain the behavioural probe and
+  the DDL comparison that a byte arm gets for free and their own arm never got, and the house
+  rule's register of open ceiling defects is now empty.
+- **A `GLOB` rule now has to say what a NUL lets it read.** `GLOB` is a C string operation
+  and stops at the first NUL exactly as `length()` does, so a refusal of every character
+  outside a set is satisfied by `'abc'` followed by a NUL and `'ZZZ!!'`. A new house rule
+  requires `instr(col, char(0)) = 0` beside any `GLOB` clause whose pattern does not end in
+  `*`, derived from the pattern rather than from the nine clauses the schema has today: a
+  trailing `*` absorbs any suffix, so such a clause matches the whole value whenever it
+  matches a prefix and truncation can only make it fail, which is why one constraint carries
+  no NUL clause on purpose and still passes. A clause the rule cannot parse is reported
+  rather than skipped. No behaviour changed.
+- **Every command the published documents offer is now checked against the project, and the
+  one that told a reader to reformat most of the backend is gone.** `docs/testing.md`
+  offered `ruff format` beside the lint step, in the same cell. Nothing here configures that
+  verb and no job runs it, so a reader following a published document rewrote 203 of the
+  backend's 256 files. `README.md` named the same job correctly and neither document
+  pointed at the other. A test now reads every command a published document offers and
+  refuses one the project does not run: a `bun run` script against the scripts
+  `frontend/package.json` declares, a program under `uv run` against the distributions
+  `backend/pyproject.toml` declares or a command this repository invokes, and a verb after
+  such a program against the invocation itself. A shape no arm claims fails rather than
+  passing. 53 offers across nine documents, all of them real. Naming a command in prose
+  stays writable: an offer is a code span headed by a runner, which is what lets a document
+  say a command is wrong. `README.md` now points at `docs/testing.md` for the rest.
+- **Comment stripping has one home, and a second instrument is refused.** Every rule that
+  reads the source tree and asks about code rather than prose now strips it with one
+  parser backed function, `frontend/tests/withoutProse.ts`. The tree held a hand written
+  character scanner beside it, which was blind to a regex literal and to JSX text, the
+  exact class the parser backed one had just been fixed for. It refused nothing the parser
+  accepts: measured over the 461 modules under `frontend/src/`, the parser keeps zero
+  characters the scanner cut, and the scanner left 728 characters of prose standing in
+  three modules that the parser removes, because it tracked strings by quote character and
+  a quote inside a regex literal, or a backtick inside a comment, opens one it never
+  leaves. A ratchet re-derives on every run which modules match a comment for
+  themselves, by running each regex they write against text that is a comment and text
+  that is not, so a new one fails by name rather than by inheriting a gap. Ten modules are
+  on that list: three strip CSS or JSONC, which this parser cannot read, and seven strip
+  TypeScript with the regex pair the home replaced and are a backlog with their
+  measurement attached. No application behaviour changed.
+- **The unauthenticated feature endpoint stopped sending a flag nothing read.**
+  `GET /api/settings/features` is the one endpoint a caller holding no token can read, and it
+  carried a Google Books toggle beside that same toggle conjoined with a stored key, so the
+  pair told a stranger the toggle was on and no key was stored, which is strictly more than
+  the conjunction alone says. Nothing in the client read the raw toggle, and the screen that
+  edits it reads the admin record. **Breaking for any client reading that field off this
+  endpoint**: it is gone from the response and from the OpenAPI schema, so a regenerated
+  client will not compile against it and a hand written one reads `undefined`, which is falsy
+  and so behaves as off. `GET /api/settings` is unchanged and still carries the toggle. The
+  deliverable is the guard rather than the removal, and it is two guards because neither holds
+  alone: one derives every flag's readers from the parse of every module naming the owning
+  hook or the generated model, the other is an equality on what the route actually sends,
+  which no regeneration can talk out of. Every field now says at its own site what it
+  discloses to a caller holding nothing.
+- **Both test coverage registers are derived from the run that reads them.** They were
+  maintained by retyping figures, so the one document whose whole purpose is to be checkable
+  was the one thing in the tree nothing checked. The counts come from the run now: the backend
+  census reads the collection the process is already executing rather than starting a second
+  one, and the frontend half is a reporter, because no test file there can see another file's
+  tasks and the static listing disagrees with the run, 7 against 16. A setup step fails any
+  run whose reporters a command line flag replaced, which a pipeline had been doing. The hand
+  written descriptions, which are the register's value, are untouched, and nine were added.
+  The headline, the rows and the shortfall for the files a published register may not name now
+  agree by construction rather than by somebody checking.
+- **An OPDS server name's limit has one home.** 100 was written four ways: both arms of the
+  check constraint, the column's own width, and the schema constant the route validates
+  against. Three of them read the model's constant now, the way the neighbouring address bound
+  already did. No migration, because the rendered SQL is byte identical on both dialects, so
+  the constraint a deployment carries does not move. The guard is behavioural and runs against
+  a migrated database, inserting the widest value the route accepts and the first one it
+  refuses for every bounded field, walked off the model's own fields rather than listed:
+  comparing a constant with itself proves nothing, and comparing constraint text refuses only
+  the spellings it enumerates.
+- **The plain text export's line breaks are derived rather than listed.** The flattening was
+  right and the guard over it was one enumeration checked against itself: a docstring named
+  five line break characters and the five test arms drove the same five, so the one rewrite
+  anybody would make, flattening the breaks it can name instead of the whitespace it cannot,
+  satisfied both. Measured, that rewrite was caught by nothing. The test sweeps Unicode for
+  the code points a line break splits on, parametrises every arm off the result, and plants a
+  forged line in eight of the record's ten lines rather than in one.
+- **One parameter stopped calling a duration a deadline.** Since the deadline work that word
+  has one meaning in the backend, an absolute moment, and one private helper took a length of
+  time under it. Renamed rather than converted, because the value goes straight into a slot
+  that takes a duration and a conversion would spread the type through a module for no change
+  in behaviour. Both are floats, so no type checker can report the swap: a test classifies a
+  parameter or argument name as a moment or a duration and reports any call binding one to the
+  other's slot, catching it from the body and from the call site alike.
+- **The linter ratchet's verdict is evidence rather than an absence.** The test that fails when
+  a suppression no longer has a finding read that finding's absence out of a parsed output, and
+  an absence has two causes it could not tell apart: on one unchanged tree it returned three
+  different answers across four runs, and its failure text tells the reader to delete the
+  entry, so acting on a red run deleted live suppressions. Four refusals stand between a run
+  and a verdict now, the report is JSON so a document cut short fails to parse rather than
+  reading as fewer findings, and a rule that still looks clean is confirmed by a second run
+  denying it alone, which errs toward keeping a suppression rather than toward accusing one.
+  Which entries count as suppressed is derived from the linter's own printed configuration
+  rather than from the one severity spelling the test knew of eleven. Reading the rendered
+  output had been finding 20 rule names among 17 rules, three of them quoted source.
+- **The publish gate catches an internal directory named through a relative path.** The guard
+  refusing a published file that points at a stripped one builds two patterns, and the
+  directory arm excluded the path separator from what may sit in front of a name, which is
+  what stops a bare word firing on an unrelated directory ending in the same element. Every
+  relative reference to one of the five directory shaped entries published. What may precede a
+  name is now exactly the segments that name nothing, the empty one and the two dot segments,
+  a set closed by how a path resolves rather than by which spellings have been seen, so no arm
+  has to be added for the next depth. Two defects found beside it and taken: any published line
+  quoting the ignore file's own name exempted itself from the guard, because the exemption
+  matched the whole line rather than its path field; and a list entry carrying a bracket built
+  its own pattern out of a character class.
+- **A mutation sweep, and its grace is a seam.** The harness that checks a guard by breaking
+  the code under it is a script now rather than a page of working notes rewritten per review.
+  It refuses to report a catch it did not earn, asks its container for a name instead of
+  assuming one, and asserts a mutant as byte preservation rather than as a diff alignment:
+  deleting `not ` and deleting ` not` yield the identical string, so a diff may align the
+  change either side of a shared token and name a span one character outside the node it
+  mutated. The wait before a hung mutant is killed is a seam the suite can shorten, clamped so
+  the environment can never lengthen it, since an unbounded value turns an escalation into a
+  wait and rebuilds the orphan the escalation exists to prevent.
+- **The working notes every agent session loads are 68% smaller, and what left them is
+  reachable by name.** `CLAUDE.md` was 7,420 words on every turn, of which one section was
+  48% and fired on a minority of them. It is 2,294 now, and six skills under `.claude/skills/`
+  carry what fires on some turns: the three seat workflow, the guard and mutation rules, how
+  to run a suite, the backend and frontend traps, and what the mirror publishes. Each costs
+  only its description while it is not in use. Five rules keep their whole text in the always
+  loaded file because a pointer that fires one turn late has already lost: a suite never runs
+  on the control plane machine, a published file never names a stripped path, the owner is
+  paged whenever work stops, a live security tooling change is confirmed first, and work is
+  named to the owner rather than numbered. The file now carries the rule that keeps it this size, and every
+  skill is self contained so this tree can be lifted out of the checkout it grew in.
+- **Three more ruff families, and the one suppression that is now a test.** `S` (flake8-bandit),
+  `ASYNC` (flake8-async) and `RUF` (ruff's own rules) join the seven already selected, so the
+  application's own Python gets a static security check it did not have. **`ruff` runs from
+  `backend/`, so this covers the application and not the twelve Python files in the pipeline
+  directory**, which are plumbing and are stripped from the mirror. 24 findings in application
+  code, none of them a defect: each is fixed or suppressed at its site with the reason. Two
+  suppressions are worth naming. `S314` is refused per XML parse site rather than per family,
+  because all three sites already refuse a doctype and cap the bytes off the wire. That argument
+  only holds while the rule sees every spelling and it does not, so
+  `TestOnlyThreeModulesTurnOutsideXmlIntoATree` carries the half ruff cannot: which modules may
+  parse at all, over every entry point and every way a file can bind the module. And the eight
+  `assert` statements that exist to narrow a type for the checker are only narrowing while
+  CPython keeps them, so `TestNothingStripsAnAssertOutOfTheImage` reads every container surface
+  and fails on `python -O` or `PYTHONOPTIMIZE`, refusing any start command or build block it
+  cannot read rather than listing the ways one could hide. The `S` family is off in the test
+  tree, stated as the family rather than as the twelve codes it fires, since a test tree is
+  nothing but assertions and fixture credentials. No behaviour changed.
+- **A linter, as a ratchet.** `bun run lint` is oxlint, called by the same script name
+  locally and in CI. Three categories are errors and every rule in them is on unless
+  `frontend/.oxlintrc.json` names it, so a rule a future version adds arrives enforced. The
+  suppression list separates a permanent refusal, carrying the reason the rule is wrong about
+  this codebase, from a backlog entry, carrying its count. A test re-derives that list on
+  every run and fails when a suppressed rule no longer has a finding, so an entry cannot
+  outlive its reason. No existing code changed.
+- **A rapid scan can be stopped, and the loop that writes a shelf has one home.** Three
+  screens wrote a shelf in bulk, two through `writeBooks` and the third in its own words, and
+  the third was the one with no way out: a three hundred row queue is up to six hundred
+  sequential requests, against a page that already stops the camera and stops the paced
+  lookup. The loop is `lib/bulkWrite.ts` now, taking the write as a callback, so the
+  concurrency rule, the stop between books, the progress report and the short count that is
+  not damage are one set of rules rather than two sets of words pointing at each other across
+  a page folder wall. The rapid queue gains the stop, a `{done} of {total}` beside it, and a
+  banner saying a stopped run was stopped and that everything it did not reach is still in the
+  queue. A stopped run prunes the rows it walked rather than the rows it offered, which is the
+  difference a stop makes and nothing else did. The queue's five figures reach the screen as
+  one value.
+- **Which columns of `books` mean what is asked for, not written out four times.** The merge's
+  absorb, the copy route, Google enrichment and the MARC gap filler each carried their own
+  tuple of column names, related to `Book` by nothing, so a column added to the schema joined
+  none of them and no diagnostic said so: completeness held by accident of nullability.
+  `backend/book_columns.py` partitions all thirty columns into six cells, refuses to import
+  when a column is classified nowhere or twice, and the four writers take their sets from it.
+  Five of the six cells are checked against a source that is not the cell as well as counted,
+  so a column filed one cell over goes red too: the copy facts against `CopyCreate`, the two
+  cells an enrichment writes against `BookMatch` in both directions, the row keeping cell
+  against the compiled visibility predicate and the foreign key graph, and the cover against
+  the one column the copy route cannot carry in its constructor. The border nothing covers,
+  `COPY_STANDING` against `ROW_KEEPING`, is named in the tests. No behaviour change: all four
+  sets are the same names they were.
+- **A pinned setting read through a module that re exported the reader is reported.** The
+  guard classified every reader it could reach through the reading module's own bindings and
+  walked past `helpers.get_bool(db, key)`, where `helpers` is another module that imported the
+  reader. The subject of an attribute call is now resolved to a module of the corpus and asked
+  what that module hands out at module scope, which is what separates it from
+  `sources.in_force`, a different function of the same name on a subject that hands out
+  nothing. A name the reading module also binds itself is not that module and is left alone.
+  No application behaviour changes and the clean tree is unchanged at 56 examined calls with
+  no unreadable entries.
+- **A swapped pair breaks a recovery phrase's checksum for most phrases, not for all.** The
+  test asserting it drew a phrase from `generate_phrase()`, so it reddened the pipeline at
+  random, 1 run in 220 measured over 20,000 phrases, with a failure reading as a regression in
+  recovery phrase validation. It uses a fixed phrase now, and a second arm holds the edge that
+  a fixture which stopped being valid would leave the swap refused for the wrong reason. Beside the pin, BIP-39's
+  checksum is written out from the specification, so two tests ask that rule which swap to
+  make before asserting the refusal, and the assertion is true of every phrase rather than
+  of most draws. The wordlist is anchored to the published SHA-256 of the standard's own
+  file, because membership word by word pins one literal and not the list, and a permuted
+  wordlist keeps every checksum self consistent while deriving a different key from every
+  phrase already written down.
+
+- **A queued scan carries the name of what happened, not the sentence.** The scan queue
+  stored rendered, translated prose in twelve places, so nothing made the next reason have a
+  sentence at all and a row was fixed in the language in force when the file failed.
+  `ScannedEntry.reason` is a closed union now and `RapidQueue` chooses the words as it draws
+  the row, over a total `Record` per union: a reason with no sentence for a member is a compile
+  error. Exactly one arm carries free text, and it is named for what it carries, the server's
+  own message. What a thrown value turns out to be is classified once, in `classifyError`,
+  which the error line renders and the queue keeps as a name. No sentence a member is shown has
+  changed.
+- **A bulk verb with no handler is refused when the module loads, naming the verb.** An eighth
+  member of `BulkAction` without an entry in the dispatch table was a `KeyError` and a 500 to
+  whoever picked it, and no test walked the enum. The table is built through its own
+  completeness check now, so the check cannot be dropped on its own, and every verb is driven
+  against a hostile argument to assert a refusal rather than a 500.
+- **The guard on an imported column's bound asks the table that decides it, and the second
+  bound has an observer.** It probed `importing.within_bounds`, which by the time an import
+  runs has nothing left to bound: every record reaches it through `Record.__post_init__` and an
+  uploaded one through `Record.from_upload` first. The assertion is now that every column the
+  MARC importer writes has an entry in `catalogue._TEXT_CEILINGS` or `_NUMBER_RANGES`, which is
+  stronger in both directions: a field whose column declares no width no longer reddens it
+  falsely, and a field carrying a `BookCreate` bound but no catalogue entry no longer passes
+  it. `within_bounds` is kept and is now declared belt rather than policy, and the one bypass it
+  can still refuse is driven over each side of every bound those columns have, asserting the
+  value the policy says comes back rather than that something changed. No behaviour change.
+- **Folding two Books has one door and a declared policy per child.** The merge carried ten
+  hand written transfer policies and nothing related them to Book's ten child collections, so
+  an eleventh child table was cascade deleted on every merge with nothing red. The child set
+  is derived from the foreign keys now, each child declares what a fold does with its rows,
+  and an eleventh with no policy fails at import naming the table. No behaviour change: the
+  ten policies, their ceilings and their order are what they were.
+- **A setting the deployment pins is read where it is pinned.** Ten settings can be fixed from
+  the environment, and a reader that consults the environment and one that does not were a
+  caller's choice at every site. Nothing went wrong, because all ten were already read
+  correctly; what is new is that they cannot quietly stop being. One place had that rule
+  written out by hand and now asks for it.
+- **A store import no longer computes two things nothing showed anybody.** Five of the six
+  device and store readers reported a schema version and a list of fields the file could not
+  fill, both dropped before they reached a screen. What a member sees is unchanged: a field a
+  device could not record still arrives empty.
+- **Cover fetches go through the same address policy the catalogue and OPDS doors use.** Both
+  cover walks build their client with `fetch.pinned_client`, which resolves an image service's
+  name once per request, admits public addresses only, and connects to the literal that passed,
+  so a listed host whose name answers inside the cluster is no longer fetched. A hop is bounded
+  by wall clock rather than by a per read timeout, which makes the interactive budget the
+  ceiling it always claimed to be: measured, a 1.0 second budget bought 1.973 seconds of a
+  download and 7.900 seconds of a candidate check, the second because the probe buffered and
+  its loop body ran once, so the clock was never consulted.
+- **A cover URL whose host cannot be decoded is refused rather than raised**, on the first hop
+  as well as on a redirect. It escaped both cover walks as a `UnicodeError`, which neither
+  their own handlers nor the metadata lookup above them catch, so one such URL answered 500 on
+  a member's ISBN lookup. `*.googleusercontent.com` is a wildcard on the host list, so this is
+  reachable from a URL a member puts on a book.
+- **MARC21 field reading is its own module**, `backend/marc_fields.py`. The upload reader and
+  the two catalogue profiles read the same fields through `Fields` and `Subfields`, instead of
+  `marc.py` reaching past `metadata.py`'s door for 17 private names at 21 sites, which was the
+  only module to module private read in the backend. No behaviour change.
+- **What a source said about a Book is one record and one door.** `lib/sourceRecord.ts`
+  declares the fields a picked file, a store's catalogue and a Calibre index all state, and the
+  three family types extend it rather than restating them. `lib/bookRequest.ts` is where that
+  record becomes the request's own names, bounded once: the two page modules spelled 34 of
+  those bounds and now spell 7. `boundIdentifiers` moved there from the library settings page,
+  which was the tree's only import from one page folder into another. No behaviour changes:
+  every field and every value is what it was, the Calibre and store bodies byte identical, and
+  the file scan draft's key order moves because the spread inserts the shared fields first.
+- **Postgres is checked where a release is about to happen**, rather than on every pipeline:
+  on a tag and on the unattended patch branch. It is an optional drop in and SQLite is the
+  primary target, so paying its wall clock on every push duplicated an addon most changes
+  cannot touch.
+- **The Socket preflight has one home.** It was spelled in the pipeline and again in the
+  unattended patch release's script, each with a comment naming the other, so fixing one left
+  the other stale: the nightly run stopped on it and paged. Both callers read the same script
+  now, and a house rule allows exactly one file to reach for that host while leaving every
+  file free to name it in prose.
+- **The parsers and the normalisers are tested over generated input, and the budget that
+  makes that honest is itself a test.** Six surfaces gained property based tests through
+  `hypothesis`: the ISBN reader, the bibliographic rules every decoder shares, the CQL
+  parser and the LIKE escaping the SRU server builds its patterns with, and the two schema
+  validators that refuse invisible characters in an identifier and in a call number. 68
+  generated tests, running in the ordinary suite at 200 examples each. Measured on the
+  `builder` node: **168.70 s** for the whole backend suite, **163.39 s** for the same suite
+  with them deselected, and **17.72 s** for the 68 on their own, which includes collecting
+  all 7,755. A second profile at 2,000 examples takes those 68 to **46.62 s** and is for the
+  run somebody starts on purpose. **Every generator is derived from the rule it is about
+  rather than from a list of the ways that rule can be broken**, which is the defect this
+  closes: a sweep written by hand is a claim about its own bounds and says nothing about
+  them, and one in this tree read `range(0x11000)` as though it covered Unicode, a
+  sixteenth of the codepoints. The character classes come from Unicode categories, the
+  catalogue wordings from the very patterns under test, and the check digits from the
+  arithmetic rather than from the functions being checked. **A property is only a claim
+  about what its generator can reach**, so each one about a hostile class ships with a
+  witness that fails loudly when the class stops being reachable, and the example budget has
+  a floor that is measured from inside a running test rather than read off a settings
+  object: a profile quietly dropped to one example is a suite that passes and tests nothing.
+
+- **What makes two books the same book is one rule now, and it was four.** A title and an
+  author were folded into a comparison key in four places with four accidental differences, so
+  the same pair of books could be a duplicate in one part of the app and two books in another.
+  Four defects came out of that, all fixed once rather than four times. A title carrying the
+  punctuation a catalogue puts on it, `Ulysses :`, did not match the same title without it,
+  which is the ordinary shape of a MARC record rather than an odd one. An accent that arrived
+  decomposed was deleted rather than composed, so one spelling of `Les Misérables` keyed two
+  ways and one of them collided with a different spelling. The rule that drops a leading
+  article from a title was applied to the author as well, folding the surnames `Das Gupta` and
+  `Gupta` into one person. Punctuation inside a credit was deleted rather than spaced, so
+  `J.R.R. Tolkien` and `J. R. R. Tolkien` were two authors here while an author page has always
+  treated them as one. The importer that reads somebody's reading history still matches on the
+  title alone and still does not fold it, which is deliberate and now says so.
+
+- **An OPDS feed's authors are stored the way every other import stores them.** It was the one
+  path that left a name in catalogue order, so `Herbert, Frank` was filed under the surname
+  alone and shared an identity with `Herbert, James`.
+
+- **A reading status now reaches every screen that offers one, or fails to compile.** The
+  status names were a `Record` the type could check and the library filter strip and the book's
+  status picker each restated the same five as a list it could not, so a sixth status added to
+  the backend would have compiled clean and appeared in neither. Both are built from one
+  ordered list whose completeness the compiler enforces, and the picker keeps only its icons.
+  The order the two screens render is unchanged and is deliberately still written out: taking
+  it from the generated enum, which happens to agree today, would let a regeneration reorder
+  two screens with nothing to review. The same guard went onto the condition list, which had
+  none at all, so a condition added to the backend was unreachable in the copy editor with
+  nothing failing.
+
+- **The star rating moved into the book page, which is the only page that uses it, and house
+  rule four gained a test.** `src/components/` is now asserted to hold nothing that speaks one
+  page's vocabulary or reaches past the framework, a sibling, the translation door and the
+  transport.
+
+- **A date is spelled the same way on every screen, in the language the reader chose.** Ten
+  components each decided their own date format and six of those calls passed no language at
+  all, so the trash page, the admin's reset queue and the account security record rendered
+  dates and times in whatever language the browser guessed while every other screen used the
+  app's. On this machine that browser guess was a third format belonging to neither catalogue.
+  Every rendered date now comes from one module, in four formats that are unchanged from what
+  each screen already showed, and a house rule refuses a new one written anywhere else. Two
+  tests that looked at a time had built their expected string with the same unlocalised call
+  the screen made, so they agreed in every language and were why a green suite never saw this.
+
+- **A language this app does not speak can no longer be stored as the one it renders in.** The
+  test for whether a language is supported asked whether the catalogue had the name at all,
+  and that question walks the prototype chain, so a stored choice of `toString` passed as
+  supported and then indexed the catalogue to a function rather than to a message table. Both
+  readers take a string the viewer controls: the stored choice, and the browser's own language
+  list. It asks for an own property now, and the arm is parametrised over five names every
+  object answers to, because a fix special casing `toString` passes a test naming only
+  `toString`. Bounded and self inflicted, since the value comes from the viewer's own storage,
+  and pre-existing rather than introduced by the date work whose review seat found it.
+
+- **What the settings hooks hand their cards is now written down.** Eleven hooks across the
+  library and data settings routes returned an object whose shape was inferred, which is how
+  one of them reached twelve members without anybody remarking on it and how two of them kept
+  returning a file nobody read. Each now declares what it returns, and the two pairs that are
+  the same shape declare it once between them.
+
+- **The DOM child walk that five file readers had each written for themselves now lives in
+  one module**, `frontend/src/lib/elementChildren.ts`, with the measurement that argues for
+  it. The EPUB package document, FictionBook and Kindle library readers take it from there;
+  the Adobe Digital Editions and comic archive readers still carry their own and are named
+  in the rule that holds the count at one. **The structural rule that a member's book file
+  cannot reach the network watches the whole directory now**, rather than the reader modules
+  it derived by the byte tokens each names: the shared walk names none of those tokens, so a
+  `fetch` written into the one module every reader hands its nodes to would have published
+  green, where the identical line in any reader it came out of fails. The import arm is
+  narrowed to pay for it, because over the whole directory a refusal of any import from the
+  generated client false refused nine modules whose only match is a type.
+
+- **The house rule that stops a test module deciding for itself what vendored code is now
+  says, in its name and in its failure message, that it covers a walk of any tree.** It
+  always did: the walk predicate reads the pattern and never the receiver, and one test
+  module already walks the browser's own source under it. No behaviour changed.
+
+- **A ninth kind of queued row on the rapid scan page would have appeared on screen with
+  nothing in it.** The scanner's rows go through a fixed set of eight states, and the rules
+  over them were written out one comparison at a time: three of the queue's own rules, the
+  reading that says a pick is still going, and the queue's own display, which had a line for
+  each state that existed and none for anything else. Adding a state compiled clean and was
+  silently wrong in all five places at once. The rules and the display are tables keyed on
+  the set of states now, so a new one does not compile until somebody says what it means and
+  what it looks like. No behaviour changes for the states that exist.
+
+- **The sentence explaining that catalogues list few ebooks could have appeared beside a
+  queue it was not true of.** The queue component decided for itself which rows a catalogue
+  had no record of, which is the one reading of a row's own fields it still did; every other
+  figure on that screen is counted once by the page's hook and rendered. It is counted with
+  the rest now, and a test refuses a second reader.
+
+- **The three ordered lists in the page level view types that a set equality test still
+  guarded, the formats, the lending answers and the light or dark modes, are refused at
+  compile time when they leave a member out, and the refusal names the member.** All five
+  such lists in that file are wrapped now. What stays a test is the duplicate entry, which
+  the type cannot see because a list naming a member twice still excludes nothing, and the
+  sequence, which the type has no opinion on.
+
+- **The key this library holds for one catalogue now reaches only that catalogue.** The
+  dispatch for the two catalogues with a JSON API of their own decided who was handed the
+  Google Books key by asking whether the source charges per request, which several sources
+  can answer yes to, so the next paid catalogue added would have been handed that key and
+  would have sent it with its own requests. The other half of the same test handed an unpaid
+  source an empty key, which is a valid argument meaning "ask without one", so such a source
+  would have asked Google anonymously and reported the answer as a book not found. Neither
+  was reachable from anything a reader can do: every catalogue this asks is one of the eleven
+  written into the release, and nothing builds another at runtime. A row names the secret its
+  own door takes, by whose secret it is, and that is refused at construction where it
+  disagrees with the rest of the row. A source that needs a credential and has no door
+  carrying one fails the startup check instead of asking without it. Both doors a catalogue
+  of this kind answers, the ISBN lookup and the title search, read that one statement on the
+  row.
+
+- **A nested test run no longer leaves a worker behind when it is killed for taking too
+  long.** The coverage register's own end to end test spawns a whole test runner over a
+  fixture library and bounds it with a timeout, and that timeout kills the runner by process
+  id: the worker the runner had forked survived it, on the machine the suite's caller runs on,
+  with nothing waiting on it to notice. The nested runner now runs its tests in threads of the
+  process the timeout can reach, so there is no second process to lose, and an arm asks the
+  nested run which process ran its tests rather than trusting the flag that put it there.
+  Starting the child in a process group of its own was measured first and is worse here: the
+  group is one nothing signals, and leaving the outer run's group is what would stop a signal
+  aimed at the suite from reaching the child at all.
+
+- **A vulnerability scanner reads the committed dependency export, and it had drifted fifteen
+  distributions behind the lock it claims to come from.** `alembic`, `cryptography`, `ldap3`,
+  `pg8000`, `rapidfuzz` and `mnemonic` among them, and eight more pins stood *newer* than the
+  lock resolves, so the export had been generated from a resolution this tree no longer has.
+  Nothing installs from that file: the image and the suite both sync from the lock. It is
+  regenerated, and three arms now compare the two committed artefacts on every run, so an
+  export that stops describing the lock is red rather than quietly audited.
+
+- **The MARC and OPDS importers carry the typed catalogue record all the way to the write**,
+  instead of turning it back into an untyped dictionary one module short of the row. Nothing
+  about what an import does changes. The dictionary's eleven keys were the only thing stopping
+  a write reaching a column the importer has no business setting, by raising when it was asked
+  for one, so that accident is replaced by a rule that reads the module and says which columns
+  a write may name.
+
+- **The developer documentation has a generated index of its decisions register.** One row per
+  heading, with the section it sits under, a link to it, and how many words the entry is. Every
+  session is told to read the relevant entry before changing anything, and nothing said which
+  entry or how large one is: they run from one paragraph to longer than most of the rest of the
+  file. It is generated from the register's own headings and regenerated rather than edited, and
+  the suite is red until a change to the register is followed by a regeneration.
+
+- **A book can be created with a list of subjects.** They are stored as supplied and
+  interpreted by nothing: no tag is created, no existing tag is matched, and nothing on any
+  screen sends them yet. A subject containing the separator this column is stored on is refused
+  at the request and dropped at the catalogue joins, because such a value reads back as two
+  subjects. Both request bodies that write the column now bound the subjects inside it rather
+  than only the string they arrive in.
+
+- **The rule for what the repository versions has one home instead of three.** Four walks decide
+  which files they are about by reading the ignore file, and three separate copies of that rule
+  answered them, one of the three a script rather than a test. They had drifted in three
+  directions, each missing a different half: one returned no directory only marker, two refused
+  nothing when the parse came back empty, and one raised where the others asserted. All four read
+  one module now, which is the union of the three rather than the largest of them, every refusal
+  raises rather than asserting so that no consumer can walk an unevaluated tree under an
+  interpreter that compiles assertions out, and whether an empty parse is a legitimate input is
+  the caller's own answer rather than a default. Nothing about which files a walk reads changes,
+  measured over every entry asked both as a file and as a directory.
+
+- **The rule that says what a `.gitignore` this project cannot honour looks like now refuses
+  four more forms and stops refusing two files git honours.** A negation was refused by
+  containment, so a versioned file with an exclamation mark anywhere in its name,
+  `notes!draft.md`, was a hard failure rather than a literal. It is the marker's position that
+  is refused now, read before the anchor and directory markers come off, because reading it
+  afterwards is the same false refusal from the other side: git reads `/!foo` as an anchored
+  literal path, and stripping the anchor moves the marker into first place. Narrowing that
+  opened a silent hole in the same move, which is why the backslash class rides with it:
+  `\!name` is git's escape for a literal marker, `fnmatch` reads the backslash as an ordinary
+  character, and the entry then matches a name git never ignores. A bare `*` is refused too, by
+  equality and never by containment: it matches every path component, so it takes every
+  population derived from this walk to zero at once, and three of this repository's own twenty
+  five entries carry a star. That failure was already loud, in nine arms across four files, so
+  what the refusal buys is one message naming the entry instead of four walks each reporting
+  that they found nothing. A byte order mark on the file no longer disarms whichever entry is on
+  line 1. **And each of those refusals now says which form it refused**, because five of them
+  shared one sentence and the likeliest one a contributor meets, a path spelled with
+  backslashes, was being told to teach the walk about a form when the answer is a forward slash.
+- **Two guards over that walk stopped deriving their own floor from the thing they were
+  checking.** The anti vacuity ratchet over the Markdown walk took both sides of its inequality
+  from one parse, so an ignore file the walk stopped understanding subtracted the floor away
+  with the walk and the comparison held over nothing; the floor now comes from a parse built
+  beside the arm rather than by it, selected by what each parsed entry matches rather than by
+  how its line is spelled, and driven over fixture trees so that the one shape where the two
+  floors differ is observed rather than asserted. And the census over roster counts in prose
+  stated the size of its own walk in nine places, none of which anything recomputed. Those
+  figures are gone, the readings kept for their history carry their date and the population they
+  were taken on, and the claims that are current facts are recomputed by four new arms. One of
+  them had already gone wrong: the sentence saying the declaration rule costs no coverage read
+  zero, and a stripped document has since gained a roster count.
+- **The committed API schema is checked by the suite rather than by a pipeline step.**
+  `frontend/openapi.json` is a committed artefact that the frontend tests read as the authority
+  on what the API accepts, and the only thing comparing it against a fresh generation ran after
+  a push. Of 24 backend job failures over 300 pipelines, 4 were that comparison, and every one
+  was a docstring edit in a router or a schema module, because a route's docstring becomes the
+  schema description. A local run answers now. The cost is real and is stated at the site: a
+  drift is reported after the suite has run rather than in the seconds before it. A generation
+  that did not happen is refused as a broken generator rather than reported as a stale schema,
+  because the remedy for the two is not the same.
+- **A wall clock bound now sits where its own comment says it does.** The test holding the
+  catalogue search deadline to its promise was bounded at the lower of the two return times it
+  discriminates between while its comment claimed the midpoint, and it went red once on
+  scheduler noise by 59ms. The bound is the midpoint now, which still fails the regression it is
+  written for and no longer fails on the good case's own overhead. The slack was sized by
+  raising the simulated slow source rather than by widening the margin alone, which costs no
+  wall clock because that sleep is abandoned whenever the deadline works; the comment records
+  what it does cost, that the overrun a partial regression has to reach before being seen moved
+  from 2.5x the deadline to 3.5x.
+- **The pytest worker count no longer cites a measurement of a different suite.** It carried a
+  serial duration, a two worker duration and a test count taken when the suite was a fifth its
+  present size. The durations are gone rather than replaced, because a duration is a fact about
+  a machine and a worker count: what carries the setting is that this suite drops and recreates
+  every table between tests and that two workers were measured using 0.68 cores between them,
+  which never depended on how many tests there are.
+- **A theme rule that reads a component's class strings now reads past a comment.** The two
+  status pill patterns were matched against the raw module, and a comment quoting a declaration
+  is a match, so a copy of a pill the app no longer paints would have become the subject of
+  every contrast measurement below it while the arm that checks the read still passed. Such a
+  comment has to quote the declaration with its key, not name the classes, so nothing in the
+  component today was a near miss. The stripping the rule reads through is the parser backed one
+  the rest of the test tree shares rather than a matcher of its own, which matters in the other
+  direction: a class string carrying a slash and a star is code that reads as a comment opener
+  to a text scan, and a text level strip deletes the declarations after it. Latent on this tree,
+  so no figure moves. No behaviour changes.
+- **A disc no longer leaves this catalogue described as a subject.** The DNB writes a content
+  type and a carrier type into a record's subject fields with an authority number on each, and
+  this library stores what the record was asserting beside the heading itself. The MARC export
+  wrote the heading back out with the vocabulary's plain code in every case, so `CD-ROM` left as
+  an ordinary topical heading: a receiving catalogue filed a disc beside a place and a period,
+  and the same record is what the public catalogue server hands anybody who asks it. A heading
+  the record marked as a content or carrier term now leaves in MARC's genre or form field with
+  the code that says which, which is the field and the code the source itself used. A heading in
+  a vocabulary that issued no such code keeps its heading and loses the mark, because there is
+  nothing to write and inventing one would be a worse answer than an honest gap.
+- **A mutation sweep that is asked to stop now takes its suite run down with it, whatever
+  asked.** An interrupt already did: the tool installs a handler for it and kills the arm's
+  whole process group on the way out. A termination signal and a hangup did not, because
+  neither had any handler at all, so the kernel ended the tool wherever it stood, nothing ran
+  on the way out, and the suite run it had started carried on holding a worker node's lock and
+  a multi gigabyte pod with nobody reading its output. That is the shape of the run that once
+  sat at 8.6 GB for 53 minutes. Both now unwind the same way an interrupt does, and a closing
+  terminal is the common way the second one arrives. The tool still reports the signal that
+  stopped it rather than an exit code of its own, and it prints, on the way in, which stops
+  this run answers for and the one command that still ends it instantly, because a stop that is
+  answered politely looks for a moment like a stop that was ignored.
+- **A sweep started so that it outlives its terminal still does.** A run launched with the
+  hangup already ignored, which is what the usual wrappers for a long job over ssh set, keeps
+  that ignore rather than having it overridden by the change above. A sweep is a suite run per
+  mutant plus one, so the long unattended run is the ordinary one, and killing it at the one
+  signal it was told to survive would have been a worse bargain than the orphan the change
+  prevents.
+- **An export no longer holds the whole shelf in memory, whichever format was asked for.** The
+  MARCXML arm was paged already; the CSV and txt arms of the same route resolved every book the
+  member could see, plus a reading status for each, and built the whole file as one string
+  before answering. They are the two an ordinary account can reach, where MARCXML is offered
+  only in library mode, and the CSV arm carries the description column, so they were the worse
+  two. All three now walk the shelf a page at a time and write one chunk a page, so the peak is
+  a page whatever the shelf holds. **The CSV and text files come out in catalogued order rather
+  than title order**, which is what paging costs: a title is a key an edit can move, so a walk
+  resuming on one drops a book silently, and a spreadsheet sorts a column back in one click.
+- **A username typed at the login screen could write a line of its own into the server log.**
+  The two LDAP failure paths interpolated it unescaped, and the traceback beside one of them
+  carried it a second way. Both are escaped now, and the unreachable directory case is logged
+  without its traceback, so nothing the caller sent can reach the log unescaped. The field's
+  missing pattern, which is where the report started, is refused rather than restored: measured
+  against the validator this application runs it accepts a carriage return and a NUL, so it was
+  never the control it looked like, and adding it would refuse stored names the sign in route
+  has to match. `docs/decisions.md` carries the measurement.
+- **The reading status pill colours are a table the theme rule reads, not text it matches.**
+  They now sit beside their two siblings in the shared page types module and are exported, and
+  the contrast measurements import that table instead of scanning the card's source for class
+  strings. The binding is a `Record` over the status type, so a status added with no colour, or
+  a colour renamed out from under the rule, is a type error rather than a measurement that
+  quietly moves to the wrong subject. Every evasion the text reading route had to be defended
+  against goes with it. No colour changes.
+- **A recovery phrase committed anywhere in the tree now fails a build.** A phrase is the key,
+  and it carries no prefix, no header and no label, so a general purpose secret scanner cannot
+  tell one from a sentence. The new check reads the wordlists the application already depends
+  on and asks for the standard's own checksum, and it separates a phrase from prose by what
+  stands **between** the words rather than by the words themselves, because a quarter of the
+  ordinary English in this repository is wordlist words and a run of them that happens to
+  checksum is the expected result rather than a surprise. It runs twice: in the test suite over
+  every versioned file, and again over the published tree, where the same rule is set narrower
+  because a refusal there would block a release.
+
+- **The duplicates page no longer holds the whole library to tell you it found nothing.** Finding
+  duplicates needs the whole catalogue, because a page of it cannot be grouped on its own, but the route
+  was loading every visible book as a full record and serialising every duplicate through the same path
+  the book listing uses, so a library with no duplicates paid all of that for an empty answer on every
+  visit. It reads nine columns per book in one query now and serialises nothing: an entry carries the
+  cover, the title, the format, the publisher, the year and the ISBN, which is what the card shows.
+  **The answer is capped and says what it left out**, up to two hundred books across whole groups, never
+  a group cut in half, with the number of groups found beside them, so a library where an import ran
+  twice is told the size of what happened instead of being handed it. **And a group larger than one
+  merge can take now works**: a merge accepts twenty entries, a group could be any size, and every
+  button on such a card was a guaranteed refusal, so a group is shown with at most the twenty a merge
+  accepts and says how many more there are. **The card names the format**, which is the case the feature
+  exists for: a hardback and a paperback are one book and two ISBNs, and the line under the title used
+  to leave that out.
+- **A mutation sweep that is killed outright now takes its suite run down with it.** The dispositions it
+  grew last month cover every stop that lets Python run, and cover none of the ones that do not: an
+  outright kill, a segfault, or the kernel's out of memory killer left the suite run going with nobody
+  waiting on the result. A healthy run left that way finished by itself and then tidied up, releasing
+  the node lock, its pod and its working copy after one run's duration. What never cleared is the
+  conjunction, a sweep stopped that way **and** a run that has hung, which nothing in the harness could
+  reach: the orphan reaper spares any pod whose creating process is still alive, and a hung run's
+  process is alive. The kernel is now told, at the run's own spawn, to kill it when the sweep dies,
+  which is the one mechanism that needs no code to survive. Measured against the real spawn: a kill
+  landing half a second into a run left 40 of 40 runs going before and 0 of 40 after, and a stop swept
+  across the spawn itself left 12 of 120 and then none. It **adds to** the existing escalation rather
+  than replacing it, since the kernel signals one process and a grandchild that ignores the stop still
+  needs the group kill. The price is that the run cannot tidy up on the way out, so its pod waits for
+  the next run's reaper pass and its working copy for the next run's sweep on that node, both of which
+  run at the start of every suite run. Where the kernel offers no such mechanism the sweep refuses to
+  start rather than running a layer short and saying nothing, and its own banner no longer offers the
+  outright kill as the immediate out without saying what that costs.
+- **A suite run now clears the working copies that killed runs left on the node.** Each run unpacks the
+  repository into a directory of its own on a disk the node keeps between runs, and removes it on the
+  way out; the stops that skip that cleanup are the ones that happen, a tool timeout, the out of memory
+  killer and an outright kill, and nothing had ever looked at that disk, so those copies stayed for
+  good. Measured on `builder` on 2026-09-29: **11 abandoned copies holding 1.6 GB, the oldest a month
+  old**, beside one live copy at 27 MB. Every run now lists what is there, asks the cluster which of
+  those runs still holds a pod, and removes only the rest. Three things fall outside it: the one shared
+  copy from before per run copies existed, at a name the listing does not match; a pod the cluster is
+  still taking down, which goes on claiming its copy; and a run in another namespace, since the listing
+  covers one while the disk is per node. Above all, a run only gets this far once its own pod is
+  running, so the node whose disk is already full is the one node this never reaches: it bounds the
+  ordinary pile, and a disk alarm on the node is what covers the case it is named for.
+- **A directory identity whose name is wider than the column no longer writes a row.** The name a
+  directory returns went straight into `users.username`, which is a sized text column SQLite does not
+  enforce, so a deployment pointing its username attribute at a distinguished name wrote a row at
+  whatever width the directory sent and logged it at that size, once per account. The LDAP door now
+  meets a check that refuses such a name and fails the sign in; the proxy door already refused one, and
+  the same check is now its backstop. **Refused rather than shortened**, because the match that finds an
+  existing member is on the username and it is unique: two identities sharing a fifty character prefix
+  would have landed on one row, and the second person to sign in would have inherited the first's books,
+  loans and notes, with no error anywhere. The refusal is at WARNING and names both the width and the
+  name, because it is a lockout somebody has to go and fix. Every log line that could name an unbounded
+  username now bounds it, including the refusal a proxy header reaches without authenticating, which is
+  the only one of them an unauthenticated caller can provoke.
+- **In a directory mode, a member whose stored username is already wider than the column can no longer
+  sign in**, and will see an ordinary failed login until an operator renames the row. The check is
+  applied before the member is looked up, so it refuses a leftover row of the 2026-08-18 class and a
+  legitimate long directory name by one mechanism. There is no endpoint that renames an account, so the
+  remedy is the database row. **In local mode nothing changes**: that door does not go through the
+  check, so the same row signs in and is still served in full.
+- **A commit subject can no longer carry an internal name onto the public mirror.** The snapshot
+  published on every push to the default branch copies the internal commit subject verbatim, and nothing
+  read it: six of this repository's 1,877 subjects hold a string the publish gate refuses in any
+  published file, five of them on the default branch's own first parent line. The publish now stops on
+  one rather than substituting a safe sentence, because substituting would rewrite what the public
+  history says. Nothing is lost by stopping: the mirror is a snapshot rather than a replay, so the next
+  commit publishes a tree carrying the blocked one, and the refusal says so. **The commit identity and
+  the branch name are scanned too**, since the author and the address are written into the commit object
+  and into the annotated tag's tagger and the branch is the ref that is pushed, and all three are
+  configured through the same environment prefix as the credential, which is where an internal hostname
+  would be typed. All three defaults measure clean, so the scan refuses nothing today and covers the
+  next edit.
+- **Every job that reads the tree about to be published now blocks the publish, or records why it does
+  not.** The image push waited for neither scan over that tree: both could still be running, or already
+  red, while the image built from it was promoted. It waits for both now. The rule behind it is derived
+  from the artefact graph rather than from a list of job names, so a scan added later is covered by
+  existing rather than by somebody remembering to wire it in.
+
+- **A tag invented against a book you cannot see is no longer in your vocabulary.**
+  `GET /api/books/tags` scoped its `book_count` through the shelf and served every row
+  unscoped, so a tag minted off a private book, by a CSV import or by creating one and
+  attaching it, reached every member on their next page load with a count of zero. The list
+  now answers with the seeded vocabulary plus the tags on books the caller can see. Attaching
+  a tag by an id you may not see, singly or in bulk, answers the same 404 an unused id
+  answers: attaching a guessed id to a book you own used to return that book with the tag's
+  name on it. **Not closed, and stated rather than implied**: tag names are globally unique
+  and creating one answers a name that already exists with the existing tag, so guessing a
+  **name** still confirms a tag exists, and a tag no book carries is attachable by id, so
+  guessing the **id** of such a tag confirms its name too. **And one thing this breaks, which
+  is a regression and not a narrowing**: typing a tag name that collides with one you cannot
+  see answers with that tag, as a collision always has, and putting it on a book then fails
+  with nothing on screen to say why. On the scan form the book is still saved and the tag is
+  dropped from the selection with no message, so the name is unusable from the picker. A CSV
+  import still does all of it and is not limited the same way, matching names against the
+  whole vocabulary under a cap that limits new tags rather than matched ones, so nothing is
+  protected by the refusal. The repair is a route that attaches a tag by name, which is not in
+  this release.
+- **The tag delete confirmation says "every book" instead of a number.** The number it carried
+  was the reader's own count and the delete is library wide, so it understated the action by
+  exactly the books the reader cannot see. The custom field confirmation already said "every
+  book" for the same reason.
+- **A recovery phrase in a commit message can no longer reach the public mirror, and the
+  message is built once instead of twice.** Everything the mirror push sends that is not the
+  exported tree, the commit subject, its body and the tag name, is derived in the job that
+  builds that tree and carried to the push as one artefact. The scan that already reads the
+  tree reads the same bytes, and the job that pushes derives nothing at all. Before this the
+  subject was recomputed at the point of sending, in an image with no Python and no wordlists,
+  so no arm had ever read one: a phrase pasted into a commit subject published, and the mirror
+  does not unpublish. The scan of the exported tree is unchanged.
+- **The recovery phrase scan could not see a Turkish phrase, and missed most Russian ones.** It
+  asked the mnemonic library whether a run of words checksums, and that library folds the
+  phrase to a decomposed form before looking each word up in a list holding the language's own
+  spelling. Where the two differ the lookup fails and the phrase reads as invalid: **649 of
+  Turkish's 2,048 words move under that fold and 276 of Russian's**, so a real 24 word Turkish
+  phrase was read correctly about one time in ten thousand. The scan computes the checksum
+  itself now, off the same lists. Measured in both directions before it was changed: over
+  12,000 phrases the library itself wrote, twelve languages at all five lengths, the old rule
+  missed 1,900 and the new one misses none; over 48,000 drawn sequences the new one refuses
+  nothing the old one accepted. The scanned tree is clean either way.
+- **The release gate in front of the mirror stopped installing the development toolchain.** The
+  job that scans the exported tree for a recovery phrase was materialising the test runner, the
+  type checker, the linter and four more, none of which it imports: 112 packages against 43,
+  and 226.4 MB installed against 83.2 MB.
+- **A release that lost its tag on the way to the mirror published untagged and said so in one
+  line of a job log.** The message the push sends carries three parts, and whether to tag was
+  read from one of them being absent. An absent file is also what a lost artefact looks like,
+  so a tag pipeline that lost that part published the release commit, never tagged the public
+  mirror, and succeeded. The message now always carries a third part saying which kind of
+  publish it is, and a push that cannot tell refuses. The cost of refusing is one deferred
+  release; the cost of guessing was a release the mirror has no tag for.
+- **A backend or Postgres suite that produced no test report no longer passes quietly.** Both
+  jobs declare a report and neither proved it had written one, which the report collector only
+  warns about. The frontend job has asserted this since a replaced reporter lost a whole
+  suite's record with every job green.
+- **A check attributed to a job that does not exist is now refused.** A colon qualified name
+  whose first segment opens a pipeline key must name a job or template the pipeline has, a
+  script the frontend manifest declares, or a job the file itself defines while also importing
+  the pipeline reader. The defect that bought it was live in five places. A name belonging to
+  another project's pipeline is refused too, and the failure message says how to write one so
+  it is not read as ours.
+- **An accepted command in a published document now carries which authority proved it**: a job
+  step names it, no job step names it but the tree runs it, or nothing invokes it and it is
+  accepted on its declaration. The set that no job step runs is pinned with a reason per
+  member, so a new member fails by name and a member that becomes a job step fails too.
+- **A comment inside a fenced code block is no longer read as a command offer, and a `#` inside
+  a quoted string is no longer read as a comment.** The repair the failure message recommends,
+  rewriting an offer as a mention, did not work inside a fence before this; and reading every
+  `#` as a comment hid every command written after a quoted one.
+- **A command written in a document now ends at a closing quote**, as it already ended at a
+  closing backtick, so a real command quoted inside another is offered without the quote riding
+  on its last token.
+- **The pipeline reader now refuses a value naming content written elsewhere in every position
+  it hands a value back from**, rather than in the positions somebody listed. Listing them was
+  wrong twice: once for a list item, and then for a mapping key inside a list item, which is
+  where the file actually writes them.
+- **What the pipeline runs, and in which job, is one asserted list rather than a sentence.**
+  Each row is checked against the pipeline, so deleting a step reds by name.
+- **A book file's own subject words reach the book, and you can take them off before it is
+  written.** Four of the five file readers were already parsing a subject out of the file and
+  throwing it away, because the record they all answer had no field for one: `dc:subject` in an
+  EPUB, `<genre>` in a FictionBook, record 105 in a Kindle file, `Genre` in a comic archive.
+  They now reach `books.categories`, the same column a catalogue lookup fills. A PDF still
+  states none, deliberately: that format's `Subject` key is the description and is already read
+  as one. **The subjects show on the queue row before anything is written, with a cross on
+  each.** Nothing in that queue is saved until "Add all", and no route clears that column
+  afterwards: enriching a book replaces the list and never empties it, so the only way to take
+  a subject off a book that already has one is to remove the book. That is the reason the
+  control is there rather than on the book's own page, and the pick panel now says so before
+  the press that starts it, in both catalogues. **What the browser refuses before it sends**:
+  the column stores its subjects joined on a semicolon, so the endpoint refuses an entry
+  containing one, and it refuses the whole book rather than the entry, which would have cost
+  somebody the book over one subject reading `Juvenile Fiction; General` in their file. Such an
+  entry is dropped now, never split and never failed. So is an empty one, one wider than the
+  column holds, and a repeat of one already kept; and the count stops at what one request may
+  carry, counting what was kept rather than what the file offered, so entries the endpoint
+  would refuse cannot hide good subjects behind them.
+- **A test that hangs now fails as a named test, and a run that quietly lost tests fails too.**
+  A hanging test used to end the whole job with nothing naming it: measured on 2026-09-26, a
+  worker parked nine minutes with no verdict and nothing in the repository bounded the wait.
+  Every test is now bounded, the bound fails that one test by name and leaves its worker alive
+  so the rest of the run still reports, and one worker death can no longer become nine.
+  Underneath all of it the session reconciles itself: it compares the tests it collected
+  against the ones that produced a report and refuses a short run, naming what went missing.
+  That half is what covers everything a per test bound cannot reach, which is a worker that
+  dies for any other reason, a truncated session, and a report that never arrived. Measured
+  with one test killing its worker mid file: at the parallel runner's default restart limit,
+  ten workers were consumed, the same test was reported failed ten times, the report carried 35
+  entries for 31 collected tests and five tests never ran; with restarts off, fifteen tests
+  disappeared. Neither shape said anything before this.
+- **What the catalogue protocol can be made to send is now measured in bytes rather than in
+  records, and the test that said so was checking a number it had been given.** The server caps
+  a response at fifty records and the comment beside that cap said a record had no size anybody
+  could have derived, because the book description is a column with no length limit. That was
+  wrong on the day it was written: every write through the application bounds a description to
+  ten thousand characters, and only a restore from a backup goes past it. The test standing
+  behind the cap built its page from a description typed into the test rather than read off
+  that bound, so it measured a page a thirtieth of the widest one a legitimate write can
+  produce, and the record count could have risen by 64% without it noticing. It now builds
+  every field at the width the application actually allows, in three different characters
+  because a character limit is not a byte limit, and with one credited author and with two
+  hundred and fifty, because no length says how many fields a record has. The figure it holds
+  is the page itself with nothing rounded off, so widening any field, adding one to the record,
+  or raising the page size fails a test rather than quietly changing what a stranger can ask
+  this server for, and a second test watches the record's fields by their MARC tags, so a field
+  added to the record is named whether or not it moves the size. The same slack was found in
+  the sibling test for the authenticated export page and is closed the same way. **No record
+  changes shape**: nothing about what the server sends is different, only what is known and
+  asserted about it.
+- **The export and the backup now declare what they actually send.** `GET /api/books/export`
+  declares `text/csv`, `text/plain` and `application/marcxml+xml`, `GET /api/backup` declares
+  `application/zip`, and both cover routes declare the three image types they serve. Every one
+  of them declared `application/json` with an empty schema before, so the published document,
+  the generated client and anything validating against it were wrong about all four. Both
+  downloads also declare the `Content-Disposition` they send.
+- **The browser asks for the types a download can actually be.** Its `Accept` header named a
+  JSON export, which does not exist, and a generic byte stream, which nothing sends, while
+  omitting two of the three export formats. It is now pinned against the committed schema
+  rather than maintained by hand.
+- **The export and the backup are rate limited**, five and three a minute per account. The
+  refusal carries `Retry-After`. **The limit bounds how often each is started and neither how
+  large the result is nor how many run at once**, and the archive download has no size bound at
+  all; both are written at the routes.
+- **A refused export says so.** The navigation bar read neither the error nor the pending flag
+  from the hook behind its export menu, so a refusal of any kind, including the one added here,
+  was a button that silently stopped working.
+- **A shelf name out of somebody's CSV can no longer publish a tag they were never shown.**
+  Importing a file matched each tag name against every tag in the library with no viewer in the
+  question, and then **put it on the book**. Where that name belonged to a tag whose only books
+  are another member's private ones, the import attached it to a book that is public by default,
+  which counted it for every member and so listed it to all of them, permanently and with no way
+  for a member to undo it; on a library publishing its catalogue it reached a reader with no
+  account. One rule now decides who a matched tag may be handed to, and both places that resolve
+  a name from a member ask it: the import and the new endpoint below. A name the member may not
+  use is left off, and the result says how many names did not go on a book without saying which
+  of the four reasons applied to each, because separating them out would answer the question the
+  refusal exists to narrow. The matching itself is unchanged and deliberately so: narrowing it
+  would make an invisible name miss, and the insert that follows a miss is the one that used to
+  take a whole upload down with it.
+- **Typing a tag name on a book is one request, and it can no longer fail after appearing to
+  succeed.** `POST /api/books/{book_id}/tags` takes a name and answers with the book. It used to
+  be two requests, one to invent the tag and one to attach it by id, and the second refused a
+  name that collided with a tag on a book the reader cannot see: the member typed a word, was
+  told the tag had been created, and then saw "Tag not found". On the scan form that refusal was
+  swallowed and the chip disappeared with it. The endpoint answers the same status whether the
+  tag was invented or already existed, so nothing in the answer reports whether a name was
+  already taken.
+- **A cancelled scan no longer leaves a tag behind.** Typing a tag name into the scan form asked
+  the server to invent the tag straight away, and that row was written whether or not the book
+  was ever saved. It stayed in the library carried by no book, invisible in the tag list,
+  holding its name against every future use of it, and removable only by an admin. The form now
+  holds the name until the book is saved and applies it then, so cancelling asks the server for
+  nothing at all.
+- **A collection's name is no longer served to members who can see nothing in it, and filing a
+  book into a guessed one no longer works.** The list handed every member every collection in
+  the library, so the name of a shelf holding only somebody's private books was the evidence
+  that those books exist, and naming its id at a write then succeeded and answered with the
+  name. A collection is now listed, renameable and fileable when a book you can see is in it,
+  when a book you can see in the trash is, or when no book at all is. An empty one is listed for
+  everybody, which is what keeps a shelf you just made on the page you made it on, and it means
+  a count of 0 says the shelf is empty rather than possibly hiding books. A collection hidden
+  while it holds one book you cannot see comes back once that book is destroyed. Two things are
+  unchanged and said out loud rather than implied: typing a name that is already taken still
+  tells you it is taken, and the ids are still consecutive.
+- **Known limitation: an empty collection can be taken off your list by somebody else.** Because
+  an empty one is listed for everybody, any member can file a book you cannot see into it, and
+  it then stops being listed, renameable or fileable for you and for its maker. Typing the name
+  again still answers with the row, and filing into that row then fails as an unknown id does.
+  Clearing it needs an admin, and the only thing an admin can do is delete the collection.
+- **The document now says that a cover can be fetched in pieces, and what arrives when it is.**
+  Both cover routes have honoured a `Range` header since the day they existed, because the
+  response they build does it for them, and they have advertised that in a header on every
+  reply. The published document said they answer 200 only, and the TypeScript client is
+  generated from that document. It now declares the partial answer too, including the multipart
+  envelope that arrives when a caller asks for two pieces at once, which is a different media
+  type from the one a single piece arrives under. The malformed and unsatisfiable range refusals
+  stay undeclared, because this document declares no refusal anywhere and two published route
+  descriptions argue from that.
+- **A book's subjects can be removed.** Three things wrote that column and nothing removed it:
+  adding the book, filling a gap from a catalogue, and absorbing a duplicate. Even an enrichment
+  asked to overwrite could only replace it with another catalogue's list, never empty it, so the
+  only removal in the product was deleting the book. The column is served to a reader with no
+  account whenever a book is public, and two ordinary acts carry a subject across that boundary:
+  making a private book public, and folding a private row into a public one. Editing a book now
+  takes a subject list, and an empty one clears it. **The browser cannot do this yet**: the API
+  takes it and the edit form has no control for it.
+- **A subject that reaches the column is now the server's own answer about the file, and two
+  suites hold it there.** The browser tidies a subject before it sends it and the server tidies
+  it again on the way in, by two rules that are deliberately not the same: the browser collapses
+  whitespace and trims, the server does that and deletes the control characters that have
+  nothing to show. What has to hold between them is that the browser never changes the server's
+  answer, and nothing held it. A browser rule one character wider than the server's does not let
+  a bad value through, it stores a subject the file never stated. That equality is now a shared
+  fixture set both suites read, with each case carrying the input and both implementations'
+  answers, so the two arms lock each other and a case cannot be edited to make a failure go
+  away. The semicolon that may not appear inside a stored subject rides in the same file: it was
+  a hand written literal in the browser and a constant on the server, pinned by nothing.
+- Corrected two published statements about how a title search row is scored. A MARC, Dublin Core
+  or MODS search row carries the identifier off its own record and a cover derived from it,
+  where the documentation said it carried neither.
+- **The Python that builds, scans and publishes this repository is now linted and type checked
+  like the rest of it, and one hole it left open is closed.** Sixteen tracked Python files, nine
+  and a half thousand lines including the secret scanner, the mutation harness and the gate that
+  decides an unattended release, were outside the linter, outside the type check and outside the
+  compile walk, because all three are anchored to the application's own directory. They are
+  inside all three now. Nothing was repaired to get there: every rule firing on the day the
+  tools went on is recorded with the count it stood at, in a list a test re-derives from the
+  linter on every run, so an entry cannot outlive the findings that justified it. What the tools
+  would **not** have caught is recorded beside them: seven defect classes were planted in the
+  outbound scanner and three went past both, all three the polarity of a refusal.
+- **The outbound scanner now fails when it scans nothing.** Its refusal to report a tree clean
+  when it has read almost no files was tested thoroughly and its entry point was tested not at
+  all, so replacing that refusal with a null left every check green while the scan ran over an
+  empty export and exited 0, one rung before a push to a mirror that does not unpublish.
+  Inverting the refusal was green the same way. Four arms now drive the entry point itself.
+- **A MARC record that prints its ISBN qualifier inside the subfield now yields the ISBN.**
+  `9783161484100 (pbk.)` is the spelling every catalogue used before subfield `$q` existed,
+  and it is the one a file another library hands over carries, where the ISBN is the
+  importer's primary match key. The same parenthesis now counts as qualification, so a cross
+  reference to another edition written that way cannot be taken as the record's own
+  identifier, and an entry that qualifies nothing but states no number cannot outrank one
+  that does.
+- **A catalogue name whose surname is a French role word no longer loses the surname.**
+  `Autrice, A A.` flips to `A A. Autrice`, and reading that form back, as an export and
+  import round trip does, took the manufactured full stop for the one a catalogue puts in
+  front of a role designation and returned `A A`. Silently: nothing said the surname had
+  gone.
+- **A custom field's name no longer reaches a member who can see nothing it was filled in
+  on.** The list of household defined fields was the whole table to everybody, so a field
+  filled in only on books the viewer cannot see published both its existence and whatever a
+  member chose to call it to the rest of the library. A definition is listed now when a book
+  the viewer can see holds a value in it, when a book in their trash does, or when no book
+  holds one at all, so a field just defined and not yet filled in is still listed to
+  everybody, its author included. The doors that take a field id agree with that list by
+  construction rather than by a second rule: renaming a field the caller may not be told
+  about, or writing a value into one, answers the same 404 an id that does not exist already
+  answered, and the refusal when a name is taken no longer says which name it clashed with.
+  Deleting a field is unchanged and stays an admin's. What a scoped list newly tells a member,
+  and the two doors no wording closes, are written down in `docs/security.md`.
+- **Renaming a custom field is recorded.** Renaming relabels content other members typed, on
+  books the renamer cannot see, and it was the only one of the three verbs leaving no trace,
+  where deleting a field logs and is an admin's. The rename now logs the account and both
+  names, whoever renames: the entry below narrows who may, and the log line says who did.
+- **The rules that walk the frontend test tree now read one corpus too, and its allowlist is
+  itself held.** The source half of this landed first and left the test half with a pattern
+  per rule, which is the same disarming cost one tree over. Both halves now name which files
+  may hold such a pattern, and each permitted file's patterns are pinned whole, exclusions
+  included: an exclusion reaches no tree, so a rule that only asks where a pattern lands
+  never sees a narrowing arrive. A narrowing applied after the sweep rather than inside it
+  is still possible where no document cites a file in the directory hidden, which is written
+  down at the rule rather than left to be found. Internal: no behaviour changes.
+- **Every rule that walks the frontend source reads one corpus, and narrowing it is refused
+  rather than obeyed.** Each tree wide rule carried its own file pattern, so disarming one
+  cost a single line in the file of whoever wanted that rule green, and the rule went on
+  reporting nothing with a real violation live. Measured twice over this tree: cut to one
+  extension the corpus loses every card and the rendering half of every page folder while
+  keeping enough files to clear any plausible floor, and narrowed by directory it keeps both
+  extensions and every exempted file and drops every page. The patterns live in one module
+  now, which holds four enumerations of the tree against each other and against two stated
+  lists, and refuses to hand over a corpus that is not the tree. Internal: no behaviour
+  changes.
+- **A reorganisation of the MARC21 field readers left their old names in prose that
+  publishes, and a reader cannot tell a name is gone.** Every surviving stale name is
+  repaired, across three documents, five backend modules, five test files and a migration,
+  and a new guard refuses a backticked `module.member` naming a member that module does not
+  have. The guard covers the qualified spelling only, and that bound is measured rather than
+  cautious: over the published tree a rule over bare private names reports names nothing
+  here defines, and reading them finds most are correct prose, third party internals, local
+  variables and names deliberately recorded as gone, so an unqualified rule would refuse by
+  accident. The escape for a name a document keeps on purpose is to drop the backticks.
+- **Every date and time this library shows is now the time where you are.** The server keeps
+  its clock in UTC and used to hand a browser a timestamp with no zone on it, so a book added
+  at noon UTC read as noon wherever the reader was sitting: an hour or two out across most of
+  Europe, and most of a working day out across the Pacific. Near midnight it showed the wrong
+  day. Timestamps now say which zone they are in, and the browser renders them in yours.
+- **A loan is due at the end of the day you picked, where you are.** A deadline was sent as a
+  bare clock time and read as UTC, so a book due on the fifth was due just after midnight on
+  the sixth in Berlin and in the late afternoon of the fifth in California, which is where it
+  went overdue while the day it was due still had hours left in it. The deadline now carries
+  the zone, so it is the end of your own day and the date shown back is the date you chose.
+  **Deadlines set before this are left as they were**: nothing recorded which zone each was
+  set in, so there is nothing to convert them from, and one near midnight may read as the
+  neighbouring day.
+- **A custom field now records the member who defined it.** Two things follow from the one
+  column. The definer is told their field exists even when the only book carrying a value in
+  it is one they cannot see, where before a member could be shut out of a field they had
+  named themselves. And renaming is now theirs: any member could relabel the whole library's
+  vocabulary, on books they cannot see and with no undo, where deleting a field has always
+  been an admin's. An admin may still rename any field they can see, so a name whose author
+  is unreachable can be repaired. **A field that existed before this release records no
+  author and stays renamable by anybody**, which is every field in your library today: there
+  is nobody to prefer, and refusing the rename would have taken the verb away from a whole
+  existing vocabulary on the morning of the upgrade.
+- **A Postgres connection can now verify the server, and a connection that quietly gave up on
+  TLS says so.** The driver was asked for no TLS context at all, which meant it offered an
+  upgrade, verified neither the certificate nor the hostname when one was accepted, and
+  carried on in the clear with nothing raised when the server declined. Nothing in
+  `DATABASE_URL` could turn any of it on: an `sslmode` written into the query string reaches
+  the driver, which has no such parameter and fails on the first connection, so a deployment
+  spelling it there finds out rather than believing it took. `DATABASE_SSL_MODE` now takes
+  libpq's own names, `disable`, `prefer`, `require`, `verify-ca` and `verify-full`, and
+  `DATABASE_SSL_ROOT_CERT` points at the CA the verifying two check against. The default is
+  `prefer`, which is exactly what this connection already did, so no deployment's behaviour
+  moves; what changes is that a declined upgrade is a warning in the log naming the modes
+  that would refuse it. SQLite deployments are untouched, and either variable set beside a
+  URL that is not Postgres is a startup failure rather than a line nothing reads.
+
 ## v0.17.3
 
 _2026-10-09_

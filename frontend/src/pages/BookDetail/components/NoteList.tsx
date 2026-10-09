@@ -2,15 +2,8 @@ import { useId, useState, type FormEvent } from "react";
 
 import type { NoteOut, UserOut } from "../../../api/generated/model";
 import { useTranslation } from "../../../i18n";
+import { shortMonthDate } from "../../../lib/date";
 import { Icon } from "../../../components";
-
-export function formatDate(iso: string, locale?: string): string {
-  return new Date(iso).toLocaleDateString(locale, {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  });
-}
 
 interface NoteListProps {
   notes: NoteOut[];
@@ -135,7 +128,7 @@ export default function NoteList({
                     <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-paper-600 dark:text-paper-400">
                       <span>
                         {note.author?.username} ·{" "}
-                        {formatDate(note.created_at, locale)}
+                        {shortMonthDate(note.created_at, locale)}
                       </span>
                       {/* Read off the server's answer, never inferred from
                           authorship. `note_visible_to` narrows every route

@@ -37,8 +37,8 @@ from typing import Final
 #: now somewhere else: `dc:subject` mixed headings like `20. Jahrhundert` in
 #: with the Dewey ones, and a looser pattern read that as the number `20.` with
 #: the caption `Jahrhundert`. Nothing hands this a subject heading any more.
-#: `metadata._dnb_subjects` says why that separation is structural rather than
-#: left to this regex.
+#: `marc_fields.Fields.controlled_subjects` says why that separation is
+#: structural rather than left to this regex.
 _NOTATION: Final = re.compile(r"^\d{3}(?:\.\d+)?$")
 
 #: A heading is one token then, optionally, a caption. The token is put through

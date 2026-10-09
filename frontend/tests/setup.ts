@@ -1,10 +1,199 @@
 import "@testing-library/jest-dom/vitest";
 
 import { cleanup } from "@testing-library/react";
-import { afterEach, beforeAll, beforeEach, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, vi } from "vitest";
 
+import { forgetPreferences } from "../src/lib/preference";
 import { resetZxingDouble } from "./doubles/zxing";
-import { hadDecompressionStream } from "./lib/withoutDecompression";
+import { openLedger, uncontrolled } from "./lib/doorLedger";
+import {
+  hadDecompressionStream,
+  realDecompressionStream,
+} from "./lib/withoutDecompression";
+
+/**
+ * The zone every run of this suite is in, pinned rather than inherited.
+ *
+ * **Nothing pinned one before, so the suite's answers depended on the machine.**
+ * The container resolved one zone and a development machine another, and both
+ * looked correct, so a date assertion could be green here and red there with no
+ * file having changed. That alone is reason enough to pin something.
+ *
+ * **Which zone is not arbitrary, and it is not the one the container happened to
+ * run.** Measured by driving the two naive parse mutants against the arms in
+ * `tests/lib/date.test.ts`, one zone at a time:
+ *
+ * | zone | `endOfDayInstant` parsed as UTC | `monthLabel` key parsed as UTC |
+ * |---|---|---|
+ * | `UTC` | not caught | not caught |
+ * | east of Greenwich (Berlin, Kolkata, Kiritimati) | caught | **not caught** |
+ * | west of Greenwich (this one, Phoenix, Honolulu) | caught | caught |
+ *
+ * Under `UTC`, parsing a wall clock as local and parsing it as UTC are the same
+ * function, so no expression over their output can tell them apart: both arms
+ * are dead and the deadline work's whole guard with them. East of Greenwich
+ * revives the first and leaves the second dead, because UTC midnight of a
+ * `YYYY-MM` bucket is still the same month locally. **Only west of Greenwich
+ * catches both**, which is what `lib/date.ts` already says in words when it
+ * warns that a UTC parse puts a January bucket in December "for anybody west of
+ * Greenwich". So the zone is west, and that is a measurement rather than taste.
+ *
+ * **No DST, which is the second constraint.** A zone that changes offset makes a
+ * fixture's expected value depend on which month its literal names, so the next
+ * person to write one inherits a trap. This zone is -09:30 year round, measured
+ * at 570 minutes in both January and August.
+ *
+ * -09:30 rather than a whole hour is the tiebreak and is argued as one rather
+ * than measured: no mutant here needs it, and it costs nothing to have an offset
+ * that a whole hour assumption cannot reproduce.
+ *
+ * **How much further west the pin could move is 30 minutes, and that is the
+ * minimum over the fixtures rather than a comfortable one picked from them.**
+ * An earlier version of this said 2.5 hours, which is the headroom of the one
+ * fixture with the most slack, and is the measurement this repository keeps
+ * paying for: a figure taken over the easiest member and written as a property
+ * of the set. The binding family is 21 occurrences of a 10:00 UTC stamp across
+ * five files, which render at 00:30 local, and three of those files assert a
+ * calendar date outright.
+ *
+ * **And this figure is armed rather than merely measured, which is the rung
+ * worth knowing.** Driven: moving the pin 90 minutes further west, to a zone
+ * that passes every check in this file once `SUITE_TIMEZONE_OFFSET` moves with
+ * it, reds **four named arms in four files**. So the pin cannot move by
+ * accident at all, the checks below refuse that, and a deliberate two line move
+ * reds by name rather than quietly costing the suite its fixtures. Still
+ * re-derive the population rather than trusting this line:
+ *
+ *     /bin/grep -rhoE '"20[0-9]{2}-[0-9]{2}-[0-9]{2}T[0-9:.]+Z"' tests/ | sort | uniq -c
+ *
+ * Each stamp's headroom is its UTC clock time minus this pin's 9:30, as minutes
+ * past local midnight, and the smallest positive one binds.
+ *
+ * **Ten occurrences already render the previous day, and that is intended.**
+ * Nine are either asserted with a line saying so or assert no date at all. The
+ * tenth is a client built `toISOString()` compared as a string, which no zone
+ * can move, so it is not a member of this class.
+ *
+ * **There is no fidelity argument for any zone, which is why catching power
+ * decides.** This app stores no zone against an account: `lib/date.ts` records
+ * that the browser's is the only statement of where a member is. So there is no
+ * production zone for a suite to match, and `UTC` was never the realistic choice,
+ * only the container's accident.
+ *
+ * **Set here rather than in an arm, because it is a global.** The suite runs
+ * `isolate: false`, so one process serves many files per worker and a pin that
+ * failed to restore would redden unrelated files non deterministically.
+ *
+ * **And it has to stay above everything.** `lib/date.ts` builds its formatters
+ * lazily on first call, and nothing this file imports constructs a `Date` or an
+ * `Intl` formatter while it is being evaluated, so this runs before any of them
+ * reads a zone. An eager formatter at module scope anywhere in that import graph
+ * would capture the old zone and this pin would miss it.
+ */
+const SUITE_TIMEZONE = "Pacific/Marquesas";
+
+/** What `SUITE_TIMEZONE` is worth in minutes, which is what `Date` actually does. */
+const SUITE_TIMEZONE_OFFSET = 570;
+
+process.env.TZ = SUITE_TIMEZONE;
+
+/**
+ * The pin, proved rather than assumed, and proved again after every test.
+ *
+ * **An unavailable zone is silently ignored, in both spellings and with two
+ * different wrong answers.** Measured on bun 1.4.2, the version the suite
+ * container runs: a name the runtime cannot resolve leaves a `process.env.TZ`
+ * assignment with the zone that was already in force, and leaves a `TZ=` set
+ * before the process started at `UTC`. Neither throws and neither warns. So a
+ * pin that is merely written is the shape of configuration this repository has
+ * twice shipped inert: accepted, plausible and binding nothing. It would be
+ * worse than no pin, because it reads as the discriminating zone while being
+ * one that discriminates nothing.
+ *
+ * **Four things are checked, and none of them is redundant.**
+ *
+ * The **name** is what the runtime says about itself. The **offset** is what
+ * `Date` actually does, and they can disagree if `Intl` carries zone data the
+ * clock does not.
+ *
+ * The **hemisphere** is the table above read as a requirement rather than as an
+ * observation, and until it was checked nothing enforced it. A bare
+ * `YYYY-MM-DD` parsed as UTC midnight lands on the day it names in every zone
+ * whose offset is zero or east, so at such a pin the date-only arms in
+ * `tests/lib/date.test.ts` and the Bought on arm in
+ * `tests/pages/Home/components/BookTable.test.tsx` pass on the broken parse.
+ * Driven, pin moved to `Asia/Tokyo` with this check disarmed, which is how it
+ * has to be re-derived now that the check exists: six arms in four files red
+ * with the code correct, and **the identical six, same names and same counts,
+ * with the date-only parse reverted**. None of the six is a date-only arm. So
+ * east of here the defect is not harder to see, it is invisible, and every red
+ * looks like a fixture date wanting a new expected value. Updating them is the
+ * repair the failure invites and it would take this suite's whole regression
+ * coverage of that defect with it, plus the `monthLabel` mutant the table above
+ * says only a western pin catches.
+ *
+ * **The four compose, and that is worth more than any one of them.** No single
+ * edit moves the pin east past all four: changing the zone forces the name
+ * check, which forces the constant to change with it; the two seasonal readings
+ * then force that constant to be what the clock actually does; and this one
+ * refuses it once it is negative. Each check alone is evadable by editing its
+ * neighbour's input, and together they are not.
+ *
+ * The **second offset, six months out, is what holds the no DST constraint**.
+ * The zone is chosen partly because it does not change offset, so a fixture's
+ * expected value never depends on which month its literal names. One reading
+ * cannot see that: swapped to a DST zone, a single instant passes and the suite
+ * quietly acquires two offsets. Two readings half a year apart refuse it.
+ *
+ * **Called from the teardown as well as here, because this is a mutable
+ * global.** Setting it once at module scope is a claim about the moment the
+ * module ran, and a test file's own module scope runs **after** this one: a line
+ * reassigning `process.env.TZ` there is undone for the next file but stands for
+ * every test in its own, where a one time assertion has already passed. Driven:
+ * one such line left this green and reddened two arms elsewhere. The teardown
+ * below already refuses a leaked global for three other objects, so this is that
+ * same check with a fourth subject.
+ */
+function assertTheZoneIsPinned(): void {
+  const resolved = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  if (resolved !== SUITE_TIMEZONE) {
+    throw new Error(
+      `the suite's timezone pin did not take: asked for ${SUITE_TIMEZONE}, got ${resolved}. ` +
+        `Either this runtime cannot resolve that zone, which it fails silently rather ` +
+        `than saying, or something reassigned the zone after setup ran.`,
+    );
+  }
+  // Two instants, roughly six months apart, so a zone that keeps a summer and a
+  // winter offset is refused rather than sampled at whichever one happens to
+  // pass. Both are read as UTC instants so the reading does not depend on the
+  // very thing it is checking.
+  const winter = new Date("2026-01-19T12:00:00Z").getTimezoneOffset();
+  const summer = new Date("2026-08-19T12:00:00Z").getTimezoneOffset();
+  if (winter !== SUITE_TIMEZONE_OFFSET || summer !== SUITE_TIMEZONE_OFFSET) {
+    throw new Error(
+      `${SUITE_TIMEZONE} is not at a constant ${SUITE_TIMEZONE_OFFSET} minutes: ` +
+        `January reads ${winter} and August reads ${summer}. A suite zone that ` +
+        `changes offset makes a fixture's rendered day depend on its month.`,
+    );
+  }
+  // `getTimezoneOffset` counts minutes BEHIND UTC, so west is positive. Read
+  // off the constant rather than off the clock, because the constant is what a
+  // person edits when they move the pin and it is already proved equal to the
+  // clock two lines above.
+  if (SUITE_TIMEZONE_OFFSET <= 0) {
+    throw new Error(
+      `the suite zone must be WEST of Greenwich and ${SUITE_TIMEZONE} is at ` +
+        `${SUITE_TIMEZONE_OFFSET} minutes. This is not a preference: a bare ` +
+        `YYYY-MM-DD parsed as UTC midnight lands on the day it names at every ` +
+        `offset of zero or east, so the date-only arms would pass on the ` +
+        `broken parse and the monthLabel mutant would go uncaught. Moving the ` +
+        `pin east reds the same arms whether or not those defects are present, ` +
+        `which is why this refuses by name here instead.`,
+    );
+  }
+}
+
+assertTheZoneIsPinned();
 
 // jsdom has no layout engine; some libraries measure on mount.
 //
@@ -33,11 +222,11 @@ if (typeof window !== "undefined" && !window.matchMedia) {
     matches: false,
     media: query,
     onchange: null,
-    addListener: vi.fn(),
-    removeListener: vi.fn(),
-    addEventListener: vi.fn(),
-    removeEventListener: vi.fn(),
-    dispatchEvent: vi.fn(),
+    addListener: vi.fn<MediaQueryList["addListener"]>(),
+    removeListener: vi.fn<MediaQueryList["removeListener"]>(),
+    addEventListener: vi.fn<MediaQueryList["addEventListener"]>(),
+    removeEventListener: vi.fn<MediaQueryList["removeEventListener"]>(),
+    dispatchEvent: vi.fn<MediaQueryList["dispatchEvent"]>(),
   })) as unknown as typeof window.matchMedia;
 }
 
@@ -113,12 +302,27 @@ function shippedPalette(): Record<string, string> {
 /**
  * Parsed once per worker **process**, not once per test file.
  *
- * This file is the suite-wide setup, so anything at module scope runs again for
- * every one of the seventy-eight files, and vitest gives each file a fresh
- * module registry: a plain module-level `let` is therefore not a cache, it is
- * the same work with an extra branch. `globalThis` outlives the registry
- * because the fork pool reuses the process, so with two workers this parses
- * twice for the whole run instead of seventy-eight times.
+ * This file is the suite-wide setup, so everything at module scope runs again
+ * for every file in the suite, and each file gets a fresh module registry: a
+ * plain module-level `let` is therefore not a cache, it is the same work with an
+ * extra branch. `globalThis` outlives that registry because the pool reuses the
+ * process, so a run parses the stylesheet far fewer times than it has files.
+ *
+ * **Both halves are measured rather than reasoned.** Driven through the suite
+ * runner over 58 files, two probes, because either alone is ambiguous:
+ *
+ * | probe | reading |
+ * |---|---|
+ * | a counter on `globalThis`, bumped by this file's module scope | reads **2** on the second file a process serves, so the global survives between files |
+ * | a parse counter in `process.env`, which survives the same way | **never reaches 2**, so `shippedPalette()` runs at most once per process |
+ *
+ * The second probe alone would be the weaker evidence, because `process.env`
+ * resetting per file would fake it; the first is what rules that out, and it
+ * shows both stores surviving together.
+ *
+ * **The file count is deliberately not written here**, because it moves
+ * whenever a test file is added and is then read as current. Count them with
+ * the suite's own report.
  *
  * The work and its errors are unchanged; only how often it happens is.
  */
@@ -211,6 +415,15 @@ beforeEach(() => {
   // its spies as part of installing it: a file that never opens a camera should
   // not have one.
   resetZxingDouble();
+  // **Centrally for the same reason.** `lib/preference.ts` holds its decoded
+  // snapshots and its listeners at module scope, because a snapshot has to be
+  // the same value until its stored string changes and a listener set has to
+  // outlive one component. The suite runs with `isolate: false`, so those live
+  // as long as the worker: a file that cleared storage and not this would be
+  // handed the previous file's snapshot for a key it believes is empty, and a
+  // listener left by an unmounted hook would be called by the next file's write.
+  // Clearing the storage alone is what makes that invisible rather than loud.
+  forgetPreferences();
   // Same guard as the matchMedia shim above, and for the same reason: this hook
   // runs for the `@vitest-environment node` files too, which have neither a
   // localStorage nor a document. The network stub below is installed either way,
@@ -301,6 +514,13 @@ const REAL_MEDIA_DEVICES =
     ? undefined
     : Object.getOwnPropertyDescriptor(navigator, "mediaDevices");
 
+//: The parser this file's environment shipped, read before any test can wrap
+//: it. **Per file and not memoised per worker**, unlike the inflater below:
+//: the inflater is the runtime's and survives an environment, while happy-dom
+//: and jsdom each bring their own `DOMParser`, and this module is evaluated
+//: once per test file, after that file's environment is built.
+const REAL_DOM_PARSER = (globalThis as { DOMParser?: unknown }).DOMParser;
+
 //: Whether this environment can inflate, seeded before any test can take it
 //: away.
 //:
@@ -326,6 +546,23 @@ const REAL_MEDIA_DEVICES =
 //: An environment that never had one is not a leak, which is why this is a
 //: question about what this worker started with rather than an assertion.
 hadDecompressionStream();
+realDecompressionStream();
+
+//: **A fresh door ledger per file**, opened at module scope, which runs once
+//: per test file before any of its tests, and read after its last one.
+//: `tests/lib/doorLedger.ts` says why it is per file and not per worker.
+openLedger();
+afterAll(() => {
+  const missing = uncontrolled();
+  if (missing.length > 0) {
+    throw new Error(
+      "A door this file drives declares a bound no positive control in this " +
+        "file overran, so deleting or loosening it reds nothing: " +
+        `${missing.join("; ")}. Add an overrunBreach arm per bound, from ` +
+        "tests/lib/readerContract.ts.",
+    );
+  }
+});
 
 afterEach(() => {
   // `cleanup()` unmounts React trees, of which a node-environment file has none.
@@ -385,6 +622,32 @@ afterEach(() => {
         "withoutDecompression.ts, which puts it back in a finally.",
     );
   }
+  // **And the same object, which presence cannot say.** The meter replaces the
+  // inflater with a counting one for one call; one left installed is present,
+  // so the check above passes it, and every later file in the worker inflates
+  // through a meter nobody reads.
+  if (
+    hadDecompressionStream() &&
+    (globalThis as { DecompressionStream?: unknown }).DecompressionStream !==
+      realDecompressionStream()
+  ) {
+    throw new Error(
+      "This test left a replacement DecompressionStream installed. Under " +
+        "isolate: false every later file in the worker inflates through it. " +
+        "Install one with the meter in tests/lib/meter.ts, which puts the " +
+        "original back in a finally.",
+    );
+  }
+
+  // **The parser, by the same identity.** The meter wraps it for one call to
+  // count what a reader hands it; one left installed reaches every later test
+  // in this file, which then parses through a meter nobody reads.
+  if ((globalThis as { DOMParser?: unknown }).DOMParser !== REAL_DOM_PARSER) {
+    throw new Error(
+      "This test left a replacement DOMParser installed. Install one with the " +
+        "meter in tests/lib/meter.ts, which puts the original back in a finally.",
+    );
+  }
 
   // **Last, after every restore above has had its chance.** Storage still
   // broken here is broken for every later file under `isolate: false`.
@@ -397,4 +660,10 @@ afterEach(() => {
         "vi.spyOn() returns and call mockRestore() on it.",
     );
   }
+
+  // **The zone, for the same reason as the three above it.** It is a mutable
+  // global, so the module scope assertion only speaks for the moment setup ran:
+  // anything that reassigns it afterwards, including a test file's own module
+  // scope, stands for the rest of that file unchallenged.
+  assertTheZoneIsPinned();
 });

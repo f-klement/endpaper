@@ -7,24 +7,19 @@ import {
   COLUMN_SPECS,
   type ColumnKey,
 } from "../../../lib/libraryColumns";
+import type { ColumnChoice } from "../hooks";
 
 interface ColumnPickerProps {
-  /** Every column this mode offers, in the order the table draws them. */
-  available: readonly ColumnKey[];
-  /** The ones currently drawn. A subset of `available`. */
-  visible: readonly ColumnKey[];
-  onToggle: (key: ColumnKey) => void;
-  /** Forget the choice and go back to this mode's default set. */
-  onReset: () => void;
-  /** False while the current set already is the default. */
-  canReset: boolean;
   /**
-   * False while the library cannot yet say which mode a change would be saved
-   * under, so every chip and the reset are disabled rather than left looking
-   * live. `pages/Home/hooks.ts` says why a write in that window cannot be
-   * allowed through.
+   * The column set, what it could be, and the two ways to change it.
+   *
+   * One value where this took five. Every one of them was about the same
+   * choice, and `canChange` is false while the library cannot yet say which
+   * mode a change would be saved under, so every chip and the reset are
+   * disabled rather than left looking live: `app/hooks.ts` says why a write in
+   * that window cannot be allowed through.
    */
-  canChange: boolean;
+  choice: ColumnChoice;
 }
 
 /**
@@ -45,14 +40,8 @@ interface ColumnPickerProps {
  * reader looking for the column they cannot find has no way to learn that it
  * is not their mistake. `aria-disabled` and the hint below say why.
  */
-export default function ColumnPicker({
-  available,
-  visible,
-  onToggle,
-  onReset,
-  canReset,
-  canChange,
-}: ColumnPickerProps) {
+export default function ColumnPicker({ choice }: ColumnPickerProps) {
+  const { columns, available, isDefault, toggle, reset, canChange } = choice;
   const { t } = useTranslation();
   const panelId = useId();
   // Closed on arrival. Somebody who has chosen their columns is not choosing
@@ -60,7 +49,7 @@ export default function ColumnPicker({
   // the table off a phone screen.
   const [open, setOpen] = useState(false);
 
-  const shown = new Set<ColumnKey>(visible);
+  const shown = new Set<ColumnKey>(columns);
 
   return (
     <div className="mb-2">
@@ -82,7 +71,7 @@ export default function ColumnPicker({
           {t("columns.label")}
           <span className="opacity-70">
             {t("columns.summary", {
-              shown: visible.length,
+              shown: columns.length,
               total: available.length,
             })}
           </span>
@@ -125,7 +114,7 @@ export default function ColumnPicker({
                 // taking the chip out of the tab order is right here and wrong
                 // there.
                 disabled={!canChange}
-                onClick={locked ? undefined : () => onToggle(key)}
+                onClick={locked ? undefined : () => toggle(key)}
                 // The house `disabled:opacity` is on the unchosen arm only,
                 // for the reason the note above gives: the chosen arm is the
                 // measured `on-accent`/`accent-fill` pair, and the title chip
@@ -147,10 +136,10 @@ export default function ColumnPicker({
           <p className="text-xs text-paper-600 dark:text-paper-400">
             {t("columns.alwaysShown")}
           </p>
-          {canReset && (
+          {!isDefault && (
             <button
               type="button"
-              onClick={onReset}
+              onClick={reset}
               disabled={!canChange}
               className="shrink-0 text-xs text-accent-700 hover:underline disabled:cursor-not-allowed disabled:no-underline disabled:opacity-50 dark:text-accent-300"
             >

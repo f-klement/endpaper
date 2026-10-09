@@ -23,6 +23,7 @@ import {
 
 import {
   getGetCustomFieldsQueryKey,
+  getListCustomFieldsQueryKey,
   getGetNotesQueryKey,
   getGetQuotesQueryKey,
   getListQuotesQueryKey,
@@ -49,7 +50,7 @@ import {
   useGetQuotes,
   useListLocations,
   useListTags,
-  useCreateTag,
+  useAddBookTagByName,
   useDeleteTag,
   getListTagsQueryKey,
   useRefreshMetadata,
@@ -199,14 +200,24 @@ export function useBookActions(
     },
   });
 
-  const createTag = useCreateTag({
+  // Somebody typing a tag name while looking at a book means "this book is
+  // that", not "add a word to the list", so it is one request that invents
+  // the tag if it is new and puts it on the book either way.
+  //
+  // **This replaced a create followed by an attach, and what went with the
+  // second request is the reason to prefer this shape.** The two answered
+  // different questions, the create by name and the attach by id, and the
+  // attach refused a name colliding with a tag on a book the reader cannot
+  // see: the member was shown "Tag not found" one beat after typing a name
+  // they had never been told about. The ordering between the attach and the
+  // tag list refetch went too, along with the paragraph explaining it, since
+  // there is now nothing to order.
+  const createTag = useAddBookTagByName({
     mutation: {
-      onSuccess: (tag) => {
-        // Straight onto the book. Somebody typing a tag name while looking at
-        // a book means "this book is that", not "add a word to the list".
-        addTag.mutate({ bookId, tagId: tag.id });
-        // The tag list is its own cache entry, and the new tag has to appear
-        // in the picker as well as on the book.
+      onSuccess: () => {
+        invalidateBook();
+        // The tag list is its own cache entry, and a newly invented tag has
+        // to appear in the picker as well as on the book.
         void queryClient.invalidateQueries({ queryKey: getListTagsQueryKey() });
       },
     },
@@ -283,12 +294,15 @@ export function useBookActions(
     setPrivacy: (isPrivate) =>
       privacy.mutate({ bookId, data: { is_private: isPrivate } }),
     addTag: (tagId) => addTag.mutate({ bookId, tagId }),
-    createTag: (name) => createTag.mutate({ data: { name } }),
+    createTag: (name) => createTag.mutate({ bookId, data: { name } }),
     isCreatingTag: createTag.isPending,
     deleteTag: (tag) => {
-      // Library wide and not undoable, unlike deleting a book. The count is
-      // in the message because "delete this tag" and "take this off 214 books"
-      // are different decisions.
+      // Library wide and not undoable, unlike deleting a book, and the message
+      // says "every book" rather than a number. `book_count` is the reader's
+      // count and the delete is not: an admin was told to take a tag off 3
+      // books when it was on two hundred, and the gap is exactly other members'
+      // private books, so publishing a true count is not available either.
+      // `customFields.deleteConfirm` settled the same question first.
       if (
         confirm(
           t("tags.deleteConfirm", {
@@ -296,7 +310,6 @@ export function useBookActions(
             // typed. Through `tagName` all the same, because the rule is that
             // no tag reaches a reader by any other road.
             name: tagName(tag, locale),
-            count: tag.book_count ?? 0,
           }),
         )
       )
@@ -337,6 +350,10 @@ export function useBookActions(
       status.error ??
       privacy.error ??
       addTag.error ??
+      // Surfaced where the create's was not: it used to be swallowed by the
+      // chain that followed it, and the one refusal this door has is the tag
+      // ceiling, which is about this book and worth saying.
+      createTag.error ??
       removeTag.error ??
       removeIdentifier.error ??
       cover.error ??
@@ -424,7 +441,7 @@ export interface UseBookCustomFieldsResult {
  * `CustomFieldValueUpdate`.
  *
  * `save` reports per call, because the server refuses a url field that does not
- * hold a URL with a 422 and the panel has to keep what was typed when it does.
+ * hold a URL with a 400 and the panel has to keep what was typed when it does.
  */
 export function useBookCustomFields(bookId: number): UseBookCustomFieldsResult {
   const queryClient = useQueryClient();
@@ -436,6 +453,14 @@ export function useBookCustomFields(bookId: number): UseBookCustomFieldsResult {
       onSuccess: () => {
         void queryClient.invalidateQueries({
           queryKey: getGetCustomFieldsQueryKey(bookId),
+        });
+        // And the definitions, because a write can change which of them this
+        // member is told about. Clearing the last value they can see on a
+        // field whose other carriers are books they cannot see takes the row
+        // off their list; filling one in on a book nobody had used it on
+        // leaves it. `backend/fields.py` holds the arms.
+        void queryClient.invalidateQueries({
+          queryKey: getListCustomFieldsQueryKey(),
         });
       },
     },
@@ -835,6 +860,16 @@ export function useBookSections(
 ): UseBookSectionsResult {
   // Read once, on mount: storage is a starting point, and re-reading it on
   // every render would fight the state this component already holds.
+  //
+  // **This is the one place a second copy of a stored value is correct, and it
+  // was deliberately left alone when the preference door was written.** Every
+  // other reader of a preference subscribes to storage and holds nothing, which
+  // is what removed a counter from the library page. Here the copy is what
+  // delivers a promise `lib/sectionState.ts` makes: when storage refuses the
+  // write, the section still folds for this visit, which is the part the reader
+  // can see. Subscribing instead would mean a tap on a section header doing
+  // nothing at all in a private window, and unlike the view's three labelled
+  // buttons a header that does not fold reads as broken rather than as refused.
   const [choices, setChoices] = useState<SectionChoices>(() =>
     readSectionChoices(STORE),
   );

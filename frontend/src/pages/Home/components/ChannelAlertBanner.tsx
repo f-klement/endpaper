@@ -15,11 +15,10 @@ interface ChannelAlertBannerProps {
  * **The bar for using this surface is high and the server is what holds it.**
  * One failed send is a network; every send failing for a day is a
  * configuration, and a banner that cannot tell them apart is one a household
- * switches off. `notifications._is_broken` makes that call: a refusal the app
- * decided itself at once, a transport failure only after 24 hours and at least
- * two consecutive failures. This component renders the verdict and does not
- * second-guess it, because the evidence it turns on lives in the health record
- * rather than in this payload.
+ * switches off. `notifications._is_broken` makes that call and states its
+ * rules. This component renders the verdict and does not second-guess it,
+ * because the evidence it turns on lives in the health record rather than in
+ * this payload.
  *
  * Admin only in effect rather than by a prop: the endpoint behind it answers
  * 403 to anybody else, so a member's query fails and this renders nothing. That

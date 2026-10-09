@@ -23,8 +23,22 @@
  * catalogue needs where the table below carries seven. So no plist is parsed
  * here and none has to be.
  *
- * The one plist inside this file is `Z_METADATA.Z_PLIST`, and `schemaVersionOf`
- * says why it is not opened either.
+ * **The one plist inside this file is `Z_METADATA.Z_PLIST`, and it is not
+ * opened either.** Core Data writes 1 into `Z_VERSION` and keeps the model's
+ * real identity in that plist beside it: **828 bytes** opening `bplist00` on
+ * the store measured, holding `NSStoreModelVersionHashes`, a digest of them,
+ * and a `BKLibraryVersion_Key`. Both Core Data stores Books keeps read
+ * `Z_VERSION = 1`, so the number in the column tells two stores apart not at
+ * all, and reaching the one that would takes a binary plist parser. Nothing
+ * here acts on either, which is the trade this module's own measurement
+ * refused everywhere else.
+ *
+ * **828 is that store with its `-wal` beside it**, and the checkpointed file
+ * alone answers 685: two readings of one store, and the paragraph below about
+ * the sidecar is why they differ. **Which figures move is the thing to know**,
+ * and it is not which file they came from. Every figure here taken from a row
+ * needs the sidecar, because without it there are no rows to say anything
+ * about; the counts of columns read the same either way.
  *
  * ## The schema is not a supported interface, and the reader is built for that
  *
@@ -32,10 +46,11 @@
  * model that ships inside the application. So nothing below names a column it
  * has not first found: `WANTED` is this module's own list, the store's
  * `ZBKLIBRARYASSET` table decides which of them are read, and a column that is
- * not there costs its field and is reported in `missing` rather than costing
- * the library. **A store that cannot be read is one skipped source and never a
- * broken import**: every outcome here is a value in a closed union, so a caller
- * importing from several places at once loses this one and keeps the rest.
+ * not there costs its field rather than costing the library, which is what a
+ * book of nulls says. **A store that cannot be read is one skipped source and
+ * never a broken import**: every outcome is a value in a closed union, so a
+ * caller importing from several places at once loses this one and keeps the
+ * rest.
  *
  * ## Where the schema was read, and what was not done
  *
@@ -125,10 +140,6 @@ export interface AppleBook {
   readonly format: AppleBooksFormat | null;
 }
 
-/** A field this library's schema could not fill. */
-export type AppleBooksField =
-  "title" | "authors" | "isbn" | "year" | "language" | "format";
-
 /** Why a database yielded no library. Closed, one sentence each on screen. */
 export type AppleBooksFailure =
   /** Opens as SQLite, and is not an Apple Books library. */
@@ -156,18 +167,6 @@ export interface AppleBooksLibrary {
    * about Apple Books rather than about their library.
    */
   readonly skipped: number;
-  /**
-   * The store's own model version, where it carries one.
-   *
-   * **1 on both stores measured, and null where there is none.** That is a fact
-   * about Apple's stores rather than about this function, whose range is any
-   * whole number a cell can hold: `schemaVersionOf` says why the number is
-   * weak. Where a Kobo's version tells one device from another, this tells
-   * nothing apart, and it is here because the shape is the family's.
-   */
-  readonly schemaVersion: number | null;
-  /** Fields no column in this store could fill. Sorted, so it compares. */
-  readonly missing: readonly AppleBooksField[];
 }
 
 export type AppleBooksReading =
@@ -315,52 +314,6 @@ function isSet(value: unknown): boolean {
 }
 
 /**
- * The store's model version, where it has one.
- *
- * Informational, and read rather than acted on: every decision below is taken
- * from the columns that are actually there, which is the same question asked of
- * the file rather than of a number the file states about itself.
- *
- * **And it is a weak number, measured rather than assumed.** Core Data writes 1
- * into `Z_VERSION` and keeps the model's real identity in `Z_PLIST` beside it:
- * **828 bytes** opening `bplist00` on the store measured, holding
- * `NSStoreModelVersionHashes`, a digest of them, and a `BKLibraryVersion_Key`.
- * Both Core Data stores Books keeps read `Z_VERSION = 1`.
- *
- * **828 is that store with its `-wal` beside it**, and the checkpointed file
- * alone answers 685: two readings of one store, and the paragraph above about
- * the sidecar is why they differ. **Which figures move is the thing to know**,
- * and it is not which file they came from. Every figure here taken from a row
- * needs the sidecar, because without it there are no rows to say anything
- * about; the counts of columns read the same either way.
- *
- * **That is the one plist inside this store and it is not opened.** It would
- * take a binary plist parser to report a number nothing acts on, which is the
- * trade this module's own measurement refused everywhere else.
- */
-function schemaVersionOf(db: SqliteDatabase): number | null {
-  return integer(
-    db.query("SELECT Z_VERSION FROM Z_METADATA")[0]?.["Z_VERSION"],
-  );
-}
-
-/** Which of `WANTED` this store does not have, as the fields they fill. */
-function missingFields(present: Set<string>): AppleBooksField[] {
-  const fields = new Map<AppleBooksField, readonly string[]>([
-    ["title", ["ZTITLE"]],
-    ["authors", ["ZAUTHOR"]],
-    ["isbn", ["ZEPUBID"]],
-    ["year", ["ZYEAR"]],
-    ["language", ["ZLANGUAGE"]],
-    ["format", ["ZPATH"]],
-  ]);
-  return [...fields]
-    .filter(([, columns]) => !columns.some((column) => present.has(column)))
-    .map(([field]) => field)
-    .sort();
-}
-
-/**
  * Whether a row is a book this member has, or one of the things a library keeps
  * beside one.
  *
@@ -442,13 +395,5 @@ export function readAppleBooksLibrary(db: SqliteDatabase): AppleBooksReading {
     });
   }
 
-  return {
-    ok: true,
-    library: {
-      books,
-      skipped,
-      schemaVersion: schemaVersionOf(db),
-      missing: missingFields(present),
-    },
-  };
+  return { ok: true, library: { books, skipped } };
 }

@@ -33,7 +33,7 @@ import dataclasses
 import logging
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
-from typing import Any, Final
+from typing import Any, Final, get_origin
 
 import covers
 import google_books
@@ -52,7 +52,7 @@ from models import (
     SUBTITLE_MAX,
     TITLE_MAX,
 )
-from schemas.book import MAX_YEAR, MIN_YEAR
+from schemas.book import MAX_CATEGORIES_PER_BOOK, MAX_YEAR, MIN_YEAR
 from schemas.classification import MAX_CLASSIFICATIONS_PER_BOOK
 
 logger = logging.getLogger("endpaper.catalogue")
@@ -115,7 +115,7 @@ class Subject:
     carried as the record wrote it and nothing here reads it as a scheme.
 
     **`vocabulary` is lower cased and `identifier` is not.** The folding is
-    `metadata._subject_vocabulary`'s, and the reason is in this repository
+    `marc_fields.Subfields.subject_vocabulary`'s, and the reason is in this repository
     rather than in the catalogues: `marc._extra_headings` decides an LCSH
     heading by `== "lcsh"`, so an uploaded file writing `$2 LCSH` would lose
     every one of them silently. **No served record motivates it**, which is
@@ -178,12 +178,40 @@ class AuthorityAssertion:
     identifier: str
 
 
-#: Fields worth having, and therefore worth scoring a record on.
+#: Fields worth having, and therefore worth scoring a record on, asked of a book
+#: that is already identified.
 #:
-#: Used twice, and the two uses are why this is a property rather than a rule at
-#: either call site: choosing between several printings of one ISBN inside a
-#: single catalogue, and choosing which catalogue leads the merge when both
-#: answer.
+#: Read at three questions, which is why it is a property rather than a rule at
+#: each call site: which of several records for one ISBN a single catalogue
+#: should answer with, which catalogue leads the merge when two answer, and how
+#: the edition picker is ordered.
+#:
+#: **`metadata._PICKABLE_FIELDS` is the other completeness score and is not this
+#: one.** It ranks title search rows, where the book is not identified yet and a
+#: row may not even be the right book. The two lists differ on five fields and
+#: each difference has its own argument; `docs/decisions.md` holds them, under
+#: *The two completeness scores are two questions, not one list*.
+#:
+#: **`isbn` and `cover_url` are absent because at a lookup neither says anything
+#: about the book.** Six lookup decoders build the cover URL from an ISBN, so it
+#: carries nothing the ISBN does not. Google Books supplies its own thumbnail
+#: and is the exception, and one source's thumbnail is not what should decide
+#: which catalogue leads.
+#:
+#: **For `isbn` the decoders do not agree, and the extent matters here.** Four
+#: stamp the ISBN that was **asked** onto the record, where it is then identical
+#: on every candidate and separates nothing. `_bnf_record` and `_loc_record` take
+#: no ISBN at all and parse one out of the record; `_google_record` does both,
+#: preferring Google's own and falling back to the asked one. Wherever a record's
+#: own ISBN is read, the field measures which catalogue printed a parseable one,
+#: which is the same ranking by source this list refuses in the other direction.
+#: Neither reading says anything about the book, which is why the disagreement
+#: strengthens the case rather than weakening it.
+#:
+#: **The edition picker is where that stops being true and they are still not
+#: scored.** Its entries are different printings, so both fields do vary there.
+#: Ranking on them changes which printings a member is shown, which is a product
+#: decision and not something this list should make on the way past.
 _SCORED: Final = (
     "author",
     "year",
@@ -333,8 +361,8 @@ _UNBOUNDED: Final = frozenset({"source"})
 #:
 #: `cover_url` and `google_books_id` are not reachable from a MARC file today:
 #: `_MARC_RECORD_FIELDS` carries neither. The other two are, and neither can
-#: arrive over-wide: `_marc_language` reads a three letter `041 $a`, and
-#: `metadata._marc_isbn` returns `isbn.parse` output. All four are classified
+#: arrive over-wide: `marc_fields.Fields.language` reads a three letter `041 $a`, and
+#: `marc_fields.Fields.isbn` returns `isbn.parse` output. All four are classified
 #: anyway, because a set that is exhaustive by assertion cannot acquire a field
 #: by default, which is the shape this repository keeps finding.
 _CUT_ON_UPLOAD: Final = frozenset(
@@ -490,6 +518,9 @@ class Record:
     isbn: str | None = None
     title: str | None = None
     subtitle: str | None = None
+    #: A **comma separated** credit line in direct order, the same value
+    #: `books.author` holds. `authors.py` owns what a comma means here and what
+    #: a producer owes before writing one.
     author: str | None = None
     publisher: str | None = None
     year: int | None = None
@@ -513,7 +544,7 @@ class Record:
     headings: tuple[Heading, ...] = ()
     #: Which record in an authority file each credited person is, where the
     #: catalogue said so. Empty everywhere but the DNB: see
-    #: `metadata._marc_author_identifiers`.
+    #: `marc_fields.Fields.author_identifiers`.
     author_identifiers: tuple[AuthorityAssertion, ...] = ()
     #: Whether the three collections above have already been folded.
     #:
@@ -641,11 +672,12 @@ class Record:
         are not read as one number.
 
         **Here rather than in each parser, and that is a rule moving rather than
-        a rule added.** `metadata._dnb_subjects` deduplicated its own subjects
-        because 689 restates the 600, 650 and 651 headings it was built from, so
-        the reference record 9783446249974 named Stevenson, Samoainseln and
-        Schatz twice each. The old `_as_match` deduplicated headings for the
-        search path and `_merge` did it again for the lookup path. Three sites,
+        a rule added.** `marc_fields.Fields.controlled_subjects` deduplicated
+        its own subjects because 689 restates the 600, 650 and 651 headings it
+        was built from, so the reference record 9783446249974 named Stevenson,
+        Samoainseln and Schatz twice each. The old `_as_match` deduplicated
+        headings for the search path and `_merge` did it again for the lookup
+        path. Three sites,
         one rule, and the next source added would have had to know about all
         three.
 
@@ -705,6 +737,10 @@ class Record:
         A count rather than a weighting: the question it answers is "is this a
         record somebody could recognise their copy from", and every field in
         `_SCORED` answers it once.
+
+        **Not the score a title search ranks on**, which is
+        `metadata._PICKABLE_FIELDS` and answers a different question over a
+        different population. `_SCORED` says why they are two.
         """
         return sum(1 for name in _SCORED if getattr(self, name)) + bool(self.subjects)
 
@@ -823,6 +859,53 @@ class Record:
         """
         return dataclasses.replace(self, cover_url=cover_url)
 
+    def with_scalars(self, **values: Any) -> Record:
+        """The same record, with these scalars rewritten. The general case of
+        `with_cover`, and here for the same reason: **no module outside this one
+        replaces a field on a `Record`**, so `_folded` keeps one reader rather
+        than becoming a convention every caller has to know.
+        `tests/test_house_rules.py::TestOnlyTheCatalogueBuildsAnUnfoldedRecord`
+        is what holds that, and it is why `importing.stored_record` asks for this
+        rather than replacing a field where it stands.
+
+        **It refuses a collection, which is the whole of the difference between
+        this and a bare `replace`.** A `replace` carrying a new `subjects` or
+        `headings` keeps the flag and skips the fold, so the record ships every
+        repeat its catalogue sent: `_folded` measures what that costs in both
+        directions, and `merged_with` is the one caller that reopens the fold
+        deliberately. **Refused rather than folded again**, because a caller
+        wanting the fold wants `merged_with`, and quietly doing the expensive
+        thing for it is how the 31 second stall arrived.
+
+        **Which names those are is derived from the declarations**, so a fourth
+        collection on `Record` joins the refusal by being a tuple rather than by
+        being remembered. Two derivations of the same set, the annotation and the
+        default, because either alone is a reading of one thing.
+
+        **Every dropper runs again, because this is a construction.** An over
+        wide scalar passed here is nulled rather than cut, and a `cover_url`
+        naming one of this deployment's own files is dropped: see
+        `_REFUSED_AS_OUR_OWN` for why that belongs in `__post_init__` and not at
+        a writer. So a caller composing a truncation with this has to know that
+        the two disagree about over wide strings, which is stated at the one
+        caller that does.
+        """
+        folded = {
+            name
+            for name, declared in self.__dataclass_fields__.items()
+            if get_origin(declared.type) is tuple or isinstance(declared.default, tuple)
+        } | {"_folded"}
+        refused = sorted(folded & values.keys())
+        if refused:
+            raise ValueError(
+                f"{', '.join(refused)}: the fold flag and the collections it "
+                "guards belong to __post_init__. A collection carried through a "
+                "replace keeps the flag set and skips the fold, so the record "
+                "then holds every repeat its catalogue sent. See the flag's own "
+                "comment and `Record.merged_with`."
+            )
+        return dataclasses.replace(self, **values)
+
     def as_lookup(self) -> dict[str, Any]:
         """The scalar facts, in the keys `schemas.book.BookLookup` names.
 
@@ -912,6 +995,21 @@ class Record:
         and its `split_categories` are the only two places that know the
         separator is a semicolon, because Google's own category names contain
         commas ("Fiction, general"). Calling it is not a third place that knows.
+
+        **The subject count is capped here, and it belongs to the shape rather
+        than to the caller**, which is exactly `match_headings`' argument one
+        field over and was bought by the same incident. `BookMatch` refuses past
+        `MAX_CATEGORIES_PER_BOOK` and `routers/books._match_rows` builds it inside
+        a `try` that drops the **row**, so an uncapped value costs a whole search
+        result for a record that is merely well described: measured, 33 short
+        subjects join to 493 characters, far inside the column's bound, and
+        returned zero rows. Capping in the search handler alone would leave
+        `GET /{id}/enrich/candidates` on the same footing, since it is fed by the
+        same function.
+
+        **The model keeps its own count bound**, because the other producer of
+        that body is a client on `POST /{id}/enrich/apply`, where nothing has
+        capped anything and a refusal is a 422 somebody can read.
         """
         return {
             "source": self.source,
@@ -924,7 +1022,10 @@ class Record:
             "description": self.description,
             "page_count": self.page_count,
             "language": self.language,
-            "categories": google_books.join_categories(self.subject_labels) or None,
+            "categories": google_books.join_categories(
+                self.subject_labels, limit=MAX_CATEGORIES_PER_BOOK
+            )
+            or None,
             "cover_url": self.cover_url,
             "isbn13": self.isbn,
             "series_name": self.series_name,
@@ -1083,7 +1184,7 @@ def _distinct(assertions: Iterable[AuthorityAssertion]) -> tuple[AuthorityAssert
 
     What this does remove is the ordinary repeat, which every DNB record with an
     author produces: `100` names the author and a `700` for the same person
-    names them again, exactly as `_marc_authors` already has to fold.
+    names them again, exactly as `marc_fields.Fields._author_entries` already has to fold.
     """
     seen: dict[AuthorityAssertion, None] = {}
     for assertion in assertions:
@@ -1107,7 +1208,7 @@ def _union(headings: Iterable[Heading]) -> tuple[Heading, ...]:
     that declares nothing arriving before one that does.** One record restates
     itself: a `689` chain repeats the `600`, `650` and `651` headings it was
     built from and declares no `$2` of its own. What decides is
-    `metadata._DNB_SUBJECT_TAGS`, whose order is `650 651 655 689 600`, so an
+    `marc_fields._DNB_SUBJECT_TAGS`, whose order is `650 651 655 689 600`, so an
     undeclared `650` or `651` reaches this loop **before** the `655` that names
     the same concept as a content type, and without the fill-in the undeclared
     copy would keep the place and the declaration would be dropped.

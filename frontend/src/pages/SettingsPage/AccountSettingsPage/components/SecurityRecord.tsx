@@ -4,6 +4,7 @@ import {
 } from "../../../../api/generated/model";
 import { ErrorState, Spinner } from "../../../../components";
 import { useTranslation, type Translate } from "../../../../i18n";
+import { numericDate } from "../../../../lib/date";
 
 interface SecurityRecordProps {
   security: MySecurityOut | undefined;
@@ -29,7 +30,7 @@ export default function SecurityRecord({
   isLoading,
   error,
 }: SecurityRecordProps) {
-  const { t } = useTranslation();
+  const { t, locale } = useTranslation();
 
   if (isLoading) {
     return <Spinner label={t("common.loading")} />;
@@ -57,10 +58,10 @@ export default function SecurityRecord({
               // that matters, so it is said without a name rather than not at
               // all.
               t("account.security.resetUnknown", {
-                date: new Date(resetOn).toLocaleDateString(),
+                date: numericDate(resetOn, locale),
               })
             : t("account.security.reset", {
-                date: new Date(resetOn).toLocaleDateString(),
+                date: numericDate(resetOn, locale),
                 name: approver,
               })}
       </p>

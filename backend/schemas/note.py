@@ -1,7 +1,6 @@
-from datetime import datetime
-
 from pydantic import BaseModel, Field
 
+from schemas.common import UtcDateTime
 from schemas.user import UserOut
 
 MAX_NOTE_LENGTH = 10_000
@@ -30,7 +29,7 @@ class NoteOut(BaseModel):
     #: Nothing leaks by reporting it: a note the caller may not read is not in
     #: the response at all, so the only `true` anybody sees is their own.
     is_private: bool
-    created_at: datetime
-    updated_at: datetime
+    created_at: UtcDateTime
+    updated_at: UtcDateTime
     author: UserOut | None = None
     model_config = {"from_attributes": True}

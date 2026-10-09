@@ -15,13 +15,16 @@ import RecoveryPanel from "../../../../src/pages/LoginPage/components/RecoveryPa
 import type { UseRecoveryResult } from "../../../../src/pages/LoginPage/hooks";
 import { renderLocalised } from "../../../utils";
 
+type OnBack = NonNullable<React.ComponentProps<typeof RecoveryPanel>["onBack"]>;
+
 function state(overrides: Partial<UseRecoveryResult> = {}): UseRecoveryResult {
   return {
-    ask: vi.fn(),
+    ask: vi.fn<(username: string) => void>(),
     isAsking: false,
     hasAsked: false,
     askError: null,
-    redeem: vi.fn(),
+    redeem:
+      vi.fn<(username: string, code: string, newPassword: string) => void>(),
     isRedeeming: false,
     hasRedeemed: false,
     redeemError: null,
@@ -31,8 +34,10 @@ function state(overrides: Partial<UseRecoveryResult> = {}): UseRecoveryResult {
 
 describe("RecoveryPanel", () => {
   it("asks an admin for the account that was typed", async () => {
-    const ask = vi.fn();
-    renderLocalised(<RecoveryPanel state={state({ ask })} onBack={vi.fn()} />);
+    const ask = vi.fn<UseRecoveryResult["ask"]>();
+    renderLocalised(
+      <RecoveryPanel state={state({ ask })} onBack={vi.fn<OnBack>()} />,
+    );
 
     const user = userEvent.setup();
     // Two username fields, one per half of the card. Index rather than a name,
@@ -49,7 +54,10 @@ describe("RecoveryPanel", () => {
     // panel that said "no such account" would be the disclosure the route
     // refuses.
     renderLocalised(
-      <RecoveryPanel state={state({ hasAsked: true })} onBack={vi.fn()} />,
+      <RecoveryPanel
+        state={state({ hasAsked: true })}
+        onBack={vi.fn<OnBack>()}
+      />,
     );
 
     expect(screen.getByRole("status")).toHaveTextContent(
@@ -60,9 +68,9 @@ describe("RecoveryPanel", () => {
   it("spends a code without asking for one first", async () => {
     // The two halves are separated by a telephone call: somebody who comes back
     // with a code must not have to request a second one to reach this form.
-    const redeem = vi.fn();
+    const redeem = vi.fn<UseRecoveryResult["redeem"]>();
     renderLocalised(
-      <RecoveryPanel state={state({ redeem })} onBack={vi.fn()} />,
+      <RecoveryPanel state={state({ redeem })} onBack={vi.fn<OnBack>()} />,
     );
 
     const user = userEvent.setup();
@@ -79,7 +87,10 @@ describe("RecoveryPanel", () => {
     // A code is not a session, so the panel's success message is an
     // instruction rather than a redirect.
     renderLocalised(
-      <RecoveryPanel state={state({ hasRedeemed: true })} onBack={vi.fn()} />,
+      <RecoveryPanel
+        state={state({ hasRedeemed: true })}
+        onBack={vi.fn<OnBack>()}
+      />,
     );
 
     expect(screen.getByText(/sign in with it/i)).toBeInTheDocument();
@@ -88,7 +99,7 @@ describe("RecoveryPanel", () => {
   it("never offers to remember the code", () => {
     // A suggestion list under this field is the previous member's code offered
     // to the next one on a shared machine.
-    renderLocalised(<RecoveryPanel state={state()} onBack={vi.fn()} />);
+    renderLocalised(<RecoveryPanel state={state()} onBack={vi.fn<OnBack>()} />);
 
     expect(screen.getByLabelText("One time code")).toHaveAttribute(
       "autocomplete",
@@ -97,7 +108,7 @@ describe("RecoveryPanel", () => {
   });
 
   it("goes back to the sign in card", async () => {
-    const onBack = vi.fn();
+    const onBack = vi.fn<OnBack>();
     renderLocalised(<RecoveryPanel state={state()} onBack={onBack} />);
 
     await userEvent

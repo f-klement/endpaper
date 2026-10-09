@@ -290,7 +290,7 @@ class TestTheHeadingFilter:
             headers=admin["headers"],
         )
 
-        assert res.status_code == 422
+        assert res.status_code == 400
         assert "32" in res.json()["detail"]
 
     def test_cannot_reach_another_members_private_book(self, client, admin, member, make_book):

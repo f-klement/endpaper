@@ -36,7 +36,7 @@ describe("Button", () => {
   });
 
   it("calls its handler", async () => {
-    const onClick = vi.fn();
+    const onClick = vi.fn<React.MouseEventHandler<HTMLButtonElement>>();
     renderLocalised(<Button onClick={onClick}>Go</Button>);
     await userEvent.click(screen.getByRole("button"));
     expect(onClick).toHaveBeenCalledOnce();
@@ -47,7 +47,7 @@ describe("Button", () => {
       // The whole point: a second click on a button that is already working is
       // a duplicate request, and several of the buttons this replaced allowed
       // exactly that.
-      const onClick = vi.fn();
+      const onClick = vi.fn<React.MouseEventHandler<HTMLButtonElement>>();
       renderLocalised(
         <Button isLoading onClick={onClick}>
           Save

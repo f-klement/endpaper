@@ -18,6 +18,25 @@ Like Endpaper or find it useful? Offer me a coffee. It helps pay for the public
 server that lets two copies of Endpaper reach each other. All features are free
 either way.
 
+## Motivation
+
+**A book that has been read once goes back on a shelf and stops being a book anybody reads.**
+Most of a household's library is like that: finished, kept because it was good, and invisible
+to everybody who might want it next. The people who would most enjoy a particular book are
+usually the ones already in the same building, the same street or the same group of friends,
+and none of them knows it is there.
+
+Endpaper exists to make a shelf legible to the people around it. Catalogue what you own once,
+and then the question "does anybody have a copy of this" has an answer, as does the more
+interesting question of what is sitting on somebody else's shelf that you would never have
+gone looking for. Lending is tracked because the practical obstacle to lending a book is not
+generosity, it is forgetting who has it.
+
+It is self hosted for the same reason. A record of what you read is not something to hand to
+a company, a shelf is a private thing until its owner decides otherwise, and nothing here
+needs an account with anybody. Books that are private stay private, and what you share is a
+decision you make per book rather than a setting you forget.
+
 ## Quick Start
 
 Run the published image. No build step, nothing to clone:
@@ -136,6 +155,33 @@ switches: library mode changes what a cataloguer sees and publishes nothing, and
 publishing is a second, separate decision. Private books stay private in every
 mode.
 
+## Usage
+
+**Getting books in.** Open the app on a phone and point the camera at a barcode, or type an
+ISBN, and the catalogues above fill in the record. For books already on disk, point Endpaper
+at a folder of ebooks and it drafts a row out of each file, reading what the file itself
+says rather than guessing from its name. A spreadsheet or an export from another cataloguing
+tool can be imported instead. Anything the lookup gets wrong is editable afterwards, and a
+book with no ISBN at all can be typed in by hand.
+
+**Organising them.** Shelves, collections and tags are yours to invent. Custom fields cover
+whatever the standard record leaves out, such as which box a book is in or where a copy was
+bought. Several copies of one title are held as copies of one book rather than as duplicates
+that have to be kept in step by hand.
+
+**Sharing them.** Every book is private or shared, decided per book. A shared book is visible
+to the other members of your library, who can see that it exists, who has it, and whether it
+is currently lent out. Lending records who took a book and when, so the answer to "where did
+that go" is in the catalogue rather than in somebody's memory.
+
+**Reading them.** Mark a book as reading or finished, rate it, and keep notes and quotes
+against it. Reading status belongs to the member rather than to the book, so two people
+reading the same copy do not overwrite each other.
+
+**Finding them.** Search covers titles, authors, series, subjects and identifiers, and the
+same catalogue is reachable from an ebook reader through OPDS, so the shelf shows up in the
+reading app rather than only in a browser.
+
 ## Local Development
 
 Two processes: the API on `:8000` and the Vite dev server on `:5173`, which proxies
@@ -183,6 +229,9 @@ Useful variants:
 | `bun run test:watch` | Re-run frontend tests on change |
 | `bun run test:coverage` | Frontend coverage report |
 | `bun run typecheck` | TypeScript, no emit |
+
+[`docs/testing.md`](docs/testing.md) holds the rest of them and how these suites are run.
+The table above is the short list.
 
 Neither suite touches the network or a real database. The backend tests run against a
 throwaway SQLite file and stub outbound calls; the frontend tests stub `fetch` outright.
@@ -249,6 +298,8 @@ Environment variables:
 |---|---|---|
 | `SECRET_KEY` | dev placeholder | Signs the JWTs. **Change this.** |
 | `DATABASE_URL` | `sqlite:///$DATA_DIR/library.db` | SQLAlchemy URL, and in practice where the SQLite file goes. Postgres is the one other engine: spell it `postgresql+pg8000://user:password@host/endpaper`, and see below |
+| `DATABASE_SSL_MODE` | unset | How hard to insist on TLS to a Postgres server: `disable`, `prefer`, `require`, `verify-ca` or `verify-full`, which are libpq's names. **Leave it unset**, which means `prefer` on a Postgres URL and reads as nothing at all on a SQLite one. Setting it beside a URL that is not Postgres is a startup failure, including setting it to `prefer` or `disable`. See below |
+| `DATABASE_SSL_ROOT_CERT` | none | The CA `verify-ca` and `verify-full` check against, as a path inside the container. It replaces the image's trust store rather than adding to it |
 | `DATA_DIR` | `/app/data` | SQLite file + uploaded covers |
 | `ALLOW_REGISTRATION` | `true` | `false` closes new signups |
 | `APP_ENV` | `prod` | `dev` relaxes the startup secret-key check |
@@ -277,13 +328,24 @@ beside the dependency in `backend/pyproject.toml`. **Spell the URL
 `postgresql+pg8000://`**; a bare `postgresql://` asks SQLAlchemy for psycopg2, which is
 not here.
 
-**That connection is not certificate checked and can be cleartext, so keep the server on
-a network you trust.** The driver offers TLS and, on a server that accepts it, verifies
-neither the certificate nor the hostname; on a server that does not, it carries on in the
-clear without saying so. Nothing in `DATABASE_URL` turns verification on. This is unlike
-the mail and Telegram paths, where verification is a property rather than a default and
-cannot be relaxed at all, so a `DATABASE_URL` carrying a password does not have the
-protection those do. `docs/security.md` states the posture in full.
+**The default connection is not certificate checked and can be cleartext, so either set
+`DATABASE_SSL_MODE` or keep the server on a network you trust.** The default, `prefer`,
+offers TLS and, on a server that accepts it, verifies neither the certificate nor the
+hostname; on a server that declines, it carries on in the clear and **logs a warning
+saying so**. This is weaker than the mail path, where verification is a property rather
+than a default, cannot be relaxed at all, and a server that will not upgrade is a failure.
+The gap is deliberate: a self hosted Postgres is usually a container with no certificate,
+so the mail module's posture as a default would refuse the ordinary deployment.
+
+| `DATABASE_SSL_MODE` | Refuses | Breaks |
+|---|---|---|
+| `disable` | nothing; it offers no TLS at all | a managed server that only accepts TLS |
+| `prefer` | nothing. The downgrade is logged, not refused | nothing. It is what this connection already did |
+| `require` | a server that declines the upgrade | the usual compose Postgres, which ships with TLS off |
+| `verify-ca` | and a certificate that chains to nothing trusted | a self signed certificate with no `DATABASE_SSL_ROOT_CERT`, and a private CA that is not mounted into the container |
+| `verify-full` | and a certificate whose name is not the host in `DATABASE_URL` | reaching the server by container name or by IP, which is most of compose |
+
+`docs/security.md` states the posture in full.
 
 **Where a credential lives.** By default an admin pastes it into Settings and it is stored
 in the database. Setting the matching environment variable instead hands that job to the
@@ -354,3 +416,29 @@ signed in as a real member this way.
 and open Settings. The API key is stored in the database and never shown again after saving.
 
 Design notes (data model, the privacy rule, auth, testing) are in [`docs/`](docs/).
+
+## Contributing
+
+Bug reports, questions and patches are all welcome. **For anything larger than a small fix,
+open an issue first**, because the reasoning behind a surprising decision is usually written
+down somewhere and it is cheaper to read it than to rediscover it.
+
+Set up a local checkout with *Local Development* above, and run the suites and the linters in
+*Testing* before proposing a change. Both suites run offline, so neither needs credentials or
+a network.
+
+A few conventions are load bearing, and a change that ignores them will be sent back:
+
+- **Tests mirror the source tree and are never beside the file they test.** `backend/tests/`
+  mirrors `backend/`, and `frontend/tests/` mirrors `frontend/src/`.
+- **Every query that returns or counts books goes through `backend/shelf.py`.** Visibility is
+  applied by construction there. Omitting it is how private books leak with a 200 and no
+  error, which is the one defect class this codebase guards hardest.
+- **Write tersely, and explain why rather than what.** A comment that guards a trap says what
+  breaks if it is removed. Prose that merely restates the code is deleted.
+- **No dashes as punctuation.** Use a colon, a comma or a full stop. This is enforced by a
+  test, so a dash will fail the suite rather than a review.
+
+**Read [`docs/decisions.md`](docs/decisions.md) before changing something that looks wrong.**
+It records what was already tried and why the current shape was chosen, and a good proportion
+of the odd looking things in this repository are odd on purpose.

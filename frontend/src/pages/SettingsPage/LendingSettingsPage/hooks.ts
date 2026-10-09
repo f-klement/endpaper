@@ -22,6 +22,14 @@ import type {
   SenderHealth,
 } from "../../../api/generated/model";
 
+export interface UseOverdueDigestResult {
+  /** What the last run by hand reported, until the button is pressed again. */
+  result: OverdueNotifyResult | null;
+  send: () => void;
+  isSending: boolean;
+  error: unknown;
+}
+
 /**
  * Running the overdue digest by hand.
  *
@@ -33,7 +41,7 @@ import type {
  * The result is held here rather than read from `mutation.data` at the call
  * site so the count survives the button being pressed again.
  */
-export function useOverdueDigest() {
+export function useOverdueDigest(): UseOverdueDigestResult {
   const queryClient = useQueryClient();
   const [result, setResult] = useState<OverdueNotifyResult | null>(null);
 

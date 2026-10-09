@@ -308,9 +308,18 @@ def _collection_names(books: list[Book], db: Session) -> dict[int, str]:
 
     **No `visible_to`.** It filters books, and there is not a book in this
     query: it reads the label a row already in the caller's hands points at.
-    The collection list itself is library wide by design, so a name is not a
-    disclosure; the **count** is, and that one is filtered where it is served
-    (`routers/collections._counts`).
+
+    **And the safety is upstream and named, not checked here.** A collection's
+    name *is* a disclosure, which is what `shelving.Shelving` decides; what
+    makes this read safe is that every id reaching it came off a row a Shelf
+    produced, so the caller is being told the name of a shelf a book they can
+    already see is filed on. **Nothing in the signature says so**: it takes a
+    plain `list[Book]`, and the public path solved the same problem with a type
+    rather than a sentence (`books_to_public_out` takes `shelf.Outbound`). So
+    this comment is the guarantee, and a caller handing it books from anywhere
+    but a Shelf breaks it silently.
+
+    The **count** is filtered where it is served, which is `Shelving.counts`.
     """
     ids = {book.collection_id for book in books if book.collection_id is not None}
     if not ids:
@@ -330,8 +339,12 @@ def books_to_out(books: list[Book], current_user: User, db: Session) -> list[Boo
     collection**, for the same reason. **Plus one per distinct `added_by` the
     session has not already loaded.**
 
-    **Only the 7 is pinned by a test**, which is worth knowing before quoting the
-    others: the conditional statements need a page shaped to trigger them.
+    **Only the constant is pinned by a test**, which is worth knowing before
+    quoting the others: the conditional statements need a page shaped to
+    trigger them. **This sentence deliberately does not repeat the figure.**
+    The test reads it out of the line above rather than carrying its own copy,
+    so that one cannot drift; the copy that used to stand here still said 7
+    after the constant became 8.
     """
     if not books:
         return []

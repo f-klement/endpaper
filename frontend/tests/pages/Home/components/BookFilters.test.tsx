@@ -15,6 +15,8 @@ import { renderLocalised } from "../../../utils";
 
 beforeEach(resetIds);
 
+type Props = React.ComponentProps<typeof BookFilters>;
+
 const FACETS: ClassificationFacets = {
   divisions: [{ division: "150", label: "Psychology", book_count: 3 }],
   headings: [
@@ -32,16 +34,19 @@ function renderFilters(overrides: Record<string, unknown> = {}) {
     filters: DEFAULT_FILTERS,
     tags: [],
     showTagPanel: false,
-    onToggleTagPanel: vi.fn(),
-    onFilterChange: vi.fn(),
+    onToggleTagPanel: vi.fn<Props["onToggleTagPanel"]>(),
+    onFilterChange: vi.fn<Props["onFilterChange"]>(),
     locations: [],
     collections: [],
     classifications: undefined,
     showClassificationPanel: false,
-    onToggleClassificationPanel: vi.fn(),
-    view: "grid" as const,
-    onViewChange: vi.fn(),
-    canChangeView: true,
+    onToggleClassificationPanel: vi.fn<Props["onToggleClassificationPanel"]>(),
+    view: {
+      value: "grid" as const,
+      set: vi.fn<Props["view"]["set"]>(),
+      setFromScope: vi.fn<Props["view"]["setFromScope"]>(),
+      canSet: true,
+    },
     ...overrides,
   };
   renderLocalised(<BookFilters {...props} />);
@@ -242,12 +247,19 @@ describe("the view group", () => {
     // A pick made in that window would be filed under the wrong mode's key,
     // so the hook refuses it. Disabled rather than inert, because a button
     // that answers a press with nothing teaches the reader the page lies.
-    const props = renderFilters({ canChangeView: false });
+    const props = renderFilters({
+      view: {
+        value: "grid",
+        set: vi.fn<Props["view"]["set"]>(),
+        setFromScope: vi.fn<Props["view"]["setFromScope"]>(),
+        canSet: false,
+      },
+    });
 
     const table = screen.getByRole("button", { name: "Table" });
     expect(table).toBeDisabled();
     await userEvent.setup().click(table);
-    expect(props.onViewChange).not.toHaveBeenCalled();
+    expect(props.view.set).not.toHaveBeenCalled();
   });
 
   it("no pressed control carries an opacity class", () => {
@@ -268,7 +280,14 @@ describe("the view group", () => {
     // Rendered disabled because that is the state the class exists for. The
     // class list does not depend on it, so either state would read the same:
     // `disabled:opacity-50` is in the string whether or not it applies.
-    renderFilters({ canChangeView: false, view: "list" as const });
+    renderFilters({
+      view: {
+        value: "list",
+        set: vi.fn<Props["view"]["set"]>(),
+        setFromScope: vi.fn<Props["view"]["setFromScope"]>(),
+        canSet: false,
+      },
+    });
 
     const pressed = screen.getAllByRole("button", { pressed: true });
     expect(pressed.length).toBeGreaterThan(1);
@@ -280,7 +299,14 @@ describe("the view group", () => {
   it("still says which view is on while it is disabled", () => {
     // The buttons are the only thing that names the current view, so a
     // disabled group has to keep answering that question.
-    renderFilters({ canChangeView: false, view: "list" as const });
+    renderFilters({
+      view: {
+        value: "list",
+        set: vi.fn<Props["view"]["set"]>(),
+        setFromScope: vi.fn<Props["view"]["setFromScope"]>(),
+        canSet: false,
+      },
+    });
 
     expect(screen.getByRole("button", { name: "List" })).toHaveAttribute(
       "aria-pressed",

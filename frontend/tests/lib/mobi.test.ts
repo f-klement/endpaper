@@ -11,15 +11,35 @@
 
 import { describe, expect, it } from "vitest";
 
-import { readMobi } from "../../src/lib/mobi";
-import { bytes, mobiBytes, palmDatabase, type MobiSpec } from "../mobiFixtures";
+import * as mobi from "../../src/lib/mobi";
+import {
+  MAX_RECORD_ZERO_BYTES,
+  readMobi,
+  type MobiReading,
+} from "../../src/lib/mobi";
+import {
+  bytes,
+  mobiBytes,
+  mobiSpec,
+  palmDatabase,
+  recordZeroStart,
+  type MobiSpec,
+} from "../mobiFixtures";
+import { holds, PROFILE, PROPERTY, witness } from "../property";
+import {
+  expectNamedOutcome,
+  hostile,
+  overrunBreach,
+  type Door,
+  type Hostile,
+} from "./readerContract";
 
 async function read(spec: MobiSpec = {}) {
   return readMobi(new Blob([mobiBytes(spec)]));
 }
 
 /** The failure or the title, so one assertion covers both arms. */
-function outcome(reading: Awaited<ReturnType<typeof readMobi>>): string {
+function verdict(reading: Awaited<ReturnType<typeof readMobi>>): string {
   return reading.ok ? `read: ${reading.metadata.title}` : reading.failure;
 }
 
@@ -107,6 +127,49 @@ describe("reading a Kindle or Mobipocket file", () => {
     expect(reading.ok && reading.metadata.authors).toEqual(["Amy Brown"]);
   });
 
+  it("reads one subject per record and folds none of them", async () => {
+    // 62 of the 69 real files carry 105, usually several records, and a repeat
+    // is two assertions rather than one: which of them the request may carry
+    // is `lib/bookRequest.boundCategories`' question and not this reader's.
+    // The contrast with `authors` two arms above is the whole arm: that one
+    // folds because two records naming one person are one author.
+    const reading = await read({
+      exth: [
+        { type: SUBJECT, value: "Fiction" },
+        { type: SUBJECT, value: "Science Fiction" },
+        { type: SUBJECT, value: "Fiction" },
+      ],
+    });
+
+    expect(reading.ok && reading.metadata.categories).toEqual([
+      "Fiction",
+      "Science Fiction",
+      "Fiction",
+    ]);
+  });
+
+  it("splits no subject record, whatever separator it contains", async () => {
+    // `readAuthors`' measurement one field over: the format says two of a
+    // thing by writing two records, so a splitter would be guessing at a value
+    // containing its own separator. A subject is where that guess is likeliest
+    // to be wrong, this column's own values containing commas.
+    const reading = await read({
+      exth: [{ type: SUBJECT, value: "Fiction, general" }],
+    });
+
+    expect(reading.ok && reading.metadata.categories).toEqual([
+      "Fiction, general",
+    ]);
+  });
+
+  it("states no subject for a file carrying no such record", async () => {
+    // The other side, without which the arms above are satisfied by a reader
+    // answering the empty list to everything. 7 of the 69 carry none.
+    const reading = await read(PUBLISHED_BOOK);
+
+    expect(reading.ok && reading.metadata.categories).toEqual([]);
+  });
+
   it("supplies neither a series nor a subtitle, because the format has none", async () => {
     const reading = await read(PUBLISHED_BOOK);
 
@@ -139,7 +202,7 @@ describe("the title", () => {
   it("is read from a file that carries no EXTH block at all", async () => {
     const reading = await read({ fullName: "Bare", exth: null });
 
-    expect(outcome(reading)).toBe("read: Bare");
+    expect(verdict(reading)).toBe("read: Bare");
   });
 
   it("is null rather than a crash when the header points past the record", async () => {
@@ -308,7 +371,7 @@ describe("a file that is not a MOBI", () => {
     // The container is shared, so the parser meets these rather than
     // hypothesises them. eReader, Plucker and PalmDOC in that order.
     for (const other of ["PNRdPPrs", "DataPlkr", "TEXtREAd"] as const) {
-      expect(outcome(await readMobi(new Blob([palmDatabase(other)])))).toBe(
+      expect(verdict(await readMobi(new Blob([palmDatabase(other)])))).toBe(
         "not-a-mobi",
       );
     }
@@ -320,47 +383,47 @@ describe("a file that is not a MOBI", () => {
     // should be added to make it work.
     const kfx = new Uint8Array(512);
     kfx.set(bytes("CONT"), 0);
-    expect(outcome(await readMobi(new Blob([kfx])))).toBe("not-a-mobi");
+    expect(verdict(await readMobi(new Blob([kfx])))).toBe("not-a-mobi");
   });
 
   it("refuses a file that is not a Palm Database", async () => {
     expect(
-      outcome(await readMobi(new Blob([bytes("<html>hello</html>")]))),
+      verdict(await readMobi(new Blob([bytes("<html>hello</html>")]))),
     ).toBe("not-a-mobi");
   });
 
   it("refuses an empty file", async () => {
-    expect(outcome(await readMobi(new Blob([])))).toBe("not-a-mobi");
+    expect(verdict(await readMobi(new Blob([])))).toBe("not-a-mobi");
   });
 
   it("refuses a Palm Database that says MOBI and holds no MOBI header", async () => {
     // The eight bytes at offset 60 are eight bytes anybody can write, which is
     // why record 0's own magic is checked as well.
-    expect(outcome(await read({ magic: "XXXX" }))).toBe("not-a-mobi");
+    expect(verdict(await read({ magic: "XXXX" }))).toBe("not-a-mobi");
   });
 });
 
 describe("a file whose offsets do not agree with its length", () => {
   it("refuses a record 0 that starts past the end", async () => {
-    expect(outcome(await read({ recordZeroAt: 0xffffff00 }))).toBe("damaged");
+    expect(verdict(await read({ recordZeroAt: 0xffffff00 }))).toBe("damaged");
   });
 
   it("refuses a record 0 that starts inside the table describing it", async () => {
-    expect(outcome(await read({ recordZeroAt: 80 }))).toBe("damaged");
+    expect(verdict(await read({ recordZeroAt: 80 }))).toBe("damaged");
   });
 
   it("refuses a table that claims more records than the file has room for", async () => {
     // The declared count moves the end of the table past where record 0 says
     // it starts, which is the cheap tell that the count is a lie.
-    expect(outcome(await read({ declaredRecords: 60000 }))).toBe("damaged");
+    expect(verdict(await read({ declaredRecords: 60000 }))).toBe("damaged");
   });
 
   it("refuses a record 0 that ends before it starts", async () => {
-    expect(outcome(await read({ recordOneAt: 4 }))).toBe("damaged");
+    expect(verdict(await read({ recordOneAt: 4 }))).toBe("damaged");
   });
 
   it("refuses a record 0 that ends past the end of the file", async () => {
-    expect(outcome(await read({ recordOneAt: 0xffffff00 }))).toBe("damaged");
+    expect(verdict(await read({ recordOneAt: 0xffffff00 }))).toBe("damaged");
   });
 
   it("refuses a record 0 declaring more bytes than it will read", async () => {
@@ -370,7 +433,7 @@ describe("a file whose offsets do not agree with its length", () => {
     // ever measured nothing reaching this arm is a big book.
     const file = new Uint8Array(4 * 1024 * 1024);
     file.set(mobiBytes({ recordOneAt: 3 * 1024 * 1024 }), 0);
-    expect(outcome(await readMobi(new Blob([file])))).toBe("damaged");
+    expect(verdict(await readMobi(new Blob([file])))).toBe("damaged");
   });
 
   it("reads a file whose last record is record 0", async () => {
@@ -383,7 +446,7 @@ describe("a file whose offsets do not agree with its length", () => {
       exth: [],
     });
 
-    expect(outcome(reading)).toBe("read: Alone");
+    expect(verdict(reading)).toBe("read: Alone");
   });
 });
 
@@ -391,8 +454,8 @@ describe("a file that is protected", () => {
   it("says so rather than saying it is a different kind of file", async () => {
     // Constructed rather than measured: 0 of the 69 real files declare
     // encryption, because a DRM bound file is not one anybody may publish.
-    expect(outcome(await read({ encryption: 1 }))).toBe("protected");
-    expect(outcome(await read({ encryption: 2 }))).toBe("protected");
+    expect(verdict(await read({ encryption: 1 }))).toBe("protected");
+    expect(verdict(await read({ encryption: 2 }))).toBe("protected");
   });
 });
 
@@ -433,7 +496,7 @@ describe("an EXTH block that walks off the end", () => {
       exth: [{ type: UPDATED_TITLE, value: "Read me" }],
     });
 
-    expect(outcome(reading)).toBe("read: Read me");
+    expect(verdict(reading)).toBe("read: Read me");
   });
 
   it("is bounded by the block when the block claims less than it spends", async () => {
@@ -451,7 +514,7 @@ describe("an EXTH block that walks off the end", () => {
       exth: [{ type: UPDATED_TITLE, value: "Read me" }],
     });
 
-    expect(outcome(reading)).toBe("read: Read me");
+    expect(verdict(reading)).toBe("read: Read me");
   });
 
   it("loses the block but not the header when the header length points nowhere", async () => {
@@ -467,7 +530,7 @@ describe("an EXTH block that walks off the end", () => {
       ],
     });
 
-    expect(outcome(reading)).toBe("read: The header's name");
+    expect(verdict(reading)).toBe("read: The header's name");
     expect(reading.ok && reading.metadata.publisher).toBeNull();
   });
 });
@@ -483,7 +546,7 @@ describe("the EXTH block is found by its magic and not by the flag", () => {
       exth: [{ type: UPDATED_TITLE, value: "Found anyway" }],
     });
 
-    expect(outcome(reading)).toBe("read: Found anyway");
+    expect(verdict(reading)).toBe("read: Found anyway");
   });
 
   it("finds no block when the magic is not there", async () => {
@@ -495,7 +558,7 @@ describe("the EXTH block is found by its magic and not by the flag", () => {
       exth: [{ type: UPDATED_TITLE, value: "Not reached" }],
     });
 
-    expect(outcome(reading)).toBe("read: The header's name");
+    expect(verdict(reading)).toBe("read: The header's name");
   });
 });
 
@@ -529,7 +592,7 @@ describe("a value with padding in it", () => {
       exth: [{ type: UPDATED_TITLE, value: new Uint8Array([0, 0]) }],
     });
 
-    expect(outcome(reading)).toBe("read: The header's name");
+    expect(verdict(reading)).toBe("read: The header's name");
   });
 
   it("says nothing rather than an empty string for a publisher", async () => {
@@ -617,5 +680,88 @@ describe("no file makes the reader throw", () => {
       const reading = await readMobi(new Blob([original.slice(0, length)]));
       expect(typeof reading.ok).toBe("boolean");
     }
+  });
+});
+
+/** A record 0 one past its ceiling, in a file long enough to hold it. */
+function past({ spec, patches }: Hostile<MobiSpec>): boolean {
+  return (
+    patches.length === 0 &&
+    spec.recordZeroAt === undefined &&
+    spec.recordOneAt !== undefined &&
+    spec.recordOneAt - recordZeroStart(spec.records ?? 2) >
+      MAX_RECORD_ZERO_BYTES &&
+    (spec.trailingBytes ?? 8) > MAX_RECORD_ZERO_BYTES
+  );
+}
+
+/**
+ * `readMobi` as a door: two reads, the head and record 0, and record 0 never
+ * more than its ceiling. **A reader with nothing to inflate**, so the meter's
+ * teeth here are the size of each read and their number.
+ */
+const door: Door<MobiSpec, MobiReading> = {
+  module: mobi,
+  ceilings: () => ({ reads: 2, perRead: MAX_RECORD_ZERO_BYTES }),
+  build: async (spec) => mobiBytes(spec),
+  open: (file) => readMobi(file),
+};
+
+describe("any MOBI a member picks", () => {
+  it(
+    "is read or refused by name, in two reads and never a record 0 past its ceiling",
+    PROPERTY,
+    async () => {
+      // **The reach reads what the reader did**: a record 0 past its ceiling
+      // is refused after the head and before a second read. Measured: a type
+      // field the reader refuses first left every past record unread with a
+      // witness over the spec green.
+      expect(
+        await holds(
+          hostile(mobiSpec()),
+          async (input) => expectNamedOutcome(door, input),
+          {
+            "refused a record 0 past its ceiling before reading it": (
+              input,
+              { outcome, counted },
+            ) =>
+              past(input) &&
+              "answered" in outcome &&
+              !outcome.answered.ok &&
+              outcome.answered.failure === "damaged" &&
+              counted.reads === 1,
+          },
+        ),
+      ).toBe(PROFILE.runs);
+    },
+  );
+
+  it("is metered, so the ceilings above are not held over nothing", async () => {
+    const { outcome, counted } = await expectNamedOutcome(door, {
+      spec: {},
+      patches: [],
+    });
+
+    expect(outcome).toMatchObject({ answered: { ok: true } });
+    expect(counted.reads).toBe(2);
+    expect(counted.read).toBeGreaterThan(0);
+  });
+
+  it("declares the bounds it is held to, so one deleted or loosened reds", async () => {
+    expect(await overrunBreach(door, { ceiling: "reads", bound: 2 })).toContain(
+      "made read 3 against a ceiling of 2",
+    );
+    expect(
+      await overrunBreach(door, {
+        ceiling: "perRead",
+        bound: MAX_RECORD_ZERO_BYTES,
+      }),
+    ).toContain(`at once against a ceiling of ${MAX_RECORD_ZERO_BYTES}`);
+  });
+
+  it("draws a record 0 one past its ceiling, in a file long enough to hold it", async () => {
+    await witness(hostile(mobiSpec()), {
+      "places record 0 past its ceiling in a file that holds it": past,
+    });
   });
 });

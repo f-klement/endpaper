@@ -10,12 +10,14 @@ import { renderLocalised } from "../../../utils";
 
 beforeEach(resetIds);
 
+type Props = React.ComponentProps<typeof CollectionCard>;
+
 function renderCard(overrides = {}) {
   const props = {
     collection: makeCollection({ id: 3, name: "Ebooks", book_count: 12 }),
     isBusy: false,
-    onRename: vi.fn(),
-    onDelete: vi.fn(),
+    onRename: vi.fn<Props["onRename"]>(),
+    onDelete: vi.fn<Props["onDelete"]>(),
     ...overrides,
   };
   renderLocalised(<CollectionCard {...props} />);

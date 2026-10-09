@@ -47,7 +47,9 @@ const DUNE = () =>
     discuss_with: [makeUser({ username: "ana" })],
   });
 
-function renderTable(props: Partial<Parameters<typeof BookTable>[0]> = {}) {
+type TableProps = Parameters<typeof BookTable>[0];
+
+function renderTable(props: Partial<TableProps> = {}) {
   return renderLocalised(
     <BookTable
       books={[DUNE()]}
@@ -122,7 +124,7 @@ describe("BookTable", () => {
   });
 
   it("asks the server for the other direction", async () => {
-    const onSortChange = vi.fn();
+    const onSortChange = vi.fn<TableProps["onSortChange"]>();
     renderTable({ sort: BookSort.title_asc, onSortChange });
 
     await userEvent
@@ -166,6 +168,35 @@ describe("BookTable", () => {
 
     const row = screen.getAllByRole("row")[1]!;
     expect(within(row).getByRole("link")).toHaveTextContent("Bare");
+  });
+
+  it("dates Bought on to the day the copy was bought", () => {
+    // **The rendered half of the purchase date reading a day early.**
+    // `purchased_at` is the only `format: date` field the API publishes, a
+    // bare `YYYY-MM-DD`, and `new Date` reads one as UTC midnight. Against the
+    // zone pinned in `tests/setup.ts` this cell read `1/4/2026` for a copy
+    // bought on the fifth, for every member west of Greenwich, and no arm in
+    // the suite looked at this column.
+    //
+    // **Driven through the component rather than through `numericDate`,**
+    // because the unit arm beside it in `tests/lib/date.test.ts` cannot see
+    // the column being wired to the wrong renderer, which is the other way
+    // this cell can be a day out.
+    renderTable({ books: [{ ...DUNE(), purchased_at: "2026-01-05" }] });
+
+    const headers = screen
+      .getAllByRole("columnheader")
+      .map((cell) => cell.textContent ?? "");
+    const column = headers.findIndex((text) => text.includes("Bought on"));
+    // The column has to be drawn for the assertion below to mean anything: a
+    // missing header gives `-1`, which would read a cell from the end of the
+    // row and could pass on the wrong one.
+    expect(column).toBeGreaterThan(-1);
+
+    const row = screen.getAllByRole("row")[1]!;
+    expect(within(row).getAllByRole("cell")[column]).toHaveTextContent(
+      "1/5/2026",
+    );
   });
 
   it("scrolls inside its own container", () => {
@@ -330,7 +361,7 @@ describe("BookTable, the cataloguer's columns", () => {
     // the word "Dewey". `BookSort.ddc` is `min` of the scheme's filing key, in
     // SQL, over the whole table rather than over the page that has been
     // loaded: see `_shelf_order` in `backend/shelf.py`.
-    const onSortChange = vi.fn();
+    const onSortChange = vi.fn<TableProps["onSortChange"]>();
     renderTable({
       books: [CATALOGUED()],
       columns: ["title", "callNumber"],
@@ -349,7 +380,7 @@ describe("BookTable, the cataloguer's columns", () => {
     // schemes. `BF75` files before `BF575` on a shelf and after it under a
     // Dewey rule, so an LCC library was reading a wrong order with nothing
     // saying so.
-    const onSortChange = vi.fn();
+    const onSortChange = vi.fn<TableProps["onSortChange"]>();
     renderTable({
       books: [CATALOGUED()],
       columns: ["title", "callNumber"],
@@ -366,7 +397,7 @@ describe("BookTable, the cataloguer's columns", () => {
   it("comes back round to the Dewey order", async () => {
     // The cycle closes rather than stopping on the last scheme, which is what
     // a header offering one order already did.
-    const onSortChange = vi.fn();
+    const onSortChange = vi.fn<TableProps["onSortChange"]>();
     renderTable({
       books: [CATALOGUED()],
       columns: ["title", "callNumber"],
@@ -414,7 +445,7 @@ describe("BookTable, the cataloguer's columns", () => {
     // The property the cycle must not have broken. `author` offers ascending
     // only, so pressing it while it is active re-asks for it rather than
     // turning the column off.
-    const onSortChange = vi.fn();
+    const onSortChange = vi.fn<TableProps["onSortChange"]>();
     renderTable({ sort: BookSort.author, onSortChange });
 
     const header = screen.getByRole("columnheader", { name: /Author/ });
@@ -489,7 +520,7 @@ describe("BookTable, the cataloguer's columns", () => {
 
 describe("BookTable, paging", () => {
   it("offers the next page when there is one", async () => {
-    const onLoadMore = vi.fn();
+    const onLoadMore = vi.fn<TableProps["onLoadMore"]>();
     renderTable({ hasMore: true, onLoadMore });
 
     await userEvent

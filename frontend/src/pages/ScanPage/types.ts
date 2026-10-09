@@ -14,7 +14,11 @@ import type { StoreIdentifier, StoreIdentifierScheme } from "../../lib/stores";
 // it a second time and `lib/calibre.ts` a third, held in agreement by tests
 // that read each other's source text.
 import { storeIdentifier } from "../../lib/stores";
-import { boundIdentifiers } from "../SettingsPage/LibrarySettingsPage/types";
+import {
+  boundCategories,
+  boundIdentifiers,
+  boundRecord,
+} from "../../lib/bookRequest";
 import type { NameClues } from "../../lib/fileName";
 import type { AudiobookGroup } from "../../lib/audiobookGroups";
 
@@ -41,6 +45,29 @@ export interface BookDraft extends BookLookup {
    * a barcode: `lib/isbn.ts` and the two catalogues name no store's number.
    */
   identifiers?: BookIdentifierIn[];
+  /**
+   * The subject words the file stated, already bounded, and editable here.
+   *
+   * **Not part of `BookLookup` either**, and for a second reason on top of
+   * `identifiers`': a catalogue answers subjects on `BookMatch` rather than on
+   * a lookup, and it answers them as one joined string. See `draftFromMatch`.
+   *
+   * **The one field a file supplies that the queue draws, and the only one
+   * with a control that removes it.** Publisher, year, description, subtitle,
+   * series and the identifiers all reach the wire from a file without being
+   * shown, and every one of them can be edited on the book's own page
+   * afterwards. This one cannot: `BookDetailsUpdate` has no `categories`, so
+   * the remedy after "Add all" is deleting the book.
+   * `ScanPage/components/RapidQueue.tsx` draws it and `useRapidIntake`'s
+   * `dropSubject` takes one off.
+   *
+   * **The queue and not the confirm card**, which is where the design round
+   * put it: `pickFiles` settles every picked file into the queue, and
+   * `LookupResult` is fed only by the barcode, the manual ISBN and the search
+   * box. No draft carrying a subject ever reaches that card, so a block there
+   * would have shown nobody anything.
+   */
+  categories?: string[];
 }
 
 /**
@@ -74,6 +101,15 @@ export interface PendingBook {
   format: BookFormat | "";
   /** Selected before the book exists, applied one call each after it does. */
   tagIds: number[];
+  /**
+   * Names typed into the picker on this form, held here and nowhere else.
+   *
+   * **Names rather than ids, because the tag may not exist yet and asking the
+   * server to invent one is what this form stopped doing.** It used to create
+   * the row on the keystroke, which left a tag carried by no book behind
+   * every cancelled scan. These are applied by name once the book exists.
+   */
+  tagNames: string[];
 }
 
 /**
@@ -90,6 +126,7 @@ export function blankPending(location: string): PendingBook {
     location,
     format: "",
     tagIds: [],
+    tagNames: [],
   };
 }
 
@@ -100,8 +137,9 @@ export function blankPending(location: string): PendingBook {
  * which is the whole reason this is one function rather than an inline
  * spread at each of the two call sites. `isPrivate` is `is_private`; an empty
  * shelf or format is `null` rather than `""`, because the column is nullable
- * and a blank string is a value; `coverFile` and `tagIds` are not in the body
- * at all, since both are separate calls made after the book has an id; and
+ * and a blank string is a value; `coverFile`, `tagIds` and `tagNames` are not
+ * in the body at all, since each is a separate call made after the book has
+ * an id; and
  * `notFound` and `suggested_tag_ids` are client state that no column matches.
  *
  * `tests/pages/ScanPage/types.test.ts` compares what this produces against the
@@ -168,6 +206,16 @@ export function blankDraft(isbn: string): BookDraft {
  * edit it. The ISBN falls back to empty rather than being dropped, because a
  * book found by title genuinely may not have one, and the server treats a
  * blank ISBN as absent rather than invalid.
+ *
+ * **`categories` is the one field this deliberately does not carry**, where
+ * `draftFromFile` does. `BookMatch.categories` is the column as it is stored,
+ * one string joined on a separator, and splitting it back apart here would put
+ * that separator rule in a second language, which `docs/data-model.md`,
+ * `catalogue.py` and `schemas/book.py` each refuse in as many words. It is
+ * written here because it used to be half of an excuse row in
+ * `tests/pages/ScanPage/types.test.ts`, whose other half stopped being true
+ * the day a reader started emitting a subject: deleting the row outright would
+ * have dropped this refusal out of the tree with it.
  */
 export function draftFromMatch(match: BookMatch): BookDraft {
   return {
@@ -295,7 +343,7 @@ const SCHEME_OF_LABEL = new Map<string, StoreIdentifierScheme>(
  * beside `isbn`.
  *
  * **One entry a matching label, folded and capped nowhere here.**
- * `LibrarySettingsPage/types.boundIdentifiers` is where a repeat of one scheme
+ * `lib/bookRequest.boundIdentifiers` is where a repeat of one scheme
  * and value becomes one row and where the request's ceiling of eight is, and
  * the two belong together: the ceiling truncates, so a repeat left standing
  * would spend a slot. Two labels naming **different** values stay two rows,
@@ -332,6 +380,19 @@ export function identifiersFromFile(
  * `lib/bookBounds.ts` carries that rule and the reason for the cut or drop
  * split.
  *
+ * **Most of those values are not this flow's to bound**, and
+ * `lib/bookRequest.boundRecord` is where a `SourceRecord` becomes them: a
+ * store's import and a Calibre library's pass through the same door, so the
+ * mapping from what a source said to what the request calls it is one
+ * expression rather than three. `subtitle` is bounded here because only a file
+ * states one.
+ *
+ * **What this path does not hand the door is the missing title.** A blank one
+ * is `""` here and is `null` for both imports, and the difference is who is
+ * watching: the member is on this screen and can type a title, where an import
+ * of nine hundred books has to report the row instead. `BookLookup` requires
+ * both `title` and `isbn` as strings, which is what the two fallbacks are.
+ *
  * **The identifiers a file labelled `ASIN`, `AMAZON` or `GOOGLE` are sent, and
  * every other label is refused.** `identifiersFromFile` is that rule and says
  * what each refusal was measured against; `boundIdentifiers` is the same door
@@ -362,21 +423,22 @@ export function identifiersFromFile(
  * reader.
  */
 export function draftFromFile(record: FileMetadata): BookDraft {
+  const bound = boundRecord(record);
   return {
-    isbn: boundText("isbn", record.isbn) ?? "",
-    title: boundText("title", record.title) ?? "",
+    ...bound,
+    isbn: bound.isbn ?? "",
+    title: bound.title ?? "",
     subtitle: boundText("subtitle", record.subtitle),
-    author: boundText("author", record.authors.join(AUTHOR_SEPARATOR)),
-    publisher: boundText("publisher", record.publisher),
-    year: boundNumber("year", record.year),
-    description: boundText("description", record.description),
-    language: boundText("language", record.language),
-    series_name: boundText("series_name", record.seriesName),
-    series_index: boundNumber("series_index", record.seriesIndex),
     // The file names neither, and an empty list is what the confirm step and
     // the batch both already handle.
     classifications: [],
     suggested_tag_ids: [],
+    // **Always set, never conditionally**, which is the shape
+    // `classifications` above already has: a send conditioned on a field being
+    // non empty is invisible to a guard reading key names off one fixture, and
+    // that guard's own docstring records both halves of such a condition going
+    // green.
+    categories: boundCategories(record.categories),
     // **Two rules and not one**, the same pair the Calibre import builds with:
     // which scheme a label names is this flow's decision and what may cross the
     // wire is one door both flows pass.

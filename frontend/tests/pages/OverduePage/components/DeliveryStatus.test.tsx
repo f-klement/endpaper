@@ -24,11 +24,11 @@ const RETIRED_CLAIM = /appear here|erscheinen hier/;
 function channel(overrides: Partial<SenderHealth> = {}): DeliveryChannel {
   const health: SenderHealth = {
     sender: OverdueSender.telegram,
-    last_run_at: "2026-08-01T09:00:00",
+    last_run_at: "2026-08-01T09:00:00Z",
     sent: false,
     reason: null,
     detail: null,
-    failing_since: "2026-07-28T09:00:00",
+    failing_since: "2026-07-28T09:00:00Z",
     failures: 9,
     broken: true,
     ...overrides,

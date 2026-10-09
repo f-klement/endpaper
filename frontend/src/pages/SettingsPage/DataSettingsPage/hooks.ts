@@ -5,6 +5,25 @@
  * the way an ordinary member does. Nothing outside this file imports from
  * `api/generated`, so regenerating the client cannot ripple into the
  * components.
+ *
+ * **Every `error` member below is `unknown`, and that is a decision rather than
+ * a shrug.** The generated mutations here declare `TError = HTTPValidationError`,
+ * so an unannotated hook infers that type, and it is never true at runtime:
+ * `api/mutator.ts` throws `ApiError` and `NetworkError`, both real `Error`
+ * subclasses, while `HTTPValidationError` is a plain generated interface that
+ * nothing in this tree constructs. Writing the inferred type into an exported
+ * interface would publish a `detail` field that is `undefined` for every failure
+ * this app can produce. The generated list queries say `unknown` outright, which
+ * `users.ts` spells as `ListTestAccountsQueryError = unknown`, so `unknown` is
+ * also the one answer that is true of every member here. Narrow with
+ * `classifyError` in `components/ErrorState.tsx`.
+ *
+ * **Three of these hooks say "a list, whether it is loading, what went wrong,
+ * and a write over it" in three different vocabularies**: `accounts` against
+ * `members` against `requests`, and `createError` against `confirmError` against
+ * `actionError`. Left alone deliberately. Unifying it means renaming members in
+ * `DataSettingsPage.tsx`, and the interfaces below are meant to make the shapes
+ * comparable rather than to move them.
  */
 
 import { useQueryClient } from "@tanstack/react-query";
@@ -32,12 +51,30 @@ import {
   useVerifyMember,
 } from "../../../api/generated/endpoints/users/users";
 import type {
+  MemberVerificationOut,
   ResetCodeOut,
+  ResetRequestOut,
+  RestoreResult,
   Token,
   UserOut,
 } from "../../../api/generated/model";
 import { useInvalidate } from "../../../api/invalidate";
 import { downloadFile } from "../../../api/mutator";
+
+export interface UseBackupResult {
+  isDownloading: boolean;
+  /** Whatever the download's promise rejected with. See the module docstring. */
+  downloadError: unknown;
+  /** Fetch the archive and hand it to the browser, named for today. */
+  download: () => void;
+  /** Replace the whole library with an archive's contents. Guarded: see above. */
+  restore: (file: File) => void;
+  isRestoring: boolean;
+  /** `unknown` for the reason the module docstring gives. */
+  restoreError: unknown;
+  /** What the restore replaced. Null until one finishes. */
+  restored: RestoreResult | null;
+}
 
 /**
  * Downloading the whole library, and putting one back.
@@ -50,7 +87,7 @@ import { downloadFile } from "../../../api/mutator";
  * destroys data it was not given the id of. The endpoint requires
  * `confirm=true`, and the page asks before sending it.
  */
-export function useBackup() {
+export function useBackup(): UseBackupResult {
   const invalidate = useInvalidate();
   const [isDownloading, setIsDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState<unknown>(null);
@@ -86,6 +123,21 @@ export function useBackup() {
   };
 }
 
+export interface UseTestAccountsResult {
+  /** Empty while the query is disabled or loading, which is why never `null`. */
+  accounts: UserOut[];
+  isLoading: boolean;
+  /** A list query's failure, so `unknown`. See the module docstring. */
+  error: unknown;
+  /** Invent one. An empty `email` sends no address field at all. */
+  create: (username: string, password: string, email: string) => void;
+  isCreating: boolean;
+  /** `unknown` for the reason the module docstring gives. */
+  createError: unknown;
+  /** The account the last `create` made. Null until one succeeds. */
+  created: UserOut | null;
+}
+
 /**
  * The accounts an admin created for testing, and the making of a new one.
  *
@@ -97,7 +149,7 @@ export function useBackup() {
  * not on it, so the filtering here is presentation. That is the right way
  * round: a client cannot be the control on who may be signed in as.
  */
-export function useTestAccounts(enabled: boolean) {
+export function useTestAccounts(enabled: boolean): UseTestAccountsResult {
   const queryClient = useQueryClient();
   const query = useListTestAccounts({ query: { enabled, retry: false } });
 
@@ -130,6 +182,14 @@ export function useTestAccounts(enabled: boolean) {
   };
 }
 
+export interface UseSwitchToTestAccountResult {
+  /** Sign in as one of them. Returns nothing: a success ends in `onSignIn`. */
+  switchTo: (username: string, password: string) => void;
+  isSwitching: boolean;
+  /** `unknown` for the reason the module docstring gives. */
+  switchError: unknown;
+}
+
 /**
  * Exchange a password for a session on a test account.
  *
@@ -140,7 +200,7 @@ export function useTestAccounts(enabled: boolean) {
  */
 export function useSwitchToTestAccount(
   onSignIn: (user: UserOut, token: string) => void,
-) {
+): UseSwitchToTestAccountResult {
   const navigate = useNavigate();
 
   const mutation = useSwitchAccountMutation({
@@ -166,6 +226,21 @@ export interface ApprovedCode {
   expiresAt: string;
 }
 
+export interface UseResetRequestsResult {
+  requests: ResetRequestOut[];
+  isLoading: boolean;
+  /** A list query's failure, so `unknown`. See the module docstring. */
+  error: unknown;
+  /** The code each approval produced, keyed by member. Why per member: above. */
+  codes: Record<number, ApprovedCode>;
+  approve: (userId: number) => void;
+  decline: (userId: number) => void;
+  /** Either write is in flight. */
+  isWorking: boolean;
+  /** Whichever write failed, the approval first. `unknown`: see above. */
+  actionError: unknown;
+}
+
 /**
  * The password reset queue, and what an admin may do with it.
  *
@@ -179,7 +254,7 @@ export interface ApprovedCode {
  * alone would drop it the moment a second approval reset that field, so it is
  * kept per member.
  */
-export function useResetRequests(enabled: boolean) {
+export function useResetRequests(enabled: boolean): UseResetRequestsResult {
   const queryClient = useQueryClient();
   // The expiry travels with the code rather than being written into a string.
   // `RESET_CODE_TTL` is the server's fact, so a screen that spelled "an hour"
@@ -234,6 +309,23 @@ export function useResetRequests(enabled: boolean) {
   };
 }
 
+export interface UseMemberVerificationResult {
+  members: MemberVerificationOut[];
+  isLoading: boolean;
+  /** A list query's failure, so `unknown`. See the module docstring. */
+  error: unknown;
+  /**
+   * Confirm one member by hand.
+   *
+   * Nothing comes back but a refetch: the override is an assertion about a
+   * person, so the server records which admin made it and the list shows that.
+   */
+  confirm: (userId: number) => void;
+  isConfirming: boolean;
+  /** `unknown` for the reason the module docstring gives. */
+  confirmError: unknown;
+}
+
 /**
  * Every member's confirmation state, and the admin override.
  *
@@ -241,7 +333,9 @@ export function useResetRequests(enabled: boolean) {
  * admin made it; this hook simply refetches, because the recorded name is what
  * the list then shows.
  */
-export function useMemberVerification(enabled: boolean) {
+export function useMemberVerification(
+  enabled: boolean,
+): UseMemberVerificationResult {
   const queryClient = useQueryClient();
   const query = useListVerification({ query: { enabled, retry: false } });
 

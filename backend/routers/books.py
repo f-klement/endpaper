@@ -2,24 +2,39 @@ import asyncio
 import csv
 import io
 import logging
-from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor
-from datetime import UTC, date, datetime
-from typing import Annotated, Any, Final
+from collections.abc import Callable, Iterator
+from concurrent.futures import Future, wait
+from datetime import UTC, datetime
+from typing import Annotated, Any, Final, Literal, NamedTuple, cast
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    HTTPException,
+    Query,
+    Response,
+    UploadFile,
+    status,
+)
 from fastapi.responses import StreamingResponse
 from pydantic import ValidationError
 from sqlalchemy import func, nullslast
 from sqlalchemy.orm import Session, joinedload
 
 import authority
+import book_columns
 import catalogue
+import catalogue_access
 import cover_store
 import covers
 import custom_fields
 import ddc
+import deadline
+import downloads
+import folding
 import google_books
+import identity
 import isbn as isbn_utils
 import lending
 import marc
@@ -52,13 +67,12 @@ from dependencies import (
 from dependencies import divisions as parse_divisions
 from dependencies import headings as parse_headings
 from enums import (
+    EXPORT_MEDIA_TYPES,
     AuthorityScheme,
     BookFormat,
     BookIdentifierScheme,
     BookSort,
     BulkAction,
-    CatalogueSource,
-    ClassificationScheme,
     ExportFormat,
     LendingWillingness,
     Locale,
@@ -66,8 +80,8 @@ from enums import (
     ReadStatus,
     TagCategory,
 )
+from fields import Fields
 from identifiers import add_identifiers
-from importing import identity_key
 from lending import Loans
 from logvalues import clipped
 from models import (
@@ -79,11 +93,9 @@ from models import (
     AuthorIdentifier,
     Book,
     BookIdentifier,
-    Classification,
     Collection,
     CustomField,
     DigitalReference,
-    Loan,
     Note,
     Quote,
     ReadingProgress,
@@ -96,15 +108,16 @@ from models import (
 from ratelimit import (
     authority_limiter,
     cover_backfill_limiter,
-    identifier_backfill_limiter,
-    metadata_limiter,
+    export_limiter,
 )
-from reading import Reading, resolve_merge
+from reading import Reading
 from schemas import (
-    MAX_CLASSIFICATIONS_PER_BOOK,
+    DUPLICATE_BOOKS_SHOWN,
     MAX_DIGITAL_REFERENCES_PER_BOOK,
-    MAX_IDENTIFIERS_PER_BOOK,
     MAX_ROW_ID,
+    MERGE_BOOKS_MAX,
+    POPPED_BEFORE_THE_ASSIGNMENT,
+    POPPED_BEFORE_THE_CONSTRUCTOR,
     AuthorBatchMergeOut,
     AuthorIdentifierOut,
     AuthorIdentifierRequest,
@@ -141,6 +154,8 @@ from schemas import (
     DigitalReferenceOut,
     DivisionFacetOut,
     DuplicateGroup,
+    DuplicateMember,
+    DuplicateReport,
     HeadingFacetOut,
     IdentifierBackfillOut,
     LocationOut,
@@ -162,6 +177,7 @@ from schemas import (
     TagCreate,
     TagOut,
 )
+from schemas.common import one_line
 from serialisation import book_to_out, books_to_out, suggested_tag_ids
 from shelf import (
     BookFilters,
@@ -170,6 +186,8 @@ from shelf import (
     order_for,
     whole_table_for_uniqueness,
 )
+from shelving import Shelving
+from tags import MAX_TAGS_PER_BOOK, Mint, Naming, Vocabulary, attach
 from uploads import read_image_upload
 
 logger = logging.getLogger("endpaper.books")
@@ -182,7 +200,14 @@ router = APIRouter(prefix="/api/books", tags=["books"])
 
 @router.get("/tags", response_model=list[TagOut])
 def list_tags(db: DbSession, current_user: CurrentUser) -> list[TagOut]:
-    """The curated vocabulary plus whatever the library has invented.
+    """The curated vocabulary plus the invented tags this member can already see.
+
+    **Not every tag the library holds.** A tag carries no member of its own, so
+    what decides who may be told it exists is the books carrying it: this
+    answers with the seeded vocabulary, which is published in the source, plus
+    every tag on a book the caller can see. An invented tag whose only books
+    are other people's private ones is absent, because listing it would publish
+    a name somebody typed against a book this caller may not read.
 
     The **client** decides the order the groups appear in (`TAG_CATEGORY_ORDER`
     in the frontend), because that is a presentation decision and it needs the
@@ -193,20 +218,15 @@ def list_tags(db: DbSession, current_user: CurrentUser) -> list[TagOut]:
 
     `book_count` is one grouped query for the whole list rather than one per
     tag: this is fetched on nearly every page, so an N+1 here is an N+1
-    everywhere.
+    everywhere. It is the same query the row filter reads, so the number and
+    the presence of the row cannot disagree.
     """
-    # Joined to Book and filtered, like every other query that counts books.
-    # Without it the count included other members' **private** books and
-    # trashed ones, and this endpoint is fetched on nearly every page, so a
-    # member could watch somebody else's private additions accrue in a number
-    # their own listing said was zero.
-    counts = dict(
-        Shelf.seen_by(db, current_user.id)
-        .select(book_tags.c.tag_id, func.count(book_tags.c.book_id))
-        .join(book_tags, book_tags.c.book_id == Book.id)
-        .group_by(book_tags.c.tag_id)
-        .all()
-    )
+    # `tags.Vocabulary` and not a clause here, because this route is not the
+    # only reader: the lookup and the search feed the whole table into
+    # `suggested_tag_ids`, which puts tag **ids** on the wire. Filtering here
+    # alone would hand a client an id it could no longer name.
+    vocabulary = Vocabulary.seen_by(db, current_user.id)
+    counts = vocabulary.counts
     return [
         TagOut(
             id=tag.id,
@@ -219,7 +239,7 @@ def list_tags(db: DbSession, current_user: CurrentUser) -> list[TagOut]:
             is_predefined=tag.is_predefined,
             book_count=counts.get(tag.id, 0),
         )
-        for tag in db.query(Tag).order_by(Tag.category, Tag.name).all()
+        for tag in vocabulary.listable()
     ]
 
 
@@ -235,33 +255,36 @@ def create_tag(payload: TagCreate, db: DbSession, current_user: CurrentUser) -> 
     "cookbooks" cannot both appear. A collision returns the existing tag rather
     than a 409: somebody typing a name that is already there wants that tag,
     and an error would send them to find it by hand.
-    """
-    # **Folded in Python on both sides, never `func.lower` against `.lower()`.**
-    # Those are two different functions: SQLite's `lower()` is ASCII only, so
-    # `lower('Ästhetik')` is `'Ästhetik'` there and `'ästhetik'` here. A stored
-    # tag with a non-ASCII capital therefore never matched, and the insert then
-    # hit the binary `unique=True` on `tags.name` with a name already present:
-    # measured, this route answered **500** to `{"name": "Ästhetik"}` whenever
-    # that tag existed. See `docs/decisions.md`, "SQLite folds case in ASCII
-    # and Python does not".
-    #
-    # One query and a scan rather than a filtered lookup, because the tags are
-    # a library's curated list plus what imports invented, and correctness here
-    # is worth more than the index. `importing.Import._tags_by_folded_name`
-    # does the same thing for the same reason.
-    folded = payload.name.lower()
-    existing = next(
-        (tag for tag in db.query(Tag).order_by(Tag.id).all() if tag.name.lower() == folded),
-        None,
-    )
-    if existing is not None:
-        return existing
 
-    tag = Tag(name=payload.name, category=TagCategory.CUSTOM, is_predefined=False)
-    db.add(tag)
+    **A tag invented here is not in `GET /api/books/tags` until a book the
+    caller can see carries it**, which is that route's rule and not an
+    omission: a tag on no book is a name and nothing else, and publishing it to
+    the whole library is the disclosure this route's two step use was part of.
+    Putting it on a book is what makes it part of the vocabulary, and the
+    clients do that in the same gesture.
+    """
+    # The fold, the order a case differing pair is resolved in, the
+    # normalisation and the ceiling are `tags.py`'s, and every writer asks the
+    # same Mint for them. **What stays here is the commit**, which is the one
+    # thing about that module's shape that cannot move: an import needs the same
+    # primitive inside a transaction it commits once, at the end of the file.
+    minted = Mint(db).get_or_mint(payload.name)
+    if minted is None:
+        # `TagCreate.tidy` refuses a name that normalises to nothing before this
+        # is reached and this Mint carries no budget, so nothing left can answer
+        # None. It is handled rather than asserted because the Mint is one
+        # function for two callers and the other has no schema in front of it.
+        #
+        # **400 and not 422**, although an empty name is what 422 is for: the
+        # committed schema types a 422 `detail` as the array of validation
+        # entries FastAPI sends, so a sentence under that status is read by a
+        # generated client as a list. `tests/test_errors.py` holds that rule and
+        # is what caught this line.
+        raise HTTPException(status_code=400, detail="A tag needs a name.")
+
     db.commit()
-    db.refresh(tag)
-    return tag
+    db.refresh(minted)
+    return minted
 
 
 @router.delete("/tags/{tag_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -316,21 +339,132 @@ def delete_tag(
 # vocabulary that only means anything on a Book.
 
 
-def _custom_field(field_id: int, db: Session) -> CustomField:
-    """The definition at this id, or a 404.
+def _no_such_custom_field() -> HTTPException:
+    """The answer for a field that is absent, and for one this Member may not
+    be told about.
 
-    Not a privacy question: a definition is Library wide, exactly like a Tag,
-    and says nothing about any Book. The 404 is only for an id that is not one.
+    **Identical on purpose**, which is `dependencies._not_found` one level out:
+    a 403 would confirm that a field at this id exists, which is exactly what
+    `fields.Fields` withholds.
+    """
+    return HTTPException(status_code=404, detail="Custom field not found")
+
+
+def _custom_field(field_id: int, db: Session, fields: Fields) -> CustomField:
+    """The definition at this id, if this Member may be told it exists.
+
+    **This is a privacy question, and this docstring said it was not.** It was
+    right while every Member could list every definition: the list was the
+    disclosure, so an id oracle beside it gave nothing away. Once
+    `list_custom_fields` is scoped, an ungated resolver is the whole leak back,
+    because the two doors it serves both answer with the field's `name`:
+    renaming a guessed id to itself reads the name off the 200, and
+    `PUT /{book_id}/custom-fields/{field_id}` returns the Book's whole list
+    with `name` on every entry. `fields.Fields.addressable` records the rest.
+
+    The absent id and the hidden one get the same 404, so the two cannot be
+    told apart **in the body or on a clock**.
+
+    **The gate is asked before the row is fetched, and that ordering is the
+    whole of the second half.** Written the other way round, `or` short
+    circuits: an absent id never reaches the three arms, so it costs **one**
+    statement where a hidden id costs several, and the two answers separate on
+    a timer by a factor, not a margin. Reordered, both paths issue the same
+    statements and the two medians sit within 1%, interleaved, 400 repetitions
+    each.
+
+    **The hidden path's absolute statement count is deliberately not written
+    here.** Two harnesses measured this question and got 4 and 5, and the claim
+    does not need the number: what it needs is that the two paths were unequal
+    and now are not.
+    `tests/routers/test_books_custom_fields.py::TestNamingAHiddenFieldByItsId::
+    test_an_absent_id_and_a_hidden_one_cost_the_same_statements` asserts the
+    **equality** rather than either count, and pins the cause rather than the
+    clock, because a timing assertion on a shared node is a flake.
+
+    **The condition is unchanged and must stay so.** `field is None` is still
+    what decides there is nothing to return, and the gate is a second refusal
+    beside it. Collapsing the two, so the gate alone answers, would let an id
+    no row carries past arm 3 and change what the door composes to.
+    """
+    may_be_told = fields.addressable(field_id)
+    field = db.get(CustomField, field_id)
+    if field is None or not may_be_told:
+        raise _no_such_custom_field()
+    return field
+
+
+def _custom_field_out(field: CustomField, fields: Fields, is_admin: bool) -> CustomFieldOut:
+    """One definition as it looks to the Member asking.
+
+    **The two gates `rename_custom_field` applies, in the same order and from
+    the same `Fields`.** `addressable` first, because an admin is not exempt
+    from it: the delete is the ungated door and this one is not, so a field
+    whose every value sits on Books the admin cannot see is a 404 to them and
+    drawing a rename control for it would be an offer the server refuses.
+    Then the admin arm, which is the route's and not the class's, for the
+    reason `Fields.renamable` gives: that class is built from a viewer id and
+    knows nothing about roles.
+
+    **Written as the whole conjunction rather than leaning on `renamable`
+    already asking `addressable`.** It does, so the left hand side is
+    redundant for a non admin and load bearing for an admin, and spelling out
+    only the half that is needed is how the admin arm would quietly widen past
+    the gate it has to stay behind.
+
+    One `Fields` across the whole list, so the cost is **constant in the number
+    of definitions**: every read on that class is lazy and cached for the
+    instance, so twenty five definitions issue what one does.
+
+    **No statement count and no bound is written here, deliberately, and the
+    figure in this spot has been wrong twice.** The arms differ by what carries
+    a field, so there is no single figure to quote; and the only statement
+    counting arm in this area pins a **parity** between two paths rather than
+    this route's total, so nothing in the tree would catch a third wrong
+    number. A bound stated and unarmed is the shape that stops guarding without
+    ever failing.
+
+    What is true without a number: `renamable` reaches the author read where
+    `_may_be_told` short circuits on a field the viewer already has a value in,
+    which is the ordinary page, so this list costs **more** than it did, and
+    the increase does not grow with the vocabulary. Count it against the pre
+    branch shape with an arm before quoting a bound again.
+    """
+    return CustomFieldOut(
+        id=field.id,
+        name=field.name,
+        kind=field.kind,
+        renamable=fields.addressable(field.id)
+        and (is_admin or fields.renamable(field.id)),
+    )
+
+
+def _any_custom_field(field_id: int, db: Session) -> CustomField:
+    """The definition at this id whoever may see it, for the admin delete alone.
+
+    **Deliberately ungated, and named so that the gated spelling is the
+    ordinary one.** `Shelving.assignable` makes the same exemption for the same
+    reason: an admin has no privilege over another member's Private Books, so
+    gating this would leave a field whose every value sits on those Books
+    undeletable for good. Here that is sharper than it is for a collection,
+    because the vocabulary has a ceiling of 25 and the delete is the only verb
+    that frees a slot in it.
     """
     field = db.get(CustomField, field_id)
     if field is None:
-        raise HTTPException(status_code=404, detail="Custom field not found")
+        raise _no_such_custom_field()
     return field
 
 
 @router.get("/custom-fields", response_model=list[CustomFieldOut])
-def list_custom_fields(db: DbSession, current_user: CurrentUser) -> list[CustomField]:
-    """Every field this library keeps, in the order it defined them.
+def list_custom_fields(db: DbSession, current_user: CurrentUser) -> list[CustomFieldOut]:
+    """Every field this library may tell you about, in the order it defined them.
+
+    **Not every field it keeps.** A field is listed when a book you can see
+    holds a value in it, when a book in your trash does, or when no book at all
+    does. A field whose every value sits on books you cannot see is absent, and
+    naming it by id is a 404. `fields.Fields` holds the three arms and what
+    they cost.
 
     **No usage count**, unlike `GET /api/books/tags`. A count of the books
     carrying a field is a disclosure: it is drawn from books the caller may not
@@ -338,14 +472,40 @@ def list_custom_fields(db: DbSession, current_user: CurrentUser) -> list[CustomF
     number in a confirmation dialog would then understate what deleting the
     field is about to destroy. Neither number is worth having, so the
     confirmation says "every book" instead. `docs/security.md` records it.
+
+    **Each row says whether you may rename it.** Every field reaching this list
+    is addressable to you by construction, since `listable` and `addressable`
+    ask the same predicate, so what `renamable` adds is the author arm and the
+    admin one. `schemas/custom_field.CustomFieldOut` records why that is a
+    boolean rather than the author's member id.
+
+    **On this list a false `renamable` is a fact about another Member**, and it
+    is a disclosure rather than a convenience. The other two causes cannot
+    reach here, since every listed row is addressable and an admin is never
+    refused the author arm, so for a Member who is not an admin the flag reads
+    exactly "somebody else defined this". Learning that used to take a rename
+    request and its 403; it is now on every page load.
+
+    **No application log records any of it, and the access log this project's
+    own serving command produces records every request, so what the change
+    removes is the one line that was distinctive.** A refusal on a path normal
+    use never produces, carrying the field id, becomes the request every
+    settings page load makes. Observability is therefore **not** unchanged, and
+    a sentence saying nothing is logged reads as though it were. Nothing here
+    claims anything about what a deployment's ingress keeps, which a published
+    file cannot know. `docs/security.md` carries the row.
     """
-    return custom_fields.definitions(db)
+    fields = Fields.seen_by(db, current_user.id)
+    return [
+        _custom_field_out(row, fields, current_user.is_admin)
+        for row in fields.listable()
+    ]
 
 
 @router.post("/custom-fields", response_model=CustomFieldOut, status_code=status.HTTP_201_CREATED)
 def define_custom_field(
     payload: CustomFieldCreate, db: DbSession, current_user: CurrentUser
-) -> CustomField:
+) -> CustomFieldOut:
     """Define a field for the whole library.
 
     Any member, like `create_tag` and for the same reason: public books are a
@@ -356,14 +516,55 @@ def define_custom_field(
     A name that already exists, in any capitalisation, returns that field
     rather than a 409: somebody typing a name that is already there wants that
     field. Past `MAX_CUSTOM_FIELDS` it refuses with 409.
+
+    **The caller is recorded as the definer**, and that is what makes two
+    other things work: the field stays on their own settings page whatever
+    carries it, and they may rename it. `fields.Fields` holds both. The
+    collision above takes no authorship: a second member typing an existing
+    name gets the row and not a stake in it.
+
+    **So `renamable` on the answer is not always true**, and the collision is
+    the case that makes it worth computing rather than asserting: a member who
+    retypes somebody else's name is handed that row and may not rename it, and
+    a member who retypes the name of a field hidden from them is handed a row
+    they cannot address at all. Both are the open door
+    `fields.Fields` records under "uniqueness is whole table of necessity";
+    this reports them rather than closing them.
+
+    **For an admin those two causes do not collide, and that is a disclosure
+    rather than a symmetry.** The sentence above reads as though the collision
+    kept both quiet, and it does keep them quiet for everybody else. The admin
+    arm means the author half never refuses, so a false `renamable` tells an
+    admin exactly one thing: a field by that name exists and every value in it
+    sits on Books they cannot see. One request and no write, where the same
+    conclusion used to take a define and then a rename.
+
+    **And nothing bounds the guessing**: no rate limiter on this route, no
+    counter anywhere, so a dictionary of candidate names can be walked at one
+    request each. That is what makes it enumeration rather than one bit about
+    a name the caller already had.
+
+    **No application log records any of it, and the access log this project's
+    own serving command produces records every request, so what the change
+    removes is the one line that was distinctive.** A distinctive refusal
+    becomes a request indistinguishable from a legitimate define. Nothing here
+    claims anything about what a deployment's ingress keeps.
+    `docs/security.md` carries the row.
+
+    **Where the `Fields` is constructed is not load bearing**, which is worth
+    saying because it reads as though it were. Autoflush puts the pending row
+    in the table before any arm reads it, and the arm for a definition no Book
+    carries admits it either way, so warming every cache before the commit
+    answers the same. Driven both ways; nothing reds.
     """
     try:
-        field = custom_fields.define(db, payload.name, payload.kind)
+        field = custom_fields.define(db, payload.name, payload.kind, current_user.id)
     except custom_fields.Refused as refusal:
         raise HTTPException(status_code=409, detail=str(refusal)) from refusal
     db.commit()
     db.refresh(field)
-    return field
+    fields = Fields.seen_by(db, current_user.id)
+    return _custom_field_out(field, fields, current_user.is_admin)
 
 
 @router.patch("/custom-fields/{field_id}", response_model=CustomFieldOut)
@@ -372,21 +573,71 @@ def rename_custom_field(
     payload: CustomFieldRename,
     db: DbSession,
     current_user: CurrentUser,
-) -> CustomField:
+) -> CustomFieldOut:
     """Rename a field. Every value under it is kept.
 
     That is the schema rather than this handler: values reference the
     definition by id, so nothing about them mentions the name. `custom_fields.rename`
     records why renaming onto an existing name is refused instead of merged.
+
+    **404 for a field you may not be told about**, which is the answer an
+    absent id already gives: see `fields.Fields.addressable`.
+
+    **403 for a field somebody else defined**, and the two refusals are
+    different on purpose. The 404 withholds that a row exists; by the time
+    this one can fire, `addressable` has already said it does, so saying
+    whose it is adds nothing the caller did not have. `fields.Fields.renamable`
+    holds the rule, including why a field with no author is renamable by
+    anybody: that is every field defined before the column existed, and a
+    refusal there would have taken the verb away from an entire existing
+    vocabulary on the morning of the upgrade.
+
+    **An admin may rename any field they can address**, for the reason the
+    delete below is admin only: a Library wide vocabulary with a ceiling of 25
+    needs somebody who can repair a name whose author is unreachable.
+
+    **It is not the same exemption, and calling it that overstates it.** The
+    delete is deliberately ungated, so it reaches a field whose every value
+    sits on Books the admin cannot see; this is gated on `addressable` like
+    every other id door here. So for a field hidden from every admin, the only
+    verb left is the delete, which destroys every value under the row. The
+    valve for a Member who has defined the whole vocabulary is therefore
+    repair where the field is visible and destruction where it is not.
+
+    **Logged, like the delete beside it.** The log line predates the author
+    column and is not replaced by it: the column says who may rename, and the
+    line says who did, which for an admin rename is a different person.
+
+    **The two refusals here are the whole of what `CustomFieldOut.renamable`
+    publishes**, and the client draws its control from that rather than
+    deriving one. A client that has gone stale still reaches them, which is
+    why the refusal is worded for a reader: hiding a control is advice and
+    this is the guarantee.
     """
-    field = _custom_field(field_id, db)
+    # One `Fields` for both questions, which is that class's own rule: a
+    # second instance here would re-issue every arm the resolver had just
+    # paid for, and `renamable` asks `addressable` again by construction.
+    fields = Fields.seen_by(db, current_user.id)
+    field = _custom_field(field_id, db, fields)
+    if not current_user.is_admin and not fields.renamable(field_id):
+        raise HTTPException(
+            status_code=403,
+            detail="Only the member who defined this field can rename it.",
+        )
+    was = field.name
     try:
         custom_fields.rename(db, field, payload.name)
     except custom_fields.Refused as refusal:
         raise HTTPException(status_code=409, detail=str(refusal)) from refusal
     db.commit()
     db.refresh(field)
-    return field
+    logger.info(
+        "Account %r renamed custom field %r to %r", current_user.username, was, field.name
+    )
+    # The same `Fields` the two gates above were asked of. A rename moves
+    # neither authorship nor what carries the field, so nothing it cached has
+    # gone stale, and a second instance would re-issue every arm.
+    return _custom_field_out(field, fields, current_user.is_admin)
 
 
 @router.delete("/custom-fields/{field_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -401,17 +652,23 @@ def delete_custom_field(
     same split `delete_tag` makes. Defining a field is additive and reversible
     by deleting it. Deleting one destroys, in one request and with no undo,
     something every member of the house typed by hand, on books the caller
-    cannot necessarily see. A `CustomField` records nobody as its author, so
-    there is no owner to ask.
+    cannot necessarily see. The row records who **defined** it, which is who
+    may rename it, and that is not an owner of the content under it: the
+    values were typed by everybody, so there is still nobody to ask.
 
     It is the sharper case of the two: deleting a tag takes a label off a book,
     and deleting a field takes the **content** a member wrote.
+
+    **The one door taking a field id that is not scoped to the caller**, and
+    deliberately: gating it would leave a field whose every value sits on books
+    the admin cannot see undeletable for good. `_any_custom_field` carries the
+    rest.
 
     204, like `delete_tag`, and the number of values removed goes to the log
     rather than to the caller. See `list_custom_fields` for why no count is
     published.
     """
-    field = _custom_field(field_id, db)
+    field = _any_custom_field(field_id, db)
     name = field.name
     removed = custom_fields.remove(db, field)
     db.commit()
@@ -426,27 +683,35 @@ async def lookup_isbn(
 ) -> BookLookup:
     # Validated before either upstream is called: a misread barcode would
     # otherwise cost two network round trips to learn nothing.
-    metadata_limiter.check(current_user.username)
+    #
+    # **And before the budget is charged, which is the ordering `refresh_metadata`
+    # already had and this route did not.** A value that reaches no catalogue must
+    # not spend a Member's metadata allowance: three barcodes misread in a row
+    # would otherwise leave them rate limited on the next one that was fine.
     canonical = isbn_utils.parse(isbn)
     if canonical is None:
         raise HTTPException(
-            status_code=422,
+            status_code=400,
             detail="Not a valid ISBN. Check the digits and try again.",
         )
 
-    result = await metadata.lookup(
-        canonical, access=settings_store.library_access(db)
+    enquiry = catalogue_access.Enquiry.for_a_member_request(
+        db, member=current_user.username
     )
+    result = await enquiry.lookup(canonical)
     if not result.found:
-        raise HTTPException(**_lookup_failure(result))
+        raise _lookup_failure(result)
 
-    assert result.record is not None
+    assert result.record is not None  # noqa: S101  narrowing, not validation
     record = result.record
     # Built here rather than left to the schema so the same objects feed the tag
     # suggestion and the response, and the two cannot disagree about what the
     # catalogues said.
     classifications = bounded_headings(record.headings)
-    all_tags = db.query(Tag).all()
+    # The tags this caller may be told about, not the table: a suggestion is a
+    # tag **id** on the wire, so an unfiltered feed here would pre-select an id
+    # the list route no longer names. `tags.Vocabulary` is the one answer.
+    all_tags = Vocabulary.seen_by(db, current_user.id).listable()
     return BookLookup(
         **record.as_lookup(),
         classifications=classifications,
@@ -535,7 +800,7 @@ def _bounded_match(fields: dict[str, Any]) -> BookMatch:
     return BookMatch.model_construct()
 
 
-def _lookup_failure(result: metadata.Lookup) -> dict[str, Any]:
+def _lookup_failure(result: metadata.Lookup) -> HTTPException:
     """Turn a failed lookup into the status and wording it deserves.
 
     All three used to be "Book not found for this ISBN", which sends someone to
@@ -547,59 +812,35 @@ def _lookup_failure(result: metadata.Lookup) -> dict[str, Any]:
     library has switched off every catalogue that answers an ISBN. That is the
     same mistake one step further on: a 404 there reports a fact about the book
     from an app that asked nobody.
+
+    **Here rather than in `catalogue_access`, and the split is the outcome
+    set.** Three of these four are about what a catalogue answered, which is
+    this handler's business. Only `NO_SOURCES` is about whether this Library may
+    ask, so only that arm defers, and it defers to the sentence rather than
+    re-deciding the status.
     """
     if result.outcome is metadata.Outcome.RATE_LIMITED:
-        return {
-            "status_code": status.HTTP_503_SERVICE_UNAVAILABLE,
-            "detail": (
+        return HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
                 "The book catalogues are rate limiting us right now. Wait a minute "
                 "and scan again, or add the book by hand."
             ),
-        }
+        )
     if result.outcome is metadata.Outcome.UNAVAILABLE:
-        return {
-            "status_code": status.HTTP_503_SERVICE_UNAVAILABLE,
-            "detail": (
+        return HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
                 "Could not reach the book catalogues. Check the connection, or add "
                 "the book by hand."
             ),
-        }
+        )
     if result.outcome is metadata.Outcome.NO_SOURCES:
-        return _no_sources()
-    return {
-        "status_code": status.HTTP_404_NOT_FOUND,
-        "detail": "No catalogue has a record for this ISBN.",
-    }
-
-
-def _no_sources(what: str = "look up an ISBN") -> dict[str, Any]:
-    """Nothing was asked, because nothing capable is switched on.
-
-    **409 rather than 404**, and it is the one refusal here that is about this
-    library rather than about the book: nothing is wrong with the ISBN or the
-    query, and a 404 would be the app reporting a fact it never checked. The
-    sentence names the screen that fixes it, because the library did this to
-    itself and can undo it in one click.
-
-    Shared by three routes rather than written three times. The lookup path
-    reaches it through `_lookup_failure`, which has a `Lookup` to read the
-    outcome off; the two search paths have no `Lookup` and decide on the plan
-    before they call out, so they call this directly.
-
-    **`what` exists because the shared sentence was true on one of the three.**
-    It read "can look up an ISBN" and was raised from two title searches, which
-    is reachable with no slow catalogue involved: switch on the Czech National
-    Library alone, which answers an ISBN and answers no title search, and a
-    title search refuses by naming the one path that still works. The default is
-    the ISBN wording so the lookup path is unchanged.
-    """
-    return {
-        "status_code": status.HTTP_409_CONFLICT,
-        "detail": (
-            f"No catalogue is switched on that can {what}. Turn one "
-            "back on under Settings, Catalogue sources."
-        ),
-    }
+        return catalogue_access.nothing_answers_an_isbn()
+    return HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail="No catalogue has a record for this ISBN.",
+    )
 
 
 @router.get("/search", response_model=BookSearchOut)
@@ -647,26 +888,12 @@ async def search_books(
     on the response say what actually happened, so a client never has to infer
     it from what it sent.
     """
-    metadata_limiter.check(current_user.username)
-    access = settings_store.library_access(db)
-    # A library that has switched every catalogue off is told so, rather than
-    # handed an empty result page that reads as "no such book". Same refusal a
-    # lookup gets, decided here because a search has no `Lookup` to carry it.
-    #
-    # **Keyed on the harder roster, not the default one**, and the difference is
-    # a library whose every enabled search catalogue is a slow one. Nothing is
-    # switched off there, so "turn one back on" would name the wrong cause; what
-    # that library gets is an empty page whose `unasked` lists what a second,
-    # longer search would reach.
-    if not access.plan.searched_harder:
-        raise HTTPException(**_no_sources("answer a title search"))
-
     # `lang` is the reader's own language, so a German library searching a
     # German title gets the German printing first. It breaks ties only: an
     # English title still returns the English book.
-    found = await metadata.title_search(
-        q, limit=limit, prefer_language=lang, access=access, harder=harder
-    )
+    found = await catalogue_access.Enquiry.for_a_member_request(
+        db, member=current_user.username
+    ).title_search(q, limit=limit, prefer_language=lang, harder=harder)
 
     # Both read off what the fan out did rather than off `harder`, which is only
     # what the reader wanted: a harder search runs the ordinary one when the two
@@ -675,7 +902,9 @@ async def search_books(
     # nothing and has nothing left to ask, and subtracting `asked` from the
     # roster here cannot tell that from a library whose catalogues are all slow.
     return BookSearchOut(
-        matches=_match_rows(found.matches, db.query(Tag).all()),
+        matches=_match_rows(
+            found.matches, Vocabulary.seen_by(db, current_user.id).listable()
+        ),
         asked=list(found.asked),
         unasked=list(found.unasked),
     )
@@ -695,13 +924,220 @@ async def search_books(
 _EXPORT_EXTENSIONS: Final[dict[ExportFormat, str]] = {ExportFormat.MARCXML: "xml"}
 
 
-@router.get("/export")
+def _export_pages(db: Session, viewer_id: int, load: Loading) -> Iterator[list[Book]]:
+    """This viewer's whole shelf, in pages a writer can serialise and drop.
+
+    **Every arm of `export_books` walks the shelf through this**, so the peak
+    is one page of rows whatever format was asked for, and everything below
+    is a guarantee all three arms hold rather than the MARCXML arm's.
+    `tests/routers/test_books.py::TestNoExportArmResolvesMoreBooksThanAPage`
+    drives every member of `ExportFormat` against it.
+
+    **Every page is a fresh `Shelf.seen_by`**, so the privacy rule is applied
+    by construction on each one rather than once on a list that is then sliced.
+    A book made private while this runs is gone from every later page, which
+    `tests/routers/test_books.py::TestNoExportArmResolvesMoreBooksThanAPage::test_a_book_made_private_ahead_of_the_walk_is_in_no_page`
+    is the only arm anywhere to observe: every other one walks a shelf with
+    nothing hidden from it, so it cannot tell a walk of the shelf from a walk
+    of the table.
+
+    **What applies the rule per page is the fresh execution, not the fresh
+    construction, and the difference was measured rather than reasoned.**
+    `visible_to` rides in the query's own SQL, so hoisting this call above the
+    loop and reusing the object narrows and re-executes exactly the same
+    statement: that mutation survived the whole of `test_books.py`. The
+    contrast that is real is the one this sentence draws with a list resolved
+    once and sliced, and a walk built that way fails the arm above **and**
+    three book counting arms. The call stays inside the loop because that is
+    what makes the re-execution legible, not because moving it would leak.
+
+    **Walked by `Book.id`, which is unique and immutable, and both of those
+    are load bearing.** An export is many reads where it used to be one, so
+    the shelf moves underneath it, and what decides whether that is visible is
+    the key the walk resumes on:
+
+    * An **offset** counts from the start of a list that has moved. A row
+      deleted behind the cursor pulls every later row back one, so the offset
+      lands a place past where it left off and the book in between is in no
+      page at all.
+    * A **mutable** key loses the same book a second way. `PATCH
+      /api/books/{book_id}` can retitle a book, so a walk resuming on the
+      title writes a book twice when it is retitled behind the cursor and not
+      at all when it is retitled ahead of it.
+
+    Both are silent, both answer 200, and a short export that nobody can
+    notice is what `docs/decisions.md` refuses under §An oversized MARC file
+    is refused. A primary key can do neither: a row that existed when the
+    export began and still exists is written exactly once.
+
+    **So every file this route writes is in catalogued order**, which the
+    MARCXML arm always was and the CSV and txt arms were not: they sorted by
+    title. Sorting by a key and paging on it are the same walk, so keeping
+    title order here would be keeping the second bullet above, and
+    `tests/routers/test_imports_marc.py::TestTheExportIsPagedRatherThanWhole`
+    has the arm that shows what it costs. A spreadsheet sorts a column back in
+    one click; a book in no page at all is invisible.
+
+    **No count, which is `Shelf.limited` rather than `Shelf.page`.** The
+    measurement and the quadratic it avoids are in that method.
+
+    **The session is still open when this runs, and that is FastAPI's
+    arrangement rather than luck.** A `StreamingResponse` body is consumed
+    after the route function has returned, and a dependency with `yield` and
+    no `dependency_scope` is exited from the request's `AsyncExitStack`, which
+    FastAPI closes after the response has been sent rather than before. Making
+    `get_db` function scoped would close the session before the first page and
+    the second would raise mid body, after a 200.
+    `tests/routers/test_imports_marc.py::TestTheExportIsPagedRatherThanWhole`
+    drives more than one page through the real ASGI stack, which is what
+    covers it.
+
+    **The page size is read here rather than passed in**, so one knob bounds
+    every arm and a test that moves it moves all of them together. A MARCXML
+    page is the dearest of the three per row: it carries the description in
+    `520 $a` as the CSV arm does and wraps every value in XML, so a number
+    measured against it is not tight for the other two.
+    """
+    after: int | None = None
+    while True:
+        shelf = Shelf.seen_by(db, viewer_id)
+        # Narrowed only once there is a row to resume after. A sentinel id
+        # standing for "before the first row" would be relying on the primary
+        # key never reaching it rather than saying so.
+        if after is not None:
+            shelf = shelf.where(Book.id > after)
+        # Read once per page into a local, because the two uses below have to
+        # be the same number: reading the constant twice is how a full page
+        # comes to look short, and a short page ends the walk.
+        size = marc.EXPORT_PAGE_RECORDS
+        books = shelf.limited(size, Book.id.asc(), load=load)
+        if not books:
+            return
+        # Read **before** the page is handed over rather than after it comes
+        # back, because the consumer streams and an unknown time passes inside
+        # that `yield`. Nothing commits on this session during a response, so
+        # nothing expires and the read is safe either way today; this costs a
+        # line and stops depending on that.
+        cursor = books[-1].id
+        short = len(books) < size
+        yield books
+        # A short page is the last page. A full one costs one more query that
+        # comes back empty, which is what a walk with no count pays instead of
+        # counting the shelf on every page.
+        if short:
+            return
+        after = cursor
+
+
+def _marcxml_pages(db: Session, viewer_id: int) -> Iterator[list[Book]]:
+    """The walk the MARCXML arm hands to `marc.stream`, bound to its loading.
+
+    **What this function decides is `Loading.PUBLISHED`**; the walk itself is
+    `_export_pages` and every arm shares it. **So the guarantees this arm
+    relies on are not this arm's**: the paging, the key it resumes on and the
+    privacy rule all belong to `_export_pages`, and the classes covering them
+    cover the CSV and txt arms too. Retiring MARCXML means deleting this
+    function, not that walk.
+
+    **"The privacy rule re-applied per page" is what this sentence used to
+    say, and it named the wrong thing as the guarantee.** What makes the export
+    private is `Shelf.seen_by`, whose predicate rides in each page's own SQL and
+    is carried by any narrowing of it; the per page rebuild is about the
+    statement rather than about the viewer, and `_export_pages` measured that.
+    A reviewer reading the old wording judges a change to that loop on privacy,
+    which is the wrong axis.
+
+    It also keeps a name of its own rather than being `_export_pages` called
+    at the route, because the tests that drive the walk alone and the one that
+    watches the route hand it over unstarted both reach it by this name.
+
+    **`Loading.PUBLISHED` rather than `EXPORTED`**, and the name is about the
+    payload rather than the audience: it is the one option that eagerly loads
+    `classifications`, which is the half of a MARC record that makes it worth
+    exchanging, and it omits `added_by` and `collection`, which are household
+    facts a catalogue record does not carry. Reading them lazily instead would
+    be one statement per book, and it would be a lazy load firing after the
+    response had begun.
+
+    **`PUBLISHED` also loads `tags`, which `marc.py` never reads**, so that is
+    one statement a page doing nothing. Stated rather than fixed: the narrower
+    option would be another member of `shelf.Loading`, and that enum is not
+    this change's to extend.
+    """
+    return _export_pages(db, viewer_id, Loading.PUBLISHED)
+
+
+#: What the export's 200 promises, and it is three media types rather than one.
+#:
+#: **Derived from `EXPORT_MEDIA_TYPES` rather than listed**, so a fourth format
+#: is declared by the same line that makes it sendable and the document cannot
+#: be short a type while the route sends it.
+#:
+#: **Which one arrives depends on `?format=`, and OpenAPI cannot say that.**
+#: There is no expression for a response content type conditioned on a request
+#: parameter, so the honest declaration is all three under 200 with the mapping
+#: written into the route description below. Splitting the route into three, one exact type
+#: each, is the only shape that makes it exact and it changes three URLs and
+#: the client's URL builder to buy exactness in a document.
+#:
+#: **No schema under each type, which is the OpenAPI 3.1 spelling for opaque
+#: bytes** and not an omission: `format: binary` belonged to 3.0 and JSON Schema
+#: 2020-12 has no such format, so a media type object with nothing in it is what
+#: says "these bytes, unconstrained".
+_EXPORT_CONTENT: Final[dict[str, dict[str, Any]]] = {
+    media_type.split(";")[0]: {} for media_type in EXPORT_MEDIA_TYPES.values()
+}
+
+
+@router.get(
+    "/export",
+    # **Both halves, and either one alone is weaker than it reads.** Measured
+    # against this worktree's FastAPI: `responses=` alone leaves
+    # `application/json` in the 200 **beside** the real types, because FastAPI
+    # derives the 200's content from `response_class.media_type` and the
+    # default class is `JSONResponse`; `response_class=StreamingResponse` alone
+    # declares no content at all, trading a wrong promise for none.
+    # `Response.media_type` is `None`, so the plain class contributes nothing
+    # and the dictionary is left as the whole answer.
+    #
+    # **The handler stays annotated `-> StreamingResponse`**, which is load
+    # bearing:
+    # `tests/routers/test_auth.py::TestARouteThatSendsNoBodyDocumentsNone`
+    # selects the routes it forbids content to by the return **annotation**
+    # being exactly `Response`, so this does not recruit the route into a rule
+    # that says the opposite.
+    response_class=Response,
+    responses={
+        200: {
+            "content": _EXPORT_CONTENT,
+            "headers": downloads.DOWNLOAD_DISPOSITION,
+        }
+    },
+)
 def export_books(
     db: DbSession,
     current_user: CurrentUser,
     format: Annotated[ExportFormat, Query()] = ExportFormat.CSV,
 ) -> StreamingResponse:
     """The shelf this member can see, as a file.
+
+    **CSV is `text/csv`, plain text is `text/plain` and MARCXML is
+    `application/marcxml+xml`.** All three are declared for the 200 because the
+    document has no way to say which of them `?format=` selects.
+
+    **Rationed, and the schema does not say so.** The refusal is a 429 carrying
+    `Retry-After`. It is not declared here because this document enumerates no
+    refusal on any operation: not a 401, which every secured operation can
+    answer, nor a 403, a 404 or a 429. So declaring one here would make this
+    refusal look deliberate and every other operation's look accidental, which
+    is a decision about the whole error surface rather than about this route.
+    `docs/decisions.md` records that reasoning, having refused the same move
+    once already, and
+    `tests/test_errors.py::TestTheDocumentEnumeratesNoRefusal` is what this
+    paragraph rests on rather than a reader's memory of it. The mechanism behind
+    the refusal is shared by every route in `ratelimit.py`, so what would make
+    declaring it honest is declaring it at all of them. The counter is not:
+    this route has its own, for the reason `ratelimit.EXPORT_LIMIT` gives.
 
     **MARCXML needs library mode and the other two do not.** A CSV export is a
     household reading its own shelf in a spreadsheet. A MARC record is a
@@ -716,8 +1152,53 @@ def export_books(
     closed, and there is nothing to conceal: `GET /api/settings/features`
     already tells any caller whether library mode is on.
     """
+    # **In the body, and the reason is not the one `ratelimit.py`'s docstring
+    # gives.** That one is about a key the body has to be parsed to know, and
+    # this key is `current_user.username`, which a dependency can see.
+    #
+    # The reason here is ordering, and it is narrower than "never a dependency",
+    # which is what this comment said first and is wrong. Measured against this
+    # worktree's FastAPI, a path operation dependency is inserted at the
+    # **front** of the route's dependency list, ahead of the endpoint's own
+    # parameters. So a charge placed there runs before authentication **unless
+    # the charging dependency itself depends on the authenticating one**, in
+    # which case FastAPI solves that first and a caller with no session gets 401.
+    # `auth.get_current_user` returns a `User` or raises and never returns
+    # `None`, so no shape of that dependency is satisfied by an absent session.
+    #
+    # **That narrowing is this route's, because authentication is its only
+    # gate.** Where the gate is authorisation the safe shape is a charge that
+    # depends on whichever dependency refuses, and depending on the
+    # authenticator alone charges a member who is then answered 403:
+    # `routers/backup.download_backup` carries that measurement at its own site.
+    # Both shapes were compiled and driven: keyed on `CurrentUser` a dependency
+    # answers 401 and never counts, and keyed on `client_address`, which needs no
+    # session and is therefore the shape somebody reaches for, it answers 429
+    # with the authentication never run.
+    #
+    # **That second shape is an oracle and a free denial.** A 429 keyed on a
+    # username tells a caller with no session that the username exists and has
+    # been active inside the window, and the same caller can spend a member's
+    # budget without holding one. The body is where the question cannot arise at
+    # all, which is why the call is here rather than in a dependency that would
+    # be equally safe today and one edit from not being.
+    # `TestTheExportDoorIsRationed::test_a_caller_with_no_session_is_401_and_spends_nothing`,
+    # in `tests/test_ratelimit.py`, is that claim rather than this paragraph.
+    #
+    # **Keyed on the authenticated username, never `client_address`.** Behind the
+    # reverse proxy this app is documented to sit behind, an address key collapses
+    # a household into one bucket, and `Retry-After` is computed from that
+    # bucket's first hit, so a shared bucket tells one member when another last
+    # exported.
+    #
+    # **Charged before the library mode gate below**, so a member probing MARCXML
+    # with the flag off spends their own export budget. That is self denial and
+    # nothing else: `GET /api/settings/features` answers `library_mode` to a
+    # caller with no token at all, so there is no oracle here to buy.
+    export_limiter.check(current_user.username)
+
     extension = _EXPORT_EXTENSIONS.get(format, format.value)
-    filename = f"endpaper-export-{date.today().isoformat()}.{extension}"
+    filename = f"endpaper-export-{downloads.datestamp()}.{extension}"
 
     if format is ExportFormat.MARCXML:
         if not settings_store.library_mode(db):
@@ -725,48 +1206,100 @@ def export_books(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="MARC export is a library mode feature.",
             )
-        # `Loading.PUBLISHED` rather than `EXPORTED`, and the name is about the
-        # payload rather than the audience: it is the one option that eagerly
-        # loads `classifications`, which is the half of a MARC record that
-        # makes it worth exchanging, and it omits `added_by` and `collection`,
-        # which are household facts a catalogue record does not carry. Reading
-        # them lazily instead would be one statement per book.
-        catalogued = Shelf.seen_by(db, current_user.id).all(
-            Book.title.asc(), load=Loading.PUBLISHED
-        )
         return StreamingResponse(
-            iter([marc.write(catalogued)]),
-            # The registered media type for MARCXML, per the Library of
-            # Congress. A cataloguer's tools dispatch on it.
-            media_type="application/marcxml+xml; charset=utf-8",
-            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+            # **Paged, and the page is what bounds this route.** The shelf
+            # is never in memory whole: `_export_pages` fetches
+            # `marc.EXPORT_PAGE_RECORDS` rows at a time and `marc.stream`
+            # writes one page of XML at a time, so the peak is a page of each
+            # at any shelf size. The library in library mode is the instance
+            # with the most books, and this arm used to materialise every one
+            # of them for an ordinary account. The CSV and txt arms below walk
+            # the same pages: neither is gated by library mode, so an ordinary
+            # account reaches them, which made them the worse of the two. What
+            # this constant is, and what refusing and truncating would each
+            # have cost, is at `marc.EXPORT_PAGE_RECORDS`.
+            marc.stream(_marcxml_pages(db, current_user.id)),
+            media_type=EXPORT_MEDIA_TYPES[format],
+            headers=downloads.attachment(filename),
         )
 
-    books = Shelf.seen_by(db, current_user.id).all(Book.title.asc(), load=Loading.EXPORTED)
+    chunks = (
+        _csv_chunks(db, current_user.id)
+        if format is ExportFormat.CSV
+        else _text_chunks(db, current_user.id)
+    )
 
-    # Batched rather than queried per book, and empty costs no statement.
-    # `status_of` is what applies "absence means unread", so the writer below
-    # reads a value for every row rather than a default per cell.
-    statuses = Reading.by(db, current_user.id).of([book.id for book in books])
+    # Handed over unstarted. Both are generator functions, so the shelf is not
+    # read until the transport pulls the body, and neither holds more than the
+    # page it is writing.
+    return StreamingResponse(
+        chunks,
+        media_type=EXPORT_MEDIA_TYPES[format],
+        headers=downloads.attachment(filename),
+    )
 
-    if format is ExportFormat.CSV:
-        output = io.StringIO()
-        writer = csv.writer(output)
-        writer.writerow(
-            [
-                "Title", "Author", "ISBN", "ISBN13", "Publisher",
-                "Year", "Pages", "Description", "Tags", "My Status",
-                "Rating", "Date Read", "Date Added", "Added By", "Format",
-                "Condition", "Location", "Collection", "Purchase Price",
-                "Purchase Currency", "Purchased On", "Purchased From",
-            ]
-        )
+
+def _drain(buffer: io.StringIO) -> str:
+    """Everything written since the last drain, and reset the buffer.
+
+    One buffer reused across pages rather than one per page: the peak is a
+    page of text, which is what the paging is for, and a fresh `csv.writer`
+    each time would be a second place the dialect is decided.
+    """
+    text = buffer.getvalue()
+    buffer.seek(0)
+    buffer.truncate(0)
+    return text
+
+
+def _csv_chunks(db: Session, viewer_id: int) -> Iterator[str]:
+    """The CSV export, one chunk a page.
+
+    The header is yielded before the first page, so an empty shelf still
+    downloads a file a spreadsheet can open rather than nothing at all.
+    """
+    # **Streaming buys the bound with a truncation, and the exporting member
+    # induces it with no privilege.** The status line goes out before page
+    # one, so a failure at page k is a 200 that ends early. `database is
+    # locked` mid walk truncates where it used to 500: it takes a write held
+    # past `database.py`'s five second `busy_timeout`, which that module names
+    # as an import, a restore or emptying the trash, so an import in one tab
+    # beside an export in another is the reproduction. The MARCXML arm
+    # took that trade on the artefact self invalidating, an unclosed
+    # `<collection>` being refused by every parser. **A short CSV is a valid
+    # CSV**, and `routers/imports.py::/csv` is what reads this file back, so
+    # here it is member data lost on the backup path. The chunked terminator
+    # is the only signal left, `docs/security.md` documents this app behind a
+    # reverse proxy, and whether one restores that signal here is
+    # **unmeasured**. Do not buffer the file back to get a better one: the
+    # peak this paging removed is what that costs.
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(
+        [
+            "Title", "Author", "ISBN", "ISBN13", "Publisher",
+            "Year", "Pages", "Description", "Tags", "My Status",
+            "Rating", "Date Read", "Date Added", "Added By", "Format",
+            "Condition", "Location", "Collection", "Purchase Price",
+            "Purchase Currency", "Purchased On", "Purchased From",
+        ]
+    )
+    yield _drain(buffer)
+
+    for books in _export_pages(db, viewer_id, Loading.EXPORTED):
+        # Batched per page rather than queried per book, and empty costs no
+        # statement. `status_of` is what applies "absence means unread", so
+        # the writer below reads a value for every row rather than a default
+        # per cell. Per page rather than over the whole shelf, because a map
+        # of every row's status is the same unbounded thing the page bounds.
+        statuses = Reading.by(db, viewer_id).of([book.id for book in books])
         for book in books:
-            # This member's own row, or None where they never touched the book.
-            # Free: `statuses` was batched above, so the rating and the read
-            # date cost no statement. Without them a member who exports and
-            # imports their own shelf loses every rating and every read date,
-            # which is data the importer has always been able to read back.
+            # This member's own row, or None where they never touched the
+            # book. Free: `statuses` was batched for this page above, so the
+            # rating and the read date cost no statement. Without them a
+            # member who exports and imports their own shelf loses every
+            # rating and every read date, which is data the importer has
+            # always been able to read back.
             reading = statuses.get(book.id)
 
             # **Every cell goes through `_csv_safe`, with no exceptions and no
@@ -833,9 +1366,22 @@ def export_books(
                     _csv_safe(book.purchase_source),
                 ]
             )
-        content = output.getvalue()
-        media_type = "text/csv; charset=utf-8"
-    else:
+        yield _drain(buffer)
+
+
+def _text_chunks(db: Session, viewer_id: int) -> Iterator[str]:
+    """The `txt` export, one chunk a page.
+
+    The blank line between two records belongs to the pair rather than to
+    either one, so it leads every chunk after the first. A trailing separator
+    instead would put an empty record at the end of every file.
+    """
+    # Truncates the same way `_csv_chunks` does, for the same reason; that
+    # comment is the one home. No importer reads this format back.
+    separator = ""
+    for books in _export_pages(db, viewer_id, Loading.EXPORTED):
+        # Batched per page, for the reason `_csv_chunks` states.
+        statuses = Reading.by(db, viewer_id).of([book.id for book in books])
         blocks: list[str] = []
         for book in books:
             # **Every value goes through `_one_line`, with no exceptions and no
@@ -866,14 +1412,8 @@ def export_books(
                     ]
                 )
             )
-        content = "\n\n".join(blocks)
-        media_type = "text/plain; charset=utf-8"
-
-    return StreamingResponse(
-        iter([content]),
-        media_type=media_type,
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-    )
+        yield separator + "\n\n".join(blocks)
+        separator = "\n\n"
 
 
 #: Characters that make a spreadsheet treat a cell as a formula rather than as
@@ -905,7 +1445,7 @@ def _csv_safe(value: object) -> str:
 
 
 def _one_line(value: object) -> str:
-    """Flatten a value onto the one line the `txt` export gives it.
+    r"""Flatten a value onto the one line the `txt` export gives it.
 
     **The record separator in that format is a newline**, and a line is
     `Label: value`, so a value carrying a newline opens a line of its own and an
@@ -920,30 +1460,47 @@ def _one_line(value: object) -> str:
     start of the **value**, and the character that matters here is at the start
     of a line **inside** it.
 
-    `str.split()` with no argument splits on every run of whitespace, so the
-    carriage return, the tab, the form feed, the vertical tab and Unicode's own
-    line separators go with the newline and the result is one line whatever the
-    value held. Measured: `str.split()` breaks on 29 code points and
-    `str.splitlines()`, which is what reads the file back, on 10, and the second
-    set is a subset of the first, swept over `range(0x110000)`. Chosen over
-    replacing `\n` alone because a CR-only line break is a line break to a
-    Windows editor and to Excel, and
-    `test_books.py::TestTheTextExportCannotBeMadeToForgeALine` drives five of
-    those characters rather than the one the newline case would have proved.
+    The collapse itself is `schemas.common.one_line`, which the fields that
+    have to be one line go through on the way in; this is the same rule applied
+    on the way out, with a `None` and a non string to absorb. What it rests on is
+    wider than what the validators rest on: `str.split()` with no argument
+    splits on every run of whitespace, and whitespace is a **superset** of what
+    a reader breaks a line on, so the carriage return, the form feed, the
+    vertical tab, the file and record separators and Unicode's own line
+    separators go with the newline and the result is one line whatever the value
+    held. Chosen over replacing `\n` alone because a CR-only line break is a
+    line break to a Windows editor and to Excel.
+
+    **The set is derived from what a line break is, never listed**, and so is
+    the guard over it: `test_books.py::TestTheTextExportCannotBeMadeToForgeALine`
+    sweeps the whole of Unicode on every run for the code points
+    `str.splitlines()` breaks on, asserts this function removes each of them,
+    and drives one HTTP arm per break. **No count is written here on purpose.**
+    The version of this docstring that named five characters had five arms
+    behind it naming the same five: measured, a rewrite flattening exactly those
+    five was caught by nothing, and by six named arms once the sweep replaced
+    them.
+
+    One list survives that, `_BREAKS_AS_MEASURED` beside the sweep, and it is a
+    floor rather than the rule. Arms parametrised off a derived set shrink with
+    it in silence, so something has to hold what the sweep found when somebody
+    last looked. It is the only thing a narrowed sweep goes red against.
 
     **It changes what the export contains, and the owner approved that on
     2026-09-17.** A multi line description already rendered as an
     indistinguishable block in this format, since nothing indents or quotes a
     continuation, so what is lost is a paragraph break in a value a reader
     could not parse anyway. What is gained is that the file cannot be made to
-    say something the library never recorded.
+    say something the library never recorded. Nothing reads this format back:
+    `import_readers` has no `txt` reader and the CSV arm is the round tripping
+    one, which is what makes flattening affordable here and not there.
 
     Applied to the typed values too, for the reason the CSV arm states at its
     own call site: the argument that a column's validator makes this impossible
     names the validator at the API, and `backup._parse_row` inserts a restored
     archive through Core, which coerces the temporal columns and nothing else.
     """
-    return "" if value is None else " ".join(str(value).split())
+    return "" if value is None else one_line(str(value))
 
 
 def _added_on(book: Book) -> str:
@@ -1029,12 +1586,12 @@ def list_books(
     # filter quietly shows the wrong shelf.
     #
     # Refused here rather than in `BookFilters`, because it is a fact about
-    # this request and the answer is a 422 with a sentence in it. A filter
+    # this request and the answer is a 400 with a sentence in it. A filter
     # value object that raised HTTP exceptions would be a schema wearing a
     # router's hat.
     if collection_id is not None and unfiled:
         raise HTTPException(
-            status_code=422,
+            status_code=400,
             detail="Ask for one collection or for the unfiled books, not both.",
         )
 
@@ -1111,12 +1668,10 @@ def _store_cover(book: Book) -> bool:
         return False
 
     # Budgeted, because every caller of this is a request with a person waiting
-    # at the end of it. The backfill does not come through here and passes none,
-    # which bounds how many covers it fetches and **not** how long each one may
-    # take: a trickled body is held to `MAX_COVER_BYTES` and the per read
-    # timeout, and nothing else. That costs one threadpool worker and a stalled
-    # backfill, and it needs a compromised host in `COVER_HOSTS`, all six of
-    # which are https. `covers.resolve_and_store` carries the same note.
+    # at the end of it. What a run with **no** budget is bounded by is not
+    # restated here: `covers.resolve_and_store`'s own note is the one place that
+    # number lives, and the version of this comment that carried a second copy
+    # went stale the day the walk grew a per hop wall clock bound.
     resolved = covers.resolve_and_store(
         book.id, book.isbn, book.cover_url, budget=covers.INTERACTIVE_BUDGET_SECONDS
     )
@@ -1126,17 +1681,32 @@ def _store_cover(book: Book) -> bool:
     return True
 
 
-def _checked_collection(db: Session, collection_id: int | None) -> int | None:
-    """The id of a collection that exists, or None, or a 400.
+def _checked_collection(db: Session, collection_id: int | None, viewer_id: int) -> int | None:
+    """The id of a collection this caller may file into, or None, or a 400.
 
     Every write that files a book goes through here. Without it an unknown id
     reaches the foreign key and surfaces as a 500 from inside an add, which
     tells the caller nothing about what they got wrong.
 
     A 400 rather than a 404: the request is about a book, and the thing that
-    does not exist is a field in its body. It is also not a privacy question,
-    because collections are library wide, so there is nothing here to withhold
-    by answering vaguely.
+    does not exist is a field in its body.
+
+    **And the same 400 for a collection this caller may not be told about**,
+    which is `shelving.Shelving.assignable`. It is the harm this door carried
+    and it was the sharper half of the two: a tag attach against a guessed id
+    hands back the book, and this hands back the **name**, through
+    `collection_name` on the `BookOut` three of the four call sites return. So
+    a guessed name answered 201 with the row and filing into it then completed,
+    with no second gate anywhere, on a consecutive integer primary key and
+    under no rate limit. The docstring here used to argue that was fine,
+    because collections are library wide and there was nothing to withhold.
+    That was the ticket's premise stated as a justification. See
+    `shelving.Shelving`, and `_require_tag` below for the same repair one
+    entity over.
+
+    A fresh collection is still writable, which is what keeps the "make one and
+    file this book into it in a single press" flow working: nothing carries it,
+    so `Shelving`'s third arm admits it.
 
     The range check is not redundant with the schemas that bound this field.
     `BulkRequest.value` is deliberately loose (`str | int | None`, because which
@@ -1150,6 +1720,8 @@ def _checked_collection(db: Session, collection_id: int | None) -> int | None:
     if not 1 <= collection_id <= MAX_ROW_ID:
         raise HTTPException(status_code=400, detail="No such collection")
     if db.get(Collection, collection_id) is None:
+        raise HTTPException(status_code=400, detail="No such collection")
+    if not Shelving.seen_by(db, viewer_id).assignable(collection_id):
         raise HTTPException(status_code=400, detail="No such collection")
     return collection_id
 
@@ -1166,7 +1738,7 @@ def _create_book(payload: BookCreate, current_user: User, db: Session, conflict:
     # `_freeable` exists to resolve.
     # Before the ISBN walk below, which purges trashed rows to free the number.
     # A bad collection id refused afterwards would have destroyed them first.
-    _checked_collection(db, payload.collection_id)
+    _checked_collection(db, payload.collection_id, current_user.id)
 
     freed: list[int] = []
     if payload.isbn:
@@ -1219,13 +1791,25 @@ def _create_book(payload: BookCreate, current_user: User, db: Session, conflict:
                 db.flush()
 
     fields = payload.model_dump()
-    # Popped before the constructor: `Book.classifications` is a relationship,
-    # so handing it a list of plain dicts raises rather than building rows.
-    # The validated models on `payload` are what the rows are written from.
-    # `identifiers` is the same shape and is popped for the same reason.
-    fields.pop("classifications", None)
-    fields.pop("identifiers", None)
-    book = Book(**fields, added_by_user_id=current_user.id)
+    # The loop rather than one `pop` per name, so this list and the import time
+    # refusal in `schemas/book.py` are the same object: a field added to the body
+    # that the constructor cannot take stops every test run there rather than
+    # failing the first create. Two cells because the reasons differ.
+    # `Book.classifications` is a relationship, so handing it a list of plain
+    # dicts raises rather than building rows, and the validated models on
+    # `payload` are what the rows are written from. `categories` IS a column, and
+    # is popped because its stored shape is one joined string: the constructor
+    # would take the list and the INSERT would fail on it.
+    for name in POPPED_BEFORE_THE_CONSTRUCTOR:
+        fields.pop(name, None)
+    book = Book(
+        **fields,
+        # Paired with the pop deliberately. A pop with no write is a 201 that
+        # accepted a field and stored nothing, which is the quietest failure
+        # available here, so the refusal named above holds both halves.
+        categories=google_books.join_categories(payload.categories),
+        added_by_user_id=current_user.id,
+    )
     db.add(book)
     # Before the commit, so a book and the headings it was added with land in
     # one transaction: a failure here must not leave a book claiming a
@@ -1347,10 +1931,11 @@ def bulk_action(
 ) -> BulkResult:
     """Apply one verb to a selection of books.
 
-    One endpoint rather than six, because every verb shares the same three
-    steps: resolve the ids the caller may actually touch, apply, and report
-    updated/unchanged/skipped. Six handlers would be six copies of the
-    permission walk, and the fifth one added would be the one that forgot it.
+    One endpoint rather than one per verb, because every verb shares the same
+    three steps: resolve the ids the caller may actually touch, apply, and
+    report updated/unchanged/skipped. A route per verb would be a copy of the
+    permission walk per verb, and the next one added would be the one that
+    forgot it.
 
     A separate `/bulk/ownership` used to sit beside this with the same body,
     the same permission walk and an identical result shape. It was removed
@@ -1375,21 +1960,27 @@ def bulk_action(
 def _bulk_add_tag(
     db: Session, books: list[Book], value: str | int | None, current_user: User
 ) -> tuple[int, int]:
-    tag = _require_tag(db, value)
+    tag = _require_tag(db, value, current_user.id)
     updated = unchanged = 0
     for book in books:
-        if any(existing.id == tag.id for existing in book.tags):
-            unchanged += 1
-        else:
-            book.tags.append(tag)
+        # **A Book at its ceiling is counted unchanged, which is true of that
+        # Book and is not the whole truth.** A refusal and "it already had this
+        # tag" are different answers and `BulkResult` has three buckets, the
+        # third of which the caller computes from the permission walk. A fourth
+        # is a response shape change, so the refusal is logged by `tags.attach`
+        # and reported here as no change rather than as a change nobody made.
+        already = any(existing.id == tag.id for existing in book.tags)
+        if not already and attach(book, tag):
             updated += 1
+        else:
+            unchanged += 1
     return updated, unchanged
 
 
 def _bulk_remove_tag(
     db: Session, books: list[Book], value: str | int | None, current_user: User
 ) -> tuple[int, int]:
-    tag = _require_tag(db, value)
+    tag = _require_tag(db, value, current_user.id)
     updated = unchanged = 0
     for book in books:
         match = next((existing for existing in book.tags if existing.id == tag.id), None)
@@ -1407,7 +1998,7 @@ def _bulk_set_status(
     try:
         new_status = ReadStatus(str(value))
     except ValueError:
-        raise HTTPException(status_code=422, detail=f"{value!r} is not a reading status") from None
+        raise HTTPException(status_code=400, detail=f"{value!r} is not a reading status") from None
 
     # One statement for the selection, the same stamping the single-book route
     # uses, and the unchanged rule: all three on `Reading.mark_each`.
@@ -1423,7 +2014,7 @@ def _bulk_set_ownership(
         new_ownership = OwnershipStatus(str(value))
     except ValueError:
         raise HTTPException(
-            status_code=422, detail=f"{value!r} is not an ownership status"
+            status_code=400, detail=f"{value!r} is not an ownership status"
         ) from None
 
     updated = unchanged = 0
@@ -1442,7 +2033,7 @@ def _bulk_set_location(
     # An empty string clears the location, which is how a box gets unpacked.
     location = str(value).strip() if value is not None else ""
     if len(location) > LOCATION_MAX:
-        raise HTTPException(status_code=422, detail="Location is too long")
+        raise HTTPException(status_code=400, detail="Location is too long")
     new_location = location or None
 
     updated = unchanged = 0
@@ -1472,9 +2063,9 @@ def _bulk_set_collection(
             new_collection = int(str(value))
         except ValueError:
             raise HTTPException(
-                status_code=422, detail="A collection id is required"
+                status_code=400, detail="A collection id is required"
             ) from None
-        _checked_collection(db, new_collection)
+        _checked_collection(db, new_collection, current_user.id)
 
     updated = unchanged = 0
     for book in books:
@@ -1499,7 +2090,7 @@ def _bulk_delete(
     return len(books), 0
 
 
-def _require_tag(db: Session, value: str | int | None) -> Tag:
+def _require_tag(db: Session, value: str | int | None, viewer_id: int) -> Tag:
     """The Tag a bulk verb names, or a refusal.
 
     The range check is not redundant, for the reason `_checked_collection`
@@ -1512,30 +2103,108 @@ def _require_tag(db: Session, value: str | int | None) -> Tag:
     404 rather than a third answer, because an id the column cannot hold is an
     id no row can carry: the caller learns exactly what they learn from an id
     that is merely unused, which is also all there is to tell them.
+
+    **And the same 404 for a Tag this caller may not be told about**, which is
+    `tags.Vocabulary.writable`. Before it, a Tag whose every Book is hidden
+    from the caller answered differently from an id nothing carries, so the
+    bulk verbs were an existence oracle over the whole table by id. The two
+    answers are now one, which is the sentence above made true rather than
+    extended.
     """
     try:
         tag_id = int(str(value))
     except (TypeError, ValueError):
-        raise HTTPException(status_code=422, detail="A tag id is required") from None
+        raise HTTPException(status_code=400, detail="A tag id is required") from None
     if not 1 <= tag_id <= MAX_ROW_ID:
         raise HTTPException(status_code=404, detail="Tag not found")
     tag = db.get(Tag, tag_id)
-    if tag is None:
+    if tag is None or not Vocabulary.seen_by(db, viewer_id).writable(tag):
         raise HTTPException(status_code=404, detail="Tag not found")
     return tag
 
 
-_BULK_HANDLERS: dict[
-    BulkAction, Callable[[Session, list[Book], str | int | None, User], tuple[int, int]]
-] = {
-    BulkAction.ADD_TAG: _bulk_add_tag,
-    BulkAction.REMOVE_TAG: _bulk_remove_tag,
-    BulkAction.SET_STATUS: _bulk_set_status,
-    BulkAction.SET_OWNERSHIP: _bulk_set_ownership,
-    BulkAction.SET_LOCATION: _bulk_set_location,
-    BulkAction.SET_COLLECTION: _bulk_set_collection,
-    BulkAction.DELETE: _bulk_delete,
-}
+#: What every bulk verb is: the books the caller may actually touch, the loose
+#: `value` out of the body, and the (updated, unchanged) it did.
+_BulkHandler = Callable[[Session, list[Book], str | int | None, User], tuple[int, int]]
+
+def _undispatched[Verb](dispatched: set[Verb], actions: set[Verb]) -> set[Verb]:
+    """The symmetric difference between the verbs dispatched and the verbs there are.
+
+    Symmetric rather than one sided: a member with no entry is a `KeyError` at
+    `bulk_action`'s subscript and a 500 to any member who picks that verb, and
+    an entry for a member the enum no longer carries is a handler nothing can
+    reach. Both are answered by editing the table below, so both belong in one
+    message.
+
+    Takes its two sides rather than reading them, so a test can drive it with a
+    synthetic enum.
+    """
+    return dispatched ^ actions
+
+
+def _dispatch_table[Verb, Handler](
+    handlers: dict[Verb, Handler], actions: set[Verb]
+) -> dict[Verb, Handler]:
+    """The verb table, or a refusal at import naming what disagrees.
+
+    **The table is built through this rather than checked beside it**, so the
+    refusal is not a statement standing on its own that can be deleted on its
+    own. That deletion is silent: measured, an `if undispatched: raise` beside
+    the table was removed with the tree otherwise intact and 7560 backend tests
+    still passed.
+
+    **The refusal holds exactly while the second argument is `set(BulkAction)`.**
+    State the condition rather than a list of edits, because the edits are not
+    deletions and there is more than one. Unwrapping the call and keeping the
+    dict literal is one. The smaller one keeps the call, the wrapper, the `raise`
+    and a message naming the right members, and compares the table against
+    itself: `_dispatch_table(t, set(t))`. Measured, whole gate green on it, 7563
+    passed and mypy clean, with the guard unable to refuse anything.
+
+    Either way the guard drops to test time, where
+    `tests/routers/test_books_bulk.py::TestEveryVerbHasAHandler` goes red the
+    moment a verb actually goes missing, and not before.
+
+    Deleting the `raise` below fails `::TestTheTableRefusesToBuild` by name, and
+    those four arms are the only thing that sees it go: with the `raise` and that
+    class both removed, 7559 passed.
+    """
+    undispatched = _undispatched(set(handlers), actions)
+    if undispatched:
+        raise RuntimeError(
+            "BulkAction and the bulk dispatch table disagree, so /books/bulk "
+            "either raises KeyError on a verb it accepts or carries a handler "
+            f"nothing reaches: {sorted(str(verb) for verb in undispatched)}. "
+            "Give a new member an entry in _BULK_HANDLERS, or drop the entry "
+            "whose member is gone."
+        )
+    return handlers
+
+
+#: Refused when this module loads, not at the first request that names the verb.
+#:
+#: `bulk_action` subscripts this table with an action pydantic has already
+#: validated, and mypy does not exhaustiveness check a `dict` literal the way it
+#: checks a `match`, so a member added to `BulkAction` and not here is a
+#: `KeyError` and a **500** with nothing in the tree red about it.
+#:
+#: The verb set is not the only hole: a verb added to both sides reading `value`
+#: its own way with no bound passes this untouched, which is how `_require_tag`
+#: answered `2**63` with a 500 for months. That one is held by
+#: `tests/routers/test_books_bulk.py::TestNoVerbTurnsAValueIntoA500`, which is
+#: parametrised over `BulkAction` rather than over a list of verb names.
+_BULK_HANDLERS: dict[BulkAction, _BulkHandler] = _dispatch_table(
+    {
+        BulkAction.ADD_TAG: _bulk_add_tag,
+        BulkAction.REMOVE_TAG: _bulk_remove_tag,
+        BulkAction.SET_STATUS: _bulk_set_status,
+        BulkAction.SET_OWNERSHIP: _bulk_set_ownership,
+        BulkAction.SET_LOCATION: _bulk_set_location,
+        BulkAction.SET_COLLECTION: _bulk_set_collection,
+        BulkAction.DELETE: _bulk_delete,
+    },
+    set(BulkAction),
+)
 
 
 # ── Browsing by series and by shelf ───────────────────────────────────────────
@@ -2220,8 +2889,29 @@ def list_classifications(
 # left the header describing 361 lines it no longer covered.
 
 
-@router.get("/duplicates", response_model=list[DuplicateGroup])
-def list_duplicates(db: DbSession, current_user: CurrentUser) -> list[DuplicateGroup]:
+class _DuplicateRow(NamedTuple):
+    """One catalogue row as this route reads it, and the whole of what it reads.
+
+    Four columns for the grouping (`id`, `title`, `author`, `copy_group`) and
+    five more for the card. Nothing here is an ORM `Book`, and that is the
+    point rather than tidiness: once no entity survives the scan, no attribute
+    read downstream can lazily load a relationship and quietly re-widen the
+    query into the per book N+1 this route has already paid for once.
+    """
+
+    id: int
+    title: str
+    author: str | None
+    copy_group: str | None
+    format: BookFormat | None
+    publisher: str | None
+    year: int | None
+    isbn: str | None
+    cover_url: str | None
+
+
+@router.get("/duplicates", response_model=DuplicateReport)
+def list_duplicates(db: DbSession, current_user: CurrentUser) -> DuplicateReport:
     """Books that look like the same work under different ids.
 
     Matched on normalised title plus author, NOT on ISBN. An accidental exact
@@ -2241,45 +2931,107 @@ def list_duplicates(db: DbSession, current_user: CurrentUser) -> list[DuplicateG
     (casefold, strip punctuation, drop a leading article) is not something
     SQLite can express, and the catalogue is small enough that scanning it is
     cheaper than maintaining a normalised column.
+
+    **The scan is unpaginated and the answer is capped, which are two
+    different statements.** Every request reads one row per visible Book,
+    because a page of the catalogue cannot be grouped on its own: a pair split
+    across two pages is two singletons. What the cap cuts is the finished
+    grouping, never the population it ran over, so a group is never split by
+    it and the answer never depends on a grouping computed in an earlier
+    request. The work is unbounded; the answer is not.
     """
-    # Two nested N+1s used to live here, measured at 4002 statements and 5.5
-    # seconds over 2000 books, on an endpoint that is unpaginated and backs a
-    # UI page. `BookOut.tags` lazy-loaded once per book, and `books_to_out`
-    # was called once per group rather than once for the lot.
-    books = Shelf.seen_by(db, current_user.id).all(load=Loading.SERIALISED)
-
-    groups: dict[str, list[Book]] = {}
-    for book in _one_per_copy_group(books):
-        groups.setdefault(_duplicate_key(book), []).append(book)
-
-    duplicated = {key: members for key, members in groups.items() if len(members) > 1}
-    if not duplicated:
-        return []
-
-    # One serialisation pass for every duplicate, then partitioned back into
-    # groups. For a page fetched with `Loading.SERIALISED`, `books_to_out`
-    # costs a constant number of statements whatever the size of the page, so
-    # calling it per group is what made this linear in groups.
+    # One statement over `books`, whatever the shelf holds, pinned by
+    # `test_books_duplicates.py::TestTheScanCostsOneStatement`. The route used
+    # to hydrate the whole visible shelf and then put every duplicate in it
+    # through `books_to_out`, for a row the card reads seven fields of.
     #
-    # **The qualification is load bearing rather than pedantry.** Without the
-    # option `books_to_out` pays one more statement per distinct author, so the
-    # cost would grow with the shelf and not with the groups; the fetch above
-    # is what supplies it.
+    # What that cost is deliberately not repeated here: it is stated once, in
+    # `books_to_out`, where a test reads it back out of the docstring and
+    # measures against it. This comment used to carry its own copy of that
+    # figure and it went stale with nothing failing anywhere.
     #
-    # The number itself is deliberately not repeated here. It is stated once,
-    # in `books_to_out`, where a test reads it back out of the docstring and
-    # measures against it. This line used to carry its own copy of the figure,
-    # and it went stale with nothing failing anywhere.
-    flat = [book for members in duplicated.values() for book in members]
-    serialised = {out.id: out for out in books_to_out(flat, current_user, db)}
-
-    return [
-        DuplicateGroup(key=key, books=[serialised[book.id] for book in members])
-        for key, members in sorted(duplicated.items())
+    # `Shelf.select` rather than a bare query, and not as a formality: it
+    # rebuilds from `seen_by`'s own criteria tuple, so this projection and the
+    # entity read it replaced are narrowed by the same object and cannot
+    # diverge. `importing.MarcIndex.build` scans on the same predicate the
+    # same way.
+    rows = [
+        _DuplicateRow(*row)
+        for row in cast(
+            "list[tuple[int, str, str | None, str | None, BookFormat | None, "
+            "str | None, int | None, str | None, str | None]]",
+            Shelf.seen_by(db, current_user.id)
+            .select(
+                Book.id,
+                Book.title,
+                Book.author,
+                Book.copy_group,
+                Book.format,
+                Book.publisher,
+                Book.year,
+                Book.isbn,
+                Book.cover_url,
+            )
+            .tuples()
+            .all(),
+        )
     ]
 
+    groups: dict[str, list[_DuplicateRow]] = {}
+    for row in _one_per_copy_group(rows):
+        groups.setdefault(_duplicate_key(row), []).append(row)
 
-def _one_per_copy_group(books: list[Book]) -> list[Book]:
+    # **`len(members) > 1` counts visible rows and is the whole privacy rule of
+    # this feature.** `key` is readable plaintext of the title and the author,
+    # so a group standing on one visible row plus a sibling the viewer cannot
+    # see would publish that sibling's title. Nothing the viewer cannot see is
+    # in `rows` at all, so such a group cannot arise here; `DuplicateGroup`
+    # refuses to be constructed with one if it ever does.
+    duplicated = sorted(
+        (key, members) for key, members in groups.items() if len(members) > 1
+    )
+
+    shown: list[DuplicateGroup] = []
+    remaining = DUPLICATE_BOOKS_SHOWN
+    for key, members in duplicated:
+        # Whole groups only. The merge action sends every id the card renders,
+        # so a group cut by the budget would be a merge offered over a subset
+        # nobody chose. A group contributes at most `MERGE_BOOKS_MAX`, which is
+        # below the budget, so the first group always fits and the answer can
+        # stop below the budget but never above it.
+        members_shown = members[:MERGE_BOOKS_MAX]
+        if len(members_shown) > remaining:
+            break
+        remaining -= len(members_shown)
+        shown.append(
+            DuplicateGroup(
+                key=key,
+                size=len(members),
+                books=[_duplicate_member(row) for row in members_shown],
+            )
+        )
+
+    return DuplicateReport(groups=shown, total_groups=len(duplicated))
+
+
+def _duplicate_member(row: _DuplicateRow) -> DuplicateMember:
+    """The card's view of one row. `author` and `copy_group` stay behind.
+
+    The author is the half of the key the group already carries, and the copy
+    group token is a fact about another member's copies.
+    """
+    return DuplicateMember(
+        id=row.id,
+        title=row.title,
+        format=row.format,
+        publisher=row.publisher,
+        year=row.year,
+        isbn=row.isbn,
+        cover_url=row.cover_url,
+    )
+
+
+def _one_per_copy_group(rows: list[_DuplicateRow]) -> list[_DuplicateRow]:
     """One row per set of deliberate copies, and every ungrouped row as it is.
 
     The representative is the lowest id in the group, which is stable between
@@ -2287,27 +3039,31 @@ def _one_per_copy_group(books: list[Book]) -> list[Book]:
     group that survives the collapse alone is dropped from the result, and a
     group that lands beside a genuine duplicate is being offered as a book, not
     as a copy.
+
+    The id order it leaves behind is also the order the member cap cuts at, so
+    which members a group over the cap shows is stable between two reads.
     """
     seen: set[str] = set()
-    kept: list[Book] = []
-    for book in sorted(books, key=lambda row: row.id):
-        if book.copy_group is not None:
-            if book.copy_group in seen:
+    kept: list[_DuplicateRow] = []
+    for row in sorted(rows, key=lambda candidate: candidate.id):
+        if row.copy_group is not None:
+            if row.copy_group in seen:
                 continue
-            seen.add(book.copy_group)
-        kept.append(book)
+            seen.add(row.copy_group)
+        kept.append(row)
     return kept
 
 
-def _duplicate_key(book: Book) -> str:
+def _duplicate_key(row: _DuplicateRow) -> str:
     """Normalise a book to something two editions of it will share.
 
-    `importing.identity_key` is the implementation, and it is there rather than
-    here because the MARC importer matches on the same key: a title collision
-    costs a reading status on the wrong edition here and merges two different
-    books there, so one notion of "the same book" has to serve both.
+    `identity.work_key` is the implementation, and it is there rather than here
+    because the MARC importer matches on the same predicate: a wrong answer
+    costs a reading status on the wrong edition at the loosest site and merges
+    two different books at this one, so which sites share a predicate is that
+    module's subject rather than this route's.
     """
-    return identity_key(book.title, book.author)
+    return identity.work_key(row.title, row.author)
 
 
 @router.post("/merge", response_model=BookOut)
@@ -2328,14 +3084,14 @@ def merge_books(
     satisfy a unique index is not an acceptable way to resolve it.
     """
     if payload.keep_id not in payload.book_ids:
-        raise HTTPException(status_code=422, detail="keep_id must be one of book_ids")
+        raise HTTPException(status_code=400, detail="keep_id must be one of book_ids")
 
     books = Shelf.seen_by(db, current_user.id).where(Book.id.in_(payload.book_ids)).all()
     found = {book.id: book for book in books}
     if payload.keep_id not in found:
         raise HTTPException(status_code=404, detail="Book not found")
     if len(found) < 2:
-        raise HTTPException(status_code=422, detail="Nothing to merge into that book")
+        raise HTTPException(status_code=400, detail="Nothing to merge into that book")
 
     keeper = found[payload.keep_id]
     losers = [book for book in books if book.id != keeper.id]
@@ -2345,21 +3101,11 @@ def merge_books(
     # book is only visible to the member who added it, so anything that came
     # back from that filter is theirs to merge. See dependencies.book_for_write.
 
-    # The ISBN is unique, so the row it is being taken from has to let go of it
-    # first, in its own flush. Doing this after the absorb puts both UPDATEs in
-    # one executemany, where the set lands before the clear and trips the index.
-    # These rows are about to cease to exist, so releasing it costs nothing.
-    absorbed_isbn = next((loser.isbn for loser in losers if loser.isbn), None)
-    if keeper.isbn is None and absorbed_isbn is not None:
-        for loser in losers:
-            loser.isbn = None
-        db.flush()
-
-    _absorb_fields(keeper, losers, isbn_override=absorbed_isbn)
-    db.flush()
-
-    _repoint_relations(db, keeper, losers)
-    db.flush()
+    # Absorbing the columns and moving every child row is `folding.fold`, which
+    # is also where the flushes and the ISBN release ordering live. What stays
+    # here is this transaction's own business: the covers on disk, the copy
+    # group tokens, and when the commit happens.
+    folding.fold(db, keeper, losers)
 
     # Read before the loop: `db.expire(loser)` below would make each of these
     # a fresh SELECT, and after the delete there is nothing left to read them
@@ -2437,283 +3183,97 @@ def merge_books(
     return book_to_out(keeper, current_user, db)
 
 
-_MERGEABLE_FIELDS = (
-    # `isbn` is absent deliberately: it is unique and handled separately, ahead
-    # of everything here. See _absorb_fields.
-    #
-    # `copy_group` is absent for a different reason, and absorbing it would be
-    # a real bug rather than a missed field: it would make the survivor a copy
-    # of the loser's siblings, which nobody asked for and which the survivor's
-    # own owner never agreed to.
-    "subtitle", "author", "publisher", "year", "description", "cover_url",
-    "page_count", "language", "categories", "google_books_id",
-    "series_name", "series_index", "location",
-    # Present for the same reason `location` is: merging two entries for one
-    # book, one of them filed, should leave the survivor on that shelf rather
-    # than unfiled. It fills a gap and never overrides, so a keeper that is
-    # already in a collection stays where its owner put it.
-    "collection_id",
-    "format", "condition", "lending", "purchase_price_minor", "purchase_currency",
-    "purchased_at", "purchase_source",
-)
-
-
-def _absorb_fields(keeper: Book, losers: list[Book], *, isbn_override: str | None = None) -> None:
-    """Fill the survivor's gaps from the rows about to disappear.
-
-    `isbn_override` is passed because the losers have already been stripped of
-    their ISBN by the time this runs, so the value cannot be read back off
-    them. See the ordering note at the call site.
-    """
-    if keeper.isbn is None and isbn_override is not None:
-        keeper.isbn = isbn_override
-
-    for field in _MERGEABLE_FIELDS:
-        if getattr(keeper, field) is not None:
-            continue
-        for loser in losers:
-            value = getattr(loser, field)
-            if value is not None:
-                setattr(keeper, field, value)
-                break
-
-
-def _repoint_relations(db: Session, keeper: Book, losers: list[Book]) -> None:
-    loser_ids = [book.id for book in losers]
-
-    # Tags: a set union, since book_tags has no payload beyond the pair.
-    existing_tags = {tag.id for tag in keeper.tags}
-    for loser in losers:
-        for tag in loser.tags:
-            if tag.id not in existing_tags:
-                keeper.tags.append(tag)
-                existing_tags.add(tag.id)
-        loser.tags.clear()
-
-    # Classifications move too, and are deduplicated on the way: two rows for
-    # one book often carry the same DDC number, and
-    # `uq_classifications_book_scheme_number` would refuse the second on the
-    # flush. Without this the cascade on the loser's deletion takes them, so a
-    # merge would silently drop the provenance of the row that lost.
-    #
-    # A duplicate is absorbed rather than simply dropped. The keeper may hold
-    # `(ddc, 004, NULL)` from K10plus while the loser holds
-    # `(ddc, 004, "Informatik")` from the DNB, and deleting that row without
-    # taking its caption loses the caption for good: nothing re-enriches a
-    # survivor. Same rule as `classifications.add_headings`, a caption where there
-    # was none is strictly more than before.
-    #
-    # **`MAX_CLASSIFICATIONS_PER_BOOK` binds here too, and this is the only
-    # other writer that it binds.** `backup.restore` also writes this table and
-    # is deliberately uncapped, for the reason given at the constant.
-    # A merge takes up to 20 books, so without the count
-    # one request moves 8 x 19 = 152 rows onto the survivor, which is then the
-    # baseline for the next merge; merge carries no rate limiter, and every
-    # listing pays for the result because `books_to_out` selectin-loads this
-    # relationship onto every row of every page. An invariant stated "full stop"
-    # with one writer exempt from it is worse than a cap that admits it is soft,
-    # so this obeys it rather than documenting an exception.
-    #
-    # The overflow is **deleted**, which is exactly where it was going before
-    # this round: the cascade on the loser's deletion took every one of its
-    # headings. Keeper first and then losers in id order, so what survives is
-    # what was already stored, the same tie-break `classifications.add_headings` uses.
-    kept = {
-        (ClassificationScheme(entry.scheme), entry.number): entry
-        for entry in keeper.classifications
-    }
-    for heading in (
-        db.query(Classification)
-        .filter(Classification.book_id.in_(loser_ids))
-        .order_by(Classification.id)
-        .all()
-    ):
-        key = (ClassificationScheme(heading.scheme), heading.number)
-        survivor = kept.get(key)
-        if survivor is not None:
-            if survivor.label is None and heading.label is not None:
-                survivor.label = heading.label
-            # And its kind, on the same rule and for a sharper reason: the
-            # loser's row may be the corrected one. Only a record that declares
-            # a `$2` ever sets this, so a merge that dropped the half that had
-            # it would put a disc back among the subjects with nothing to see.
-            if survivor.kind is None and heading.kind is not None:
-                survivor.kind = heading.kind
-            db.delete(heading)
-            continue
-        if len(kept) >= MAX_CLASSIFICATIONS_PER_BOOK:
-            logger.info(
-                "Book %s is at the classification ceiling; merge drops %r",
-                keeper.id,
-                heading.number,
-            )
-            db.delete(heading)
-            continue
-        heading.book_id = keeper.id
-        kept[key] = heading
-
-    # Notes and loans carry their own history and simply move across. Assigned
-    # object by object rather than with a bulk UPDATE: a bulk update with
-    # synchronize_session=False leaves the session's loaded collections stale,
-    # and the delete that follows would cascade straight through them.
-    for note in db.query(Note).filter(Note.book_id.in_(loser_ids)).all():
-        note.book_id = keeper.id
-
-    # Quotes move with the notes. Without this the cascade on the loser's
-    # deletion would take them, and a merge would silently destroy passages
-    # somebody typed out by hand. The page numbers travel unchanged and may now
-    # describe a different printing, which is the standing cost of merging two
-    # rows that were two editions: the alternative is refusing the merge.
-    for quote in db.query(Quote).filter(Quote.book_id.in_(loser_ids)).all():
-        quote.book_id = keeper.id
-
-    # File references move with the quotes, deduplicated on the way for the
-    # reason the classifications above are: `uq_digital_references_location`
-    # would refuse the flush where the keeper and a loser were catalogued from
-    # the same file, which is the **likely** case rather than an edge, since
-    # two rows for one book are commonly two imports of one library.
-    #
-    # **Two arms, and they are two different events**, which is why they are not
-    # one condition. A duplicate is dropped and nothing is lost: two reports of
-    # one file are two accounts of the same thing, and the keeper already holds
-    # it. This is the difference from the classifications, where a duplicate is
-    # absorbed instead, because a caption where there was none is strictly more
-    # than before and a second report of a path is not.
-    #
-    # An overflow is a **loss**, and it is logged for that reason. The location
-    # was supplied by a Member and nothing regenerates it: no catalogue holds
-    # where somebody keeps their files. The classification block above logs its
-    # own drop and this one was silent, which is the shape where a comment
-    # saying "nothing is lost" sits over a statement that loses something.
-    #
-    # **`MAX_DIGITAL_REFERENCES_PER_BOOK` binds here too**, and this is the
-    # second of the two capped writers of this table, on the rule the
-    # classification ceiling records: a merge takes up to 20 books in one
-    # unlimited request, so an uncapped move is a stored write nobody bounded.
-    kept_files = {
-        (entry.root_label, entry.relative_path): entry
-        for entry in keeper.digital_references
-    }
-    for reference in (
-        db.query(DigitalReference)
-        .filter(DigitalReference.book_id.in_(loser_ids))
-        .order_by(DigitalReference.id)
-        .all()
-    ):
-        location = (reference.root_label, reference.relative_path)
-        if location in kept_files:
-            db.delete(reference)
-            continue
-        if len(kept_files) >= MAX_DIGITAL_REFERENCES_PER_BOOK:
-            logger.info(
-                "Book %s is at the digital reference ceiling; merge drops %r",
-                keeper.id,
-                reference.relative_path,
-            )
-            db.delete(reference)
-            continue
-        reference.book_id = keeper.id
-        kept_files[location] = reference
-
-    # Identifiers move with the file references, deduplicated on the way for the
-    # reason they are: `uq_book_identifiers_book_scheme_value` would refuse the
-    # flush where the keeper and a loser were imported from the same store, and
-    # two rows for one book commonly are two imports of one library.
-    #
-    # **Only an exact repeat is a duplicate here**, which is the difference from
-    # the headings above and is the whole reason the unique index carries the
-    # value. Two Kindle entries a member declared the same book carry two
-    # ASINs, and both survive: that is the merge saying which editions were
-    # folded together, and keying on the scheme alone would have made it an
-    # `IntegrityError` instead of a fact.
-    #
-    # **`MAX_IDENTIFIERS_PER_BOOK` binds here too**, on the rule the two blocks
-    # above record: a merge takes up to 20 books in one unlimited request, so an
-    # uncapped move is a stored write nobody bounded. The drop is a **loss** and
-    # is logged for that reason: an identifier came out of a member's own export
-    # and no catalogue holds it, so nothing regenerates it.
-    kept_identifiers = {
-        (BookIdentifierScheme(row.scheme), row.value) for row in keeper.identifiers
-    }
-    for identifier in (
-        db.query(BookIdentifier)
-        .filter(BookIdentifier.book_id.in_(loser_ids))
-        .order_by(BookIdentifier.id)
-        .all()
-    ):
-        assertion = (BookIdentifierScheme(identifier.scheme), identifier.value)
-        if assertion in kept_identifiers:
-            db.delete(identifier)
-            continue
-        if len(kept_identifiers) >= MAX_IDENTIFIERS_PER_BOOK:
-            logger.info(
-                "Book %s is at the identifier ceiling; merge drops %r",
-                keeper.id,
-                identifier.value,
-            )
-            db.delete(identifier)
-            continue
-        identifier.book_id = keeper.id
-        kept_identifiers.add(assertion)
-
-    moved = db.query(Loan).filter(Loan.book_id.in_(loser_ids)).all()
-    for loan in moved:
-        loan.book_id = keeper.id
-
-    # Merging two books that are both lent out used to give the survivor **two
-    # open loans**, which the data model says cannot happen: `returned_at IS
-    # NULL` is the single active loan. Every later `POST /api/loans` on that
-    # book then 409s forever, and the UI renders one `active_loan` so there is
-    # no way to see or close the other.
-    #
-    # The earliest one stays open, because it is the loan that has been out
-    # longest and is the one worth chasing. The rest are closed now: the books
-    # they described have just become one book, so they are not still out.
-    # Built from the objects in hand rather than by re-querying: the
-    # repointing above is not flushed yet, so a fresh query does not
-    # necessarily see the moved loans as belonging to the survivor.
-    on_keeper = db.query(Loan).filter(Loan.book_id == keeper.id).all()
-    open_loans = sorted(
-        {loan.id: loan for loan in [*on_keeper, *moved]}.values(),
-        key=lambda loan: (loan.loaned_at, loan.id),
-    )
-    # `lending.is_open`, not the column: the merge is the one caller that
-    # cannot ask `Loans.open_on`, because the repointing above is not flushed
-    # and these rows are the only place the survivor's loans exist yet.
-    still_open = [loan for loan in open_loans if lending.is_open(loan)]
-    now = datetime.now(UTC).replace(tzinfo=None)
-    for loan in still_open[1:]:
-        lending.close(loan, now)
-
-    # Progress moves wholesale. It carries no uniqueness of its own, so
-    # unlike the statuses below there is nothing to resolve: two members'
-    # readings of what turned out to be one book are two histories of one book.
-    # Left out, the losers' rows would be cascade-deleted with them, silently
-    # throwing away reading history the merge was never asked to touch.
-    for entry in db.query(ReadingProgress).filter(
-        ReadingProgress.book_id.in_(loser_ids)
-    ):
-        entry.book_id = keeper.id
-
-    # Every member's reading records, not just the caller's: see
-    # `reading.resolve_merge`, which owns why they cannot simply move.
-    resolve_merge(db, keeper.id, loser_ids)
-
-    # The library's own fields, for the reason the quotes above move: left out,
-    # the cascade on the loser's deletion would take a calibre-web link
-    # somebody typed by hand, silently. `custom_fields.resolve_merge` owns the
-    # collision rule, which is the keeper's own value winning.
-    custom_fields.resolve_merge(db, keeper.id, loser_ids)
-
-
 # ── Covers ────────────────────────────────────────────────────────────────────
 
-#: Books one backfill run repairs. The run is bounded rather than open ended
-#: because it holds an HTTP request open while it fetches: at six at a time and
-#: a six second timeout, a hundred books is the most that reliably finishes
-#: inside a proxy's read timeout. The response says how many are left, and the
-#: caller presses again.
+#: Books one backfill run repairs.
+#:
+#: **Bounded because it holds an HTTP request open while it fetches**, and it is
+#: what a press examines at most rather than what a run costs:
+#: `COVER_BACKFILL_DEADLINE_SECONDS` bounds the run's life whatever the hundred is.
+#: The response says how many are left, and the caller presses again.
 MAX_BACKFILL_BOOKS: Final = 100
+
+#: Wall clock one book of a backfill run may spend.
+#:
+#: **Twelve, two hops of `covers.TIMEOUT_SECONDS`.** One cover book is a candidate
+#: check and then a download, each of which may walk up to `covers.MAX_REDIRECTS`
+#: further hops, and with no budget every one of those hops gets the full
+#: `covers.TIMEOUT_SECONDS`: `covers.resolve_and_store` records what that bounds
+#: and what it does not. Passing this is what makes a book's cost a number, and so
+#: what makes a wave's.
+#:
+#: **A book that runs out of budget is not lost and is not skipped.** Past it the
+#: best candidate is kept unverified, so the row carries the remote URL and the run
+#: counts the book `unreachable`; no file lands behind its id, so it is a candidate
+#: again on the next pass through the library. That is the trade
+#: `covers.INTERACTIVE_BUDGET_SECONDS` makes on the add path, for a caller who is
+#: waiting on one book rather than on a run of them.
+#:
+#: **Not that constant's four.** Four is sized against a person watching one book
+#: being added, and Open Library answers every cover with a chain of three hops
+#: (`covers.COVER_HOSTS` measured it), so four here would report `unreachable` for
+#: covers that are merely behind two redirects.
+#:
+#: **Retuning `covers.TIMEOUT_SECONDS` means retuning this.** A budget that is not
+#: whole hops of it buys a fraction of a hop nothing can spend, `_hop_seconds`
+#: giving a hop the smaller of that timeout and what is left, so
+#: `test_a_books_budget_is_whole_hops` goes red on the hop timeout moving and the
+#: edit it is asking for is here rather than there.
+COVER_BACKFILL_BUDGET_SECONDS: Final = 12
+
+#: How long one backfill run may spend waiting for fetch slots.
+#:
+#: **Twenty four, and this route's first deadline of any kind.** Without one a run
+#: was bounded only by the batch: `ceil(MAX_BACKFILL_BOOKS /
+#: covers.MAX_CONCURRENT_FETCHES)` waves, 17, of whatever one book cost, which with
+#: nothing bounding a book was the figure `covers.INTERACTIVE_BUDGET_SECONDS`
+#: derives for an unbudgeted walk and put a run near 400s. At
+#: `ratelimit.COVER_BACKFILL_LIMIT`'s 0.1 presses a second that is **41 runs in
+#: flight from one member**, each holding a connection and six fetch slots, which
+#: is what this constant and `covers.FETCHES_AT_ONCE` close between them.
+#:
+#: * **The hold.** `get_current_user` checks a connection out before this runs and
+#:   `get_db` returns it only after the response, so a run holds one for its whole
+#:   life: this plus one `COVER_BACKFILL_BUDGET_SECONDS`, because the check before a
+#:   wave is `left(ends) <= 0`, so a wave admitted just under 24 runs a full book
+#:   after it. `0.1 x 36s` is **3.6 runs in flight**, against 41.
+#:
+#:   **One budget and not one per book of the wave, and what makes that true is
+#:   where the wave's cancels sit.** The handler cancels every unstarted
+#:   submission of a wave before it reads any of them; interleaved, a worker freed
+#:   during one read starts the next offset and the wave drains serially for a
+#:   budget a book, measured at 0.919s against a claimed 0.400s. The comment at
+#:   that loop carries the measurement, and this figure is only the hold while the
+#:   ordering there holds.
+#: * **The sibling's hold is the ceiling, not a number repeated here.**
+#:   `IDENTIFIER_BACKFILL_DEADLINE_SECONDS` argues its own hold down to a share of
+#:   the pool and states the pool's size; this route's arrival rate is the same, so
+#:   the comparison is between the two holds and
+#:   `TestTheDeadlineIsDerivedRatherThanChosen` asserts it rather than copying the
+#:   figure a third time.
+#: * **The wave.** Two whole `COVER_BACKFILL_BUDGET_SECONDS`, so where every book
+#:   spends its whole budget a cut lands where a wave would have ended rather than
+#:   mid wave.
+#:
+#: **It does not make this route safe for the pool**, for the reason the sibling
+#: constant states in full: the limiter keys on a username and under
+#: `AUTH_MODE=proxy` a username is free, so no arrival rate bounds the adversarial
+#: case. It moves one member's hold and removes no class.
+#:
+#: **This figure exists because the fan out runs inside the request.** Move it to a
+#: background job and this is deleted rather than retuned, while
+#: `covers.FETCHES_AT_ONCE`, the per book budget and the cursor all survive
+#: unchanged.
+COVER_BACKFILL_DEADLINE_SECONDS: Final = 24
+
+#: The three outcomes `CoverBackfillOut` counts, as the run's own walk labels one
+#: book.
+#:
+#: A `Literal` for `_Bucket`'s reason, which that alias states: the counts are taken
+#: with `list.count`, so a typo in one of the three reports 0 for that outcome while
+#: `examined`, which is the length of the run rather than their sum, stays right.
+#: Nothing on the wire would say so. Against this alias mypy refuses the typo.
+_Cover = Literal["stored", "unreachable", "still_missing"]
 
 
 @router.post("/covers/backfill", response_model=CoverBackfillOut)
@@ -2767,6 +3327,20 @@ def backfill_covers(
     once the end is reached, so pressing again starts over and re-tries the ones
     that failed, which may since have become fixable.
 
+    **Bounded in wall clock as well as in books**, so a slow or blackholing image
+    service leaves the batch short rather than holding the request open. A short
+    run answers with whatever resolved, counts only the books it has an outcome
+    for, and moves the cursor over exactly those, so pressing again resumes at the
+    first book this one did not reach. The reply does not distinguish a short run
+    from a complete one and does not need to: press again while `remaining` is
+    above zero.
+
+    **Each book is bounded too.** A cover is a candidate check and then a
+    download, each of which may follow redirects, and with no budget every hop of
+    both got a timeout of its own, so one unlucky book could spend what the whole
+    run was meant to. Past its budget a book keeps the remote URL, is counted
+    `unreachable`, and is a candidate again on the next pass through the library.
+
     Idempotent either way: a book with a file behind it is never a candidate, so
     a second pass over the same range examines nothing it fixed.
     """
@@ -2784,63 +3358,187 @@ def backfill_covers(
     candidates = [book for book in catalogue if book.id not in on_disk]
     batch = candidates[:MAX_BACKFILL_BOOKS]
 
-    # Concurrent, because serial would be one round trip per book: a thousand
-    # books at even half a second each is eight minutes of waiting. Bounded,
-    # because the other end is two free public services and this deployment has
-    # one address at them.
-    #
-    # Only the fetch runs in the pool. The Session is not thread safe, so the
-    # assignment happens back here, in one thread. `pool.map` yields results in
-    # the order it was given the inputs, which is what makes the positional zip
-    # below correct.
-    with ThreadPoolExecutor(max_workers=covers.MAX_CONCURRENT_FETCHES) as pool:
-        resolved = list(
-            pool.map(
-                lambda book: covers.resolve_and_store(book.id, book.isbn, book.cover_url),
-                batch,
-            )
-        )
+    ends = deadline.in_(COVER_BACKFILL_DEADLINE_SECONDS)
 
-    stored = 0
-    unreachable = 0
-    still_missing = 0
-    for book, url in zip(batch, resolved, strict=True):
+    def record(book: Book, url: str | None) -> _Cover:
+        """Fold one answer into its Book, and name the outcome it counts as."""
         if url is None:
-            still_missing += 1
-            continue
+            return "still_missing"
+        # **The guard is not about the UPDATE, which the unit of work already
+        # elides**: an assignment of an equal value emits no statement and this
+        # table has no `onupdate`, measured with a cursor listener. What it keeps
+        # out is `Book._store_covers_over_https`, which **drops** a value it finds
+        # unrenderable rather than passing it through. `resolve_and_store` answers
+        # with `supplied` when the download fails, so an unrenderable URL that
+        # `backup.restore` wrote through Core, where `@validates` does not fire,
+        # comes back here equal to the column: assigning it would null the only
+        # cover that row has and log a warning, on a run that repaired nothing.
+        # `test_a_run_that_re_resolves_an_unrenderable_stored_cover_keeps_it` fails
+        # if this goes.
         if url != book.cover_url:
             book.cover_url = url
         if covers.is_local(url):
-            stored += 1
-        else:
-            # Resolved to a remote URL this server could not download. Counted
-            # separately from "no image service has one": with no egress every
-            # book lands here, and folding it into either of the other two would
-            # report a clean no-op in exactly the situation this exists for.
-            unreachable += 1
+            return "stored"
+        # Resolved to a remote URL this server could not download. Counted
+        # separately from "no image service has one": with no egress every book
+        # lands here, and folding it into either of the other two would report a
+        # clean no-op in exactly the situation this exists for.
+        return "unreachable"
+
+    # One outcome per book of the batch, in batch order, `None` where this run
+    # learned nothing about it: no slot came free inside the deadline, or the
+    # deadline cut before its wave was submitted.
+    outcomes: list[_Cover | None] = [None] * len(batch)
+    cut_short = False
+
+    # **Waves of `covers.MAX_CONCURRENT_FETCHES`, the deadline checked between
+    # them, rather than one `pool.map` over the batch.** Concurrent either way,
+    # because serial is one round trip per book and a thousand books at even half
+    # a second each is eight minutes of waiting. Three reasons for the waves, and
+    # the first changes an answer rather than a cost.
+    #
+    # * `next_after_id` has to be the end of the **contiguous** examined run, and
+    #   submitting in batch order a wave at a time is what makes the examined set
+    #   a prefix by construction. `pool.map` has the ordering but not the cut: it
+    #   cannot be stopped at a wall clock without abandoning the iterator, and an
+    #   abandoned fetch still writes its file, which takes the book out of the
+    #   candidate set with its row left pointing at whatever it pointed at before.
+    # * A submission is queued, not run, so submitting the whole batch at once
+    #   puts a second member's first wave behind a hundred of somebody else's
+    #   fetches. A wave never leaves more than `covers.MAX_CONCURRENT_FETCHES`
+    #   queued, so the pool's own order is a queue of waves rather than of runs.
+    # * It is what puts a cut on a wave boundary, which is the third of
+    #   `COVER_BACKFILL_DEADLINE_SECONDS`' derivations.
+    #
+    # The cost, stated rather than left to be discovered: a wave's wall clock is
+    # its slowest book, so idle slots appear where one `map` would have kept six
+    # in flight.
+    at = 0
+    while at < len(batch):
+        if deadline.left(ends) <= 0:
+            cut_short = True
+            break
+        # **Every column is read here, in this thread, and never in the pool.**
+        # The Session is not thread safe, and a lazy load or a refresh fired from
+        # a worker is a read on this handler's session from another thread. The
+        # comment this replaces claimed only the fetch ran in the pool while the
+        # `lambda` it sat on read three columns there.
+        asked: list[tuple[int, Book, Future[str | None]]] = []
+        while at < len(batch) and len(asked) < covers.MAX_CONCURRENT_FETCHES:
+            book = batch[at]
+            asked.append(
+                (
+                    at,
+                    book,
+                    covers.FETCHES_AT_ONCE.submit(
+                        covers.resolve_and_store,
+                        book.id,
+                        book.isbn,
+                        book.cover_url,
+                        budget=COVER_BACKFILL_BUDGET_SECONDS,
+                    ),
+                )
+            )
+            at += 1
+
+        # **The deadline is spent on the slot and nowhere else**, and the two
+        # spellings a reader reaches for first are both worse.
+        #
+        # A deadline on the **request** loses the answers already in hand: the
+        # fetches that finished have written their files, so abandoning their
+        # results leaves a cover behind a book id with the row still naming the
+        # remote URL it could not download, and nothing makes that book a
+        # candidate again to repair it.
+        #
+        # Cancelling a fetch in flight cannot be done at all: a thread running
+        # `covers.resolve_and_store` is not interruptible, and the file it is part
+        # way through writing is `cover_store`'s to finish. So what this waits on
+        # is only the part that is still a **queue position**, and
+        # `Future.cancel` is what distinguishes the two: true for a submission
+        # that never started, false for one that is running or done, which is then
+        # read for its answer and counted.
+        #
+        # **The wait is therefore not a bound on the wave.** A wave that has
+        # started runs to `COVER_BACKFILL_BUDGET_SECONDS`, which is the second term
+        # in the hold that constant's own comment derives.
+        wait([fetching for _, _, fetching in asked], timeout=max(deadline.left(ends), 0.0))
+
+        # **Every cancel before any read, and that ordering is the hold.** A read
+        # blocks for up to `COVER_BACKFILL_BUDGET_SECONDS` and this pool is process
+        # wide, so with the two interleaved a worker freed during the read of one
+        # offset dequeues the next one and **starts** it: its `cancel` then answers
+        # False, it is waited for from its own start, and the wave drains serially
+        # for one budget a book. Measured on a one slot stand-in, three books, a
+        # 0.1s deadline and a 0.3s fetch: **0.919s held against the 0.400s the
+        # deadline claims, the whole wave examined and the run not reporting a cut**,
+        # which at the shipped figures is `24 + 6 x 12` rather than `24 + 12`.
+        # Cancelling first makes every future still read one that had started at or
+        # before the cut, which is what `COVER_BACKFILL_DEADLINE_SECONDS`' hold is
+        # derived from, and it leaves nothing queued behind a read that raises.
+        started = [
+            (offset, book, fetching)
+            for offset, book, fetching in asked
+            if not fetching.cancel()
+        ]
+        if len(started) != len(asked):
+            # A submission that never started is a book this run never examined,
+            # and so is everything after it.
+            cut_short = True
+        for offset, book, fetching in started:
+            outcomes[offset] = record(book, fetching.result())
+        if cut_short:
+            break
+
     db.commit()
 
-    remaining = len(candidates) - len(batch)
+    # The unbroken examined run, which is the only thing the cursor may clear.
+    #
+    # **A book past the cut whose fetch did answer is still stored**, because the
+    # bytes are already on this volume: the row is updated and committed above,
+    # which is what keeps the column and the directory agreeing. It is counted in
+    # no outcome, so the reply understates what this run did and never overstates
+    # it, and that book is not a candidate for the next press.
+    cleared = outcomes[
+        : next(
+            (offset for offset, outcome in enumerate(outcomes) if outcome is None),
+            len(outcomes),
+        )
+    ]
+    examined = len(cleared)
+    stored = cleared.count("stored")
+    unreachable = cleared.count("unreachable")
+    still_missing = cleared.count("still_missing")
+    remaining = len(candidates) - examined
     logger.info(
-        "Cover backfill for %s: examined %d, stored %d, unreachable %d, "
-        "none found for %d, %d left. Totals: %s",
+        "Cover backfill for %s: examined %d of %d, stored %d, unreachable %d, "
+        "none found for %d, %d left%s. Totals: %s",
         current_user.username,
+        examined,
         len(batch),
         stored,
         unreachable,
         still_missing,
         remaining,
+        ", cut short by the deadline" if cut_short else "",
         covers.outcome_counts(),
     )
     return CoverBackfillOut(
-        examined=len(batch),
+        examined=examined,
         stored=stored,
         unreachable=unreachable,
         still_missing=still_missing,
         remaining=remaining,
-        # 0 at the end, so the next press starts over rather than answering
-        # nothing for ever.
-        next_after_id=batch[-1].id if remaining > 0 else 0,
+        # **The last book of the unbroken examined run, never the last book of the
+        # batch**, which would skip every book a cut dropped for a whole pass of
+        # the library. Where the run examined none of them it is `after_id`
+        # unchanged, so the next press resumes where this one stood. 0 at the end,
+        # so the next press starts over rather than answering nothing for ever,
+        # and a cut can never report the end: a cut means at least one book of the
+        # batch has no outcome, so `examined <= len(batch) - 1` and `remaining` is
+        # at least 1.
+        next_after_id=(
+            (batch[examined - 1].id if examined else after_id) if remaining > 0 else 0
+        ),
     )
 
 
@@ -2853,19 +3551,24 @@ def backfill_covers(
 #: proxy's read timeout, which for the deployments this ships to is a minute.
 #: `IDENTIFIER_BACKFILL_CONCURRENCY` in flight over fifty books is
 #: `ceil(50 / 6)` waves, nine, and one request is bounded by
-#: `fetch.TIMEOUT_SECONDS`, so the worst case is **90s**. That worst case is
-#: every request timing out, which means Google is unreachable and the batch
-#: was going to produce nothing anyway; the case that has to fit inside the
-#: proxy is the ordinary one, which is one wave of latency per nine.
+#: `fetch.TIMEOUT_SECONDS`, so this constant alone would put the worst case at
+#: **90s**.
+#:
+#: **It no longer does, and this figure is no longer what keeps the route inside
+#: the minute.** `IDENTIFIER_BACKFILL_DEADLINE_SECONDS` bounds the run's life at
+#: 40s whatever the fifty is, so the arithmetic above is now what the fifty would
+#: cost unbounded rather than what a run costs. The fifty survives as what a
+#: press examines at most, which is the presses a member pays, and the paragraph
+#: below is the number to argue with.
 #:
 #: **Deliberately not compared with the cover backfill's hundred**, and an
 #: earlier version of this paragraph was: "six at a time against a six second
-#: timeout, so a hundred books is at worst 100s". That figure does not exist.
-#: `backfill_covers` passes no budget to `covers.resolve_and_store`, whose own
-#: docstring says nothing then bounds a download in time, and one cover book is
-#: up to three candidate checks plus a download rather than one request. The
-#: two routes differ in the work per book, not in the timeout, so the hundred
-#: is not evidence about this fifty.
+#: timeout, so a hundred books is at worst 100s". That figure does not exist. One
+#: cover book is up to three candidate checks plus a download rather than one
+#: request, which is why that route's per book ceiling is its own constant,
+#: `COVER_BACKFILL_BUDGET_SECONDS`, rather than a request's timeout. The two routes
+#: differ in the work per book, not in the timeout, so the hundred is not evidence
+#: about this fifty.
 #:
 #: **What it costs a member is presses**, and that is the number to argue with:
 #: a 900 book Play Books import is 18 of them. The response says how many are
@@ -2874,14 +3577,122 @@ MAX_IDENTIFIER_BACKFILL: Final = 50
 
 #: Volume lookups in flight at once during a backfill.
 #:
-#: **Six, the same as `covers.MAX_CONCURRENT_FETCHES`, and bounded for the same
-#: reason plus one of its own.** A backfill runs over a whole library, so an
-#: unbounded gather would open a socket per book and get this deployment's
-#: address refused. The reason of its own is memory: `fetch.MAX_RESPONSE_BYTES`
-#: prices the pod at sixteen concurrent 2 MiB responses, and `metadata.search`
-#: already spends eight of them, so a backfill that ran ten at a time could put
-#: a search over the ceiling that constant computes.
+#: **Six, derived here rather than borrowed.** A backfill runs over a whole
+#: library, so an unbounded gather would open a socket per book and get this
+#: deployment's address refused. The binding reason is memory:
+#: `fetch.MAX_RESPONSE_BYTES` prices the pod at sixteen concurrent 2 MiB
+#: responses, and `metadata.search` already spends eight of them, so a backfill
+#: that ran ten at a time could put a search over the ceiling that constant
+#: computes.
+#:
+#: **`covers.MAX_CONCURRENT_FETCHES` is also six and that is not evidence**, on
+#: the ground `MAX_IDENTIFIER_BACKFILL` states four lines above: that route is
+#: bounded by what two image services will tolerate, and this one by a metered
+#: key's bill. Either may move without the other.
 IDENTIFIER_BACKFILL_CONCURRENCY: Final = 6
+
+#: The pod's slots for a backfill's outbound volume requests, held once for the
+#: process rather than once per request.
+#:
+#: **Built here rather than in the handler body, which is the defect this
+#: replaces.** The ceiling it defends belongs to the pod:
+#: `fetch.MAX_RESPONSE_BYTES` prices sixteen concurrent responses and
+#: `metadata.search` spends eight of them **per fan out, not per pod**: the
+#: default path admits four fan outs per member, `ratelimit.METADATA_LIMIT`'s 60 a
+#: minute over `metadata.SEARCH_DEADLINE_SECONDS`' 4.0s, so 32 responses can be
+#: live on that path alone. So this bound leaves room for one fan out and **does
+#: not keep the pod under the sixteen**, which is the search path's own question
+#: and has its own ticket. A semaphore built per call
+#: bounds one call and enforces nothing about the pod, so nine runs of six
+#: inside this route's own rate limit put 54 sockets, and **54, plus a search's
+#: eight**, at that constant's own retention figure is about 1.99 GB of parse
+#: against a pod `fetch.py` records being OOMKilled at 1.8 GB once already.
+#: **The eight is load bearing and was left out of that sentence once**: 54 alone
+#: is 1.73 GB, which is under the 1.8, so what carries the conclusion is the
+#: sockets a search is already holding rather than this route's own. `metadata._HARDER_AT_ONCE` is the
+#: same placement for the same reason and states the pool's fifteen this does
+#: not restate.
+#:
+#: **Process wide is pod wide only because the pod runs one process.** The image
+#: gives uvicorn no `--workers`, so under one this is the pod's bound and under
+#: `--workers N` it becomes per worker and the sixteen is exceeded N-fold with
+#: nothing going red. No test in this tree can read a `CMD` line.
+#:
+#: **Waited on, where `_HARDER_AT_ONCE` refuses to wait, and the difference is
+#: the caller rather than the resource.** A search that loses its slot runs the
+#: ordinary search and says which catalogues it asked, so a refusal there is a
+#: true answer; a backfill has nothing cheaper to do, so a refusal is a retry
+#: and no rows. `IDENTIFIER_BACKFILL_DEADLINE_SECONDS` is what buys the wait.
+#:
+#: **What a process wide bound admits, said here because a later reader will
+#: assume it absent**: occupancy is observable across members, since a member
+#: can read somebody else's activity off their own batch's shortfall. Six slots
+#: busy, and not a title, an identifier or whose books; every public book is
+#: already a candidate for everyone, so nothing is paid to close it.
+_BACKFILL_LOOKUPS_AT_ONCE: Final = asyncio.Semaphore(IDENTIFIER_BACKFILL_CONCURRENCY)
+
+#: How long one backfill run may spend waiting for slots and for answers.
+#:
+#: **Thirty, and three independent derivations land on it**, which is the reason
+#: to prefer it to 25 or 35.
+#:
+#: * **The pool.** `get_current_user` checks a connection out before this runs
+#:   and `get_db` returns it only after the response, so a run holds one for its
+#:   whole life. **Little's law takes the hold, not this constant**, and the hold
+#:   is this plus one `fetch.TIMEOUT_SECONDS`: waves are sequential and the check
+#:   before each one is `left(ends) <= 0`, so an acquire admitted just under 30
+#:   runs a full request after it, which `fetch.get` bounds with no retry on the
+#:   path. This route's limiter allows six presses a minute, so `0.1/s x 40s` is
+#:   **4 of the pool's fifteen per member**, against the 9 the route held when its
+#:   worst case was 90s, which is that same quantity over that life.
+#: * **The wave.** It is exactly three times `fetch.TIMEOUT_SECONDS`, so in the
+#:   every-request-times-out case a cut lands where a wave would have ended
+#:   anyway rather than mid wave, which is what the loop below needs.
+#: * **The proxy.** Half the 60s read timeout measured on the proxy in front of
+#:   this, which leaves the two queries and the commit real margin. That figure
+#:   is deliberately not given a name here: it is a dependency default nobody in
+#:   this deployment set, and a named constant would read as this repository's.
+#:
+#: **It does not make this route safe for the pool**, and a comment saying it
+#: did would be the thing that stopped anybody finishing the job. It moves the
+#: hold from 9 of fifteen to 4 and removes no class: the limiter keys on a
+#: username, and under `AUTH_MODE=proxy` a username is free, so no arrival rate
+#: bounds the adversarial case. The class goes only by not holding the session
+#: across the fan out, which is larger than one sitting.
+#:
+#: **Not sized against `QueuePool`'s 30.0s `pool_timeout`, which is the
+#: comparison the next reader reaches for**, because the honest handler bound is
+#: this plus `fetch.TIMEOUT_SECONDS`, 40s, and that is longer. `pool_timeout` is
+#: a waiter's patience once the pool is empty, not a permitted hold: at 4 of
+#: fifteen per member nothing waits, and where occupancy does empty the pool no
+#: value of this constant saves it.
+#:
+#: **This figure exists because the fan out runs inside the request.** Move it
+#: to a background job and this constant is deleted rather than retuned, while
+#: `_BACKFILL_LOOKUPS_AT_ONCE` and the cursor both survive unchanged.
+IDENTIFIER_BACKFILL_DEADLINE_SECONDS: Final = 30
+
+#: The four outcomes `IdentifierBackfillOut` counts, as the backfill's own walk
+#: labels one book.
+#:
+#: **A `Literal` rather than four bare strings, because the invariant is
+#: published.** `IdentifierBackfillOut`'s docstring promises that `examined` is
+#: the sum of these four, and the run counts them with `list.count`, so a typo in
+#: one of the four calls returned 0 for that outcome, broke the promised
+#: arithmetic on the wire and reported a smaller `examined`, with nothing at all
+#: to say so. Against this alias `count` takes a `_Bucket | None` and mypy refuses
+#: the typo.
+#:
+#: **It does not cover the fifth site**, `"enriched" in buckets`, which decides
+#: whether to commit: `list.__contains__` takes `object`, so a typo there type
+#: checks. What catches that one is behaviour rather than a type, and loudly:
+#: nothing is committed, so every arm that presses twice and expects the second
+#: press to examine nothing fails.
+#:
+#: Not an enum, which is what `enums.py` is for: these four are read only by the
+#: handler that writes them, and a name in that module is a name the schema layer
+#: and the migrations can reach.
+_Bucket = Literal["enriched", "not_found", "unavailable", "unresolvable"]
 
 
 def _resolvable_volume_id(book: Book) -> str | None:
@@ -2926,27 +3737,6 @@ def _resolvable_volume_id(book: Book) -> str | None:
     return None
 
 
-def _google_books_in_force(db: Session) -> metadata.Access:
-    """The same value as `settings_store.library_access`, minus the keychain.
-
-    **The one handler that does not call that resolver, because its only
-    outbound door is `metadata.lookup_volume`**, which sends no login: Google
-    Books' secret is the key in the query string. Resolving the logins here
-    would open the keychain once per request for a credential this path cannot
-    send, and hand the door a mapping it drops without a word.
-
-    **The plan is still resolved, and it is a different gate from the key.**
-    `settings_store.ready_sources` puts Google Books in the plan only when its
-    section is on and a key is in force, and `catalogue_sources` then intersects
-    that with the household's provider list. So the plan answers "may this
-    library ask Google at all" and the key answers "with what".
-    """
-    return metadata.Access(
-        plan=settings_store.catalogue_sources(db),
-        api_key=settings_store.google_books_api_key(db),
-    )
-
-
 @router.post("/identifiers/backfill", response_model=IdentifierBackfillOut)
 async def backfill_from_identifiers(
     db: DbSession,
@@ -2989,26 +3779,26 @@ async def backfill_from_identifiers(
     operator action work.
 
     **Refuses with 409 when this library does not ask Google Books**, rather
-    than examining nothing and reporting a clean run. A source with no usable
-    key must say so: the cause is a switch and a key in Settings, and a zero
-    would send somebody hunting through their library instead.
+    than examining nothing and reporting a clean run. The cause is a switch and
+    a key in Settings, and the reply names both.
 
-    Batched and resumable. `next_after_id` carries on past what this run tried,
-    and comes back as 0 at the end of the library so pressing again starts over
-    and re-tries whatever has since become resolvable.
+    Batched and resumable. `next_after_id` carries on past what this run
+    examined, and comes back as 0 at the end of the library so pressing again
+    starts over and re-tries whatever has since become resolvable.
+
+    **Bounded in wall clock as well as in books**, so a slow or busy Google
+    leaves the batch short rather than holding the request open. A short run
+    answers with whatever resolved, counts only the books it has an outcome for,
+    and moves the cursor over exactly those, so pressing again resumes at the
+    first book this one did not reach. The reply does not distinguish a short run
+    from a complete one and does not need to: press again while `remaining` is
+    above zero.
     """
-    identifier_backfill_limiter.check(current_user.username)
-
-    access = _google_books_in_force(db)
-    if CatalogueSource.GOOGLE_BOOKS not in access.plan.asked:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=(
-                "This library does not ask Google Books, so a Google volume id "
-                "cannot be resolved. Switch Google Books on in Settings and add "
-                "an API key."
-            ),
-        )
+    # Charges the batch's own limiter and refuses unless Google Books is asked,
+    # both behind the constructor. Holding one of these means the answer was yes.
+    google = catalogue_access.GoogleVolumes.for_a_batch_backfill(
+        db, member=current_user.username
+    )
 
     # `Book.identifiers.any(...)` is a correlated EXISTS over `books` rather
     # than a second table in the FROM, which is what `Shelf.where` admits: a
@@ -3033,32 +3823,56 @@ async def backfill_from_identifiers(
     # it will never resolve, and leaving it out of `next_after_id` would park
     # the run on it for ever.
     pairs = [(book, _resolvable_volume_id(book)) for book in batch]
-    askable = [(book, value) for book, value in pairs if value is not None]
 
-    # Bounded rather than gathered whole. See `IDENTIFIER_BACKFILL_CONCURRENCY`.
-    gate = asyncio.Semaphore(IDENTIFIER_BACKFILL_CONCURRENCY)
+    ends = deadline.in_(IDENTIFIER_BACKFILL_DEADLINE_SECONDS)
 
-    async def resolve(volume_id: str) -> metadata.Lookup:
-        async with gate:
-            return await metadata.lookup_volume(
-                volume_id, access.api_key, plan=access.plan
-            )
+    async def resolve(volume_id: str) -> metadata.Lookup | None:
+        """One volume lookup, or `None` where no slot came free in time.
 
-    # `return_exceptions` is not set, for `metadata.lookup`'s reason: every
-    # source turns its own failures into an outcome, so an exception escaping
-    # one is a bug worth seeing rather than a network condition to absorb.
-    results = await asyncio.gather(*(resolve(value) for _, value in askable))
+        **The deadline is spent on the acquire and nowhere else**, and the two
+        spellings a reader reaches for first are both worse than no deadline.
 
-    enriched = 0
-    not_found = 0
-    unavailable = 0
-    for (book, _), result in zip(askable, results, strict=True):
+        `deadline=` threaded down to `fetch` is the shape `authority.py` uses,
+        so it is the first thing a reader of that precedent copies, and it
+        **bounds nothing here**: `deadline.left` is consulted when a request
+        starts, and a coroutine parked on `acquire` has not started one. It
+        would leave this handler's connection checked out for as long as the
+        queue is long, which is the whole reason the deadline exists, and it
+        widens three signatures to do it.
+
+        `asyncio.timeout` around the `gather` **loses the whole batch**: the
+        children that already answered are unreachable through a cancelled
+        gather, so nothing merges, nothing commits, the caller gets a 500, and
+        up to `MAX_IDENTIFIER_BACKFILL` metered requests are spent on a cursor
+        that cannot advance, so the member presses again and spends them again.
+
+        `asyncio.wait(timeout=)` cancelling the stragglers is refused for a
+        narrower reason: `for_a_batch_backfill` charges the limiter before a
+        slot is sought and a cancelled Google request is already charged, so
+        cancelling a lookup in flight spends a metered request for nothing.
+
+        **Cancelling a pending acquire leaks no slot**, which is what makes this
+        safe rather than hoped: `asyncio.Semaphore.acquire` restores the count
+        and wakes the next waiter when its own wait is cancelled. Remove the
+        timeout and a starved run holds the request and the connection open for
+        as long as somebody else's batch takes.
+        """
+        try:
+            async with asyncio.timeout(deadline.left(ends)):
+                await _BACKFILL_LOOKUPS_AT_ONCE.acquire()
+        except TimeoutError:
+            return None
+        try:
+            return await google.volume(volume_id)
+        finally:
+            _BACKFILL_LOOKUPS_AT_ONCE.release()
+
+    def store(book: Book, result: metadata.Lookup) -> _Bucket:
+        """Fold one answer into its Book, and name the outcome it counts as."""
         if result.outcome is metadata.Outcome.NOT_FOUND:
-            not_found += 1
-            continue
+            return "not_found"
         if not result.found or result.record is None:
-            unavailable += 1
-            continue
+            return "unavailable"
         # Bounded here rather than trusted, exactly as `enrich_book` does it:
         # this is whatever Google answered and `merge_into` writes twelve
         # columns from it.
@@ -3077,9 +3891,110 @@ async def backfill_from_identifiers(
         # saw it: nothing written, the Book still a candidate, `enriched: 1` on
         # every press for ever. Found by a design critic as the defect the
         # removal of `unchanged` had moved one layer up.
-        enriched += 1
+        return "enriched"
 
-    if enriched:
+    # One bucket per book of the batch, in batch order, `None` where this run
+    # learned nothing about it: no slot came free inside the deadline, or the
+    # deadline cut before its wave started.
+    buckets: list[_Bucket | None] = [None] * len(pairs)
+    cut_short = False
+
+    # **Waves of `IDENTIFIER_BACKFILL_CONCURRENCY` lookups, the deadline checked
+    # between them, rather than one `gather` over the whole batch.** Three
+    # reasons, and the first changes an answer rather than a cost.
+    #
+    # * `next_after_id` has to be the end of the **contiguous** examined run,
+    #   and going in batch order is what makes the examined set a prefix by
+    #   construction. Read off the order the semaphore woke its waiters it would
+    #   rest on `asyncio.Semaphore` being FIFO, which CPython is today and
+    #   promises nowhere.
+    #
+    #   **The prefix does not depend on FIFO. Fair progress under contention
+    #   does.** A second member's six waiters sit ahead of the first member's next
+    #   wave only because the wakeups are ordered; without that order, one member
+    #   pressing flat out keeps all six slots occupied, since four runs in flight
+    #   each want six of six, and everybody else's press resolves nothing while
+    #   spending one of their own six. Bounded in damage, not in reach: a starved
+    #   run answers 200, spends no metered request and leaves the cursor where it
+    #   stood, so it costs the feature rather than data, and the presser's
+    #   username is free under `AUTH_MODE=proxy`.
+    # * One `gather` over fifty books enqueues fifty acquires at once, so a
+    #   second member's run queues behind all fifty: at six at a time and
+    #   `fetch.TIMEOUT_SECONDS` each that is up to 83s of slot time, longer than
+    #   any deadline that fits inside the proxy's minute, so their batch would
+    #   resolve approximately nothing whatever this deadline's value is. A wave
+    #   never leaves more than `IDENTIFIER_BACKFILL_CONCURRENCY` pending.
+    # * It is what puts a cut on a wave boundary, which is the third of
+    #   `IDENTIFIER_BACKFILL_DEADLINE_SECONDS`' derivations.
+    #
+    # The cost, stated rather than left to be discovered: a wave's wall clock is
+    # its slowest member, so idle slots appear where one gather would have kept
+    # six in flight. `ceil(50 / 6)`, the nine waves `MAX_IDENTIFIER_BACKFILL`
+    # models this route as, is the ceiling: a batch with unresolvable rows in it
+    # runs fewer, because a wave is filled by lookup rather than by book.
+    at = 0
+    while at < len(pairs):
+        if deadline.left(ends) <= 0:
+            cut_short = True
+            break
+        # **A wave is six lookups, not six books**, and the difference is the
+        # throughput of a library this route exists for. Sliced off `pairs`
+        # instead, a wave holding k unresolvable rows ran `6 - k` requests and
+        # still spent one request's latency, so a half unresolvable library
+        # examined about half as many books per press inside the same deadline
+        # and a wholly unresolvable one spent a wave on nothing. That is not a
+        # spare case: `IdentifierBackfillOut`'s own docstring records a library
+        # whose rows are all unresolvable, because the candidate query narrows on
+        # carrying a `google_books` identifier and cannot narrow on its shape.
+        #
+        # **It costs the prefix nothing**, which is the only thing that could
+        # have refused it: the span is still contiguous in batch order and still
+        # walked in that order, so everything before the first book that got no
+        # slot still has an outcome. What it does change is that a wave's span in
+        # books is no longer six, so the nine waves `MAX_IDENTIFIER_BACKFILL`
+        # models this route as is now a ceiling rather than a count.
+        asked: list[tuple[int, Book, str]] = []
+        while at < len(pairs) and len(asked) < IDENTIFIER_BACKFILL_CONCURRENCY:
+            book, value = pairs[at]
+            if value is None:
+                # No request to make, so no slot to wait for: examined for free,
+                # exactly as it was before this route had a deadline. Marked as
+                # the walk passes it, which is what keeps the examined set
+                # contiguous while the wave is filled by lookup rather than by
+                # book.
+                buckets[at] = "unresolvable"
+            else:
+                asked.append((at, book, value))
+            at += 1
+        # `return_exceptions` is not set, for `metadata.lookup`'s reason: every
+        # source turns its own failures into an outcome, so an exception
+        # escaping one is a bug worth seeing rather than a network condition to
+        # absorb. **Empty needs no guard here and does under `asyncio.wait`**,
+        # which raises `ValueError` on an empty set where `asyncio.gather()`
+        # returns `[]`; a library whose every row is unresolvable reaches this
+        # with nothing asked, and `metadata._within_deadline`'s docstring records
+        # that defect shipping once.
+        answers = await asyncio.gather(*(resolve(value) for _, _, value in asked))
+        for (offset, book, _), answer in zip(asked, answers, strict=True):
+            if answer is None:
+                cut_short = True
+                continue
+            buckets[offset] = store(book, answer)
+        if cut_short:
+            break
+
+    # The unbroken examined run, which is the only thing the cursor may clear.
+    #
+    # **A book past the cut that did answer is still stored**, because its
+    # metered request is already paid for and `merge_into` writes
+    # `google_books_id`, which takes it out of the candidate set so the next
+    # press does not spend another. It is counted in no bucket, so the reply
+    # understates what this run did and never overstates it.
+    cleared = buckets[
+        : next((at for at, bucket in enumerate(buckets) if bucket is None), len(buckets))
+    ]
+
+    if "enriched" in buckets:
         # **One commit for the batch, in a thread**, which is where this differs
         # from `enrich_book` and why. That handler is a coroutine too and
         # commits inline, because it holds one dirty Book; this holds up to
@@ -3094,23 +4009,38 @@ async def backfill_from_identifiers(
         # limit. `POST /api/books/covers/backfill` is the route for that, it is
         # already bounded against those services, and a book this run gave a
         # `cover_url` to is a candidate for it.
+        #
+        # **Outside every deadline scope, and it has to stay there.**
+        # `asyncio.to_thread` cannot be cancelled, which `notifications.py`
+        # already records: inside a scope that expires, the await is cancelled,
+        # the thread keeps committing, and `get_db` closes the session under it
+        # on a connection built with `check_same_thread=False`. A test for that
+        # would be flaky rather than red, which is why this is a comment.
         await asyncio.to_thread(db.commit)
 
-    # Every book in the batch, not only the ones asked about: an unresolvable
-    # row was still examined, and the cursor has to clear it.
-    examined = len(batch)
-    unresolvable = examined - len(askable)
+    # **The books this run has an outcome for, which is not always the batch.**
+    # A book with no resolvable identifier is examined for free, as before; a
+    # book the deadline never got a slot for is not examined at all, and neither
+    # is anything after it, so every count here is over the prefix and the four
+    # still sum to `examined`, which is what keeps the wire shape unchanged.
+    examined = len(cleared)
+    enriched = cleared.count("enriched")
+    not_found = cleared.count("not_found")
+    unavailable = cleared.count("unavailable")
+    unresolvable = cleared.count("unresolvable")
     remaining = total - examined
     logger.info(
-        "Identifier backfill for %s: examined %d, enriched %d, "
-        "no such volume %d, unavailable %d, unresolvable %d, %d left",
+        "Identifier backfill for %s: examined %d of %d, enriched %d, "
+        "no such volume %d, unavailable %d, unresolvable %d, %d left%s",
         current_user.username,
         examined,
+        len(batch),
         enriched,
         not_found,
         unavailable,
         unresolvable,
         remaining,
+        ", cut short by the deadline" if cut_short else "",
     )
     return IdentifierBackfillOut(
         examined=examined,
@@ -3126,7 +4056,21 @@ async def backfill_from_identifiers(
         unavailable=unavailable,
         unresolvable=unresolvable,
         remaining=remaining,
-        next_after_id=batch[-1].id if remaining > 0 and batch else 0,
+        # **The last book of the unbroken examined run, never the last book of
+        # the batch.** `batch[-1].id` would skip every book a cut dropped for a
+        # whole pass of the library, and they would come back only when the
+        # cursor wrapped to 0. Where the run examined none of them it is
+        # `after_id` unchanged, so the next press resumes where this one stood.
+        # 0 at the end, so the next press starts over rather than answering
+        # nothing for ever.
+        #
+        # **A cut can never report the library finished**, which is the one way
+        # this could lose books: a cut means at least one book of the batch has
+        # no outcome, so `examined <= len(batch) - 1 <= total - 1`, so
+        # `remaining >= 1` and the cursor moves over the prefix rather than to 0.
+        next_after_id=(
+            (batch[examined - 1].id if examined else after_id) if remaining > 0 else 0
+        ),
     )
 
 
@@ -3462,13 +4406,17 @@ def get_book(book: BookForRead, db: DbSession, current_user: CurrentUser) -> Boo
 #: copies of each other while naming different books is a state nothing else in
 #: this app knows how to render.
 #:
-#: `cover_url` is absent and handled separately, because a cover this app holds
-#: is a file named by book id: see the note in the handler.
-_WORK_FIELDS: Final = (
-    "isbn", "title", "subtitle", "author", "publisher", "year", "description",
-    "page_count", "language", "categories", "google_books_id",
-    "series_name", "series_index",
-)
+#: Which columns those are is `book_columns`', not this route's: a tuple written
+#: out here would relate to `Book` through nothing, and that module refuses to
+#: import when a column of `books` is classified nowhere. `cover_url` is absent
+#: there too and handled separately here, because a cover this app holds is a
+#: file named by book id: see the note in the handler.
+#:
+#: **A local name rather than the import at the call site**, because
+#: `enums.BookIdentifierScheme.GOOGLE_BOOKS` names this one in prose and that
+#: docstring is the column's description in `openapi.json`. Spelling it away is
+#: a client regeneration.
+_WORK_FIELDS: Final = book_columns.WORK_FACTS
 
 
 @router.get("/{book_id}/copies", response_model=list[BookOut])
@@ -3521,7 +4469,7 @@ def add_copy(
     re-picking six of them for a second paperback is exactly the friction this
     feature exists to remove.
     """
-    _checked_collection(db, payload.collection_id)
+    _checked_collection(db, payload.collection_id, current_user.id)
 
     if book.copy_group is None:
         book.copy_group = copy_group_token()
@@ -3625,7 +4573,7 @@ def set_collection(
     **Per book row, so per copy.** Filing one paperback does not file the
     other, which is the point of two rows: see `models.Book.collection_id`.
     """
-    book.collection_id = _checked_collection(db, payload.collection_id)
+    book.collection_id = _checked_collection(db, payload.collection_id, current_user.id)
     db.commit()
     db.refresh(book)
     return book_to_out(book, current_user, db)
@@ -3814,6 +4762,65 @@ def delete_progress(
 # ── Tagging ───────────────────────────────────────────────────────────────────
 
 
+@router.post("/{book_id}/tags", response_model=BookOut)
+def add_book_tag_by_name(
+    payload: TagCreate,
+    book: BookForWrite,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> BookOut:
+    """Put a tag with this name on this book, inventing it if it is new.
+
+    One request where typing a name used to be two, and the two were a
+    different question each: inventing a tag hands back an id, and attaching
+    that id is asked of somebody who might have guessed it. Typing a name is
+    neither. Somebody typing a tag name while looking at a book means "this
+    book is that", so this is the one gesture and the one answer.
+
+    **The book as it stands, always, and never a 409, a 201 or a 404 for the
+    name.** A status that told a minted name from a matched one would answer
+    "does this name already exist" in the status line, which is the question
+    a member may not have answered about a tag they cannot see. A name that
+    is not this member's to use is left off the book, in the same shape as a
+    name that is: `tags.Naming` decides it and carries what that does and does
+    not close.
+
+    Refused only for what the caller can already see: a name that is not a
+    name, by `TagCreate`, and a book already carrying
+    `MAX_TAGS_PER_BOOK` tags, with the sentence and the reasoning of the
+    attach by id route beside this one.
+    """
+    # **No `Vocabulary` call in this handler, and the absence is the design.**
+    # The gate on the route below is about an id the caller may have guessed;
+    # here the caller supplied a name they typed, which is a different
+    # question with a different answer, and asking both would be the two
+    # cooperating rules `tags.Naming` exists to be instead of.
+    #
+    # **And no query for a Tag here either.** A hand rolled lookup would be a
+    # read of the tag table with no viewer, needing its own entry in
+    # `tests/test_tags.py::TAG_READERS` and its own reason; going through the
+    # Naming reads through the Mint's index, which is already classified.
+    #
+    # **The ceiling refusal below is conditional on the name resolving, and
+    # that is a residue rather than something to close here.** A member who
+    # fills their own book to the ceiling first reads a 400 for a name they
+    # may use against a 200 for one they may not. It is the answer
+    # `create_tag` already gives in one request with no setup, so it opens no
+    # channel; asking `room_on` before resolving would instead refuse a name
+    # the book already carries, which is a false refusal on a request that
+    # changes nothing.
+    tag = Naming.for_member(db, current_user.id).tag(payload.name)
+    if tag is not None and tag not in book.tags:
+        if not attach(book, tag):
+            raise HTTPException(
+                status_code=400,
+                detail=f"A book can carry {MAX_TAGS_PER_BOOK} tags, and this one already does.",
+            )
+        db.commit()
+        db.refresh(book)
+    return book_to_out(book, current_user, db)
+
+
 @router.post("/{book_id}/tags/{tag_id}", response_model=BookOut)
 def add_book_tag(
     tag_id: RowId,
@@ -3822,10 +4829,27 @@ def add_book_tag(
     current_user: CurrentUser,
 ) -> BookOut:
     tag = db.get(Tag, tag_id)
-    if tag is None:
+    # **The name confirmation this route used to be.** `book_to_out` returns
+    # the Book with its tags, so attaching a guessed id to a Book you own
+    # handed back the name of a Tag whose every Book was hidden from you: a
+    # stronger channel than the list ever was, because it answers for a chosen
+    # id rather than dumping the table. `tags.Vocabulary.writable` collapses
+    # that into the 404 an unused id already gets.
+    if tag is None or not Vocabulary.seen_by(db, current_user.id).writable(tag):
         raise HTTPException(status_code=404, detail="Tag not found")
     if tag not in book.tags:
-        book.tags.append(tag)
+        # **Refused rather than dropped, which is where this differs from the
+        # import.** A member pressed one button for one tag, so a 200 with the
+        # tag missing is the picker lying to them; an import is a file of
+        # thousands and its ceiling is reached quietly by design. `tags.attach`
+        # is what makes the ceiling true of every writer: this route is how the
+        # 4000 tags on one Book that the import cap exists to prevent stayed
+        # reachable, one request at a time.
+        if not attach(book, tag):
+            raise HTTPException(
+                status_code=400,
+                detail=f"A book can carry {MAX_TAGS_PER_BOOK} tags, and this one already does.",
+            )
         db.commit()
         db.refresh(book)
     return book_to_out(book, current_user, db)
@@ -3839,6 +4863,13 @@ def remove_book_tag(
     current_user: CurrentUser,
 ) -> BookOut:
     tag = db.get(Tag, tag_id)
+    # **Not gated by `tags.Vocabulary`, and that is the measurement rather than
+    # an oversight.** This answers 200 with the unchanged Book for an id no row
+    # carries and for an id the caller may not be told about alike, so it
+    # confirms nothing today. Refusing the second with a 404 would *create* the
+    # tell: a 404 here would mean "that id is a Tag you cannot see" against the
+    # 200 everything else gets. The bulk verb is gated because its own refusal
+    # already existed and the gate collapses two answers into one.
     if tag is not None and tag in book.tags:
         book.tags.remove(tag)
         db.commit()
@@ -3902,6 +4933,7 @@ def set_custom_field(
     payload: CustomFieldValueUpdate,
     book: BookForWrite,
     db: DbSession,
+    current_user: CurrentUser,
 ) -> list[CustomFieldValueOut]:
     """Fill in a field on this book, or clear it with an empty value.
 
@@ -3911,17 +4943,22 @@ def set_custom_field(
     Returns the book's whole list rather than the one value, so a client that
     has just written one is holding the same thing `GET` would give it.
 
-    422 when the field holds a link and the value is not one: an address with
+    **404 for a field you may not be told about**, and this is the door that
+    makes the scoped list worth having: the response carries `name` on every
+    entry, so an ungated write would be a name oracle over a small integer id
+    space, reachable on a book of your own. See `fields.Fields.addressable`.
+
+    400 when the field holds a link and the value is not one: an address with
     no scheme, a `javascript:` or `data:` URL, or a host that is missing. See
     `custom_fields.link_target` for the whole list and why it is re-checked on
     every read as well as here.
     """
-    field = _custom_field(field_id, db)
+    field = _custom_field(field_id, db, Fields.seen_by(db, current_user.id))
     try:
         custom_fields.write(db, book, field, payload.value)
     except custom_fields.Refused as refusal:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(refusal)
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(refusal)
         ) from refusal
     db.commit()
     return _custom_fields_out(book, db)
@@ -3957,15 +4994,18 @@ async def refresh_metadata(book: BookForWrite, db: DbSession, current_user: Curr
     if not book.isbn:
         raise HTTPException(status_code=400, detail="Book has no ISBN, cannot refresh metadata")
 
-    metadata_limiter.check(current_user.username)
-    lookup_key = isbn_utils.parse(book.isbn) or book.isbn
-    result = await metadata.lookup(
-        lookup_key, access=settings_store.library_access(db)
+    # Below the refusal above, so a book with no ISBN costs no budget. The
+    # constructor is what charges, which is why it is a statement here rather
+    # than a dependency: a dependency runs before this handler's own 400.
+    enquiry = catalogue_access.Enquiry.for_a_member_request(
+        db, member=current_user.username
     )
+    lookup_key = isbn_utils.parse(book.isbn) or book.isbn
+    result = await enquiry.lookup(lookup_key)
     if not result.found:
-        raise HTTPException(**_lookup_failure(result))
+        raise _lookup_failure(result)
 
-    assert result.record is not None
+    assert result.record is not None  # noqa: S101  narrowing, not validation
     record = result.record
 
     # Nine columns written straight off the record, and the ceiling on all of
@@ -4544,17 +5584,17 @@ async def enrich_book(
     adds what is missing, it does not overrule what somebody typed.
     Classifications need a selected candidate through `enrich/apply`.
     """
-    metadata_limiter.check(current_user.username)
-    # Resolved once, because this handler reaches outward up to three times and
-    # the three must not be able to ask different sets of catalogues or send a
-    # different login. `metadata.Access` is frozen so that holds by type.
-    access = settings_store.library_access(db)
+    # One `Enquiry` for all three paths below, because they must not be able to
+    # ask different sets of catalogues or send a different login. It holds the
+    # access privately, so there is nothing here to rebuild between them.
+    enquiry = catalogue_access.Enquiry.for_a_member_request(
+        db, member=current_user.username
+    )
     # **Refused up front rather than per half.** Both halves are optional on
     # their own, so without this a library with nothing switched on got the
     # lookup's 409 and then the search's failure from one request. Asking
     # nothing is one answer, not two.
-    if not access.plan.asked:
-        raise HTTPException(**_no_sources())
+    enquiry.refuse_if_nothing_is_asked()
 
     # `as_match()` on both paths, and it carries no Classifications by
     # construction. That is ADR 0006 held by the type rather than by this
@@ -4563,14 +5603,14 @@ async def enrich_book(
     assertions: tuple[catalogue.AuthorityAssertion, ...] = ()
     recorded = RecordedAssertions(stored=[], refused=[])
     if book.isbn:
-        result = await metadata.lookup(book.isbn, access=access)
+        result = await enquiry.lookup(book.isbn)
         # `found`, like `lookup_isbn` and `refresh_metadata`, rather than a bare
         # test for the record. This is the third consumer of a `Lookup` and the
         # only one that writes to a Book without telling the Member why nothing
         # happened, so it is the one that must not decide on a different
         # question from its two siblings.
         if result.found:
-            assert result.record is not None
+            assert result.record is not None  # noqa: S101  narrowing, not validation
             fields = result.record.as_match()
             # **Only on this branch.** A record found by the Book's own ISBN
             # asserts who wrote *this* Book; the title and author search below
@@ -4595,11 +5635,9 @@ async def enrich_book(
         # every book of an imported library is matched by its title.
         volume_id = _resolvable_volume_id(book)
         if volume_id is not None:
-            volume = await metadata.lookup_volume(
-                volume_id, access.api_key, plan=access.plan
-            )
+            volume = await enquiry.volume(volume_id)
             if volume.found:
-                assert volume.record is not None
+                assert volume.record is not None  # noqa: S101  narrowing, not validation
                 # No `assertions`, unlike the ISBN branch above. `Record.
                 # author_identifiers` is empty for every source but the DNB, so
                 # there is nothing here to record even by mistake, and
@@ -4610,7 +5648,7 @@ async def enrich_book(
         # No ISBN, no resolvable store identifier, or nobody carries this
         # edition under either.
         query = " ".join(part for part in (book.title, book.author) if part)
-        matches = await metadata.search(query, limit=1, access=access)
+        matches = await enquiry.search(query, limit=1)
         if matches:
             fields = matches[0].as_match()
 
@@ -4717,34 +5755,15 @@ async def enrichment_candidates(
     else, and is ranked so a German edition of a German book is not buried
     under whatever Google happened to return first.
     """
-    metadata_limiter.check(current_user.username)
     query = " ".join(part for part in (book.title, book.author) if part)
 
-    access = settings_store.library_access(db)
-    # **The same two corrections the title search route took, applied here
-    # because this route runs a title search too.** `metadata.candidates` calls
-    # `search` internally, so it reaches the catalogues by the query above and
-    # not by an ISBN.
-    #
-    # `what`, because the shared sentence defaults to the ISBN wording and this
-    # path cannot look one up: refusing a title search by naming the ISBN route
-    # is the defect that argument was added for, fixed at one of its two sites.
-    #
-    # `searched_harder`, because `plan.searched` narrowed when the slow sources
-    # became opt in. A library whose every enabled search catalogue is slow has
-    # switched nothing off, so "turn one back on" names the wrong cause. It gets
-    # an empty candidate list instead, which is what a search that asked nobody
-    # honestly is.
-    if not access.plan.searched_harder:
-        raise HTTPException(**_no_sources("answer a title search"))
-
-    matches = await metadata.candidates(
-        query,
-        isbn=book.isbn,
-        limit=5,
-        prefer_language=book.language,
-        access=access,
-    )
+    # `candidates` refuses on the search roster rather than the lookup one,
+    # because it runs a title search internally: it reaches the catalogues by the
+    # query above and not by this book's ISBN. Both the roster and the wording are
+    # the door's.
+    matches = await catalogue_access.Enquiry.for_a_member_request(
+        db, member=current_user.username
+    ).candidates(query, isbn=book.isbn, limit=5, prefer_language=book.language)
     return _match_rows(matches, all_tags=None)
 
 
@@ -4815,11 +5834,40 @@ def update_book_details(
     """Correct the catalogue entry by hand.
 
     `exclude_unset` is what makes a partial update partial: an absent field is
-    left alone and an explicit null clears. Without it every unsent field would
-    arrive as None and wipe the record, which is the classic PATCH bug.
+    left alone and an explicit null clears where the column allows one. Without
+    it every unsent field would arrive as None and wipe the record, which is the
+    classic PATCH bug. A null for a column the database will not leave empty is
+    refused by `BookDetailsUpdate` before it reaches here, because it used to
+    reach the flush and answer 500.
+
+    **`categories` clears on an empty list rather than on a null**, because its
+    request shape is a list and its column is one joined string. This is the
+    only route that removes a subject: the create route writes them, the
+    catalogue gap fill and the merge's absorb add them, and an overwriting
+    enrich cannot empty the column because the merge skips an empty incoming
+    value. Before this the only removal was deleting the book, and the column
+    is served to readers with no account.
     """
-    for field, value in payload.model_dump(exclude_unset=True).items():
+    fields = payload.model_dump(exclude_unset=True)
+    # The loop rather than one `pop` per name, for the reason `_create_book`
+    # gives at its own pop: this list and the import time refusal beneath
+    # `BookDetailsUpdate` are the same object, so a container field added to
+    # that body stops every test run there rather than reaching this `setattr`
+    # and failing the flush on somebody's library.
+    reshaped = [name for name in POPPED_BEFORE_THE_ASSIGNMENT if name in fields]
+    for name in reshaped:
+        fields.pop(name)
+
+    for field, value in fields.items():
         setattr(book, field, value)
+
+    # Paired with the pop deliberately, exactly as at the create door: a pop
+    # with no write is a 200 that accepted a field and stored nothing, which is
+    # the quietest failure available here.
+    # `tests/schemas/test_book.py::TestEveryReshapedFieldIsWrittenAtTheRoute`
+    # reads this function's source and holds both halves.
+    if "categories" in reshaped:
+        book.categories = google_books.join_categories(payload.categories)
 
     db.commit()
     db.refresh(book)

@@ -520,6 +520,23 @@ class TestMergeRefusesRubbish:
         assert merge(client, admin["headers"], ["someone"], "y" * 301).status_code == 422
 
 
+class TestTheNameAMergeKeeps:
+    def test_a_control_character_is_removed_before_the_key_is_taken(
+        self, client, admin, make_book
+    ):
+        r"""`author_key` turns anything that is not a letter, a digit or
+        whitespace into a space, so `Le\u0000Guin` reads as `LeGuin` on every
+        screen and keys as `le guin`: the name a member typed and the name they
+        would have to type to reach it again are different strings."""
+        make_book(admin["headers"], title="Rocannon", author="U. K. Le Guin")
+
+        res = merge(client, admin["headers"], ["u k le guin"], "Le\u0000Guin")
+
+        assert res.status_code == 200, res.text
+        assert res.json()["name"] == "LeGuin"
+        assert author_key(res.json()["name"]) == author_key("LeGuin")
+
+
 class TestUndoingAMerge:
     def test_the_spelling_becomes_its_own_author_again(
         self, client, admin, make_book
@@ -695,6 +712,24 @@ class TestConfirmingAnAuthorityIdentifier:
         res = confirm(client, admin["headers"], "Sean P. Kane", "   ")
 
         assert res.status_code == 422
+
+    def test_an_identifier_carrying_a_nul_is_stored_without_it(
+        self, client, admin, make_book
+    ):
+        """The same 500 by a door the collapse did not reach.
+
+        `ck_author_identifiers_bounds` is `length(identifier) > 0`, and
+        SQLite's `length()` counts up to the first NUL, so a leading one is a
+        value to look at and no value to the check. Collapsing whitespace left
+        it, because a NUL is not whitespace. Reverting the validator to the
+        collapse alone fails this arm on the status line.
+        """
+        make_book(admin["headers"], title="Docker", author="Sean P. Kane")
+
+        res = confirm(client, admin["headers"], "Sean P. Kane", "\u0000104224321")
+
+        assert res.status_code == 201, res.text
+        assert res.json()["identifier"]["identifier"] == "104224321"
 
 
 class TestRemovingAnAuthorityIdentifier:

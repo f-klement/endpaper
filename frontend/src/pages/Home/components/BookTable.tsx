@@ -17,6 +17,7 @@ import {
   headingKind,
   headingText,
 } from "../../../lib/classificationLabels";
+import { numericDate } from "../../../lib/date";
 import {
   COLUMN_KEYS,
   COLUMN_SPECS,
@@ -65,10 +66,6 @@ interface Column {
   /** Right aligned, for the columns that hold a number. */
   numeric?: boolean;
   render: (book: BookOut, t: Translate, locale: Locale) => string;
-}
-
-function date(iso: string | null | undefined, locale: string): string {
-  return iso ? new Date(iso).toLocaleDateString(locale) : "";
 }
 
 function number(value: number | null | undefined): string {
@@ -259,7 +256,7 @@ const COLUMNS: Record<ColumnKey, Column> = {
     // sorts one way and says so through `aria-sort` rather than pretending to
     // toggle.
     sort: [{ sort: BookSort.newest, direction: "descending" }],
-    render: (book, _t, locale) => date(book.added_at, locale),
+    render: (book, _t, locale) => numericDate(book.added_at, locale),
   },
   price: {
     sort: [],
@@ -274,7 +271,7 @@ const COLUMNS: Record<ColumnKey, Column> = {
   },
   purchasedAt: {
     sort: [],
-    render: (book, _t, locale) => date(book.purchased_at, locale),
+    render: (book, _t, locale) => numericDate(book.purchased_at, locale),
   },
   purchaseSource: {
     sort: [],

@@ -8,6 +8,8 @@ import type { AuthorMergeGroup } from "../../../../src/api/generated/model";
 import BatchBar from "../../../../src/pages/AuthorsPage/components/BatchBar";
 import { renderLocalised } from "../../../utils";
 
+type OnFold = NonNullable<React.ComponentProps<typeof BatchBar>["onFold"]>;
+
 // The request the button would send, which is what the counts describe.
 const TOLKIEN: AuthorMergeGroup = {
   keys: ["jrr tolkien", "j r r tolkien"],
@@ -32,7 +34,7 @@ describe("BatchBar", () => {
         heldBack={0}
         withdrawn={0}
         isMerging={false}
-        onFold={vi.fn()}
+        onFold={vi.fn<OnFold>()}
       />,
     );
 
@@ -48,7 +50,7 @@ describe("BatchBar", () => {
         heldBack={2}
         withdrawn={0}
         isMerging={false}
-        onFold={vi.fn()}
+        onFold={vi.fn<OnFold>()}
       />,
     );
 
@@ -62,7 +64,7 @@ describe("BatchBar", () => {
         heldBack={0}
         withdrawn={0}
         isMerging={false}
-        onFold={vi.fn()}
+        onFold={vi.fn<OnFold>()}
       />,
     );
 
@@ -70,7 +72,7 @@ describe("BatchBar", () => {
   });
 
   it("asks before folding, with both counts in the question", async () => {
-    const onFold = vi.fn();
+    const onFold = vi.fn<OnFold>();
     renderLocalised(
       <BatchBar
         payload={[TOLKIEN, LE_GUIN]}
@@ -93,7 +95,7 @@ describe("BatchBar", () => {
 
   it("folds nothing when the question is refused", async () => {
     vi.spyOn(window, "confirm").mockReturnValue(false);
-    const onFold = vi.fn();
+    const onFold = vi.fn<OnFold>();
     renderLocalised(
       <BatchBar
         payload={[TOLKIEN]}
@@ -120,7 +122,7 @@ describe("BatchBar", () => {
         heldBack={1}
         withdrawn={2}
         isMerging={false}
-        onFold={vi.fn()}
+        onFold={vi.fn<OnFold>()}
       />,
     );
 
@@ -139,7 +141,7 @@ describe("BatchBar", () => {
         heldBack={3}
         withdrawn={0}
         isMerging={false}
-        onFold={vi.fn()}
+        onFold={vi.fn<OnFold>()}
       />,
     );
 

@@ -9,6 +9,7 @@ import {
   OverdueSender,
   type SenderHealth,
   type SettingsOut,
+  type SettingsUpdate,
 } from "../../../../../src/api/generated/model";
 import ReminderSendersSection from "../../../../../src/pages/SettingsPage/LendingSettingsPage/components/ReminderSendersSection";
 import { renderLocalised } from "../../../../utils";
@@ -50,7 +51,7 @@ function renderSection(
   settings: Partial<SettingsOut> = {},
   health: Partial<Record<OverdueSender, SenderHealth>> = {},
 ) {
-  const onSave = vi.fn();
+  const onSave = vi.fn<(patch: SettingsUpdate) => void>();
   const rendered = renderLocalised(
     <ReminderSendersSection
       settings={makeSettings(settings)}
@@ -276,15 +277,17 @@ describe("the in app channel", () => {
           sent: false,
           broken: true,
           reason: OverdueNotifyReason.misconfigured,
-          failing_since: "2026-08-20T09:00:00",
-          last_run_at: "2026-08-26T09:00:00",
+          failing_since: "2026-08-20T09:00:00Z",
+          last_run_at: "2026-08-26T09:00:00Z",
           failures: 9,
         },
       },
     );
 
+    // The 20th at 09:00 UTC is the 19th where the suite is, pinned in
+    // `tests/setup.ts`.
     expect(
-      screen.getByText(/not working since august 20, 2026/i),
+      screen.getByText(/not working since august 19, 2026/i),
     ).toBeInTheDocument();
   });
 });
@@ -300,7 +303,7 @@ describe("the in app channel draws no health line", () => {
         in_app: {
           sender: OverdueSender.in_app,
           sent: true,
-          last_run_at: "2026-08-27T09:00:00",
+          last_run_at: "2026-08-27T09:00:00Z",
         },
       },
     );
