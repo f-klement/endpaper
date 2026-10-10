@@ -57,7 +57,7 @@ COPY docker/build-yaz.sh /tmp/build-yaz.sh
 RUN sh /tmp/build-yaz.sh build && rm -f /tmp/build-yaz.sh
 
 # ── Stage 2: Build the React PWA with Bun ──────────────────────────────────
-FROM oven/bun:1.4.2-alpine@sha256:d888c0ae6c86d7866ff10c5aafdd9077b36aee6455b33dd270fb93c0dd5cef6f AS frontend
+FROM oven/bun:1.4.3-alpine@sha256:629e17411f1f129dbec3af78d5af9c9f2a937435c80349437206c6b0b7422373 AS frontend
 WORKDIR /app/frontend
 
 # Manifest, lockfile and bunfig first, so the install layer is cached until a
