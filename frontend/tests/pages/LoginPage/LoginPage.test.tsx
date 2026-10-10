@@ -1,12 +1,16 @@
 /** Tests for src/pages/LoginPage. */
 
-import { screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import fc from "fast-check";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AuthMode } from "../../../src/api/generated/model";
 import LoginPage from "../../../src/pages/LoginPage";
 import { makeUser, resetIds } from "../../factories";
+import { answersOf } from "../../lib/schemaArbitrary";
+import { holds, PROFILE, PROPERTY, witness } from "../../property";
+import { forget, overSchema } from "../../schemaPage";
 import { mockApi, renderWithProviders, type MockApi } from "../../utils";
 
 type OnSignIn = NonNullable<React.ComponentProps<typeof LoginPage>["onSignIn"]>;
@@ -424,5 +428,92 @@ describe("LoginPage", () => {
         ),
       );
     });
+  });
+});
+
+/** Type `value` into the field labelled `label`, where the page shows one. */
+const typeInto =
+  (label: string | RegExp, value: string) => (page: HTMLElement) => {
+    const field = within(page).queryByLabelText(label);
+    if (field !== null) fireEvent.change(field, { target: { value } });
+  };
+
+/** Press the form's submit button, where the page shows one. */
+const submit = (page: HTMLElement) => {
+  const button = within(page).queryByRole("button", {
+    name: /^(sign in|create account)$/i,
+  });
+  if (button !== null) fireEvent.click(button);
+};
+
+/** Switch the form to registration, where the page offers it. */
+const toRegister = (page: HTMLElement) => {
+  const tab = within(page).queryByRole("button", {
+    name: "Switch to registration",
+  });
+  if (tab !== null) fireEvent.click(tab);
+};
+
+/** The token a registration answered, or `undefined` where there is none. */
+const tokenOf = (body: unknown) =>
+  (body as { token?: unknown } | undefined)?.token;
+
+describe("LoginPage over any answer the schema permits", () => {
+  // What the page's hooks are handed is drawn from `openapi.json`, per
+  // request. `tests/schemaPage.tsx` holds what the page may not do, and, since
+  // the page renders to a visitor with no account, that it asks for nothing
+  // the document requires an account for. Its main request is asked for on a
+  // reader's act, so each example signs in, or, where it draws the choice and
+  // the drawn configuration offers the tab, registers; that answer is drawn too.
+  it("is drawn an error body and a session", async () => {
+    await witness(answersOf("login"), {
+      "is an error body": (answer) => answer.status === 422,
+      "is a session": (answer) => answer.status === 200,
+    });
+  });
+
+  it("is drawn an error body, a session and an account to confirm", async () => {
+    await witness(answersOf("register"), {
+      "is an error body": (answer) => answer.status === 422,
+      "is a session": (answer) =>
+        answer.status === 201 && tokenOf(answer.body) != null,
+      "is an account to confirm": (answer) =>
+        answer.status === 201 && tokenOf(answer.body) == null,
+    });
+  });
+
+  it("neither throws nor shows a value nobody can name", PROPERTY, async () => {
+    expect(
+      await holds(
+        fc.tuple(fc.boolean(), fc.gen()),
+        async ([registers, answers]) => {
+          try {
+            const rendered = await overSchema(
+              <LoginPage onSignIn={() => {}} />,
+              answers,
+              {
+                uses: [
+                  ...(registers ? [toRegister] : []),
+                  typeInto("Username", "kim"),
+                  typeInto("Password", "password123"),
+                  typeInto(/^Email address/, "kim@example.org"),
+                  submit,
+                ],
+                anonymous: true,
+              },
+            );
+            expect(rendered.problems).toEqual([]);
+            return rendered;
+          } finally {
+            forget();
+          }
+        },
+        {
+          "signed in": (_, rendered) => rendered.asked.includes("login"),
+          registered: (_, rendered) => rendered.asked.includes("register"),
+          "drew an alert": (_, rendered) => rendered.alerts.length > 0,
+        },
+      ),
+    ).toBe(PROFILE.runs);
   });
 });

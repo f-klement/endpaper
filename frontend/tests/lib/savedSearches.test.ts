@@ -20,6 +20,8 @@ import {
   type SavedSearch,
 } from "../../src/lib/savedSearches";
 
+import { whileStorageRefuses } from "../storageRefusal";
+
 const UNREAD = { ...DEFAULT_FILTERS, status: "unread" as never };
 const READ = { ...DEFAULT_FILTERS, status: "read" as never };
 
@@ -102,17 +104,21 @@ describe("when storage cannot be trusted", () => {
   });
 
   it("reads as empty when storage refuses to answer", () => {
-    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
-      throw new Error("denied");
+    // A search is stored, so the empty list can only come from the refusal.
+    save("Loft");
+    whileStorageRefuses("getItem", () => {
+      expect(savedSearchesPreference.read()).toEqual([]);
     });
-    expect(savedSearchesPreference.read()).toEqual([]);
   });
 
   it("saves silently when storage is full", () => {
-    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
-      throw new Error("quota");
+    save("Loft");
+    whileStorageRefuses("setItem", () => {
+      expect(() => savedSearchesPreference.write([])).not.toThrow();
     });
-    expect(() => savedSearchesPreference.write([])).not.toThrow();
+    expect(savedSearchesPreference.read().map((search) => search.name)).toEqual(
+      ["Loft"],
+    );
   });
 });
 

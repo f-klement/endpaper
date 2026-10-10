@@ -376,11 +376,19 @@ function paletteTokensOnce(): Record<string, string> {
  * that would clear it is the thing that is broken. Contained: the test is
  * failing anyway and `beforeEach` clears both stores before the next one.
  *
- * Why `vi.spyOn(Storage.prototype, ...)` is fine while the instance is not:
- * the prototype is a plain object, so the suite wide restore does reach it.
- * **Eight files spy that way and none of them leaks; exactly one spied on an
- * instance, and that is the one that did.** Counted excluding this file, which
- * matches only because this comment names the call.
+ * **Why neither spy works, measured against happy-dom and vitest's spy.** A spy
+ * on the instance lands there because the proxy's `defineProperty` trap puts it
+ * on the target. vitest found the method on the prototype, so its restore
+ * deletes the instance's property, and the proxy's `deleteProperty` trap
+ * refuses anything that is not a stored item. `mockRestore()` on the handle
+ * does put storage right, by resetting the spy to call through, though the spy
+ * stays. A spy on `Storage.prototype` is restored, but happy-dom binds an own
+ * copy of each storage method onto the instance the first time it is read,
+ * and this probe reads all three after every test. Installed after that read,
+ * the spy is never called and its test runs on storage that answered;
+ * installed before it, the bound copy calls the spy, which restoring the
+ * prototype does not reach. Replace the method on the instance and put it back
+ * in a `finally`, as `whileStorageRefuses` in `tests/storageRefusal.ts` does.
  */
 function storageLeftBroken(): string | null {
   if (typeof window === "undefined") return null;
@@ -656,8 +664,11 @@ afterEach(() => {
     throw new Error(
       `This test left ${broken} broken. vi.restoreAllMocks() does not put ` +
         "back a spy installed on a storage instance, so it reaches every " +
-        "later file. Spy on Storage.prototype instead, or keep the handle " +
-        "vi.spyOn() returns and call mockRestore() on it.",
+        "later file. Replace the method on the instance and put it back in a " +
+        "finally, as whileStorageRefuses in tests/storageRefusal.ts " +
+        "does, or keep the handle vi.spyOn() returns and call mockRestore() " +
+        "on it. A spy on Storage.prototype is no way out: once the method " +
+        "has been read, it is never called.",
     );
   }
 

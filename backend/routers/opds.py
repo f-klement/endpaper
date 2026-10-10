@@ -30,6 +30,7 @@ from dependencies import CurrentUser, DbSession, RowId
 from importing import OpdsImport
 from models import OpdsServer, User
 from ratelimit import import_limiter
+from refusals import refuses
 from schemas import (
     OpdsCredentialIn,
     OpdsServerIn,
@@ -169,6 +170,7 @@ def add_server(
 
 
 @router.put("/servers/{server_id}", response_model=OpdsServerOut)
+@refuses(404)
 def edit_server(
     server_id: RowId,
     payload: OpdsServerIn,
@@ -214,6 +216,7 @@ def edit_server(
 
 
 @router.delete("/servers/{server_id}", status_code=204)
+@refuses(404)
 def remove_server(
     server_id: RowId,
     db: DbSession,
@@ -235,6 +238,7 @@ def remove_server(
 
 
 @router.put("/servers/{server_id}/credential", response_model=OpdsServerOut)
+@refuses(404)
 def set_server_credential(
     server_id: RowId,
     payload: OpdsCredentialIn,
@@ -267,6 +271,7 @@ def set_server_credential(
 
 
 @router.delete("/servers/{server_id}/credential", response_model=OpdsServerOut)
+@refuses(404)
 def forget_server_credential(
     server_id: RowId,
     db: DbSession,
@@ -285,6 +290,7 @@ def forget_server_credential(
 
 
 @router.post("/servers/{server_id}/sync", response_model=OpdsSyncOut)
+@refuses(404)
 async def sync_server(
     server_id: RowId,
     db: DbSession,

@@ -35,6 +35,8 @@ import { lastLocationPreference } from "../../src/lib/lastLocation";
 import { savedSearchesPreference } from "../../src/lib/savedSearches";
 import { sectionChoicesPreference } from "../../src/lib/sectionState";
 
+import { whileStorageRefuses } from "../storageRefusal";
+
 beforeEach(() => {
   localStorage.clear();
   forgetPreferences();
@@ -176,11 +178,13 @@ describe("reading", () => {
   it("answers with the default when storage refuses, rather than throwing", () => {
     // React calls a read while rendering, so a throw here is a blank screen
     // rather than a fallback.
-    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
-      throw new Error("denied");
+    // Something readable is stored, so the default can only come from the
+    // refusal.
+    localStorage.setItem("test.colour", "red");
+    whileStorageRefuses("getItem", () => {
+      expect(() => colour.read()).not.toThrow();
+      expect(colour.read()).toBe("grey");
     });
-    expect(() => colour.read()).not.toThrow();
-    expect(colour.read()).toBe("grey");
   });
 
   it("answers with the default when the decode itself throws", () => {
@@ -224,10 +228,12 @@ describe("a snapshot", () => {
     // The default on this path is held rather than rebuilt. Handing back a new
     // one each call would make a private window the one place the library never
     // finished drawing.
-    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
-      throw new Error("denied");
+    localStorage.setItem("test.list", "a,b");
+    whileStorageRefuses("getItem", () => {
+      const first = list.read();
+      expect(first).toEqual([]);
+      expect(list.read()).toBe(first);
     });
-    expect(list.read()).toBe(list.read());
   });
 
   it("cannot be edited by the reader it was handed to", () => {
@@ -253,10 +259,10 @@ describe("writing", () => {
   });
 
   it("says nothing when storage refuses to keep it", () => {
-    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
-      throw new Error("quota");
+    whileStorageRefuses("setItem", () => {
+      expect(() => colour.write("red")).not.toThrow();
     });
-    expect(() => colour.write("red")).not.toThrow();
+    expect(localStorage.getItem("test.colour")).toBeNull();
   });
 
   it("tells a reader", () => {
@@ -271,12 +277,10 @@ describe("writing", () => {
     // The reader is drawing whatever a control just tried to change, so a
     // notification that only fired on success would leave that control drawn as
     // though the press had taken.
-    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
-      throw new Error("quota");
-    });
     const heard = vi.fn<() => void>();
     const stop = colour.subscribe(heard);
-    colour.write("red");
+    whileStorageRefuses("setItem", () => colour.write("red"));
+    expect(localStorage.getItem("test.colour")).toBeNull();
     expect(heard).toHaveBeenCalled();
     stop();
   });

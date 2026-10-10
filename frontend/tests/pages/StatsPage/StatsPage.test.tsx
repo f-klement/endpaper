@@ -1,12 +1,17 @@
 /** Tests for src/pages/StatsPage. */
 
 import { screen } from "@testing-library/react";
-import { beforeEach, describe, expect, it } from "vitest";
+import fc from "fast-check";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { Locale, TagCategory, TagKey } from "../../../src/api/generated/model";
+import { getToken, setSession } from "../../../src/api/mutator";
 import StatsPage from "../../../src/pages/StatsPage";
-import { makeStats, resetIds } from "../../factories";
+import { makeStats, makeUser, resetIds } from "../../factories";
 import { mockApi, renderWithProviders, type MockApi } from "../../utils";
+import { answersOf } from "../../lib/schemaArbitrary";
+import { holds, PROFILE, PROPERTY, witness } from "../../property";
+import { forget, overSchema, type OverSchema } from "../../schemaPage";
 
 let api: MockApi;
 
@@ -94,6 +99,33 @@ describe("StatsPage", () => {
 
     expect(await screen.findByText("Informatik")).toBeInTheDocument();
     expect(screen.queryByText("Computing")).not.toBeInTheDocument();
+  });
+
+  it("keeps apart two tags that read the same in German", async () => {
+    // The seeded Computing is Informatik on a German page, and a household can
+    // name a tag Informatik itself. Keyed by the label, the two rows shared a
+    // React key and a refetch could show one row's count on the other.
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => {});
+    api.on("/api/stats", {
+      body: makeStats({
+        total: 3,
+        by_tag: [
+          {
+            name: "Computing",
+            category: TagCategory.genre,
+            key: TagKey.computing,
+            count: 2,
+          },
+          { name: "Informatik", category: TagCategory.genre, count: 1 },
+        ],
+      }),
+    });
+    renderWithProviders(<StatsPage />, { locale: Locale.de });
+
+    expect(await screen.findAllByText("Informatik")).toHaveLength(2);
+    expect(consoleError.mock.calls.flat().join(" ")).not.toContain("same key");
   });
 
   it("omits a section with no rows", async () => {
@@ -192,5 +224,58 @@ describe("the count column", () => {
 
     const count = await screen.findByText("3", { selector: "span" });
     expect(count.className).toContain("w-6");
+  });
+});
+
+/** The token the property's examples are signed in with. */
+const SESSION = "a-session-the-property-signed-in-with";
+
+/** Whether any request was answered 401, which ends a session. */
+const endedBy = (rendered: OverSchema) =>
+  rendered.answered.some(([, answer]) => answer.status === 401);
+
+/** The length of every list a stats body holds. */
+const lists = (body: unknown) =>
+  Object.values((body ?? {}) as Record<string, unknown>)
+    .filter(Array.isArray)
+    .map((list) => list.length);
+
+describe("StatsPage over any answer the schema permits", () => {
+  // What the page's hooks are handed is drawn from `openapi.json`, per
+  // request. `tests/schemaPage.tsx` holds what the page may not do.
+  it("is drawn every shape of answer its main request declares", async () => {
+    await witness(answersOf("get_stats"), {
+      "holds an empty list": (answer) =>
+        lists(answer.body).some((n) => n === 0),
+      "holds a list with an entry": (answer) =>
+        lists(answer.body).some((n) => n > 0),
+    });
+  });
+
+  // Signed in, so a drawn 401 has a session to end: the mutator clears it,
+  // and every other answer leaves it where it was.
+  it("neither throws nor shows a value nobody can name", PROPERTY, async () => {
+    expect(
+      await holds(
+        fc.gen(),
+        async (answers) => {
+          try {
+            setSession(SESSION, makeUser());
+            const rendered = await overSchema(<StatsPage />, answers);
+            expect(rendered.problems).toEqual([]);
+            expect(getToken()).toBe(endedBy(rendered) ? null : SESSION);
+            return rendered;
+          } finally {
+            forget();
+          }
+        },
+        {
+          "showed a value an answer carried": (_, rendered) =>
+            rendered.echoed > 0,
+          "was drawn a 401 and ended the session": (_, rendered) =>
+            endedBy(rendered),
+        },
+      ),
+    ).toBe(PROFILE.runs);
   });
 });

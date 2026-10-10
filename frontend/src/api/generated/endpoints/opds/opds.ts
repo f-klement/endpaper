@@ -28,6 +28,7 @@ import type {
   OpdsServerOut,
   OpdsServerSummaryOut,
   OpdsSyncOut,
+  Refusal,
   SyncServerParams,
 } from "../../model";
 
@@ -76,7 +77,7 @@ export const getListServersQueryKey = () => {
 
 export const getListServersQueryOptions = <
   TData = Awaited<ReturnType<typeof listServers>>,
-  TError = unknown,
+  TError = Refusal,
 >(options?: {
   query?: Partial<
     UseQueryOptions<Awaited<ReturnType<typeof listServers>>, TError, TData>
@@ -101,11 +102,11 @@ export const getListServersQueryOptions = <
 export type ListServersQueryResult = NonNullable<
   Awaited<ReturnType<typeof listServers>>
 >;
-export type ListServersQueryError = unknown;
+export type ListServersQueryError = Refusal;
 
 export function useListServers<
   TData = Awaited<ReturnType<typeof listServers>>,
-  TError = unknown,
+  TError = Refusal,
 >(
   options: {
     query: Partial<
@@ -127,7 +128,7 @@ export function useListServers<
 };
 export function useListServers<
   TData = Awaited<ReturnType<typeof listServers>>,
-  TError = unknown,
+  TError = Refusal,
 >(
   options?: {
     query?: Partial<
@@ -149,7 +150,7 @@ export function useListServers<
 };
 export function useListServers<
   TData = Awaited<ReturnType<typeof listServers>>,
-  TError = unknown,
+  TError = Refusal,
 >(
   options?: {
     query?: Partial<
@@ -167,7 +168,7 @@ export function useListServers<
 
 export function useListServers<
   TData = Awaited<ReturnType<typeof listServers>>,
-  TError = unknown,
+  TError = Refusal,
 >(
   options?: {
     query?: Partial<
@@ -241,7 +242,7 @@ export const addServer = async (
 export const getAddServerMutationKey = () => ["addServer"] as const;
 
 export const getAddServerMutationOptions = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -282,13 +283,16 @@ export type AddServerMutationResult = NonNullable<
   Awaited<ReturnType<typeof addServer>>
 >;
 export type AddServerMutationBody = OpdsServerIn;
-export type AddServerMutationError = HTTPValidationError;
+export type AddServerMutationError = Refusal | HTTPValidationError;
 export type AddServerMutationVariables = { data: OpdsServerIn };
 
 /**
  * @summary Add Server
  */
-export const useAddServer = <TError = HTTPValidationError, TContext = unknown>(
+export const useAddServer = <
+  TError = Refusal | HTTPValidationError,
+  TContext = unknown,
+>(
   options?: {
     mutation?: UseMutationOptions<
       Awaited<ReturnType<typeof addServer>>,
@@ -341,7 +345,7 @@ export const getListSyncableServersQueryKey = () => {
 
 export const getListSyncableServersQueryOptions = <
   TData = Awaited<ReturnType<typeof listSyncableServers>>,
-  TError = unknown,
+  TError = Refusal,
 >(options?: {
   query?: Partial<
     UseQueryOptions<
@@ -370,11 +374,11 @@ export const getListSyncableServersQueryOptions = <
 export type ListSyncableServersQueryResult = NonNullable<
   Awaited<ReturnType<typeof listSyncableServers>>
 >;
-export type ListSyncableServersQueryError = unknown;
+export type ListSyncableServersQueryError = Refusal;
 
 export function useListSyncableServers<
   TData = Awaited<ReturnType<typeof listSyncableServers>>,
-  TError = unknown,
+  TError = Refusal,
 >(
   options: {
     query: Partial<
@@ -400,7 +404,7 @@ export function useListSyncableServers<
 };
 export function useListSyncableServers<
   TData = Awaited<ReturnType<typeof listSyncableServers>>,
-  TError = unknown,
+  TError = Refusal,
 >(
   options?: {
     query?: Partial<
@@ -426,7 +430,7 @@ export function useListSyncableServers<
 };
 export function useListSyncableServers<
   TData = Awaited<ReturnType<typeof listSyncableServers>>,
-  TError = unknown,
+  TError = Refusal,
 >(
   options?: {
     query?: Partial<
@@ -448,7 +452,7 @@ export function useListSyncableServers<
 
 export function useListSyncableServers<
   TData = Awaited<ReturnType<typeof listSyncableServers>>,
-  TError = unknown,
+  TError = Refusal,
 >(
   options?: {
     query?: Partial<
@@ -501,7 +505,7 @@ export const removeServer = async (
 export const getRemoveServerMutationKey = () => ["removeServer"] as const;
 
 export const getRemoveServerMutationOptions = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -542,14 +546,14 @@ export type RemoveServerMutationResult = NonNullable<
   Awaited<ReturnType<typeof removeServer>>
 >;
 
-export type RemoveServerMutationError = HTTPValidationError;
+export type RemoveServerMutationError = Refusal | HTTPValidationError;
 export type RemoveServerMutationVariables = { serverId: number };
 
 /**
  * @summary Remove Server
  */
 export const useRemoveServer = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(
   options?: {
@@ -634,7 +638,7 @@ export const editServer = async (
 export const getEditServerMutationKey = () => ["editServer"] as const;
 
 export const getEditServerMutationOptions = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -675,7 +679,7 @@ export type EditServerMutationResult = NonNullable<
   Awaited<ReturnType<typeof editServer>>
 >;
 export type EditServerMutationBody = OpdsServerIn;
-export type EditServerMutationError = HTTPValidationError;
+export type EditServerMutationError = Refusal | HTTPValidationError;
 export type EditServerMutationVariables = {
   serverId: number;
   data: OpdsServerIn;
@@ -684,7 +688,10 @@ export type EditServerMutationVariables = {
 /**
  * @summary Edit Server
  */
-export const useEditServer = <TError = HTTPValidationError, TContext = unknown>(
+export const useEditServer = <
+  TError = Refusal | HTTPValidationError,
+  TContext = unknown,
+>(
   options?: {
     mutation?: UseMutationOptions<
       Awaited<ReturnType<typeof editServer>>,
@@ -730,7 +737,7 @@ export const getForgetServerCredentialMutationKey = () =>
   ["forgetServerCredential"] as const;
 
 export const getForgetServerCredentialMutationOptions = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -771,14 +778,14 @@ export type ForgetServerCredentialMutationResult = NonNullable<
   Awaited<ReturnType<typeof forgetServerCredential>>
 >;
 
-export type ForgetServerCredentialMutationError = HTTPValidationError;
+export type ForgetServerCredentialMutationError = Refusal | HTTPValidationError;
 export type ForgetServerCredentialMutationVariables = { serverId: number };
 
 /**
  * @summary Forget Server Credential
  */
 export const useForgetServerCredential = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(
   options?: {
@@ -860,7 +867,7 @@ export const getSetServerCredentialMutationKey = () =>
   ["setServerCredential"] as const;
 
 export const getSetServerCredentialMutationOptions = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -901,7 +908,7 @@ export type SetServerCredentialMutationResult = NonNullable<
   Awaited<ReturnType<typeof setServerCredential>>
 >;
 export type SetServerCredentialMutationBody = OpdsCredentialIn;
-export type SetServerCredentialMutationError = HTTPValidationError;
+export type SetServerCredentialMutationError = Refusal | HTTPValidationError;
 export type SetServerCredentialMutationVariables = {
   serverId: number;
   data: OpdsCredentialIn;
@@ -911,7 +918,7 @@ export type SetServerCredentialMutationVariables = {
  * @summary Set Server Credential
  */
 export const useSetServerCredential = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(
   options?: {
@@ -1011,7 +1018,7 @@ export const syncServer = async (
 export const getSyncServerMutationKey = () => ["syncServer"] as const;
 
 export const getSyncServerMutationOptions = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -1052,7 +1059,7 @@ export type SyncServerMutationResult = NonNullable<
   Awaited<ReturnType<typeof syncServer>>
 >;
 
-export type SyncServerMutationError = HTTPValidationError;
+export type SyncServerMutationError = Refusal | HTTPValidationError;
 export type SyncServerMutationVariables = {
   serverId: number;
   params?: SyncServerParams;
@@ -1061,7 +1068,10 @@ export type SyncServerMutationVariables = {
 /**
  * @summary Sync Server
  */
-export const useSyncServer = <TError = HTTPValidationError, TContext = unknown>(
+export const useSyncServer = <
+  TError = Refusal | HTTPValidationError,
+  TContext = unknown,
+>(
   options?: {
     mutation?: UseMutationOptions<
       Awaited<ReturnType<typeof syncServer>>,

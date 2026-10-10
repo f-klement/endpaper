@@ -8,7 +8,7 @@
  * alone passes on the wrong implementation.
  */
 
-import { screen, within } from "@testing-library/react";
+import { fireEvent, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { Locale } from "../../../../src/api/generated/model";
@@ -261,5 +261,50 @@ describe("nothing offers to change a note's visibility", () => {
     expect(
       screen.getAllByRole("button").map((button) => button.textContent),
     ).toEqual(["Add"]);
+  });
+});
+
+describe("a blank note", () => {
+  function renderWith(notes: ReturnType<typeof makeNote>[]) {
+    const onAdd = vi.fn<(content: string) => void>();
+    const onEdit = vi.fn<(noteId: number, content: string) => void>();
+    renderLocalised(
+      <NoteList
+        notes={notes}
+        currentUser={READER}
+        isAdding={false}
+        onAdd={onAdd}
+        onEdit={onEdit}
+        onRemove={vi.fn<(noteId: number) => void>()}
+      />,
+    );
+    return { onAdd, onEdit };
+  }
+
+  it("is not sent when the form is submitted without its button", () => {
+    // The button already refuses blank text; the form refuses it as well, for
+    // a submit that does not go through the button.
+    const { onAdd } = renderWith([]);
+    const box = screen.getByLabelText("Add a note");
+    fireEvent.change(box, { target: { value: "   " } });
+
+    fireEvent.submit(box.closest("form")!);
+
+    expect(onAdd).not.toHaveBeenCalled();
+  });
+
+  it("is not saved over a note, which stays open for editing", () => {
+    // Unlike adding, the save button here is never disabled, so this is the
+    // only thing between a cleared box and an empty note.
+    const { onEdit } = renderWith([makeNote({ user_id: READER.id })]);
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    fireEvent.change(screen.getByLabelText("Edit note"), {
+      target: { value: "   " },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(onEdit).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("Edit note")).toBeInTheDocument();
   });
 });

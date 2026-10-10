@@ -17,7 +17,9 @@ import {
   useBookSections,
   type BookSection,
 } from "../../../src/pages/BookDetail/hooks";
+import { writeSectionChoice } from "../../../src/lib/sectionState";
 import { makeBook, makeLoan, resetIds } from "../../factories";
+import { whileStorageRefuses } from "../../storageRefusal";
 import { renderHookWithProviders } from "../../utils";
 
 beforeEach(() => {
@@ -221,14 +223,16 @@ describe("useBookSections", () => {
 
   it("renders with no memory at all when storage refuses", () => {
     // A private window. The book still has to draw, on the book's defaults.
-    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
-      throw new Error("denied");
+    // A reader closed the section earlier, so an open one can only be the
+    // book's default reached through the refusal.
+    writeSectionChoice("bookDetailSections", "about", false);
+
+    whileStorageRefuses("getItem", () => {
+      const { result } = renderHookWithProviders(() =>
+        useBookSections(1, defaults({ about: true })),
+      );
+
+      expect(result.current.isOpen("about")).toBe(true);
     });
-
-    const { result } = renderHookWithProviders(() =>
-      useBookSections(1, defaults({ about: true })),
-    );
-
-    expect(result.current.isOpen("about")).toBe(true);
   });
 });

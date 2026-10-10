@@ -372,6 +372,14 @@ function isRef(value: PdfValue): value is PdfRef {
   return typeof value === "object" && value !== null && value.kind === "ref";
 }
 
+function isArray(value: PdfValue | undefined): value is PdfArray {
+  return typeof value === "object" && value !== null && value.kind === "array";
+}
+
+function isName(value: PdfValue | undefined): value is PdfName {
+  return typeof value === "object" && value !== null && value.kind === "name";
+}
+
 // --- the lexer --------------------------------------------------------------
 
 const SPACE = new Set([0x00, 0x09, 0x0a, 0x0c, 0x0d, 0x20]);
@@ -382,6 +390,15 @@ const DELIMITER = new Set([
 function isRegular(byte: number): boolean {
   return !SPACE.has(byte) && !DELIMITER.has(byte);
 }
+
+/** `\n`, `\r`, `\t`, `\b` and `\f`, by the byte after the backslash. */
+const SIMPLE_ESCAPES: ReadonlyMap<number, number> = new Map([
+  [0x6e, 0x0a],
+  [0x72, 0x0d],
+  [0x74, 0x09],
+  [0x62, 0x08],
+  [0x66, 0x0c],
+]);
 
 /**
  * One PDF object, read out of a buffer somebody else supplied.
@@ -588,36 +605,8 @@ class Lexer {
       const byte = this.byte();
       this.at += 1;
       if (byte === 0x5c) {
-        const escaped = this.byte();
-        this.at += 1;
-        const simple: Record<number, number> = {
-          0x6e: 0x0a,
-          0x72: 0x0d,
-          0x74: 0x09,
-          0x62: 0x08,
-          0x66: 0x0c,
-        };
-        if (escaped in simple) {
-          out.push(simple[escaped]!);
-        } else if (escaped >= 0x30 && escaped <= 0x37) {
-          let code = escaped - 0x30;
-          for (let digit = 0; digit < 2; digit += 1) {
-            const next = this.byte();
-            if (next < 0x30 || next > 0x37) break;
-            code = code * 8 + (next - 0x30);
-            this.at += 1;
-          }
-          out.push(code & 0xff);
-        } else if (escaped === 0x0d) {
-          // A backslash before a line break is a continuation and adds nothing.
-          if (this.byte() === 0x0a) this.at += 1;
-        } else if (escaped === 0x0a) {
-          // Same, for the other line ending.
-        } else if (escaped < 0) {
-          throw new PdfError("damaged", "string ended inside an escape");
-        } else {
-          out.push(escaped);
-        }
+        const escaped = this.escape();
+        if (escaped !== null) out.push(escaped);
       } else if (byte === 0x28) {
         depth += 1;
         out.push(byte);
@@ -630,6 +619,38 @@ class Lexer {
       }
     }
     throw new PdfError("damaged", "string ended early");
+  }
+
+  /**
+   * The byte the escape after a backslash stands for, consumed, or `null` for
+   * a line continuation, which stands for nothing.
+   */
+  private escape(): number | null {
+    const escaped = this.byte();
+    this.at += 1;
+    const simple = SIMPLE_ESCAPES.get(escaped);
+    if (simple !== undefined) return simple;
+    if (escaped >= 0x30 && escaped <= 0x37) {
+      let code = escaped - 0x30;
+      for (let digit = 0; digit < 2; digit += 1) {
+        const next = this.byte();
+        if (next < 0x30 || next > 0x37) break;
+        code = code * 8 + (next - 0x30);
+        this.at += 1;
+      }
+      return code & 0xff;
+    }
+    if (escaped === 0x0d) {
+      // A backslash before a line break is a continuation and adds nothing.
+      if (this.byte() === 0x0a) this.at += 1;
+      return null;
+    }
+    // Same, for the other line ending.
+    if (escaped === 0x0a) return null;
+    if (escaped < 0) {
+      throw new PdfError("damaged", "string ended inside an escape");
+    }
+    return escaped;
   }
 }
 
@@ -1000,20 +1021,9 @@ function unpredict(data: Uint8Array, columns: number): Uint8Array {
         case 3:
           decoded[index] = (byte + ((left + up) >> 1)) & 0xff;
           break;
-        case 4: {
-          const estimate = left + up - upLeft;
-          const dLeft = Math.abs(estimate - left);
-          const dUp = Math.abs(estimate - up);
-          const dUpLeft = Math.abs(estimate - upLeft);
-          const best =
-            dLeft <= dUp && dLeft <= dUpLeft
-              ? left
-              : dUp <= dUpLeft
-                ? up
-                : upLeft;
-          decoded[index] = (byte + best) & 0xff;
+        case 4:
+          decoded[index] = (byte + paeth(left, up, upLeft)) & 0xff;
           break;
-        }
         default:
           throw new PdfError("damaged", `unknown row filter ${filter}`);
       }
@@ -1021,6 +1031,93 @@ function unpredict(data: Uint8Array, columns: number): Uint8Array {
     previous.set(decoded);
   }
   return out;
+}
+
+/**
+ * PNG's Paeth predictor: whichever neighbour is nearest `left + up - upLeft`,
+ * ties going to `left`, then to `up`, in the order PNG fixes.
+ */
+function paeth(left: number, up: number, upLeft: number): number {
+  const estimate = left + up - upLeft;
+  const dLeft = Math.abs(estimate - left);
+  const dUp = Math.abs(estimate - up);
+  const dUpLeft = Math.abs(estimate - upLeft);
+  if (dLeft <= dUp && dLeft <= dUpLeft) return left;
+  return dUp <= dUpLeft ? up : upLeft;
+}
+
+/**
+ * `N G obj` at the cursor, consumed, answering the object number it declares,
+ * or `null` when the keyword is not there.
+ *
+ * **The number is `Number` of the token, so it can be `NaN`**, which equals no
+ * object a caller asks for. The generation is read and dropped, for the reason
+ * `Lexer.reference` gives.
+ */
+function objectHeader(lexer: Lexer): number | null {
+  lexer.skip();
+  const declared = Number(lexer.token());
+  lexer.skip();
+  lexer.token();
+  lexer.skip();
+  return lexer.take("obj") ? declared : null;
+}
+
+/**
+ * A cross reference stream's `/W`, the byte width of each of a row's three
+ * fields, or `null` for one that describes no row this reader can read: not an
+ * array of three, or holding a width that is not a whole number from 0 to 8.
+ */
+function fieldWidths(
+  dictionary: PdfDict,
+): readonly [number, number, number] | null {
+  const widths = dictionary.entries.get("W");
+  if (!isArray(widths)) return null;
+  const w = widths.items.map((item) =>
+    typeof item === "number" && Number.isInteger(item) && item >= 0 && item <= 8
+      ? item
+      : -1,
+  );
+  if (w.length !== 3 || w.some((width) => width < 0)) return null;
+  return [w[0]!, w[1]!, w[2]!];
+}
+
+/**
+ * A cross reference stream's `/Index`, as a flat run of first number and count
+ * pairs, with any member that is not a number read as `-1`. Absent or not an
+ * array, it is one run from 0 of `/Size` entries, and of none when `/Size` is not a number.
+ */
+function indexRuns(dictionary: PdfDict): number[] {
+  const declared = dictionary.entries.get("Index");
+  if (isArray(declared)) {
+    return declared.items.map((item) => (typeof item === "number" ? item : -1));
+  }
+  const size = dictionary.entries.get("Size");
+  return [0, typeof size === "number" ? size : 0];
+}
+
+/**
+ * One big endian field of `width` bytes at `at`, and 0 for a width of 0.
+ *
+ * Multiplication rather than a shift: a five byte offset is past what `<<`
+ * keeps, and it would wrap to a small number silently.
+ */
+function readField(data: Uint8Array, at: number, width: number): number {
+  let value = 0;
+  for (let byte = 0; byte < width; byte += 1) {
+    value = value * 256 + data[at + byte]!;
+  }
+  return value;
+}
+
+/**
+ * The filters a `/Filter` names, in order: one name, or the names in an array,
+ * where a member that is not a name is skipped.
+ */
+function filterNames(filter: PdfValue | undefined): string[] {
+  if (isName(filter)) return [filter.value];
+  if (!isArray(filter)) return [];
+  return filter.items.filter(isName).map((item) => item.value);
 }
 
 /** Where an object lives: at a byte offset, or inside an object stream. */
@@ -1175,37 +1272,17 @@ class Document {
     window: Uint8Array,
   ): Promise<PdfDict | null> {
     const header = new Lexer(window);
-    header.skip();
-    header.token(); // the object number
-    header.skip();
-    header.token(); // the generation
-    header.skip();
-    if (!header.take("obj")) return null;
+    // The object number is not checked: a section is found by its offset.
+    if (objectHeader(header) === null) return null;
     const dictionary = header.object();
     if (!isDict(dictionary)) return null;
 
     const data = await this.streamBytes(at, dictionary, header.at, window);
     if (data === null) return dictionary;
 
-    const widths = dictionary.entries.get("W");
-    if (
-      widths === undefined ||
-      typeof widths !== "object" ||
-      widths === null ||
-      widths.kind !== "array"
-    ) {
-      return dictionary;
-    }
-    const w = widths.items.map((item) =>
-      typeof item === "number" &&
-      Number.isInteger(item) &&
-      item >= 0 &&
-      item <= 8
-        ? item
-        : -1,
-    );
-    if (w.length !== 3 || w.some((width) => width < 0)) return dictionary;
-    const record = w[0]! + w[1]! + w[2]!;
+    const w = fieldWidths(dictionary);
+    if (w === null) return dictionary;
+    const record = w[0] + w[1] + w[2];
     // **A bound on work, not on the answer.** A record of no bytes never moves
     // the cursor, so the end of data check below can never stop it, and every
     // run `/Index` names would be walked to its count while reading nothing and
@@ -1213,16 +1290,7 @@ class Document {
     // crafted file costs to read is not.
     if (record === 0) return dictionary;
 
-    const size = dictionary.entries.get("Size");
-    const declared = dictionary.entries.get("Index");
-    const index: number[] =
-      declared !== undefined &&
-      typeof declared === "object" &&
-      declared !== null &&
-      declared.kind === "array"
-        ? declared.items.map((item) => (typeof item === "number" ? item : -1))
-        : [0, typeof size === "number" ? size : 0];
-
+    const index = indexRuns(dictionary);
     let cursor = 0;
     for (let pair = 0; pair + 1 < index.length; pair += 2) {
       const first = index[pair]!;
@@ -1238,28 +1306,17 @@ class Document {
         // whole type and offset, and would be remembered from bytes the stream
         // does not hold.
         if (cursor + record > data.length) break;
-        const fields = [0, 0, 0];
-        for (let field = 0; field < 3; field += 1) {
-          let value = 0;
-          for (let byte = 0; byte < w[field]!; byte += 1) {
-            // Multiplication rather than a shift: a five byte offset is past
-            // what `<<` keeps, and it would wrap to a small number silently.
-            value = value * 256 + data[cursor]!;
-            cursor += 1;
-          }
-          fields[field] = value;
-        }
+        const type = readField(data, cursor, w[0]);
+        const second = readField(data, cursor + w[0], w[1]);
+        const third = readField(data, cursor + w[0] + w[1], w[2]);
+        cursor += record;
         // A zero width first field means the type is 1, which the format says.
-        const kind = w[0] === 0 ? 1 : fields[0]!;
+        const kind = w[0] === 0 ? 1 : type;
         const num = first + step;
-        if (kind === 1 && fields[1]! > 0) {
-          this.remember(num, { in: "file", at: fields[1]! });
+        if (kind === 1 && second > 0) {
+          this.remember(num, { in: "file", at: second });
         } else if (kind === 2) {
-          this.remember(num, {
-            in: "stream",
-            stream: fields[1]!,
-            index: fields[2]!,
-          });
+          this.remember(num, { in: "stream", stream: second, index: third });
         }
       }
     }
@@ -1323,22 +1380,7 @@ class Document {
       raw = search.subarray(0, end);
     }
 
-    const filter = dictionary.entries.get("Filter");
-    const names: string[] = [];
-    if (typeof filter === "object" && filter !== null) {
-      if (filter.kind === "name") names.push(filter.value);
-      if (filter.kind === "array") {
-        for (const item of filter.items) {
-          if (
-            typeof item === "object" &&
-            item !== null &&
-            item.kind === "name"
-          ) {
-            names.push(item.value);
-          }
-        }
-      }
-    }
+    const names = filterNames(dictionary.entries.get("Filter"));
     if (names.length === 0) return raw;
     // One filter only. A chain means a stream that has been encoded twice,
     // which no metadata stream in the corpus is, and applying the first of two
@@ -1346,15 +1388,27 @@ class Document {
     if (names.length > 1 || names[0] !== "FlateDecode") return null;
 
     const inflated = await inflate(raw, this.source);
+    const columns = await this.predictorColumns(dictionary);
+    return columns === null ? inflated : unpredict(inflated, columns);
+  }
+
+  /**
+   * The `/Columns` a stream's PNG predictor declares, 1 where it names none,
+   * or `null` when the stream declares no PNG predictor.
+   *
+   * `/DecodeParms` written as an array is read by its first member, the one
+   * that goes with the only filter `streamBytes` applies. That member is
+   * resolved in turn, since a writer may keep the parameters as an object of
+   * their own, and left unresolved it reads as no predictor at all.
+   */
+  private async predictorColumns(dictionary: PdfDict): Promise<number | null> {
     let parms = await this.resolve(dictionary.entries.get("DecodeParms"));
-    if (typeof parms === "object" && parms !== null && parms.kind === "array") {
-      parms = parms.items[0] ?? null;
-    }
-    if (!isDict(parms)) return inflated;
+    if (isArray(parms)) parms = await this.resolve(parms.items[0]);
+    if (!isDict(parms)) return null;
     const predictor = await this.resolve(parms.entries.get("Predictor"));
-    if (typeof predictor !== "number" || predictor < 10) return inflated;
+    if (typeof predictor !== "number" || predictor < 10) return null;
     const columns = await this.resolve(parms.entries.get("Columns"));
-    return unpredict(inflated, typeof columns === "number" ? columns : 1);
+    return typeof columns === "number" ? columns : 1;
   }
 
   /**
@@ -1388,16 +1442,10 @@ class Document {
     const window = await this.source.read(entry.at, OBJECT_WINDOW_BYTES);
     if (window.length === 0) return null;
     const lexer = new Lexer(window);
-    lexer.skip();
-    const declared = Number(lexer.token());
-    lexer.skip();
-    lexer.token();
-    lexer.skip();
-    if (!lexer.take("obj")) return null;
     // **The object at the offset has to be the object asked for.** A table that
     // points at the wrong place is how an incremental update goes wrong, and
     // taking whatever is there would put another book's title on this one.
-    if (declared !== num) return null;
+    if (objectHeader(lexer) !== num) return null;
     return lexer.object();
   }
 
@@ -1428,12 +1476,7 @@ class Document {
 
     const window = await this.source.read(entry.at, OBJECT_WINDOW_BYTES);
     const header = new Lexer(window);
-    header.skip();
-    header.token();
-    header.skip();
-    header.token();
-    header.skip();
-    if (!header.take("obj")) return contents;
+    if (objectHeader(header) === null) return contents;
     const dictionary = header.object();
     if (!isDict(dictionary)) return contents;
 
@@ -1516,12 +1559,7 @@ class Document {
     if (entry === undefined || entry.in !== "file") return null;
     const window = await this.source.read(entry.at, OBJECT_WINDOW_BYTES);
     const lexer = new Lexer(window);
-    lexer.skip();
-    const declared = Number(lexer.token());
-    lexer.skip();
-    lexer.token();
-    lexer.skip();
-    if (!lexer.take("obj") || declared !== reference.num) return null;
+    if (objectHeader(lexer) !== reference.num) return null;
     const dictionary = lexer.object();
     if (!isDict(dictionary)) return null;
     return await this.streamBytes(entry.at, dictionary, lexer.at, window);

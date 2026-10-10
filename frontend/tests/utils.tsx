@@ -54,6 +54,11 @@ export interface StubResponse {
    * redirected. The mutator treats that as the reverse proxy signing us out.
    */
   type?: ResponseType;
+  /**
+   * The status line's reason phrase, `Status <n>` unless set. A browser
+   * talking HTTP/2 is handed an empty one, which is what production sends.
+   */
+  statusText?: string;
 }
 
 /** Matched against the request URL; the first match wins. */
@@ -148,7 +153,7 @@ export function mockApi(): MockApi {
         ok: status >= 200 && status < 300,
         status,
         type: stub.type ?? "basic",
-        statusText: `Status ${status}`,
+        statusText: stub.statusText ?? `Status ${status}`,
         headers: new Headers({
           "content-type": "application/json",
           ...stub.headers,
@@ -180,6 +185,21 @@ export function mockApi(): MockApi {
     },
   };
   return api;
+}
+
+/**
+ * A reply the test sends when it chooses, so the page can be looked at while
+ * the request is still out. Hand `respond` to `api.on`.
+ */
+export function heldOpen(): {
+  respond: () => Promise<StubResponse>;
+  release: (reply: StubResponse) => void;
+} {
+  let release!: (reply: StubResponse) => void;
+  const pending = new Promise<StubResponse>((resolve) => {
+    release = resolve;
+  });
+  return { respond: () => pending, release: (reply) => release(reply) };
 }
 
 // ── Rendering ─────────────────────────────────────────────────────────────────
@@ -219,7 +239,8 @@ interface ProvidersOptions extends Omit<RenderOptions, "wrapper"> {
 }
 
 /**
- * Reports the router's current path without putting anything on the page.
+ * Reports the router's current path, its query and its hash, without putting
+ * anything on the page.
  *
  * **This is what a page's navigation is asserted against, rather than a spy on
  * `useNavigate`.** Replacing that hook means `vi.mock("react-router-dom")`,
@@ -244,10 +265,10 @@ interface ProvidersOptions extends Omit<RenderOptions, "wrapper"> {
  * interaction, so an effect costs nothing here.
  */
 function PathProbe({ onPath }: { onPath: (path: string) => void }) {
-  const { pathname, search } = useLocation();
+  const { pathname, search, hash } = useLocation();
   useEffect(() => {
-    onPath(`${pathname}${search}`);
-  }, [onPath, pathname, search]);
+    onPath(`${pathname}${search}${hash}`);
+  }, [onPath, pathname, search, hash]);
   return null;
 }
 

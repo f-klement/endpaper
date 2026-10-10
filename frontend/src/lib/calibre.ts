@@ -323,11 +323,11 @@ function tablesIn(db: SqliteDatabase): Set<string> {
  * comes back six times from the join, and every field then has to be
  * de-duplicated by whoever reads it.
  */
-function groupByBook(
+function groupByBook<T>(
   rows: readonly SqliteRow[],
-  value: (row: SqliteRow) => string | null,
-): Map<number, string[]> {
-  const grouped = new Map<number, string[]>();
+  value: (row: SqliteRow) => T | null,
+): Map<number, T[]> {
+  const grouped = new Map<number, T[]>();
   for (const row of rows) {
     const book = integer(row["book"]);
     const one = value(row);
@@ -337,6 +337,22 @@ function groupByBook(
     else existing.push(one);
   }
   return grouped;
+}
+
+/**
+ * `groupByBook` over a relation the library may not have, and empty where it
+ * has not. `table` is the one whose absence means the relation is absent, and
+ * `rows` runs only when it is there.
+ */
+function relation<T>(
+  tables: ReadonlySet<string>,
+  table: string,
+  rows: () => readonly SqliteRow[],
+  value: (row: SqliteRow) => T | null,
+): Map<number, T[]> {
+  return tables.has(table)
+    ? groupByBook(rows(), value)
+    : new Map<number, T[]>();
 }
 
 /**
@@ -596,81 +612,83 @@ export function readCalibreLibrary(db: SqliteDatabase): CalibreReading {
   );
   if (rows.length === 0) return { ok: false, failure: "empty" };
 
-  const authors = tables.has("authors")
-    ? groupByBook(
-        db.query(
-          `SELECT link.book AS book, authors.name AS name
-             FROM books_authors_link link
-             JOIN authors ON authors.id = link.author
-            ORDER BY link.id`,
-        ),
-        (row) => {
-          const name = text(row["name"]);
-          return name !== null && CALIBRE_PLACEHOLDER.author(name)
-            ? null
-            : name;
-        },
-      )
-    : new Map<number, string[]>();
+  const authors = relation(
+    tables,
+    "authors",
+    () =>
+      db.query(
+        `SELECT link.book AS book, authors.name AS name
+           FROM books_authors_link link
+           JOIN authors ON authors.id = link.author
+          ORDER BY link.id`,
+      ),
+    (row) => {
+      const name = text(row["name"]);
+      return name !== null && CALIBRE_PLACEHOLDER.author(name) ? null : name;
+    },
+  );
 
-  const publishers = tables.has("books_publishers_link")
-    ? groupByBook(
-        db.query(
-          `SELECT link.book AS book, publishers.name AS name
-             FROM books_publishers_link link
-             JOIN publishers ON publishers.id = link.publisher`,
-        ),
-        (row) => text(row["name"]),
-      )
-    : new Map<number, string[]>();
+  const publishers = relation(
+    tables,
+    "books_publishers_link",
+    () =>
+      db.query(
+        `SELECT link.book AS book, publishers.name AS name
+           FROM books_publishers_link link
+           JOIN publishers ON publishers.id = link.publisher`,
+      ),
+    (row) => text(row["name"]),
+  );
 
-  const languages = tables.has("books_languages_link")
-    ? groupByBook(
-        db.query(
-          `SELECT link.book AS book, languages.lang_code AS code
-             FROM books_languages_link link
-             JOIN languages ON languages.id = link.lang_code
-            ORDER BY link.id`,
-        ),
-        (row) => text(row["code"]),
-      )
-    : new Map<number, string[]>();
+  const languages = relation(
+    tables,
+    "books_languages_link",
+    () =>
+      db.query(
+        `SELECT link.book AS book, languages.lang_code AS code
+           FROM books_languages_link link
+           JOIN languages ON languages.id = link.lang_code
+          ORDER BY link.id`,
+      ),
+    (row) => text(row["code"]),
+  );
 
-  const series = tables.has("books_series_link")
-    ? groupByBook(
-        db.query(
-          `SELECT link.book AS book, series.name AS name
-             FROM books_series_link link
-             JOIN series ON series.id = link.series`,
-        ),
-        (row) => text(row["name"]),
-      )
-    : new Map<number, string[]>();
+  const series = relation(
+    tables,
+    "books_series_link",
+    () =>
+      db.query(
+        `SELECT link.book AS book, series.name AS name
+           FROM books_series_link link
+           JOIN series ON series.id = link.series`,
+      ),
+    (row) => text(row["name"]),
+  );
 
-  const comments = tables.has("comments")
-    ? groupByBook(db.query("SELECT book, text FROM comments"), (row) =>
-        text(row["text"]),
-      )
-    : new Map<number, string[]>();
+  const comments = relation(
+    tables,
+    "comments",
+    () => db.query("SELECT book, text FROM comments"),
+    (row) => text(row["text"]),
+  );
 
-  const files = tables.has("data")
-    ? groupByBook(db.query("SELECT book, format FROM data"), (row) =>
-        text(row["format"]),
-      )
-    : new Map<number, string[]>();
+  const files = relation(
+    tables,
+    "data",
+    () => db.query("SELECT book, format FROM data"),
+    (row) => text(row["format"]),
+  );
 
-  const identifiers = new Map<number, CalibreIdentifier[]>();
-  if (tables.has("identifiers")) {
-    for (const row of db.query("SELECT book, type, val FROM identifiers")) {
-      const book = integer(row["book"]);
+  const identifiers = relation(
+    tables,
+    "identifiers",
+    () => db.query("SELECT book, type, val FROM identifiers"),
+    (row): CalibreIdentifier | null => {
       const type = text(row["type"]);
       const value = text(row["val"]);
-      if (book === null || type === null || value === null) continue;
-      const existing = identifiers.get(book);
-      if (existing === undefined) identifiers.set(book, [{ type, value }]);
-      else existing.push({ type, value });
-    }
-  }
+      return type === null || value === null ? null : { type, value };
+    },
+  );
 
   const books: CalibreBook[] = [];
   for (const row of rows) {

@@ -13,6 +13,7 @@ from dependencies import CurrentUser, DbSession, Paging, RowId
 from enums import LendingWillingness, SettingKey
 from lending import Loans
 from models import Book, Loan, User
+from refusals import refuses
 from schemas import LoanCreate, LoanOut, MyOverdueOut, OverdueNotifyResult, Page
 from shelf import Shelf
 
@@ -190,6 +191,7 @@ NOT_LENDABLE: Final = "not_lendable"
 
 
 @router.post("", response_model=LoanOut, status_code=status.HTTP_201_CREATED)
+@refuses(404)
 def create_loan(payload: LoanCreate, db: DbSession, current_user: CurrentUser) -> LoanOut:
     """Record that a book has gone out.
 
@@ -407,6 +409,7 @@ async def notify_overdue(
 
 
 @router.put("/{loan_id}/return", response_model=LoanOut)
+@refuses(404)
 def return_loan(loan_id: RowId, db: DbSession, current_user: CurrentUser) -> LoanOut:
     """Recording a return is a shelf action, not an ownership one, so any member
     may do it, for any book they can see."""

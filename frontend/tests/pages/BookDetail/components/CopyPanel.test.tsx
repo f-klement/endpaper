@@ -13,7 +13,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import CopyPanel from "../../../../src/pages/BookDetail/components/CopyPanel";
 import { makeBook, resetIds } from "../../../factories";
 import { renderLocalised } from "../../../utils";
-import type { BookDetailsUpdate } from "../../../../src/api/generated/model";
+import type {
+  BookDetailsUpdate,
+  BookOut,
+} from "../../../../src/api/generated/model";
 
 beforeEach(resetIds);
 
@@ -23,6 +26,17 @@ function renderPanel(book = {}) {
     <CopyPanel book={makeBook(book)} isSaving={false} onSave={onSave} />,
   );
   return onSave;
+}
+
+/** The panel over one book, for a test that rerenders it with another. */
+function panel(book: BookOut) {
+  return (
+    <CopyPanel
+      book={book}
+      isSaving={false}
+      onSave={vi.fn<(fields: BookDetailsUpdate) => void>()}
+    />
+  );
 }
 
 describe("CopyPanel", () => {
@@ -97,6 +111,18 @@ describe("CopyPanel", () => {
     expect(
       screen.getByRole("button", { name: "Save copy details" }),
     ).toBeDisabled();
+  });
+
+  it("shows the stored values again when the book changes underneath", () => {
+    const book = makeBook({ purchase_currency: "EUR" });
+    const { rerender } = renderLocalised(panel(book));
+    fireEvent.change(screen.getByLabelText("Currency"), {
+      target: { value: "GBP" },
+    });
+
+    rerender(panel({ ...book, purchase_currency: "USD" }));
+
+    expect(screen.getByLabelText("Currency")).toHaveValue("USD");
   });
 
   it("shows a stored price back as a decimal", () => {

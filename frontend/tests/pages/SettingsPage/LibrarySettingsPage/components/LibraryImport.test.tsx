@@ -189,6 +189,17 @@ describe("LibraryImport", () => {
       ).toBeInTheDocument();
     });
 
+    it("names a reader called for an object member, such as toString, by its own token", () => {
+      // A plain object answers `toString` with the prototype's function, which
+      // `??` keeps, so the sentence named nothing.
+      renderImport({
+        preview: preview({ reader: "toString" as ImportPreviewOut["reader"] }),
+      });
+      expect(
+        screen.getByText("Read as a toString export."),
+      ).toBeInTheDocument();
+    });
+
     it("says how many rows the file itself marks as deleted, and by which column", () => {
       // The one number on this screen about books that will not arrive, and
       // it is said before the write rather than after it. The column is named
@@ -220,6 +231,18 @@ describe("LibraryImport", () => {
       expect(
         screen.getByText(/No column in this file marks a row as deleted/),
       ).toBeInTheDocument();
+    });
+
+    it("offers nothing to press while the import is running", () => {
+      // One request, with no stop to offer: a second press would send the file
+      // twice, and a cancel would clear the preview under a write still going.
+      renderImport({ preview: preview(), isImporting: true });
+
+      expect(
+        screen.getByRole("button", { name: "Importing..." }),
+      ).toBeDisabled();
+      expect(screen.getByRole("button", { name: "Cancel" })).toBeDisabled();
+      expect(screen.getByLabelText("Choose a file")).toBeDisabled();
     });
 
     it("will not import a file with no rows in it", () => {

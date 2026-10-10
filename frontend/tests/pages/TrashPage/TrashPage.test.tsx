@@ -8,18 +8,24 @@
 
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import fc from "fast-check";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { getUpdateStatusMutationKey } from "../../../src/api/generated/endpoints/books/books";
 import { Locale } from "../../../src/api/generated/model";
 import { ToastProvider } from "../../../src/app/toast";
 import TrashPage from "../../../src/pages/TrashPage";
 import { makeBook, resetIds } from "../../factories";
 import {
+  createTestQueryClient,
+  heldOpen,
   mockApi,
   renderWithProviders,
   type MockApi,
-  type StubResponse,
 } from "../../utils";
+import { answersOf } from "../../lib/schemaArbitrary";
+import { holds, PROFILE, PROPERTY, witness } from "../../property";
+import { forget, overSchema } from "../../schemaPage";
 
 let api: MockApi;
 
@@ -34,21 +40,6 @@ beforeEach(() => {
     },
   });
 });
-
-/**
- * A reply the test sends when it chooses, so the page can be looked at while
- * the request is still out.
- */
-function heldOpen(): {
-  respond: () => Promise<StubResponse>;
-  release: (reply: StubResponse) => void;
-} {
-  let release!: (reply: StubResponse) => void;
-  const pending = new Promise<StubResponse>((resolve) => {
-    release = resolve;
-  });
-  return { respond: () => pending, release: (reply) => release(reply) };
-}
 
 /** The list row holding a title. */
 function rowOf(title: string): HTMLElement {
@@ -217,6 +208,177 @@ describe("TrashPage", () => {
 
       reply.release({ status: 204 });
     });
+
+    it("marks both rows while one is being put back and the other deleted", async () => {
+      twoBooks();
+      const restoring = heldOpen();
+      const purging = heldOpen();
+      api.on("/api/books/7/restore", restoring.respond, "POST");
+      api.on("/api/books/8/permanent", purging.respond, "DELETE");
+      vi.spyOn(window, "confirm").mockReturnValue(true);
+      renderWithProviders(<TrashPage />);
+      await screen.findByText("Dune");
+      const user = userEvent.setup();
+
+      await user.click(
+        within(rowOf("Dune")).getByRole("button", { name: /Put back/ }),
+      );
+      await user.click(
+        within(rowOf("Emma")).getByRole("button", { name: "Delete for good" }),
+      );
+
+      await waitFor(() =>
+        expect(api.lastCall("/api/books/8/permanent", "DELETE")).toBeDefined(),
+      );
+      await waitFor(() =>
+        expect(
+          within(rowOf("Dune")).getByRole("button", {
+            name: "Delete for good",
+          }),
+        ).toBeDisabled(),
+      );
+      for (const name of [/Put back/, "Delete for good"])
+        expect(
+          within(rowOf("Emma")).getByRole("button", { name }),
+        ).toBeDisabled();
+
+      restoring.release({ body: makeBook({ id: 7 }) });
+      purging.release({ status: 204 });
+    });
+
+    it("keeps each row marked until its own put back answers", async () => {
+      // A mutation remembers only its latest call, so reading the hook's own
+      // variables would unmark Dune the moment Emma was pressed. And a write
+      // that has answered stays in the mutation cache, so only reading the
+      // pending ones lets Dune go once its own answer lands.
+      twoBooks();
+      const dune = heldOpen();
+      const emma = heldOpen();
+      api.on("/api/books/7/restore", dune.respond, "POST");
+      api.on("/api/books/8/restore", emma.respond, "POST");
+      renderWithProviders(<TrashPage />);
+      await screen.findByText("Dune");
+      const user = userEvent.setup();
+
+      await user.click(
+        within(rowOf("Dune")).getByRole("button", { name: /Put back/ }),
+      );
+      await user.click(
+        within(rowOf("Emma")).getByRole("button", { name: /Put back/ }),
+      );
+
+      await waitFor(() =>
+        expect(api.lastCall("/api/books/8/restore", "POST")).toBeDefined(),
+      );
+      await waitFor(() => {
+        for (const title of ["Dune", "Emma"])
+          expect(
+            within(rowOf(title)).getByRole("button", {
+              name: "Delete for good",
+            }),
+          ).toBeDisabled();
+      });
+
+      dune.release({ body: makeBook({ id: 7 }) });
+
+      await waitFor(() =>
+        expect(
+          within(rowOf("Dune")).getByRole("button", { name: /Put back/ }),
+        ).toBeEnabled(),
+      );
+      expect(
+        within(rowOf("Emma")).getByRole("button", { name: /Put back/ }),
+      ).toBeDisabled();
+
+      emma.release({ body: makeBook({ id: 8 }) });
+    });
+
+    it("reports a failed put back when another row's put back was pressed after it", async () => {
+      // The hook's own `error` is its latest call's, Emma's here, so Dune's
+      // failure would show nothing at all.
+      twoBooks();
+      const dune = heldOpen();
+      const emma = heldOpen();
+      api.on("/api/books/7/restore", dune.respond, "POST");
+      api.on("/api/books/8/restore", emma.respond, "POST");
+      renderWithProviders(
+        <ToastProvider>
+          <TrashPage />
+        </ToastProvider>,
+      );
+      await screen.findByText("Dune");
+      const user = userEvent.setup();
+
+      await user.click(
+        within(rowOf("Dune")).getByRole("button", { name: /Put back/ }),
+      );
+      await user.click(
+        within(rowOf("Emma")).getByRole("button", { name: /Put back/ }),
+      );
+      await waitFor(() =>
+        expect(api.lastCall("/api/books/8/restore", "POST")).toBeDefined(),
+      );
+
+      dune.release({ status: 400, body: { detail: "Dune is not deleted" } });
+      emma.release({ body: makeBook({ id: 8 }) });
+
+      expect(await screen.findByText("Back on the shelf.")).toBeInTheDocument();
+      expect(await screen.findByRole("alert")).toHaveTextContent(
+        "Dune is not deleted",
+      );
+    });
+
+    it("reports a failed delete for good when another row's delete was pressed after it", async () => {
+      // The purge twin: its failure is wired separately from the put back's,
+      // so the test above cannot see it go silent.
+      twoBooks();
+      const dune = heldOpen();
+      const emma = heldOpen();
+      api.on("/api/books/7/permanent", dune.respond, "DELETE");
+      api.on("/api/books/8/permanent", emma.respond, "DELETE");
+      vi.spyOn(window, "confirm").mockReturnValue(true);
+      renderWithProviders(<TrashPage />);
+      await screen.findByText("Dune");
+      const user = userEvent.setup();
+
+      await user.click(
+        within(rowOf("Dune")).getByRole("button", { name: "Delete for good" }),
+      );
+      await user.click(
+        within(rowOf("Emma")).getByRole("button", { name: "Delete for good" }),
+      );
+      await waitFor(() =>
+        expect(api.lastCall("/api/books/8/permanent", "DELETE")).toBeDefined(),
+      );
+
+      dune.release({ status: 400, body: { detail: "Dune is on loan" } });
+      emma.release({ status: 204 });
+
+      expect(await screen.findByRole("alert")).toHaveTextContent(
+        "Dune is on loan",
+      );
+    });
+
+    it("leaves a row pressable while a different write on its book is out", async () => {
+      // Only a put back or a delete marks a trash row. A status change on the
+      // same book carries the same id, and it must not refuse a press here.
+      twoBooks();
+      const queryClient = createTestQueryClient();
+      void queryClient
+        .getMutationCache()
+        .build(queryClient, {
+          mutationKey: getUpdateStatusMutationKey(),
+          mutationFn: () => new Promise(() => {}),
+        })
+        .execute({ bookId: 7 });
+      renderWithProviders(<TrashPage />, { queryClient });
+      await screen.findByText("Dune");
+
+      expect(queryClient.isMutating()).toBe(1);
+      expect(
+        within(rowOf("Dune")).getByRole("button", { name: /Put back/ }),
+      ).toBeEnabled();
+    });
   });
 
   describe("deleting for good", () => {
@@ -317,5 +479,43 @@ describe("TrashPage", () => {
     renderWithProviders(<TrashPage />);
 
     expect(await screen.findByRole("alert")).toBeInTheDocument();
+  });
+});
+
+/** How many entries a page body holds, or -1 for one that is not a page. */
+const entries = (body: unknown) =>
+  (body as { items?: unknown[] } | undefined)?.items?.length ?? -1;
+
+describe("TrashPage over any answer the schema permits", () => {
+  // What the page's hooks are handed is drawn from `openapi.json`, per
+  // request. `tests/schemaPage.tsx` holds what the page may not do.
+  it("is drawn every shape of answer its main request declares", async () => {
+    await witness(answersOf("list_trash"), {
+      "is an error body": (answer) => answer.status === 422,
+      "is an empty page": (answer) => entries(answer.body) === 0,
+      "is a page with an entry": (answer) => entries(answer.body) > 0,
+    });
+  });
+
+  it("neither throws nor shows a value nobody can name", PROPERTY, async () => {
+    expect(
+      await holds(
+        fc.gen(),
+        async (answers) => {
+          try {
+            const rendered = await overSchema(<TrashPage />, answers);
+            expect(rendered.problems).toEqual([]);
+            return rendered;
+          } finally {
+            forget();
+          }
+        },
+        {
+          "showed a value an answer carried": (_, rendered) =>
+            rendered.echoed > 0,
+          "drew an alert": (_, rendered) => rendered.alerts.length > 0,
+        },
+      ),
+    ).toBe(PROFILE.runs);
   });
 });

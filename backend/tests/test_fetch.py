@@ -727,6 +727,24 @@ class TestDecodingMatchesWhatHttpxWouldHaveDone:
             "b": "\N{GRINNING FACE}",
         }
 
+    @pytest.mark.parametrize(
+        "written",
+        [
+            pytest.param(b'["\\uD800"]', id="an escape in upper case hex"),
+            pytest.param(b'["\\udC00"]', id="an escape in mixed case hex"),
+            pytest.param(b'["\xed\xa0\x80"]', id="the raw bytes of one, in UTF-8"),
+            pytest.param(
+                '["\ud800"]'.encode("utf-16-le", "surrogatepass"), id="the raw bytes of one, in UTF-16"
+            ),
+        ],
+    )
+    def test_the_repair_is_reached_however_the_body_spells_the_surrogate(self, written):
+        """`json.loads` decodes bytes with `surrogatepass`, so a surrogate can
+        arrive as itself as well as escaped, and an escape's hex digits take
+        either case. Each row is a spelling the check ahead of the walk has to
+        see, or the walk is skipped and the surrogate reaches a response model."""
+        assert fetch.Fetched(200, written).json() == ["\N{REPLACEMENT CHARACTER}"]
+
     def test_the_repair_walks_as_deep_as_the_parser_does(self):
         """Walked with a stack: a repair that recursed would raise on an answer
         the parser had just accepted. 3,000 is past the interpreter's default

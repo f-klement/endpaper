@@ -17,9 +17,9 @@ a constant:
 
 * **An ignore file that is not there.** A population derived from a rule that is
   missing is a population with no bound.
-* **A form this cannot honour**: a negation, a backslash, a `**`, a bare `*`, and
-  a wildcard inside an anchored pattern, because that arm compares text rather
-  than matching. Approximating wide drops a versioned file from the walk, which
+* **A form this cannot honour**: a negation, a backslash, a `**` anywhere but
+  a leading `**/` before one name, a bare `*`, and a character class inside an
+  anchored pattern. Approximating wide drops a versioned file from the walk, which
   is the defect the walk exists to stop; approximating narrow walks a directory
   the repository ignores, which is how the publish tooling's own output came to
   be read as source.
@@ -58,7 +58,7 @@ latent one: `[[:alpha:]]` becomes a set of the six characters `[:ahlp` followed
 by a **literal `]`**, so it matches a two character string such as `a]` and no
 single character at all. Counted against `fnmatch.translate`, which yields
 `[\\[:alpha:]\\]`. So it matches nothing a letter class is written for. Anchored,
-the wildcard clause takes it; unanchored it passes.
+the character class clause takes it; unanchored it passes.
 
 That form is not in this repository's ignore file. Naming what is refused is
 honest; a further predicate for each shape somebody thinks of is the enumeration
@@ -98,13 +98,75 @@ repeating this, because two copies of one reason is the shape this module exists
 to remove and they had already drifted apart when they were written.
 """
 
+import os
 from collections.abc import Sequence
-from fnmatch import fnmatch
+from fnmatch import fnmatchcase
 from pathlib import Path
 
 #: A parsed entry: the pattern, whether it is anchored to the root, and whether
 #: it carries git's directory only marker.
 IgnoreEntry = tuple[str, bool, bool]
+
+
+def _matches(name: str, pattern: str) -> bool:
+    """`fnmatch` over the filesystem encoding's bytes, because git matches
+    bytes: its `?` takes one byte, so `/?.md` keeps a one letter name whose
+    letter is two bytes. Over text a `?` takes the whole letter and drops a
+    versioned file from the walk."""
+    return fnmatchcase(os.fsencode(name), os.fsencode(pattern))
+
+
+def _unsupported(entry: str, *, anchored: bool, negated: bool) -> str | None:
+    """Why `ignore_patterns` cannot honour `entry`, or None when it can.
+
+    **`negated` is passed in rather than read off `entry`**, which has lost its
+    markers by now; why that matters is at `negated`'s assignment in
+    `ignore_patterns`. `anchored` is the answer after the strip, slash inside
+    included, since the anchored arm matches component by component and a
+    class there is the POSIX class reading this module's head describes.
+    """
+    # **The backslash class is here because `negated` is a position test.**
+    # Containment on `!` used to refuse `\!foo` as a side effect; by position
+    # it passes, and `fnmatch` then reads the backslash as an ordinary
+    # character and matches a name git never ignores. Narrow and silent, so
+    # removing either of these two re-opens the other's hole.
+    #
+    # **`entry == "*"` and never `"*" in entry`.** A bare star matches every
+    # component, which takes a population derived from this walk to zero with
+    # the parse non-empty and any ratchet over it comparing nothing. By
+    # containment it would refuse three of this repository's own 25 entries.
+    # What goes past: `?*` matches every component as a bare star does and
+    # passes, which takes writing it on purpose. `?` and a character class
+    # each match a component narrower than every name, so neither empties a
+    # population on its own, and the extent of what some other spelling of
+    # "matches everything" does here is not claimed.
+    #
+    # **The message carries which term fired, because five terms sharing one
+    # sentence tell a contributor to teach the walk about a form when the fix
+    # is a character.** The backslash is the term most likely to be met, by
+    # somebody writing a path the way their shell does, and the answer to it
+    # is one sentence rather than a change here.
+    if negated:
+        return "a negation, whose marker git reads in the line's first position"
+    if "\\" in entry:
+        return (
+            "a backslash: git spells every pattern with forward slashes, and "
+            "`fnmatch` reads the character as ordinary rather than as an escape"
+        )
+    if "**" in entry:
+        return (
+            "a `**` other than a leading `**/` before one name: git matches it "
+            "across any number of directories, and this matches one component at a time"
+        )
+    if entry == "*":
+        return "a bare `*`, which matches every component and empties the walk"
+    # **`*` and `?` are matched per component, as git matches them, and a
+    # class is not.** Anchored, it is the POSIX class reading at the head of
+    # this module, which fails narrow, and this clause is where that refusal
+    # has always lived.
+    if anchored and "[" in entry:
+        return "a character class inside an anchored pattern, which `fnmatch` misreads"
+    return None
 
 
 def ignore_patterns(ignore_file: Path, *, refuse_empty: bool) -> list[IgnoreEntry]:
@@ -183,44 +245,15 @@ def ignore_patterns(ignore_file: Path, *, refuse_empty: bool) -> list[IgnoreEntr
         # live in the copy that dropped the marker.
         directory_only = entry.endswith("/")
         entry = entry.strip("/")
+        # **A leading `**/` before one name is git's spelling of "at any
+        # depth"**, which is exactly what an unanchored name already means, so
+        # `**/__pycache__/` is `__pycache__/`. Before more than one name it is
+        # not: the rest carries a slash and would read as anchored, so it keeps
+        # its `**` and is refused below.
+        if not anchored and entry.startswith("**/") and "/" not in entry[3:]:
+            entry = entry[3:]
         anchored = anchored or "/" in entry
-        # The anchored arm compares text rather than matching, so a wildcard
-        # there would read as "never matches" instead of raising.
-        #
-        # **The backslash class is here because `negated` is a position test.**
-        # Containment on `!` used to refuse `\!foo` as a side effect; by position
-        # it passes, and `fnmatch` then reads the backslash as an ordinary
-        # character and matches a name git never ignores. Narrow and silent, so
-        # removing either of these two re-opens the other's hole.
-        #
-        # **`entry == "*"` and never `"*" in entry`.** A bare star matches every
-        # component, which takes a population derived from this walk to zero with
-        # the parse non-empty and any ratchet over it comparing nothing. By
-        # containment it would refuse three of this repository's own 25 entries.
-        # What goes past: `?` and a character class each match a component
-        # narrower than every name, so neither empties a population on its own,
-        # and the extent of what some other spelling of "matches everything" does
-        # here is not claimed.
-        #
-        # **The message carries which term fired, because five terms sharing one
-        # sentence tell a contributor to teach the walk about a form when the fix
-        # is a character.** The backslash is the term most likely to be met, by
-        # somebody writing a path the way their shell does, and the answer to it
-        # is one sentence rather than a change here.
-        refused = None
-        if negated:
-            refused = "a negation, whose marker git reads in the line's first position"
-        elif "\\" in entry:
-            refused = (
-                "a backslash: git spells every pattern with forward slashes, and "
-                "`fnmatch` reads the character as ordinary rather than as an escape"
-            )
-        elif "**" in entry:
-            refused = "a `**`, which this matches one component at a time"
-        elif entry == "*":
-            refused = "a bare `*`, which matches every component and empties the walk"
-        elif anchored and set(entry) & set("*?["):
-            refused = "a wildcard inside an anchored pattern, which is compared as text"
+        refused = _unsupported(entry, anchored=anchored, negated=negated)
         if refused is not None:
             raise SystemExit(
                 f"unsupported .gitignore form, teach this walk about it: {entry} "
@@ -283,23 +316,28 @@ def is_ignored(relative: Path, patterns: Sequence[IgnoreEntry], *, is_dir: bool)
     the guard over the strip list catches the shortening and is **green** on the
     `is_dir` drop, and the marker arm above catches both.
     """
-    text = str(relative)
     for pattern, anchored, directory_only in patterns:
         if anchored:
             # An anchored pattern matches the path itself, where the marker
-            # decides, or anything under it, where it cannot.
-            matched = (
-                (is_dir or not directory_only)
-                if text == pattern
-                else text.startswith(f"{pattern}/")
-            )
+            # decides, or anything under it, where it cannot. **Component by
+            # component, and that is the separator**: a `*` cannot cross a
+            # slash, as in git, and `backend/data` cannot take
+            # `backend/database.py`.
+            segments = pattern.split("/")
+            parts = relative.parts
+            if len(parts) < len(segments) or not all(
+                _matches(part, segment) for part, segment in zip(parts, segments, strict=False)
+            ):
+                matched = False
+            else:
+                matched = len(parts) > len(segments) or is_dir or not directory_only
         else:
             # A directory only pattern still matches a **directory component**
             # of a file's path. The last component is the entry itself and is a
             # directory only when the caller says so; every component before it
             # is one by construction.
             parts = relative.parts if (is_dir or not directory_only) else relative.parts[:-1]
-            matched = any(fnmatch(part, pattern) for part in parts)
+            matched = any(_matches(part, pattern) for part in parts)
         if matched:
             return True
     return False

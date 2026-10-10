@@ -2,12 +2,16 @@
 
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import fc from "fast-check";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import AuthorsPage from "../../../src/pages/AuthorsPage";
 import { ToastProvider } from "../../../src/app/toast";
 import { resetIds } from "../../factories";
 import { mockApi, renderWithProviders, type MockApi } from "../../utils";
+import { answersOf } from "../../lib/schemaArbitrary";
+import { holds, PROFILE, PROPERTY, witness } from "../../property";
+import { forget, overSchema, scripted } from "../../schemaPage";
 
 let api: MockApi;
 
@@ -508,5 +512,68 @@ describe("AuthorsPage", () => {
         api.lastCall("/api/books/authors/aliases/7", "DELETE"),
       ).toBeDefined(),
     );
+  });
+});
+
+/** How many entries a list body holds, or -1 for one that is not a list. */
+const entries = (body: unknown) => (Array.isArray(body) ? body.length : -1);
+
+describe("AuthorsPage over any answer the schema permits", () => {
+  // What the page's hooks are handed is drawn from `openapi.json`, per
+  // request. `tests/schemaPage.tsx` holds what the page may not do.
+  it("is drawn every shape of answer its main request declares", async () => {
+    await witness(answersOf("list_authors"), {
+      "is an empty list": (answer) => entries(answer.body) === 0,
+      "is a list with an entry": (answer) => entries(answer.body) > 0,
+    });
+  });
+
+  it("neither throws nor shows a value nobody can name", PROPERTY, async () => {
+    expect(
+      await holds(
+        fc.gen(),
+        async (answers) => {
+          try {
+            const rendered = await overSchema(<AuthorsPage />, answers);
+            expect(rendered.problems).toEqual([]);
+            return rendered;
+          } finally {
+            forget();
+          }
+        },
+        {
+          "showed a value an answer carried": (_, rendered) =>
+            rendered.echoed > 0,
+        },
+      ),
+    ).toBe(PROFILE.runs);
+  });
+
+  it("shows a group whose id is the name of a member every object has", async () => {
+    // A counterexample, landed: the group's id, its keys joined, is
+    // `toString`, which an object of excluded names answered with a function.
+    try {
+      const rendered = await overSchema(
+        <AuthorsPage />,
+        scripted([
+          [
+            "list_authors",
+            { status: 200, body: [{ book_count: 0, key: "", name: "" }] },
+          ],
+          [
+            "list_author_suggestions",
+            {
+              status: 200,
+              body: [{ keys: ["toString"], names: [], reasons: [] }],
+            },
+          ],
+        ]),
+      );
+      expect(rendered.problems).toEqual([]);
+      // A key with no name beside it is shown as itself.
+      expect(rendered.shown).toContain("toString");
+    } finally {
+      forget();
+    }
   });
 });

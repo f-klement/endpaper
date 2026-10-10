@@ -11,7 +11,8 @@
  * bars fall below a pixel each and no amount of decoding effort recovers them.
  */
 
-import { screen, waitFor } from "@testing-library/react";
+import { act, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { renderLocalised } from "../../../utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -301,6 +302,74 @@ describe("BarcodeScanner", () => {
 
     expect(stopTrack).toHaveBeenCalled();
   });
+
+  it("names the camera unavailable when the refusal carries no message", async () => {
+    // A browser may reject with something that is not an Error, which has no
+    // message to show: the translated line stands in for it.
+    getUserMedia.mockRejectedValue("NotAllowed");
+    renderLocalised(<BarcodeScanner active onDetected={vi.fn<OnDetected>()} />);
+
+    // Two: the heading always reads it, and the detail line reads it only
+    // when it stands in for the missing message.
+    expect(await screen.findAllByText("Camera unavailable")).toHaveLength(2);
+  });
+});
+
+/**
+ * A camera request held open until the test answers it.
+ *
+ * The permission prompt can sit open while the member leaves the page, so the
+ * answer arrives at a scanner that has already been closed.
+ */
+function heldCamera() {
+  let answer!: (stream: MediaStream) => void;
+  let refuse!: (reason: unknown) => void;
+  getUserMedia.mockReturnValue(
+    new Promise<MediaStream>((resolve, reject) => {
+      answer = resolve;
+      refuse = reject;
+    }),
+  );
+  return { answer: (stream: MediaStream) => answer(stream), refuse };
+}
+
+/** Run `deliver` and let every promise it settles be handled. */
+async function settle(deliver: () => void): Promise<void> {
+  await act(async () => {
+    deliver();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+}
+
+describe("a camera that answers after the scanner was closed", () => {
+  it("is released at once rather than left running", async () => {
+    const camera = heldCamera();
+    const { unmount } = renderLocalised(
+      <BarcodeScanner active onDetected={vi.fn<OnDetected>()} />,
+    );
+    await waitFor(() => expect(getUserMedia).toHaveBeenCalled());
+    unmount();
+
+    await settle(() => camera.answer(fakeStream()));
+
+    expect(stopTrack).toHaveBeenCalled();
+    expect(decodeFromStream).not.toHaveBeenCalled();
+  });
+
+  it("leaves no error behind for a refusal that arrives after it", async () => {
+    const camera = heldCamera();
+    const { rerender } = renderLocalised(
+      <BarcodeScanner active onDetected={vi.fn<OnDetected>()} />,
+    );
+    await waitFor(() => expect(getUserMedia).toHaveBeenCalled());
+    rerender(
+      <BarcodeScanner active={false} onDetected={vi.fn<OnDetected>()} />,
+    );
+
+    await settle(() => camera.refuse(new Error("Permission denied")));
+
+    expect(screen.queryByText("Camera unavailable")).not.toBeInTheDocument();
+  });
 });
 
 describe("the camera light", () => {
@@ -316,5 +385,73 @@ describe("the camera light", () => {
     await waitFor(() => expect(decodeFromStream).toHaveBeenCalled());
 
     expect(screen.queryByText("Camera light")).not.toBeInTheDocument();
+  });
+
+  it("asks the camera for its light when pressed", async () => {
+    const stream = fakeStream({ torch: true });
+    getUserMedia.mockResolvedValue(stream);
+    const user = userEvent.setup();
+    renderLocalised(<BarcodeScanner active onDetected={vi.fn<OnDetected>()} />);
+
+    await user.click(
+      await screen.findByRole("button", { name: "Camera light" }),
+    );
+
+    expect(stream.getVideoTracks()[0]!.applyConstraints).toHaveBeenCalledWith({
+      advanced: [{ torch: true }],
+    });
+  });
+
+  it("shows the light as on once the camera has accepted it", async () => {
+    getUserMedia.mockResolvedValue(fakeStream({ torch: true }));
+    const user = userEvent.setup();
+    renderLocalised(<BarcodeScanner active onDetected={vi.fn<OnDetected>()} />);
+    const button = await screen.findByRole("button", { name: "Camera light" });
+
+    await user.click(button);
+
+    await waitFor(() => expect(button).toHaveAttribute("aria-pressed", "true"));
+  });
+
+  it("turns the light off again on a second press", async () => {
+    const stream = fakeStream({ torch: true });
+    getUserMedia.mockResolvedValue(stream);
+    const user = userEvent.setup();
+    renderLocalised(<BarcodeScanner active onDetected={vi.fn<OnDetected>()} />);
+    const button = await screen.findByRole("button", { name: "Camera light" });
+
+    await user.click(button);
+    await waitFor(() => expect(button).toHaveAttribute("aria-pressed", "true"));
+    await user.click(button);
+
+    await waitFor(() =>
+      expect(button).toHaveAttribute("aria-pressed", "false"),
+    );
+    expect(
+      stream.getVideoTracks()[0]!.applyConstraints,
+    ).toHaveBeenLastCalledWith({ advanced: [{ torch: false }] });
+  });
+
+  it("withdraws the control when the camera refuses the light", async () => {
+    // A camera that reported the capability and then refused it: the scan
+    // works without light, so the control goes rather than an error appearing.
+    const stream = fakeStream({ torch: true });
+    vi.mocked(stream.getVideoTracks()[0]!.applyConstraints).mockRejectedValue(
+      new Error("OverconstrainedError"),
+    );
+    getUserMedia.mockResolvedValue(stream);
+    const user = userEvent.setup();
+    renderLocalised(<BarcodeScanner active onDetected={vi.fn<OnDetected>()} />);
+
+    await user.click(
+      await screen.findByRole("button", { name: "Camera light" }),
+    );
+
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("button", { name: "Camera light" }),
+      ).not.toBeInTheDocument(),
+    );
+    expect(screen.queryByText("Camera unavailable")).not.toBeInTheDocument();
   });
 });

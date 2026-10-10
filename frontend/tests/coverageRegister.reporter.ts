@@ -64,6 +64,14 @@ import {
 } from "./coverageRegister";
 import { MARKER, OWNER } from "./coverageRegister.globalSetup";
 
+/**
+ * Set to `off` by the plant harness for every arm it runs: the register is
+ * red by construction on a branch that adds a test, so a plant's baseline
+ * would refuse exactly there. Only that word turns this reporter off; the
+ * suite runner refuses any other value before a run starts.
+ */
+export const SWITCH = "ENDPAPER_COVERAGE_REGISTER";
+
 export default class CoverageRegisterReporter {
   private vitest: {
     projects?: {
@@ -179,6 +187,22 @@ export default class CoverageRegisterReporter {
             `discovered and not the same ones: ${missing.join(", ")} was ` +
             "discovered and did not run.",
         );
+    }
+
+    // **Here, where the document is read**, so the checks above about the run
+    // itself still run under the switch, as they do in the backend half.
+    // Printed, so the run's own output says what it did not check. A pipeline
+    // runs vitest directly rather than through the suite runner, so there a CI
+    // variable carrying the switch fails the run instead of passing it unchecked.
+    if (process.env[SWITCH] === "off") {
+      if (process.env.GITLAB_CI !== undefined)
+        throw new Error(
+          `${SWITCH}=off is for a plant copy, and this run is a pipeline.`,
+        );
+      console.log(
+        `coverage register: not checked, ${SWITCH}=off. No write is offered.`,
+      );
+      return;
     }
 
     const itsRegister = join(testRoot, "COVERAGE.md");

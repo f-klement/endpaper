@@ -1,3 +1,5 @@
+import type { ReactNode } from "react";
+
 import type {
   ClassificationFacets,
   CollectionOut,
@@ -20,7 +22,7 @@ import {
   STATUS_FILTERS,
   VIEW_OPTIONS,
 } from "../types";
-import { Icon } from "../../../components";
+import { Icon, type IconName } from "../../../components";
 
 interface BookFiltersProps {
   filters: Filters;
@@ -54,6 +56,96 @@ interface BookFiltersProps {
   view: RememberedPerScope<CatalogueMode, LibraryView>;
 }
 
+/** A filter arrived at by following a link, shown with a way to take it off. */
+function FilterChip({
+  label,
+  value,
+  onClear,
+}: {
+  label: string;
+  value: string;
+  onClear: () => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div className="mt-2">
+      <span className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full bg-accent-50 border border-accent-200 text-accent-800 dark:bg-accent-950 dark:border-accent-900 dark:text-accent-300">
+        {label}: {value}
+        <button
+          type="button"
+          onClick={onClear}
+          aria-label={t("common.clearSelection")}
+          className="opacity-60 hover:opacity-100 leading-none"
+        >
+          ×
+        </button>
+      </span>
+    </div>
+  );
+}
+
+/**
+ * A pill that folds a picker panel open, with the number of picks it holds and
+ * a way to clear them. The panel is `children`, drawn only while open.
+ */
+function PanelToggle({
+  icon,
+  label,
+  count,
+  isOpen,
+  onToggle,
+  onClear,
+  children,
+}: {
+  icon: IconName;
+  label: string;
+  count: number;
+  isOpen: boolean;
+  onToggle: () => void;
+  onClear: () => void;
+  children: ReactNode;
+}) {
+  const { t } = useTranslation();
+  return (
+    <>
+      <div className="mt-2">
+        <button
+          onClick={onToggle}
+          className={`text-sm px-3 py-1 rounded-full border transition-colors inline-flex items-center gap-1.5 ${
+            count > 0
+              ? "bg-accent-fill border-accent-fill text-on-accent"
+              : "border-paper-200 text-paper-600 bg-paper-0 hover:border-accent-300 " +
+                "dark:bg-paper-900 dark:border-paper-700 dark:text-paper-300"
+          }`}
+        >
+          <Icon name={icon} className="w-3.5 h-3.5" /> {label}{" "}
+          {count > 0 && `(${count})`}
+          <Icon
+            name="chevron"
+            className={`w-3 h-3 opacity-70 transition-transform duration-150 ${
+              isOpen ? "-rotate-90" : "rotate-90"
+            }`}
+          />
+        </button>
+        {count > 0 && (
+          <button
+            onClick={onClear}
+            className="ml-2 text-xs text-paper-600 hover:text-paper-800 underline dark:text-paper-400 dark:hover:text-paper-300"
+          >
+            {t("library.clear")}
+          </button>
+        )}
+      </div>
+
+      {isOpen && (
+        <div className="mt-2 p-3 bg-paper-50 rounded-xl border border-paper-100 dark:bg-paper-900 dark:border-paper-800">
+          {children}
+        </div>
+      )}
+    </>
+  );
+}
+
 /**
  * The status pills, the sort select, and the two collapsible panels.
  * Presentational.
@@ -72,11 +164,6 @@ export default function BookFilters({
   view,
 }: BookFiltersProps) {
   const { t } = useTranslation();
-  const activeTagCount = filters.tagIds.length;
-  // Both groups count towards one badge, because the pill is one control and
-  // "3" beside it should mean three things are narrowing the shelf.
-  const activeClassificationCount =
-    filters.headings.length + filters.ddcDivisions.length;
 
   return (
     <>
@@ -310,132 +397,69 @@ export default function BookFilters({
           link carried: the display name is on the authors page, and showing it
           here would need a second request to find out what it is. */}
       {filters.author && (
-        <div className="mt-2">
-          <span className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full bg-accent-50 border border-accent-200 text-accent-800 dark:bg-accent-950 dark:border-accent-900 dark:text-accent-300">
-            {t("authors.label")}: {filters.author}
-            <button
-              type="button"
-              onClick={() => onFilterChange({ author: null })}
-              aria-label={t("common.clearSelection")}
-              className="opacity-60 hover:opacity-100 leading-none"
-            >
-              ×
-            </button>
-          </span>
-        </div>
+        <FilterChip
+          label={t("authors.label")}
+          value={filters.author}
+          onClear={() => onFilterChange({ author: null })}
+        />
       )}
 
       {/* A series filter is arrived at by following a link from a book, so it
           is shown as a removable chip rather than as another dropdown. */}
       {filters.series && (
-        <div className="mt-2">
-          <span className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full bg-accent-50 border border-accent-200 text-accent-800 dark:bg-accent-950 dark:border-accent-900 dark:text-accent-300">
-            {t("series.label")}: {filters.series}
-            <button
-              type="button"
-              onClick={() => onFilterChange({ series: null })}
-              aria-label={t("common.clearSelection")}
-              className="opacity-60 hover:opacity-100 leading-none"
-            >
-              ×
-            </button>
-          </span>
-        </div>
+        <FilterChip
+          label={t("series.label")}
+          value={filters.series}
+          onClear={() => onFilterChange({ series: null })}
+        />
       )}
 
-      <div className="mt-2">
-        <button
-          onClick={onToggleTagPanel}
-          className={`text-sm px-3 py-1 rounded-full border transition-colors inline-flex items-center gap-1.5 ${
-            activeTagCount > 0
-              ? "bg-accent-fill border-accent-fill text-on-accent"
-              : "border-paper-200 text-paper-600 bg-paper-0 hover:border-accent-300 " +
-                "dark:bg-paper-900 dark:border-paper-700 dark:text-paper-300"
-          }`}
-        >
-          <Icon name="tag" className="w-3.5 h-3.5" /> {t("library.tags")}{" "}
-          {activeTagCount > 0 && `(${activeTagCount})`}
-          <Icon
-            name="chevron"
-            className={`w-3 h-3 opacity-70 transition-transform duration-150 ${
-              showTagPanel ? "-rotate-90" : "rotate-90"
-            }`}
-          />
-        </button>
-        {activeTagCount > 0 && (
-          <button
-            onClick={() => onFilterChange({ tagIds: [] })}
-            className="ml-2 text-xs text-paper-600 hover:text-paper-800 underline dark:text-paper-400 dark:hover:text-paper-300"
-          >
-            {t("library.clear")}
-          </button>
-        )}
-      </div>
-
-      {showTagPanel && (
-        <div className="mt-2 p-3 bg-paper-50 rounded-xl border border-paper-100 dark:bg-paper-900 dark:border-paper-800">
-          <TagPicker
-            tags={tags}
-            selectedIds={filters.tagIds}
-            onToggle={(tagId) =>
-              onFilterChange(toggledFilter(filters, "tagIds", tagId))
-            }
-          />
-        </div>
-      )}
+      <PanelToggle
+        icon="tag"
+        label={t("library.tags")}
+        count={filters.tagIds.length}
+        isOpen={showTagPanel}
+        onToggle={onToggleTagPanel}
+        onClear={() => onFilterChange({ tagIds: [] })}
+      >
+        <TagPicker
+          tags={tags}
+          selectedIds={filters.tagIds}
+          onToggle={(tagId) =>
+            onFilterChange(toggledFilter(filters, "tagIds", tagId))
+          }
+        />
+      </PanelToggle>
 
       {/* Beside the tag pill and never inside it. The two filter the same
           shelf and mean different things: a tag is this library's word, a
           heading is a published scheme's. Folding them into one control would
           be the flattening the whole store exists to avoid. */}
-      <div className="mt-2">
-        <button
-          onClick={onToggleClassificationPanel}
-          className={`text-sm px-3 py-1 rounded-full border transition-colors inline-flex items-center gap-1.5 ${
-            activeClassificationCount > 0
-              ? "bg-accent-fill border-accent-fill text-on-accent"
-              : "border-paper-200 text-paper-600 bg-paper-0 hover:border-accent-300 " +
-                "dark:bg-paper-900 dark:border-paper-700 dark:text-paper-300"
-          }`}
-        >
-          <Icon name="library" className="w-3.5 h-3.5" />{" "}
-          {t("classification.filter")}{" "}
-          {activeClassificationCount > 0 && `(${activeClassificationCount})`}
-          <Icon
-            name="chevron"
-            className={`w-3 h-3 opacity-70 transition-transform duration-150 ${
-              showClassificationPanel ? "-rotate-90" : "rotate-90"
-            }`}
-          />
-        </button>
-        {activeClassificationCount > 0 && (
-          <button
-            // Both facets, because the badge above counts both: one control
-            // says how many things are narrowing the shelf, so one clear has
-            // to take them all off.
-            onClick={() => onFilterChange({ headings: [], ddcDivisions: [] })}
-            className="ml-2 text-xs text-paper-600 hover:text-paper-800 underline dark:text-paper-400 dark:hover:text-paper-300"
-          >
-            {t("library.clear")}
-          </button>
-        )}
-      </div>
-
-      {showClassificationPanel && (
-        <div className="mt-2 p-3 bg-paper-50 rounded-xl border border-paper-100 dark:bg-paper-900 dark:border-paper-800">
-          <ClassificationPicker
-            facets={classifications}
-            selectedHeadings={filters.headings}
-            selectedDivisions={filters.ddcDivisions}
-            onToggleHeading={(heading) =>
-              onFilterChange(toggledFilter(filters, "headings", heading))
-            }
-            onToggleDivision={(division) =>
-              onFilterChange(toggledFilter(filters, "ddcDivisions", division))
-            }
-          />
-        </div>
-      )}
+      <PanelToggle
+        icon="library"
+        label={t("classification.filter")}
+        // Both groups count towards one badge, because the pill is one control
+        // and "3" beside it should mean three things are narrowing the shelf.
+        count={filters.headings.length + filters.ddcDivisions.length}
+        isOpen={showClassificationPanel}
+        onToggle={onToggleClassificationPanel}
+        // Both facets, because the badge counts both: one control says how
+        // many things are narrowing the shelf, so one clear has to take them
+        // all off.
+        onClear={() => onFilterChange({ headings: [], ddcDivisions: [] })}
+      >
+        <ClassificationPicker
+          facets={classifications}
+          selectedHeadings={filters.headings}
+          selectedDivisions={filters.ddcDivisions}
+          onToggleHeading={(heading) =>
+            onFilterChange(toggledFilter(filters, "headings", heading))
+          }
+          onToggleDivision={(division) =>
+            onFilterChange(toggledFilter(filters, "ddcDivisions", division))
+          }
+        />
+      </PanelToggle>
     </>
   );
 }

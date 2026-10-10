@@ -2763,6 +2763,9 @@ describe("a member's book file cannot leave the browser", () => {
       // The picker component, and its props.
       "FilePickPanel",
       "FilePickPanelProps",
+      // The import cards' picker, and its props: a hidden input and a button.
+      "FilePicker",
+      "FilePickerProps",
       // The other half of `FileReader`: what one resolves to.
       "FileReading",
     ]);
@@ -3773,6 +3776,136 @@ describe("a module is replaced by an alias, never by a module mock", () => {
     // without matching a call.
     for (const name of replacers) {
       expect(replacesAModule(`vi.${name}("./x");`, "ts")).toBe(true);
+    }
+  });
+});
+
+/**
+ * Does this source spy on a method of `Storage.prototype`?
+ *
+ * **Parsed, for the reason `replacesAModule` above is**: a comment or a string
+ * naming the spelling is not a call, which is what keeps the notes explaining
+ * the trap and this rule's own fixtures outside it.
+ *
+ * It refuses a call of `spyOn` on a receiver whose rightmost name is `vi`,
+ * whose first argument, once any type assertion, non null assertion or
+ * `satisfies` around it is unwrapped, is `prototype` read off something whose
+ * rightmost name is `Storage`, dotted or bracketed. Anything else goes past,
+ * and every other route to the prototype or to `spyOn` takes a deliberate
+ * act. Matched by name, so a class or import of our own called `Storage`
+ * would be refused too; none exists.
+ */
+function spiesOnStoragePrototype(source: string, lang: "ts" | "tsx"): boolean {
+  // The name after a dot, or the literal inside brackets.
+  const memberName = (node: Node): string | null => {
+    const property = node.property;
+    if (!isNode(property)) return null;
+    return (
+      text(property.name) ??
+      (typeof property.value === "string" ? property.value : null)
+    );
+  };
+  const rightmost = (value: unknown): string | null =>
+    isNode(value) ? (text(value.name) ?? memberName(value)) : null;
+  // The nodes a TypeScript spelling wraps around an expression without
+  // changing its value. The parser drops parentheses itself.
+  const TYPE_WRAPPERS = new Set([
+    "TSAsExpression",
+    "TSNonNullExpression",
+    "TSSatisfiesExpression",
+    "TSTypeAssertion",
+  ]);
+  const withoutTypeWrappers = (value: unknown): unknown => {
+    let node = value;
+    while (isNode(node) && TYPE_WRAPPERS.has(node.type)) node = node.expression;
+    return node;
+  };
+
+  let found = false;
+  const walk = (value: unknown): void => {
+    if (found) return;
+    if (Array.isArray(value)) {
+      for (const item of value as unknown[]) walk(item);
+      return;
+    }
+    if (!isNode(value)) return;
+    const callee = value.callee;
+    const target = Array.isArray(value.arguments)
+      ? withoutTypeWrappers((value.arguments as unknown[])[0])
+      : undefined;
+    if (
+      value.type === "CallExpression" &&
+      isNode(callee) &&
+      callee.type === "MemberExpression" &&
+      rightmost(callee.object) === "vi" &&
+      memberName(callee) === "spyOn" &&
+      isNode(target) &&
+      target.type === "MemberExpression" &&
+      memberName(target) === "prototype" &&
+      rightmost(target.object) === "Storage"
+    ) {
+      found = true;
+      return;
+    }
+    for (const key of Object.keys(value)) walk(value[key]);
+  };
+  walk(parseAst(source, { lang }));
+  return found;
+}
+
+describe("storage is refused on the instance, never by a prototype spy", () => {
+  /**
+   * **A spy on `Storage.prototype` is a test of nothing.** happy-dom binds an
+   * own copy of each storage method onto the instance the first time it is
+   * read, so a prototype spy installed after that is never called and its test
+   * runs on storage that answered. Installed before that first read, it is
+   * bound onto the instance and survives `vi.restoreAllMocks()`, so it reaches
+   * later tests in the worker. `whileStorageRefuses` in
+   * `tests/storageRefusal.ts` is the shape that refuses and puts it back.
+   */
+  it("is not called anywhere in the suite", () => {
+    const offenders = testEntries()
+      .filter(([path, source]) => spiesOnStoragePrototype(source, langOf(path)))
+      .map(([path]) => path.replace("./", "tests/"));
+
+    expect(offenders).toEqual([]);
+  });
+
+  it("tells a call apart from prose about one", () => {
+    const prose = [
+      `// vi.spyOn(Storage.prototype, "getItem") is never called once read.`,
+      `/* vi.spyOn(Storage.prototype, "setItem"); */`,
+      `const said = 'vi.spyOn(Storage.prototype, "getItem")';`,
+    ].join("\n");
+    expect(spiesOnStoragePrototype(prose, "ts")).toBe(false);
+
+    // A spy on the instance, with its handle restored, is the other shape the
+    // setup message offers, so it is not this rule's to refuse.
+    expect(
+      spiesOnStoragePrototype(
+        `const h = vi.spyOn(localStorage, "getItem"); h.mockRestore();`,
+        "ts",
+      ),
+    ).toBe(false);
+    expect(spiesOnStoragePrototype(`vi.spyOn(window, "confirm");`, "ts")).toBe(
+      false,
+    );
+
+    for (const code of [
+      `vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {});`,
+      // The split prettier writes when the call heads an assignment chain,
+      // which is how one of the sites this rule was written after was spelled.
+      `const s = vi\n  .spyOn(Storage.prototype, "setItem");`,
+      `vi.spyOn(window.Storage.prototype, "removeItem");`,
+      `globalThis.vi.spyOn(Storage.prototype, "getItem");`,
+      `vi["spyOn"](Storage["prototype"], "getItem");`,
+      // A type wrapper is an honest TypeScript spelling, one per kind.
+      `vi.spyOn(Storage.prototype as Storage, "getItem");`,
+      `vi.spyOn(Storage.prototype!, "getItem");`,
+      `vi.spyOn(Storage.prototype satisfies Storage, "getItem");`,
+      `vi.spyOn(<Storage>Storage.prototype, "getItem");`,
+    ]) {
+      expect(spiesOnStoragePrototype(code, "ts")).toBe(true);
     }
   });
 });

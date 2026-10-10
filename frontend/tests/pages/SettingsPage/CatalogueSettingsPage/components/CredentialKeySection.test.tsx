@@ -250,6 +250,27 @@ describe("with a key in place", () => {
       api.lastCall("/api/settings/credential-key", "DELETE"),
     ).toBeUndefined();
   });
+
+  it("discards it once the question is answered", async () => {
+    const user = userEvent.setup();
+    api.on(
+      "/api/settings/credential-key",
+      { body: { ...NO_KEY, configured: true, location: "file" } },
+      "GET",
+    );
+    api.on("/api/settings/credential-key", { body: NO_KEY }, "DELETE");
+    render();
+    await user.click(
+      await screen.findByRole("button", { name: "Discard this key" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Discard this key" }));
+
+    await waitFor(() =>
+      expect(
+        api.lastCall("/api/settings/credential-key", "DELETE"),
+      ).toBeDefined(),
+    );
+  });
 });
 
 describe("typing a phrase back in", () => {
@@ -273,6 +294,26 @@ describe("typing a phrase back in", () => {
         },
       ),
     );
+  });
+
+  it("drops what was typed when it is cancelled", async () => {
+    // The box holds the key itself, so a cancelled entry must not wait in
+    // state for the next person to open it.
+    const user = userEvent.setup();
+    render();
+    await user.click(
+      await screen.findByRole("button", { name: "Enter a recovery phrase" }),
+    );
+    await user.type(
+      screen.getByLabelText("Enter a recovery phrase"),
+      "one two three",
+    );
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    await user.click(
+      screen.getByRole("button", { name: "Enter a recovery phrase" }),
+    );
+
+    expect(screen.getByLabelText("Enter a recovery phrase")).toHaveValue("");
   });
 
   it("says capitals and spacing do not matter", async () => {

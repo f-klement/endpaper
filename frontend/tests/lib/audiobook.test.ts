@@ -141,6 +141,21 @@ describe("an ID3 tagged MP3", () => {
     expect(tags).toMatchObject({ album: "Dune", artists: ["Frank Herbert"] });
   });
 
+  it("reads a 2.2 frame that ends before where a 2.3 header's flags would sit", async () => {
+    // 2.2 has no flag bytes. The last frame's body is three bytes and the tag
+    // has no padding, so reading flags at 2.3's offset reads past the tag.
+    const tags = await tagsOf(
+      mp3({
+        head: id3v2({
+          major: 2,
+          frames: [plainFrame("TP1", "Stephen King"), plainFrame("TAL", "It")],
+        }),
+      }),
+    );
+
+    expect(tags).toMatchObject({ album: "It", artists: ["Stephen King"] });
+  });
+
   it("takes several artists out of one NUL separated 2.4 frame", async () => {
     const tags = await tagsOf(
       mp3({
@@ -210,6 +225,28 @@ describe("an ID3 tagged MP3", () => {
     expect(tags?.album).toBe("ÿ Dune");
   });
 
+  it("steps over the length a 2.4 frame puts in front of its body when it says so", async () => {
+    // UTF-16, so the four length bytes read as text would be a different
+    // encoding byte and a different value rather than NULs a split drops.
+    const text = [1, ...utf16("Dune", false)];
+    const tags = await tagsOf(
+      mp3({
+        head: id3v2({
+          major: 4,
+          frames: [
+            {
+              id: "TALB",
+              body: new Uint8Array([0, 0, 0, text.length, ...text]),
+              flags: 0x0001,
+            },
+          ],
+        }),
+      }),
+    );
+
+    expect(tags?.album).toBe("Dune");
+  });
+
   it("skips a compressed frame rather than reading its bytes as text", async () => {
     const tags = await tagsOf(
       mp3({
@@ -227,6 +264,32 @@ describe("an ID3 tagged MP3", () => {
     );
 
     expect(tags).toMatchObject({ album: null, artists: ["Zane Grey"] });
+  });
+
+  // 2.3 and 2.4 put compression and encryption at different bits, and each
+  // version's bits mean nothing in the other: one mask for both would skip a
+  // readable frame in one direction or read a compressed one in the other.
+  it.each([
+    { verb: "skips", major: 3, bit: "0x0080", album: null },
+    { verb: "skips", major: 3, bit: "0x0040", album: null },
+    { verb: "reads", major: 3, bit: "0x0008", album: "Dune" },
+    { verb: "skips", major: 4, bit: "0x0008", album: null },
+    { verb: "skips", major: 4, bit: "0x0004", album: null },
+    { verb: "reads", major: 4, bit: "0x0080", album: "Dune" },
+  ])("$verb a 2.$major frame flagged $bit", async ({ major, bit, album }) => {
+    const tags = await tagsOf(
+      mp3({
+        head: id3v2({
+          major,
+          frames: [
+            plainFrame("TALB", "Dune", Number(bit)),
+            plainFrame("TPE1", "Frank Herbert"),
+          ],
+        }),
+      }),
+    );
+
+    expect(tags).toMatchObject({ album, artists: ["Frank Herbert"] });
   });
 
   it("steps over the extended header each version spells differently", async () => {

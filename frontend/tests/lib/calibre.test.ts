@@ -414,6 +414,20 @@ describe("finding the file beside a book", () => {
 
     expect(index.has("José/Book (1)")).toBe(true);
   });
+
+  it("passes over a package document that carries no path", () => {
+    // An ordinary file picker hands over no directory, so there is no book to
+    // pair the file with.
+    const index = indexOpfFiles([new File(["<package/>"], "metadata.opf")]);
+
+    expect(index.size).toBe(0);
+  });
+
+  it("passes over a package document at the library's root, which is no book's", () => {
+    const index = indexOpfFiles([picked("Calibre/metadata.opf")]);
+
+    expect(index.size).toBe(0);
+  });
 });
 
 /**

@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 
 import type { BookIdentifierOut, BookOut } from "../../../api/generated/model";
 import { errorText } from "../../../components/ErrorState";
-import { useTranslation } from "../../../i18n";
+import { useTranslation, type Translate } from "../../../i18n";
 import { searchUrl } from "../../../lib/goodreads";
 import { CoverImage } from "../../components";
 import IdentifierChips from "./IdentifierChips";
@@ -22,6 +22,101 @@ interface BookHeaderProps {
   onRemoveIdentifier: (identifier: BookIdentifierOut) => void;
 }
 
+const CHIP =
+  "text-xs text-paper-600 bg-paper-100 px-2 py-0.5 rounded dark:text-paper-400 dark:bg-paper-800";
+
+/** One chip under the title. */
+interface FactChip {
+  key: string;
+  text: string;
+  className: string;
+}
+
+/**
+ * The chips under the title, one per fact the book carries, in the order they
+ * are drawn.
+ *
+ * A page count of zero is a count and gets a chip; the text facts and the
+ * year are shown only when set. A list rather than one `&&` per chip, because
+ * React prints a falsy number behind `&&`: a year of zero would leave a bare
+ * "0" in the row.
+ */
+function factChips(book: BookOut, t: Translate): FactChip[] {
+  const chips: FactChip[] = [];
+  if (book.publisher)
+    chips.push({ key: "publisher", text: book.publisher, className: CHIP });
+  if (book.year)
+    chips.push({ key: "year", text: String(book.year), className: CHIP });
+  if (book.page_count != null)
+    chips.push({
+      key: "pages",
+      text: t("book.pages", { count: book.page_count }),
+      className: CHIP,
+    });
+  if (book.language)
+    chips.push({
+      key: "language",
+      text: book.language,
+      className:
+        "text-xs text-paper-600 bg-paper-100 px-2 py-0.5 rounded uppercase dark:text-paper-400 dark:bg-paper-800",
+    });
+  if (book.location)
+    chips.push({
+      key: "location",
+      text: book.location,
+      className:
+        "text-xs text-amber-700 bg-amber-50 px-2 py-0.5 rounded dark:text-amber-300 dark:bg-amber-950",
+    });
+  if (book.isbn)
+    chips.push({
+      key: "isbn",
+      text: t("book.isbn", { isbn: book.isbn }),
+      className: CHIP,
+    });
+  return chips;
+}
+
+/**
+ * "by {author}" with each name a link, or nothing when nobody is credited.
+ *
+ * The phrase is not broken into fragments a translator would have to
+ * reassemble. German does not keep English word order, so the catalogue holds
+ * the whole sentence and the placeholder is located by rendering it with a
+ * sentinel and splitting there: whatever sits on either side of the name stays
+ * where the translation put it. A catalogue that lost the placeholder degrades
+ * to the phrase followed by the names rather than to an exception.
+ */
+function AuthorCredit({ book }: { book: BookOut }) {
+  const { t } = useTranslation();
+  if (!book.author) return null;
+  const [byPrefix, bySuffix = ""] = t("book.by", { author: "\u0000" }).split(
+    "\u0000",
+  );
+  return (
+    <p className="text-paper-600 text-sm mt-1 dark:text-paper-400">
+      {/* The credit line as printed, with each name inside it a link. The
+          split comes from the payload (`authors`) rather than from a comma in
+          here: the separator rule belongs to the server, which is also where
+          `categories` proves how easy it is to get wrong. A book whose credit
+          line is one name still renders the line, so the text on screen is
+          what the cover says either way. */}
+      {byPrefix}
+      {(book.authors ?? [book.author]).map((name, index) => (
+        <span key={name}>
+          {index > 0 && ", "}
+          <Link
+            to={`/?author=${encodeURIComponent(name)}`}
+            className="hover:text-accent-700 hover:underline dark:hover:text-accent-400"
+          >
+            {name}
+          </Link>
+        </span>
+      ))}
+      {bySuffix}
+    </p>
+  );
+}
+
 /** Cover, title, metadata chips and the refresh control. */
 export default function BookHeader({
   book,
@@ -34,17 +129,6 @@ export default function BookHeader({
   onRemoveIdentifier,
 }: BookHeaderProps) {
   const { t } = useTranslation();
-
-  // "by {author}" with each name a link, without breaking the phrase into
-  // fragments a translator would have to reassemble. German does not keep
-  // English word order, so the catalogue holds the whole sentence and the
-  // placeholder is located by rendering it with a sentinel and splitting
-  // there: whatever sits on either side of the name stays where the
-  // translation put it. A catalogue that lost the placeholder degrades to the
-  // phrase followed by the names rather than to an exception.
-  const [byPrefix, bySuffix = ""] = t("book.by", { author: "\u0000" }).split(
-    "\u0000",
-  );
   const coverInput = useRef<HTMLInputElement>(null);
 
   function handleCover(event: ChangeEvent<HTMLInputElement>) {
@@ -132,61 +216,14 @@ export default function BookHeader({
               : t("series.partOfUnnumbered", { name: book.series_name })}
           </Link>
         )}
-        {book.author && (
-          <p className="text-paper-600 text-sm mt-1 dark:text-paper-400">
-            {/* The credit line as printed, with each name inside it a link.
-                The split comes from the payload (`authors`) rather than from a
-                comma in here: the separator rule belongs to the server, which
-                is also where `categories` proves how easy it is to get wrong.
-                A book whose credit line is one name still renders the line, so
-                the text on screen is what the cover says either way. */}
-            {byPrefix}
-            {(book.authors ?? [book.author]).map((name, index) => (
-              <span key={name}>
-                {index > 0 && ", "}
-                <Link
-                  to={`/?author=${encodeURIComponent(name)}`}
-                  className="hover:text-accent-700 hover:underline dark:hover:text-accent-400"
-                >
-                  {name}
-                </Link>
-              </span>
-            ))}
-            {bySuffix}
-          </p>
-        )}
+        <AuthorCredit book={book} />
 
         <div className="flex flex-wrap gap-2 mt-2">
-          {book.publisher && (
-            <span className="text-xs text-paper-600 bg-paper-100 px-2 py-0.5 rounded dark:text-paper-400 dark:bg-paper-800">
-              {book.publisher}
+          {factChips(book, t).map((chip) => (
+            <span key={chip.key} className={chip.className}>
+              {chip.text}
             </span>
-          )}
-          {book.year && (
-            <span className="text-xs text-paper-600 bg-paper-100 px-2 py-0.5 rounded dark:text-paper-400 dark:bg-paper-800">
-              {book.year}
-            </span>
-          )}
-          {book.page_count != null && (
-            <span className="text-xs text-paper-600 bg-paper-100 px-2 py-0.5 rounded dark:text-paper-400 dark:bg-paper-800">
-              {t("book.pages", { count: book.page_count })}
-            </span>
-          )}
-          {book.language && (
-            <span className="text-xs text-paper-600 bg-paper-100 px-2 py-0.5 rounded uppercase dark:text-paper-400 dark:bg-paper-800">
-              {book.language}
-            </span>
-          )}
-          {book.location && (
-            <span className="text-xs text-amber-700 bg-amber-50 px-2 py-0.5 rounded dark:text-amber-300 dark:bg-amber-950">
-              {book.location}
-            </span>
-          )}
-          {book.isbn && (
-            <span className="text-xs text-paper-600 bg-paper-100 px-2 py-0.5 rounded dark:text-paper-400 dark:bg-paper-800">
-              {t("book.isbn", { isbn: book.isbn })}
-            </span>
-          )}
+          ))}
           {/* After the ISBN and never before it. The ISBN is the edition's own
               number and everything here is a store's number for it, so a row
               that led with a vendor would put the borrowed name first. Absent

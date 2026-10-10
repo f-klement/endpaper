@@ -2,8 +2,9 @@
 
 **The client route is not settled and this module is not it.** What these tests pin is
 therefore deliberately narrow: the rules that any client behind `z3950.Session` has to
-follow, written where they currently live. The ctypes wiring is not tested and cannot be,
-because the suite is hermetic and no shared library is present.
+follow, written where they currently live. The suite is hermetic and holds no copy of
+YAZ, so the ctypes wiring runs against `StandInLibrary`, which reaches the conversions on
+this side of each call and nothing about how the real library behaves.
 
 The one test here that would be the only warning of a real regression is the latch.
 Measured 2026-08-28 against a closed port on a host that resolves: the connect reports
@@ -15,6 +16,7 @@ already, and it is produced by the library rather than by anything here.
 
 import ctypes
 from dataclasses import dataclass, field
+from typing import Any
 
 import pytest
 
@@ -46,6 +48,7 @@ class FakeBindings:
     hits: int = 1
     record_value: tuple[str, bytes] | None = ("USmarc", b"record")
     resultset_handle: int = 55
+    connection_handle: int = 7
     options: dict[str, str] = field(default_factory=dict)
     connected: list[tuple[str, int]] = field(default_factory=list)
     searched: list[str] = field(default_factory=list)
@@ -54,7 +57,7 @@ class FakeBindings:
     _errors_read: int = 0
 
     def create(self) -> int:
-        return 7
+        return self.connection_handle
 
     def option(self, connection: int, key: str, value: str) -> None:
         self.options[key] = value
@@ -126,6 +129,23 @@ class TestTheFirstFailureIsLatched:
         with pytest.raises(z3950.Refused) as first:
             session.fetch(0)
         with pytest.raises(z3950.Refused) as second:
+            session.search("q")
+        assert second.value is first.value
+
+    def test_a_connection_the_library_could_not_allocate_is_unreachable(self):
+        bindings = FakeBindings(connection_handle=0)
+        with pytest.raises(z3950.Unreachable):
+            opened(bindings)
+        assert bindings.connected == []
+
+    def test_a_search_answered_with_no_result_set_is_unreachable_and_latched(self):
+        # A null handle with no diagnostic beside it: reading it as zero hits would be
+        # the "this catalogue does not hold the book" the latch exists to refuse.
+        bindings = FakeBindings(resultset_handle=0)
+        session = opened(bindings)
+        with pytest.raises(z3950.Unreachable) as first:
+            session.search("q")
+        with pytest.raises(z3950.Unreachable) as second:
             session.search("q")
         assert second.value is first.value
 
@@ -398,6 +418,163 @@ class TestTheCtypesDeclarationsAreComplete:
         for name, restype, _ in provisional.SIGNATURES:
             if name.endswith(("_create", "_search_pqf", "_record", "_get")):
                 assert restype is ctypes.c_void_p, name
+
+
+class StandInLibrary:
+    """Stands where `libyaz.so.5` would: one C function pointer per row of `SIGNATURES`.
+
+    Each is built from its row's own prototype, so a call from `CtypesBindings` crosses
+    the argument and return conversions a loaded library would, and the Python behind
+    it answers the way ZOOM does: a null pointer for a missing handle, out parameters
+    left unset, a record member read by name with its length beside it.
+
+    **What it cannot catch is a wrong row**, because both sides of the call are built
+    from the same row. The declaration tests above hold the rows.
+    """
+
+    def __init__(
+        self,
+        *,
+        connection: int | None = 7,
+        resultset: int | None = 55,
+        record: int | None = 99,
+        members: dict[bytes, bytes | None] | None = None,
+        error: tuple[int, bytes | None, bytes | None, bytes | None] = (0, None, None, None),
+        hits: int = 3,
+    ) -> None:
+        self.answers = {"connection": connection, "resultset": resultset, "record": record}
+        self.hits = hits
+        self.members = {b"raw": b"record", b"syntax": b"USmarc"} if members is None else members
+        self.error = error
+        self.calls: list[tuple[str, tuple[Any, ...]]] = []
+        # Pointers handed to the caller point into these, so they live as long as this.
+        self._buffers: dict[bytes, ctypes.Array[ctypes.c_char]] = {}
+        for name, restype, argtypes in provisional.SIGNATURES:
+            behind = getattr(self, f"_{name}")
+            setattr(self, name, ctypes.CFUNCTYPE(restype, *argtypes)(behind))
+
+    def _called(self, name: str, *arguments: Any) -> None:
+        self.calls.append((name, arguments))
+
+    def _ZOOM_connection_create(self, options: int | None) -> int | None:
+        return self.answers["connection"]
+
+    def _ZOOM_connection_connect(self, connection: int, host: bytes, port: int) -> None:
+        self._called("connect", connection, host, port)
+
+    def _ZOOM_connection_option_set(self, connection: int, key: bytes, value: bytes) -> None:
+        self._called("option", connection, key, value)
+
+    def _ZOOM_connection_error_x(self, connection: int, message: Any, detail: Any, diagset: Any) -> int:
+        code, *strings = self.error
+        for out, value in zip((message, detail, diagset), strings, strict=True):
+            if value is not None:
+                out[0] = value
+        return code
+
+    def _ZOOM_connection_search_pqf(self, connection: int, pqf: bytes) -> int | None:
+        self._called("search", connection, pqf)
+        return self.answers["resultset"]
+
+    def _ZOOM_connection_destroy(self, connection: int) -> None:
+        self._called("destroy connection", connection)
+
+    def _ZOOM_resultset_size(self, resultset: int) -> int:
+        return self.hits
+
+    def _ZOOM_resultset_record(self, resultset: int, index: int) -> int | None:
+        return self.answers["record"]
+
+    def _ZOOM_resultset_destroy(self, resultset: int) -> None:
+        self._called("destroy result set", resultset)
+
+    def _ZOOM_record_get(self, record: int, name: bytes, length: Any) -> int | None:
+        value = self.members.get(name)
+        if value is None:
+            return None
+        buffer = self._buffers.setdefault(name, ctypes.create_string_buffer(value, len(value)))
+        length[0] = len(value)
+        return ctypes.addressof(buffer)
+
+
+def bound(
+    monkeypatch: pytest.MonkeyPatch, **answers: Any
+) -> tuple[provisional.CtypesBindings, StandInLibrary]:
+    """`CtypesBindings` over a `StandInLibrary` built from the keywords given."""
+    library = StandInLibrary(**answers)
+    monkeypatch.setattr(ctypes, "CDLL", lambda path: library)
+    return provisional.CtypesBindings(), library
+
+
+class TestTheCtypesWiringReadsWhatTheLibraryAnswers:
+    def test_a_record_holding_a_nul_arrives_whole(self, monkeypatch):
+        # The reason `ZOOM_record_get` is declared `c_void_p` and read with its length:
+        # MARC21 is binary, and a read that stops at the first NUL truncates the record.
+        bindings, _ = bound(monkeypatch, members={b"raw": b"00\x0000", b"syntax": b"USmarc"})
+        assert bindings.record(55, 0) == ("USmarc", b"00\x0000")
+
+    def test_a_position_the_library_holds_no_record_for_is_no_record(self, monkeypatch):
+        assert bound(monkeypatch, record=None)[0].record(55, 0) is None
+
+    def test_a_record_with_no_raw_member_is_no_record(self, monkeypatch):
+        assert bound(monkeypatch, members={b"syntax": b"USmarc"})[0].record(55, 0) is None
+
+    def test_a_record_with_no_syntax_member_has_an_empty_label(self, monkeypatch):
+        assert bound(monkeypatch, members={b"raw": b"record"})[0].record(55, 0) == ("", b"record")
+
+    def test_a_diagnostic_arrives_through_its_three_out_parameters(self, monkeypatch):
+        bindings, _ = bound(monkeypatch, error=(239, b"Record syntax not supported", b"1.2.840", b"Bib-1"))
+        assert bindings.error(7) == (239, "Record syntax not supported", "1.2.840", "Bib-1")
+
+    def test_a_diagnostic_string_the_library_left_unset_reads_as_empty(self, monkeypatch):
+        bindings, _ = bound(monkeypatch, error=(0, None, None, None))
+        assert bindings.error(7) == (0, "", "", "")
+
+    def test_a_null_connection_reads_as_none_allocated(self, monkeypatch):
+        assert bound(monkeypatch, connection=None)[0].create() == 0
+
+    def test_a_null_result_set_reads_as_none_returned(self, monkeypatch):
+        assert bound(monkeypatch, resultset=None)[0].search(7, "q") == 0
+
+
+class TestTheCtypesWiringCarriesAnAssociationToTheLibrary:
+    def test_the_hit_count_is_the_librarys(self, monkeypatch):
+        assert bound(monkeypatch, hits=36)[0].size(55) == 36
+
+    def test_text_reaches_the_library_as_bytes(self, monkeypatch):
+        bindings, library = bound(monkeypatch)
+        bindings.option(7, "databaseName", "EXAMPLE")
+        bindings.connect(7, "catalogue.example", 210)
+        bindings.search(7, '@attr 1=7 "9780262033848"')
+        assert library.calls == [
+            ("option", (7, b"databaseName", b"EXAMPLE")),
+            ("connect", (7, b"catalogue.example", 210)),
+            ("search", (7, b'@attr 1=7 "9780262033848"')),
+        ]
+
+    def test_both_handles_are_released_through_the_library(self, monkeypatch):
+        bindings, library = bound(monkeypatch)
+        bindings.free_resultset(55)
+        bindings.free_connection(7)
+        assert library.calls == [
+            ("destroy result set", (55,)),
+            ("destroy connection", (7,)),
+        ]
+
+    def test_the_library_is_loaded_at_the_first_open_and_not_before(self, monkeypatch):
+        loaded: list[str] = []
+        library = StandInLibrary()
+
+        def load(path: str) -> StandInLibrary:
+            loaded.append(path)
+            return library
+
+        monkeypatch.setattr(ctypes, "CDLL", load)
+        client = provisional.ProvisionalYazClient()
+        assert loaded == []
+        session = client.open(TARGET, timeout=5.0)
+        assert loaded == [provisional.LIBRARY]
+        assert session.search("q") == 3
 
 
 def test_the_client_and_the_session_satisfy_the_seams_protocols():

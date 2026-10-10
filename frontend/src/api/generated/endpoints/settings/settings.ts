@@ -29,6 +29,7 @@ import type {
   LoginImageOut,
   RecoveryPhraseIn,
   RecoveryPhraseOut,
+  Refusal,
   SenderHealth,
   SettingsOut,
   SettingsUpdate,
@@ -79,7 +80,7 @@ export const getGetSettingsQueryKey = () => {
 
 export const getGetSettingsQueryOptions = <
   TData = Awaited<ReturnType<typeof getSettings>>,
-  TError = unknown,
+  TError = Refusal,
 >(options?: {
   query?: Partial<
     UseQueryOptions<Awaited<ReturnType<typeof getSettings>>, TError, TData>
@@ -104,11 +105,11 @@ export const getGetSettingsQueryOptions = <
 export type GetSettingsQueryResult = NonNullable<
   Awaited<ReturnType<typeof getSettings>>
 >;
-export type GetSettingsQueryError = unknown;
+export type GetSettingsQueryError = Refusal;
 
 export function useGetSettings<
   TData = Awaited<ReturnType<typeof getSettings>>,
-  TError = unknown,
+  TError = Refusal,
 >(
   options: {
     query: Partial<
@@ -130,7 +131,7 @@ export function useGetSettings<
 };
 export function useGetSettings<
   TData = Awaited<ReturnType<typeof getSettings>>,
-  TError = unknown,
+  TError = Refusal,
 >(
   options?: {
     query?: Partial<
@@ -152,7 +153,7 @@ export function useGetSettings<
 };
 export function useGetSettings<
   TData = Awaited<ReturnType<typeof getSettings>>,
-  TError = unknown,
+  TError = Refusal,
 >(
   options?: {
     query?: Partial<
@@ -170,7 +171,7 @@ export function useGetSettings<
 
 export function useGetSettings<
   TData = Awaited<ReturnType<typeof getSettings>>,
-  TError = unknown,
+  TError = Refusal,
 >(
   options?: {
     query?: Partial<
@@ -243,7 +244,7 @@ export const updateSettings = async (
 export const getUpdateSettingsMutationKey = () => ["updateSettings"] as const;
 
 export const getUpdateSettingsMutationOptions = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -284,14 +285,14 @@ export type UpdateSettingsMutationResult = NonNullable<
   Awaited<ReturnType<typeof updateSettings>>
 >;
 export type UpdateSettingsMutationBody = SettingsUpdate;
-export type UpdateSettingsMutationError = HTTPValidationError;
+export type UpdateSettingsMutationError = Refusal | HTTPValidationError;
 export type UpdateSettingsMutationVariables = { data: SettingsUpdate };
 
 /**
  * @summary Update Settings
  */
 export const useUpdateSettings = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(
   options?: {
@@ -362,7 +363,7 @@ export const getForgetSourceCredentialMutationKey = () =>
   ["forgetSourceCredential"] as const;
 
 export const getForgetSourceCredentialMutationOptions = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -403,14 +404,14 @@ export type ForgetSourceCredentialMutationResult = NonNullable<
   Awaited<ReturnType<typeof forgetSourceCredential>>
 >;
 
-export type ForgetSourceCredentialMutationError = HTTPValidationError;
+export type ForgetSourceCredentialMutationError = Refusal | HTTPValidationError;
 export type ForgetSourceCredentialMutationVariables = { source: string };
 
 /**
  * @summary Forget Source Credential
  */
 export const useForgetSourceCredential = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(
   options?: {
@@ -493,7 +494,7 @@ export const getSetSourceCredentialMutationKey = () =>
   ["setSourceCredential"] as const;
 
 export const getSetSourceCredentialMutationOptions = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -534,7 +535,7 @@ export type SetSourceCredentialMutationResult = NonNullable<
   Awaited<ReturnType<typeof setSourceCredential>>
 >;
 export type SetSourceCredentialMutationBody = SourceCredentialIn;
-export type SetSourceCredentialMutationError = HTTPValidationError;
+export type SetSourceCredentialMutationError = Refusal | HTTPValidationError;
 export type SetSourceCredentialMutationVariables = {
   source: string;
   data: SourceCredentialIn;
@@ -544,7 +545,7 @@ export type SetSourceCredentialMutationVariables = {
  * @summary Set Source Credential
  */
 export const useSetSourceCredential = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(
   options?: {
@@ -585,9 +586,10 @@ export const getForgetCredentialKeyUrl = () => {
  * logins first is the way to reach a clean state, and `DELETE` on a source's
  * credential needs no key for exactly that reason.
  *
- * 409 when the deployment pinned the key through the environment: a process
- * cannot unset a variable for its own next start, so there is nothing here to
- * clear.
+ * 409 when a store holding the key cannot be cleared from here, naming it:
+ * the environment, because a process cannot unset a variable for its own next
+ * start; a key file this process cannot remove; or a keychain that kept the
+ * key.
  * @summary Forget Credential Key
  */
 export const forgetCredentialKey = async (
@@ -603,7 +605,7 @@ export const getForgetCredentialKeyMutationKey = () =>
   ["forgetCredentialKey"] as const;
 
 export const getForgetCredentialKeyMutationOptions = <
-  TError = unknown,
+  TError = Refusal,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -642,12 +644,12 @@ export type ForgetCredentialKeyMutationResult = NonNullable<
   Awaited<ReturnType<typeof forgetCredentialKey>>
 >;
 
-export type ForgetCredentialKeyMutationError = unknown;
+export type ForgetCredentialKeyMutationError = Refusal;
 
 /**
  * @summary Forget Credential Key
  */
-export const useForgetCredentialKey = <TError = unknown, TContext = unknown>(
+export const useForgetCredentialKey = <TError = Refusal, TContext = unknown>(
   options?: {
     mutation?: UseMutationOptions<
       Awaited<ReturnType<typeof forgetCredentialKey>>,
@@ -695,7 +697,7 @@ export const getGetCredentialKeyQueryKey = () => {
 
 export const getGetCredentialKeyQueryOptions = <
   TData = Awaited<ReturnType<typeof getCredentialKey>>,
-  TError = unknown,
+  TError = Refusal,
 >(options?: {
   query?: Partial<
     UseQueryOptions<Awaited<ReturnType<typeof getCredentialKey>>, TError, TData>
@@ -720,11 +722,11 @@ export const getGetCredentialKeyQueryOptions = <
 export type GetCredentialKeyQueryResult = NonNullable<
   Awaited<ReturnType<typeof getCredentialKey>>
 >;
-export type GetCredentialKeyQueryError = unknown;
+export type GetCredentialKeyQueryError = Refusal;
 
 export function useGetCredentialKey<
   TData = Awaited<ReturnType<typeof getCredentialKey>>,
-  TError = unknown,
+  TError = Refusal,
 >(
   options: {
     query: Partial<
@@ -750,7 +752,7 @@ export function useGetCredentialKey<
 };
 export function useGetCredentialKey<
   TData = Awaited<ReturnType<typeof getCredentialKey>>,
-  TError = unknown,
+  TError = Refusal,
 >(
   options?: {
     query?: Partial<
@@ -776,7 +778,7 @@ export function useGetCredentialKey<
 };
 export function useGetCredentialKey<
   TData = Awaited<ReturnType<typeof getCredentialKey>>,
-  TError = unknown,
+  TError = Refusal,
 >(
   options?: {
     query?: Partial<
@@ -798,7 +800,7 @@ export function useGetCredentialKey<
 
 export function useGetCredentialKey<
   TData = Awaited<ReturnType<typeof getCredentialKey>>,
-  TError = unknown,
+  TError = Refusal,
 >(
   options?: {
     query?: Partial<
@@ -855,7 +857,7 @@ export const getCreateCredentialKeyMutationKey = () =>
   ["createCredentialKey"] as const;
 
 export const getCreateCredentialKeyMutationOptions = <
-  TError = unknown,
+  TError = Refusal,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -894,12 +896,12 @@ export type CreateCredentialKeyMutationResult = NonNullable<
   Awaited<ReturnType<typeof createCredentialKey>>
 >;
 
-export type CreateCredentialKeyMutationError = unknown;
+export type CreateCredentialKeyMutationError = Refusal;
 
 /**
  * @summary Create Credential Key
  */
-export const useCreateCredentialKey = <TError = unknown, TContext = unknown>(
+export const useCreateCredentialKey = <TError = Refusal, TContext = unknown>(
   options?: {
     mutation?: UseMutationOptions<
       Awaited<ReturnType<typeof createCredentialKey>>,
@@ -979,7 +981,7 @@ export const getRestoreCredentialKeyMutationKey = () =>
   ["restoreCredentialKey"] as const;
 
 export const getRestoreCredentialKeyMutationOptions = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -1020,14 +1022,14 @@ export type RestoreCredentialKeyMutationResult = NonNullable<
   Awaited<ReturnType<typeof restoreCredentialKey>>
 >;
 export type RestoreCredentialKeyMutationBody = RecoveryPhraseIn;
-export type RestoreCredentialKeyMutationError = HTTPValidationError;
+export type RestoreCredentialKeyMutationError = Refusal | HTTPValidationError;
 export type RestoreCredentialKeyMutationVariables = { data: RecoveryPhraseIn };
 
 /**
  * @summary Restore Credential Key
  */
 export const useRestoreCredentialKey = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(
   options?: {
@@ -1229,7 +1231,7 @@ export const getGetLoginImageQueryKey = () => {
 
 export const getGetLoginImageQueryOptions = <
   TData = Awaited<ReturnType<typeof getLoginImage>>,
-  TError = unknown,
+  TError = Refusal,
 >(options?: {
   query?: Partial<
     UseQueryOptions<Awaited<ReturnType<typeof getLoginImage>>, TError, TData>
@@ -1254,11 +1256,11 @@ export const getGetLoginImageQueryOptions = <
 export type GetLoginImageQueryResult = NonNullable<
   Awaited<ReturnType<typeof getLoginImage>>
 >;
-export type GetLoginImageQueryError = unknown;
+export type GetLoginImageQueryError = Refusal;
 
 export function useGetLoginImage<
   TData = Awaited<ReturnType<typeof getLoginImage>>,
-  TError = unknown,
+  TError = Refusal,
 >(
   options: {
     query: Partial<
@@ -1280,7 +1282,7 @@ export function useGetLoginImage<
 };
 export function useGetLoginImage<
   TData = Awaited<ReturnType<typeof getLoginImage>>,
-  TError = unknown,
+  TError = Refusal,
 >(
   options?: {
     query?: Partial<
@@ -1302,7 +1304,7 @@ export function useGetLoginImage<
 };
 export function useGetLoginImage<
   TData = Awaited<ReturnType<typeof getLoginImage>>,
-  TError = unknown,
+  TError = Refusal,
 >(
   options?: {
     query?: Partial<
@@ -1320,7 +1322,7 @@ export function useGetLoginImage<
 
 export function useGetLoginImage<
   TData = Awaited<ReturnType<typeof getLoginImage>>,
-  TError = unknown,
+  TError = Refusal,
 >(
   options?: {
     query?: Partial<
@@ -1366,7 +1368,7 @@ export const setLoginImage = async (
 export const getSetLoginImageMutationKey = () => ["setLoginImage"] as const;
 
 export const getSetLoginImageMutationOptions = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -1407,14 +1409,14 @@ export type SetLoginImageMutationResult = NonNullable<
   Awaited<ReturnType<typeof setLoginImage>>
 >;
 export type SetLoginImageMutationBody = BodySetLoginImage;
-export type SetLoginImageMutationError = HTTPValidationError;
+export type SetLoginImageMutationError = Refusal | HTTPValidationError;
 export type SetLoginImageMutationVariables = { data: BodySetLoginImage };
 
 /**
  * @summary Set Login Image
  */
 export const useSetLoginImage = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(
   options?: {
@@ -1470,7 +1472,7 @@ export const getGetSenderHealthQueryKey = () => {
 
 export const getGetSenderHealthQueryOptions = <
   TData = Awaited<ReturnType<typeof getSenderHealth>>,
-  TError = unknown,
+  TError = Refusal,
 >(options?: {
   query?: Partial<
     UseQueryOptions<Awaited<ReturnType<typeof getSenderHealth>>, TError, TData>
@@ -1495,11 +1497,11 @@ export const getGetSenderHealthQueryOptions = <
 export type GetSenderHealthQueryResult = NonNullable<
   Awaited<ReturnType<typeof getSenderHealth>>
 >;
-export type GetSenderHealthQueryError = unknown;
+export type GetSenderHealthQueryError = Refusal;
 
 export function useGetSenderHealth<
   TData = Awaited<ReturnType<typeof getSenderHealth>>,
-  TError = unknown,
+  TError = Refusal,
 >(
   options: {
     query: Partial<
@@ -1525,7 +1527,7 @@ export function useGetSenderHealth<
 };
 export function useGetSenderHealth<
   TData = Awaited<ReturnType<typeof getSenderHealth>>,
-  TError = unknown,
+  TError = Refusal,
 >(
   options?: {
     query?: Partial<
@@ -1551,7 +1553,7 @@ export function useGetSenderHealth<
 };
 export function useGetSenderHealth<
   TData = Awaited<ReturnType<typeof getSenderHealth>>,
-  TError = unknown,
+  TError = Refusal,
 >(
   options?: {
     query?: Partial<
@@ -1573,7 +1575,7 @@ export function useGetSenderHealth<
 
 export function useGetSenderHealth<
   TData = Awaited<ReturnType<typeof getSenderHealth>>,
-  TError = unknown,
+  TError = Refusal,
 >(
   options?: {
     query?: Partial<

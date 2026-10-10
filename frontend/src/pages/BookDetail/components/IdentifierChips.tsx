@@ -41,7 +41,11 @@ const LABEL_BY_NAME: Partial<Record<string, MessageKey>> = SCHEME_LABEL;
 
 /** One chip's whole sentence, naming the store where this build knows it. */
 function chipText(t: Translate, identifier: BookIdentifierOut): string {
-  const key = LABEL_BY_NAME[identifier.scheme];
+  // `Object.hasOwn` first: a scheme named `toString` otherwise reads the
+  // prototype's function, skips the fallback and reaches `t` as a key.
+  const key = Object.hasOwn(LABEL_BY_NAME, identifier.scheme)
+    ? LABEL_BY_NAME[identifier.scheme]
+    : undefined;
   return key === undefined
     ? t("identifier.other", {
         scheme: identifier.scheme,

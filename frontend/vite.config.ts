@@ -364,7 +364,12 @@ export default defineConfig({
     // disarming the guard.
     reporters: ["default", "./tests/coverageRegister.reporter.ts", ...junit()],
     // The other half of that, and the half a command line cannot take away.
-    globalSetup: ["./tests/coverageRegister.globalSetup.ts"],
+    // The second hands the seed guard the configuration this process loaded,
+    // which a worker resolving it again cannot see.
+    globalSetup: [
+      "./tests/coverageRegister.globalSetup.ts",
+      "./tests/runConfiguration.globalSetup.ts",
+    ],
     setupFiles: ["./tests/setup.ts"],
     // **Pinned because a guard in `tests/setup.ts` depends on it, and nothing
     // named that dependency.** That file's `afterEach` refuses a leaked global

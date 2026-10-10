@@ -33,6 +33,23 @@ const CONDITIONS: { value: BookCondition; label: MessageKey }[] =
   CONDITION_ORDER.map((value) => ({ value, label: CONDITION_LABELS[value] }));
 
 /**
+ * The form's fields as the stored book fills them, an absent value being an
+ * empty field. One place, because the panel reads it three times: to seed the
+ * form, to reseed it when the book changes underneath, and to tell whether
+ * anything was edited.
+ */
+function copyDraft(book: BookOut) {
+  return {
+    format: book.format ?? "",
+    condition: book.condition ?? "",
+    price: formatMinor(book.purchase_price_minor),
+    currency: book.purchase_currency ?? "",
+    purchasedAt: book.purchased_at ?? "",
+    source: book.purchase_source ?? "",
+  };
+}
+
+/**
  * Facts about the object on the shelf, rather than about the work.
  *
  * Behind a disclosure on purpose, and that disclosure is now the "Your copies"
@@ -44,39 +61,41 @@ const CONDITIONS: { value: BookCondition; label: MessageKey }[] =
  */
 export default function CopyPanel({ book, isSaving, onSave }: CopyPanelProps) {
   const { t } = useTranslation();
-  const [format, setFormat] = useState<string>(book.format ?? "");
-  const [condition, setCondition] = useState<string>(book.condition ?? "");
-  const [price, setPrice] = useState(formatMinor(book.purchase_price_minor));
-  const [currency, setCurrency] = useState(book.purchase_currency ?? "");
-  const [purchasedAt, setPurchasedAt] = useState(book.purchased_at ?? "");
-  const [source, setSource] = useState(book.purchase_source ?? "");
+  const saved = copyDraft(book);
+  const [format, setFormat] = useState<string>(saved.format);
+  const [condition, setCondition] = useState<string>(saved.condition);
+  const [price, setPrice] = useState(saved.price);
+  const [currency, setCurrency] = useState(saved.currency);
+  const [purchasedAt, setPurchasedAt] = useState(saved.purchasedAt);
+  const [source, setSource] = useState(saved.source);
   const [priceError, setPriceError] = useState(false);
 
-  // Re-seed when the book changes underneath, the same reason ShelfPanel does.
+  // Re-seed when the book changes underneath, the same reason ShelfPanel does,
+  // and keyed on the draft's own values for the same reason as there.
   useEffect(() => {
-    setFormat(book.format ?? "");
-    setCondition(book.condition ?? "");
-    setPrice(formatMinor(book.purchase_price_minor));
-    setCurrency(book.purchase_currency ?? "");
-    setPurchasedAt(book.purchased_at ?? "");
-    setSource(book.purchase_source ?? "");
+    setFormat(saved.format);
+    setCondition(saved.condition);
+    setPrice(saved.price);
+    setCurrency(saved.currency);
+    setPurchasedAt(saved.purchasedAt);
+    setSource(saved.source);
     setPriceError(false);
   }, [
-    book.format,
-    book.condition,
-    book.purchase_price_minor,
-    book.purchase_currency,
-    book.purchased_at,
-    book.purchase_source,
+    saved.format,
+    saved.condition,
+    saved.price,
+    saved.currency,
+    saved.purchasedAt,
+    saved.source,
   ]);
 
   const dirty =
-    format !== (book.format ?? "") ||
-    condition !== (book.condition ?? "") ||
-    price !== formatMinor(book.purchase_price_minor) ||
-    currency !== (book.purchase_currency ?? "") ||
-    purchasedAt !== (book.purchased_at ?? "") ||
-    source !== (book.purchase_source ?? "");
+    format !== saved.format ||
+    condition !== saved.condition ||
+    price !== saved.price ||
+    currency !== saved.currency ||
+    purchasedAt !== saved.purchasedAt ||
+    source !== saved.source;
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();

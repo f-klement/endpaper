@@ -16,6 +16,7 @@ from auth import require_admin
 from dependencies import DbSession
 from enums import CatalogueSource, SettingKey
 from models import User
+from refusals import refuses
 from schemas import (
     CatalogueSourceOut,
     CredentialKeyOut,
@@ -145,6 +146,7 @@ def _refuse_if_pinned(key: SettingKey) -> None:
 
 
 @router.get("/login-image", response_model=LoginImageOut)
+@refuses(404)
 async def get_login_image() -> LoginImageOut:
     """Public: the login page renders before anyone holds a token."""
     path = cover_store.login_background_path()
@@ -634,9 +636,10 @@ def forget_credential_key(
     logins first is the way to reach a clean state, and `DELETE` on a source's
     credential needs no key for exactly that reason.
 
-    409 when the deployment pinned the key through the environment: a process
-    cannot unset a variable for its own next start, so there is nothing here to
-    clear.
+    409 when a store holding the key cannot be cleared from here, naming it:
+    the environment, because a process cannot unset a variable for its own next
+    start; a key file this process cannot remove; or a keychain that kept the
+    key.
     """
     try:
         credentials.forget_key()
@@ -646,6 +649,7 @@ def forget_credential_key(
 
 
 @router.put("/catalogue-sources/{source}/credential", response_model=SettingsOut)
+@refuses(404)
 def set_source_credential(
     source: str,
     payload: SourceCredentialIn,
@@ -695,6 +699,7 @@ def set_source_credential(
 
 
 @router.delete("/catalogue-sources/{source}/credential", response_model=SettingsOut)
+@refuses(404)
 def forget_source_credential(
     source: str,
     db: DbSession,

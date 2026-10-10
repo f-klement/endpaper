@@ -126,7 +126,10 @@ export interface Counted {
  * of the meter and of `MeteredFile` is a `#` field, which nothing outside
  * the class reaches. **What it still allows, stated**: a door handing the
  * meter a larger finite bound than it hands its reader. The zip seam is the
- * one door that sets it, from the same value at the same line.
+ * one door that sets it, from the same value at the same line. And a door
+ * that puts the engine's own inflater back on the global for part of its
+ * read: `measure` installs the counting one once per call and does not look
+ * again. Both take a deliberate act, so neither is checked.
  */
 export interface DoorMeter {
   require(holds: boolean, breach: string): void;

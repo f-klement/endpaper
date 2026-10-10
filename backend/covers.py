@@ -47,8 +47,10 @@ and refuses past it. `docs/decisions.md` has the round this was settled in.
 import asyncio
 import logging
 from collections import Counter
+from collections.abc import Awaitable, Callable
 from concurrent.futures import ThreadPoolExecutor
-from enum import StrEnum
+from dataclasses import dataclass
+from enum import Enum, StrEnum, auto
 from typing import Final
 from urllib.parse import urljoin, urlsplit
 
@@ -213,7 +215,7 @@ resolver: fetch.Resolver = fetch.system_resolver
 
 
 def _client() -> httpx.AsyncClient:
-    """The client both cover walks are made with, and what it carries.
+    """The client `_check` and `_download` each walk with, and what it carries.
 
     **`fetch.pinned_client`, so the address is classified after resolution and
     the connection goes to the literal that passed.** `COVER_HOSTS` says which
@@ -226,11 +228,11 @@ def _client() -> httpx.AsyncClient:
 
     **`follow_redirects=False` is `fetch._client`'s and is load bearing here.**
     A client that follows a redirect follows it anywhere, and the hop is the one
-    place a listed host gets to choose the next one. `_check` and `download`
-    walk the hops themselves so that `is_fetchable` runs on every one.
+    place a listed host gets to choose the next one. `_walk` walks the hops
+    itself so that `is_fetchable` runs on every one.
 
     `accept-encoding: identity` comes with it, paired with the `aiter_raw` in
-    both walks: `fetch._IDENTITY` carries the measurement. It costs nothing at
+    both reads: `fetch._IDENTITY` carries the measurement. It costs nothing at
     this door, because JPEG, PNG and WebP are already compressed and no image
     service gzips them.
 
@@ -268,8 +270,7 @@ def _next_hop(current: str, response: httpx.Response) -> str | None:
     """Where this redirect points, resolved against the hop it came from.
 
     None when it carries no `Location` at all, which is a redirect this walk
-    cannot follow rather than a service saying no. One home for the join, so the
-    two walks cannot come to disagree about what a relative `Location` means.
+    cannot follow rather than a service saying no.
     """
     location = response.headers.get("location")
     return None if not location else urljoin(current, location)
@@ -529,71 +530,79 @@ def candidates(isbn: str) -> tuple[str, ...]:
     return (open_library_url(isbn), dnb_url(isbn))
 
 
-async def _check(
-    client: httpx.AsyncClient, url: str, deadline: float | None = None
-) -> bool | None:
-    """True if it is an image, False if it is definitely absent, None if unknown.
+class _Stop(Enum):
+    """Why a cover walk ended before it reached a response to read.
 
-    The three-way answer is the point. `False` means a service said 404, so the
-    next candidate is worth trying. `None` means the question could not be
-    answered (a 5xx, a timeout, a refused connection), and the caller keeps the
-    URL rather than discarding a cover over a blip.
-
-    A GET rather than a HEAD: some image services answer HEAD with a 405 or
-    with headers that do not match what a GET returns, and only a few hundred
-    bytes are read.
-
-    **Every hop is checked against `is_fetchable` before the request**, this one
-    included, because `resolve` puts a member-supplied URL at the front of its
-    candidate list. Redirects are followed by hand rather than by the client, so
-    that a listed host cannot hand the server an unlisted one to go and read.
-    An unlisted host is `False`, not `None`: it is not a blip to retry, it is a
-    candidate to drop.
-
-    **A hop is bounded by `asyncio.timeout` and not by the client's `timeout=`.**
-    See `_hop_seconds`: this function is where the 7.900s against a 1.0 second
-    budget was measured.
+    `_walk` answers one of these and each caller maps it to its own answer:
+    `_check` to its three way verdict, `_download` to None. What each says in
+    the log is the caller's too, because the two word it differently, except
+    `UNUSABLE`'s, which `_walk` writes because both callers word it alike.
     """
-    target = url
+
+    #: A hop's host is not on `COVER_HOSTS`.
+    UNLISTED = auto()
+    #: A host `idna` cannot decode, on the first hop or on a `Location`.
+    UNUSABLE = auto()
+    #: The budget was spent before the next hop could start.
+    SPENT = auto()
+    #: A redirect carrying no `Location`, which this walk cannot follow.
+    NOWHERE = auto()
+    #: A transport error, or the hop's own `asyncio.timeout`.
+    FAILED = auto()
+    #: More than `MAX_REDIRECTS` redirects.
+    LOOPED = auto()
+
+
+@dataclass(frozen=True)
+class _Stopped:
+    """A walk that ended without a response, where, and on what error."""
+
+    reason: _Stop
+    #: The hop the walk stopped at, which is the URL a log line names.
+    hop: str
+    error: Exception | None = None
+
+
+async def _walk[T](
+    client: httpx.AsyncClient,
+    url: str,
+    deadline: float | None,
+    read_answer: Callable[[str, httpx.Response], Awaitable[T]],
+) -> T | _Stopped:
+    """Follow `url`'s redirects by hand and hand the last response to `read_answer`.
+
+    The one walk `_check` and `_download` share, so the rules below hold for
+    both by construction rather than by two copies kept in step.
+
+    **Every hop is checked against `is_fetchable` before the request**, the
+    first included, because `resolve` puts a member-supplied URL at the front of
+    its candidate list and `cover_url` reaches `_download` from `BookCreate`.
+    Redirects are followed here rather than by the client, so that a listed host
+    cannot hand the server an unlisted one to go and read.
+
+    **A hop is bounded by `asyncio.timeout` and not by the client's
+    `timeout=`.** See `_hop_seconds`. `read_answer` runs inside that bound and
+    inside the handler, so a body that trickles is cut at the budget and a
+    transport error while reading it is `FAILED` like one before the headers.
+    """
+    hop = url
     for _ in range(MAX_REDIRECTS + 1):
-        if not is_fetchable(target):
-            logger.warning("Refused to check a cover on an unlisted host: %s", target[:200])
-            return False
+        if not is_fetchable(hop):
+            return _Stopped(_Stop.UNLISTED, hop)
         remaining = left(deadline)
         if remaining is not None and remaining <= 0:
-            return None
+            return _Stopped(_Stop.SPENT, hop)
         try:
             async with asyncio.timeout(_hop_seconds(deadline)):
-                async with client.stream("GET", target) as response:
-                    if response.is_redirect:
-                        following = _next_hop(target, response)
-                        if following is None:
-                            return None
-                        target = following
-                        continue
-                    if response.status_code == 404:
-                        return False
-                    if response.status_code >= 400:
-                        return None
-                    content_type = response.headers.get("content-type", "")
-                    if not content_type.startswith("image/"):
-                        # A 200 that is not an image is an error page with the
-                        # wrong status, which is the other way this fails.
-                        return False
-                    # **`aiter_raw()` with no size, and the size is what made
-                    # this unbounded.** httpx chunks to whatever it is given, so
-                    # `aiter_raw(512)` waited for 512 bytes and the loop body,
-                    # which is the only thing that stops the read, ran once:
-                    # measured, ceil(512 / the server's chunk size) reads, each
-                    # bounded only by the per read timeout, so 7.900s under a
-                    # 1.0 second budget at 64 bytes a chunk. The question is
-                    # whether any bytes arrived, which is the first chunk.
-                    # Raw rather than decoded for `fetch._IDENTITY`'s reason.
-                    async for chunk in response.aiter_raw():
-                        return len(chunk) > 0
-                    return False
-        except (httpx.HTTPError, TimeoutError):
-            return None
+                async with client.stream("GET", hop) as response:
+                    if not response.is_redirect:
+                        return await read_answer(hop, response)
+                    following = _next_hop(hop, response)
+                    if following is None:
+                        return _Stopped(_Stop.NOWHERE, hop)
+                    hop = following
+        except (httpx.HTTPError, TimeoutError) as error:
+            return _Stopped(_Stop.FAILED, hop, error)
         except UnicodeError:
             # **A host `idna` cannot decode raises here, out of `client.stream`,
             # and `is_fetchable` never sees it.** `idna.IDNAError` is a
@@ -613,12 +622,72 @@ async def _check(
             # this wraps the whole hop rather than the redirect handling, and
             # the log line says which URL rather than which of the two it was.
             #
-            # False rather than None for the same reason an unlisted host is: a
-            # candidate to drop, not a blip to retry.
-            logger.warning("Refused a cover URL with an unusable host: %s", target[:200])
-            return False
-    logger.info("Cover check gave up after %d redirects: %s", MAX_REDIRECTS, url[:200])
-    return None
+            # Logged here rather than by the caller because both callers word it
+            # alike, which none of the other reasons are.
+            logger.warning("Refused a cover URL with an unusable host: %s", hop[:200])
+            return _Stopped(_Stop.UNUSABLE, hop)
+    return _Stopped(_Stop.LOOPED, hop)
+
+
+async def _check(
+    client: httpx.AsyncClient, url: str, deadline: float | None = None
+) -> bool | None:
+    """True if it is an image, False if it is definitely absent, None if unknown.
+
+    The three-way answer is the point. `False` means a service said 404, so the
+    next candidate is worth trying. `None` means the question could not be
+    answered (a 5xx, a timeout, a refused connection), and the caller keeps the
+    URL rather than discarding a cover over a blip.
+
+    A GET rather than a HEAD: some image services answer HEAD with a 405 or
+    with headers that do not match what a GET returns, and only a few hundred
+    bytes are read.
+
+    The hops are `_walk`'s, and so are the host test before each one and the
+    per hop bound. An unlisted host is `False`, not `None`: it is not a blip to
+    retry, it is a candidate to drop. This function is where the 7.900s against
+    a 1.0 second budget in `_hop_seconds` was measured.
+    """
+    answer = await _walk(client, url, deadline, _is_an_image)
+    if not isinstance(answer, _Stopped):
+        return answer
+    match answer.reason:
+        case _Stop.UNLISTED:
+            logger.warning(
+                "Refused to check a cover on an unlisted host: %s", answer.hop[:200]
+            )
+        case _Stop.LOOPED:
+            logger.info(
+                "Cover check gave up after %d redirects: %s", MAX_REDIRECTS, url[:200]
+            )
+    # A host this server refuses is refused on every retry, so it is dropped
+    # where a 5xx or a timeout keeps the URL.
+    return False if answer.reason in (_Stop.UNLISTED, _Stop.UNUSABLE) else None
+
+
+async def _is_an_image(hop: str, response: httpx.Response) -> bool | None:
+    """`_check`'s verdict on the response its walk ended at."""
+    if response.status_code == 404:
+        return False
+    if response.status_code >= 400:
+        return None
+    content_type = response.headers.get("content-type", "")
+    if not content_type.startswith("image/"):
+        # A 200 that is not an image is an error page with the
+        # wrong status, which is the other way this fails.
+        return False
+    # **`aiter_raw()` with no size, and the size is what made
+    # this unbounded.** httpx chunks to whatever it is given, so
+    # `aiter_raw(512)` waited for 512 bytes and the loop body,
+    # which is the only thing that stops the read, ran once:
+    # measured, ceil(512 / the server's chunk size) reads, each
+    # bounded only by the per read timeout, so 7.900s under a
+    # 1.0 second budget at 64 bytes a chunk. The question is
+    # whether any bytes arrived, which is the first chunk.
+    # Raw rather than decoded for `fetch._IDENTITY`'s reason.
+    async for chunk in response.aiter_raw():
+        return len(chunk) > 0
+    return False
 
 
 async def resolve(
@@ -768,7 +837,8 @@ def adopt(book_id: int, from_book_id: int) -> str | None:
     None means "these bytes are the only copy, do not sweep them". A caller that
     discards this answer and then forgets the source id destroys a hand-uploaded
     cover for good, since nothing remote exists for the backfill to re-fetch.
-    `merge_books` is the only caller and does exactly that check.
+    `merge_books` is the only caller, through `_MergeCovers.settle`, which does
+    exactly that check.
     """
     try:
         moved = cover_store.move(book_id, from_book_id)
@@ -818,105 +888,73 @@ async def _download(url: str, deadline: float | None = None) -> bytes | None:
     bytes are handed on unnamed, because what a cover file is called is
     `cover_store`'s to decide and one decision is all there is room for.
 
+    **The URL is tested against `is_fetchable` before every request, redirects
+    included**, by `_walk`. `cover_url` reaches here from `BookCreate`, which is
+    member input, so without that this is an authenticated caller choosing which
+    host the server connects to and reading an image-shaped answer back out.
+    """
+    async with _client() as client:
+        answer = await _walk(client, url, deadline, _image_bytes)
+    if not isinstance(answer, _Stopped):
+        return answer
+    match answer.reason:
+        case _Stop.UNLISTED:
+            logger.warning(
+                "Refused to download a cover from an unlisted host: %s", answer.hop[:200]
+            )
+        case _Stop.SPENT:
+            logger.info("Cover download ran out of budget: %s", answer.hop[:200])
+        case _Stop.FAILED:
+            logger.info("Cover download failed for %s: %s", answer.hop, answer.error)
+        case _Stop.LOOPED:
+            logger.info(
+                "Cover download gave up after %d redirects: %s", MAX_REDIRECTS, url[:200]
+            )
+    return None
+
+
+async def _image_bytes(hop: str, response: httpx.Response) -> bytes | None:
+    """`_download`'s read of the response its walk ended at: the image, or None.
+
     The body is read in **raw** chunks against `MAX_COVER_BYTES` rather than
     with `response.read()`, so a service answering with an endless stream is
     refused at the cap instead of filling the container's memory. Raw because
     the decoded iterator expands a chunk before the cap can look at it: see
     `fetch._IDENTITY`.
-
-    **The URL is tested against `is_fetchable` before every request, redirects
-    included.** `cover_url` reaches here from `BookCreate`, which is member
-    input, so without that this is an authenticated caller choosing which host
-    the server connects to and reading an image-shaped answer back out.
-    Redirects are followed by hand, with a hop limit, because a client that
-    follows them turns one allowed host into a way to reach any other.
     """
-    target = url
+    if response.status_code >= 400:
+        logger.info("Cover download refused with %d: %s", response.status_code, hop)
+        return None
+    encoding = response.headers.get("content-encoding", "").strip().lower()
+    if encoding not in ("", "identity"):
+        # **The braces to `accept-encoding: identity`'s
+        # belt, and without it the belt is a regression.**
+        # `aiter_raw` never decodes, so a service that gzips
+        # anyway would have its gzip bytes written to disk
+        # as the image, where the decoded iterator decoded
+        # them correctly before. `is_fetchable` limits this
+        # to `COVER_HOSTS`, so it is robustness rather than
+        # a hole, but refusing is one line and keeps "raw
+        # bytes" and "the image" the same thing.
+        # `fetch.UnrequestedEncoding` is the same check at
+        # the same point.
+        logger.info("Cover came back %s when identity was asked for: %s", encoding, hop)
+        return None
+    total = 0
     chunks: list[bytes] = []
-    async with _client() as client:
-        for _ in range(MAX_REDIRECTS + 1):
-            if not is_fetchable(target):
-                logger.warning(
-                    "Refused to download a cover from an unlisted host: %s", target[:200]
-                )
-                return None
-            remaining = left(deadline)
-            if remaining is not None and remaining <= 0:
-                logger.info("Cover download ran out of budget: %s", target[:200])
-                return None
-            chunks = []
-            try:
-                async with asyncio.timeout(_hop_seconds(deadline)):
-                    async with client.stream("GET", target) as response:
-                        if response.is_redirect:
-                            following = _next_hop(target, response)
-                            if following is None:
-                                return None
-                            target = following
-                            continue
-                        if response.status_code >= 400:
-                            logger.info(
-                                "Cover download refused with %d: %s",
-                                response.status_code,
-                                target,
-                            )
-                            return None
-                        encoding = (
-                            response.headers.get("content-encoding", "").strip().lower()
-                        )
-                        if encoding not in ("", "identity"):
-                            # **The braces to `accept-encoding: identity`'s
-                            # belt, and without it the belt is a regression.**
-                            # `aiter_raw` never decodes, so a service that gzips
-                            # anyway would have its gzip bytes written to disk
-                            # as the image, where the decoded iterator decoded
-                            # them correctly before. `is_fetchable` limits this
-                            # to `COVER_HOSTS`, so it is robustness rather than
-                            # a hole, but refusing is one line and keeps "raw
-                            # bytes" and "the image" the same thing.
-                            # `fetch.UnrequestedEncoding` is the same check at
-                            # the same point.
-                            logger.info(
-                                "Cover came back %s when identity was asked for: %s",
-                                encoding,
-                                target,
-                            )
-                            return None
-                        total = 0
-                        # `aiter_raw`, not `aiter_bytes`: see `fetch._IDENTITY`.
-                        # **Nothing here tests the clock, and that is the
-                        # wrapper's job now.** The version that did could only
-                        # look once a chunk had already arrived, so a service
-                        # sizing chunks just inside the per read timeout ran a
-                        # full budget past the deadline: measured, 1.973s
-                        # against 1.0s. `asyncio.timeout` cuts mid read.
-                        async for chunk in response.aiter_raw():
-                            total += len(chunk)
-                            if total > MAX_COVER_BYTES:
-                                logger.info(
-                                    "Cover over %d bytes, refused: %s",
-                                    MAX_COVER_BYTES,
-                                    target,
-                                )
-                                return None
-                            chunks.append(chunk)
-            except (httpx.HTTPError, TimeoutError) as error:
-                logger.info("Cover download failed for %s: %s", target, error)
-                return None
-            except UnicodeError:
-                # A host `idna` cannot decode, on this hop or on the `Location`
-                # that reached it. `_check` carries the measurement, why this is
-                # not an `httpx.HTTPError`, and why the first hop is in scope.
-                logger.warning(
-                    "Refused a cover URL with an unusable host: %s", target[:200]
-                )
-                return None
-            break
-        else:
-            logger.info(
-                "Cover download gave up after %d redirects: %s", MAX_REDIRECTS, url[:200]
-            )
+    # `aiter_raw`, not `aiter_bytes`: see `fetch._IDENTITY`.
+    # **Nothing here tests the clock, and that is the
+    # wrapper's job now.** The version that did could only
+    # look once a chunk had already arrived, so a service
+    # sizing chunks just inside the per read timeout ran a
+    # full budget past the deadline: measured, 1.973s
+    # against 1.0s. `asyncio.timeout` cuts mid read.
+    async for chunk in response.aiter_raw():
+        total += len(chunk)
+        if total > MAX_COVER_BYTES:
+            logger.info("Cover over %d bytes, refused: %s", MAX_COVER_BYTES, hop)
             return None
+        chunks.append(chunk)
 
     data = b"".join(chunks)
     if sniff_image_extension(data) is None:
@@ -924,7 +962,7 @@ async def _download(url: str, deadline: float | None = None) -> bytes | None:
         # which is how both of these services report "no cover" on a bad day.
         # Counted as a failed download here rather than left to the store's
         # refusal, so the log says which of the two it was.
-        logger.info("Cover download was not an image: %s", target)
+        logger.info("Cover download was not an image: %s", hop)
         return None
     return data
 

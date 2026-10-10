@@ -26,21 +26,30 @@
  * | the replay agrees with the run | a hang's last `run <i>` line regenerating something other than what ran |
  * | no committed file pins the seed | the gate turned back into one sweep repeated forever, by a name, a dotenv file or bun's configuration |
  * | every property witnessed, under the runner's options, found by binding | an arbitrary weakened so it cannot draw the shape its property is about; a property run under an alias, off the runner's namespace, through a specifier the bundler resolves to the runner, or with options of its own |
- * | the samplers, derived and pinned | a drawing export of the runner other than `holds` and `witness` used outside this guard; a witness standing alone |
+ * | the samplers, derived and pinned, and every export of the runner | a drawing export of the runner other than `holds` and `witness` used outside this guard, by any spelling of the export; a witness standing alone |
  * | the reaches, pinned per file | a reach deleted |
- * | every door, by its import closure | a module a door reaches with no property; a property crediting a module its test does not import |
+ * | every door, by its import closure as Vite's server transform resolves it | a module a door reaches with no property; a property crediting a module its test does not import |
  *
  * **What the runner holds for itself, every property, every run**, and so is
- * not an arm here: a run that executed fewer examples than its profile, and a
- * run that was interrupted, both fail inside `holds`.
+ * not an arm here: a run that executed fewer examples than its profile, a run
+ * that was interrupted, and a reach argument naming nothing all fail inside
+ * `holds`.
  */
 
-import { readdirSync, readFileSync } from "node:fs";
+import {
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import fc from "fast-check";
-import { parseAst, resolveConfig } from "vite";
-import { describe, expect, it } from "vitest";
+import { createServer, parseAst, type ViteDevServer } from "vite";
+import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
 
 import {
   DRAWS_FOR_ITSELF,
@@ -54,10 +63,11 @@ import {
   PROPERTY,
   REPLAY,
   replay,
+  runnerExports,
   witness,
   writeAll,
 } from "./property";
-import { sourceEntries, sourceText } from "./sourceModules";
+import { sourceEntries } from "./sourceModules";
 import { testEntries, testEntriesBesides, testText } from "./testModules";
 import { langOf } from "./withoutProse";
 
@@ -632,6 +642,19 @@ describe("what a property runs", () => {
     expect(PROFILE).toBe(PROFILES.suite);
   });
 
+  it(
+    "refuses a run or a witness that names nothing to reach",
+    PROPERTY,
+    async () => {
+      // A third argument is what the reach pin below counts, so one naming
+      // nothing would keep that count right while the run reached nothing.
+      await expect(holds(fc.nat(), async () => {}, {})).rejects.toThrow(
+        /names nothing/,
+      );
+      await expect(witness(fc.nat(), {})).rejects.toThrow(/names no class/);
+    },
+  );
+
   it("writes a progress line whole through a pipe that is full for a moment", () => {
     // A write refused twice for a full pipe, then taking half, then the rest:
     // the line arrives once and whole, and nothing throws.
@@ -747,14 +770,16 @@ function outside(relative: string): string {
  * **Files a loader reads by convention are refused by existence, not read**,
  * in the arms after this one: bun loads a dotenv file into every worker, and
  * vitest copies Vite's prefixed variables into each, so the variable need not
- * be named in a file at all to reach a property. Where Vite looks for one, which variables
- * it copies, and the suite's own `test.env` are read off Vite's resolved
- * configuration rather than its text, so a key spelled by computation is a
- * value like any other. **And the residue, as a mechanism**: code that runs
- * before the runner, a setup file or a global setup, can set the variable under
- * a computed name, which no reading of text sees, and a configuration vitest
- * loads other than the one resolved here, through a flag on the `test` script
- * or a project it names, is read by the text arm alone.
+ * be named in a file at all to reach a property. Where Vite looks for one, and
+ * what vitest adds to the environment each worker inherits, are read off the
+ * configuration vitest's main process loaded rather than its text, so a key
+ * spelled by computation is a value like any other. **And the residue, as a
+ * mechanism**: code that runs before the runner, a setup file or a global
+ * setup, can set the variable under a computed name, which no reading of text
+ * sees; so can the configuration's own code, or a `define` key, putting it
+ * into the main process's environment, which every worker inherits and which
+ * nothing here lists; and a project the configuration names is answered for
+ * the root project only.
  */
 function runInputs(): [string, string][] {
   return [
@@ -834,36 +859,26 @@ describe("no committed file pins the seed", () => {
     ).toEqual([]);
   });
 
-  it("leaves Vite's resolved configuration pointing at no other dotenv file, and copying no pin", async () => {
+  it("leaves the configuration vitest loaded pointing at no other dotenv file, and copying no pin", () => {
     // **Values, not spellings.** A text match for the two keys passed them
     // written as computed keys, and with the variable in `types/.env.test`
-    // and the prefix widened, every seed was one, measured. So the
-    // configuration is resolved the way the suite resolves it, in mode
-    // `test`, and asked what it holds: the root as the only place Vite loads
-    // a dotenv file from, which the arm above holds empty; no prefix of its
-    // own, so only `VITE_` variables are copied; and neither the loaded
-    // environment nor the suite's `test.env` carrying the variable. **And
-    // that this is the configuration vitest takes**: a `vitest.config.*` is
-    // taken ahead of it, so one is refused by existence. **What it cannot
-    // see**: this resolves the configuration in the worker running it, and
-    // vitest's main process loads the environment. A configuration answering
-    // differently in the two pinned every seed with this arm green, measured
-    // by the final security review.
-    expect(
-      readdirSync(FRONTEND).filter((name) => name.startsWith("vitest.config.")),
-    ).toEqual([]);
-    const resolved = await resolveConfig(
-      { root: FRONTEND, mode: "test", logLevel: "silent" },
-      "serve",
-    );
-    expect(resolved.configFile).toBe(`${resolved.root}/vite.config.ts`);
-    expect(resolved.envDir).toBe(resolved.root);
-    expect(resolved.envPrefix).toBeUndefined();
-    expect(Object.keys(resolved.env)).not.toContain(REPLAY);
-    const suite = (resolved as { test?: { env?: Record<string, unknown> } })
-      .test;
-    expect(suite).toBeDefined();
-    expect(Object.keys(suite?.env ?? {})).not.toContain(REPLAY);
+    // and the prefix widened, every seed was one, measured. **And the values
+    // vitest's main process holds, not this worker's**: the main process
+    // loads the environment, and a configuration answering differently in
+    // the two pinned every seed while a resolution here was green, measured.
+    // So `tests/runConfiguration.globalSetup.ts` hands over what was loaded:
+    // the file, with the root as the only place Vite loads a dotenv file from,
+    // which the arm above holds empty; no prefix of its own, so only `VITE_`
+    // variables are copied; and what vitest adds to the environment each
+    // worker inherits, which is not the whole of it (the residue above).
+    const loaded = inject("runConfiguration");
+    expect(loaded).toBeDefined();
+    expect(`${loaded.root}/`).toBe(FRONTEND);
+    expect(loaded.configFile).toBe(`${loaded.root}/vite.config.ts`);
+    expect(loaded.envDir).toBe(loaded.root);
+    expect(loaded.envPrefix).toBeNull();
+    expect(loaded.workerEnv).toContain("MODE");
+    expect(loaded.workerEnv).not.toContain(REPLAY);
   });
 
   it("lets bun's configuration hold only the keys it holds today", () => {
@@ -924,17 +939,80 @@ function isRunner(specifier: unknown, path: string): boolean {
   return resolved.endsWith("/tests/property");
 }
 
+/** The names a parameter binds, through any pattern it is written as. */
+function boundBy(pattern: unknown): string[] {
+  if (!isNode(pattern)) return [];
+  switch (pattern.type) {
+    case "Identifier":
+      return [pattern.name as string];
+    case "AssignmentPattern":
+      return boundBy(pattern.left);
+    case "RestElement":
+      return boundBy(pattern.argument);
+    case "TSParameterProperty":
+      return boundBy(pattern.parameter);
+    case "ArrayPattern":
+      return (pattern.elements as unknown[]).flatMap(boundBy);
+    case "ObjectPattern":
+      return (pattern.properties as Node[]).flatMap((one) =>
+        boundBy(one.type === "Property" ? one.value : one),
+      );
+    default:
+      return [];
+  }
+}
+
 /**
- * The runner's exports that draw values, **derived by parse of the runner**:
- * a function whose body reaches a door member of the generator, or calls a
- * function that does. Asserted by equality below, so a fourth reds once and
- * somebody decides which side of the counting it is on.
+ * Whether an identifier under `ancestors` names something other than a value
+ * of the scope it sits in: a property after a dot, a key, anything in a type,
+ * or a parameter of a function around it, which shadows a function of the
+ * same name. A type node holds a value only under its `expression` or
+ * `initializer`, as a cast does.
  */
-function samplersOf(source: string): string[] {
+function namesNoOuterValue(node: Node, ancestors: readonly Node[]): boolean {
+  const name = node.name as string;
+  return (
+    isNameOnly(node, ancestors.at(-1)) ||
+    ancestors.some((above, at) => {
+      const below = ancestors[at + 1] ?? node;
+      return (
+        above.type.startsWith("TS") &&
+        above.expression !== below &&
+        above.initializer !== below
+      );
+    }) ||
+    ancestors.some(
+      (above) =>
+        Array.isArray(above.params) &&
+        (above.params as unknown[]).flatMap(boundBy).includes(name),
+    )
+  );
+}
+
+/**
+ * The runner's exports that draw values, and every export whose function body
+ * the parse read, **derived by parse of the runner**. A body is a function
+ * declared, or bound to a top level constant, and an export is one declared
+ * exported or named in an export list. A body draws when it reaches a door
+ * member of the generator, or names a body that draws as a value.
+ *
+ * **`read` is what the arm below holds the runner's function exports
+ * against**, as the runner itself lists them: an export this parse reads no
+ * body for, wrapped in a call or a cast or brought from another module, reds
+ * there by name rather than passing as one that draws nothing. **What it does
+ * not see**: a method of an exported object, and a local of a body that
+ * shadows a drawing function, which is read as that function, loud. And the
+ * quiet one: the arm holds exports only, so a read export that draws through
+ * a local helper whose body the parse cannot read (in a cast, a wrapped call,
+ * an object method, a class, a reassigned binding) is derived as drawing
+ * nothing.
+ */
+function samplersOf(source: string): { draws: string[]; read: string[] } {
   const ast = parseAst(source, { lang: "ts" }) as unknown as Node;
   const namespaces = new Set<string>();
   const bodies = new Map<string, Node>();
-  const exported = new Set<string>();
+  // Exported name to local name, which an export list may make differ.
+  const exported = new Map<string, string>();
   for (const statement of ast.body as Node[]) {
     if (
       statement.type === "ImportDeclaration" &&
@@ -946,6 +1024,15 @@ function samplersOf(source: string): string[] {
         }
       }
     }
+    if (
+      statement.type === "ExportNamedDeclaration" &&
+      !isNode(statement.declaration) &&
+      !isNode(statement.source)
+    ) {
+      for (const specifier of statement.specifiers as Node[]) {
+        exported.set(nameOf(specifier.exported)!, nameOf(specifier.local)!);
+      }
+    }
     const declared =
       statement.type === "ExportNamedDeclaration" &&
       isNode(statement.declaration)
@@ -954,7 +1041,24 @@ function samplersOf(source: string): string[] {
     if (declared.type === "FunctionDeclaration" && isNode(declared.id)) {
       const name = nameOf(declared.id)!;
       bodies.set(name, declared);
-      if (declared !== statement) exported.add(name);
+      if (declared !== statement) exported.set(name, name);
+    }
+    // A helper written as a constant arrow, the tree's ordinary style, is a
+    // body too: read as nothing, it let a stated export draw through it.
+    if (declared.type === "VariableDeclaration") {
+      for (const declarator of declared.declarations as Node[]) {
+        const init = declarator.init;
+        if (
+          isNode(init) &&
+          (init.type === "ArrowFunctionExpression" ||
+            init.type === "FunctionExpression") &&
+          nameOf(declarator.id) !== null
+        ) {
+          const name = nameOf(declarator.id)!;
+          bodies.set(name, init);
+          if (declared !== statement) exported.set(name, name);
+        }
+      }
     }
   }
   const draws = new Set<string>();
@@ -963,7 +1067,7 @@ function samplersOf(source: string): string[] {
     for (const [name, body] of bodies) {
       if (draws.has(name)) continue;
       let reaches = false;
-      walk(body, (node) => {
+      walk(body, (node, ancestors) => {
         const member =
           node.type === "MemberExpression" &&
           isNode(node.object) &&
@@ -973,7 +1077,8 @@ function samplersOf(source: string): string[] {
         const call =
           node.type === "Identifier" &&
           node.name !== name &&
-          draws.has(node.name as string);
+          draws.has(node.name as string) &&
+          !namesNoOuterValue(node, ancestors);
         if (member || call) reaches = true;
       });
       if (reaches) {
@@ -982,13 +1087,46 @@ function samplersOf(source: string): string[] {
       }
     }
   }
-  const out = [...draws].filter((name) => exported.has(name));
-  out.sort();
-  return out;
+  const of = (keep: (local: string) => boolean) => {
+    const names = [...exported]
+      .filter(([, local]) => keep(local))
+      .map(([name]) => name);
+    names.sort();
+    return names;
+  };
+  return {
+    draws: of((local) => draws.has(local)),
+    read: of((local) => bodies.has(local)),
+  };
 }
 
+/** What the parse reads of the runner's own source today. */
+const PARSED = samplersOf(testText(RUNNER));
+
 /** The runner's drawing exports, as the runner's own source says today. */
-const SAMPLERS = new Set(samplersOf(testText(RUNNER)));
+const SAMPLERS = new Set(PARSED.draws);
+
+/**
+ * The runner's other exports, stated, so a new one reds once and somebody
+ * decides which side of the counting it is on. A name here is a value, or a
+ * function whose body the parse read and found drawing nothing.
+ */
+const DRAWS_NOTHING = [
+  "DRAWS_FOR_ITSELF",
+  "edges",
+  "fastCheckExports",
+  "FLOOR",
+  "lastSeed",
+  "namesTheGenerator",
+  "PROFILE",
+  "PROFILES",
+  "PROPERTY",
+  "REPLAY",
+  "runnerExports",
+  "sometimes",
+  "spelled",
+  "writeAll",
+];
 
 /** The nearest of `ancestors` to the node that satisfies `matches`. */
 function innermost(
@@ -1152,6 +1290,8 @@ function propertyCalls(source: string, path: string) {
  * dropped: a reach deleted is a smaller count, which only an equality sees.
  */
 const REACHING: Readonly<Record<string, number>> = {
+  // The arm refusing a reach that names nothing, which is this guard's own.
+  "./propertyBudget.test.ts": 1,
   "./lib/audiobook.test.ts": 2,
   "./lib/calibre.test.ts": 1,
   "./lib/cbz.test.ts": 1,
@@ -1159,10 +1299,33 @@ const REACHING: Readonly<Record<string, number>> = {
   "./lib/fb2.test.ts": 2,
   "./lib/mobi.test.ts": 1,
   "./lib/pdf.test.ts": 1,
+  "./lib/schemaArbitrary.test.ts": 1,
   "./lib/sqlite.test.ts": 1,
   "./lib/stores.test.ts": 1,
   "./lib/takeout.test.ts": 1,
   "./lib/zip.test.ts": 1,
+  "./pages/AuthorsPage/AuthorsPage.test.tsx": 1,
+  "./pages/BookDetail/BookDetail.test.tsx": 1,
+  "./pages/CollectionsPage/CollectionsPage.test.tsx": 1,
+  "./pages/DuplicatesPage/DuplicatesPage.test.tsx": 1,
+  "./pages/Home/Home.test.tsx": 1,
+  "./pages/LoginPage/LoginPage.test.tsx": 1,
+  "./pages/LoansPage/LoansPage.test.tsx": 1,
+  "./pages/OverduePage/OverduePage.test.tsx": 1,
+  "./pages/PublicCataloguePage/PublicBookPage.test.tsx": 1,
+  "./pages/PublicCataloguePage/PublicCataloguePage.test.tsx": 1,
+  "./pages/QuotesPage/QuotesPage.test.tsx": 1,
+  "./pages/ScanPage/ScanPage.test.tsx": 1,
+  "./pages/SeriesPage/SeriesPage.test.tsx": 1,
+  "./pages/SettingsPage/AccountSettingsPage/AccountSettingsPage.test.tsx": 1,
+  "./pages/SettingsPage/AppearanceSettingsPage/AppearanceSettingsPage.test.tsx": 1,
+  "./pages/SettingsPage/CatalogueSettingsPage/CatalogueSettingsPage.test.tsx": 1,
+  "./pages/SettingsPage/DataSettingsPage/DataSettingsPage.test.tsx": 1,
+  "./pages/SettingsPage/LendingSettingsPage/LendingSettingsPage.test.tsx": 1,
+  "./pages/SettingsPage/LibrarySettingsPage/LibrarySettingsPage.test.tsx": 1,
+  "./pages/SettingsPage/PublicCatalogueSettingsPage/PublicCatalogueSettingsPage.test.tsx": 1,
+  "./pages/StatsPage/StatsPage.test.tsx": 1,
+  "./pages/TrashPage/TrashPage.test.tsx": 1,
 };
 
 /** A module's calls, every field empty but what a row names. */
@@ -1295,12 +1458,50 @@ describe("every property", () => {
   it("draws through exactly the runner exports this guard knows", () => {
     // **Derived from the runner and asserted**, so a fourth sampler reds
     // here once rather than becoming a fixed sweep no arm counts.
-    expect([...SAMPLERS]).toEqual(["holds", "replay", "witness"]);
+    expect(
+      [...SAMPLERS],
+      "a new export of tests/property.ts draws: count it where holds and " +
+        "witness are counted, in propertyCalls, or make it draw nothing",
+    ).toEqual(["holds", "replay", "witness"]);
+    const exports = runnerExports();
+    const stated = [...SAMPLERS, ...DRAWS_NOTHING];
+    stated.sort();
+    expect(
+      exports.map(([name]) => name),
+      "a new export of tests/property.ts that draws nothing is named in " +
+        "DRAWS_NOTHING in this file; one that draws is found by samplersOf " +
+        "when every helper it draws through is a body the parse reads",
+    ).toEqual(stated);
+    // **The parse held against the runner's own list**: every export that is
+    // a function at run time must be one whose body the parse read, so a form
+    // it cannot read is refused here rather than read as drawing nothing.
+    expect(
+      exports
+        .filter(
+          ([name, kind]) => kind === "function" && !PARSED.read.includes(name),
+        )
+        .map(([name]) => name),
+      "an export of tests/property.ts whose body samplersOf cannot read: " +
+        "write it as a function declaration, or a top level constant bound " +
+        "to an arrow, exported by declaration or by an export list",
+    ).toEqual([]);
     expect(
       samplersOf(
         `import fc from "fast-check"; function inner() { return fc.sample(a); } export function outer() { return inner(); } export function plain() { return 1; }`,
       ),
-    ).toEqual(["outer"]);
+    ).toEqual({ draws: ["outer"], read: ["outer", "plain"] });
+    expect(
+      samplersOf(
+        `import fc from "fast-check"; const inner = () => fc.sample(a); export const outer = function () { return inner(); }; export const plain = () => 1;`,
+      ),
+    ).toEqual({ draws: ["outer"], read: ["outer", "plain"] });
+    // An export list, renamed, and a drawing name in a member, a key, a type
+    // and a parameter, none of which reaches it.
+    expect(
+      samplersOf(
+        `import fc from "fast-check"; const inner = () => fc.sample(a); const quiet = (r: { inner: number }, inner: number) => r.inner + ({ inner: 1 }).inner + inner; export { inner as drawn, quiet }; export const cast = (() => 1) as () => number;`,
+      ),
+    ).toEqual({ draws: ["drawn"], read: ["drawn", "quiet"] });
   });
 
   it("draws uncounted only in this guard", () => {
@@ -1378,11 +1579,34 @@ describe("every property", () => {
       "./lib/mobi.test.ts",
       "./lib/opf.test.ts",
       "./lib/pdf.test.ts",
+      "./lib/schemaArbitrary.test.ts",
       "./lib/sqlite.test.ts",
       "./lib/stores.test.ts",
       "./lib/takeout.test.ts",
       "./lib/xmlEntities.test.ts",
       "./lib/zip.test.ts",
+      "./pages/AuthorsPage/AuthorsPage.test.tsx",
+      "./pages/BookDetail/BookDetail.test.tsx",
+      "./pages/CollectionsPage/CollectionsPage.test.tsx",
+      "./pages/DuplicatesPage/DuplicatesPage.test.tsx",
+      "./pages/Home/Home.test.tsx",
+      "./pages/LoansPage/LoansPage.test.tsx",
+      "./pages/LoginPage/LoginPage.test.tsx",
+      "./pages/OverduePage/OverduePage.test.tsx",
+      "./pages/PublicCataloguePage/PublicBookPage.test.tsx",
+      "./pages/PublicCataloguePage/PublicCataloguePage.test.tsx",
+      "./pages/QuotesPage/QuotesPage.test.tsx",
+      "./pages/ScanPage/ScanPage.test.tsx",
+      "./pages/SeriesPage/SeriesPage.test.tsx",
+      "./pages/SettingsPage/AccountSettingsPage/AccountSettingsPage.test.tsx",
+      "./pages/SettingsPage/AppearanceSettingsPage/AppearanceSettingsPage.test.tsx",
+      "./pages/SettingsPage/CatalogueSettingsPage/CatalogueSettingsPage.test.tsx",
+      "./pages/SettingsPage/DataSettingsPage/DataSettingsPage.test.tsx",
+      "./pages/SettingsPage/LendingSettingsPage/LendingSettingsPage.test.tsx",
+      "./pages/SettingsPage/LibrarySettingsPage/LibrarySettingsPage.test.tsx",
+      "./pages/SettingsPage/PublicCatalogueSettingsPage/PublicCatalogueSettingsPage.test.tsx",
+      "./pages/StatsPage/StatsPage.test.tsx",
+      "./pages/TrashPage/TrashPage.test.tsx",
       "./propertyBudget.test.ts",
     ]);
     expect(testEntries().length).toBeGreaterThan(withProperties().length);
@@ -1444,135 +1668,131 @@ const THROUGH_A_DOOR: Readonly<Record<string, string>> = {
 const NOT_FOLLOWED = "api/generated/";
 
 /**
- * The module a relative specifier names, from the module at `from`, as a key
- * of `sources`: tried as written, then with each extension the bundler would
- * add, then as a directory's index. `null` where none is a module.
+ * What the module at `url` loads for a value, as paths below `src/`, **resolved
+ * by Vite rather than by this file**: its server transform of the module, read
+ * for the imports it kept. So a reader loaded through `import.meta.glob`, a
+ * specifier ending in `.js` and a type only import each mean here what they
+ * mean to the build, where a hand resolution missed the first, threw on the
+ * second and had to be taught the third. The aliases are the ones vitest's main
+ * process resolved by, so a specifier only one resolves is followed, and a
+ * module the suite replaces with a double is the double here. What is not a module under
+ * `src/`, a package or an asset, is a leaf. **What it does not follow,
+ * stated**: a module loaded as a Web Worker, by `new Worker(new URL(...))` or
+ * a `?worker` import, which the page build bundles and this transform does not
+ * report as the module; and a root absolute specifier in backticks,
+ * `` import(`/src/lib/x.ts`) ``, which the transform drops and `unreadImports`
+ * reads as a literal. The first is a gap, stated; the second takes a
+ * deliberate act.
  */
-function moduleAt(
-  from: string,
-  specifier: string,
-  sources: ReadonlySet<string>,
-): string | null {
-  const joined = new URL(specifier, `file:///${from}`).pathname.slice(1);
-  const candidates = [
-    joined,
-    `${joined}.ts`,
-    `${joined}.tsx`,
-    `${joined}/index.ts`,
-    `${joined}/index.tsx`,
-  ];
-  return candidates.find((one) => sources.has(one)) ?? null;
+async function loads(server: ViteDevServer, url: string): Promise<string[]> {
+  const result = await server.environments.ssr.transformRequest(url);
+  if (result === null) throw new Error(`the bundler could not load ${url}`);
+  return [...(result.deps ?? []), ...(result.dynamicDeps ?? [])]
+    .filter((id) => /^\/src\/[^?]*\.tsx?$/.test(id))
+    .map((id) => id.slice("/src/".length));
 }
 
 /**
- * What one module imports for its value, as relative specifiers, by parse: a
- * static import that is not only types, a re-export, and a dynamic import of
- * a literal, which is how both registries load their readers.
+ * Every dynamic import in one module whose specifier is not a literal.
  *
- * **A dynamic import of anything but a literal is answered as unread**, and
- * refused by the arm below: the walk cannot say what it loads, and a reader
- * loaded by a template passed every arm here, measured.
+ * **Refused by the arm below**, because what Vite makes of one is not what the
+ * module loads. A bare variable, or a template such as `./${g}.ts`, it reads
+ * as nothing and leaves out of what `loads` answers in silence: a reader
+ * loaded by a template passed every arm here, measured. A template with a
+ * directory, such as `../lib/${g}.ts`, it widens to every module the pattern
+ * matches, which would demand a property of each.
  */
-function valueImports(
-  path: string,
-  source: string,
-): { specifiers: string[]; unread: string[] } {
+function unreadImports(path: string, source: string): string[] {
   const ast = parseAst(source, { lang: langOf(path) }) as unknown as Node;
-  const specifiers: string[] = [];
   const unread: string[] = [];
-  const add = (specifier: unknown) => {
-    if (typeof specifier === "string" && specifier.startsWith(".")) {
-      specifiers.push(specifier);
-    }
-  };
   walk(ast, (node) => {
-    if (node.type === "ImportDeclaration") {
-      const declared = node.specifiers as Node[];
-      const typeOnly =
-        node.importKind === "type" ||
-        (declared.length > 0 &&
-          declared.every((one) => one.importKind === "type"));
-      if (!typeOnly) add((node.source as Node).value);
-    }
     if (
-      (node.type === "ExportNamedDeclaration" ||
-        node.type === "ExportAllDeclaration") &&
-      isNode(node.source) &&
-      node.exportKind !== "type"
+      node.type === "ImportExpression" &&
+      (!isNode(node.source) || stringOf(node.source) === null)
     ) {
-      add(node.source.value);
-    }
-    if (node.type === "ImportExpression") {
-      const named = isNode(node.source) ? stringOf(node.source) : null;
-      if (named === null)
-        unread.push(`${path}: a dynamic import of no literal`);
-      else add(named);
+      unread.push(`${path}: a dynamic import of no literal`);
     }
   });
-  return { specifiers, unread };
+  return unread;
 }
 
 /**
  * Every module under `src/` the roots reach for a value, the roots among
- * them, and what the walk could not follow. A specifier naming no module is
- * thrown, loud, rather than dropped.
+ * them, and what the walk could not follow.
  */
-function closure(): { modules: string[]; unread: string[] } {
+async function closure(
+  server: ViteDevServer,
+): Promise<{ modules: string[]; unread: string[] }> {
   const sources = new Map(sourceEntries());
-  const keys = new Set(sources.keys());
   const seen = new Set<string>();
   const unread: string[] = [];
-  const stack = [...ROOTS];
-  while (stack.length > 0) {
-    const path = stack.pop()!;
-    if (seen.has(path) || path.startsWith(NOT_FOLLOWED)) continue;
+  const visit = async (path: string): Promise<void> => {
+    if (seen.has(path) || path.startsWith(NOT_FOLLOWED)) return;
     const source = sources.get(path);
     if (source === undefined) throw new Error(`${path} is not a module`);
     seen.add(path);
-    const found = valueImports(path, source);
-    unread.push(...found.unread);
-    for (const specifier of found.specifiers) {
-      const module = moduleAt(path, specifier, keys);
-      if (module === null) {
-        throw new Error(`${path} imports ${specifier}, which is no module`);
-      }
-      stack.push(module);
-    }
-  }
+    unread.push(...unreadImports(path, source));
+    await Promise.all((await loads(server, `/src/${path}`)).map(visit));
+  };
+  await Promise.all(ROOTS.map(visit));
+  unread.sort();
   const modules = [...seen];
   modules.sort();
   return { modules, unread };
 }
 
-describe("every door a stranger's input enters through", () => {
-  /**
-   * The modules whose own test file runs a property, by that file's name,
-   * **and only where that file imports the module for a value**: measured, a
-   * test file gaining a property over nothing of its module's credited the
-   * module with every arm green. **Still not a check of what the property
-   * drives**, which no parse here makes: a test importing its module and
-   * running a property over something else is credited.
-   */
-  const propertyModules = () => {
-    const keys = new Set(sourceEntries().map(([path]) => path));
-    const credited = testEntriesBesides(RUNNER)
+/**
+ * The modules whose own test file runs a property, by that file's name, **and
+ * only where that file loads the module for a value**: measured, a test file
+ * gaining a property over nothing of its module's credited the module with
+ * every arm green. **Still not a check of what the property drives**, which no
+ * parse here makes: a test loading its module and running a property over
+ * something else is credited.
+ */
+async function propertyModules(server: ViteDevServer): Promise<string[]> {
+  const credited = await Promise.all(
+    testEntriesBesides(RUNNER)
       .filter(([path]) => path.startsWith("./lib/"))
       .filter(([path, source]) => propertyCalls(source, path).properties > 0)
-      .map(([path, source]) => {
+      .map(async ([path]) => {
         const module = path.replace(/^\.\//, "").replace(/\.test\.ts$/, ".ts");
-        const imported = valueImports(path, source).specifiers.map((one) => {
-          const joined = new URL(one, `file:///tests/${path.slice(2)}`)
-            .pathname;
-          return joined.startsWith("/src/")
-            ? moduleAt("", `.${joined.slice(4)}`, keys)
-            : null;
-        });
-        return imported.includes(module) ? module : null;
-      })
-      .filter((module): module is string => module !== null);
-    credited.sort();
-    return credited;
-  };
+        const loaded = await loads(server, `/tests/${path.slice(2)}`);
+        return loaded.includes(module) ? module : null;
+      }),
+  );
+  const modules = credited.filter((one): one is string => one !== null);
+  modules.sort();
+  return modules;
+}
+
+describe("every door a stranger's input enters through", () => {
+  let server: ViteDevServer;
+  let reached: { modules: string[]; unread: string[] };
+  let credited: string[];
+
+  // **Derived once**: the walk transforms every module it reaches and every
+  // test of the reader family, which no single arm's five seconds holds.
+  beforeAll(async () => {
+    server = await createServer({
+      root: FRONTEND,
+      mode: "test",
+      logLevel: "silent",
+      appType: "custom",
+      server: { middlewareMode: true, hmr: false, ws: false, watch: null },
+      optimizeDeps: { noDiscovery: true, include: [] },
+      // **The run's aliases, as vitest's main process resolved them**, handed
+      // over by `tests/runConfiguration.globalSetup.ts`. A plain server reads
+      // no `test.alias`, so a test importing its module through one loaded
+      // nothing here and its property went uncredited, measured.
+      resolve: { alias: inject("runConfiguration").aliases },
+    });
+    reached = await closure(server);
+    credited = await propertyModules(server);
+  }, 60_000);
+
+  afterAll(async () => {
+    await server.close();
+  });
 
   it("has a property, or is named as reached only through one", () => {
     // **Two derivations of one population**: what the doors import, walked
@@ -1580,50 +1800,109 @@ describe("every door a stranger's input enters through", () => {
     // the test tree. A reader added to a registry and given no property is in
     // the first and not the second, and a property left behind by a door
     // that went is in the second and not the first.
-    const named = [...propertyModules(), ...Object.keys(THROUGH_A_DOOR)];
+    const named = [...credited, ...Object.keys(THROUGH_A_DOOR)];
     named.sort();
-    expect(closure().modules).toEqual(named);
+    expect(reached.modules).toEqual(named);
   });
 
   it("is loaded by a specifier the walk can read", () => {
-    expect(closure().unread).toEqual([]);
+    expect(reached.unread).toEqual([]);
   });
 
   it("names nothing as reached through a door that has a property of its own", () => {
-    // Derived once: the walk parses every test module, and a derivation per
-    // key crossed the five seconds an arm is allowed.
-    const covered = new Set(propertyModules());
     expect(
-      Object.keys(THROUGH_A_DOOR).filter((path) => covered.has(path)),
+      Object.keys(THROUGH_A_DOOR).filter((path) => credited.includes(path)),
     ).toEqual([]);
   });
 
-  it("follows the edges a registry loads its readers by", () => {
+  it("follows the edges a registry loads its readers by", async () => {
     // **The reader registry imports every reader lazily**, so a walk that
     // followed only static imports would stop at it and report a closure with
     // no reader in it, which the equality above would then hold over less.
-    const keys = new Set(sourceEntries().map(([path]) => path));
+    expect(await loads(server, "/src/lib/fileReaders.ts")).toEqual(
+      expect.arrayContaining(["lib/epub.ts", "lib/pdf.ts"]),
+    );
     expect(
-      valueImports(
-        "lib/fileReaders.ts",
-        sourceText("lib/fileReaders.ts"),
-      ).specifiers.map((one) => moduleAt("lib/fileReaders.ts", one, keys)),
-    ).toEqual(expect.arrayContaining(["lib/epub.ts", "lib/pdf.ts"]));
-    expect(
-      valueImports(
+      unreadImports(
         "lib/x.ts",
-        'import type { A } from "./a"; import { type B } from "./b"; import { c } from "./c"; export * from "./d"; await import("./e"); await import(`./f`); await import(`./${g}`); await import(h);',
+        'await import("./e"); await import(`./f`); await import(`./${g}`); await import(h);',
       ),
-    ).toEqual({
-      specifiers: ["./c", "./d", "./e", "./f"],
-      unread: [
-        "lib/x.ts: a dynamic import of no literal",
-        "lib/x.ts: a dynamic import of no literal",
-      ],
-    });
-    // And out of `lib/`, which is where a helper the walk did not follow sat.
+    ).toEqual([
+      "lib/x.ts: a dynamic import of no literal",
+      "lib/x.ts: a dynamic import of no literal",
+    ]);
+  });
+
+  it("applies the run's aliases, and each resolves as its replacement does", async () => {
+    // **Two loads of the configuration compared**: what this worker's server
+    // read as `test.alias` against what the main process resolved by, so a
+    // global setup reading the wrong place, or a configuration answering
+    // differently in a worker, reds here rather than walking without the
+    // alias. Then each alias the walk applies must resolve as its
+    // replacement does, which an alias the walk did not apply cannot: the
+    // scanner's double is not the package.
+    const run = inject("runConfiguration").aliases;
+    const own = server.config.test?.alias ?? {};
+    const declared = Array.isArray(own)
+      ? own.map(({ find, replacement }) => ({ find, replacement }))
+      : Object.entries(own).map(([find, replacement]) => ({
+          find,
+          replacement,
+        }));
     expect(
-      moduleAt("lib/opf.ts", "../app/helper", new Set(["app/helper.ts"])),
-    ).toBe("app/helper.ts");
+      declared.filter(
+        (one) =>
+          !run.some(
+            (applied) =>
+              applied.find === one.find &&
+              applied.replacement === one.replacement,
+          ),
+      ),
+      "a test.alias entry this worker read is not among the aliases the " +
+        "run resolved by: make the global setup hand it over, or make the " +
+        "configuration answer the same in a worker, and spell its find as a string",
+    ).toEqual([]);
+    const importer = join(FRONTEND, "src/lib/fileReaders.ts");
+    const resolve = async (id: string) =>
+      (await server.environments.ssr.pluginContainer.resolveId(id, importer))
+        ?.id;
+    const resolved = await Promise.all(
+      run.map(async ({ find, replacement }) => ({
+        find,
+        byFind: await resolve(find),
+        // What Vite's alias plugin answers for a replacement that resolves
+        // to nothing, a directory, is the replacement itself.
+        byReplacement: (await resolve(replacement)) ?? replacement,
+      })),
+    );
+    expect(
+      resolved.filter((one) => one.byFind !== one.byReplacement),
+      "an alias the walk does not resolve to its replacement: hand the " +
+        "run's aliases to the walk's server in beforeAll above",
+    ).toEqual([]);
+  });
+
+  it("follows a glob, a script suffix and an asset as the build does", async () => {
+    // A reader behind `import.meta.glob` passed every arm while the walk read
+    // specifiers itself, and a `.js` suffix or an asset made it throw. The
+    // type only import is the edge the build drops.
+    const directory = mkdtempSync(join(tmpdir(), "endpaper-closure-"));
+    const registry = join(directory, "registry.ts");
+    writeFileSync(
+      registry,
+      [
+        'export const readers = import.meta.glob("/src/lib/epub.ts");',
+        'export { supportedExtension } from "/src/lib/fileName.js";',
+        'export { default as sheet } from "/src/index.css?url";',
+        'import type { SourceRecord } from "/src/lib/sourceRecord";',
+      ].join("\n"),
+    );
+    try {
+      const found = await loads(server, registry);
+      found.sort();
+      expect(found).toEqual(["lib/epub.ts", "lib/fileName.ts"]);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 });

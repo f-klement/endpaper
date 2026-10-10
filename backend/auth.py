@@ -12,6 +12,7 @@ from config import auth_mode, secret_key
 from database import get_db
 from enums import AuthMode
 from models import User, is_switch_target
+from refusals import refuses
 
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7  # 1 week
@@ -221,6 +222,7 @@ def _switch_session(
     return user if is_switch_target(user) else None
 
 
+@refuses(401)
 def get_current_user_for_cover(
     request: Request,
     token: Annotated[str | None, Depends(oauth2_scheme)],
@@ -274,6 +276,7 @@ def get_current_user_for_cover(
     return user
 
 
+@refuses(401)
 def get_current_user(
     request: Request,
     token: Annotated[str | None, Depends(oauth2_scheme)],
@@ -316,6 +319,7 @@ def get_current_user(
     return user
 
 
+@refuses(403)
 def require_admin(current_user: Annotated[User, Depends(get_current_user)]) -> User:
     if not current_user.is_admin:
         raise HTTPException(status_code=403, detail="Admin access required")

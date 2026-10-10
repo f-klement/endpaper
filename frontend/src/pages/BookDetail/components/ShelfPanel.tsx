@@ -16,6 +16,23 @@ interface ShelfPanelProps {
 }
 
 /**
+ * The form's fields as the stored book fills them, an absent value being an
+ * empty field. One place, because the panel reads it three times: to seed the
+ * form, to reseed it when the book changes underneath, and to tell whether
+ * anything was edited.
+ */
+function shelfDraft(book: BookOut) {
+  return {
+    seriesName: book.series_name ?? "",
+    seriesIndex:
+      book.series_index === null || book.series_index === undefined
+        ? ""
+        : String(book.series_index),
+    location: book.location ?? "",
+  };
+}
+
+/**
  * Which series a book belongs to, and where the copy physically is.
  *
  * Both are free text and both are edited here rather than in a modal, because
@@ -29,34 +46,28 @@ export default function ShelfPanel({
   onSave,
 }: ShelfPanelProps) {
   const { t } = useTranslation();
-  const [seriesName, setSeriesName] = useState(book.series_name ?? "");
-  const [seriesIndex, setSeriesIndex] = useState(
-    book.series_index === null || book.series_index === undefined
-      ? ""
-      : String(book.series_index),
-  );
-  const [location, setLocation] = useState(book.location ?? "");
+  const saved = shelfDraft(book);
+  const [seriesName, setSeriesName] = useState(saved.seriesName);
+  const [seriesIndex, setSeriesIndex] = useState(saved.seriesIndex);
+  const [location, setLocation] = useState(saved.location);
 
   // Re-seed when the book changes underneath, which happens after an
   // enrichment run fills the series in. Without this the form keeps showing
-  // the empty values it mounted with.
+  // the empty values it mounted with. Keyed on the draft's own values, the
+  // ones the seed and the dirty check read, so a column flipping between null
+  // and undefined, which is the same empty field, does not reseed. Keep the
+  // keys primitive: keyed on `saved` itself, a fresh object every render, the
+  // effect would wipe an edit on every keystroke.
   useEffect(() => {
-    setSeriesName(book.series_name ?? "");
-    setSeriesIndex(
-      book.series_index === null || book.series_index === undefined
-        ? ""
-        : String(book.series_index),
-    );
-    setLocation(book.location ?? "");
-  }, [book.series_name, book.series_index, book.location]);
+    setSeriesName(saved.seriesName);
+    setSeriesIndex(saved.seriesIndex);
+    setLocation(saved.location);
+  }, [saved.seriesName, saved.seriesIndex, saved.location]);
 
   const dirty =
-    seriesName !== (book.series_name ?? "") ||
-    location !== (book.location ?? "") ||
-    seriesIndex !==
-      (book.series_index === null || book.series_index === undefined
-        ? ""
-        : String(book.series_index));
+    seriesName !== saved.seriesName ||
+    location !== saved.location ||
+    seriesIndex !== saved.seriesIndex;
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();

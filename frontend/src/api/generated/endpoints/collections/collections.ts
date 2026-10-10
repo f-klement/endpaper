@@ -26,6 +26,7 @@ import type {
   CollectionOut,
   CollectionUpdate,
   HTTPValidationError,
+  Refusal,
 } from "../../model";
 
 import { customFetch } from "../../../mutator.ts";
@@ -85,7 +86,7 @@ export const getListCollectionsQueryKey = () => {
 
 export const getListCollectionsQueryOptions = <
   TData = Awaited<ReturnType<typeof listCollections>>,
-  TError = unknown,
+  TError = Refusal,
 >(options?: {
   query?: Partial<
     UseQueryOptions<Awaited<ReturnType<typeof listCollections>>, TError, TData>
@@ -110,11 +111,11 @@ export const getListCollectionsQueryOptions = <
 export type ListCollectionsQueryResult = NonNullable<
   Awaited<ReturnType<typeof listCollections>>
 >;
-export type ListCollectionsQueryError = unknown;
+export type ListCollectionsQueryError = Refusal;
 
 export function useListCollections<
   TData = Awaited<ReturnType<typeof listCollections>>,
-  TError = unknown,
+  TError = Refusal,
 >(
   options: {
     query: Partial<
@@ -140,7 +141,7 @@ export function useListCollections<
 };
 export function useListCollections<
   TData = Awaited<ReturnType<typeof listCollections>>,
-  TError = unknown,
+  TError = Refusal,
 >(
   options?: {
     query?: Partial<
@@ -166,7 +167,7 @@ export function useListCollections<
 };
 export function useListCollections<
   TData = Awaited<ReturnType<typeof listCollections>>,
-  TError = unknown,
+  TError = Refusal,
 >(
   options?: {
     query?: Partial<
@@ -188,7 +189,7 @@ export function useListCollections<
 
 export function useListCollections<
   TData = Awaited<ReturnType<typeof listCollections>>,
-  TError = unknown,
+  TError = Refusal,
 >(
   options?: {
     query?: Partial<
@@ -280,7 +281,7 @@ export const getCreateCollectionMutationKey = () =>
   ["createCollection"] as const;
 
 export const getCreateCollectionMutationOptions = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -321,14 +322,14 @@ export type CreateCollectionMutationResult = NonNullable<
   Awaited<ReturnType<typeof createCollection>>
 >;
 export type CreateCollectionMutationBody = CollectionCreate;
-export type CreateCollectionMutationError = HTTPValidationError;
+export type CreateCollectionMutationError = Refusal | HTTPValidationError;
 export type CreateCollectionMutationVariables = { data: CollectionCreate };
 
 /**
  * @summary Create Collection
  */
 export const useCreateCollection = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(
   options?: {
@@ -395,7 +396,7 @@ export const getDeleteCollectionMutationKey = () =>
   ["deleteCollection"] as const;
 
 export const getDeleteCollectionMutationOptions = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -436,14 +437,14 @@ export type DeleteCollectionMutationResult = NonNullable<
   Awaited<ReturnType<typeof deleteCollection>>
 >;
 
-export type DeleteCollectionMutationError = HTTPValidationError;
+export type DeleteCollectionMutationError = Refusal | HTTPValidationError;
 export type DeleteCollectionMutationVariables = { collectionId: number };
 
 /**
  * @summary Delete Collection
  */
 export const useDeleteCollection = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(
   options?: {
@@ -535,7 +536,7 @@ export const getRenameCollectionMutationKey = () =>
   ["renameCollection"] as const;
 
 export const getRenameCollectionMutationOptions = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -576,7 +577,7 @@ export type RenameCollectionMutationResult = NonNullable<
   Awaited<ReturnType<typeof renameCollection>>
 >;
 export type RenameCollectionMutationBody = CollectionUpdate;
-export type RenameCollectionMutationError = HTTPValidationError;
+export type RenameCollectionMutationError = Refusal | HTTPValidationError;
 export type RenameCollectionMutationVariables = {
   collectionId: number;
   data: CollectionUpdate;
@@ -586,7 +587,7 @@ export type RenameCollectionMutationVariables = {
  * @summary Rename Collection
  */
 export const useRenameCollection = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(
   options?: {

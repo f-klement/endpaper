@@ -47,6 +47,7 @@ from __future__ import annotations
 
 import ast
 import json
+import os
 import re
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
@@ -1443,9 +1444,64 @@ def _rows_of_zero_with_no_engine_reason(
     )
 
 
+#: Set to `off` by the plant harness for every arm it runs: the register is red
+#: by construction on a branch that adds a test, so a plant's baseline would
+#: refuse exactly there. Only that word turns the document's arms off; the
+#: suite runner refuses any other value before a run starts.
+SWITCH = "ENDPAPER_COVERAGE_REGISTER"
+
+
+def _the_document() -> str:
+    """The document, or a skip for every arm reading it when the switch is off.
+
+    **Here because this is the file's one read of the document**, so every
+    arm comparing it to the tree or the run skips, and the arms testing the
+    readers on text of their own still run.
+
+    **In a pipeline the switch fails instead.** The pipeline runs pytest
+    directly rather than through the suite runner, so a CI variable carrying
+    the switch would otherwise skip the register on every job it reaches,
+    green.
+    """
+    if os.environ.get(SWITCH) == "off":
+        if "GITLAB_CI" in os.environ:
+            pytest.fail(f"{SWITCH}=off is for a plant copy and this is a pipeline")
+        pytest.skip(f"{SWITCH}=off: this run does not check {REGISTER.name}")
+    return REGISTER.read_text(encoding="utf-8")
+
+
 @pytest.fixture(scope="module")
 def register() -> str:
-    return REGISTER.read_text(encoding="utf-8")
+    return _the_document()
+
+
+class TestThePlantHarnessSwitch:
+    def test_off_skips_the_arms_that_read_the_document(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Cleared, because the pipeline running this arm sets it.
+        monkeypatch.delenv("GITLAB_CI", raising=False)
+        monkeypatch.setenv(SWITCH, "off")
+
+        with pytest.raises(pytest.skip.Exception, match=SWITCH):
+            _the_document()
+
+    def test_off_in_a_pipeline_fails_rather_than_skips(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("GITLAB_CI", "true")
+        monkeypatch.setenv(SWITCH, "off")
+
+        # Both caught: a skip escaping this arm would report it skipped, not red.
+        with pytest.raises((pytest.fail.Exception, pytest.skip.Exception)) as raised:
+            _the_document()
+
+        assert raised.type is pytest.fail.Exception
+
+    def test_unset_reads_the_document(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv(SWITCH, raising=False)
+
+        assert _the_document() == REGISTER.read_text(encoding="utf-8")
 
 
 @pytest.fixture

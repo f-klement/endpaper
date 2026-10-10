@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import type { LoanOut } from "../../api/generated/model";
 import { useTranslation } from "../../i18n";
 import { numericDate } from "../../lib/date";
-import { loanState } from "../../lib/loanState";
+import { loanState, overdueText } from "../../lib/loanState";
 import { Button } from "../../components";
 import CoverImage from "./CoverImage";
 
@@ -66,9 +66,10 @@ export default function LoanRow({
   // of `loanState` together, so no two of the places below can disagree about
   // the same row.
   const { isOpen, returnedOn } = loanState(loan);
-  // Defaulted because both fields are optional in the generated type: they
-  // carry a server side default, so orval emits them as `number | undefined`
-  // and TypeScript will not let either be compared without this.
+  // Defaulted because the field is optional in the generated type: it carries
+  // a server side default, so orval emits it as `number | undefined` and
+  // TypeScript will not let it be compared without this. `overdueText` does
+  // the same for `days_overdue`.
   //
   // **Not because of `serialisation.loan_summary`**, which was the reason
   // written here first and is a real omission on a payload this component
@@ -76,7 +77,6 @@ export default function LoanRow({
   // loan reaching `LoanRow` comes from the loans list or the overdue page,
   // where both fields are filled. Zero renders nothing either way.
   const daysOut = loan.days_out ?? 0;
-  const daysOverdue = loan.days_overdue ?? 0;
 
   return (
     <div
@@ -129,31 +129,7 @@ export default function LoanRow({
           </p>
           {loan.is_overdue && (
             <span className="inline-block mt-1 text-xs font-medium text-danger-700 bg-danger-100 border border-danger-100 px-2 py-0.5 rounded-full dark:bg-danger-700 dark:border-danger-700 dark:text-danger-100">
-              {/* The day count leads, because it is what tells a week from a
-                  year at a glance, and the date stays beside it: it is what a
-                  person writing to a borrower needs, and the only other place
-                  it appears is the `dueOn` line below, which is gated on the
-                  loan not being overdue. Leading with the count alone took the
-                  deadline off every overdue row past its first day.
-
-                  The count is 0 within the first day past the deadline, which
-                  says nothing, so the date carries that case on its own, and
-                  the bare word carries a loan flagged with no date at all. */}
-              {daysOverdue > 0 && loan.due_at
-                ? t(
-                    daysOverdue === 1
-                      ? "loans.overdueByOneDaySince"
-                      : "loans.overdueByDaysSince",
-                    {
-                      days: daysOverdue,
-                      date: numericDate(loan.due_at, locale),
-                    },
-                  )
-                : loan.due_at
-                  ? t("loans.overdueSince", {
-                      date: numericDate(loan.due_at, locale),
-                    })
-                  : t("loans.overdue")}
+              {overdueText(loan, locale, t)}
             </span>
           )}
           {/* `isOpen` rather than the column: a deadline on a book already

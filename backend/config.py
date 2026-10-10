@@ -8,8 +8,11 @@ exist before the app starts serving from it.
 """
 
 import os
+import ssl
 from pathlib import Path
 from typing import Final
+
+from ldap3 import Server
 
 from enums import AppEnv, AuthMode, SettingKey
 
@@ -248,6 +251,27 @@ def ldap_start_tls() -> bool:
     return os.getenv("LDAP_START_TLS", "false").strip().lower() == "true"
 
 
+def ldap_ca_file() -> str:
+    """Path to the CA bundle a directory's certificate is checked against, or empty.
+
+    Empty means the image's own trust store, which holds the public authorities
+    and not the self signed or private CA a household directory usually has.
+    **Supplying it replaces that store rather than adding to it**, as
+    `DATABASE_SSL_ROOT_CERT` does: a private CA here means a public one no
+    longer verifies. There is no setting that skips the check.
+    """
+    return os.getenv("LDAP_CA_FILE", "").strip()
+
+
+def ldap_allow_cleartext() -> bool:
+    """Whether this deployment chose to send directory passwords unencrypted.
+
+    Every sign in sends the member's password to the directory, so a connection
+    with no TLS is cleartext whether or not a service account is configured.
+    """
+    return os.getenv("LDAP_ALLOW_CLEARTEXT", "false").strip().lower() == "true"
+
+
 def proxy_user_header() -> str:
     """Header naming the authenticated member. Authelia sends Remote-User."""
     return os.getenv("PROXY_USER_HEADER", "Remote-User").strip()
@@ -307,8 +331,55 @@ def validate_auth_config() -> None:
                 "LDAP_BIND_DN to search anonymously on purpose."
             )
 
+        _validate_ldap_transport()
+
     if mode is AuthMode.PROXY and not proxy_user_header():
         raise RuntimeError("AUTH_MODE=proxy requires PROXY_USER_HEADER to name a header.")
+
+
+def _validate_ldap_transport() -> None:
+    """Refuse a directory connection that would carry a password in the clear,
+    and a CA file that would never be read or cannot be.
+
+    **An anonymous search is no exception.** It sends no service password, but
+    the member's own bind that follows it sends theirs, and that is every sign
+    in. So without TLS the only way to start is `LDAP_ALLOW_CLEARTEXT=true`.
+
+    Whether the URL is TLS is ldap3's own reading of it, so a spelling the
+    client treats as cleartext (no scheme at all, `ldapi://`) is cleartext here.
+    """
+    encrypted = Server(ldap_url()).ssl or ldap_start_tls()
+    if not encrypted and not ldap_allow_cleartext():
+        raise RuntimeError(
+            "LDAP_URL is not ldaps:// and LDAP_START_TLS is off, so every sign in "
+            "would send a password to the directory in cleartext. Use an ldaps:// "
+            "URL or set LDAP_START_TLS=true; or, on a network you trust, set "
+            "LDAP_ALLOW_CLEARTEXT=true to accept that."
+        )
+
+    ca_file = ldap_ca_file()
+    if not ca_file:
+        return
+    if not encrypted:
+        # The same rule as `DATABASE_SSL_ROOT_CERT`: a TLS setting the
+        # connection cannot honour is how a deployment comes to believe it is
+        # verified.
+        raise RuntimeError(
+            "LDAP_CA_FILE is set and the directory connection uses no TLS, so the "
+            "file would never be read. Use an ldaps:// URL or LDAP_START_TLS=true, "
+            "or unset LDAP_CA_FILE."
+        )
+    # Loaded the way every connection will load it, so a path that was never
+    # mounted, a file this user cannot read and a file holding no certificate
+    # all fail here rather than at the first sign in.
+    try:
+        ssl.create_default_context(cafile=ca_file)
+    except OSError as failure:
+        raise RuntimeError(
+            f"LDAP_CA_FILE={ca_file!r} could not be loaded as a CA bundle ({failure}). "
+            "In a container the CA has to be mounted in, and the path is the one "
+            "inside the container rather than the one on the host."
+        ) from None
 
 
 def ensure_data_dirs() -> None:

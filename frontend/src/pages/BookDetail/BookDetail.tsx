@@ -362,7 +362,9 @@ export default function BookDetail({ currentUser }: BookDetailProps) {
                     {t("book.categories")}
                   </p>
                   <div className="flex flex-wrap gap-1.5">
-                    {book.categories.map((category) => (
+                    {/* Once each: a catalogue can send a category twice,
+                        and the name is the chip's identity. */}
+                    {[...new Set(book.categories)].map((category) => (
                       <span
                         key={category}
                         className="text-xs text-paper-600 bg-paper-100 px-2 py-0.5 rounded dark:text-paper-400 dark:bg-paper-800"

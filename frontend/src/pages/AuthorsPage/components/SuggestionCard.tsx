@@ -108,7 +108,12 @@ export default function SuggestionCard({
 
       <p className="text-xs text-paper-600 dark:text-paper-400">
         {group.reasons
-          .map((reason) => REASONS[reason])
+          // `Object.hasOwn` before the read, because the key is a server
+          // string: `toString` indexes the prototype to a function, which
+          // passes the `undefined` filter below and reaches `t`.
+          .map((reason) =>
+            Object.hasOwn(REASONS, reason) ? REASONS[reason] : undefined,
+          )
           // **A reason this build does not know is dropped, never rendered
           // raw.** The type above makes that unreachable for a client and
           // server built together, and this is the version skew case: an older

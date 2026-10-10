@@ -9,6 +9,7 @@ truth, and the one people forget to change.
 from logging.config import fileConfig
 
 from alembic import context
+from alembic.util import CommandError
 from sqlalchemy import engine_from_config, pool
 
 # Importing models registers every table on Base.metadata, which is what
@@ -34,18 +35,20 @@ target_metadata = Base.metadata
 
 
 def run_migrations_offline() -> None:
-    """Emit SQL to stdout instead of running it (`alembic upgrade --sql`)."""
-    context.configure(
-        url=database_url(),
-        target_metadata=target_metadata,
-        literal_binds=True,
-        dialect_opts={"paramstyle": "named"},
-        # SQLite cannot ALTER most things in place; batch mode rewrites the
-        # table around the change instead of failing.
-        render_as_batch=True,
+    """Refuse `alembic upgrade --sql`, which cannot render this chain on either engine.
+
+    On SQLite the first batch operation needs a live connection to reflect the
+    table it rebuilds, and on Postgres a revision that asks its connection which
+    engine it is on fails against the stand in offline mode supplies. Both
+    failed after printing part of the script, so this refuses before the first
+    line rather than let a partial script pass for a whole one. The refusal is
+    whole rather than per command, so `stamp --sql`, which runs no revision and
+    could render, is refused as well.
+    """
+    raise CommandError(
+        "This migration chain cannot be rendered offline; "
+        "run it against the database instead of with --sql."
     )
-    with context.begin_transaction():
-        context.run_migrations()
 
 
 def run_migrations_online() -> None:

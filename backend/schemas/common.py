@@ -203,6 +203,16 @@ def one_line_without_any_control_character(value: str) -> str:
     return one_line(value.translate(_CONTROL_CHARACTERS))
 
 
+class Refusal(BaseModel):
+    """A refusal: the sentence saying why, in `detail`."""
+
+    # A string: this is declared only for `refusals.DECLARED`, and the object
+    # `detail` this backend also sends rides on a 409, which is not among them.
+    # `tests/test_refusals.py` refuses one of the three built with a mapping or
+    # a list. The mutator reads either shape (`errorDetail` in `frontend/src/api`).
+    detail: str
+
+
 class Page[T](BaseModel):
     """A slice of a longer list, plus what the client needs to ask for more.
 

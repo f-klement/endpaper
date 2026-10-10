@@ -3,17 +3,21 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Route, Routes } from "react-router-dom";
+import fc from "fast-check";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   BookIdentifierScheme,
+  Locale,
   OwnershipStatus,
   ReadStatus,
   type CustomFieldOut,
   type UserOut,
 } from "../../../src/api/generated/model";
+import { de, en } from "../../../src/i18n";
 import BookDetail from "../../../src/pages/BookDetail";
 import { BOOK_SECTIONS } from "../../../src/pages/BookDetail/hooks";
+import { writeSectionChoice } from "../../../src/lib/sectionState";
 import {
   makeBook,
   makeLoan,
@@ -23,7 +27,11 @@ import {
   makeTagSet,
   resetIds,
 } from "../../factories";
+import { whileStorageRefuses } from "../../storageRefusal";
 import { mockApi, renderWithProviders, type MockApi } from "../../utils";
+import { answersOf } from "../../lib/schemaArbitrary";
+import { holds, PROFILE, PROPERTY, witness } from "../../property";
+import { forget, overSchema, scripted } from "../../schemaPage";
 
 const OWNER: UserOut = {
   id: 1,
@@ -1185,6 +1193,25 @@ describe("BookDetail enrichment fields", () => {
     expect(screen.getByText("Science Fiction")).toBeVisible();
   });
 
+  it("shows a category the catalogue sent twice once, with no key warning", async () => {
+    // Google's categories are stored as sent, repeats and all, and the name is
+    // the chip's React key.
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => {});
+    stubLoad({
+      book: makeBook({
+        id: 1,
+        added_by: OWNER,
+        categories: ["Space Opera", "Space Opera"],
+      }),
+    });
+    renderDetail();
+
+    expect(await screen.findAllByText("Space Opera")).toHaveLength(1);
+    expect(consoleError.mock.calls.flat().join(" ")).not.toContain("same key");
+  });
+
   it("leaves the sections out when there is nothing to show", async () => {
     stubLoad({ book: makeBook({ id: 1, added_by: OWNER, categories: [] }) });
     renderDetail();
@@ -1551,9 +1578,9 @@ describe("BookDetail sections", () => {
   it("draws a book the same way when storage has nothing to say", async () => {
     // A private window, or a browser set to block site data. The defaults are
     // the book's, and nothing on the page depends on a stored value existing.
-    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
-      throw new Error("denied");
-    });
+    // A reader closed the loan earlier, so an open one can only be the book's
+    // default reached through the refusal.
+    writeSectionChoice("bookDetailSections", "lending", false);
     stubLoad({
       book: makeBook({
         id: 1,
@@ -1561,10 +1588,140 @@ describe("BookDetail sections", () => {
         active_loan: makeLoan({ id: 9 }),
       }),
     });
-    renderDetail();
 
-    expect(
-      await screen.findByRole("button", { name: "Lending this copy" }),
-    ).toHaveAttribute("aria-expanded", "true");
+    await whileStorageRefuses("getItem", async () => {
+      renderDetail();
+
+      expect(
+        await screen.findByRole("button", { name: "Lending this copy" }),
+      ).toHaveAttribute("aria-expanded", "true");
+    });
   });
+});
+
+describe("BookDetail over any answer the schema permits", () => {
+  // What the page's hooks are handed is drawn from `openapi.json`, per
+  // request. `tests/schemaPage.tsx` holds what the page may not do.
+  it("is drawn every shape of answer its main request declares", async () => {
+    await witness(answersOf("get_book"), {
+      "is an error body": (answer) => answer.status === 422,
+      "is a book": (answer) => answer.status === 200,
+    });
+  });
+
+  it("neither throws nor shows a value nobody can name", PROPERTY, async () => {
+    expect(
+      await holds(
+        fc.gen(),
+        async (answers) => {
+          try {
+            const rendered = await overSchema(
+              <Routes>
+                <Route
+                  path="/book/:id"
+                  element={<BookDetail currentUser={OWNER} />}
+                />
+              </Routes>,
+              answers,
+              { route: "/book/12" },
+            );
+            expect(rendered.problems).toEqual([]);
+            return rendered;
+          } finally {
+            forget();
+          }
+        },
+        {
+          "showed a value an answer carried": (_, rendered) =>
+            rendered.echoed > 0,
+          "drew an alert": (_, rendered) => rendered.alerts.length > 0,
+        },
+      ),
+    ).toBe(PROFILE.runs);
+  });
+
+  it.each([Locale.en, Locale.de])(
+    "names a 422 whose only message is blank in the reader's language (%s)",
+    async (locale) => {
+      // The property's counterexample, its answers in the order the page asked.
+      // The last is the one: a `msg` of only a tab, which the alert showed as
+      // its retry button and nothing else. Its status text is empty, as over
+      // HTTP/2, where a fallback to it showed an English literal.
+      const book = {
+        active_loan: {
+          book_id: 0,
+          id: 0,
+          loaned_at: "0000-01-01T00:00:00.000Z",
+          loaned_by_user_id: 0,
+          loaned_to_user_id: null,
+          returned_at: "1970-01-01T00:00:00.000Z",
+        },
+        added_at: "0000-01-01T00:00:00.000Z",
+        author: "",
+        collection_name: "",
+        copy_count: 0,
+        cover_url: null,
+        description: null,
+        discuss_with: [],
+        id: 0,
+        isbn: null,
+        my_finished_at: "1970-01-01T00:00:00.000Z",
+        my_progress_page: 0,
+        my_progress_percent: null,
+        my_progress_recorded_at: "1970-01-01T00:00:00.000Z",
+        my_rating: 0,
+        my_started_at: null,
+        my_status: "unread",
+        my_wants_to_discuss: false,
+        publisher: null,
+        subtitle: null,
+        title: "",
+        year: 0,
+      };
+      const empty = { status: 200, body: [] };
+      try {
+        const rendered = await overSchema(
+          <Routes>
+            <Route
+              path="/book/:id"
+              element={<BookDetail currentUser={OWNER} />}
+            />
+          </Routes>,
+          scripted([
+            ["get_book", { status: 200, body: book }],
+            ["list_tags", empty],
+            ["list_users", empty],
+            ["list_locations", empty],
+            ["list_collections", empty],
+            ["get_notes", { status: 422, body: {} }],
+            ["get_quotes", empty],
+            ["list_progress", empty],
+            [
+              "get_feature_flags",
+              {
+                status: 200,
+                body: { default_locale: "en", goodreads_lookup_enabled: false },
+              },
+            ],
+            ["list_copies", empty],
+            ["list_custom_fields", empty],
+            [
+              "get_custom_fields",
+              {
+                status: 422,
+                body: { detail: [{ loc: [], msg: "\t", type: "" }] },
+              },
+            ],
+          ]),
+          { route: "/book/12", locale },
+        );
+        expect(rendered.problems).toEqual([]);
+        // Two: the notes' 422, with no detail at all, is named the same way.
+        const named = { en, de }[locale]["common.somethingWentWrong"];
+        expect(rendered.alerts).toEqual([named, named]);
+      } finally {
+        forget();
+      }
+    },
+  );
 });

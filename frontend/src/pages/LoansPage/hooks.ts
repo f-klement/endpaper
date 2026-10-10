@@ -3,10 +3,9 @@ import { useState } from "react";
 import {
   useListLoans,
   useMyOverdue,
-  useReturnLoan,
 } from "../../api/generated/endpoints/loans/loans";
 import type { LoanOut } from "../../api/generated/model";
-import { useInvalidate } from "../../api/invalidate";
+import { useLoanReturn } from "../hooks";
 
 /** Rows per request. The list is read top-down, so a page is generous. */
 export const PAGE_SIZE = 50;
@@ -43,14 +42,13 @@ export interface UseLoansResult {
   error: unknown;
   refetch: () => void;
 
-  returningId: number | null;
+  returningIds: ReadonlySet<number>;
   markReturned: (loanId: number) => void;
 }
 
 export function useLoans(): UseLoansResult {
   const [showAll, setShowAll] = useState(false);
   const [overdueOnly, setOverdueOnly] = useState(false);
-  const invalidate = useInvalidate();
 
   const params = {
     active_only: !showAll,
@@ -64,13 +62,7 @@ export function useLoans(): UseLoansResult {
   // read. It answers `{enabled, count}` and costs no rows at all.
   const overdue = useMyOverdue({ query: { staleTime: 60_000 } });
 
-  const returnLoan = useReturnLoan({
-    // A return changes the loans list, the overdue list, the in app count and
-    // every book's `active_loan`. `invalidate.loans()` is that set named once;
-    // this hook used to assemble it here and the overdue list was missing from
-    // it, because the list did not exist yet when the keys were written out.
-    mutation: { onSuccess: () => invalidate.loans() },
-  });
+  const returning = useLoanReturn();
 
   return {
     loans: loans.data?.items ?? [],
@@ -82,14 +74,10 @@ export function useLoans(): UseLoansResult {
     setShowAll,
 
     isLoading: loans.isPending,
-    error: loans.error ?? returnLoan.error,
+    error: loans.error ?? returning.error,
     refetch: () => void loans.refetch(),
 
-    // The row spinner needs to know *which* loan is in flight, which the
-    // mutation's own isPending cannot say.
-    returningId: returnLoan.isPending
-      ? (returnLoan.variables?.loanId ?? null)
-      : null,
-    markReturned: (loanId) => returnLoan.mutate({ loanId }),
+    returningIds: returning.returningIds,
+    markReturned: returning.markReturned,
   };
 }

@@ -52,6 +52,7 @@ from fastapi.responses import FileResponse
 
 import cover_store
 from dependencies import BookForCover
+from refusals import refuses
 
 router = APIRouter(prefix="/covers", tags=["covers"])
 
@@ -155,11 +156,11 @@ _MULTIPART_BYTERANGES: Final = "multipart/byteranges"
 #:
 #: **The 400 and the 416 a `Range` header can also produce are left undeclared,
 #: and that is a refusal rather than an omission.**
-#: `tests/test_errors.py::TestTheDocumentEnumeratesNoRefusal` holds that this
-#: document enumerates no refusal anywhere, which two published route docstrings
-#: argue from by name. Declaring one here would make both of them false through
-#: a decorator edit, and whether to declare refusals is a decision about the
-#: whole surface rather than about these two routes.
+#: `tests/test_errors.py::TestTheDocumentDeclaresNoOtherRefusal` holds that this
+#: document declares no refusal but a 401, a 403 or a 404, which two published
+#: route docstrings argue from by name. Declaring another here would make both of
+#: them false through a decorator edit, and which refusals to declare is a
+#: decision about the whole surface rather than about these two routes.
 #:
 #: **A conditional request is not a third key either.** `FileResponse` does no
 #: conditional handling at all, measured two ways: the only 304 in the pinned
@@ -221,6 +222,7 @@ def _not_found() -> HTTPException:
         206: {"content": _DECLARED_PARTIAL_CONTENT},
     },
 )
+@refuses(404)
 def get_login_background(
     extension: Annotated[str, PathParam(pattern=r"^[A-Za-z]{3,4}$")],
 ) -> FileResponse:
@@ -257,6 +259,7 @@ def get_login_background(
         206: {"content": _DECLARED_PARTIAL_CONTENT},
     },
 )
+@refuses(404)
 def get_cover(
     book: BookForCover,
     extension: Annotated[str, PathParam(pattern=r"^[A-Za-z]{3,4}$")],

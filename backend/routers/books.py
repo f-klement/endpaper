@@ -111,6 +111,7 @@ from ratelimit import (
     export_limiter,
 )
 from reading import Reading
+from refusals import refuses
 from schemas import (
     DUPLICATE_BOOKS_SHOWN,
     MAX_DIGITAL_REFERENCES_PER_BOOK,
@@ -288,6 +289,7 @@ def create_tag(payload: TagCreate, db: DbSession, current_user: CurrentUser) -> 
 
 
 @router.delete("/tags/{tag_id}", status_code=status.HTTP_204_NO_CONTENT)
+@refuses(404)
 def delete_tag(
     tag_id: RowId,
     db: DbSession,
@@ -568,6 +570,7 @@ def define_custom_field(
 
 
 @router.patch("/custom-fields/{field_id}", response_model=CustomFieldOut)
+@refuses(403, 404)
 def rename_custom_field(
     field_id: RowId,
     payload: CustomFieldRename,
@@ -641,6 +644,7 @@ def rename_custom_field(
 
 
 @router.delete("/custom-fields/{field_id}", status_code=status.HTTP_204_NO_CONTENT)
+@refuses(404)
 def delete_custom_field(
     field_id: RowId,
     db: DbSession,
@@ -676,6 +680,7 @@ def delete_custom_field(
 
 
 @router.get("/lookup", response_model=BookLookup)
+@refuses(404)
 async def lookup_isbn(
     db: DbSession,
     current_user: CurrentUser,
@@ -1114,6 +1119,7 @@ _EXPORT_CONTENT: Final[dict[str, dict[str, Any]]] = {
         }
     },
 )
+@refuses(403)
 def export_books(
     db: DbSession,
     current_user: CurrentUser,
@@ -1126,14 +1132,15 @@ def export_books(
     document has no way to say which of them `?format=` selects.
 
     **Rationed, and the schema does not say so.** The refusal is a 429 carrying
-    `Retry-After`. It is not declared here because this document enumerates no
-    refusal on any operation: not a 401, which every secured operation can
-    answer, nor a 403, a 404 or a 429. So declaring one here would make this
+    `Retry-After`. It is not declared here because this document declares a
+    refusal only where it declares one for every operation that can answer
+    it: a 401, a 403 or a 404, derived in `refusals.py` from what each route
+    runs, and nothing else. So declaring a 429 here alone would make this
     refusal look deliberate and every other operation's look accidental, which
     is a decision about the whole error surface rather than about this route.
     `docs/decisions.md` records that reasoning, having refused the same move
     once already, and
-    `tests/test_errors.py::TestTheDocumentEnumeratesNoRefusal` is what this
+    `tests/test_errors.py::TestTheDocumentDeclaresNoOtherRefusal` is what this
     paragraph rests on rather than a reader's memory of it. The mechanism behind
     the refusal is shared by every route in `ratelimit.py`, so what would make
     declaring it honest is declaring it at all of them. The counter is not:
@@ -1924,6 +1931,7 @@ def scan_add(payload: BookCreate, db: DbSession, current_user: CurrentUser) -> B
 
 
 @router.post("/bulk", response_model=BulkResult)
+@refuses(404)
 def bulk_action(
     payload: BulkRequest,
     db: DbSession,
@@ -2392,6 +2400,7 @@ async def author_wikipedia(
 
 
 @router.post("/authors/merge", response_model=AuthorOut)
+@refuses(404)
 def merge_authors(
     payload: AuthorMergeRequest, db: DbSession, current_user: CurrentUser
 ) -> AuthorOut:
@@ -2426,6 +2435,7 @@ def merge_authors(
 
 
 @router.post("/authors/merge/batch", response_model=AuthorBatchMergeOut)
+@refuses(404)
 def merge_authors_batch(
     payload: AuthorMergeBatchRequest, db: DbSession, current_user: CurrentUser
 ) -> AuthorBatchMergeOut:
@@ -2465,6 +2475,7 @@ def merge_authors_batch(
 
 
 @router.delete("/authors/aliases/{alias_id}", status_code=status.HTTP_204_NO_CONTENT)
+@refuses(404)
 def unmerge_author(alias_id: RowId, db: DbSession, current_user: CurrentUser) -> None:
     """Undo one merge. The spelling becomes its own author again.
 
@@ -2541,6 +2552,7 @@ def _authority_out(candidate: authority.AuthorityCandidate) -> AuthorityCandidat
 
 
 @router.get("/authors/authority", response_model=list[AuthorityCandidateOut])
+@refuses(404)
 async def author_authority(
     db: DbSession,
     current_user: CurrentUser,
@@ -2701,6 +2713,7 @@ async def _cross_references_for(identifier: str) -> dict[AuthorityScheme, str]:
     response_model=ConfirmedIdentifierOut,
     status_code=status.HTTP_201_CREATED,
 )
+@refuses(404)
 async def confirm_author_identifier(
     payload: AuthorIdentifierRequest,
     db: DbSession,
@@ -2786,6 +2799,7 @@ async def confirm_author_identifier(
 @router.delete(
     "/authors/identifiers/{identifier_id}", status_code=status.HTTP_204_NO_CONTENT
 )
+@refuses(404)
 def forget_author_identifier(
     identifier_id: RowId, db: DbSession, current_user: CurrentUser
 ) -> None:
@@ -3067,6 +3081,7 @@ def _duplicate_key(row: _DuplicateRow) -> str:
 
 
 @router.post("/merge", response_model=BookOut)
+@refuses(404)
 def merge_books(
     payload: MergeRequest,
     db: DbSession,
@@ -3112,26 +3127,9 @@ def merge_books(
     # from at all.
     shrinking_groups = {loser.copy_group for loser in losers} - {None}
 
-    orphaned_covers: list[int] = []
-    adoptions: list[int] = []
+    cover_files = _MergeCovers(keeper)
     for loser in losers:
-        # The keeper may have absorbed the loser's `cover_url`, which names a
-        # file about to be deleted with it. Moving the file is what keeps that
-        # cover working; everything else the loser held is dead bytes.
-        #
-        # Decided here, performed after the commit. The URL has to be known now
-        # because it goes into the row, and `covers.adoption_url` answers that
-        # from the source file's extension without moving anything. Doing the
-        # move here as well would put a filesystem write no rollback undoes
-        # inside the transaction: a raise between this loop and the commit,
-        # which `_normalise_copy_group`'s flush makes reachable, would leave the
-        # keeper's row naming a file that had already moved somewhere else.
-        if keeper.cover_url == covers.local_url_for(loser.id):
-            planned = covers.adoption_url(keeper.id, loser.id)
-            keeper.cover_url = planned
-            if planned is not None:
-                adoptions.append(loser.id)
-        orphaned_covers.append(loser.id)
+        cover_files.plan(loser)
 
         # Expire before deleting. The repointing above moved rows out from
         # under the loser, but its loaded relationship collections still list
@@ -3151,36 +3149,80 @@ def merge_books(
             _normalise_copy_group(token, db)
 
     db.commit()
-    # After the commit, for the reason in `_purge`: a file **moved or unlinked**
-    # before it is a loss no rollback undoes. Writing a new one is the other way
-    # round on purpose, everywhere in this module; see docs/decisions.md.
-    #
-    # Adoptions first, and **their outcome decides the sweep**. `adopt` answers
-    # None when the move failed, and `cover_store.move` is atomic and
-    # re-raises having removed only its own temporary file, so on that answer
-    # the loser's cover is still sitting under the loser's id. Sweeping it
-    # anyway destroys the only copy there is, which for a hand-uploaded cover
-    # means destroying it for good: there is no remote source, so the backfill
-    # has nothing to re-fetch and cannot repair it.
-    kept = {
-        from_book_id
-        for from_book_id in adoptions
-        if covers.adopt(keeper.id, from_book_id) is None
-    }
-    for book_id in orphaned_covers:
-        if book_id not in kept:
-            cover_store.remove(book_id)
-
-    # The row promised a cover the move did not produce, so it is corrected
-    # rather than left naming a file nobody wrote. This is what the old
-    # pre-commit ordering did with `adopted if adopted else None`, and losing it
-    # was the one thing deferring the move made worse rather than better.
-    if kept:
-        keeper.cover_url = None
+    if cover_files.settle():
         db.commit()
 
     db.refresh(keeper)
     return book_to_out(keeper, current_user, db)
+
+
+class _MergeCovers:
+    """The cover files one merge moves: planned before its commit, settled after.
+
+    The keeper may absorb a loser's `cover_url`, which names a file about to be
+    deleted with the loser. Moving the file is what keeps that cover working;
+    everything else a loser held is dead bytes.
+
+    **Two halves because the move has two, and they sit on opposite sides of the
+    commit.** The URL has to be known before it, because it goes into the row,
+    and `covers.adoption_url` answers that from the source file's extension
+    without moving anything. The move waits until after it: a filesystem write
+    no rollback undoes, made inside the transaction, would leave the keeper's
+    row naming a file that had already moved somewhere else on any raise between
+    the loop and the commit, which `_normalise_copy_group`'s flush makes
+    reachable.
+    """
+
+    def __init__(self, keeper: Book) -> None:
+        self._keeper = keeper
+        self._adoptions: list[int] = []
+        self._orphaned: list[int] = []
+
+    def plan(self, loser: Book) -> None:
+        """Point the keeper's row at the file it will own. Moves nothing.
+
+        Called for each loser while it is still loaded, before it is deleted.
+        """
+        if self._keeper.cover_url == covers.local_url_for(loser.id):
+            planned = covers.adoption_url(self._keeper.id, loser.id)
+            self._keeper.cover_url = planned
+            if planned is not None:
+                self._adoptions.append(loser.id)
+        self._orphaned.append(loser.id)
+
+    def settle(self) -> bool:
+        """Move the adopted files and sweep the rest. Call after the commit.
+
+        After it for the reason in `_purge`: a file **moved or unlinked** before
+        it is a loss no rollback undoes. Writing a new one is the other way
+        round on purpose, everywhere in this module; see docs/decisions.md.
+
+        True when the keeper's row changed and the caller has a commit to make.
+        """
+        # Adoptions first, and **their outcome decides the sweep**. `adopt`
+        # answers None when the move failed, and `cover_store.move` is atomic
+        # and re-raises having removed only its own temporary file, so on that
+        # answer the loser's cover is still sitting under the loser's id.
+        # Sweeping it anyway destroys the only copy there is, which for a
+        # hand-uploaded cover means destroying it for good: there is no remote
+        # source, so the backfill has nothing to re-fetch and cannot repair it.
+        kept = {
+            from_book_id
+            for from_book_id in self._adoptions
+            if covers.adopt(self._keeper.id, from_book_id) is None
+        }
+        for book_id in self._orphaned:
+            if book_id not in kept:
+                cover_store.remove(book_id)
+
+        # The row promised a cover the move did not produce, so it is corrected
+        # rather than left naming a file nobody wrote. This is what the old
+        # pre-commit ordering did with `adopted if adopted else None`, and
+        # losing it was the one thing deferring the move made worse rather than
+        # better.
+        if kept:
+            self._keeper.cover_url = None
+        return bool(kept)
 
 
 # ── Covers ────────────────────────────────────────────────────────────────────
@@ -4726,6 +4768,7 @@ def add_progress(
 
 
 @router.delete("/{book_id}/progress/{progress_id}", status_code=status.HTTP_204_NO_CONTENT)
+@refuses(404)
 def delete_progress(
     progress_id: RowId,
     book: BookForRead,
@@ -4822,6 +4865,7 @@ def add_book_tag_by_name(
 
 
 @router.post("/{book_id}/tags/{tag_id}", response_model=BookOut)
+@refuses(404)
 def add_book_tag(
     tag_id: RowId,
     book: BookForWrite,
@@ -4928,6 +4972,7 @@ def get_custom_fields(book: BookForRead, db: DbSession) -> list[CustomFieldValue
 
 
 @router.put("/{book_id}/custom-fields/{field_id}", response_model=list[CustomFieldValueOut])
+@refuses(404)
 def set_custom_field(
     field_id: RowId,
     payload: CustomFieldValueUpdate,
@@ -4990,6 +5035,7 @@ async def upload_cover(
 
 
 @router.put("/{book_id}/refresh", response_model=BookOut)
+@refuses(404)
 async def refresh_metadata(book: BookForWrite, db: DbSession, current_user: CurrentUser) -> BookOut:
     if not book.isbn:
         raise HTTPException(status_code=400, detail="Book has no ISBN, cannot refresh metadata")
@@ -5160,6 +5206,7 @@ def _note_for_edit(note_id: int, book: Book, current_user: User, db: Session) ->
 
 
 @router.put("/{book_id}/notes/{note_id}", response_model=NoteOut)
+@refuses(403, 404)
 def edit_note(
     note_id: RowId,
     payload: NoteCreate,
@@ -5174,6 +5221,7 @@ def edit_note(
 
 
 @router.delete("/{book_id}/notes/{note_id}", status_code=status.HTTP_204_NO_CONTENT)
+@refuses(403, 404)
 def delete_note(
     note_id: RowId,
     book: BookForRead,
@@ -5262,6 +5310,7 @@ def _quote_for_edit(quote_id: int, book: Book, current_user: User, db: Session) 
 
 
 @router.put("/{book_id}/quotes/{quote_id}", response_model=QuoteOut)
+@refuses(403, 404)
 def edit_quote(
     quote_id: RowId,
     payload: QuoteCreate,
@@ -5278,6 +5327,7 @@ def edit_quote(
 
 
 @router.delete("/{book_id}/quotes/{quote_id}", status_code=status.HTTP_204_NO_CONTENT)
+@refuses(403, 404)
 def delete_quote(
     quote_id: RowId,
     book: BookForRead,
@@ -5436,6 +5486,7 @@ def report_digital_reference(
     "/{book_id}/digital-references/{reference_id}/missing",
     response_model=DigitalReferenceOut,
 )
+@refuses(404)
 def report_digital_reference_missing(
     reference_id: RowId,
     book: BookForWrite,
@@ -5467,6 +5518,7 @@ def report_digital_reference_missing(
     "/{book_id}/digital-references/{reference_id}",
     status_code=status.HTTP_204_NO_CONTENT,
 )
+@refuses(404)
 def forget_digital_reference(
     reference_id: RowId,
     book: BookForWrite,
@@ -5512,6 +5564,7 @@ def _book_identifier_for(book: Book, identifier_id: int, db: Session) -> BookIde
     "/{book_id}/identifiers/{identifier_id}",
     status_code=status.HTTP_204_NO_CONTENT,
 )
+@refuses(404)
 def forget_book_identifier(
     identifier_id: RowId,
     book: BookForWrite,

@@ -401,7 +401,9 @@ signed in as a real member this way.
 | `LDAP_USERNAME_ATTRIBUTE` | `uid` | The attribute holding the login name |
 | `LDAP_ADMIN_GROUP` | none | Members of this group get admin, re-checked at each sign-in |
 | `LDAP_EMAIL_ATTRIBUTE` | none | The attribute holding a member's address, usually `mail`. Set it and the directory owns the address, re-applied at each sign-in and read only in the app. **Setting it clears the stored address of any member the directory has none for**, at their next sign-in, and the field is read only from then on, so it cannot be put back |
-| `LDAP_START_TLS` | `false` | Upgrade a plain connection with StartTLS |
+| `LDAP_START_TLS` | `false` | Upgrade a plain connection with StartTLS. If the directory does not upgrade, no password is sent |
+| `LDAP_CA_FILE` | none | CA bundle the directory's certificate is checked against, for a self signed or private CA. **Replaces** the image's trust store. The certificate and host name are always checked over TLS; nothing turns that off. A certificate listing DNS names in its subjectAltName must list the `LDAP_URL` host among them. Python's strict X.509 checks need a home made CA to carry key usage and a subject key identifier, and the server certificate an authority key identifier |
+| `LDAP_ALLOW_CLEARTEXT` | `false` | **Required to start without TLS.** An `ldap://` URL without StartTLS sends every sign in's password in cleartext, so it is refused unless this is `true` |
 | `PROXY_USER_HEADER` | `Remote-User` | Header naming the signed-in account |
 | `PROXY_GROUPS_HEADER` | `Remote-Groups` | Comma-separated group list |
 | `PROXY_ADMIN_GROUP` | none | Membership of this group grants admin |

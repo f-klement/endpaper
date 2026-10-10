@@ -26,9 +26,14 @@
  *
  * `tests/lib/loanState.test.ts` holds the rule that nothing else under `src`
  * names the column, which is the browser's half of the backend's own.
+ *
+ * `overdueText` words the overdue badge, the other answer a loan card reads off
+ * one loan, so the card holds markup and this module holds what it says.
  */
 
-import type { LoanOut } from "../api/generated/model";
+import type { LoanOut, Locale } from "../api/generated/model";
+import type { Translate } from "../i18n";
+import { numericDate } from "./date";
 
 /** A loan as a screen reads it. */
 export interface LoanState {
@@ -58,4 +63,34 @@ export interface LoanState {
 export function loanState(loan: LoanOut): LoanState {
   const returnedOn = loan.returned_at || null;
   return { isOpen: returnedOn === null, returnedOn };
+}
+
+/**
+ * What an overdue loan's badge says.
+ *
+ * **The day count leads, because it tells a week from a year at a glance, and
+ * the date stays beside it**: it is what a person writing to a borrower needs,
+ * and the deadline line a card draws for an open loan is gated on the loan not
+ * being overdue, so the badge is the only place an overdue row can show it.
+ *
+ * The count is 0 within the first day past the deadline, which says nothing,
+ * so the date carries that case on its own, and the bare word carries a loan
+ * flagged with no date at all. `days_overdue` is defaulted because the
+ * generated type makes it optional; the server fills it on every loan a list
+ * returns.
+ */
+export function overdueText(
+  loan: LoanOut,
+  locale: Locale,
+  t: Translate,
+): string {
+  if (!loan.due_at) return t("loans.overdue");
+  const date = numericDate(loan.due_at, locale);
+  const days = loan.days_overdue ?? 0;
+  if (days > 0)
+    return t(
+      days === 1 ? "loans.overdueByOneDaySince" : "loans.overdueByDaysSince",
+      { days, date },
+    );
+  return t("loans.overdueSince", { date });
 }

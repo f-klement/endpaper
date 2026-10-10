@@ -29,6 +29,7 @@ import type {
   MemberEmailOut,
   MemberVerificationOut,
   MySecurityOut,
+  Refusal,
   ResetCodeOut,
   ResetRequestOut,
   UserCreate,
@@ -84,7 +85,7 @@ export const getListUsersQueryKey = () => {
 
 export const getListUsersQueryOptions = <
   TData = Awaited<ReturnType<typeof listUsers>>,
-  TError = unknown,
+  TError = Refusal,
 >(options?: {
   query?: Partial<
     UseQueryOptions<Awaited<ReturnType<typeof listUsers>>, TError, TData>
@@ -109,11 +110,11 @@ export const getListUsersQueryOptions = <
 export type ListUsersQueryResult = NonNullable<
   Awaited<ReturnType<typeof listUsers>>
 >;
-export type ListUsersQueryError = unknown;
+export type ListUsersQueryError = Refusal;
 
 export function useListUsers<
   TData = Awaited<ReturnType<typeof listUsers>>,
-  TError = unknown,
+  TError = Refusal,
 >(
   options: {
     query: Partial<
@@ -135,7 +136,7 @@ export function useListUsers<
 };
 export function useListUsers<
   TData = Awaited<ReturnType<typeof listUsers>>,
-  TError = unknown,
+  TError = Refusal,
 >(
   options?: {
     query?: Partial<
@@ -157,7 +158,7 @@ export function useListUsers<
 };
 export function useListUsers<
   TData = Awaited<ReturnType<typeof listUsers>>,
-  TError = unknown,
+  TError = Refusal,
 >(
   options?: {
     query?: Partial<
@@ -175,7 +176,7 @@ export function useListUsers<
 
 export function useListUsers<
   TData = Awaited<ReturnType<typeof listUsers>>,
-  TError = unknown,
+  TError = Refusal,
 >(
   options?: {
     query?: Partial<
@@ -230,7 +231,7 @@ export const getListEmailsQueryKey = () => {
 
 export const getListEmailsQueryOptions = <
   TData = Awaited<ReturnType<typeof listEmails>>,
-  TError = unknown,
+  TError = Refusal,
 >(options?: {
   query?: Partial<
     UseQueryOptions<Awaited<ReturnType<typeof listEmails>>, TError, TData>
@@ -255,11 +256,11 @@ export const getListEmailsQueryOptions = <
 export type ListEmailsQueryResult = NonNullable<
   Awaited<ReturnType<typeof listEmails>>
 >;
-export type ListEmailsQueryError = unknown;
+export type ListEmailsQueryError = Refusal;
 
 export function useListEmails<
   TData = Awaited<ReturnType<typeof listEmails>>,
-  TError = unknown,
+  TError = Refusal,
 >(
   options: {
     query: Partial<
@@ -281,7 +282,7 @@ export function useListEmails<
 };
 export function useListEmails<
   TData = Awaited<ReturnType<typeof listEmails>>,
-  TError = unknown,
+  TError = Refusal,
 >(
   options?: {
     query?: Partial<
@@ -303,7 +304,7 @@ export function useListEmails<
 };
 export function useListEmails<
   TData = Awaited<ReturnType<typeof listEmails>>,
-  TError = unknown,
+  TError = Refusal,
 >(
   options?: {
     query?: Partial<
@@ -321,7 +322,7 @@ export function useListEmails<
 
 export function useListEmails<
   TData = Awaited<ReturnType<typeof listEmails>>,
-  TError = unknown,
+  TError = Refusal,
 >(
   options?: {
     query?: Partial<
@@ -371,7 +372,7 @@ export const getGetMyAppearanceQueryKey = () => {
 
 export const getGetMyAppearanceQueryOptions = <
   TData = Awaited<ReturnType<typeof getMyAppearance>>,
-  TError = unknown,
+  TError = Refusal,
 >(options?: {
   query?: Partial<
     UseQueryOptions<Awaited<ReturnType<typeof getMyAppearance>>, TError, TData>
@@ -396,11 +397,11 @@ export const getGetMyAppearanceQueryOptions = <
 export type GetMyAppearanceQueryResult = NonNullable<
   Awaited<ReturnType<typeof getMyAppearance>>
 >;
-export type GetMyAppearanceQueryError = unknown;
+export type GetMyAppearanceQueryError = Refusal;
 
 export function useGetMyAppearance<
   TData = Awaited<ReturnType<typeof getMyAppearance>>,
-  TError = unknown,
+  TError = Refusal,
 >(
   options: {
     query: Partial<
@@ -426,7 +427,7 @@ export function useGetMyAppearance<
 };
 export function useGetMyAppearance<
   TData = Awaited<ReturnType<typeof getMyAppearance>>,
-  TError = unknown,
+  TError = Refusal,
 >(
   options?: {
     query?: Partial<
@@ -452,7 +453,7 @@ export function useGetMyAppearance<
 };
 export function useGetMyAppearance<
   TData = Awaited<ReturnType<typeof getMyAppearance>>,
-  TError = unknown,
+  TError = Refusal,
 >(
   options?: {
     query?: Partial<
@@ -474,7 +475,7 @@ export function useGetMyAppearance<
 
 export function useGetMyAppearance<
   TData = Awaited<ReturnType<typeof getMyAppearance>>,
-  TError = unknown,
+  TError = Refusal,
 >(
   options?: {
     query?: Partial<
@@ -551,7 +552,7 @@ export const setMyAppearance = async (
 export const getSetMyAppearanceMutationKey = () => ["setMyAppearance"] as const;
 
 export const getSetMyAppearanceMutationOptions = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -592,14 +593,14 @@ export type SetMyAppearanceMutationResult = NonNullable<
   Awaited<ReturnType<typeof setMyAppearance>>
 >;
 export type SetMyAppearanceMutationBody = AppearanceUpdate;
-export type SetMyAppearanceMutationError = HTTPValidationError;
+export type SetMyAppearanceMutationError = Refusal | HTTPValidationError;
 export type SetMyAppearanceMutationVariables = { data: AppearanceUpdate };
 
 /**
  * @summary Set My Appearance
  */
 export const useSetMyAppearance = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(
   options?: {
@@ -647,7 +648,7 @@ export const getGetMyEmailQueryKey = () => {
 
 export const getGetMyEmailQueryOptions = <
   TData = Awaited<ReturnType<typeof getMyEmail>>,
-  TError = unknown,
+  TError = Refusal,
 >(options?: {
   query?: Partial<
     UseQueryOptions<Awaited<ReturnType<typeof getMyEmail>>, TError, TData>
@@ -672,11 +673,11 @@ export const getGetMyEmailQueryOptions = <
 export type GetMyEmailQueryResult = NonNullable<
   Awaited<ReturnType<typeof getMyEmail>>
 >;
-export type GetMyEmailQueryError = unknown;
+export type GetMyEmailQueryError = Refusal;
 
 export function useGetMyEmail<
   TData = Awaited<ReturnType<typeof getMyEmail>>,
-  TError = unknown,
+  TError = Refusal,
 >(
   options: {
     query: Partial<
@@ -698,7 +699,7 @@ export function useGetMyEmail<
 };
 export function useGetMyEmail<
   TData = Awaited<ReturnType<typeof getMyEmail>>,
-  TError = unknown,
+  TError = Refusal,
 >(
   options?: {
     query?: Partial<
@@ -720,7 +721,7 @@ export function useGetMyEmail<
 };
 export function useGetMyEmail<
   TData = Awaited<ReturnType<typeof getMyEmail>>,
-  TError = unknown,
+  TError = Refusal,
 >(
   options?: {
     query?: Partial<
@@ -738,7 +739,7 @@ export function useGetMyEmail<
 
 export function useGetMyEmail<
   TData = Awaited<ReturnType<typeof getMyEmail>>,
-  TError = unknown,
+  TError = Refusal,
 >(
   options?: {
     query?: Partial<
@@ -807,7 +808,7 @@ export const setMyEmail = async (
 export const getSetMyEmailMutationKey = () => ["setMyEmail"] as const;
 
 export const getSetMyEmailMutationOptions = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -848,13 +849,16 @@ export type SetMyEmailMutationResult = NonNullable<
   Awaited<ReturnType<typeof setMyEmail>>
 >;
 export type SetMyEmailMutationBody = EmailUpdate;
-export type SetMyEmailMutationError = HTTPValidationError;
+export type SetMyEmailMutationError = Refusal | HTTPValidationError;
 export type SetMyEmailMutationVariables = { data: EmailUpdate };
 
 /**
  * @summary Set My Email
  */
-export const useSetMyEmail = <TError = HTTPValidationError, TContext = unknown>(
+export const useSetMyEmail = <
+  TError = Refusal | HTTPValidationError,
+  TContext = unknown,
+>(
   options?: {
     mutation?: UseMutationOptions<
       Awaited<ReturnType<typeof setMyEmail>>,
@@ -906,7 +910,7 @@ export const getGetMySecurityQueryKey = () => {
 
 export const getGetMySecurityQueryOptions = <
   TData = Awaited<ReturnType<typeof getMySecurity>>,
-  TError = unknown,
+  TError = Refusal,
 >(options?: {
   query?: Partial<
     UseQueryOptions<Awaited<ReturnType<typeof getMySecurity>>, TError, TData>
@@ -931,11 +935,11 @@ export const getGetMySecurityQueryOptions = <
 export type GetMySecurityQueryResult = NonNullable<
   Awaited<ReturnType<typeof getMySecurity>>
 >;
-export type GetMySecurityQueryError = unknown;
+export type GetMySecurityQueryError = Refusal;
 
 export function useGetMySecurity<
   TData = Awaited<ReturnType<typeof getMySecurity>>,
-  TError = unknown,
+  TError = Refusal,
 >(
   options: {
     query: Partial<
@@ -957,7 +961,7 @@ export function useGetMySecurity<
 };
 export function useGetMySecurity<
   TData = Awaited<ReturnType<typeof getMySecurity>>,
-  TError = unknown,
+  TError = Refusal,
 >(
   options?: {
     query?: Partial<
@@ -979,7 +983,7 @@ export function useGetMySecurity<
 };
 export function useGetMySecurity<
   TData = Awaited<ReturnType<typeof getMySecurity>>,
-  TError = unknown,
+  TError = Refusal,
 >(
   options?: {
     query?: Partial<
@@ -997,7 +1001,7 @@ export function useGetMySecurity<
 
 export function useGetMySecurity<
   TData = Awaited<ReturnType<typeof getMySecurity>>,
-  TError = unknown,
+  TError = Refusal,
 >(
   options?: {
     query?: Partial<
@@ -1047,7 +1051,7 @@ export const getListPasswordResetsQueryKey = () => {
 
 export const getListPasswordResetsQueryOptions = <
   TData = Awaited<ReturnType<typeof listPasswordResets>>,
-  TError = unknown,
+  TError = Refusal,
 >(options?: {
   query?: Partial<
     UseQueryOptions<
@@ -1076,11 +1080,11 @@ export const getListPasswordResetsQueryOptions = <
 export type ListPasswordResetsQueryResult = NonNullable<
   Awaited<ReturnType<typeof listPasswordResets>>
 >;
-export type ListPasswordResetsQueryError = unknown;
+export type ListPasswordResetsQueryError = Refusal;
 
 export function useListPasswordResets<
   TData = Awaited<ReturnType<typeof listPasswordResets>>,
-  TError = unknown,
+  TError = Refusal,
 >(
   options: {
     query: Partial<
@@ -1106,7 +1110,7 @@ export function useListPasswordResets<
 };
 export function useListPasswordResets<
   TData = Awaited<ReturnType<typeof listPasswordResets>>,
-  TError = unknown,
+  TError = Refusal,
 >(
   options?: {
     query?: Partial<
@@ -1132,7 +1136,7 @@ export function useListPasswordResets<
 };
 export function useListPasswordResets<
   TData = Awaited<ReturnType<typeof listPasswordResets>>,
-  TError = unknown,
+  TError = Refusal,
 >(
   options?: {
     query?: Partial<
@@ -1154,7 +1158,7 @@ export function useListPasswordResets<
 
 export function useListPasswordResets<
   TData = Awaited<ReturnType<typeof listPasswordResets>>,
-  TError = unknown,
+  TError = Refusal,
 >(
   options?: {
     query?: Partial<
@@ -1202,7 +1206,7 @@ export const getDeclinePasswordResetMutationKey = () =>
   ["declinePasswordReset"] as const;
 
 export const getDeclinePasswordResetMutationOptions = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -1243,14 +1247,14 @@ export type DeclinePasswordResetMutationResult = NonNullable<
   Awaited<ReturnType<typeof declinePasswordReset>>
 >;
 
-export type DeclinePasswordResetMutationError = HTTPValidationError;
+export type DeclinePasswordResetMutationError = Refusal | HTTPValidationError;
 export type DeclinePasswordResetMutationVariables = { userId: number };
 
 /**
  * @summary Decline Password Reset
  */
 export const useDeclinePasswordReset = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(
   options?: {
@@ -1310,7 +1314,7 @@ export const getApprovePasswordResetMutationKey = () =>
   ["approvePasswordReset"] as const;
 
 export const getApprovePasswordResetMutationOptions = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -1351,14 +1355,14 @@ export type ApprovePasswordResetMutationResult = NonNullable<
   Awaited<ReturnType<typeof approvePasswordReset>>
 >;
 
-export type ApprovePasswordResetMutationError = HTTPValidationError;
+export type ApprovePasswordResetMutationError = Refusal | HTTPValidationError;
 export type ApprovePasswordResetMutationVariables = { userId: number };
 
 /**
  * @summary Approve Password Reset
  */
 export const useApprovePasswordReset = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(
   options?: {
@@ -1417,7 +1421,7 @@ export const getListTestAccountsQueryKey = () => {
 
 export const getListTestAccountsQueryOptions = <
   TData = Awaited<ReturnType<typeof listTestAccounts>>,
-  TError = unknown,
+  TError = Refusal,
 >(options?: {
   query?: Partial<
     UseQueryOptions<Awaited<ReturnType<typeof listTestAccounts>>, TError, TData>
@@ -1442,11 +1446,11 @@ export const getListTestAccountsQueryOptions = <
 export type ListTestAccountsQueryResult = NonNullable<
   Awaited<ReturnType<typeof listTestAccounts>>
 >;
-export type ListTestAccountsQueryError = unknown;
+export type ListTestAccountsQueryError = Refusal;
 
 export function useListTestAccounts<
   TData = Awaited<ReturnType<typeof listTestAccounts>>,
-  TError = unknown,
+  TError = Refusal,
 >(
   options: {
     query: Partial<
@@ -1472,7 +1476,7 @@ export function useListTestAccounts<
 };
 export function useListTestAccounts<
   TData = Awaited<ReturnType<typeof listTestAccounts>>,
-  TError = unknown,
+  TError = Refusal,
 >(
   options?: {
     query?: Partial<
@@ -1498,7 +1502,7 @@ export function useListTestAccounts<
 };
 export function useListTestAccounts<
   TData = Awaited<ReturnType<typeof listTestAccounts>>,
-  TError = unknown,
+  TError = Refusal,
 >(
   options?: {
     query?: Partial<
@@ -1520,7 +1524,7 @@ export function useListTestAccounts<
 
 export function useListTestAccounts<
   TData = Awaited<ReturnType<typeof listTestAccounts>>,
-  TError = unknown,
+  TError = Refusal,
 >(
   options?: {
     query?: Partial<
@@ -1602,7 +1606,7 @@ export const getCreateTestAccountMutationKey = () =>
   ["createTestAccount"] as const;
 
 export const getCreateTestAccountMutationOptions = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -1643,14 +1647,14 @@ export type CreateTestAccountMutationResult = NonNullable<
   Awaited<ReturnType<typeof createTestAccount>>
 >;
 export type CreateTestAccountMutationBody = UserCreate;
-export type CreateTestAccountMutationError = HTTPValidationError;
+export type CreateTestAccountMutationError = Refusal | HTTPValidationError;
 export type CreateTestAccountMutationVariables = { data: UserCreate };
 
 /**
  * @summary Create Test Account
  */
 export const useCreateTestAccount = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(
   options?: {
@@ -1700,7 +1704,7 @@ export const getListVerificationQueryKey = () => {
 
 export const getListVerificationQueryOptions = <
   TData = Awaited<ReturnType<typeof listVerification>>,
-  TError = unknown,
+  TError = Refusal,
 >(options?: {
   query?: Partial<
     UseQueryOptions<Awaited<ReturnType<typeof listVerification>>, TError, TData>
@@ -1725,11 +1729,11 @@ export const getListVerificationQueryOptions = <
 export type ListVerificationQueryResult = NonNullable<
   Awaited<ReturnType<typeof listVerification>>
 >;
-export type ListVerificationQueryError = unknown;
+export type ListVerificationQueryError = Refusal;
 
 export function useListVerification<
   TData = Awaited<ReturnType<typeof listVerification>>,
-  TError = unknown,
+  TError = Refusal,
 >(
   options: {
     query: Partial<
@@ -1755,7 +1759,7 @@ export function useListVerification<
 };
 export function useListVerification<
   TData = Awaited<ReturnType<typeof listVerification>>,
-  TError = unknown,
+  TError = Refusal,
 >(
   options?: {
     query?: Partial<
@@ -1781,7 +1785,7 @@ export function useListVerification<
 };
 export function useListVerification<
   TData = Awaited<ReturnType<typeof listVerification>>,
-  TError = unknown,
+  TError = Refusal,
 >(
   options?: {
     query?: Partial<
@@ -1803,7 +1807,7 @@ export function useListVerification<
 
 export function useListVerification<
   TData = Awaited<ReturnType<typeof listVerification>>,
-  TError = unknown,
+  TError = Refusal,
 >(
   options?: {
     query?: Partial<
@@ -1877,7 +1881,7 @@ export const setMemberEmail = async (
 export const getSetMemberEmailMutationKey = () => ["setMemberEmail"] as const;
 
 export const getSetMemberEmailMutationOptions = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -1918,7 +1922,7 @@ export type SetMemberEmailMutationResult = NonNullable<
   Awaited<ReturnType<typeof setMemberEmail>>
 >;
 export type SetMemberEmailMutationBody = EmailUpdate;
-export type SetMemberEmailMutationError = HTTPValidationError;
+export type SetMemberEmailMutationError = Refusal | HTTPValidationError;
 export type SetMemberEmailMutationVariables = {
   userId: number;
   data: EmailUpdate;
@@ -1928,7 +1932,7 @@ export type SetMemberEmailMutationVariables = {
  * @summary Set Member Email
  */
 export const useSetMemberEmail = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(
   options?: {
@@ -1987,7 +1991,7 @@ export const verifyMember = async (
 export const getVerifyMemberMutationKey = () => ["verifyMember"] as const;
 
 export const getVerifyMemberMutationOptions = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -2028,14 +2032,14 @@ export type VerifyMemberMutationResult = NonNullable<
   Awaited<ReturnType<typeof verifyMember>>
 >;
 
-export type VerifyMemberMutationError = HTTPValidationError;
+export type VerifyMemberMutationError = Refusal | HTTPValidationError;
 export type VerifyMemberMutationVariables = { userId: number };
 
 /**
  * @summary Verify Member
  */
 export const useVerifyMember = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(
   options?: {

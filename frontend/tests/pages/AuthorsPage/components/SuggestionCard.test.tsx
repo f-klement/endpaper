@@ -110,6 +110,24 @@ describe("SuggestionCard", () => {
     expect(screen.queryByText(/sortition/)).not.toBeInTheDocument();
   });
 
+  it("drops a rule named for an object member, such as toString", () => {
+    // The key is a server string, and a plain object answers `toString` with
+    // the prototype's function rather than `undefined`, which the filter for
+    // an unknown rule does not catch.
+    renderLocalised(
+      <Card
+        group={{
+          ...GROUP,
+          reasons: ["initials", "toString"] as SuggestionReason[],
+        }}
+      />,
+    );
+
+    expect(
+      screen.getByText("an initial against a full name"),
+    ).toBeInTheDocument();
+  });
+
   it("merges the whole group into the name that is kept", async () => {
     const onMerge = vi.fn<OnMerge>();
     renderLocalised(<Card group={GROUP} onMerge={onMerge} />);

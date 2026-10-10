@@ -50,7 +50,7 @@ src/
 ├── lib/                     isbn.ts, goodreads.ts: pure functions, no React
 ├── pages/
 │   ├── components/         shared by several pages (TagPicker, BookCard)
-│   ├── hooks.ts            cross-page hooks (useSession)
+│   ├── hooks.ts            cross-page hooks (useSession, useLoanReturn)
 │   ├── types.ts            cross-page view types, tag grouping and style tables
 │   ├── AppearancePage/     index.ts · AppearancePage.tsx · hooks.ts · components/
 │   ├── Home/               index.ts · Home.tsx · hooks.ts · types.ts · components/

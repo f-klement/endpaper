@@ -2,12 +2,16 @@
 
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import fc from "fast-check";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { BookFormat, Locale } from "../../../src/api/generated/model";
 import type { DuplicateMember } from "../../../src/api/generated/model";
 import DuplicatesPage from "../../../src/pages/DuplicatesPage";
 import { resetIds } from "../../factories";
+import { answersOf } from "../../lib/schemaArbitrary";
+import { holds, PROFILE, PROPERTY, witness } from "../../property";
+import { forget, overSchema } from "../../schemaPage";
 import { mockApi, renderWithProviders, type MockApi } from "../../utils";
 
 let api: MockApi;
@@ -296,5 +300,45 @@ describe("DuplicatesPage", () => {
     renderWithProviders(<DuplicatesPage />);
 
     expect(await screen.findByRole("alert")).toHaveTextContent("Nope");
+  });
+});
+
+/** A report's groups, or `undefined` for an answer that is not a report. */
+const groupsOf = (body: unknown) =>
+  (body as { groups?: unknown[] } | undefined)?.groups;
+
+describe("DuplicatesPage over any answer the schema permits", () => {
+  // What the page's hooks are handed is drawn from `openapi.json`, per
+  // request. `tests/schemaPage.tsx` holds what the page may not do. The
+  // report declares a 401 beside its 200, so that is drawn as well.
+  it("is drawn an empty report, a group, and a report the server capped", async () => {
+    await witness(answersOf("list_duplicates"), {
+      "is an empty report": (answer) => groupsOf(answer.body)?.length === 0,
+      "holds a group": (answer) => (groupsOf(answer.body)?.length ?? 0) > 0,
+      "counts more groups than it holds": (answer) =>
+        (answer.body as { total_groups: number }).total_groups >
+        (groupsOf(answer.body)?.length ?? 0),
+    });
+  });
+
+  it("neither throws nor shows a value nobody can name", PROPERTY, async () => {
+    expect(
+      await holds(
+        fc.gen(),
+        async (answers) => {
+          try {
+            const rendered = await overSchema(<DuplicatesPage />, answers);
+            expect(rendered.problems).toEqual([]);
+            return rendered;
+          } finally {
+            forget();
+          }
+        },
+        {
+          "showed a value an answer carried": (_, rendered) =>
+            rendered.echoed > 0,
+        },
+      ),
+    ).toBe(PROFILE.runs);
   });
 });

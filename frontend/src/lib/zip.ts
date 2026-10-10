@@ -382,6 +382,40 @@ export async function openZip(blob: Blob): Promise<ZipArchive> {
     directoryOffset,
     directoryOffset + directorySize,
   );
+  const entries = readCentralDirectory(directory, total);
+
+  return {
+    entries,
+    find: (name) => entries.find((entry) => entry.name === name),
+    read: async (entry, limit) => {
+      // The whole entry, so the ceiling and the stop are the same number and
+      // stopping early is the refusal. This is the one place the two questions
+      // meet, and the refusal lives here rather than as a flag threaded through
+      // `readEntry`, so that neither read has to ask which kind it is.
+      const whole = await readEntry(blob, entry, limit, limit);
+      if (whole.partial) {
+        throw new ZipError(
+          "too-large",
+          `${entry.name} holds more than ${limit}`,
+        );
+      }
+      return whole.bytes;
+    },
+    readPrefix: (entry, bounds) =>
+      readEntry(blob, entry, bounds.limit, bounds.prefix),
+  };
+}
+
+/**
+ * The `total` entries a central directory holds, in the order it holds them.
+ *
+ * Refuses an encrypted or zip64 entry, a header without its signature, and a
+ * directory that ends before its `total`th header does.
+ */
+function readCentralDirectory(
+  directory: Uint8Array,
+  total: number,
+): ZipEntry[] {
   const headers = new DataView(
     directory.buffer,
     directory.byteOffset,
@@ -437,27 +471,7 @@ export async function openZip(blob: Blob): Promise<ZipArchive> {
     });
     at = nameAt + nameLength + extraLength + commentLength;
   }
-
-  return {
-    entries,
-    find: (name) => entries.find((entry) => entry.name === name),
-    read: async (entry, limit) => {
-      // The whole entry, so the ceiling and the stop are the same number and
-      // stopping early is the refusal. This is the one place the two questions
-      // meet, and the refusal lives here rather than as a flag threaded through
-      // `readEntry`, so that neither read has to ask which kind it is.
-      const whole = await readEntry(blob, entry, limit, limit);
-      if (whole.partial) {
-        throw new ZipError(
-          "too-large",
-          `${entry.name} holds more than ${limit}`,
-        );
-      }
-      return whole.bytes;
-    },
-    readPrefix: (entry, bounds) =>
-      readEntry(blob, entry, bounds.limit, bounds.prefix),
-  };
+  return entries;
 }
 
 /**

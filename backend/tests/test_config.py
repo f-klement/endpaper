@@ -8,6 +8,7 @@ import pytest
 
 import config
 from enums import AppEnv
+from tests.helpers import an_authority
 
 
 class TestRegistrationEnabled:
@@ -190,3 +191,100 @@ class TestUploadLimits:
 
     def test_the_cap_is_generous_enough_for_a_cover(self):
         assert config.MAX_UPLOAD_BYTES >= 2 * 1024 * 1024
+
+
+class TestLdapStartupRefusesCleartext:
+    """`validate_auth_config` under `AUTH_MODE=ldap`, on how the directory is
+    reached. The bind credentials have their own arms in
+    `tests/test_auth_backends_bindguard.py`."""
+
+    @pytest.fixture(autouse=True)
+    def ldap(self, monkeypatch):
+        monkeypatch.setenv("AUTH_MODE", "ldap")
+        monkeypatch.setenv("LDAP_USER_BASE_DN", "ou=people,dc=example,dc=org")
+        monkeypatch.setenv("LDAP_BIND_DN", "cn=service,dc=example,dc=org")
+        monkeypatch.setenv("LDAP_BIND_PASSWORD", "service-secret")
+        for name in ("LDAP_START_TLS", "LDAP_ALLOW_CLEARTEXT", "LDAP_CA_FILE"):
+            monkeypatch.delenv(name, raising=False)
+
+    def test_a_plain_url_is_refused_naming_both_ways_out(self, monkeypatch):
+        monkeypatch.setenv("LDAP_URL", "ldap://directory.example.org")
+
+        with pytest.raises(RuntimeError, match="cleartext") as refused:
+            config.validate_auth_config()
+
+        assert "LDAP_START_TLS=true" in str(refused.value)
+        assert "LDAP_ALLOW_CLEARTEXT=true" in str(refused.value)
+
+    def test_an_anonymous_search_over_a_plain_url_is_refused_too(self, monkeypatch):
+        """No service password goes out, but the member's bind after the search
+        sends theirs, and that is every sign in."""
+        monkeypatch.setenv("LDAP_URL", "ldap://directory.example.org")
+        monkeypatch.delenv("LDAP_BIND_DN")
+        monkeypatch.delenv("LDAP_BIND_PASSWORD")
+
+        with pytest.raises(RuntimeError, match="cleartext"):
+            config.validate_auth_config()
+
+    def test_a_url_with_no_scheme_is_cleartext(self, monkeypatch):
+        """ldap3 dials a bare host without TLS, so it is refused as one."""
+        monkeypatch.setenv("LDAP_URL", "directory.example.org")
+
+        with pytest.raises(RuntimeError, match="cleartext"):
+            config.validate_auth_config()
+
+    def test_allowing_cleartext_by_name_lets_a_plain_url_start(self, monkeypatch):
+        monkeypatch.setenv("LDAP_URL", "ldap://directory.example.org")
+        monkeypatch.setenv("LDAP_ALLOW_CLEARTEXT", "true")
+
+        config.validate_auth_config()
+
+    def test_start_tls_lets_a_plain_url_start(self, monkeypatch):
+        monkeypatch.setenv("LDAP_URL", "ldap://directory.example.org")
+        monkeypatch.setenv("LDAP_START_TLS", "true")
+
+        config.validate_auth_config()
+
+    def test_an_ldaps_url_starts(self, monkeypatch):
+        monkeypatch.setenv("LDAP_URL", "ldaps://directory.example.org")
+
+        config.validate_auth_config()
+
+
+class TestLdapCaFileIsCheckedAtStartup:
+    @pytest.fixture(autouse=True)
+    def ldaps(self, monkeypatch):
+        monkeypatch.setenv("AUTH_MODE", "ldap")
+        monkeypatch.setenv("LDAP_URL", "ldaps://directory.example.org")
+        monkeypatch.setenv("LDAP_USER_BASE_DN", "ou=people,dc=example,dc=org")
+        for name in ("LDAP_START_TLS", "LDAP_ALLOW_CLEARTEXT", "LDAP_BIND_DN"):
+            monkeypatch.delenv(name, raising=False)
+
+    def test_a_file_that_is_not_there_fails_startup_naming_it(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("LDAP_CA_FILE", str(tmp_path / "never-mounted.pem"))
+
+        with pytest.raises(RuntimeError, match="LDAP_CA_FILE"):
+            config.validate_auth_config()
+
+    def test_a_file_holding_no_certificate_fails_startup_naming_it(self, monkeypatch, tmp_path):
+        not_a_bundle = tmp_path / "ca.pem"
+        not_a_bundle.write_text("this is not a certificate\n")
+        monkeypatch.setenv("LDAP_CA_FILE", str(not_a_bundle))
+
+        with pytest.raises(RuntimeError, match="LDAP_CA_FILE"):
+            config.validate_auth_config()
+
+    def test_a_file_holding_a_certificate_is_accepted(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("LDAP_CA_FILE", str(an_authority("a private CA", tmp_path).pem))
+
+        config.validate_auth_config()
+
+    def test_a_file_beside_a_connection_with_no_tls_is_refused(self, monkeypatch, tmp_path):
+        """It would never be read, and a deployment that set it believes the
+        directory is verified."""
+        monkeypatch.setenv("LDAP_URL", "ldap://directory.example.org")
+        monkeypatch.setenv("LDAP_ALLOW_CLEARTEXT", "true")
+        monkeypatch.setenv("LDAP_CA_FILE", str(an_authority("a private CA", tmp_path).pem))
+
+        with pytest.raises(RuntimeError, match="never be read"):
+            config.validate_auth_config()

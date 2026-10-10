@@ -23,6 +23,7 @@ from starlette.types import Scope
 
 import metadata
 import notifications
+import refusals
 import targets
 from config import (
     DATA_DIR,
@@ -676,6 +677,11 @@ app.include_router(covers.router)
 # line is unchecked, which is why the test tree holds the ordering rather than
 # trusting this comment.
 assert_unique_operation_ids()
+
+# Below every `include_router` for the same reason, and before anything reads
+# the schema or serves a request: see `refusals.declare`. A route it misses
+# is one `tests/test_refusals.py` names.
+refusals.declare(schema_routes())
 
 # Vite's `build.assetsDir`. Every filename it emits there carries a content
 # hash, so the name changes whenever the bytes do.

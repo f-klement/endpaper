@@ -6,9 +6,9 @@ import {
   type SettingsOut,
   type SettingsUpdate,
 } from "../../../../api/generated/model";
-import { Icon } from "../../../../components";
-import { useTranslation, type Translate } from "../../../../i18n";
+import { useTranslation } from "../../../../i18n";
 import { SettingsSection } from "../../../components";
+import SecretField from "../../components/SecretField";
 import ToggleField from "../../components/ToggleField";
 import { SenderHealthLine } from "../../../components";
 
@@ -37,9 +37,9 @@ import { SenderHealthLine } from "../../../components";
  * There is deliberately no "do not check certificates" option: nothing in the
  * app can switch verification off, so offering the control would be a lie.
  *
- * The secrets are write only boxes, like the Google key and the webhook secret
- * above them. The browser never received the stored value, so an empty box has
- * to mean "leave it alone".
+ * The secrets are `SecretField`s, like the webhook secret above them. The
+ * browser never received the stored value, so an empty box has to mean "leave
+ * it alone".
  */
 
 /** What the two transport flags mean together, as one choice. */
@@ -75,115 +75,10 @@ const SAVE_CLASS =
   "px-3 py-1.5 rounded-lg bg-accent-fill text-on-accent text-xs font-medium " +
   "hover:bg-accent-fill-hover disabled:opacity-40 transition-colors";
 
-const CLEAR_CLASS =
-  "px-3 py-1.5 rounded-lg border border-paper-200 text-xs font-medium " +
-  "text-danger-600 hover:bg-danger-100 disabled:opacity-40 transition-colors " +
-  "dark:border-paper-700 dark:text-danger-300";
-
 const HINT_CLASS = "text-xs text-paper-600 dark:text-paper-400";
 
 const LABEL_CLASS =
   "block text-xs font-medium text-paper-600 dark:text-paper-300";
-
-interface SecretBoxProps {
-  id: string;
-  label: string;
-  placeholder: string;
-  showLabel: string;
-  hideLabel: string;
-  status: string;
-  saveLabel: string;
-  clearLabel: string;
-  hasStored: boolean;
-  pinned: boolean;
-  isSaving: boolean;
-  onSave: (value: string) => void;
-  onClear: () => void;
-}
-
-/**
- * A write only credential field.
- *
- * Its own component because the page now holds four of them, and the reveal
- * button is the part that goes wrong: each one needs a label naming **which**
- * secret it reveals, or a screen reader user hears "Show" four times with
- * nothing to tell them apart.
- */
-function SecretBox({
-  id,
-  label,
-  placeholder,
-  showLabel,
-  hideLabel,
-  status,
-  saveLabel,
-  clearLabel,
-  hasStored,
-  pinned,
-  isSaving,
-  onSave,
-  onClear,
-}: SecretBoxProps) {
-  const [value, setValue] = useState("");
-  const [shown, setShown] = useState(false);
-
-  return (
-    <div className="space-y-1.5">
-      <label htmlFor={id} className={LABEL_CLASS}>
-        {label}
-      </label>
-      <div className="relative">
-        <input
-          id={id}
-          type={shown ? "text" : "password"}
-          autoComplete="off"
-          disabled={pinned}
-          value={value}
-          onChange={(event) => setValue(event.target.value)}
-          placeholder={placeholder}
-          className={`${FIELD_CLASS} pr-10`}
-        />
-        <button
-          type="button"
-          onClick={() => setShown((was) => !was)}
-          aria-label={shown ? hideLabel : showLabel}
-          aria-pressed={shown}
-          className="absolute right-2 top-1/2 -translate-y-1/2 text-paper-600 hover:text-paper-800 text-sm leading-none dark:text-paper-400 dark:hover:text-paper-300"
-        >
-          <span aria-hidden="true">
-            <Icon name={shown ? "eyeOff" : "eye"} className="w-4 h-4" />
-          </span>
-        </button>
-      </div>
-      <p className={HINT_CLASS}>{status}</p>
-      {!pinned && (
-        <div className="flex gap-2 pt-1">
-          <button
-            type="button"
-            disabled={isSaving || value.trim() === ""}
-            onClick={() => {
-              onSave(value.trim());
-              setValue("");
-            }}
-            className={SAVE_CLASS}
-          >
-            {saveLabel}
-          </button>
-          {hasStored && (
-            <button
-              type="button"
-              disabled={isSaving}
-              onClick={onClear}
-              className={CLEAR_CLASS}
-            >
-              {clearLabel}
-            </button>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
 
 interface ReminderSendersSectionProps {
   settings: SettingsOut;
@@ -201,38 +96,12 @@ export default function ReminderSendersSection({
 }: ReminderSendersSectionProps) {
   const { t } = useTranslation();
 
-  // Drafts rather than controlled mirrors of `settings`: typing a host should
-  // not save it a character at a time, and a controlled field whose value only
-  // changes after a round trip snaps back mid edit.
-  const [server, setServer] = useState(settings.mail_server ?? "");
-  const [port, setPort] = useState(settings.mail_port ?? "");
-  const [username, setUsername] = useState(settings.mail_username ?? "");
-  const [from, setFrom] = useState(settings.mail_default_sender ?? "");
-  const [to, setTo] = useState(settings.overdue_mail_to ?? "");
+  // A draft rather than a controlled mirror of `settings`, like the mail
+  // fields in `MailBlock`.
   const [chat, setChat] = useState(settings.telegram_chat_id ?? "");
 
-  const pinned = new Set(settings.mail_from_env ?? []);
   const tokenPinned = settings.telegram_bot_token_from_env === true;
   const chatPinned = settings.telegram_chat_id_from_env === true;
-
-  const mailDirty =
-    server !== (settings.mail_server ?? "") ||
-    port !== (settings.mail_port ?? "") ||
-    username !== (settings.mail_username ?? "") ||
-    from !== (settings.mail_default_sender ?? "") ||
-    to !== (settings.overdue_mail_to ?? "");
-
-  // Only the fields this deployment does not pin. Sending a pinned one back
-  // would be a 409 the admin cannot act on from here.
-  function saveMail() {
-    const patch: SettingsUpdate = { overdue_mail_to: to.trim() };
-    if (!pinned.has("mail_server")) patch.mail_server = server.trim();
-    if (!pinned.has("mail_port")) patch.mail_port = port.trim();
-    if (!pinned.has("mail_username")) patch.mail_username = username.trim();
-    if (!pinned.has("mail_default_sender"))
-      patch.mail_default_sender = from.trim();
-    onSave(patch);
-  }
 
   return (
     <SettingsSection title={t("settings.senders")} icon="inbox">
@@ -275,20 +144,6 @@ export default function ReminderSendersSection({
         settings={settings}
         isSaving={isSaving}
         onSave={onSave}
-        pinned={pinned}
-        t={t}
-        server={server}
-        setServer={setServer}
-        port={port}
-        setPort={setPort}
-        username={username}
-        setUsername={setUsername}
-        from={from}
-        setFrom={setFrom}
-        to={to}
-        setTo={setTo}
-        mailDirty={mailDirty}
-        saveMail={saveMail}
         health={health[OverdueSender.email]}
       />
 
@@ -306,7 +161,7 @@ export default function ReminderSendersSection({
 
         <SenderHealthLine health={health[OverdueSender.telegram]} />
 
-        <SecretBox
+        <SecretField
           id="telegram-bot-token"
           label={t("settings.telegramToken")}
           placeholder={t("settings.telegramTokenPlaceholder")}
@@ -321,9 +176,7 @@ export default function ReminderSendersSection({
                   })
                 : t("settings.telegramTokenMissing")
           }
-          saveLabel={
-            isSaving ? t("common.saving") : t("settings.telegramTokenSave")
-          }
+          saveLabel={t("settings.telegramTokenSave")}
           clearLabel={t("settings.telegramTokenClear")}
           hasStored={settings.has_telegram_bot_token === true}
           pinned={tokenPinned}
@@ -371,44 +224,49 @@ interface MailBlockProps {
   settings: SettingsOut;
   isSaving: boolean;
   onSave: (patch: SettingsUpdate) => void;
-  pinned: Set<string>;
-  t: Translate;
-  server: string;
-  setServer: (value: string) => void;
-  port: string;
-  setPort: (value: string) => void;
-  username: string;
-  setUsername: (value: string) => void;
-  from: string;
-  setFrom: (value: string) => void;
-  to: string;
-  setTo: (value: string) => void;
-  mailDirty: boolean;
-  saveMail: () => void;
   health: SenderHealth | undefined;
 }
 
-/** The mail half, split out only so neither half is a screen of its own. */
-function MailBlock({
-  settings,
-  isSaving,
-  onSave,
-  pinned,
-  t,
-  server,
-  setServer,
-  port,
-  setPort,
-  username,
-  setUsername,
-  from,
-  setFrom,
-  to,
-  setTo,
-  mailDirty,
-  saveMail,
-  health,
-}: MailBlockProps) {
+/**
+ * The mail channel: its switch, its standing record, the connection and the
+ * recipient.
+ *
+ * It owns its drafts and their save, so the section above holds nothing of
+ * mail's but the slot it sits in.
+ */
+function MailBlock({ settings, isSaving, onSave, health }: MailBlockProps) {
+  const { t } = useTranslation();
+
+  // Drafts rather than controlled mirrors of `settings`: typing a host should
+  // not save it a character at a time, and a controlled field whose value only
+  // changes after a round trip snaps back mid edit.
+  const [server, setServer] = useState(settings.mail_server ?? "");
+  const [port, setPort] = useState(settings.mail_port ?? "");
+  const [username, setUsername] = useState(settings.mail_username ?? "");
+  const [from, setFrom] = useState(settings.mail_default_sender ?? "");
+  const [to, setTo] = useState(settings.overdue_mail_to ?? "");
+
+  const pinned = new Set(settings.mail_from_env ?? []);
+
+  const mailDirty =
+    server !== (settings.mail_server ?? "") ||
+    port !== (settings.mail_port ?? "") ||
+    username !== (settings.mail_username ?? "") ||
+    from !== (settings.mail_default_sender ?? "") ||
+    to !== (settings.overdue_mail_to ?? "");
+
+  // Only the fields this deployment does not pin. Sending a pinned one back
+  // would be a 409 the admin cannot act on from here.
+  function saveMail() {
+    const patch: SettingsUpdate = { overdue_mail_to: to.trim() };
+    if (!pinned.has("mail_server")) patch.mail_server = server.trim();
+    if (!pinned.has("mail_port")) patch.mail_port = port.trim();
+    if (!pinned.has("mail_username")) patch.mail_username = username.trim();
+    if (!pinned.has("mail_default_sender"))
+      patch.mail_default_sender = from.trim();
+    onSave(patch);
+  }
+
   const encryption = encryptionOf(settings);
 
   return (
@@ -510,7 +368,7 @@ function MailBlock({
         />
       </div>
 
-      <SecretBox
+      <SecretField
         id="mail-password"
         label={t("settings.mailPassword")}
         placeholder={t("settings.mailPasswordPlaceholder")}
@@ -525,9 +383,7 @@ function MailBlock({
                 })
               : t("settings.mailPasswordMissing")
         }
-        saveLabel={
-          isSaving ? t("common.saving") : t("settings.mailPasswordSave")
-        }
+        saveLabel={t("settings.mailPasswordSave")}
         clearLabel={t("settings.mailPasswordClear")}
         hasStored={settings.has_mail_password === true}
         pinned={pinned.has("mail_password")}

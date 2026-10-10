@@ -140,6 +140,35 @@ describe("CalibreImport", () => {
     ).toBeInTheDocument();
   });
 
+  it("opens the folder picker from the cross check button", async () => {
+    renderCard({ preview: preview() });
+    const opened = vi.fn<() => void>();
+    screen
+      .getByLabelText("Check against the files beside the books")
+      .addEventListener("click", opened);
+
+    await userEvent.setup().click(
+      screen.getByRole("button", {
+        name: "Check against the files beside the books",
+      }),
+    );
+
+    expect(opened).toHaveBeenCalledOnce();
+  });
+
+  it("leaves no picker a keyboard can reach while an import runs", () => {
+    // A new database clears the preview, and Stop with it, while the books are
+    // still being written; a folder starts a cross check under the write.
+    renderCard({ preview: preview(), isImporting: true });
+
+    expect(
+      screen.getByLabelText("Choose a copy of metadata.db"),
+    ).toBeDisabled();
+    expect(
+      screen.getByLabelText("Check against the files beside the books"),
+    ).toBeDisabled();
+  });
+
   it("counts the books it would write, not the rows it read", () => {
     // 897 read and 890 with a title. Naming 897 on the button promises seven
     // books the import will not make.

@@ -416,7 +416,7 @@ describe("the module cannot see a file", () => {
     // asserts that it is: a `File` is a `Blob`, and the two guards named
     // different sets for one commit until both critic seats found the gap.
     expect(withoutProse(source)).not.toMatch(
-      /\b(?:DataView|(?:[A-Z]\w*)?(?:Array|Blob|Buffer|Stream)\w*|File(?!Metadata|Naming|Identifier|Failure|Reading|PickPanel)\w*)\b/,
+      /\b(?:DataView|(?:[A-Z]\w*)?(?:Array|Blob|Buffer|Stream)\w*|File(?!Metadata|Naming|Identifier|Failure|Reading|PickPanel|Picker)\w*)\b/,
     );
   });
 

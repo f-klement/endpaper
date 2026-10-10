@@ -12,8 +12,8 @@ describe("StatSection", () => {
       <StatSection
         title="By Genre"
         rows={[
-          { label: "Fantasy", count: 3 },
-          { label: "Horror", count: 1 },
+          { id: "Fantasy", label: "Fantasy", count: 3 },
+          { id: "Horror", label: "Horror", count: 1 },
         ]}
         colorClass="bg-accent-400"
       />,
@@ -36,8 +36,8 @@ describe("StatSection", () => {
       <StatSection
         title="By Genre"
         rows={[
-          { label: "Fantasy", count: 10 },
-          { label: "Horror", count: 5 },
+          { id: "Fantasy", label: "Fantasy", count: 10 },
+          { id: "Horror", label: "Horror", count: 5 },
         ]}
         colorClass="bg-accent-400"
       />,
@@ -51,7 +51,7 @@ describe("StatSection", () => {
     const { container } = renderLocalised(
       <StatSection
         title="By Genre"
-        rows={[{ label: "Fantasy", count: 0 }]}
+        rows={[{ id: "Fantasy", label: "Fantasy", count: 0 }]}
         colorClass="bg-accent-400"
       />,
     );

@@ -274,6 +274,25 @@ describe("writing what was read", () => {
     ).toBeInTheDocument();
   });
 
+  it("stops a running import from the button that was the cancel", async () => {
+    const props = renderCard({ preview: preview(), isImporting: true });
+
+    await userEvent
+      .setup()
+      .click(screen.getByRole("button", { name: en["stores.stop"] }));
+
+    expect(props.onStop).toHaveBeenCalledOnce();
+    expect(props.onCancel).not.toHaveBeenCalled();
+  });
+
+  it("offers no picker a keyboard can reach while an import runs", () => {
+    // A store's picker is always offered, so busy alone keeps a pick from
+    // swapping a source mid import.
+    renderCard({ preview: preview(), isImporting: true });
+
+    expect(screen.getByLabelText(en[STORES.kobo.choose])).toBeDisabled();
+  });
+
   it("says a short count was the member's own doing", () => {
     renderCard({
       result: { added: 2, failures: [], stopped: true },

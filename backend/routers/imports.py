@@ -39,6 +39,7 @@ from dependencies import CurrentUser, DbSession
 from import_readers import ImportReader
 from importing import Import, MarcImport, MarcIndex, stored_record
 from ratelimit import import_limiter
+from refusals import refuses
 from schemas import (
     ImportPreviewOut,
     ImportPreviewRow,
@@ -285,6 +286,7 @@ _PREVIEW_RECORDS = csv_import.PREVIEW_ROWS
 
 
 @router.post("/marc/preview", response_model=MarcPreviewOut)
+@refuses(403)
 def preview_marc(
     db: DbSession,
     current_user: CurrentUser,
@@ -363,6 +365,7 @@ def preview_marc(
 
 
 @router.post("/marc", response_model=ImportResultOut)
+@refuses(403)
 def import_marc(
     db: DbSession,
     current_user: CurrentUser,

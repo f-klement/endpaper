@@ -363,15 +363,14 @@ somebody decides which side of the door the new name is on.
   `replay(arbitrary, seed, i)` regenerates it. Setting `ENDPAPER_PROPERTY_SEED` pins a seed for
   reproducing a red, and the runner refuses it where `CI` is set. The budget guard refuses the
   name in any module under `frontend/` and in the manifest; refuses a dotenv file at the top of
-  `frontend/` by its existence, since bun and Vite each load one into the workers; reads Vite's
-  resolved configuration for where it loads one, which variables it copies and the suite's own
-  environment, refusing a second suite configuration by its existence; and pins the keys of
-  bun's configuration, whose `preload` runs code in every worker. That configuration is resolved
-  as the worker running the guard resolves it, so one that answers differently in vitest's main
-  process, which is the one that loads the environment, passes as the worker sees it. Code that
-  runs before the runner can still set the variable under a computed name, and a configuration
-  vitest is pointed at by a flag or a project is read only for the name spelled out; none of that
-  reads either.
+  `frontend/` by its existence, since bun and Vite each load one into the workers; reads the
+  configuration vitest's main process loaded, handed over by a global setup, for which file it
+  is, where Vite loads a dotenv file from and what vitest adds to the environment each worker
+  inherits; and pins the keys of bun's configuration, whose `preload` runs code in every
+  worker. Code that runs before the runner can still set the variable under a computed name;
+  so can the configuration's own code or a `define` key, by putting it into the main process's
+  environment, which every worker inherits and nothing reads; and a project the configuration
+  names is answered for the root project only.
 - **Counted work is the oracle, not "did it throw".** The PDF reader once charged bytes read
   and not bytes inflated, and answered `ok` with nothing thrown. `tests/lib/meter.ts` counts
   what a reader reads off the file it was handed, what comes out of the inflater and what is
@@ -393,16 +392,20 @@ somebody decides which side of the door the new name is on.
   behind a header the reader refuses first reaches no inflater and satisfies any predicate over
   the spec. Each reach follows the run's own seed. A property over a door handed a string or a
   tree names none; its witness is what says the shape is drawn. The budget guard pins how many
-  properties in each file name one, so a reach dropped is a red.
+  properties in each file name one, so a reach dropped is a red, and the runner refuses one
+  that names nothing.
 - **Every bound a door declares has a positive control in the same file**: a stub reading,
   inflating or parsing past it under the door's own ceilings, which must be refused by name. A
   property is green over a correct reader whatever its door declares, so without one a ceiling
   deleted or loosened reds nothing. A ledger the suite's setup keeps per file refuses a bound a
   driven door declared and no control in that file overran.
 - **Every door has a property**, or is named as reached only through one: every module the
-  six roots named in `tests/propertyBudget.test.ts` reach for a value, following every relative
-  import under `src/` but the generated client's. A door outside what those roots reach is
-  outside the rule, and the budget guard names the one there is.
+  six roots named in `tests/propertyBudget.test.ts` reach for a value, following every import
+  under `src/`, the generated client's excepted, as Vite's server transform resolves it, globs
+  included, with the string keyed aliases vitest's main process resolved the run by. A module loaded as a
+  Web Worker, by `new Worker(new URL(...))` or a `?worker` import, is not followed: that
+  transform reports neither as an import of the module itself. A door outside what those roots reach is outside
+  the rule, and the budget guard names the one there is.
 
 What a counterexample becomes is one rule for both suites, under
 [Generated input](#generated-input).

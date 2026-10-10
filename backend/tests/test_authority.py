@@ -1432,6 +1432,20 @@ class TestTheClusterIsFoundByKeyWhenLobidNamesNone:
         assert queried == ["local.viafID = 27967576"]
 
     @pytest.mark.asyncio
+    async def test_a_hit_that_is_not_an_object_is_passed_over(self):
+        suggest = {**VIAF_AUTOSUGGEST, "result": ["noise", *VIAF_AUTOSUGGEST["result"]]}
+        with respx.mock(assert_all_called=False) as mock:
+            _viaf_router(mock, brief=VIAF_BARE, suggest=suggest)
+            await authority.national_identifiers(self._no_cluster())
+            queried = [
+                call.request.url.params.get("query")
+                for call in mock.calls
+                if call.request.url.path.endswith("/search")
+            ]
+
+        assert queried == ["local.viafID = 27967576"]
+
+    @pytest.mark.asyncio
     async def test_a_hit_with_an_unusable_cluster_id_is_ambiguity_not_a_skip(self):
         """`if not isinstance(cluster, str): return None`, which had no guard.
 
@@ -1695,8 +1709,39 @@ class TestBothOfViafsResponseShapesReadTheSame:
 
         assert sources["LIH"] == "LNB:V-174543;=BK"
 
+    def test_a_response_listing_several_records_is_read_from_its_first(self):
+        record = deepcopy(VIAF_BRIEF)
+        records = record["searchRetrieveResponse"]["records"]
+        records["record"] = [records["record"], {}]
+        sources = authority._viaf_sources(
+            authority._viaf_cluster_record(record), _CODES_THE_FIXTURES_CARRY
+        )
+
+        assert sources["DNB"] == "118753711"
+
+    def test_a_heading_whose_sources_are_not_text_is_passed_over(self):
+        cluster = {
+            "ns1:mainHeadings": {
+                "ns1:data": [
+                    {"ns1:sources": {"ns1:sid": 7}},
+                    {"ns1:sources": {"ns1:sid": [None, "DNB|118753711"]}},
+                ]
+            }
+        }
+
+        assert authority._viaf_sources(cluster, frozenset({"DNB"})) == {
+            "DNB": "118753711"
+        }
+
     def test_a_body_in_neither_shape_is_nothing_rather_than_a_crash(self):
-        bodies: tuple[Any, ...] = ({}, {"searchRetrieveResponse": {}}, [], "text", None)
+        bodies: tuple[Any, ...] = (
+            {},
+            {"searchRetrieveResponse": {}},
+            {"searchRetrieveResponse": {"records": {"record": []}}},
+            [],
+            "text",
+            None,
+        )
         for body in bodies:
             record = authority._viaf_cluster_record(body)
 
@@ -2286,6 +2331,41 @@ class TestTheOutwardWikipediaLink:
         assert found["Q1512"] == authority.WikipediaArticle(
             url="https://www.wikidata.org/wiki/Q1512", language=None
         )
+
+    @pytest.mark.asyncio
+    async def test_a_second_pass_answering_with_no_entities_leaves_the_item_page(self):
+        with respx.mock(assert_all_called=False) as mock:
+            seen = self._router(
+                mock,
+                filtered=self._sitelinks(Q1512={}),
+                unfiltered={"entities": ["Q1512"]},
+            )
+            found = await authority.wikipedia_articles(("Q1512",), prefer=("de", "en"))
+
+        assert seen == ["dewiki|enwiki", None]
+        assert found["Q1512"] == authority.WikipediaArticle(
+            url="https://www.wikidata.org/wiki/Q1512", language=None
+        )
+
+    @pytest.mark.asyncio
+    async def test_a_sitelink_that_is_not_an_object_with_a_url_is_passed_over(self):
+        english = "https://en.wikipedia.org/wiki/Robert_Louis_Stevenson"
+        body = {
+            "entities": {
+                "Q1512": {
+                    "sitelinks": {
+                        "dewiki": "https://de.wikipedia.org/wiki/X",
+                        "frwiki": {"site": "frwiki", "url": 7},
+                        "enwiki": {"site": "enwiki", "url": english},
+                    }
+                }
+            }
+        }
+        with respx.mock(assert_all_called=False) as mock:
+            self._router(mock, filtered=body)
+            found = await authority.wikipedia_articles(("Q1512",), prefer=("de", "en"))
+
+        assert found["Q1512"] == authority.WikipediaArticle(url=english, language="en")
 
     @pytest.mark.asyncio
     async def test_wikidata_being_down_costs_the_language_and_not_the_button(self):
@@ -3088,6 +3168,93 @@ class TestUnusableAnswers:
 
         assert candidate is not None
         assert candidate.wikidata_id is None
+
+
+class TestAnUnusableAnswerFromAnySupplierCostsWhatItCarried:
+    """One malformed field or body, from lobid, Wikidata or VIAF, costs that and nothing else."""
+
+    @pytest.mark.asyncio
+    async def test_a_search_answered_with_json_that_is_not_an_object_is_unavailable(self):
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(url__startswith=LOBID).mock(return_value=_json([]))
+            with pytest.raises(AuthorityUnavailable):
+                await search("anybody")
+
+    @pytest.mark.asyncio
+    async def test_a_search_answer_carrying_no_member_list_finds_nobody(self):
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(url__startswith=LOBID).mock(return_value=_json({"member": "nobody"}))
+            assert await search("anybody") == []
+
+    @pytest.mark.asyncio
+    async def test_a_member_that_is_not_an_object_is_dropped(self):
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(url__startswith=LOBID).mock(
+                return_value=_json({"member": [5, LOBID_SEARCH["member"][0]]})
+            )
+            _wikidata_router(mock)
+            found = await search("anybody")
+
+        assert [row.identifier for row in found] == ["118753711"]
+
+    @pytest.mark.asyncio
+    async def test_a_date_is_the_first_usable_entry_of_its_list(self):
+        record = {**LOBID_RECORD, "dateOfBirth": ["  ", 5, "1850-11-13"], "dateOfDeath": ["", None]}
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(url__startswith=LOBID).mock(return_value=_json(record))
+            _wikidata_router(mock)
+            candidate = await resolve("118753711")
+
+        assert candidate is not None
+        assert (candidate.born, candidate.died) == ("1850-11-13", None)
+
+    @pytest.mark.asyncio
+    async def test_a_description_answer_that_is_not_an_object_costs_the_description(self):
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(url__startswith=LOBID).mock(return_value=_json(LOBID_RECORD))
+            _wikidata_router(mock, description=[])
+            candidate = await resolve("118753711")
+
+        assert candidate is not None
+        assert candidate.description is None
+        assert candidate.wikidata_id == "Q1512"
+
+    @pytest.mark.asyncio
+    async def test_a_claims_answer_that_is_not_an_object_is_silence_and_not_a_conflict(self):
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(url__startswith=LOBID).mock(return_value=_json(LOBID_RECORD))
+            _wikidata_router(mock, viaf=[])
+            candidate = await resolve("118753711")
+
+        assert candidate is not None
+        assert [row for row in candidate.disagreements if row.about == "viaf"] == []
+
+    @pytest.mark.asyncio
+    async def test_a_statement_that_is_not_an_object_is_passed_over_for_the_next(self):
+        other: dict[str, Any] = deepcopy(WIKIDATA_VIAF)
+        statement = other["claims"]["P214"][0]
+        statement["mainsnak"]["datavalue"]["value"] = "11111111"
+        other["claims"]["P214"] = ["junk", statement]
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(url__startswith=LOBID).mock(return_value=_json(LOBID_RECORD))
+            _wikidata_router(mock, viaf=other)
+            candidate = await resolve("118753711")
+
+        assert candidate is not None
+        [row] = [d for d in candidate.disagreements if d.about == "viaf"]
+        assert row.wikidata == "11111111"
+
+    @pytest.mark.asyncio
+    async def test_a_viaf_that_cannot_be_reached_costs_the_national_identifiers_only(self):
+        async def unreachable(*args: Any, **kwargs: Any) -> Any:
+            raise httpx.ConnectError("refused")
+
+        with respx.mock(assert_all_called=False) as mock:
+            _wikidata_router(mock)
+            with _patched_fetch_get(unreachable):
+                found = await authority.national_identifiers(_certain_candidate())
+
+        assert found == {}
 
 
 class TestTheFanOutIsBoundedInTimeAsWellAsInCount:

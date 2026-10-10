@@ -1,7 +1,7 @@
 /** Tests for
  * src/pages/SettingsPage/LibrarySettingsPage/components/CustomFieldsSection.tsx. */
 
-import { screen, within } from "@testing-library/react";
+import { fireEvent, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -108,6 +108,18 @@ describe("CustomFieldsSection", () => {
     renderSection({ fields: [] });
 
     expect(screen.getByRole("button", { name: "Add field" })).toBeDisabled();
+  });
+
+  it("defines nothing for a name of only spaces submitted without the button", () => {
+    // The button refuses it above; the form refuses it as well, for a submit
+    // that does not go through the button.
+    const props = renderSection({ fields: [] });
+    const box = screen.getByLabelText("Field name");
+    fireEvent.change(box, { target: { value: "   " } });
+
+    fireEvent.submit(box.closest("form")!);
+
+    expect(props.onDefine).not.toHaveBeenCalled();
   });
 
   it("renames a field without touching anything else", async () => {

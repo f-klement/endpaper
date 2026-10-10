@@ -15,10 +15,14 @@
 
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import fc from "fast-check";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import CatalogueSettingsPage from "../../../../src/pages/SettingsPage/CatalogueSettingsPage";
 import { mockApi, renderWithProviders, type MockApi } from "../../../utils";
+import { answersOf } from "../../../lib/schemaArbitrary";
+import { holds, PROFILE, PROPERTY, witness } from "../../../property";
+import { forget, overSchema } from "../../../schemaPage";
 
 let api: MockApi;
 
@@ -342,5 +346,46 @@ describe("CatalogueSettingsPage API key handling", () => {
         await screen.findByLabelText("Enable extra book details"),
       ).toBeEnabled();
     });
+  });
+});
+
+/** How many catalogue sources a settings answer names, absent as none. */
+const sources = (body: unknown) =>
+  (body as { catalogue_sources?: unknown[] }).catalogue_sources?.length ?? 0;
+
+describe("CatalogueSettingsPage over any answer the schema permits", () => {
+  // What the page's hooks are handed is drawn from `openapi.json`, per
+  // request. `tests/schemaPage.tsx` holds what the page may not do. Every
+  // request this page makes for a signed in account declares a 401 beside its
+  // 200, and an admin only one a 403, so both are drawn as well.
+  it("is drawn settings naming no catalogue source and naming one", async () => {
+    await witness(answersOf("get_settings"), {
+      "names no catalogue source": (answer) => sources(answer.body) === 0,
+      "names a catalogue source": (answer) => sources(answer.body) > 0,
+    });
+  });
+
+  it("neither throws nor shows a value nobody can name", PROPERTY, async () => {
+    expect(
+      await holds(
+        fc.gen(),
+        async (answers) => {
+          try {
+            const rendered = await overSchema(
+              <CatalogueSettingsPage />,
+              answers,
+            );
+            expect(rendered.problems).toEqual([]);
+            return rendered;
+          } finally {
+            forget();
+          }
+        },
+        {
+          "showed a value an answer carried": (_, rendered) =>
+            rendered.echoed > 0,
+        },
+      ),
+    ).toBe(PROFILE.runs);
   });
 });

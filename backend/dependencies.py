@@ -32,6 +32,7 @@ from auth import get_current_user, get_current_user_for_cover
 from database import get_db
 from enums import ClassificationScheme
 from models import CLASSIFICATION_NUMBER_MAX, Book, User
+from refusals import refuses
 from schemas.common import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, MAX_ROW_ID, one_line
 from shelf import Loading, Shelf
 
@@ -295,6 +296,7 @@ def _not_found() -> HTTPException:
     return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found")
 
 
+@refuses(404)
 def book_for_read(
     book_id: RowId,
     db: Annotated[Session, Depends(get_db)],
@@ -321,6 +323,7 @@ def book_for_read(
     return book
 
 
+@refuses(404)
 def book_for_cover(
     book_id: RowId,
     db: Annotated[Session, Depends(get_db)],
@@ -342,6 +345,7 @@ def book_for_cover(
     return book
 
 
+@refuses(404)
 def book_in_trash(
     book_id: RowId,
     db: Annotated[Session, Depends(get_db)],
@@ -378,6 +382,7 @@ def book_for_write(
     return book
 
 
+@refuses(403)
 def book_for_owner(
     book: Annotated[Book, Depends(book_for_read)],
     current_user: Annotated[User, Depends(get_current_user)],

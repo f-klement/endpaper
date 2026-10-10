@@ -10,6 +10,7 @@ from auth_backends import directory_owns_email
 from dependencies import CurrentUser, DbSession, RowId
 from enums import AuthMode, VerificationProvenance
 from models import User, app_holds_the_password, switch_targets
+from refusals import refuses
 from schemas import (
     AppearanceOut,
     AppearanceUpdate,
@@ -318,6 +319,7 @@ def list_password_resets(
 
 
 @router.post("/password-resets/{user_id}/approve", response_model=ResetCodeOut)
+@refuses(404)
 def approve_password_reset(
     user_id: RowId,
     db: DbSession,
@@ -350,6 +352,7 @@ def approve_password_reset(
 
 
 @router.delete("/password-resets/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+@refuses(404)
 def decline_password_reset(
     user_id: RowId,
     db: DbSession,
@@ -435,6 +438,7 @@ def get_my_security(db: DbSession, current_user: CurrentUser) -> MySecurityOut:
 
 
 @router.post("/{user_id}/verify", response_model=MemberVerificationOut)
+@refuses(404)
 def verify_member(
     user_id: RowId,
     db: DbSession,
@@ -482,6 +486,7 @@ def verify_member(
 
 
 @router.put("/{user_id}/email", response_model=MemberEmailOut)
+@refuses(404)
 def set_member_email(
     user_id: RowId,
     payload: EmailUpdate,

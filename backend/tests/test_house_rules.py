@@ -1005,7 +1005,12 @@ def _reached(qualified: str, root: Path) -> set[str]:
 
 
 def _docstring_nodes(tree: ast.Module) -> set[ast.AST]:
-    """Every string constant that is a module, class or function docstring."""
+    """Every string constant that is a module, class or function docstring.
+
+    Guards in other files skip what this returns as prose, so a widening here
+    lets each of them skip more in silence.
+    `TestTheDocstringWalkTakesTheFirstStatementOnly` pins that direction.
+    """
     found: set[ast.AST] = set()
     for node in ast.walk(tree):
         if not isinstance(
@@ -1020,6 +1025,23 @@ def _docstring_nodes(tree: ast.Module) -> set[ast.AST]:
         ):
             found.add(first.value)
     return found
+
+
+class TestTheDocstringWalkTakesTheFirstStatementOnly:
+    """A string is a docstring by its position, and only the first one counts."""
+
+    def test_a_bare_string_in_second_position_is_not_a_docstring(self) -> None:
+        tree = ast.parse(
+            '"""module"""\n'
+            "def f():\n"
+            '    """function"""\n'
+            '    "after a docstring"\n'
+            "class C:\n"
+            "    x = 1\n"
+            '    "after an assignment"\n'
+        )
+        found = sorted(ast.unparse(node) for node in _docstring_nodes(tree))
+        assert found == ["'function'", "'module'"]
 
 
 def _docstrings_carrying_a_control_character(source: str) -> list[int]:
@@ -2173,7 +2195,7 @@ class TestEveryRequestBodyRowIdIsBounded:
     Only int-shaped fields are the question. A `str` bound by `max_length` is a
     different rule, and a `float` cannot overflow the driver.
 
-    Measured on the tree as it stands: **122** models under `schemas/`, **43** of
+    Measured on the tree as it stands: **123** models under `schemas/`, **43** of
     them reachable from a request.
 
     **What those two numbers count, because a bare number is what rots.** The
@@ -8312,7 +8334,8 @@ class TestEveryMarkdownFileHasBalancedCodeFences:
         [
             ("!docs/keep.md", "a negation"),
             ("build/**/out", "a `**`"),
-            ("build-*/out", "a wildcard inside an anchored pattern"),
+            ("build-[ab]/out", "a character class inside an anchored pattern"),
+            ("**/build/out", "a `**`"),
             ("a**b", "a `**`"),
             ("\\!docs/keep.md", "a backslash"),
             ("a\\*b", "a backslash"),
@@ -8331,10 +8354,8 @@ class TestEveryMarkdownFileHasBalancedCodeFences:
         **Every term of the refusal, not the negation alone.** Two of them were
         reachable only from the pipeline selftest, which the backend gate does not
         collect because `testpaths` names this tree, so an edit dropping either
-        passed here and failed on a push. `a**b` is in the set because without it
-        one term is credited and never exercised: the anchored wildcard clause
-        refuses `build/**/out` and `build-*/out` on its own, so deleting the `**`
-        term leaves both still refused.
+        passed here and failed on a push. `**/build/out` is the leading `**/` the
+        parse does not take, because more than one name follows it.
 
         **The backslash forms are here because the negation term is a position
         test**, and the two cases are not interchangeable. `\\!docs/keep.md` is
@@ -8345,14 +8366,13 @@ class TestEveryMarkdownFileHasBalancedCodeFences:
 
         **The three spellings of a bare star are one term and three parses.** The
         refusal tests the entry after the markers come off, so `*/` and `/*` arrive
-        at it as `*` by two different routes and neither is credited to the
-        anchored wildcard clause: `/*` reaches that clause too, `*/` does not, and
-        `*` reaches neither. What a star costs is at the refusal's own site.
+        at it as `*` by two different routes. What a star costs is at the
+        refusal's own site.
 
-        **The message has to name the term, not only the entry.** Eight of these
-        nine came back in identical words, so the one a contributor is likeliest to
-        meet, a path spelled with backslashes, was told to teach the walk about a
-        form when the answer is a character. Asserted here rather than left to the
+        **The message has to name the term, not only the entry.** One message in
+        the same words for every form told the contributor likeliest to meet one,
+        with a path spelled in backslashes, to teach the walk about a form when the
+        answer is a character. Asserted here rather than left to the
         refusal's own comment, because a message nothing reads is prose.
         """
         (tmp_path / ".gitignore").write_text(f"docs/\n{form}\n")
@@ -8390,6 +8410,46 @@ class TestEveryMarkdownFileHasBalancedCodeFences:
         """
         (tmp_path / ".gitignore").write_text(f"{entry}\n")
         assert ignore_patterns(tmp_path / ".gitignore", refuse_empty=True) == [parsed]
+
+    @pytest.mark.parametrize(
+        ("entry", "path", "is_dir", "ignored"),
+        [
+            ("**/__pycache__/", "a/__pycache__/x.pyc", False, True),
+            ("**/__pycache__/", "a/__pycache__", True, True),
+            ("**/__pycache__/", "__pycache__/x.pyc", False, True),
+            ("**/__pycache__/", "b/__pycache__", False, False),
+            ("/*.log", "top.log", False, True),
+            ("/*.log", "sub/deep.log", False, False),
+            ("/build-*/out", "build-x/out/f", False, True),
+            ("/build-*/out", "x/build-x/out", False, False),
+        ],
+    )
+    def test_a_leading_double_star_and_an_anchored_star_read_as_git_reads_them(
+        self, tmp_path: Path, entry: str, path: str, is_dir: bool, ignored: bool
+    ) -> None:
+        """Each row is `git check-ignore`'s answer, and each entry was refused.
+
+        **A `*` in an anchored pattern stops at a slash**, which is why the
+        deep log stays: a reading that compared the pattern against the whole
+        path with `fnmatch` would ignore it, because there a star crosses one.
+        """
+        (tmp_path / ".gitignore").write_text(f"{entry}\n")
+        patterns = ignore_patterns(tmp_path / ".gitignore", refuse_empty=True)
+        assert is_ignored(Path(path), patterns, is_dir=is_dir) is ignored
+
+    @pytest.mark.parametrize(
+        ("entry", "ignored"),
+        [("/?.md", False), ("?.md", False), ("/??.md", True)],
+    )
+    def test_a_question_mark_takes_one_byte_as_git_does(
+        self, tmp_path: Path, entry: str, ignored: bool
+    ) -> None:
+        """Each row is `git check-ignore`'s answer for a one letter name whose
+        letter is two bytes in UTF-8. Matched over text, `?` took the letter and
+        dropped a file git keeps."""
+        (tmp_path / ".gitignore").write_text(f"{entry}\n", encoding="utf-8")
+        patterns = ignore_patterns(tmp_path / ".gitignore", refuse_empty=True)
+        assert is_ignored(Path(f"{chr(0xE9)}.md"), patterns, is_dir=False) is ignored
 
     def test_a_byte_order_mark_does_not_disarm_the_entry_behind_it(
         self, tmp_path: Path
@@ -11597,8 +11657,17 @@ class TestOnlyThreeModulesTurnOutsideXmlIntoATree:
 #: XML is `_XML_PARSERS`, the set the rule above holds against the linter.
 #: **Shared, and so is the corpus walk and the module tuple**: a member dropped
 #: from that set is dropped from both rules at once, which is why the XML rule
-#: holds one literal call per member. Beside it, the JSON, zip and CSV readers.
-#: **This is a census of four modules' entry points and not of every parse**:
+#: holds one literal call per member. Beside it, the JSON, zip and CSV readers,
+#: and `xml_parse.fed`.
+#:
+#: **`fed` because a parser is built in one place and fed in another**, and the
+#: door is where it is fed. Each door builds and feeds in one function today,
+#: so this adds no row; it keeps a door in the census when its parser comes
+#: from a factory elsewhere, which `xml_parse.py` is the natural home for and
+#: which would otherwise name only the factory. A door feeding a parser by
+#: calling its `feed` directly is outside it.
+#:
+#: **This is a census of five modules' entry points and not of every parse**:
 #: `urllib.parse.parse_qs` in the SRU request reader and the hand written CQL
 #: parser behind it are byte doors outside it, each with properties in
 #: `tests/test_sru.py`, and so is a third party's parser, one reached through a
@@ -11608,6 +11677,7 @@ _PARSE_ENTRY_POINTS: Final[dict[tuple[str, ...], frozenset[str]]] = {
     ("json",): frozenset({"loads", "load"}),
     ("zipfile",): frozenset({"ZipFile"}),
     ("csv",): frozenset({"reader", "DictReader"}),
+    ("xml_parse",): frozenset({"fed"}),
 }
 
 
@@ -11679,8 +11749,16 @@ def _parse_sites(source: str) -> list[tuple[str, tuple[str, ...]]]:
 #: **Derived from the tree and held to it by equality both ways**, so a new
 #: parse reds until it is placed here and a row whose parse went away reds
 #: until it is removed. A value naming a test is resolved to a class holding a
-#: generated test, so a renamed property reds too. What a register cannot know
-#: is who wrote the bytes, which is the whole of the judgement in each reason.
+#: generated test, in the test file mirroring the door's module, so a renamed
+#: property and a row pointing at another module's property red too. What a
+#: register cannot know is who wrote the bytes, which is the whole of the
+#: judgement in each reason.
+#:
+#: **A row is a function, not a call**, because a byte door is a function: a
+#: second parse inside a registered door adds no row, and the row's property
+#: answers for whatever the door parses of the input it generates.
+#: `backup.py::read_manifest` holds two, both of that input. A second parse of
+#: bytes from elsewhere inside a registered door is read by eye.
 _BYTE_DOORS: Final[dict[str, str]] = {
     "marc.py::_parsed": "tests/test_marc.py::TestAnUploadIsReadOrRefusedByName",
     "metadata.py::_parsed": (
@@ -11708,6 +11786,31 @@ _BYTE_DOORS: Final[dict[str, str]] = {
         "empty object on `ValueError` and `RecursionError`, each a named case"
     ),
 }
+
+
+def is_generated(decorators: list[str]) -> bool:
+    """Whether hypothesis supplies the arguments of a function so decorated.
+
+    Matched on the decorator call's last name rather than on a list of import
+    spellings: `given(...)` and `hypothesis.given(...)` are one decorator, and
+    which of them a file writes is not a property of the test. A substring
+    match counted `@pytest.mark.skip(reason="not given")`.
+    """
+    return any(name.split("(", 1)[0].split(".")[-1] == "given" for name in decorators)
+
+
+def _is_skipped(decorators: list[str]) -> bool:
+    """Whether a test or class so decorated is skipped or expected to fail, on
+    any condition, read off the decorator call's last name as `is_generated` is."""
+    return any(
+        name.split("(", 1)[0].split(".")[-1] in {"skip", "skipif", "xfail"} for name in decorators
+    )
+
+
+def _mirror_of(module: str) -> str:
+    """The test file mirroring an application module, as rule 1 places it."""
+    path = Path(module)
+    return (Path("tests") / path.parent / f"test_{path.name}").as_posix()
 
 
 def _xml_modules_of_the_census() -> list[str]:
@@ -11760,6 +11863,9 @@ class TestEveryByteDoorIsRegistered:
             "a method": (
                 "import json\nclass C:\n    def f(self, b):\n        return json.load(b)\n"
             ),
+            "a parser built elsewhere and fed here": (
+                "import xml_parse\ndef f(parser, b):\n    return xml_parse.fed(parser, b)\n"
+            ),
         }
         missed = [name for name, source in seen.items() if not _parse_sites(source)]
         assert not missed, f"a parse is invisible to the census: {missed}"
@@ -11767,7 +11873,11 @@ class TestEveryByteDoorIsRegistered:
 
     def test_every_property_it_names_exists_and_generates(self):
         """A register row pointing at a property that was renamed or lost its
-        `@given` is a door with no property, reading as one with."""
+        `@given` is a door with no property, reading as one with. Generating
+        is read off the decorator's callee, as `test_property_budget.py`
+        reads it, so a skip whose reason says "given" is not one, and a
+        property skipped or expected to fail by a mark on it or its class is
+        none either. A module's `pytestmark` is read by eye."""
         named = [value for value in _BYTE_DOORS.values() if value.startswith("tests/")]
         assert named, "the register names no property, so this arm is vacuous"
         missing = []
@@ -11780,13 +11890,29 @@ class TestEveryByteDoorIsRegistered:
             ]
             generates = any(
                 isinstance(item, ast.FunctionDef)
-                and any("given" in ast.unparse(d) for d in item.decorator_list)
+                and is_generated([ast.unparse(d) for d in item.decorator_list])
+                and not _is_skipped([ast.unparse(d) for d in item.decorator_list])
+                and not _is_skipped([ast.unparse(d) for d in node.decorator_list])
                 for node in classes
                 for item in node.body
             )
             if not generates:
                 missing.append(reference)
         assert not missing, f"named as a door's property and holding none: {missing}"
+
+    def test_every_property_it_names_is_in_the_test_file_of_its_door(self):
+        """Tests mirror the source tree, so a door's property lives in the
+        test file of the door's module. A row copied from another door's, or
+        two rows swapped, names a property that generates and reaches a
+        different door; this is what reds on it. Two doors of one module
+        naming each other's property pass, and are read by eye."""
+        misplaced = [
+            f"{door} -> {value}"
+            for door, value in _BYTE_DOORS.items()
+            if value.startswith("tests/")
+            and value.split("::")[0] != _mirror_of(door.split("::")[0])
+        ]
+        assert not misplaced, f"a door's property is in another module's test file: {misplaced}"
 
 
 #: The process starters ruff 0.16.7 reports under no rule, measured with the

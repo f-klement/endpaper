@@ -9,12 +9,11 @@
 import {
   useListOverdue,
   useMyOverdue,
-  useReturnLoan,
 } from "../../api/generated/endpoints/loans/loans";
 import { useGetSenderHealth } from "../../api/generated/endpoints/settings/settings";
 import type { LoanOut, SenderHealth } from "../../api/generated/model";
-import { useInvalidate } from "../../api/invalidate";
 import { ApiError } from "../../api/mutator";
+import { useLoanReturn } from "../hooks";
 import type { DeliveryRecord } from "./types";
 
 /** Rows per request. The page is read top-down, so a page is generous. */
@@ -59,13 +58,11 @@ export interface UseOverdueResult {
   error: unknown;
   refetch: () => void;
 
-  returningId: number | null;
+  returningIds: ReadonlySet<number>;
   markReturned: (loanId: number) => void;
 }
 
 export function useOverdue(): UseOverdueResult {
-  const invalidate = useInvalidate();
-
   const overdue = useListOverdue({ page_size: PAGE_SIZE });
 
   // Only `enabled` is read from this one. The count beside it is the same
@@ -79,9 +76,7 @@ export function useOverdue(): UseOverdueResult {
     query: { retry: false, staleTime: 300_000 },
   });
 
-  const returnLoan = useReturnLoan({
-    mutation: { onSuccess: () => invalidate.loans() },
-  });
+  const returning = useLoanReturn();
 
   return {
     loans: overdue.data?.items ?? [],
@@ -93,13 +88,11 @@ export function useOverdue(): UseOverdueResult {
     // The health query's error is deliberately absent: a member's 403 is the
     // expected answer there, and reporting it would put a permanent red box on
     // a page that loaded correctly.
-    error: overdue.error ?? returnLoan.error,
+    error: overdue.error ?? returning.error,
     refetch: () => void overdue.refetch(),
 
-    returningId: returnLoan.isPending
-      ? (returnLoan.variables?.loanId ?? null)
-      : null,
-    markReturned: (loanId) => returnLoan.mutate({ loanId }),
+    returningIds: returning.returningIds,
+    markReturned: returning.markReturned,
   };
 }
 

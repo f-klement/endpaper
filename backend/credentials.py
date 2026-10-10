@@ -302,9 +302,10 @@ def _clear_keychain() -> None:
     try:
         module.delete_password(_KEYCHAIN_SERVICE, _KEYCHAIN_ENTRY)
     except module.errors.KeyringError:
-        # Already absent is the common case and is not a failure. A keychain
-        # that refused is reported by the write that follows, which is the call
-        # whose failure actually matters.
+        # Reached only with a key there: `forget_key` has just read one, and
+        # `store_key` never clears the keychain, which is the first store it
+        # writes. So this is a refusal, and the keychain's errors do not say
+        # whether it kept the key: `forget_key` reads it back to find out.
         return
 
 
@@ -407,7 +408,16 @@ def _file_is_writable() -> bool:
 
 
 def _clear_file() -> None:
-    key_file().unlink(missing_ok=True)
+    # `_file_is_writable` asks whether the file can be written, and removing it
+    # needs its directory: a key file mounted on its own, or in a directory this
+    # process cannot write, passes that and fails here. Uncaught it was a 500.
+    path = key_file()
+    try:
+        path.unlink(missing_ok=True)
+    except OSError as error:
+        raise KeyConfigurationError(
+            f"The key file at {path} could not be removed."
+        ) from error
 
 
 @dataclass(frozen=True)
@@ -648,6 +658,14 @@ def forget_key() -> int:
                 "where the app is configured."
             )
         clear()
+        # Read back, because `_clear_keychain` answers quietly when the keychain
+        # refuses: counting that store as cleared would report the key gone
+        # while it stays in force.
+        if source.read():
+            raise KeyConfigurationError(
+                f"The key in {source.name} could not be removed. Remove it there "
+                "and try again."
+            )
         cleared += 1
     return cleared
 

@@ -57,10 +57,11 @@ def download_backup(
 
     **Rationed, and the schema does not say so.** The refusal is a 429 carrying
     `Retry-After`, undeclared for the reason `routers/books.export_books`
-    states: this document enumerates no refusal on any of its operations, so
-    declaring one here would make it look deliberate and every other
-    operation's look accidental.
-    `tests/test_errors.py::TestTheDocumentEnumeratesNoRefusal` holds that fact,
+    states: this document declares a 401, a 403 or a 404 wherever the code a
+    route runs builds one and no other refusal on any operation, so declaring a
+    429 here alone would make it look deliberate and every other one look
+    accidental. `tests/test_refusals.py` holds the first half and
+    `tests/test_errors.py::TestTheDocumentDeclaresNoOtherRefusal` the second,
     because a reason described in prose rots silently where an asserted one
     reddens.
 

@@ -22,6 +22,8 @@ import {
   type ColumnKey,
 } from "../../src/lib/libraryColumns";
 
+import { whileStorageRefuses } from "../storageRefusal";
+
 beforeEach(() => localStorage.clear());
 afterEach(() => vi.restoreAllMocks());
 
@@ -213,21 +215,26 @@ describe("reading and writing a column set", () => {
   });
 
   it("falls back to the default when storage refuses to answer", () => {
-    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
-      throw new Error("denied");
+    // A choice is stored, so the default can only come from the refusal.
+    libraryColumnsPreference.write("cataloguer", ["title", "callNumber"]);
+    whileStorageRefuses("getItem", () => {
+      expect(libraryColumnsPreference.read("cataloguer")).toEqual([
+        ...DEFAULT_COLUMNS.cataloguer,
+      ]);
     });
-    expect(libraryColumnsPreference.read("cataloguer")).toEqual([
-      ...DEFAULT_COLUMNS.cataloguer,
-    ]);
   });
 
   it("says nothing when storage refuses to keep a choice", () => {
-    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
-      throw new Error("quota");
+    libraryColumnsPreference.write("household", ["title", "author"]);
+    whileStorageRefuses("setItem", () => {
+      expect(() =>
+        libraryColumnsPreference.write("household", ["title"]),
+      ).not.toThrow();
     });
-    expect(() =>
-      libraryColumnsPreference.write("household", ["title"]),
-    ).not.toThrow();
+    expect(libraryColumnsPreference.read("household")).toEqual([
+      "title",
+      "author",
+    ]);
   });
 
   it("never hands back the exported default itself", () => {
@@ -284,12 +291,18 @@ describe("going back to the default", () => {
   });
 
   it("says nothing when storage refuses", () => {
-    vi.spyOn(Storage.prototype, "removeItem").mockImplementation(() => {
-      throw new Error("denied");
+    // Going back to the default clears the key, so a refusal leaves the
+    // earlier choice standing.
+    libraryColumnsPreference.write("household", ["title", "author"]);
+    whileStorageRefuses("removeItem", () => {
+      expect(() =>
+        libraryColumnsPreference.write("household", DEFAULT_COLUMNS.household),
+      ).not.toThrow();
     });
-    expect(() =>
-      libraryColumnsPreference.write("household", DEFAULT_COLUMNS.household),
-    ).not.toThrow();
+    expect(libraryColumnsPreference.read("household")).toEqual([
+      "title",
+      "author",
+    ]);
   });
 });
 

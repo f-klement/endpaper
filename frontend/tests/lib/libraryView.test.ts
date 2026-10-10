@@ -21,6 +21,8 @@ import {
   libraryViewPreference,
 } from "../../src/lib/libraryView";
 
+import { whileStorageRefuses } from "../storageRefusal";
+
 beforeEach(() => localStorage.clear());
 afterEach(() => vi.restoreAllMocks());
 
@@ -63,22 +65,26 @@ describe("reading a remembered view", () => {
   it("falls back to each mode's own default when storage refuses to answer", () => {
     // A private window. The library still has to render, and it has to render
     // as the mode being read rather than as the first one written down.
-    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
-      throw new Error("denied");
+    // Both modes hold a choice, so each default can only come from the
+    // refusal.
+    libraryViewPreference.write("household", "table");
+    libraryViewPreference.write("cataloguer", "table");
+    whileStorageRefuses("getItem", () => {
+      expect(libraryViewPreference.read("household")).toBe("grid");
+      expect(libraryViewPreference.read("cataloguer")).toBe("list");
     });
-    expect(libraryViewPreference.read("household")).toBe("grid");
-    expect(libraryViewPreference.read("cataloguer")).toBe("list");
   });
 });
 
 describe("writing one", () => {
   it("says nothing when storage refuses to keep it", () => {
-    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
-      throw new Error("quota");
+    libraryViewPreference.write("household", "list");
+    whileStorageRefuses("setItem", () => {
+      expect(() =>
+        libraryViewPreference.write("household", "table"),
+      ).not.toThrow();
     });
-    expect(() =>
-      libraryViewPreference.write("household", "table"),
-    ).not.toThrow();
+    expect(libraryViewPreference.read("household")).toBe("list");
   });
 
   it("keeps a choice that happens to be the default", () => {

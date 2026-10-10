@@ -2,6 +2,7 @@
 
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import fc from "fast-check";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import LoansPage from "../../../src/pages/LoansPage";
@@ -13,7 +14,15 @@ import {
   makeUser,
   resetIds,
 } from "../../factories";
-import { mockApi, renderWithProviders, type MockApi } from "../../utils";
+import {
+  heldOpen,
+  mockApi,
+  renderWithProviders,
+  type MockApi,
+} from "../../utils";
+import { answersOf } from "../../lib/schemaArbitrary";
+import { holds, PROFILE, PROPERTY, witness } from "../../property";
+import { forget, overSchema } from "../../schemaPage";
 
 let api: MockApi;
 
@@ -156,6 +165,150 @@ describe("LoansPage", () => {
         .setup()
         .click(await screen.findByRole("button", { name: "Mark Returned" }));
 
+      expect(await screen.findByRole("alert")).toHaveTextContent(
+        "Loan already returned",
+      );
+    });
+
+    it("takes a failed return's alert down once the return is pressed again", async () => {
+      let presses = 0;
+      api.on(
+        "/api/loans/5/return",
+        () =>
+          ++presses === 1
+            ? { status: 400, body: { detail: "Loan already returned" } }
+            : { body: makeLoan({ returned_at: "2026-03-01T12:00:00Z" }) },
+        "PUT",
+      );
+      renderWithProviders(<LoansPage />);
+      const button = await screen.findByRole("button", {
+        name: "Mark Returned",
+      });
+      const user = userEvent.setup();
+      await user.click(button);
+      await screen.findByRole("alert");
+
+      await user.click(button);
+
+      await waitFor(() => expect(presses).toBe(2));
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    });
+
+    it("asks for the list again once a return lands", async () => {
+      // The returned loan leaves the active list, and only a refetch shows it.
+      api.on(
+        "/api/loans/5/return",
+        { body: makeLoan({ returned_at: "2026-03-01T12:00:00Z" }) },
+        "PUT",
+      );
+      renderWithProviders(<LoansPage />);
+      const button = await screen.findByRole("button", {
+        name: "Mark Returned",
+      });
+      const listReads = () =>
+        api.calls.filter((call) => /\/api\/loans\?/.test(call.url)).length;
+      const before = listReads();
+
+      await userEvent.setup().click(button);
+
+      await waitFor(() => expect(listReads()).toBeGreaterThan(before));
+    });
+  });
+
+  describe("a loan mid return", () => {
+    // The busy marker is a loan id, so a second row must stay pressable.
+    it("marks the row being returned, and only that row", async () => {
+      api.on("/api/loans", {
+        body: makeLoanPage([
+          makeLoan({ id: 5, book: makeBook({ title: "Dune" }) }),
+          makeLoan({ id: 6, book: makeBook({ title: "Emma" }) }),
+        ]),
+      });
+      const reply = heldOpen();
+      api.on("/api/loans/5/return", reply.respond, "PUT");
+      renderWithProviders(<LoansPage />);
+      await screen.findByText("Emma");
+      const [dune, emma] = screen.getAllByRole("button", {
+        name: "Mark Returned",
+      });
+
+      await userEvent.setup().click(dune!);
+
+      await waitFor(() => expect(dune).toBeDisabled());
+      expect(emma).toBeEnabled();
+
+      reply.release({ body: makeLoan({ id: 5 }) });
+    });
+
+    it("keeps each row marked until its own return answers, a failed one included", async () => {
+      // A mutation remembers only its latest call, so reading the hook's own
+      // variables would unmark the first row the moment the second was
+      // pressed. And a write that has failed stays in the mutation cache, so
+      // only reading the pending ones lets the reader retry it.
+      api.on("/api/loans", {
+        body: makeLoanPage([
+          makeLoan({ id: 5, book: makeBook({ title: "Dune" }) }),
+          makeLoan({ id: 6, book: makeBook({ title: "Emma" }) }),
+        ]),
+      });
+      const first = heldOpen();
+      const second = heldOpen();
+      api.on("/api/loans/5/return", first.respond, "PUT");
+      api.on("/api/loans/6/return", second.respond, "PUT");
+      renderWithProviders(<LoansPage />);
+      await screen.findByText("Emma");
+      const [dune, emma] = screen.getAllByRole("button", {
+        name: "Mark Returned",
+      });
+      const user = userEvent.setup();
+
+      await user.click(dune!);
+      await user.click(emma!);
+
+      await waitFor(() =>
+        expect(api.lastCall("/api/loans/6/return", "PUT")).toBeDefined(),
+      );
+      await waitFor(() => expect(emma).toBeDisabled());
+      expect(dune).toBeDisabled();
+
+      first.release({ status: 400, body: { detail: "Loan already returned" } });
+
+      await waitFor(() => expect(dune).toBeEnabled());
+      expect(emma).toBeDisabled();
+
+      second.release({ body: makeLoan({ id: 6 }) });
+    });
+
+    it("reports a failed return when another row's return was pressed after it", async () => {
+      // The hook's own `error` is its latest call's, Emma's here, so Dune's
+      // failure would show nothing at all.
+      api.on("/api/loans", {
+        body: makeLoanPage([
+          makeLoan({ id: 5, book: makeBook({ title: "Dune" }) }),
+          makeLoan({ id: 6, book: makeBook({ title: "Emma" }) }),
+        ]),
+      });
+      const first = heldOpen();
+      const second = heldOpen();
+      api.on("/api/loans/5/return", first.respond, "PUT");
+      api.on("/api/loans/6/return", second.respond, "PUT");
+      renderWithProviders(<LoansPage />);
+      await screen.findByText("Emma");
+      const [dune, emma] = screen.getAllByRole("button", {
+        name: "Mark Returned",
+      });
+      const user = userEvent.setup();
+
+      await user.click(dune!);
+      await user.click(emma!);
+      await waitFor(() =>
+        expect(api.lastCall("/api/loans/6/return", "PUT")).toBeDefined(),
+      );
+
+      first.release({ status: 400, body: { detail: "Loan already returned" } });
+      second.release({ body: makeLoan({ id: 6 }) });
+
+      await waitFor(() => expect(emma).toBeEnabled());
       expect(await screen.findByRole("alert")).toHaveTextContent(
         "Loan already returned",
       );
@@ -354,5 +507,43 @@ describe("LoansPage overdue handling", () => {
     expect(await screen.findByText(/^Due /)).toBeInTheDocument();
     // Scoped to the row: an unscoped /Overdue/ also matches the filter button.
     expect(screen.queryByText(/Overdue since/)).not.toBeInTheDocument();
+  });
+});
+
+/** How many entries a page body holds, or -1 for one that is not a page. */
+const entries = (body: unknown) =>
+  (body as { items?: unknown[] } | undefined)?.items?.length ?? -1;
+
+describe("LoansPage over any answer the schema permits", () => {
+  // What the page's hooks are handed is drawn from `openapi.json`, per
+  // request. `tests/schemaPage.tsx` holds what the page may not do.
+  it("is drawn every shape of answer its main request declares", async () => {
+    await witness(answersOf("list_loans"), {
+      "is an error body": (answer) => answer.status === 422,
+      "is an empty page": (answer) => entries(answer.body) === 0,
+      "is a page with an entry": (answer) => entries(answer.body) > 0,
+    });
+  });
+
+  it("neither throws nor shows a value nobody can name", PROPERTY, async () => {
+    expect(
+      await holds(
+        fc.gen(),
+        async (answers) => {
+          try {
+            const rendered = await overSchema(<LoansPage />, answers);
+            expect(rendered.problems).toEqual([]);
+            return rendered;
+          } finally {
+            forget();
+          }
+        },
+        {
+          "showed a value an answer carried": (_, rendered) =>
+            rendered.echoed > 0,
+          "drew an alert": (_, rendered) => rendered.alerts.length > 0,
+        },
+      ),
+    ).toBe(PROFILE.runs);
   });
 });

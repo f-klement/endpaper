@@ -22,15 +22,16 @@ import httpx
 import pg8000
 import pytest
 import respx
-from fastapi import HTTPException
 from fastapi.exceptions import ResponseValidationError
 from pydantic import BaseModel, ValidationError
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError, PendingRollbackError
+from starlette.exceptions import HTTPException
 from starlette.requests import ClientDisconnect
 
 import main
 from errors import AnswerUnhandledErrors, is_api_path, render_error_page
+from refusals import DECLARED
 from tests.test_house_rules import BACKEND, _python_sources
 
 HTML = {"Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"}
@@ -713,8 +714,8 @@ def _status_of(call: ast.Call, context: _Module) -> set[int] | None:
     return None if given is None else _one_status(given, context.module)
 
 
-def _refusals() -> list[tuple[str, int, set[int] | None]]:
-    """(file, line, statuses) for every `HTTPException` this backend builds.
+def _constructions() -> list[tuple[str, ast.Call, set[int] | None]]:
+    """(file, call, statuses) for every `HTTPException` this backend builds.
 
     Constructions rather than `raise` statements, because several are built by
     a helper and returned: `dependencies._not_found` and its neighbours. A walk
@@ -722,9 +723,10 @@ def _refusals() -> list[tuple[str, int, set[int] | None]]:
 
     The class is resolved rather than matched by name, so an alias at the
     import and a subclass both count, and a local variable that happens to be
-    called `HTTPException` does not.
+    called `HTTPException` does not. Starlette's class is the one tested, so
+    FastAPI's, which subclasses it, and Starlette's own both count.
     """
-    found: list[tuple[str, int, set[int] | None]] = []
+    found: list[tuple[str, ast.Call, set[int] | None]] = []
     for path in _python_sources():
         where = path.relative_to(BACKEND).as_posix()
         module = importlib.import_module(where.removesuffix(".py").replace("/", "."))
@@ -742,24 +744,30 @@ def _refusals() -> list[tuple[str, int, set[int] | None]]:
                 continue
             built = _resolve(node.func, module)
             if isinstance(built, type) and issubclass(built, HTTPException):
-                found.append((where, node.lineno, _status_of(node, context)))
+                found.append((where, node, _status_of(node, context)))
     return found
 
 
-class TestTheDocumentEnumeratesNoRefusal:
+def _refusals() -> list[tuple[str, int, set[int] | None]]:
+    """(file, line, statuses) for every construction `_constructions` finds."""
+    return [(where, node.lineno, statuses) for where, node, statuses in _constructions()]
+
+
+class TestTheDocumentDeclaresNoOtherRefusal:
     """The fact two published docstrings rest on, asserted rather than described.
 
     `routers/books.export_books` and `routers/backup.download_backup` both say,
-    in prose the mirror publishes, that this document enumerates no refusal
-    anywhere, and give that as the reason the 429 they can answer is not
-    declared on them alone. **A described reason rots silently and an asserted
-    one reddens**, so the day somebody declares a refusal on any operation,
-    those two paragraphs stop being true and this says so by name.
+    in prose the mirror publishes, that this document declares a 401, a 403 or
+    a 404 wherever one can be answered and no other refusal anywhere, and give
+    that as the reason the 429 they can answer is not declared on them alone.
+    **A described reason rots silently and an asserted one reddens**, so the
+    day somebody declares another refusal on any operation, those two
+    paragraphs stop being true and this says so by name.
 
-    **This is a pin, not a policy.** It does not say declaring refusals is
-    wrong; it says the two routes above are arguing from a property of the whole
-    document, and that property has changed. The right answer to a red here may
-    well be to declare them everywhere and rewrite both paragraphs.
+    **This is a pin, not a policy.** It does not say declaring other refusals
+    is wrong; it says the two routes above are arguing from a property of the
+    whole document. The three it admits are held to their routes and to their
+    one body by `tests/test_refusals.py`.
 
     422 is excluded because FastAPI writes it from the route's own parameter
     validation rather than anybody declaring it, which is the distinction the
@@ -816,18 +824,21 @@ class TestTheDocumentEnumeratesNoRefusal:
         below over any tree at all."""
         assert len(self._declared_keys()) > 2, self._declared_keys()
 
-    def test_no_declared_status_is_a_refusal(self) -> None:
-        refusals = sorted(
-            status for status in self._declared_keys() if self._is_a_refusal(status)
+    def test_no_declared_refusal_is_outside_the_three(self) -> None:
+        admitted = {str(status) for status in DECLARED}
+        others = sorted(
+            status
+            for status in self._declared_keys()
+            if self._is_a_refusal(status) and status not in admitted
         )
 
-        assert refusals == [], (
-            f"This document now declares {refusals}, and two published route "
-            "docstrings argue from it declaring none: `export_books` and "
-            "`download_backup` each say their 429 is left undeclared because "
-            "declaring one refusal on one operation would make it look "
-            "deliberate and the rest accidental. Rewrite both paragraphs, or "
-            "declare the refusals across the surface, which is what they say "
+        assert others == [], (
+            f"This document now declares {others}, and two published route "
+            f"docstrings argue from it declaring no refusal but {sorted(admitted)}: "
+            "`export_books` and `download_backup` each say their 429 is left "
+            "undeclared because declaring one refusal on one operation would make "
+            "it look deliberate and the rest accidental. Rewrite both paragraphs, "
+            "or declare that refusal across the surface, which is what they say "
             "the whole decision is."
         )
 
@@ -847,13 +858,11 @@ class TestNoRefusalBorrowsAStatusTheSchemaTypesDifferently:
     wrote it, so neither a rename of the envelope nor a new spelling of the
     constant walks past this.
 
-    What it does not say is that a refusal is **documented**. Four routes declare
-    a `responses` entry since 2026-09-29 and every one of them declares only the
-    media type of its own 200, so no refusal anywhere in this tree is documented
-    and `response_schema_conformance` still has nothing to compare against one;
-    `docs/decisions.md` records why declaring one was refused, and
-    `routers/books.export_books` records why a 429 added that day was not the
-    exception.
+    What it does not say is that a refusal is **documented**. Only a 401, a 403
+    and a 404 are, each with a string `detail`, which is not a shape this rule
+    can be about; `tests/test_refusals.py` holds that string, `refusals.py`
+    says why those three and `routers/books.export_books` why a 429 is not
+    among them.
     """
 
     def test_the_schema_types_a_status_this_rule_can_be_about(self) -> None:

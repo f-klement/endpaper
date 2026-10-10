@@ -1171,6 +1171,26 @@ class TestCache:
         assert route.call_count == 2
 
 
+    def test_an_answer_past_its_lifetime_is_forgotten(self):
+        metadata._cache[GERMAN_ISBN] = (-1.0, metadata.Lookup(Outcome.NOT_FOUND, source="dnb"))
+
+        assert metadata._cached(GERMAN_ISBN) is None
+        assert GERMAN_ISBN not in metadata._cache
+
+    def test_a_full_cache_forgets_its_oldest_quarter_to_make_room(self):
+        answer = metadata.Lookup(Outcome.NOT_FOUND, source="dnb")
+        for n in range(metadata._MAX_ENTRIES):
+            metadata._cache[f"older {n}"] = (math.inf, answer)
+
+        metadata._remember(GERMAN_ISBN, answer)
+
+        quarter = metadata._MAX_ENTRIES // 4
+        assert "older 0" not in metadata._cache
+        assert f"older {quarter - 1}" not in metadata._cache
+        assert f"older {quarter}" in metadata._cache
+        assert GERMAN_ISBN in metadata._cache
+
+
 class TestDnbRecord:
     """The DNB record, read as MARC21 since 2026-08-24.
 
@@ -2573,6 +2593,11 @@ class TestSearchTerms:
     def test_an_empty_query_yields_nothing(self):
         assert metadata._search_terms("   ") == []
 
+    def test_a_word_carrying_a_control_character_is_dropped_rather_than_refused(self):
+        # `str.split` does not split on one, so it survives into a term that
+        # `targets.cql_term` refuses. The rest of the query is still asked.
+        assert metadata._search_terms("moby di" + chr(1) + "ck melville") == ["moby", "melville"]
+
 
 class TestAccentsAndNearSpellings:
     """Half the shelf is not English and phone keyboards have no umlauts."""
@@ -2607,6 +2632,18 @@ class TestRanking:
         real call and every arm below stayed green.
         """
         return metadata._ranked(matches, metadata._search_terms(query), prefer_language)
+
+    def test_a_query_with_no_usable_word_leaves_catalogue_order_alone(self):
+        thin = self.match(title="Dune")
+        complete = self.match(
+            title="Dune", author="Frank Herbert", year=2021, publisher="Ace", page_count=600
+        )
+        assert self.rank([thin, complete], "j k") == [thin, complete]
+
+    def test_a_row_with_no_title_is_ranked_by_its_author(self):
+        untitled = self.match(title="", author="Herman Melville")
+        other = self.match(title="Typee", author="Somebody Else")
+        assert self.rank([other, untitled], "melville")[0] is untitled
 
     def test_the_novel_outranks_a_book_about_it(self):
         """The study guide carries the author's name inside its own title.
@@ -3435,6 +3472,40 @@ class TestSearchDeadline:
         assert results == [[Record(title="One")], [Record(title="Two")]]
 
 
+#: A Library of Congress title search as the catalogue answered it, twenty MODS
+#: records, recorded 2026-10-10. The widest page `xml_parse.MAX_NAMES` is
+#: measured against, because MODS does not repeat its names from record to
+#: record as MARC does.
+LOC_SEARCH_PAGE: Final = BACKEND / "tests" / "fixtures" / "loc_mods_search.xml"
+
+
+class TestALibraryOfCongressSearchPageIsReadWhole:
+    @pytest.mark.asyncio
+    async def test_a_recorded_page_answers_every_row_an_unbounded_parse_does(self):
+        """A bound on distinct names set under what this page uses refuses it,
+        and the search door turns that refusal into no rows at all."""
+        page = LOC_SEARCH_PAGE.read_text(encoding="utf-8")
+        target = targets.SEEDED[CatalogueSource.LOC]
+        limit = 20
+        # `MAX_NAMES` is measured on this page, so it must be the page the door
+        # asks for. Without this, raising the cap leaves the bound unmeasured.
+        assert page.count("<mods ") == target.search_records(limit), (
+            "LoC search_cap no longer matches the recorded page: record a page "
+            "of the new size and count its names against xml_parse.MAX_NAMES"
+        )
+        unbounded = metadata._SEARCH_READERS[target.reader](
+            ElementTree.fromstring(page), target.decoding
+        )
+        assert unbounded
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(url__startswith="http://lx2.loc.gov").mock(return_value=_xml(page))
+            rows = await metadata._search_one(
+                target, "war and peace", limit, "", credential=None
+            )
+
+        assert [row.title for row in rows] == [row.title for row in unbounded]
+
+
 class TestLibraryOfCongressClassifications:
     """The one source that returns two schemes for one book.
 
@@ -3490,6 +3561,41 @@ class TestLibraryOfCongressClassifications:
 
         assert ClassificationScheme.DDC in schemes
         assert "rvk" not in schemes
+
+
+class TestALibraryOfCongressRecordIsReadOrRefusedByItsOwnFields:
+    MODS = (
+        '<mods xmlns="http://www.loc.gov/mods/v3">'
+        "<typeOfResource>text</typeOfResource>"
+        "<titleInfo><title>Clean Code</title></titleInfo>"
+        '<name type="personal"><namePart>Martin, Robert C.</namePart>'
+        "<role><roleTerm>author</roleTerm></role></name>"
+        "<physicalDescription><extent>464 p.</extent></physicalDescription>"
+        "</mods>"
+    )
+
+    def _read(self, mods: str) -> Record | None:
+        return _loc_record(ElementTree.fromstring(mods), source="loc")
+
+    def test_an_online_extent_is_not_a_book(self):
+        online = self.MODS.replace("464 p.", "1 online resource (464 pages)")
+        assert self._read(online) is None
+
+    def test_a_title_naming_a_volume_slot_is_no_title(self):
+        assert self._read(self.MODS.replace("Clean Code", "Band 2")) is None
+
+    def test_a_translator_credited_beside_the_author_changes_nothing(self):
+        translated = self.MODS.replace(
+            "<physicalDescription>",
+            '<name type="personal"><namePart>Rodriguez, Ana</namePart>'
+            "<role><roleTerm>translator</roleTerm></role></name><physicalDescription>",
+        )
+        alone = self._read(self.MODS)
+        assert alone is not None
+        assert alone.author
+        with_translator = self._read(translated)
+        assert with_translator is not None
+        assert with_translator.author == alone.author
 
 
 class TestLibraryOfCongressSubjectHeadings:
@@ -4243,6 +4349,59 @@ class TestTheOpenLibraryLookup:
         assert result.record.page_count is None
 
 
+class TestAMalformedOpenLibraryFieldCostsThatFieldAlone:
+    """Open Library is a wiki, so any account can write any shape into a field."""
+
+    @staticmethod
+    async def _record(
+        edition: dict[str, object] | None = None,
+        work: object = OL_WORK,
+        author: httpx.Response | None = None,
+    ) -> Record:
+        with respx.mock(assert_all_called=False) as mock:
+            _open_library_routes(
+                mock,
+                edition=httpx.Response(200, json=_ol_edition(**(edition or {}))),
+                work=httpx.Response(200, json=work),
+                author=author or httpx.Response(200, json=OL_AUTHOR),
+            )
+            result = await metadata._open_library(ENGLISH_ISBN)
+        assert result.record is not None
+        return result.record
+
+    @pytest.mark.asyncio
+    async def test_a_subject_written_as_an_object_contributes_its_name(self):
+        record = await self._record(
+            work={"subjects": [{"name": "Algorithms"}, {"name": "  "}, {"key": "x"}, 5]}
+        )
+        assert record.subject_labels == ["Algorithms"]
+
+    @pytest.mark.asyncio
+    async def test_a_dewey_entry_that_is_not_text_is_skipped(self):
+        record = await self._record(
+            {"dewey_decimal_class": [5, "005.1"], "lc_classifications": None}
+        )
+        assert record.headings == (Heading(ClassificationScheme.DDC, "005.1"),)
+
+    @pytest.mark.asyncio
+    async def test_a_call_number_that_is_not_text_is_not_stored(self):
+        record = await self._record(
+            {"dewey_decimal_class": None, "lc_classifications": [{"a": 1}]}
+        )
+        assert record.headings == ()
+
+    @pytest.mark.asyncio
+    async def test_a_language_entry_with_no_key_is_no_language(self):
+        record = await self._record({"languages": [{"code": "eng"}]})
+        assert record.language is None
+
+    @pytest.mark.asyncio
+    async def test_an_author_record_refused_with_a_status_costs_the_author_only(self):
+        record = await self._record(author=httpx.Response(503))
+        assert record.author is None
+        assert record.title == "Introduction to Algorithms"
+
+
 #: An editions listing, in the shape `/works/{key}/editions.json` returns.
 OL_EDITIONS = {
     "size": 3,
@@ -4438,6 +4597,61 @@ class TestTheEditionCluster:
         assert rows == []
 
 
+class TestAFailingPartOfTheClusterCostsItsOwnRows:
+    """Each request behind a cluster can fail on its own, and costs what it carried."""
+
+    @pytest.mark.asyncio
+    async def test_a_listing_refused_with_a_status_is_no_cluster(self):
+        with respx.mock(assert_all_called=False) as mock:
+            TestTheEditionCluster._routes(mock)
+            mock.get(url__regex=r"https://openlibrary\.org/works/[^/]+/editions\.json.*").mock(
+                return_value=httpx.Response(503)
+            )
+            assert await editions(ENGLISH_ISBN, 5) == []
+
+    @pytest.mark.asyncio
+    async def test_a_listing_that_cannot_be_reached_is_no_cluster(self):
+        with respx.mock(assert_all_called=False) as mock:
+            TestTheEditionCluster._routes(mock)
+            mock.get(url__regex=r"https://openlibrary\.org/works/[^/]+/editions\.json.*").mock(
+                side_effect=httpx.ConnectError("refused")
+            )
+            assert await editions(ENGLISH_ISBN, 5) == []
+
+    @pytest.mark.asyncio
+    async def test_an_entry_that_is_not_an_object_is_passed_over(self):
+        entries = OL_EDITIONS["entries"]
+        assert isinstance(entries, list)
+        listing = {**OL_EDITIONS, "entries": ["nope", *entries]}
+        with respx.mock(assert_all_called=False) as mock:
+            TestTheEditionCluster._routes(mock, listing)
+            rows = await editions(ENGLISH_ISBN, 5)
+
+        assert [row.isbn for row in rows] == ["9780262270830", "9783486590029", None]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "answer",
+        [
+            pytest.param(httpx.Response(503), id="a status"),
+            pytest.param(httpx.ConnectError("refused"), id="no answer"),
+            pytest.param(httpx.Response(200, json={}), id="no name"),
+        ],
+    )
+    async def test_an_author_lookup_that_fails_costs_that_name_and_not_the_cluster(self, answer):
+        with respx.mock(assert_all_called=False) as mock:
+            TestTheEditionCluster._routes(mock)
+            route = mock.get(url__startswith=OL_AUTHORS)
+            if isinstance(answer, Exception):
+                route.mock(side_effect=answer)
+            else:
+                route.mock(return_value=answer)
+            rows = await editions(ENGLISH_ISBN, 5)
+
+        assert [row.isbn for row in rows] == ["9780262270830", "9783486590029", None]
+        assert rows[0].author is None
+
+
 class TestTheCandidates:
     """The cluster and the search, and the rule between them."""
 
@@ -4541,6 +4755,27 @@ class TestTheCandidates:
             )
 
         assert [row.isbn for row in rows].count("9780262270830") == 1
+
+    @pytest.mark.asyncio
+    async def test_a_search_row_with_no_isbn_is_always_kept(self):
+        with respx.mock(assert_all_called=False) as mock:
+            self._routes(mock)
+            mock.get(url__startswith="https://openlibrary.org/search.json").mock(
+                return_value=httpx.Response(
+                    200,
+                    json={
+                        "docs": [
+                            {"title": "Introduction to Algorithms", "author_name": ["Thomas H. Cormen"]}
+                        ]
+                    },
+                )
+            )
+            rows = await candidates(
+                "Introduction to Algorithms", isbn=ENGLISH_ISBN, limit=5
+            )
+
+        # One from the cluster, its 1990 printing, and one from the search.
+        assert [row.isbn for row in rows].count(None) == 2
 
     @pytest.mark.asyncio
     async def test_a_book_with_no_isbn_still_gets_the_search(self):
@@ -5785,6 +6020,33 @@ class TestTheCzechNationalLibrary:
 
         assert result.outcome is Outcome.NOT_FOUND
 
+    @pytest.mark.asyncio
+    async def test_a_server_error_is_unavailable_rather_than_not_found(self):
+        """Not found would send a member to type in a record that was going to
+        resolve once the catalogue came back."""
+        with respx.mock(assert_all_called=False) as mock:
+            silence_covers(mock)
+            mock.get(url__startswith=NKP).mock(return_value=httpx.Response(500))
+            result = await metadata._lookup_one(
+                targets.SEEDED[CatalogueSource.NKP], self.ISBN, "", credential=None
+            )
+
+        assert result.outcome is Outcome.UNAVAILABLE
+
+    @pytest.mark.parametrize(
+        ("old", "new"),
+        [
+            pytest.param("<title>Ostře sledované vlaky /</title>", "", id="no title"),
+            pytest.param("<type>text</type>", "<type>image</type>", id="not printed"),
+            pytest.param(
+                "<title>Ostře sledované vlaky /</title>", "<title>Band 2 /</title>", id="a volume slot"
+            ),
+        ],
+    )
+    def test_a_record_that_is_not_a_book_with_a_title_is_no_record(self, old, new):
+        record = ElementTree.fromstring(NKP_RECORD.replace(old, new))
+        assert metadata._nkp_record(record, self.ISBN, source="nkp") is None
+
     def test_the_shared_online_rule_is_left_alone(self):
         """The Czech phrasing is this source's constant and not a widening of
         `bibliographic._NOT_A_BOOK`, which every other source is filtered by. Widening that on
@@ -6667,8 +6929,13 @@ class TestACatalogueAnswerIsReadOrRefusedByName:
         lookup, found = got.value
         assert isinstance(lookup, metadata.Lookup)
         assert len(found) <= len(answer.records)
+        # Per byte of the text the parser is handed, as the OPDS door's bound
+        # is, never of the body on the wire: a body in `utf_32` is four times
+        # its text, and dividing by it loosened this bound fourfold on every
+        # draw of that charset.
         assert got.peak <= (
-            metadata.ALLOCATION_FACTOR * len(response.content) + xml_parse.ALLOCATION_FLOOR
+            metadata.ALLOCATION_FACTOR * len(response.text.encode())
+            + xml_parse.ALLOCATION_FLOOR
         )
 
     def test_the_generator_still_reaches_a_charset_that_yields_a_lone_surrogate(self):
@@ -6727,6 +6994,78 @@ class TestACatalogueAnswerIsReadOrRefusedByName:
         assert _parsed("<a>" * depth + "</a>" * depth).tag == "a"
         with pytest.raises(ElementTree.ParseError, match="nested more than"):
             _parsed("<a>" * (depth + 1) + "</a>" * (depth + 1))
+
+    def test_a_namespace_at_the_bound_parses_and_one_byte_longer_is_refused(self):
+        """The positive control for `xml_parse.MAX_NAMESPACE` at the catalogue
+        parse, refused as the depth bound is."""
+        bound = xml_parse.MAX_NAMESPACE
+        assert _parsed(f'<a xmlns:x="{"u" * bound}"/>').tag == "a"
+        with pytest.raises(ElementTree.ParseError, match="namespace is longer"):
+            _parsed(f'<a xmlns:x="{"u" * (bound + 1)}"/>')
+
+    @staticmethod
+    def _response_holding(fill: str) -> fetch.Fetched:
+        """A search response whose one record carries `fill` among its fields."""
+        text = (
+            '<searchRetrieveResponse xmlns="http://www.loc.gov/zing/srw/">'
+            "<numberOfRecords>1</numberOfRecords><records><record><recordData>"
+            f'<collection xmlns="{marc_fields.NAMESPACE}"><record>'
+            '<datafield tag="245"><subfield code="a">T</subfield></datafield>'
+            f"{fill}</record></collection>"
+            "</recordData></record></records></searchRetrieveResponse>"
+        )
+        return fetch.Fetched(200, text.encode(), "utf-8")
+
+    @staticmethod
+    def _assert_inside_the_bound(response: fetch.Fetched) -> None:
+        got = answer_of(
+            asked,
+            response,
+            targets.SEEDED[CatalogueSource.BNA],
+            targets.SEEDED[CatalogueSource.BNF],
+            answers=tuple,
+            refuses=None,
+        )
+        assert got.peak <= (
+            metadata.ALLOCATION_FACTOR * len(response.text.encode()) + xml_parse.ALLOCATION_FLOOR
+        )
+
+    def test_a_response_of_one_short_element_repeated_is_refused_inside_its_bound(self):
+        """The shortest element carrying an attribute, which read whole cost
+        37.5 times the response. Refused by `xml_parse.BYTES_PER_ATTRIBUTED`,
+        as a `ParseError` like the bounds above."""
+        response = self._response_holding('<e a=""/>' * 100_000)
+        with pytest.raises(ElementTree.ParseError, match="carries an attribute"):
+            _parsed(response.text)
+        self._assert_inside_the_bound(response)
+
+    def test_the_costliest_shape_found_at_the_bound_is_read_inside_its_bound(self):
+        """**The shape `metadata.ALLOCATION_FACTOR` is measured on**, as
+        `opds.ALLOCATION_FACTOR`'s is, after one character above U+FFFF: this
+        door decodes the response inside the call, and that character makes
+        the whole text four bytes a character."""
+        shape = '<e a=""/>Ā<x/>Ā<x/>Ā'
+        assert len(shape) == xml_parse.BYTES_PER_ATTRIBUTED
+        response = self._response_holding("\U0001d400" + shape * 45_000)
+        assert _parses(response)
+        self._assert_inside_the_bound(response)
+
+    def test_a_response_of_bare_elements_is_read_inside_the_bound_by_a_dublin_core_search(self):
+        """**The Dublin Core search walked to each record through ElementPath's
+        `..`**, which maps every element of the tree to its parent first, so
+        bare elements cost 35 times their size through it and 21 through every
+        other reader."""
+        self._assert_inside_the_bound(self._response_holding("<e/>" * 200_000))
+
+    def test_a_dublin_core_search_finds_parents_in_the_order_element_path_does(self):
+        """`_parents_of` stands in for `findall(".//t/..")`, which yields each
+        parent at its first `t` in document order: here a nested parent's `t`
+        comes before its enclosing parent's own, and the root holds one too."""
+        root = ElementTree.fromstring("<r><p><q><t/></q><t/><t/></p><t/><s/></r>")
+        assert [element.tag for element in metadata._parents_of(root, "t")] == [
+            element.tag for element in root.findall(".//t/..")
+        ]
+        assert [element.tag for element in metadata._parents_of(root, "t")] == ["q", "p", "r"]
 
 
 class TestEverySourceSetsTheIsbnItWasAskedFor:

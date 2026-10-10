@@ -30,10 +30,10 @@ export default function CredentialKeySection({
   const { t } = useTranslation();
   const key = useCredentialKey();
   const credentials = useSourceCredentials();
+  // Both here rather than in the panels they open: each panel's trigger sits
+  // in the button row, and the panel goes below the row.
   const [entering, setEntering] = useState(false);
-  const [typed, setTyped] = useState("");
   const [confirmingDiscard, setConfirmingDiscard] = useState(false);
-  const [confirmingDismiss, setConfirmingDismiss] = useState(false);
 
   if (key.isLoading || !key.key) return null;
 
@@ -71,55 +71,7 @@ export default function CredentialKeySection({
       </p>
 
       {key.phrase ? (
-        <div className="space-y-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-3 dark:border-amber-900 dark:bg-amber-950">
-          <p className="text-xs font-medium text-amber-900 dark:text-amber-100">
-            {t("settings.credentialKeyPhraseTitle")}
-          </p>
-          <p className="font-mono text-sm leading-relaxed break-words text-amber-950 select-all dark:text-amber-50">
-            {key.phrase}
-          </p>
-          <p className="text-xs text-amber-800 dark:text-amber-200">
-            {t("settings.credentialKeyShownOnce")}
-          </p>
-          {/* Two steps, because this is the irreversible one. Discarding a key
-              is recoverable by anybody holding the phrase; dismissing these
-              words destroys the only copy there will ever be, and it sat one
-              click away directly under them. */}
-          {confirmingDismiss ? (
-            <div className="space-y-2">
-              <p className="text-xs font-medium text-amber-900 dark:text-amber-100">
-                {t("settings.credentialKeyDismissConfirm")}
-              </p>
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    key.dismissPhrase();
-                    setConfirmingDismiss(false);
-                  }}
-                  className="px-3 py-1.5 rounded-lg bg-accent-fill text-on-accent text-xs font-medium hover:bg-accent-fill-hover transition-colors"
-                >
-                  {t("settings.credentialKeyDone")}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setConfirmingDismiss(false)}
-                  className="px-3 py-1.5 rounded-lg border border-amber-300 text-xs font-medium dark:border-amber-800"
-                >
-                  {t("common.cancel")}
-                </button>
-              </div>
-            </div>
-          ) : (
-            <button
-              type="button"
-              onClick={() => setConfirmingDismiss(true)}
-              className="px-3 py-1.5 rounded-lg bg-accent-fill text-on-accent text-xs font-medium hover:bg-accent-fill-hover transition-colors"
-            >
-              {t("settings.credentialKeyDone")}
-            </button>
-          )}
-        </div>
+        <PhraseNotice phrase={key.phrase} onDismiss={key.dismissPhrase} />
       ) : (
         <p className="text-xs text-paper-600 dark:text-paper-400">
           {held.configured
@@ -219,83 +171,197 @@ export default function CredentialKeySection({
       </div>
 
       {confirmingDiscard && (
-        <div className="space-y-2 rounded-xl border border-danger-200 px-3 py-3 dark:border-danger-900">
-          <p className="text-xs text-danger-700 dark:text-danger-200">
-            {t("settings.credentialKeyForgetHint")}
-          </p>
-          <div className="flex gap-2">
-            <button
-              type="button"
-              disabled={key.isWorking}
-              onClick={() => {
-                key.forget();
-                setConfirmingDiscard(false);
-              }}
-              className="px-3 py-1.5 rounded-lg bg-danger-600 text-on-accent text-xs font-medium disabled:opacity-40 transition-colors"
-            >
-              {t("settings.credentialKeyForget")}
-            </button>
-            <button
-              type="button"
-              onClick={() => setConfirmingDiscard(false)}
-              className="px-3 py-1.5 rounded-lg border border-paper-200 text-xs font-medium dark:border-paper-700"
-            >
-              {t("common.cancel")}
-            </button>
-          </div>
-        </div>
+        <DiscardQuestion
+          isWorking={key.isWorking}
+          onDiscard={key.forget}
+          onClose={() => setConfirmingDiscard(false)}
+        />
       )}
 
       {entering && (
-        <div className="space-y-1.5">
-          <label
-            htmlFor="recovery-phrase"
-            className="block text-xs font-medium text-paper-600 dark:text-paper-300"
-          >
-            {t("settings.credentialKeyRestore")}
-          </label>
-          <textarea
-            id="recovery-phrase"
-            rows={3}
-            autoComplete="off"
-            // Chrome's enhanced spell check ships a field's contents to a
-            // third party, and this field holds the key itself.
-            spellCheck={false}
-            autoCorrect="off"
-            value={typed}
-            onChange={(event) => setTyped(event.target.value)}
-            className="w-full px-3 py-2 rounded-xl border border-paper-200 text-sm font-mono dark:border-paper-700"
-          />
-          <p className="text-xs text-paper-600 dark:text-paper-400">
-            {t("settings.credentialKeyRestoreHint")}
+        <RestoreEntry
+          isWorking={key.isWorking}
+          onRestore={key.restore}
+          onClose={() => setEntering(false)}
+        />
+      )}
+    </SettingsSection>
+  );
+}
+
+/**
+ * The words, held on screen until the reader says twice they have them.
+ *
+ * Two steps, because this is the irreversible one. Discarding a key is
+ * recoverable by anybody holding the phrase; dismissing these words destroys
+ * the only copy there will ever be, and it sat one click away directly under
+ * them.
+ */
+function PhraseNotice({
+  phrase,
+  onDismiss,
+}: {
+  phrase: string;
+  onDismiss: () => void;
+}) {
+  const { t } = useTranslation();
+  const [confirming, setConfirming] = useState(false);
+
+  return (
+    <div className="space-y-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-3 dark:border-amber-900 dark:bg-amber-950">
+      <p className="text-xs font-medium text-amber-900 dark:text-amber-100">
+        {t("settings.credentialKeyPhraseTitle")}
+      </p>
+      <p className="font-mono text-sm leading-relaxed break-words text-amber-950 select-all dark:text-amber-50">
+        {phrase}
+      </p>
+      <p className="text-xs text-amber-800 dark:text-amber-200">
+        {t("settings.credentialKeyShownOnce")}
+      </p>
+      {confirming ? (
+        <div className="space-y-2">
+          <p className="text-xs font-medium text-amber-900 dark:text-amber-100">
+            {t("settings.credentialKeyDismissConfirm")}
           </p>
           <div className="flex gap-2">
             <button
               type="button"
-              disabled={key.isWorking || typed.trim() === ""}
-              onClick={() =>
-                key.restore(typed, () => {
-                  setTyped("");
-                  setEntering(false);
-                })
-              }
-              className="px-3 py-1.5 rounded-lg bg-accent-fill text-on-accent text-xs font-medium hover:bg-accent-fill-hover disabled:opacity-40 transition-colors"
+              onClick={() => {
+                onDismiss();
+                setConfirming(false);
+              }}
+              className="px-3 py-1.5 rounded-lg bg-accent-fill text-on-accent text-xs font-medium hover:bg-accent-fill-hover transition-colors"
             >
-              {t("settings.credentialKeyRestoreSave")}
+              {t("settings.credentialKeyDone")}
             </button>
             <button
               type="button"
-              onClick={() => {
-                setTyped("");
-                setEntering(false);
-              }}
-              className="px-3 py-1.5 rounded-lg border border-paper-200 text-xs font-medium dark:border-paper-700"
+              onClick={() => setConfirming(false)}
+              className="px-3 py-1.5 rounded-lg border border-amber-300 text-xs font-medium dark:border-amber-800"
             >
               {t("common.cancel")}
             </button>
           </div>
         </div>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setConfirming(true)}
+          className="px-3 py-1.5 rounded-lg bg-accent-fill text-on-accent text-xs font-medium hover:bg-accent-fill-hover transition-colors"
+        >
+          {t("settings.credentialKeyDone")}
+        </button>
       )}
-    </SettingsSection>
+    </div>
+  );
+}
+
+/** The question that confirms discarding the key, and the discard itself. */
+function DiscardQuestion({
+  isWorking,
+  onDiscard,
+  onClose,
+}: {
+  isWorking: boolean;
+  onDiscard: () => void;
+  onClose: () => void;
+}) {
+  const { t } = useTranslation();
+
+  return (
+    <div className="space-y-2 rounded-xl border border-danger-200 px-3 py-3 dark:border-danger-900">
+      <p className="text-xs text-danger-700 dark:text-danger-200">
+        {t("settings.credentialKeyForgetHint")}
+      </p>
+      <div className="flex gap-2">
+        <button
+          type="button"
+          disabled={isWorking}
+          onClick={() => {
+            onDiscard();
+            onClose();
+          }}
+          className="px-3 py-1.5 rounded-lg bg-danger-600 text-on-accent text-xs font-medium disabled:opacity-40 transition-colors"
+        >
+          {t("settings.credentialKeyForget")}
+        </button>
+        <button
+          type="button"
+          onClick={onClose}
+          className="px-3 py-1.5 rounded-lg border border-paper-200 text-xs font-medium dark:border-paper-700"
+        >
+          {t("common.cancel")}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The box a recovery phrase is typed back into.
+ *
+ * It owns what was typed, so closing it, by cancelling or by the server taking
+ * the phrase, drops the words with it. A refusal leaves them in place: the
+ * checksum's 400 is the one a reader corrects by editing, not by retyping
+ * the whole phrase.
+ */
+function RestoreEntry({
+  isWorking,
+  onRestore,
+  onClose,
+}: {
+  isWorking: boolean;
+  onRestore: (words: string, onDone: () => void) => void;
+  onClose: () => void;
+}) {
+  const { t } = useTranslation();
+  const [typed, setTyped] = useState("");
+
+  return (
+    <div className="space-y-1.5">
+      <label
+        htmlFor="recovery-phrase"
+        className="block text-xs font-medium text-paper-600 dark:text-paper-300"
+      >
+        {t("settings.credentialKeyRestore")}
+      </label>
+      <textarea
+        id="recovery-phrase"
+        rows={3}
+        autoComplete="off"
+        // Chrome's enhanced spell check ships a field's contents to a
+        // third party, and this field holds the key itself.
+        spellCheck={false}
+        autoCorrect="off"
+        value={typed}
+        onChange={(event) => setTyped(event.target.value)}
+        className="w-full px-3 py-2 rounded-xl border border-paper-200 text-sm font-mono dark:border-paper-700"
+      />
+      <p className="text-xs text-paper-600 dark:text-paper-400">
+        {t("settings.credentialKeyRestoreHint")}
+      </p>
+      <div className="flex gap-2">
+        <button
+          type="button"
+          disabled={isWorking || typed.trim() === ""}
+          onClick={() =>
+            onRestore(typed, () => {
+              setTyped("");
+              onClose();
+            })
+          }
+          className="px-3 py-1.5 rounded-lg bg-accent-fill text-on-accent text-xs font-medium hover:bg-accent-fill-hover disabled:opacity-40 transition-colors"
+        >
+          {t("settings.credentialKeyRestoreSave")}
+        </button>
+        <button
+          type="button"
+          onClick={onClose}
+          className="px-3 py-1.5 rounded-lg border border-paper-200 text-xs font-medium dark:border-paper-700"
+        >
+          {t("common.cancel")}
+        </button>
+      </div>
+    </div>
   );
 }

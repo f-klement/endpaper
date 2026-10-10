@@ -509,6 +509,17 @@ async def system_resolver(host: str, port: int) -> Sequence[str]:
 #: pair decodes to the one code point it encodes. See `Fetched.text`.
 _LONE_SURROGATE: Final = re.compile("[\ud800-\udfff]")
 
+#: Everything in a JSON body's text that can parse to a surrogate: one already
+#: in the text, which `json.loads` lets through by decoding with
+#: `surrogatepass`, and an escape whose first two hex digits name one. JSON
+#: spells an escape with a lower case `u` only; its hex digits take either case.
+#:
+#: **A superset, and only that is load bearing.** An escaped backslash before
+#: `ud800` and a valid escaped pair both match and cost a walk that changes
+#: nothing; a spelling this misses is a surrogate left in the answer, which is
+#: a 500. `tests/test_fetch.py` holds each spelling.
+_MAY_PARSE_TO_A_SURROGATE: Final = re.compile(r"[\ud800-\udfff]|\\u[dD][89a-fA-F]")
+
 
 def _without_lone_surrogates(value: Any) -> Any:
     """A parsed JSON value with every lone surrogate in it, key or string, replaced.
@@ -611,6 +622,11 @@ class Fetched:
         `text` does.** `json.loads` decodes a `\\ud800` escape to a surrogate
         with no partner, and a response model carrying one fails to serialise:
         one source's title made the lookup answer 500.
+
+        **The repair walks only a body whose text could parse to one**, because
+        the walk runs on the event loop and visits every value of a body that
+        almost never carries one. The text checked is the one `json.loads`
+        decodes bytes to, by the same call.
         """
         try:
             parsed = jsonlib.loads(self.content)
@@ -619,6 +635,9 @@ class Fetched:
             # message: `json.loads` phrases this as a stack overflow, which
             # describes this process rather than the body that caused it.
             raise ValueError("Body is nested too deeply to parse as JSON") from failure
+        text = self.content.decode(jsonlib.detect_encoding(self.content), "surrogatepass")
+        if _MAY_PARSE_TO_A_SURROGATE.search(text) is None:
+            return parsed
         return _without_lone_surrogates(parsed)
 
 

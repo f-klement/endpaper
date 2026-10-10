@@ -1,0 +1,1334 @@
+<?xml version="1.0"?>
+<zs:searchRetrieveResponse xmlns:zs="http://www.loc.gov/zing/srw/"><zs:version>1.1</zs:version><zs:numberOfRecords>4502</zs:numberOfRecords><zs:records><zs:record><zs:recordSchema>mods</zs:recordSchema><zs:recordPacking>xml</zs:recordPacking><zs:recordData><mods xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns="http://www.loc.gov/mods/v3" version="3.8" xsi:schemaLocation="http://www.loc.gov/mods/v3 http://www.loc.gov/standards/mods/v3/mods-3-8.xsd">
+  <titleInfo>
+    <title>War and peace</title>
+    <subTitle>Musica per il film, War and peace</subTitle>
+  </titleInfo>
+  <name type="personal" usage="primary">
+    <namePart>Rota, Nino,</namePart>
+    <namePart type="date">1911-1979</namePart>
+  </name>
+  <typeOfResource>notated music</typeOfResource>
+  <genre authority="rdacontent">notated music</genre>
+  <originInfo>
+    <place>
+      <placeTerm type="code" authority="marccountry">xx</placeTerm>
+    </place>
+    <issuance>monographic</issuance>
+    <place>
+      <placeTerm type="text">n.p</placeTerm>
+    </place>
+    <dateIssued>n.d.]</dateIssued>
+  </originInfo>
+  <language>
+    <languageTerm authority="iso639-2b" type="code">eng</languageTerm>
+  </language>
+  <physicalDescription>
+    <form authority="marcform">print</form>
+    <form type="media" authority="rdamedia">unmediated</form>
+    <form type="carrier" authority="rdacarrier">volume</form>
+    <extent>Piano-conductor score (16 p.) cm.</extent>
+  </physicalDescription>
+  <note>[For orchestra]</note>
+  <classification authority="lcc">M1527.R677 W3</classification>
+  <identifier type="lccn">unk84095265</identifier>
+  <recordInfo>
+    <recordContentSource authority="marcorg">DLC</recordContentSource>
+    <recordCreationDate encoding="marc">841120</recordCreationDate>
+    <recordChangeDate encoding="iso8601">20250608001713.7</recordChangeDate>
+    <recordIdentifier>6752496</recordIdentifier>
+    <recordOrigin>Converted from MARCXML to MODS version 3.8 using MARC21slim2MODS3-8_XSLT1-0.xsl
+				(Revision 1.172 20230208)</recordOrigin>
+  </recordInfo>
+</mods></zs:recordData><zs:recordPosition>1</zs:recordPosition></zs:record><zs:record><zs:recordSchema>mods</zs:recordSchema><zs:recordPacking>xml</zs:recordPacking><zs:recordData><mods xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns="http://www.loc.gov/mods/v3" version="3.8" xsi:schemaLocation="http://www.loc.gov/mods/v3 http://www.loc.gov/standards/mods/v3/mods-3-8.xsd">
+  <titleInfo>
+    <title>War and peace</title>
+  </titleInfo>
+  <titleInfo type="alternative">
+    <title>APA at the Phoenix</title>
+  </titleInfo>
+  <name type="personal">
+    <namePart>Coe, Richard L. (Richard Livingstone),</namePart>
+    <namePart type="date">1914-1995</namePart>
+    <role>
+      <roleTerm type="text">annotator</roleTerm>
+    </role>
+  </name>
+  <name type="personal">
+    <namePart>Rabb, Ellis,</namePart>
+    <namePart type="date">1930-1998</namePart>
+  </name>
+  <name type="personal">
+    <namePart>Wexler, Peter,</namePart>
+    <namePart type="date">1936-</namePart>
+  </name>
+  <name type="personal">
+    <namePart>Haugan, Judith.</namePart>
+  </name>
+  <name type="personal">
+    <namePart>Potts, Nancy.</namePart>
+  </name>
+  <name type="personal">
+    <namePart>Hemsley, Gilbert V.</namePart>
+  </name>
+  <name type="personal">
+    <namePart>Neumann, Alfred.</namePart>
+  </name>
+  <name type="personal">
+    <namePart>Piscator, Erwin,</namePart>
+    <namePart type="date">1893-1966</namePart>
+  </name>
+  <name type="personal">
+    <namePart>Prufer, Guntram.</namePart>
+  </name>
+  <name type="personal">
+    <namePart>MacDonald, Robert David.</namePart>
+  </name>
+  <name type="personal">
+    <namePart>Coe, Richard L. (Richard Livingstone),</namePart>
+    <namePart type="date">1914-1995</namePart>
+    <role>
+      <roleTerm type="text">annotator</roleTerm>
+    </role>
+  </name>
+  <name type="corporate">
+    <namePart>Phoenix Theatre (Project)</namePart>
+  </name>
+  <name type="corporate">
+    <namePart>APA-Phoenix Repertory Company</namePart>
+  </name>
+  <name type="corporate">
+    <namePart>Richard L. Coe Theater Programs Collection (Library of Congress)</namePart>
+  </name>
+  <typeOfResource>text</typeOfResource>
+  <genre authority="marcgt">biography</genre>
+  <genre authority="rdacontent">text</genre>
+  <genre authority="rbgenr">Theater programs-New York (State)-New York.</genre>
+  <genre authority="rbgenr">Theater programs-1967.</genre>
+  <originInfo>
+    <place>
+      <placeTerm type="code" authority="marccountry">xx</placeTerm>
+    </place>
+    <dateIssued encoding="marc">1967</dateIssued>
+    <issuance>monographic</issuance>
+    <dateIssued>[1967]</dateIssued>
+  </originInfo>
+  <language>
+    <languageTerm authority="iso639-2b" type="code">eng</languageTerm>
+  </language>
+  <physicalDescription>
+    <form authority="marcform">print</form>
+    <form type="media" authority="rdamedia">unmediated</form>
+    <form type="carrier" authority="rdacarrier">volume</form>
+    <extent>1 v. (theater program).</extent>
+  </physicalDescription>
+  <abstract type="Summary">Phoenix Theatre (a project of Theatre Incorporated), T. Edward Hambleton, Norris Houghton, managing directors, with the Association of Producing Arts presents APA at the Phoenix, "War and Peace," after the novel by Leo Tolstoy, adapted for the stage by Alfred Neumann, Erwin Piscator, Guntram Prufer, English verison by Robert David MacDonald, directed by Ellis Rabb, designed by Peter Wexler, decor by Judith Haugan, costumes designed by Nancy Potts, lighting designed by Gilbert Hemsley.</abstract>
+  <note>Phoenix Theatre, [March 21-June 17, 1967].</note>
+  <note>Title devised by Library staff.</note>
+  <note>Cast: Clayton Corzatte, Donald Moffat, Jennifer Harmon, Sydney Walker, Christine Pickles, Rosemary Harris, Mark White, Joanna Roos, Ronald Bishop, Paul Sparer, Richard Jordan, Gordon Gould, Joseph Bird, Richard Woods, Keene Curtis, John Allan Macunovich, Robert Lumish, Al Hill, Ed Levey, Michael McCarthy, Leonard Peters, David Prass, Barry Bonner, George Addis, Richard Netzband, William Shorr.</note>
+  <note>LC copy has notations by Coe. Mimeograph typescript slip found with program announcing "A midnight special at the Phoenix," a one man, one act, one hour play by Richard Hepburn called "Washing the Car," at the Phoenix, Friday February 19th, 26th and March 5th [1965]. Accompanied by 2 copies of brochure about the APA, the company members and ticket availability information for upcoming performances of "Man and Superman," by George Bernard Shaw, "Judith," by Jean Giraudoux, and "War and Peace". DLC</note>
+  <note>In: Richard L. Coe Theater Programs Collection (Library of Congress).</note>
+  <subject>
+    <hierarchicalGeographic>
+      <country>United States</country>
+      <state>New York</state>
+      <city>New York</city>
+    </hierarchicalGeographic>
+  </subject>
+  <classification authority="lcc">PN2093 .C64 1995 no. W09</classification>
+  <relatedItem>
+    <titleInfo>
+      <title>Voi&#x306;na i mir. English</title>
+    </titleInfo>
+    <name type="personal">
+      <namePart>Tolstoy, Leo,</namePart>
+      <namePart type="termsOfAddress">graf,</namePart>
+      <namePart type="date">1828-1910</namePart>
+    </name>
+  </relatedItem>
+  <relatedItem type="constituent">
+    <titleInfo>
+      <title>APA at the Phoenix</title>
+    </titleInfo>
+  </relatedItem>
+  <identifier type="lccn">2010368929</identifier>
+  <recordInfo>
+    <descriptionStandard>aacr</descriptionStandard>
+    <recordContentSource authority="marcorg">DLC</recordContentSource>
+    <recordCreationDate encoding="marc">100430</recordCreationDate>
+    <recordChangeDate encoding="iso8601">20250607034812.5</recordChangeDate>
+    <recordIdentifier>16210982</recordIdentifier>
+    <recordOrigin>Converted from MARCXML to MODS version 3.8 using MARC21slim2MODS3-8_XSLT1-0.xsl
+				(Revision 1.172 20230208)</recordOrigin>
+  </recordInfo>
+</mods></zs:recordData><zs:recordPosition>2</zs:recordPosition></zs:record><zs:record><zs:recordSchema>mods</zs:recordSchema><zs:recordPacking>xml</zs:recordPacking><zs:recordData><mods xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns="http://www.loc.gov/mods/v3" version="3.8" xsi:schemaLocation="http://www.loc.gov/mods/v3 http://www.loc.gov/standards/mods/v3/mods-3-8.xsd">
+  <titleInfo>
+    <title>War and peace</title>
+  </titleInfo>
+  <name type="personal">
+    <namePart>De Silva, Anil, </namePart>
+    <role>
+      <roleTerm type="text">ed</roleTerm>
+    </role>
+  </name>
+  <name type="corporate">
+    <namePart>World Confederation of Organizations of the Teaching Profession.</namePart>
+  </name>
+  <typeOfResource>text</typeOfResource>
+  <genre authority="rdacontent">text</genre>
+  <originInfo>
+    <place>
+      <placeTerm type="code" authority="marccountry">ctu</placeTerm>
+    </place>
+    <dateIssued encoding="marc">1965</dateIssued>
+    <issuance>monographic</issuance>
+    <place>
+      <placeTerm type="text">Greenwich, Conn</placeTerm>
+    </place>
+    <agent>
+      <namePart>New York Graphic Society</namePart>
+    </agent>
+    <dateIssued>[1965]</dateIssued>
+  </originInfo>
+  <language>
+    <languageTerm authority="iso639-2b" type="code">eng</languageTerm>
+  </language>
+  <physicalDescription>
+    <form authority="marcform">print</form>
+    <form type="media" authority="rdamedia">unmediated</form>
+    <form type="carrier" authority="rdacarrier">volume</form>
+    <extent>64 p. illus., plates (part col.) 32 cm.</extent>
+  </physicalDescription>
+  <subject authority="lcsh">
+    <topic>War in art</topic>
+  </subject>
+  <subject authority="lcsh">
+    <topic>Peace in art</topic>
+  </subject>
+  <classification authority="lcc">N8260 .W35 1965</classification>
+  <relatedItem type="series">
+    <titleInfo>
+      <title>Man through his art</title>
+      <partNumber>v. 1</partNumber>
+    </titleInfo>
+  </relatedItem>
+  <identifier type="lccn">65003851</identifier>
+  <recordInfo>
+    <recordContentSource authority="marcorg">DLC</recordContentSource>
+    <recordCreationDate encoding="marc">830617</recordCreationDate>
+    <recordChangeDate encoding="iso8601">20250608021235.4</recordChangeDate>
+    <recordIdentifier>7991294</recordIdentifier>
+    <recordOrigin>Converted from MARCXML to MODS version 3.8 using MARC21slim2MODS3-8_XSLT1-0.xsl
+				(Revision 1.172 20230208)</recordOrigin>
+  </recordInfo>
+</mods></zs:recordData><zs:recordPosition>3</zs:recordPosition></zs:record><zs:record><zs:recordSchema>mods</zs:recordSchema><zs:recordPacking>xml</zs:recordPacking><zs:recordData><mods xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns="http://www.loc.gov/mods/v3" version="3.8" xsi:schemaLocation="http://www.loc.gov/mods/v3 http://www.loc.gov/standards/mods/v3/mods-3-8.xsd">
+  <titleInfo>
+    <title>War and peace</title>
+  </titleInfo>
+  <name type="personal">
+    <namePart>Neumann, Alfred.</namePart>
+  </name>
+  <name type="personal">
+    <namePart>Piscator, Erwin,</namePart>
+    <namePart type="date">1893-1966</namePart>
+  </name>
+  <name type="personal">
+    <namePart>Prufer, Guntram.</namePart>
+  </name>
+  <name type="personal">
+    <namePart>MacDonald, Robert David.</namePart>
+  </name>
+  <name type="corporate">
+    <namePart>Phoenix Theatre (Project)</namePart>
+  </name>
+  <name type="corporate">
+    <namePart>APA-Phoenix Repertory Company</namePart>
+  </name>
+  <name type="corporate">
+    <namePart>Richard L. Coe Theater Programs Collection (Library of Congress)</namePart>
+  </name>
+  <typeOfResource>text</typeOfResource>
+  <genre authority="marcgt">biography</genre>
+  <genre authority="rdacontent">text</genre>
+  <genre authority="rbgenr">Playbills-New York (State)-New York.</genre>
+  <genre authority="rbgenr">Playbills-1967.</genre>
+  <originInfo>
+    <place>
+      <placeTerm type="code" authority="marccountry">xx</placeTerm>
+    </place>
+    <issuance>monographic</issuance>
+    <dateIssued>1967</dateIssued>
+  </originInfo>
+  <language>
+    <languageTerm authority="iso639-2b" type="code">eng</languageTerm>
+  </language>
+  <physicalDescription>
+    <form authority="marcform">print</form>
+    <form type="media" authority="rdamedia">unmediated</form>
+    <form type="carrier" authority="rdacarrier">volume</form>
+    <extent>1 sheet (playbill).</extent>
+  </physicalDescription>
+  <abstract type="Summary">[Phoenix Theatre?], "War and Peace," after the novel by Leo Tolstoy, adapted for the stage by Alfred Neumann, Erwin Piscator, Guntram Prufer, English version by Robert David MacDonald.</abstract>
+  <note>[Phoenix Theatre?], Friday evening, May 12, 1967.</note>
+  <note>Title devised by Library staff.</note>
+  <note>Cast: Clayton Corzatte, Donald Moffat, Jennifer Harmon, Richard Woods, Betty Miller, Rosemary Harris, George Pentecost, Dee Victor, Stefan Gierasch, Alan Fudge, Marco St. John, Gordon Gould, Joseph Bird, James Greene, Keene Curtis, James Storm, James Greene, Nat Simmons, George Addis, Bill Egan, Alexander Courtney, Kenneth Freeman, Reuben Greene, Harley Hackett, Roger Karenrider, Ken Kliban, Michael Alan MacDonald, Hancel McCord, John Merensky, Don Parker, Stephen Peters, Gastone Rossilli, James Sullivan, James Whittle.</note>
+  <note>In: Richard L. Coe Theater Programs Collection (Library of Congress).</note>
+  <subject>
+    <hierarchicalGeographic>
+      <country>United States</country>
+      <state>New York</state>
+      <city>New York</city>
+    </hierarchicalGeographic>
+  </subject>
+  <classification authority="lcc">PN2093 .C64 1995 no. W09b</classification>
+  <relatedItem>
+    <titleInfo>
+      <title>Voi&#x306;na i mir. English</title>
+    </titleInfo>
+    <name type="personal">
+      <namePart>Tolstoy, Leo,</namePart>
+      <namePart type="termsOfAddress">graf,</namePart>
+      <namePart type="date">1828-1910</namePart>
+    </name>
+  </relatedItem>
+  <identifier type="lccn">2010368930</identifier>
+  <recordInfo>
+    <descriptionStandard>aacr</descriptionStandard>
+    <recordContentSource authority="marcorg">DLC</recordContentSource>
+    <recordCreationDate encoding="marc">100430</recordCreationDate>
+    <recordChangeDate encoding="iso8601">20250607034812.6</recordChangeDate>
+    <recordIdentifier>16211007</recordIdentifier>
+    <recordOrigin>Converted from MARCXML to MODS version 3.8 using MARC21slim2MODS3-8_XSLT1-0.xsl
+				(Revision 1.172 20230208)</recordOrigin>
+  </recordInfo>
+</mods></zs:recordData><zs:recordPosition>4</zs:recordPosition></zs:record><zs:record><zs:recordSchema>mods</zs:recordSchema><zs:recordPacking>xml</zs:recordPacking><zs:recordData><mods xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns="http://www.loc.gov/mods/v3" version="3.8" xsi:schemaLocation="http://www.loc.gov/mods/v3 http://www.loc.gov/standards/mods/v3/mods-3-8.xsd">
+  <titleInfo>
+    <title>War and peace</title>
+  </titleInfo>
+  <name type="personal" usage="primary">
+    <namePart>Parry, C. Hubert H. (Charles Hubert Hastings),</namePart>
+    <namePart type="date">1848-1918</namePart>
+  </name>
+  <typeOfResource>text</typeOfResource>
+  <genre authority="rdacontent">text</genre>
+  <originInfo>
+    <place>
+      <placeTerm type="code" authority="marccountry">enk</placeTerm>
+    </place>
+    <dateIssued encoding="marc">1903</dateIssued>
+    <issuance>monographic</issuance>
+    <place>
+      <placeTerm type="text">London</placeTerm>
+    </place>
+    <agent>
+      <namePart>Novello and co. ltd.</namePart>
+    </agent>
+    <dateIssued>c1903</dateIssued>
+  </originInfo>
+  <language>
+    <languageTerm authority="iso639-2b" type="code">eng</languageTerm>
+  </language>
+  <physicalDescription>
+    <form authority="marcform">print</form>
+    <form type="media" authority="rdamedia">unmediated</form>
+    <form type="carrier" authority="rdacarrier">volume</form>
+    <extent>p. cm.</extent>
+  </physicalDescription>
+  <classification authority="lcc">M1533.P26 W2</classification>
+  <identifier type="lccn">unk84094674</identifier>
+  <recordInfo>
+    <recordContentSource authority="marcorg">DLC</recordContentSource>
+    <recordCreationDate encoding="marc">841115</recordCreationDate>
+    <recordChangeDate encoding="iso8601">20250608010054.6</recordChangeDate>
+    <recordIdentifier>7220956</recordIdentifier>
+    <recordOrigin>Converted from MARCXML to MODS version 3.8 using MARC21slim2MODS3-8_XSLT1-0.xsl
+				(Revision 1.172 20230208)</recordOrigin>
+  </recordInfo>
+</mods></zs:recordData><zs:recordPosition>5</zs:recordPosition></zs:record><zs:record><zs:recordSchema>mods</zs:recordSchema><zs:recordPacking>xml</zs:recordPacking><zs:recordData><mods xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns="http://www.loc.gov/mods/v3" version="3.8" xsi:schemaLocation="http://www.loc.gov/mods/v3 http://www.loc.gov/standards/mods/v3/mods-3-8.xsd">
+  <titleInfo>
+    <title>War &amp; peace</title>
+  </titleInfo>
+  <titleInfo type="alternative">
+    <title>War and peace</title>
+  </titleInfo>
+  <titleInfo type="uniform">
+    <title>War &amp; peace (London, England : 1913)</title>
+  </titleInfo>
+  <name type="corporate">
+    <namePart>Garton Foundation.</namePart>
+    <nameIdentifier>https://id.oclc.org/worldcat/entity/E39QH7JmrBpYrK6vXVkQJbhtWt</nameIdentifier>
+  </name>
+  <typeOfResource>text</typeOfResource>
+  <genre authority="marcgt">periodical</genre>
+  <genre authority="rdacontent">text</genre>
+  <genre authority="fast">Periodicals.</genre>
+  <originInfo>
+    <place>
+      <placeTerm type="code" authority="marccountry">enk</placeTerm>
+    </place>
+    <dateIssued encoding="marc" point="start">1913</dateIssued>
+    <dateIssued encoding="marc" point="end">1918</dateIssued>
+    <issuance>serial</issuance>
+    <frequency authority="marcfrequency">Monthly</frequency>
+    <place>
+      <placeTerm type="text">London]</placeTerm>
+    </place>
+    <agent>
+      <namePart>[War &amp; Peace Ltd.]</namePart>
+    </agent>
+    <dateIssued>1913-1918</dateIssued>
+    <frequency>Monthly</frequency>
+  </originInfo>
+  <language>
+    <languageTerm authority="iso639-2b" type="code">eng</languageTerm>
+  </language>
+  <physicalDescription>
+    <form authority="marcform">print</form>
+    <form type="media" authority="rdamedia">unmediated</form>
+    <form type="carrier" authority="rdacarrier">volume</form>
+    <extent>6 volumes : illustrations ; 25-32 cm</extent>
+  </physicalDescription>
+  <physicalDescription>
+    <form type="Illustrative content">illustration</form>
+  </physicalDescription>
+  <note type="date/sequential designation">Vol. 1, no. 1 (Oct. 1913)-no. 62 (Nov. 1918).</note>
+  <note>Title from cover.</note>
+  <note>Published to promote the aims of the Garton Foundation and allied societies.</note>
+  <subject authority="lcsh">
+    <topic>International cooperation</topic>
+    <genre>Periodicals</genre>
+  </subject>
+  <subject authority="lcsh">
+    <topic>Peace</topic>
+    <genre>Periodicals</genre>
+  </subject>
+  <subject authority="lcsh">
+    <topic>War</topic>
+    <genre>Periodicals</genre>
+  </subject>
+  <subject xmlns:xlink="http://www.w3.org/1999/xlink" authority="fast" xlink:href="(OCoLC)fst00976857">
+    <topic>International cooperation</topic>
+  </subject>
+  <subject xmlns:xlink="http://www.w3.org/1999/xlink" authority="fast" xlink:href="(OCoLC)fst01055758">
+    <topic>Peace</topic>
+  </subject>
+  <subject xmlns:xlink="http://www.w3.org/1999/xlink" authority="fast" xlink:href="(OCoLC)fst01170328">
+    <topic>War</topic>
+  </subject>
+  <classification authority="lcc">JX1901 .W3</classification>
+  <classification authority="ddc" edition="19">327.1/7/05</classification>
+  <relatedItem type="otherFormat" otherType="Online version:" displayLabel="Online version:">
+    <titleInfo>
+      <title>War &amp; peace (London, England : 1913)</title>
+    </titleInfo>
+    <identifier type="local">(OCoLC)1084274168</identifier>
+  </relatedItem>
+  <relatedItem type="succeeding">
+    <titleInfo>
+      <title>International review (London, Eng. : 1918)</title>
+    </titleInfo>
+    <identifier type="local">(DLC)   16003720</identifier>
+    <identifier type="local">(OCoLC)7636446</identifier>
+  </relatedItem>
+  <identifier type="lccn">sf 83007019</identifier>
+  <identifier type="oclc">7636432</identifier>
+  <recordInfo>
+    <descriptionStandard>aacr</descriptionStandard>
+    <recordContentSource authority="marcorg">YHM</recordContentSource>
+    <recordCreationDate encoding="marc">810803</recordCreationDate>
+    <recordChangeDate encoding="iso8601">20260805105048.7</recordChangeDate>
+    <recordIdentifier>11266159</recordIdentifier>
+    <recordOrigin>Converted from MARCXML to MODS version 3.8 using MARC21slim2MODS3-8_XSLT1-0.xsl
+				(Revision 1.172 20230208)</recordOrigin>
+    <languageOfCataloging>
+      <languageTerm authority="iso639-2b" type="code">eng</languageTerm>
+    </languageOfCataloging>
+  </recordInfo>
+</mods></zs:recordData><zs:recordPosition>6</zs:recordPosition></zs:record><zs:record><zs:recordSchema>mods</zs:recordSchema><zs:recordPacking>xml</zs:recordPacking><zs:recordData><mods xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns="http://www.loc.gov/mods/v3" version="3.8" xsi:schemaLocation="http://www.loc.gov/mods/v3 http://www.loc.gov/standards/mods/v3/mods-3-8.xsd">
+  <titleInfo>
+    <title>War and peace</title>
+  </titleInfo>
+  <titleInfo type="uniform" nameTitleGroup="1">
+    <title>Voi&#x306;na i mir. English</title>
+  </titleInfo>
+  <name type="personal" usage="primary" nameTitleGroup="1">
+    <namePart>Tolstoy, Leo,</namePart>
+    <namePart type="termsOfAddress">graf,</namePart>
+    <namePart type="date">1828-1910</namePart>
+  </name>
+  <typeOfResource>text</typeOfResource>
+  <genre authority="rdacontent">text</genre>
+  <genre authority="lcgft" valueURI="https://id.loc.gov/authorities/genreForms/gf2014026339">Fiction.</genre>
+  <originInfo>
+    <place>
+      <placeTerm type="code" authority="marccountry">nyu</placeTerm>
+    </place>
+    <dateIssued encoding="marc">1955</dateIssued>
+    <issuance>monographic</issuance>
+    <place>
+      <placeTerm type="text">New York</placeTerm>
+    </place>
+    <agent>
+      <namePart>Dell Pub. Co.</namePart>
+    </agent>
+    <dateIssued>1955]</dateIssued>
+  </originInfo>
+  <language>
+    <languageTerm authority="iso639-2b" type="code">eng</languageTerm>
+  </language>
+  <physicalDescription>
+    <form authority="marcform">print</form>
+    <form type="media" authority="rdamedia">unmediated</form>
+    <form type="carrier" authority="rdacarrier">volume</form>
+    <extent>512 p. 17 cm.</extent>
+  </physicalDescription>
+  <subject>
+    <geographicCode authority="marcgac">e-ur---</geographicCode>
+  </subject>
+  <subject authority="lcsh">
+    <name type="personal">
+      <namePart>Napoleon</namePart>
+      <namePart type="termsOfAddress">I, Emperor of the French,</namePart>
+      <namePart type="date">1769-1821</namePart>
+    </name>
+    <genre>Fiction</genre>
+  </subject>
+  <subject authority="lcsh">
+    <topic>Napoleonic Wars, 1800-1815</topic>
+    <topic>Campaigns</topic>
+    <geographic>Russia</geographic>
+    <genre>Fiction</genre>
+  </subject>
+  <subject authority="lcsh">
+    <geographic>Russia</geographic>
+    <topic>History</topic>
+    <temporal>Alexander I, 1801-1825</temporal>
+    <genre>Fiction</genre>
+  </subject>
+  <classification authority="lcc">PZ3.T588 W30</classification>
+  <identifier type="lccn">55011759</identifier>
+  <recordInfo>
+    <recordContentSource authority="marcorg">DLC</recordContentSource>
+    <recordCreationDate encoding="marc">830518</recordCreationDate>
+    <recordChangeDate encoding="iso8601">20250608012252.8</recordChangeDate>
+    <recordIdentifier>7456793</recordIdentifier>
+    <recordOrigin>Converted from MARCXML to MODS version 3.8 using MARC21slim2MODS3-8_XSLT1-0.xsl
+				(Revision 1.172 20230208)</recordOrigin>
+  </recordInfo>
+</mods></zs:recordData><zs:recordPosition>7</zs:recordPosition></zs:record><zs:record><zs:recordSchema>mods</zs:recordSchema><zs:recordPacking>xml</zs:recordPacking><zs:recordData><mods xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns="http://www.loc.gov/mods/v3" version="3.8" xsi:schemaLocation="http://www.loc.gov/mods/v3 http://www.loc.gov/standards/mods/v3/mods-3-8.xsd">
+  <titleInfo>
+    <title>War and peace</title>
+  </titleInfo>
+  <name type="corporate">
+    <namePart>Copyright Collection (Library of Congress)</namePart>
+  </name>
+  <typeOfResource>moving image</typeOfResource>
+  <genre authority="marcgt">videorecording</genre>
+  <originInfo>
+    <place>
+      <placeTerm type="code" authority="marccountry">xx</placeTerm>
+    </place>
+    <issuance>monographic</issuance>
+    <dateIssued>1990</dateIssued>
+  </originInfo>
+  <language>
+    <languageTerm authority="iso639-2b" type="code">rus</languageTerm>
+  </language>
+  <language objectPart="summary">
+    <languageTerm authority="iso639-2b" type="code">eng</languageTerm>
+  </language>
+  <physicalDescription>
+    <form authority="marccategory">videorecording</form>
+    <extent>2 videocassettes of 2 (VHS) : sd., col. ; 1/2 in. viewing copy.</extent>
+  </physicalDescription>
+  <note>Copyright: Seattle Opera Association. Appl. au.: opera production, including orchestral and choral performance, back drops, and separate artistic elements of the stage settings and costumes: Seattle Opera Association. DCR 1990; PUB 21Jul90; REG 8Aug95; PA851-694.</note>
+  <note>Based on the novel by Leo Tolstoy.</note>
+  <note>Sources used: copyright data base; copyright data sheet.</note>
+  <note type="acquisition">Received: 10-8-1997; viewing copy; copyright deposit--***; Copyright Collection.</note>
+  <note type="language">In Russian, with English subtitles.</note>
+  <classification authority="lcc">VAF 4081-4082 (viewing copy)</classification>
+  <identifier type="lccn">98505108</identifier>
+  <recordInfo>
+    <descriptionStandard>aacr</descriptionStandard>
+    <descriptionStandard>amim</descriptionStandard>
+    <recordContentSource authority="marcorg">DLC</recordContentSource>
+    <recordCreationDate encoding="marc">980402</recordCreationDate>
+    <recordChangeDate encoding="iso8601">20250606175538.8</recordChangeDate>
+    <recordIdentifier>11712533</recordIdentifier>
+    <recordOrigin>Converted from MARCXML to MODS version 3.8 using MARC21slim2MODS3-8_XSLT1-0.xsl
+				(Revision 1.172 20230208)</recordOrigin>
+  </recordInfo>
+</mods></zs:recordData><zs:recordPosition>8</zs:recordPosition></zs:record><zs:record><zs:recordSchema>mods</zs:recordSchema><zs:recordPacking>xml</zs:recordPacking><zs:recordData><mods xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns="http://www.loc.gov/mods/v3" version="3.8" xsi:schemaLocation="http://www.loc.gov/mods/v3 http://www.loc.gov/standards/mods/v3/mods-3-8.xsd">
+  <titleInfo>
+    <title>War and peace</title>
+  </titleInfo>
+  <titleInfo type="uniform" nameTitleGroup="1">
+    <title>Voi&#x306;na i mir. English</title>
+  </titleInfo>
+  <name type="personal" usage="primary" nameTitleGroup="1">
+    <namePart>Tolstoy, Leo,</namePart>
+    <namePart type="termsOfAddress">graf,</namePart>
+    <namePart type="date">1828-1910</namePart>
+  </name>
+  <name type="personal">
+    <namePart>Maude, Louise,</namePart>
+    <namePart type="date">1855-1939</namePart>
+  </name>
+  <name type="personal">
+    <namePart>Maude, Aylmer,</namePart>
+    <namePart type="date">1858-1938</namePart>
+  </name>
+  <name type="personal">
+    <namePart>Vereshchagin, Vasilii&#x306; Vasil&#x2B9;evich,</namePart>
+    <namePart type="date">1842-1904</namePart>
+  </name>
+  <name type="personal">
+    <namePart>Eichenberg, Fritz,</namePart>
+    <namePart type="date">1901-1990</namePart>
+  </name>
+  <typeOfResource>text</typeOfResource>
+  <genre authority="rdacontent">text</genre>
+  <genre authority="lcgft" valueURI="https://id.loc.gov/authorities/genreForms/gf2014026339">Fiction.</genre>
+  <originInfo>
+    <place>
+      <placeTerm type="code" authority="marccountry">nyu</placeTerm>
+    </place>
+    <dateIssued encoding="marc">1943</dateIssued>
+    <issuance>monographic</issuance>
+    <place>
+      <placeTerm type="text">New York</placeTerm>
+    </place>
+    <agent>
+      <namePart>Heritage Press</namePart>
+    </agent>
+    <dateIssued>[1943]</dateIssued>
+  </originInfo>
+  <language>
+    <languageTerm authority="iso639-2b" type="code">eng</languageTerm>
+  </language>
+  <physicalDescription>
+    <form authority="marcform">print</form>
+    <form type="media" authority="rdamedia">unmediated</form>
+    <form type="carrier" authority="rdacarrier">volume</form>
+    <extent>2 v. fronts., illus., double plates (part col.) maps. 20 cm.</extent>
+  </physicalDescription>
+  <subject>
+    <geographicCode authority="marcgac">e-ur---</geographicCode>
+  </subject>
+  <subject authority="lcsh">
+    <name type="personal">
+      <namePart>Napoleon</namePart>
+      <namePart type="termsOfAddress">I, Emperor of the French,</namePart>
+      <namePart type="date">1769-1821</namePart>
+    </name>
+    <genre>Fiction</genre>
+  </subject>
+  <subject authority="lcsh">
+    <topic>Napoleonic Wars, 1800-1815</topic>
+    <topic>Campaigns</topic>
+    <geographic>Russia</geographic>
+    <genre>Fiction</genre>
+  </subject>
+  <subject authority="lcsh">
+    <geographic>Russia</geographic>
+    <topic>History</topic>
+    <temporal>Alexander I, 1801-1825</temporal>
+    <genre>Fiction</genre>
+  </subject>
+  <classification authority="lcc">PZ3.T588 W17</classification>
+  <identifier type="lccn">44008544</identifier>
+  <recordInfo>
+    <recordContentSource authority="marcorg">DLC</recordContentSource>
+    <recordCreationDate encoding="marc">830518</recordCreationDate>
+    <recordChangeDate encoding="iso8601">20250608003359.2</recordChangeDate>
+    <recordIdentifier>6927580</recordIdentifier>
+    <recordOrigin>Converted from MARCXML to MODS version 3.8 using MARC21slim2MODS3-8_XSLT1-0.xsl
+				(Revision 1.172 20230208)</recordOrigin>
+  </recordInfo>
+</mods></zs:recordData><zs:recordPosition>9</zs:recordPosition></zs:record><zs:record><zs:recordSchema>mods</zs:recordSchema><zs:recordPacking>xml</zs:recordPacking><zs:recordData><mods xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns="http://www.loc.gov/mods/v3" version="3.8" xsi:schemaLocation="http://www.loc.gov/mods/v3 http://www.loc.gov/standards/mods/v3/mods-3-8.xsd">
+  <titleInfo>
+    <title>War, peace, and nonresistance</title>
+  </titleInfo>
+  <name type="personal" usage="primary">
+    <namePart>Hershberger, Guy F. (Guy Franklin),</namePart>
+    <namePart type="date">1896-1989</namePart>
+  </name>
+  <typeOfResource>text</typeOfResource>
+  <genre authority="rdacontent">text</genre>
+  <originInfo>
+    <place>
+      <placeTerm type="code" authority="marccountry">xx</placeTerm>
+    </place>
+    <issuance>monographic</issuance>
+    <place>
+      <placeTerm type="text">Scottdale, Pa</placeTerm>
+    </place>
+    <agent>
+      <namePart>Herald press</namePart>
+    </agent>
+    <dateIssued>1953</dateIssued>
+    <edition>[Rev. ed.]</edition>
+  </originInfo>
+  <language>
+    <languageTerm authority="iso639-2b" type="code">eng</languageTerm>
+  </language>
+  <physicalDescription>
+    <form authority="marcform">print</form>
+    <form type="media" authority="rdamedia">unmediated</form>
+    <form type="carrier" authority="rdacarrier">volume</form>
+    <extent>375 p.</extent>
+  </physicalDescription>
+  <subject authority="lcsh">
+    <topic>Pacifism</topic>
+    <topic>Religious aspects</topic>
+    <topic>Mennonites</topic>
+  </subject>
+  <subject authority="lcsh">
+    <topic>Peace</topic>
+    <topic>Religious aspects</topic>
+    <topic>Mennonties</topic>
+  </subject>
+  <subject authority="lcsh">
+    <topic>Mennonites</topic>
+    <topic>Doctrines</topic>
+  </subject>
+  <classification authority="lcc">BR115.P4 H4 1953</classification>
+  <identifier type="lccn">53007586</identifier>
+  <identifier type="oclc">378801</identifier>
+  <recordInfo>
+    <recordContentSource authority="marcorg">DLC</recordContentSource>
+    <recordCreationDate encoding="marc">720811</recordCreationDate>
+    <recordChangeDate encoding="iso8601">20250608033254.7</recordChangeDate>
+    <recordIdentifier>8849337</recordIdentifier>
+    <recordOrigin>Converted from MARCXML to MODS version 3.8 using MARC21slim2MODS3-8_XSLT1-0.xsl
+				(Revision 1.172 20230208)</recordOrigin>
+  </recordInfo>
+</mods></zs:recordData><zs:recordPosition>10</zs:recordPosition></zs:record><zs:record><zs:recordSchema>mods</zs:recordSchema><zs:recordPacking>xml</zs:recordPacking><zs:recordData><mods xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns="http://www.loc.gov/mods/v3" version="3.8" xsi:schemaLocation="http://www.loc.gov/mods/v3 http://www.loc.gov/standards/mods/v3/mods-3-8.xsd">
+  <titleInfo>
+    <title>Between war and peace</title>
+  </titleInfo>
+  <name type="personal" usage="primary">
+    <namePart>Boeckel, Florence (Brewer),</namePart>
+    <namePart type="date">1885-</namePart>
+  </name>
+  <name type="corporate">
+    <namePart>National Council for Prevention of War, Washington, D.C.</namePart>
+  </name>
+  <typeOfResource>text</typeOfResource>
+  <genre authority="rdacontent">text</genre>
+  <originInfo>
+    <place>
+      <placeTerm type="code" authority="marccountry">dcu</placeTerm>
+    </place>
+    <issuance>serial</issuance>
+    <frequency authority="marcfrequency">Completely irregular</frequency>
+    <place>
+      <placeTerm type="text">Washington, D.C</placeTerm>
+    </place>
+    <agent>
+      <namePart>National Council for Prevention of War</namePart>
+    </agent>
+    <dateIssued>19 -41</dateIssued>
+    <frequency>Unknown</frequency>
+  </originInfo>
+  <language>
+    <languageTerm authority="iso639-2b" type="code">eng</languageTerm>
+  </language>
+  <physicalDescription>
+    <form type="media" authority="rdamedia">unmediated</form>
+    <form type="carrier" authority="rdacarrier">volume</form>
+    <extent>v. in 28 cm.</extent>
+  </physicalDescription>
+  <subject>
+    <geographicCode authority="marcgac">n-us---</geographicCode>
+  </subject>
+  <subject authority="lcsh">
+    <topic>World War, 1939-1945</topic>
+    <geographic>United States</geographic>
+  </subject>
+  <subject authority="lcsh">
+    <geographic>United States</geographic>
+    <topic>Foreign relations</topic>
+    <temporal>1933-1945</temporal>
+  </subject>
+  <classification authority="lcc">E740 .B63</classification>
+  <identifier type="lccn">45041002</identifier>
+  <recordInfo>
+    <recordContentSource authority="marcorg">DLC</recordContentSource>
+    <recordCreationDate encoding="marc">810604</recordCreationDate>
+    <recordChangeDate encoding="iso8601">20250606155740.8</recordChangeDate>
+    <recordIdentifier>10213714</recordIdentifier>
+    <recordOrigin>Converted from MARCXML to MODS version 3.8 using MARC21slim2MODS3-8_XSLT1-0.xsl
+				(Revision 1.172 20230208)</recordOrigin>
+  </recordInfo>
+</mods></zs:recordData><zs:recordPosition>11</zs:recordPosition></zs:record><zs:record><zs:recordSchema>mods</zs:recordSchema><zs:recordPacking>xml</zs:recordPacking><zs:recordData><mods xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns="http://www.loc.gov/mods/v3" version="3.8" xsi:schemaLocation="http://www.loc.gov/mods/v3 http://www.loc.gov/standards/mods/v3/mods-3-8.xsd">
+  <titleInfo>
+    <title>Greek</title>
+    <partName>War &amp; peace</partName>
+  </titleInfo>
+  <titleInfo type="alternative">
+    <title>War &amp; peace</title>
+  </titleInfo>
+  <name type="corporate">
+    <namePart>Copyright Collection (Library of Congress)</namePart>
+  </name>
+  <typeOfResource>moving image</typeOfResource>
+  <genre authority="marcgt">motion picture</genre>
+  <genre authority="rdacontent">two-dimensional moving image</genre>
+  <genre authority="lcgft">Fiction television programs.</genre>
+  <genre authority="lcgft">Teen television programs.</genre>
+  <originInfo>
+    <place>
+      <placeTerm type="code" authority="marccountry">xxu</placeTerm>
+    </place>
+    <dateIssued encoding="marc">2008</dateIssued>
+    <issuance>monographic</issuance>
+    <dateIssued>2008-04-14</dateIssued>
+  </originInfo>
+  <language>
+    <languageTerm authority="iso639-2b" type="code">eng</languageTerm>
+  </language>
+  <physicalDescription>
+    <form authority="marccategory">videorecording</form>
+    <form authority="marcsmd">videocassette</form>
+    <form type="media" authority="rdamedia">video</form>
+    <form type="carrier" authority="rdacarrier">videocassette</form>
+    <extent>viewing copy. 1 videocassette of 1 (Betacam SP) (60 min.) : sd., col. ; 1/2 in.</extent>
+  </physicalDescription>
+  <note>Copyright Claimant: Disney Enterprises Inc. Date of Creation: 2008; Date of Publication: 2008-04-14; Registration Number / Date: PA0001615839 / 2008-08-12.</note>
+  <note>Episode no. 1014.</note>
+  <note>Sources used: videocassette container; Copyright catalog online; Copyright description.</note>
+  <note type="performers">Clark Duke, Tiffany DuPont, Scott Michael Foster.</note>
+  <note type="acquisition">viewing copy; Received: 2009-02-12; Copyright deposit--RNR; Copyright Collection.</note>
+  <classification authority="lcc">VBT 4659 (viewing copy)</classification>
+  <identifier type="lccn">2009594098</identifier>
+  <recordInfo>
+    <descriptionStandard>aacr</descriptionStandard>
+    <descriptionStandard>amim</descriptionStandard>
+    <recordContentSource authority="marcorg">DLC</recordContentSource>
+    <recordCreationDate encoding="marc">090619</recordCreationDate>
+    <recordChangeDate encoding="iso8601">20260126141853.4</recordChangeDate>
+    <recordIdentifier>15782216</recordIdentifier>
+    <recordOrigin>Converted from MARCXML to MODS version 3.8 using MARC21slim2MODS3-8_XSLT1-0.xsl
+				(Revision 1.172 20230208)</recordOrigin>
+  </recordInfo>
+</mods></zs:recordData><zs:recordPosition>12</zs:recordPosition></zs:record><zs:record><zs:recordSchema>mods</zs:recordSchema><zs:recordPacking>xml</zs:recordPacking><zs:recordData><mods xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns="http://www.loc.gov/mods/v3" version="3.8" xsi:schemaLocation="http://www.loc.gov/mods/v3 http://www.loc.gov/standards/mods/v3/mods-3-8.xsd">
+  <titleInfo>
+    <title>War, peace and justice</title>
+  </titleInfo>
+  <name type="personal" usage="primary">
+    <namePart>Adow, Benjamin.</namePart>
+  </name>
+  <typeOfResource>text</typeOfResource>
+  <genre authority="rdacontent">text</genre>
+  <genre authority="lcgft" valueURI="https://id.loc.gov/authorities/genreForms/gf2015026053">Tracts (Ephemera).</genre>
+  <originInfo>
+    <place>
+      <placeTerm type="code" authority="marccountry">nyu</placeTerm>
+    </place>
+    <dateIssued encoding="marc">1943</dateIssued>
+    <issuance>monographic</issuance>
+    <place>
+      <placeTerm type="text">New York, N.Y</placeTerm>
+    </place>
+    <agent>
+      <namePart>Pamphlet Distributing Co.</namePart>
+    </agent>
+    <dateIssued>[1943]</dateIssued>
+  </originInfo>
+  <language>
+    <languageTerm authority="iso639-2b" type="code">eng</languageTerm>
+  </language>
+  <physicalDescription>
+    <form authority="marcform">print</form>
+    <form type="media" authority="rdamedia">unmediated</form>
+    <form type="carrier" authority="rdacarrier">volume</form>
+    <extent>15, [1] p. 23 cm.</extent>
+  </physicalDescription>
+  <subject authority="lcsh">
+    <topic>World War, 1939-1945</topic>
+    <genre>Pamphlets</genre>
+  </subject>
+  <classification authority="lcc">D743.9 .A37</classification>
+  <identifier type="lccn">43012495</identifier>
+  <recordInfo>
+    <recordContentSource authority="marcorg">DLC</recordContentSource>
+    <recordCreationDate encoding="marc">830613</recordCreationDate>
+    <recordChangeDate encoding="iso8601">20250607234951.4</recordChangeDate>
+    <recordIdentifier>6454786</recordIdentifier>
+    <recordOrigin>Converted from MARCXML to MODS version 3.8 using MARC21slim2MODS3-8_XSLT1-0.xsl
+				(Revision 1.172 20230208)</recordOrigin>
+  </recordInfo>
+</mods></zs:recordData><zs:recordPosition>13</zs:recordPosition></zs:record><zs:record><zs:recordSchema>mods</zs:recordSchema><zs:recordPacking>xml</zs:recordPacking><zs:recordData><mods xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns="http://www.loc.gov/mods/v3" version="3.8" xsi:schemaLocation="http://www.loc.gov/mods/v3 http://www.loc.gov/standards/mods/v3/mods-3-8.xsd">
+  <titleInfo>
+    <title>[Peace and war]</title>
+  </titleInfo>
+  <name type="personal" usage="primary">
+    <namePart>Pennell, Joseph,</namePart>
+    <namePart type="date">1857-1926</namePart>
+    <role>
+      <roleTerm type="text">artist</roleTerm>
+    </role>
+  </name>
+  <typeOfResource>still image</typeOfResource>
+  <genre authority="marcgt">graphic</genre>
+  <genre authority="rdacontent">still image</genre>
+  <originInfo>
+    <place>
+      <placeTerm type="code" authority="marccountry">xxu</placeTerm>
+    </place>
+    <dateIssued encoding="marc">1916</dateIssued>
+    <issuance>monographic</issuance>
+    <dateIssued>[1916]</dateIssued>
+  </originInfo>
+  <language>
+    <languageTerm authority="iso639-2b" type="code">eng</languageTerm>
+  </language>
+  <physicalDescription>
+    <form authority="marccategory">nonprojected graphic</form>
+    <form authority="marcsmd">print</form>
+    <form authority="gmd">graphic</form>
+    <form type="media" authority="rdamedia">unmediated</form>
+    <form type="carrier" authority="rdacarrier">sheet</form>
+    <extent>1 print : lithograph ; 40.2 x 52.8 cm.</extent>
+  </physicalDescription>
+  <accessCondition type="use and reproduction">No known restrictions on publication.</accessCondition>
+  <note>[His English war work series] Wuerth, 461. Edition of 50. Signed in reverse on stone; signed in pencil. DLC</note>
+  <note>Title and other information from Beall.</note>
+  <note type="acquisition">Gift; Pennell Collection.</note>
+  <classification authority="lcc">FP - XIX - P420, no. 461</classification>
+  <location>
+    <physicalLocation>Library of Congress Prints and Photographs Division Washington, D.C. 20540 USA</physicalLocation>
+  </location>
+  <relatedItem type="isReferencedBy">
+    <titleInfo>
+      <title>American prints in the Library of Congress : a catalog of the collection / compiled by Karen F. Beall... Baltimore : John Hopkins Press, 1970,</title>
+    </titleInfo>
+    <part>
+      <detail type="part">
+        <number>p. 374</number>
+      </detail>
+    </part>
+  </relatedItem>
+  <identifier type="lccn">2003676133</identifier>
+  <recordInfo>
+    <descriptionStandard>aacr</descriptionStandard>
+    <recordContentSource authority="marcorg">DLC</recordContentSource>
+    <recordCreationDate encoding="marc">030717</recordCreationDate>
+    <recordChangeDate encoding="iso8601">20250606201920.9</recordChangeDate>
+    <recordIdentifier>13278272</recordIdentifier>
+    <recordOrigin>Converted from MARCXML to MODS version 3.8 using MARC21slim2MODS3-8_XSLT1-0.xsl
+				(Revision 1.172 20230208)</recordOrigin>
+  </recordInfo>
+</mods></zs:recordData><zs:recordPosition>14</zs:recordPosition></zs:record><zs:record><zs:recordSchema>mods</zs:recordSchema><zs:recordPacking>xml</zs:recordPacking><zs:recordData><mods xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns="http://www.loc.gov/mods/v3" version="3.8" xsi:schemaLocation="http://www.loc.gov/mods/v3 http://www.loc.gov/standards/mods/v3/mods-3-8.xsd">
+  <titleInfo>
+    <title>Peace and war</title>
+  </titleInfo>
+  <name type="personal" usage="primary">
+    <namePart>Block, Herbert,</namePart>
+    <namePart type="date">1909-2001</namePart>
+    <role>
+      <roleTerm type="text">artist</roleTerm>
+    </role>
+  </name>
+  <typeOfResource>still image</typeOfResource>
+  <genre authority="marcgt">graphic</genre>
+  <genre authority="rdacontent">still image</genre>
+  <genre authority="gmgpc">Drawings-American.</genre>
+  <genre authority="gmgpc">Editorial cartoons-American.</genre>
+  <originInfo>
+    <place>
+      <placeTerm type="code" authority="marccountry">xxu</placeTerm>
+    </place>
+    <dateIssued encoding="marc">1939</dateIssued>
+    <issuance>monographic</issuance>
+    <dateIssued>[1939 Dec.?]</dateIssued>
+  </originInfo>
+  <language>
+    <languageTerm authority="iso639-2b" type="code">eng</languageTerm>
+  </language>
+  <physicalDescription>
+    <form authority="marccategory">electronic resource</form>
+    <form authority="marcsmd">remote</form>
+    <form authority="marccategory">nonprojected graphic</form>
+    <form authority="marcsmd">drawing</form>
+    <form authority="gmd">graphic</form>
+    <form type="media" authority="rdamedia">unmediated</form>
+    <form type="media" authority="rdamedia">computer</form>
+    <form type="carrier" authority="rdacarrier">sheet</form>
+    <form type="carrier" authority="rdacarrier">online resource</form>
+    <extent>1 drawing.</extent>
+  </physicalDescription>
+  <accessCondition type="use and reproduction">Publication may be restricted. For information see "Herbert Block ("Herblock") Rights and Restrictions,"</accessCondition>
+  <note>Not signed; attributed to Herblock.</note>
+  <note>Forms part of: Herbert L. Block (Herblock) collection (Library of Congress).</note>
+  <subject authority="lcsh">
+    <name type="personal">
+      <namePart>Roosevelt, Franklin D. (Franklin Delano),</namePart>
+      <namePart type="date">1882-1945</namePart>
+    </name>
+  </subject>
+  <subject authority="lcsh">
+    <topic>New Year</topic>
+  </subject>
+  <subject authority="lctgm">
+    <topic>Events</topic>
+  </subject>
+  <subject authority="lctgm">
+    <topic>Neutrality</topic>
+    <geographic>United States</geographic>
+  </subject>
+  <subject authority="lctgm">
+    <topic>Peace</topic>
+  </subject>
+  <subject authority="lctgm">
+    <topic>War</topic>
+  </subject>
+  <classification authority="lcc">BLOCK, no. 1325</classification>
+  <location>
+    <physicalLocation>Library of Congress Prints and Photographs Division Washington, D.C. 20540 USA</physicalLocation>
+    <physicalLocation xmlns:xlink="http://www.w3.org/1999/xlink" xlink:href="http://hdl.loc.gov/loc.pnp/pp.print">http://hdl.loc.gov/loc.pnp/pp.print</physicalLocation>
+  </location>
+  <location>
+    <url displayLabel="digital file from original drawing" usage="primary display">http://hdl.loc.gov/loc.pnp/hlb.01325</url>
+  </location>
+  <relatedItem type="host">
+    <titleInfo>
+      <title>Herbert L. Block (Herblock) collection (Library of Congress)</title>
+    </titleInfo>
+    <identifier type="local">(DLC)  2009632507</identifier>
+    <name>
+      <namePart>Block, Herbert, 1909-2001.</namePart>
+    </name>
+  </relatedItem>
+  <identifier type="lccn">2010636809</identifier>
+  <identifier type="stock number">LC-DIG-hlb-01325 DLC</identifier>
+  <identifier type="hdl">hdl:loc.pnp/hlb.01325</identifier>
+  <recordInfo>
+    <descriptionStandard>aacr</descriptionStandard>
+    <descriptionStandard>gihc</descriptionStandard>
+    <recordContentSource authority="marcorg">DLC</recordContentSource>
+    <recordCreationDate encoding="marc">091202</recordCreationDate>
+    <recordChangeDate encoding="iso8601">20260508184938.6</recordChangeDate>
+    <recordIdentifier>16268546</recordIdentifier>
+    <recordOrigin>Converted from MARCXML to MODS version 3.8 using MARC21slim2MODS3-8_XSLT1-0.xsl
+				(Revision 1.172 20230208)</recordOrigin>
+  </recordInfo>
+</mods></zs:recordData><zs:recordPosition>15</zs:recordPosition></zs:record><zs:record><zs:recordSchema>mods</zs:recordSchema><zs:recordPacking>xml</zs:recordPacking><zs:recordData><mods xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns="http://www.loc.gov/mods/v3" version="3.8" xsi:schemaLocation="http://www.loc.gov/mods/v3 http://www.loc.gov/standards/mods/v3/mods-3-8.xsd">
+  <titleInfo>
+    <title>War, transition and peace</title>
+  </titleInfo>
+  <name type="corporate">
+    <namePart>Fellowship of Reconciliation (U.S.)</namePart>
+  </name>
+  <typeOfResource>text</typeOfResource>
+  <genre authority="rdacontent">text</genre>
+  <originInfo>
+    <place>
+      <placeTerm type="code" authority="marccountry">nyu</placeTerm>
+    </place>
+    <dateIssued encoding="marc" point="start" qualifier="questionable">1944</dateIssued>
+    <issuance>monographic</issuance>
+    <place>
+      <placeTerm type="text">New York</placeTerm>
+    </place>
+    <agent>
+      <namePart>The Fellowship of reconciliation</namePart>
+    </agent>
+    <dateIssued>1944?]</dateIssued>
+  </originInfo>
+  <language>
+    <languageTerm authority="iso639-2b" type="code">eng</languageTerm>
+  </language>
+  <physicalDescription>
+    <form authority="marcform">print</form>
+    <form type="media" authority="rdamedia">unmediated</form>
+    <form type="carrier" authority="rdacarrier">volume</form>
+    <extent>32 p. 23 cm.</extent>
+  </physicalDescription>
+  <note>Cover title.</note>
+  <subject authority="lcsh">
+    <topic>World War, 1939-1945</topic>
+    <topic>Causes</topic>
+  </subject>
+  <subject authority="lcsh">
+    <topic>World War, 1939-1945</topic>
+    <topic>Peace</topic>
+  </subject>
+  <classification authority="lcc">D816.5 .W28</classification>
+  <classification authority="ddc">940.531</classification>
+  <identifier type="lccn">45001175</identifier>
+  <identifier type="oclc">2806319</identifier>
+  <recordInfo>
+    <recordContentSource authority="marcorg">DLC</recordContentSource>
+    <recordCreationDate encoding="marc">770316</recordCreationDate>
+    <recordChangeDate encoding="iso8601">20250607235040.6</recordChangeDate>
+    <recordIdentifier>6463726</recordIdentifier>
+    <recordOrigin>Converted from MARCXML to MODS version 3.8 using MARC21slim2MODS3-8_XSLT1-0.xsl
+				(Revision 1.172 20230208)</recordOrigin>
+  </recordInfo>
+</mods></zs:recordData><zs:recordPosition>16</zs:recordPosition></zs:record><zs:record><zs:recordSchema>mods</zs:recordSchema><zs:recordPacking>xml</zs:recordPacking><zs:recordData><mods xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns="http://www.loc.gov/mods/v3" version="3.8" xsi:schemaLocation="http://www.loc.gov/mods/v3 http://www.loc.gov/standards/mods/v3/mods-3-8.xsd">
+  <titleInfo>
+    <title>War, peace, and union</title>
+  </titleInfo>
+  <name type="corporate">
+    <namePart>Fine Arts Gallery of San Diego</namePart>
+  </name>
+  <typeOfResource>text</typeOfResource>
+  <genre authority="marcgt">catalog</genre>
+  <genre authority="rdacontent">text</genre>
+  <genre authority="lcgft" valueURI="https://id.loc.gov/authorities/genreForms/gf2014026098">Exhibition catalogs.</genre>
+  <genre authority="lcgft" valueURI="https://id.loc.gov/authorities/genreForms/gf2014026111">Illustrated works.</genre>
+  <originInfo>
+    <place>
+      <placeTerm type="code" authority="marccountry">cau</placeTerm>
+    </place>
+    <dateIssued encoding="marc">1960</dateIssued>
+    <issuance>monographic</issuance>
+    <place>
+      <placeTerm type="text">San Diego</placeTerm>
+    </place>
+    <dateIssued>1960]</dateIssued>
+  </originInfo>
+  <language>
+    <languageTerm authority="iso639-2b" type="code">eng</languageTerm>
+  </language>
+  <physicalDescription>
+    <form authority="marcform">print</form>
+    <form type="media" authority="rdamedia">unmediated</form>
+    <form type="carrier" authority="rdacarrier">volume</form>
+    <extent>20 p. illus. 23 cm.</extent>
+  </physicalDescription>
+  <note>Catalogue of exhibition held Oct. 7-Oct. 30, 1960.</note>
+  <subject authority="lcsh">
+    <topic>Painting, American</topic>
+    <genre>Exhibitions</genre>
+  </subject>
+  <subject authority="lcsh">
+    <geographic>United States</geographic>
+    <topic>History</topic>
+    <temporal>Civil War, 1861-1865</temporal>
+    <genre>Pictorial works</genre>
+  </subject>
+  <classification authority="lcc">N6510 .S3</classification>
+  <identifier type="lccn">61042084</identifier>
+  <identifier type="oclc">3512520</identifier>
+  <recordInfo>
+    <recordContentSource authority="marcorg">DLC</recordContentSource>
+    <recordCreationDate encoding="marc">771223</recordCreationDate>
+    <recordChangeDate encoding="iso8601">20250608004320.5</recordChangeDate>
+    <recordIdentifier>7030024</recordIdentifier>
+    <recordOrigin>Converted from MARCXML to MODS version 3.8 using MARC21slim2MODS3-8_XSLT1-0.xsl
+				(Revision 1.172 20230208)</recordOrigin>
+  </recordInfo>
+</mods></zs:recordData><zs:recordPosition>17</zs:recordPosition></zs:record><zs:record><zs:recordSchema>mods</zs:recordSchema><zs:recordPacking>xml</zs:recordPacking><zs:recordData><mods xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns="http://www.loc.gov/mods/v3" version="3.8" xsi:schemaLocation="http://www.loc.gov/mods/v3 http://www.loc.gov/standards/mods/v3/mods-3-8.xsd">
+  <titleInfo>
+    <title>War, peace, and nonresistance</title>
+  </titleInfo>
+  <name type="personal" usage="primary">
+    <namePart>Hershberger, Guy F. (Guy Franklin),</namePart>
+    <namePart type="date">1896-1989</namePart>
+  </name>
+  <typeOfResource>text</typeOfResource>
+  <genre authority="marcgt">bibliography</genre>
+  <genre authority="rdacontent">text</genre>
+  <originInfo>
+    <place>
+      <placeTerm type="code" authority="marccountry">pau</placeTerm>
+    </place>
+    <dateIssued encoding="marc">1969</dateIssued>
+    <issuance>monographic</issuance>
+    <place>
+      <placeTerm type="text">Scottdale, Pa</placeTerm>
+    </place>
+    <agent>
+      <namePart>Herald Press</namePart>
+    </agent>
+    <dateIssued>[1969]</dateIssued>
+    <edition>[3d ed., rev.]</edition>
+  </originInfo>
+  <language>
+    <languageTerm authority="iso639-2b" type="code">eng</languageTerm>
+  </language>
+  <physicalDescription>
+    <form authority="marcform">print</form>
+    <form type="media" authority="rdamedia">unmediated</form>
+    <form type="carrier" authority="rdacarrier">volume</form>
+    <extent>xvi, 382 p. 23 cm.</extent>
+  </physicalDescription>
+  <note type="bibliography">Includes bibliographical references.</note>
+  <subject authority="lcsh">
+    <topic>Pacifism</topic>
+    <topic>Religious aspects</topic>
+    <topic>Mennonites</topic>
+  </subject>
+  <subject authority="lcsh">
+    <topic>Peace</topic>
+    <topic>Religious aspects</topic>
+    <topic>Mennonites</topic>
+  </subject>
+  <subject authority="lcsh">
+    <topic>Mennonites</topic>
+    <topic>Doctrines</topic>
+  </subject>
+  <classification authority="lcc">BT736.4 .H47 1969</classification>
+  <classification authority="ddc">261.8/73</classification>
+  <identifier type="isbn">0836114493</identifier>
+  <identifier type="isbn">9780836114492</identifier>
+  <identifier type="lccn">72008199</identifier>
+  <recordInfo>
+    <recordContentSource authority="marcorg">DLC</recordContentSource>
+    <recordCreationDate encoding="marc">691218</recordCreationDate>
+    <recordChangeDate encoding="iso8601">20250607045510.0</recordChangeDate>
+    <recordIdentifier>1714872</recordIdentifier>
+    <recordOrigin>Converted from MARCXML to MODS version 3.8 using MARC21slim2MODS3-8_XSLT1-0.xsl
+				(Revision 1.172 20230208)</recordOrigin>
+  </recordInfo>
+</mods></zs:recordData><zs:recordPosition>18</zs:recordPosition></zs:record><zs:record><zs:recordSchema>mods</zs:recordSchema><zs:recordPacking>xml</zs:recordPacking><zs:recordData><mods xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns="http://www.loc.gov/mods/v3" version="3.8" xsi:schemaLocation="http://www.loc.gov/mods/v3 http://www.loc.gov/standards/mods/v3/mods-3-8.xsd">
+  <titleInfo>
+    <title>Peace, war, and humanity</title>
+  </titleInfo>
+  <titleInfo type="alternative">
+    <title>Humanity, Peace, war, and</title>
+  </titleInfo>
+  <name type="personal" usage="primary">
+    <namePart>MacDonald, Arthur,</namePart>
+    <namePart type="date">1856-1936</namePart>
+  </name>
+  <typeOfResource>text</typeOfResource>
+  <genre authority="rdacontent">text</genre>
+  <originInfo>
+    <place>
+      <placeTerm type="code" authority="marccountry">dcu</placeTerm>
+    </place>
+    <dateIssued encoding="marc">1915</dateIssued>
+    <issuance>monographic</issuance>
+    <place>
+      <placeTerm type="text">Washington, D.C</placeTerm>
+    </place>
+    <agent>
+      <namePart>Judd &amp; Detweiler</namePart>
+    </agent>
+    <dateIssued>1915]</dateIssued>
+  </originInfo>
+  <language>
+    <languageTerm authority="iso639-2b" type="code">eng</languageTerm>
+  </language>
+  <physicalDescription>
+    <form authority="marcform">print</form>
+    <form type="media" authority="rdamedia">unmediated</form>
+    <form type="carrier" authority="rdacarrier">volume</form>
+    <extent>26 p. 22 cm.</extent>
+  </physicalDescription>
+  <note type="additional physical form">Also available in digital form.</note>
+  <subject authority="lcsh">
+    <topic>Peace</topic>
+  </subject>
+  <subject authority="lcsh">
+    <topic>World War, 1914-1918</topic>
+  </subject>
+  <classification authority="lcc">JX1963 .M15</classification>
+  <location>
+    <url displayLabel="View online content for this title." usage="primary display">https://hdl.loc.gov/loc.gdc/gdcscd.00332661127</url>
+  </location>
+  <identifier type="lccn">15015892</identifier>
+  <recordInfo>
+    <recordContentSource authority="marcorg">DLC</recordContentSource>
+    <recordCreationDate encoding="marc">830119</recordCreationDate>
+    <recordChangeDate encoding="iso8601">20260708153849.7</recordChangeDate>
+    <recordIdentifier>10112882</recordIdentifier>
+    <recordOrigin>Converted from MARCXML to MODS version 3.8 using MARC21slim2MODS3-8_XSLT1-0.xsl
+				(Revision 1.172 20230208)</recordOrigin>
+  </recordInfo>
+</mods></zs:recordData><zs:recordPosition>19</zs:recordPosition></zs:record><zs:record><zs:recordSchema>mods</zs:recordSchema><zs:recordPacking>xml</zs:recordPacking><zs:recordData><mods xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns="http://www.loc.gov/mods/v3" version="3.8" xsi:schemaLocation="http://www.loc.gov/mods/v3 http://www.loc.gov/standards/mods/v3/mods-3-8.xsd">
+  <titleInfo>
+    <title>War &amp; peace</title>
+  </titleInfo>
+  <titleInfo type="alternative">
+    <title>War and peace</title>
+  </titleInfo>
+  <name type="personal">
+    <namePart>Zhou, Jiaojiao,</namePart>
+    <role>
+      <roleTerm type="text">composer</roleTerm>
+    </role>
+  </name>
+  <name type="corporate">
+    <namePart>Albany Records (Firm),</namePart>
+    <role>
+      <roleTerm type="text">publisher</roleTerm>
+    </role>
+  </name>
+  <name type="corporate">
+    <namePart>Copyright Collection (Library of Congress)</namePart>
+  </name>
+  <typeOfResource>moving image</typeOfResource>
+  <genre authority="marcgt">motion picture</genre>
+  <genre authority="rdacontent">two-dimensional moving image</genre>
+  <genre authority="lcgft">Filmed performances.</genre>
+  <genre authority="lcgft">Nonfiction films.</genre>
+  <originInfo>
+    <place>
+      <placeTerm type="code" authority="marccountry">xxu</placeTerm>
+    </place>
+    <dateIssued encoding="marc">2019</dateIssued>
+    <copyrightDate encoding="marc">2019</copyrightDate>
+    <issuance>monographic</issuance>
+    <dateCreated encoding="marc" point="start">2019</dateCreated>
+    <dateCaptured>20180215</dateCaptured>
+  </originInfo>
+  <originInfo eventType="publication">
+    <place>
+      <placeTerm type="text">[Albany, NY] :</placeTerm>
+    </place>
+    <agent>
+      <namePart>Albany Records,</namePart>
+      <role>
+        <roleTerm>publisher</roleTerm>
+      </role>
+    </agent>
+    <dateIssued>[2019]</dateIssued>
+  </originInfo>
+  <language>
+    <languageTerm authority="iso639-2b" type="code">zxx</languageTerm>
+  </language>
+  <physicalDescription>
+    <form authority="marccategory">videorecording</form>
+    <form authority="marcsmd">videodisc</form>
+    <form type="media" authority="rdamedia">video</form>
+    <form type="carrier" authority="rdacarrier">videodisc</form>
+    <extent>viewing copy 1 videodisc : sound, color ; 4 3/4 in. + 1 booklet</extent>
+  </physicalDescription>
+  <physicalDescription>
+    <extent>4 3/4 in.</extent>
+  </physicalDescription>
+  <physicalDescription>
+    <form type="Type of recording">digital</form>
+    <form type="Recording medium">optical</form>
+  </physicalDescription>
+  <abstract type="Summary">"The Joseph &amp; Loretta Law Institute of Arts and Technology presents the Denver International Electronic Music Festival 2018 as an inaugural performing arts event. War &amp; peace represents our new and unique Total Music production because it showcases a new concept of total entertainment by immersing the audience in entertaining sounds and rhythm, beautiful and meaningful visual imagery and culturally diverse creative expression. Although traditional music performances are meant to appeal mainly to our auditory sense, Total Music is different because it offers the willingness to combine artistic resources from other cultures with advancing digital technologies in order to create music that impacts our senses in a manner seldom achieved before. War &amp; peace provides the opportunity to push boundaries of musical entertainment by using new combinations of musical instruments, new multicultural art direction and new dance styles. By doing so, an entirely different visual and auditory impace is provided to the audience"--Booklet.</abstract>
+  <note type="statement of responsibility">produced by Joseph &amp; Loretta Law Institute of Arts and Technology ; conceived, produced &amp; directed by Dennis Law MD.</note>
+  <note>Title from container.</note>
+  <note>"A Total Music concert"--Container.</note>
+  <note>Source used: videodisc container.</note>
+  <note type="creation/production credits">Music composed by Jiaojiao Zhou ; costume design, Ah Kuan ; choreography, Chen Jiao.</note>
+  <note type="performers">Vocal artist: Christianna McMullen (coloratura soprano).</note>
+  <note type="performers">Dancers: Chen Jiao, Sun Chenxue, Wang Haiou, Ma Ruhai (martial artist).</note>
+  <note type="venue">Recorded live on February 15, 2018, at the Robert &amp; Judi Newman Center for Performing Arts, University of Denver in Denver, Colorado.</note>
+  <classification authority="lcc">DVE 8071 (viewing copy)</classification>
+  <identifier type="lccn">2023600181</identifier>
+  <identifier type="videorecording identifier">TROY1776 Albany Records</identifier>
+  <identifier type="upc">034061177623</identifier>
+  <recordInfo>
+    <descriptionStandard>rda</descriptionStandard>
+    <recordContentSource authority="marcorg">DLC</recordContentSource>
+    <recordCreationDate encoding="marc">230515</recordCreationDate>
+    <recordChangeDate encoding="iso8601">20250607121857.3</recordChangeDate>
+    <recordIdentifier>23129535</recordIdentifier>
+    <recordOrigin>Converted from MARCXML to MODS version 3.8 using MARC21slim2MODS3-8_XSLT1-0.xsl
+				(Revision 1.172 20230208)</recordOrigin>
+    <languageOfCataloging>
+      <languageTerm authority="iso639-2b" type="code">eng</languageTerm>
+    </languageOfCataloging>
+  </recordInfo>
+</mods></zs:recordData><zs:recordPosition>20</zs:recordPosition></zs:record></zs:records><zs:nextRecordPosition>21</zs:nextRecordPosition><zs:echoedSearchRetrieveRequest><zs:version>1.1</zs:version><zs:query>dc.title="war and peace"</zs:query><zs:maximumRecords>20</zs:maximumRecords><zs:recordPacking>xml</zs:recordPacking><zs:recordSchema>mods</zs:recordSchema></zs:echoedSearchRetrieveRequest></zs:searchRetrieveResponse>

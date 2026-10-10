@@ -1,7 +1,8 @@
 /** Tests for src/pages/CollectionsPage. */
 
-import { screen } from "@testing-library/react";
+import { act, fireEvent, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import fc from "fast-check";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import CollectionsPage from "../../../src/pages/CollectionsPage";
@@ -12,6 +13,9 @@ import {
   renderWithProviders,
   type MockApi,
 } from "../../utils";
+import { answersOf } from "../../lib/schemaArbitrary";
+import { holds, PROFILE, PROPERTY, witness } from "../../property";
+import { forget, overSchema } from "../../schemaPage";
 
 let api: MockApi;
 
@@ -64,6 +68,23 @@ describe("CollectionsPage", () => {
     expect(
       screen.getByRole("button", { name: "Add collection" }),
     ).toBeDisabled();
+  });
+
+  it("sends nothing for a name of only spaces submitted without the button", async () => {
+    // The button refuses it above; the form refuses it as well, for a submit
+    // that does not go through the button.
+    api.on("/api/collections", { body: [] });
+    renderWithProviders(<CollectionsPage />);
+    await screen.findByText("No collections yet");
+    const box = screen.getByLabelText("Name");
+    fireEvent.change(box, { target: { value: "   " } });
+
+    await act(async () => {
+      fireEvent.submit(box.closest("form")!);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(api.lastCall("/api/collections", "POST")).toBeUndefined();
   });
 
   it("surfaces a name that is already taken", async () => {
@@ -145,5 +166,40 @@ describe("CollectionsPage", () => {
     renderWithProviders(<CollectionsPage />);
 
     expect(await screen.findByRole("alert")).toHaveTextContent("Nope");
+  });
+});
+
+/** How many entries a list body holds, or -1 for one that is not a list. */
+const entries = (body: unknown) => (Array.isArray(body) ? body.length : -1);
+
+describe("CollectionsPage over any answer the schema permits", () => {
+  // What the page's hooks are handed is drawn from `openapi.json`, per
+  // request. `tests/schemaPage.tsx` holds what the page may not do.
+  it("is drawn every shape of answer its main request declares", async () => {
+    await witness(answersOf("list_collections"), {
+      "is an empty list": (answer) => entries(answer.body) === 0,
+      "is a list with an entry": (answer) => entries(answer.body) > 0,
+    });
+  });
+
+  it("neither throws nor shows a value nobody can name", PROPERTY, async () => {
+    expect(
+      await holds(
+        fc.gen(),
+        async (answers) => {
+          try {
+            const rendered = await overSchema(<CollectionsPage />, answers);
+            expect(rendered.problems).toEqual([]);
+            return rendered;
+          } finally {
+            forget();
+          }
+        },
+        {
+          "showed a value an answer carried": (_, rendered) =>
+            rendered.echoed > 0,
+        },
+      ),
+    ).toBe(PROFILE.runs);
   });
 });

@@ -28,7 +28,7 @@ import pytest
 from sqlalchemy import event
 
 import authorship as authorship_module
-from authors import DEFAULT_MATCHER, EXACT_MATCHER, author_key, resolve_alias_map
+from authors import AUTHOR_NAME_MAX, DEFAULT_MATCHER, EXACT_MATCHER, author_key, resolve_alias_map
 from authors import SuggestionReason as Reason
 from authorship import (
     IDENTITY_SPINE,
@@ -548,6 +548,39 @@ class TestACandidateIsNotStoredSilently:
 
         assert row.provenance == AuthorityProvenance.CATALOGUE
         assert db.query(AuthorIdentifier).count() == 1
+
+
+class TestASpellingNoKeyCanHoldIsNeverFiled:
+    """`AUTHOR_NAME_MAX` bounds a spelling filed under a key, and a credit line is longer."""
+
+    LONG = "Ann " + "b" * AUTHOR_NAME_MAX
+
+    def test_confirming_an_identifier_for_it_is_refused_as_not_found(self, db, user):
+        shelve(db, user, self.LONG)
+
+        with pytest.raises(AuthorNotFound):
+            Authorship.seen_by(db, user.id).confirm_identifier(
+                self.LONG, AuthorityScheme.GND, "1042243212", by_user_id=user.id
+            )
+
+    def test_recording_cross_references_for_it_is_refused_as_not_found(self, db, user):
+        shelve(db, user, self.LONG)
+
+        with pytest.raises(AuthorNotFound):
+            Authorship.seen_by(db, user.id).record_cross_references(
+                self.LONG, {AuthorityScheme.VIAF: "88919448"}, by_user_id=user.id
+            )
+
+
+class TestAKeyOrANameNobodyCarries:
+    def test_a_key_no_spelling_on_the_shelf_carries_answers_with_itself(self, db, user):
+        shelve(db, user, "Sean P. Kane")
+        assert Authorship.seen_by(db, user.id).spelling_for("le guin ursula k") == "le guin ursula k"
+
+    def test_a_name_naming_nobody_has_no_display_name(self, db, user):
+        shelve(db, user, "Sean P. Kane")
+        with pytest.raises(AuthorNotFound):
+            Authorship.seen_by(db, user.id).display_name("Ursula K. Le Guin")
 
 
 class TestAnIdentifierIsRemovableAndNeverEditable:
@@ -1540,6 +1573,23 @@ class TestWhatABatchWouldFold:
 
         assert held.keep_name is None
         assert held.names  # still listed, so a reader knows it was considered
+
+    def test_a_name_only_folded_into_holds_back_a_group_kept_elsewhere(self, db, user):
+        """`Boz` points at `Charles Dickens`, which has no row of its own, so only
+        the second arm of `_would_repoint` sees that keeping `C. Dickens`, the
+        other decided name, would repoint `Boz`."""
+        shelve(db, user, "C. Dickens", "Charles Dickens", "Boz", "Ch. Dickens")
+        authorship = Authorship.seen_by(db, user.id)
+        authorship.merge([author_key("Boz")], "Charles Dickens", by_user_id=user.id)
+        authorship.merge(
+            [author_key("Ch. Dickens"), author_key("C. Dickens")],
+            "C. Dickens",
+            by_user_id=user.id,
+        )
+
+        held = _group(authorship.suggestions(), "C. Dickens", "Charles Dickens")
+
+        assert held.keep_name is None
 
     def test_a_decision_only_visible_to_somebody_else_still_holds_the_name(
         self, db, user, other

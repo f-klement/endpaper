@@ -110,7 +110,11 @@ to change.
 `AUTH_MODE=ldap` checks credentials against a directory and creates no local passwords.
 Needs `LDAP_URL`, `LDAP_USER_BASE_DN`, and usually `LDAP_BIND_DN` with
 `LDAP_BIND_PASSWORD`. `LDAP_ADMIN_GROUP` grants admin; `LDAP_USER_FILTER`,
-`LDAP_USERNAME_ATTRIBUTE` and `LDAP_START_TLS` tune the rest.
+`LDAP_USERNAME_ATTRIBUTE` and `LDAP_START_TLS` tune the rest. Over TLS the
+directory's certificate and host name are always checked; a private CA goes in
+`LDAP_CA_FILE`. Without TLS the app refuses to start unless
+`LDAP_ALLOW_CLEARTEXT=true`, because every sign in would send a password in
+cleartext.
 `LDAP_EMAIL_ATTRIBUTE` (usually `mail`) hands the directory ownership of each
 member's address; leave it empty and members set their own in the app. Turning it
 on **clears the address of every member the directory has none for**, at their

@@ -24,6 +24,7 @@ import type {
 import type {
   BodyRestoreBackup,
   HTTPValidationError,
+  Refusal,
   RestoreBackupParams,
   RestoreResult,
 } from "../../model";
@@ -63,10 +64,11 @@ export const getDownloadBackupUrl = () => {
  *
  * **Rationed, and the schema does not say so.** The refusal is a 429 carrying
  * `Retry-After`, undeclared for the reason `routers/books.export_books`
- * states: this document enumerates no refusal on any of its operations, so
- * declaring one here would make it look deliberate and every other
- * operation's look accidental.
- * `tests/test_errors.py::TestTheDocumentEnumeratesNoRefusal` holds that fact,
+ * states: this document declares a 401, a 403 or a 404 wherever the code a
+ * route runs builds one and no other refusal on any operation, so declaring a
+ * 429 here alone would make it look deliberate and every other one look
+ * accidental. `tests/test_refusals.py` holds the first half and
+ * `tests/test_errors.py::TestTheDocumentDeclaresNoOtherRefusal` the second,
  * because a reason described in prose rots silently where an asserted one
  * reddens.
  *
@@ -95,7 +97,7 @@ export const getDownloadBackupQueryKey = () => {
 
 export const getDownloadBackupQueryOptions = <
   TData = Awaited<ReturnType<typeof downloadBackup>>,
-  TError = unknown,
+  TError = Refusal,
 >(options?: {
   query?: Partial<
     UseQueryOptions<Awaited<ReturnType<typeof downloadBackup>>, TError, TData>
@@ -120,11 +122,11 @@ export const getDownloadBackupQueryOptions = <
 export type DownloadBackupQueryResult = NonNullable<
   Awaited<ReturnType<typeof downloadBackup>>
 >;
-export type DownloadBackupQueryError = unknown;
+export type DownloadBackupQueryError = Refusal;
 
 export function useDownloadBackup<
   TData = Awaited<ReturnType<typeof downloadBackup>>,
-  TError = unknown,
+  TError = Refusal,
 >(
   options: {
     query: Partial<
@@ -146,7 +148,7 @@ export function useDownloadBackup<
 };
 export function useDownloadBackup<
   TData = Awaited<ReturnType<typeof downloadBackup>>,
-  TError = unknown,
+  TError = Refusal,
 >(
   options?: {
     query?: Partial<
@@ -168,7 +170,7 @@ export function useDownloadBackup<
 };
 export function useDownloadBackup<
   TData = Awaited<ReturnType<typeof downloadBackup>>,
-  TError = unknown,
+  TError = Refusal,
 >(
   options?: {
     query?: Partial<
@@ -186,7 +188,7 @@ export function useDownloadBackup<
 
 export function useDownloadBackup<
   TData = Awaited<ReturnType<typeof downloadBackup>>,
-  TError = unknown,
+  TError = Refusal,
 >(
   options?: {
     query?: Partial<
@@ -255,7 +257,7 @@ export const restoreBackup = async (
 export const getRestoreBackupMutationKey = () => ["restoreBackup"] as const;
 
 export const getRestoreBackupMutationOptions = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -296,7 +298,7 @@ export type RestoreBackupMutationResult = NonNullable<
   Awaited<ReturnType<typeof restoreBackup>>
 >;
 export type RestoreBackupMutationBody = BodyRestoreBackup;
-export type RestoreBackupMutationError = HTTPValidationError;
+export type RestoreBackupMutationError = Refusal | HTTPValidationError;
 export type RestoreBackupMutationVariables = {
   data: BodyRestoreBackup;
   params?: RestoreBackupParams;
@@ -306,7 +308,7 @@ export type RestoreBackupMutationVariables = {
  * @summary Restore Backup
  */
 export const useRestoreBackup = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(
   options?: {

@@ -651,6 +651,10 @@ class Target:
             raise ValueError(
                 f"{self.source}: a shipped login on a row that needs no credential"
             )
+        self._check_secret()
+
+    def _check_secret(self) -> None:
+        """Refuses a secret this row may not be handed, and a value that is not one."""
         if not isinstance(self.secret, Secret):
             # **A `StrEnum` member equals its own string, so the value has to be
             # refused here or three sites disagree about it.** This class and

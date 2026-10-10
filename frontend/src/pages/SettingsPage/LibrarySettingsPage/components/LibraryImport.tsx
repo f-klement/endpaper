@@ -1,11 +1,17 @@
-import { useRef, useState } from "react";
+import { useState } from "react";
 
 import type {
   ImportResultOut,
   ImportPreviewOut,
 } from "../../../../api/generated/model";
-import { errorText } from "../../../../components/ErrorState";
 import { useTranslation } from "../../../../i18n";
+import {
+  ConfirmRow,
+  FilePicker,
+  ImportError,
+  ResultPanel,
+  ReviewAdded,
+} from "./ImportChrome";
 import ImportPreview from "./ImportPreview";
 
 interface LibraryImportProps {
@@ -31,8 +37,9 @@ interface LibraryImportProps {
  * a few hundred books. So the file is read and reported on first, and nothing
  * is written until somebody has looked at it.
  *
- * Dumb: it owns the file input and the two checkboxes. The mutations, the
- * cache invalidation and the results live in the page's hooks.
+ * Dumb: it owns the two checkboxes, and draws the picker, the row and the
+ * panels from `./ImportChrome`. The mutations, the cache invalidation and the
+ * results live in the page's hooks.
  */
 export default function LibraryImport({
   isPreviewing,
@@ -48,7 +55,6 @@ export default function LibraryImport({
   const { t } = useTranslation();
   const [createMissing, setCreateMissing] = useState(true);
   const [applyTags, setApplyTags] = useState(false);
-  const fileInput = useRef<HTMLInputElement>(null);
 
   return (
     <div className="space-y-3">
@@ -56,31 +62,14 @@ export default function LibraryImport({
         {t("import.explain")}
       </p>
 
-      <input
-        ref={fileInput}
-        type="file"
+      <FilePicker
         accept=".csv,.tsv,.txt,text/csv,text/tab-separated-values"
-        // Visually hidden but still in the tree, so it stays reachable by
-        // keyboard and announced by name rather than as an unlabelled input.
-        aria-label={t("import.chooseFile")}
-        className="sr-only"
-        onChange={(event) => {
-          const file = event.target.files?.[0];
-          if (file) onChoose(file);
-          // Reset, so choosing the same file twice fires change again.
-          event.target.value = "";
-        }}
+        label={t("import.chooseFile")}
+        busy={isPreviewing}
+        busyLabel={t("import.reading")}
+        offered={!preview}
+        onFile={onChoose}
       />
-      {!preview && (
-        <button
-          type="button"
-          disabled={isPreviewing}
-          onClick={() => fileInput.current?.click()}
-          className="w-full py-2.5 rounded-xl border border-paper-200 text-sm font-medium text-paper-700 hover:bg-paper-50 disabled:opacity-50 transition-colors dark:border-paper-700 dark:text-paper-200 dark:hover:bg-paper-800"
-        >
-          {isPreviewing ? t("import.reading") : t("import.chooseFile")}
-        </button>
-      )}
 
       {preview && (
         <>
@@ -125,40 +114,21 @@ export default function LibraryImport({
             </p>
           )}
 
-          <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={onCancel}
-              disabled={isImporting}
-              className="flex-1 py-2.5 rounded-xl border border-paper-200 text-sm font-medium text-paper-600 hover:bg-paper-50 disabled:opacity-50 dark:border-paper-700 dark:text-paper-300 dark:hover:bg-paper-800"
-            >
-              {t("common.cancel")}
-            </button>
-            <button
-              type="button"
-              disabled={isImporting || preview.total_rows === 0}
-              onClick={() => onConfirm({ createMissing, applyTags })}
-              className="flex-1 py-2.5 rounded-xl bg-accent-fill text-sm font-semibold text-on-accent hover:bg-accent-fill-hover disabled:bg-accent-300"
-            >
-              {isImporting
-                ? t("import.importing")
-                : t("import.confirm", { count: preview.total_rows })}
-            </button>
-          </div>
+          <ConfirmRow
+            isImporting={isImporting}
+            withheld={preview.total_rows === 0}
+            confirmLabel={t("import.confirm", { count: preview.total_rows })}
+            importingLabel={t("import.importing")}
+            onConfirm={() => onConfirm({ createMissing, applyTags })}
+            onCancel={onCancel}
+          />
         </>
       )}
 
-      {error != null && (
-        <p
-          role="alert"
-          className="text-sm text-danger-600 dark:text-danger-300"
-        >
-          {errorText(error, t("common.somethingWentWrong"), t)}
-        </p>
-      )}
+      <ImportError error={error} />
 
       {result && (
-        <div className="text-sm text-paper-700 bg-paper-50 border border-paper-200 rounded-xl p-3 space-y-2 dark:text-paper-200 dark:bg-paper-900 dark:border-paper-700">
+        <ResultPanel>
           <p>
             {t("import.result", {
               rowsRead: result.rows_read,
@@ -191,16 +161,8 @@ export default function LibraryImport({
               </ul>
             </div>
           )}
-          {result.created > 0 && (
-            <button
-              type="button"
-              onClick={onReviewUnconfirmed}
-              className="text-sm font-medium text-accent-700 hover:text-accent-800 dark:text-accent-400 dark:hover:text-accent-300"
-            >
-              {t("ownership.reviewThem")}
-            </button>
-          )}
-        </div>
+          <ReviewAdded added={result.created} onReview={onReviewUnconfirmed} />
+        </ResultPanel>
       )}
     </div>
   );

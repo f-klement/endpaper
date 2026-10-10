@@ -27,6 +27,7 @@ import type {
   ListPublicBooksParams,
   PagePublicBookOut,
   PublicBookOut,
+  Refusal,
 } from "../../model";
 
 import { customFetch } from "../../../mutator.ts";
@@ -120,7 +121,7 @@ export const getListPublicBooksInfiniteQueryOptions = <
     Awaited<ReturnType<typeof listPublicBooks>>,
     ListPublicBooksParams["page"]
   >,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   params?: ListPublicBooksParams,
   options?: {
@@ -163,14 +164,14 @@ export const getListPublicBooksInfiniteQueryOptions = <
 export type ListPublicBooksInfiniteQueryResult = NonNullable<
   Awaited<ReturnType<typeof listPublicBooks>>
 >;
-export type ListPublicBooksInfiniteQueryError = HTTPValidationError;
+export type ListPublicBooksInfiniteQueryError = Refusal | HTTPValidationError;
 
 export function useListPublicBooksInfinite<
   TData = InfiniteData<
     Awaited<ReturnType<typeof listPublicBooks>>,
     ListPublicBooksParams["page"]
   >,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   params: undefined | ListPublicBooksParams,
   options: {
@@ -203,7 +204,7 @@ export function useListPublicBooksInfinite<
     Awaited<ReturnType<typeof listPublicBooks>>,
     ListPublicBooksParams["page"]
   >,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   params?: ListPublicBooksParams,
   options?: {
@@ -236,7 +237,7 @@ export function useListPublicBooksInfinite<
     Awaited<ReturnType<typeof listPublicBooks>>,
     ListPublicBooksParams["page"]
   >,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   params?: ListPublicBooksParams,
   options?: {
@@ -264,7 +265,7 @@ export function useListPublicBooksInfinite<
     Awaited<ReturnType<typeof listPublicBooks>>,
     ListPublicBooksParams["page"]
   >,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   params?: ListPublicBooksParams,
   options?: {
@@ -297,7 +298,7 @@ export function useListPublicBooksInfinite<
 
 export const getListPublicBooksQueryOptions = <
   TData = Awaited<ReturnType<typeof listPublicBooks>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   params?: ListPublicBooksParams,
   options?: {
@@ -329,11 +330,11 @@ export const getListPublicBooksQueryOptions = <
 export type ListPublicBooksQueryResult = NonNullable<
   Awaited<ReturnType<typeof listPublicBooks>>
 >;
-export type ListPublicBooksQueryError = HTTPValidationError;
+export type ListPublicBooksQueryError = Refusal | HTTPValidationError;
 
 export function useListPublicBooks<
   TData = Awaited<ReturnType<typeof listPublicBooks>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   params: undefined | ListPublicBooksParams,
   options: {
@@ -360,7 +361,7 @@ export function useListPublicBooks<
 };
 export function useListPublicBooks<
   TData = Awaited<ReturnType<typeof listPublicBooks>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   params?: ListPublicBooksParams,
   options?: {
@@ -387,7 +388,7 @@ export function useListPublicBooks<
 };
 export function useListPublicBooks<
   TData = Awaited<ReturnType<typeof listPublicBooks>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   params?: ListPublicBooksParams,
   options?: {
@@ -410,7 +411,7 @@ export function useListPublicBooks<
 
 export function useListPublicBooks<
   TData = Awaited<ReturnType<typeof listPublicBooks>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   params?: ListPublicBooksParams,
   options?: {
@@ -471,7 +472,7 @@ export const getGetPublicBookQueryKey = (bookId: number) => {
 
 export const getGetPublicBookQueryOptions = <
   TData = Awaited<ReturnType<typeof getPublicBook>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   bookId: number,
   options?: {
@@ -504,11 +505,11 @@ export const getGetPublicBookQueryOptions = <
 export type GetPublicBookQueryResult = NonNullable<
   Awaited<ReturnType<typeof getPublicBook>>
 >;
-export type GetPublicBookQueryError = HTTPValidationError;
+export type GetPublicBookQueryError = Refusal | HTTPValidationError;
 
 export function useGetPublicBook<
   TData = Awaited<ReturnType<typeof getPublicBook>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   bookId: number,
   options: {
@@ -531,7 +532,7 @@ export function useGetPublicBook<
 };
 export function useGetPublicBook<
   TData = Awaited<ReturnType<typeof getPublicBook>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   bookId: number,
   options?: {
@@ -554,7 +555,7 @@ export function useGetPublicBook<
 };
 export function useGetPublicBook<
   TData = Awaited<ReturnType<typeof getPublicBook>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   bookId: number,
   options?: {
@@ -573,7 +574,7 @@ export function useGetPublicBook<
 
 export function useGetPublicBook<
   TData = Awaited<ReturnType<typeof getPublicBook>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   bookId: number,
   options?: {

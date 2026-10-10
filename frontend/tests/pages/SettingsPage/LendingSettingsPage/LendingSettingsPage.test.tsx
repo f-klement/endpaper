@@ -9,10 +9,14 @@
  */
 
 import { screen } from "@testing-library/react";
+import fc from "fast-check";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import LendingSettingsPage from "../../../../src/pages/SettingsPage/LendingSettingsPage";
 import { mockApi, renderWithProviders, type MockApi } from "../../../utils";
+import { answersOf } from "../../../lib/schemaArbitrary";
+import { holds, PROFILE, PROPERTY, witness } from "../../../property";
+import { forget, overSchema } from "../../../schemaPage";
 
 let api: MockApi;
 
@@ -64,5 +68,42 @@ describe("LendingSettingsPage", () => {
       await screen.findByText("Only an admin can change these."),
     ).toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+});
+
+/** How many entries an answer holds, or -1 for one that is not a list. */
+const entries = (body: unknown) => (Array.isArray(body) ? body.length : -1);
+
+describe("LendingSettingsPage over any answer the schema permits", () => {
+  // What the page's hooks are handed is drawn from `openapi.json`, per
+  // request. `tests/schemaPage.tsx` holds what the page may not do. Every
+  // request this page makes for a signed in account declares a 401 beside its
+  // 200, and an admin only one a 403, so both are drawn as well.
+  it("is drawn no sender and a sender", async () => {
+    await witness(answersOf("get_sender_health"), {
+      "is no sender": (answer) => entries(answer.body) === 0,
+      "is a sender": (answer) => entries(answer.body) > 0,
+    });
+  });
+
+  it("neither throws nor shows a value nobody can name", PROPERTY, async () => {
+    expect(
+      await holds(
+        fc.gen(),
+        async (answers) => {
+          try {
+            const rendered = await overSchema(<LendingSettingsPage />, answers);
+            expect(rendered.problems).toEqual([]);
+            return rendered;
+          } finally {
+            forget();
+          }
+        },
+        {
+          "showed a value an answer carried": (_, rendered) =>
+            rendered.echoed > 0,
+        },
+      ),
+    ).toBe(PROFILE.runs);
   });
 });

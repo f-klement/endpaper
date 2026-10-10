@@ -27,7 +27,7 @@ from enums import CatalogueSource, CredentialProvenance
 from models import CatalogueCredential
 from tests.conftest import forget_any_encryption_key
 from tests.helpers import sealed_before_the_origin_was_bound
-from tests.test_house_rules import _is_vendored
+from tests.test_house_rules import _docstring_nodes, _is_vendored
 
 #: The address the roster holds for the source these tests use.
 #:
@@ -99,6 +99,23 @@ class _LockedKeyring(keyring.backend.KeyringBackend):
 
     def delete_password(self, service: str, username: str) -> None:
         raise keyring.errors.PasswordDeleteError("locked")
+
+
+class _KeepingKeyring(_InMemoryKeyring):
+    """A keychain that answers and will not delete, as one does when its owner
+    declines the prompt."""
+
+    def delete_password(self, service: str, username: str) -> None:
+        raise keyring.errors.PasswordDeleteError("declined")
+
+
+@pytest.fixture
+def keeping_keychain():
+    """A keychain that keeps what it holds for the length of one test."""
+    previous = keyring.get_keyring()
+    keyring.set_keyring(_KeepingKeyring())
+    yield
+    keyring.set_keyring(previous)
 
 
 @pytest.fixture
@@ -467,6 +484,15 @@ class TestAStoreThatCannotAnswerIsNeverReadAsEmpty:
         with pytest.raises(credentials.KeyConfigurationError, match="refused to store"):
             credentials.store_key(credentials.generate_phrase())
         assert not credentials.key_file().exists()
+
+    def test_a_keychain_that_keeps_the_key_is_not_reported_as_cleared(
+        self, keeping_keychain
+    ):
+        credentials.store_key(credentials.generate_phrase())
+
+        with pytest.raises(credentials.KeyConfigurationError):
+            credentials.forget_key()
+        assert credentials.key_material() is not None
 
     def test_a_key_file_that_exists_and_cannot_be_read_is_reported(
         self, monkeypatch, tmp_path
@@ -1144,7 +1170,9 @@ class TestTheSupersededSchemeIsSafeOnlyWhileARosterAddressIsCode:
         **The bound**: this recognises a statement by having whitespace in it,
         so a query assembled from fragments across separate constants passes,
         and so would a one word statement if SQL had one. Nothing here builds
-        SQL that way. The failure direction is a loud false positive on prose
+        SQL that way. A real docstring read back as SQL, `text(_q.__doc__)`,
+        passes as well, because docstrings are skipped; that takes writing it
+        on purpose. The failure direction is a loud false positive on prose
         naming the table outside a docstring, of which there are none. Attacked in process,
         2026-09-07: that shape survived both other arms.
 
@@ -1170,19 +1198,10 @@ class TestTheSupersededSchemeIsSafeOnlyWhileARosterAddressIsCode:
             # Docstrings are `ast.Constant` too, and five modules discuss this
             # table in prose. Prose is not a query, so they are collected by
             # identity and skipped rather than matched around.
-            prose = set()
-            for holder in ast.walk(tree):
-                if isinstance(holder, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
-                    first = next(iter(getattr(holder, "body", [])), None)
-                    if (
-                        isinstance(first, ast.Expr)
-                        and isinstance(first.value, ast.Constant)
-                        and isinstance(first.value.value, str)
-                    ):
-                        prose.add(id(first.value))
+            prose = _docstring_nodes(tree)
             for node in ast.walk(tree):
                 if isinstance(node, ast.Constant) and isinstance(node.value, str):
-                    if id(node) in prose:
+                    if node in prose:
                         continue
                     text = node.value
                     if "catalogue_targets" not in text:
@@ -2557,6 +2576,30 @@ class TestDiscardingAKeyThatCannotBeDiscardedSaysSo:
         with pytest.raises(credentials.KeyConfigurationError) as refusal:
             credentials.forget_key()
         assert "cannot be removed from here" in str(refusal.value)
+
+    def test_a_key_file_whose_directory_refuses_the_removal_is_refused_naming_it(
+        self, monkeypatch, tmp_path
+    ):
+        """Writable, so `available()` passes, and its directory refuses the
+        unlink: a file mounted on its own. That was an `OSError` and a 500.
+
+        The refusal is stubbed rather than made with a mode, because the suite
+        runs as root and root may unlink from a 0500 directory.
+        """
+
+        class Undeletable(Path):
+            def unlink(self, missing_ok=False):
+                raise PermissionError(13, "Permission denied", str(self))
+
+        held = Undeletable(tmp_path / "key")
+        phrase = credentials.generate_phrase()
+        held.write_text(phrase)
+        monkeypatch.setattr(credentials, "key_file", lambda: held)
+
+        with pytest.raises(credentials.KeyConfigurationError) as refusal:
+            credentials.forget_key()
+        assert str(refusal.value) == f"The key file at {held} could not be removed."
+        assert credentials.key_material() == credentials.phrase_to_key(phrase)
 
     def test_a_key_it_can_reach_is_still_cleared(self, db):
         credentials.generate_key(db)

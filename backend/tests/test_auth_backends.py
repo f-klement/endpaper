@@ -107,6 +107,25 @@ class TestAuthenticateLdap:
         assert first.id == second.id
         assert db.query(User).filter(User.username == "kim").count() == 1
 
+    def test_a_service_account_the_directory_refuses_is_a_failed_login(
+        self, db, ldap_mode, monkeypatch
+    ):
+        # The directory holds kim and would accept the member's bind, so only
+        # the refused service bind can make this a failure. With no entry the
+        # search alone returns None and the bind's answer is never read.
+        kim = FakeEntry("uid=kim,ou=people,dc=example,dc=org", "kim", [])
+        handed_out = install_directory(
+            monkeypatch,
+            [
+                FakeConnection(bind_results=[False], entries=[kim]),
+                FakeConnection(bind_results=[True], entries=[]),
+            ],
+        )
+
+        assert auth_backends.authenticate_ldap(db, "kim", "correct-horse") is None
+        assert len(handed_out) == 1
+        assert handed_out[0].searched_filter is None
+
     def test_a_wrong_password_fails_the_user_bind(self, db, ldap_mode, monkeypatch):
         directory_with(monkeypatch, user_bind=False)
 
@@ -192,6 +211,17 @@ class TestLdapAdminGroup:
 
     def test_absence_does_not(self, db, ldap_mode, monkeypatch, not_first):
         directory_with(monkeypatch, groups=["cn=readers,ou=groups,dc=example,dc=org"])
+
+        user = auth_backends.authenticate_ldap(db, "kim", "correct-horse")
+
+        assert user is not None
+        assert user.is_admin is False
+
+    def test_with_no_admin_group_configured_no_group_grants_admin(
+        self, db, ldap_mode, monkeypatch, not_first
+    ):
+        monkeypatch.delenv("LDAP_ADMIN_GROUP")
+        directory_with(monkeypatch, groups=["cn=librarians,ou=groups,dc=example,dc=org"])
 
         user = auth_backends.authenticate_ldap(db, "kim", "correct-horse")
 

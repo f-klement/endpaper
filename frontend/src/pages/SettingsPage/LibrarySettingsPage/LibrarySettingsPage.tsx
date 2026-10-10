@@ -54,7 +54,8 @@ import {
  * **Two import cards and not one, and they are not merging.** The Calibre card
  * has a preview and a cross check the store card has nothing to offer, and the
  * store card reads several sources at once, which Calibre has no second library
- * to do. What they do share, the write, is `./importing`.
+ * to do. What they do share is the write, in `./importing`, and the picker, the
+ * confirm row and the outcome panel, in `./components/ImportChrome`.
  */
 export default function LibrarySettingsPage() {
   const { t } = useTranslation();

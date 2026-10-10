@@ -5,14 +5,20 @@ loaded by pytest for its fixtures, and importing from it is fragile under the
 importlib import mode this suite uses.
 """
 
+import datetime as dt
 import re
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
 import httpx
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 
 import auth_backends
 import targets
@@ -559,7 +565,8 @@ class FakeConnection:
         self._bind_results = list(bind_results)
         self.entries: list[FakeEntry] = []
         self._available = entries
-        self.result = "fake"
+        #: The shape ldap3 leaves after an operation, read for a referral.
+        self.result = {"result": 0, "description": "success"}
         self.searched_filter: str | None = None
         #: What the search asked the directory for. Recorded because the
         #: shipped default must not add an attribute to it: a test asserting
@@ -682,3 +689,115 @@ def sealed_before_the_origin_was_bound(material: bytes, source: str, secret: str
     box = AESGCM(credentials._expand(material, credentials._ENCRYPTION_INFO, 32))
     sealed = box.encrypt(nonce, secret.encode("utf-8"), associated)
     return ".".join(("v1", generation, credentials._b64(nonce), credentials._b64(sealed)))
+
+
+# ── Certificates ──────────────────────────────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class Issued:
+    """A server certificate and its key, as PEM files a listener loads."""
+
+    certificate: Path
+    key: Path
+
+
+@dataclass(frozen=True)
+class Authority:
+    name: str
+    key: ec.EllipticCurvePrivateKey
+    certificate: x509.Certificate
+    pem: Path
+
+
+def an_authority(name: str, into: Path) -> Authority:
+    """A self signed CA carrying the extensions strict verification requires,
+    written to a PEM file under `into`.
+
+    Python's default context sets strict X509 checking, which refuses a CA with
+    no key usage and a leaf with no authority key identifier. Without them every
+    arm here would fail on the fixture rather than on the property.
+    """
+    key = ec.generate_private_key(ec.SECP256R1())
+    subject = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, name)])
+    now = dt.datetime.now(dt.UTC)
+    certificate = (
+        x509.CertificateBuilder()
+        .subject_name(subject)
+        .issuer_name(subject)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - dt.timedelta(days=1))
+        .not_valid_after(now + dt.timedelta(days=1))
+        .add_extension(x509.BasicConstraints(ca=True, path_length=None), critical=True)
+        .add_extension(
+            x509.KeyUsage(
+                digital_signature=False,
+                content_commitment=False,
+                key_encipherment=False,
+                data_encipherment=False,
+                key_agreement=False,
+                key_cert_sign=True,
+                crl_sign=True,
+                encipher_only=False,
+                decipher_only=False,
+            ),
+            critical=True,
+        )
+        .add_extension(x509.SubjectKeyIdentifier.from_public_key(key.public_key()), critical=False)
+        .sign(key, hashes.SHA256())
+    )
+    pem = into / f"{name.replace(' ', '-')}.pem"
+    pem.write_bytes(certificate.public_bytes(serialization.Encoding.PEM))
+    return Authority(name, key, certificate, pem)
+
+
+def issue_certificate(
+    authority: Authority, names: Sequence[x509.GeneralName], into: Path, stem: str
+) -> Issued:
+    """A server certificate from `authority` naming `names` in its subjectAltName,
+    and nothing in its subject that a check would read as a host name."""
+    key = ec.generate_private_key(ec.SECP256R1())
+    now = dt.datetime.now(dt.UTC)
+    certificate = (
+        x509.CertificateBuilder()
+        .subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "directory")]))
+        .issuer_name(authority.certificate.subject)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - dt.timedelta(days=1))
+        .not_valid_after(now + dt.timedelta(days=1))
+        .add_extension(x509.SubjectAlternativeName(names), critical=False)
+        .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
+        .add_extension(
+            x509.KeyUsage(
+                digital_signature=True,
+                content_commitment=False,
+                key_encipherment=False,
+                data_encipherment=False,
+                key_agreement=False,
+                key_cert_sign=False,
+                crl_sign=False,
+                encipher_only=False,
+                decipher_only=False,
+            ),
+            critical=True,
+        )
+        .add_extension(x509.ExtendedKeyUsage([ExtendedKeyUsageOID.SERVER_AUTH]), critical=False)
+        .add_extension(
+            x509.AuthorityKeyIdentifier.from_issuer_public_key(authority.key.public_key()),
+            critical=False,
+        )
+        .sign(authority.key, hashes.SHA256())
+    )
+    certificate_path = into / f"{stem}.pem"
+    key_path = into / f"{stem}.key"
+    certificate_path.write_bytes(certificate.public_bytes(serialization.Encoding.PEM))
+    key_path.write_bytes(
+        key.private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption(),
+        )
+    )
+    return Issued(certificate_path, key_path)

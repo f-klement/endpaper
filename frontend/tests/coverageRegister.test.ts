@@ -41,7 +41,7 @@ import {
   registerReading,
   teardown,
 } from "./coverageRegister.globalSetup";
-import CoverageRegisterReporter from "./coverageRegister.reporter";
+import CoverageRegisterReporter, { SWITCH } from "./coverageRegister.reporter";
 
 /**
  * A census this file made up.
@@ -97,6 +97,23 @@ const registerFor = (body: Census, rows: [string, number][]): string =>
     "",
   ].join("\n");
 
+/**
+ * The plant harness's switch, cleared for this file and put back after it.
+ *
+ * **This file drives the reporter itself**, in process and through nested
+ * runs that inherit this environment, so its arms are about the register
+ * whether or not the outer run checks it. Left set, the arms needing the
+ * reporter to speak went red on a plant baseline.
+ */
+let switchWas: string | undefined;
+beforeAll(() => {
+  switchWas = process.env[SWITCH];
+  delete process.env[SWITCH];
+});
+afterAll(() => {
+  if (switchWas !== undefined) process.env[SWITCH] = switchWas;
+});
+
 describe("reading the document", () => {
   it("reads a row whose columns are padded", () => {
     expect(rowsOf("| `lib/zip.test.ts`   |    50 | The zip seam |\n")).toEqual([
@@ -122,6 +139,58 @@ describe("reading the document", () => {
     );
   });
 });
+
+/**
+ * The plant harness's switch, driven in process with the pipeline's own
+ * variable as given. A run of `ran` over a discovery of `found`, both real
+ * files here, whose sources the reporter reads.
+ */
+const underTheSwitch = async (
+  found: string[],
+  ran: string[],
+  pipeline: string | undefined,
+): Promise<{ thrown: unknown; said: string }> => {
+  const frontend = join(import.meta.dirname, "..");
+  const sink = mkdtempSync(join(tmpdir(), "register-switch-"));
+  const out = openSync(join(sink, "out"), "w");
+  const reporter = new CoverageRegisterReporter({ out });
+  reporter.onInit({
+    projects: [
+      {
+        config: { root: frontend },
+        globTestFiles: () => Promise.resolve({ testFiles: found }),
+      },
+    ],
+  });
+  const pipelineWas = process.env.GITLAB_CI;
+  if (pipeline === undefined) delete process.env.GITLAB_CI;
+  else process.env.GITLAB_CI = pipeline;
+  process.env[SWITCH] = "off";
+
+  let thrown: unknown;
+  try {
+    await reporter.onTestRunEnd(
+      ran.map((moduleId) => ({
+        moduleId,
+        children: { allTests: () => [1] },
+      })),
+      [],
+      "passed",
+    );
+  } catch (error) {
+    thrown = error;
+  } finally {
+    delete process.env[SWITCH];
+    if (pipelineWas === undefined) delete process.env.GITLAB_CI;
+    else process.env.GITLAB_CI = pipelineWas;
+    closeSync(out);
+  }
+  const said = readFileSync(join(sink, "out"), "utf8");
+  rmSync(sink, { recursive: true });
+  return { thrown, said };
+};
+
+const testFile = (file: string) => join(import.meta.dirname, file);
 
 /**
  * The write a run offers, which is the whole of what a deliberate write
@@ -353,6 +422,38 @@ describe("the write a run offers", () => {
     rmSync(sink, { recursive: true });
 
     expect(said).toContain(WRITE_SENTINEL);
+  });
+
+  /**
+   * The run below is one the register does not describe, so with the switch
+   * on this same call throws, which the arm above relies on; off, it neither
+   * throws nor offers a write.
+   */
+  it("reads no document and offers no write when the switch is off", async () => {
+    const ran = [testFile("withoutProse.test.ts")];
+    const { thrown, said } = await underTheSwitch(ran, ran, undefined);
+
+    expect(thrown).toBeUndefined();
+    expect(said).not.toContain(WRITE_SENTINEL);
+  });
+
+  it("still refuses a run that is not the discovered one when the switch is off", async () => {
+    const { thrown } = await underTheSwitch(
+      [testFile("withoutProse.test.ts"), testFile("licence.test.ts")],
+      [testFile("withoutProse.test.ts"), testFile("storageRefusal.test.ts")],
+      undefined,
+    );
+
+    expect(String(thrown)).toContain(
+      "licence.test.ts was discovered and did not run",
+    );
+  });
+
+  it("fails rather than skips when the switch is off in a pipeline", async () => {
+    const ran = [testFile("withoutProse.test.ts")];
+    const { thrown } = await underTheSwitch(ran, ran, "true");
+
+    expect(String(thrown)).toContain(`${SWITCH}=off is for a plant copy`);
   });
 
   it("distinguishes a register from no register", () => {

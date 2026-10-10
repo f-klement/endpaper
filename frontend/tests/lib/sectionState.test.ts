@@ -17,6 +17,8 @@ import {
   writeSectionChoice,
 } from "../../src/lib/sectionState";
 
+import { whileStorageRefuses } from "../storageRefusal";
+
 /** One of the two stores. The pair is exercised in its own describe below. */
 const STORE = "bookDetailSections";
 
@@ -78,11 +80,12 @@ describe("readSectionChoices", () => {
   });
 
   it("returns nothing when storage refuses to answer", () => {
-    // A private window. The book still has to render.
-    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
-      throw new Error("denied");
+    // A private window. The book still has to render. A choice is stored,
+    // so finding nothing can only come from the refusal.
+    writeSectionChoice(STORE, "lending", true);
+    whileStorageRefuses("getItem", () => {
+      expect(readSectionChoices(STORE)).toEqual({});
     });
-    expect(readSectionChoices(STORE)).toEqual({});
   });
 });
 
@@ -103,10 +106,11 @@ describe("writeSectionChoice", () => {
   });
 
   it("says nothing when storage refuses to keep it", () => {
-    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
-      throw new Error("quota");
+    writeSectionChoice(STORE, "lending", false);
+    whileStorageRefuses("setItem", () => {
+      expect(() => writeSectionChoice(STORE, "lending", true)).not.toThrow();
     });
-    expect(() => writeSectionChoice(STORE, "lending", true)).not.toThrow();
+    expect(readSectionChoices(STORE)).toEqual({ lending: "closed" });
   });
 });
 

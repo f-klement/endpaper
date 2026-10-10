@@ -11,8 +11,15 @@
  * covers scan, lookup and confirm.
  */
 
-import { act, fireEvent, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import fc from "fast-check";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { installCamera } from "../../doubles/camera";
@@ -20,6 +27,9 @@ import { decodeFromStream, emitBarcode } from "../../doubles/zxing";
 
 import ScanPage from "../../../src/pages/ScanPage";
 import { makeBook, makeTagSet, resetIds } from "../../factories";
+import { answersOf, DISTINCT } from "../../lib/schemaArbitrary";
+import { holds, PROFILE, PROPERTY, witness } from "../../property";
+import { forget, overSchema, type OverSchema } from "../../schemaPage";
 import { mockApi, renderWithProviders, type MockApi } from "../../utils";
 import { epubFile, packageDocument } from "../../zipFixtures";
 
@@ -650,5 +660,76 @@ describe("ScanPage", () => {
 
     expect(await screen.findByLabelText("ISBN")).toBeInTheDocument();
     expect(screen.queryByText("by Frank Herbert")).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * The title the lookup answered, where it answered one a reach can look for:
+ * a `DISTINCT` marker, as `echoed` counts, so the page's own words cannot
+ * pass the reach by spelling a short title.
+ */
+const lookedUpTitle = (rendered: OverSchema) => {
+  const found = rendered.answered.find(
+    ([operationId, answer]) =>
+      operationId === "lookup_isbn" && answer.status === 200,
+  );
+  const title = (found?.[1].body as { title?: unknown } | undefined)?.title;
+  return typeof title === "string" && DISTINCT.test(title) ? title : undefined;
+};
+
+describe("ScanPage over any answer the schema permits", () => {
+  // What the page's hooks are handed is drawn from `openapi.json`, per
+  // request. `tests/schemaPage.tsx` holds what the page may not do. The page
+  // asks for nothing about a book until a reader names one, so each example
+  // types an ISBN and looks it up, and the lookup's answer is drawn too. A
+  // failed lookup opens a blank draft rather than an alert, by design
+  // (`useScanFlow`), so no reach asks for an alert.
+  it("is drawn an error body and a lookup", async () => {
+    await witness(answersOf("lookup_isbn"), {
+      "is an error body": (answer) => answer.status === 422,
+      "is a lookup": (answer) => answer.status === 200,
+    });
+  });
+
+  it("neither throws nor shows a value nobody can name", PROPERTY, async () => {
+    expect(
+      await holds(
+        fc.gen(),
+        async (answers) => {
+          try {
+            const rendered = await overSchema(<ScanPage />, answers, {
+              uses: [
+                (page) =>
+                  fireEvent.change(within(page).getByLabelText("ISBN"), {
+                    target: { value: LOOKUP.isbn },
+                  }),
+                (page) =>
+                  fireEvent.click(
+                    within(page).getByRole("button", { name: "Look up" }),
+                  ),
+              ],
+            });
+            expect(rendered.problems).toEqual([]);
+            return rendered;
+          } finally {
+            forget();
+          }
+        },
+        {
+          "looked the book up": (_, rendered) =>
+            rendered.asked.includes("lookup_isbn"),
+          // The lookup's own title, rather than any drawn string: the tags and
+          // locations the draft offers are drawn too, and shown whatever the
+          // lookup answered.
+          "showed the title the lookup answered": (_, rendered) => {
+            const title = lookedUpTitle(rendered);
+            return (
+              title !== undefined &&
+              rendered.shown.some((text) => text.includes(title))
+            );
+          },
+        },
+      ),
+    ).toBe(PROFILE.runs);
   });
 });

@@ -1614,6 +1614,23 @@ class TestConfirmingStoresTheCrossReferencesThatCameWithTheRecord:
         assert len(set(seen)) == 1, seen
         assert None not in seen
 
+    def test_a_record_the_authority_file_no_longer_holds_costs_the_cross_references_only(
+        self, client, admin, make_book
+    ):
+        """Confirmed numbers are not re-checked against lobid first, so one it
+        answers 404 for is still stored, with nothing beside it."""
+        make_book(admin["headers"], title="Kidnapped", author="Robert Louis Stevenson")
+
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(url__startswith=LOBID).mock(return_value=httpx.Response(404))
+            res = confirm(
+                client, admin["headers"], "Robert Louis Stevenson", "118753711"
+            )
+
+        assert res.status_code == 201, res.text
+        assert res.json()["identifier"]["identifier"] == "118753711"
+        assert res.json()["cross_references"] == []
+
     def test_viaf_being_down_costs_the_national_ones_and_nothing_else(
         self, client, admin, make_book
     ):

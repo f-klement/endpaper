@@ -2,6 +2,144 @@
 
 ## Unreleased
 
+## v0.18.0
+
+_2026-10-10_
+
+Mostly the refactor epic and what its reviews turned up, so much of what follows is internal
+and says so. What an operator sees: LDAP now checks the directory's certificate and host name
+and refuses cleartext unless told to allow it, which is breaking, and its entry says what to
+set; referrals are no longer followed. What a member sees: an upload, catalogue answer or OPDS
+page is refused for more shapes that cost far more memory than their size, a browser that
+refuses site storage no longer breaks every page, and a failed write on one row is reported
+however many rows were pressed after it.
+
+- **Breaking: LDAP now checks the directory's certificate and host name, and refuses
+  cleartext.** Over `ldaps://` or with `LDAP_START_TLS=true`, the directory's certificate must
+  chain to a trusted CA and name the host in `LDAP_URL`; the common name counts only when the
+  subjectAltName lists no DNS name. Before this any certificate was accepted, so whoever
+  answered in the middle collected the bind passwords. A self signed or private CA goes in the
+  new `LDAP_CA_FILE`, which replaces the image's trust store, and nothing turns the check off.
+  **What an operator must do before upgrading**: a deployment stops signing members in when its
+  certificate is self signed or from a private CA and `LDAP_CA_FILE` is unset; when the
+  certificate's subjectAltName lists DNS names without the `LDAP_URL` host, such as a cluster
+  internal name dialled against a certificate for a public one; or when a home made CA fails
+  Python's strict X.509 checks (a CA without key usage or a subject key identifier, or a server
+  certificate without an authority key identifier), which needs the certificate reissued. A
+  deployment on `ldap://` or `ldapi://` without StartTLS must set `LDAP_ALLOW_CLEARTEXT=true`
+  or it will not start, with or without a service account, because every sign in sends the
+  member's password. `LDAP_CA_FILE` set without TLS, or naming a file that does not load as a
+  CA bundle, also stops the start rather than the first sign in.
+
+- **Breaking: LDAP referrals are no longer followed.** The client used to follow one to any
+  host and bind there as the service account, outside every check above. A search answered
+  with a referral now finds no member, and the log names the referral. A directory whose user
+  base is held by another server is reached by pointing `LDAP_URL` at that server.
+
+- **StartTLS reporting no upgrade stops the connection before the bind.** This is hardening:
+  with the bundled LDAP client a real refusal already raised, so no released build sent a
+  password this way.
+
+- The API schema documents the 401, 403 and 404 each operation can answer, with a
+  `Refusal` body (`{"detail": string}`); the generated client's error types include it.
+
+- **An XML upload, catalogue answer or OPDS page is refused for four more shapes that cost
+  far more memory than their size.** A namespace longer than 256 bytes, refused before the
+  parse, since one tag declaring it could take hundreds of megabytes; more than 128 distinct
+  element and attribute names, which a MARC upload of names never repeated used to pay for at
+  about forty times its size; more than 64 attributes on one tag; and elements carrying an
+  attribute packed closer than one in every 20 bytes, where the shortest such element repeated
+  cost 36.5 times its size. No MARCXML can be that dense, and an Atom summary carrying escaped
+  HTML is still read. Separately, the BnF search reader no longer builds a map over every
+  element of an answer.
+
+- **Forgetting the credential key no longer reports success while the key stays in force.** A
+  system keychain that declined the delete was counted as cleared, and a key file that could
+  not be removed answered 500; both now answer 409 naming the store that kept the key.
+
+- **A CSV import cell holding thousands of digits is dropped like any other out of range
+  number**, where it failed the whole import with a 500.
+
+- **Rendering the migrations as SQL is refused before it prints anything.** The offline mode
+  could not render this chain on either engine and used to fail after printing part of the
+  script.
+
+- **A browser that refuses site storage no longer breaks every page.** Reading the session
+  threw, so every request failed; it now asks without a token, which behind a sign in portal
+  needs none and elsewhere reads as signed out. Signing out with such storage still reaches the
+  next screen.
+
+- **A PDF whose metadata stream keeps its decoding parameters as a separate object has its
+  embedded metadata read**, the language among it, where it read as having none.
+
+- **Calibre's check against files button opens the folder picker.** It did nothing. While an
+  import runs, the import pickers can no longer be reached from the keyboard either, where a
+  second pick could take Stop away from an import still writing.
+
+- **A book whose year is 0 no longer shows a bare 0** in its header, and the public page
+  leaves such a year off.
+
+- **An error whose message is blank is named in the reader's language**, where it showed an
+  alert with no words, or an untranslated one.
+
+- **A book listing one category twice shows it once, and the statistics lists key a row by
+  what it counts rather than by its label**, which two tags can share.
+
+- **The Authors page no longer fails on a suggested merge whose key is `toString`**, or any
+  other name every object carries.
+
+- **A row with a write out stays disabled until that write answers, whatever is pressed
+  before it.** Pressing Put back or Delete for good on a trash row, or Mark Returned on a
+  loan, and then on a second row before the first answered, left the first pressable while its
+  write was still out. Every row now stays marked until its own write answers, and
+  is pressable again as soon as it does, a failed write included. Both loan pages share one
+  return action.
+
+- **A failed write on one row is reported even when a later row's write answers.** Pressing Put
+  back, Delete for good or Mark Returned on one row and then on a second showed the first row's
+  failure only if it was the last to answer, so a refused write could pass with nothing said.
+  Each failure now shows its message, and pressing that action again takes it down.
+
+- **An automatic patch release's backend bump ships a lock free of the release age cutoff it
+  resolved under**, and refuses the release when dropping the cutoff moves a pin or brings
+  back a file uploaded inside the window. The publish job's templates are pinned, so none can
+  make it run after a failed image check, and the scan's blindness check counts a lockfile
+  only where the scanner files it as a language package. Nothing a member sees moves.
+
+- **Twenty two pages are rendered over every response the committed API schema permits.**
+  A page that throws, prints a placeholder such as `undefined` or `NaN`, raises an alert with
+  no words, makes a request the schema does not declare, or on a public page asks for an
+  operation that needs an account, is refused. It found the blank error, repeated key and
+  `toString` defects above. Nothing else a member sees moves.
+
+- **The frontend's property guards read which runner exports draw by parse, checked against
+  what the runner really exports, and walk the module graph with the run's own aliases.**
+  Nothing a member sees moves.
+
+- **A test of a storage refusal refuses on the storage instance**, where the prototype spy it
+  replaced was never called, and the house rules refuse the prototype spy. Nothing a member
+  sees moves.
+
+- **Tests reach the rest of what the coverage measurement left unreached, on both sides**,
+  and what stays unreached says why where it is left out. Nothing a member sees moves.
+
+- **The longest functions in the backend, its test helpers, the frontend's byte readers,
+  settings sections, import cards and page helpers are split into named steps.** Nothing a
+  member sees moves beyond the entries above.
+
+- **The guard that finds which readers build a classification heading follows calls through
+  imports, annotations and constructors** rather than bare names. Nothing a member sees moves.
+
+- **Five forms the test tree's readers refused although their own tools accept them are read
+  as the tools read them.** Nothing a member sees moves.
+
+- **A hand planted defect runs as a mode of the mutation sweep**, on a copy whose runner it
+  cannot edit, with the coverage registers off, and counts as caught only where its log names
+  a failing test. Nothing a member sees moves.
+
+- **A bounded test run that times out reports a timeout, never a kill**, and the frontend
+  suite fits the memory of the smallest test node. Nothing a member sees moves.
+
 - **One reminder channel failing in a way the app did not anticipate no longer stops the
   others.** The overdue digest goes out on the webhook, then mail, then Telegram, and a
   failure that was neither a refused setting nor an unreachable destination used to end the

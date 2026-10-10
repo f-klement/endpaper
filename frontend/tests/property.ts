@@ -51,6 +51,8 @@ import fc from "fast-check";
 import * as fastCheck from "fast-check";
 import { expect } from "vitest";
 
+import * as runner from "./property";
+
 /** How many examples a property runs, by profile. */
 export interface Profile {
   readonly runs: number;
@@ -221,6 +223,12 @@ export type Reaches<T, R> = Readonly<
  * names the seed, and is a generator or a door that stopped reaching its
  * subject, not bad luck worth a rerun.
  *
+ * **A third argument naming nothing is refused**, as a witness naming no class
+ * is: the budget guard pins how many properties per file pass one, so an
+ * entry commented out while chasing a flaky reach would otherwise leave the
+ * count right and the run reaching nothing. It counts the argument, as the
+ * guard does, so an `undefined` there is refused too.
+ *
  * **Answers how many examples executed**, which each property's `it` asserts
  * is the profile's: `expect(await holds(...)).toBe(PROFILE.runs)`. The check
  * below already refuses fewer, so this is the arm saying so in its own body,
@@ -236,8 +244,15 @@ export type Reaches<T, R> = Readonly<
 export async function holds<T, R = void>(
   arbitrary: fc.Arbitrary<T>,
   predicate: (value: T) => Promise<R>,
-  reaches: Reaches<T, R> = {},
+  reaches?: Reaches<T, R>,
 ): Promise<number> {
+  if (arguments.length > 2 && Object.keys(reaches ?? {}).length === 0) {
+    throw new Error(
+      "a property names what its run must reach and names nothing, so it " +
+        "reaches nothing: name a reach, or call holds with two arguments " +
+        "where there is nothing to reach, rather than passing undefined on",
+    );
+  }
   const configured = fc.readConfigureGlobal();
   if (Object.keys(configured).length > 0) {
     throw new Error(
@@ -271,7 +286,7 @@ export async function holds<T, R = void>(
         throw error;
       }
       if (failed) return;
-      for (const [name, reach] of Object.entries(reaches)) {
+      for (const [name, reach] of Object.entries(reaches ?? {})) {
         if (!reached.has(name) && reach(value, answered)) reached.add(name);
       }
     }),
@@ -301,7 +316,9 @@ export async function holds<T, R = void>(
         "lowered the run without changing a number this module passes",
     );
   }
-  const missed = Object.keys(reaches).filter((name) => !reached.has(name));
+  const missed = Object.keys(reaches ?? {}).filter(
+    (name) => !reached.has(name),
+  );
   if (missed.length > 0) {
     throw new Error(
       `the property passed at seed ${seed} and drew no example that ` +
@@ -486,4 +503,22 @@ export function fastCheckExports(): string[] {
   const names = Object.keys(fastCheck);
   names.sort();
   return names;
+}
+
+/**
+ * Every name this module exports at run time, sorted, each with its `typeof`.
+ *
+ * **Here for `fastCheckExports`' reason**: the budget guard refuses a namespace
+ * of the runner reached other than by a dot everywhere but here. It lists the
+ * exports an importer gets, whatever form declared them, so the guard holds
+ * its parse of this module against it: a function export whose body the parse
+ * did not read is refused there.
+ */
+export function runnerExports(): [string, string][] {
+  const names = Object.keys(runner);
+  names.sort();
+  return names.map((name) => [
+    name,
+    typeof runner[name as keyof typeof runner],
+  ]);
 }

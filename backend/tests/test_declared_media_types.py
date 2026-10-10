@@ -143,9 +143,10 @@ def _the_refusal_rules_business(key: str) -> bool:
 
     Its members are everything at or above 400 and every key that is not a
     plain number: `4XX`, `default`, and a ranged success such as `2XX`.
-    `tests/test_errors.py::TestTheDocumentEnumeratesNoRefusal` refuses all of
-    them outright, so a route declaring one is red there before anything here
-    could have an opinion.
+    `tests/test_errors.py::TestTheDocumentDeclaresNoOtherRefusal` refuses all of
+    them but a 401, a 403 and a 404, so a route declaring another is red there
+    before anything here could have an opinion, and `tests/test_refusals.py`
+    holds the content of those three to the one body.
 
     **Its own predicate, called rather than restated, which is what turns the
     interlock from a paragraph into one object.** Both ends used to describe
@@ -155,7 +156,7 @@ def _the_refusal_rules_business(key: str) -> bool:
     rule's population by construction, so a key cannot be stepped over here
     and allowed there.
     """
-    return the_refusal_rule.TestTheDocumentEnumeratesNoRefusal._is_a_refusal(key)
+    return the_refusal_rule.TestTheDocumentDeclaresNoOtherRefusal._is_a_refusal(key)
 
 
 def _carries_a_representation(key: str) -> bool:
@@ -190,7 +191,7 @@ def _answers_without_a_body(key: str) -> bool:
     **Disjointness is not all by construction, and calling it that is one rung
     too strong.** This cell cannot overlap the other three, because it is
     defined as their negation. Cells one and two cannot overlap only because
-    `TestTheDocumentEnumeratesNoRefusal._is_a_refusal` opens by excluding the
+    `TestTheDocumentDeclaresNoOtherRefusal._is_a_refusal` opens by excluding the
     validation key, which is a fact in another file rather than a property of
     anything here. That pair is **tested**, by `TestThePartitionIsOne`, where
     one arm is complete cover for it because the framework's cell holds
@@ -643,13 +644,13 @@ class TestTheCellsNoLiveRouteReaches:
     def test_a_refusal_key_is_left_to_the_rule_that_owns_it(self) -> None:
         """The interlock, driven rather than described. `4XX` and 503 both
         carry content here and all three rules step over them, which is only
-        safe because `tests/test_errors.py::TestTheDocumentEnumeratesNoRefusal`
+        safe because `tests/test_errors.py::TestTheDocumentDeclaresNoOtherRefusal`
         reddens on either key first. Its predicate is the one
         `_the_refusal_rules_business` calls, so the two cannot drift."""
         assert self._verdicts("/content-beside-a-refusal") == (False, False, False)
 
-        assert the_refusal_rule.TestTheDocumentEnumeratesNoRefusal._is_a_refusal("4XX")
-        assert the_refusal_rule.TestTheDocumentEnumeratesNoRefusal._is_a_refusal("503")
+        assert the_refusal_rule.TestTheDocumentDeclaresNoOtherRefusal._is_a_refusal("4XX")
+        assert the_refusal_rule.TestTheDocumentDeclaresNoOtherRefusal._is_a_refusal("503")
 
     @pytest.mark.parametrize("method", ["get", "put"])
     def test_every_method_of_a_route_is_read(self, method: str) -> None:

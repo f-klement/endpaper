@@ -510,6 +510,64 @@ function extendedHeaderLength(body: Uint8Array, major: number): number | null {
   return size > body.length - 4 ? null : 4 + size;
 }
 
+/**
+ * How one ID3 version lays out a frame header: the id's length, the header's
+ * length, how the size is written, and which flag bits mean what. A bit this
+ * version has no flag for is 0, so a test against it never passes.
+ */
+interface FrameLayout {
+  readonly idLength: number;
+  readonly headLength: number;
+  readonly size: (view: DataView, at: number) => number | null;
+  readonly flags: (view: DataView, at: number) => number;
+  /** Compressed or encrypted, neither of which is implemented. */
+  readonly unreadable: number;
+  /** A four byte length precedes the frame's body. */
+  readonly dataLength: number;
+  /** Unsynchronisation undone per frame rather than per tag. */
+  readonly unsynchronised: number;
+}
+
+/** 2.2: three character ids, a three byte size, and no flags at all. */
+const ID3V22: FrameLayout = {
+  idLength: 3,
+  headLength: 6,
+  size: (view, at) =>
+    (view.getUint8(at + 3) << 16) |
+    (view.getUint8(at + 4) << 8) |
+    view.getUint8(at + 5),
+  flags: () => 0,
+  unreadable: 0,
+  dataLength: 0,
+  unsynchronised: 0,
+};
+
+/** 2.3: a plain four byte size, and compression and encryption flags. */
+const ID3V23: FrameLayout = {
+  idLength: 4,
+  headLength: 10,
+  size: (view, at) => view.getUint32(at + 4),
+  flags: (view, at) => view.getUint16(at + 8),
+  unreadable: 0x0080 | 0x0040,
+  dataLength: 0,
+  unsynchronised: 0,
+};
+
+/**
+ * 2.4: a synchsafe size, the same two flags at other bits, and two flags of
+ * its own: a data length in front of the body, and unsynchronisation applied
+ * per frame.
+ */
+const ID3V24: FrameLayout = {
+  idLength: 4,
+  headLength: 10,
+  size: (view, at) => synchsafe(view, at + 4),
+  flags: (view, at) => view.getUint16(at + 8),
+  unreadable: 0x0008 | 0x0004,
+  dataLength: 0x0001,
+  unsynchronised: 0x0002,
+};
+
 /** Every text frame in the tag, by frame id, in the order they appear. */
 function readFrames(
   body: Uint8Array,
@@ -518,48 +576,35 @@ function readFrames(
 ): Map<string, string[]> {
   const found = new Map<string, string[]>();
   const view = new DataView(body.buffer, body.byteOffset, body.byteLength);
-  const idLength = major === 2 ? 3 : 4;
-  const headLength = major === 2 ? 6 : 10;
+  const layout = major === 2 ? ID3V22 : major === 4 ? ID3V24 : ID3V23;
 
   let at = from;
-  while (at + headLength <= body.length) {
-    const id = fourCharacters(view, at).slice(0, idLength);
+  while (at + layout.headLength <= body.length) {
+    const id = fourCharacters(view, at).slice(0, layout.idLength);
     // A run of zero bytes is the padding every writer leaves after the frames,
     // and any other unnameable id is a tag this has lost its place in.
     if (!/^[A-Z0-9]+$/.test(id)) break;
 
-    let size: number | null;
-    if (major === 2) {
-      size = (body[at + 3]! << 16) | (body[at + 4]! << 8) | body[at + 5]!;
-    } else if (major === 4) {
-      size = synchsafe(view, at + 4);
-    } else {
-      size = view.getUint32(at + 4);
-    }
+    const size = layout.size(view, at);
     if (size === null || size < 0) break;
-    let start = at + headLength;
+    let start = at + layout.headLength;
     if (start + size > body.length) break;
 
-    const frameFlags = major === 2 ? 0 : view.getUint16(at + 8);
+    const frameFlags = layout.flags(view, at);
     at = start + size;
 
-    // Compressed and encrypted frames, in the two spellings the versions use.
-    // Neither is implemented, so the frame is skipped rather than decoded as
-    // though its bytes were text.
-    const squashed = major === 4 ? 0x0008 : 0x0080;
-    const locked = major === 4 ? 0x0004 : 0x0040;
-    if ((frameFlags & (squashed | locked)) !== 0) continue;
+    // Neither compression nor encryption is implemented, so such a frame is
+    // skipped rather than decoded as though its bytes were text.
+    if ((frameFlags & layout.unreadable) !== 0) continue;
 
     let length = size;
-    // 2.4 puts a four byte length in front of the body of a frame that declares
-    // one, and undoes unsynchronisation per frame rather than per tag.
-    if (major === 4 && (frameFlags & 0x0001) !== 0) {
+    if ((frameFlags & layout.dataLength) !== 0) {
       if (length < 4) continue;
       start += 4;
       length -= 4;
     }
     let payload = body.subarray(start, start + length);
-    if (major === 4 && (frameFlags & 0x0002) !== 0) {
+    if ((frameFlags & layout.unsynchronised) !== 0) {
       payload = desynchronise(payload);
     }
 

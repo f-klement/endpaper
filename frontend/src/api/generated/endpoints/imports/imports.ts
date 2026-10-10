@@ -25,6 +25,7 @@ import type {
   ImportResultOut,
   MarcPreviewOut,
   PreviewImportParams,
+  Refusal,
 } from "../../model";
 
 import { customFetch } from "../../../mutator.ts";
@@ -105,7 +106,7 @@ export const importCsv = async (
 export const getImportCsvMutationKey = () => ["importCsv"] as const;
 
 export const getImportCsvMutationOptions = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -146,7 +147,7 @@ export type ImportCsvMutationResult = NonNullable<
   Awaited<ReturnType<typeof importCsv>>
 >;
 export type ImportCsvMutationBody = BodyImportCsv;
-export type ImportCsvMutationError = HTTPValidationError;
+export type ImportCsvMutationError = Refusal | HTTPValidationError;
 export type ImportCsvMutationVariables = {
   data: BodyImportCsv;
   params?: ImportCsvParams;
@@ -155,7 +156,10 @@ export type ImportCsvMutationVariables = {
 /**
  * @summary Import Csv
  */
-export const useImportCsv = <TError = HTTPValidationError, TContext = unknown>(
+export const useImportCsv = <
+  TError = Refusal | HTTPValidationError,
+  TContext = unknown,
+>(
   options?: {
     mutation?: UseMutationOptions<
       Awaited<ReturnType<typeof importCsv>>,
@@ -235,7 +239,7 @@ export const importMarc = async (
 export const getImportMarcMutationKey = () => ["importMarc"] as const;
 
 export const getImportMarcMutationOptions = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -276,7 +280,7 @@ export type ImportMarcMutationResult = NonNullable<
   Awaited<ReturnType<typeof importMarc>>
 >;
 export type ImportMarcMutationBody = BodyImportMarc;
-export type ImportMarcMutationError = HTTPValidationError;
+export type ImportMarcMutationError = Refusal | HTTPValidationError;
 export type ImportMarcMutationVariables = {
   data: BodyImportMarc;
   params?: ImportMarcParams;
@@ -285,7 +289,10 @@ export type ImportMarcMutationVariables = {
 /**
  * @summary Import Marc
  */
-export const useImportMarc = <TError = HTTPValidationError, TContext = unknown>(
+export const useImportMarc = <
+  TError = Refusal | HTTPValidationError,
+  TContext = unknown,
+>(
   options?: {
     mutation?: UseMutationOptions<
       Awaited<ReturnType<typeof importMarc>>,
@@ -361,7 +368,7 @@ export const previewMarc = async (
 export const getPreviewMarcMutationKey = () => ["previewMarc"] as const;
 
 export const getPreviewMarcMutationOptions = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -402,14 +409,14 @@ export type PreviewMarcMutationResult = NonNullable<
   Awaited<ReturnType<typeof previewMarc>>
 >;
 export type PreviewMarcMutationBody = BodyPreviewMarc;
-export type PreviewMarcMutationError = HTTPValidationError;
+export type PreviewMarcMutationError = Refusal | HTTPValidationError;
 export type PreviewMarcMutationVariables = { data: BodyPreviewMarc };
 
 /**
  * @summary Preview Marc
  */
 export const usePreviewMarc = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(
   options?: {
@@ -487,7 +494,7 @@ export const previewImport = async (
 export const getPreviewImportMutationKey = () => ["previewImport"] as const;
 
 export const getPreviewImportMutationOptions = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -528,7 +535,7 @@ export type PreviewImportMutationResult = NonNullable<
   Awaited<ReturnType<typeof previewImport>>
 >;
 export type PreviewImportMutationBody = BodyPreviewImport;
-export type PreviewImportMutationError = HTTPValidationError;
+export type PreviewImportMutationError = Refusal | HTTPValidationError;
 export type PreviewImportMutationVariables = {
   data: BodyPreviewImport;
   params?: PreviewImportParams;
@@ -538,7 +545,7 @@ export type PreviewImportMutationVariables = {
  * @summary Preview Import
  */
 export const usePreviewImport = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(
   options?: {

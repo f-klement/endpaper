@@ -272,6 +272,53 @@ class TestARowCannotCarryQueryStructure:
             _seeded(lookup_records=0)
 
 
+class TestAnSruRowNamesEverythingARequestNeeds:
+    @pytest.mark.parametrize("missing", ["sru_version", "query_parameter"])
+    def test_a_row_with_no_version_or_no_query_parameter_is_refused(self, missing):
+        with pytest.raises(ValueError, match="needs a version and a parameter"):
+            _seeded(**{missing: ""})
+
+    def test_a_row_with_no_query_language_is_refused(self):
+        with pytest.raises(ValueError, match="needs a query language"):
+            _seeded(query_language=None)
+
+    def test_a_title_index_that_is_not_a_name_is_refused(self):
+        with pytest.raises(ValueError, match="not an index name"):
+            _seeded(title_index="pica.all=x or pica.all")
+
+    def test_a_row_that_searches_with_no_query_shape_is_refused(self):
+        with pytest.raises(ValueError, match="answers a search and names no query shape"):
+            _seeded(title_query_shape=None)
+
+    @pytest.mark.parametrize("field", ["search_multiplier", "search_cap"])
+    def test_a_row_that_searches_for_no_records_is_refused(self, field):
+        with pytest.raises(ValueError, match="answers a search and asks for no records"):
+            _seeded(**{field: 0})
+
+    def test_a_row_that_answers_no_search_builds_no_title_query(self):
+        target = _seeded(answers_search=False, title_index="", title_query_shape=None)
+        with pytest.raises(targets.BadQuery):
+            target.title_query(["dune"])
+
+
+class TestABespokeRowCarriesNoQueryShape:
+    def test_a_use_attribute_on_a_bespoke_row_is_refused(self):
+        with pytest.raises(ValueError, match="a bespoke target carries no query shape"):
+            targets.Target(
+                source=CatalogueSource.OPEN_LIBRARY,
+                rank=2,
+                transport=targets.Transport.BESPOKE,
+                base_url="https://openlibrary.org",
+                reader=targets.Reader.OPEN_LIBRARY,
+                answers_lookup=True,
+                answers_search=True,
+                metered=False,
+                needs_key=False,
+                serves_groups=frozenset(),
+                isbn_attribute=7,
+            )
+
+
 class TestTheQueryIsBuiltHereAndNowhereElse:
     """`cql_term` and `z3950.pqf_term` are the only two doors a value goes through."""
 

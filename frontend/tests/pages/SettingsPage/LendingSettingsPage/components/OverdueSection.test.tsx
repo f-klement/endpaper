@@ -106,9 +106,9 @@ describe("OverdueSection", () => {
   });
 
   it("names its reveal button for its own field", () => {
-    // The Google Books key on the same page already uses the shared "Show".
-    // Two reveal buttons announced identically leave a screen reader user no
-    // way to tell which secret they are about to put on screen.
+    // The mail password and the bot token sit on the same page. Two reveal
+    // buttons announced identically leave a screen reader user no way to tell
+    // which secret they are about to put on screen.
     renderSection();
     expect(
       screen.getByRole("button", { name: "Show the signing secret" }),
@@ -123,6 +123,20 @@ describe("OverdueSection", () => {
 
     expect(screen.getByText(/A secret is stored/)).toBeInTheDocument();
     expect(screen.getByLabelText("Signing secret")).toHaveValue("");
+  });
+
+  it("saves what was typed, trimmed, as the signing secret", async () => {
+    const user = userEvent.setup();
+    const { onSave } = renderSection();
+
+    fireEvent.change(screen.getByLabelText("Signing secret"), {
+      target: { value: "  typed  " },
+    });
+    await user.click(screen.getByRole("button", { name: "Save secret" }));
+
+    expect(onSave).toHaveBeenCalledExactlyOnceWith({
+      overdue_webhook_secret: "typed",
+    });
   });
 
   it("clears the secret with an empty string, not an absent field", async () => {

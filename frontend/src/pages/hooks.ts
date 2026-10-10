@@ -1,8 +1,9 @@
 /**
- * Session state, shared by every page.
+ * Hooks that belong to no single page: the session, going back, which rows
+ * have a write out, a write's failure, and returning a loan.
  *
- * Hoisted to this level because App gates routing on it and LoginPage writes
- * it, so it belongs to neither.
+ * The session is hoisted to this level because App gates routing on it and
+ * LoginPage writes it, so it belongs to neither.
  *
  * Where the identity comes from depends on how the server is configured:
  *
@@ -20,7 +21,13 @@
  *                  goes away, because its answer depends on one.
  */
 
-import { useQueryClient, type QueryClient } from "@tanstack/react-query";
+import {
+  matchMutation,
+  useMutationState,
+  useQueryClient,
+  type MutationKey,
+  type QueryClient,
+} from "@tanstack/react-query";
 import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 
@@ -29,8 +36,15 @@ import {
   useLogout,
   useMe,
 } from "../api/generated/endpoints/auth/auth";
+import {
+  getReturnLoanMutationKey,
+  useReturnLoan,
+  type ReturnLoanMutationVariables,
+} from "../api/generated/endpoints/loans/loans";
 import { AuthMode, type UserOut } from "../api/generated/model";
+import { useInvalidate } from "../api/invalidate";
 import { clearSession, setSession } from "../api/mutator";
+import { pendingRows } from "../lib/pendingRow";
 
 const USER_KEY = "user";
 
@@ -240,4 +254,107 @@ export function useGoBack(fallback = "/"): () => void {
     if (key === "default") navigate(fallback);
     else navigate(-1);
   }, [key, navigate, fallback]);
+}
+
+/** The fields of a write's variables that hold a number, which a row id is. */
+type RowKey<TVariables> = {
+  [K in keyof TVariables]-?: TVariables[K] extends number ? K : never;
+}[keyof TVariables] &
+  string;
+
+/**
+ * The `key` of every call of these writes still out, so each row with a write
+ * out is marked until that write answers.
+ *
+ * Read from the mutation cache rather than from the mutation hooks, because a
+ * hook remembers only its latest call: pressing the same action on a second
+ * row would unmark the first while its write is still out. The keys match as
+ * react-query matches them, by prefix, and wherever the call was made, so a
+ * write still out from another page marks its row here too.
+ *
+ * `TVariables` is the variables type of those writes, named at the call, and
+ * `key` must be a number field of it, so a misspelt key fails the type check
+ * rather than marking nothing. Left out, it is `unknown` and no key passes:
+ * without `NoInfer` the compiler would infer a variables type from the key
+ * itself, and any spelling would pass. That it names the same writes as the
+ * keys is the caller's to keep true.
+ */
+export function usePendingRows<TVariables>(
+  key: NoInfer<RowKey<TVariables>>,
+  ...writes: readonly MutationKey[]
+): ReadonlySet<number> {
+  const calls = useMutationState({
+    filters: {
+      status: "pending",
+      predicate: (mutation) =>
+        writes.some((mutationKey) => matchMutation({ mutationKey }, mutation)),
+    },
+    select: (mutation) => mutation.state.variables,
+  });
+  return pendingRows(key, calls);
+}
+
+export interface WriteFailure {
+  /** The failure to show, until the next press of the write. */
+  error: unknown;
+  /** Spread into the write's `mutation` options. */
+  report: {
+    onMutate: () => undefined;
+    onError: (error: unknown) => void;
+  };
+}
+
+/**
+ * A write's failure, whichever of its calls failed, for a page's error slot.
+ *
+ * A mutation hook's `error` is its latest call's, so a failure on one row is
+ * silent once the same write has been pressed on another row after it. The
+ * callbacks in `report` go into the write's own options, which every call
+ * keeps, so each failure is reported however many presses followed it. A press
+ * clears it, as the latest call's `error` did, and a later failure replaces it:
+ * the slot holds one failure, the most recent.
+ */
+export function useWriteFailure(): WriteFailure {
+  const [error, setError] = useState<unknown>(null);
+  const report = {
+    onMutate: () => {
+      setError(null);
+      return undefined;
+    },
+    // An updater, because `setError` would call a thrown function as one.
+    onError: (failure: unknown) => setError(() => failure),
+  };
+  return { error, report };
+}
+
+export interface UseLoanReturnResult {
+  /** Every loan whose return is out, so each such row shows it. */
+  returningIds: ReadonlySet<number>;
+  markReturned: (loanId: number) => void;
+  /** A return's failure, for the page's own error slot. */
+  error: unknown;
+}
+
+/**
+ * Marking a loan returned from a list of loans.
+ *
+ * Both loan lists draw `LoanRow` and return through this, so the write and
+ * what it makes stale, `invalidate.loans()`, are named once.
+ */
+export function useLoanReturn(): UseLoanReturnResult {
+  const invalidate = useInvalidate();
+  const failure = useWriteFailure();
+  const returnLoan = useReturnLoan({
+    mutation: { ...failure.report, onSuccess: () => invalidate.loans() },
+  });
+  const returningIds = usePendingRows<ReturnLoanMutationVariables>(
+    "loanId",
+    getReturnLoanMutationKey(),
+  );
+
+  return {
+    returningIds,
+    markReturned: (loanId) => returnLoan.mutate({ loanId }),
+    error: failure.error,
+  };
 }

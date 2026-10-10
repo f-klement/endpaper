@@ -25,7 +25,7 @@ from models import DESCRIPTION_MAX, TITLE_MAX, Classification
 from routers.books import _bounded_match
 from schemas import MAX_CLASSIFICATIONS_PER_BOOK
 from schemas.book import CATEGORIES_MAX
-from tests.helpers import GOOGLE_BOOKS, K10PLUS, silence_catalogues, sru_response
+from tests.helpers import GOOGLE_BOOKS, K10PLUS, PNG_BYTES, silence_catalogues, sru_response
 
 
 def volume(
@@ -424,6 +424,29 @@ class TestApplyingAChosenEdition:
                 headers=admin["headers"],
             )
             assert not any(route.called for route in mock.routes)
+
+    def test_a_cover_uploaded_here_is_kept_and_nothing_is_fetched_over_it(
+        self, client, admin, make_book, covers_dir
+    ):
+        book = make_book(admin["headers"])
+        uploaded = client.post(
+            f"/api/books/{book['id']}/cover",
+            files={"file": ("cover.png", PNG_BYTES, "image/png")},
+            headers=admin["headers"],
+        )
+        assert uploaded.status_code == 200, uploaded.text
+
+        with respx.mock(assert_all_called=False) as mock:
+            silence_catalogues(mock)
+            res = client.post(
+                f"/api/books/{book['id']}/enrich/apply",
+                json=self.choice(),
+                headers=admin["headers"],
+            )
+            assert not any(route.called for route in mock.routes)
+
+        assert res.status_code == 200, res.text
+        assert res.json()["book"]["cover_url"] == uploaded.json()["cover_url"]
 
     def test_does_not_overrule_a_typed_value(self, client, admin, make_book):
         book = make_book(admin["headers"], title="Dune", author="Somebody Else")

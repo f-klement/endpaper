@@ -117,6 +117,8 @@ export interface EntrySpec {
   localExtra?: Uint8Array<ArrayBuffer>;
   /** Extra field on the central header only, for the same reason inverted. */
   centralExtra?: Uint8Array<ArrayBuffer>;
+  /** The entry's own comment, which only the central header carries. */
+  centralComment?: Uint8Array<ArrayBuffer>;
   /** What the central directory claims, when that should differ from the truth. */
   centralCompressedSize?: number;
   centralUncompressedSize?: number;
@@ -203,6 +205,7 @@ export async function buildZip(
     const name = bytes(entry.name);
     const localExtra = entry.localExtra ?? new Uint8Array(0);
     const centralExtra = entry.centralExtra ?? new Uint8Array(0);
+    const centralComment = entry.centralComment ?? new Uint8Array(0);
     const flags = entry.flags ?? 0;
 
     const local = new Uint8Array(30 + name.length + localExtra.length);
@@ -219,7 +222,9 @@ export async function buildZip(
     local.set(name, 30);
     local.set(localExtra, 30 + name.length);
 
-    const header = new Uint8Array(46 + name.length + centralExtra.length);
+    const header = new Uint8Array(
+      46 + name.length + centralExtra.length + centralComment.length,
+    );
     const headerView = new DataView(header.buffer);
     headerView.setUint32(0, CENTRAL_SIGNATURE, true);
     headerView.setUint16(4, 20, true);
@@ -235,9 +240,11 @@ export async function buildZip(
     headerView.setUint32(24, entry.centralUncompressedSize ?? length, true);
     headerView.setUint16(28, name.length, true);
     headerView.setUint16(30, centralExtra.length, true);
+    headerView.setUint16(32, centralComment.length, true);
     headerView.setUint32(42, entry.centralHeaderOffset ?? offset, true);
     header.set(name, 46);
     header.set(centralExtra, 46 + name.length);
+    header.set(centralComment, 46 + name.length + centralExtra.length);
 
     parts.push(local, stored);
     central.push(header);
@@ -406,6 +413,7 @@ export function bombEntry(
     flags: fc.constant(undefined),
     localExtra: fc.constant(undefined),
     centralExtra: fc.constant(undefined),
+    centralComment: fc.constant(undefined),
     centralCompressedSize: fc.constant(undefined),
     centralUncompressedSize: fc.constantFrom(
       0,
@@ -486,6 +494,7 @@ export function entrySpec(
     flags: sometimes(fc.constantFrom(1, 8, 0x800, 0xffff)),
     localExtra: extra,
     centralExtra: extra,
+    centralComment: extra,
     centralCompressedSize: declared,
     centralUncompressedSize: declared,
     centralHeaderOffset: sometimes(fc.constantFrom(0, 1, 0xffffffff)),

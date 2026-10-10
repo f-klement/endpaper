@@ -1,11 +1,17 @@
-import { useRef, useState } from "react";
+import { useState } from "react";
 
 import type {
   ImportResultOut,
   MarcPreviewOut,
 } from "../../../../api/generated/model";
-import { errorText } from "../../../../components/ErrorState";
 import { useTranslation } from "../../../../i18n";
+import {
+  ConfirmRow,
+  FilePicker,
+  ImportError,
+  ResultPanel,
+  ReviewAdded,
+} from "./ImportChrome";
 
 interface MarcImportProps {
   isPreviewing: boolean;
@@ -31,8 +37,9 @@ interface MarcImportProps {
  * what is already on this shelf is shown before the write, next to the count of
  * what would be added.
  *
- * Dumb: it owns the file input and the one checkbox. The mutations, the cache
- * invalidation and the results live in the page's hooks.
+ * Dumb: it owns the one checkbox, and draws the picker, the row and the panels
+ * from `./ImportChrome`. The mutations, the cache invalidation and the results
+ * live in the page's hooks.
  */
 export default function MarcImport({
   isPreviewing,
@@ -50,7 +57,6 @@ export default function MarcImport({
   // mostly books the household does not own; a catalogue transfer that adds no
   // records has transferred nothing.
   const [createMissing, setCreateMissing] = useState(true);
-  const fileInput = useRef<HTMLInputElement>(null);
 
   // **Both refusals, not one.** A record already held is filled in rather than
   // added; a record whose ISBN belongs to a book this account cannot see is
@@ -66,31 +72,14 @@ export default function MarcImport({
         {t("marc.explain")}
       </p>
 
-      <input
-        ref={fileInput}
-        type="file"
+      <FilePicker
         accept=".xml,.marcxml,application/marcxml+xml,text/xml,application/xml"
-        // Visually hidden but still in the tree, so it stays reachable by
-        // keyboard and announced by name rather than as an unlabelled input.
-        aria-label={t("marc.chooseFile")}
-        className="sr-only"
-        onChange={(event) => {
-          const file = event.target.files?.[0];
-          if (file) onChoose(file);
-          // Reset, so choosing the same file twice fires change again.
-          event.target.value = "";
-        }}
+        label={t("marc.chooseFile")}
+        busy={isPreviewing}
+        busyLabel={t("marc.reading")}
+        offered={!preview}
+        onFile={onChoose}
       />
-      {!preview && (
-        <button
-          type="button"
-          disabled={isPreviewing}
-          onClick={() => fileInput.current?.click()}
-          className="w-full py-2.5 rounded-xl border border-paper-200 text-sm font-medium text-paper-700 hover:bg-paper-50 disabled:opacity-50 transition-colors dark:border-paper-700 dark:text-paper-200 dark:hover:bg-paper-800"
-        >
-          {isPreviewing ? t("marc.reading") : t("marc.chooseFile")}
-        </button>
-      )}
 
       {preview && (
         <>
@@ -148,54 +137,36 @@ export default function MarcImport({
             </p>
           )}
 
-          <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={onCancel}
-              disabled={isImporting}
-              className="flex-1 py-2.5 rounded-xl border border-paper-200 text-sm font-medium text-paper-600 hover:bg-paper-50 disabled:opacity-50 dark:border-paper-700 dark:text-paper-300 dark:hover:bg-paper-800"
-            >
-              {t("common.cancel")}
-            </button>
-            <button
-              type="button"
-              disabled={
-                isImporting ||
-                (createMissing
-                  ? wouldBeAdded + preview.already_held === 0
-                  : preview.already_held === 0)
-              }
-              onClick={() => onConfirm({ createMissing })}
-              className="flex-1 py-2.5 rounded-xl bg-accent-fill text-sm font-semibold text-on-accent hover:bg-accent-fill-hover disabled:bg-accent-300"
-            >
-              {/* The count follows the switch. With it off nothing is created
-                  and only the held records are filled in, so naming the whole
-                  file there promised an import that would not happen. */}
-              {isImporting
-                ? t("marc.importing")
-                : createMissing
-                  ? t("marc.confirm", {
-                      count: wouldBeAdded + preview.already_held,
-                    })
-                  : t("marc.confirmMatchedOnly", {
-                      count: preview.already_held,
-                    })}
-            </button>
-          </div>
+          <ConfirmRow
+            isImporting={isImporting}
+            withheld={
+              createMissing
+                ? wouldBeAdded + preview.already_held === 0
+                : preview.already_held === 0
+            }
+            // The count follows the switch. With it off nothing is created
+            // and only the held records are filled in, so naming the whole
+            // file there promised an import that would not happen.
+            confirmLabel={
+              createMissing
+                ? t("marc.confirm", {
+                    count: wouldBeAdded + preview.already_held,
+                  })
+                : t("marc.confirmMatchedOnly", {
+                    count: preview.already_held,
+                  })
+            }
+            importingLabel={t("marc.importing")}
+            onConfirm={() => onConfirm({ createMissing })}
+            onCancel={onCancel}
+          />
         </>
       )}
 
-      {error != null && (
-        <p
-          role="alert"
-          className="text-sm text-danger-600 dark:text-danger-300"
-        >
-          {errorText(error, t("common.somethingWentWrong"), t)}
-        </p>
-      )}
+      <ImportError error={error} />
 
       {result && (
-        <div className="text-sm text-paper-700 bg-paper-50 border border-paper-200 rounded-xl p-3 space-y-2 dark:text-paper-200 dark:bg-paper-900 dark:border-paper-700">
+        <ResultPanel>
           <p>
             {t("marc.result", {
               rowsRead: result.rows_read,
@@ -208,16 +179,8 @@ export default function MarcImport({
               {t("marc.resultSkipped", { count: result.skipped })}
             </p>
           )}
-          {result.created > 0 && (
-            <button
-              type="button"
-              onClick={onReviewUnconfirmed}
-              className="text-sm font-medium text-accent-700 hover:text-accent-800 dark:text-accent-400 dark:hover:text-accent-300"
-            >
-              {t("ownership.reviewThem")}
-            </button>
-          )}
-        </div>
+          <ReviewAdded added={result.created} onReview={onReviewUnconfirmed} />
+        </ResultPanel>
       )}
     </div>
   );

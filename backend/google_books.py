@@ -332,36 +332,13 @@ def _series_in_parentheses(title: str) -> tuple[str, str] | None:
     if not body.endswith(")"):
         return None
     close = len(body) - 1
-    # The number: digits, or digits, a point and digits, ending at the close.
-    end = close
-    start = end
-    while start > 0 and _is_ascii_digit(body[start - 1]):
-        start -= 1
-    if start == end:
+    start = _number_start(body, close)
+    if start is None:
         return None
-    if start >= 2 and body[start - 1] == "." and _is_ascii_digit(body[start - 2]):
-        whole = start - 1
-        while whole > 0 and _is_ascii_digit(body[whole - 1]):
-            whole -= 1
-        start = whole
-    number = body[start:end]
-    # The marker right before it: `#`, `book` and whitespace, or `bk`, an
-    # optional point and optional whitespace.
-    at = start
-    if at >= 1 and body[at - 1] == "#":
-        marker = at - 1
-    else:
-        spaces = at
-        while spaces > 0 and body[spaces - 1].isspace():
-            spaces -= 1
-        if spaces < at and spaces >= 4 and _folds_to(body[spaces - 4 : spaces], "book"):
-            marker = spaces - 4
-        else:
-            point = spaces - 1 if spaces >= 1 and body[spaces - 1] == "." else spaces
-            if point >= 2 and _folds_to(body[point - 2 : point], "bk"):
-                marker = point - 2
-            else:
-                return None
+    marker = _marker_start(body, start)
+    if marker is None:
+        return None
+    number = body[start:close]
     # The separators before the marker, as many as there are.
     run = marker
     while run > 0 and _is_separator(body[run - 1]):
@@ -378,6 +355,42 @@ def _series_in_parentheses(title: str) -> tuple[str, str] | None:
     # first of them, if one is left over for the separator.
     if marker - run >= 2:
         return body[run], number
+    return None
+
+
+def _number_start(body: str, end: int) -> int | None:
+    """Where the number ending at `end` starts, or None where no digit ends there.
+
+    The number is digits, or digits, a point and digits: `[0-9]+(?:\\.[0-9]+)?`.
+    """
+    start = end
+    while start > 0 and _is_ascii_digit(body[start - 1]):
+        start -= 1
+    if start == end:
+        return None
+    if start >= 2 and body[start - 1] == "." and _is_ascii_digit(body[start - 2]):
+        start -= 1
+        while start > 0 and _is_ascii_digit(body[start - 1]):
+            start -= 1
+    return start
+
+
+def _marker_start(body: str, at: int) -> int | None:
+    """Where the series marker ending at `at` starts, or None where there is none.
+
+    The marker is `#`, or `book` and whitespace, or `bk`, an optional point and
+    optional whitespace: `(?:#|book\\s+|bk\\.?\\s*)`, case blind.
+    """
+    if at >= 1 and body[at - 1] == "#":
+        return at - 1
+    spaces = at
+    while spaces > 0 and body[spaces - 1].isspace():
+        spaces -= 1
+    if spaces < at and spaces >= 4 and _folds_to(body[spaces - 4 : spaces], "book"):
+        return spaces - 4
+    point = spaces - 1 if spaces >= 1 and body[spaces - 1] == "." else spaces
+    if point >= 2 and _folds_to(body[point - 2 : point], "bk"):
+        return point - 2
     return None
 
 

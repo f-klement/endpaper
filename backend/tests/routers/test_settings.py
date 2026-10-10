@@ -247,6 +247,14 @@ class TestUpdateSettings:
         # Read straight from the database, bypassing the request that wrote it.
         assert settings_store.get_bool(db, SettingKey.GOOGLE_BOOKS_ENABLED) is True
 
+    @pytest.mark.parametrize("field", sorted(settings_router._STORED_BOOL))
+    @pytest.mark.parametrize("value", [True, False])
+    def test_a_stored_switch_is_written_as_it_was_sent(self, client, admin, db, field, value):
+        res = client.put("/api/settings", json={field: value}, headers=admin["headers"])
+
+        assert res.status_code == 200, res.text
+        assert settings_store.get_bool(db, settings_router._STORED_BOOL[field]) is value
+
     def test_an_absent_field_is_left_alone(self, client, admin):
         """The reason the update is partial.
 
@@ -1748,6 +1756,11 @@ class TestTheKeyRoutesReportAboutTheKeyAndNeverTheKey:
         )
         assert response.status_code == 409
 
+    def test_discarding_a_key_the_environment_pins_is_a_409(self, client, admin, monkeypatch):
+        monkeypatch.setenv("CREDENTIAL_ENCRYPTION_KEY", credentials.generate_phrase())
+        response = client.delete("/api/settings/credential-key", headers=admin["headers"])
+        assert response.status_code == 409
+
     def test_the_key_can_be_discarded_and_a_new_one_made(self, client, admin):
         client.post("/api/settings/credential-key", headers=admin["headers"])
         discarded = client.delete("/api/settings/credential-key", headers=admin["headers"])
@@ -1912,6 +1925,20 @@ class TestACredentialIsStoredSealedAndShownMasked:
         )
         assert response.status_code == 409
         assert "CREDENTIAL_ENCRYPTION_KEY" in response.json()["detail"]
+
+    def test_a_mistyped_key_in_the_environment_is_refused_naming_it(
+        self, client, admin, monkeypatch
+    ):
+        """`is_from_env` reads the source's own variable, not the key, so a key
+        that is not a phrase reaches `put` and is refused there."""
+        monkeypatch.setenv("CREDENTIAL_ENCRYPTION_KEY", "not a recovery phrase")
+        response = client.put(
+            "/api/settings/catalogue-sources/bne/credential",
+            json={"username": "alice", "password": "hunter2"},
+            headers=admin["headers"],
+        )
+        assert response.status_code == 409
+        assert response.json()["detail"].startswith("CREDENTIAL_ENCRYPTION_KEY")
 
     def test_a_rotated_key_is_reported_as_needing_re_entry(self, client, keyed):
         client.put(

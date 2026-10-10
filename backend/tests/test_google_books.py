@@ -249,6 +249,12 @@ class TestMergeInto:
 
         assert book.publisher == "The edition I actually own"
 
+    def test_overwriting_with_the_value_already_there_reports_no_change(self):
+        book = Book(title="Dune", publisher="Chilton")
+        changed = merge_into(book, _as_match(VOLUME), overwrite=True)
+
+        assert "publisher" not in changed
+
     def test_overwrite_replaces_it_when_asked(self):
         book = Book(title="Dune", publisher="Wrong")
         merge_into(book, _as_match(VOLUME), overwrite=True)
@@ -504,6 +510,22 @@ class TestTheParenthesisedSeriesIsReadInOnePass:
         after the parenthesised one was narrowed, and read both as 3.0."""
         assert _series_from_title(shape.format(digit)) == (None, None)
 
+    @pytest.mark.parametrize(
+        "title",
+        [
+            pytest.param("Dune (Dune Chronicles 1)", id="no marker"),
+            pytest.param("Dune Chronicles #1)", id="no opening"),
+            pytest.param("Dune ( #1)", id="nothing to name"),
+            pytest.param("Dune (, #1)", id="a separator as the name"),
+            pytest.param("Dune (Chronicles#1)", id="no separator before the marker"),
+            pytest.param("Dune (Dune Chronicles bk. 1)", id="the short marker"),
+        ],
+    )
+    def test_a_shape_the_generator_does_not_reach_answers_as_the_expression_did(self, title):
+        match = _SERIES_IN_PARENTHESES.search(title)
+        expected = (match.group(1), match.group(2)) if match else None
+        assert _series_in_parentheses(title) == expected
+
     @pytest.mark.parametrize("close", ["", ")"])
     def test_a_title_as_long_as_a_response_is_read_in_one_pass(self, close):
         """A run of `(` filling a whole response, with and without a closing
@@ -570,6 +592,18 @@ class TestSeriesParsing:
             }
         )
         assert (fields["series_name"], fields["series_index"]) == ("Dune Chronicles", 2.0)
+
+    def test_a_series_position_that_is_not_a_number_leaves_the_titles(self):
+        fields = _volume_to_fields(
+            {
+                "id": "x",
+                "volumeInfo": {
+                    "title": "Dune (Dune Chronicles #1)",
+                    "seriesInfo": {"volumeSeries": [{"orderNumber": "first"}]},
+                },
+            }
+        )
+        assert (fields["series_name"], fields["series_index"]) == ("Dune Chronicles", 1.0)
 
     def test_a_volume_with_no_series_reports_none(self):
         fields = _volume_to_fields({"id": "x", "volumeInfo": {"title": "Plain"}})

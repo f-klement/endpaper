@@ -9,10 +9,17 @@
  */
 
 import { screen } from "@testing-library/react";
+import fc from "fast-check";
 import { Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it } from "vitest";
 
+import { Locale, type PublicBookOut } from "../../../src/api/generated/model";
+import { en, interpolate, type Translate } from "../../../src/i18n";
 import { PublicBookPage } from "../../../src/pages/PublicCataloguePage";
+import { publicFacts } from "../../../src/pages/PublicCataloguePage/PublicBookPage";
+import { answersOf } from "../../lib/schemaArbitrary";
+import { holds, PROFILE, PROPERTY, witness } from "../../property";
+import { forget, overSchema } from "../../schemaPage";
 import { mockApi, renderWithProviders, type MockApi } from "../../utils";
 
 let api: MockApi;
@@ -133,5 +140,101 @@ describe("PublicBookPage", () => {
     expect(
       await screen.findByRole("link", { name: "Back to the catalogue" }),
     ).toHaveAttribute("href", "/catalogue");
+  });
+});
+
+/** The English catalogue, as the page's own translator reads it. */
+const english: Translate = (key, params) =>
+  interpolate(en[key], params ?? {}, Locale.en);
+
+function factsOf(overrides: Partial<PublicBookOut> = {}): [string, string][] {
+  return publicFacts({ ...RECORD, ...overrides } as PublicBookOut, english);
+}
+
+describe("publicFacts", () => {
+  it("lists every fact a full record carries, in the page's order", () => {
+    expect(factsOf()).toEqual([
+      ["ISBN", "9780441013593"],
+      ["Publisher", "Chilton"],
+      ["Year", "1965"],
+      ["Language", "en"],
+      ["Pages", "412"],
+      ["Format", "Paperback"],
+      ["Series", "Dune 1"],
+    ]);
+  });
+
+  it("leaves out a fact the record does not carry", () => {
+    expect(
+      factsOf({
+        isbn: null,
+        publisher: "",
+        year: null,
+        language: null,
+        page_count: undefined,
+        format: null,
+        series_name: null,
+      }),
+    ).toEqual([]);
+  });
+
+  it("leaves out a year of zero, which is no year a book can be stored with", () => {
+    const facts = factsOf({ year: 0 });
+
+    expect(facts.map(([label]) => label)).not.toContain("Year");
+  });
+
+  it("names a series without a number when it has none", () => {
+    expect(factsOf({ series_index: null })).toContainEqual(["Series", "Dune"]);
+  });
+});
+
+/** A record's field, or `undefined` for an answer that is not a record. */
+const field = (body: unknown, key: string) =>
+  (body as Record<string, unknown> | undefined)?.[key];
+
+describe("PublicBookPage over any answer the schema permits", () => {
+  // What the page's hooks are handed is drawn from `openapi.json`, per
+  // request. `tests/schemaPage.tsx` holds what the page may not do, and, since
+  // this page renders to a visitor with no account, that it asks for nothing
+  // the document requires an account for, whatever it is sent.
+  it("is drawn an error body, a null fact and a classified record", async () => {
+    await witness(answersOf("get_public_book"), {
+      "is an error body": (answer) => answer.status === 422,
+      "is a record whose year is null": (answer) =>
+        answer.status === 200 && field(answer.body, "year") === null,
+      "is a record with a classification": (answer) =>
+        answer.status === 200 &&
+        ((field(answer.body, "classifications") as unknown[] | undefined)
+          ?.length ?? 0) > 0,
+    });
+  });
+
+  it("neither throws nor shows a value nobody can name", PROPERTY, async () => {
+    expect(
+      await holds(
+        fc.gen(),
+        async (answers) => {
+          try {
+            const rendered = await overSchema(
+              <Routes>
+                <Route path="/catalogue/:id" element={<PublicBookPage />} />
+              </Routes>,
+              answers,
+              { route: "/catalogue/12", anonymous: true },
+            );
+            expect(rendered.problems).toEqual([]);
+            return rendered;
+          } finally {
+            forget();
+          }
+        },
+        {
+          "showed a value an answer carried": (_, rendered) =>
+            rendered.echoed > 0,
+          "drew an alert": (_, rendered) => rendered.alerts.length > 0,
+        },
+      ),
+    ).toBe(PROFILE.runs);
   });
 });

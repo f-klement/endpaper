@@ -1,6 +1,6 @@
 /** Tests for src/theme/appearance.ts. */
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 
 import {
   DEFAULT_APPEARANCE,
@@ -12,6 +12,8 @@ import {
   type Appearance,
 } from "../../src/theme/appearance";
 import { isPaletteId } from "../../src/theme/palettes";
+
+import { whileStorageRefuses } from "../storageRefusal";
 
 /**
  * A palette id this build does not have, and no build ever will.
@@ -136,14 +138,15 @@ describe("the cache", () => {
   });
 
   it("survives storage that refuses to be written", () => {
-    const setItem = vi
-      .spyOn(Storage.prototype, "setItem")
-      .mockImplementation(() => {
-        throw new Error("QuotaExceededError");
-      });
+    // A choice is already stored, so finding it unchanged afterwards can only
+    // mean the write was refused rather than skipped.
+    const before: Appearance = { ...GRUVBOX, mode: "light" };
+    cacheAppearance(3, before);
 
-    expect(() => cacheAppearance(3, GRUVBOX)).not.toThrow();
-    setItem.mockRestore();
+    whileStorageRefuses("setItem", () => {
+      expect(() => cacheAppearance(3, GRUVBOX)).not.toThrow();
+    });
+    expect(readCachedAppearance(3)).toEqual(before);
   });
 });
 

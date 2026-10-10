@@ -15,12 +15,16 @@
  *    public**, rather than asking "are you sure".
  */
 
-import { screen } from "@testing-library/react";
+import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import fc from "fast-check";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import PublicCatalogueSettingsPage from "../../../../src/pages/SettingsPage/PublicCatalogueSettingsPage";
 import { mockApi, renderWithProviders, type MockApi } from "../../../utils";
+import { answersOf } from "../../../lib/schemaArbitrary";
+import { holds, PROFILE, PROPERTY, witness } from "../../../property";
+import { forget, overSchema } from "../../../schemaPage";
 
 let api: MockApi;
 
@@ -292,5 +296,57 @@ describe("PublicCatalogueSettingsPage", () => {
         name: "Let anyone search this catalogue",
       }),
     ).toBeChecked();
+  });
+});
+
+/** A field of an answer, or `undefined` for one that is not an object. */
+const field = (body: unknown, key: string) =>
+  (body as Record<string, unknown> | undefined)?.[key];
+
+describe("PublicCatalogueSettingsPage over any answer the schema permits", () => {
+  // What the page's hooks are handed is drawn from `openapi.json`, per
+  // request. `tests/schemaPage.tsx` holds what the page may not do. Every
+  // request this page makes for a signed in account declares a 401 beside its
+  // 200, and an admin only one a 403, so both are drawn as well.
+  it("is drawn a catalogue switched on and switched off", async () => {
+    await witness(answersOf("get_settings"), {
+      "is switched on": (answer) =>
+        field(answer.body, "public_catalogue_enabled") === true,
+      "is switched off": (answer) =>
+        field(answer.body, "public_catalogue_enabled") === false,
+    });
+  });
+
+  it("neither throws nor shows a value nobody can name", PROPERTY, async () => {
+    expect(
+      await holds(
+        fc.gen(),
+        async (answers) => {
+          try {
+            const rendered = await overSchema(
+              <PublicCatalogueSettingsPage />,
+              answers,
+            );
+            expect(rendered.problems).toEqual([]);
+            // The page shows no string an answer carries, only switches, so
+            // the reach is the publish switch an answer turned on, which is
+            // off where the answer says nothing. Asked here, before `forget`
+            // empties the page.
+            return (
+              within(rendered.container).queryByRole<HTMLInputElement>(
+                "checkbox",
+                { name: "Let anyone search this catalogue" },
+              )?.checked === true
+            );
+          } finally {
+            forget();
+          }
+        },
+        {
+          "ticked the publish switch the settings turned on": (_, ticked) =>
+            ticked,
+        },
+      ),
+    ).toBe(PROFILE.runs);
   });
 });

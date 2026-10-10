@@ -8,13 +8,14 @@ import {
   type SettingsOut,
   type SettingsUpdate,
 } from "../../../../api/generated/model";
-import { ErrorState, Icon } from "../../../../components";
+import { ErrorState } from "../../../../components";
 import { useTranslation, type MessageKey } from "../../../../i18n";
 import {
   SENDER_LABELS,
   SENDER_ROW_REASONS,
 } from "../../../../i18n/senderNames";
 import { SenderHealthLine, SettingsSection } from "../../../components";
+import SecretField from "../../components/SecretField";
 import ToggleField from "../../components/ToggleField";
 
 /**
@@ -73,22 +74,10 @@ export default function OverdueSection({
   health,
 }: OverdueSectionProps) {
   const { t } = useTranslation();
-  // Both are drafts rather than controlled mirrors of `settings`: typing a URL
-  // should not save it a character at a time.
+  // A draft rather than a controlled mirror of `settings`: typing a URL should
+  // not save it a character at a time.
   const [url, setUrl] = useState(settings.overdue_webhook_url ?? "");
-  const [secret, setSecret] = useState("");
-  const [showSecret, setShowSecret] = useState(false);
-  const [days, setDays] = useState(String(settings.overdue_reminder_days ?? 7));
-
   const urlDirty = url !== (settings.overdue_webhook_url ?? "");
-  const daysDirty = days !== String(settings.overdue_reminder_days ?? 7);
-  // The server refuses anything outside these bounds with a 422, so the button
-  // is withheld rather than offering a save that can only fail. Zero in
-  // particular would mean resending the same list on every tick.
-  const parsedDays =
-    /^\d+$/.test(days.trim()) && Number(days) >= 1 && Number(days) <= 365
-      ? Number(days)
-      : null;
 
   return (
     <SettingsSection title={t("settings.overdue")} icon="handshake">
@@ -144,114 +133,34 @@ export default function OverdueSection({
         )}
       </div>
 
-      <div className="space-y-1.5">
-        <label
-          htmlFor="overdue-webhook-secret"
-          className="block text-xs font-medium text-paper-600 dark:text-paper-300"
-        >
-          {t("settings.overdueSecret")}
-        </label>
-        <div className="relative">
-          <input
-            id="overdue-webhook-secret"
-            type={showSecret ? "text" : "password"}
-            autoComplete="off"
-            value={secret}
-            onChange={(event) => setSecret(event.target.value)}
-            placeholder={t("settings.overdueSecretPlaceholder")}
-            className="w-full px-3 py-2 pr-10 rounded-xl border border-paper-200 text-sm dark:border-paper-700"
-          />
-          {/* Named for its field rather than using the shared "Show", which
-              the Google Books key already uses on this page. Two reveal
-              buttons announced identically leave a screen reader user no way
-              to tell which secret they are about to put on screen. */}
-          <button
-            type="button"
-            onClick={() => setShowSecret((shown) => !shown)}
-            aria-label={
-              showSecret
-                ? t("settings.overdueSecretHide")
-                : t("settings.overdueSecretShow")
-            }
-            aria-pressed={showSecret}
-            className="absolute right-2 top-1/2 -translate-y-1/2 text-paper-600 hover:text-paper-800 text-sm leading-none dark:text-paper-400 dark:hover:text-paper-300"
-          >
-            <span aria-hidden="true">
-              <Icon name={showSecret ? "eyeOff" : "eye"} className="w-4 h-4" />
-            </span>
-          </button>
-        </div>
-        <p className="text-xs text-paper-600 dark:text-paper-400">
-          {settings.has_overdue_webhook_secret
+      <SecretField
+        id="overdue-webhook-secret"
+        label={t("settings.overdueSecret")}
+        placeholder={t("settings.overdueSecretPlaceholder")}
+        showLabel={t("settings.overdueSecretShow")}
+        hideLabel={t("settings.overdueSecretHide")}
+        status={
+          settings.has_overdue_webhook_secret
             ? t("settings.overdueSecretSet", {
                 preview: settings.overdue_webhook_secret_preview ?? "",
               })
-            : t("settings.overdueSecretMissing")}
-        </p>
-        <div className="flex gap-2 pt-1">
-          <button
-            type="button"
-            disabled={isSaving || secret.trim() === ""}
-            onClick={() => {
-              onSave({ overdue_webhook_secret: secret.trim() });
-              setSecret("");
-            }}
-            className="px-3 py-1.5 rounded-lg bg-accent-fill text-on-accent text-xs font-medium hover:bg-accent-fill-hover disabled:opacity-40 transition-colors"
-          >
-            {isSaving ? t("common.saving") : t("settings.overdueSecretSave")}
-          </button>
-          {settings.has_overdue_webhook_secret && (
-            <button
-              type="button"
-              disabled={isSaving}
-              // An empty string clears it; `undefined` would mean "leave
-              // alone", which is the opposite.
-              onClick={() => onSave({ overdue_webhook_secret: "" })}
-              className="px-3 py-1.5 rounded-lg border border-paper-200 text-xs font-medium text-danger-600 hover:bg-danger-100 disabled:opacity-40 transition-colors dark:border-paper-700 dark:text-danger-300"
-            >
-              {t("settings.overdueSecretClear")}
-            </button>
-          )}
-        </div>
-      </div>
+            : t("settings.overdueSecretMissing")
+        }
+        saveLabel={t("settings.overdueSecretSave")}
+        clearLabel={t("settings.overdueSecretClear")}
+        hasStored={settings.has_overdue_webhook_secret === true}
+        isSaving={isSaving}
+        onSave={(value) => onSave({ overdue_webhook_secret: value })}
+        // An empty string clears it; `undefined` would mean "leave alone",
+        // which is the opposite.
+        onClear={() => onSave({ overdue_webhook_secret: "" })}
+      />
 
-      <div className="space-y-1.5">
-        <label
-          htmlFor="overdue-reminder-days"
-          className="block text-xs font-medium text-paper-600 dark:text-paper-300"
-        >
-          {t("settings.overdueDays")}
-        </label>
-        {/* A draft with its own save, not a write per keystroke. Bound
-            straight to `settings` it would be a controlled field whose value
-            only changes after a round trip, so clearing it to type 14 snapped
-            back to the stored number and saved 714. It would also have saved
-            the 1 on the way to 14. */}
-        <div className="flex gap-2 items-center">
-          <input
-            id="overdue-reminder-days"
-            type="number"
-            min={1}
-            max={365}
-            value={days}
-            onChange={(event) => setDays(event.target.value)}
-            className="w-24 px-3 py-2 rounded-xl border border-paper-200 text-sm dark:border-paper-700"
-          />
-          {daysDirty && parsedDays !== null && (
-            <button
-              type="button"
-              disabled={isSaving}
-              onClick={() => onSave({ overdue_reminder_days: parsedDays })}
-              className="px-3 py-1.5 rounded-lg bg-accent-fill text-on-accent text-xs font-medium hover:bg-accent-fill-hover disabled:opacity-40 transition-colors"
-            >
-              {isSaving ? t("common.saving") : t("settings.overdueDaysSave")}
-            </button>
-          )}
-        </div>
-        <p className="text-xs text-paper-600 dark:text-paper-400">
-          {t("settings.overdueDaysHint")}
-        </p>
-      </div>
+      <ReminderDaysField
+        stored={settings.overdue_reminder_days}
+        isSaving={isSaving}
+        onSave={onSave}
+      />
 
       <div className="space-y-1.5 pt-1">
         <button
@@ -264,54 +173,7 @@ export default function OverdueSection({
             ? t("settings.overdueSending")
             : t("settings.overdueSendNow")}
         </button>
-        {/* The count, not "done". "Nothing is overdue" and "the receiver
-            refused it" both look like silence otherwise. */}
-        {sendResult && (
-          <p
-            role="status"
-            className="text-xs text-paper-600 dark:text-paper-400"
-          >
-            {sendResult.sent
-              ? t("settings.overdueSent", { count: sendResult.loans ?? 0 })
-              : /* `reason` is null exactly when `sent` is true, so the
-                   fallback is unreachable in practice. It is here because the
-                   type allows the pair and a screen that renders nothing at
-                   all is worse than one that is vague. */
-                t(
-                  sendResult.reason
-                    ? REASON_LABELS[sendResult.reason]
-                    : "settings.overdueNothingSent",
-                )}
-            {(sendResult.skipped_private ?? 0) > 0 &&
-              ` ${t("settings.overdueSkippedPrivate", {
-                count: sendResult.skipped_private ?? 0,
-              })}`}
-          </p>
-        )}
-        {/* One line per channel that was tried. `sent` at the top is true when
-            any channel delivered, and the loans are stamped on that, so a run
-            that reached the chat and not the webhook would otherwise read as a
-            clean send with the failure nowhere on the screen. */}
-        {sendResult && (sendResult.senders?.length ?? 0) > 0 && (
-          <ul className="text-xs text-paper-600 dark:text-paper-400 space-y-0.5">
-            {(sendResult.senders ?? []).map((entry: SenderOutcome) => (
-              <li key={entry.sender}>
-                {entry.sent
-                  ? t("settings.overdueSenderSent", {
-                      sender: t(SENDER_LABELS[entry.sender]),
-                    })
-                  : t("settings.overdueSenderFailed", {
-                      sender: t(SENDER_LABELS[entry.sender]),
-                      detail: t(
-                        entry.reason
-                          ? SENDER_ROW_REASONS[entry.reason]
-                          : "settings.overdueRowNothingSent",
-                      ),
-                    })}
-              </li>
-            ))}
-          </ul>
-        )}
+        {sendResult && <SendReport result={sendResult} />}
         {sendError != null && (
           <ErrorState
             error={sendError}
@@ -320,5 +182,127 @@ export default function OverdueSection({
         )}
       </div>
     </SettingsSection>
+  );
+}
+
+interface ReminderDaysFieldProps {
+  stored: number | undefined;
+  isSaving: boolean;
+  onSave: (patch: SettingsUpdate) => void;
+}
+
+/** How long to wait before chasing the same loan again. */
+function ReminderDaysField({
+  stored,
+  isSaving,
+  onSave,
+}: ReminderDaysFieldProps) {
+  const { t } = useTranslation();
+  const [days, setDays] = useState(String(stored ?? 7));
+
+  const daysDirty = days !== String(stored ?? 7);
+  // The server refuses anything outside these bounds with a 422, so the button
+  // is withheld rather than offering a save that can only fail. Zero in
+  // particular would mean resending the same list on every tick.
+  const parsedDays =
+    /^\d+$/.test(days.trim()) && Number(days) >= 1 && Number(days) <= 365
+      ? Number(days)
+      : null;
+
+  return (
+    <div className="space-y-1.5">
+      <label
+        htmlFor="overdue-reminder-days"
+        className="block text-xs font-medium text-paper-600 dark:text-paper-300"
+      >
+        {t("settings.overdueDays")}
+      </label>
+      {/* A draft with its own save, not a write per keystroke. Bound
+          straight to `settings` it would be a controlled field whose value
+          only changes after a round trip, so clearing it to type 14 snapped
+          back to the stored number and saved 714. It would also have saved
+          the 1 on the way to 14. */}
+      <div className="flex gap-2 items-center">
+        <input
+          id="overdue-reminder-days"
+          type="number"
+          min={1}
+          max={365}
+          value={days}
+          onChange={(event) => setDays(event.target.value)}
+          className="w-24 px-3 py-2 rounded-xl border border-paper-200 text-sm dark:border-paper-700"
+        />
+        {daysDirty && parsedDays !== null && (
+          <button
+            type="button"
+            disabled={isSaving}
+            onClick={() => onSave({ overdue_reminder_days: parsedDays })}
+            className="px-3 py-1.5 rounded-lg bg-accent-fill text-on-accent text-xs font-medium hover:bg-accent-fill-hover disabled:opacity-40 transition-colors"
+          >
+            {isSaving ? t("common.saving") : t("settings.overdueDaysSave")}
+          </button>
+        )}
+      </div>
+      <p className="text-xs text-paper-600 dark:text-paper-400">
+        {t("settings.overdueDaysHint")}
+      </p>
+    </div>
+  );
+}
+
+/**
+ * What one run did: the whole run in a sentence, then one line per channel.
+ *
+ * A fragment, so its lines sit in the caller's spacing beside the send button.
+ */
+function SendReport({ result }: { result: OverdueNotifyResult }) {
+  const { t } = useTranslation();
+
+  return (
+    <>
+      {/* The count, not "done". "Nothing is overdue" and "the receiver
+            refused it" both look like silence otherwise. */}
+      <p role="status" className="text-xs text-paper-600 dark:text-paper-400">
+        {result.sent
+          ? t("settings.overdueSent", { count: result.loans ?? 0 })
+          : /* `reason` is null exactly when `sent` is true, so the
+                   fallback is unreachable in practice. It is here because the
+                   type allows the pair and a screen that renders nothing at
+                   all is worse than one that is vague. */
+            t(
+              result.reason
+                ? REASON_LABELS[result.reason]
+                : "settings.overdueNothingSent",
+            )}
+        {(result.skipped_private ?? 0) > 0 &&
+          ` ${t("settings.overdueSkippedPrivate", {
+            count: result.skipped_private ?? 0,
+          })}`}
+      </p>
+      {/* One line per channel that was tried. `sent` at the top is true when
+            any channel delivered, and the loans are stamped on that, so a run
+            that reached the chat and not the webhook would otherwise read as a
+            clean send with the failure nowhere on the screen. */}
+      {(result.senders?.length ?? 0) > 0 && (
+        <ul className="text-xs text-paper-600 dark:text-paper-400 space-y-0.5">
+          {(result.senders ?? []).map((entry: SenderOutcome) => (
+            <li key={entry.sender}>
+              {entry.sent
+                ? t("settings.overdueSenderSent", {
+                    sender: t(SENDER_LABELS[entry.sender]),
+                  })
+                : t("settings.overdueSenderFailed", {
+                    sender: t(SENDER_LABELS[entry.sender]),
+                    detail: t(
+                      entry.reason
+                        ? SENDER_ROW_REASONS[entry.reason]
+                        : "settings.overdueRowNothingSent",
+                    ),
+                  })}
+            </li>
+          ))}
+        </ul>
+      )}
+    </>
   );
 }

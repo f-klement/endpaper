@@ -26,7 +26,9 @@ from config import validate_auth_config
 @pytest.fixture
 def ldap_configured(monkeypatch):
     monkeypatch.setenv("AUTH_MODE", "ldap")
-    monkeypatch.setenv("LDAP_URL", "ldap://directory.invalid")
+    # ldaps, because a plain URL is refused at startup on its own account, and
+    # these arms are about the bind credentials.
+    monkeypatch.setenv("LDAP_URL", "ldaps://directory.invalid")
     monkeypatch.setenv("LDAP_USER_BASE_DN", "ou=people,dc=example,dc=org")
 
 

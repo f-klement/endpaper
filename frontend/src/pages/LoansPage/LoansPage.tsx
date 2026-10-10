@@ -96,7 +96,7 @@ export default function LoansPage() {
             <LoanRow
               key={loan.id}
               loan={loan}
-              isReturning={loans.returningId === loan.id}
+              isReturning={loans.returningIds.has(loan.id)}
               onMarkReturned={loans.markReturned}
             />
           ))}

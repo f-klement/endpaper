@@ -358,6 +358,55 @@ describe("writing the library", () => {
   });
 });
 
+describe("cancelling the card", () => {
+  it("forgets the library it read", async () => {
+    const { result } = importHook();
+    await act(async () => result.current.choose(await libraryFile(2)));
+    await waitFor(() => expect(result.current.preview).not.toBeNull());
+
+    act(() => result.current.reset());
+
+    expect(result.current.preview).toBeNull();
+  });
+
+  it("leaves nothing for a later confirm to write", async () => {
+    // The books are held apart from the preview, so clearing only the screen
+    // would leave a confirm able to write a library nobody is looking at.
+    const { result } = importHook();
+    await act(async () => result.current.choose(await libraryFile(2)));
+    await waitFor(() => expect(result.current.preview).not.toBeNull());
+    act(() => result.current.reset());
+
+    await act(async () => result.current.confirm());
+
+    expect(posted).toHaveLength(0);
+  });
+
+  it("clears the last import's outcome", async () => {
+    const { result } = importHook();
+    await act(async () => result.current.choose(await libraryFile(1)));
+    await waitFor(() => expect(result.current.preview).not.toBeNull());
+    await act(async () => result.current.confirm());
+    await waitFor(() => expect(result.current.result).not.toBeNull());
+
+    act(() => result.current.reset());
+
+    expect(result.current.result).toBeNull();
+  });
+
+  it("clears the refusal of a file that was not a library", async () => {
+    const { result } = importHook();
+    await act(async () =>
+      result.current.choose(new File(["not a database"], "metadata.db")),
+    );
+    await waitFor(() => expect(result.current.failure).not.toBeNull());
+
+    act(() => result.current.reset());
+
+    expect(result.current.failure).toBeNull();
+  });
+});
+
 /**
  * A Kobo device holding `count` books, plus one row nobody owns.
  *

@@ -71,11 +71,20 @@ MAX_RECORDS: Final = 20_000
 #: `tracemalloc`, under this times the bytes uploaded plus
 #: `xml_parse.ALLOCATION_FLOOR`, which says what the bound is and what holds it.
 #:
-#: Measured on CPython 3.14.0: a record of empty `datafield` elements back to
-#: back, the costliest shape per byte that is still a file to read, peaked at
-#: 25.7 times its size; ordinary records near 12. A nest past
+#: Measured by `tracemalloc` on the suite pod, CPython 3.14.8 with expat
+#: 2.8.5, about 1 MiB of each shape repeated. The costliest found that the
+#: bounds in `xml_parse` admit, `'<e a="\u0100"/>\u0100b<x/>\u0100'`, an
+#: element carrying an attribute at `xml_parse.BYTES_PER_ATTRIBUTED` and the
+#: rest a bare element and tails, peaked at 29.6 times its size; empty
+#: `datafield` elements, which this reader turns into entries, at 27.4; and a
+#: page of `marc.write`'s densest records at 9.2. A nest past
 #: `xml_parse.MAX_DEPTH` is refused within one chunk, and what one costs
 #: unrefused is said there.
+#:
+#: **A value or tail of one character outside Latin 1 is the costliest filler
+#: found**: CPython keeps one string for each Latin 1 character, so a tail of
+#: `b` costs the tree nothing, while U+0100 costs a string of its own for two
+#: bytes of document.
 ALLOCATION_FACTOR: Final = 32
 
 #: How many Books the export holds at once.

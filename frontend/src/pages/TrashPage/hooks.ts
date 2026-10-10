@@ -7,15 +7,20 @@
  */
 
 import {
+  getPurgeBookMutationKey,
+  getRestoreBookMutationKey,
   useEmptyTrash,
   useListTrash,
   usePurgeBook,
   useRestoreBook,
+  type PurgeBookMutationVariables,
+  type RestoreBookMutationVariables,
 } from "../../api/generated/endpoints/books/books";
 import type { BookOut } from "../../api/generated/model";
 import { useInvalidate } from "../../api/invalidate";
 import { useToast } from "../../app/toast";
 import { useTranslation } from "../../i18n";
+import { usePendingRows, useWriteFailure } from "../hooks";
 
 /** Rows per request. The trash is small and read top-down. */
 export const PAGE_SIZE = 50;
@@ -30,8 +35,11 @@ export interface UseTrashResult {
   restore: (bookId: number) => void;
   purge: (bookId: number) => void;
   empty: () => void;
-  /** Which book is mid-request, so the row can show it. */
-  busyId: number | null;
+  /**
+   * Every book with a put back or a delete still out, so each such row shows
+   * it and refuses a second press until that write answers.
+   */
+  busyIds: ReadonlySet<number>;
   isEmptying: boolean;
 }
 
@@ -47,15 +55,22 @@ export function useTrash(): UseTrashResult {
   // the accounts or the settings: emptying the trash cannot touch either.
   const refresh = () => invalidate.catalogue();
 
+  // One slot each, so pressing one verb leaves the other's failure on screen,
+  // as reading each hook's own `error` did.
+  const restoreFailure = useWriteFailure();
+  const purgeFailure = useWriteFailure();
   const restore = useRestoreBook({
     mutation: {
+      ...restoreFailure.report,
       onSuccess: () => {
         refresh();
         toast.show({ message: t("trash.restored") });
       },
     },
   });
-  const purge = usePurgeBook({ mutation: { onSuccess: refresh } });
+  const purge = usePurgeBook({
+    mutation: { ...purgeFailure.report, onSuccess: refresh },
+  });
   const empty = useEmptyTrash({
     mutation: {
       onSuccess: (result) => {
@@ -64,22 +79,22 @@ export function useTrash(): UseTrashResult {
       },
     },
   });
+  const busyIds = usePendingRows<
+    RestoreBookMutationVariables | PurgeBookMutationVariables
+  >("bookId", getRestoreBookMutationKey(), getPurgeBookMutationKey());
 
   return {
     books: trash.data?.items ?? [],
     total: trash.data?.total ?? 0,
     isLoading: trash.isPending,
-    error: trash.error ?? restore.error ?? purge.error ?? empty.error,
+    error:
+      trash.error ?? restoreFailure.error ?? purgeFailure.error ?? empty.error,
     refetch: () => void trash.refetch(),
 
     restore: (bookId) => restore.mutate({ bookId }),
     purge: (bookId) => purge.mutate({ bookId }),
     empty: () => empty.mutate(),
-    busyId: restore.isPending
-      ? (restore.variables?.bookId ?? null)
-      : purge.isPending
-        ? (purge.variables?.bookId ?? null)
-        : null,
+    busyIds,
     isEmptying: empty.isPending,
   };
 }

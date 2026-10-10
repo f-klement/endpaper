@@ -13,11 +13,15 @@
 
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import fc from "fast-check";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AuthMode } from "../../../../src/api/generated/model";
 import DataSettingsPage from "../../../../src/pages/SettingsPage/DataSettingsPage";
 import { mockApi, renderWithProviders, type MockApi } from "../../../utils";
+import { answersOf } from "../../../lib/schemaArbitrary";
+import { holds, PROFILE, PROPERTY, witness } from "../../../property";
+import { forget, overSchema } from "../../../schemaPage";
 
 let api: MockApi;
 
@@ -227,5 +231,48 @@ describe("DataSettingsPage", () => {
         screen.queryByText("Password reset requests"),
       ).not.toBeInTheDocument();
     });
+  });
+});
+
+/** How many entries an answer holds, or -1 for one that is not a list. */
+const entries = (body: unknown) => (Array.isArray(body) ? body.length : -1);
+
+describe("DataSettingsPage over any answer the schema permits", () => {
+  // What the page's hooks are handed is drawn from `openapi.json`, per
+  // request. `tests/schemaPage.tsx` holds what the page may not do. Every
+  // request this page makes for a signed in account declares a 401 beside its
+  // 200, and an admin only one a 403, so both are drawn as well.
+  it("is drawn no test account and one", async () => {
+    await witness(answersOf("list_test_accounts"), {
+      "is no test account": (answer) => entries(answer.body) === 0,
+      "is a test account": (answer) => entries(answer.body) > 0,
+    });
+  });
+
+  it("neither throws nor shows a value nobody can name", PROPERTY, async () => {
+    expect(
+      await holds(
+        fc.record({
+          mode: fc.constantFrom(...Object.values(AuthMode)),
+          answers: fc.gen(),
+        }),
+        async ({ mode, answers }) => {
+          try {
+            const rendered = await overSchema(
+              <DataSettingsPage mode={mode} onSignIn={() => {}} />,
+              answers,
+            );
+            expect(rendered.problems).toEqual([]);
+            return rendered;
+          } finally {
+            forget();
+          }
+        },
+        {
+          "showed a value an answer carried": (_, rendered) =>
+            rendered.echoed > 0,
+        },
+      ),
+    ).toBe(PROFILE.runs);
   });
 });

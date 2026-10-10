@@ -30,6 +30,7 @@ import type {
   MyOverdueOut,
   OverdueNotifyResult,
   PageLoanOut,
+  Refusal,
 } from "../../model";
 
 import { customFetch } from "../../../mutator.ts";
@@ -89,7 +90,7 @@ export const getListLoansQueryKey = (params?: ListLoansParams) => {
 
 export const getListLoansQueryOptions = <
   TData = Awaited<ReturnType<typeof listLoans>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   params?: ListLoansParams,
   options?: {
@@ -117,11 +118,11 @@ export const getListLoansQueryOptions = <
 export type ListLoansQueryResult = NonNullable<
   Awaited<ReturnType<typeof listLoans>>
 >;
-export type ListLoansQueryError = HTTPValidationError;
+export type ListLoansQueryError = Refusal | HTTPValidationError;
 
 export function useListLoans<
   TData = Awaited<ReturnType<typeof listLoans>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   params: undefined | ListLoansParams,
   options: {
@@ -144,7 +145,7 @@ export function useListLoans<
 };
 export function useListLoans<
   TData = Awaited<ReturnType<typeof listLoans>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   params?: ListLoansParams,
   options?: {
@@ -167,7 +168,7 @@ export function useListLoans<
 };
 export function useListLoans<
   TData = Awaited<ReturnType<typeof listLoans>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   params?: ListLoansParams,
   options?: {
@@ -186,7 +187,7 @@ export function useListLoans<
 
 export function useListLoans<
   TData = Awaited<ReturnType<typeof listLoans>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   params?: ListLoansParams,
   options?: {
@@ -272,7 +273,7 @@ export const createLoan = async (
 export const getCreateLoanMutationKey = () => ["createLoan"] as const;
 
 export const getCreateLoanMutationOptions = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -313,13 +314,16 @@ export type CreateLoanMutationResult = NonNullable<
   Awaited<ReturnType<typeof createLoan>>
 >;
 export type CreateLoanMutationBody = LoanCreate;
-export type CreateLoanMutationError = HTTPValidationError;
+export type CreateLoanMutationError = Refusal | HTTPValidationError;
 export type CreateLoanMutationVariables = { data: LoanCreate };
 
 /**
  * @summary Create Loan
  */
-export const useCreateLoan = <TError = HTTPValidationError, TContext = unknown>(
+export const useCreateLoan = <
+  TError = Refusal | HTTPValidationError,
+  TContext = unknown,
+>(
   options?: {
     mutation?: UseMutationOptions<
       Awaited<ReturnType<typeof createLoan>>,
@@ -408,7 +412,7 @@ export const getListOverdueQueryKey = (params?: ListOverdueParams) => {
 
 export const getListOverdueQueryOptions = <
   TData = Awaited<ReturnType<typeof listOverdue>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   params?: ListOverdueParams,
   options?: {
@@ -436,11 +440,11 @@ export const getListOverdueQueryOptions = <
 export type ListOverdueQueryResult = NonNullable<
   Awaited<ReturnType<typeof listOverdue>>
 >;
-export type ListOverdueQueryError = HTTPValidationError;
+export type ListOverdueQueryError = Refusal | HTTPValidationError;
 
 export function useListOverdue<
   TData = Awaited<ReturnType<typeof listOverdue>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   params: undefined | ListOverdueParams,
   options: {
@@ -463,7 +467,7 @@ export function useListOverdue<
 };
 export function useListOverdue<
   TData = Awaited<ReturnType<typeof listOverdue>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   params?: ListOverdueParams,
   options?: {
@@ -486,7 +490,7 @@ export function useListOverdue<
 };
 export function useListOverdue<
   TData = Awaited<ReturnType<typeof listOverdue>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   params?: ListOverdueParams,
   options?: {
@@ -505,7 +509,7 @@ export function useListOverdue<
 
 export function useListOverdue<
   TData = Awaited<ReturnType<typeof listOverdue>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   params?: ListOverdueParams,
   options?: {
@@ -578,7 +582,7 @@ export const getMyOverdueQueryKey = () => {
 
 export const getMyOverdueQueryOptions = <
   TData = Awaited<ReturnType<typeof myOverdue>>,
-  TError = unknown,
+  TError = Refusal,
 >(options?: {
   query?: Partial<
     UseQueryOptions<Awaited<ReturnType<typeof myOverdue>>, TError, TData>
@@ -603,11 +607,11 @@ export const getMyOverdueQueryOptions = <
 export type MyOverdueQueryResult = NonNullable<
   Awaited<ReturnType<typeof myOverdue>>
 >;
-export type MyOverdueQueryError = unknown;
+export type MyOverdueQueryError = Refusal;
 
 export function useMyOverdue<
   TData = Awaited<ReturnType<typeof myOverdue>>,
-  TError = unknown,
+  TError = Refusal,
 >(
   options: {
     query: Partial<
@@ -629,7 +633,7 @@ export function useMyOverdue<
 };
 export function useMyOverdue<
   TData = Awaited<ReturnType<typeof myOverdue>>,
-  TError = unknown,
+  TError = Refusal,
 >(
   options?: {
     query?: Partial<
@@ -651,7 +655,7 @@ export function useMyOverdue<
 };
 export function useMyOverdue<
   TData = Awaited<ReturnType<typeof myOverdue>>,
-  TError = unknown,
+  TError = Refusal,
 >(
   options?: {
     query?: Partial<
@@ -669,7 +673,7 @@ export function useMyOverdue<
 
 export function useMyOverdue<
   TData = Awaited<ReturnType<typeof myOverdue>>,
-  TError = unknown,
+  TError = Refusal,
 >(
   options?: {
     query?: Partial<
@@ -725,7 +729,7 @@ export const notifyOverdue = async (
 export const getNotifyOverdueMutationKey = () => ["notifyOverdue"] as const;
 
 export const getNotifyOverdueMutationOptions = <
-  TError = unknown,
+  TError = Refusal,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -764,12 +768,12 @@ export type NotifyOverdueMutationResult = NonNullable<
   Awaited<ReturnType<typeof notifyOverdue>>
 >;
 
-export type NotifyOverdueMutationError = unknown;
+export type NotifyOverdueMutationError = Refusal;
 
 /**
  * @summary Notify Overdue
  */
-export const useNotifyOverdue = <TError = unknown, TContext = unknown>(
+export const useNotifyOverdue = <TError = Refusal, TContext = unknown>(
   options?: {
     mutation?: UseMutationOptions<
       Awaited<ReturnType<typeof notifyOverdue>>,
@@ -810,7 +814,7 @@ export const returnLoan = async (
 export const getReturnLoanMutationKey = () => ["returnLoan"] as const;
 
 export const getReturnLoanMutationOptions = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -851,13 +855,16 @@ export type ReturnLoanMutationResult = NonNullable<
   Awaited<ReturnType<typeof returnLoan>>
 >;
 
-export type ReturnLoanMutationError = HTTPValidationError;
+export type ReturnLoanMutationError = Refusal | HTTPValidationError;
 export type ReturnLoanMutationVariables = { loanId: number };
 
 /**
  * @summary Return Loan
  */
-export const useReturnLoan = <TError = HTTPValidationError, TContext = unknown>(
+export const useReturnLoan = <
+  TError = Refusal | HTTPValidationError,
+  TContext = unknown,
+>(
   options?: {
     mutation?: UseMutationOptions<
       Awaited<ReturnType<typeof returnLoan>>,

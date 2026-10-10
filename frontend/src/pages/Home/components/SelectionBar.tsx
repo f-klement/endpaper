@@ -60,6 +60,9 @@ export default function SelectionBar({
   // case and deserves the primary buttons; deleting forty books is not, and
   // should not sit one mis-tap away from them.
   const [showMore, setShowMore] = useState(false);
+  // Every action on the selection is off while there is nothing to act on or
+  // a request is already in flight.
+  const cannotAct = selectedCount === 0 || isApplying;
 
   return (
     <div className="sticky bottom-0 z-40 -mx-4 px-4 py-3 bg-paper-0/95 backdrop-blur-sm border-t border-paper-200 dark:bg-paper-900/95 dark:border-paper-700">
@@ -97,7 +100,7 @@ export default function SelectionBar({
         <div className="flex gap-2">
           <button
             type="button"
-            disabled={selectedCount === 0 || isApplying}
+            disabled={cannotAct}
             onClick={() => onApply(OwnershipStatus.owned)}
             className="flex-1 py-2.5 rounded-xl bg-accent-fill text-on-accent text-sm font-medium hover:bg-accent-fill-hover disabled:opacity-40 transition-colors"
           >
@@ -105,7 +108,7 @@ export default function SelectionBar({
           </button>
           <button
             type="button"
-            disabled={selectedCount === 0 || isApplying}
+            disabled={cannotAct}
             onClick={() => onApply(OwnershipStatus.not_owned)}
             className="px-4 py-2.5 rounded-xl border border-paper-200 text-sm font-medium text-paper-600 hover:bg-paper-50 disabled:opacity-40 transition-colors dark:border-paper-700 dark:text-paper-300 dark:hover:bg-paper-800"
           >
@@ -136,7 +139,7 @@ export default function SelectionBar({
               <select
                 aria-label={t("bulk.setStatus")}
                 defaultValue=""
-                disabled={selectedCount === 0 || isApplying}
+                disabled={cannotAct}
                 onChange={(event) => {
                   if (event.target.value) {
                     onRun(BulkAction.set_status, event.target.value);
@@ -156,7 +159,7 @@ export default function SelectionBar({
               <select
                 aria-label={t("bulk.addTag")}
                 defaultValue=""
-                disabled={selectedCount === 0 || isApplying}
+                disabled={cannotAct}
                 onChange={(event) => {
                   if (event.target.value) {
                     onRun(BulkAction.add_tag, Number(event.target.value));
@@ -181,7 +184,7 @@ export default function SelectionBar({
               <select
                 aria-label={t("bulk.setCollection")}
                 defaultValue=""
-                disabled={selectedCount === 0 || isApplying}
+                disabled={cannotAct}
                 onChange={(event) => {
                   if (event.target.value) {
                     // The empty string is the placeholder, so clearing needs a
@@ -210,7 +213,7 @@ export default function SelectionBar({
             <div className="flex gap-2">
               <button
                 type="button"
-                disabled={selectedCount === 0 || isApplying}
+                disabled={cannotAct}
                 onClick={() => {
                   const place = prompt(t("bulk.locationPrompt"));
                   // null is cancel; an empty string is a deliberate clear, and
@@ -223,7 +226,7 @@ export default function SelectionBar({
               </button>
               <button
                 type="button"
-                disabled={selectedCount === 0 || isApplying}
+                disabled={cannotAct}
                 onClick={() => {
                   if (
                     confirm(t("bulk.deleteConfirm", { count: selectedCount }))

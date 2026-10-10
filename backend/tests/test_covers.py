@@ -731,8 +731,8 @@ class _AsyncTrickle(httpx.AsyncByteStream):
     sender wants. That is the shape a per operation timeout cannot see, and
     the only thing that stops it is the hop's wall clock bound.
 
-    **`asyncio.sleep`, not `time.sleep`.** Both cover walks are coroutines, and
-    a blocking sleep inside one holds the event loop, so the `asyncio.timeout`
+    **`asyncio.sleep`, not `time.sleep`.** The cover walk is a coroutine, and
+    a blocking sleep inside it holds the event loop, so the `asyncio.timeout`
     under test never gets to fire and the guard passes on a module that has
     none.
 
@@ -772,6 +772,16 @@ async def _slow_redirect_to_the_dnb(request):
     """
     await asyncio.sleep(0.8)
     return httpx.Response(302, headers={"location": DNB + "?isbn=x"})
+
+
+async def _headers_after_three_seconds(request):
+    """An image whose headers take three seconds, longer than any budget here.
+
+    Every other stall in this file sends its headers inside the budget. Finite
+    for `_AsyncTrickle`'s reason.
+    """
+    await asyncio.sleep(3.0)
+    return image()
 
 
 class _NeverAnswers(httpx.AsyncByteStream):
@@ -1243,6 +1253,25 @@ class TestTheInteractiveBudget:
         assert verdict is None
         assert spent < 1.4
 
+    def test_a_check_of_a_service_slow_to_send_its_headers_stops_at_the_budget(self):
+        """The hop's bound covers the wait for headers, not only the body.
+
+        Every other stall in this class sends its headers inside the budget, so
+        this is the arm that reds if `_walk`'s `asyncio.timeout` moves inside
+        `client.stream`, where the request and its headers would be bounded by
+        the client's own `timeout=` alone.
+        """
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(url__startswith=AT_OPEN_LIBRARY).mock(
+                side_effect=_headers_after_three_seconds
+            )
+            started = monotonic()
+            verdict = _await(_check_one(covers.open_library_url(ENGLISH), budget=1.0))
+            spent = monotonic() - started
+
+        assert verdict is None
+        assert spent < 1.4
+
     def test_a_hop_is_bounded_even_when_no_budget_was_given(self, monkeypatch):
         """The backfill passes no deadline, and used to get no bound with it.
 
@@ -1270,7 +1299,7 @@ class TestTheInteractiveBudget:
 
         **Every other guard here drives one hop, so the recomputation was
         stated and nothing could fail on it**: hoisting `_hop_seconds(deadline)`
-        out of both `for` loops and reusing one value left the suite green,
+        out of the walk's `for` loop and reusing one value left the suite green,
         because no test in this file registers a 302 under a clock. What the
         hoist costs is the walk ceiling: each hop gets the **whole** budget
         rather than what is left, so two hops are two budgets.
@@ -1582,7 +1611,7 @@ class TestFetchesAreRefusedBeforeTheyHappen:
 
         assert hops.call_count == covers.MAX_REDIRECTS + 1
 
-    def test_a_redirect_with_an_empty_location_is_followed_by_neither_walk(self):
+    def test_a_redirect_with_an_empty_location_is_followed_by_neither_caller(self):
         """A `Location` that is present and empty: a redirect with nowhere to go,
         which the check answers as unknown and the download as nothing."""
         with respx.mock(assert_all_called=False) as mock:
@@ -1698,8 +1727,8 @@ class TestWhereAListedHostAnswers:
 
 class TestAHostIdnaCannotDecode:
     """`idna.IDNAError` is a `UnicodeError` and not an `httpx.HTTPError`, so
-    both walks' handlers missed it. Measured on this tree: `covers.resolve`
-    raised `idna.core.InvalidCodepoint` into `metadata.lookup`, which catches
+    the walk's transport handler does not catch it. Measured on this tree:
+    `covers.resolve` raised `idna.core.InvalidCodepoint` into `metadata.lookup`, which catches
     `httpx.HTTPError` and `ElementTree.ParseError` and would have answered 500
     on a member's lookup. `fetch._walk_hops` records the same trap.
 

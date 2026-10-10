@@ -944,6 +944,58 @@ the container, at `DATABASE_SSL_ROOT_CERT`, and that file **replaces** the image
 store rather than adding to it, which is libpq's behaviour for `sslrootcert` and the right
 one for a certificate you issued yourself.
 
+### The directory connection verifies when it is encrypted, and refuses to start when it is not
+
+Under `AUTH_MODE=ldap` every sign in sends the member's password to the directory, and the
+search before it may send the service account's. So this connection is held to the SMTP
+standard above rather than the database's default.
+
+**Over TLS the certificate and the host name are always checked**, whether TLS comes from
+an `ldaps://` URL or from `LDAP_START_TLS=true`, and nothing turns that off. The check is
+the standard library's default context, run in the handshake, so a directory presenting a
+certificate it cannot vouch for receives no bind at all. ldap3, the client underneath,
+checks neither by default. A self signed or private CA goes in
+`LDAP_CA_FILE`, which **replaces** the image's trust store rather than adding to it, as
+`DATABASE_SSL_ROOT_CERT` does. A CA file that is missing or holds no certificate fails
+startup naming the setting, and so does one beside a connection with no TLS, where it would
+never be read.
+
+**Two certificates a looser client accepted are refused.** One whose subjectAltName lists
+DNS names but not the host in `LDAP_URL`, such as a certificate for a public name dialled by
+a cluster internal one: the standard library reads the subject's common name only when the
+subjectAltName lists no DNS name, so the common name cannot rescue the match. And one that
+fails Python's strict X.509 checks, on by default since 3.13: a home made CA whose
+certificate carries no key usage extension or no subject key identifier, or a server
+certificate with no authority key identifier. Both show up in the log as a failed
+connection to the directory, and the remedy is to reissue the certificate, not to relax the
+check.
+
+**StartTLS fails closed.** When the directory declines the upgrade, or the client reports
+that it did not happen, the connection is dropped before the bind, so no password is sent in
+the clear on the connection that asked for encryption. What does go out first, before the
+StartTLS request, is the client's anonymous read of the directory's root entry and schema,
+which carries no credential.
+
+**Without TLS the app refuses to start unless `LDAP_ALLOW_CLEARTEXT=true`.** An anonymous
+search is no exception: it sends no service password, but the member's bind after it sends
+theirs. Whether a URL is encrypted is the LDAP client's own reading of it, so a host with no
+scheme is cleartext too. The setting exists for a directory on a network the operator
+trusts, and it is named so that a deployment running in the clear has said so.
+
+| `LDAP_URL` | `LDAP_START_TLS` | starts | certificate and host name |
+|---|---|---|---|
+| `ldaps://` | either | yes | checked |
+| `ldap://` | `true` | yes | checked; no upgrade means no bind |
+| `ldap://` | `false` | only with `LDAP_ALLOW_CLEARTEXT=true` | n/a, cleartext |
+
+**A referral is not followed.** ldap3 follows one by default and binds to the host it names
+with the service account's credentials, over a connection whose TLS it builds itself: in the
+clear when the referral names a plain `ldap://` host from an `ldaps://` connection, and with
+no certificate check at all after StartTLS. None of the checks above would reach it. So a
+search answered with a referral finds no member, the login fails, and the log names the
+referral. A directory whose user base lives on another server is reached by pointing
+`LDAP_URL` at that server.
+
 ### The webhook URL is an admin-to-admin capability, and a blocklist would not fix it
 
 An admin can point it at an address inside the cluster, and a request will be made to it
@@ -1223,7 +1275,7 @@ fallback when a download fails. What may be rendered and what this server may co
 different questions with different answers.
 
 **The host rule says nothing about where that host answers, and the address policy is the
-second half.** `covers._client` builds both walks' client with
+second half.** `covers._client` builds the cover walk's client with
 `fetch.pinned_client(fetch.PUBLIC_ADDRESSES)`, which resolves the name once per request,
 refuses every class of address but public, and connects to the literal that passed: a listed
 host whose resolver answers inside this cluster used to be fetched. It is defence in depth

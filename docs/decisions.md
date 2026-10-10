@@ -5086,16 +5086,18 @@ parameters, and `?page_size=abc` is a real, reachable 422 whose `detail` is an a
 declaration would have been right about the rarer case and wrong about the commoner one.
 
 **What the old behaviour refused that the new one accepts: nothing, and one thing is now
-undocumented that was documented wrongly.** No route in this tree declares a `responses`
-entry, so all 117 `HTTPException` constructions across ten statuses are undocumented
-already; these fourteen join them rather than leaving a documented set. Nothing in
+undocumented that was documented wrongly.** The schema declares no 400 on any operation,
+so these fourteen join an undeclared status rather than leaving a documented set; it
+declares a 401, a 403 or a 404 where a route's code builds one, for the reason under
+*The schema declares the 401, 403 and 404 a route's code builds, and no other refusal*.
+Nothing in
 `frontend/src` branches on 422 or 400: the mutator renders `detail` identically for both
 and only 403, 404 and 409 are read off `ApiError.status`. `errors._PRESENTATION` carries
 400 as it carries 422, and all fourteen sites are under `/api` or `/auth`, which
 `errors.is_api_path` answers with JSON unconditionally.
 
 **Declaring 400 on those six operations alone was refused rather than forgotten**: it would
-make six refusals look deliberate and the other 111 accidental, and it is a decision about
+make six refusals look deliberate and every other 400 accidental, and it is a decision about
 the whole error surface rather than about this defect.
 
 `tests/test_errors.py::TestNoRefusalBorrowsAStatusTheSchemaTypesDifferently` is the guard,
@@ -5106,6 +5108,32 @@ given is resolved in the globals of the module that wrote it, so `422` and
 `**kwargs` mapping built by a helper is followed, which is how the three
 `HTTPException(**_lookup_failure(result))` sites are inside the rule rather than in its
 blind spot. 117 constructions on 2026-09-20, all resolved, none borrowing 422.
+
+### The schema declares the 401, 403 and 404 a route's code builds, and no other refusal
+
+A page has to survive these three whatever it asked, and the schema driven property can
+draw only what is declared. `@refuses(...)` goes on the handler or the dependency a raise is
+reached from; `refusals.declare` reads the marks through each route's dependency tree, so
+authentication and the admin gate are derived from the dependencies a route takes.
+
+`tests/test_refusals.py` derives the same set from the code a second way, from the
+`HTTPException` constructions each served route reaches, and holds each route to equality.
+That is why non admin 403s are declared too: a partial rule cannot be checked by equality.
+A second arm holds coverage rather than spelling: every 401, 403 or 404 construction in the
+tree lies inside some route's walk, the API fallback and the SPA mount excepted, so a raise
+that no route reaches in a way the walk follows is named at its line rather than trusted. What
+neither arm sees is a refusal **returned** as a response rather than raised.
+
+`declare` reads each route as written, so a dependency given to
+`include_router(..., dependencies=...)` is refused by the equality (the walk reads the
+served route) with the remedy of moving it onto the included `APIRouter(...)`.
+
+400, 409 and 429 stay undeclared everywhere, for the uniformity reason `export_books`
+gives. 422 is not declared by hand, so FastAPI's `HTTPValidationError` entry stands.
+
+**What the old document refused that this accepts**: nothing at runtime; the schema now
+promises three statuses it already sent. The one consumer visible change is the generated
+client's error types, widened to `Refusal` or `Refusal | HTTPValidationError`.
 
 ### A route that answers with no body documents none
 
@@ -10540,10 +10568,15 @@ other keeps the doubles honest.
 
 **A spy on a storage instance survives `vi.restoreAllMocks()`.** `setItem` is inherited, so
 the spy lands on the instance and the suite wide restore never reaches it; measured, a
-throwing stub reached 33 of 66 tests in a later file. `vi.spyOn(Storage.prototype, ...)` is
-fine, because the prototype is a plain object the restore does reach, and eight files spy that
-way without leaking. `tests/setup.ts` now round trips both storages after every test and fails
-the test that broke one.
+throwing stub reached 33 of 66 tests in a later file. **`vi.spyOn(Storage.prototype, ...)` is
+not the way round it**: happy-dom binds an own copy of each storage method onto the instance
+the first time it is read, so a prototype spy installed after that read is never called and
+its test runs on storage that answered. Measured: a refusal branch two tests claimed to reach
+had 0 hits, and 5 of 5 once the refusal was put on the instance. The shape that holds replaces
+the method on the instance and puts it back in a `finally`; it is `whileStorageRefuses` in
+`frontend/tests/storageRefusal.ts`, and `frontend/tests/houseRules.test.ts` refuses the prototype
+spy. `tests/setup.ts` round trips both
+storages after every test and fails the test that broke one.
 
 **That defect predates `isolate: false`, which only widened it**: it was already leaking
 through the rest of its own file, and per file isolation hid it at the boundary rather than
@@ -21313,11 +21346,12 @@ and the answer is written at the instrument's configuration or at the test, neve
 | file | decision | where it is said |
 |---|---|---|
 | `scripts/dump_openapi.py` | **omitted from measurement.** Every backend run executes it as a child process, through the drift test that compares what it prints with the committed schema byte for byte. Coverage follows the parent, so it read as never run | the backend's coverage configuration, at `omit` |
-| `scripts/postgres_database.py` | **measured.** `_safe_name` is unit tested, since it is the only thing between a name and DDL that takes no bind parameter. The server half runs only against Postgres, through `conftest.py` under a Postgres `DATABASE_URL` and the pipeline's Postgres job, so a SQLite run leaves it unreached by design | the docstring of its test file, and the comment above `omit` |
-| `migrations/` | **measured, not covered further.** Upgrades build the schema every run uses. A downgrade is reached only where a test drives one on purpose; the rest show as unreached rather than vanishing, which is the honest reading | the comment above `omit` |
+| `scripts/postgres_database.py` | **measured.** `_safe_name` is unit tested, since it is the only thing between a name and DDL that takes no bind parameter, and so is `main`'s exit status, which is the pipeline job's verdict. The server half runs only against Postgres, through `conftest.py` under a Postgres `DATABASE_URL` and the pipeline's Postgres job, so a SQLite run leaves it unreached by design | the docstring of its test file, and the comment above `omit` |
+| `migrations/` | **measured, and every downgrade is driven.** Upgrades build the schema every run uses, and `tests/test_schema.py` downgrades the whole chain to an empty database and upgrades it again, so each downgrade runs at least once, against the rows the upgrades seed. What stays unreached is `env.py`'s logging setup for a terminal run | the comment above `omit` |
 
-Within `migrations/`, `env.py`'s offline mode is the SQL emitting upgrade, an operator tool nothing
-in the application calls. The seeded tag keying migration's refusal of two rows claiming one key is a
+Within `migrations/`, `env.py`'s offline mode is refused: rendering this chain as SQL cannot work on
+either engine and used to fail after printing part of the script, so it now raises before the first
+line, and the refusal covers every offline command. The seeded tag keying migration's refusal of two rows claiming one key is a
 data guard rather than a schema step, so it is the one migration arm where a test pins behaviour
 rather than a number, and it has one.
 
@@ -21454,9 +21488,10 @@ builder in `xml_parse.py` that refuses an element deeper than `MAX_DEPTH`, and f
 `PARSE_CHUNK` at a time, because expat goes on reading whatever it was handed after a handler
 raises. The figures behind both constants are at the constants.
 
-**Width is not bounded at runtime.** Flat elements cost about half what nested ones do, and each
-door declares its `ALLOCATION_FACTOR`, which a generated property holds `tracemalloc`'s peak to, so
-a rise reds and the absolute figure is bounded by nothing here. **Allocation, not
+**Width is bounded at runtime only where a shape costs more per byte than any door's factor**, by
+the four bounds in *A parsed XML document is bounded by its namespaces, names, attributes and
+density*. Below them, each door declares its `ALLOCATION_FACTOR`, which a generated property holds
+`tracemalloc`'s peak to, so a rise reds. **Allocation, not
 time**: the property budget entry refuses a wall clock deadline, and a traced peak is deterministic
 where a timing is not. The peak is taken on a second call with logging off, so it is the input's
 cost rather than a first traceback filling a source cache; a door keeping state per input reads as
@@ -21489,3 +21524,122 @@ refuses one reached through a symbolic or hard link, takes a pair only as a whol
 up in the register as it was, with one digit run per row and one pair per row, and a block only in
 plain sentence characters. **Residue**: a second print site beside the printer, which the applier
 refuses at merge rather than in the run.
+
+## `Shelf.matching` is left whole although ruff's C901 counts it over ten
+
+C901 is not in the backend's ruff selection, so nothing enforces that line; the count is what a run
+selecting it reports. The function is one flat `if` per `BookFilters` field, nested one level at
+most, and splitting it would divide the filter list into groups named only as some of the filters.
+And `test_shelf.py::test_every_filter_field_narrows_something` reads the fields off the source
+between `def matching(` and `def _with_read_status(`, so a helper reading a field outside that span
+reddens that guard.
+
+## LDAP TLS is checked in the handshake by the standard library, and referrals are not followed
+
+**The socket is wrapped by `_VerifyingTls` rather than by setting ldap3's `validate`**, because
+ldap3 2.9.1 then turns the handshake's hostname check off and matches afterwards with a copy of the
+matcher Python removed in 3.12, which refuses an IP literal host even when the certificate carries
+the matching IP SAN. The standard library's default context checks the chain and the name before a
+byte of the bind is written.
+
+**Referrals are off** (`auto_referrals=False`). ldap3 builds a referral's connection with its own
+`Tls`, which is cleartext for an `ldap://` referral from an `ldaps://` origin and unchecked after
+StartTLS, and binds there as the service account. Following referrals safely would need a second
+implementation of every check; a directory that needs one is reached by pointing `LDAP_URL` at the
+server holding the base.
+
+**Cleartext is refused at startup rather than at sign in**, since the environment cannot change
+under a running container, and **anonymous search is not exempt**, because the member's own bind
+follows it. No setting turns verification off; a private CA is trusted by naming it.
+
+## A parsed XML document is bounded by its namespaces, names, attributes and density
+
+Four shapes cost more per byte than any door's `ALLOCATION_FACTOR` and need no doctype, as the nest
+did: a long namespace, multiplied by every distinct name using it; distinct names themselves; many
+attributes on one tag; and short elements each carrying an attribute. Each is refused at every door
+that parses XML, by a constant in `xml_parse.py` that carries its measurement.
+
+**A count where the cost is per name, a budget per byte where it is per element.** Expat keeps every
+distinct name for the whole parse, so names are counted (`MAX_NAMES`) and the worst a name can cost
+is capped by the namespace length (`MAX_NAMESPACE`). An element carrying an attribute costs a
+dictionary wherever it sits, and a fixed count small enough to matter would refuse an honest MARC
+upload, so that bound is per byte (`BYTES_PER_ATTRIBUTED`), set at the shortest such element
+MARCXML allows, so no MARCXML is refused for its density. Each door's factor is measured on the
+costliest shape these bounds admit, so moving a bound means measuring the factors again.
+
+**Two are read before the parse, because expat expands a tag's attribute names before any handler
+sees the tag.** A namespace too long as written and a tag carrying more than `MAX_ATTRIBUTES` are
+found by a scan over the input. The attribute scan walks a tag's own grammar, so the escaped HTML an
+Atom summary carries, which has no `<`, is never read as a tag. The namespace is refused again as
+parsed, which is the exact rule, since a value in an eight bit encoding can pass as written and fail
+in UTF-8.
+
+**The name bound rests on a page size this application chooses.** MODS names grow with the page, so
+`MAX_NAMES` is held against a Library of Congress page at our own search cap, and the catalogue
+door's test reds when the cap and that page part. Raising the bound trades that margin against what
+a refusal costs; the arithmetic is at the constant, and so is what stays open.
+
+## A storage refusal is no token, not a failed request
+
+`getToken` answers `null` when the browser refuses to read storage. Behind the forward auth portal a
+request needs no token, so a throw there broke every page for a reader whose browser blocks site
+data; elsewhere a missing token is a 401, the same as being signed out. `clearSession` swallows a
+refusal for the same reason, so the screen that follows it still comes; `setSession` keeps
+throwing, because a sign in that cannot be kept is a failure the form should show. The case an admin
+switched into another account meets is argued at `getToken`.
+
+## A helper reached only from a sheltered create is sheltered
+
+The guard holding every importer to the spine reports a `Book(...)` outside the spine's `create`
+argument. A `_create` that moves its construction into a helper still routes through the spine, so a
+function every reference to which is sheltered is sheltered too. **A reference grants shelter only
+where it surely names the function, and any reference that may name it removes shelter**, a
+subclass's or a mixin's `self.X` included, because an inherited method is reached through exactly
+that spelling. The cost is loud: a class sharing the name unshelters this one, and a base routed
+only by a subclass is reported, which routing the call in the base cures. What it cannot see is
+listed at `_creates_outside_the_spine`.
+
+## The classifications call graph types a receiver, and falls back by name only to what builds a heading
+
+The guard deriving which readers feed a classification heading resolves a call through Python's
+scoping, annotations, constructors and aliases, so a call to a method is drawn to that method's
+class and not to every function sharing its name. Where it cannot place a method, it follows the
+name to a function that builds a heading itself, or to a method that reaches one, and to nothing
+else; a module function that only reaches a heading stays out, which keeps `.read()` on an upload
+off `marc.read`. **The cost is a loud false refusal** if a builder or a delegating method ever
+shares a name with an unrelated method, which the count arm's failure message names, and a quiet
+miss on a heading reached through an inherited method.
+
+## A runner export that draws is found by parse, and the parse is held to the real export list
+
+The property budget guard has to know which exports of the property runner draw from the generator,
+because a draw outside them is never counted. Watching an export draw means calling it with
+arguments the guard has never seen, and a draw behind a branch on them, or behind an argument that
+throws first, reads as drawing nothing: the silent direction, which this guard exists to close. So
+the drawing exports are read from the runner's source, and every function the runner exports at run
+time must be one whose body the parse read. A form the parse cannot read, a cast, a wrapped call or
+a re-export, reds by name instead of passing as drawing nothing.
+
+## A hand plant is a mode of the mutation sweep, run with the coverage registers off
+
+The isolated copy, the baseline, the group kill and the stop handling a hand plant needs were
+already in the mutation sweep and guarded there, so a plant is a mode of it rather than a second
+tool. An arm counts as caught only where its log names a failing test, and the timeout plugin's
+message is read only on pytest's own lines, because the log of a test about that reader quotes the
+message as data and would turn a catch into an invalid run. A plant may not edit the runner's own
+scripts, which run on the host.
+
+**The coverage registers are switched off for every arm rather than their reds tolerated.** They
+are red by construction on any branch adding a test until the wave's register write, and tolerating
+them would put the registers' test ids and the frontend reporter's error text into the verdict
+reader, where one missed subtraction reads a survivor as caught. The switch is one variable,
+accepted in one spelling, refused on a tree with git history and failing in a pipeline, so it
+reaches a suite only in a plant copy, and the verdict line names it. A plant aimed at a register's
+own checks therefore survives, which is the loud direction.
+
+## A bounded run's timeout is read off a marker, not off the timer's exit status
+
+The timer writes a marker before it kills, and the run reads the marker. The exit status could not
+tell: cancelling the timer can kill one that has already fired and not yet exited, which reported a
+timeout as a kill. The kill does not wait on the marker, so a marker that cannot be written still
+ends the run. A suite that ends on its own as the timer fires reads as a timeout, which is a red.

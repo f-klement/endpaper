@@ -15,6 +15,8 @@ import {
   rememberLastLocation,
 } from "../../src/lib/lastLocation";
 
+import { whileStorageRefuses } from "../storageRefusal";
+
 beforeEach(() => localStorage.clear());
 afterEach(() => vi.restoreAllMocks());
 
@@ -66,16 +68,18 @@ describe("rememberLastLocation", () => {
 
 describe("when storage is unavailable", () => {
   it("reads as empty rather than throwing", () => {
-    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
-      throw new Error("denied");
+    // A place is stored, so the empty answer can only come from the refusal.
+    rememberLastLocation("Loft box 2");
+    whileStorageRefuses("getItem", () => {
+      expect(readLastLocation()).toBe("");
     });
-    expect(readLastLocation()).toBe("");
   });
 
   it("writes silently rather than failing the add", () => {
-    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
-      throw new Error("denied");
+    rememberLastLocation("Loft box 2");
+    whileStorageRefuses("setItem", () => {
+      expect(() => rememberLastLocation("Kitchen")).not.toThrow();
     });
-    expect(() => rememberLastLocation("Kitchen")).not.toThrow();
+    expect(readLastLocation()).toBe("Loft box 2");
   });
 });

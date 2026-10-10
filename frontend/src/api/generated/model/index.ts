@@ -161,6 +161,7 @@ export * from "./quoteWithBookOut.ts";
 export * from "./readStatus.ts";
 export * from "./recoveryPhraseIn.ts";
 export * from "./recoveryPhraseOut.ts";
+export * from "./refusal.ts";
 export * from "./refusedAssertionOut.ts";
 export * from "./registrationOut.ts";
 export * from "./resetCodeOut.ts";

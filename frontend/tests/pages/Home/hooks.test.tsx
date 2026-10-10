@@ -19,9 +19,11 @@ import {
   useBookSelection,
   useColumnChoice,
   useLibrary,
+  useSavedSearches,
   useUnconfirmedCount,
   useViewChoice,
 } from "../../../src/pages/Home/hooks";
+import { DEFAULT_FILTERS } from "../../../src/lib/bookFilters";
 import {
   DEFAULT_COLUMNS,
   libraryColumnsPreference,
@@ -905,6 +907,33 @@ describe("useLibrary returns the library and nothing a browser remembered", () =
     ]);
   });
 });
+describe("useSavedSearches", () => {
+  const DESERT = { ...DEFAULT_FILTERS, query: "desert" };
+
+  it("keeps the filters on screen under the name they were saved with", () => {
+    const { result } = renderHookWithProviders(() => useSavedSearches(DESERT));
+
+    act(() => result.current.save("Arrakis"));
+
+    expect(result.current.searches).toEqual([
+      expect.objectContaining({ name: "Arrakis", filters: DESERT }),
+    ]);
+  });
+
+  it("forgets the one it is told to and keeps the rest", () => {
+    const { result } = renderHookWithProviders(() => useSavedSearches(DESERT));
+    act(() => result.current.save("Arrakis"));
+    act(() => result.current.save("Caladan"));
+    const [arrakis] = result.current.searches;
+
+    act(() => result.current.remove(arrakis!.id));
+
+    expect(result.current.searches.map((search) => search.name)).toEqual([
+      "Caladan",
+    ]);
+  });
+});
+
 describe("useBookSelection", () => {
   function renderSelection() {
     return renderHookWithProviders(() => useBookSelection());

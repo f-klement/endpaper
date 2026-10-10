@@ -168,6 +168,47 @@ describe("openZip", () => {
     expect(new TextDecoder().decode(read)).toBe("hello");
   });
 
+  it("steps over an entry's own comment to reach the next header", async () => {
+    // Only the central header carries an entry comment, so a walk that skips
+    // the name and the extra field alone starts the next header inside it.
+    const archive = await open({
+      entries: [
+        { name: "one.txt", data: "a", centralComment: bytes("first entry") },
+        { name: "two.txt", data: "b" },
+      ],
+    });
+
+    expect(archive.entries.map((entry) => entry.name)).toEqual([
+      "one.txt",
+      "two.txt",
+    ]);
+  });
+
+  it("does not list a central header written inside an entry's comment", async () => {
+    // A comment is free bytes, so it can carry a whole header naming an entry
+    // the archive does not have. Only the declared comment length tells the
+    // two apart: a walk that searched forward for the next signature instead
+    // would list the forgery in place of the real second entry.
+    const name = bytes("META-INF/container.xml");
+    const forged = new Uint8Array(46 + name.length);
+    const view = new DataView(forged.buffer);
+    view.setUint32(0, 0x02014b50, true);
+    view.setUint16(28, name.length, true);
+    forged.set(name, 46);
+
+    const archive = await open({
+      entries: [
+        { name: "one.txt", data: "a", centralComment: forged },
+        { name: "two.txt", data: "b" },
+      ],
+    });
+
+    expect(archive.entries.map((entry) => entry.name)).toEqual([
+      "one.txt",
+      "two.txt",
+    ]);
+  });
+
   it("takes the last end of central directory record, not one inside the file", async () => {
     // The four signature bytes occur in ordinary data, so finding them is not
     // evidence of anything. What decides it is that the comment length has to

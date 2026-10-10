@@ -1,14 +1,48 @@
 import { Link, useParams } from "react-router-dom";
 
-import { TagCategory } from "../../api/generated/model";
+import { TagCategory, type PublicBookOut } from "../../api/generated/model";
 import { EmptyState, ErrorState, Spinner } from "../../components";
 import { KIND_LABEL, headingKind } from "../../lib/classificationLabels";
-import { tagName, useTranslation } from "../../i18n";
+import { tagName, useTranslation, type Translate } from "../../i18n";
 import { Page } from "../components";
 import CoverImage from "../components/CoverImage";
 import { FORMAT_LABELS, TAG_PILL_CLASSES } from "../types";
 import PublicShell from "./components/PublicShell";
 import { usePublicBook } from "./hooks";
+
+/**
+ * The bibliographic facts a record carries, as label and value pairs in the
+ * order the page lists them. A fact the record does not carry is left out
+ * rather than shown empty. So is a year of zero: the schema's MIN_YEAR is 1,
+ * so a 0 is not a year.
+ *
+ * Exported so its own test can state the rule without rendering a page.
+ */
+export function publicFacts(
+  book: PublicBookOut,
+  t: Translate,
+): [string, string][] {
+  const facts: [string, string][] = [];
+  if (book.isbn) facts.push([t("public.fact.isbn"), book.isbn]);
+  if (book.publisher) facts.push([t("public.fact.publisher"), book.publisher]);
+  if (book.year) facts.push([t("public.fact.year"), String(book.year)]);
+  if (book.language) facts.push([t("public.fact.language"), book.language]);
+  if (book.page_count !== null && book.page_count !== undefined) {
+    facts.push([t("public.fact.pages"), String(book.page_count)]);
+  }
+  if (book.format) {
+    facts.push([t("public.fact.format"), t(FORMAT_LABELS[book.format])]);
+  }
+  if (book.series_name) {
+    facts.push([
+      t("public.fact.series"),
+      book.series_index === null || book.series_index === undefined
+        ? book.series_name
+        : `${book.series_name} ${book.series_index}`,
+    ]);
+  }
+  return facts;
+}
 
 /**
  * One published record, read by somebody with no account.
@@ -73,27 +107,7 @@ export default function PublicBookPage() {
   const credit = (book.authors ?? []).join(", ");
   const classifications = book.classifications ?? [];
   const tags = book.tags ?? [];
-  const facts: [string, string][] = [];
-  if (book.isbn) facts.push([t("public.fact.isbn"), book.isbn]);
-  if (book.publisher) facts.push([t("public.fact.publisher"), book.publisher]);
-  if (book.year !== null && book.year !== undefined) {
-    facts.push([t("public.fact.year"), String(book.year)]);
-  }
-  if (book.language) facts.push([t("public.fact.language"), book.language]);
-  if (book.page_count !== null && book.page_count !== undefined) {
-    facts.push([t("public.fact.pages"), String(book.page_count)]);
-  }
-  if (book.format) {
-    facts.push([t("public.fact.format"), t(FORMAT_LABELS[book.format])]);
-  }
-  if (book.series_name) {
-    facts.push([
-      t("public.fact.series"),
-      book.series_index === null || book.series_index === undefined
-        ? book.series_name
-        : `${book.series_name} ${book.series_index}`,
-    ]);
-  }
+  const facts = publicFacts(book, t);
 
   return (
     <PublicShell>

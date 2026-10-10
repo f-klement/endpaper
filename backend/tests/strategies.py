@@ -158,22 +158,28 @@ class Node:
     #: suite pod's stack is about a megabyte and a twenty thousand deep chain
     #: overflowed this module's own builder before it reached a door.
     nest: int = 0
-    #: This many empty `<x/>` elements after the nest, side by side. **The
-    #: width atom**, the nest's other half: an element costs its builder a node
+    #: This many copies of `sibling` after the nest, side by side. **The width
+    #: atom**, the nest's other half: an element costs its builder a node
     #: whatever its depth, and at a size the generators otherwise draw the
     #: allocation floor hides that cost. Drawn wide, it is the positive control
     #: for **the tree builder**: a builder that comes to spend more per element
-    #: reds. No reader reads an `<x/>`, so a reader that comes to spend more per
-    #: field it reads is outside it, measured: 800 bytes more per MARC
-    #: `datafield` passed every arm.
+    #: reds.
     width: int = 0
+    #: The empty element the width atom repeats. `<x/>`, which no reader reads,
+    #: is the builder's control. **A reader's control is an element that reader
+    #: reads**, because the builder's tree is freed before a reader walks it and
+    #: the reader's phase then sets the peak: measured, 800 bytes more per MARC
+    #: `datafield` passed every arm while only `<x/>` was drawn. The MARC
+    #: upload's property draws one, in `tests/test_marc.py`; no other door's
+    #: property draws a reader's element.
+    sibling: str = "<x/>"
 
 
 def xml_of(node: Node) -> str:
     """A node as XML text. Escaped, so the structure drawn is the one parsed."""
     attrs = "".join(f" {name}={quoteattr(value)}" for name, value in node.attrs)
     inner = escape(node.text) + "".join(xml_of(child) for child in node.children)
-    inner += "<x>" * node.nest + "</x>" * node.nest + "<x/>" * node.width
+    inner += "<x>" * node.nest + "</x>" * node.nest + node.sibling * node.width
     return f"<{node.tag}{attrs}>{inner}</{node.tag}>"
 
 
@@ -234,9 +240,13 @@ def xml_characters() -> SearchStrategy[str]:
 #: What a run of one unit is drawn as: a few thousand, up to past a typical
 #: field's column.
 #:
-#: **A size atom, the frontend's remedy**: a regex or a fold that turns
-#: superlinear does so on a run of one character, and hypothesis's default text
-#: sizes never draw one long enough to matter.
+#: **A size atom, for reach and not for cost.** Hypothesis's default text sizes
+#: never draw a run long enough to put a field past its column, and this is
+#: drawn to; nothing checks that a drawn run reaches a reader's field.
+#: **Nothing measures what a run costs in time**: the quadratic form of the BnF
+#: publisher rule took a fraction of a second at this length, far inside any
+#: test's ceiling, so no property here reds on a superlinear rule.
+#: `docs/testing.md`, "What none of this sees", says where one is held instead.
 _RUN: Final = st.integers(1_000, 8_000)
 
 
@@ -451,14 +461,51 @@ PATCHES: Final = st.lists(
 class Answered[T]:
     """What one call of a byte door did: its answer or its refusal, and its peak.
 
-    `peak` is `tracemalloc`'s traced peak over the call, in bytes, which repeats
-    to within a few hundred bytes on one interpreter: the deterministic half of
-    what a door costs. Wall clock is not read, and `docs/decisions.md` says why.
+    `peak` is `tracemalloc`'s traced peak, in bytes, which repeats to within a
+    few hundred bytes on one interpreter: the deterministic half of what a door
+    costs. **The larger of two calls' peaks**: the second call's, and the first
+    call's less `FIRST_CALL_ALLOWANCE`; `answer_of` says why both. Wall clock is
+    not read, and `docs/decisions.md` says why.
     """
 
     value: T | None
     refusal: Exception | None
     peak: int
+
+
+#: What a byte door's first call on an input may spend on caches the process
+#: keeps, over what the same call costs warm, in bytes `tracemalloc` traces.
+#:
+#: **Measured, then given room**: over 620 `answer_of` calls through the three
+#: XML byte doors on the suite pod (`builder`, CPython 3.14.8), each door's test
+#: file in a fresh `pytest -n 0` process, a first call never spent more than
+#: 10,001 bytes over the second. A codec's module is not
+#: among those caches, because `TEXT_CODECS` imports every codec as this module
+#: loads. What this does not cover is the point of tracing the first call: a
+#: door that keeps state per input, such as a memo on its parse, spends its
+#: whole parse on the first call and nothing on the second.
+FIRST_CALL_ALLOWANCE: Final = 64 * 1024
+
+
+def _traced_peak[T](
+    door: Callable[..., T], args: tuple[Any, ...], refuses: type[Exception] | None
+) -> tuple[T | None, Exception | None, int]:
+    """One call of `door`: its answer or its declared refusal, and the traced peak.
+
+    Any exception other than the declared refusal propagates.
+    """
+    tracemalloc.start()
+    try:
+        tracemalloc.reset_peak()
+        try:
+            value = door(*args)
+        except Exception as error:
+            if refuses is None or not isinstance(error, refuses):
+                raise
+            return None, error, tracemalloc.get_traced_memory()[1]
+        return value, None, tracemalloc.get_traced_memory()[1]
+    finally:
+        tracemalloc.stop()
 
 
 def answer_of[T](
@@ -483,18 +530,16 @@ def answer_of[T](
     even with the door's own class, because its module is the test's. So a
     property passes the door itself, and a wrapper is reviewed.
 
-    **The door is called once before the traced call, and that call is not
-    counted.** A first call fills caches the process keeps: a codec's module
+    **Both calls are traced, and the first is allowed `FIRST_CALL_ALLOWANCE`
+    more.** A first call fills caches the process keeps: a codec's module
     imported for a declared encoding, and `linecache`'s copy of a source file
-    when a lookup logs a traceback. A 442 byte catalogue response crossed the
-    floor at 282,240 bytes in the suite on the call that first logged one, and
-    in one process here a response the parser refuses peaked at 623,928 bytes on
-    its first call and 56,171 on its second: a peak about the process rather
-    than the input. The traced call is the second, so its peak is this input's
-    cost to a warm process. **A door keeping state per input reads as free**:
-    a memo on its parse, filled by the first call, leaves the second nothing to
-    allocate, and a builder plant that reds all three XML properties passes
-    with one, measured. Tracing the first call too is what would see it.
+    when a lookup logs a traceback. So a first call's peak is partly the
+    process's rather than the input's, and the second call is this input's
+    cost to a warm process. **The first is traced
+    as well because a door keeping state per input reads as free on the
+    second**: a memo on its parse, filled by the first call, leaves the second
+    nothing to allocate, and a builder plant that reds all three XML properties
+    passed with one, measured, while only the second call was traced.
 
     **Logging is off for both calls.** A one past the bound catalogue response,
     refused and logged with its traceback, still peaked at 714,919 bytes on the
@@ -517,24 +562,12 @@ def answer_of[T](
     was_disabled = logging.root.manager.disable
     logging.disable(logging.CRITICAL)
     try:
-        try:
-            door(*args)
-        except Exception as error:
-            if refuses is None or not isinstance(error, refuses):
-                raise
-        tracemalloc.start()
-        try:
-            tracemalloc.reset_peak()
-            try:
-                value = door(*args)
-            except Exception as error:
-                if refuses is None or not isinstance(error, refuses):
-                    raise
-                return Answered(None, error, tracemalloc.get_traced_memory()[1])
-            peak = tracemalloc.get_traced_memory()[1]
-        finally:
-            tracemalloc.stop()
+        first = _traced_peak(door, args, refuses)[2]
+        value, refusal, second = _traced_peak(door, args, refuses)
     finally:
         logging.disable(was_disabled)
+    peak = max(second, first - FIRST_CALL_ALLOWANCE)
+    if refusal is not None:
+        return Answered(None, refusal, peak)
     assert isinstance(value, answers), f"{door.__qualname__} answered {type(value)!r}"
     return Answered(value, None, peak)

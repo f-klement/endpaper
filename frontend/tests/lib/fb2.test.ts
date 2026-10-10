@@ -232,6 +232,19 @@ describe("the genres, which are this format's subjects", () => {
 
     expect(record?.categories).toEqual([]);
   });
+
+  it("drops a genre element with no text, rather than filing an empty subject", () => {
+    // Only generated input reached this arm before, so whether a run covered
+    // it depended on the seed.
+    const record = read(
+      fb2(
+        "<title-info><genre/><genre>sf</genre><genre>  </genre>" +
+          "<book-title>Т</book-title></title-info>",
+      ),
+    );
+
+    expect(record?.categories).toEqual(["sf"]);
+  });
 });
 
 describe("the series, which FB2 carries as a typed field", () => {

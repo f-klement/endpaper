@@ -38,6 +38,7 @@ from ratelimit import (
     recovery_request_address_limiter,
     register_limiter,
 )
+from refusals import refuses
 from schemas import (
     AuthConfigOut,
     LoginRequest,
@@ -81,6 +82,7 @@ def auth_config(db: DbSession) -> AuthConfigOut:
 @router.post(
     "/register", response_model=RegistrationOut, status_code=status.HTTP_201_CREATED
 )
+@refuses(403)
 def register(
     payload: UserCreate,
     request: Request,
@@ -211,6 +213,7 @@ def _signup_refusal() -> str:
 
 
 @router.post("/login", response_model=Token)
+@refuses(401, 403)
 def login(
     payload: LoginRequest, request: Request, response: Response, db: DbSession
 ) -> Token:
@@ -290,6 +293,7 @@ def _charge_a_request(username: str, request: Request) -> None:
     status_code=status.HTTP_202_ACCEPTED,
     response_class=Response,
 )
+@refuses(403)
 def request_password_reset(
     payload: ResetRequest, request: Request, db: DbSession
 ) -> Response:
@@ -319,6 +323,7 @@ def request_password_reset(
 
 
 @router.post("/reset/redeem", status_code=status.HTTP_204_NO_CONTENT)
+@refuses(403)
 def redeem_password_reset(
     payload: ResetRedeem, request: Request, db: DbSession
 ) -> Response:
@@ -406,6 +411,7 @@ def confirm_address(
 
 
 @router.post("/switch", response_model=Token)
+@refuses(401, 404)
 def switch_account(
     payload: LoginRequest,
     request: Request,

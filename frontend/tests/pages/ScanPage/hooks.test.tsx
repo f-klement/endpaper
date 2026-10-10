@@ -2390,6 +2390,95 @@ describe("useRapidIntake and a file with no usable metadata", () => {
   });
 });
 
+describe("confirming a scanned book", () => {
+  const LOOKUP = {
+    isbn: "9780441013593",
+    title: "Dune",
+    author: "Frank Herbert",
+    suggested_tag_ids: [],
+  };
+
+  /** A scan looked up and drafted, whose confirm the server answers as book 42. */
+  async function readyToConfirm(onAdded: (bookId: number) => void) {
+    api.on("/api/books/lookup", { body: LOOKUP });
+    api.on("/api/books/scan", { body: makeBook({ id: 42 }) }, "POST");
+    const rendered = renderHookWithProviders(() => useScanFlow(onAdded));
+    act(() => rendered.result.current.lookup("9780441013593"));
+    await waitFor(() =>
+      expect(rendered.result.current.pending.draft).not.toBeNull(),
+    );
+    return rendered;
+  }
+
+  it("sends nothing before there is a draft to send", async () => {
+    const { result } = renderHookWithProviders(() => useScanFlow(() => {}));
+
+    await act(async () => {
+      result.current.confirm();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(api.lastCall("/api/books/scan", "POST")).toBeUndefined();
+    expect(result.current.error).toBeNull();
+  });
+
+  it("puts the chosen cover on the book it has just made", async () => {
+    const onAdded = vi.fn<(bookId: number) => void>();
+    const { result } = await readyToConfirm(onAdded);
+    api.on("/api/books/42/cover", { body: makeBook({ id: 42 }) }, "POST");
+    act(() =>
+      result.current.update({ coverFile: new File(["jpeg"], "cover.jpg") }),
+    );
+
+    act(() => result.current.confirm());
+
+    await waitFor(() => expect(onAdded).toHaveBeenCalledWith(42));
+    const sent = api.lastCall("/api/books/42/cover", "POST")?.body;
+    expect(sent).toBeInstanceOf(FormData);
+    expect(((sent as FormData).get("file") as File).name).toBe("cover.jpg");
+  });
+
+  it("keeps the book when its cover is refused", async () => {
+    // The book exists by then, so a refused cover is not worth making the
+    // member scan it again.
+    const onAdded = vi.fn<(bookId: number) => void>();
+    const { result } = await readyToConfirm(onAdded);
+    api.on(
+      "/api/books/42/cover",
+      { status: 413, body: { detail: "too large" } },
+      "POST",
+    );
+    act(() =>
+      result.current.update({ coverFile: new File(["jpeg"], "cover.jpg") }),
+    );
+
+    act(() => result.current.confirm());
+
+    await waitFor(() => expect(onAdded).toHaveBeenCalledWith(42));
+    expect(api.lastCall("/api/books/42/cover", "POST")).toBeDefined();
+    expect(result.current.error).toBeNull();
+  });
+
+  it("keeps the book when a typed tag name is refused", async () => {
+    const onAdded = vi.fn<(bookId: number) => void>();
+    const { result } = await readyToConfirm(onAdded);
+    api.on(
+      "/api/books/42/tags",
+      { status: 500, body: { detail: "boom" } },
+      "POST",
+    );
+    act(() => result.current.createTag("Loft"));
+
+    act(() => result.current.confirm());
+
+    await waitFor(() => expect(onAdded).toHaveBeenCalledWith(42));
+    expect(api.lastCall("/api/books/42/tags", "POST")?.body).toEqual({
+      name: "Loft",
+    });
+    expect(result.current.error).toBeNull();
+  });
+});
+
 /**
  * The pace, against the budget it was priced on.
  *

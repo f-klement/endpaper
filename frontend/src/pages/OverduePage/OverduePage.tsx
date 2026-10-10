@@ -87,7 +87,7 @@ export default function OverduePage() {
             <LoanRow
               key={loan.id}
               loan={loan}
-              isReturning={overdue.returningId === loan.id}
+              isReturning={overdue.returningIds.has(loan.id)}
               onMarkReturned={overdue.markReturned}
             />
           ))}

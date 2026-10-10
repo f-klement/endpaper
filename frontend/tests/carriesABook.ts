@@ -88,6 +88,10 @@
  * among them, and `DataView` is written out because it is the one such name a
  * builder in this tree is actually handed.
  *
+ * **Nor a type derived from an exempted name.** `ComponentProps<typeof
+ * FilePicker>["onFile"]` takes a `File` and spells no new name, so the census
+ * has nothing to sort. Writing one is a deliberate act, not a slip.
+ *
  * **And a structural type spelled with brackets is outside it too**, which is
  * the same type on both sides of the line: `Array<number>` is refused because
  * `Array` is a name, and `number[]` is admitted.
@@ -108,4 +112,4 @@
  * and stated them as though they were one measurement.
  */
 export const CARRIES_A_BOOK =
-  /\b(?:DataView|(?:[A-Z]\w*)?(?:Array|Blob|Buffer|Stream)\w*|File(?!Metadata|Naming|Identifier|Failure|Reading|PickPanel)\w*)\b/;
+  /\b(?:DataView|(?:[A-Z]\w*)?(?:Array|Blob|Buffer|Stream)\w*|File(?!Metadata|Naming|Identifier|Failure|Reading|PickPanel|Picker)\w*)\b/;

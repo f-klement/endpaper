@@ -25,6 +25,18 @@ function renderPanel(book: Partial<BookOut> = {}) {
   return onSave;
 }
 
+/** The panel over one book, for a test that rerenders it with another. */
+function panel(book: BookOut) {
+  return (
+    <ShelfPanel
+      book={book}
+      knownLocations={[]}
+      isSaving={false}
+      onSave={vi.fn<(fields: BookDetailsUpdate) => void>()}
+    />
+  );
+}
+
 describe("ShelfPanel", () => {
   it("shows the current values", () => {
     renderPanel({ series_name: "Dune", series_index: 2, location: "Loft" });
@@ -80,6 +92,28 @@ describe("ShelfPanel", () => {
     expect(onSave).toHaveBeenCalledWith(
       expect.objectContaining({ series_index: 2.5 }),
     );
+  });
+
+  it("shows a series an enrichment filled in after it mounted", () => {
+    const book = makeBook({ series_name: null, series_index: null });
+    const { rerender } = renderLocalised(panel(book));
+
+    rerender(panel({ ...book, series_name: "Dune", series_index: 2 }));
+
+    expect(screen.getByLabelText("Series")).toHaveValue("Dune");
+    expect(screen.getByLabelText("No.")).toHaveValue(2);
+  });
+
+  it("keeps an unsaved edit when a refetch hands back an equal book", () => {
+    const book = makeBook({ series_name: "Dune", series_index: 2 });
+    const { rerender } = renderLocalised(panel(book));
+    fireEvent.change(screen.getByLabelText("Where it is"), {
+      target: { value: "Kitchen" },
+    });
+
+    rerender(panel({ ...book }));
+
+    expect(screen.getByLabelText("Where it is")).toHaveValue("Kitchen");
   });
 
   it("offers the known locations as suggestions", () => {

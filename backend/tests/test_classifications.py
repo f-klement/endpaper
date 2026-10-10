@@ -11,6 +11,8 @@ import ast
 import pathlib
 import re
 import sys
+import textwrap
+from collections.abc import Iterable, Iterator, Mapping
 from typing import Any
 from xml.etree import ElementTree
 
@@ -453,29 +455,336 @@ def _modules(root: pathlib.Path = BACKEND) -> list[pathlib.Path]:
     return found
 
 
-def _call_graph() -> tuple[dict[str, set[str]], set[str]]:
-    """Every function this application defines, what it calls, and which build a Heading."""
+def _module_name(path: pathlib.Path, root: pathlib.Path = BACKEND) -> str:
+    """The name `import` gives a module under `backend/`, which is `__module__`."""
+    parts = path.relative_to(root).with_suffix("").parts
+    return ".".join(parts[:-1] if parts[-1] == "__init__" else parts)
+
+
+def _qualified(function: Any) -> str:
+    """A function's node in the graph: the dotted name Python itself gives it."""
+    return f"{function.__module__}.{function.__qualname__}"
+
+
+#: What a construction site calls, as `_qualified` names it.
+_HEADING = _qualified(Heading)
+
+_FUNCTION = ast.FunctionDef | ast.AsyncFunctionDef
+
+#: The receiver `_edges` writes for an attribute called on a value it cannot type.
+_UNTYPED = "<untyped>"
+
+#: One scope's names, each to the dotted name it denotes, or to None where it
+#: holds a value the graph cannot follow.
+_Scope = dict[str, str | None]
+
+
+def _own_nodes(body: Iterable[ast.AST]) -> Iterator[ast.AST]:
+    """Every node one scope evaluates itself.
+
+    A nested function, class or lambda is yielded, and so are its decorators,
+    defaults and bases, which run where it is defined; its body is another
+    scope's.
+    """
+    pending = list(body)
+    while pending:
+        node = pending.pop()
+        yield node
+        if isinstance(node, _FUNCTION | ast.Lambda):
+            pending.extend(node.args.defaults)
+            pending.extend(d for d in node.args.kw_defaults if d is not None)
+        if isinstance(node, _FUNCTION | ast.ClassDef):
+            pending.extend(node.decorator_list)
+        if isinstance(node, ast.ClassDef):
+            pending.extend([*node.bases, *node.keywords])
+        elif not isinstance(node, _FUNCTION | ast.Lambda):
+            pending.extend(ast.iter_child_nodes(node))
+
+
+def _definitions(
+    body: Iterable[ast.AST], prefix: str
+) -> Iterator[tuple[str, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef]]:
+    """Every function and class under `prefix`, by the `__qualname__` Python gives it."""
+    for node in _own_nodes(body):
+        if isinstance(node, _FUNCTION | ast.ClassDef):
+            name = f"{prefix}.{node.name}"
+            yield name, node
+            local = isinstance(node, _FUNCTION)
+            yield from _definitions(node.body, f"{name}.<locals>" if local else name)
+
+
+def _imported(node: ast.Import | ast.ImportFrom) -> Iterator[tuple[str, str]]:
+    """The names one import statement binds, each to the dotted name it denotes."""
+    for alias in node.names:
+        if isinstance(node, ast.ImportFrom):
+            if alias.name != "*":
+                yield alias.asname or alias.name, f"{node.module}.{alias.name}"
+        elif alias.asname:
+            yield alias.asname, alias.name
+        else:
+            head = alias.name.split(".")[0]
+            yield head, head
+
+
+def _bindings(
+    body: Iterable[ast.AST], prefix: str, outer: Iterable[_Scope] = ()
+) -> _Scope:
+    """The names one scope binds, under Python's rule that any binding makes it local.
+
+    A definition or an import is followed. So is a name bound by `name = <expr>`
+    or `type name = <expr>`, to whatever `_named` makes of the expression read
+    in this scope and in source order: `fields = marc_fields.Fields(record)`
+    types `fields`, `alias = fields` on a later line types `alias` the same,
+    and a PEP 695 alias types an annotation spelled through it. Where a name
+    has two such bindings, one of them types it; mypy's strict mode refuses a
+    rebinding to another type. A name bound only some other way holds a value
+    and shadows whatever an outer scope calls by it. A name declared `global`
+    or `nonlocal` is the outer scope's.
+    """
+    bound: _Scope = {}
+    declared: set[str] = set()
+    held: dict[str, ast.expr] = {}
+    for node in _own_nodes(body):
+        if isinstance(node, _FUNCTION | ast.ClassDef):
+            bound[node.name] = f"{prefix}.{node.name}"
+        elif isinstance(node, ast.Import | ast.ImportFrom):
+            bound.update(_imported(node))
+        elif isinstance(node, ast.Global | ast.Nonlocal):
+            declared.update(node.names)
+        elif isinstance(node, ast.Name) and not isinstance(node.ctx, ast.Load):
+            bound.setdefault(node.id, None)
+        elif isinstance(node, ast.ExceptHandler | ast.MatchAs | ast.MatchStar) and node.name:
+            bound.setdefault(node.name, None)
+        if isinstance(node, ast.TypeAlias):
+            held[node.name.id] = node.value
+        elif (
+            isinstance(node, ast.Assign)
+            and len(node.targets) == 1
+            and isinstance(target := node.targets[0], ast.Name)
+        ):
+            held[target.id] = node.value
+    # `_own_nodes` yields a body from its end, so without the sort `alias =
+    # fields` is read before `fields` is typed and stays untyped itself.
+    in_source_order = sorted(
+        held.items(), key=lambda item: (item[1].lineno, item[1].col_offset)
+    )
+    for name, value in in_source_order:
+        if bound.get(name) is None:
+            bound[name] = _named(value, [*outer, bound])
+    return {name: value for name, value in bound.items() if name not in declared}
+
+
+def _named(expr: ast.expr | None, scopes: list[_Scope]) -> str | None:
+    """The dotted name an expression denotes where it is read, or None.
+
+    A name, attributes off one, or a call of one denotes something: `C(...)`
+    is read as `C`, the type of the object it constructs. A subscript or a
+    literal is a value the graph cannot type. `X | None` is read as `X`, so an
+    optional annotation types its parameter too.
+    """
+    if isinstance(expr, ast.BinOp) and isinstance(expr.op, ast.BitOr):
+        sides = [
+            side
+            for side in (expr.left, expr.right)
+            if not (isinstance(side, ast.Constant) and side.value is None)
+        ]
+        expr = sides[0] if len(sides) == 1 else None
+    parts: list[str] = []
+    while isinstance(expr, ast.Attribute | ast.Call):
+        if isinstance(expr, ast.Call):
+            # What a function returns is no attribute of it, so `f(...).m`
+            # names a `f.m` that `_graph_of` finds nowhere, and it reaches only
+            # what `_graph_of` follows the name `m` to.
+            expr = expr.func
+        else:
+            parts.insert(0, expr.attr)
+            expr = expr.value
+    if not isinstance(expr, ast.Name):
+        return None
+    head = next((scope[expr.id] for scope in reversed(scopes) if expr.id in scope), None)
+    return None if head is None else ".".join([head, *parts])
+
+
+def _parameters(arguments: ast.arguments) -> list[ast.arg]:
+    """Every parameter a signature binds, of every kind."""
+    every = [
+        *arguments.posonlyargs,
+        *arguments.args,
+        arguments.vararg,
+        *arguments.kwonlyargs,
+        arguments.kwarg,
+    ]
+    return [parameter for parameter in every if parameter is not None]
+
+
+def _signature(
+    node: ast.FunctionDef | ast.AsyncFunctionDef, scopes: list[_Scope], owner: str | None
+) -> _Scope:
+    """A function's parameters, each to the class its annotation names, or None.
+
+    A method's first parameter denotes its class, unless the method is static.
+    """
+    bound = {
+        parameter.arg: _named(parameter.annotation, scopes)
+        for parameter in _parameters(node.args)
+    }
+    positional = [*node.args.posonlyargs, *node.args.args]
+    static = any(
+        isinstance(decorator, ast.Name) and decorator.id == "staticmethod"
+        for decorator in node.decorator_list
+    )
+    if owner is not None and positional and not static:
+        bound[positional[0].arg] = owner
+    return bound
+
+
+def _edges(tree: ast.Module, module: str) -> dict[str, set[str]]:
+    """What each function one module defines calls, as the dotted name each call denotes.
+
+    A name is resolved as Python resolves it: through the enclosing function
+    scopes, then the module's definitions and imports. So a parameter or a
+    local shadows the module function it spells, and an aliased import is
+    followed. An attribute is followed off a module, a class, a method's first
+    parameter, a parameter annotated with a class (`fields:
+    marc_fields.Fields` is how both MARC readers reach their headings), a
+    constructed object, and a name `_bindings` types. A decorator is a call
+    the function makes, since what it wraps is what gets registered.
+
+    **An attribute called on a receiver it cannot type**, such as a subscript,
+    a loop variable or an unannotated parameter, **is written with the
+    receiver `_UNTYPED`**, and `_graph_of` decides what that reaches. An
+    enclosing function owns every call its nested functions make.
+
+    Callees are as written here; `_graph_of` follows a re-export and keeps
+    those that land on a function.
+    """
+    names = {id(node): name for name, node in _definitions(tree.body, module)}
+    calls: dict[str, set[str]] = {}
+
+    def walk(
+        body: Iterable[ast.AST],
+        scopes: list[_Scope],
+        owners: tuple[str, ...],
+        cls: str | None,
+    ) -> None:
+        for node in _own_nodes(body):
+            if isinstance(node, ast.Call) and owners:
+                callee = _named(node.func, scopes)
+                if callee is None and isinstance(node.func, ast.Attribute):
+                    callee = f"{_UNTYPED}.{node.func.attr}"
+                if callee is not None:
+                    for owner in owners:
+                        calls.setdefault(owner, set()).add(callee)
+            elif isinstance(node, _FUNCTION):
+                name = names[id(node)]
+                # A decorator replaces the function, so what it reaches is the
+                # function's own: `@with_headings(scheme)` on an entry.
+                for decorator in node.decorator_list:
+                    wrapper = _named(decorator, scopes)
+                    if wrapper is not None:
+                        calls.setdefault(name, set()).add(wrapper)
+                given = _signature(node, scopes, cls)
+                local = {
+                    **_bindings(node.body, f"{name}.<locals>", [*scopes, given]),
+                    **given,
+                }
+                walk(node.body, [*scopes, local], (*owners, name), None)
+            elif isinstance(node, ast.ClassDef):
+                # A class body's names are not visible to its methods.
+                walk(node.body, scopes, owners, names[id(node)])
+            elif isinstance(node, ast.Lambda):
+                shadowed: _Scope = {p.arg: None for p in _parameters(node.args)}
+                walk([node.body], [*scopes, shadowed], owners, None)
+
+    walk(tree.body, [_bindings(tree.body, module)], (), None)
+    return calls
+
+
+def _graph_of(trees: Mapping[str, ast.Module]) -> tuple[dict[str, set[str]], set[str]]:
+    """Every function the modules define, what it calls, and which build a Heading.
+
+    **Keyed by module and qualified name, so two functions sharing a name are
+    two nodes.** A callee naming something one of these modules re-exports
+    (`schemas.BookOut`) is followed to where it is defined.
+
+    **A callee that lands on no function is followed by its last name, but only
+    to a function that builds a Heading itself or a method that reaches one**,
+    whatever the receiver was: one `_edges` could not type, a class the method
+    is inherited into, `super()`, an attribute of an attribute. The targets grow
+    until the reach stops moving, since a method reached this way can be what
+    the next caller needs. The guess errs toward reaching, so a wrong one reds
+    the stated count rather than leaving it stale. Leaving out a module
+    function that only reaches one is what keeps `.read()` on an upload off
+    `marc.read`, which reaches a heading but builds none itself.
+
+    What draws no edge: a module function that reaches a heading only through
+    another function, called on such a receiver; a parameter annotated with a
+    `Protocol`, which lands on the protocol's `...` stub and not on an
+    implementation; and a function handed over by reference rather than
+    called, as `functools.partial` or a dict of callables hands it over.
+    """
+    functions: set[str] = set()
+    classes: set[str] = set()
+    known = set(trees)
+    imports: dict[str, dict[str, str]] = {}
+    for module, tree in trees.items():
+        for name, node in _definitions(tree.body, module):
+            known.add(name)
+            if isinstance(node, _FUNCTION):
+                functions.add(name)
+            else:
+                classes.add(name)
+        imports[module] = {
+            name: target
+            for node in _own_nodes(tree.body)
+            if isinstance(node, ast.Import | ast.ImportFrom)
+            for name, target in _imported(node)
+        }
+
+    def defined(dotted: str, hops: int = 0) -> str:
+        parts = dotted.split(".")
+        cut = next(
+            (i for i in range(len(parts), 0, -1) if ".".join(parts[:i]) in trees), 0
+        )
+        # The bound is a re-export cycle, which would otherwise not end.
+        if not cut or hops > len(trees):
+            return dotted
+        current = ".".join(parts[:cut])
+        for part in parts[cut:]:
+            following = f"{current}.{part}"
+            if following not in known and part in imports.get(current, {}):
+                following = defined(imports[current][part], hops + 1)
+            current = following
+        return current
+
     calls: dict[str, set[str]] = {}
     builds: set[str] = set()
-    for path in _modules():
-        for node in ast.walk(ast.parse(path.read_text())):
-            if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
-                continue
-            for inner in ast.walk(node):
-                if not isinstance(inner, ast.Call):
-                    continue
-                called = inner.func
-                if isinstance(called, ast.Name):
-                    name = called.id
-                elif isinstance(called, ast.Attribute):
-                    name = called.attr
+    unplaced: dict[str, set[str]] = {}
+    for module, tree in trees.items():
+        for function, callees in _edges(tree, module).items():
+            for callee in map(defined, callees):
+                if callee == _HEADING:
+                    builds.add(function)
+                elif callee in functions:
+                    calls.setdefault(function, set()).add(callee)
                 else:
-                    continue
-                if name == Heading.__name__:
-                    builds.add(node.name)
-                else:
-                    calls.setdefault(node.name, set()).add(name)
+                    unplaced.setdefault(function, set()).add(callee.rsplit(".", 1)[-1])
+    methods = {name for name in functions if name.rsplit(".", 1)[0] in classes}
+    targets: set[str] = set()
+    while (widened := builds | (_reaching(calls, builds) & methods)) != targets:
+        targets = widened
+        for function, attributes in unplaced.items():
+            for target in targets:
+                if target.rsplit(".", 1)[-1] in attributes:
+                    calls.setdefault(function, set()).add(target)
     return calls, builds
+
+
+def _call_graph() -> tuple[dict[str, set[str]], set[str]]:
+    """`_graph_of` this application."""
+    return _graph_of(
+        {_module_name(path): ast.parse(path.read_text()) for path in _modules()}
+    )
 
 
 def _reaching(calls: dict[str, set[str]], builds: set[str]) -> set[str]:
@@ -535,7 +844,7 @@ def _dispatch_tables() -> list[dict[decoders.Reader, Any]]:
     The shape is the rule: a non empty `dict` whose every key is a `Reader` and
     whose every value can be called. **The callable half is not decoration**: a
     `dict[Reader, str]` of per reader labels is not a dispatch table, and
-    admitting one would put a value with no `__name__` into the walk, where the
+    admitting one would put a value with no `__qualname__` into the walk, where the
     only honest thing left to do with it is skip it silently.
 
     Which modules are searched is `_table_holding_modules`, and it is derived
@@ -557,12 +866,12 @@ def _registered_entries() -> dict[decoders.Reader, set[str]]:
     entries: dict[decoders.Reader, set[str]] = {}
     for table in _dispatch_tables():
         for reader, decoder in table.items():
-            # `decoder.__name__` rather than a `getattr` default, so anything
+            # `_qualified` rather than a `getattr` default, so anything
             # the walk cannot name raises here instead of contributing an empty
             # name nothing can match. Two kinds reach this: a value the shape
-            # rule should not have admitted, and a callable with no `__name__`,
+            # rule should not have admitted, and a callable with no `__qualname__`,
             # which a `functools.partial` in a table would legitimately be.
-            entries.setdefault(reader, set()).add(decoder.__name__)
+            entries.setdefault(reader, set()).add(_qualified(decoder))
     return entries
 
 
@@ -592,6 +901,257 @@ _CLASSIFIED = (
     '<subfield code="0">(DE-588)4026894-9</subfield>'
     "<subfield code=\"2\">gnd</subfield></datafield>"
 )
+
+
+def _parsed(source: str) -> ast.Module:
+    return ast.parse(textwrap.dedent(source))
+
+
+class TestTheCallGraphResolvesACallTheWayPythonDoes:
+    """`_edges` and `_graph_of`, on constructed modules, one resolution each."""
+
+    def test_a_call_to_a_function_of_this_module_is_an_edge_to_it(self):
+        tree = _parsed("""
+            def load():
+                return read()
+
+            def read():
+                pass
+            """)
+
+        assert _edges(tree, "m") == {"m.load": {"m.read"}}
+
+    def test_an_imported_name_is_an_edge_to_where_it_was_imported_from(self):
+        tree = _parsed("""
+            import isbn
+            from marc import read as read_marc
+
+            def load():
+                read_marc()
+                isbn.parse()
+            """)
+
+        assert _edges(tree, "m") == {"m.load": {"marc.read", "isbn.parse"}}
+
+    def test_a_parameter_shadows_the_module_name_it_spells(self):
+        tree = _parsed("""
+            from marc import read, ask, more, key, rest
+
+            def walk(read, /, ask, *more, key, **rest):
+                read(); ask(); more(); key(); rest(); parse()
+
+            def parse():
+                pass
+            """)
+
+        assert _edges(tree, "m") == {"m.walk": {"m.parse"}}
+
+    def test_an_attribute_on_a_parameter_is_followed_only_through_its_annotation(self):
+        tree = _parsed("""
+            import marc_fields
+
+            def load(upload, fields: marc_fields.Fields | None):
+                upload.read()
+                fields.ddc_headings()
+            """)
+
+        assert _edges(tree, "m") == {
+            "m.load": {f"{_UNTYPED}.read", "marc_fields.Fields.ddc_headings"}
+        }
+
+    def test_a_method_s_first_parameter_is_its_class_unless_the_method_is_static(self):
+        tree = _parsed("""
+            class C:
+                def m(self):
+                    pass
+
+                def load(self):
+                    self.m()
+
+                @staticmethod
+                def build(record):
+                    record.m()
+            """)
+
+        assert _edges(tree, "m") == {
+            "m.C.load": {"m.C.m"},
+            "m.C.build": {f"{_UNTYPED}.m"},
+        }
+
+    def test_a_constructed_object_has_the_type_of_its_class(self):
+        tree = _parsed("""
+            import marc_fields
+
+            def load(record):
+                fields = marc_fields.Fields(record)
+                fields.ddc_headings()
+                marc_fields.Fields(record).controlled_subjects()
+            """)
+
+        assert _edges(tree, "m") == {
+            "m.load": {
+                "marc_fields.Fields",
+                "marc_fields.Fields.ddc_headings",
+                "marc_fields.Fields.controlled_subjects",
+            }
+        }
+
+    def test_an_alias_of_a_typed_local_has_its_type(self):
+        tree = _parsed("""
+            import marc_fields
+
+            def load(record):
+                fields = marc_fields.Fields(record)
+                alias = fields
+                alias.ddc_headings()
+            """)
+
+        assert _edges(tree, "m") == {
+            "m.load": {"marc_fields.Fields", "marc_fields.Fields.ddc_headings"}
+        }
+
+    def test_a_type_alias_types_an_annotation_spelled_through_it(self):
+        tree = _parsed("""
+            import marc_fields
+
+            type Fields = marc_fields.Fields
+
+            def load(fields: Fields):
+                fields.ddc_headings()
+            """)
+
+        assert _edges(tree, "m") == {"m.load": {"marc_fields.Fields.ddc_headings"}}
+
+    def test_a_decorator_is_a_call_the_function_makes(self):
+        tree = _parsed("""
+            def with_headings(scheme):
+                pass
+
+            @with_headings("LCSH")
+            def load():
+                pass
+            """)
+
+        assert _edges(tree, "m") == {"m.load": {"m.with_headings"}}
+
+    def test_an_untyped_receiver_reaches_a_builder_by_its_name_and_nothing_else(self):
+        trees = {
+            "marc": _parsed("""
+                from catalogue import Heading
+
+                def ddc_headings(record):
+                    return Heading()
+
+                def read(record):
+                    return ddc_headings(record)
+                """),
+            "user": _parsed("""
+                def load(upload):
+                    upload.read()
+
+                def classify(parser):
+                    parser.ddc_headings()
+                """),
+        }
+
+        assert _reaching(*_graph_of(trees)) == {
+            "marc.ddc_headings",
+            "marc.read",
+            "user.classify",
+        }
+
+    @pytest.mark.parametrize(
+        "load",
+        [
+            """
+            def load(record):
+                as_fields(record).headings()
+            """,
+            """
+            def load(record):
+                for fields in [marc_fields.Fields(record)]:
+                    fields.headings()
+            """,
+            """
+            def load(record):
+                fields: marc_fields.Fields = as_fields(record)
+                fields.headings()
+            """,
+        ],
+        ids=["a helper's result", "a loop variable", "an annotated local"],
+    )
+    def test_an_untyped_receiver_reaches_a_method_that_only_delegates(self, load):
+        """A method building nothing itself is followed by name as well, so a
+        reader delegating through one is not dropped for the spelling of its
+        receiver."""
+        trees = {
+            "marc_fields": _parsed("""
+                from catalogue import Heading
+
+                class Fields:
+                    def ddc_headings(self):
+                        return Heading()
+
+                    def headings(self):
+                        return self.ddc_headings()
+                """),
+            "user": _parsed(
+                textwrap.dedent("""
+                    import marc_fields
+
+                    def as_fields(record) -> marc_fields.Fields:
+                        return marc_fields.Fields(record)
+                    """)
+                + textwrap.dedent(load)
+            ),
+        }
+
+        assert _reaching(*_graph_of(trees)) == {
+            "marc_fields.Fields.ddc_headings",
+            "marc_fields.Fields.headings",
+            "user.load",
+        }
+
+    def test_a_name_defined_in_two_modules_is_two_nodes(self):
+        trees = {
+            "a": _parsed("""
+                from catalogue import Heading
+
+                def read():
+                    return Heading()
+                """),
+            "b": _parsed("""
+                def read():
+                    return None
+                """),
+            "c": _parsed("""
+                from b import read
+
+                def load():
+                    return read()
+                """),
+        }
+
+        assert _reaching(*_graph_of(trees)) == {"a.read"}
+
+    def test_a_call_through_a_re_export_lands_on_the_definition(self):
+        trees = {
+            "pkg": _parsed("from pkg.inner import parse"),
+            "pkg.inner": _parsed("""
+                def parse():
+                    pass
+                """),
+            "user": _parsed("""
+                import pkg
+
+                def load():
+                    pkg.parse()
+                """),
+        }
+
+        calls, _ = _graph_of(trees)
+
+        assert calls == {"user.load": {"pkg.inner.parse"}}
 
 
 class TestHowManyCataloguescanFeedOneBooksHeadings:
@@ -718,7 +1278,7 @@ class TestHowManyCataloguescanFeedOneBooksHeadings:
         reader = builds_nothing[0]
         # The other half of the patched dict carries an assumption too, so it
         # fails with its own reason rather than as "discovery is broken".
-        assert metadata._dnb_record.__name__ in _reaching(*_call_graph()), (
+        assert _qualified(metadata._dnb_record) in _reaching(*_call_graph()), (
             "the decoder this patches in no longer reaches a Heading, so the "
             "test would prove nothing about discovery"
         )
@@ -731,6 +1291,22 @@ class TestHowManyCataloguescanFeedOneBooksHeadings:
         )
 
         assert reader in self._derived()
+
+    def test_every_registered_entry_is_a_function_the_walk_defines(self):
+        """`_derived` joins the tables to the graph by name, so an entry the graph
+        has no function for, a lambda or a class, would drop its reader in
+        silence."""
+        functions = {
+            name
+            for path in _modules()
+            for name, node in _definitions(
+                ast.parse(path.read_text()).body, _module_name(path)
+            )
+            if isinstance(node, _FUNCTION)
+        }
+        registered = set().union(*_registered_entries().values())
+
+        assert registered <= functions, registered - functions
 
     def test_every_reader_is_answered_by_something(self):
         """A reader missing from every dispatch table would be excluded silently
@@ -844,7 +1420,10 @@ class TestHowManyCataloguescanFeedOneBooksHeadings:
         assert stated == len(derived), (
             f"the docstring says {stated} catalogues; the readers that "
             f"build a Heading are fed by {len(derived)}: "
-            f"{sorted(source.value for source in derived)}"
+            f"{sorted(source.value for source in derived)}. A rise for a reader "
+            "nobody touched means a new builder or delegating method shares a "
+            "name with a method that reader calls on a value the graph cannot "
+            "type, which `_graph_of` follows by that name"
         )
 
     def test_the_data_model_states_the_same_count(self):

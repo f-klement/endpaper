@@ -25,6 +25,7 @@ import type {
   AuthConfigOut,
   HTTPValidationError,
   LoginRequest,
+  Refusal,
   RegistrationOut,
   ResetRedeem,
   ResetRequest,
@@ -242,7 +243,7 @@ export const login = async (
 export const getLoginMutationKey = () => ["login"] as const;
 
 export const getLoginMutationOptions = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -283,13 +284,16 @@ export type LoginMutationResult = NonNullable<
   Awaited<ReturnType<typeof login>>
 >;
 export type LoginMutationBody = LoginRequest;
-export type LoginMutationError = HTTPValidationError;
+export type LoginMutationError = Refusal | HTTPValidationError;
 export type LoginMutationVariables = { data: LoginRequest };
 
 /**
  * @summary Login
  */
-export const useLogin = <TError = HTTPValidationError, TContext = unknown>(
+export const useLogin = <
+  TError = Refusal | HTTPValidationError,
+  TContext = unknown,
+>(
   options?: {
     mutation?: UseMutationOptions<
       Awaited<ReturnType<typeof login>>,
@@ -422,7 +426,7 @@ export const getMeQueryKey = () => {
 
 export const getMeQueryOptions = <
   TData = Awaited<ReturnType<typeof me>>,
-  TError = unknown,
+  TError = Refusal,
 >(options?: {
   query?: Partial<
     UseQueryOptions<Awaited<ReturnType<typeof me>>, TError, TData>
@@ -444,9 +448,9 @@ export const getMeQueryOptions = <
 };
 
 export type MeQueryResult = NonNullable<Awaited<ReturnType<typeof me>>>;
-export type MeQueryError = unknown;
+export type MeQueryError = Refusal;
 
-export function useMe<TData = Awaited<ReturnType<typeof me>>, TError = unknown>(
+export function useMe<TData = Awaited<ReturnType<typeof me>>, TError = Refusal>(
   options: {
     query: Partial<
       UseQueryOptions<Awaited<ReturnType<typeof me>>, TError, TData>
@@ -465,7 +469,7 @@ export function useMe<TData = Awaited<ReturnType<typeof me>>, TError = unknown>(
 ): DefinedUseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
-export function useMe<TData = Awaited<ReturnType<typeof me>>, TError = unknown>(
+export function useMe<TData = Awaited<ReturnType<typeof me>>, TError = Refusal>(
   options?: {
     query?: Partial<
       UseQueryOptions<Awaited<ReturnType<typeof me>>, TError, TData>
@@ -484,7 +488,7 @@ export function useMe<TData = Awaited<ReturnType<typeof me>>, TError = unknown>(
 ): UseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
-export function useMe<TData = Awaited<ReturnType<typeof me>>, TError = unknown>(
+export function useMe<TData = Awaited<ReturnType<typeof me>>, TError = Refusal>(
   options?: {
     query?: Partial<
       UseQueryOptions<Awaited<ReturnType<typeof me>>, TError, TData>
@@ -499,7 +503,7 @@ export function useMe<TData = Awaited<ReturnType<typeof me>>, TError = unknown>(
  * @summary Me
  */
 
-export function useMe<TData = Awaited<ReturnType<typeof me>>, TError = unknown>(
+export function useMe<TData = Awaited<ReturnType<typeof me>>, TError = Refusal>(
   options?: {
     query?: Partial<
       UseQueryOptions<Awaited<ReturnType<typeof me>>, TError, TData>
@@ -566,7 +570,7 @@ export const register = async (
 export const getRegisterMutationKey = () => ["register"] as const;
 
 export const getRegisterMutationOptions = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -607,13 +611,16 @@ export type RegisterMutationResult = NonNullable<
   Awaited<ReturnType<typeof register>>
 >;
 export type RegisterMutationBody = UserCreate;
-export type RegisterMutationError = HTTPValidationError;
+export type RegisterMutationError = Refusal | HTTPValidationError;
 export type RegisterMutationVariables = { data: UserCreate };
 
 /**
  * @summary Register
  */
-export const useRegister = <TError = HTTPValidationError, TContext = unknown>(
+export const useRegister = <
+  TError = Refusal | HTTPValidationError,
+  TContext = unknown,
+>(
   options?: {
     mutation?: UseMutationOptions<
       Awaited<ReturnType<typeof register>>,
@@ -688,7 +695,7 @@ export const getRedeemPasswordResetMutationKey = () =>
   ["redeemPasswordReset"] as const;
 
 export const getRedeemPasswordResetMutationOptions = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -729,14 +736,14 @@ export type RedeemPasswordResetMutationResult = NonNullable<
   Awaited<ReturnType<typeof redeemPasswordReset>>
 >;
 export type RedeemPasswordResetMutationBody = ResetRedeem;
-export type RedeemPasswordResetMutationError = HTTPValidationError;
+export type RedeemPasswordResetMutationError = Refusal | HTTPValidationError;
 export type RedeemPasswordResetMutationVariables = { data: ResetRedeem };
 
 /**
  * @summary Redeem Password Reset
  */
 export const useRedeemPasswordReset = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(
   options?: {
@@ -823,7 +830,7 @@ export const getRequestPasswordResetMutationKey = () =>
   ["requestPasswordReset"] as const;
 
 export const getRequestPasswordResetMutationOptions = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -864,14 +871,14 @@ export type RequestPasswordResetMutationResult = NonNullable<
   Awaited<ReturnType<typeof requestPasswordReset>>
 >;
 export type RequestPasswordResetMutationBody = ResetRequest;
-export type RequestPasswordResetMutationError = HTTPValidationError;
+export type RequestPasswordResetMutationError = Refusal | HTTPValidationError;
 export type RequestPasswordResetMutationVariables = { data: ResetRequest };
 
 /**
  * @summary Request Password Reset
  */
 export const useRequestPasswordReset = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(
   options?: {
@@ -963,7 +970,7 @@ export const switchAccount = async (
 export const getSwitchAccountMutationKey = () => ["switchAccount"] as const;
 
 export const getSwitchAccountMutationOptions = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -1004,14 +1011,14 @@ export type SwitchAccountMutationResult = NonNullable<
   Awaited<ReturnType<typeof switchAccount>>
 >;
 export type SwitchAccountMutationBody = LoginRequest;
-export type SwitchAccountMutationError = HTTPValidationError;
+export type SwitchAccountMutationError = Refusal | HTTPValidationError;
 export type SwitchAccountMutationVariables = { data: LoginRequest };
 
 /**
  * @summary Switch Account
  */
 export const useSwitchAccount = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(
   options?: {

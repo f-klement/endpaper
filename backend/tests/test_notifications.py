@@ -1385,6 +1385,11 @@ class TestTheInAppChannel:
         with pytest.raises(AssertionError, match="does not push"):
             await notifications._deliver(OverdueSender.IN_APP, db, {}, "subject")
 
+    def test_a_log_line_about_it_names_the_app_rather_than_raising(self, db):
+        """`_destination` runs on the failure path, before a send. A raise there
+        would be a second failure carrying the first, so the arm answers."""
+        assert notifications._destination(OverdueSender.IN_APP, db) == "the app"
+
     @pytest.mark.asyncio
     async def test_it_alone_sends_nothing_and_says_so(self, in_app_on, lend):
         """Not `DISABLED`: reminders are on, and every member reads them in the

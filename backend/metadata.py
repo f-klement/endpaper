@@ -823,12 +823,19 @@ DOCTYPE: Final = "<!DOCTYPE"
 #: The catalogue response path's half of its allocation bound: see
 #: `xml_parse.ALLOCATION_FLOOR`.
 #:
-#: Measured by `tracemalloc` on CPython 3.14.0 through the MARC lookup reader,
-#: whose per field structures are the costliest a catalogue can make it build:
-#: empty `datafield` elements back to back peaked at 25.7 times their bytes,
-#: text bearing records near 11, and a nest past `xml_parse.MAX_DEPTH` is
-#: refused within one chunk.
-ALLOCATION_FACTOR: Final = 32
+#: Measured by `tracemalloc` on the suite pod, CPython 3.14.8 with expat
+#: 2.8.5, about 1 MiB of each shape repeated, through every seeded SRU lookup
+#: and search, per byte of the text as UTF-8. The costliest found that the
+#: bounds in `xml_parse` admit, `'<e a=""/>\u0100<x/>\u0100<x/>\u0100'` as
+#: `marc.ALLOCATION_FACTOR` describes its kind, after one character above
+#: U+FFFF, peaked at 32.6, and at 30.9 without that character; empty
+#: `datafield` elements through the MARC readers at 27.4. A nest past
+#: `xml_parse.MAX_DEPTH` is refused within one chunk.
+#:
+#: **The one character is why this door's factor is over the others'**: the
+#: door decodes the response inside the call, and a character above U+FFFF
+#: anywhere makes the whole text four bytes a character.
+ALLOCATION_FACTOR: Final = 33
 
 
 def _parsed(body: str) -> ElementTree.Element:
@@ -2998,7 +3005,31 @@ def _dublin_core_search(
     The selector is the format's and not the row's; the decoder the row names
     is what reads what it finds.
     """
-    return _records(root.findall(f".//{_DC}title/.."), decoding)
+    return _records(_parents_of(root, f"{_DC}title"), decoding)
+
+
+def _parents_of(root: ElementTree.Element, tag: str) -> list[ElementTree.Element]:
+    """`root.findall(f".//{tag}/..")`, in its order, without the map it builds.
+
+    **ElementPath answers `..` by mapping every element of the tree to its
+    parent first**, whatever the selector before it matched, so a response of
+    bare `<e/>` cost 35 times its size through this search where the same page
+    cost 20 through the others, over `ALLOCATION_FACTOR`; by `tracemalloc` on
+    the suite pod, CPython 3.14.8. This walks the tree once and holds only the
+    open path, at most `xml_parse.MAX_DEPTH` deep, and the parents it found.
+    """
+    found: dict[ElementTree.Element, None] = {}
+    path = [(root, iter(root))]
+    while path:
+        parent, children = path[-1]
+        child = next(children, None)
+        if child is None:
+            path.pop()
+            continue
+        if child.tag == tag:
+            found.setdefault(parent)
+        path.append((child, iter(child)))
+    return list(found)
 
 
 def _mods_search(

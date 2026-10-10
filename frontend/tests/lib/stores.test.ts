@@ -1838,6 +1838,66 @@ describe("any file a member picks for a store", () => {
     expect(outcome).toEqual({ answered: { ok: false, failure: "too-large" } });
   });
 
+  // **The three refusals below were reached only by generated input**, so
+  // whether a run covered each depended on the seed. One example each.
+  const moonBackup = (spec: Partial<MoonSpec>) =>
+    check({
+      store: "moonReader",
+      input: {
+        spec: {
+          directory: "com.flyersoft.moonreaderp/",
+          index: ["mrbooks.db"],
+          tag: undefined,
+          database: {
+            tables: [
+              {
+                name: "books",
+                columns: ["filename", "book", "author"],
+                rows: [["/sdcard/Books/Dune.epub", "Dune", "Frank Herbert"]],
+                counted: undefined,
+              },
+            ],
+            padTo: undefined,
+          },
+          notAZip: false,
+          ...spec,
+        },
+        patches: [],
+      },
+    });
+
+  // Deleting the `tag === null` check leaves this green: `find(null)` answers
+  // nothing and the next guard returns the same refusal, so it pins the answer,
+  // not that check.
+  it("answers a Moon+ index that names no database as not a backup", async () => {
+    const { outcome } = await moonBackup({ index: ["positions10.xml"] });
+
+    expect(outcome).toEqual({
+      answered: { ok: false, failure: "not-a-moon-reader-backup" },
+    });
+  });
+
+  it("answers a Moon+ backup missing the entry its index names as not a backup", async () => {
+    // The index names line one, and the database was written as line three.
+    const { outcome } = await moonBackup({ tag: 3 });
+
+    expect(outcome).toEqual({
+      answered: { ok: false, failure: "not-a-moon-reader-backup" },
+    });
+  });
+
+  it("answers a Moon+ database entry that is not a database by the database's refusal", async () => {
+    // A database with no tables exports as zero bytes, which the SQLite seam
+    // refuses by name.
+    const { outcome } = await moonBackup({
+      database: { tables: [], padTo: undefined },
+    });
+
+    expect(outcome).toEqual({
+      answered: { ok: false, failure: "not-a-database" },
+    });
+  });
+
   it("answers a Kindle catalogue whose declaration a patch broke as not one, rather than throwing", async () => {
     // **What the property above found once its seed was fresh**, as it printed
     // it: a byte at offset 2 turns `<?xml` into an instruction whose target is

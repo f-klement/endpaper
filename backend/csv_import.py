@@ -581,8 +581,15 @@ def _int(
     digits = decimal.group(1) if decimal else re.sub(r"[.,]", "", raw)
     if not digits:
         return None
+    # Past `maximum` already, and past about 4300 digits `int()` raises
+    # ValueError, which the import routes do not catch: a 500 for one cell.
+    # That limit counts leading zeros, so the stripped digits are what is
+    # converted and not only what is measured: a cell of zeros raised.
+    significant = digits.lstrip("0")
+    if len(significant) > len(str(maximum)):
+        return None
 
-    number = int(digits)
+    number = int(significant or "0")
     return number if minimum <= number <= maximum else None
 
 

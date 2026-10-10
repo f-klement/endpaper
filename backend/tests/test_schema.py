@@ -137,6 +137,49 @@ class TestEmptyDatabase:
         assert current_revision() is not None
 
 
+class TestTheChainRunsBothWays:
+    def test_every_revision_downgrades_to_an_empty_database(self):
+        # The other downgrade tests stop at a named revision, so the oldest
+        # downgrades are reached by this one alone.
+        from alembic import command
+
+        drop_everything()
+        schema.upgrade_to_head()
+
+        command.downgrade(schema._alembic_config(), "base")
+
+        assert table_names() == {"alembic_version"}
+
+    def test_a_database_downgraded_to_nothing_upgrades_again(self):
+        from alembic import command
+
+        drop_everything()
+        schema.upgrade_to_head()
+        head = current_revision()
+        command.downgrade(schema._alembic_config(), "base")
+
+        schema.upgrade_to_head()
+
+        assert current_revision() == head
+        assert {"books", "users", "tags", "loans", "notes", "user_books", "book_tags"} <= (
+            table_names()
+        )
+
+    def test_rendering_the_chain_as_sql_is_refused_before_a_line_is_printed(self):
+        from io import StringIO
+
+        from alembic import command
+        from alembic.util import CommandError
+
+        config = schema._alembic_config()
+        config.output_buffer = StringIO()
+
+        with pytest.raises(CommandError, match="cannot be rendered offline"):
+            command.upgrade(config, "head", sql=True)
+
+        assert config.output_buffer.getvalue() == ""
+
+
 class TestAdoptingAPreAlembicDatabase:
     """The migration path for an installation that predates Alembic."""
 

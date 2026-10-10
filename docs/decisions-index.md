@@ -236,7 +236,7 @@ repeat the argument.
 | A write names what it made stale | [Deleting a custom field is admin only, defining one is not](decisions.md#deleting-a-custom-field-is-admin-only-defining-one-is-not) | 341 |
 | A write names what it made stale | [`MAX_CUSTOM_FIELDS` is the only ceiling the feature needs](decisions.md#max_custom_fields-is-the-only-ceiling-the-feature-needs) | 134 |
 | A write names what it made stale | [Settings is an index of six routes, and the descriptions are the page](decisions.md#settings-is-an-index-of-six-routes-and-the-descriptions-are-the-page) | 433 |
-|  | [Tooling](decisions.md#tooling) | 5,225 |
+|  | [Tooling](decisions.md#tooling) | 5,528 |
 | Tooling | [Bun, not npm](decisions.md#bun-not-npm) | 27 |
 | Tooling | [`bunfig.toml` configures a security scanner](decisions.md#bunfigtoml-configures-a-security-scanner) | 66 |
 | Tooling | [`--import-mode=importlib` for pytest](decisions.md#--import-modeimportlib-for-pytest) | 10 |
@@ -252,7 +252,8 @@ repeat the argument.
 | Tooling | [The frontend has no sweep, and the route to one is recorded rather than built](decisions.md#the-frontend-has-no-sweep-and-the-route-to-one-is-recorded-rather-than-built) | 223 |
 | Tooling | [A schema driven run over every operation, and what it is allowed to claim](decisions.md#a-schema-driven-run-over-every-operation-and-what-it-is-allowed-to-claim) | 639 |
 | Tooling | [Three ways a response contradicted the schema that declares it, and one 500](decisions.md#three-ways-a-response-contradicted-the-schema-that-declares-it-and-one-500) | 649 |
-| Tooling | [Every hand raised refusal is a sentence, so none of them may use 422](decisions.md#every-hand-raised-refusal-is-a-sentence-so-none-of-them-may-use-422) | 429 |
+| Tooling | [Every hand raised refusal is a sentence, so none of them may use 422](decisions.md#every-hand-raised-refusal-is-a-sentence-so-none-of-them-may-use-422) | 455 |
+| Tooling | [The schema declares the 401, 403 and 404 a route's code builds, and no other refusal](decisions.md#the-schema-declares-the-401-403-and-404-a-routes-code-builds-and-no-other-refusal) | 260 |
 | Tooling | [A route that answers with no body documents none](decisions.md#a-route-that-answers-with-no-body-documents-none) | 311 |
 | Tooling | [A route declares every answer it files, and no rule chooses between them](decisions.md#a-route-declares-every-answer-it-files-and-no-rule-chooses-between-them) | 277 |
 | Tooling | [The truth about a partial answer is a second media type, not a second copy of the first](decisions.md#the-truth-about-a-partial-answer-is-a-second-media-type-not-a-second-copy-of-the-first) | 186 |
@@ -465,14 +466,14 @@ repeat the argument.
 |  | [The longer fan out is bounded by concurrency, and the bound never waits](decisions.md#the-longer-fan-out-is-bounded-by-concurrency-and-the-bound-never-waits) | 902 |
 | The longer fan out is bounded by concurrency, and the bound never waits | [The backfill waits where the search refuses, and a deadline is what buys the wait](decisions.md#the-backfill-waits-where-the-search-refuses-and-a-deadline-is-what-buys-the-wait) | 701 |
 |  | [Asking nothing has two causes, and the answer has to tell them apart](decisions.md#asking-nothing-has-two-causes-and-the-answer-has-to-tell-them-apart) | 253 |
-|  | [The refused long search names our own limit, not the catalogues'](decisions.md#the-refused-long-search-names-our-own-limit-not-the-catalogues) | 3,975 |
+|  | [The refused long search names our own limit, not the catalogues'](decisions.md#the-refused-long-search-names-our-own-limit-not-the-catalogues) | 4,048 |
 | The refused long search names our own limit, not the catalogues' | [A scheme says how its own call numbers sort, and a scheme with no rule sorts as text](decisions.md#a-scheme-says-how-its-own-call-numbers-sort-and-a-scheme-with-no-rule-sorts-as-text) | 846 |
 | The refused long search names our own limit, not the catalogues' | [A catalogue source is a row, and its parser is not](decisions.md#a-catalogue-source-is-a-row-and-its-parser-is-not) | 201 |
 | The refused long search names our own limit, not the catalogues' | [The runtime asks the constant, and the table waits for the ticket that edits it](decisions.md#the-runtime-asks-the-constant-and-the-table-waits-for-the-ticket-that-edits-it) | 157 |
 | The refused long search names our own limit, not the catalogues' | [An invariant a restore can reach is a CHECK constraint or it is nothing](decisions.md#an-invariant-a-restore-can-reach-is-a-check-constraint-or-it-is-nothing) | 129 |
 | The refused long search names our own limit, not the catalogues' | [The roster guard changed shape because the question did](decisions.md#the-roster-guard-changed-shape-because-the-question-did) | 120 |
 | The refused long search names our own limit, not the catalogues' | [What the guard learned from being attacked](decisions.md#what-the-guard-learned-from-being-attacked) | 189 |
-| The refused long search names our own limit, not the catalogues' | [The frontend suite shares one environment, and `tests/doubles/` is what pays for it](decisions.md#the-frontend-suite-shares-one-environment-and-testsdoubles-is-what-pays-for-it) | 448 |
+| The refused long search names our own limit, not the catalogues' | [The frontend suite shares one environment, and `tests/doubles/` is what pays for it](decisions.md#the-frontend-suite-shares-one-environment-and-testsdoubles-is-what-pays-for-it) | 521 |
 | The refused long search names our own limit, not the catalogues' | [The backend suite is twice as slow in CI as in an identical pod, and three obvious reasons are not it](decisions.md#the-backend-suite-is-twice-as-slow-in-ci-as-in-an-identical-pod-and-three-obvious-reasons-are-not-it) | 424 |
 | The refused long search names our own limit, not the catalogues' | [The runner checks its image against the pipeline for both toolchains, not one](decisions.md#the-runner-checks-its-image-against-the-pipeline-for-both-toolchains-not-one) | 451 |
 | The refused long search names our own limit, not the catalogues' | [What the pipeline now reports about its own CPU](decisions.md#what-the-pipeline-now-reports-about-its-own-cpu) | 622 |
@@ -852,12 +853,21 @@ repeat the argument.
 |  | [The oracle for a reader is counted work, not "did it throw"](decisions.md#the-oracle-for-a-reader-is-counted-work-not-did-it-throw) | 441 |
 |  | [Every bound a door declares is held by a control, and a ledger refuses one without](decisions.md#every-bound-a-door-declares-is-held-by-a-control-and-a-ledger-refuses-one-without) | 458 |
 |  | [The build refuses a bundle that loads or emits the property generator](decisions.md#the-build-refuses-a-bundle-that-loads-or-emits-the-property-generator) | 211 |
-|  | [A coverage gap is answered where the instrument is configured or the code is tested, never by a figure](decisions.md#a-coverage-gap-is-answered-where-the-instrument-is-configured-or-the-code-is-tested-never-by-a-figure) | 280 |
+|  | [A coverage gap is answered where the instrument is configured or the code is tested, never by a figure](decisions.md#a-coverage-gap-is-answered-where-the-instrument-is-configured-or-the-code-is-tested-never-by-a-figure) | 331 |
 |  | [A webhook address is refused where the URL parser would raise, at save and at send](decisions.md#a-webhook-address-is-refused-where-the-url-parser-would-raise-at-save-and-at-send) | 198 |
 |  | [An error whose message can quote a value is logged by its type, place and frames](decisions.md#an-error-whose-message-can-quote-a-value-is-logged-by-its-type-place-and-frames) | 260 |
 |  | [A route's crash is answered inside the app, so the server logs it once](decisions.md#a-routes-crash-is-answered-inside-the-app-so-the-server-logs-it-once) | 256 |
 |  | [A security waiver in the application stays at its line, and is held by value](decisions.md#a-security-waiver-in-the-application-stays-at-its-line-and-is-held-by-value) | 449 |
 |  | [A suppression comment is read the way ruff reads it, and may not name a policing rule](decisions.md#a-suppression-comment-is-read-the-way-ruff-reads-it-and-may-not-name-a-policing-rule) | 321 |
-|  | [A parsed XML document is bounded by depth while it parses, and fed to its parser in chunks](decisions.md#a-parsed-xml-document-is-bounded-by-depth-while-it-parses-and-fed-to-its-parser-in-chunks) | 329 |
+|  | [A parsed XML document is bounded by depth while it parses, and fed to its parser in chunks](decisions.md#a-parsed-xml-document-is-bounded-by-depth-while-it-parses-and-fed-to-its-parser-in-chunks) | 341 |
 |  | [The coverage register's write is printed in a loop until every byte is out](decisions.md#the-coverage-registers-write-is-printed-in-a-loop-until-every-byte-is-out) | 209 |
+|  | [`Shelf.matching` is left whole although ruff's C901 counts it over ten](decisions.md#shelfmatching-is-left-whole-although-ruffs-c901-counts-it-over-ten) | 79 |
+|  | [LDAP TLS is checked in the handshake by the standard library, and referrals are not followed](decisions.md#ldap-tls-is-checked-in-the-handshake-by-the-standard-library-and-referrals-are-not-followed) | 176 |
+|  | [A parsed XML document is bounded by its namespaces, names, attributes and density](decisions.md#a-parsed-xml-document-is-bounded-by-its-namespaces-names-attributes-and-density) | 337 |
+|  | [A storage refusal is no token, not a failed request](decisions.md#a-storage-refusal-is-no-token-not-a-failed-request) | 95 |
+|  | [A helper reached only from a sheltered create is sheltered](decisions.md#a-helper-reached-only-from-a-sheltered-create-is-sheltered) | 117 |
+|  | [The classifications call graph types a receiver, and falls back by name only to what builds a heading](decisions.md#the-classifications-call-graph-types-a-receiver-and-falls-back-by-name-only-to-what-builds-a-heading) | 127 |
+|  | [A runner export that draws is found by parse, and the parse is held to the real export list](decisions.md#a-runner-export-that-draws-is-found-by-parse-and-the-parse-is-held-to-the-real-export-list) | 117 |
+|  | [A hand plant is a mode of the mutation sweep, run with the coverage registers off](decisions.md#a-hand-plant-is-a-mode-of-the-mutation-sweep-run-with-the-coverage-registers-off) | 210 |
+|  | [A bounded run's timeout is read off a marker, not off the timer's exit status](decisions.md#a-bounded-runs-timeout-is-read-off-a-marker-not-off-the-timers-exit-status) | 79 |
 <!-- index: end -->

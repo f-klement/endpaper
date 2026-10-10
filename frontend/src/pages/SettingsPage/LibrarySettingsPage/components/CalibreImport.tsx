@@ -1,14 +1,20 @@
 import { useRef } from "react";
 
-import { errorText } from "../../../../components/ErrorState";
 import { useTranslation, type MessageKey } from "../../../../i18n";
-import { DUPLICATE_STATUS, FAILURES_SHOWN } from "../importing";
 import type {
   CalibreIntakeFailure,
   CalibrePreview,
   CalibreProgress,
   CalibreResult,
 } from "../hooks";
+import {
+  ConfirmRow,
+  FilePicker,
+  ImportAlert,
+  ImportError,
+  OutcomePanel,
+  type OutcomeMessages,
+} from "./ImportChrome";
 
 interface CalibreImportProps {
   isReading: boolean;
@@ -44,8 +50,9 @@ interface CalibreImportProps {
  * whether the choice paid on this library. A library reporting no ISBNs is one
  * that should have arrived through the feed.
  *
- * Dumb: it owns two file inputs and the buttons. The reading, the cross check
- * and the writes live in the page's hooks.
+ * Dumb: it holds the cross check's folder input and nothing else; the file
+ * picker, the row and the panels are `./ImportChrome`'s. The reading, the cross
+ * check and the writes live in the page's hooks.
  */
 export default function CalibreImport({
   isReading,
@@ -62,7 +69,6 @@ export default function CalibreImport({
   onCancel,
 }: CalibreImportProps) {
   const { t } = useTranslation();
-  const databaseInput = useRef<HTMLInputElement>(null);
   const folderInput = useRef<HTMLInputElement>(null);
 
   return (
@@ -74,21 +80,20 @@ export default function CalibreImport({
         {t("calibre.safety")}
       </p>
 
-      <input
-        ref={databaseInput}
-        type="file"
+      <FilePicker
         accept=".db,application/vnd.sqlite3,application/x-sqlite3"
-        aria-label={t("calibre.chooseFile")}
-        className="sr-only"
-        onChange={(event) => {
-          const file = event.target.files?.[0];
-          if (file) onChoose(file);
-          // Reset, so choosing the same file twice fires change again.
-          event.target.value = "";
-        }}
+        label={t("calibre.chooseFile")}
+        busy={isReading}
+        busyLabel={t("calibre.reading")}
+        offered={!preview}
+        onFile={onChoose}
       />
       <input
         ref={(node) => {
+          // The cross check button clicks `folderInput`, and this callback is
+          // the input's only ref, so it fills that itself: without this line
+          // the button clicks nothing.
+          folderInput.current = node;
           // `webkitdirectory` is set here rather than written as a prop: it is
           // not in React's attribute table, so the prop spelling either fails
           // the type check or is dropped depending on the version, and both
@@ -99,6 +104,11 @@ export default function CalibreImport({
         multiple
         aria-label={t("calibre.crossCheck")}
         className="sr-only"
+        // Its button's state: absent before a library is read and while the
+        // import runs, disabled while reading. Left enabled, a keyboard reaches
+        // it where a pointer cannot, and starts a cross check under a running
+        // write.
+        disabled={!preview || isImporting || isReading}
         onChange={(event) => {
           const files = [...(event.target.files ?? [])];
           event.target.value = "";
@@ -106,25 +116,7 @@ export default function CalibreImport({
         }}
       />
 
-      {!preview && (
-        <button
-          type="button"
-          disabled={isReading}
-          onClick={() => databaseInput.current?.click()}
-          className="w-full py-2.5 rounded-xl border border-paper-200 text-sm font-medium text-paper-700 hover:bg-paper-50 disabled:opacity-50 transition-colors dark:border-paper-700 dark:text-paper-200 dark:hover:bg-paper-800"
-        >
-          {isReading ? t("calibre.reading") : t("calibre.chooseFile")}
-        </button>
-      )}
-
-      {failure && (
-        <p
-          role="alert"
-          className="text-sm text-danger-600 dark:text-danger-300"
-        >
-          {t(FAILURE_MESSAGES[failure])}
-        </p>
-      )}
+      {failure && <ImportAlert>{t(FAILURE_MESSAGES[failure])}</ImportAlert>}
 
       {preview && (
         <>
@@ -199,64 +191,21 @@ export default function CalibreImport({
             </p>
           )}
 
-          <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={isImporting ? onStop : onCancel}
-              className="flex-1 py-2.5 rounded-xl border border-paper-200 text-sm font-medium text-paper-600 hover:bg-paper-50 dark:border-paper-700 dark:text-paper-300 dark:hover:bg-paper-800"
-            >
-              {isImporting ? t("calibre.stop") : t("common.cancel")}
-            </button>
-            <button
-              type="button"
-              disabled={isImporting || isReading || preview.importable === 0}
-              onClick={onConfirm}
-              className="flex-1 py-2.5 rounded-xl bg-accent-fill text-sm font-semibold text-on-accent hover:bg-accent-fill-hover disabled:bg-accent-300"
-            >
-              {isImporting
-                ? t("calibre.importing")
-                : t("calibre.confirm", { count: preview.importable })}
-            </button>
-          </div>
+          <ConfirmRow
+            isImporting={isImporting}
+            withheld={isReading || preview.importable === 0}
+            confirmLabel={t("calibre.confirm", { count: preview.importable })}
+            importingLabel={t("calibre.importing")}
+            onConfirm={onConfirm}
+            onCancel={onCancel}
+            stop={{ label: t("calibre.stop"), onStop }}
+          />
         </>
       )}
 
-      {error != null && (
-        <p
-          role="alert"
-          className="text-sm text-danger-600 dark:text-danger-300"
-        >
-          {errorText(error, t("common.somethingWentWrong"), t)}
-        </p>
-      )}
+      <ImportError error={error} />
 
-      {result && (
-        <div className="text-sm text-paper-700 bg-paper-50 border border-paper-200 rounded-xl p-3 space-y-2 dark:text-paper-200 dark:bg-paper-900 dark:border-paper-700">
-          <p>
-            {result.stopped
-              ? t("calibre.resultStopped", { added: result.added })
-              : t("calibre.result", { added: result.added })}
-          </p>
-          {result.failures.length > 0 && (
-            <>
-              <p className="text-xs text-paper-600 dark:text-paper-400">
-                {t("calibre.resultFailures", { count: result.failures.length })}
-              </p>
-              <ul className="text-xs text-paper-600 space-y-0.5 dark:text-paper-400">
-                {result.failures.slice(0, FAILURES_SHOWN).map((row, index) => (
-                  <li key={index} className="truncate">
-                    {row.title}
-                    {" · "}
-                    {row.status === DUPLICATE_STATUS
-                      ? t("calibre.duplicate")
-                      : t("calibre.notAdded")}
-                  </li>
-                ))}
-              </ul>
-            </>
-          )}
-        </div>
-      )}
+      {result && <OutcomePanel outcome={result} messages={OUTCOME_MESSAGES} />}
     </div>
   );
 }
@@ -274,4 +223,13 @@ const FAILURE_MESSAGES: Record<CalibreIntakeFailure, MessageKey> = {
   "no-engine": "calibre.failureNoEngine",
   "not-a-calibre-library": "calibre.failureNotCalibre",
   empty: "calibre.failureEmpty",
+};
+
+/** The outcome panel's sentences, in this card's words. */
+const OUTCOME_MESSAGES: OutcomeMessages = {
+  result: "calibre.result",
+  resultStopped: "calibre.resultStopped",
+  resultFailures: "calibre.resultFailures",
+  duplicate: "calibre.duplicate",
+  notAdded: "calibre.notAdded",
 };

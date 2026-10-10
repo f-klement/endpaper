@@ -498,8 +498,8 @@ def _default_client() -> Client:
     """The client in use today.
 
     Imported here rather than at module scope so that this module can be imported, and
-    every bound in it tested, on a machine with no Z39.50 client installed at all. The
-    test suite is hermetic and never reaches this function.
+    every bound in it tested, on a machine with no Z39.50 client installed at all.
+    Building the client loads nothing either: the library is read at its first open.
     """
     from z3950_provisional import ProvisionalYazClient
 

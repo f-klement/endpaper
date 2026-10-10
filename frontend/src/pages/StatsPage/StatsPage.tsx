@@ -84,6 +84,7 @@ export default function StatsPage() {
       <StatSection
         title={t("stats.finishedByMonth")}
         rows={(stats.finished_by_month ?? []).map((row) => ({
+          id: row.month,
           label: monthLabel(row.month, locale),
           count: row.count,
         }))}
@@ -102,6 +103,7 @@ export default function StatsPage() {
       <StatSection
         title={t("stats.pagesByMonth")}
         rows={(stats.pages_by_month ?? []).map((row) => ({
+          id: row.month,
           label: monthLabel(row.month, locale),
           count: row.count,
         }))}
@@ -115,6 +117,7 @@ export default function StatsPage() {
       <StatSection
         title={t("stats.byMember")}
         rows={stats.per_user.map((row) => ({
+          id: row.username,
           label: row.username,
           count: row.count,
         }))}
@@ -129,6 +132,7 @@ export default function StatsPage() {
       <StatSection
         title={t("stats.byCollection")}
         rows={(stats.by_collection ?? []).map((row) => ({
+          id: row.name,
           label: row.name,
           count: row.count,
         }))}
@@ -143,7 +147,11 @@ export default function StatsPage() {
             .filter((row) => row.category === category)
             // Through `tagName` like every other tag on screen: these rows
             // carry the key for exactly that.
-            .map((row) => ({ label: tagName(row, locale), count: row.count }))}
+            .map((row) => ({
+              id: row.name,
+              label: tagName(row, locale),
+              count: row.count,
+            }))}
           colorClass="bg-accent-400"
         />
       ))}
@@ -151,6 +159,7 @@ export default function StatsPage() {
       <StatSection
         title={t("stats.overTime")}
         rows={stats.by_month.map((row) => ({
+          id: row.month,
           label: monthLabel(row.month, locale),
           count: row.count,
         }))}

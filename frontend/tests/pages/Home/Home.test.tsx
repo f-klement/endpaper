@@ -2,10 +2,19 @@
 
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import fc from "fast-check";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import Home from "../../../src/pages/Home";
+import {
+  AVAILABLE_COLUMNS,
+  libraryColumnsPreference,
+} from "../../../src/lib/libraryColumns";
+import { libraryViewPreference } from "../../../src/lib/libraryView";
 import { makeBook, makeBookPage, makeTagSet, resetIds } from "../../factories";
+import { answersOf } from "../../lib/schemaArbitrary";
+import { holds, PROFILE, PROPERTY, witness } from "../../property";
+import { forget, overSchema } from "../../schemaPage";
 import { mockApi, renderWithProviders, type MockApi } from "../../utils";
 
 let api: MockApi;
@@ -430,5 +439,68 @@ describe("Home unconfirmed banner", () => {
     expect(
       screen.queryByText(/have not been confirmed/),
     ).not.toBeInTheDocument();
+  });
+});
+
+/** The entries of a page body, or `undefined` for one that is not a page. */
+const items = (body: unknown) =>
+  (body as { items?: unknown[] } | undefined)?.items;
+
+describe("Home over any answer the schema permits", () => {
+  // What the page's hooks are handed is drawn from `openapi.json`, per
+  // request, so an error body, an empty page, a field at its bound and a null
+  // where one is allowed each reach the page as a server could send them.
+  // The view is drawn too, since each of the three draws the books its own
+  // way, and so is a table of every column it offers, which is where most of
+  // a book's fields reach the page. `tests/schemaPage.tsx` holds what the
+  // page may not do.
+  const DRAWS = fc.record({
+    view: fc.constantFrom("grid", "table", "list"),
+    everyColumn: fc.boolean(),
+    answers: fc.gen(),
+  });
+
+  it("is drawn an error body, an empty page and a page of books", async () => {
+    await witness(answersOf("list_books"), {
+      "is an error body": (answer) => answer.status === 422,
+      "is an empty page": (answer) =>
+        answer.status === 200 && items(answer.body)?.length === 0,
+      "is a page of books": (answer) =>
+        answer.status === 200 && (items(answer.body)?.length ?? 0) > 0,
+    });
+  });
+
+  it("neither throws nor shows a value nobody can name", PROPERTY, async () => {
+    expect(
+      await holds(
+        DRAWS,
+        async ({ view, everyColumn, answers }) => {
+          for (const mode of ["household", "cataloguer"] as const) {
+            localStorage.setItem(libraryViewPreference.keyFor(mode), view);
+            if (everyColumn) {
+              localStorage.setItem(
+                libraryColumnsPreference.keyFor(mode),
+                AVAILABLE_COLUMNS[mode].join(","),
+              );
+            }
+          }
+          try {
+            const rendered = await overSchema(<Home />, answers);
+            expect(rendered.problems).toEqual([]);
+            return {
+              books:
+                rendered.container.querySelectorAll('a[href^="/book/"]').length,
+              alerts: rendered.alerts.length,
+            };
+          } finally {
+            forget();
+          }
+        },
+        {
+          "drew a book onto the page": (_, rendered) => rendered.books > 0,
+          "drew an alert": (_, rendered) => rendered.alerts > 0,
+        },
+      ),
+    ).toBe(PROFILE.runs);
   });
 });

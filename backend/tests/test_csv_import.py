@@ -281,6 +281,15 @@ class TestRefusing:
         # The real headers are named, so a column can be picked by hand.
         assert "Colour" in str(error.value)
 
+    def test_a_file_whose_first_line_is_blank_has_no_header_row(self):
+        with pytest.raises(ImportError_, match="no header row"):
+            parse(b"\nTitle,Author\nDune,Frank Herbert\n")
+
+    def test_a_file_longer_than_the_bound_is_read_up_to_it(self, monkeypatch):
+        monkeypatch.setattr(csv_import, "MAX_ROWS", 2)
+        parsed = parse(b"Title\nDune\nEmma\nUlysses\n")
+        assert [row.title for row in parsed.rows] == ["Dune", "Emma"]
+
     def test_a_row_with_no_title_is_counted_not_dropped_silently(self):
         parsed = parse(b"Title,Author\n,Nobody\nDune,Frank Herbert\n")
         assert len(parsed.rows) == 1
@@ -352,6 +361,14 @@ class TestFieldParsing:
         # A wrong date lands in "books finished in 2021" and nobody notices.
         assert _parse_date("sometime last spring") is None
 
+    def test_a_date_shaped_cell_naming_no_real_day_is_absent(self):
+        assert _parse_date("2021/13/45") is None
+
+    def test_a_year_column_holding_a_date_gives_up_its_year(self):
+        """Read as a number, `03/06/2014` would be the year 3."""
+        [row] = parse(b"Title,Year Published\nDune,03/06/2014\n").rows
+        assert row.year == 2014
+
     def test_a_rating_outside_the_scale_is_dropped(self):
         [row] = parse(b"Title,Rating\nDune,9\n").rows
         assert row.rating is None
@@ -363,6 +380,25 @@ class TestFieldParsing:
     def test_a_year_a_spreadsheet_mangled_is_dropped(self):
         [row] = parse(b"Title,Year Published\nDune,12345\n").rows
         assert row.year is None
+
+    def test_a_page_count_longer_than_python_converts_is_dropped(self):
+        """CPython's `int()` refuses more than 4300 digits, which escaped the
+        import routes as a 500."""
+        [row] = parse(b"Title,Pages\nDune," + b"9" * 5000 + b"\n").rows
+        assert (row.title, row.pages) == ("Dune", None)
+
+    @pytest.mark.parametrize(
+        ("cell", "pages"),
+        [(b"0" * 5000, None), (b"0" * 5000 + b"12", 12)],
+        ids=["zeros", "zeros then twelve"],
+    )
+    def test_leading_zeros_past_what_python_converts_are_read_as_the_number(
+        self, cell, pages
+    ):
+        """The 4300 digit limit counts leading zeros, so a bound that measured
+        only the significant digits still handed `int()` all of them."""
+        [row] = parse(b"Title,Pages\nDune," + cell + b"\n").rows
+        assert (row.title, row.pages) == ("Dune", pages)
 
     def test_unwrapping_leaves_an_ordinary_value_alone(self):
         assert _unwrap_excel_formula("9780441013593") == "9780441013593"
@@ -1602,6 +1638,22 @@ class TestLibraryThingsPublicationCellIsThreeFields:
         ).encode()
         [row] = parse(content).rows
         assert (row.publisher, row.year) == ("Emecé", 1979)
+
+    def test_each_column_of_its_own_beats_its_part_of_the_compound_cell(self):
+        content = (
+            "Title\tPrimary Author\tPublication\tPublisher\tYear\tBinding\n"
+            "Le Grand Meaulnes\tFournier, Alain\tGallimard (1979), Paperback\tEmecé\t1983\tHardcover\n"
+        ).encode()
+        [row] = parse(content).rows
+        assert (row.publisher, row.year, row.format) == ("Emecé", 1983, BookFormat.HARDCOVER)
+
+    def test_a_publisher_column_beats_a_cell_with_no_bracketed_year(self):
+        content = (
+            "Title\tPrimary Author\tPublication\tPublisher\n"
+            "Le Grand Meaulnes\tFournier, Alain\tGallimard, Poche\tEmecé\n"
+        ).encode()
+        [row] = parse(content).rows
+        assert row.publisher == "Emecé"
 
     def test_an_empty_publication_cell_leaves_the_row_alone(self):
         content = LIBRARYTHING_PUBLICATION.replace(b"Gallimard (1979), Paperback", b"")

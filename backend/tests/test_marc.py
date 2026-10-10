@@ -32,6 +32,7 @@ import marc_fields
 import xml_parse
 from catalogue import Heading
 from enums import ClassificationScheme, HeadingKind
+from models import AUTHOR_LINE_MAX
 from tests.strategies import (
     FAR_PAST_ANY_DEPTH,
     PATCHES,
@@ -161,6 +162,8 @@ class MarcDocument:
     patches: tuple[tuple[int, int], ...]
     #: How many empty siblings the extra record carries, 0 for none.
     width: int = 0
+    #: Which empty element those siblings are: `Node.sibling` says why two.
+    sibling: str = "<x/>"
 
 
 #: What may stand in a prolog before the root, each a place a doctype can follow.
@@ -173,7 +176,14 @@ def marc_document(document: MarcDocument) -> bytes:
     """The bytes of an upload the spec describes."""
     records = list(document.records)
     if document.nest_depth or document.width:
-        records.append(Node("record", nest=document.nest_depth, width=document.width))
+        records.append(
+            Node(
+                "record",
+                nest=document.nest_depth,
+                width=document.width,
+                sibling=document.sibling,
+            )
+        )
     body = (
         f'<collection xmlns="{MARCXML}">'
         + "".join(xml_of(record) for record in records)
@@ -730,6 +740,108 @@ class TestTheReaderRefusesAWholeFile:
         with pytest.raises(marc.MarcError, match="nested more than"):
             marc.read(marc_document(one_deeper))
 
+    def test_a_namespace_at_the_bound_is_read_and_one_byte_longer_is_refused(self):
+        """The positive control for `xml_parse.MAX_NAMESPACE` at this door,
+        declared on the collection beside MARCXML's own."""
+
+        def declaring(length: int) -> bytes:
+            written = marc.write([a_book()]).encode()
+            assert written.count(b"<collection ") == 1
+            return written.replace(b"<collection ", b'<collection xmlns:x="' + b"u" * length + b'" ')
+
+        parsed = marc.read(declaring(xml_parse.MAX_NAMESPACE))
+        assert (len(parsed.records), parsed.skipped) == (1, 0)
+        with pytest.raises(marc.MarcError, match="namespace is longer"):
+            marc.read(declaring(xml_parse.MAX_NAMESPACE + 1))
+
+    @staticmethod
+    def _beside_a_record(declaration: bytes, extra: bytes) -> bytes:
+        """A written record, its collection declaring `declaration` and holding `extra`."""
+        written = marc.write([a_book()]).encode()
+        assert written.count(b"<collection ") == written.count(b"</collection>") == 1
+        return written.replace(b"<collection ", b"<collection " + declaration + b" ").replace(
+            b"</collection>", extra + b"</collection>"
+        )
+
+    def test_an_upload_of_many_distinct_names_is_refused_inside_its_bound(self):
+        """**Any member can send this**, and it is the costliest name there is:
+        each one new, under the longest namespace `xml_parse.MAX_NAMESPACE`
+        admits. Read whole it costs more than this door's factor allows, as
+        `xml_parse.MAX_NAMES` records; refused at the name past the bound."""
+        data = self._beside_a_record(
+            b'xmlns:x="' + b"u" * xml_parse.MAX_NAMESPACE + b'"',
+            b"".join(b"<x:n%d/>" % i for i in range(100_000)),
+        )
+        got = answer_of(marc.read, data, answers=marc.ParsedMarc, refuses=marc.MarcError)
+        assert "distinct element and attribute" in str(got.refusal)
+        assert got.peak <= marc.ALLOCATION_FACTOR * len(data) + xml_parse.ALLOCATION_FLOOR
+
+    def test_an_upload_with_one_crowded_tag_is_refused_inside_its_bound(self):
+        """The same names as attributes of one tag, which expat expands before
+        any handler sees the tag: refused by `xml_parse.MAX_ATTRIBUTES` before
+        the parse."""
+        data = self._beside_a_record(
+            b'xmlns:x="' + b"u" * xml_parse.MAX_NAMESPACE + b'"',
+            b"<x:e" + b"".join(b' x:n%d=""' % i for i in range(100_000)) + b"/>",
+        )
+        got = answer_of(marc.read, data, answers=marc.ParsedMarc, refuses=marc.MarcError)
+        assert "tag carries more than" in str(got.refusal)
+        assert got.peak <= marc.ALLOCATION_FACTOR * len(data) + xml_parse.ALLOCATION_FLOOR
+
+    def test_an_upload_of_one_short_element_repeated_is_refused_inside_its_bound(self):
+        """**Any member can send this**: the shortest element carrying an
+        attribute, which read whole cost 36.5 times its size, over this door's
+        factor. Refused by `xml_parse.BYTES_PER_ATTRIBUTED`."""
+        data = self._beside_a_record(b'xmlns:x="u"', b'<e a=""/>' * 100_000)
+        got = answer_of(marc.read, data, answers=marc.ParsedMarc, refuses=marc.MarcError)
+        assert "carries an attribute" in str(got.refusal)
+        assert got.peak <= marc.ALLOCATION_FACTOR * len(data) + xml_parse.ALLOCATION_FLOOR
+
+    def test_the_costliest_shape_found_at_the_bound_is_read_inside_its_bound(self):
+        """**The shape `marc.ALLOCATION_FACTOR` is measured on**: an element
+        carrying an attribute at the density bound, its value and the tails
+        one character outside Latin 1, which costs a string of its own."""
+        shape = '<e a="Ā"/>Āb<x/>Ā'.encode()
+        assert len(shape) == xml_parse.BYTES_PER_ATTRIBUTED
+        data = self._beside_a_record(b'xmlns:x="u"', shape * 50_000)
+        got = answer_of(marc.read, data, answers=marc.ParsedMarc, refuses=marc.MarcError)
+        assert got.value is not None
+        assert got.peak <= marc.ALLOCATION_FACTOR * len(data) + xml_parse.ALLOCATION_FLOOR
+
+    def test_marcxml_of_nothing_but_its_shortest_attributed_element_is_read(self):
+        """**`xml_parse.BYTES_PER_ATTRIBUTED` is this grammar's own floor**: an
+        empty subfield, 20 bytes, is the shortest element carrying an attribute
+        the slim schema allows, so no MARCXML is denser, whatever wrote it.
+        Reds when the bound is tightened past it."""
+        data = (
+            f'<collection xmlns="{marc_fields.NAMESPACE}"><record>'
+            '<datafield tag="245" ind1="0" ind2="0"><subfield code="a">T</subfield>'
+            + '<subfield code="a"/>' * 10_000
+            + "</datafield></record></collection>"
+        ).encode()
+        assert len(marc.read(data).records) == 1
+
+    def test_the_densest_record_this_writer_makes_is_read_back(self):
+        """**The densest document recorded is this writer's**: credits,
+        subjects and classifications of one character each, every one a field
+        carrying a subfield. 250 credits is what `AUTHOR_LINE_MAX` holds; a
+        Book's headings have no cap. Reds when the writer packs elements
+        carrying an attribute closer than `xml_parse.BYTES_PER_ATTRIBUTED`.
+
+        **Ten records, because one is short enough for
+        `xml_parse.ATTRIBUTED_ALLOWANCE` to admit it** at a bound twice as
+        tight: the allowance is about a twentieth of one record's elements."""
+        book = a_book(
+            title="T",
+            author="x," * (AUTHOR_LINE_MAX // 2),
+            classifications=[a_heading(ClassificationScheme.LCSH, "x")] * 100
+            + [a_heading(ClassificationScheme.DDC, "1")] * 100,
+        )
+        written = marc.write([book] * 10).encode()
+        assert written.count(b'tag="700"') == 10 * (AUTHOR_LINE_MAX // 2 - 1)
+        assert written.count(b'tag="650"') == written.count(b'tag="082"') == 10 * 100
+        assert len(marc.read(written).records) == 10
+
     def test_something_that_is_not_xml_is_refused_with_a_reason(self):
         with pytest.raises(marc.MarcError, match="not XML"):
             marc.read(b"Title,Author\nStoner,John Williams\n")
@@ -759,6 +871,10 @@ class TestTheReaderRefusesAWholeFile:
             marc.read(many)
 
 
+#: The MARC readers' costliest element, as the width atom repeats it: an empty
+#: `datafield`, which `marc_fields.Fields` turns into an entry of its own.
+MARC_READ_SIBLING: Final = '<datafield tag="245"/>'
+
 MARC_DOCUMENTS: Final = st.builds(
     MarcDocument,
     records=st.lists(marc_records(), max_size=4).map(tuple),
@@ -770,6 +886,7 @@ MARC_DOCUMENTS: Final = st.builds(
     nest_depth=depths(xml_parse.MAX_DEPTH - 2),
     patches=st.just(()) | PATCHES,
     width=widths(),
+    sibling=st.sampled_from(["<x/>", MARC_READ_SIBLING]),
 )
 
 
@@ -790,7 +907,8 @@ class TestAnUploadIsReadOrRefusedByName:
     the readers name, a declaration drawn from the codec registry and from the
     declaration's own grammar, a doctype after each thing a prolog may hold, the
     UTF-16 the NUL sniff refuses, a nest at and around `xml_parse.MAX_DEPTH`
-    and far past it, `WIDE` empty siblings, and a few single byte patches. Raw
+    and far past it, `WIDE` empty siblings no reader reads or `WIDE` empty
+    fields the reader does, and a few single byte patches. Raw
     bytes reached nothing past the parse, measured in the design round.
     """
 
@@ -852,22 +970,43 @@ class TestAnUploadIsReadOrRefusedByName:
         doctype is refused before any element is built."""
         witness(
             MARC_DOCUMENTS,
-            lambda document: document.width > 0 and _refusal_of(document) is None,
+            lambda document: document.width > 0
+            and document.sibling == "<x/>"
+            and _refusal_of(document) is None,
             reaches="a record of `WIDE` empty siblings, read",
         )
 
+    def test_the_generator_still_reaches_a_wide_record_of_fields_read(self):
+        """The reader's positive control: `WIDE` empty `datafield` elements
+        reaching `marc_fields.Fields`, asked of what the door answered."""
+        witness(
+            MARC_DOCUMENTS,
+            lambda document: document.width > 0
+            and document.sibling == MARC_READ_SIBLING
+            and _refusal_of(document) is None,
+            reaches="a record of `WIDE` empty fields, read",
+        )
+
     def test_the_width_atom_is_wide_enough_that_the_builder_sets_the_peak(self):
-        """**What the witness above cannot see: how wide `WIDE` is.** It asks
-        only for a width above none, so lowering `WIDE` to speed the properties
-        up switches the builder's control off with every arm green: measured
-        through the runner, a builder retaining 100 bytes more per element reds
-        all three allocation properties at `WIDE`, and at `WIDE = 10` passes
-        them. So a record of `WIDE` empty siblings has to cost more than
-        `xml_parse.ALLOCATION_FLOOR` on its own, which is what puts the
-        builder's cost per element, and not the floor, in charge of the peak.
+        """**What the witnesses above cannot see: how wide `WIDE` is.** They
+        ask only for a width above none, so lowering `WIDE` to speed the
+        properties up switches the builder's control off with every arm green:
+        measured through the runner, a builder retaining 100 bytes more per
+        element reds all three allocation properties at `WIDE`, and at
+        `WIDE = 10` passes them. So a record of `WIDE` empty siblings has to
+        cost more than twice `xml_parse.ALLOCATION_FLOOR` on its own, which is
+        what puts the builder's cost per element, and not the floor, in charge
+        of the peak. **Twice, because once was not enough at this door**: at the
+        lowest `WIDE` a bar of once the floor admitted, a builder retaining 50
+        bytes more per element passed the MARC property while the other two
+        reddened, measured.
+
+        **It reads the tree it runs in**, so a builder made costlier lowers the
+        width this admits: a lowering and that defect landing in one change
+        can pass together, while the lowering alone reds here.
 
         **It refuses one legitimate change, on purpose**: a faster builder that
-        makes such a record cheaper than the floor reds it too. That is the
+        makes such a record cheaper than the bar reds it too. That is the
         control losing its power, and the answer is a wider `WIDE`, never a
         lower bar here.
         """
@@ -884,7 +1023,7 @@ class TestAnUploadIsReadOrRefusedByName:
             marc.read, marc_document(document), answers=marc.ParsedMarc, refuses=marc.MarcError
         )
         assert got.value is not None
-        assert got.peak > xml_parse.ALLOCATION_FLOOR
+        assert got.peak > 2 * xml_parse.ALLOCATION_FLOOR
 
     def test_the_generator_still_reaches_the_depth_bound(self):
         witness(

@@ -200,11 +200,20 @@ MAX_ENTRIES: Final = 10_000
 #: `tracemalloc`, under this times the bytes of the page plus
 #: `xml_parse.ALLOCATION_FLOOR`, which says what the bound is and what holds it.
 #:
-#: Measured on CPython 3.14.0: empty elements back to back, the costliest
-#: shape per byte that still parses, peaked at 20.2 times the page and
-#: ordinary entries near 10. A nest past `xml_parse.MAX_DEPTH` is refused within
-#: one chunk.
-ALLOCATION_FACTOR: Final = 24
+#: Measured by `tracemalloc` on the suite pod, CPython 3.14.8 with expat
+#: 2.8.5, about 1 MiB of each shape repeated. The costliest found that the
+#: bounds in `xml_parse` admit, of the kind `marc.ALLOCATION_FACTOR`
+#: describes, peaked at 29.2 times the page, for the 21 character
+#: `'<e a="\u0100"/>\u0100<x/>\u0100<x/>\u0100'`, and
+#: `'<e a=""/>\u0100<x/>\u0100<x/>\u0100'`, which the test at this door reads,
+#: at 29.1; bare elements at 20.0, and entries this reader reads at most 11.2.
+#: A nest past `xml_parse.MAX_DEPTH` is refused within one chunk.
+#:
+#: **30, where it was 24, because the density bound is one rule for three
+#: doors**: at `xml_parse.BYTES_PER_ATTRIBUTED` the shape above reads over 24
+#: here, and a bound tight enough to hold 24 would refuse MARCXML its own
+#: grammar allows.
+ALLOCATION_FACTOR: Final = 30
 
 #: The wall clock a whole sync may spend fetching, redirects and bodies included.
 #:

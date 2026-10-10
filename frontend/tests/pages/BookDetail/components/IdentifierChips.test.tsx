@@ -171,6 +171,16 @@ describe("a scheme this build has no name for", () => {
     ).toBeInTheDocument();
   });
 
+  it("names a scheme called for an object member, such as toString, by its token", () => {
+    // A plain object answers `toString` with the prototype's function, which
+    // is not `undefined` and so skipped this fallback.
+    renderChips([
+      { id: 5, scheme: "toString" as BookIdentifierScheme, value: "a-token" },
+    ]);
+
+    expect(screen.getByText("toString reference: a-token")).toBeInTheDocument();
+  });
+
   it("says it in German too", () => {
     renderChips(
       [

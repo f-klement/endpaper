@@ -252,6 +252,21 @@ describe("the text a string carries", () => {
 
     expect(verdict(reading)).toBe("read: Café");
   });
+
+  // Each escape's answer is told apart from the backslash being dropped: a
+  // control character comes out of `clean` as a space, and a continuation as
+  // nothing at all.
+  it.each([
+    ["the five single letter escapes", "A\\nB\\rC\\tD\\bE\\fF", "A B C D E F"],
+    ["a continuation before CR LF", "Line\\\r\nBreak", "LineBreak"],
+    ["a continuation before a lone CR", "Line\\\rBreak", "LineBreak"],
+    ["a continuation before a lone LF", "Line\\\nBreak", "LineBreak"],
+    ["an octal escape cut short by an 8", "A\\618", "A18"],
+  ])("reads %s", async (_, title, expected) => {
+    const reading = await read(withInfo(`/Title (${title})`));
+
+    expect(verdict(reading)).toBe(`read: ${expected}`);
+  });
 });
 
 describe("a title the file carries but this reader will not use", () => {
@@ -462,6 +477,53 @@ describe("the XMP packet", () => {
     if (!reading.ok) return;
     expect(reading.metadata.language).toBe("de");
   });
+
+  it("reads a value written straight into its element rather than in a list", async () => {
+    // The specification wraps every one of these in a list, and a producer
+    // that does not is still telling the truth about the book.
+    const packet =
+      `<?xpacket begin="" id="W5M0MpCehiHzreSzNTczkc9d"?>\n` +
+      `<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">` +
+      `<rdf:Description xmlns:dc="http://purl.org/dc/elements/1.1/">` +
+      `<dc:publisher>Chilton</dc:publisher>` +
+      `</rdf:Description></rdf:RDF>\n<?xpacket end="w"?>`;
+
+    const reading = await withXmp(packet);
+
+    expect(reading.ok).toBe(true);
+    if (!reading.ok) return;
+    expect(reading.metadata.publisher).toBe("Chilton");
+  });
+});
+
+describe("an array longer than anything real", () => {
+  /**
+   * An information dictionary carrying an array of `count` numbers, packed in
+   * an object stream, because a plain object is read through a window far
+   * shorter than the bound. A classic trailer, read through the grown cross
+   * reference window, reaches it too.
+   */
+  async function withArrayOf(count: number) {
+    return read(
+      await streamPdf(
+        [
+          object(1, `<< /Title (Wide) /Keywords [${"0 ".repeat(count)}] >>`),
+          object(2, "<< /Type /Catalog >>"),
+        ],
+        "/Info 1 0 R /Root 2 0 R",
+        { packed: [[1]] },
+      ),
+    );
+  }
+
+  it("is read at exactly half a million members, so the refusal below is the array's", async () => {
+    // At the bound rather than well under it, so a lowered bound reds here.
+    expect(verdict(await withArrayOf(500_000))).toBe("read: Wide");
+  });
+
+  it("is refused past half a million members, taking its object with it", async () => {
+    expect(verdict(await withArrayOf(500_001))).toBe("read: null");
+  });
 });
 
 describe("a cross reference this reader has to follow", () => {
@@ -664,13 +726,16 @@ describe("a cross reference stream's own layout", () => {
   });
 
   it("refuses a fractional width, over rows the next whole width would read", async () => {
+    // The two fractions sum to a whole record, so a reader taking them steps
+    // from row to row exactly and reads each type and offset whole. With one
+    // fraction alone its cursor leaves the rows and it finds nothing either.
     const bytes = rewritten(
       await streamPdf(objects, trailer, {
         predictor: false,
         widths: [1, 5, 2],
       }),
       "/W [1 5 2]",
-      "/W [1 4.5 2]",
+      "/W [1 4.5 2.5]",
     );
 
     expect(verdict(await read(bytes))).toBe("not-a-pdf");
@@ -864,6 +929,28 @@ describe("the filter and parameters a stream declares", () => {
         "<< /Type /Metadata /Filter /FlateDecode /DecodeParms << /Predictor 12 >> >>",
         await deflate(predict(packet, 1, () => 2)),
       ).body,
+    );
+
+    expect(language(await read(bytes))).toBe("read: fr");
+  });
+
+  it("follows a reference written as the one member of a /DecodeParms array", async () => {
+    // The parameters kept as an object of their own. Left unresolved, the
+    // reference reads as no predictor and the packet comes back still
+    // predicted, which is a missing language rather than an error.
+    const packet = latin(xmpPacket({ language: "fr" }));
+    const bytes = classicPdf(
+      [
+        object(1, "<< /Title (Packet) >>"),
+        object(2, "<< /Type /Catalog /Metadata 3 0 R >>"),
+        streamObject(
+          3,
+          "<< /Type /Metadata /Filter /FlateDecode /DecodeParms [4 0 R] >>",
+          await deflate(predict(packet, 1, () => 2)),
+        ),
+        object(4, "<< /Predictor 12 >>"),
+      ],
+      "/Info 1 0 R /Root 2 0 R",
     );
 
     expect(language(await read(bytes))).toBe("read: fr");
@@ -1154,6 +1241,25 @@ describe("a number the file supplied that does not agree with the file", () => {
     );
 
     expect(verdict(await read(swapped))).toBe("read: null");
+  });
+
+  it("refuses an object whose header has no obj keyword", async () => {
+    // The keyword blanked to spaces of its own length, so every offset holds
+    // and the dictionary after it is still readable to a reader that skipped
+    // the check.
+    const bytes = rewritten(
+      classicPdf(
+        [
+          object(1, "<< /Title (The Right Book) >>"),
+          object(2, "<< /Type /Catalog >>"),
+        ],
+        "/Info 1 0 R /Root 2 0 R",
+      ),
+      "1 0 obj",
+      "1 0    ",
+    );
+
+    expect(verdict(await read(bytes))).toBe("read: null");
   });
 
   it("refuses a cross reference table whose subsection header is not a number", async () => {

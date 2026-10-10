@@ -42,6 +42,100 @@ export function defaultUnit(book: BookOut): Unit {
 }
 
 /**
+ * Where the reader has got to: the latest position, and a bar when there is a
+ * percentage to draw it at.
+ */
+function ProgressSummary({ book }: { book: BookOut }) {
+  const { t } = useTranslation();
+  const percent = book.my_progress_percent ?? null;
+
+  if (book.my_progress_page == null && book.my_progress_percent == null) {
+    return (
+      <p className="text-sm text-paper-600 italic dark:text-paper-400">
+        {t("progress.none")}
+      </p>
+    );
+  }
+
+  return (
+    <div className="space-y-1.5">
+      <p className="text-sm text-paper-700 dark:text-paper-200">
+        {book.my_progress_page != null
+          ? book.page_count
+            ? t("progress.onPageOf", {
+                page: book.my_progress_page,
+                total: book.page_count,
+              })
+            : t("progress.onPage", { page: book.my_progress_page })
+          : t("progress.atPercent", {
+              percent: book.my_progress_percent ?? 0,
+            })}
+      </p>
+      {percent != null && (
+        <div
+          role="progressbar"
+          aria-valuenow={percent}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-label={t("progress.label")}
+          className="h-2 rounded-full bg-paper-100 overflow-hidden dark:bg-paper-800"
+        >
+          <div
+            className="h-full rounded-full bg-accent-400"
+            style={{ width: `${percent}%` }}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Every recorded position, in the order the caller passes, each removable. */
+function ProgressLog({
+  entries,
+  onRemove,
+}: {
+  entries: ProgressOut[];
+  onRemove: (progressId: number) => void;
+}) {
+  const { t, locale } = useTranslation();
+  return (
+    <ul className="space-y-1.5">
+      {entries.map((entry) => (
+        <li
+          key={entry.id}
+          className="flex items-center gap-2 text-xs text-paper-600 dark:text-paper-400"
+        >
+          <span className="flex-1">
+            {[
+              entry.page != null
+                ? t("progress.onPage", { page: entry.page })
+                : t("progress.atPercent", { percent: entry.percent ?? 0 }),
+              entry.minutes != null
+                ? t("progress.minutesRead", { minutes: entry.minutes })
+                : null,
+              shortMonthDate(entry.recorded_at, locale),
+            ]
+              .filter(Boolean)
+              .join(" · ")}
+          </span>
+          <button
+            type="button"
+            onClick={() => onRemove(entry.id)}
+            aria-label={t("progress.removeEntry")}
+            className="text-paper-600 hover:text-danger-600 dark:text-paper-400 dark:hover:text-danger-300"
+          >
+            <span aria-hidden="true">
+              <Icon name="close" className="w-3.5 h-3.5" />
+            </span>
+          </button>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/**
  * Where this reader has got to, and how they got there.
  *
  * A log rather than a single editable number, because the questions the panel
@@ -59,7 +153,7 @@ export default function ProgressPanel({
   onRecord,
   onRemove,
 }: ProgressPanelProps) {
-  const { t, locale } = useTranslation();
+  const { t } = useTranslation();
   const [unit, setUnit] = useState<Unit>(() => defaultUnit(book));
   const [position, setPosition] = useState("");
   const [minutes, setMinutes] = useState("");
@@ -82,8 +176,6 @@ export default function ProgressPanel({
     setMinutes("");
   }
 
-  const percent = book.my_progress_percent ?? null;
-
   return (
     <div className="space-y-3">
       {/* h3, not h2: the section handle that folds this panel away is the
@@ -93,41 +185,7 @@ export default function ProgressPanel({
         {t("progress.label")}
       </h3>
 
-      {book.my_progress_page != null || book.my_progress_percent != null ? (
-        <div className="space-y-1.5">
-          <p className="text-sm text-paper-700 dark:text-paper-200">
-            {book.my_progress_page != null
-              ? book.page_count
-                ? t("progress.onPageOf", {
-                    page: book.my_progress_page,
-                    total: book.page_count,
-                  })
-                : t("progress.onPage", { page: book.my_progress_page })
-              : t("progress.atPercent", {
-                  percent: book.my_progress_percent ?? 0,
-                })}
-          </p>
-          {percent != null && (
-            <div
-              role="progressbar"
-              aria-valuenow={percent}
-              aria-valuemin={0}
-              aria-valuemax={100}
-              aria-label={t("progress.label")}
-              className="h-2 rounded-full bg-paper-100 overflow-hidden dark:bg-paper-800"
-            >
-              <div
-                className="h-full rounded-full bg-accent-400"
-                style={{ width: `${percent}%` }}
-              />
-            </div>
-          )}
-        </div>
-      ) : (
-        <p className="text-sm text-paper-600 italic dark:text-paper-400">
-          {t("progress.none")}
-        </p>
-      )}
+      <ProgressSummary book={book} />
 
       <form onSubmit={submit} className="space-y-2">
         {/* Both units are always offered, whichever one is preselected. A book
@@ -200,38 +258,7 @@ export default function ProgressPanel({
       </form>
 
       {entries.length > 0 && (
-        <ul className="space-y-1.5">
-          {entries.map((entry) => (
-            <li
-              key={entry.id}
-              className="flex items-center gap-2 text-xs text-paper-600 dark:text-paper-400"
-            >
-              <span className="flex-1">
-                {[
-                  entry.page != null
-                    ? t("progress.onPage", { page: entry.page })
-                    : t("progress.atPercent", { percent: entry.percent ?? 0 }),
-                  entry.minutes != null
-                    ? t("progress.minutesRead", { minutes: entry.minutes })
-                    : null,
-                  shortMonthDate(entry.recorded_at, locale),
-                ]
-                  .filter(Boolean)
-                  .join(" · ")}
-              </span>
-              <button
-                type="button"
-                onClick={() => onRemove(entry.id)}
-                aria-label={t("progress.removeEntry")}
-                className="text-paper-600 hover:text-danger-600 dark:text-paper-400 dark:hover:text-danger-300"
-              >
-                <span aria-hidden="true">
-                  <Icon name="close" className="w-3.5 h-3.5" />
-                </span>
-              </button>
-            </li>
-          ))}
-        </ul>
+        <ProgressLog entries={entries} onRemove={onRemove} />
       )}
     </div>
   );

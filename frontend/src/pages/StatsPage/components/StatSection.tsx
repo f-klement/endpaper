@@ -1,7 +1,12 @@
 import Bar from "./Bar";
 
 export interface StatRow {
-  /** Row label, unique within the section. Also used as the React key. */
+  /**
+   * What the row counts, unique within the section: a month, a member, a
+   * stored tag name. **Not the label**: a seeded tag shown in German can
+   * read the same as a tag a household named itself.
+   */
+  id: string;
   label: string;
   count: number;
 }
@@ -44,7 +49,7 @@ export default function StatSection({
       </h2>
       <div className="space-y-2.5">
         {rows.map((row) => (
-          <div key={row.label} className="flex items-center gap-3">
+          <div key={row.id} className="flex items-center gap-3">
             <span
               className={`text-sm text-paper-600 truncate dark:text-paper-300 ${labelWidthClass}`}
             >

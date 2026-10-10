@@ -2,6 +2,7 @@
 
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import fc from "fast-check";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { OverdueSender } from "../../../src/api/generated/model";
@@ -13,7 +14,15 @@ import {
   makeLoanPage,
   resetIds,
 } from "../../factories";
-import { mockApi, renderWithProviders, type MockApi } from "../../utils";
+import {
+  heldOpen,
+  mockApi,
+  renderWithProviders,
+  type MockApi,
+} from "../../utils";
+import { answersOf } from "../../lib/schemaArbitrary";
+import { holds, PROFILE, PROPERTY, witness } from "../../property";
+import { forget, overSchema } from "../../schemaPage";
 
 let api: MockApi;
 
@@ -115,6 +124,47 @@ describe("OverduePage", () => {
     await waitFor(() =>
       expect(api.lastCall(`/api/loans/${loan.id}/return`, "PUT")).toBeDefined(),
     );
+  });
+
+  it("reports a failed return", async () => {
+    const loan = overdueLoan();
+    api.on(/\/api\/loans\/overdue(\?|$)/, { body: makeLoanPage([loan]) });
+    api.on(
+      `/api/loans/${loan.id}/return`,
+      { status: 400, body: { detail: "Loan already returned" } },
+      "PUT",
+    );
+    renderWithProviders(<OverduePage />);
+
+    await userEvent.click(
+      await screen.findByRole("button", { name: /mark returned/i }),
+    );
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Loan already returned",
+    );
+  });
+
+  it("marks the row being returned, and only that row", async () => {
+    // The busy marker is a loan id, so a second row must stay pressable.
+    const first = overdueLoan("Piranesi");
+    api.on(/\/api\/loans\/overdue(\?|$)/, {
+      body: makeLoanPage([first, overdueLoan("Emma")]),
+    });
+    const reply = heldOpen();
+    api.on(`/api/loans/${first.id}/return`, reply.respond, "PUT");
+    renderWithProviders(<OverduePage />);
+    await screen.findByText("Emma");
+    const [piranesi, emma] = screen.getAllByRole("button", {
+      name: /mark returned/i,
+    });
+
+    await userEvent.click(piranesi!);
+
+    await waitFor(() => expect(piranesi).toBeDisabled());
+    expect(emma).toBeEnabled();
+
+    reply.release({ body: first });
   });
 });
 
@@ -228,5 +278,43 @@ describe("the delivery status", () => {
     expect(
       await screen.findByText(/channel record could not be read/),
     ).toBeInTheDocument();
+  });
+});
+
+/** How many entries a page body holds, or -1 for one that is not a page. */
+const entries = (body: unknown) =>
+  (body as { items?: unknown[] } | undefined)?.items?.length ?? -1;
+
+describe("OverduePage over any answer the schema permits", () => {
+  // What the page's hooks are handed is drawn from `openapi.json`, per
+  // request. `tests/schemaPage.tsx` holds what the page may not do.
+  it("is drawn every shape of answer its main request declares", async () => {
+    await witness(answersOf("list_overdue"), {
+      "is an error body": (answer) => answer.status === 422,
+      "is an empty page": (answer) => entries(answer.body) === 0,
+      "is a page with an entry": (answer) => entries(answer.body) > 0,
+    });
+  });
+
+  it("neither throws nor shows a value nobody can name", PROPERTY, async () => {
+    expect(
+      await holds(
+        fc.gen(),
+        async (answers) => {
+          try {
+            const rendered = await overSchema(<OverduePage />, answers);
+            expect(rendered.problems).toEqual([]);
+            return rendered;
+          } finally {
+            forget();
+          }
+        },
+        {
+          "showed a value an answer carried": (_, rendered) =>
+            rendered.echoed > 0,
+          "drew an alert": (_, rendered) => rendered.alerts.length > 0,
+        },
+      ),
+    ).toBe(PROFILE.runs);
   });
 });

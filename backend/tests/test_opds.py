@@ -11,6 +11,7 @@ addresses are resolved rather than written as literals.
 """
 
 import dataclasses
+import html
 import pathlib
 import time
 from dataclasses import dataclass
@@ -589,6 +590,64 @@ class TestWhatThisReaderRefusesToParse:
         one_deeper = dataclasses.replace(at_the_bound, nest_depth=xml_parse.MAX_DEPTH - 1)
         with pytest.raises(opds.FeedUnreadable, match="nested more than"):
             opds.read_page(a_page(one_deeper))
+
+    @staticmethod
+    def _an_entry_holding(fill: str) -> str:
+        return f'<feed xmlns="http://www.w3.org/2005/Atom"><entry><title>T</title>{fill}</entry></feed>'
+
+    def test_a_page_of_one_short_element_repeated_is_refused_inside_its_bound(self):
+        """The shortest element carrying an attribute, which read whole cost
+        36.5 times the page. Refused by `xml_parse.BYTES_PER_ATTRIBUTED`."""
+        page = self._an_entry_holding('<e a=""/>' * 100_000)
+        got = answer_of(opds.read_page, page, answers=opds.Page, refuses=opds.FeedUnreadable)
+        assert "carries an attribute" in str(got.refusal)
+        assert got.peak <= opds.ALLOCATION_FACTOR * len(page.encode()) + xml_parse.ALLOCATION_FLOOR
+
+    def test_the_costliest_shape_found_at_the_bound_is_read_inside_its_bound(self):
+        """**The shape `opds.ALLOCATION_FACTOR` is measured on**: an element
+        carrying an attribute at the density bound, counted in characters
+        since this door is handed text, the rest bare elements, every tail one
+        character outside Latin 1."""
+        shape = '<e a=""/>Ā<x/>Ā<x/>Ā'
+        assert len(shape) == xml_parse.BYTES_PER_ATTRIBUTED
+        page = self._an_entry_holding(shape * 45_000)
+        got = answer_of(opds.read_page, page, answers=opds.Page, refuses=opds.FeedUnreadable)
+        assert got.value is not None
+        assert got.peak <= opds.ALLOCATION_FACTOR * len(page.encode()) + xml_parse.ALLOCATION_FLOOR
+
+    def test_a_namespace_at_the_bound_is_read_and_one_byte_longer_is_refused(self):
+        """The positive control for `xml_parse.MAX_NAMESPACE` at this door."""
+
+        def declaring(length: int) -> str:
+            return (
+                f'<feed xmlns="http://www.w3.org/2005/Atom" xmlns:x="{"u" * length}" '
+                'xmlns:dc="http://purl.org/dc/elements/1.1/">'
+                "<entry><title>Small Gods</title>"
+                "<dc:identifier>9780552152976</dc:identifier>"
+                '<link rel="http://opds-spec.org/acquisition" href="/d/1"/></entry>'
+                "</feed>"
+            )
+
+        assert opds.read_page(declaring(xml_parse.MAX_NAMESPACE)).records[0].isbn == "9780552152976"
+        with pytest.raises(opds.FeedUnreadable, match="namespace is longer"):
+            opds.read_page(declaring(xml_parse.MAX_NAMESPACE + 1))
+
+    def test_a_summary_of_escaped_html_is_read_and_not_taken_for_a_crowded_tag(self):
+        """Atom carries a `type="html"` summary as escaped character data, with
+        its quotes left bare, so a styled description holds more attribute look
+        alikes than `xml_parse.MAX_ATTRIBUTES` in a run with no `<`. Refusing it
+        refuses the whole sync."""
+        paragraph = (
+            '<p class="MsoNormal" style="margin:0">'
+            '<span lang="EN-GB" style="font-size:12pt">A paragraph.</span></p>'
+        )
+        summary = html.escape(paragraph * (xml_parse.MAX_ATTRIBUTES // 4 + 1), quote=False)
+        assert summary.count('="') > xml_parse.MAX_ATTRIBUTES
+        entry = _book("Small Gods", extra=f'<summary type="html">{summary}</summary>')
+
+        assert [record.title for record in opds.read_page(_feed(entry)).records] == [
+            "Small Gods"
+        ]
 
 
 class TestADecoderWorksOnAFile:

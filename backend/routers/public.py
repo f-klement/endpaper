@@ -60,6 +60,7 @@ from dependencies import DbSession, Paging, RowId, TagIdList, row_ids
 from enums import BookFormat
 from models import SERIES_NAME_MAX, Book
 from ratelimit import client_address, public_catalogue_limiter
+from refusals import refuses
 from schemas import Page, PublicBookOut, PublicBookSort
 from serialisation import books_to_public_out
 from shelf import BookFilters, Loading, Shelf, order_for
@@ -89,6 +90,7 @@ PUBLIC_PREFIX = "/api/public"
 PUBLIC_PAGE_PREFIX = "/catalogue"
 
 
+@refuses(404)
 def public_reader(
     request: Request,
     db: DbSession,
@@ -204,6 +206,7 @@ def list_public_books(
     response_model=PublicBookOut,
     summary="One record from the published catalogue",
 )
+@refuses(404)
 def get_public_book(
     book_id: RowId,
     db: DbSession,

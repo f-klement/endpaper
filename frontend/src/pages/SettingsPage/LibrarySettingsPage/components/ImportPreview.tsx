@@ -40,6 +40,19 @@ const SERVICE_NAMES: Record<string, string> = {
   openreads: "Openreads",
 };
 
+/**
+ * The name to show for a reader, its own token where this build has none.
+ *
+ * `Object.hasOwn` rather than `??` alone, because the token is a server string
+ * and `toString` reads the prototype's function, which `??` keeps.
+ */
+function serviceName(reader: string): string {
+  const name = Object.hasOwn(SERVICE_NAMES, reader)
+    ? SERVICE_NAMES[reader]
+    : undefined;
+  return name ?? reader;
+}
+
 /** The header that filled a field, from whichever of its keys matched. */
 function columnFor(
   mapping: Record<string, string | null>,
@@ -99,7 +112,7 @@ export default function ImportPreview({ preview }: ImportPreviewProps) {
 
       <p className="mt-2 text-xs text-paper-600 dark:text-paper-400">
         {service
-          ? t("import.readAs", { service: SERVICE_NAMES[service] ?? service })
+          ? t("import.readAs", { service: serviceName(service) })
           : t("import.readAsGeneric")}
       </p>
 

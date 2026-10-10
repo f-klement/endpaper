@@ -1719,6 +1719,13 @@ class TestAHostileQueryCannotBreakTheDocument:
         assert details is not None
         assert details.text == "<script>"
 
+    def test_a_refusal_with_nothing_to_echo_carries_no_details_element(self, db):
+        """A blank parameter is kept, so `operation=` is refused with empty
+        details, and an empty `<details>` would be noise a client has to read."""
+        response = respond(db, operation="")
+        assert diagnostic_of(response) == sru.Diagnostic.UNSUPPORTED_OPERATION
+        assert response.find(f"{SRW}diagnostics/{DIAG}diagnostic/{DIAG}details") is None
+
     def test_a_parameter_sent_twice_is_refused(self, db):
         """Neither taking the first nor taking the last is right, because the
         client cannot tell which it got. `targets.py` records the same hazard
@@ -2151,6 +2158,17 @@ class TestTheParametersClientsActuallySend:
         )
         assert diagnostic_of(response) is None
 
+    def test_the_one_packing_this_answers_in_may_be_asked_for(self, db, shelf):
+        response = respond(
+            db, operation="searchRetrieve", query="Chartreuse", recordPacking="xml"
+        )
+        assert diagnostic_of(response) is None
+        assert number_of_records(response) == 1
+
+    def test_a_query_of_only_spaces_is_a_query_not_supplied(self, db, shelf):
+        response = respond(db, operation="searchRetrieve", query="   ")
+        assert diagnostic_of(response) == sru.Diagnostic.MANDATORY_PARAMETER_NOT_SUPPLIED
+
     @pytest.mark.parametrize("name", sorted(sru.SCHEMA_NAMES))
     def test_both_spellings_of_the_marcxml_schema_are_accepted(self, db, shelf, name):
         response = respond(
@@ -2444,6 +2462,32 @@ def _diagnostic_of(query: str) -> sru.Diagnostic | None:
     except sru.SruError as error:
         return error.diagnostic
     return None
+
+
+class TestAMalformedQueryIsRefusedByName:
+    @pytest.mark.parametrize("query", ["dog and", "(dog or"])
+    def test_a_query_that_stops_where_a_clause_must_follow_is_a_syntax_error(self, query):
+        assert _diagnostic_of(query) is sru.Diagnostic.QUERY_SYNTAX_ERROR
+
+    def test_a_closing_parenthesis_with_nothing_open_is_refused(self):
+        assert _diagnostic_of(")dog") is sru.Diagnostic.UNSUPPORTED_USE_OF_PARENTHESES
+
+    def test_a_bare_index_name_means_the_index_it_abbreviates(self, db, shelf):
+        bare = respond(db, query="title = Chartreuse")
+        assert diagnostic_of(bare) is None
+        assert record_ids(bare) == record_ids(respond(db, query="dc.title = Chartreuse"))
+        assert number_of_records(bare) == 1
+
+    def test_a_quoted_term_with_nothing_inside_is_an_empty_term(self):
+        assert _diagnostic_of('dc.title = ""') is sru.Diagnostic.EMPTY_TERM
+
+    def test_a_bare_index_name_this_server_does_not_know_is_refused(self, db, shelf):
+        response = respond(db, query="nowhere = dog")
+        assert diagnostic_of(response) == sru.Diagnostic.UNSUPPORTED_INDEX
+
+    def test_a_masked_term_on_a_numeric_index_is_refused(self, db, shelf):
+        response = respond(db, query="dc.date = 19*")
+        assert diagnostic_of(response) == sru.Diagnostic.TERM_IN_INVALID_FORMAT
 
 
 @pytest.mark.property

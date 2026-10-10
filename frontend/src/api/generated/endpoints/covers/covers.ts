@@ -18,7 +18,7 @@ import type {
   UseQueryResult,
 } from "@tanstack/react-query";
 
-import type { HTTPValidationError } from "../../model";
+import type { HTTPValidationError, Refusal } from "../../model";
 
 import { customFetch } from "../../../mutator.ts";
 
@@ -76,7 +76,7 @@ export const getGetLoginBackgroundQueryKey = (extension: string) => {
 
 export const getGetLoginBackgroundQueryOptions = <
   TData = Awaited<ReturnType<typeof getLoginBackground>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   extension: string,
   options?: {
@@ -115,11 +115,11 @@ export const getGetLoginBackgroundQueryOptions = <
 export type GetLoginBackgroundQueryResult = NonNullable<
   Awaited<ReturnType<typeof getLoginBackground>>
 >;
-export type GetLoginBackgroundQueryError = HTTPValidationError;
+export type GetLoginBackgroundQueryError = Refusal | HTTPValidationError;
 
 export function useGetLoginBackground<
   TData = Awaited<ReturnType<typeof getLoginBackground>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   extension: string,
   options: {
@@ -146,7 +146,7 @@ export function useGetLoginBackground<
 };
 export function useGetLoginBackground<
   TData = Awaited<ReturnType<typeof getLoginBackground>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   extension: string,
   options?: {
@@ -173,7 +173,7 @@ export function useGetLoginBackground<
 };
 export function useGetLoginBackground<
   TData = Awaited<ReturnType<typeof getLoginBackground>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   extension: string,
   options?: {
@@ -196,7 +196,7 @@ export function useGetLoginBackground<
 
 export function useGetLoginBackground<
   TData = Awaited<ReturnType<typeof getLoginBackground>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   extension: string,
   options?: {
@@ -258,7 +258,7 @@ export const getGetCoverQueryKey = (bookId: number, extension: string) => {
 
 export const getGetCoverQueryOptions = <
   TData = Awaited<ReturnType<typeof getCover>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   bookId: number,
   extension: string,
@@ -295,11 +295,11 @@ export const getGetCoverQueryOptions = <
 export type GetCoverQueryResult = NonNullable<
   Awaited<ReturnType<typeof getCover>>
 >;
-export type GetCoverQueryError = HTTPValidationError;
+export type GetCoverQueryError = Refusal | HTTPValidationError;
 
 export function useGetCover<
   TData = Awaited<ReturnType<typeof getCover>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   bookId: number,
   extension: string,
@@ -323,7 +323,7 @@ export function useGetCover<
 };
 export function useGetCover<
   TData = Awaited<ReturnType<typeof getCover>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   bookId: number,
   extension: string,
@@ -347,7 +347,7 @@ export function useGetCover<
 };
 export function useGetCover<
   TData = Awaited<ReturnType<typeof getCover>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   bookId: number,
   extension: string,
@@ -367,7 +367,7 @@ export function useGetCover<
 
 export function useGetCover<
   TData = Awaited<ReturnType<typeof getCover>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   bookId: number,
   extension: string,

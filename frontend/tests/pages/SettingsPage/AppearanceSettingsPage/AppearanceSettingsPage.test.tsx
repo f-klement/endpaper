@@ -17,6 +17,7 @@
 
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import fc from "fast-check";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { Locale } from "../../../../src/api/generated/model";
@@ -28,6 +29,9 @@ import {
   renderWithProviders,
   type MockApi,
 } from "../../../utils";
+import { answersOf } from "../../../lib/schemaArbitrary";
+import { holds, PROFILE, PROPERTY, witness } from "../../../property";
+import { forget, overSchema } from "../../../schemaPage";
 
 let api: MockApi;
 
@@ -188,5 +192,58 @@ describe("AppearanceSettingsPage", () => {
         }),
       );
     });
+  });
+});
+
+/** A field of an answer, or `undefined` for one that is not an object. */
+const field = (body: unknown, key: string) =>
+  (body as Record<string, unknown> | undefined)?.[key];
+
+describe("AppearanceSettingsPage over any answer the schema permits", () => {
+  // What the page's hooks are handed is drawn from `openapi.json`, per
+  // request. `tests/schemaPage.tsx` holds what the page may not do. Every
+  // request this page makes for a signed in account declares a 401 beside its
+  // 200, and an admin only one a 403, so both are drawn as well.
+  it("is drawn every default language", async () => {
+    await witness(answersOf("get_settings"), {
+      "defaults to English": (answer) =>
+        field(answer.body, "default_locale") === Locale.en,
+      "defaults to German": (answer) =>
+        field(answer.body, "default_locale") === Locale.de,
+    });
+  });
+
+  it("neither throws nor shows a value nobody can name", PROPERTY, async () => {
+    expect(
+      await holds(
+        fc.gen(),
+        async (answers) => {
+          try {
+            const rendered = await overSchema(
+              <AppearanceSettingsPage />,
+              answers,
+            );
+            expect(rendered.problems).toEqual([]);
+            // The page draws no string an answer carries, only the default
+            // language it names, so that is the reach. Asked here, before
+            // `forget` empties the page.
+            return within(rendered.container)
+              .queryAllByRole("group", {
+                name: "Default language for new visitors",
+              })
+              .some(
+                (group) =>
+                  group.querySelector('[aria-pressed="true"]') !== null,
+              );
+          } finally {
+            forget();
+          }
+        },
+        {
+          "marked the default language the settings name": (_, marked) =>
+            marked,
+        },
+      ),
+    ).toBe(PROFILE.runs);
   });
 });

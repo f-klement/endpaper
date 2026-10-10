@@ -255,9 +255,11 @@ source = ["."]
 # the instrument from reading as a test somebody forgot.
 #
 # Measured and not listed, deliberately: `migrations/`, whose upgrades build the
-# schema every run uses, so a downgrade no test drives shows as unreached rather
-# than vanishing; and `scripts/postgres_database.py`, whose server half runs only
-# against Postgres, which its test file's docstring states.
+# schema every run uses and whose downgrades `tests/test_schema.py` runs back to
+# an empty database, so an arm of a revision neither reaches shows as unreached
+# rather than vanishing; its `env.py` reads the logging file only when run from
+# a terminal, which no test is. And `scripts/postgres_database.py`, whose server half runs only against
+# Postgres, which its test file's docstring states.
 omit = [
     "tests/*",
     ".venv/*",
@@ -268,6 +270,15 @@ omit = [
     # ["subprocess"]` follows a child, and is not switched on suite wide here.
     "scripts/dump_openapi.py",
 ]
+
+[tool.coverage.report]
+# `assert_never` marks the end of a chain over a closed enum, and mypy fails
+# the gate on it the day the chain stops being exhaustive. Reaching it from a
+# test takes a value the type checker refuses, so a report would only ever show
+# it unreached. Anchored, so only a statement that is the call matches: coverage
+# drops the whole block a matched line opens, and unanchored, a line merely
+# naming the call would take what it opens with it.
+exclude_also = ["^\\s*assert_never\\("]
 
 [tool.ruff]
 line-length = 110

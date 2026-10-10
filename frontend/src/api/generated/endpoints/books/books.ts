@@ -89,6 +89,7 @@ import type {
   PurgeResult,
   QuoteCreate,
   QuoteOut,
+  Refusal,
   SearchBooksParams,
   SeriesOut,
   TagCreate,
@@ -168,7 +169,7 @@ export const getListBooksInfiniteQueryOptions = <
     Awaited<ReturnType<typeof listBooks>>,
     ListBooksParams["page"]
   >,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   params?: ListBooksParams,
   options?: {
@@ -211,14 +212,14 @@ export const getListBooksInfiniteQueryOptions = <
 export type ListBooksInfiniteQueryResult = NonNullable<
   Awaited<ReturnType<typeof listBooks>>
 >;
-export type ListBooksInfiniteQueryError = HTTPValidationError;
+export type ListBooksInfiniteQueryError = Refusal | HTTPValidationError;
 
 export function useListBooksInfinite<
   TData = InfiniteData<
     Awaited<ReturnType<typeof listBooks>>,
     ListBooksParams["page"]
   >,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   params: undefined | ListBooksParams,
   options: {
@@ -251,7 +252,7 @@ export function useListBooksInfinite<
     Awaited<ReturnType<typeof listBooks>>,
     ListBooksParams["page"]
   >,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   params?: ListBooksParams,
   options?: {
@@ -284,7 +285,7 @@ export function useListBooksInfinite<
     Awaited<ReturnType<typeof listBooks>>,
     ListBooksParams["page"]
   >,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   params?: ListBooksParams,
   options?: {
@@ -312,7 +313,7 @@ export function useListBooksInfinite<
     Awaited<ReturnType<typeof listBooks>>,
     ListBooksParams["page"]
   >,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   params?: ListBooksParams,
   options?: {
@@ -345,7 +346,7 @@ export function useListBooksInfinite<
 
 export const getListBooksQueryOptions = <
   TData = Awaited<ReturnType<typeof listBooks>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   params?: ListBooksParams,
   options?: {
@@ -373,11 +374,11 @@ export const getListBooksQueryOptions = <
 export type ListBooksQueryResult = NonNullable<
   Awaited<ReturnType<typeof listBooks>>
 >;
-export type ListBooksQueryError = HTTPValidationError;
+export type ListBooksQueryError = Refusal | HTTPValidationError;
 
 export function useListBooks<
   TData = Awaited<ReturnType<typeof listBooks>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   params: undefined | ListBooksParams,
   options: {
@@ -400,7 +401,7 @@ export function useListBooks<
 };
 export function useListBooks<
   TData = Awaited<ReturnType<typeof listBooks>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   params?: ListBooksParams,
   options?: {
@@ -423,7 +424,7 @@ export function useListBooks<
 };
 export function useListBooks<
   TData = Awaited<ReturnType<typeof listBooks>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   params?: ListBooksParams,
   options?: {
@@ -442,7 +443,7 @@ export function useListBooks<
 
 export function useListBooks<
   TData = Awaited<ReturnType<typeof listBooks>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   params?: ListBooksParams,
   options?: {
@@ -511,7 +512,7 @@ export const addBook = async (
 export const getAddBookMutationKey = () => ["addBook"] as const;
 
 export const getAddBookMutationOptions = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -552,13 +553,16 @@ export type AddBookMutationResult = NonNullable<
   Awaited<ReturnType<typeof addBook>>
 >;
 export type AddBookMutationBody = BookCreate;
-export type AddBookMutationError = HTTPValidationError;
+export type AddBookMutationError = Refusal | HTTPValidationError;
 export type AddBookMutationVariables = { data: BookCreate };
 
 /**
  * @summary Add Book
  */
-export const useAddBook = <TError = HTTPValidationError, TContext = unknown>(
+export const useAddBook = <
+  TError = Refusal | HTTPValidationError,
+  TContext = unknown,
+>(
   options?: {
     mutation?: UseMutationOptions<
       Awaited<ReturnType<typeof addBook>>,
@@ -607,7 +611,7 @@ export const getListAuthorsQueryKey = () => {
 
 export const getListAuthorsQueryOptions = <
   TData = Awaited<ReturnType<typeof listAuthors>>,
-  TError = unknown,
+  TError = Refusal,
 >(options?: {
   query?: Partial<
     UseQueryOptions<Awaited<ReturnType<typeof listAuthors>>, TError, TData>
@@ -632,11 +636,11 @@ export const getListAuthorsQueryOptions = <
 export type ListAuthorsQueryResult = NonNullable<
   Awaited<ReturnType<typeof listAuthors>>
 >;
-export type ListAuthorsQueryError = unknown;
+export type ListAuthorsQueryError = Refusal;
 
 export function useListAuthors<
   TData = Awaited<ReturnType<typeof listAuthors>>,
-  TError = unknown,
+  TError = Refusal,
 >(
   options: {
     query: Partial<
@@ -658,7 +662,7 @@ export function useListAuthors<
 };
 export function useListAuthors<
   TData = Awaited<ReturnType<typeof listAuthors>>,
-  TError = unknown,
+  TError = Refusal,
 >(
   options?: {
     query?: Partial<
@@ -680,7 +684,7 @@ export function useListAuthors<
 };
 export function useListAuthors<
   TData = Awaited<ReturnType<typeof listAuthors>>,
-  TError = unknown,
+  TError = Refusal,
 >(
   options?: {
     query?: Partial<
@@ -698,7 +702,7 @@ export function useListAuthors<
 
 export function useListAuthors<
   TData = Awaited<ReturnType<typeof listAuthors>>,
-  TError = unknown,
+  TError = Refusal,
 >(
   options?: {
     query?: Partial<
@@ -758,7 +762,7 @@ export const unmergeAuthor = async (
 export const getUnmergeAuthorMutationKey = () => ["unmergeAuthor"] as const;
 
 export const getUnmergeAuthorMutationOptions = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -799,14 +803,14 @@ export type UnmergeAuthorMutationResult = NonNullable<
   Awaited<ReturnType<typeof unmergeAuthor>>
 >;
 
-export type UnmergeAuthorMutationError = HTTPValidationError;
+export type UnmergeAuthorMutationError = Refusal | HTTPValidationError;
 export type UnmergeAuthorMutationVariables = { aliasId: number };
 
 /**
  * @summary Unmerge Author
  */
 export const useUnmergeAuthor = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(
   options?: {
@@ -895,7 +899,7 @@ export const getAuthorAuthorityQueryKey = (params?: AuthorAuthorityParams) => {
 
 export const getAuthorAuthorityQueryOptions = <
   TData = Awaited<ReturnType<typeof authorAuthority>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   params: AuthorAuthorityParams,
   options?: {
@@ -927,11 +931,11 @@ export const getAuthorAuthorityQueryOptions = <
 export type AuthorAuthorityQueryResult = NonNullable<
   Awaited<ReturnType<typeof authorAuthority>>
 >;
-export type AuthorAuthorityQueryError = HTTPValidationError;
+export type AuthorAuthorityQueryError = Refusal | HTTPValidationError;
 
 export function useAuthorAuthority<
   TData = Awaited<ReturnType<typeof authorAuthority>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   params: AuthorAuthorityParams,
   options: {
@@ -958,7 +962,7 @@ export function useAuthorAuthority<
 };
 export function useAuthorAuthority<
   TData = Awaited<ReturnType<typeof authorAuthority>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   params: AuthorAuthorityParams,
   options?: {
@@ -985,7 +989,7 @@ export function useAuthorAuthority<
 };
 export function useAuthorAuthority<
   TData = Awaited<ReturnType<typeof authorAuthority>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   params: AuthorAuthorityParams,
   options?: {
@@ -1008,7 +1012,7 @@ export function useAuthorAuthority<
 
 export function useAuthorAuthority<
   TData = Awaited<ReturnType<typeof authorAuthority>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   params: AuthorAuthorityParams,
   options?: {
@@ -1100,7 +1104,7 @@ export const getConfirmAuthorIdentifierMutationKey = () =>
   ["confirmAuthorIdentifier"] as const;
 
 export const getConfirmAuthorIdentifierMutationOptions = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -1141,7 +1145,8 @@ export type ConfirmAuthorIdentifierMutationResult = NonNullable<
   Awaited<ReturnType<typeof confirmAuthorIdentifier>>
 >;
 export type ConfirmAuthorIdentifierMutationBody = AuthorIdentifierRequest;
-export type ConfirmAuthorIdentifierMutationError = HTTPValidationError;
+export type ConfirmAuthorIdentifierMutationError =
+  Refusal | HTTPValidationError;
 export type ConfirmAuthorIdentifierMutationVariables = {
   data: AuthorIdentifierRequest;
 };
@@ -1150,7 +1155,7 @@ export type ConfirmAuthorIdentifierMutationVariables = {
  * @summary Confirm Author Identifier
  */
 export const useConfirmAuthorIdentifier = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(
   options?: {
@@ -1207,7 +1212,7 @@ export const getForgetAuthorIdentifierMutationKey = () =>
   ["forgetAuthorIdentifier"] as const;
 
 export const getForgetAuthorIdentifierMutationOptions = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -1248,14 +1253,14 @@ export type ForgetAuthorIdentifierMutationResult = NonNullable<
   Awaited<ReturnType<typeof forgetAuthorIdentifier>>
 >;
 
-export type ForgetAuthorIdentifierMutationError = HTTPValidationError;
+export type ForgetAuthorIdentifierMutationError = Refusal | HTTPValidationError;
 export type ForgetAuthorIdentifierMutationVariables = { identifierId: number };
 
 /**
  * @summary Forget Author Identifier
  */
 export const useForgetAuthorIdentifier = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(
   options?: {
@@ -1346,7 +1351,7 @@ export const mergeAuthors = async (
 export const getMergeAuthorsMutationKey = () => ["mergeAuthors"] as const;
 
 export const getMergeAuthorsMutationOptions = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -1387,14 +1392,14 @@ export type MergeAuthorsMutationResult = NonNullable<
   Awaited<ReturnType<typeof mergeAuthors>>
 >;
 export type MergeAuthorsMutationBody = AuthorMergeRequest;
-export type MergeAuthorsMutationError = HTTPValidationError;
+export type MergeAuthorsMutationError = Refusal | HTTPValidationError;
 export type MergeAuthorsMutationVariables = { data: AuthorMergeRequest };
 
 /**
  * @summary Merge Authors
  */
 export const useMergeAuthors = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(
   options?: {
@@ -1480,7 +1485,7 @@ export const getMergeAuthorsBatchMutationKey = () =>
   ["mergeAuthorsBatch"] as const;
 
 export const getMergeAuthorsBatchMutationOptions = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -1521,7 +1526,7 @@ export type MergeAuthorsBatchMutationResult = NonNullable<
   Awaited<ReturnType<typeof mergeAuthorsBatch>>
 >;
 export type MergeAuthorsBatchMutationBody = AuthorMergeBatchRequest;
-export type MergeAuthorsBatchMutationError = HTTPValidationError;
+export type MergeAuthorsBatchMutationError = Refusal | HTTPValidationError;
 export type MergeAuthorsBatchMutationVariables = {
   data: AuthorMergeBatchRequest;
 };
@@ -1530,7 +1535,7 @@ export type MergeAuthorsBatchMutationVariables = {
  * @summary Merge Authors Batch
  */
 export const useMergeAuthorsBatch = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(
   options?: {
@@ -1617,7 +1622,7 @@ export const getListAuthorSuggestionsQueryKey = (
 
 export const getListAuthorSuggestionsQueryOptions = <
   TData = Awaited<ReturnType<typeof listAuthorSuggestions>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   params?: ListAuthorSuggestionsParams,
   options?: {
@@ -1651,11 +1656,11 @@ export const getListAuthorSuggestionsQueryOptions = <
 export type ListAuthorSuggestionsQueryResult = NonNullable<
   Awaited<ReturnType<typeof listAuthorSuggestions>>
 >;
-export type ListAuthorSuggestionsQueryError = HTTPValidationError;
+export type ListAuthorSuggestionsQueryError = Refusal | HTTPValidationError;
 
 export function useListAuthorSuggestions<
   TData = Awaited<ReturnType<typeof listAuthorSuggestions>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   params: undefined | ListAuthorSuggestionsParams,
   options: {
@@ -1682,7 +1687,7 @@ export function useListAuthorSuggestions<
 };
 export function useListAuthorSuggestions<
   TData = Awaited<ReturnType<typeof listAuthorSuggestions>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   params?: ListAuthorSuggestionsParams,
   options?: {
@@ -1709,7 +1714,7 @@ export function useListAuthorSuggestions<
 };
 export function useListAuthorSuggestions<
   TData = Awaited<ReturnType<typeof listAuthorSuggestions>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   params?: ListAuthorSuggestionsParams,
   options?: {
@@ -1732,7 +1737,7 @@ export function useListAuthorSuggestions<
 
 export function useListAuthorSuggestions<
   TData = Awaited<ReturnType<typeof listAuthorSuggestions>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   params?: ListAuthorSuggestionsParams,
   options?: {
@@ -1802,7 +1807,7 @@ export const getAuthorWikipediaQueryKey = (params?: AuthorWikipediaParams) => {
 
 export const getAuthorWikipediaQueryOptions = <
   TData = Awaited<ReturnType<typeof authorWikipedia>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   params?: AuthorWikipediaParams,
   options?: {
@@ -1834,11 +1839,11 @@ export const getAuthorWikipediaQueryOptions = <
 export type AuthorWikipediaQueryResult = NonNullable<
   Awaited<ReturnType<typeof authorWikipedia>>
 >;
-export type AuthorWikipediaQueryError = HTTPValidationError;
+export type AuthorWikipediaQueryError = Refusal | HTTPValidationError;
 
 export function useAuthorWikipedia<
   TData = Awaited<ReturnType<typeof authorWikipedia>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   params: undefined | AuthorWikipediaParams,
   options: {
@@ -1865,7 +1870,7 @@ export function useAuthorWikipedia<
 };
 export function useAuthorWikipedia<
   TData = Awaited<ReturnType<typeof authorWikipedia>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   params?: AuthorWikipediaParams,
   options?: {
@@ -1892,7 +1897,7 @@ export function useAuthorWikipedia<
 };
 export function useAuthorWikipedia<
   TData = Awaited<ReturnType<typeof authorWikipedia>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   params?: AuthorWikipediaParams,
   options?: {
@@ -1915,7 +1920,7 @@ export function useAuthorWikipedia<
 
 export function useAuthorWikipedia<
   TData = Awaited<ReturnType<typeof authorWikipedia>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   params?: AuthorWikipediaParams,
   options?: {
@@ -2001,7 +2006,7 @@ export const bulkAction = async (
 export const getBulkActionMutationKey = () => ["bulkAction"] as const;
 
 export const getBulkActionMutationOptions = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -2042,13 +2047,16 @@ export type BulkActionMutationResult = NonNullable<
   Awaited<ReturnType<typeof bulkAction>>
 >;
 export type BulkActionMutationBody = BulkRequest;
-export type BulkActionMutationError = HTTPValidationError;
+export type BulkActionMutationError = Refusal | HTTPValidationError;
 export type BulkActionMutationVariables = { data: BulkRequest };
 
 /**
  * @summary Bulk Action
  */
-export const useBulkAction = <TError = HTTPValidationError, TContext = unknown>(
+export const useBulkAction = <
+  TError = Refusal | HTTPValidationError,
+  TContext = unknown,
+>(
   options?: {
     mutation?: UseMutationOptions<
       Awaited<ReturnType<typeof bulkAction>>,
@@ -2104,7 +2112,7 @@ export const getListClassificationsQueryKey = () => {
 
 export const getListClassificationsQueryOptions = <
   TData = Awaited<ReturnType<typeof listClassifications>>,
-  TError = unknown,
+  TError = Refusal,
 >(options?: {
   query?: Partial<
     UseQueryOptions<
@@ -2133,11 +2141,11 @@ export const getListClassificationsQueryOptions = <
 export type ListClassificationsQueryResult = NonNullable<
   Awaited<ReturnType<typeof listClassifications>>
 >;
-export type ListClassificationsQueryError = unknown;
+export type ListClassificationsQueryError = Refusal;
 
 export function useListClassifications<
   TData = Awaited<ReturnType<typeof listClassifications>>,
-  TError = unknown,
+  TError = Refusal,
 >(
   options: {
     query: Partial<
@@ -2163,7 +2171,7 @@ export function useListClassifications<
 };
 export function useListClassifications<
   TData = Awaited<ReturnType<typeof listClassifications>>,
-  TError = unknown,
+  TError = Refusal,
 >(
   options?: {
     query?: Partial<
@@ -2189,7 +2197,7 @@ export function useListClassifications<
 };
 export function useListClassifications<
   TData = Awaited<ReturnType<typeof listClassifications>>,
-  TError = unknown,
+  TError = Refusal,
 >(
   options?: {
     query?: Partial<
@@ -2211,7 +2219,7 @@ export function useListClassifications<
 
 export function useListClassifications<
   TData = Awaited<ReturnType<typeof listClassifications>>,
-  TError = unknown,
+  TError = Refusal,
 >(
   options?: {
     query?: Partial<
@@ -2316,7 +2324,7 @@ export const backfillCovers = async (
 export const getBackfillCoversMutationKey = () => ["backfillCovers"] as const;
 
 export const getBackfillCoversMutationOptions = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -2357,14 +2365,14 @@ export type BackfillCoversMutationResult = NonNullable<
   Awaited<ReturnType<typeof backfillCovers>>
 >;
 
-export type BackfillCoversMutationError = HTTPValidationError;
+export type BackfillCoversMutationError = Refusal | HTTPValidationError;
 export type BackfillCoversMutationVariables = { params?: BackfillCoversParams };
 
 /**
  * @summary Backfill Covers
  */
 export const useBackfillCovers = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(
   options?: {
@@ -2443,7 +2451,7 @@ export const getListCustomFieldsQueryKey = () => {
 
 export const getListCustomFieldsQueryOptions = <
   TData = Awaited<ReturnType<typeof listCustomFields>>,
-  TError = unknown,
+  TError = Refusal,
 >(options?: {
   query?: Partial<
     UseQueryOptions<Awaited<ReturnType<typeof listCustomFields>>, TError, TData>
@@ -2468,11 +2476,11 @@ export const getListCustomFieldsQueryOptions = <
 export type ListCustomFieldsQueryResult = NonNullable<
   Awaited<ReturnType<typeof listCustomFields>>
 >;
-export type ListCustomFieldsQueryError = unknown;
+export type ListCustomFieldsQueryError = Refusal;
 
 export function useListCustomFields<
   TData = Awaited<ReturnType<typeof listCustomFields>>,
-  TError = unknown,
+  TError = Refusal,
 >(
   options: {
     query: Partial<
@@ -2498,7 +2506,7 @@ export function useListCustomFields<
 };
 export function useListCustomFields<
   TData = Awaited<ReturnType<typeof listCustomFields>>,
-  TError = unknown,
+  TError = Refusal,
 >(
   options?: {
     query?: Partial<
@@ -2524,7 +2532,7 @@ export function useListCustomFields<
 };
 export function useListCustomFields<
   TData = Awaited<ReturnType<typeof listCustomFields>>,
-  TError = unknown,
+  TError = Refusal,
 >(
   options?: {
     query?: Partial<
@@ -2546,7 +2554,7 @@ export function useListCustomFields<
 
 export function useListCustomFields<
   TData = Awaited<ReturnType<typeof listCustomFields>>,
-  TError = unknown,
+  TError = Refusal,
 >(
   options?: {
     query?: Partial<
@@ -2669,7 +2677,7 @@ export const getDefineCustomFieldMutationKey = () =>
   ["defineCustomField"] as const;
 
 export const getDefineCustomFieldMutationOptions = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -2710,14 +2718,14 @@ export type DefineCustomFieldMutationResult = NonNullable<
   Awaited<ReturnType<typeof defineCustomField>>
 >;
 export type DefineCustomFieldMutationBody = CustomFieldCreate;
-export type DefineCustomFieldMutationError = HTTPValidationError;
+export type DefineCustomFieldMutationError = Refusal | HTTPValidationError;
 export type DefineCustomFieldMutationVariables = { data: CustomFieldCreate };
 
 /**
  * @summary Define Custom Field
  */
 export const useDefineCustomField = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(
   options?: {
@@ -2780,7 +2788,7 @@ export const getDeleteCustomFieldMutationKey = () =>
   ["deleteCustomField"] as const;
 
 export const getDeleteCustomFieldMutationOptions = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -2821,14 +2829,14 @@ export type DeleteCustomFieldMutationResult = NonNullable<
   Awaited<ReturnType<typeof deleteCustomField>>
 >;
 
-export type DeleteCustomFieldMutationError = HTTPValidationError;
+export type DeleteCustomFieldMutationError = Refusal | HTTPValidationError;
 export type DeleteCustomFieldMutationVariables = { fieldId: number };
 
 /**
  * @summary Delete Custom Field
  */
 export const useDeleteCustomField = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(
   options?: {
@@ -2936,7 +2944,7 @@ export const getRenameCustomFieldMutationKey = () =>
   ["renameCustomField"] as const;
 
 export const getRenameCustomFieldMutationOptions = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -2977,7 +2985,7 @@ export type RenameCustomFieldMutationResult = NonNullable<
   Awaited<ReturnType<typeof renameCustomField>>
 >;
 export type RenameCustomFieldMutationBody = CustomFieldRename;
-export type RenameCustomFieldMutationError = HTTPValidationError;
+export type RenameCustomFieldMutationError = Refusal | HTTPValidationError;
 export type RenameCustomFieldMutationVariables = {
   fieldId: number;
   data: CustomFieldRename;
@@ -2987,7 +2995,7 @@ export type RenameCustomFieldMutationVariables = {
  * @summary Rename Custom Field
  */
 export const useRenameCustomField = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(
   options?: {
@@ -3105,7 +3113,7 @@ export const getListMissingDigitalReferencesQueryKey = (
 
 export const getListMissingDigitalReferencesQueryOptions = <
   TData = Awaited<ReturnType<typeof listMissingDigitalReferences>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   params?: ListMissingDigitalReferencesParams,
   options?: {
@@ -3139,11 +3147,12 @@ export const getListMissingDigitalReferencesQueryOptions = <
 export type ListMissingDigitalReferencesQueryResult = NonNullable<
   Awaited<ReturnType<typeof listMissingDigitalReferences>>
 >;
-export type ListMissingDigitalReferencesQueryError = HTTPValidationError;
+export type ListMissingDigitalReferencesQueryError =
+  Refusal | HTTPValidationError;
 
 export function useListMissingDigitalReferences<
   TData = Awaited<ReturnType<typeof listMissingDigitalReferences>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   params: undefined | ListMissingDigitalReferencesParams,
   options: {
@@ -3170,7 +3179,7 @@ export function useListMissingDigitalReferences<
 };
 export function useListMissingDigitalReferences<
   TData = Awaited<ReturnType<typeof listMissingDigitalReferences>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   params?: ListMissingDigitalReferencesParams,
   options?: {
@@ -3197,7 +3206,7 @@ export function useListMissingDigitalReferences<
 };
 export function useListMissingDigitalReferences<
   TData = Awaited<ReturnType<typeof listMissingDigitalReferences>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   params?: ListMissingDigitalReferencesParams,
   options?: {
@@ -3220,7 +3229,7 @@ export function useListMissingDigitalReferences<
 
 export function useListMissingDigitalReferences<
   TData = Awaited<ReturnType<typeof listMissingDigitalReferences>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   params?: ListMissingDigitalReferencesParams,
   options?: {
@@ -3299,7 +3308,7 @@ export const getListDuplicatesQueryKey = () => {
 
 export const getListDuplicatesQueryOptions = <
   TData = Awaited<ReturnType<typeof listDuplicates>>,
-  TError = unknown,
+  TError = Refusal,
 >(options?: {
   query?: Partial<
     UseQueryOptions<Awaited<ReturnType<typeof listDuplicates>>, TError, TData>
@@ -3324,11 +3333,11 @@ export const getListDuplicatesQueryOptions = <
 export type ListDuplicatesQueryResult = NonNullable<
   Awaited<ReturnType<typeof listDuplicates>>
 >;
-export type ListDuplicatesQueryError = unknown;
+export type ListDuplicatesQueryError = Refusal;
 
 export function useListDuplicates<
   TData = Awaited<ReturnType<typeof listDuplicates>>,
-  TError = unknown,
+  TError = Refusal,
 >(
   options: {
     query: Partial<
@@ -3350,7 +3359,7 @@ export function useListDuplicates<
 };
 export function useListDuplicates<
   TData = Awaited<ReturnType<typeof listDuplicates>>,
-  TError = unknown,
+  TError = Refusal,
 >(
   options?: {
     query?: Partial<
@@ -3372,7 +3381,7 @@ export function useListDuplicates<
 };
 export function useListDuplicates<
   TData = Awaited<ReturnType<typeof listDuplicates>>,
-  TError = unknown,
+  TError = Refusal,
 >(
   options?: {
     query?: Partial<
@@ -3390,7 +3399,7 @@ export function useListDuplicates<
 
 export function useListDuplicates<
   TData = Awaited<ReturnType<typeof listDuplicates>>,
-  TError = unknown,
+  TError = Refusal,
 >(
   options?: {
     query?: Partial<
@@ -3436,14 +3445,15 @@ export const getExportBooksUrl = (params?: ExportBooksParams) => {
  * document has no way to say which of them `?format=` selects.
  *
  * **Rationed, and the schema does not say so.** The refusal is a 429 carrying
- * `Retry-After`. It is not declared here because this document enumerates no
- * refusal on any operation: not a 401, which every secured operation can
- * answer, nor a 403, a 404 or a 429. So declaring one here would make this
+ * `Retry-After`. It is not declared here because this document declares a
+ * refusal only where it declares one for every operation that can answer
+ * it: a 401, a 403 or a 404, derived in `refusals.py` from what each route
+ * runs, and nothing else. So declaring a 429 here alone would make this
  * refusal look deliberate and every other operation's look accidental, which
  * is a decision about the whole error surface rather than about this route.
  * `docs/decisions.md` records that reasoning, having refused the same move
  * once already, and
- * `tests/test_errors.py::TestTheDocumentEnumeratesNoRefusal` is what this
+ * `tests/test_errors.py::TestTheDocumentDeclaresNoOtherRefusal` is what this
  * paragraph rests on rather than a reader's memory of it. The mechanism behind
  * the refusal is shared by every route in `ratelimit.py`, so what would make
  * declaring it honest is declaring it at all of them. The counter is not:
@@ -3479,7 +3489,7 @@ export const getExportBooksQueryKey = (params?: ExportBooksParams) => {
 
 export const getExportBooksQueryOptions = <
   TData = Awaited<ReturnType<typeof exportBooks>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   params?: ExportBooksParams,
   options?: {
@@ -3507,11 +3517,11 @@ export const getExportBooksQueryOptions = <
 export type ExportBooksQueryResult = NonNullable<
   Awaited<ReturnType<typeof exportBooks>>
 >;
-export type ExportBooksQueryError = HTTPValidationError;
+export type ExportBooksQueryError = Refusal | HTTPValidationError;
 
 export function useExportBooks<
   TData = Awaited<ReturnType<typeof exportBooks>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   params: undefined | ExportBooksParams,
   options: {
@@ -3534,7 +3544,7 @@ export function useExportBooks<
 };
 export function useExportBooks<
   TData = Awaited<ReturnType<typeof exportBooks>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   params?: ExportBooksParams,
   options?: {
@@ -3557,7 +3567,7 @@ export function useExportBooks<
 };
 export function useExportBooks<
   TData = Awaited<ReturnType<typeof exportBooks>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   params?: ExportBooksParams,
   options?: {
@@ -3576,7 +3586,7 @@ export function useExportBooks<
 
 export function useExportBooks<
   TData = Awaited<ReturnType<typeof exportBooks>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   params?: ExportBooksParams,
   options?: {
@@ -3677,7 +3687,7 @@ export const getBackfillFromIdentifiersMutationKey = () =>
   ["backfillFromIdentifiers"] as const;
 
 export const getBackfillFromIdentifiersMutationOptions = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -3718,7 +3728,8 @@ export type BackfillFromIdentifiersMutationResult = NonNullable<
   Awaited<ReturnType<typeof backfillFromIdentifiers>>
 >;
 
-export type BackfillFromIdentifiersMutationError = HTTPValidationError;
+export type BackfillFromIdentifiersMutationError =
+  Refusal | HTTPValidationError;
 export type BackfillFromIdentifiersMutationVariables = {
   params?: BackfillFromIdentifiersParams;
 };
@@ -3727,7 +3738,7 @@ export type BackfillFromIdentifiersMutationVariables = {
  * @summary Backfill From Identifiers
  */
 export const useBackfillFromIdentifiers = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(
   options?: {
@@ -3777,7 +3788,7 @@ export const getListLocationsQueryKey = () => {
 
 export const getListLocationsQueryOptions = <
   TData = Awaited<ReturnType<typeof listLocations>>,
-  TError = unknown,
+  TError = Refusal,
 >(options?: {
   query?: Partial<
     UseQueryOptions<Awaited<ReturnType<typeof listLocations>>, TError, TData>
@@ -3802,11 +3813,11 @@ export const getListLocationsQueryOptions = <
 export type ListLocationsQueryResult = NonNullable<
   Awaited<ReturnType<typeof listLocations>>
 >;
-export type ListLocationsQueryError = unknown;
+export type ListLocationsQueryError = Refusal;
 
 export function useListLocations<
   TData = Awaited<ReturnType<typeof listLocations>>,
-  TError = unknown,
+  TError = Refusal,
 >(
   options: {
     query: Partial<
@@ -3828,7 +3839,7 @@ export function useListLocations<
 };
 export function useListLocations<
   TData = Awaited<ReturnType<typeof listLocations>>,
-  TError = unknown,
+  TError = Refusal,
 >(
   options?: {
     query?: Partial<
@@ -3850,7 +3861,7 @@ export function useListLocations<
 };
 export function useListLocations<
   TData = Awaited<ReturnType<typeof listLocations>>,
-  TError = unknown,
+  TError = Refusal,
 >(
   options?: {
     query?: Partial<
@@ -3868,7 +3879,7 @@ export function useListLocations<
 
 export function useListLocations<
   TData = Awaited<ReturnType<typeof listLocations>>,
-  TError = unknown,
+  TError = Refusal,
 >(
   options?: {
     query?: Partial<
@@ -3925,7 +3936,7 @@ export const getLookupIsbnQueryKey = (params?: LookupIsbnParams) => {
 
 export const getLookupIsbnQueryOptions = <
   TData = Awaited<ReturnType<typeof lookupIsbn>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   params: LookupIsbnParams,
   options?: {
@@ -3953,11 +3964,11 @@ export const getLookupIsbnQueryOptions = <
 export type LookupIsbnQueryResult = NonNullable<
   Awaited<ReturnType<typeof lookupIsbn>>
 >;
-export type LookupIsbnQueryError = HTTPValidationError;
+export type LookupIsbnQueryError = Refusal | HTTPValidationError;
 
 export function useLookupIsbn<
   TData = Awaited<ReturnType<typeof lookupIsbn>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   params: LookupIsbnParams,
   options: {
@@ -3980,7 +3991,7 @@ export function useLookupIsbn<
 };
 export function useLookupIsbn<
   TData = Awaited<ReturnType<typeof lookupIsbn>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   params: LookupIsbnParams,
   options?: {
@@ -4003,7 +4014,7 @@ export function useLookupIsbn<
 };
 export function useLookupIsbn<
   TData = Awaited<ReturnType<typeof lookupIsbn>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   params: LookupIsbnParams,
   options?: {
@@ -4022,7 +4033,7 @@ export function useLookupIsbn<
 
 export function useLookupIsbn<
   TData = Awaited<ReturnType<typeof lookupIsbn>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   params: LookupIsbnParams,
   options?: {
@@ -4101,7 +4112,7 @@ export const mergeBooks = async (
 export const getMergeBooksMutationKey = () => ["mergeBooks"] as const;
 
 export const getMergeBooksMutationOptions = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -4142,13 +4153,16 @@ export type MergeBooksMutationResult = NonNullable<
   Awaited<ReturnType<typeof mergeBooks>>
 >;
 export type MergeBooksMutationBody = MergeRequest;
-export type MergeBooksMutationError = HTTPValidationError;
+export type MergeBooksMutationError = Refusal | HTTPValidationError;
 export type MergeBooksMutationVariables = { data: MergeRequest };
 
 /**
  * @summary Merge Books
  */
-export const useMergeBooks = <TError = HTTPValidationError, TContext = unknown>(
+export const useMergeBooks = <
+  TError = Refusal | HTTPValidationError,
+  TContext = unknown,
+>(
   options?: {
     mutation?: UseMutationOptions<
       Awaited<ReturnType<typeof mergeBooks>>,
@@ -4228,7 +4242,7 @@ export const getListQuotesQueryKey = (params?: ListQuotesParams) => {
 
 export const getListQuotesQueryOptions = <
   TData = Awaited<ReturnType<typeof listQuotes>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   params?: ListQuotesParams,
   options?: {
@@ -4256,11 +4270,11 @@ export const getListQuotesQueryOptions = <
 export type ListQuotesQueryResult = NonNullable<
   Awaited<ReturnType<typeof listQuotes>>
 >;
-export type ListQuotesQueryError = HTTPValidationError;
+export type ListQuotesQueryError = Refusal | HTTPValidationError;
 
 export function useListQuotes<
   TData = Awaited<ReturnType<typeof listQuotes>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   params: undefined | ListQuotesParams,
   options: {
@@ -4283,7 +4297,7 @@ export function useListQuotes<
 };
 export function useListQuotes<
   TData = Awaited<ReturnType<typeof listQuotes>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   params?: ListQuotesParams,
   options?: {
@@ -4306,7 +4320,7 @@ export function useListQuotes<
 };
 export function useListQuotes<
   TData = Awaited<ReturnType<typeof listQuotes>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   params?: ListQuotesParams,
   options?: {
@@ -4325,7 +4339,7 @@ export function useListQuotes<
 
 export function useListQuotes<
   TData = Awaited<ReturnType<typeof listQuotes>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   params?: ListQuotesParams,
   options?: {
@@ -4396,7 +4410,7 @@ export const scanAdd = async (
 export const getScanAddMutationKey = () => ["scanAdd"] as const;
 
 export const getScanAddMutationOptions = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -4437,13 +4451,16 @@ export type ScanAddMutationResult = NonNullable<
   Awaited<ReturnType<typeof scanAdd>>
 >;
 export type ScanAddMutationBody = BookCreate;
-export type ScanAddMutationError = HTTPValidationError;
+export type ScanAddMutationError = Refusal | HTTPValidationError;
 export type ScanAddMutationVariables = { data: BookCreate };
 
 /**
  * @summary Scan Add
  */
-export const useScanAdd = <TError = HTTPValidationError, TContext = unknown>(
+export const useScanAdd = <
+  TError = Refusal | HTTPValidationError,
+  TContext = unknown,
+>(
   options?: {
     mutation?: UseMutationOptions<
       Awaited<ReturnType<typeof scanAdd>>,
@@ -4521,7 +4538,7 @@ export const getSearchBooksQueryKey = (params?: SearchBooksParams) => {
 
 export const getSearchBooksQueryOptions = <
   TData = Awaited<ReturnType<typeof searchBooks>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   params: SearchBooksParams,
   options?: {
@@ -4549,11 +4566,11 @@ export const getSearchBooksQueryOptions = <
 export type SearchBooksQueryResult = NonNullable<
   Awaited<ReturnType<typeof searchBooks>>
 >;
-export type SearchBooksQueryError = HTTPValidationError;
+export type SearchBooksQueryError = Refusal | HTTPValidationError;
 
 export function useSearchBooks<
   TData = Awaited<ReturnType<typeof searchBooks>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   params: SearchBooksParams,
   options: {
@@ -4576,7 +4593,7 @@ export function useSearchBooks<
 };
 export function useSearchBooks<
   TData = Awaited<ReturnType<typeof searchBooks>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   params: SearchBooksParams,
   options?: {
@@ -4599,7 +4616,7 @@ export function useSearchBooks<
 };
 export function useSearchBooks<
   TData = Awaited<ReturnType<typeof searchBooks>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   params: SearchBooksParams,
   options?: {
@@ -4618,7 +4635,7 @@ export function useSearchBooks<
 
 export function useSearchBooks<
   TData = Awaited<ReturnType<typeof searchBooks>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   params: SearchBooksParams,
   options?: {
@@ -4668,7 +4685,7 @@ export const getListSeriesQueryKey = () => {
 
 export const getListSeriesQueryOptions = <
   TData = Awaited<ReturnType<typeof listSeries>>,
-  TError = unknown,
+  TError = Refusal,
 >(options?: {
   query?: Partial<
     UseQueryOptions<Awaited<ReturnType<typeof listSeries>>, TError, TData>
@@ -4693,11 +4710,11 @@ export const getListSeriesQueryOptions = <
 export type ListSeriesQueryResult = NonNullable<
   Awaited<ReturnType<typeof listSeries>>
 >;
-export type ListSeriesQueryError = unknown;
+export type ListSeriesQueryError = Refusal;
 
 export function useListSeries<
   TData = Awaited<ReturnType<typeof listSeries>>,
-  TError = unknown,
+  TError = Refusal,
 >(
   options: {
     query: Partial<
@@ -4719,7 +4736,7 @@ export function useListSeries<
 };
 export function useListSeries<
   TData = Awaited<ReturnType<typeof listSeries>>,
-  TError = unknown,
+  TError = Refusal,
 >(
   options?: {
     query?: Partial<
@@ -4741,7 +4758,7 @@ export function useListSeries<
 };
 export function useListSeries<
   TData = Awaited<ReturnType<typeof listSeries>>,
-  TError = unknown,
+  TError = Refusal,
 >(
   options?: {
     query?: Partial<
@@ -4759,7 +4776,7 @@ export function useListSeries<
 
 export function useListSeries<
   TData = Awaited<ReturnType<typeof listSeries>>,
-  TError = unknown,
+  TError = Refusal,
 >(
   options?: {
     query?: Partial<
@@ -4823,7 +4840,7 @@ export const getListTagsQueryKey = () => {
 
 export const getListTagsQueryOptions = <
   TData = Awaited<ReturnType<typeof listTags>>,
-  TError = unknown,
+  TError = Refusal,
 >(options?: {
   query?: Partial<
     UseQueryOptions<Awaited<ReturnType<typeof listTags>>, TError, TData>
@@ -4848,11 +4865,11 @@ export const getListTagsQueryOptions = <
 export type ListTagsQueryResult = NonNullable<
   Awaited<ReturnType<typeof listTags>>
 >;
-export type ListTagsQueryError = unknown;
+export type ListTagsQueryError = Refusal;
 
 export function useListTags<
   TData = Awaited<ReturnType<typeof listTags>>,
-  TError = unknown,
+  TError = Refusal,
 >(
   options: {
     query: Partial<
@@ -4874,7 +4891,7 @@ export function useListTags<
 };
 export function useListTags<
   TData = Awaited<ReturnType<typeof listTags>>,
-  TError = unknown,
+  TError = Refusal,
 >(
   options?: {
     query?: Partial<
@@ -4896,7 +4913,7 @@ export function useListTags<
 };
 export function useListTags<
   TData = Awaited<ReturnType<typeof listTags>>,
-  TError = unknown,
+  TError = Refusal,
 >(
   options?: {
     query?: Partial<
@@ -4914,7 +4931,7 @@ export function useListTags<
 
 export function useListTags<
   TData = Awaited<ReturnType<typeof listTags>>,
-  TError = unknown,
+  TError = Refusal,
 >(
   options?: {
     query?: Partial<
@@ -4999,7 +5016,7 @@ export const createTag = async (
 export const getCreateTagMutationKey = () => ["createTag"] as const;
 
 export const getCreateTagMutationOptions = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -5040,13 +5057,16 @@ export type CreateTagMutationResult = NonNullable<
   Awaited<ReturnType<typeof createTag>>
 >;
 export type CreateTagMutationBody = TagCreate;
-export type CreateTagMutationError = HTTPValidationError;
+export type CreateTagMutationError = Refusal | HTTPValidationError;
 export type CreateTagMutationVariables = { data: TagCreate };
 
 /**
  * @summary Create Tag
  */
-export const useCreateTag = <TError = HTTPValidationError, TContext = unknown>(
+export const useCreateTag = <
+  TError = Refusal | HTTPValidationError,
+  TContext = unknown,
+>(
   options?: {
     mutation?: UseMutationOptions<
       Awaited<ReturnType<typeof createTag>>,
@@ -5100,7 +5120,7 @@ export const deleteTag = async (
 export const getDeleteTagMutationKey = () => ["deleteTag"] as const;
 
 export const getDeleteTagMutationOptions = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -5141,13 +5161,16 @@ export type DeleteTagMutationResult = NonNullable<
   Awaited<ReturnType<typeof deleteTag>>
 >;
 
-export type DeleteTagMutationError = HTTPValidationError;
+export type DeleteTagMutationError = Refusal | HTTPValidationError;
 export type DeleteTagMutationVariables = { tagId: number };
 
 /**
  * @summary Delete Tag
  */
-export const useDeleteTag = <TError = HTTPValidationError, TContext = unknown>(
+export const useDeleteTag = <
+  TError = Refusal | HTTPValidationError,
+  TContext = unknown,
+>(
   options?: {
     mutation?: UseMutationOptions<
       Awaited<ReturnType<typeof deleteTag>>,
@@ -5191,7 +5214,7 @@ export const emptyTrash = async (
 export const getEmptyTrashMutationKey = () => ["emptyTrash"] as const;
 
 export const getEmptyTrashMutationOptions = <
-  TError = unknown,
+  TError = Refusal,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -5230,12 +5253,12 @@ export type EmptyTrashMutationResult = NonNullable<
   Awaited<ReturnType<typeof emptyTrash>>
 >;
 
-export type EmptyTrashMutationError = unknown;
+export type EmptyTrashMutationError = Refusal;
 
 /**
  * @summary Empty Trash
  */
-export const useEmptyTrash = <TError = unknown, TContext = unknown>(
+export const useEmptyTrash = <TError = Refusal, TContext = unknown>(
   options?: {
     mutation?: UseMutationOptions<
       Awaited<ReturnType<typeof emptyTrash>>,
@@ -5297,7 +5320,7 @@ export const getListTrashQueryKey = (params?: ListTrashParams) => {
 
 export const getListTrashQueryOptions = <
   TData = Awaited<ReturnType<typeof listTrash>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   params?: ListTrashParams,
   options?: {
@@ -5325,11 +5348,11 @@ export const getListTrashQueryOptions = <
 export type ListTrashQueryResult = NonNullable<
   Awaited<ReturnType<typeof listTrash>>
 >;
-export type ListTrashQueryError = HTTPValidationError;
+export type ListTrashQueryError = Refusal | HTTPValidationError;
 
 export function useListTrash<
   TData = Awaited<ReturnType<typeof listTrash>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   params: undefined | ListTrashParams,
   options: {
@@ -5352,7 +5375,7 @@ export function useListTrash<
 };
 export function useListTrash<
   TData = Awaited<ReturnType<typeof listTrash>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   params?: ListTrashParams,
   options?: {
@@ -5375,7 +5398,7 @@ export function useListTrash<
 };
 export function useListTrash<
   TData = Awaited<ReturnType<typeof listTrash>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   params?: ListTrashParams,
   options?: {
@@ -5394,7 +5417,7 @@ export function useListTrash<
 
 export function useListTrash<
   TData = Awaited<ReturnType<typeof listTrash>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   params?: ListTrashParams,
   options?: {
@@ -5446,7 +5469,7 @@ export const deleteBook = async (
 export const getDeleteBookMutationKey = () => ["deleteBook"] as const;
 
 export const getDeleteBookMutationOptions = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -5487,13 +5510,16 @@ export type DeleteBookMutationResult = NonNullable<
   Awaited<ReturnType<typeof deleteBook>>
 >;
 
-export type DeleteBookMutationError = HTTPValidationError;
+export type DeleteBookMutationError = Refusal | HTTPValidationError;
 export type DeleteBookMutationVariables = { bookId: number };
 
 /**
  * @summary Delete Book
  */
-export const useDeleteBook = <TError = HTTPValidationError, TContext = unknown>(
+export const useDeleteBook = <
+  TError = Refusal | HTTPValidationError,
+  TContext = unknown,
+>(
   options?: {
     mutation?: UseMutationOptions<
       Awaited<ReturnType<typeof deleteBook>>,
@@ -5535,7 +5561,7 @@ export const getGetBookQueryKey = (bookId: number) => {
 
 export const getGetBookQueryOptions = <
   TData = Awaited<ReturnType<typeof getBook>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   bookId: number,
   options?: {
@@ -5566,11 +5592,11 @@ export const getGetBookQueryOptions = <
 export type GetBookQueryResult = NonNullable<
   Awaited<ReturnType<typeof getBook>>
 >;
-export type GetBookQueryError = HTTPValidationError;
+export type GetBookQueryError = Refusal | HTTPValidationError;
 
 export function useGetBook<
   TData = Awaited<ReturnType<typeof getBook>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   bookId: number,
   options: {
@@ -5593,7 +5619,7 @@ export function useGetBook<
 };
 export function useGetBook<
   TData = Awaited<ReturnType<typeof getBook>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   bookId: number,
   options?: {
@@ -5616,7 +5642,7 @@ export function useGetBook<
 };
 export function useGetBook<
   TData = Awaited<ReturnType<typeof getBook>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   bookId: number,
   options?: {
@@ -5635,7 +5661,7 @@ export function useGetBook<
 
 export function useGetBook<
   TData = Awaited<ReturnType<typeof getBook>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   bookId: number,
   options?: {
@@ -5722,7 +5748,7 @@ export const getUpdateBookDetailsMutationKey = () =>
   ["updateBookDetails"] as const;
 
 export const getUpdateBookDetailsMutationOptions = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -5763,7 +5789,7 @@ export type UpdateBookDetailsMutationResult = NonNullable<
   Awaited<ReturnType<typeof updateBookDetails>>
 >;
 export type UpdateBookDetailsMutationBody = BookDetailsUpdate;
-export type UpdateBookDetailsMutationError = HTTPValidationError;
+export type UpdateBookDetailsMutationError = Refusal | HTTPValidationError;
 export type UpdateBookDetailsMutationVariables = {
   bookId: number;
   data: BookDetailsUpdate;
@@ -5773,7 +5799,7 @@ export type UpdateBookDetailsMutationVariables = {
  * @summary Update Book Details
  */
 export const useUpdateBookDetails = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(
   options?: {
@@ -5851,7 +5877,7 @@ export const setCollection = async (
 export const getSetCollectionMutationKey = () => ["setCollection"] as const;
 
 export const getSetCollectionMutationOptions = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -5892,7 +5918,7 @@ export type SetCollectionMutationResult = NonNullable<
   Awaited<ReturnType<typeof setCollection>>
 >;
 export type SetCollectionMutationBody = CollectionAssign;
-export type SetCollectionMutationError = HTTPValidationError;
+export type SetCollectionMutationError = Refusal | HTTPValidationError;
 export type SetCollectionMutationVariables = {
   bookId: number;
   data: CollectionAssign;
@@ -5902,7 +5928,7 @@ export type SetCollectionMutationVariables = {
  * @summary Set Collection
  */
 export const useSetCollection = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(
   options?: {
@@ -5955,7 +5981,7 @@ export const getListCopiesQueryKey = (bookId: number) => {
 
 export const getListCopiesQueryOptions = <
   TData = Awaited<ReturnType<typeof listCopies>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   bookId: number,
   options?: {
@@ -5988,11 +6014,11 @@ export const getListCopiesQueryOptions = <
 export type ListCopiesQueryResult = NonNullable<
   Awaited<ReturnType<typeof listCopies>>
 >;
-export type ListCopiesQueryError = HTTPValidationError;
+export type ListCopiesQueryError = Refusal | HTTPValidationError;
 
 export function useListCopies<
   TData = Awaited<ReturnType<typeof listCopies>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   bookId: number,
   options: {
@@ -6015,7 +6041,7 @@ export function useListCopies<
 };
 export function useListCopies<
   TData = Awaited<ReturnType<typeof listCopies>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   bookId: number,
   options?: {
@@ -6038,7 +6064,7 @@ export function useListCopies<
 };
 export function useListCopies<
   TData = Awaited<ReturnType<typeof listCopies>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   bookId: number,
   options?: {
@@ -6057,7 +6083,7 @@ export function useListCopies<
 
 export function useListCopies<
   TData = Awaited<ReturnType<typeof listCopies>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   bookId: number,
   options?: {
@@ -6144,7 +6170,7 @@ export const addCopy = async (
 export const getAddCopyMutationKey = () => ["addCopy"] as const;
 
 export const getAddCopyMutationOptions = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -6185,13 +6211,16 @@ export type AddCopyMutationResult = NonNullable<
   Awaited<ReturnType<typeof addCopy>>
 >;
 export type AddCopyMutationBody = CopyCreate;
-export type AddCopyMutationError = HTTPValidationError;
+export type AddCopyMutationError = Refusal | HTTPValidationError;
 export type AddCopyMutationVariables = { bookId: number; data: CopyCreate };
 
 /**
  * @summary Add Copy
  */
-export const useAddCopy = <TError = HTTPValidationError, TContext = unknown>(
+export const useAddCopy = <
+  TError = Refusal | HTTPValidationError,
+  TContext = unknown,
+>(
   options?: {
     mutation?: UseMutationOptions<
       Awaited<ReturnType<typeof addCopy>>,
@@ -6235,7 +6264,7 @@ export const uploadCover = async (
 export const getUploadCoverMutationKey = () => ["uploadCover"] as const;
 
 export const getUploadCoverMutationOptions = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -6276,7 +6305,7 @@ export type UploadCoverMutationResult = NonNullable<
   Awaited<ReturnType<typeof uploadCover>>
 >;
 export type UploadCoverMutationBody = BodyUploadCover;
-export type UploadCoverMutationError = HTTPValidationError;
+export type UploadCoverMutationError = Refusal | HTTPValidationError;
 export type UploadCoverMutationVariables = {
   bookId: number;
   data: BodyUploadCover;
@@ -6286,7 +6315,7 @@ export type UploadCoverMutationVariables = {
  * @summary Upload Cover
  */
 export const useUploadCover = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(
   options?: {
@@ -6336,7 +6365,7 @@ export const getGetCustomFieldsQueryKey = (bookId: number) => {
 
 export const getGetCustomFieldsQueryOptions = <
   TData = Awaited<ReturnType<typeof getCustomFields>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   bookId: number,
   options?: {
@@ -6373,11 +6402,11 @@ export const getGetCustomFieldsQueryOptions = <
 export type GetCustomFieldsQueryResult = NonNullable<
   Awaited<ReturnType<typeof getCustomFields>>
 >;
-export type GetCustomFieldsQueryError = HTTPValidationError;
+export type GetCustomFieldsQueryError = Refusal | HTTPValidationError;
 
 export function useGetCustomFields<
   TData = Awaited<ReturnType<typeof getCustomFields>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   bookId: number,
   options: {
@@ -6404,7 +6433,7 @@ export function useGetCustomFields<
 };
 export function useGetCustomFields<
   TData = Awaited<ReturnType<typeof getCustomFields>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   bookId: number,
   options?: {
@@ -6431,7 +6460,7 @@ export function useGetCustomFields<
 };
 export function useGetCustomFields<
   TData = Awaited<ReturnType<typeof getCustomFields>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   bookId: number,
   options?: {
@@ -6454,7 +6483,7 @@ export function useGetCustomFields<
 
 export function useGetCustomFields<
   TData = Awaited<ReturnType<typeof getCustomFields>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   bookId: number,
   options?: {
@@ -6549,7 +6578,7 @@ export const setCustomField = async (
 export const getSetCustomFieldMutationKey = () => ["setCustomField"] as const;
 
 export const getSetCustomFieldMutationOptions = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -6590,7 +6619,7 @@ export type SetCustomFieldMutationResult = NonNullable<
   Awaited<ReturnType<typeof setCustomField>>
 >;
 export type SetCustomFieldMutationBody = CustomFieldValueUpdate;
-export type SetCustomFieldMutationError = HTTPValidationError;
+export type SetCustomFieldMutationError = Refusal | HTTPValidationError;
 export type SetCustomFieldMutationVariables = {
   bookId: number;
   fieldId: number;
@@ -6601,7 +6630,7 @@ export type SetCustomFieldMutationVariables = {
  * @summary Set Custom Field
  */
 export const useSetCustomField = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(
   options?: {
@@ -6657,7 +6686,7 @@ export const getListDigitalReferencesQueryKey = (bookId: number) => {
 
 export const getListDigitalReferencesQueryOptions = <
   TData = Awaited<ReturnType<typeof listDigitalReferences>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   bookId: number,
   options?: {
@@ -6696,11 +6725,11 @@ export const getListDigitalReferencesQueryOptions = <
 export type ListDigitalReferencesQueryResult = NonNullable<
   Awaited<ReturnType<typeof listDigitalReferences>>
 >;
-export type ListDigitalReferencesQueryError = HTTPValidationError;
+export type ListDigitalReferencesQueryError = Refusal | HTTPValidationError;
 
 export function useListDigitalReferences<
   TData = Awaited<ReturnType<typeof listDigitalReferences>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   bookId: number,
   options: {
@@ -6727,7 +6756,7 @@ export function useListDigitalReferences<
 };
 export function useListDigitalReferences<
   TData = Awaited<ReturnType<typeof listDigitalReferences>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   bookId: number,
   options?: {
@@ -6754,7 +6783,7 @@ export function useListDigitalReferences<
 };
 export function useListDigitalReferences<
   TData = Awaited<ReturnType<typeof listDigitalReferences>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   bookId: number,
   options?: {
@@ -6777,7 +6806,7 @@ export function useListDigitalReferences<
 
 export function useListDigitalReferences<
   TData = Awaited<ReturnType<typeof listDigitalReferences>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   bookId: number,
   options?: {
@@ -6881,7 +6910,7 @@ export const getReportDigitalReferenceMutationKey = () =>
   ["reportDigitalReference"] as const;
 
 export const getReportDigitalReferenceMutationOptions = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -6922,7 +6951,7 @@ export type ReportDigitalReferenceMutationResult = NonNullable<
   Awaited<ReturnType<typeof reportDigitalReference>>
 >;
 export type ReportDigitalReferenceMutationBody = DigitalReferenceIn;
-export type ReportDigitalReferenceMutationError = HTTPValidationError;
+export type ReportDigitalReferenceMutationError = Refusal | HTTPValidationError;
 export type ReportDigitalReferenceMutationVariables = {
   bookId: number;
   data: DigitalReferenceIn;
@@ -6932,7 +6961,7 @@ export type ReportDigitalReferenceMutationVariables = {
  * @summary Report Digital Reference
  */
 export const useReportDigitalReference = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(
   options?: {
@@ -6987,7 +7016,7 @@ export const getForgetDigitalReferenceMutationKey = () =>
   ["forgetDigitalReference"] as const;
 
 export const getForgetDigitalReferenceMutationOptions = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -7028,7 +7057,7 @@ export type ForgetDigitalReferenceMutationResult = NonNullable<
   Awaited<ReturnType<typeof forgetDigitalReference>>
 >;
 
-export type ForgetDigitalReferenceMutationError = HTTPValidationError;
+export type ForgetDigitalReferenceMutationError = Refusal | HTTPValidationError;
 export type ForgetDigitalReferenceMutationVariables = {
   bookId: number;
   referenceId: number;
@@ -7038,7 +7067,7 @@ export type ForgetDigitalReferenceMutationVariables = {
  * @summary Forget Digital Reference
  */
 export const useForgetDigitalReference = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(
   options?: {
@@ -7103,7 +7132,7 @@ export const getReportDigitalReferenceMissingMutationKey = () =>
   ["reportDigitalReferenceMissing"] as const;
 
 export const getReportDigitalReferenceMissingMutationOptions = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -7144,7 +7173,8 @@ export type ReportDigitalReferenceMissingMutationResult = NonNullable<
   Awaited<ReturnType<typeof reportDigitalReferenceMissing>>
 >;
 
-export type ReportDigitalReferenceMissingMutationError = HTTPValidationError;
+export type ReportDigitalReferenceMissingMutationError =
+  Refusal | HTTPValidationError;
 export type ReportDigitalReferenceMissingMutationVariables = {
   bookId: number;
   referenceId: number;
@@ -7154,7 +7184,7 @@ export type ReportDigitalReferenceMissingMutationVariables = {
  * @summary Report Digital Reference Missing
  */
 export const useReportDigitalReferenceMissing = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(
   options?: {
@@ -7237,7 +7267,7 @@ export const setDiscuss = async (
 export const getSetDiscussMutationKey = () => ["setDiscuss"] as const;
 
 export const getSetDiscussMutationOptions = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -7278,7 +7308,7 @@ export type SetDiscussMutationResult = NonNullable<
   Awaited<ReturnType<typeof setDiscuss>>
 >;
 export type SetDiscussMutationBody = BookDiscussUpdate;
-export type SetDiscussMutationError = HTTPValidationError;
+export type SetDiscussMutationError = Refusal | HTTPValidationError;
 export type SetDiscussMutationVariables = {
   bookId: number;
   data: BookDiscussUpdate;
@@ -7287,7 +7317,10 @@ export type SetDiscussMutationVariables = {
 /**
  * @summary Set Discuss
  */
-export const useSetDiscuss = <TError = HTTPValidationError, TContext = unknown>(
+export const useSetDiscuss = <
+  TError = Refusal | HTTPValidationError,
+  TContext = unknown,
+>(
   options?: {
     mutation?: UseMutationOptions<
       Awaited<ReturnType<typeof setDiscuss>>,
@@ -7363,7 +7396,7 @@ export const enrichBook = async (
 export const getEnrichBookMutationKey = () => ["enrichBook"] as const;
 
 export const getEnrichBookMutationOptions = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -7404,7 +7437,7 @@ export type EnrichBookMutationResult = NonNullable<
   Awaited<ReturnType<typeof enrichBook>>
 >;
 
-export type EnrichBookMutationError = HTTPValidationError;
+export type EnrichBookMutationError = Refusal | HTTPValidationError;
 export type EnrichBookMutationVariables = {
   bookId: number;
   params?: EnrichBookParams;
@@ -7413,7 +7446,10 @@ export type EnrichBookMutationVariables = {
 /**
  * @summary Enrich Book
  */
-export const useEnrichBook = <TError = HTTPValidationError, TContext = unknown>(
+export const useEnrichBook = <
+  TError = Refusal | HTTPValidationError,
+  TContext = unknown,
+>(
   options?: {
     mutation?: UseMutationOptions<
       Awaited<ReturnType<typeof enrichBook>>,
@@ -7509,7 +7545,7 @@ export const applyEnrichment = async (
 export const getApplyEnrichmentMutationKey = () => ["applyEnrichment"] as const;
 
 export const getApplyEnrichmentMutationOptions = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -7550,7 +7586,7 @@ export type ApplyEnrichmentMutationResult = NonNullable<
   Awaited<ReturnType<typeof applyEnrichment>>
 >;
 export type ApplyEnrichmentMutationBody = BookMatch;
-export type ApplyEnrichmentMutationError = HTTPValidationError;
+export type ApplyEnrichmentMutationError = Refusal | HTTPValidationError;
 export type ApplyEnrichmentMutationVariables = {
   bookId: number;
   data: BookMatch;
@@ -7561,7 +7597,7 @@ export type ApplyEnrichmentMutationVariables = {
  * @summary Apply Enrichment
  */
 export const useApplyEnrichment = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(
   options?: {
@@ -7615,7 +7651,7 @@ export const getEnrichmentCandidatesQueryKey = (bookId: number) => {
 
 export const getEnrichmentCandidatesQueryOptions = <
   TData = Awaited<ReturnType<typeof enrichmentCandidates>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   bookId: number,
   options?: {
@@ -7654,11 +7690,11 @@ export const getEnrichmentCandidatesQueryOptions = <
 export type EnrichmentCandidatesQueryResult = NonNullable<
   Awaited<ReturnType<typeof enrichmentCandidates>>
 >;
-export type EnrichmentCandidatesQueryError = HTTPValidationError;
+export type EnrichmentCandidatesQueryError = Refusal | HTTPValidationError;
 
 export function useEnrichmentCandidates<
   TData = Awaited<ReturnType<typeof enrichmentCandidates>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   bookId: number,
   options: {
@@ -7685,7 +7721,7 @@ export function useEnrichmentCandidates<
 };
 export function useEnrichmentCandidates<
   TData = Awaited<ReturnType<typeof enrichmentCandidates>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   bookId: number,
   options?: {
@@ -7712,7 +7748,7 @@ export function useEnrichmentCandidates<
 };
 export function useEnrichmentCandidates<
   TData = Awaited<ReturnType<typeof enrichmentCandidates>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   bookId: number,
   options?: {
@@ -7735,7 +7771,7 @@ export function useEnrichmentCandidates<
 
 export function useEnrichmentCandidates<
   TData = Awaited<ReturnType<typeof enrichmentCandidates>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   bookId: number,
   options?: {
@@ -7813,7 +7849,7 @@ export const getForgetBookIdentifierMutationKey = () =>
   ["forgetBookIdentifier"] as const;
 
 export const getForgetBookIdentifierMutationOptions = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -7854,7 +7890,7 @@ export type ForgetBookIdentifierMutationResult = NonNullable<
   Awaited<ReturnType<typeof forgetBookIdentifier>>
 >;
 
-export type ForgetBookIdentifierMutationError = HTTPValidationError;
+export type ForgetBookIdentifierMutationError = Refusal | HTTPValidationError;
 export type ForgetBookIdentifierMutationVariables = {
   bookId: number;
   identifierId: number;
@@ -7864,7 +7900,7 @@ export type ForgetBookIdentifierMutationVariables = {
  * @summary Forget Book Identifier
  */
 export const useForgetBookIdentifier = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(
   options?: {
@@ -7919,7 +7955,7 @@ export const getGetNotesQueryKey = (bookId: number) => {
 
 export const getGetNotesQueryOptions = <
   TData = Awaited<ReturnType<typeof getNotes>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   bookId: number,
   options?: {
@@ -7950,11 +7986,11 @@ export const getGetNotesQueryOptions = <
 export type GetNotesQueryResult = NonNullable<
   Awaited<ReturnType<typeof getNotes>>
 >;
-export type GetNotesQueryError = HTTPValidationError;
+export type GetNotesQueryError = Refusal | HTTPValidationError;
 
 export function useGetNotes<
   TData = Awaited<ReturnType<typeof getNotes>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   bookId: number,
   options: {
@@ -7977,7 +8013,7 @@ export function useGetNotes<
 };
 export function useGetNotes<
   TData = Awaited<ReturnType<typeof getNotes>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   bookId: number,
   options?: {
@@ -8000,7 +8036,7 @@ export function useGetNotes<
 };
 export function useGetNotes<
   TData = Awaited<ReturnType<typeof getNotes>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   bookId: number,
   options?: {
@@ -8019,7 +8055,7 @@ export function useGetNotes<
 
 export function useGetNotes<
   TData = Awaited<ReturnType<typeof getNotes>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   bookId: number,
   options?: {
@@ -8089,7 +8125,7 @@ export const addNote = async (
 export const getAddNoteMutationKey = () => ["addNote"] as const;
 
 export const getAddNoteMutationOptions = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -8130,13 +8166,16 @@ export type AddNoteMutationResult = NonNullable<
   Awaited<ReturnType<typeof addNote>>
 >;
 export type AddNoteMutationBody = NoteCreate;
-export type AddNoteMutationError = HTTPValidationError;
+export type AddNoteMutationError = Refusal | HTTPValidationError;
 export type AddNoteMutationVariables = { bookId: number; data: NoteCreate };
 
 /**
  * @summary Add Note
  */
-export const useAddNote = <TError = HTTPValidationError, TContext = unknown>(
+export const useAddNote = <
+  TError = Refusal | HTTPValidationError,
+  TContext = unknown,
+>(
   options?: {
     mutation?: UseMutationOptions<
       Awaited<ReturnType<typeof addNote>>,
@@ -8176,7 +8215,7 @@ export const deleteNote = async (
 export const getDeleteNoteMutationKey = () => ["deleteNote"] as const;
 
 export const getDeleteNoteMutationOptions = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -8217,13 +8256,16 @@ export type DeleteNoteMutationResult = NonNullable<
   Awaited<ReturnType<typeof deleteNote>>
 >;
 
-export type DeleteNoteMutationError = HTTPValidationError;
+export type DeleteNoteMutationError = Refusal | HTTPValidationError;
 export type DeleteNoteMutationVariables = { bookId: number; noteId: number };
 
 /**
  * @summary Delete Note
  */
-export const useDeleteNote = <TError = HTTPValidationError, TContext = unknown>(
+export const useDeleteNote = <
+  TError = Refusal | HTTPValidationError,
+  TContext = unknown,
+>(
   options?: {
     mutation?: UseMutationOptions<
       Awaited<ReturnType<typeof deleteNote>>,
@@ -8290,7 +8332,7 @@ export const editNote = async (
 export const getEditNoteMutationKey = () => ["editNote"] as const;
 
 export const getEditNoteMutationOptions = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -8331,7 +8373,7 @@ export type EditNoteMutationResult = NonNullable<
   Awaited<ReturnType<typeof editNote>>
 >;
 export type EditNoteMutationBody = NoteCreate;
-export type EditNoteMutationError = HTTPValidationError;
+export type EditNoteMutationError = Refusal | HTTPValidationError;
 export type EditNoteMutationVariables = {
   bookId: number;
   noteId: number;
@@ -8341,7 +8383,10 @@ export type EditNoteMutationVariables = {
 /**
  * @summary Edit Note
  */
-export const useEditNote = <TError = HTTPValidationError, TContext = unknown>(
+export const useEditNote = <
+  TError = Refusal | HTTPValidationError,
+  TContext = unknown,
+>(
   options?: {
     mutation?: UseMutationOptions<
       Awaited<ReturnType<typeof editNote>>,
@@ -8407,7 +8452,7 @@ export const setOwnership = async (
 export const getSetOwnershipMutationKey = () => ["setOwnership"] as const;
 
 export const getSetOwnershipMutationOptions = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -8448,7 +8493,7 @@ export type SetOwnershipMutationResult = NonNullable<
   Awaited<ReturnType<typeof setOwnership>>
 >;
 export type SetOwnershipMutationBody = OwnershipUpdate;
-export type SetOwnershipMutationError = HTTPValidationError;
+export type SetOwnershipMutationError = Refusal | HTTPValidationError;
 export type SetOwnershipMutationVariables = {
   bookId: number;
   data: OwnershipUpdate;
@@ -8458,7 +8503,7 @@ export type SetOwnershipMutationVariables = {
  * @summary Set Ownership
  */
 export const useSetOwnership = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(
   options?: {
@@ -8500,7 +8545,7 @@ export const purgeBook = async (
 export const getPurgeBookMutationKey = () => ["purgeBook"] as const;
 
 export const getPurgeBookMutationOptions = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -8541,13 +8586,16 @@ export type PurgeBookMutationResult = NonNullable<
   Awaited<ReturnType<typeof purgeBook>>
 >;
 
-export type PurgeBookMutationError = HTTPValidationError;
+export type PurgeBookMutationError = Refusal | HTTPValidationError;
 export type PurgeBookMutationVariables = { bookId: number };
 
 /**
  * @summary Purge Book
  */
-export const usePurgeBook = <TError = HTTPValidationError, TContext = unknown>(
+export const usePurgeBook = <
+  TError = Refusal | HTTPValidationError,
+  TContext = unknown,
+>(
   options?: {
     mutation?: UseMutationOptions<
       Awaited<ReturnType<typeof purgeBook>>,
@@ -8613,7 +8661,7 @@ export const setPrivacy = async (
 export const getSetPrivacyMutationKey = () => ["setPrivacy"] as const;
 
 export const getSetPrivacyMutationOptions = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -8654,7 +8702,7 @@ export type SetPrivacyMutationResult = NonNullable<
   Awaited<ReturnType<typeof setPrivacy>>
 >;
 export type SetPrivacyMutationBody = PrivacyUpdate;
-export type SetPrivacyMutationError = HTTPValidationError;
+export type SetPrivacyMutationError = Refusal | HTTPValidationError;
 export type SetPrivacyMutationVariables = {
   bookId: number;
   data: PrivacyUpdate;
@@ -8663,7 +8711,10 @@ export type SetPrivacyMutationVariables = {
 /**
  * @summary Set Privacy
  */
-export const useSetPrivacy = <TError = HTTPValidationError, TContext = unknown>(
+export const useSetPrivacy = <
+  TError = Refusal | HTTPValidationError,
+  TContext = unknown,
+>(
   options?: {
     mutation?: UseMutationOptions<
       Awaited<ReturnType<typeof setPrivacy>>,
@@ -8710,7 +8761,7 @@ export const getListProgressQueryKey = (bookId: number) => {
 
 export const getListProgressQueryOptions = <
   TData = Awaited<ReturnType<typeof listProgress>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   bookId: number,
   options?: {
@@ -8743,11 +8794,11 @@ export const getListProgressQueryOptions = <
 export type ListProgressQueryResult = NonNullable<
   Awaited<ReturnType<typeof listProgress>>
 >;
-export type ListProgressQueryError = HTTPValidationError;
+export type ListProgressQueryError = Refusal | HTTPValidationError;
 
 export function useListProgress<
   TData = Awaited<ReturnType<typeof listProgress>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   bookId: number,
   options: {
@@ -8770,7 +8821,7 @@ export function useListProgress<
 };
 export function useListProgress<
   TData = Awaited<ReturnType<typeof listProgress>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   bookId: number,
   options?: {
@@ -8793,7 +8844,7 @@ export function useListProgress<
 };
 export function useListProgress<
   TData = Awaited<ReturnType<typeof listProgress>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   bookId: number,
   options?: {
@@ -8812,7 +8863,7 @@ export function useListProgress<
 
 export function useListProgress<
   TData = Awaited<ReturnType<typeof listProgress>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   bookId: number,
   options?: {
@@ -8894,7 +8945,7 @@ export const addProgress = async (
 export const getAddProgressMutationKey = () => ["addProgress"] as const;
 
 export const getAddProgressMutationOptions = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -8935,7 +8986,7 @@ export type AddProgressMutationResult = NonNullable<
   Awaited<ReturnType<typeof addProgress>>
 >;
 export type AddProgressMutationBody = ProgressCreate;
-export type AddProgressMutationError = HTTPValidationError;
+export type AddProgressMutationError = Refusal | HTTPValidationError;
 export type AddProgressMutationVariables = {
   bookId: number;
   data: ProgressCreate;
@@ -8945,7 +8996,7 @@ export type AddProgressMutationVariables = {
  * @summary Add Progress
  */
 export const useAddProgress = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(
   options?: {
@@ -8998,7 +9049,7 @@ export const deleteProgress = async (
 export const getDeleteProgressMutationKey = () => ["deleteProgress"] as const;
 
 export const getDeleteProgressMutationOptions = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -9039,7 +9090,7 @@ export type DeleteProgressMutationResult = NonNullable<
   Awaited<ReturnType<typeof deleteProgress>>
 >;
 
-export type DeleteProgressMutationError = HTTPValidationError;
+export type DeleteProgressMutationError = Refusal | HTTPValidationError;
 export type DeleteProgressMutationVariables = {
   bookId: number;
   progressId: number;
@@ -9049,7 +9100,7 @@ export type DeleteProgressMutationVariables = {
  * @summary Delete Progress
  */
 export const useDeleteProgress = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(
   options?: {
@@ -9099,7 +9150,7 @@ export const getGetQuotesQueryKey = (bookId: number) => {
 
 export const getGetQuotesQueryOptions = <
   TData = Awaited<ReturnType<typeof getQuotes>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   bookId: number,
   options?: {
@@ -9130,11 +9181,11 @@ export const getGetQuotesQueryOptions = <
 export type GetQuotesQueryResult = NonNullable<
   Awaited<ReturnType<typeof getQuotes>>
 >;
-export type GetQuotesQueryError = HTTPValidationError;
+export type GetQuotesQueryError = Refusal | HTTPValidationError;
 
 export function useGetQuotes<
   TData = Awaited<ReturnType<typeof getQuotes>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   bookId: number,
   options: {
@@ -9157,7 +9208,7 @@ export function useGetQuotes<
 };
 export function useGetQuotes<
   TData = Awaited<ReturnType<typeof getQuotes>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   bookId: number,
   options?: {
@@ -9180,7 +9231,7 @@ export function useGetQuotes<
 };
 export function useGetQuotes<
   TData = Awaited<ReturnType<typeof getQuotes>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   bookId: number,
   options?: {
@@ -9199,7 +9250,7 @@ export function useGetQuotes<
 
 export function useGetQuotes<
   TData = Awaited<ReturnType<typeof getQuotes>>,
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
 >(
   bookId: number,
   options?: {
@@ -9269,7 +9320,7 @@ export const addQuote = async (
 export const getAddQuoteMutationKey = () => ["addQuote"] as const;
 
 export const getAddQuoteMutationOptions = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -9310,13 +9361,16 @@ export type AddQuoteMutationResult = NonNullable<
   Awaited<ReturnType<typeof addQuote>>
 >;
 export type AddQuoteMutationBody = QuoteCreate;
-export type AddQuoteMutationError = HTTPValidationError;
+export type AddQuoteMutationError = Refusal | HTTPValidationError;
 export type AddQuoteMutationVariables = { bookId: number; data: QuoteCreate };
 
 /**
  * @summary Add Quote
  */
-export const useAddQuote = <TError = HTTPValidationError, TContext = unknown>(
+export const useAddQuote = <
+  TError = Refusal | HTTPValidationError,
+  TContext = unknown,
+>(
   options?: {
     mutation?: UseMutationOptions<
       Awaited<ReturnType<typeof addQuote>>,
@@ -9356,7 +9410,7 @@ export const deleteQuote = async (
 export const getDeleteQuoteMutationKey = () => ["deleteQuote"] as const;
 
 export const getDeleteQuoteMutationOptions = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -9397,14 +9451,14 @@ export type DeleteQuoteMutationResult = NonNullable<
   Awaited<ReturnType<typeof deleteQuote>>
 >;
 
-export type DeleteQuoteMutationError = HTTPValidationError;
+export type DeleteQuoteMutationError = Refusal | HTTPValidationError;
 export type DeleteQuoteMutationVariables = { bookId: number; quoteId: number };
 
 /**
  * @summary Delete Quote
  */
 export const useDeleteQuote = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(
   options?: {
@@ -9473,7 +9527,7 @@ export const editQuote = async (
 export const getEditQuoteMutationKey = () => ["editQuote"] as const;
 
 export const getEditQuoteMutationOptions = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -9514,7 +9568,7 @@ export type EditQuoteMutationResult = NonNullable<
   Awaited<ReturnType<typeof editQuote>>
 >;
 export type EditQuoteMutationBody = QuoteCreate;
-export type EditQuoteMutationError = HTTPValidationError;
+export type EditQuoteMutationError = Refusal | HTTPValidationError;
 export type EditQuoteMutationVariables = {
   bookId: number;
   quoteId: number;
@@ -9524,7 +9578,10 @@ export type EditQuoteMutationVariables = {
 /**
  * @summary Edit Quote
  */
-export const useEditQuote = <TError = HTTPValidationError, TContext = unknown>(
+export const useEditQuote = <
+  TError = Refusal | HTTPValidationError,
+  TContext = unknown,
+>(
   options?: {
     mutation?: UseMutationOptions<
       Awaited<ReturnType<typeof editQuote>>,
@@ -9596,7 +9653,7 @@ export const setRating = async (
 export const getSetRatingMutationKey = () => ["setRating"] as const;
 
 export const getSetRatingMutationOptions = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -9637,7 +9694,7 @@ export type SetRatingMutationResult = NonNullable<
   Awaited<ReturnType<typeof setRating>>
 >;
 export type SetRatingMutationBody = BookRatingUpdate;
-export type SetRatingMutationError = HTTPValidationError;
+export type SetRatingMutationError = Refusal | HTTPValidationError;
 export type SetRatingMutationVariables = {
   bookId: number;
   data: BookRatingUpdate;
@@ -9646,7 +9703,10 @@ export type SetRatingMutationVariables = {
 /**
  * @summary Set Rating
  */
-export const useSetRating = <TError = HTTPValidationError, TContext = unknown>(
+export const useSetRating = <
+  TError = Refusal | HTTPValidationError,
+  TContext = unknown,
+>(
   options?: {
     mutation?: UseMutationOptions<
       Awaited<ReturnType<typeof setRating>>,
@@ -9685,7 +9745,7 @@ export const refreshMetadata = async (
 export const getRefreshMetadataMutationKey = () => ["refreshMetadata"] as const;
 
 export const getRefreshMetadataMutationOptions = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -9726,14 +9786,14 @@ export type RefreshMetadataMutationResult = NonNullable<
   Awaited<ReturnType<typeof refreshMetadata>>
 >;
 
-export type RefreshMetadataMutationError = HTTPValidationError;
+export type RefreshMetadataMutationError = Refusal | HTTPValidationError;
 export type RefreshMetadataMutationVariables = { bookId: number };
 
 /**
  * @summary Refresh Metadata
  */
 export const useRefreshMetadata = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(
   options?: {
@@ -9780,7 +9840,7 @@ export const restoreBook = async (
 export const getRestoreBookMutationKey = () => ["restoreBook"] as const;
 
 export const getRestoreBookMutationOptions = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -9821,14 +9881,14 @@ export type RestoreBookMutationResult = NonNullable<
   Awaited<ReturnType<typeof restoreBook>>
 >;
 
-export type RestoreBookMutationError = HTTPValidationError;
+export type RestoreBookMutationError = Refusal | HTTPValidationError;
 export type RestoreBookMutationVariables = { bookId: number };
 
 /**
  * @summary Restore Book
  */
 export const useRestoreBook = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(
   options?: {
@@ -9898,7 +9958,7 @@ export const updateStatus = async (
 export const getUpdateStatusMutationKey = () => ["updateStatus"] as const;
 
 export const getUpdateStatusMutationOptions = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -9939,7 +9999,7 @@ export type UpdateStatusMutationResult = NonNullable<
   Awaited<ReturnType<typeof updateStatus>>
 >;
 export type UpdateStatusMutationBody = BookStatusUpdate;
-export type UpdateStatusMutationError = HTTPValidationError;
+export type UpdateStatusMutationError = Refusal | HTTPValidationError;
 export type UpdateStatusMutationVariables = {
   bookId: number;
   data: BookStatusUpdate;
@@ -9949,7 +10009,7 @@ export type UpdateStatusMutationVariables = {
  * @summary Update Status
  */
 export const useUpdateStatus = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(
   options?: {
@@ -10038,7 +10098,7 @@ export const getAddBookTagByNameMutationKey = () =>
   ["addBookTagByName"] as const;
 
 export const getAddBookTagByNameMutationOptions = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -10079,7 +10139,7 @@ export type AddBookTagByNameMutationResult = NonNullable<
   Awaited<ReturnType<typeof addBookTagByName>>
 >;
 export type AddBookTagByNameMutationBody = TagCreate;
-export type AddBookTagByNameMutationError = HTTPValidationError;
+export type AddBookTagByNameMutationError = Refusal | HTTPValidationError;
 export type AddBookTagByNameMutationVariables = {
   bookId: number;
   data: TagCreate;
@@ -10089,7 +10149,7 @@ export type AddBookTagByNameMutationVariables = {
  * @summary Add Book Tag By Name
  */
 export const useAddBookTagByName = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(
   options?: {
@@ -10131,7 +10191,7 @@ export const removeBookTag = async (
 export const getRemoveBookTagMutationKey = () => ["removeBookTag"] as const;
 
 export const getRemoveBookTagMutationOptions = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -10172,14 +10232,14 @@ export type RemoveBookTagMutationResult = NonNullable<
   Awaited<ReturnType<typeof removeBookTag>>
 >;
 
-export type RemoveBookTagMutationError = HTTPValidationError;
+export type RemoveBookTagMutationError = Refusal | HTTPValidationError;
 export type RemoveBookTagMutationVariables = { bookId: number; tagId: number };
 
 /**
  * @summary Remove Book Tag
  */
 export const useRemoveBookTag = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(
   options?: {
@@ -10221,7 +10281,7 @@ export const addBookTag = async (
 export const getAddBookTagMutationKey = () => ["addBookTag"] as const;
 
 export const getAddBookTagMutationOptions = <
-  TError = HTTPValidationError,
+  TError = Refusal | HTTPValidationError,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -10262,13 +10322,16 @@ export type AddBookTagMutationResult = NonNullable<
   Awaited<ReturnType<typeof addBookTag>>
 >;
 
-export type AddBookTagMutationError = HTTPValidationError;
+export type AddBookTagMutationError = Refusal | HTTPValidationError;
 export type AddBookTagMutationVariables = { bookId: number; tagId: number };
 
 /**
  * @summary Add Book Tag
  */
-export const useAddBookTag = <TError = HTTPValidationError, TContext = unknown>(
+export const useAddBookTag = <
+  TError = Refusal | HTTPValidationError,
+  TContext = unknown,
+>(
   options?: {
     mutation?: UseMutationOptions<
       Awaited<ReturnType<typeof addBookTag>>,

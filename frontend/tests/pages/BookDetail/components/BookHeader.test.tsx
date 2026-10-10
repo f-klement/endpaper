@@ -178,6 +178,22 @@ describe("the facts in the chip row", () => {
     expect(screen.getByText("0 pages")).toBeInTheDocument();
   });
 
+  it("prints no stray zero for a year of zero", () => {
+    renderHeader(
+      makeBook({
+        year: 0,
+        publisher: null,
+        page_count: null,
+        language: null,
+        location: null,
+        isbn: null,
+        identifiers: [],
+      }),
+    );
+
+    expect(screen.queryByText("0")).not.toBeInTheDocument();
+  });
+
   it("shows no chip for a fact the book does not carry", () => {
     // Counted rather than read: a guard taken off renders an empty chip,
     // which no text query can see.

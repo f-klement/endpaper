@@ -12,11 +12,22 @@
  * are the three things that make that work.
  */
 
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it } from "vitest";
+import fc from "fast-check";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { DEBOUNCE_MS } from "../../../src/pages/components";
 import PublicCataloguePage from "../../../src/pages/PublicCataloguePage";
+import { answersOf } from "../../lib/schemaArbitrary";
+import { holds, PROFILE, PROPERTY, witness } from "../../property";
+import { forget, overSchema, scripted } from "../../schemaPage";
 import { mockApi, renderWithProviders, type MockApi } from "../../utils";
 
 let api: MockApi;
@@ -368,5 +379,113 @@ describe("PublicCataloguePage", () => {
       "href",
       "/login",
     );
+  });
+});
+
+/** How many entries a page body holds, or -1 for one that is not a page. */
+const entries = (body: unknown) =>
+  (body as { items?: unknown[] } | undefined)?.items?.length ?? -1;
+
+/**
+ * Type a search, where the page offers one, and let its debounce run out, on
+ * a clock of the step's own so an example does not wait `DEBOUNCE_MS` for
+ * real. Real timers are back before the search renders, so the request it
+ * starts runs on them. A closed catalogue offers no search.
+ */
+const search = (view: HTMLElement) => {
+  const box = within(view).queryByRole("searchbox", {
+    name: "Search this catalogue",
+  });
+  if (box === null) return;
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  try {
+    fireEvent.change(box, { target: { value: "dune" } });
+    act(() => {
+      vi.advanceTimersByTime(DEBOUNCE_MS);
+      vi.useRealTimers();
+    });
+  } finally {
+    vi.useRealTimers();
+  }
+};
+
+/** Press Show more, where the page offers it. */
+const showMore = (view: HTMLElement) => {
+  const button = within(view).queryByRole("button", { name: "Show more" });
+  if (button !== null) fireEvent.click(button);
+};
+
+/** How many times the catalogue was asked for. */
+const catalogueAsks = (asked: readonly string[]) =>
+  asked.filter((operationId) => operationId === "list_public_books").length;
+
+describe("PublicCataloguePage over any answer the schema permits", () => {
+  // What the page's hooks are handed is drawn from `openapi.json`, per
+  // request. `tests/schemaPage.tsx` holds what the page may not do, and, since
+  // this page renders to a visitor with no account, that it asks for nothing
+  // the document requires an account for, whatever it is sent. A reader asks
+  // again by searching and by pressing Show more, so each example does both.
+  it("is drawn every shape of answer its main request declares", async () => {
+    await witness(answersOf("list_public_books"), {
+      "is an error body": (answer) => answer.status === 422,
+      "is the closed catalogue": (answer) => answer.status === 404,
+      "is an empty page": (answer) => entries(answer.body) === 0,
+      "is a page with an entry": (answer) => entries(answer.body) > 0,
+    });
+  });
+
+  it("neither throws nor shows a value nobody can name", PROPERTY, async () => {
+    expect(
+      await holds(
+        fc.gen(),
+        async (answers) => {
+          try {
+            const rendered = await overSchema(
+              <PublicCataloguePage />,
+              answers,
+              {
+                uses: [search, showMore],
+                anonymous: true,
+              },
+            );
+            expect(rendered.problems).toEqual([]);
+            return rendered;
+          } finally {
+            forget();
+          }
+        },
+        {
+          "showed a value an answer carried": (_, rendered) =>
+            rendered.echoed > 0,
+          "drew an alert": (_, rendered) => rendered.alerts.length > 0,
+          // Arrival, the search, then Show more: the third ask is the button.
+          "searched and pressed Show more": (_, rendered) =>
+            catalogueAsks(rendered.asked) >= 3,
+        },
+      ),
+    ).toBe(PROFILE.runs);
+  });
+
+  it("shows a closed catalogue and asks nothing more of it", async () => {
+    // The property's counterexample: a 404, which is how the server says
+    // nothing is published; the blank `detail` is the draw that found it. The
+    // page was right; the reader's search step looked for a box the closed
+    // screen does not have.
+    try {
+      const rendered = await overSchema(
+        <PublicCataloguePage />,
+        scripted([
+          ["list_public_books", { status: 404, body: { detail: "" } }],
+        ]),
+        { uses: [search, showMore], anonymous: true },
+      );
+      expect(rendered.problems).toEqual([]);
+      expect(rendered.asked).toEqual(["list_public_books"]);
+      expect(
+        within(rendered.container).getByText(/does not publish/i),
+      ).toBeInTheDocument();
+    } finally {
+      forget();
+    }
   });
 });

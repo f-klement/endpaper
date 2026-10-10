@@ -90,6 +90,16 @@ describe("MarcImport", () => {
       });
   });
 
+  it("offers no second pick while the first file is being read", () => {
+    renderMarc({ isPreviewing: true });
+
+    expect(
+      screen.getByRole("button", { name: "Reading the file..." }),
+    ).toBeDisabled();
+    // The hidden input too: a keyboard reaches it without the button.
+    expect(screen.getByLabelText("Choose a MARC file")).toBeDisabled();
+  });
+
   it("reports how many records the file holds and how many are usable", () => {
     renderMarc({ preview: preview({ total_records: 12, readable: 10 }) });
     expect(

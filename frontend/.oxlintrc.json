@@ -236,7 +236,7 @@
     // these on will not report those sites while the directive stands.
     //
     // The other row is a habit: an index used as a key.
-    "react/no-array-index-key": "off", // 12
+    "react/no-array-index-key": "off", // 11
     "react/set-state-in-effect": "off", // 10
     "react/refs": "off", // 6
     "react/exhaustive-effect-dependencies": "off" // 4

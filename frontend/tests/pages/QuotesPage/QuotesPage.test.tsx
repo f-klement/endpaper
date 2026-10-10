@@ -2,11 +2,15 @@
 
 import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import fc from "fast-check";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import QuotesPage from "../../../src/pages/QuotesPage";
 import { makeQuoteWithBook, resetIds } from "../../factories";
 import { mockApi, renderWithProviders, type MockApi } from "../../utils";
+import { answersOf } from "../../lib/schemaArbitrary";
+import { holds, PROFILE, PROPERTY, witness } from "../../property";
+import { forget, overSchema } from "../../schemaPage";
 
 let api: MockApi;
 
@@ -107,5 +111,43 @@ describe("QuotesPage", () => {
 
     expect(await screen.findByRole("alert")).toBeInTheDocument();
     expect(screen.queryByText("No quotes saved yet")).not.toBeInTheDocument();
+  });
+});
+
+/** How many entries a page body holds, or -1 for one that is not a page. */
+const entries = (body: unknown) =>
+  (body as { items?: unknown[] } | undefined)?.items?.length ?? -1;
+
+describe("QuotesPage over any answer the schema permits", () => {
+  // What the page's hooks are handed is drawn from `openapi.json`, per
+  // request. `tests/schemaPage.tsx` holds what the page may not do.
+  it("is drawn every shape of answer its main request declares", async () => {
+    await witness(answersOf("list_quotes"), {
+      "is an error body": (answer) => answer.status === 422,
+      "is an empty page": (answer) => entries(answer.body) === 0,
+      "is a page with an entry": (answer) => entries(answer.body) > 0,
+    });
+  });
+
+  it("neither throws nor shows a value nobody can name", PROPERTY, async () => {
+    expect(
+      await holds(
+        fc.gen(),
+        async (answers) => {
+          try {
+            const rendered = await overSchema(<QuotesPage />, answers);
+            expect(rendered.problems).toEqual([]);
+            return rendered;
+          } finally {
+            forget();
+          }
+        },
+        {
+          "showed a value an answer carried": (_, rendered) =>
+            rendered.echoed > 0,
+          "drew an alert": (_, rendered) => rendered.alerts.length > 0,
+        },
+      ),
+    ).toBe(PROFILE.runs);
   });
 });

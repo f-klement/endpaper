@@ -46,7 +46,13 @@ export default function AuthorsPage() {
   // inside the card, because both the card's own button and the batch have to
   // honour them**: while this lived in the card, unticking a name left it out
   // of that group's merge and the batch folded it anyway.
-  const [excluded, setExcluded] = useState<Record<string, string[]>>({});
+  //
+  // **A `Map`, never a plain object.** A group's id is its keys joined, and a
+  // key is the server's; read from an object, an id such as `toString` finds
+  // the member every object has rather than nothing, and the page throws.
+  const [excluded, setExcluded] = useState<ReadonlyMap<string, string[]>>(
+    () => new Map(),
+  );
 
   const matching = useMemo(() => {
     const needle = search.trim().toLocaleLowerCase();
@@ -81,7 +87,7 @@ export default function AuthorsPage() {
 
   const groupId = (group: AuthorSuggestionOut) => group.keys.join("|");
   const excludedIn = (group: AuthorSuggestionOut) =>
-    excluded[groupId(group)] ?? [];
+    excluded.get(groupId(group)) ?? [];
   const includedIn = (group: AuthorSuggestionOut) =>
     group.keys.filter((key) => !excludedIn(group).includes(key));
 
@@ -133,19 +139,19 @@ export default function AuthorsPage() {
       return;
     }
     setDropped((current) => current.filter((other) => other !== id));
-    setExcluded((current) => ({ ...current, [id]: [] }));
+    setExcluded((current) => new Map(current).set(id, []));
   }
 
   function toggleName(group: AuthorSuggestionOut, key: string) {
     const id = groupId(group);
     setExcluded((current) => {
-      const before = current[id] ?? [];
-      return {
-        ...current,
-        [id]: before.includes(key)
+      const before = current.get(id) ?? [];
+      return new Map(current).set(
+        id,
+        before.includes(key)
           ? before.filter((other) => other !== key)
           : [...before, key],
-      };
+      );
     });
   }
 
@@ -168,7 +174,7 @@ export default function AuthorsPage() {
   function foldBatch() {
     authors.mergeBatch(payload);
     setDropped([]);
-    setExcluded({});
+    setExcluded(new Map());
   }
 
   if (authors.isLoading) return <Spinner label={t("common.loading")} />;

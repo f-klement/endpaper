@@ -11,7 +11,9 @@ directory being written to.
 """
 
 import json
+import lzma
 import zipfile
+import zlib
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from io import BytesIO
@@ -819,6 +821,12 @@ class ArchiveSpec:
 #: patch printed against one run lands on the same byte in the next.
 _EPOCH: Final = (1980, 1, 1, 0, 0, 0)
 
+#: The cover beside the manifest. **Its own bytes, never `tests.helpers.JPEG_BYTES`**:
+#: the named cases below patch offsets in the archive this builds, which wrap
+#: with its length, so one byte more in the shared fixture moved four of them
+#: onto other damage while their ids still named the old cause.
+_COVER: Final = b"\xff\xd8\xff" + b"\x00" * 8
+
 
 def an_archive(spec: ArchiveSpec) -> bytes:
     """The bytes of a backup the spec describes, with a cover beside the manifest."""
@@ -826,7 +834,7 @@ def an_archive(spec: ArchiveSpec) -> bytes:
     manifest = ("[" * spec.depth + body + "]" * spec.depth).encode()
     buffer = BytesIO()
     with zipfile.ZipFile(buffer, "w") as archive:
-        for name, data in ((backup.MANIFEST_NAME, manifest), ("covers/1.jpg", JPEG_BYTES)):
+        for name, data in ((backup.MANIFEST_NAME, manifest), ("covers/1.jpg", _COVER)):
             entry = zipfile.ZipInfo(name, date_time=_EPOCH)
             # What `writestr` sets for a name given as a string, so the only
             # difference from the archive the property was first run over is
@@ -986,80 +994,101 @@ class TestAnArchiveTheReaderCannotReadIsRefusedRatherThanA500:
     """
 
     @pytest.mark.parametrize(
-        ("spec", "refusal"),
+        ("spec", "refusal", "cause"),
         [
             pytest.param(
                 ArchiveSpec(manifest=[], depth=0, method=0, patches=((80925, 1),)),
                 "could not be read",
+                (NotImplementedError, "compression method"),
                 id="NotImplementedError, an unknown compression method",
             ),
             pytest.param(
                 ArchiveSpec(manifest=[], depth=0, method=0, patches=((80923, 64),)),
                 "could not be read",
+                (NotImplementedError, "strong encryption"),
                 id="NotImplementedError, strong encryption",
             ),
             pytest.param(
                 ArchiveSpec(manifest=[], depth=0, method=0, patches=((80923, 32),)),
                 "could not be read",
+                (NotImplementedError, "patched data"),
                 id="NotImplementedError, patched data",
             ),
             pytest.param(
                 ArchiveSpec(manifest=[], depth=0, method=0, patches=((80923, 1),)),
                 "could not be read",
+                (RuntimeError, "is encrypted"),
                 id="RuntimeError, an entry flagged encrypted",
             ),
             pytest.param(
                 ArchiveSpec(manifest=[], depth=0, method=0, patches=((80921, 64),)),
                 "not an Endpaper backup",
+                (NotImplementedError, "zip file version"),
                 id="NotImplementedError on open, a zip version from the future",
             ),
             pytest.param(
                 ArchiveSpec(manifest=None, depth=0, method=0, patches=((80925, 1),)),
                 "could not be read",
+                (zipfile.BadZipFile, "Truncated file header"),
                 id="BadZipFile, a truncated header",
             ),
             pytest.param(
                 ArchiveSpec(manifest=_EMPTY_LIBRARY, depth=0, method=14, patches=((52, 1),)),
                 "could not be read",
+                (lzma.LZMAError, "Corrupt input data"),
                 id="LZMAError, a corrupt LZMA stream",
             ),
             pytest.param(
                 ArchiveSpec(manifest=_EMPTY_LIBRARY, depth=0, method=12, patches=((43, 0),)),
                 "could not be read",
+                (OSError, "Invalid data stream"),
                 id="OSError, a corrupt bzip2 stream",
             ),
             pytest.param(
                 ArchiveSpec(manifest=_EMPTY_LIBRARY, depth=0, method=8, patches=((43, 0),)),
                 "could not be read",
+                (zlib.error, "while decompressing"),
                 id="zlib.error, a corrupt deflate stream",
             ),
             pytest.param(
                 ArchiveSpec(manifest=_EMPTY_LIBRARY, depth=0, method=0, patches=((43, 0),)),
                 "could not be read",
+                (zipfile.BadZipFile, "Bad CRC-32"),
                 id="BadZipFile, a bad checksum",
             ),
             pytest.param(
                 ArchiveSpec(manifest=_EMPTY_LIBRARY, depth=0, method=0, patches=((28, 1),)),
                 "could not be read",
+                (zipfile.BadZipFile, "Overlapped entries"),
                 id="BadZipFile, overlapped entries",
             ),
             pytest.param(
                 ArchiveSpec(manifest=_EMPTY_LIBRARY, depth=0, method=0, patches=((26, 0),)),
                 "could not be read",
+                (zipfile.BadZipFile, "differ"),
                 id="BadZipFile, a header naming another file",
             ),
             pytest.param(
                 ArchiveSpec(manifest=_EMPTY_LIBRARY, depth=0, method=0, patches=((0, 0),)),
                 "could not be read",
+                (zipfile.BadZipFile, "Bad magic number"),
                 id="BadZipFile, a bad magic number",
             ),
         ],
     )
-    def test_a_damaged_archive_is_refused_by_name(self, spec, refusal):
-        """Each id names what the case raised before, so a reader can tell
-        them apart; the assertion is the refusal it is now."""
-        with pytest.raises(RestoreError, match=refusal):
+    def test_a_damaged_archive_is_refused_by_name(self, spec, refusal, cause):
+        """Each id names what the case raised before, and the refusal now
+        carries it as its cause. **The cause is asserted, not only the
+        message**: most kinds of damage share one message, so without it a
+        case whose patch lands on other damage passes under an id that is no
+        longer true. **By its type and a fragment of what it says**, because
+        several kinds share a type: two of these swapped would pass on the
+        type alone."""
+        kind, says = cause
+        with pytest.raises(RestoreError, match=refusal) as caught:
             backup.read_manifest(an_archive(spec))
+        assert type(caught.value.__cause__) is kind
+        assert says in str(caught.value.__cause__)
 
     def test_a_manifest_that_is_valid_json_and_not_an_object_is_refused(self):
         """Was `AttributeError` on the first `.get`."""
@@ -1071,7 +1100,7 @@ class TestAnArchiveTheReaderCannotReadIsRefusedRatherThanA500:
         """Was `RecursionError`. **Stored, so its compression ratio is one**:
         deflated, the same manifest is refused earlier by `_reject_a_bomb` and
         never reaches the parser, which is how a first probe missed it."""
-        spec = ArchiveSpec(manifest=_EMPTY_LIBRARY, depth=400_000, method=0, patches=())
+        spec = ArchiveSpec(manifest=_EMPTY_LIBRARY, depth=MANIFEST_DEPTH, method=0, patches=())
         with pytest.raises(RestoreError, match="could not be read") as refusal:
             backup.read_manifest(an_archive(spec))
         assert isinstance(refusal.value.__cause__, RecursionError)

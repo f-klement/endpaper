@@ -1518,6 +1518,24 @@ def _creates_outside_the_spine(source: str, spine: str = SPINE) -> list[str]:
       call sits inside the spine's `create` argument and no other, which is
       what a `create=lambda: ...` is. The other arguments are not shelter:
       `fill_gaps` runs on the matched arm, past the refusal.
+      **Or inside a function every reference to which is sheltered**, so a
+      `_create` that moves its `Book(...)` into a helper still routes through
+      the spine. One reference anywhere else, called or only named, and the
+      function is not sheltered. **A reference grants shelter only where it
+      surely names the function**, keyed the way a call is below, so another
+      class's `self._create` does not shelter this one's. **Any reference that
+      may name it removes shelter**, another class's `self._create` included,
+      because a subclass or a mixin reaches the inherited method through
+      exactly that spelling. The cost is loud: a class sharing the name and
+      calling its own off the spine unshelters this one. So is a base class
+      whose `_create` holds the helper chain, routed only by a subclass: the
+      subclass's `self._create` surely names the subclass and not the base, so
+      it cannot grant, and the base is reported. Routing the call in the base
+      itself is the fix. `getattr` with a
+      string is not seen, nor is a lambda a sheltered function stores for a
+      later call, and each takes writing it on purpose. A function reached only
+      from a module this pass is not handed is the blind spot already listed
+      below, one call further down.
     * **a constructor nothing in the module calls or names.** An `apply` entry
       point is exactly such a function, so a bare `Book(` written straight into
       the import loop has no call site to catch and the first check sees
@@ -1530,8 +1548,10 @@ def _creates_outside_the_spine(source: str, spine: str = SPINE) -> list[str]:
     covered whatever it names things. **The constructor set is not derived from
     a property though**, and the pack that said otherwise was wrong: it matches
     the literal name `Book`, which is source text matching, so an import
-    aliased to another name is invisible. That is the known cost of the one
-    matched token here, and it is stated rather than bounded.
+    aliased to another name is invisible, and so is an attribute call such as
+    `models.Book(...)`; each takes an import this module does not write. That
+    is the known cost of the one matched token here, and it is stated rather
+    than bounded.
 
     **The rest of what it cannot see**, likewise stated:
 
@@ -1548,19 +1568,8 @@ def _creates_outside_the_spine(source: str, spine: str = SPINE) -> list[str]:
       routed, and the behavioural classes above say what routing it buys.
     """
     tree = ast.parse(source)
-    parents: dict[int, ast.AST] = {}
-    for node in ast.walk(tree):
-        for child in ast.iter_child_nodes(node):
-            parents[id(child)] = node
-
-    def qualified(node: ast.AST) -> str:
-        parts: list[str] = []
-        cursor: ast.AST | None = node
-        while cursor is not None:
-            if isinstance(cursor, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
-                parts.append(cursor.name)
-            cursor = parents.get(id(cursor))
-        return ".".join(reversed(parts)) or "<module>"
+    parents = _parents_of(tree)
+    qualified = _qualifier(parents)
 
     constructors = [
         function
@@ -1624,6 +1633,45 @@ def _creates_outside_the_spine(source: str, spine: str = SPINE) -> list[str]:
                         named_builders.add(
                             f"{here}.{node.attr}" if here else node.attr
                         )
+
+    def surely_names(node: ast.AST, function: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
+        """Whether `node` refers to `function`: its name, unless it is
+        `self.X` written in a different class."""
+        if isinstance(node, ast.Name):
+            return node.id == function.name
+        if not isinstance(node, ast.Attribute) or node.attr != function.name:
+            return False
+        if isinstance(node.value, ast.Name) and node.value.id == "self":
+            here = owner(node)
+            return here is None or here == owner(function)
+        return True
+
+    # **Least fixed point, so a function sheltered only by itself is not.** A
+    # recursive helper's own call is a reference that is sheltered only once
+    # the helper is, which never happens from below.
+    references = [node for node in ast.walk(tree) if isinstance(node, ast.Name | ast.Attribute)]
+    functions = [
+        node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
+    ]
+    sheltered_functions: set[int] = set()
+    grew = True
+    while grew:
+        grew = False
+        for function in functions:
+            if id(function) in sheltered_functions:
+                continue
+            naming = [node for node in references if surely_names(node, function)]
+            # Any class's `self.X` may reach this one through inheritance.
+            loose = [
+                node
+                for node in references
+                if isinstance(node, ast.Attribute) and node.attr == function.name
+            ]
+            if naming and all(id(node) in sheltered for node in naming + loose):
+                sheltered_functions.add(id(function))
+                for statement in function.body:
+                    sheltered.update(id(node) for node in ast.walk(statement))
+                grew = True
 
     def called(call: ast.Call) -> str | None:
         if isinstance(call.func, ast.Attribute):
@@ -1845,6 +1893,94 @@ class OaiImport:
 '''
 
 
+A_FOURTH_IMPORTER_WHOSE_CREATE_CALLS_A_HELPER = '''
+class OaiImport:
+    def apply(self, records, *, create_missing=True):
+        for record in records:
+            self._apply_one(record, create_missing)
+
+    def _apply_one(self, record, create_missing):
+        _settle_one(
+            self._index,
+            self._tally,
+            self._index.find(self._db, record),
+            isbn=record.isbn,
+            unmatched_title=record.title,
+            create=lambda: self._create(record),
+            fill_gaps=lambda matched: None,
+            create_missing=create_missing,
+        )
+
+    def _create(self, record):
+        book = self._book_from(record)
+        self._db.add(book)
+        return book
+
+    def _book_from(self, record):
+        return Book(title=record.title)
+'''
+
+#: The same helper, also reached from the matched arm.
+A_FOURTH_IMPORTER_WHOSE_HELPER_IS_ALSO_REACHED_OFF_THE_SPINE = (
+    A_FOURTH_IMPORTER_WHOSE_CREATE_CALLS_A_HELPER.replace(
+        "fill_gaps=lambda matched: None", "fill_gaps=lambda matched: self._book_from(record)"
+    )
+)
+
+#: Two classes, one routed and one not, sharing the builder's name.
+A_FOURTH_IMPORTER_WHOSE_HELPER_SITS_BEHIND_A_COLLIDING_NAME = (
+    A_FOURTH_IMPORTER_WHOSE_CREATE_CALLS_A_HELPER
+    + '''
+
+class OpdsImport:
+    def apply(self, records):
+        harvest.drive(self, records)
+
+    def _create(self, record):
+        book = self._book_from(record)
+        self._db.add(book)
+        return book
+
+    def _book_from(self, record):
+        return Book(title=record.title)
+'''
+)
+
+#: A subclass reaching the routed class's `_create` on the matched arm.
+A_FOURTH_IMPORTER_SUBCLASSED_TO_CREATE_ON_THE_MATCHED_ARM = (
+    A_FOURTH_IMPORTER_WHOSE_CREATE_CALLS_A_HELPER
+    + '''
+
+class OaiRefresh(OaiImport):
+    def apply(self, records):
+        for record in records:
+            _settle_one(
+                self._index,
+                self._tally,
+                self._index.find(self._db, record),
+                isbn=record.isbn,
+                unmatched_title=record.title,
+                create=lambda: None,
+                fill_gaps=lambda matched: self._create(record),
+                create_missing=True,
+            )
+'''
+)
+
+#: A mixin the routed class inherits, reaching its `_create` off the spine.
+A_FOURTH_IMPORTER_WHOSE_MIXIN_CREATES_OFF_THE_SPINE = (
+    A_FOURTH_IMPORTER_WHOSE_CREATE_CALLS_A_HELPER.replace(
+        "class OaiImport:", "class OaiImport(Refreshing):"
+    )
+    + '''
+
+class Refreshing:
+    def refresh(self, record):
+        return self._create(record)
+'''
+)
+
+
 class TestEveryImporterCreatesThroughTheSpine:
     """The class this stops returning is **a fourth importer whose privacy
     branch is written by hand**.
@@ -1918,6 +2054,41 @@ class TestEveryImporterCreatesThroughTheSpine:
         author never looks for**, and it is a trap laid for whoever converts a
         lambda to a partial and reads the red as the guard being wrong."""
         assert _creates_outside_the_spine(A_FOURTH_IMPORTER_HANDING_ITS_BUILDER_OVER) == []
+
+    def test_a_create_that_builds_through_a_helper_is_clean(self):
+        """Moving `Book(...)` out of a sheltered `_create` into a helper it
+        calls changes no route, and the pass reported `_create` until shelter
+        reached a function referenced only from sheltered code."""
+        assert _creates_outside_the_spine(A_FOURTH_IMPORTER_WHOSE_CREATE_CALLS_A_HELPER) == []
+
+    def test_a_helper_also_reached_off_the_spine_is_named(self):
+        """One reference outside the shelter and that call is named. The call
+        inside `_create` stays clean, because it is behind the refusal."""
+        assert _creates_outside_the_spine(
+            A_FOURTH_IMPORTER_WHOSE_HELPER_IS_ALSO_REACHED_OFF_THE_SPINE
+        ) == ["OaiImport._apply_one"]
+
+    def test_a_routed_class_does_not_shelter_another_class_sharing_its_names(self):
+        """`self._create` written in one class is not a reference to another
+        class's `_create`, so the unrouted one's helper call is named."""
+        assert _creates_outside_the_spine(
+            A_FOURTH_IMPORTER_WHOSE_HELPER_SITS_BEHIND_A_COLLIDING_NAME
+        ) == ["OpdsImport._create"]
+
+    @pytest.mark.parametrize(
+        "source",
+        [
+            pytest.param(A_FOURTH_IMPORTER_SUBCLASSED_TO_CREATE_ON_THE_MATCHED_ARM, id="subclass"),
+            pytest.param(A_FOURTH_IMPORTER_WHOSE_MIXIN_CREATES_OFF_THE_SPINE, id="mixin"),
+        ],
+    )
+    def test_another_class_reaching_the_inherited_create_unshelters_it(self, source: str) -> None:
+        """`self._create` written in another class reaches this one's at run
+        time, so it cannot shelter it and must not be ignored either. Keying it
+        away sheltered `_create` while a second Book was minted past the
+        refusal. The mixin is why it is any class's and not only a subclass's:
+        the mixin has no base to tell it apart."""
+        assert _creates_outside_the_spine(source) == ["OaiImport._create"]
 
     def test_a_fourth_importer_routed_through_the_spine_is_clean(self):
         """The other half of the diagonal. Without it a pass that named every

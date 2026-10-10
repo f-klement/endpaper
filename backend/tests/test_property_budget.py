@@ -40,7 +40,7 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from tests.conftest import ACTIVE_PROPERTY_PROFILE, PROPERTY_PROFILES
-from tests.test_house_rules import BACKEND, _test_sources
+from tests.test_house_rules import BACKEND, _test_sources, is_generated
 
 #: The fewest examples any profile here may spend on one property.
 #:
@@ -153,16 +153,6 @@ def _lowers_the_budget(node: ast.AST) -> list[str]:
     return found
 
 
-def _is_generated(names: list[str]) -> bool:
-    """Whether hypothesis supplies this function's arguments.
-
-    Matched on the decorator call rather than on a list of import spellings:
-    `given(...)` and `hypothesis.given(...)` are one decorator, and which of
-    them a file writes is not a property of the test.
-    """
-    return any(name.split("(", 1)[0].split(".")[-1] == "given" for name in names)
-
-
 class TestEveryGeneratedTestSaysSo:
     """The marker and the generated tests are one set, kept so by derivation.
 
@@ -197,7 +187,7 @@ class TestEveryGeneratedTestSaysSo:
                     if not node.name.startswith("test"):
                         continue
                     own = _decorator_names(node)
-                    if not _is_generated(own):
+                    if not is_generated(own):
                         continue
                     marked = "pytest.mark.property" in own + on_the_class
                     lowered = _lowers_the_budget(node) + _lowers_the_budget(parent)

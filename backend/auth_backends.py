@@ -16,10 +16,12 @@ it came from.
 
 import logging
 import re
+import ssl
 
 from fastapi import Request
-from ldap3 import ALL, Connection, Server
+from ldap3 import ALL, Connection, Server, Tls
 from ldap3.core.exceptions import LDAPException
+from ldap3.core.results import RESULT_REFERRAL
 from ldap3.utils.conv import escape_filter_chars
 from sqlalchemy.orm import Session
 
@@ -31,6 +33,7 @@ from config import (
     ldap_admin_group,
     ldap_bind_dn,
     ldap_bind_password,
+    ldap_ca_file,
     ldap_email_attribute,
     ldap_start_tls,
     ldap_url,
@@ -438,6 +441,36 @@ def has_password(password: str | None) -> bool:
     return bool(password and password.strip())
 
 
+class _VerifyingTls(Tls):  # type: ignore[misc]  # ldap3 ships no type information
+    """TLS to the directory with its certificate and its hostname both checked.
+
+    **ldap3's own `Tls()` checks neither**: its default is `CERT_NONE`, which
+    encrypts to whoever answers and hands them the bind password.
+    `validate=CERT_REQUIRED` alone would fix the certificate and leave the
+    hostname to ldap3, which turns the handshake's own check off and matches
+    afterwards with a copy of the matcher Python removed in 3.12, one that
+    refuses an IP address as the host. So the socket is wrapped here, by the
+    standard library's default context, which checks both in the handshake and
+    before a byte of the bind is written.
+
+    `validate` is set only so ldap3's own description of this object says what
+    it does; `wrap_socket` below is the only reader that decides anything.
+    """
+
+    def __init__(self, ca_file: str) -> None:
+        # Empty means the image's store; a file replaces it rather than adding
+        # to it, which is `create_default_context`'s own behaviour for `cafile`.
+        super().__init__(validate=ssl.CERT_REQUIRED, ca_certs_file=ca_file or None)
+
+    def wrap_socket(self, connection: Connection, do_handshake: bool = False) -> None:
+        context = ssl.create_default_context(cafile=self.ca_certs_file)
+        connection.socket = context.wrap_socket(
+            connection.socket,
+            server_hostname=connection.server.host,
+            do_handshake_on_connect=do_handshake,
+        )
+
+
 def _connect(user: str | None = None, password: str | None = None) -> Connection:
     """Open a connection, refusing any binding that would be anonymous.
 
@@ -459,16 +492,36 @@ def _connect(user: str | None = None, password: str | None = None) -> Connection
             "treat this as an anonymous bind. Set LDAP_BIND_PASSWORD."
         )
 
-    server = Server(ldap_url(), get_info=ALL, connect_timeout=LDAP_TIMEOUT_SECONDS)
+    server = Server(
+        ldap_url(),
+        get_info=ALL,
+        connect_timeout=LDAP_TIMEOUT_SECONDS,
+        tls=_VerifyingTls(ldap_ca_file()),
+    )
     connection = Connection(
         server,
         user=user or None,
         password=password or None,
         auto_bind=False,
         receive_timeout=LDAP_TIMEOUT_SECONDS,
+        # **Removing this sends the service password around every check above.**
+        # ldap3 follows a referral to whatever host it names and binds there as
+        # this connection's user, building that connection's TLS itself: in
+        # cleartext when the referral is `ldap://` from an `ldaps://` origin,
+        # and with a `Tls()` that checks nothing after StartTLS. Not following
+        # one fails the login closed; `authenticate_ldap` logs why.
+        auto_referrals=False,
     )
-    if ldap_start_tls():
-        connection.start_tls()
+    # **The return value is the whole point.** ldap3 answers `False` when it did
+    # not upgrade, and ignoring it sends the bind, password and all, over the
+    # plain connection StartTLS was meant to protect. An `ldaps://` URL is TLS
+    # before anything is sent, and ldap3 answers `False` to StartTLS on one, so
+    # it is not asked.
+    if ldap_start_tls() and not server.ssl and not connection.start_tls():
+        raise LDAPException(
+            "LDAP_START_TLS is set and the directory connection was not upgraded, "
+            "so no bind is sent on it rather than a password in cleartext."
+        )
     return connection
 
 
@@ -574,6 +627,16 @@ def authenticate_ldap(db: Session, username: str, password: str) -> User | None:
                 search_filter=search_filter,
                 attributes=attributes,
             )
+            if search_connection.result["result"] == RESULT_REFERRAL:
+                # Not followed (`_connect` says why), so the member is not
+                # found. The URLs come from the directory and are logged as the
+                # list's repr, which escapes a newline in one.
+                logger.warning(
+                    "LDAP search was answered with a referral, which is not followed: %s. "
+                    "Point LDAP_URL at the server holding LDAP_USER_BASE_DN.",
+                    search_connection.result["referrals"],
+                )
+                return None
             if not search_connection.entries:
                 # No such member. Deliberately indistinguishable from a wrong
                 # password to whoever is asking.

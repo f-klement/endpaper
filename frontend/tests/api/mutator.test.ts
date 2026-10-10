@@ -12,6 +12,7 @@ import {
   setSession,
 } from "../../src/api/mutator";
 import { makeUser, resetIds } from "../factories";
+import { whileStorageRefuses } from "../storageRefusal";
 import { mockApi } from "../utils";
 
 beforeEach(() => {
@@ -57,6 +58,16 @@ describe("request headers", () => {
     await customFetch("/api/books");
     const headers = api.fetch.mock.calls[0]![1].headers as Headers;
     expect(headers.get("Authorization")).toBe("Bearer abc123");
+  });
+
+  it("asks without a token when storage refuses to answer", async () => {
+    // A token is stored, so a request with none can only come from the
+    // refusal. Behind the portal no token is needed, so the page still draws.
+    localStorage.setItem("token", "abc123");
+    const api = mockApi().on("/api/books", { body: [] });
+    await whileStorageRefuses("getItem", () => customFetch("/api/books"));
+    const headers = api.fetch.mock.calls[0]![1].headers as Headers;
+    expect(headers.get("Authorization")).toBeNull();
   });
 
   it("sends JSON content type by default", async () => {
@@ -166,6 +177,49 @@ describe("errors", () => {
     await expect(customFetch("/api/books")).rejects.toThrow(
       "Field required, Input should be a valid integer",
     );
+  });
+
+  it("falls back to status text when every 422 message is blank", async () => {
+    // The schema's 422 body as the page property drew it: a `msg` that is
+    // only whitespace, which the alert showed as nothing but its button. The
+    // second shows nothing either and is not whitespace to `trim()`.
+    mockApi().on("/api/books", {
+      status: 422,
+      body: {
+        detail: [
+          { loc: [], msg: "\t", type: "" },
+          { loc: [], msg: "\u200b\u00ad", type: "" },
+        ],
+      },
+    });
+    await expect(customFetch("/api/books")).rejects.toMatchObject({
+      message: "Status 422",
+    });
+  });
+
+  it("leaves the message empty when the status line says nothing either", async () => {
+    // HTTP/2 carries no reason phrase. An empty message is what lets the
+    // page's own fallback name the failure, in the reader's language.
+    mockApi().on("/api/books", {
+      status: 422,
+      statusText: "",
+      body: { detail: [{ loc: [], msg: " ", type: "" }] },
+    });
+    await expect(customFetch("/api/books")).rejects.toMatchObject({
+      message: "",
+      status: 422,
+    });
+  });
+
+  it("keeps the book a blank duplicate message names", async () => {
+    mockApi().on("/api/books", {
+      status: 409,
+      body: { detail: { message: "\u200b", book_id: 7 } },
+    });
+    await expect(customFetch("/api/books")).rejects.toMatchObject({
+      message: "Status 409",
+      bookId: 7,
+    });
   });
 
   it("falls back to status text when the body is not JSON", async () => {
@@ -418,15 +472,44 @@ describe("the reload an edge sign-out triggers is counted", () => {
 
     await expiredAtTheEdge(mutator.customFetch);
 
-    // **Restored here rather than left to `vi.restoreAllMocks()`.** `setItem`
-    // is inherited, so the spy is installed on `Storage.prototype`, which is
-    // shared by every file in the worker under `isolate: false`. Measured: the
-    // suite-wide restore does not take it off, and a throwing `setItem` then
-    // makes every later `recordReload()` fail, so the next file expecting a
+    // **Restored here rather than left to `vi.restoreAllMocks()`.** The spy
+    // sits on the storage instance, which every file in the worker shares under
+    // `isolate: false`, and the suite wide restore cannot take it off: why is
+    // at `storageLeftBroken` in `tests/setup.ts`. `mockRestore()` resets it to
+    // call through, which is what puts storage right. Measured: left throwing,
+    // it makes every later `recordReload()` fail, so the next file expecting a
     // reload never gets one. That failed four tests in `tests/app/App.test.tsx`
     // whenever the shuffle put this file first.
     setItem.mockRestore();
     stop();
+    expect(window.location.reload).not.toHaveBeenCalled();
+    expect(ended).toHaveBeenCalledTimes(1);
+  });
+
+  it("still says so when storage refuses to give up the session", async () => {
+    // A browser blocking site data refuses every storage call, the session's
+    // removal included. Clearing the session is the first step on the way
+    // out, so a throw there skips the step the arm above checks and hands the reader the raw
+    // storage error instead.
+    const mutator = await freshPageLoad();
+    const ended = vi.fn<() => void>();
+    const stop = mutator.onSessionEnded(ended);
+    const setItem = vi
+      .spyOn(window.sessionStorage, "setItem")
+      .mockImplementation(() => {
+        throw new DOMException("QuotaExceededError");
+      });
+
+    try {
+      await whileStorageRefuses("removeItem", () =>
+        expiredAtTheEdge(mutator.customFetch),
+      );
+    } finally {
+      // Put back by hand, for the reason the arm above gives.
+      setItem.mockRestore();
+      stop();
+    }
+
     expect(window.location.reload).not.toHaveBeenCalled();
     expect(ended).toHaveBeenCalledTimes(1);
   });

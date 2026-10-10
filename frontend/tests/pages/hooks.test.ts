@@ -1,4 +1,4 @@
-/** Tests for src/pages/hooks.ts: the cross-page session hook. */
+/** Tests for src/pages/hooks.ts: the hooks that belong to no single page. */
 
 import { QueryClientProvider, type QueryClient } from "@tanstack/react-query";
 import { act, renderHook, waitFor } from "@testing-library/react";
@@ -6,10 +6,24 @@ import { createElement, type ReactNode } from "react";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import {
+  getRestoreBookMutationKey,
+  type RestoreBookMutationVariables,
+} from "../../src/api/generated/endpoints/books/books";
 import { AuthMode, type UserOut } from "../../src/api/generated/model";
-import { readStoredUser, useGoBack, useSession } from "../../src/pages/hooks";
+import {
+  readStoredUser,
+  useGoBack,
+  usePendingRows,
+  useSession,
+} from "../../src/pages/hooks";
 import { makeUser, resetIds } from "../factories";
-import { createTestQueryClient, mockApi, type MockApi } from "../utils";
+import {
+  createTestQueryClient,
+  mockApi,
+  renderHookWithProviders,
+  type MockApi,
+} from "../utils";
 
 let api: MockApi;
 
@@ -574,5 +588,38 @@ describe("useGoBack", () => {
     act(() => result.current.goBack());
 
     expect(result.current.location.pathname).toBe("/loans");
+  });
+});
+
+describe("usePendingRows", () => {
+  it("refuses at the type check a row key its writes do not carry", () => {
+    // At run time a misspelt key marks nothing and says nothing, so the type
+    // check is what refuses it. `@ts-expect-error` is itself an error once the
+    // line under it compiles, and `tsconfig.json` includes `tests`, so a
+    // signature that stops refusing turns the type check red. The first call
+    // carries no directive, so one that refused every key would too.
+    type Variables = RestoreBookMutationVariables;
+    const KEY = getRestoreBookMutationKey();
+    const client = createTestQueryClient();
+    void client
+      .getMutationCache()
+      .build(client, {
+        mutationKey: KEY,
+        mutationFn: () => new Promise(() => {}),
+      })
+      .execute({ bookId: 7 });
+
+    const { result } = renderHookWithProviders(
+      () => [
+        usePendingRows<Variables>("bookId", KEY),
+        // @ts-expect-error not a field of the variables
+        usePendingRows<Variables>("bookid", KEY),
+        // @ts-expect-error no variables type is named, so no key passes
+        usePendingRows("bookId", KEY),
+      ],
+      { queryClient: client },
+    );
+
+    expect(result.current).toEqual([new Set([7]), new Set(), new Set([7])]);
   });
 });

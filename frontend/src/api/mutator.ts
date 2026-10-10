@@ -68,7 +68,19 @@ async function request(url: string, init: RequestInit): Promise<Response> {
 }
 
 export function getToken(): string | null {
-  return localStorage.getItem(TOKEN_KEY);
+  // Storage a browser refuses to read means no token, not a failed request.
+  // Behind the forward-auth portal the request needs none, so a throw here
+  // would break every page for a reader whose browser blocks site data;
+  // elsewhere it is a 401, the same as being signed out. An admin switched
+  // into another account whose storage starts refusing mid session sends
+  // requests as the admin, reads and writes alike: no privilege is gained,
+  // since the portal already vouches for the admin, and it needs storage that
+  // accepted the switch in the first place.
+  try {
+    return localStorage.getItem(TOKEN_KEY);
+  } catch {
+    return null;
+  }
 }
 
 export function setSession(token: string, user: unknown): void {
@@ -77,8 +89,38 @@ export function setSession(token: string, user: unknown): void {
 }
 
 export function clearSession(): void {
-  localStorage.removeItem(TOKEN_KEY);
-  localStorage.removeItem(USER_KEY);
+  // Storage that refuses the removal cannot be cleared from here, and every
+  // caller has a next step that still has to run: the reload or the session
+  // ended screen at the edge, the login screen on a 401, an ordinary sign out,
+  // the switch back under the portal. A throw here would skip it and hand the
+  // reader a raw storage error. `setSession` keeps throwing: a sign in that
+  // cannot be kept is a failure the login form should show. One case this
+  // trades away: storage that refuses the removal while still answering reads
+  // keeps the token, so a local or ldap sign out shows signed out and the next
+  // page load signs back in. No browser is known to refuse one and not the
+  // other; blocked site data refuses both.
+  try {
+    localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(USER_KEY);
+  } catch {
+    // Nothing to do: see above.
+  }
+}
+
+/** A character somebody can see: a letter, a digit, punctuation or a symbol. */
+const SEEN = /[\p{L}\p{N}\p{P}\p{S}]/u;
+
+/**
+ * Whether `text` is a message with something in it to read.
+ *
+ * **A blank `detail`, `msg` or `message` is no message**, and falls through
+ * to the status text: the schema's 422 body allows a `msg` of nothing but
+ * whitespace, and taken as the message it drew an alert holding a retry
+ * button and no words. Blank means nothing seen, not only whitespace: a zero
+ * width space or a soft hyphen survives `trim()` and shows nothing either.
+ */
+function readable(text: unknown): text is string {
+  return typeof text === "string" && SEEN.test(text);
 }
 
 /**
@@ -91,39 +133,43 @@ export function clearSession(): void {
  */
 async function errorDetail(
   response: Response,
-  fallback: string,
 ): Promise<{ message: string; bookId?: number }> {
   try {
     const body: unknown = await response.json();
     const detail = (body as { detail?: unknown }).detail;
 
-    if (typeof detail === "string") return { message: detail };
+    if (readable(detail)) return { message: detail };
 
     if (Array.isArray(detail)) {
       const messages = detail
         .map((item) => (item as { msg?: unknown }).msg)
-        .filter((msg): msg is string => typeof msg === "string");
+        .filter(readable);
       if (messages.length > 0) return { message: messages.join(", ") };
     }
 
     // An object detail: a message plus whatever the route could say about it.
-    // Only the duplicate-ISBN 409 sends one today.
-    if (detail && typeof detail === "object") {
+    // Only the duplicate-ISBN 409 sends one today. Not a list, which is an
+    // object too and is read above.
+    if (detail && typeof detail === "object" && !Array.isArray(detail)) {
       const { message, book_id: bookId } = detail as {
         message?: unknown;
         book_id?: unknown;
       };
-      if (typeof message === "string") {
-        return {
-          message,
-          bookId: typeof bookId === "number" ? bookId : undefined,
-        };
-      }
+      // The book is kept when the sentence is blank: it is what lets the
+      // reader open the copy already on the shelf.
+      return {
+        message: readable(message) ? message : response.statusText,
+        bookId: typeof bookId === "number" ? bookId : undefined,
+      };
     }
   } catch {
     // Body was not JSON, so fall through to the status text.
   }
-  return { message: response.statusText || fallback };
+  // **Empty over HTTP/2, which has no reason phrase, and left empty.** An
+  // `ApiError` with no message is named by the caller's own fallback, in the
+  // reader's language (`errorText`); an English literal here was what a
+  // German reader saw.
+  return { message: response.statusText };
 }
 
 /** Where to send someone whose session has ended. */
@@ -398,7 +444,7 @@ export const customFetch = async <T>(
   }
 
   if (!response.ok) {
-    const detail = await errorDetail(response, "Request failed");
+    const detail = await errorDetail(response);
     throw new ApiError(detail.message, response.status, detail.bookId);
   }
 
@@ -470,10 +516,7 @@ export async function downloadFile(
     throw new ApiError("Your session has expired. Please sign in again.", 401);
   }
   if (!response.ok) {
-    throw new ApiError(
-      (await errorDetail(response, "Download failed")).message,
-      response.status,
-    );
+    throw new ApiError((await errorDetail(response)).message, response.status);
   }
 
   const disposition = response.headers.get("content-disposition") ?? "";

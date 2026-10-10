@@ -117,6 +117,44 @@ describe("ReminderSendersSection", () => {
       expect(screen.getByLabelText("Show the bot token")).toBeVisible();
     });
 
+    it("saves what was typed, trimmed, as the mail password", () => {
+      const { onSave } = renderSection();
+      fireEvent.change(screen.getByLabelText("Mail password"), {
+        target: { value: "  typed  " },
+      });
+      fireEvent.click(screen.getByText("Save password"));
+      expect(onSave).toHaveBeenCalledExactlyOnceWith({
+        mail_password: "typed",
+      });
+    });
+
+    it("hides what was revealed once the deployment pins it", () => {
+      // The reveal button goes with the pin, so nothing would be left to hide
+      // the typed draft if the box stayed in clear.
+      const { onSave, rerender } = renderSection();
+      fireEvent.change(screen.getByLabelText("Mail password"), {
+        target: { value: "typed" },
+      });
+      fireEvent.click(screen.getByLabelText("Show the mail password"));
+      expect(screen.getByLabelText("Mail password")).toHaveAttribute(
+        "type",
+        "text",
+      );
+
+      rerender(
+        <ReminderSendersSection
+          settings={makeSettings({ mail_from_env: ["mail_password"] })}
+          isSaving={false}
+          onSave={onSave}
+          health={{}}
+        />,
+      );
+      expect(screen.getByLabelText("Mail password")).toHaveAttribute(
+        "type",
+        "password",
+      );
+    });
+
     it("clears with an empty string, which is not the same as leaving it alone", () => {
       const { onSave } = renderSection({ has_mail_password: true });
       fireEvent.click(screen.getByText("Remove stored password"));
@@ -126,6 +164,19 @@ describe("ReminderSendersSection", () => {
     it("offers no clear button when nothing is stored", () => {
       renderSection();
       expect(screen.queryByText("Remove stored password")).toBeNull();
+    });
+  });
+
+  describe("the bot token", () => {
+    it("saves what was typed, trimmed, as the bot token", () => {
+      const { onSave } = renderSection();
+      fireEvent.change(screen.getByLabelText("Bot token"), {
+        target: { value: "  typed  " },
+      });
+      fireEvent.click(screen.getByText("Save token"));
+      expect(onSave).toHaveBeenCalledExactlyOnceWith({
+        telegram_bot_token: "typed",
+      });
     });
   });
 
@@ -161,6 +212,22 @@ describe("ReminderSendersSection", () => {
     });
   });
 
+  it("saves every mail field, trimmed, when the deployment pins none", () => {
+    const { onSave } = renderSection();
+    fireEvent.change(screen.getByLabelText("Mail server"), {
+      target: { value: " smtp.example.org " },
+    });
+    fireEvent.click(screen.getByText("Save mail settings"));
+
+    expect(onSave).toHaveBeenCalledWith({
+      overdue_mail_to: "",
+      mail_server: "smtp.example.org",
+      mail_port: "587",
+      mail_username: "",
+      mail_default_sender: "",
+    });
+  });
+
   describe("a setting the deployment pinned", () => {
     it("is shown, not editable, and says so", () => {
       renderSection({
@@ -189,14 +256,36 @@ describe("ReminderSendersSection", () => {
       expect(patch).toHaveProperty("mail_username", "library");
     });
 
-    it("hides the save button for a pinned secret", () => {
-      renderSection({ mail_from_env: ["mail_password"] });
-      expect(screen.queryByText("Save password")).toBeNull();
+    it("leaves out each of the four it can pin, and sends the recipient alone", () => {
+      const { onSave } = renderSection({
+        mail_from_env: [
+          "mail_server",
+          "mail_port",
+          "mail_username",
+          "mail_default_sender",
+        ],
+      });
+      fireEvent.change(screen.getByLabelText("Send reminders to"), {
+        target: { value: " house@example.org " },
+      });
+      fireEvent.click(screen.getByText("Save mail settings"));
+
+      expect(onSave).toHaveBeenCalledWith({
+        overdue_mail_to: "house@example.org",
+      });
     });
 
-    it("hides the save button for a pinned bot token", () => {
+    it("offers no save and no reveal for a pinned password", () => {
+      // The box is disabled and empty, so a reveal would unmask nothing.
+      renderSection({ mail_from_env: ["mail_password"] });
+      expect(screen.queryByText("Save password")).toBeNull();
+      expect(screen.queryByLabelText("Show the mail password")).toBeNull();
+    });
+
+    it("offers no save and no reveal for a pinned bot token", () => {
       renderSection({ telegram_bot_token_from_env: true });
       expect(screen.queryByText("Save token")).toBeNull();
+      expect(screen.queryByLabelText("Show the bot token")).toBeNull();
     });
   });
 

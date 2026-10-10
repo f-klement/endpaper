@@ -69,7 +69,7 @@ export default function TrashPage() {
               <TrashRow
                 key={book.id}
                 book={book}
-                isBusy={trash.busyId === book.id}
+                isBusy={trash.busyIds.has(book.id)}
                 onRestore={() => trash.restore(book.id)}
                 onPurge={() => trash.purge(book.id)}
               />

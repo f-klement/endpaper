@@ -670,6 +670,26 @@ describe("the primitives", () => {
     expect(whole).toBe(2);
     expect(broken).toBe(4);
   });
+
+  it("draws nothing for a span with no length", () => {
+    // A span that starts where it ends has no band in it, and drawing it anyway
+    // adds a pair of edges with nothing between them.
+    const straight: Branch = [
+      [
+        [0, 0],
+        [40, 0],
+        [80, 0],
+        [120, 0],
+      ],
+    ];
+    const edges = (
+      ribbon(straight, 10, [
+        [0, 0.4],
+        [0.5, 0.5],
+      ]).match(/M/g) ?? []
+    ).length;
+    expect(edges).toBe(2);
+  });
 });
 
 describe("measure", () => {

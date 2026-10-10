@@ -24,6 +24,7 @@ from sqlalchemy.orm import Session
 from auth import require_admin
 from dependencies import CurrentUser, DbSession, RowId
 from models import Collection, User, fold_collection_name
+from refusals import refuses
 from schemas import CollectionCreate, CollectionOut, CollectionUpdate
 from shelving import Shelving
 
@@ -123,6 +124,7 @@ def create_collection(
 
 
 @router.patch("/{collection_id}", response_model=CollectionOut)
+@refuses(404)
 def rename_collection(
     collection_id: RowId,
     payload: CollectionUpdate,
@@ -176,6 +178,7 @@ def rename_collection(
 
 
 @router.delete("/{collection_id}", status_code=status.HTTP_204_NO_CONTENT)
+@refuses(404)
 def delete_collection(
     collection_id: RowId,
     db: DbSession,

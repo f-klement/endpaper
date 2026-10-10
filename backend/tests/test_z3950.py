@@ -24,11 +24,13 @@ Four of these would be the only warning of a real regression:
   back only for the positions asked for, so `records` is the whole of the byte cost.
 
 Nothing here opens a socket. Every client is a fake, which is also why this file can run
-on a machine with no Z39.50 client installed: `z3950._default_client` is never reached.
+on a machine with no Z39.50 client installed: `z3950._default_client` builds a client
+and loads nothing until that client opens, which no test here asks it to.
 """
 
 import ast
 import asyncio
+import ctypes
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -145,6 +147,13 @@ class TestATermCannotChangeTheQuery:
 
     def test_a_backslash_is_escaped_so_a_trailing_one_cannot_eat_the_quote(self):
         assert z3950.title_query("moby dick\\") == '@attr 1=4 "moby dick\\\\"'
+
+    @pytest.mark.parametrize("use", [True, "7 @and @attr 1=4 anything", 7.0])
+    def test_a_use_attribute_that_is_not_an_int_is_refused(self, use):
+        # A row can store text in an INTEGER column, and rendered here that text is query
+        # structure. `True` is an `int` to Python and is refused with the rest.
+        with pytest.raises(z3950.BadQuery):
+            z3950.query(use, "x")
 
     def test_an_at_sign_is_escaped_because_it_can_replace_the_use_attribute(self):
         # **This replaced a test that asserted the opposite.** It said an `@` needs no
@@ -406,6 +415,14 @@ class TestOneAssociationIsOneClock:
         assert z3950.STILL_ANSWERING in str(raised.value)
         assert z3950.BEFORE_STARTING not in str(raised.value)
         assert time.monotonic() - started < 1.0
+
+    async def test_a_search_whose_own_deadline_has_passed_never_reaches_the_session(self):
+        session = FakeSession()
+        async with z3950.association(TARGET, client=FakeClient(session)) as open_association:
+            with pytest.raises(z3950.DeadlineExceeded) as raised:
+                await z3950.search(open_association, "q", deadline=time.monotonic() - 1)
+        assert z3950.BEFORE_STARTING in str(raised.value)
+        assert session.searched == []
 
     def test_the_two_ways_a_budget_runs_out_read_differently(self):
         # Through a set rather than `!=`: both are `Final` string literals, so mypy
@@ -795,6 +812,15 @@ class TestTheModuleCanBeImportedWithNoClientInstalled:
         at_import = import_time_names(ast.parse(Path(z3950.__file__).read_text()))
         assert "ctypes" not in at_import
         assert "z3950_provisional" not in at_import
+
+    def test_the_default_client_is_built_without_loading_a_library(self, monkeypatch):
+        # The load waits for the first open, so building the client the seam uses
+        # today needs no YAZ on the machine either.
+        def refuse(path: str) -> None:
+            raise AssertionError(f"loaded {path} while building the client")
+
+        monkeypatch.setattr(ctypes, "CDLL", refuse)
+        assert type(z3950._default_client()).__name__ == "ProvisionalYazClient"
 
     def test_the_walk_sees_past_the_top_level_statement_list(self):
         # The guard above is only as good as this: `tree.body` alone is not a scope.

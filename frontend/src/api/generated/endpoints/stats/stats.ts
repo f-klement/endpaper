@@ -18,7 +18,7 @@ import type {
   UseQueryResult,
 } from "@tanstack/react-query";
 
-import type { StatsOut } from "../../model";
+import type { Refusal, StatsOut } from "../../model";
 
 import { customFetch } from "../../../mutator.ts";
 
@@ -76,7 +76,7 @@ export const getGetStatsQueryKey = () => {
 
 export const getGetStatsQueryOptions = <
   TData = Awaited<ReturnType<typeof getStats>>,
-  TError = unknown,
+  TError = Refusal,
 >(options?: {
   query?: Partial<
     UseQueryOptions<Awaited<ReturnType<typeof getStats>>, TError, TData>
@@ -101,11 +101,11 @@ export const getGetStatsQueryOptions = <
 export type GetStatsQueryResult = NonNullable<
   Awaited<ReturnType<typeof getStats>>
 >;
-export type GetStatsQueryError = unknown;
+export type GetStatsQueryError = Refusal;
 
 export function useGetStats<
   TData = Awaited<ReturnType<typeof getStats>>,
-  TError = unknown,
+  TError = Refusal,
 >(
   options: {
     query: Partial<
@@ -127,7 +127,7 @@ export function useGetStats<
 };
 export function useGetStats<
   TData = Awaited<ReturnType<typeof getStats>>,
-  TError = unknown,
+  TError = Refusal,
 >(
   options?: {
     query?: Partial<
@@ -149,7 +149,7 @@ export function useGetStats<
 };
 export function useGetStats<
   TData = Awaited<ReturnType<typeof getStats>>,
-  TError = unknown,
+  TError = Refusal,
 >(
   options?: {
     query?: Partial<
@@ -167,7 +167,7 @@ export function useGetStats<
 
 export function useGetStats<
   TData = Awaited<ReturnType<typeof getStats>>,
-  TError = unknown,
+  TError = Refusal,
 >(
   options?: {
     query?: Partial<
