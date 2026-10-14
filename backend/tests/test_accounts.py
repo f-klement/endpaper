@@ -7,7 +7,6 @@ behaviour check.
 
 import ast
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 
 import pytest
 
@@ -15,50 +14,7 @@ import accounts
 import settings_store
 from enums import AuthMode, SettingKey, VerificationProvenance
 from models import PasswordResetRequest, User
-from tests.test_house_rules import _is_vendored
-
-BACKEND = Path(__file__).resolve().parent.parent
-
-
-def _sources(root: Path = BACKEND) -> list[Path]:
-    """Every module of this app's own, migrations and the test tree excluded.
-
-    **`root` is what lets the diagonal in `test_house_rules.py` drive this.**
-    Calling the shared predicate is what makes this walk right; taking the tree
-    is what lets something check that it does, against a tree with vendored code
-    planted in it. Without it this walk was correct and exercised by nothing but
-    a pipeline, which is how the class it belongs to went red five times.
-
-    **Stated as an exclusion.** An inclusion list is what goes stale the next
-    time the backend grows a directory, which is the shape of guard defect this
-    repository has already made once.
-
-    **What vendored means is `test_house_rules._is_vendored` and not a list
-    here.** This walk named `.venv` and nothing else, so in the pipeline, which
-    sets `UV_CACHE_DIR` inside `backend/`, it read third party source out of
-    `.uv-cache/` and would have reported it for constructing a reset request.
-    That is the environment difference the shared rule was written for, and a
-    second copy of it is a second thing to remember.
-
-    **The two names left here are matched against the path relative to
-    `BACKEND`.** Asked of the whole path, as this did, a checkout under a
-    directory called `tests` matches every file it holds and the walk returns
-    nothing, which passes every rule below it in silence.
-    """
-    found = [
-        path
-        for path in root.rglob("*.py")
-        if not {"tests", "migrations"} & set(path.relative_to(root).parts)
-        and not _is_vendored(path, root)
-    ]
-    # **The packages it must cover, not a number.** A floor of `> 30` does not
-    # bind on a walk that reads 124 files: a mutation marking `routers` and
-    # `schemas` vendored left two guards of this shape green, and `routers/` is
-    # the exact directory the first version of one of them missed. A walk that
-    # stopped matching would otherwise retire the rules below it rather than
-    # failing them, which is the half a refusal test cannot see.
-    assert {"routers", "schemas"} <= {path.parent.name for path in found}, found
-    return found
+from tests.corpus import BACKEND, application_modules
 
 
 def _turn_the_policy_on(db) -> None:
@@ -83,7 +39,7 @@ class TestOnlyAMemberStartsAReset:
         """The insert lives in one place, checked over the source rather than
         by trusting a review to notice a second one."""
         offenders: list[str] = []
-        for path in _sources():
+        for path in application_modules():
             if path.name == "accounts.py":
                 continue
             for node in ast.walk(ast.parse(path.read_text())):

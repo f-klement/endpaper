@@ -26,7 +26,7 @@
  * **There is no `unchanged`, and a design critic is why.** One was declared,
  * for books whose record answered and carried nothing new. It could not
  * happen: a candidate is a Book with no `google_books_id`, every volume
- * resource carries one, and `merge_into` writes it, so every answered book
+ * resource carries one, and `evidence` writes it, so every answered book
  * gains at least that field. The only body that reached it was a 200 with no
  * `id`, which `google_books.lookup_by_volume_id` now refuses as not a volume.
  * A count that cannot be non zero is a fact about the code stated on the wire.

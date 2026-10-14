@@ -42,6 +42,7 @@ import {
   teardown,
 } from "./coverageRegister.globalSetup";
 import CoverageRegisterReporter, { SWITCH } from "./coverageRegister.reporter";
+import { isNode, walk } from "./sourceReader";
 
 /**
  * A census this file made up.
@@ -1116,34 +1117,25 @@ describe("a global setup refusal is printed with its text", () => {
     const path = join(import.meta.dirname, "coverageRegister.globalSetup.ts");
     const thrown: string[] = [];
     let declared = 0;
-    const walk = (node: unknown): void => {
-      if (Array.isArray(node)) {
-        for (const child of node) walk(child);
-        return;
-      }
-      if (typeof node !== "object" || node === null) return;
-      const here = node as {
-        type?: string;
-        id?: { type?: string; name?: string } | null;
-        argument?: { type?: string; callee?: { type?: string; name?: string } };
-      };
+    walk(parseAst(readFileSync(path, "utf8"), { lang: "ts" }), (here) => {
       if (
         (here.type === "FunctionDeclaration" ||
           here.type === "VariableDeclarator") &&
-        here.id?.type === "Identifier" &&
+        isNode(here.id) &&
+        here.id.type === "Identifier" &&
         here.id.name === "refusal"
       )
         declared += 1;
-      if (here.type === "ThrowStatement")
-        thrown.push(
-          here.argument?.type === "CallExpression" &&
-            here.argument.callee?.type === "Identifier"
-            ? (here.argument.callee.name ?? "")
-            : (here.argument?.type ?? ""),
-        );
-      for (const value of Object.values(node)) walk(value);
-    };
-    walk(parseAst(readFileSync(path, "utf8"), { lang: "ts" }));
+      if (here.type !== "ThrowStatement") return;
+      const argument = isNode(here.argument) ? here.argument : null;
+      thrown.push(
+        argument?.type === "CallExpression" &&
+          isNode(argument.callee) &&
+          argument.callee.type === "Identifier"
+          ? (argument.callee.name as string)
+          : (argument?.type ?? ""),
+      );
+    });
 
     expect(thrown).not.toHaveLength(0);
     expect(new Set(thrown)).toEqual(new Set(["refusal"]));

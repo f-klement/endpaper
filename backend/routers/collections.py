@@ -146,18 +146,18 @@ def rename_collection(
     that name and not for two shelves to become one.
 
     **And the same 404 for a collection this caller may not be told about**,
-    which is `shelving.Shelving.assignable`. This route is open to every member
-    and answers over the whole id space, so before it the 404-or-200 was an
-    existence oracle by id on a table of consecutive integers: closing the list
-    and leaving this would have moved a broadcast to a poll. The two answers
-    are now one.
+    at the same cost, which is `shelving.Shelving.resolve`. This route is open
+    to every member and answers over the whole id space, so before it the
+    404-or-200 was an existence oracle by id on a table of consecutive
+    integers: closing the list and leaving this would have moved a broadcast to
+    a poll. The two answers are now one.
 
     The 409 is the other half and is not closed: a taken name still answers
     differently from a free one, for the reason `create_collection` gives.
     """
     shelving = Shelving.seen_by(db, current_user.id)
-    collection = db.get(Collection, collection_id)
-    if collection is None or not shelving.assignable(collection.id):
+    collection = shelving.resolve(collection_id)
+    if collection is None:
         raise HTTPException(status_code=404, detail="Collection not found")
 
     clash = _named(db, payload.name, other_than=collection_id)

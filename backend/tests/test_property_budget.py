@@ -40,7 +40,8 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from tests.conftest import ACTIVE_PROPERTY_PROFILE, PROPERTY_PROFILES
-from tests.test_house_rules import BACKEND, _test_sources, is_generated
+from tests.corpus import BACKEND, suite_modules
+from tests.test_house_rules import is_generated
 
 #: The fewest examples any profile here may spend on one property.
 #:
@@ -172,7 +173,7 @@ class TestEveryGeneratedTestSaysSo:
         """
         found: list[tuple[str, str, bool, list[str]]] = []
         modules = 0
-        for path in sorted(_test_sources()):
+        for path in sorted(suite_modules()):
             modules += 1
             tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
             for parent in ast.walk(tree):

@@ -1,8 +1,8 @@
 """Tests for backend/google_books.py.
 
 The HTTP calls are intercepted with respx, so nothing here reaches Google. What
-is worth pinning is the field mapping and, above all, the merge rule:
-enrichment adds what is missing and does not overrule what a member typed.
+is worth pinning is the field mapping and the payload guards. The merge rule
+that used to live here is `evidence`'s, and `tests/test_evidence.py` holds it.
 """
 
 import logging
@@ -16,26 +16,19 @@ import respx
 from hypothesis import given
 from hypothesis import strategies as st
 
-import covers
 import fetch
 from google_books import (
-    CATEGORY_SEPARATOR,
     VOLUME_ID,
     GoogleBooksError,
     _series_from_title,
     _series_in_parentheses,
     _volume_to_fields,
     is_a_volume_id,
-    join_categories,
     lookup_by_isbn,
     lookup_by_volume_id,
-    merge_into,
     search,
-    split_categories,
 )
-from models import Book
-from schemas import BookMatch
-from tests.test_house_rules import _is_vendored
+from tests.corpus import browser_modules
 
 VOLUMES = "https://www.googleapis.com/books/v1/volumes"
 
@@ -108,9 +101,11 @@ class TestFieldMapping:
         volume = {"volumeInfo": {"authors": ["Frank Herbert", "Brian Herbert"]}}
         assert _volume_to_fields(volume)["author"] == "Frank Herbert, Brian Herbert"
 
-    def test_joins_categories_into_one_string(self):
-        # Google's own subject list, not the curated Tag vocabulary.
-        assert _volume_to_fields(VOLUME)["categories"] == "Fiction; Science Fiction"
+    def test_hands_on_the_categories_as_a_list(self):
+        """Google's own subject list, not the curated Tag vocabulary. A list
+        because the joined form belongs to `categories`, and this adapter
+        joining it is what held an import cycle open."""
+        assert _volume_to_fields(VOLUME)["categories"] == ["Fiction", "Science Fiction"]
 
     def test_extracts_the_year_from_a_partial_date(self):
         assert _volume_to_fields(VOLUME)["year"] == 1965
@@ -119,7 +114,7 @@ class TestFieldMapping:
         # Google returns wildly uneven records; a sparse one must not raise.
         fields = _volume_to_fields({"id": "x", "volumeInfo": {}})
         assert fields["title"] is None
-        assert fields["categories"] is None
+        assert fields["categories"] == []
         assert fields["year"] is None
 
 
@@ -219,243 +214,6 @@ class TestSearch:
         )
         assert await search("   ", "key") == []
         assert route.call_count == 0
-
-
-def _as_match(volume: dict) -> BookMatch:
-    """A Google volume through the bound `merge_into` now insists on.
-
-    `merge_into` takes a `BookMatch` rather than a dictionary, so a test that
-    hands it a dictionary is testing a call the type checker refuses. That is
-    the point of the signature and not an inconvenience of it: see
-    `TestTheSignatureIsTheBound` below.
-    """
-    return BookMatch(**_volume_to_fields(volume))
-
-
-class TestMergeInto:
-    """The rule that matters: fill gaps, do not overrule people."""
-
-    def test_fills_an_empty_field(self):
-        book = Book(title="Dune", page_count=None)
-        changed = merge_into(book, _as_match(VOLUME), overwrite=False)
-
-        assert book.page_count == 412
-        assert "page_count" in changed
-
-    def test_leaves_an_existing_value_alone(self):
-        # A member who corrected a value should not have Google undo it.
-        book = Book(title="Dune", publisher="The edition I actually own")
-        merge_into(book, _as_match(VOLUME), overwrite=False)
-
-        assert book.publisher == "The edition I actually own"
-
-    def test_overwriting_with_the_value_already_there_reports_no_change(self):
-        book = Book(title="Dune", publisher="Chilton")
-        changed = merge_into(book, _as_match(VOLUME), overwrite=True)
-
-        assert "publisher" not in changed
-
-    def test_overwrite_replaces_it_when_asked(self):
-        book = Book(title="Dune", publisher="Wrong")
-        merge_into(book, _as_match(VOLUME), overwrite=True)
-
-        assert book.publisher == "Chilton"
-
-    def test_reports_only_what_actually_changed(self):
-        # Enrichment often finds a volume and has nothing to add; saying
-        # "done" would look like a no-op bug.
-        book = Book(title="Dune", page_count=412, language="en")
-        fields = {"page_count": 412, "language": "en"}
-
-        assert merge_into(book, BookMatch(**fields), overwrite=False) == []
-
-    def test_ignores_fields_google_left_empty(self):
-        book = Book(title="Dune", publisher="Chilton")
-        merge_into(book, BookMatch(publisher=None, page_count=None), overwrite=True)
-
-        assert book.publisher == "Chilton"
-
-    def test_never_replaces_a_locally_uploaded_cover(self):
-        # An uploaded cover lives under the local prefix and outranks a remote
-        # one, which is the same question the metadata refresh asks.
-        book = Book(title="Dune", cover_url="/covers/12.png")
-        merge_into(book, _as_match(VOLUME), overwrite=True)
-
-        assert book.cover_url == "/covers/12.png"
-
-    def test_the_local_cover_rule_is_covers_own(self, monkeypatch):
-        """Behavioural, because a grep is satisfied by the defect it replaced.
-
-        This writer spelled the prefix itself. Every arm above passed, and goes
-        on passing, for a copy of the literal: the two answers only diverge once
-        the prefix moves. `covers.is_local` reads `LOCAL_COVER_PREFIX` at call
-        time, so moving it here moves this writer with it, and a copy answers
-        for the old prefix and overrules an upload the refresh handler protects.
-
-        The structural half is
-        `test_covers.py::TestNoOtherModuleDecidesWhetherACoverIsLocal`, which
-        refuses the copy in any module rather than at this one call.
-        """
-        monkeypatch.setattr(covers, "LOCAL_COVER_PREFIX", "/held/")
-        book = Book(title="Dune", cover_url="/held/1.jpg")
-
-        # The cover alone: this volume fills nine other empty fields, and the
-        # question here is which of them `cover_url` is not.
-        assert "cover_url" not in merge_into(book, _as_match(VOLUME), overwrite=True)
-        assert book.cover_url == "/held/1.jpg"
-
-    def test_fills_an_absent_cover(self):
-        book = Book(title="Dune", cover_url=None)
-        changed = merge_into(book, _as_match(VOLUME), overwrite=False)
-
-        assert book.cover_url == "https://books.google.com/cover.jpg"
-        assert "cover_url" in changed
-
-    def test_does_not_touch_the_title(self):
-        """Deliberately excluded from the merge list.
-
-        A title is how the book is recognised on the shelf, and Google's
-        spelling of it (series numbering, subtitle folded in) is often not the
-        one the library uses.
-        """
-        book = Book(title="Dune (Dune Chronicles, Book 1)")
-        merge_into(book, _as_match(VOLUME), overwrite=True)
-
-        assert book.title == "Dune (Dune Chronicles, Book 1)"
-
-
-class TestTheSignatureIsTheBound:
-    """`merge_into` takes a `BookMatch`, and that type is the whole guard.
-
-    Both routes that reach this function write third party values into columns.
-    Until 2026-09-03 one of them validated its dictionary through the model and
-    the other passed `Record.as_match()` straight through, so the identical
-    oversized value was a 422 on `POST /{id}/enrich/apply` and a stored row on
-    `POST /{id}/enrich`.
-
-    The fix is a type rather than a call site convention, because a convention
-    is what the second route already failed to follow. mypy refuses a
-    dictionary at any call site; these pin the arms mypy cannot, which are a
-    caller that never runs it and a later edit that widens the annotation back.
-    """
-
-    #: The five `BookMatch` fields `merge_into` deliberately leaves alone, and
-    #: why. Named rather than counted, so the partition below has to sum.
-    #:
-    #: `source` labels the picker row and has no column. `title` is how a book
-    #: is recognised on the shelf and Google's spelling of it is often not the
-    #: library's. `isbn13` is one printing among several rather than this copy.
-    #: `classifications` and `suggested_tag_ids` are not scalars and are
-    #: applied by `add_headings` and by the caller respectively.
-    NOT_WRITTEN = frozenset(
-        {"source", "title", "isbn13", "classifications", "suggested_tag_ids"}
-    )
-
-    def _names_read_off_the_match(self) -> set[str]:
-        """Every field name `merge_into` takes off its argument, from the source.
-
-        Two shapes, because the function uses two: a `getattr` over whatever the
-        loop walks, and a direct attribute access for the cover. Reading both is
-        what makes this a second derivation rather than a re-reading of the set,
-        and the cover is the name only the second shape sees.
-
-        **The loop's iterator is evaluated, not pattern matched.** A walk that
-        reads `loop.iter.elts` sees a literal and nothing else, so it returns the
-        empty set the moment the loop names a constant instead: the partition
-        below then goes short and fails, which is the right direction, but it
-        makes this a question about a spelling rather than about the columns.
-        Evaluating the expression in the module's own namespace follows any
-        spelling there is, for `test_the_model_is_the_only_channel_into_it`'s
-        reason about `ast.unparse`: enumerating the kinds is the shape this
-        repository keeps paying for.
-        """
-        import ast
-        import inspect
-
-        import google_books
-
-        tree = ast.parse(inspect.getsource(google_books))
-        fn = next(
-            node
-            for node in ast.walk(tree)
-            if isinstance(node, ast.FunctionDef) and node.name == "merge_into"
-        )
-        names = {
-            node.attr
-            for node in ast.walk(fn)
-            if isinstance(node, ast.Attribute)
-            and isinstance(node.value, ast.Name)
-            and node.value.id == "match"
-        }
-        for loop in (node for node in ast.walk(fn) if isinstance(node, ast.For)):
-            walked = eval(ast.unparse(loop.iter), vars(google_books))
-            names |= {name for name in walked if isinstance(name, str)}
-        return names
-
-    def test_every_column_it_writes_is_a_field_the_model_bounds(self):
-        """The partition has to sum, which is what stops it going vacuous.
-
-        An empty walk would leave the union short of the model's own fields and
-        fail here rather than passing quietly, and a name added to the merge
-        list that `BookMatch` does not carry cannot be bounded by anything.
-        """
-        written = self._names_read_off_the_match()
-
-        assert written & self.NOT_WRITTEN == set()
-        assert written | self.NOT_WRITTEN == set(BookMatch.model_fields)
-
-    def test_the_model_is_the_only_channel_into_it(self):
-        """Widening the annotation reopens the hole in silence, and so does
-        leaving it alone and adding a second parameter beside it.
-
-        mypy is what actually enforces the door, so the annotation is the door,
-        and the parameter list is what stops a second door being cut. The
-        partition above sees neither: it reads the names taken **off** `match`,
-        so an unbounded dictionary arriving under another name writes the same
-        columns and leaves that set untouched.
-
-        **The whole argument list, not a list of its parts.** The first version
-        of this checked `args`, `kwonlyargs`, `vararg` and `kwarg`, which is
-        four of the five kinds an argument list has, and a security seat walked
-        a `raw: dict, /` positional only parameter past both guards on the
-        fifth, reading it in the body as `raw["series_index"]` where no
-        `ast.Attribute` on `match` exists for the partition to see. Enumerating
-        the kinds is the shape this repository keeps paying for; unparsing the
-        node covers every kind there is, and the defaults and annotations with
-        them, leaving no arm to add for the next one.
-
-        Read off the source rather than off `__annotations__`, because the
-        import naming the type is `TYPE_CHECKING` only: evaluating it at
-        runtime is the cycle the guard on that import exists to avoid.
-        """
-        import ast
-        import inspect
-
-        import google_books
-
-        tree = ast.parse(inspect.getsource(google_books))
-        fn = next(
-            node
-            for node in ast.walk(tree)
-            if isinstance(node, ast.FunctionDef) and node.name == "merge_into"
-        )
-
-        assert (
-            ast.unparse(fn.args) == "book: object, match: BookMatch, *, overwrite: bool"
-        )
-
-    def test_a_bare_dictionary_raises_rather_than_writing(self):
-        """The runtime arm, for a caller mypy never saw.
-
-        It fails on the first field rather than on the twelfth, so nothing is
-        half written when it does.
-        """
-        book = Book(title="Dune", page_count=None)
-
-        with pytest.raises(AttributeError, match="'dict' object has no attribute"):
-            merge_into(book, _volume_to_fields(VOLUME), overwrite=False)  # type: ignore[arg-type]
-
-        assert book.page_count is None
 
 
 #: The expression the parenthesised series rule used to be, its `\d` narrowed to
@@ -747,40 +505,18 @@ class TestTheShapeIsSpelledOncePerTree:
     #: 1,185 passed in 42 files under the first; 3 passed under the second.
     BINDING = f"google_books: {LITERAL}"
 
-    #: What counts as the browser's own source, and what that leaves out.
-    #:
-    #: `src` rather than the whole frontend: a test may quote a rule in order to
-    #: assert it, and `tests/lib/stores.test.ts` does, so a census over both
-    #: would count the guard as a second spelling. **The bound is stated rather
-    #: than left to be rediscovered**: a rule written in a `.mts`, `.cts`, `.js`
-    #: or `.jsx` under `src`, or in `frontend/public/`, is outside this. Neither
-    #: exists today, measured 2026-09-20: the only other files under `src` are
-    #: two stylesheets, and the only shipped script outside it is
-    #: `public/sw-cleanup.js`. Found by the security seat.
-    SUFFIXES = {".ts", ".tsx"}
+    @staticmethod
+    def _browser_sources() -> dict[str, str]:
+        """Every module of the browser's own source, keyed by path from the repository.
 
-    @classmethod
-    def _browser_sources(cls) -> dict[str, str]:
-        """Every module of the browser's own source, keyed by path from here.
-
-        **`_is_vendored` decides what is ours, rather than a second answer
-        written here.** It is `test_house_rules.py`'s shared predicate and its
-        set already names `node_modules`, which is the one directory this walk
-        would have to learn about the day somebody points the root a level up at
-        `frontend/`. A walk that decides that for itself is what the rule
-        `test_no_other_test_module_walks_a_tree_of_python_without_the_shared_rule`
-        refuses, and it refuses it by shape rather than by which tree is walked.
-
-        **It narrows this corpus by nothing today**, measured 2026-09-20: 461
-        modules before the filter and 461 after. What it would narrow by is a
-        dot directory or a `node_modules` under `src`, and it is here for the
-        day the root moves rather than for a file it drops now.
+        `src` rather than the whole frontend: a test may quote a rule in order
+        to assert it, and `tests/lib/stores.test.ts` does, so a census over both
+        would count the guard as a second spelling. What `browser_modules`
+        leaves out is at its own site.
         """
-        root = REPOSITORY / "frontend" / "src"
         return {
             path.relative_to(REPOSITORY).as_posix(): path.read_text(encoding="utf-8")
-            for path in sorted(root.rglob("*"))
-            if path.suffix in cls.SUFFIXES and not _is_vendored(path, REPOSITORY)
+            for path in browser_modules(REPOSITORY)
         }
 
     def test_the_browser_binds_the_shape_in_one_module(self):
@@ -1140,103 +876,21 @@ class TestAHostileVolumePayload:
             google, {"title": "Dune", "categories": ["Fiction", 7]}
         )
         assert fields is not None
-        assert fields["categories"] == "Fiction"
+        assert fields["categories"] == ["Fiction"]
 
 
-class TestTheJoinRefusesToStoreASubjectThatWouldReadBackAsTwo:
-    """`join_categories` drops a subject carrying the separator.
+class TestTheAdapterDropsASubjectThatWouldReadBackAsTwo:
+    """`_volume_to_fields` applies the catalogue policy `categories` names.
 
-    **The one place that knows the separator, so it reaches every producer.** Two
-    upstream joins build their value without looking inside a single subject,
-    `_volume_to_fields` here and `catalogue.Record.as_match`, and a subject holding
-    a bare separator is not representable in this column: `split_categories` splits
-    on that character, so storing one serves two subjects to every reader and
-    manufactures an assertion nobody made.
-
-    Dropped rather than raised, because this runs inside a catalogue read and
-    raising would lose a record over one subject.
-    `schemas.book.normalised_subjects` is what refuses, at both request bodies
-    carrying this field.
+    Through the producer rather than the helper, since that is the path that
+    built such a value. The helper's own arms are in `tests/test_categories.py`.
     """
 
-    def test_a_clean_list_is_joined_whole(self) -> None:
-        """The baseline. A join that dropped everything would pass every arm
-        below."""
-        assert join_categories(["Fiction", "Science Fiction"]) == (
-            f"Fiction{CATEGORY_SEPARATOR}Science Fiction"
-        )
-
-    def test_a_subject_carrying_the_separator_is_dropped(self) -> None:
-        """The arm. Before this, `["Fiction; general"]` stored whole and read back
-        as two subjects, measured."""
-        assert join_categories(["Fiction; general", "Horror"]) == "Horror"
-
-    def test_a_list_of_nothing_but_such_subjects_stores_a_null(self) -> None:
-        """The column is nullable and an empty join answers None, so dropping the
-        only subject leaves no row claiming an empty string."""
-        assert join_categories(["A;B"]) is None
-
-    def test_no_value_this_join_produces_reads_back_as_more_subjects(self) -> None:
-        """The property the drop buys, over inputs that can break it.
-
-        The list here carries two separator bearing subjects, so a join that kept
-        them would answer four subjects for a list of four.
-        """
-        supplied = ["Fiction", "Fiction; general", "Horror", "A;B"]
-        assert any(CATEGORY_SEPARATOR.strip() in subject for subject in supplied)
-
-        stored = join_categories(supplied)
-
-        assert split_categories(stored) == ["Fiction", "Horror"]
-
-    def test_a_volume_whose_category_carries_the_separator_stores_neither_half(
+    def test_a_volume_whose_category_carries_the_separator_keeps_neither_half(
         self,
     ) -> None:
-        """Through the producer rather than the helper, since that is the path that
-        built such a value."""
         fields = _volume_to_fields(
             {"volumeInfo": {"title": "T", "categories": ["Fiction; general"]}}
         )
 
-        assert fields["categories"] is None
-
-
-class TestTheJoinCapsTheCountForAProducer:
-    """`join_categories(..., limit=)` caps what a producer hands `BookMatch`.
-
-    **The cap belongs to the producer because the model refuses**, and
-    `routers/books._match_rows` builds that model inside a `try` that drops the
-    **row**. So an uncapped producer costs a whole search result for a record that
-    is merely well described. `catalogue.Record.match_headings` carries the same
-    rule one field over, and the incident that bought it.
-    """
-
-    def test_without_a_limit_nothing_is_truncated(self) -> None:
-        """The baseline, and the create route depends on it: that caller is already
-        bounded by the request schema and passes no limit."""
-        assert join_categories(["a"] * 40) == CATEGORY_SEPARATOR.join(["a"] * 40)
-
-    def test_a_list_past_the_limit_is_truncated_to_it(self) -> None:
-        assert join_categories(["a"] * 40, limit=32) == CATEGORY_SEPARATOR.join(
-            ["a"] * 32
-        )
-
-    def test_a_list_inside_the_limit_is_untouched(self) -> None:
-        """The false refusal the cap could have bought."""
-        assert join_categories(["a"] * 32, limit=32) == CATEGORY_SEPARATOR.join(
-            ["a"] * 32
-        )
-
-    def test_the_drop_runs_before_the_truncation(self) -> None:
-        """`bounded_headings`' rule, and the arm that separates the two orders.
-
-        The separator bearing subjects are at the **front**, so truncating first
-        would keep them, watch the join drop them, and answer **30** against a limit
-        of 32, having discarded the two good subjects that sat behind them. Measured
-        both ways. Dropping first answers the limit exactly.
-        """
-        supplied = ["bad;one", "bad;two"] + [f"good {i}" for i in range(32)]
-
-        stored = join_categories(supplied, limit=32)
-
-        assert split_categories(stored) == [f"good {i}" for i in range(32)]
+        assert fields["categories"] == []

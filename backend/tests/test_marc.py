@@ -33,6 +33,7 @@ import xml_parse
 from catalogue import Heading
 from enums import ClassificationScheme, HeadingKind
 from models import AUTHOR_LINE_MAX
+from tests.corpus import application_modules
 from tests.strategies import (
     FAR_PAST_ANY_DEPTH,
     PATCHES,
@@ -47,7 +48,6 @@ from tests.strategies import (
     witness,
     xml_of,
 )
-from tests.test_house_rules import _is_vendored
 
 #: The kinds a stored row can actually declare, driven from the enum.
 #:
@@ -1313,9 +1313,9 @@ class TestNoModuleReadsAnotherModulesPrivateNames:
 
         **No total is given, deliberately.** Any total here has to exclude this
         module's own test file and this sentence, which quotes the spelling and
-        so counts itself. `_is_vendored` in `test_house_rules.py` records the
-        same recursion: its first draft quoted both phrases and the census then
-        reported the comment. The narrow claim above is the part that guards; a
+        so counts itself. The comment on `NOT_PROSE` in `test_roster_counts.py`
+        records the same recursion: its first draft quoted both phrases and the
+        census then reported the comment. The narrow claim above is the part that guards; a
         total is the part that rots.
 
         A file that does `import shelf` *and* binds `shelf` to something else in
@@ -1403,7 +1403,7 @@ class TestNoModuleReadsAnotherModulesPrivateNames:
     def _offenders(cls, root: pathlib.Path) -> dict[str, list[str]]:
         """Every module under `root` reading another's private names, by path.
 
-        **`root` is a parameter for the reason `_python_sources` and
+        **`root` is a parameter for the reason `application_modules` and
         `test_bibliographic._callers` take one**: a walk asserted only against
         this checkout is a walk nobody has watched fail, and the assertion this
         serves is that a set is empty. Three single anchor mutations of the body
@@ -1412,51 +1412,12 @@ class TestNoModuleReadsAnotherModulesPrivateNames:
         asserting the empty set. `test_a_planted_reach_in_is_reported` drives it
         against a tree it builds.
         """
-        # **A directory of ours is decided structurally, never by name**, and
-        # that took two red pipelines to learn. The first version skipped a set
-        # of names, `{"tests", "migrations", ".venv", "__pycache__"}`; CI put an
-        # environment inside `backend/` under some other name, the walk went in,
-        # and the guard reported `pydantic`, `packaging`, `urllib3` and the
-        # standard library's own `xml` reading each other's private names as
-        # violations of a rule about this application. A name list is the shape
-        # this repository records as wrong every time: it enumerates something
-        # open.
-        #
-        # What is closed is the structure. **A Python environment always has a
-        # `pyvenv.cfg` at its root**, whatever the directory is called, and
-        # installed packages always sit under `site-packages`. So the walk is
-        # bounded to this package's own sub-packages: the top level modules,
-        # plus each depth one directory that holds Python and is not an
-        # environment, a cache or hidden.
-        def is_ours(directory: pathlib.Path) -> bool:
-            return (
-                directory.is_dir()
-                and not directory.name.startswith(".")
-                and directory.name not in {"__pycache__", "tests", "migrations"}
-                and not (directory / "pyvenv.cfg").exists()
-                and "site-packages" not in directory.parts
-                and any(directory.rglob("*.py"))
-            )
-
-        packages = sorted(d for d in root.iterdir() if is_ours(d))
-        def is_ours_file(f: pathlib.Path) -> bool:
-            """Belt and braces under a package of ours: a nested environment or
-            cache is excluded at any depth.
-
-            **The same three names and the dot are now
-            `test_house_rules._is_vendored`.** This file and `test_covers.py`
-            reached `site-packages` independently, which is why the shared
-            predicate carries it: the dot alone does not cover an environment
-            whose directory is not called `.venv`, and that is the tree CI built
-            here. The `pyvenv.cfg` test in `is_ours` above stays, because it
-            answers a question about the filesystem that a path predicate
-            cannot.
-            """
-            return not _is_vendored(f, root)
-
-        sources = sorted(root.glob("*.py")) + [
-            f for d in packages for f in sorted(d.rglob("*.py")) if is_ours_file(f)
-        ]
+        sources = application_modules(root)
+        packages = {
+            path.relative_to(root).parts[0]
+            for path in sources
+            if len(path.relative_to(root).parts) > 1
+        }
 
         # Only this application's own modules, so `metadata._parsed` would count
         # and a
@@ -1466,7 +1427,7 @@ class TestNoModuleReadsAnotherModulesPrivateNames:
         # Sub-package names as well as module stems, because `import
         # schemas.book as b` then `b._x` keys under `schemas`, and a namespace
         # package such as `routers` has no `__init__.py` to be recognised by.
-        ours = {f.stem for f in sources} | {d.name for d in packages}
+        ours = {f.stem for f in sources} | packages
 
         offenders = {}
         for path in sources:

@@ -35,6 +35,25 @@ import { declarePreference } from "../src/lib/preference";
 // The refusal this file and the ScanPage guard both apply, in one home: the
 // module says why it is not a copy per guard.
 import { CARRIES_A_BOOK } from "./carriesABook";
+
+// The committed schema, read once, which is where the dated field names come
+// from. `committedSchema.ts` says why there is one reader rather than one per
+// rule.
+import {
+  branchesOf,
+  committedSchema,
+  objectsIn,
+  type SchemaNode,
+} from "./committedSchema";
+
+// The publish gate's anchor for an internal document, and its window, in the
+// one copy this tree holds. **Its pin is here**, in `reads the declaration the
+// way the publish gate reads it`, because the boundary fixture there is built
+// from `HEADER_LINES` and so moves with it: measured, the arm is green at
+// every value from 3 to 200 while the set of documents it drops moves by six.
+// A published file cannot read the gate's script, which is stripped, so the
+// number is written out there rather than derived.
+import { declaresItselfInternal, HEADER_LINES } from "./coverageRegister";
 import { namesTheGenerator } from "./property";
 
 // The comment stripper every rule below reads its sources through, and what
@@ -59,6 +78,21 @@ import ignoreRules from "../../.gitignore?raw";
 // is no longer the tree. The pattern used to be written here, where narrowing
 // it was one edit in the file holding the rules it disarmed.
 import { sourceEntries as entries, sourceText } from "./sourceModules";
+
+// The node, the walk, the names a binding binds and where a path lands, each
+// in one home. `sourceReader.ts` says what its copies here disagreed on.
+import {
+  boundBy,
+  childrenOf,
+  isNode,
+  namesBoundBy,
+  nodesIn,
+  parentsOf,
+  resolvePath,
+  walk,
+  type Descent,
+  type Node,
+} from "./sourceReader";
 
 // The one enumeration of `tests/`, and the one thing that refuses a corpus
 // that is no longer the tree. Three patterns used to be written here and in
@@ -245,12 +279,7 @@ const REACHES_THE_FLAGS = ["useFeatureFlagsState", "FeatureFlagsOut"];
  */
 function namesIn(path: string, source: string): Set<string> {
   const names = new Set<string>();
-  const walk = (value: unknown): void => {
-    if (Array.isArray(value)) {
-      for (const item of value as unknown[]) walk(item);
-      return;
-    }
-    if (!isNode(value)) return;
+  walk(parseAst(source, { lang: langOf(path) }), (value) => {
     if (value.type === "Identifier") {
       const name = text(value.name);
       if (name !== null) names.add(name);
@@ -261,9 +290,7 @@ function namesIn(path: string, source: string): Set<string> {
     }
     const literal = text(value.value);
     if (literal !== null) names.add(literal);
-    for (const key of Object.keys(value)) walk(value[key]);
-  };
-  walk(parseAst(source, { lang: langOf(path) }));
+  });
   return names;
 }
 
@@ -1047,58 +1074,6 @@ const RUNNER_NAMES = new Set(["it", "test", "describe"]);
 /** The module a runner name has to come from to be the runner. */
 const RUNNER_MODULE = "vitest";
 
-/** The nodes `value` holds, whether it is one node or a list of them. */
-function nodesIn(value: unknown): Node[] {
-  if (Array.isArray(value))
-    return (value as unknown[]).filter((one): one is Node => isNode(one));
-  return isNode(value) ? [value] : [];
-}
-
-/** Every node `node` holds directly, by its own keys rather than by a list. */
-function heldBy(node: Node): Node[] {
-  return Object.keys(node).flatMap((key) => nodesIn(node[key]));
-}
-
-/** Every node under `root`, each with the node holding it. */
-function parentsOf(root: Node): Map<Node, Node | null> {
-  const parents = new Map<Node, Node | null>([[root, null]]);
-  const pending: Node[] = [root];
-  while (pending.length > 0) {
-    const node = pending.pop() as Node;
-    for (const child of heldBy(node)) {
-      parents.set(child, node);
-      pending.push(child);
-    }
-  }
-  return parents;
-}
-
-/**
- * Every name a binding position binds, by the pattern grammar.
- *
- * **Closed, and a shape outside it is recorded rather than skipped.**
- * Skipping one is how a shadowing binding goes unseen, and an unseen shadow
- * is what lets a pin and a generator spelling one name read as holding one
- * table while they name two.
- */
-function boundBy(pattern: unknown, out: Node[], unreadable: string[]): void {
-  if (!isNode(pattern)) return;
-  if (pattern.type === "Identifier") out.push(pattern);
-  else if (pattern.type === "ObjectPattern")
-    for (const one of nodesIn(pattern.properties))
-      boundBy(one, out, unreadable);
-  else if (pattern.type === "ArrayPattern")
-    for (const one of nodesIn(pattern.elements)) boundBy(one, out, unreadable);
-  else if (pattern.type === "Property") boundBy(pattern.value, out, unreadable);
-  else if (pattern.type === "AssignmentPattern")
-    boundBy(pattern.left, out, unreadable);
-  else if (pattern.type === "RestElement")
-    boundBy(pattern.argument, out, unreadable);
-  else if (pattern.type === "TSParameterProperty")
-    boundBy(pattern.parameter, out, unreadable);
-  else unreadable.push(pattern.type);
-}
-
 /** What one scope binds, and the binding shapes it could not read. */
 interface ScopeBindings {
   readonly names: Map<string, Node>;
@@ -1125,9 +1100,9 @@ function scopeBindings(scope: Node): ScopeBindings {
     if (name !== null && !names.has(name)) names.set(name, value);
   };
   const take = (pattern: unknown): void => {
-    const out: Node[] = [];
-    boundBy(pattern, out, unreadable);
-    for (const one of out) add(one);
+    const bound = boundBy(pattern);
+    unreadable.push(...bound.unreadable);
+    for (const one of bound.identifiers) add(one);
   };
 
   for (const one of nodesIn(scope.params)) take(one);
@@ -1135,67 +1110,59 @@ function scopeBindings(scope: Node): ScopeBindings {
   if (scope.type === "FunctionExpression" || scope.type === "ClassExpression")
     add(scope.id);
 
-  const lexical = (node: Node): void => {
-    for (const child of heldBy(node)) {
-      if (SCOPES.has(child.type)) {
-        // A nested declaration binds its own name out here even though its
-        // body is somebody else's scope. **Written as the two exceptions
-        // rather than as a list of declarations**, which is what it was: a
-        // function expression and a class expression bind their own name
-        // inward only, and every other scope node either carries a
-        // declaration's name or carries no `id` at all, where this is a no
-        // op. Naming the declarations instead left `declare function` out,
-        // measured, and that is a shadow nobody sees.
-        if (
-          child.type !== "FunctionExpression" &&
-          child.type !== "ClassExpression"
-        )
-          add(child.id);
-        continue;
-      }
-      if (child.type === "VariableDeclarator") take(child.id);
-      else if (IMPORT_BINDINGS.has(child.type)) add(child.local);
-      else if (
-        child.type === "TSEnumDeclaration" ||
-        child.type === "TSModuleDeclaration" ||
-        child.type === "TSImportEqualsDeclaration"
+  walk(childrenOf(scope), (child) => {
+    if (SCOPES.has(child.type)) {
+      // A nested declaration binds its own name out here even though its
+      // body is somebody else's scope. **Written as the two exceptions
+      // rather than as a list of declarations**, which is what it was: a
+      // function expression and a class expression bind their own name
+      // inward only, and every other scope node either carries a
+      // declaration's name or carries no `id` at all, where this is a no
+      // op. Naming the declarations instead left `declare function` out,
+      // measured, and that is a shadow nobody sees.
+      if (
+        child.type !== "FunctionExpression" &&
+        child.type !== "ClassExpression"
       )
         add(child.id);
-      // **A declaration kind this reader does not know is recorded, not
-      // walked past.** `boundBy` already does that for a pattern shape, and
-      // for one round this one did not do it for a declaration kind, so
-      // `import T = A.rows` was a shadow that went unseen and the group read
-      // as held while driving another table. The key is carrying an `id`
-      // that is an identifier, which is what declaring a name looks like
-      // whatever the kind is called.
-      else if (
-        !BINDS_IN_THE_TYPE_SPACE.has(child.type) &&
-        isNode(child.id) &&
-        child.id.type === "Identifier"
-      )
-        unreadable.push(child.type);
-      lexical(child);
+      return false;
     }
-  };
-  lexical(scope);
+    if (child.type === "VariableDeclarator") take(child.id);
+    else if (IMPORT_BINDINGS.has(child.type)) add(child.local);
+    else if (
+      child.type === "TSEnumDeclaration" ||
+      child.type === "TSModuleDeclaration" ||
+      child.type === "TSImportEqualsDeclaration"
+    )
+      add(child.id);
+    // **A declaration kind this reader does not know is recorded, not
+    // walked past.** `boundBy` already does that for a pattern shape, and
+    // for one round this one did not do it for a declaration kind, so
+    // `import T = A.rows` was a shadow that went unseen and the group read
+    // as held while driving another table. The key is carrying an `id`
+    // that is an identifier, which is what declaring a name looks like
+    // whatever the kind is called.
+    else if (
+      !BINDS_IN_THE_TYPE_SPACE.has(child.type) &&
+      isNode(child.id) &&
+      child.id.type === "Identifier"
+    )
+      unreadable.push(child.type);
+  });
 
   if (scope.type === "Program" || Array.isArray(scope.params)) {
-    const hoisted = (node: Node): void => {
-      for (const child of heldBy(node)) {
-        if (
-          Array.isArray(child.params) ||
-          child.type === "ClassDeclaration" ||
-          child.type === "ClassExpression"
-        ) {
-          if (child.type === "FunctionDeclaration") add(child.id);
-          continue;
-        }
-        if (child.type === "VariableDeclaration" && text(child.kind) === "var")
-          for (const one of nodesIn(child.declarations)) take(one.id);
-        hoisted(child);
+    walk(childrenOf(scope), (child) => {
+      if (
+        Array.isArray(child.params) ||
+        child.type === "ClassDeclaration" ||
+        child.type === "ClassExpression"
+      ) {
+        if (child.type === "FunctionDeclaration") add(child.id);
+        return false;
       }
-    };
-    hoisted(scope);
+      if (child.type === "VariableDeclaration" && text(child.kind) === "var")
+        for (const one of nodesIn(child.declarations)) take(one.id);
+    });
   }
   return { names, unreadable };
 }
@@ -1444,7 +1411,7 @@ function namesAgain(
       isNode(init) && namesAgain(init, declaration, resolve, parents, seen)
     );
   }
-  return heldBy(written).some((one) =>
+  return childrenOf(written).some((one) =>
     namesAgain(one, declaration, resolve, parents, seen),
   );
 }
@@ -2940,16 +2907,9 @@ function buildersIn(source: string, lang: "ts" | "tsx"): DraftBuilder[] {
       params: (node.params as unknown[]).filter(isNode).map(slice),
     });
   };
-  const walk = (value: unknown, parent: Node | null): void => {
-    if (Array.isArray(value)) {
-      for (const item of value as unknown[]) walk(item, parent);
-      return;
-    }
-    if (!isNode(value)) return;
-    consider(value, parent);
-    for (const key of Object.keys(value)) walk(value[key], value);
-  };
-  walk(parseAst(source, { lang }), null);
+  walk(parseAst(source, { lang }), (value, ancestors) => {
+    consider(value, ancestors.at(-1) ?? null);
+  });
   return found;
 }
 
@@ -3535,13 +3495,8 @@ function replacesAModule(source: string, lang: "ts" | "tsx"): boolean {
    */
   const receiver = (node: Node): string | null =>
     text(node.name) ?? named(node);
-  const walk = (value: unknown): void => {
-    if (found) return;
-    if (Array.isArray(value)) {
-      for (const item of value as unknown[]) walk(item);
-      return;
-    }
-    if (!isNode(value)) return;
+  walk(parseAst(source, { lang }), (value) => {
+    if (found) return false;
     const callee = value.callee;
     if (
       value.type === "CallExpression" &&
@@ -3552,11 +3507,9 @@ function replacesAModule(source: string, lang: "ts" | "tsx"): boolean {
       REPLACES_A_MODULE.test(named(callee) ?? "")
     ) {
       found = true;
-      return;
+      return false;
     }
-    for (const key of Object.keys(value)) walk(value[key]);
-  };
-  walk(parseAst(source, { lang }));
+  });
   return found;
 }
 
@@ -3822,13 +3775,8 @@ function spiesOnStoragePrototype(source: string, lang: "ts" | "tsx"): boolean {
   };
 
   let found = false;
-  const walk = (value: unknown): void => {
-    if (found) return;
-    if (Array.isArray(value)) {
-      for (const item of value as unknown[]) walk(item);
-      return;
-    }
-    if (!isNode(value)) return;
+  walk(parseAst(source, { lang }), (value) => {
+    if (found) return false;
     const callee = value.callee;
     const target = Array.isArray(value.arguments)
       ? withoutTypeWrappers((value.arguments as unknown[])[0])
@@ -3845,11 +3793,9 @@ function spiesOnStoragePrototype(source: string, lang: "ts" | "tsx"): boolean {
       rightmost(target.object) === "Storage"
     ) {
       found = true;
-      return;
+      return false;
     }
-    for (const key of Object.keys(value)) walk(value[key]);
-  };
-  walk(parseAst(source, { lang }));
+  });
   return found;
 }
 
@@ -3910,16 +3856,6 @@ describe("storage is refused on the instance, never by a prototype spy", () => {
   });
 });
 
-type Node = { type: string } & Record<string, unknown>;
-
-function isNode(value: unknown): value is Node {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    typeof (value as { type?: unknown }).type === "string"
-  );
-}
-
 function text(value: unknown): string | null {
   return typeof value === "string" ? value : null;
 }
@@ -3947,7 +3883,7 @@ function text(value: unknown): string | null {
  * as far as this can tell. A callable it can show is refused whether or not it
  * runs, so `.bind` on an arrow is refused, which is the strict one.
  */
-function defers(ancestors: Node[], at: number): boolean {
+function defers(ancestors: readonly Node[], at: number): boolean {
   const node = ancestors[at];
   if (node === undefined || !Array.isArray(node.params)) return false;
   let child = node;
@@ -4027,24 +3963,14 @@ function decoderConstructions(
   lang: "ts" | "tsx",
 ): Construction[] {
   const found: Construction[] = [];
-  const ancestors: Node[] = [];
-  const walk = (value: unknown): void => {
-    if (Array.isArray(value)) {
-      for (const item of value as unknown[]) walk(item);
-      return;
-    }
-    if (!isNode(value)) return;
+  walk(parseAst(source, { lang }), (value, ancestors) => {
     if (isDecoderConstruction(value)) {
       found.push({
         label: labelOf(value),
         deferred: ancestors.some((_node, at) => defers(ancestors, at)),
       });
     }
-    ancestors.push(value);
-    for (const key of Object.keys(value)) walk(value[key]);
-    ancestors.pop();
-  };
-  walk(parseAst(source, { lang }));
+  });
   return found;
 }
 
@@ -4223,25 +4149,6 @@ describe("a decoder a runtime may not carry is never built at module scope", () 
 });
 
 /**
- * `.` and `..` resolved, against a base given as segments.
- *
- * **One home, because a document's key and a citation's target have to land in
- * the same space.** They did not. The document half of `citingFiles` keyed by
- * string replacement and `normalised` resolved, so the two documents the glob
- * below reaches from its own directory were keyed against the repository root
- * and a relative citation written in either resolved from there.
- */
-function resolveSegments(base: readonly string[], path: string): string[] {
-  const parts = [...base];
-  for (const part of path.split("/")) {
-    if (part === "" || part === ".") continue;
-    if (part === "..") parts.pop();
-    else parts.push(part);
-  }
-  return parts;
-}
-
-/**
  * Where every glob in this file is written from, which is where this file sits.
  *
  * A move reds `reads every published document the glob hands over`: the
@@ -4249,9 +4156,16 @@ function resolveSegments(base: readonly string[], path: string): string[] {
  */
 const GLOBBED_FROM = ["frontend", "tests"];
 
-/** A glob key as a path from the repository root. */
+/**
+ * A glob key as a path from the repository root.
+ *
+ * **Through `resolvePath`, as a citation's target is**, because a document's
+ * key and a citation's target have to land in the same space. They did not
+ * once: the document half of `citingFiles` keyed by string replacement and
+ * `normalised` resolved.
+ */
 function repositoryPath(key: string): string {
-  return resolveSegments(GLOBBED_FROM, key).join("/");
+  return resolvePath(GLOBBED_FROM, key).join("/");
 }
 
 /**
@@ -4550,40 +4464,6 @@ const DOCUMENTS = withoutThePublishTree(GLOBBED_DOCUMENTS);
  * the file named above; the answer then is to write the verdict, not to
  * exclude the register.
  */
-
-/**
- * The publish gate's own anchor for an internal document, and its window.
- *
- * **A copy, and the third the repository holds.** A published file cannot read
- * the gate's script, which is stripped, so the number is written out rather
- * than derived, here and in
- * `backend/tests/test_roster_counts.py::test_the_window_is_the_number_the_publish_gate_uses`.
- * **That test pins that file's copy and not this one**, which an earlier
- * draft of this comment claimed the other way round: change the constant here
- * alone and it stays green. This copy is pinned by a literal in
- * `reads the declaration the way the publish gate reads it` below, and it has
- * to be, because the boundary fixture there is built from `HEADER_LINES` and
- * so moves with it: measured, the arm is green at every value from 3 to 200
- * while the set of documents it drops moves by six.
- *
- * **Getting the window wrong here is quiet rather than loud.** A narrower one
- * keeps a document whose declaration sits below it, which widens the rule's
- * scope and can only add a report; a wider one drops a document that merely
- * discusses the convention, which is the direction the gate's own comment says
- * the bound exists to protect.
- */
-const INTERNAL = /^[^A-Za-z0-9]{0,6}[ \t]*\*\*This file is internal\.\*\*/m;
-const HEADER_LINES = 30;
-
-/**
- * Whether a document declares itself internal in its opening lines.
- *
- * **Lines, and the same count the gate uses.** Anything measured another way
- * is a second rule wearing the gate's name.
- */
-function declaresItselfInternal(source: string): boolean {
-  return INTERNAL.test(source.split("\n").slice(0, HEADER_LINES).join("\n"));
-}
 
 const ONES = [
   "zero",
@@ -4983,6 +4863,19 @@ describe("the number of table columns is not written down", () => {
     const past = `${"x\n".repeat(HEADER_LINES)}**This file is internal.**\n`;
     expect(declaresItselfInternal(past)).toBe(false);
     expect(declaresItselfInternal("nothing to declare\n")).toBe(false);
+    // The anchor and the prefix bound, both the gate's: mentioned after a
+    // word, or behind more than six marks, it is not a declaration.
+    expect(declaresItselfInternal("see **This file is internal.**\n")).toBe(
+      false,
+    );
+    expect(declaresItselfInternal(">>>>>>>**This file is internal.**\n")).toBe(
+      false,
+    );
+    // The bound from below: six marks is still a prefix, so tightening the
+    // gate's `{0,6}` reds here rather than refusing a real comment style.
+    expect(declaresItselfInternal(">>>>>>**This file is internal.**\n")).toBe(
+      true,
+    );
     // **The window itself, as a literal.** Every assertion above is built from
     // `HEADER_LINES`, so all of them follow it wherever it goes and none of
     // them bounds it. Without this line the constant is at the "stated" rung
@@ -5073,25 +4966,23 @@ const WALLPAPER = `../src/${WALLPAPER_MODULE}`;
  * `allowImportingTsExtensions` means both spellings occur.
  */
 function flatten(parts: string[]): string {
-  const out: string[] = [];
-  for (const part of parts) {
-    if (part === "" || part === ".") continue;
-    if (part === "..") {
-      if (out.length > 0 && out[out.length - 1] !== "..") out.pop();
-      else out.push("..");
-      continue;
-    }
-    out.push(part);
-  }
-  return out.join("/").replace(/\.(?:ts|tsx)$/, "");
+  return resolvePath([], parts.join("/"))
+    .join("/")
+    .replace(/\.(?:ts|tsx)$/, "");
 }
 
 /**
  * A relative specifier, resolved against the module that wrote it.
  *
- * Both globs are keyed relative to this directory, so resolving into the same
- * space makes an importer's `../../src/theme/patterns` and the glob's
+ * Each glob has its key space, below, so resolving into the same space makes
+ * an importer's `../../src/theme/patterns` and the glob's
  * `../src/theme/patterns.ts` one string.
+ *
+ * **Resolved from the module's place in the repository and brought back into
+ * its space**, as `resolveFrom` does for a glob, so a specifier that climbs out
+ * of `frontend/` and back in by name lands where the bundler lands it. A key
+ * led by a dot is relative to this directory and any other to `src/`, which is
+ * how the two corpora key a module.
  *
  * **A bare specifier answers `null` and that is the known hole.** A package
  * name cannot name a file under `src` today: `tsconfig.json` declares no
@@ -5109,7 +5000,15 @@ function flatten(parts: string[]): string {
  */
 function resolvedFrom(from: string, specifier: string): string | null {
   if (!specifier.startsWith(".")) return null;
-  return flatten([...from.split("/").slice(0, -1), ...specifier.split("/")]);
+  const root = from.startsWith(".") ? GLOBBED_FROM : ["frontend", "src"];
+  const place = resolvePath(root, from).slice(0, -1);
+  const landed = resolvePath(place, specifier);
+  let shared = 0;
+  while (shared < root.length && landed[shared] === root[shared]) shared += 1;
+  return flatten([
+    ...root.slice(shared).map(() => ".."),
+    ...landed.slice(shared),
+  ]);
 }
 
 /**
@@ -5139,12 +5038,7 @@ function importedFrom(path: string, source: string, subject: string): string[] {
   const refuse = (what: string): never => {
     throw new Error(`${path} reaches ${subject} by ${what}`);
   };
-  const walk = (value: unknown): void => {
-    if (Array.isArray(value)) {
-      for (const item of value as unknown[]) walk(item);
-      return;
-    }
-    if (!isNode(value)) return;
+  walk(parseAst(source, { lang: langOf(path) }), (value) => {
     const from = isNode(value.source) ? text(value.source.value) : null;
     const specifiers = value.specifiers;
     // **Both sides go through `flatten`**, which is the half a comparison on
@@ -5169,9 +5063,7 @@ function importedFrom(path: string, source: string, subject: string): string[] {
         else names.push(name);
       }
     }
-    for (const key of Object.keys(value)) walk(value[key]);
-  };
-  walk(parseAst(source, { lang: langOf(path) }));
+  });
   return names;
 }
 
@@ -5374,6 +5266,26 @@ describe("every wallpaper export is imported by name somewhere", () => {
     ).toEqual([]);
   });
 
+  it("resolves a specifier that leaves the frontend tree and comes back by name", () => {
+    // The bundler lands both on the module, so a resolver counting from a
+    // space with no root misses the first by a `frontend` segment and the
+    // second by a `src` one.
+    expect(
+      importedFrom(
+        "../src/pages/ScanPage/hooks.ts",
+        'import { alive } from "../../../../frontend/src/lib/stores";',
+        "../src/lib/stores.ts",
+      ),
+    ).toEqual(["alive"]);
+    expect(
+      importedFrom(
+        "components/EmptyState.tsx",
+        'import { alive } from "../../src/i18n";',
+        "i18n",
+      ),
+    ).toEqual(["alive"]);
+  });
+
   it("does not let a module vouch for its own exports", () => {
     // A module importing from itself is legal and cyclic, and a name reached
     // only that way is reached by nobody. The subject is dropped from the
@@ -5495,12 +5407,7 @@ const SCAN_REASONS = "pages/ScanPage/hooks.ts";
  */
 function declaredIn(path: string, source: string, name: string): Node | null {
   let found: Node | null = null;
-  const walk = (value: unknown): void => {
-    if (Array.isArray(value)) {
-      for (const item of value as unknown[]) walk(item);
-      return;
-    }
-    if (!isNode(value)) return;
+  walk(parseAst(source, { lang: langOf(path) }), (value) => {
     const named = isNode(value.id) && text(value.id.name) === name;
     if (
       named &&
@@ -5510,9 +5417,7 @@ function declaredIn(path: string, source: string, name: string): Node | null {
       found = value.typeAnnotation;
     if (named && value.type === "TSInterfaceDeclaration" && isNode(value.body))
       found = { type: "TSTypeLiteral", members: value.body.body };
-    for (const key of Object.keys(value)) walk(value[key]);
-  };
-  walk(parseAst(source, { lang: langOf(path) }));
+  });
   return found;
 }
 
@@ -6156,19 +6061,12 @@ describe("browser storage is reached through one door", () => {
  */
 function specifiersOf(path: string, source: string): string[] {
   const out: string[] = [];
-  const walk = (value: unknown): void => {
-    if (Array.isArray(value)) {
-      for (const item of value as unknown[]) walk(item);
-      return;
-    }
-    if (!isNode(value)) return;
+  walk(parseAst(source, { lang: langOf(path) }), (value) => {
     if (isNode(value.source)) {
       const from = text(value.source.value);
       if (from !== null) out.push(from);
     }
-    for (const key of Object.keys(value)) walk(value[key]);
-  };
-  walk(parseAst(source, { lang: langOf(path) }));
+  });
   return out;
 }
 
@@ -7388,58 +7286,17 @@ describe("a date reaches a reader through one module", () => {
 });
 
 /**
- * The committed schema, which is where the dated field names come from.
- *
- * Read the way `lib/bookBounds.test.ts` and `lib/bookRequest.test.ts` read it,
- * so there is one idiom for "ask the API what it declares" rather than three.
+ * The non null branches of one property, and of its entries where it is a
+ * list, each `$ref` followed: a dated entry type is a dated field.
  */
-const SCHEMA = import.meta.glob("../openapi.json", {
-  query: "?raw",
-  import: "default",
-  eager: true,
-}) as Record<string, string>;
-
-/** As much of a JSON Schema node as the walk below has to understand. */
-interface SchemaNode {
-  type?: unknown;
-  format?: unknown;
-  properties?: Record<string, SchemaNode>;
-  anyOf?: SchemaNode[];
-  items?: SchemaNode;
-  [key: string]: unknown;
-}
-
-let schema: SchemaNode | undefined;
-
-/**
- * Parsed once, because the rule below asks for it per module.
- *
- * Half a megabyte of JSON parsed three hundred times is minutes, and this file
- * already states what a test environment costs a run.
- */
-function schemaDocument(): SchemaNode {
-  const raw = SCHEMA["../openapi.json"] ?? "";
-  // A glob that matched nothing would make every field name below disappear
-  // and the rule pass over an empty subject.
-  expect(raw.length).toBeGreaterThan(1000);
-  schema ??= JSON.parse(raw) as SchemaNode;
-  return schema;
-}
-
-/**
- * The members of one property's schema that are not the null branch.
- *
- * A nullable field is `anyOf: [{the real thing}, {"type": "null"}]`, which is
- * the same flattening `lib/bookBounds.test.ts` does for a bound. Written here
- * rather than imported because that one keeps only the four keys a bound uses
- * and drops `format`, which is the whole subject of this rule.
- */
-function branchesOf(property: SchemaNode): SchemaNode[] {
-  const parts = [property, ...(property.anyOf ?? [])];
-  const items = parts
-    .map((part) => part.items)
-    .filter((part) => part !== undefined);
-  return [...parts, ...items].filter((part) => part.type !== "null");
+function datedBranchesOf(property: SchemaNode, where: string): SchemaNode[] {
+  const branches = branchesOf(property, where);
+  const ofEntries = branches
+    .filter((part) => part["items"] !== undefined)
+    .flatMap((part) =>
+      branchesOf(part["items"] as SchemaNode, `${where}/items`),
+    );
+  return branches.concat(ofEntries);
 }
 
 /**
@@ -7461,23 +7318,19 @@ let dated: string[] | undefined;
 function datedFields(): string[] {
   if (dated !== undefined) return dated;
   const names = new Set<string>();
-  const walk = (node: unknown): void => {
-    if (Array.isArray(node)) {
-      for (const item of node as unknown[]) walk(item);
-      return;
-    }
-    if (typeof node !== "object" || node === null) return;
-    const record = node as SchemaNode;
-    for (const [name, property] of Object.entries(record.properties ?? {}))
+  for (const record of objectsIn(committedSchema())) {
+    const properties = (record["properties"] ?? {}) as Record<
+      string,
+      SchemaNode
+    >;
+    for (const [name, property] of Object.entries(properties))
       if (
-        branchesOf(property).some(
-          (part) => part.format === "date" || part.format === "date-time",
+        datedBranchesOf(property, name).some(
+          (part) => part["format"] === "date" || part["format"] === "date-time",
         )
       )
         names.add(name);
-    for (const value of Object.values(record)) walk(value);
-  };
-  walk(schemaDocument());
+  }
   dated = [...names].sort();
   return dated;
 }
@@ -7485,24 +7338,20 @@ function datedFields(): string[] {
 /** The non null types those fields are declared with, as a set. */
 function datedFieldTypes(): string[] {
   const types = new Set<string>();
-  const walk = (node: unknown): void => {
-    if (Array.isArray(node)) {
-      for (const item of node as unknown[]) walk(item);
-      return;
-    }
-    if (typeof node !== "object" || node === null) return;
-    const record = node as SchemaNode;
-    for (const property of Object.values(record.properties ?? {}))
-      for (const part of branchesOf(property))
-        if (part.format === "date" || part.format === "date-time")
+  for (const record of objectsIn(committedSchema())) {
+    const properties = (record["properties"] ?? {}) as Record<
+      string,
+      SchemaNode
+    >;
+    for (const [name, property] of Object.entries(properties))
+      for (const part of datedBranchesOf(property, name))
+        if (part["format"] === "date" || part["format"] === "date-time")
           types.add(
-            typeof part.type === "string"
-              ? part.type
-              : `${JSON.stringify(part.type)}`,
+            typeof part["type"] === "string"
+              ? part["type"]
+              : `${JSON.stringify(part["type"])}`,
           );
-    for (const value of Object.values(record)) walk(value);
-  };
-  walk(schemaDocument());
+  }
   return [...types].sort();
 }
 
@@ -7673,24 +7522,14 @@ function carriesATypeOnly(node: Node): boolean {
  */
 function identifiersUnder(value: unknown): Set<string> {
   const names = new Set<string>();
-  const walk = (node: unknown): void => {
-    if (Array.isArray(node)) {
-      for (const item of node as unknown[]) walk(item);
-      return;
-    }
-    if (!isNode(node)) return;
-    if (node.type === "JSXElement" || node.type === "JSXFragment") return;
-    if (carriesATypeOnly(node)) {
-      walk(node.expression);
-      return;
-    }
+  walk(value, (node) => {
+    if (node.type === "JSXElement" || node.type === "JSXFragment") return false;
+    if (carriesATypeOnly(node)) return [node.expression];
     if (node.type === "Identifier") {
       const name = text(node.name);
       if (name !== null) names.add(name);
     }
-    for (const key of Object.keys(node)) walk(node[key]);
-  };
-  walk(value);
+  });
   return names;
 }
 
@@ -7712,7 +7551,7 @@ function identifiersUnder(value: unknown): Set<string> {
  */
 function renderedExpressionsIn(path: string, source: string): Node[] {
   const results: Node[] = [];
-  visitNodes(parseAst(source, { lang: langOf(path) }), (node) => {
+  walk(parseAst(source, { lang: langOf(path) }), (node) => {
     if (node.type !== "JSXElement" && node.type !== "JSXFragment") return;
     for (const child of Array.isArray(node.children)
       ? (node.children as unknown[])
@@ -7749,11 +7588,10 @@ function doorExports(): Set<string> {
 /**
  * Every name a module binds at its top level, under any form.
  *
- * **A declarator id goes through `identifiersIn` and not through `.name`.**
+ * **A declarator id goes through `namesBoundBy` and not through `.name`.**
  * A pattern has no `name`, so reading the property direct answers `undefined`
  * for `const { numericDate } = helpers` and for the array form, and both were
- * cleared. That reader is the file's one home for the names a binding target
- * writes, and this is the fourth time the same shape has been paid for here.
+ * cleared.
  *
  * **An import binds too, and only one from somewhere other than the door.**
  * `import { numericDate } from "./elsewhere"` has no `id` at all, so a door
@@ -7783,7 +7621,7 @@ function declaredAtTopLevel(path: string, source: string): Set<string> {
         return;
       for (const one of Array.isArray(node.specifiers) ? node.specifiers : [])
         if (isNode(one) && isNode(one.local))
-          for (const name of identifiersIn(one.local)) names.add(name);
+          for (const name of namesBoundBy(one.local)) names.add(name);
       return;
     }
     if (node.type === "VariableDeclaration") {
@@ -7791,7 +7629,7 @@ function declaredAtTopLevel(path: string, source: string): Set<string> {
         ? node.declarations
         : [])
         if (isNode(one) && isNode(one.id))
-          for (const name of identifiersIn(one.id)) names.add(name);
+          for (const name of namesBoundBy(one.id)) names.add(name);
       return;
     }
     const id = node.id;
@@ -7857,7 +7695,7 @@ function formattingNamesIn(path: string, source: string): Set<string> {
     [...doorExports()].filter((name) => !declared.has(name)),
   );
   const names = new Set(door);
-  visitNodes(parseAst(source, { lang: langOf(path) }), (node) => {
+  walk(parseAst(source, { lang: langOf(path) }), (node) => {
     if (node.type !== "VariableDeclarator" || !isNode(node.init)) return;
     if (
       node.init.type !== "ArrowFunctionExpression" &&
@@ -7935,48 +7773,44 @@ function fieldsReadIn(
   fields: string[],
 ): Set<string> {
   const found = new Set<string>();
-  const walk = (node: unknown, binds: boolean): void => {
-    if (Array.isArray(node)) {
-      for (const item of node as unknown[]) walk(item, binds);
-      return;
-    }
-    if (!isNode(node)) return;
-    // A nested element renders itself, and the walk reaches it on its own
-    // account. Without this, a field handed to a child component as an
-    // attribute is reported as a rendering.
-    if (node.type === "JSXElement" || node.type === "JSXFragment") return;
-    if (carriesATypeOnly(node)) {
-      walk(node.expression, binds);
-      return;
-    }
-    if (node.type === "CallExpression") {
-      const callee = calleeNameOf(node);
-      if (callee !== null && door.has(callee)) return;
-    }
-    // The forwarding record, applied through the same function the census
-    // reads, so there is one application of it rather than two.
-    const results = resultsOf(node);
-    if (results.length !== 1 || results[0] !== node) {
-      for (const result of results) walk(result, binds);
-      return;
-    }
-    if (!binds) {
-      const written: (string | null)[] = [
-        node.type === "Identifier" ? text(node.name) : null,
-        node.type === "TemplateElement"
-          ? text((node.value as { cooked?: unknown })?.cooked)
-          : null,
-        text(node.value),
-      ];
-      for (const name of written)
-        if (name !== null && fields.includes(name)) found.add(name);
-    }
-    for (const key of Object.keys(node)) {
-      if (key === "key" && node.type === "Property" && !node.computed) continue;
-      walk(node[key], key === "params" ? true : binds);
-    }
-  };
-  walk(value, false);
+  const visit =
+    (binds: boolean) =>
+    (node: Node): Descent => {
+      // A nested element renders itself, and the walk reaches it on its own
+      // account. Without this, a field handed to a child component as an
+      // attribute is reported as a rendering.
+      if (node.type === "JSXElement" || node.type === "JSXFragment")
+        return false;
+      if (carriesATypeOnly(node)) return [node.expression];
+      if (node.type === "CallExpression") {
+        const callee = calleeNameOf(node);
+        if (callee !== null && door.has(callee)) return false;
+      }
+      // The forwarding record, applied through the same function the census
+      // reads, so there is one application of it rather than two.
+      const results = resultsOf(node);
+      if (results.length !== 1 || results[0] !== node) return results;
+      if (!binds) {
+        const written: (string | null)[] = [
+          node.type === "Identifier" ? text(node.name) : null,
+          node.type === "TemplateElement"
+            ? text((node.value as { cooked?: unknown })?.cooked)
+            : null,
+          text(node.value),
+        ];
+        for (const name of written)
+          if (name !== null && fields.includes(name)) found.add(name);
+      }
+      const held: unknown[] = [];
+      for (const key of Object.keys(node)) {
+        if (key === "key" && node.type === "Property" && !node.computed)
+          continue;
+        if (key === "params" && !binds) walk(node[key], visit(true));
+        else held.push(node[key]);
+      }
+      return held;
+    };
+  walk(value, visit(false));
   return found;
 }
 
@@ -8421,9 +8255,9 @@ describe("a dated field named in a JSX child is handed to a door call", () => {
     // `ParenthesizedExpression` has no case because this parser keeps no node
     // for a bracket, which is asserted rather than assumed.
     const kinds = new Set<string>();
-    visitNodes(parseAst("const a = (b);", { lang: "ts" }), (node) =>
-      kinds.add(node.type),
-    );
+    walk(parseAst("const a = (b);", { lang: "ts" }), (node) => {
+      kinds.add(node.type);
+    });
     expect([...kinds]).not.toContain("ParenthesizedExpression");
   });
 
@@ -8565,17 +8399,6 @@ describe("a dated field named in a JSX child is handed to a door call", () => {
   });
 });
 
-/** Every node under `value`, in no particular order. */
-function visitNodes(value: unknown, visit: (node: Node) => void): void {
-  if (Array.isArray(value)) {
-    for (const item of value as unknown[]) visitNodes(item, visit);
-    return;
-  }
-  if (!isNode(value)) return;
-  visit(value);
-  for (const key of Object.keys(value)) visitNodes(value[key], visit);
-}
-
 /** One exported hook, its interface width and the writes behind it. */
 interface HookRow {
   readonly path: string;
@@ -8603,12 +8426,12 @@ function mutationHookNames(): Set<string> {
   const names = new Set<string>();
   for (const [path, source] of entries()) {
     if (!path.startsWith("api/generated/endpoints/")) continue;
-    visitNodes(parseAst(source, { lang: langOf(path) }), (node) => {
+    walk(parseAst(source, { lang: langOf(path) }), (node) => {
       if (node.type !== "VariableDeclarator") return;
       const id = isNode(node.id) ? text(node.id.name) : null;
       if (id === null || !/^use[A-Z]/.test(id)) return;
       let mutates = false;
-      visitNodes(node, (inner) => {
+      walk(node, (inner) => {
         if (
           inner.type === "TSTypeReference" &&
           isNode(inner.typeName) &&
@@ -8673,60 +8496,15 @@ function bindingsOf(node: Node): Binding[] {
     // identifier does. Asking whether the `id` happens to be an identifier is
     // the same mistake one binding form over as asking whether a declaration
     // happens to sit under an `export` keyword: a hook destructured out of a
-    // factory reached neither list. Every identifier the pattern carries is
-    // taken, so no spelling of a pattern is enumerated here.
-    return identifiersIn(one.id).map((name) => ({
+    // factory reached neither list. Every name the pattern binds is taken,
+    // by the one binding reader, so no spelling of a pattern is enumerated
+    // here.
+    return namesBoundBy(one.id).map((name) => ({
       name,
       value,
       declaredAs: null,
     }));
   });
-}
-
-/**
- * Every name a binding pattern binds.
- *
- * **In a destructuring pattern a key is never a binding, under any spelling.**
- * In `{ a: b }` the name bound is `b` and `a` is the property being read from;
- * in `{ [expr]: b }` the same holds, and `expr` is an expression that names a
- * value already bound somewhere else. So a key contributes no name here, and
- * that is a property of what a key is rather than a list of the ways one can be
- * written.
- *
- * **Do not re-add a condition that descends into a computed key.** It was tried
- * on the argument that a computed key is an expression where a written one is a
- * label, which is true and is the reason to skip both: descending collects a
- * **read** as though it were a binding. Measured, `{ [useTheHook]: renamed }`
- * took that hook out of the measured set.
- *
- * **What it costs when this is wrong is a row deleted, not a row added.** The
- * census keys its bindings by name, so a name collected here that nothing
- * declares overwrites whatever did declare it with a value that is not
- * callable, and the hook leaves the measured set. Three lines whose only effect
- * was one key turned two red arms green. Same class as the specifier export and
- * the pattern binding, and the third time it has been paid for.
- */
-function identifiersIn(pattern: Node): string[] {
-  const names: string[] = [];
-  const walk = (value: unknown): void => {
-    if (Array.isArray(value)) {
-      for (const item of value as unknown[]) walk(item);
-      return;
-    }
-    if (!isNode(value)) return;
-    if (value.type === "Identifier") {
-      const name = text(value.name);
-      if (name !== null) names.push(name);
-      return;
-    }
-    const carriesAKey = value.type.endsWith("Property");
-    for (const key of Object.keys(value)) {
-      if (carriesAKey && key === "key") continue;
-      walk(value[key]);
-    }
-  };
-  walk(pattern);
-  return names;
 }
 
 /** One exported hook and whether its return type is written down. */
@@ -8966,7 +8744,7 @@ function hookRows(): {
         continue;
       }
       const called = new Set<string>();
-      visitNodes(fn.body, (node) => {
+      walk(fn.body, (node) => {
         if (node.type !== "CallExpression" || !isNode(node.callee)) return;
         const callee = text(node.callee.name);
         if (callee !== null) called.add(callee);
@@ -9477,10 +9255,31 @@ const PRINTF = /%[sdifjo#]/;
 const inCitationSpace = (path: string): string =>
   path.replace(/^frontend\//, "");
 
-/** The cited path with `.` and `..` resolved, and the repository root off. */
+/**
+ * A path in citation space back where it sits in the repository.
+ *
+ * **Sound because the repository root holds no `src/` and no `tests/`**, so
+ * a key led by either can only have lost `frontend/`. A document directly
+ * under `frontend/` would be keyed as though it sat at the root, which this
+ * cannot undo; there is none.
+ */
+const inRepositorySpace = (path: string): string =>
+  /^(?:src|tests)\//.test(path) ? `frontend/${path}` : path;
+
+/**
+ * The cited path with `.` and `..` resolved where its document sits, and the
+ * repository root off.
+ *
+ * **Resolved from the document's place in the repository, not its key**, or a
+ * climb out of the frontend tree is counted from a directory one level too
+ * shallow. Resolving from the key worked only while a `..` past the root was
+ * dropped, which absorbed the missing segment.
+ */
 function normalised(from: string, cited: string): string {
-  const base = cited.startsWith(".") ? from.split("/").slice(0, -1) : [];
-  return inCitationSpace(resolveSegments(base, cited).join("/"));
+  const base = cited.startsWith(".")
+    ? inRepositorySpace(from).split("/").slice(0, -1)
+    : [];
+  return inCitationSpace(resolvePath(base, cited).join("/"));
 }
 
 /**
@@ -9531,18 +9330,10 @@ function constantsIn(source: string, lang: "ts" | "tsx"): Set<string> {
     return null;
   };
 
-  const walk = (value: unknown): void => {
-    if (Array.isArray(value)) {
-      value.forEach(walk);
-      return;
-    }
-    if (!isNode(value)) return;
+  walk(parseAst(source, { lang }), (value) => {
     const folded = fold(value);
     if (folded !== null) found.add(folded);
-    for (const key of Object.keys(value)) walk(value[key]);
-  };
-
-  walk(parseAst(source, { lang }) as unknown as Node);
+  });
   return found;
 }
 
@@ -10282,9 +10073,10 @@ describe("a test cited by name still carries that name", () => {
     // **The first case is the one that was wrong and the second is the one
     // that was not.** A citation at or below such a document's own directory
     // used to resolve from the repository root; a citation climbing back into
-    // the source tree landed correctly anyway, because the stray segment is
-    // popped by the first `..`. Both are here so the repair is not credited
-    // for the half it did not change.
+    // the source tree landed correctly anyway. Both are here so the repair is
+    // not credited for the half it did not change. The third climbs one level
+    // past the repository root, which names nothing here and was read as
+    // the second while a `..` past the root was dropped.
     const cite = (path: string, label: string) =>
       "`" + path + "::" + label + "`";
     const home = citationKey("./doubles/README.md");
@@ -10301,6 +10093,12 @@ describe("a test cited by name still carries that name", () => {
         [home]: cite("../../../frontend/tests/theme/a.test.ts", "the name"),
       }),
     ).toEqual([]);
+    expect(
+      unwritten({
+        "tests/theme/a.test.ts": `it("the name", () => {});`,
+        [home]: cite("../../../../frontend/tests/theme/a.test.ts", "the name"),
+      }),
+    ).toHaveLength(1);
   });
 
   it("reads a citation the formatter wrapped, at any depth", () => {
@@ -10397,12 +10195,7 @@ function globPatterns(source: string, lang: "ts" | "tsx"): string[] {
       return ((node.elements as unknown[]) ?? []).flatMap(patternsOf);
     return [""];
   };
-  const walk = (value: unknown): void => {
-    if (Array.isArray(value)) {
-      for (const item of value as unknown[]) walk(item);
-      return;
-    }
-    if (!isNode(value)) return;
+  walk(parseAst(source, { lang }), (value) => {
     const callee = value.callee;
     if (
       value.type === "CallExpression" &&
@@ -10414,9 +10207,7 @@ function globPatterns(source: string, lang: "ts" | "tsx"): string[] {
       callee.property.name === "glob"
     )
       out.push(...patternsOf(((value.arguments as unknown[]) ?? [])[0]));
-    for (const key of Object.keys(value)) walk(value[key]);
-  };
-  walk(parseAst(source, { lang }));
+  });
   return out;
 }
 
@@ -10497,26 +10288,32 @@ function servesAModule(pattern: string): boolean {
  * **A brace in a directory position is a wildcard**, because one of its
  * branches can be the tree: `../{src,public}/*.ts` reaches it by expansion
  * while reading as a literal directory named `{src,public}`.
+ *
+ * **Resolved from the repository root and then brought back under the
+ * project**, so a pattern that climbs out of `frontend/` lands where it
+ * points. Resolved from the project, `../../src/x.ts` written one level down
+ * dropped the climb past the root and named `src/x.ts`, and
+ * `../../frontend/src/**` named a directory called `frontend` and missed the
+ * tree. A path above the project comes back led by `..`.
  */
 function resolveFrom(
   from: string,
   pattern: string,
 ): { at: string[]; descends: boolean } {
   const segments = pattern.split("/");
-  const at: string[] = pattern.startsWith("/")
-    ? []
-    : ["tests", ...from.replace("./", "").split("/")].slice(0, -1);
-  let descends = false;
-  for (const [index, part] of segments.entries()) {
-    if (part.includes("*") || part.includes("{")) {
-      descends = index < segments.length - 1;
-      break;
-    }
-    if (part === "." || part === "") continue;
-    if (part === "..") at.pop();
-    else at.push(part);
-  }
-  return { at, descends };
+  const wild = segments.findIndex(
+    (part) => part.includes("*") || part.includes("{"),
+  );
+  const literal = wild === -1 ? segments : segments.slice(0, wild);
+  const [project] = GLOBBED_FROM;
+  const base = pattern.startsWith("/")
+    ? [project!]
+    : [...GLOBBED_FROM, ...from.replace("./", "").split("/")].slice(0, -1);
+  const resolved = resolvePath(base, literal.join("/"));
+  return {
+    at: resolved[0] === project ? resolved.slice(1) : ["..", ...resolved],
+    descends: wild !== -1 && wild < segments.length - 1,
+  };
 }
 
 /** Whether a pattern written in one file can match a module under `tree`. */
@@ -10528,11 +10325,11 @@ function reachesTheTree(from: string, pattern: string, tree: string): boolean {
   const { at, descends } = resolveFrom(from, pattern);
   const base = at.join("/");
 
-  // Both trees sit directly under the project root, so the root is their only
-  // ancestor and a walk that stopped above one reaches it only by descending.
-  return (
-    base === tree || base.startsWith(`${tree}/`) || (base === "" && descends)
-  );
+  // Both trees sit directly under the project root, so the root and what is
+  // above it are their only ancestors, and a walk that stopped at one of
+  // those reaches a tree only by descending.
+  const above = at.every((part) => part === "..");
+  return base === tree || base.startsWith(`${tree}/`) || (above && descends);
 }
 
 function reachesTheSourceTree(from: string, pattern: string): boolean {
@@ -10560,12 +10357,7 @@ function reachesTheTestTree(from: string, pattern: string): boolean {
  */
 function globOptionKeys(source: string, lang: "ts" | "tsx"): string[] {
   const out: string[] = [];
-  const walk = (value: unknown): void => {
-    if (Array.isArray(value)) {
-      for (const item of value as unknown[]) walk(item);
-      return;
-    }
-    if (!isNode(value)) return;
+  walk(parseAst(source, { lang }), (value) => {
     const callee = value.callee;
     if (
       value.type === "CallExpression" &&
@@ -10585,9 +10377,7 @@ function globOptionKeys(source: string, lang: "ts" | "tsx"): string[] {
           out.push(name ?? "an option this rule could not read");
         }
     }
-    for (const key of Object.keys(value)) walk(value[key]);
-  };
-  walk(parseAst(source, { lang }));
+  });
   return out;
 }
 
@@ -10680,6 +10470,11 @@ describe("the corpus under src has one pattern", () => {
       // early on the brace. One row per tree position it can take.
       ["./x.test.ts", "../{src,public}/lib/pdf.ts"],
       ["./lib/x.test.ts", "../../{src,dist}/index.css"],
+      // Out of the project and back in by its name, which resolved to a
+      // directory called `frontend` under the project and missed.
+      ["./x.test.ts", "../../frontend/src/**/*.ts"],
+      // Above the project and descending, which reaches every tree under it.
+      ["./x.test.ts", "../../**/*.ts"],
     ];
     const misses: [string, string][] = [
       // No wildcard, so it answers for one module or for nothing.
@@ -10693,6 +10488,8 @@ describe("the corpus under src has one pattern", () => {
       ["./theme/x.test.ts", "../../../docs/*.md"],
       // A sibling of the tree rather than the tree.
       ["./x.test.ts", "../public/**/*"],
+      // The repository's `src`, which a dropped climb read as the tree.
+      ["./x.test.ts", "../../src/**/*.ts"],
       // An exclusion, which narrows a pattern rather than being one.
       ["./x.test.ts", "!../src/**/*.ts"],
       // The frontend root with no descent, which is not the tree.
@@ -10983,6 +10780,33 @@ describe("one file of either tree is read by name from that tree's corpus", () =
       .map(([path]) => path)
       .sort();
 
+  it("reads the committed schema in one module", () => {
+    // Outside both trees, so the rule above lets it through; one reader is
+    // `committedSchema.ts`'s rule, and its header says why. Seen as a glob
+    // resolving to the document, a module specifier naming it (a JSON
+    // import, a `?raw` import, a dynamic `import()`, a re-export), or a
+    // `node:fs` read naming it in quotes.
+    const isTheDocument = (path: string, pattern: string): boolean =>
+      resolveFrom(path, pattern.split("?")[0]!).at.join("/") === "openapi.json";
+    const schemaReaders = testEntries()
+      .filter(
+        ([path, source]) =>
+          globPatterns(source, langOf(path)).some((pattern) =>
+            isTheDocument(path, pattern),
+          ) ||
+          specifiersOf(path, source).some((specifier) =>
+            isTheDocument(path, specifier),
+          ) ||
+          // A call rather than the name: this file names the document's
+          // path in a probe row below and reads no file by `node:fs`.
+          (/readFileSync\(/.test(source) &&
+            /["'][^"'`\n]*openapi\.json["']/.test(source)),
+      )
+      .map(([path]) => path);
+
+    expect(schemaReaders).toEqual(["./committedSchema.ts"]);
+  });
+
   it("resolves a one file pattern the way the corpus rule resolves a glob", () => {
     // **Each row is a read this tree had when the rule was written, or its
     // control.** The two trees, both depths, the array form and the shapes
@@ -11003,6 +10827,8 @@ describe("one file of either tree is read by name from that tree's corpus", () =
         "tests/lib/fileName.test.ts",
       ],
       ["./x.test.ts", "/src/lib/zip.ts", "src/lib/zip.ts"],
+      // Out of the project and back in by its name.
+      ["./x.test.ts", "../../frontend/src/lib/zip.ts", "src/lib/zip.ts"],
     ];
     const outside: [string, string][] = [
       // No corpus to come from, so nothing here can name them.
@@ -11010,6 +10836,9 @@ describe("one file of either tree is read by name from that tree's corpus", () =
       ["./lib/sqlite.test.ts", "../../package.json"],
       ["./pages/ScanPage/hooks.test.tsx", "../../../../backend/ratelimit.py"],
       ["./houseRules.test.ts", "../vite.config.ts"],
+      // A climb past the project root names the repository's `src`, which is
+      // not the tree; dropping the climb read it as the tree.
+      ["./x.test.ts", "../../src/lib/zip.ts"],
       // **Inside `tests/` and still outside, because it is not a module.**
       // Both of these are in that corpus module's `NOT_MODULES`, so
       // `testText` refuses them by construction and there is no accessor to
@@ -11324,31 +11153,6 @@ const DECLARES_A_NAME = new Set([
 ]);
 
 /**
- * Every name one declaration binds, however the target is shaped.
- *
- * **Every identifier under the target, not the targets that are an
- * identifier.** A destructured binding is a member like any other, and this
- * tree writes them at module scope. The type annotation is skipped, because
- * the identifiers in one are types this module names rather than names it
- * binds, and admitting them resolves a citation to a type declared somewhere
- * else.
- */
-function namesBound(node: unknown, into: Set<string>): void {
-  if (Array.isArray(node)) {
-    for (const item of node as unknown[]) namesBound(item, into);
-    return;
-  }
-  if (!isNode(node)) return;
-  if (node.type === "Identifier") {
-    const name = text(node.name);
-    if (name !== null) into.add(name);
-    return;
-  }
-  for (const key of Object.keys(node))
-    if (key !== "typeAnnotation") namesBound(node[key], into);
-}
-
-/**
  * Every member name a declaration's class, interface, enum, type or object
  * body holds.
  *
@@ -11358,49 +11162,56 @@ function namesBound(node: unknown, into: Set<string>): void {
  * named `does not resolve a member of a type declared inside a function` is
  * the only thing that holds it.
  */
-function membersDeclaredIn(node: unknown, into: Set<string>): void {
-  if (Array.isArray(node)) {
-    for (const item of node as unknown[]) membersDeclaredIn(item, into);
-    return;
-  }
-  if (!isNode(node)) return;
-  if (DECLARES_A_MEMBER.has(node.type)) {
-    // **`key` or `id`, because the two are not one convention.** A property
-    // signature, a method signature, an object property and a class member
-    // name themselves in `key`; an enum member names itself in `id`, measured
-    // off this parser. Reading `key` alone left every enum member out of the
-    // index, which is a false refusal of every citation to one.
-    const named = isNode(node.key) ? node.key : node.id;
-    const name = isNode(named) ? (text(named.name) ?? text(named.value)) : null;
-    if (name !== null) into.add(name);
-  }
-  // **It stops at a call as well, and that bound is what keeps the object
-  // key admission to objects a module declares.** Admitting keys is what
-  // indexes a message catalogue; without this line it also indexes the keys
-  // of a call's arguments, of a default parameter value and of a type
-  // annotation object, none of which is a member a sentence can cite.
-  // **Measured as differences, because the totals count this file.** The
-  // index reads every module of both trees including this one, so a total
-  // moves whenever an arm is added here, and the three that stood in this
-  // comment were each exactly three low by the time the commit carrying them
-  // landed. The differences do not have that problem: the key admission adds
-  // **3,335** names and this stop costs **101**, and both hold on the tree
-  // this comment ships in as well as on the two before it, where the totals
-  // moved under them each time. The catalogue's **1,160** is unaffected either way,
-  // because the catalogue is not the file doing the counting.
-  // Admitting one of those keys is a false acceptance, which is the direction
-  // no sweep finds, and the reason this is a bound rather than a preference.
-  //
-  // **What it refuses, and the tidy up that reopens the hole it closed.** An
-  // export whose object passes through a call is not indexed at all, so
-  // `export const en = Object.freeze({ ... })` would make every citation of a
-  // message key a false refusal again, which is exactly the defect the key
-  // admission was added to close. Nothing is live because `src/i18n/en.ts`
-  // declares its object directly, and that is an unstated property of one
-  // file rather than anything held here: freeze the catalogue, or wrap it in
-  // any helper, and the citations to it start reporting.
-  if (node.type === "BlockStatement" || node.type === "CallExpression") return;
-  for (const key of Object.keys(node)) membersDeclaredIn(node[key], into);
+function membersDeclaredIn(value: unknown, into: Set<string>): void {
+  walk(value, (node) => {
+    if (DECLARES_A_MEMBER.has(node.type)) {
+      // **`key` or `id`, because the two are not one convention.** A property
+      // signature, a method signature, an object property and a class member
+      // name themselves in `key`; an enum member names itself in `id`, measured
+      // off this parser. Reading `key` alone left every enum member out of the
+      // index, which is a false refusal of every citation to one.
+      const named = isNode(node.key) ? node.key : node.id;
+      const name = isNode(named)
+        ? (text(named.name) ?? text(named.value))
+        : null;
+      if (name !== null) into.add(name);
+    }
+    // **It stops at a call as well, and that bound is what keeps the object
+    // key admission to objects a module declares.** Admitting keys is what
+    // indexes a message catalogue; without this line it also indexes the keys
+    // of a call's arguments, of a default parameter value and of a type
+    // annotation object, none of which is a member a sentence can cite.
+    // **Measured as differences, because the totals count this file.** The
+    // index reads every module of both trees including this one, so a total
+    // moves whenever an arm is added here, and the three that stood in this
+    // comment were each exactly three low by the time the commit carrying them
+    // landed. The differences do not have that problem: the key admission adds
+    // **3,335** names and this stop costs **101**, and both hold on the tree
+    // this comment ships in as well as on the two before it, where the totals
+    // moved under them each time. The catalogue's **1,160** is unaffected either way,
+    // because the catalogue is not the file doing the counting.
+    // Admitting one of those keys is a false acceptance, which is the direction
+    // no sweep finds, and the reason this is a bound rather than a preference.
+    //
+    // **What it refuses, and the tidy up that reopens the hole it closed.** An
+    // export whose object passes through a call is not indexed at all, so
+    // `export const en = Object.freeze({ ... })` would make every citation of a
+    // message key a false refusal again, which is exactly the defect the key
+    // admission was added to close. Nothing is live because `src/i18n/en.ts`
+    // declares its object directly, and that is an unstated property of one
+    // file rather than anything held here: freeze the catalogue, or wrap it in
+    // any helper, and the citations to it start reporting.
+    if (node.type === "BlockStatement" || node.type === "CallExpression")
+      return false;
+    // **A parameter declares no member either**: its pattern's keys are
+    // properties read and its annotation types a local, so
+    // `function f({ a: b }: { c: string }) {}` declares `f` and nothing in it.
+    // A type parameter or argument list is also called `params`, and is read.
+    if (Array.isArray(node.params) && !node.type.startsWith("TSTypeParameter"))
+      return Object.keys(node)
+        .filter((key) => key !== "params")
+        .map((key) => node[key]);
+  });
 }
 
 /**
@@ -11452,8 +11263,11 @@ function declaresInto(body: unknown, into: Set<string>): boolean {
     if (node.type === "VariableDeclaration") {
       for (const declarator of (node.declarations as unknown[]) ?? []) {
         if (!isNode(declarator)) continue;
-        namesBound(declarator.id, into);
-        membersDeclaredIn(declarator.id, into);
+        for (const name of namesBoundBy(declarator.id)) into.add(name);
+        // The annotation, not the target: a target's keys are properties read,
+        // so `const { a: b } = x` declares `b` and no member `a`.
+        if (isNode(declarator.id))
+          membersDeclaredIn(declarator.id.typeAnnotation, into);
         membersDeclaredIn(declarator.init, into);
       }
       continue;
@@ -11953,10 +11767,10 @@ describe("a module member cited in prose is still declared there", () => {
     // **The widening this rule has to stay closed against**, which is the one
     // mutation that takes it green over a live defect: index every identifier
     // a declaration holds rather than the names it declares. Measured with
-    // `namesBound(node, found)` added to the declaration branch, which is the
-    // one line that does it: this arm and the one below it both red, which is
-    // the honest size of that mutant rather than evidence about this arm
-    // alone.
+    // every identifier under the declaration outside a type annotation added
+    // to `found` in the declaration branch, which is one line: this arm and
+    // the one below it both red, which is the honest size of that mutant
+    // rather than evidence about this arm alone.
     //
     // **The two obvious weakenings are not that one**, measured rather than
     // assumed: removing the stop at a function body leaves this green, and so
@@ -11989,6 +11803,30 @@ describe("a module member cited in prose is still declared there", () => {
       ),
     ).toEqual([
       "src/x.ts names thing.ts and the member notAMember, undeclared",
+    ]);
+  });
+
+  it("does not resolve a key a binding pattern reads", () => {
+    // A key in a pattern names a property of the value read, at a top level
+    // declarator and at a parameter alike, and a parameter's annotation types
+    // a local: none is a member the module declares. The name the declarator
+    // binds is, so `b` is the row that keeps this from passing on an empty
+    // index.
+    const module = `export const { a: b } = x;\nexport function f({ k: v }: { c: string }) {}`;
+    // Joined rather than written out, so this file's source holds no citation.
+    const cited = ["a", "b", "k", "c"]
+      .map((name) => ["`thing.ts", `${name}\``].join("::"))
+      .join(" ");
+
+    expect(
+      unheld(
+        { "src/x.ts": `// ${cited}\nexport const x = 1;` },
+        { "src/thing.ts": module },
+      ),
+    ).toEqual([
+      "src/x.ts names thing.ts and the member a, undeclared",
+      "src/x.ts names thing.ts and the member k, undeclared",
+      "src/x.ts names thing.ts and the member c, undeclared",
     ]);
   });
 
@@ -12062,12 +11900,7 @@ describe("a module member cited in prose is still declared there", () => {
  */
 function generatorNamed(path: string, source: string): string[] {
   const out: string[] = [];
-  const walk = (value: unknown): void => {
-    if (Array.isArray(value)) {
-      for (const item of value as unknown[]) walk(item);
-      return;
-    }
-    if (!isNode(value)) return;
+  walk(parseAst(source, { lang: langOf(path) }), (value) => {
     const spelling =
       value.type === "Literal" && typeof value.value === "string"
         ? value.value
@@ -12077,9 +11910,7 @@ function generatorNamed(path: string, source: string): string[] {
               .cooked ?? null)
           : null;
     if (spelling !== null && namesTheGenerator(spelling)) out.push(spelling);
-    for (const key of Object.keys(value)) walk(value[key]);
-  };
-  walk(parseAst(source, { lang: langOf(path) }));
+  });
   return out;
 }
 

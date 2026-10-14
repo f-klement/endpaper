@@ -13,18 +13,16 @@ Every outbound call is intercepted with respx, so the suite never touches the
 network and never needs a real API key.
 """
 
-import logging
 from contextlib import contextmanager
 
 import httpx
 import pytest
 import respx
 
+from categories import CATEGORIES_MAX
 from enums import SettingKey
 from models import DESCRIPTION_MAX, TITLE_MAX, Classification
-from routers.books import _bounded_match
 from schemas import MAX_CLASSIFICATIONS_PER_BOOK
-from schemas.book import CATEGORIES_MAX
 from tests.helpers import GOOGLE_BOOKS, K10PLUS, PNG_BYTES, silence_catalogues, sru_response
 
 
@@ -509,7 +507,7 @@ class TestApplyingAChosenEdition:
 
 class TestAnEnrichmentBodyCannotOverflowTheDatabase:
     """`POST /{id}/enrich/apply` takes a `BookMatch` as its body, and
-    `merge_into` writes `year` and `page_count` onto the book. Unbounded, a
+    `evidence.confirm` writes `year` and `page_count` onto the book. Unbounded, a
     value past SQLite's INTEGER raises `OverflowError` on the commit: a 500 for
     any member, from a plain JSON field.
 
@@ -762,143 +760,3 @@ class TestTheTwoRoutesAgreeAboutOneVolume:
             )
 
         assert res.json()["found"] is False
-
-
-class TestBoundingOneRecord:
-    """`routers.books._bounded_match`, the door that route now goes through.
-
-    Its policy is per field where its neighbour `_match_rows` is per row, and
-    the two disagree in a way a member can see: a record the picker refuses to
-    show whole is a record the unattended route still fills a Book from.
-    Measured, and filed rather than resolved here. These drive the arms the
-    route tests above cannot reach from outside.
-    """
-
-    def test_a_clean_record_arrives_whole(self):
-        match = _bounded_match({"title": "Dune", "page_count": 412, "year": 1965})
-
-        assert (match.title, match.page_count, match.year) == ("Dune", 412, 1965)
-
-    def test_only_the_refused_field_is_dropped(self):
-        match = _bounded_match({"title": "Dune", "series_index": 1e9})
-
-        assert match.title == "Dune"
-        assert match.series_index is None
-
-    def test_two_refused_fields_are_both_dropped(self):
-        """Pydantic collects every field error in one pass, so this costs one
-        iteration rather than two. Pinned anyway, because the loop's
-        termination argument does not rest on that and a reader should not have
-        to assume it.
-        """
-        match = _bounded_match({"title": "Dune", "series_index": 1e9, "year": 99999})
-
-        assert match.title == "Dune"
-        assert match.series_index is None
-        assert match.year is None
-
-    def test_a_refusal_naming_no_field_gives_up_on_the_record(
-        self, monkeypatch, caplog
-    ):
-        """The arm there is nothing to drop for.
-
-        `BookMatch` carries no model level validator today, which is exactly
-        why this drives one in rather than asserting the arm is there.
-        Measured: pydantic reports a `mode="after"` model validator's error at
-        `loc == ()`, where a field error reports `loc == ("title",)`.
-
-        The log is what separates this arm from the loop simply running out,
-        which the bound makes it do to the same value. Without the early exit
-        the record is reported as a dropped field, repeatedly, naming none.
-        """
-        from pydantic import BaseModel, Field, model_validator
-
-        import routers.books as books_router
-
-        class Stub(BaseModel):
-            title: str | None = Field(default=None, max_length=500)
-
-            @model_validator(mode="after")
-            def _refuse_shouting(self):
-                if self.title == "SHOUT":
-                    raise ValueError("not that one")
-                return self
-
-        monkeypatch.setattr(books_router, "BookMatch", Stub)
-
-        with caplog.at_level(logging.INFO, logger="endpaper.books"):
-            assert books_router._bounded_match({"title": "SHOUT"}).title is None
-
-        assert "Discarded" in caplog.text
-        assert "Dropped" not in caplog.text
-        assert books_router._bounded_match({"title": "Dune"}).title == "Dune"
-
-    def test_a_record_whose_every_field_is_refused_is_not_a_discard(self, caplog):
-        """The pass the loop bound's `+ 1` exists for.
-
-        Every pass deletes at least one key, so a record of one refused field
-        needs a second pass to answer with the empty match. A bound of exactly
-        one pass per key falls through to the fallback instead and reaches the
-        same value, so only the log tells the two apart: this record was read
-        and stripped, it was not refused whole.
-        """
-        with caplog.at_level(logging.INFO, logger="endpaper.books"):
-            match = _bounded_match({"series_index": 1e9})
-
-        assert match.series_index is None
-        assert "series_index" in caplog.text
-        assert "Discarded" not in caplog.text
-
-    def test_a_field_the_record_never_supplied_is_not_deleted_from_it(
-        self, monkeypatch
-    ):
-        """The arm the first mutation round missed, under its right name.
-
-        Pydantic reports a **missing** required field at a `loc` naming a key
-        the record never sent, so without intersecting the refused names with
-        the record's own keys the helper deletes a key that is not there.
-        Measured on a stub carrying one required field: `Req(title="x" * 10)`
-        reports `[('name',), ('title',)]`, only the second of which is in the
-        record, and removing the intersection raises `KeyError: 'name'`.
-
-        **It is a `KeyError`, not a stall**, which is what this test was called
-        after for one round. There is no shape that repeats a pass: a refused
-        set either meets the record, in which case the record shrinks, or it
-        does not, in which case the old code raised.
-
-        The same stub drives the give up arm, which is why they are one test:
-        with `name` required, `Req()` raises too, so a fallback that validated
-        would answer 500 on the one path that exists to avoid one.
-        """
-        from pydantic import BaseModel, Field
-
-        import routers.books as books_router
-
-        class Req(BaseModel):
-            name: str
-            title: str | None = Field(default=None, max_length=5)
-
-        monkeypatch.setattr(books_router, "BookMatch", Req)
-
-        match = books_router._bounded_match({"title": "far too long"})
-
-        assert match.title is None
-
-    def test_the_empty_match_is_what_the_fallback_builds(self):
-        """`model_construct` skips validation, so it is worth pinning that it
-        still produces the model `BookMatch()` produces rather than something
-        emptier. If a required field is ever added the two stop agreeing, and
-        this is where that shows up."""
-        from schemas import BookMatch
-
-        assert BookMatch.model_construct() == BookMatch()
-
-    def test_it_says_what_it_dropped(self, caplog):
-        """A dropped field is invisible in the response by design, so the log
-        is where it is recorded. INFO, like `_match_rows`.
-        """
-        with caplog.at_level(logging.INFO, logger="endpaper.books"):
-            _bounded_match({"source": "dnb", "title": "Dune", "series_index": 1e9})
-
-        assert "series_index" in caplog.text
-        assert "dnb" in caplog.text

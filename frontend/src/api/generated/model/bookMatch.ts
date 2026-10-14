@@ -19,15 +19,15 @@ import type { ClassificationIn } from "./classificationIn.ts";
  * is a value a member chose rather than one a catalogue supplied.
  *
  * **And since 2026-09-03 it is the only way a catalogue value reaches a Book
- * column through `merge_into`**, which is a second reason for the same
- * bounds rather than a second rule. `google_books.merge_into` takes this
- * model rather than a dictionary, so `POST /api/books/{id}/enrich` builds one
- * through `routers/books._bounded_match` instead of handing over whatever
+ * column on enrichment**, which is a second reason for the same bounds rather
+ * than a second rule. `evidence` writes from this model rather than from a
+ * dictionary, so `POST /api/books/{id}/enrich` builds one through
+ * `evidence._bounded_match` instead of handing over whatever
  * `Record.as_match()` assembled. Before that the ceilings applied on one
  * route and not on its neighbour: the same oversized value was a 422 on
  * apply and a stored row on enrich, same book, one route apart.
  *
- * **Through `merge_into` was the whole of the claim, because a third route
+ * **Through this model was the whole of the claim, because a third route
  * did not go through it, and that closed on 2026-09-03 one layer below all
  * three.** `PUT /api/books/{id}/refresh` assigns nine columns straight off the
  * same `catalogue.Record` and builds no model at all, so a 9999 year and a

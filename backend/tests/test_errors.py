@@ -32,7 +32,7 @@ from starlette.requests import ClientDisconnect
 import main
 from errors import AnswerUnhandledErrors, is_api_path, render_error_page
 from refusals import DECLARED
-from tests.test_house_rules import BACKEND, _python_sources
+from tests.corpus import BACKEND, application_modules
 
 HTML = {"Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"}
 JSON = {"Accept": "application/json"}
@@ -727,7 +727,7 @@ def _constructions() -> list[tuple[str, ast.Call, set[int] | None]]:
     FastAPI's, which subclasses it, and Starlette's own both count.
     """
     found: list[tuple[str, ast.Call, set[int] | None]] = []
-    for path in _python_sources():
+    for path in application_modules():
         where = path.relative_to(BACKEND).as_posix()
         module = importlib.import_module(where.removesuffix(".py").replace("/", "."))
         tree = ast.parse(path.read_text(encoding="utf-8"))

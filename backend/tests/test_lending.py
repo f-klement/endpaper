@@ -16,7 +16,7 @@ import lending
 import notifications
 from database import Base
 from models import Book, Loan
-from tests.test_house_rules import _source_modules
+from tests.corpus import application_sources
 
 
 def now() -> datetime:
@@ -558,7 +558,7 @@ class TestTheWayOutOfTheDoorHasTheCallersItClaims:
     def test_only_the_two_argued_callers_reach_past_the_door(self):
         found = [
             f"{name}:{node.lineno}"
-            for name, source in _source_modules().items()
+            for name, source in application_sources().items()
             for node in ast.walk(ast.parse(source))
             if isinstance(node, ast.Call)
             and isinstance(node.func, ast.Attribute)
@@ -628,7 +628,7 @@ class TestOnlyTheDeskBuildsAScope:
     def test_nothing_outside_the_desk_builds_a_scope_or_opens_its_query(self):
         offences = [
             f"{name}:{site}"
-            for name, source in _source_modules().items()
+            for name, source in application_sources().items()
             if name != "lending.py"
             for site in _reaches_around_the_door(source)
         ]

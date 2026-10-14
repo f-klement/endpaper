@@ -14,8 +14,9 @@ states what its two instruments do not see.
 rest of this file. The writes had an owner and the reads had none, and a
 vocabulary any member can extend, read by anybody with no viewer in the
 question, published the name of a tag minted off somebody's Private Book on
-every page load. `Vocabulary` is where that question is answered now; its own
-docstring carries what it closes and what it leaves open, and
+every page load. `Vocabulary` is where that question is answered now, as the
+tag arm of `disclosure.Disclosure`; its own docstring carries what it closes and
+what it leaves open, and
 `tests/test_tags.py::TestNothingElseDecidesWhoMaySeeATag` is the counterpart
 guard, over the same corpus and with the same instrument as the shelf rule.
 
@@ -56,26 +57,23 @@ own transaction.
 
 **`attach` queries for no Book**: it takes one somebody else resolved, and the
 privacy rule is `shelf.py`'s, applied before that Book reaches this function.
-**`Vocabulary` does query, through `Shelf`**, and that is the second half of
-this module rather than an exception to the first: who may be told a tag exists
-is a question about the Books carrying it, so it cannot be answered without
-asking the Shelf. This file therefore carries entries in
-`tests/test_shelf.py`'s fourth pass, one per statement, where it used to carry
-none.
+**`Vocabulary` asks about Books, through `disclosure.Disclosure`**, which
+reads them through the Shelf: who may be told a tag exists is a question about
+the Books carrying it, and the same question about collections and custom
+fields is answered by the same rule.
 """
 
 import logging
 from collections.abc import Iterable
 from typing import Final, Self, final
 
-from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from disclosure import Carrier, Disclosure
 from enums import TagCategory
-from models import Book, Tag, book_tags
+from models import Book, Tag
 from schemas.common import one_line_without_invisible_characters
 from schemas.tag import MAX_TAG_NAME, known_key
-from shelf import Shelf
 
 logger = logging.getLogger("endpaper.tags")
 
@@ -284,22 +282,19 @@ class Mint:
 class Vocabulary:
     """Which Tags one Member may be told about, and which they may put on a Book.
 
-    **The reading counterpart of `Mint`, and the seam this module was missing.**
-    A Tag carries no member and `tags` has no foreign key to `books`, so nothing
-    in a row says who may read it: the answer is whoever may read a Book that
-    carries it. That is a question about the Shelf, asked here once, rather than
-    a clause in each of the six routes that used to read the table whole.
+    **The tag arm of `disclosure.Disclosure`**, which owns the rule, its reads
+    and their order. What is here is what only a Tag has: the seeded
+    vocabulary, and a list that answers a different question from the write.
 
-    One Vocabulary per request. The Shelf query is read **lazily and once**, so
-    a caller that asks nothing pays nothing, and the two questions below share
-    it rather than each issuing their own.
+    One Vocabulary per request or unit of work, like the `Disclosure` it holds.
 
     ## The two questions are different, and collapsing them was the trap
 
     `listable` is what the server **volunteers**: it hands back names nobody
     asked for, so the bar is that the name is already legible to this viewer.
-    `writable` is asked about a Tag the caller **named by id**, so the bar is
-    only that answering does not confirm a name they could not otherwise reach.
+    `writable` and `resolve` are asked about a Tag the caller **named by id**,
+    so the bar is only that answering does not confirm a name they could not
+    otherwise reach.
 
     One predicate cannot serve both. `listable` must hide a Tag no Book
     carries, because a name on nothing is a name and nothing else. `writable`
@@ -337,27 +332,22 @@ class Vocabulary:
     so **every** observable answer to "may I have this name" answers "does it
     exist". Refusing, attaching and dropping silently are three answers and
     each of them is one; so is a Book handed back without the name on it, so
-    is a drop count, and so is `writable`'s own last arm, which lets a
-    guessed **id** be attached when no Book carries that Tag and hands the
-    name back on the Book. No number of them is written here, because the
-    set is open and a count of it goes stale against the code the moment a door
-    answers differently. The strongest is `create_tag`, which hands back the
-    colliding row itself, in one request, with no rate limit on it. Closing
-    this means tag identity ceasing to be global, which is a migration rather
-    than an edit here.
-
-    **Not addressed at all: `collections` and `custom_fields`**, which are the
-    same shape and were measured live on this tree. This class takes a viewer
-    and a `Shelf`, so a second vocabulary moves behind it without a second
-    design round; nothing here is specific to `tags` but the entity.
+    is a drop count, and so is the rule's own last arm, which lets a guessed
+    **id** be attached when no Book carries that Tag and hands the name back
+    on the Book. No number of them is written here, because the set is open
+    and a count of it goes stale against the code the moment a door answers
+    differently. The strongest is `create_tag`, which hands back the colliding
+    row itself, in one request, with no rate limit on it. Closing this means
+    tag identity ceasing to be global, which is a migration rather than an
+    edit here.
     """
 
-    __slots__ = ("_counts", "_db", "_viewer_id")
+    __slots__ = ("_db", "_rule", "_seeded")
 
     def __init__(self, db: Session, viewer_id: int) -> None:
         self._db = db
-        self._viewer_id = viewer_id
-        self._counts: dict[int, int] | None = None
+        self._seeded: frozenset[int] | None = None
+        self._rule = Disclosure.seen_by(db, viewer_id, Carrier.BOOK_TAGS, self._is_seeded_id)
 
     @classmethod
     def seen_by(cls, db: Session, viewer_id: int) -> Self:
@@ -373,32 +363,22 @@ class Vocabulary:
     def counts(self) -> dict[int, int]:
         """Tag id to how many of this Member's visible Books carry it.
 
-        **Joined to `books` through the Shelf, like every other query that
-        counts Books.** Without it the count included other members' Private
-        Books and trashed ones, and the endpoint this feeds is fetched on
-        nearly every page, so a member could watch somebody else's private
-        additions accrue in a number their own listing said was zero.
-
-        A tag id is absent rather than zero when nothing visible carries it,
-        which is what makes `.get(id, 0)` the visibility arm below as well as
-        the published count.
+        **Through the Shelf, like every other query that counts Books.**
+        Without it the count included other members' Private Books and trashed
+        ones, and the endpoint this feeds is fetched on nearly every page, so a
+        member could watch somebody else's private additions accrue in a number
+        their own listing said was zero. A tag id is absent rather than zero
+        when nothing visible carries it.
         """
-        if self._counts is None:
-            self._counts = dict(
-                Shelf.seen_by(self._db, self._viewer_id)
-                .select(book_tags.c.tag_id, func.count(book_tags.c.book_id))
-                .join(book_tags, book_tags.c.book_id == Book.id)
-                .group_by(book_tags.c.tag_id)
-                .all()
-            )
-        return self._counts
+        return self._rule.counts
 
     def listable(self) -> list[Tag]:
         """Every Tag this Member may be told exists, ordered for the client.
 
-        Two arms, and the order is by category then name so the response is
-        deterministic: the order a reader sees is the client's, which re-sorts
-        with a collator because no SQL fold moves `Ä`.
+        Two arms, seeded or carried by a visible Book, and no others: the list
+        is what the server volunteers. The order is by category then name so
+        the response is deterministic: the order a reader sees is the client's,
+        which re-sorts with a collator because no SQL fold moves `Ä`.
         """
         counts = self.counts
         return [
@@ -407,86 +387,41 @@ class Vocabulary:
             if _is_seeded(tag) or counts.get(tag.id, 0) > 0
         ]
 
-    def writable(self, tag: Tag) -> bool:
-        """Whether this Member may act on a Tag they have named by id.
+    def writable(self, tag_id: int) -> bool:
+        """Whether this Member may act on the Tag at an id they have named.
 
-        False means the route answers 404, which is the answer an id no row
-        carries already gets: a Tag whose every Book is hidden from the caller
-        becomes indistinguishable from one that is not there.
-
-        **Four arms, in cost order, and the last two are why this is not
-        `listable`.**
-
-        1. Seeded. Its name is in `PREDEFINED_TAGS`, which the mirror
-           publishes, so it discloses nothing that is not already public.
-        2. A Book on this Member's shelf carries it, so they can already read
-           the name off that Book.
-        3. A **trashed Book this Member may see** carries it, which is their
-           own trashed Books and everybody's trashed public ones.
-           `in_trash_for` is the mirror of `visible_to` rather than an
-           ownership test, so the set is wider than the arm's name used to
-           say, and the reason it is still safe is unchanged: those are Books
-           whose trash listing this Member is served, so they can read the
-           name off one. Without this arm a member who trashes the last Book
-           carrying a Tag they invented could never put it on another one, and
-           a name only a trashed public Book carries would be lost to
-           everybody at once.
-        4. **No Book carries it at all.** Such a Tag names no Book, so allowing
-           it discloses no Book, and this is the arm every create depends on:
-           between minting a Tag and attaching it there is no carrier, and on
-           the scan form that gap is as long as the form is open. The tell it
-           leaves is in this class's own docstring under what is not closed.
+        `disclosure.Disclosure.may_be_told`, with the seeded vocabulary as the
+        tag's own arm: its names are in `PREDEFINED_TAGS`, which the mirror
+        publishes, so admitting one discloses nothing that is not already
+        public. True for an id no row carries, which is what lets a Tag just
+        minted be attached.
         """
-        if _is_seeded(tag):
-            return True
-        if self.counts.get(tag.id, 0) > 0:
-            return True
-        if self._carried_in_the_trash_this_member_sees(tag):
-            return True
-        return not self._carried_by_any_book(tag)
+        return self._rule.may_be_told(tag_id)
 
-    def _carried_in_the_trash_this_member_sees(self, tag: Tag) -> bool:
-        """Whether a trashed Book this Member may see carries this Tag.
+    def resolve(self, tag_id: int) -> Tag | None:
+        """The Tag at this id, or None for an id no row carries and for one
+        this Member may not be told about alike. The door answers None with
+        what an unused id already gets, 404 in the path and 400 in a body."""
+        return self._rule.resolve(tag_id, self._row)
 
-        **Not "a Book this Member trashed", which is what this was called and
-        is narrower than what it asks.** `Shelf.trashed_by` is
-        `in_trash_for`, the mirror of `visible_to`: trashed, and public or
-        theirs. So another member's trashed **public** Book answers True here,
-        and that is correct rather than a leak, because this Member is served
-        that Book in their own trash listing and can read the name off it. The
-        arm would be a leak if the predicate were unscoped, which is the
-        mistake the name invited.
+    def _row(self, tag_id: int) -> Tag | None:
+        """The read `resolve` hands the rule, which asks it after the gate."""
+        return self._db.get(Tag, tag_id)
 
-        `Shelf.trashed_by` and not a flag on `seen_by`, for the reason that
-        method gives: a predicate that means "on the shelf" or "in the trash"
-        depending on an argument is one a caller can get backwards, and
-        backwards here would answer this question over every member's trash,
-        private Books included.
+    def _is_seeded_id(self, tag_id: int) -> bool:
+        """The seeded arm, by id, so the gate can run before the row is read.
+
+        The whole set in one statement, lazily, so the arm costs the same
+        whatever the id: `disclosure` says why that matters. Two columns and
+        never a name. Decided by `_is_seeded_key`, the test `listable` applies
+        to a row, so the two cannot disagree about which Tags are seeded.
         """
-        return bool(
-            Shelf.trashed_by(self._db, self._viewer_id)
-            .select(func.count(book_tags.c.book_id))
-            .join(book_tags, book_tags.c.book_id == Book.id)
-            .filter(book_tags.c.tag_id == tag.id)
-            .scalar()
-        )
-
-    def _carried_by_any_book(self, tag: Tag) -> bool:
-        """Whether any Book in the library carries this Tag, viewer or no viewer.
-
-        **Deliberately unscoped, and it is the one question here that has to
-        be.** Every other read in this class asks what this Member may see; this
-        one asks whether there is anything to disclose at all, and scoping it
-        would answer yes for a Tag the Member simply cannot see, which is the
-        case arm 4 exists to separate. It returns a boolean and never a count,
-        so nothing about how many hidden Books carry the Tag leaves this method.
-        """
-        return bool(
-            self._db.query(func.count(book_tags.c.book_id))
-            .filter(book_tags.c.tag_id == tag.id)
-            .limit(1)
-            .scalar()
-        )
+        if self._seeded is None:
+            rows = self._db.query(Tag.id, Tag.key).filter(Tag.key.isnot(None)).all()
+            self._seeded = frozenset(
+                row_id for row_id, key in rows if _is_seeded_key(key)
+            )
+        return tag_id in self._seeded
 
 
 @final
@@ -511,35 +446,28 @@ class Naming:
     that defaults to public, which made that name `listable` to every member
     permanently and with no member level undo. What is **not** refused is
     anything a Member already reaches: a seeded name, a name on their own
-    shelf or in their own trash, a name no Book carries, and a name this unit
-    of work has already handed them.
+    shelf or in their own trash, and a name no Book carries.
 
-    **That last one is not a concession, and leaving it out is a false refusal
-    in every ordinary upload.** `Vocabulary.counts` is read once per unit of
-    work, so a Tag this import put on its own first Book is still absent from
-    that count at the second row, while `_carried_by_any_book` is live and
-    answers yes: from the second row on, the Member's own name would be
-    refused off their own Book. **What puts a Tag in that population is
-    having gained its first carrier inside this unit of work**, and the
-    common member is the name the upload itself invents: a shelf name on two
-    books is two rows carrying it, and the second is refused. A Tag the
-    Library already held that no Book carried is the same case by another
-    road, and is the rarer one. Recording what was allowed is also the true answer
-    rather than a patch over a stale read: a Member who put the name on their
-    own Book a moment ago can read it back off that Book.
+    **A name this unit of work has handed over stays handed over, and the
+    rule's snapshot is what holds it.** Each of its reads is taken at the
+    first question that needs it and kept for the unit of work, so every read
+    that admitted a name was taken before this unit attached that name, and
+    the answer does not move when the unit puts the name on its own Book. A
+    live unscoped read would see that attach and refuse the name
+    from the second row of every ordinary upload on, which is why
+    `tests/test_tags.py::test_a_name_it_has_already_handed_over_stays_handed_over`
+    pins the repeat.
 
     One Naming per unit of work, a request or an import, like the Mint and the
     Vocabulary it composes. Nothing here commits, for the reason the module
     docstring gives.
     """
 
-    __slots__ = ("_allowed", "_mint", "_vocabulary")
+    __slots__ = ("_mint", "_vocabulary")
 
     def __init__(self, mint: Mint, vocabulary: Vocabulary) -> None:
         self._mint = mint
         self._vocabulary = vocabulary
-        #: Tag ids this unit of work has already handed to this writer.
-        self._allowed: set[int] = set()
 
     @classmethod
     def for_member(cls, db: Session, member_id: int, *, budget: int | None = None) -> Self:
@@ -566,8 +494,7 @@ class Naming:
         tag = self._mint.get_or_mint(raw)
         if tag is None:
             return None
-        if tag.id in self._allowed or self._vocabulary.writable(tag):
-            self._allowed.add(tag.id)
+        if self._vocabulary.writable(tag.id):
             return tag
         # **The name as submitted, never `tag.name`.** The stored row's
         # spelling is what the guess was folded onto, and handing that to a
@@ -616,7 +543,12 @@ def _is_seeded(tag: Tag) -> bool:
     would leave a key describing a name the row no longer has; that is the
     residue of this derivation, not of the column choice.
     """
-    return known_key(tag.key) is not None
+    return _is_seeded_key(tag.key)
+
+
+def _is_seeded_key(key: str | None) -> bool:
+    """`_is_seeded` on the column alone, for a reader holding no row."""
+    return known_key(key) is not None
 
 
 def room_on(book: Book) -> bool:

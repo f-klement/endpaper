@@ -18,10 +18,9 @@ import pytest
 import respx
 
 import sources
+from categories import CATEGORIES_MAX, MAX_CATEGORIES_PER_BOOK, split_categories
 from enums import CatalogueSource
-from google_books import split_categories
 from schemas import MAX_CLASSIFICATIONS_PER_BOOK
-from schemas.book import CATEGORIES_MAX, MAX_CATEGORIES_PER_BOOK
 from tests.helpers import (
     BNF,
     DNB,

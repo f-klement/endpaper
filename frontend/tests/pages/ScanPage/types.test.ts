@@ -40,6 +40,14 @@ import { producedValue } from "../../../src/lib/stores";
 import { TEXT_CEILINGS } from "../../../src/lib/bookBounds";
 import type { FileMetadata } from "../../../src/lib/fileReaders";
 import { CARRIES_A_BOOK } from "../../carriesABook";
+import {
+  operationById,
+  propertiesOf,
+  requiredOf,
+  resolved,
+  statedBound,
+  type SchemaNode,
+} from "../../committedSchema";
 // One module's text per tree, each from the armed corpus that refuses a name
 // its tree does not hold. The array glob this replaced read both with a
 // lookup defaulting to the empty string.
@@ -187,58 +195,23 @@ describe("toScanRequest", () => {
   });
 });
 
-const SCHEMA = import.meta.glob("../../../openapi.json", {
-  query: "?raw",
-  import: "default",
-  eager: true,
-}) as Record<string, string>;
-
-interface Operation {
-  operationId?: string;
-  requestBody?: {
-    content?: Record<string, { schema?: { $ref?: string } }>;
-  };
-}
-
 interface BodySchema {
-  properties?: Record<string, unknown>;
-  required?: string[];
+  properties: Readonly<Record<string, SchemaNode>>;
+  required: readonly string[];
 }
 
 /** The body one endpoint documents: what it accepts and what it insists on. */
-function requestSchema(
-  operationId: string,
-  expectedRef: string,
-  minimumProperties: number,
-): BodySchema {
-  const raw = SCHEMA["../../../openapi.json"] ?? "";
-  // A glob that matched nothing would make every assertion below pass forever.
-  expect(raw.length).toBeGreaterThan(1000);
-
-  const schema = JSON.parse(raw) as {
-    paths: Record<string, Record<string, Operation>>;
-    components: { schemas: Record<string, BodySchema> };
-  };
-  const operations = Object.values(schema.paths).flatMap((methods) =>
-    Object.values(methods).filter(
-      (operation) => operation.operationId === operationId,
-    ),
-  );
-  expect(operations).toHaveLength(1);
-
-  const ref =
-    operations[0]!.requestBody?.content?.["application/json"]?.schema?.$ref;
+function requestSchema(operationId: string, expectedRef: string): BodySchema {
+  const declared = operationById(operationId).operation.requestBody;
+  const body = declared === undefined ? undefined : resolved(declared);
+  const ref = (
+    body?.["content"] as Record<string, { schema?: SchemaNode }> | undefined
+  )?.["application/json"]?.schema?.["$ref"];
   // Named rather than only followed: a route that starts taking a different
   // schema is a change somebody should have to make here as well.
   expect(ref).toBe(expectedRef);
-
-  const body = schema.components.schemas[ref!.split("/").pop()!]!;
-  // A schema whose properties moved behind a composition keyword would leave
-  // both comparisons below asserting nothing.
-  expect(Object.keys(body.properties ?? {}).length).toBeGreaterThan(
-    minimumProperties,
-  );
-  return body;
+  const name = expectedRef.split("/").pop()!;
+  return { properties: propertiesOf(name), required: requiredOf(name) };
 }
 
 /**
@@ -325,8 +298,7 @@ describe("the scan request agrees with the API", () => {
     // nothing in any log to say a column was never written.
     const accepted = new Set(
       Object.keys(
-        requestSchema("scan_add", "#/components/schemas/BookCreate", 10)
-          .properties ?? {},
+        requestSchema("scan_add", "#/components/schemas/BookCreate").properties,
       ),
     );
 
@@ -339,8 +311,7 @@ describe("the scan request agrees with the API", () => {
     // wires it up, and nothing else would say so.
     const sent = new Set(sentNames());
     const missing = Object.keys(
-      requestSchema("scan_add", "#/components/schemas/BookCreate", 10)
-        .properties ?? {},
+      requestSchema("scan_add", "#/components/schemas/BookCreate").properties,
     ).filter((name) => !sent.has(name) && !(name in NOT_SENT_BY_THE_SCAN_FLOW));
 
     expect(missing).toEqual([]);
@@ -356,8 +327,7 @@ describe("the scan request agrees with the API", () => {
     // longer takes, which is the one thing this table exists to prevent.
     const accepted = new Set(
       Object.keys(
-        requestSchema("scan_add", "#/components/schemas/BookCreate", 10)
-          .properties ?? {},
+        requestSchema("scan_add", "#/components/schemas/BookCreate").properties,
       ),
     );
     const sent = new Set(sentNames());
@@ -381,10 +351,10 @@ describe("the scan request agrees with the API", () => {
     // A 422 on the last press of a scan, after the lookup and the tag picking,
     // is the most expensive place in the app to discover a missing field.
     const sent = new Set(sentNames());
-    const missing = (
-      requestSchema("scan_add", "#/components/schemas/BookCreate", 10)
-        .required ?? []
-    ).filter((name) => !sent.has(name));
+    const missing = requestSchema(
+      "scan_add",
+      "#/components/schemas/BookCreate",
+    ).required.filter((name) => !sent.has(name));
 
     expect(missing).toEqual([]);
   });
@@ -440,8 +410,7 @@ describe("the copy request agrees with the API", () => {
   it("sends no field the endpoint does not accept", () => {
     const accepted = new Set(
       Object.keys(
-        requestSchema("add_copy", "#/components/schemas/CopyCreate", 5)
-          .properties ?? {},
+        requestSchema("add_copy", "#/components/schemas/CopyCreate").properties,
       ),
     );
     const sent = Object.keys(toCopyRequest(pending()));
@@ -451,8 +420,7 @@ describe("the copy request agrees with the API", () => {
 
   it("sends every field the endpoint accepts, or names why not", () => {
     const accepted = Object.keys(
-      requestSchema("add_copy", "#/components/schemas/CopyCreate", 5)
-        .properties ?? {},
+      requestSchema("add_copy", "#/components/schemas/CopyCreate").properties,
     );
     const sent = new Set(Object.keys(toCopyRequest(pending())));
 
@@ -509,8 +477,7 @@ describe("the copy request agrees with the API", () => {
     // something. Same rot and the same cost as the scan request's.
     const accepted = new Set(
       Object.keys(
-        requestSchema("add_copy", "#/components/schemas/CopyCreate", 5)
-          .properties ?? {},
+        requestSchema("add_copy", "#/components/schemas/CopyCreate").properties,
       ),
     );
     const sent = new Set(Object.keys(toCopyRequest(pending())));
@@ -534,10 +501,10 @@ describe("the copy request agrees with the API", () => {
     // press, which is the second most expensive place in this flow to find
     // out, and nothing else in the tree would say so.
     const sent = new Set(Object.keys(toCopyRequest(pending())));
-    const missing = (
-      requestSchema("add_copy", "#/components/schemas/CopyCreate", 5)
-        .required ?? []
-    ).filter((name) => !sent.has(name));
+    const missing = requestSchema(
+      "add_copy",
+      "#/components/schemas/CopyCreate",
+    ).required.filter((name) => !sent.has(name));
 
     expect(missing).toEqual([]);
   });
@@ -696,10 +663,12 @@ describe("draftFromFile", () => {
     // would still pass the day the schema moved, a smaller count being a weaker
     // claim. Distinct values throughout, so the fold cannot be what shortens
     // this.
-    const limit = (
-      requestSchema("scan_add", "#/components/schemas/BookCreate", 10)
-        .properties as { identifiers: { maxItems: number } }
-    ).identifiers.maxItems;
+    const limit = statedBound(
+      requestSchema("scan_add", "#/components/schemas/BookCreate").properties[
+        "identifiers"
+      ],
+      "maxItems",
+    );
     const identifiers = Array.from({ length: limit + 1 }, (_, index) => ({
       scheme: "AMAZON",
       value: `B000R34YK${index}`,

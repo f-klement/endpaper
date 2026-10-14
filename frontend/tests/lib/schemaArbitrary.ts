@@ -3,13 +3,14 @@
  *
  * **Derived from `openapi.json`, never from a copy of it**, so an operation,
  * a field or a bound the backend adds reaches every property here the day
- * the client is regenerated. Read the way `lib/bookBounds.test.ts` reads it.
+ * the client is regenerated. Read through `tests/committedSchema.ts`, which
+ * every reader of the document shares.
  *
  * **The subset of JSON Schema this reads is the subset the document uses,
- * and a keyword outside it is refused by name** rather than ignored: an
- * ignored `exclusiveMinimum` or `const` would draw values the schema forbids,
- * and a red over one of them would be the deriver's fault and read as the
- * page's. `tests/lib/schemaArbitrary.test.ts` builds every response the
+ * and a keyword outside it is refused by name** (`refuseUnmodelled`) rather
+ * than ignored: an ignored `exclusiveMinimum` or `const` would draw values
+ * the schema forbids, and a red over one of them would be the deriver's fault
+ * and read as the page's. `tests/lib/schemaArbitrary.test.ts` builds every response the
  * document declares, so a keyword added to it reds there first.
  *
  * **What it draws beyond the backend's habits, deliberately**: an optional
@@ -34,80 +35,17 @@
 
 import fc from "fast-check";
 
+import {
+  assertedKeys,
+  committedSchema,
+  operationById,
+  refuseUnmodelled,
+  responseOf,
+  target,
+  type Document,
+  type SchemaNode,
+} from "../committedSchema";
 import { spelled, type Repeated } from "../property";
-
-/** As much of a JSON Schema node as the deriver reads. */
-export type SchemaNode = Readonly<Record<string, unknown>>;
-
-interface Operation {
-  readonly operationId: string;
-  /** Who may call it; absent where anybody may. */
-  readonly security?: readonly Readonly<Record<string, unknown>>[];
-  readonly responses: Readonly<
-    Record<
-      string,
-      { readonly content?: Readonly<Record<string, { schema?: SchemaNode }>> }
-    >
-  >;
-}
-
-interface Document {
-  /** A default every operation without its own would inherit. */
-  readonly security?: unknown;
-  readonly paths: Readonly<Record<string, Readonly<Record<string, Operation>>>>;
-  readonly components: {
-    readonly schemas: Readonly<Record<string, SchemaNode>>;
-  };
-}
-
-const SCHEMA = import.meta.glob("../../openapi.json", {
-  query: "?raw",
-  import: "default",
-  eager: true,
-}) as Record<string, string>;
-
-let parsed: Document | undefined;
-
-/** The committed document, parsed once. */
-export function schemaDocument(): Document {
-  const raw = SCHEMA["../../openapi.json"] ?? "";
-  // A glob matching nothing would leave no operation to draw for, and every
-  // property over it green over an empty subject.
-  if (raw.length < 1000) throw new Error("openapi.json was not read");
-  parsed ??= JSON.parse(raw) as Document;
-  return parsed;
-}
-
-/** Keywords that say nothing about what a value may be. */
-const ANNOTATIONS = new Set([
-  "title",
-  "description",
-  "default",
-  "contentMediaType",
-]);
-
-/** Keywords the deriver honours, which is every one the document uses. */
-const ASSERTIONS = new Set([
-  "$ref",
-  "anyOf",
-  "enum",
-  "type",
-  "properties",
-  "required",
-  "additionalProperties",
-  "items",
-  "minimum",
-  "maximum",
-  "minLength",
-  "maxLength",
-  "minItems",
-  "maxItems",
-  "pattern",
-  "format",
-]);
-
-/** The keywords that stand alone: nothing else may assert beside them. */
-const ALONE = ["$ref", "anyOf"];
 
 /**
  * How long a list grows where the schema sets no bound. A list at a declared
@@ -260,7 +198,7 @@ function stringOf(node: SchemaNode): fc.Arbitrary<string | AtBound> {
 
 /** Whether `node` is a string and asserts nothing else. */
 function bareString(node: SchemaNode): boolean {
-  const asserted = Object.keys(node).filter((key) => !ANNOTATIONS.has(key));
+  const asserted = assertedKeys(node);
   return asserted.length === 1 && node["type"] === "string";
 }
 
@@ -311,10 +249,20 @@ function arrayOf(node: SchemaNode, where: string): fc.Arbitrary<unknown[]> {
   const each = arbitraryOf(items as SchemaNode, `${where}/items`);
   const minLength = numberAt(node, "minItems") ?? 0;
   const maxItems = numberAt(node, "maxItems");
-  const some = fc.array(each, {
+  const drawn = fc.array(each, {
     minLength,
     maxLength: Math.max(minLength, Math.min(maxItems ?? LIST_CAP, LIST_CAP)),
   });
+  // An empty list as an edge where the schema permits one: `fc.array` alone
+  // draws one too rarely for a witness over every operation's answers to see
+  // it at every seed, and an empty list is a page's own branch.
+  const some =
+    minLength === 0
+      ? fc.oneof(
+          { arbitrary: drawn, weight: 3 },
+          { arbitrary: fc.array(each, { maxLength: 0 }), weight: 1 },
+        )
+      : drawn;
   if (maxItems === undefined || maxItems <= LIST_CAP) return some;
   return fc.oneof(
     { arbitrary: some, weight: 3 },
@@ -384,8 +332,7 @@ function refOf(ref: unknown, where: string): fc.Arbitrary<unknown> {
   // A schema reaching itself would build forever. None does today; this says
   // so loudly the day one does, where `fc.letrec` would then be the fix.
   if (building.has(name)) throw new Error(`${where}: ${name} reaches itself`);
-  const schema = schemaDocument().components.schemas[name];
-  if (schema === undefined) throw new Error(`${where}: no schema ${name}`);
+  const schema = target(ref, committedSchema());
   building.add(name);
   try {
     const built = arbitraryOf(schema, name);
@@ -404,18 +351,7 @@ export function arbitraryOf(
   node: SchemaNode,
   where: string,
 ): fc.Arbitrary<unknown> {
-  const asserted = Object.keys(node).filter((key) => !ANNOTATIONS.has(key));
-  for (const key of asserted) {
-    if (!ASSERTIONS.has(key)) {
-      throw new Error(`${where}: the deriver does not read ${key}`);
-    }
-  }
-  for (const alone of ALONE) {
-    if (alone in node && asserted.length > 1) {
-      const others = asserted.filter((key) => key !== alone).join(", ");
-      throw new Error(`${where}: ${alone} beside ${others}`);
-    }
-  }
+  refuseUnmodelled(node, where);
   if ("$ref" in node) return refOf(node["$ref"], where);
   if ("anyOf" in node) {
     const branches = node["anyOf"] as SchemaNode[];
@@ -455,16 +391,6 @@ export interface Answer {
   readonly body?: unknown;
 }
 
-/** The operation an id names, refused when the document has none. */
-function operation(operationId: string): Operation {
-  for (const methods of Object.values(schemaDocument().paths)) {
-    for (const found of Object.values(methods)) {
-      if (found.operationId === operationId) return found;
-    }
-  }
-  throw new Error(`openapi.json declares no operation ${operationId}`);
-}
-
 /**
  * The answers one operation's responses declare, without the ones this
  * cannot draw: a status that is not a number, and a body that is not JSON.
@@ -473,14 +399,13 @@ function declaredAnswers(
   operationId: string,
 ): [number, fc.Arbitrary<Answer>][] {
   const answers: [number, fc.Arbitrary<Answer>][] = [];
-  for (const [code, response] of Object.entries(
-    operation(operationId).responses,
-  )) {
+  const located = operationById(operationId);
+  for (const code of Object.keys(located.operation.responses)) {
     const status = Number(code);
     if (!Number.isInteger(status)) {
       throw new Error(`${operationId}: a response for ${code}`);
     }
-    const content = response.content;
+    const content = responseOf(located, code)!.response.content;
     if (content === undefined) {
       answers.push([status, fc.constant({ status })]);
       continue;
@@ -526,7 +451,7 @@ export function answersOf(operationId: string): fc.Arbitrary<Answer> {
 
 /** Every operation id the document declares. */
 export function operationIds(): string[] {
-  const ids = Object.values(schemaDocument().paths).flatMap((methods) =>
+  const ids = Object.values(committedSchema().paths).flatMap((methods) =>
     Object.values(methods).map((one) => one.operationId),
   );
   ids.sort();
@@ -546,7 +471,7 @@ export function operationIds(): string[] {
  * two arms are exercised nowhere else.
  */
 export function anonymousOperations(
-  document: Document = schemaDocument(),
+  document: Document = committedSchema(),
 ): Set<string> {
   if (document.security !== undefined) {
     throw new Error("openapi.json sets a default security, which this ignores");
@@ -593,7 +518,7 @@ function literal(route: Route): number {
 function routeTable(): Route[] {
   if (routes !== undefined) return routes;
   const table: Route[] = [];
-  for (const [path, methods] of Object.entries(schemaDocument().paths)) {
+  for (const [path, methods] of Object.entries(committedSchema().paths)) {
     const segments = path
       .split("/")
       .map((segment) =>

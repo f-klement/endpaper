@@ -7,19 +7,20 @@ import { MemoryRouter, useLocation } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
-  getRestoreBookMutationKey,
-  type RestoreBookMutationVariables,
+  getPurgeBookMutationOptions,
+  getRestoreBookMutationOptions,
 } from "../../src/api/generated/endpoints/books/books";
 import { AuthMode, type UserOut } from "../../src/api/generated/model";
 import {
   readStoredUser,
   useGoBack,
-  usePendingRows,
+  useRowWrite,
   useSession,
 } from "../../src/pages/hooks";
 import { makeUser, resetIds } from "../factories";
 import {
   createTestQueryClient,
+  heldOpen,
   mockApi,
   renderHookWithProviders,
   type MockApi,
@@ -591,35 +592,63 @@ describe("useGoBack", () => {
   });
 });
 
-describe("usePendingRows", () => {
-  it("refuses at the type check a row key its writes do not carry", () => {
+describe("useRowWrite", () => {
+  it("reports a slow failure on one row after a later row's write succeeded", async () => {
+    // The shape a mutation hook's own `error` gets wrong: it is the latest
+    // call's, the second row's here, which succeeded. A purge held open on a
+    // third book is another write keyed by the same field, so it marks a row
+    // here only if the pending calls are not filtered by this write's key.
+    const first = heldOpen();
+    const other = heldOpen();
+    api.on("/api/books/7/restore", first.respond);
+    api.on("/api/books/8/restore", { body: {} });
+    api.on("/api/books/9/permanent", other.respond, "DELETE");
+    const { result } = renderHookWithProviders(() => ({
+      restore: useRowWrite(getRestoreBookMutationOptions, "bookId"),
+      purge: useRowWrite(getPurgeBookMutationOptions, "bookId"),
+    }));
+
+    act(() => result.current.purge.mutate({ bookId: 9 }));
+    act(() => result.current.restore.mutate({ bookId: 7 }));
+    act(() => result.current.restore.mutate({ bookId: 8 }));
+    await waitFor(() =>
+      expect(result.current.restore.pendingRows).toEqual(new Set([7])),
+    );
+    expect(result.current.purge.pendingRows).toEqual(new Set([9]));
+    first.release({ status: 404, body: { detail: "Book not found" } });
+
+    await waitFor(() =>
+      expect(result.current.restore.error).toMatchObject({
+        message: "Book not found",
+      }),
+    );
+    expect(result.current.restore.pendingRows).toEqual(new Set());
+    other.release({ status: 204 });
+  });
+
+  it("refuses at the type check a row key its write does not carry", async () => {
     // At run time a misspelt key marks nothing and says nothing, so the type
     // check is what refuses it. `@ts-expect-error` is itself an error once the
     // line under it compiles, and `tsconfig.json` includes `tests`, so a
     // signature that stops refusing turns the type check red. The first call
-    // carries no directive, so one that refused every key would too.
-    type Variables = RestoreBookMutationVariables;
-    const KEY = getRestoreBookMutationKey();
-    const client = createTestQueryClient();
-    void client
-      .getMutationCache()
-      .build(client, {
-        mutationKey: KEY,
-        mutationFn: () => new Promise(() => {}),
-      })
-      .execute({ bookId: 7 });
+    // carries no directive, so one that refused every key would too. Row zero
+    // is a row, so a truthiness test in place of the type test would show here.
+    const held = heldOpen();
+    api.on("/api/books/0/restore", held.respond);
+    const { result } = renderHookWithProviders(() => [
+      useRowWrite(getRestoreBookMutationOptions, "bookId"),
+      // @ts-expect-error not a field of the variables
+      useRowWrite(getRestoreBookMutationOptions, "bookid"),
+    ]);
 
-    const { result } = renderHookWithProviders(
-      () => [
-        usePendingRows<Variables>("bookId", KEY),
-        // @ts-expect-error not a field of the variables
-        usePendingRows<Variables>("bookid", KEY),
-        // @ts-expect-error no variables type is named, so no key passes
-        usePendingRows("bookId", KEY),
-      ],
-      { queryClient: client },
+    act(() => result.current[0]!.mutate({ bookId: 0 }));
+
+    await waitFor(() =>
+      expect(result.current.map((write) => write.pendingRows)).toEqual([
+        new Set([0]),
+        new Set(),
+      ]),
     );
-
-    expect(result.current).toEqual([new Set([7]), new Set(), new Set([7])]);
+    held.release({ body: {} });
   });
 });

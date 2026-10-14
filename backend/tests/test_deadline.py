@@ -21,7 +21,7 @@ import pytest
 
 import deadline
 from deadline import in_, left
-from tests.test_house_rules import BACKEND, _python_sources
+from tests.corpus import BACKEND, application_modules
 
 
 class TestADeadlineIsAnAbsoluteMonotonicTimestamp:
@@ -138,14 +138,14 @@ class TestTheModuleEveryoneTrustsImportsNothingOfOurs:
 def _modules_that_could_read_a_clock() -> list[Path]:
     """Every module of ours but `deadline.py`, which is the one that may.
 
-    **`test_house_rules._python_sources`, not a walk of its own**, which is
+    **`corpus.application_modules`, not a walk of its own**, which is
     what keeps one definition of what vendored means. An exemption is a filter
     over it rather than a reason to copy it. The exclusion here is a path and
     not a basename for the reason `test_covers._our_modules` states.
     """
     return [
         path
-        for path in _python_sources()
+        for path in application_modules()
         if path.relative_to(BACKEND).as_posix() != "deadline.py"
     ]
 
@@ -493,7 +493,7 @@ class TestTheTwoWordsDoNotMix:
     * **A value reaching a slot through anything but a name**, which is a
       `*args`, a dataclass field, or a local bound from an expression this
       cannot classify.
-    * **The test tree**, which `_python_sources` excludes. The spies in
+    * **The test tree**, which `application_modules` excludes. The spies in
       `test_metadata.py` mirror this signature and are outside the walk.
 
     `TestTheDoorIsTwoFunctionsWide` guards the module's shape,
@@ -502,7 +502,7 @@ class TestTheTwoWordsDoNotMix:
     """
 
     def test_no_call_passes_a_duration_where_a_moment_is_named(self):
-        trees = {path: ast.parse(path.read_text()) for path in _python_sources()}
+        trees = {path: ast.parse(path.read_text()) for path in application_modules()}
         ours = {_dotted(path): _positional_names(tree) for path, tree in trees.items()}
         offenders = [
             f"{path.relative_to(BACKEND)}:{line}: {why}"
@@ -605,7 +605,7 @@ class TestTheTwoWordsDoNotMix:
         owns the word. `routers.opds` is named because the stem it shares with
         `opds` is what the first version of `_dotted` got wrong.
         """
-        walked = {_dotted(path) for path in _python_sources()}
+        walked = {_dotted(path) for path in application_modules()}
 
         assert {
             "authority",

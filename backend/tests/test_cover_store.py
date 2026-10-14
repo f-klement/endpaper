@@ -28,8 +28,8 @@ import pytest
 
 import cover_store
 from config import ALLOWED_IMAGE_EXTENSIONS, COVERS_DIR
+from tests.corpus import application_sources
 from tests.helpers import JPEG_BYTES, NOT_AN_IMAGE, PNG_BYTES, WEBP_BYTES
-from tests.test_house_rules import _source_modules
 
 #: The module that defines where the directory is, and the module that owns it.
 #:
@@ -124,7 +124,7 @@ class TestTheDirectoryHasOneOwner:
     def test_no_other_module_knows_where_covers_live(self) -> None:
         offenders = sorted(
             name
-            for name, source in _source_modules().items()
+            for name, source in application_sources().items()
             if name not in _ALLOWED_TO_KNOW_THE_DIRECTORY
             and ("COVERS_DIR" in _names_used(source) or _composes_the_directory(source))
         )
@@ -137,7 +137,7 @@ class TestTheDirectoryHasOneOwner:
         """The sweep is the difference between them, and it is not a caller's choice."""
         offenders = sorted(
             name
-            for name, source in _source_modules().items()
+            for name, source in application_sources().items()
             if name not in _ALLOWED_TO_WRITE and _THE_WRITERS & _names_used(source)
         )
         assert not offenders, (
@@ -153,7 +153,7 @@ class TestTheDirectoryHasOneOwner:
         The five names are the importers the ticket measured. If the corpus ever
         stops holding them, the two passes above are green over nothing.
         """
-        corpus = set(_source_modules())
+        corpus = set(application_sources())
         assert {
             "backup.py",
             "covers.py",

@@ -43,10 +43,9 @@ import sources
 import targets
 from catalogue import Record
 from enums import Capability, CatalogueSource, SourceFamily
+from tests.corpus import BACKEND, shipped_modules
 from tests.strategies import Node, answer_of, field_values, marc_records, witness, xml_of
-from tests.test_house_rules import _is_vendored
 
-BACKEND = pathlib.Path(__file__).resolve().parent.parent
 FIXTURE = BACKEND / "tests" / "fixtures" / "marc21_one_record.xml"
 
 #: The ISBN the fixture record names in its own 020.
@@ -388,35 +387,6 @@ class TestADecodingIsValidatedWhereverItIsBuilt:
         )
 
 
-def _production_sources(root: pathlib.Path = BACKEND) -> list[pathlib.Path]:
-    """Every module of this application that is not a test.
-
-    **`root` is what lets the diagonal in `test_house_rules.py` drive this**,
-    against a tree with vendored code planted in it, rather than leaving a walk
-    that is right by construction and exercised by nothing.
-
-    Stated as the exclusion, so a package added later is read rather than
-    skipped.
-
-    **What vendored means is `test_house_rules._is_vendored`.** The three names
-    this held were every cache anybody had seen locally, and the pipeline sets
-    `UV_CACHE_DIR` inside `backend/`, so `.uv-cache/` was read and any
-    dependency spelling `Decoding(` would have been reported for skipping this
-    application's projection.
-    """
-    found = [
-        path
-        for path in root.rglob("*.py")
-        if "tests" not in path.relative_to(root).parts
-        and not _is_vendored(path, root)
-    ]
-    # The packages it must cover rather than a number, so a walk that lost a
-    # whole directory fails rather than passing on a smaller sweep. See
-    # `test_accounts._sources` for the mutation that made a count look adequate.
-    assert {"routers", "schemas"} <= {path.parent.name for path in found}, found
-    return found
-
-
 class TestOnlyTheProjectionTurnsARowIntoADecoding:
     """`Target.decoding` says it is the only place a catalogue row becomes a
     decoding, and a docstring saying so is enforced by nothing.
@@ -480,7 +450,7 @@ class TestOnlyTheProjectionTurnsARowIntoADecoding:
     def test_no_module_that_can_reach_a_row_builds_one_itself(self):
         offenders = [
             path.relative_to(BACKEND).as_posix()
-            for path in _production_sources()
+            for path in shipped_modules()
             if all(self._reads(path))
         ]
 
@@ -494,8 +464,8 @@ class TestOnlyTheProjectionTurnsARowIntoADecoding:
         that reads nothing.
         """
         assert self._reads(BACKEND / "targets.py") == (False, True)
-        assert any(self._reads(path)[0] for path in _production_sources())
-        assert len(_production_sources()) > 50
+        assert any(self._reads(path)[0] for path in shipped_modules())
+        assert len(shipped_modules()) > 50
 
 
 #: One source identifier of each family, shaped alike, so the only thing that

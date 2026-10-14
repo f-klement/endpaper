@@ -28,21 +28,23 @@ import {
   getGetQuotesQueryKey,
   getListQuotesQueryKey,
   getListProgressQueryKey,
+  getDeleteNoteMutationOptions,
+  getDeleteProgressMutationOptions,
+  getDeleteQuoteMutationOptions,
+  getDeleteTagMutationOptions,
+  getEditNoteMutationOptions,
+  getEditQuoteMutationOptions,
+  getForgetBookIdentifierMutationOptions,
+  getRemoveBookTagMutationOptions,
   useAddBookTag,
   useAddCopy,
   useListCopies,
   useAddProgress,
-  useDeleteProgress,
   useListProgress,
   useAddNote,
   useAddQuote,
   useApplyEnrichment,
   useDeleteBook,
-  useForgetBookIdentifier,
-  useDeleteNote,
-  useDeleteQuote,
-  useEditNote,
-  useEditQuote,
   useEnrichmentCandidates,
   useGetBook,
   useGetCustomFields,
@@ -51,11 +53,9 @@ import {
   useListLocations,
   useListTags,
   useAddBookTagByName,
-  useDeleteTag,
   getListTagsQueryKey,
   useRefreshMetadata,
   useRestoreBook,
-  useRemoveBookTag,
   useListCustomFields,
   useSetCollection,
   useSetCustomField,
@@ -80,6 +80,7 @@ import { useListUsers } from "../../api/generated/endpoints/users/users";
 import { useGoogleBooksReady } from "../../app/hooks";
 import { useToast } from "../../app/toast";
 import type { Borrower } from "./components/LoanPanel";
+import { useRowWrite } from "../hooks";
 import { tagName, useSortedByName, useTranslation } from "../../i18n";
 import type {
   BookMatch,
@@ -190,14 +191,10 @@ export function useBookActions(
   const privacy = useSetPrivacy({ mutation });
   const addTag = useAddBookTag({ mutation });
 
-  const deleteTag = useDeleteTag({
-    mutation: {
-      onSuccess: () => {
-        // It came off every book in the library, not only this one, and the
-        // tag list itself is now a name shorter.
-        invalidate.catalogue();
-      },
-    },
+  const deleteTag = useRowWrite(getDeleteTagMutationOptions, "tagId", () => {
+    // It came off every book in the library, not only this one, and the tag
+    // list itself is now a name shorter.
+    invalidate.catalogue();
   });
 
   // Somebody typing a tag name while looking at a book means "this book is
@@ -222,11 +219,19 @@ export function useBookActions(
       },
     },
   });
-  const removeTag = useRemoveBookTag({ mutation });
-  // `mutation`, so the book and the listings both drop it: `books_to_out`
-  // carries these onto every row of every page, so a page cached before the
-  // removal still holds the row.
-  const removeIdentifier = useForgetBookIdentifier({ mutation });
+  const removeTag = useRowWrite(
+    getRemoveBookTagMutationOptions,
+    "tagId",
+    invalidateBook,
+  );
+  // The book's own invalidation, so the book and the listings both drop it:
+  // `books_to_out` carries these onto every row of every page, so a page
+  // cached before the removal still holds the row.
+  const removeIdentifier = useRowWrite(
+    getForgetBookIdentifierMutationOptions,
+    "identifierId",
+    invalidateBook,
+  );
   const cover = useUploadCover({ mutation });
   // Not `mutation`: a metadata refresh rewrites the title, the author and the
   // series, which the author index, the series index and the shelf list are
@@ -356,6 +361,7 @@ export function useBookActions(
       createTag.error ??
       removeTag.error ??
       removeIdentifier.error ??
+      deleteTag.error ??
       cover.error ??
       ownership.error ??
       collection.error ??
@@ -389,8 +395,16 @@ export function useBookNotes(bookId: number): UseBookNotesResult {
   };
 
   const add = useAddNote({ mutation });
-  const edit = useEditNote({ mutation });
-  const remove = useDeleteNote({ mutation });
+  const edit = useRowWrite(
+    getEditNoteMutationOptions,
+    "noteId",
+    mutation.onSuccess,
+  );
+  const remove = useRowWrite(
+    getDeleteNoteMutationOptions,
+    "noteId",
+    mutation.onSuccess,
+  );
 
   return {
     notes: notes.data ?? [],
@@ -511,8 +525,16 @@ export function useBookQuotes(bookId: number): UseBookQuotesResult {
   };
 
   const add = useAddQuote({ mutation });
-  const edit = useEditQuote({ mutation });
-  const remove = useDeleteQuote({ mutation });
+  const edit = useRowWrite(
+    getEditQuoteMutationOptions,
+    "quoteId",
+    mutation.onSuccess,
+  );
+  const remove = useRowWrite(
+    getDeleteQuoteMutationOptions,
+    "quoteId",
+    mutation.onSuccess,
+  );
 
   return {
     quotes: quotes.data ?? [],
@@ -742,7 +764,11 @@ export function useBookProgress(bookId: number): UseBookProgressResult {
   };
 
   const record = useAddProgress({ mutation });
-  const remove = useDeleteProgress({ mutation });
+  const remove = useRowWrite(
+    getDeleteProgressMutationOptions,
+    "progressId",
+    mutation.onSuccess,
+  );
 
   return {
     entries: entries.data ?? [],

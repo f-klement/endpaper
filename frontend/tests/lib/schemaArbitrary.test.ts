@@ -17,6 +17,15 @@ import Ajv2020 from "ajv/dist/2020";
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 
+import {
+  committedSchema,
+  escaped,
+  itemsOf,
+  operationById,
+  propertiesOf,
+  responseOf,
+  statedBound,
+} from "../committedSchema";
 import { holds, PROFILE, PROPERTY, witness } from "../property";
 import {
   AtBound,
@@ -25,7 +34,6 @@ import {
   arbitraryOf,
   operationAt,
   operationIds,
-  schemaDocument,
   SESSION_KEY,
   SESSION_TOKEN,
   spelledOut,
@@ -43,47 +51,23 @@ const DATE_TIME =
 const ajv = new Ajv2020({ strict: false });
 ajv.addFormat("date-time", DATE_TIME);
 ajv.addFormat("date", /^\d{4}-\d{2}-\d{2}$/);
-ajv.addSchema(schemaDocument() as object, BASE);
-
-/** A JSON pointer's token for `key`. */
-function token(key: string): string {
-  return key.replaceAll("~", "~0").replaceAll("/", "~1");
-}
-
-/** The path and method an operation id is declared under. */
-function addressOf(operationId: string): [string, string] {
-  for (const [path, methods] of Object.entries(schemaDocument().paths)) {
-    for (const [method, one] of Object.entries(methods)) {
-      if (one.operationId === operationId) return [path, method];
-    }
-  }
-  throw new Error(`no operation ${operationId}`);
-}
+ajv.addSchema(committedSchema() as object, BASE);
 
 /** One compiled validator per response, since a compile walks every `$ref`. */
 const validators = new Map<string, ReturnType<typeof ajv.compile>>();
 
 /** What ajv says of `answer` as a response of `operationId`, or `null`. */
 function refusal(operationId: string, answer: Answer): string | null {
-  const [path, method] = addressOf(operationId);
-  const declared = schemaDocument().paths[path]![method]!.responses;
-  const response = declared[String(answer.status)];
-  if (response === undefined) return `${answer.status} is not declared`;
-  if (response.content === undefined) {
+  const declared = responseOf(
+    operationById(operationId),
+    String(answer.status),
+  );
+  if (declared === undefined) return `${answer.status} is not declared`;
+  if (declared.response.content === undefined) {
     return answer.body === undefined ? null : "a body where none is declared";
   }
-  const pointer = [
-    "paths",
-    path,
-    method,
-    "responses",
-    String(answer.status),
-    "content",
-    "application/json",
-    "schema",
-  ]
-    .map(token)
-    .join("/");
+  // Where the response is declared, which for a `$ref` is where it points.
+  const pointer = `${declared.pointer}/content/${escaped("application/json")}/schema`;
   const validate =
     validators.get(pointer) ?? ajv.compile({ $ref: `${BASE}#/${pointer}` });
   validators.set(pointer, validate);
@@ -108,10 +92,8 @@ function holdsAtBound(value: unknown): boolean {
 
 /** A tag id's declared maximum, read off the document. */
 function tagIdBound(): number {
-  const match = schemaDocument().components.schemas["BookMatch"] as {
-    properties: { suggested_tag_ids: { items: { maximum: number } } };
-  };
-  return match.properties.suggested_tag_ids.items.maximum;
+  const ids = propertiesOf("BookMatch")["suggested_tag_ids"]!;
+  return statedBound(itemsOf(ids), "maximum");
 }
 
 /** Whether a list of enrichment candidates suggests a tag id at its bound. */
@@ -165,7 +147,7 @@ describe("the schema deriver", () => {
   it("refuses a keyword it does not read, naming where it sits", () => {
     expect(() =>
       arbitraryOf({ type: "integer", exclusiveMinimum: 0 }, "Here/count"),
-    ).toThrow("Here/count: the deriver does not read exclusiveMinimum");
+    ).toThrow("Here/count: no reader of the schema models exclusiveMinimum");
   });
 
   it("refuses a format beside a length, which it would otherwise drop", () => {

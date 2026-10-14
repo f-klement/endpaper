@@ -21,10 +21,10 @@ that.
 
 **Three functions here read past a viewer** and they are named at the bottom of
 this file rather than left as comments: the table wide uniqueness check, the
-re-read of rows a caller already filtered, and the set of collection ids some
-Book is filed under. The third answers whether there is anything to disclose at
-all, which is a question no viewer can be applied to without changing it into a
-different one; `shelving.Shelving` is its only caller and says why.
+re-read of rows a caller already filtered, and the set of vocabulary entries some
+Book carries. The third answers whether there is anything to disclose at all,
+which is a question no viewer can be applied to without changing it into a
+different one; `disclosure.Disclosure` is its only caller and says why.
 
 **`Outbound` is the same rule one step past the query.** A `Book` in a list no
 longer records whose shelf produced it, so a member's own shelf and the public
@@ -65,7 +65,7 @@ import sys
 from collections.abc import Collection, Iterator, Sequence
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Self
+from typing import TYPE_CHECKING, Any, Self
 
 from sqlalchemy import func, nullslast, or_, select
 from sqlalchemy.orm import Query, Session, joinedload, selectinload
@@ -81,6 +81,12 @@ from enums import (
     ReadStatus,
 )
 from models import Book, Classification, Tag, UserBook, in_trash_for, visible_to
+
+if TYPE_CHECKING:
+    # The type alone: `disclosure` reads Books through this module, so a run
+    # time import either way would be a cycle, and this function only reads
+    # the attribute the type names.
+    from disclosure import Carrier
 
 
 class Loading(Enum):
@@ -1202,27 +1208,30 @@ def rereading_filtered_rows(db: Session, book_ids: Collection[int]) -> Query[Boo
     return db.query(Book).filter(Book.id.in_(book_ids))
 
 
-def collections_any_book_is_filed_in(db: Session) -> frozenset[int]:
-    """Every `collections.id` some Book in the library points at, viewer or no
-    viewer.
+def entries_any_book_carries(db: Session, carrier: Carrier) -> frozenset[int]:
+    """Every entry id some Book in the library carries, viewer or no viewer.
 
     **Deliberately unscoped, and it is the one question about Books here that
     has to be.** Every other read in this module asks which Books a Member may
-    see. This one asks whether a collection has anything to disclose at all, and
-    scoping it would answer "nothing" for a shelf full of Books the Member
-    simply cannot see, which is the case its one caller exists to separate from
-    an empty shelf. See `shelving.Shelving`.
+    see. This one asks whether an entry has anything to disclose at all, and
+    scoping it would answer "nothing" for an entry carried only by Books the
+    Member simply cannot see, which is the case its one caller exists to
+    separate from an entry nothing carries. See `disclosure.Disclosure`.
 
     **Ids, never a count and never a name.** What crosses this boundary is a set
     of the ids that are carried, so nothing about how many hidden Books carry
     one, or whose they are, can leave through it. A caller wanting the count
     would have to write its own query, which is a read this rule can see.
 
-    One caller: `shelving.Shelving`. `tests/test_shelf.py::
+    **The table is chosen by `carrier`, so no rule reading the arguments to
+    `query()` sees which one.** `tests/test_shelf.py::_parameterised_reads`
+    reports it, and `PARAMETERISED_READERS` records it as unseeable. What
+    bounds it is the type: each `Carrier` member names one id column, and
+    `tests/test_disclosure.py` pins the member set.
+
+    One caller: `disclosure.Disclosure`. `tests/test_shelf.py::
     test_the_named_ways_past_a_viewer_have_the_callers_they_claim` is what makes
     a second one a decision rather than an edit.
     """
-    rows = (
-        db.query(Book.collection_id).filter(Book.collection_id.isnot(None)).distinct()
-    )
+    rows = db.query(carrier.entry).filter(carrier.entry.isnot(None)).distinct()
     return frozenset(row[0] for row in rows if row[0] is not None)

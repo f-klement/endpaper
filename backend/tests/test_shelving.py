@@ -10,7 +10,7 @@ a reason.
 import ast
 from typing import Final
 
-from tests.test_house_rules import _source_modules
+from tests.corpus import application_sources
 from tests.test_shelf import _book_owned_offences, _statement_at
 from tests.test_tags import _reaches_private
 
@@ -45,7 +45,7 @@ COLLECTION: Final = frozenset({"Collection"})
 #: * **A raw `text(...)` read over the table.** `db.execute(text("SELECT id,
 #:   name FROM collections"))` names no entity anywhere, so the pass is blind
 #:   to it and an unentried module holding one stays green. **No live member**,
-#:   measured 2026-09-30 over `_source_modules()`. The shape is written in this
+#:   measured 2026-09-30 over `application_sources()`. The shape is written in this
 #:   repository, by the `e7b3d02a5c94` revision that folded collection names
 #:   outside ASCII, and `migrations/` is one of the directories that corpus
 #:   excludes. `tests/test_shelf.py` carries the same hole for `books` on its
@@ -74,18 +74,6 @@ COLLECTION: Final = frozenset({"Collection"})
 #: A reason, not a restatement. "Admin only, and the name never leaves" is a
 #: reason; "reads a Collection" is not.
 COLLECTION_READERS: Final = {
-    "routers/books.py": [
-        (
-            "_checked_collection: if db.get(Collection, collection_id) is None: "
-            'raise HTTPException(status_code=400, detail="No such collection")',
-            "the collection a book write names by id. **Gated two lines below** "
-            "by `Shelving.assignable`, which is what collapses a collection the "
-            "caller may not be told about into the 400 an unused id already "
-            "gets. It is the door that mattered: three of its four call sites "
-            "answer with a `BookOut`, which carries `collection_name`, so a "
-            "guessed id used to hand back the name.",
-        ),
-    ],
     "routers/collections.py": [
         (
             "_named: query = db.query(Collection).filter( Collection.name_folded "
@@ -105,13 +93,6 @@ COLLECTION_READERS: Final = {
             "the same statement's rename arm, narrowing the collision check "
             "away from the row being renamed. It reads an id the caller already "
             "named and resolves no name.",
-        ),
-        (
-            "rename_collection: collection = db.get(Collection, collection_id)",
-            "the collection a rename names by id. **Gated on the next line** by "
-            "`Shelving.assignable`. Open to every member and answering over the "
-            "whole id space, so left ungated beside a closed list it would have "
-            "moved a broadcast to a poll.",
         ),
         (
             "delete_collection: collection = db.get(Collection, collection_id)",
@@ -153,12 +134,21 @@ COLLECTION_READERS: Final = {
         (
             "listable: return [ row for row in self._db.query(Collection) "
             ".order_by(func.lower(Collection.name)) .all() if "
-            "self._may_be_told(row.id) ]",
+            "self._rule.may_be_told(row.id) ]",
             "**the rule itself**, and the one read in the tree whose job is to "
             "decide this question. The comprehension is the filter: the table is "
             "read whole and each row is kept only when one of the three arms "
             "admits it. The scoping is in the same statement as the read, which "
             "is what an entry here can check and a reader can see.",
+        ),
+        (
+            "_row: return self._db.get(Collection, collection_id)",
+            "the collection an id door names, read only as the `fetch` "
+            "`Shelving.resolve` hands `disclosure.Disclosure.resolve`, which asks "
+            "the gate first and answers None for a collection the caller may "
+            "not be told about exactly as for an unused id. The book write "
+            "doors and the rename read the row here instead of beside their own "
+            "gate.",
         ),
     ],
 }
@@ -254,7 +244,7 @@ class TestNothingElseDecidesWhoMayBeToldACollectionExists:
         return report
 
     def test_every_collection_reader_is_classified(self) -> None:
-        report = self._report(_source_modules())
+        report = self._report(application_sources())
 
         assert not report, (
             "A statement reads the collections table, and either is not "
@@ -285,7 +275,7 @@ class TestNothingElseDecidesWhoMayBeToldACollectionExists:
         **A floor on the number of reads in that module does not catch it.**
         The plant adds a read rather than removing one.
         """
-        sources = dict(_source_modules())
+        sources = dict(application_sources())
         sources["shelving.py"] += (
             "\n\ndef every_collection_there_is(db):\n"
             "    return db.query(Collection).order_by(Collection.name).all()\n"
@@ -312,7 +302,7 @@ class TestNothingElseDecidesWhoMayBeToldACollectionExists:
         from under it, so the failure is the plant rather than an accident of
         the corpus holding exactly one spare offence.
         """
-        sources = dict(_source_modules())
+        sources = dict(application_sources())
         sources["shelving.py"] += (
             "\n\ndef every_collection_there_is(db):\n"
             "    return db.query(Collection).all()\n"
@@ -339,8 +329,9 @@ class TestNothingElseDecidesWhoMayBeToldACollectionExists:
         about a caller that holds what somebody else read, and the tag rule
         measured that exactly: one line swapping a vocabulary for another
         object's private index passed the whole gate and served a member a
-        hidden name. Here the state at risk is `_carried`, which is every
-        collection id some book is filed under, with no viewer applied.
+        hidden name. Here the state at risk is `_rule`, the
+        `disclosure.Disclosure` whose last arm reads every collection id some
+        book is filed under, with no viewer applied.
 
         **What this contains is the class's surface, not the rows**, and
         `_reaches_private`'s own docstring carries the three mechanisms outside
@@ -358,12 +349,12 @@ class TestNothingElseDecidesWhoMayBeToldACollectionExists:
 
         reaching = {
             name: sites
-            for name, source in _source_modules().items()
+            for name, source in application_sources().items()
             if name != self.OWNER and (sites := _reaches_private(source, private))
         }
 
         assert not reaching, (
-            "`Shelving._carried` is every carried collection id with no viewer, "
-            "and the registry entry for the read behind it is safe only because "
-            f"nothing but the reader holds it. These reach into it: {reaching}."
+            "`Shelving._rule` answers for collection ids with no viewer applied "
+            "to its last arm, and is safe only because nothing but the reader "
+            f"asks it. These reach into it: {reaching}."
         )

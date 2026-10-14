@@ -736,19 +736,28 @@ class TestWhoMayBeToldATagExists:
 
         assert response.status_code == 404
 
-    def test_a_bulk_add_of_a_tag_you_may_not_see_is_a_404(
+    def test_a_bulk_add_of_a_tag_you_may_not_see_is_the_400_an_unused_id_gets(
         self, client, admin, member, make_book
     ):
+        """Status and body both: a different detail would be the oracle again."""
         hidden = self._hidden_tag(client, admin, make_book)
         mine = make_book(member["headers"], title="Mine")
 
-        response = client.post(
-            "/api/books/bulk",
-            json={"action": "add_tag", "book_ids": [mine["id"]], "value": hidden["id"]},
-            headers=member["headers"],
-        )
+        def bulk_add(tag_id: int):
+            return client.post(
+                "/api/books/bulk",
+                json={"action": "add_tag", "book_ids": [mine["id"]], "value": tag_id},
+                headers=member["headers"],
+            )
 
-        assert response.status_code == 404
+        hidden_response = bulk_add(hidden["id"])
+        unused_response = bulk_add(hidden["id"] + 1000)
+
+        assert hidden_response.status_code == 400
+        assert (hidden_response.status_code, hidden_response.json()) == (
+            unused_response.status_code,
+            unused_response.json(),
+        )
 
     def test_removing_a_tag_you_may_not_see_is_the_200_an_unused_id_gets(
         self, client, admin, member, make_book

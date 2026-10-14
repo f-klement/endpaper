@@ -101,11 +101,11 @@ from enums import CustomFieldKind
 from models import Book, CustomField, CustomFieldValue, User
 
 # **Imported, not copied.** What counts as a module of this project is one fact
-# and `_is_vendored` is where it is decided. This walk used to be spelled out
+# and `is_vendored` is where it is decided. This walk used to be spelled out
 # here, excluding `{"tests", "migrations", ".venv"}` by name, which is the
 # directory a developer has and not the one the pipeline creates under
 # `backend/` for its uv cache.
-from tests.test_house_rules import _source_modules
+from tests.corpus import application_sources
 
 BACKEND = Path(__file__).resolve().parent.parent
 
@@ -116,18 +116,16 @@ BACKEND = Path(__file__).resolve().parent.parent
 #: a viewer `test_shelf.py` documents. Nothing else: a router asks
 #: `custom_fields.py`, and it holds only `CustomField`, the definition.
 #:
-#: **`fields.py` is the fourth and it is a different question rather than an
-#: exemption**, which is why it needs saying here rather than being waved
-#: through. The three above read values; that module asks which **definitions**
-#: a Member may be told exist, and the only way to answer it is to ask which
-#: ones anything is filed under. Every one of its three reads selects
-#: `field_id` and nothing else, so no value, no `book_id` and no count crosses
-#: out of it, two of the three go through the Shelf, and
-#: `test_shelf.py::BOOK_OWNED_READERS` carries the statement and the reason for
-#: each. The sentence above that says a definition "says nothing about any
-#: Book" is what stopped being true: a definition carried only by Private Books
-#: says those Books exist, which is what `fields.Fields` closes.
-VALUE_READERS = {"models.py", "custom_fields.py", "backup.py", "fields.py"}
+#: **`disclosure.py` is the fourth and it is a different question rather than
+#: an exemption.** It asks which **definitions** a Member may be told exist,
+#: for custom fields as for tags and collections, and the only way to answer
+#: that is to ask which ones anything is filed under. It names this table to
+#: say how a Book carries a field, `book_id` to join and `field_id` as the
+#: answer, and its reads select that id and nothing else:
+#: `tests/test_disclosure.py` holds the shape and `tests/test_fields.py` the
+#: two column names. A definition carried only by Private Books says those
+#: Books exist, which is what that rule closes.
+VALUE_READERS = {"models.py", "custom_fields.py", "backup.py", "disclosure.py"}
 
 #: The modules a `from ... import *` can bind the name through. Derived from the
 #: allowlist rather than written out, for the reason `test_reading.py` derives
@@ -416,7 +414,7 @@ class TestOnlyABookReachesAValue:
     def test_no_module_but_the_seam_imports_the_value(self):
         offenders = sorted(
             name
-            for name, source in _source_modules().items()
+            for name, source in application_sources().items()
             if name not in VALUE_READERS and "CustomFieldValue" in _imported_names(source)
         )
         assert offenders == [], (
@@ -546,7 +544,7 @@ class TestOnlyABookReachesAValue:
         `routers/books.py` would leave a set of module names unchanged.
         """
         calls: dict[str, list[str]] = {name: [] for name in PAST_A_BOOK}
-        for name, source in _source_modules().items():
+        for name, source in application_sources().items():
             if name == "custom_fields.py":
                 continue
             for node in ast.walk(ast.parse(source)):

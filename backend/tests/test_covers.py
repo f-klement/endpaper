@@ -29,6 +29,7 @@ import cover_store
 import covers
 import fetch
 from tests.conftest import REAL_RESOLVE_AND_STORE
+from tests.corpus import BACKEND, application_modules
 from tests.helpers import (
     AT_ANY_COVER_HOST,
     AT_DNB_COVERS,
@@ -39,7 +40,6 @@ from tests.helpers import (
     PNG_BYTES,
     WEBP_BYTES,
 )
-from tests.test_house_rules import _is_vendored
 
 #: The two image services as a member, a candidate builder or a `Location`
 #: spells them. Assertions about what this module *produces* use these.
@@ -366,48 +366,20 @@ class TestTheHostList:
         assert not any(c.isspace() or c == ";" for c in entry), entry
 
 
-_BACKEND: Final = Path(__file__).resolve().parent.parent
-
-
-def _our_modules(root: Path = _BACKEND) -> list[Path]:
-    """Every module of ours but `covers.py`, which is the one that may.
-
-    **`root` is what lets the diagonal in `test_house_rules.py` drive this**,
-    against a tree with vendored code planted in it. Calling the shared
-    predicate is what makes the walk right; taking the tree is what lets
-    something check that it does.
-
-    **What vendored means is `test_house_rules._is_vendored`.** This walk
-    named `.venv` and `site-packages` for itself, which was right about
-    `site-packages` and blind to `.uv-cache/`: the pipeline sets
-    `UV_CACHE_DIR` inside `backend/`, so it read third party source there
-    and nowhere a developer would see it. The `site-packages` half is now in
-    the shared predicate, put there because this module and `test_marc.py`
-    reached it independently.
-
-    **The two names left are matched relative to `_BACKEND`**, not against
-    the whole path: asked absolutely, a checkout under a directory called
-    `tests` empties this walk and every rule below it passes on nothing.
+def _our_modules() -> list[Path]:
+    """Every application module but `covers.py`, which is the one that may.
 
     **The one exemption is a path and not a basename**, which is what says
-    `routers/covers.py` is walked. Spelled `path.name`, this tree's two files
+    `routers/covers.py` is read. Spelled `path.name`, this tree's two files
     called `covers.py` were both exempt, so the router that serves the store
     could hold an image host or the prefix and neither rule below would see
-    it. Measured before this exemption became a path: 85 files walked,
-    `routers/covers.py` not among them. It is 86 with it.
+    it.
     """
-    found = [
+    return [
         path
-        for path in root.rglob("*.py")
-        if not _is_vendored(path, root)
-        and not {"tests", "migrations"}
-        & set(path.relative_to(root).parts)
-        and path.relative_to(root).as_posix() != "covers.py"
+        for path in application_modules()
+        if path.relative_to(BACKEND).as_posix() != "covers.py"
     ]
-    # The packages it must cover rather than a number: a count is satisfied
-    # by a walk that lost a whole directory. See `test_accounts._sources`.
-    assert {"routers", "schemas"} <= {path.parent.name for path in found}, found
-    return found
 
 
 class TestNoOtherModuleBuildsACoverUrl:
@@ -629,7 +601,7 @@ class TestNoOtherModuleDecidesWhetherACoverIsLocal:
 
     def test_no_module_reads_the_constant(self):
         offenders = [
-            f"{path.relative_to(_BACKEND)}:{line}"
+            f"{path.relative_to(BACKEND)}:{line}"
             for path in _our_modules()
             for line in self._names_the_constant(ast.parse(path.read_text()))
         ]
@@ -649,7 +621,7 @@ class TestNoOtherModuleDecidesWhetherACoverIsLocal:
     READERS_INSIDE_COVERS: Final = 3
 
     def test_covers_itself_reads_it_three_times(self):
-        source = (_BACKEND / "covers.py").read_text()
+        source = (BACKEND / "covers.py").read_text()
         loads = [
             node.lineno
             for node in ast.walk(ast.parse(source))
@@ -670,7 +642,7 @@ class TestNoOtherModuleDecidesWhetherACoverIsLocal:
                 and node.value == covers.LOCAL_COVER_PREFIX
             )
             if occurrences:
-                found[path.relative_to(_BACKEND).as_posix()] = occurrences
+                found[path.relative_to(BACKEND).as_posix()] = occurrences
 
         # One equality rather than a list of offenders, so that a new
         # occurrence inside an exempt file is as loud as a new file.
@@ -1810,7 +1782,7 @@ class TestNoCoverRequestIsMadeOutsideTheDoor:
         `fetch.catalogue_client`, which drops the pin while leaving every other
         bound in place. `TestWhereAListedHostAnswers` is that arm.
         """
-        source = (_BACKEND / "covers.py").read_text()
+        source = (BACKEND / "covers.py").read_text()
         built = sorted(
             node.func.attr
             for node in ast.walk(ast.parse(source))

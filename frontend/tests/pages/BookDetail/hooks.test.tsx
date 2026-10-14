@@ -1,26 +1,29 @@
 /**
- * Tests for the section state in src/pages/BookDetail/hooks.ts.
+ * Tests for src/pages/BookDetail/hooks.ts.
  *
  * The API hooks on this page are covered through the page itself, in
- * BookDetail.test.tsx. What is only testable here is the interaction between
- * a book's own defaults and what a reader has said, which is three states and
- * is invisible to any test that checks the default alone.
+ * BookDetail.test.tsx, apart from a race between two rows, which a page test
+ * would spend most of its lines opening editors to reach. What else is only
+ * testable here is the interaction between a book's own defaults and what a
+ * reader has said, which is three states and is invisible to any test that
+ * checks the default alone.
  */
 
-import { act } from "@testing-library/react";
+import { act, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { BookOut } from "../../../src/api/generated/model";
 import {
   hasAbout,
   sectionDefaults,
+  useBookNotes,
   useBookSections,
   type BookSection,
 } from "../../../src/pages/BookDetail/hooks";
 import { writeSectionChoice } from "../../../src/lib/sectionState";
 import { makeBook, makeLoan, resetIds } from "../../factories";
 import { whileStorageRefuses } from "../../storageRefusal";
-import { renderHookWithProviders } from "../../utils";
+import { heldOpen, mockApi, renderHookWithProviders } from "../../utils";
 
 beforeEach(() => {
   resetIds();
@@ -234,5 +237,29 @@ describe("useBookSections", () => {
 
       expect(result.current.isOpen("about")).toBe(true);
     });
+  });
+});
+
+describe("useBookNotes", () => {
+  it("reports a failed removal when another note's removal was pressed after it", async () => {
+    // A mutation hook's `error` is its latest call's, the second note's here,
+    // so the first note's failure would show nothing at all.
+    const api = mockApi();
+    api.on("/api/books/1/notes", { body: [] }, "GET");
+    const first = heldOpen();
+    api.on("/api/books/1/notes/5", first.respond, "DELETE");
+    api.on("/api/books/1/notes/6", { status: 204 }, "DELETE");
+    const { result } = renderHookWithProviders(() => useBookNotes(1));
+
+    act(() => result.current.remove(5));
+    act(() => result.current.remove(6));
+    await waitFor(() =>
+      expect(api.lastCall("/api/books/1/notes/6", "DELETE")).toBeDefined(),
+    );
+    first.release({ status: 404, body: { detail: "Note not found" } });
+
+    await waitFor(() =>
+      expect(result.current.error).toMatchObject({ message: "Note not found" }),
+    );
   });
 });

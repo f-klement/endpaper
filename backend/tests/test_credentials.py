@@ -26,8 +26,9 @@ from database import Base
 from enums import CatalogueSource, CredentialProvenance
 from models import CatalogueCredential
 from tests.conftest import forget_any_encryption_key
+from tests.corpus import application_modules
 from tests.helpers import sealed_before_the_origin_was_bound
-from tests.test_house_rules import _docstring_nodes, _is_vendored
+from tests.test_house_rules import _docstring_nodes
 
 #: The address the roster holds for the source these tests use.
 #:
@@ -995,24 +996,6 @@ class TestTheSupersededSchemeIsSafeOnlyWhileARosterAddressIsCode:
     #: which is a second instrument rather than a further arm on this one.
     MAY_USE_THE_ROSTER_TABLE = {"models.py", "main.py", "backup.py"}
 
-    #: What the walk does not read **of this project's own**, stated rather
-    #: than as a list of what it does.
-    #:
-    #: The tests, which name the table in order to check it, and the migrations,
-    #: which are its history and necessarily name it.
-    #:
-    #: **What is not ours is `test_house_rules._is_vendored` and is no longer
-    #: named here.** This set held `.venv` and `__pycache__`, which is every
-    #: cache anybody had seen locally, and the pipeline sets `UV_CACHE_DIR`
-    #: inside `backend/`: measured 2026-09-07, without a vendored exclusion the
-    #: walk read 3,148 files of which 3,068, or 97.5%, were third party, so a
-    #: dependency shipping a class of this name would redden a guard about this
-    #: repository, in the environment where it is trusted and nowhere else.
-    #: Everything else under `backend/` is read, at every depth: the first
-    #: version of this walk read the top level only, so `routers/` was invisible
-    #: and the exact change it guards against passed it.
-    NOT_READ = {"tests", "migrations"}
-
     def _modules_naming_it_in_code(self) -> set[str]:
         """Which backend modules name `CatalogueTarget` as code, not as prose.
 
@@ -1021,18 +1004,9 @@ class TestTheSupersededSchemeIsSafeOnlyWhileARosterAddressIsCode:
         """
         import ast
 
-        backend = Path(__file__).resolve().parents[1]
         found = set()
         read: set[str] = set()
-        # **`rglob`, and the first version of this said `glob`.** That reads the
-        # top level only, so `routers/` was not scanned at all and the mutation
-        # this guard exists to catch, a resolver reading the address off a row in
-        # `routers/books.py`, walked past it. Excluded: the tests, which name the
-        # table to check it, and the migrations, which are the history of it.
-        for path in sorted(backend.rglob("*.py")):
-            parts = set(path.relative_to(backend).parts)
-            if parts & self.NOT_READ or _is_vendored(path, backend):
-                continue
+        for path in application_modules():
             read.add(path.parent.name)
             tree = ast.parse(path.read_text(encoding="utf-8"))
             for node in ast.walk(tree):
@@ -1129,16 +1103,10 @@ class TestTheSupersededSchemeIsSafeOnlyWhileARosterAddressIsCode:
         """
         import ast
 
-        backend = Path(__file__).resolve().parents[1]
         offenders = []
         read: set[str] = set()
-        for path in sorted(backend.rglob("*.py")):
-            parts = set(path.relative_to(backend).parts)
-            if (
-                parts & self.NOT_READ
-                or _is_vendored(path, backend)
-                or path.name == "targets.py"
-            ):
+        for path in application_modules():
+            if path.name == "targets.py":
                 continue
             read.add(path.parent.name)
             for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
@@ -1181,18 +1149,14 @@ class TestTheSupersededSchemeIsSafeOnlyWhileARosterAddressIsCode:
         """
         import ast
 
-        backend = Path(__file__).resolve().parents[1]
         offenders = []
         read: set[str] = set()
-        for path in sorted(backend.rglob("*.py")):
-            parts = set(path.relative_to(backend).parts)
-            # **Not exempting the three allowed modules, unlike the walk
-            # above.** They may name the ORM class, which is what they are
-            # allowed for; reaching the column by raw statement is a different
-            # act and none of them does it. Exempting them here was free scope
-            # given away for nothing.
-            if parts & self.NOT_READ or _is_vendored(path, backend):
-                continue
+        # **Not exempting the three allowed modules, unlike the walk above.**
+        # They may name the ORM class, which is what they are allowed for;
+        # reaching the column by raw statement is a different act and none of
+        # them does it. Exempting them here was free scope given away for
+        # nothing.
+        for path in application_modules():
             read.add(path.parent.name)
             tree = ast.parse(path.read_text(encoding="utf-8"))
             # Docstrings are `ast.Constant` too, and five modules discuss this

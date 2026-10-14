@@ -26,7 +26,7 @@ from enums import AuthorityScheme, ClassificationScheme, HeadingKind
 from models import DESCRIPTION_MAX, ISBN_MAX, TITLE_MAX, Book
 from schemas.book import BookCreate, BookLookup, BookMatch
 from schemas.classification import MAX_CLASSIFICATIONS_PER_BOOK
-from tests.test_house_rules import _is_vendored
+from tests.corpus import BACKEND, shipped_modules
 
 #: What a text field has to start with to satisfy a validator other than its
 #: length. Only `cover_url` can be helped this way: `BookCreate` refuses
@@ -850,7 +850,7 @@ class TestARecordFitsTheColumnsItFeeds:
     straight off a record, and eight of them had no ceiling in the schema, in
     the model or in SQLite, which does not enforce a `VARCHAR` length. Bounding
     the refresh handler alone would have been a fourth door beside `as_lookup`,
-    `_match_rows` and `_bounded_match`; bounding the record is the one place all
+    `_match_rows` and `evidence._bounded_match`; bounding the record is the one place all
     four agree.
 
     The rule is the one the enrichment route settled: the value too wide loses
@@ -1468,19 +1468,14 @@ class TestARecordFromAnUploadedFile:
         version walked and parsed **2,977** files, **2,879** of them inside
         `backend/.venv`, taking 12.9 seconds against 98 application files. It
         passed only because no dependency happens to call anything named
-        `from_upload`. `test_house_rules._is_vendored` is the rule this tree
-        already keeps for that, written after CI's `UV_CACHE_DIR` put a cache
-        under `backend/` and turned a green local walk red on every push.
+        `from_upload`. So it reads `shipped_modules` from `tests/corpus.py`,
+        where what this project wrote is decided once.
         """
-        backend = pathlib.Path(catalogue.__file__).parent
         callers = [
             relative
-            for path in sorted(backend.rglob("*.py"))
-            if not _is_vendored(path)
-            for relative in [path.relative_to(backend).as_posix()]
-            if not relative.startswith("tests/")
-            and relative != "catalogue.py"
-            and _opens_the_upload_door(path.read_text())
+            for path in shipped_modules()
+            for relative in [path.relative_to(BACKEND).as_posix()]
+            if relative != "catalogue.py" and _opens_the_upload_door(path.read_text())
         ]
 
         assert callers == ["marc.py"]

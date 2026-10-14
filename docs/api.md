@@ -898,11 +898,11 @@ it.** A tag row carries no member, so what decides who may be told it exists is
 the books carrying it: without that rule, a name somebody typed against a
 private book, or that an import minted from one, reached every member on their
 next page load with a `book_count` of zero. The seeded group is exempt because
-its names are in the source. The same rule answers `POST
-/api/books/{id}/tags/{tag_id}` and the bulk tag verbs with a **404** for a tag
-whose every book is hidden from the caller, which is the answer an unused id
-already gets: attaching a guessed id to a book you own used to return the book
-with that tag's name on it.
+its names are in the source. The same rule answers a tag whose every book is
+hidden from the caller exactly as it answers an unused id: **404** from `POST
+/api/books/{id}/tags/{tag_id}`, where the id is in the path, and **400** from
+the bulk tag verbs, where it is in the body. Attaching a guessed id to a book
+you own used to return the book with that tag's name on it.
 
 **What it does not close.** The name space is globally unique and a create
 answers a collision with the existing row, so guessing a **name** still

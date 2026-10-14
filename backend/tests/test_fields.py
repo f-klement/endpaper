@@ -46,10 +46,10 @@ import custom_fields
 from enums import CustomFieldKind
 from fields import Fields
 from models import MAX_CUSTOM_FIELDS, Book, CustomField, CustomFieldValue, User
+from tests.corpus import application_sources
 from tests.test_house_rules import (
     _model_names_safe_to_resolve,
     _receiver_model,
-    _source_modules,
     column_mentions,
     declared_schema_fields,
 )
@@ -74,20 +74,21 @@ CUSTOM_FIELD: Final = frozenset({"CustomField"})
 #:   publishing its rows is invisible here. That is
 #:   `TestTheWholeTableReadHasTheCallersItClaims`, and it is the rule this
 #:   registry structurally cannot be.
-#: * **`backup.py`** reads the table through a runtime bound name in `_TABLES`,
-#:   so no pass reading the arguments to `query()` sees it. Admin only, which
-#:   `tests/test_shelf.py` asserts separately, and unfiltered on purpose
-#:   because an archive missing rows restores a library missing them.
+#: * **`backup.py`** reads the table through `select(*columns)` over a table
+#:   bound at run time, so this pass cannot see which table it reads.
+#:   `tests/test_shelf.py` lists it as a parameterised reader and asserts it
+#:   admin only. It is unfiltered on purpose, because an archive missing rows
+#:   restores a library missing them.
 #: * **A raw `text(...)` read.** Names no entity, so the pass is blind to it.
-#:   No live member, measured 2026-10-01 over `_source_modules()`.
+#:   No live member, measured 2026-10-01 over `application_sources()`.
 #:   `tests/test_shelf.py` carries the same hole for `books`, with the argument
 #:   for naming it rather than chasing it.
 #: * **A computed entity.** `model = getattr(models, "CustomField")` then
 #:   `db.query(model)`. The alias resolver follows an assignment from a name
 #:   and not from a call, so the pass reports nothing: measured 2026-10-01,
-#:   that probe comes back empty. It is also invisible to the walk over
-#:   parameterised readers, whose test is on a call's arguments. No live
-#:   member: no module outside `shelf.py` reaches an entity off `models`
+#:   that probe comes back empty. The walk over parameterised readers
+#:   reports it when `model` is bound inside a function and not at module
+#:   level. No live member: no module outside `shelf.py` reaches an entity off `models`
 #:   through `getattr`. Contrived, and named because a list of three read as
 #:   closed.
 #:
@@ -126,13 +127,23 @@ FIELD_READERS: Final = {
     ],
     "fields.py": [
         (
+            "_row: return self._db.get(CustomField, field_id)",
+            "the definition an id door names, read only as the `fetch` "
+            "`Fields.resolve` hands `disclosure.Disclosure.resolve`, which asks "
+            "the gate first and answers None for a field the caller may not be "
+            "told about exactly as for an unused id. Two callers, the rename "
+            "and the value write, and both answer with the field's `name`, "
+            "which is why leaving it ungated beside a scoped list would have "
+            "moved a broadcast to a poll.",
+        ),
+        (
             "_author_of: rows = self._db.query( CustomField.id, "
             "CustomField.created_by_user_id ).all()",
             "**two columns and never a row**, which is both the privacy bound "
             "and the reason the statement is shaped this way. What crosses is "
             "a member id per definition id, for definitions this class decides "
             "separately whether to admit: `listable` filters every row through "
-            "`_may_be_told`, and `renamable` is asked only after `addressable` "
+            "`Disclosure.may_be_told`, and `renamable` is asked only after `addressable` "
             "has answered. No `name` and no `kind` leave here, so the read "
             "cannot become the broadcast this module exists to close. "
             "**Unscoped on purpose**: the question is who the author is, which "
@@ -147,15 +158,6 @@ FIELD_READERS: Final = {
         ),
     ],
     "routers/books.py": [
-        (
-            "_custom_field: field = db.get(CustomField, field_id)",
-            "the definition an id door names. **Gated in the same statement's "
-            "condition** by `Fields.addressable`, which collapses a field the "
-            "caller may not be told about into the 404 an absent id already "
-            "gets. Two callers, the rename and the value write, and both "
-            "answer with the field's `name`, which is why leaving it ungated "
-            "beside a scoped list would have moved a broadcast to a poll.",
-        ),
         (
             "_any_custom_field: field = db.get(CustomField, field_id)",
             "the same read for the admin delete, and **deliberately ungated**, "
@@ -328,7 +330,7 @@ def _definition_callers(sources: dict[str, str]) -> list[str]:
 
     Both need a line written for no other purpose, in a module whose import of
     `custom_fields` is itself the thing a reviewer reads. Neither is live:
-    measured over `_source_modules()` on 2026-10-01, no module binds this
+    measured over `application_sources()` on 2026-10-01, no module binds this
     function to a local or reaches it through a computed `getattr`.
     """
     sites: list[str] = []
@@ -409,7 +411,7 @@ class TestNothingElseDecidesWhoMayBeToldAFieldExists:
     OWNER: Final = "fields.py"
 
     def test_every_definition_reader_is_classified(self) -> None:
-        report = _report(_source_modules())
+        report = _report(application_sources())
 
         assert not report, (
             "A statement reads the custom field definitions, and either is not "
@@ -434,7 +436,7 @@ class TestNothingElseDecidesWhoMayBeToldAFieldExists:
         whole table, point the route at it, and the disclosure is back with the
         guard green.
         """
-        sources = dict(_source_modules())
+        sources = dict(application_sources())
         sources["fields.py"] += (
             "\n\ndef every_field_there_is(db):\n"
             "    return db.query(CustomField).order_by(CustomField.id).all()\n"
@@ -466,7 +468,7 @@ class TestNothingElseDecidesWhoMayBeToldAFieldExists:
         from under it, so the failure is the plant rather than an accident of
         the corpus holding exactly one spare offence.
         """
-        sources = dict(_source_modules())
+        sources = dict(application_sources())
         sources["fields.py"] += (
             "\n\ndef every_field_there_is(db):\n"
             "    return db.query(CustomField).all()\n"
@@ -489,8 +491,9 @@ class TestNothingElseDecidesWhoMayBeToldAFieldExists:
     def test_the_readers_private_state_is_reached_from_nowhere_else(self) -> None:
         """The half the registry structurally cannot see: where the rows go.
 
-        The state at risk is `_carried`, every field id some book holds a value
-        in, with no viewer applied. One line swapping a `Fields` for another
+        The state at risk is `_rule`, the `disclosure.Disclosure` whose last arm
+        reads every field id some book holds a value in, with no viewer
+        applied. One line swapping a `Fields` for another
         object's index is a whole gate green on a member reading a hidden name,
         which is measured on the tag version of this rule.
 
@@ -507,14 +510,14 @@ class TestNothingElseDecidesWhoMayBeToldAFieldExists:
 
         reaching = {
             name: sites
-            for name, source in _source_modules().items()
+            for name, source in application_sources().items()
             if name != self.OWNER and (sites := _reaches_private(source, private))
         }
 
         assert not reaching, (
-            "`Fields._carried` is every carried field id with no viewer, and "
-            "the registry entry for the read behind it is safe only because "
-            f"nothing but the reader holds it. These reach into it: {reaching}."
+            "`Fields._rule` answers for field ids with no viewer applied to its "
+            "last arm, and is safe only because nothing but the reader asks it. "
+            f"These reach into it: {reaching}."
         )
 
 
@@ -538,7 +541,7 @@ class TestTheWholeTableReadHasTheCallersItClaims:
     def test_one_module_outside_custom_fields_calls_it(self) -> None:
         sources = {
             name: source
-            for name, source in _source_modules().items()
+            for name, source in application_sources().items()
             if name != "custom_fields.py"
         }
 
@@ -569,7 +572,7 @@ class TestTheWholeTableReadHasTheCallersItClaims:
         publisher, and the outside walk never names it because the route calls
         the wrapper rather than this function.
         """
-        source = _source_modules()["custom_fields.py"]
+        source = application_sources()["custom_fields.py"]
         tree = ast.parse(source)
         callers = sorted(
             {
@@ -596,7 +599,7 @@ class TestTheWholeTableReadHasTheCallersItClaims:
         that found nothing and a corpus that moved."""
         sources = {
             name: source
-            for name, source in _source_modules().items()
+            for name, source in application_sources().items()
             if name != "custom_fields.py"
         }
         sources["routers/books.py"] += (
@@ -618,7 +621,7 @@ class TestTheWholeTableReadHasTheCallersItClaims:
         """
         sources = {
             name: source
-            for name, source in _source_modules().items()
+            for name, source in application_sources().items()
             if name != "custom_fields.py"
         }
         before = _definition_callers(sources)
@@ -671,7 +674,7 @@ class TestTheWholeTableReadHasTheCallersItClaims:
     #:
     #: An arm asserting a limit is what stops the limit being read as a miss
     #: somebody will later close by accident and leave undocumented. Both are
-    #: measured dead over `_source_modules()`; `_definition_callers` carries
+    #: measured dead over `application_sources()`; `_definition_callers` carries
     #: why neither is chased.
     REACHES_IT_UNSEEN: Final = {
         "the function bound to a local": (
@@ -721,7 +724,7 @@ def _line_of_the_listable_call() -> int:
     A literal line number in an assertion is a guard that reds on an unrelated
     edit and teaches the next person to edit the guard.
     """
-    sites = _definition_callers({"fields.py": _source_modules()["fields.py"]})
+    sites = _definition_callers({"fields.py": application_sources()["fields.py"]})
     assert len(sites) == 1, sites
     return int(sites[0].split(":")[1])
 
@@ -729,24 +732,24 @@ def _line_of_the_listable_call() -> int:
 class TestOnlyFieldIdsCrossOutOfTheValueTable:
     """What makes the unscoped arm safe is the bound, so the bound is asserted.
 
-    `Fields._carried_by_any_book` reads `custom_field_values` with no viewer.
-    Its own docstring says what crosses is a set of field ids, never a count
-    and never a value, which is the same bound
-    `shelf.collections_any_book_is_filed_in` states. A sentence is the rung
-    below a test, and this is the test.
+    The rule's unscoped arm, `shelf.entries_any_book_carries`, reads
+    `custom_field_values` with no viewer, through the column
+    `disclosure.Carrier` names. Its docstring says what crosses is a set of
+    ids, never a count and never a value. A sentence is the rung below a test,
+    and this is the test: `disclosure.py` is the one module naming the table's
+    columns for that rule, and it names the two below.
 
     **It is not what holds the class, and `_named_attributes_of` says which
-    spelling walks past it.** What holds the class is the per module statement
-    count in `BOOK_OWNED_READERS`: any read that names a column this walk
-    cannot see is still a statement, and a statement here is either one of the
-    three classified keys or a red.
+    spelling walks past it.** What holds the class is
+    `tests/test_disclosure.py::TestTheRuleReadsThroughTheShelfAndCarriesOnlyTheEntry`,
+    which refuses any column but the entry in a read.
     """
 
     def test_the_module_names_two_columns_and_these_are_they(self) -> None:
-        named = _named_attributes_of(_source_modules()["fields.py"], "CustomFieldValue")
+        named = _named_attributes_of(application_sources()["disclosure.py"], "CustomFieldValue")
 
         assert named == ["book_id", "field_id"], (
-            "`fields.py` names a column of `custom_field_values` other than the "
+            "`disclosure.py` names a column of `custom_field_values` other than the "
             f"two it is allowed to: {named}. `book_id` is the join onclause and "
             "`field_id` is the answer. Naming `value` would carry a member's "
             "text out of a read that applies no viewer, and a count of rows "
@@ -1129,10 +1132,10 @@ class TestListingCostsTheSameWhateverTheNumberOfDefinitions:
         assert listed_for_one == []
         assert listed_for_twenty_five == []
         # **The floor has its own mutant and is not decoration.** A
-        # `_may_be_told` answering False without consulting an arm leaves every
-        # other assertion here true: the list is empty, which is what the three
-        # above require, and one statement at both populations satisfies the
-        # equality below. This is the only line that reds on it.
+        # `Disclosure.may_be_told` answering False without consulting an arm
+        # leaves every other assertion here true: the list is empty, which is
+        # what the three above require, and one statement at both populations
+        # satisfies the equality below. This is the only line that reds on it.
         #
         # **The mutant that does NOT isolate it is the obvious one.** A
         # `listable` returning the table without consulting the predicate was
@@ -1290,7 +1293,7 @@ class TestFieldsIsTheOnlyReaderOfTheAuthorColumn:
         """
         readers: set[str] = set()
         writers: set[str] = set()
-        for name, source in _source_modules().items():
+        for name, source in application_sources().items():
             tree = ast.parse(source)
             resolvable = _model_names_safe_to_resolve(tree)
             for mention in column_mentions(tree, {self.AUTHOR}):

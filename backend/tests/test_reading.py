@@ -63,11 +63,11 @@ from reading import Reading, discussers, resolve_merge
 from shelf import Shelf
 
 # **Imported, not copied.** What counts as a module of this project is one fact
-# and `_is_vendored` is where it is decided. This walk used to be spelled out
+# and `is_vendored` is where it is decided. This walk used to be spelled out
 # here, excluding `{"tests", "migrations", ".venv"}` by name, which is the
 # directory a developer has and not the one the pipeline creates under
 # `backend/` for its uv cache.
-from tests.test_house_rules import _source_modules
+from tests.corpus import application_sources
 
 #: Where `UserBook` may be imported.
 #:
@@ -212,7 +212,7 @@ class TestReadingIsTheOnlyWayIn:
     def test_no_module_but_the_reading_record_imports_user_book(self):
         offenders = sorted(
             name
-            for name, source in _source_modules().items()
+            for name, source in application_sources().items()
             if name not in READING_RECORD_READERS and "UserBook" in _imported_names(source)
         )
         assert offenders == [], (
@@ -235,7 +235,7 @@ class TestReadingIsTheOnlyWayIn:
         not. **Call sites, not modules**: a second `discussers` call inside
         `serialisation.py` would leave a set of module names unchanged.
         """
-        calls = _named_way_callers(_source_modules())
+        calls = _named_way_callers(application_sources())
 
         assert len(calls["discussers"]) == 1, calls
         assert len(calls["resolve_merge"]) == 1, calls
@@ -364,7 +364,7 @@ class TestEveryCallerOfOf:
     """
 
     def test_the_table_names_exactly_the_call_sites_in_the_tree(self):
-        readings, _ = _of_call_sites(_source_modules())
+        readings, _ = _of_call_sites(application_sources())
 
         assert readings == _tabled_callers()
 
@@ -372,7 +372,7 @@ class TestEveryCallerOfOf:
         """The belt, and the reason the table can be trusted as complete: a
         `.of(` whose receiver this pass cannot recognise is a failure rather
         than a row it drops."""
-        _, strangers = _of_call_sites(_source_modules())
+        _, strangers = _of_call_sites(application_sources())
 
         assert strangers == []
 

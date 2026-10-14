@@ -1440,8 +1440,8 @@ class TestAnEnrichmentOnlyStoresASpellingTheBookAdopts:
     def test_an_ordinary_enrich_stores_nothing_it_cannot_reach(
         self, client, admin, make_book, db
     ):
-        """`merge_into` skips `author` when the Book has one and `overwrite` is
-        false, which is the default, so the catalogue's spelling is never
+        """`evidence.apply_record` skips `author` when the Book has one and
+        `overwrite` is false, which is the default, so the catalogue's spelling is never
         adopted and there is nothing to hang an identifier on."""
         book = make_book(admin["headers"], isbn=GERMAN_ISBN, author="S. P. Kane")
 

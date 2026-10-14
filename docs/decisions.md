@@ -803,8 +803,8 @@ half of what it claims to select.
 ### `categories` is joined with a semicolon, not a comma
 
 Google's own category names contain commas ("Fiction, general"), so a comma-joined list
-cannot be split back apart. `google_books.join_categories` and `split_categories` are the only
-two places **on the server** that know the delimiter, and the API serves the field as a
+cannot be split back apart. `backend/categories.py` is the one place **on the server** that
+knows the delimiter, and the API serves the field as a
 **list** so no client has to know it to read one.
 
 **A client that writes one does.** `frontend/src/lib/bookRequest.ts` drops an entry carrying
@@ -9606,7 +9606,7 @@ column, or from a stated derivation.
 **`max_length` on a `list` is a count, not a length.** `suggested_tag_ids` was
 `list[RowIdField]`, which bounds every entry's value and nothing about how many.
 
-**`series_index` is the one that matters.** `google_books.merge_into` writes it and
+**`series_index` is the one that matters.** `evidence` writes it and
 `routers/books.list_series` computes `set(range(1, max(held) + 1))` over it, so a stored
 `1e9` is roughly 70 GB and ten minutes, per member, per request, until somebody finds the
 row. Measured in `importing.py` at 70.5 bytes and 0.624s per million elements.
@@ -9647,7 +9647,7 @@ other half and are the half that was missing.
 #### Two bounds this entry does not close
 
 **`POST /api/books/{id}/enrich` writes catalogue values with no bound at all.** It hands
-`Record.as_match()` to `merge_into` without building a `BookMatch`, so `series_index = 1e9` is
+`Record.as_match()` to the merge without building a `BookMatch`, so `series_index = 1e9` is
 stored with a **200** where the same value on `/enrich/apply` is a **422**. Catalogue
 reachable, not upload only: `marc_fields.Fields.title_statement` takes the first digit run of `245 $n` and
 calls `float()`. The fix cannot live here, because `google_books` importing the declarations
@@ -9786,26 +9786,26 @@ oversized value was a 422 on one route and a stored row on the other.
 
 The bound is on the **signature** rather than at the call site, and that is the whole point
 rather than tidiness: a rule a caller has to remember is exactly the rule the second route
-failed to follow. `google_books.merge_into(book, match: BookMatch, *, overwrite)` fails
-mypy for a dictionary at any call site and raises on the first `getattr` at runtime, so a
+failed to follow. `evidence._apply_match(book, match: BookMatch, policy)`, reached through
+`apply_record` and `confirm`, fails mypy for a dictionary at any call site and raises on the first `getattr` at runtime, so a
 third call site inherits the bound instead of having to be told about it.
 
-The import is `TYPE_CHECKING` only and cannot be otherwise: `schemas/book.py` imports
-`split_categories` from `google_books`, so a runtime import there is a cycle. PEP 649 is
-why the annotation still needs no quoting, and Python 3.14 is already required for the same
-reason elsewhere.
+`google_books` imports `BookMatch` at run time. The cycle that once forced a `TYPE_CHECKING`
+guard was the Categories codec living in the adapter while `schemas.book` read it; the codec
+now lives in `backend/categories.py`, which imports nothing from the application, and a test
+refuses an application import there.
 
 ---
 
 ## The enrichment door drops the field; the search door drops the row
 
-`routers/books._match_rows` and `routers/books._bounded_match` both build a `BookMatch`
+`routers/books._match_rows` and `evidence._bounded_match` both build a `BookMatch`
 from third party data and they refuse differently, which is deliberate.
 
 A search answers with a page, so a record the schema refuses costs one result out of
 several and dropping it whole is honest. Automatic enrichment answers with the one record
 the catalogues returned, so refusing it whole would report `found=False` about a book they
-did find, and lose eleven good fields to one bad one: `merge_into` writes twelve columns,
+did find, and lose eleven good fields to one bad one: `evidence._apply_match` writes twelve columns,
 eleven loop names plus `cover_url`, and one of them is the refused one. The field is
 dropped and logged at INFO instead, which is the only place a dropped field is recorded:
 the response cannot show it.
@@ -9840,7 +9840,7 @@ deciding fact is the wire shape, not the producer.**
 `BookCreate.categories` and `BookDetailsUpdate.categories` are lists and **refuse** a subject
 containing the separator, with a 422. They are one rule rather than two, applied from
 `schemas.book.normalised_subjects`, which both call. `BookMatch.categories` is one joined string
-and **splits and rejoins**. `google_books.join_categories` **drops** such a subject. None of the
+and **splits and rejoins**. `categories.join_categories` **drops** such a subject. None of the
 four is a relaxation of another.
 
 **The ground for refusing is that the value is unrepresentable, not that it is risky.**
@@ -9870,7 +9870,7 @@ at both sites.
 any value the column holds through any of the request doors.
 
 **The match door stays a string rather than becoming a list**, on three measured grounds:
-`google_books.merge_into` assigns this column by name off `book_columns.WORK_DETAIL`, so a list
+`evidence` assigns this column by name off `book_columns.WORK_DETAIL`, so a list
 would need reshaping there; `catalogue.as_match` would have to stop joining, against the rule its
 own site states; and `TestTheSignatureIsTheBound` partitions names rather than types, so it would
 not catch either. Three reshape sites against one.
@@ -9884,8 +9884,8 @@ count the create door allows.
 it inside a `try` that drops the **row**, so a count bound on the model alone cost a whole search
 result for a record that is merely well described: measured, 33 short subjects join to 493
 characters, far inside the width bound, and returned **zero** rows where 32 returned one.
-`catalogue.Record.as_match` now passes the count to `join_categories`, which is
-`Record.match_headings`' arrangement one field over and was bought there by the same incident, in
+`catalogue.Record.as_match` caps through `join_categories`, whose default is the count
+(`MAX_CATEGORIES_PER_BOOK`), which is `Record.match_headings`' arrangement one field over and was bought there by the same incident, in
 its words "it belongs to the shape rather than to the caller". The model keeps its refusal,
 because the other producer of that body is a client on `POST /{book_id}/enrich/apply` where
 nothing has capped anything and a 422 is readable. Measured after: 33, 40 and 200 subject records
@@ -9975,13 +9975,13 @@ product of what the other is computed from.
 alone, which `model_fields_set` distinguishes, and **an explicit null is refused with a 422
 rather than accepted as a second spelling of the clear.** Every other field of that body clears
 on a null, because its column holds one value and a null is how that value goes away; this one
-arrives as a list and is stored as one joined string, and `google_books.join_categories` already
+arrives as a list and is stored as one joined string, and `categories.join_categories` already
 answers `None` for an empty list, so an empty list **is** the cleared column. Two spellings
 reaching one column is how the two of them eventually reach it differently, and it would give
 the create body and the update body different types for one field in the generated client.
 
 **What has not changed is the rest of the write side**, which is why the removal mattered:
-`google_books.merge_into` still skips an incoming value that is null, empty or an empty list, so
+`evidence` still skips an incoming value that `is_empty`, None or the empty string, so
 an enrich apply with `overwrite` replaces the value and cannot clear it, and
 `folding._absorb_fields` only ever fills a gap. So the hand edit route is the **only** removal,
 and before it the only removal was deleting the book.
@@ -10110,7 +10110,7 @@ eight of them had no ceiling anywhere: none in the schema, because no Pydantic m
 that path, and none in the database, because SQLite does not enforce a `VARCHAR` length.
 
 Two doors were available. Routing that one write through a bounded model, the way the
-enrichment route goes through `_bounded_match`, would have closed the route and left the
+enrichment route goes through `evidence._bounded_match`, would have closed the route and left the
 shape that produced it: **four** consumers read the same record and three of them had a
 bound. So the bound went into `Record.__post_init__`, which is the one place all four
 agree, and the refresh handler needed no code change at all.
@@ -11123,7 +11123,7 @@ rather than merely passing a 500 along.
 `schemas/book._a_cover_url_the_column_can_hold`, called from both. Not by raising
 `max_length` to 501, which would state a bound nobody could derive from the column. The
 ceiling is refused rather than dropped, because here there is a caller to tell: a 422 on both
-routes, and `routers/books._bounded_match` catches it and drops the field, which is the
+routes, and `evidence._bounded_match` catches it and drops the field, which is the
 catalogue path's answer reached through this one rule. `catalogue._AS_STORED` is the same
 rule on the catalogue path.
 
@@ -14928,11 +14928,11 @@ than with a fact. The cost is that this store cannot refuse a retype, because a 
 second edition look the same; what it buys is a merge that cannot 500.
 
 **`google_books` is a member of the enum and does not go to `books.google_books_id`.** That
-column records which Google volume this row's *metadata* was taken from: `merge_into` is its
+column records which Google volume this row's *metadata* was taken from: `evidence` is its
 only writer and `overwrite=True` retypes it. A row here records which volume a member's own
 export says they own, which is a claim rather than a preference, and `AuthorIdentifier`
 already draws that asymmetry for a person's name. Writing the store's assertion into the
-enrichment column would also have changed enrichment's behaviour: `merge_into` skips a field
+enrichment column would also have changed enrichment's behaviour: `evidence` skips a field
 that is already set, so a Play Books import would have stopped Google recording its own
 volume. The two can legitimately differ, being the edition sold and the edition matched.
 
@@ -15509,10 +15509,10 @@ among them.
 
 ## The local cover precedence is `covers.is_local` and nothing else
 
-`google_books.merge_into` spelled `(current_cover or "").startswith("/covers/")` against the
+The merge, now `evidence`, spelled `(current_cover or "").startswith("/covers/")` against the
 constant `covers.py` holds. The predicate is now shared and the **precedence is not**: the
 refresh handler in `routers/books.py` clears a non local cover unconditionally, where
-`merge_into` also asks whether the field is free and whether the value would change. Those two
+`evidence` also asks whether the field is free and whether the value would change. Those two
 differ on purpose and both stay.
 
 Enforced structurally rather than by a grep, because the literal is legitimate in two other
@@ -16067,7 +16067,7 @@ A review listed "a record is bounded before a write" as unowned, citing `refresh
 own comment. Three seats read that comment independently and all three found it says the
 opposite: the ceiling on all nine columns is `catalogue.Record.__post_init__`, which clears a
 scalar the column cannot hold before the record leaves `metadata.lookup`, and a bound in the
-handler would be a fourth door beside `as_lookup`, `_match_rows` and `_bounded_match`.
+handler would be a fourth door beside `as_lookup`, `_match_rows` and `evidence._bounded_match`.
 
 Refused, and recorded because the premise was wrong rather than because the fix was hard. What
 records it in the tree is that comment, which already says so.
@@ -16610,9 +16610,9 @@ foreign key graph. One border has nothing on it, `COPY_STANDING` against `ROW_KE
 
 Every column moved into every cell it is not in, 150 moves, and **the instrument matters more
 than the number**. Against `backend/tests/test_book_columns.py` alone, 21 stay green. Adding
-one arm from another file, `test_google_books.py::TestTheSignatureIsTheBound`, takes it to 10:
+one arm from another file, `test_evidence.py::TestTheSignatureIsTheBound`, takes it to 10:
 a guard rather than a behaviour test, and it sees every column leaving `WORK_DETAIL` and every
-one arriving except `cover_url`, which `merge_into` reads off the match below its loop. Adding
+one arriving except `cover_url`, which `evidence._apply_match` reads off the match below its loop. Adding
 `tests/routers/test_books_copies.py` and the rest of `test_google_books.py` takes it to 5.
 
 **Against the whole backend suite**, exactly one of those five is green and has a consequence:
@@ -21643,3 +21643,101 @@ The timer writes a marker before it kills, and the run reads the marker. The exi
 tell: cancelling the timer can kill one that has already fired and not yet exited, which reported a
 timeout as a kill. The kill does not wait on the marker, so a marker that cannot be written still
 ends the run. A suite that ends on its own as the timer fires reads as a timeout, which is a red.
+
+## One home for what this project wrote, and a ratchet on call sites instead of policing walks
+
+`is_vendored` and every population built on it live in `backend/tests/corpus.py`, each taking a root. Guards ask for a population by name. Before, 46 modules imported the private names from the house rules module, 14 more built walks of their own, and about 900 lines checked where a walk could be written and what each one reached. Every one of those hand built walks had been right on a developer's checkout and wrong in the pipeline. With one home the per walk check has nothing to check; what remains is that a new walk is not written, which is a ratchet on call sites in the module's own test.
+
+**Given up:** the ratchet matches by name: `rglob`, `.walk` on anything but `ast`, a bare `walk` from `os`, and a `glob` or `iglob` whose pattern is a `**` literal or is not a literal at all. An unreadable pattern counts because a named constant is the first spelling an author writes. A hand rolled `iterdir` or `scandir` recursion, `os.fwalk`, `pkgutil.walk_packages`, a renamed `walk` import and a `git ls-files` subprocess pass; each takes a deliberate act. The corpus's own `_walk` takes a caller's prune, so a second arm refuses any module but the corpus's test importing or reading a private name of it. A stripped module states its own count (`WALKS_OF_MY_OWN`) because a published row naming it fails in a mirror clone.
+
+**Kept separate on purpose:** the internal Markdown guard's own exclusion list is not taken from the corpus. Measured: with a narrowing planted in the corpus, the guard's containment arm reds by name on three documents while the two lists are separate, and is green with the list shared. The guard therefore extends its own list by its own route (an environment directory is told by the `pyvenv.cfg` it carries, not by its name).
+
+**Kept:** the mnemonic scan guard's versioned walk is the one internal layer, because it must read the dotted paths the publish gate strips. It is a filter over `project_files` with the strip list readmitted.
+
+**Decided rather than asked:** the Markdown and roster populations now also prune `__pycache__`, `node_modules`, `site-packages`, `dist-packages` and any directory holding a `pyvenv.cfg`, where before they pruned the dot alone. Each is ignored in the real tree or belongs to a tool, so this narrows only what nobody wrote. Python populations are sorted lists.
+
+**The tooling that walks the repository asks the same module, loaded by path.** The documented commands checker decided what a tool owns with a hidden directory rule of its own, beside the one the suite's guards share. It now loads the corpus module by path, as it already loads the ignore rule, and reads `project_files`. The module's only import from the test tree is the ignore rule, under the suite's name for it, so the checker registers its own copy under that name for the length of the load and removes it after; inside the suite the name already holds the same file. Moving the corpus rule into the ignore rule's module would give that module a second subject, and putting `backend/` on the import path is refused there for the shadowing it causes. An empty ignore parse is refused before the walk, because the shared walk accepts one for its planted trees and here it is the permissive direction; a nested ignore file is still refused. No ratchet covers the tooling directory: it would need an internal home to count a population of two walks, and both now share the population.
+
+## The internal declaration rule has one copy per language, spelled for the pipeline's engine
+
+`backend/tests/declaration.py` answers whether a file declares itself internal; every Python reader asks it. It follows busybox `grep -E` on musl with no locale, measured in the pipeline's image, because that is what decides what publishes: a character bound, musl's space set, a line ended only by a newline. Three hand copies had drifted from the gate in shapes the tree did not yet hold: a substring matched a mention, a regex refused space the gate accepts, and reading text with universal newlines made a bare carriage return a line start. No tracked file was classified differently by any of them.
+
+A stripped guard runs the gate's own pattern and window through the suite's `grep` over shapes for each clause and compares, so nothing is written down as the expected answer and the engine decides. It derives its space shapes rather than listing them: one per member of the copy's class and one per code point Unicode or Python calls a space or a control, so a member added or dropped lands on a shape. It also holds case, and the window by a sentence on its last line and one past it. The suite's image and the gate's image agreed on every shape both ran, but the whole derived set runs only in the suite's image.
+
+The frontend has one copy, exported by the register module and used by the house rules. It was unpinned before; negative fixtures now hold the anchor and the bound of six marks against the gate's pattern. The gate itself was not edited. Where engines disagree about it (a byte against a character bound, a carriage return or U+2028 as a line start in JavaScript) is left to the gate's owner.
+
+## Tests read the parse through one source reader
+
+`tests/sourceReader.ts` holds one node type, one walk, one binding reader and one path resolver. Five binding readers had disagreed on `const { a: b }: Props = x;`, three counting a type name or a key as a binding, and four resolvers disagreed on a `..` past their base. A `..` past the base is kept, because dropping it reads a path out of a space as a path in it. The glob, specifier and citation resolvers therefore resolve from the repository root and map back, so a climb out of `frontend/` lands where it points; the old resolvers got the citation case right only because the dropped `..` absorbed a missing segment.
+
+Parameters and binding patterns declare no member: a top level `const { a: b } = x` indexes `b` and not `a`, and a parameter's keys and annotation members stay out of the member index. Measured over 714 indexed modules, 155 names left the index and none was gained, and no citation lost its target. No hand written recursive walk over the parse is left under the frontend tests.
+
+## Test readers of `openapi.json` go through one module
+
+`tests/committedSchema.ts` reads the committed document. A reader written per rule cast it to its own partial type and skipped what it did not follow, so a parameter or body declared by `$ref`, or a composed body, read as empty and a comparison over it passed. The helper answers from the whole document or throws, which replaces each rule's length floor. The house rules hold it to one module: a glob resolving to the document, or a `readFileSync(` call beside a quoted path ending `openapi.json`. The call rather than the name, because the literal alone falsely refuses a probe row and ajv's base URL. An import of the document, with or without `?raw`, is refused like the glob. A template literal path, a read through a helper in another module and a `fetch` pass; each takes a deliberate act.
+
+A response is read through `responseOf`, and `Operation.responses` is typed as raw nodes, so a raw read of `content` does not typecheck: a response declared by `$ref` has no `content` of its own, and a raw read draws and judges it as bodiless. The committed document has no response `$ref` today.
+
+The schema deriver draws an empty list as a weighted edge (1 in 4) wherever `minItems` is 0. Measured over 1000 fresh seeds, `fc.array` alone left 10 runs of 200 answers with no empty list for the witness to see, a flake that predated the rewrite; with the edge, none.
+
+## A write pressed on a row of a list goes through `useRowWrite`, and a page wide busy flag stays at its site
+
+`useRowWrite` is built from the generated `get<Operation>MutationOptions` rather than the hook, because the options carry the mutation key and the pending rows must be found by the key of the mutation actually run; a key passed separately is a second copy that can name another write. It replaced `usePendingRows` and `useWriteFailure`, which a mutation hook's own `error` and `isPending` could not stand in for: they describe the latest call only, so a write pressed on a second row unmarked the first and hid its failure once the second succeeded.
+
+**It offers no page wide busy flag.** Every page that refuses all its rows while a write is out spans two or three writes, so one write's flag cannot say it. Each such page ORs its writes' `isPending` where it draws the buttons: the collections rename and remove, the Authors page (merge, undo and batch merge), a custom field's define, rename and remove, the data reset's approve and decline, a book's loan create and complete, and the two catalogue settings sites (create, restore and forget of the credential key; save and remove of a source's login). A shared helper would have to take several writes, which is a different shape and has no caller asking for it.
+
+**The row is a number field of the write's variables, and nothing more.** Any number field passes, a sibling one too, so which is the row is the caller's to pick. A write whose id is unique only under a parent, such as a tag taken off one book, marks that id under every parent; a tag's id is the same on every book that carries it, so the over mark is on the other books' rows of the same tag.
+
+Moving the tag delete onto it also put its failure in the page's error chain, where it had been in none.
+
+## One module owns a Book's Categories column
+
+`backend/categories.py` holds the separator, the count and width bounds, `split_categories` and one function per policy: `refuse_separator` (refuse, for request bodies), `rebound_categories` (split and re-bound, for a match), and `kept_categories` and `join_categories` (drop and cap, for an adapter). The fourth policy, drop in the browser, is named in its docstring and in `bookRequest.ts`. It imports nothing from the application, and a test refuses an application import there. `google_books` imports `BookMatch` at run time: the cycle that forced a `TYPE_CHECKING` guard was the codec living in the adapter while the book schema read it.
+
+The cap is `join_categories`' default (`MAX_CATEGORIES_PER_BOOK`), so `catalogue.as_match` passes nothing. The Google adapter opts out with `limit=None`, because `as_match` caps after it and a Record's other readers want every subject.
+
+## The Google adapter hands on a list, and the list is the split of the join
+
+`_volume_to_fields` returns `categories` as `kept_categories(subjects, limit=None)`, a list, and the metadata layer no longer splits. `kept_categories` drops a separator bearing subject, caps, and trims and drops empty entries after the cap, so the cap counts what was supplied and the list is exactly what `split_categories` read back from the old joined value. A property test holds that identity against a join spelled without the module's trim.
+
+`join_categories` now trims, so its string could differ from the old one only in padding and empty segments, and no live input has either: every adapter trims its labels and drops empty ones before it builds a `Subject` (Open Library, NKP, BnF, K10plus, DNB, Google), and every request entry goes through `one_line`. So the stored value does not change. `BookMatch`'s `max_length` reads the joined string as it arrives, so a future adapter handing padded labels would get more admitted than before; what is stored stays bounded by `rebound_categories`' rejoin width.
+
+## An id in the path is a 404, an id in the body is a 400
+
+Settled by the owner. `_checked_collection` already answered 400 for a collection id in a body, because the thing that does not exist is a field of the request, and `_require_tag` answered 404 for the same case on the bulk tag verbs. Now both answer 400. An unused tag id, one past the column's range and one the caller may not be told about give one status and one body, so the existence oracle `Vocabulary.writable` closed stays closed; a test holds the hidden tag's status and body equal to an unused id's. `add_book_tag` takes its id in the path and still answers 404. The frontend branches on neither status at these doors. The bulk route no longer declares a 404 in the OpenAPI document, since this was its only one.
+
+## One module applies outside evidence to an existing Book
+
+`backend/evidence.py` is the only writer that applies a Catalogue record, a selected candidate or an imported row to a Book that already exists. Three named policies: `FILL_GAPS`, `OVERWRITE`, `REFRESH`. Three doors: `apply_record` (enrichment, the identifier backfill and refresh; bounds the record through `BookMatch` field by field first, writes no Classification), `confirm` (`enrich/apply` only; of the catalogue routes, the one door through which a Catalogue record's Classifications cross, ADR 0006), and `fill_gaps` (the three importers). `is_empty` is the one definition of empty; it writes nothing.
+
+**A MARC import's headings are the exception, and stay outside the module.** The MARC importer adds a file's own headings to a matched existing Book after its gap fill, as it did before this module. Moving that in is not part of this change, and neither is the ADR's wording against that path.
+
+**Empty is None or `""` for every policy.** Before, the merge held that and the three importers held only None, so a stored `""` was filled by enrichment and never by an import, and an incoming `""` was written by an import. Now a stored `""` is a gap to every importer, and an incoming `""` is skipped by every policy except where a refresh clears. Both halves are pinned per importer. Whether `""` should be storable at all is a separate question.
+
+**Refresh keeps exactly its nine columns:** `title`, `subtitle`, `author`, `publisher`, `year`, `description`, `language`, `page_count`, `cover_url`. It writes `title` and skips `categories`, the series fields and `google_books_id`, recorded as it stands. Its per column rules are unchanged: five cleared when the source is silent, `title`, `language` and `page_count` kept, the cover replaced or cleared unless the Member uploaded one. The cover writes through the same rule as the scalars, as a column a refresh clears, below its upload guard.
+
+**`fill_gaps` refuses a name outside `WORK_DETAIL` and `format`.** That is what the three importers name: CSV publisher, year, page_count and format, MARC a subset of `WORK_DETAIL`, OPDS `author`. The CSV importer fills `format`, a copy detail, because a Member's own shelf export describes their copy, so `WORK_DETAIL` alone would refuse a write the tree makes today. The copy's other details are refused: no importer names one, and a file naming `collection_id` or a location on a matched Book would be filing it, possibly another Member's public one. The first version admitted every column another row may fill less the cover, so an importer naming `collection_id` passed with every arm green. `format` is spelled as a literal rather than read through `COPY_DETAIL`, because the book columns test holds the documented inert moves on no module reading another cell. Which columns each importer names stays at the importer.
+
+**What stays with the caller, and why.** Fetching the cover and the commit: the create and copy paths share the cover store, and two callers run it on a thread from a coroutine while one runs it inline. The refresh handler still asks `covers.is_local` before the write, to decide whether to fetch, which is what it did before. OPDS ownership stays in the OPDS filler: its gap is `UNKNOWN`, not an empty value.
+
+## One rule decides who may be told a vocabulary entry exists
+
+Tags, collections and custom fields each wrote the same three reads and their own arm order, and four of five id doors fetched before they gated, so a hidden id cost three statements more than an absent one. `disclosure.Disclosure` holds the reads, the order (visible, trashed, the vocabulary's own arms, then nothing carries it, last because it is the only arm admitting an absent id) and `resolve`, which gates first and always fetches. Every arm reads a whole set once, so its cost does not depend on the id; an absent and a hidden id now cost the same number of statements at all six id requests.
+
+Refused: a fetch skipped on refusal, which separates the two the other way by one statement; and per id live reads for tags, whose cost depends on the id.
+
+**`Naming` keeps no memory of what it handed over.** The rule reads each set once per unit of work, before the unit attaches the name it is asked about, so a name admitted once is admitted again by the same snapshot. Measured by planting the memory away: the tag, import and CSV import tests stayed green. A test reds if a read goes live again. The residue, with no fix: a Tag that gains its first hidden carrier during a long import stays admitted by name for the rest of it. Nothing new is disclosed, since the name is the importer's own and the outcome is what minting it would have produced.
+
+**The rule's reads left the book owned reader table for a shape rule.** They take their column at run time and the shelf is not a query builder to the fourth pass, so nothing keyed them. A test now holds that no query begins in the module, that every select receiver is a Shelf read, and that the select arguments are only the carrier's entry and a count.
+
+**The parameterised read guard reports a runtime name anywhere in an argument.** It first listed spellings (a name, then an attribute rooted at one), and a wrapped call, a starred argument, a subscript, a method result, `getattr` and a keyword each passed; the backup module's `select(*columns)` was a live runtime table read it did not report. The premise is now any name in any argument not bound at module level. Measured over the 103 backend modules, it adds the backup module alone and refuses nothing that names only imports. A module level alias is bound at import and stays out by design. The diagonal compares statements, not modules, because a listed module holds reads the fourth pass sees by design. The backup module is listed with its reason: the archive reads every table on purpose, for an admin only.
+
+## One reader for the pipeline file, and the shell runners keep theirs, held equal
+
+The pipeline file had several readers in the internal tooling, each answering a short list where it met a shape it did not model. They now ask one reader that raises instead. The two shell scripts that read the file keep `grep` and `awk`, because the hosts they run on are not known to carry Python; a guard runs each of their readings, the file it names included, over the live file and holds it equal to the reader's answer, so a pipeline edit that moves one and not the other fails by name. The release decider's scan of an older tag's pipeline file was not moved onto the reader: doing so loads a module by path inside the release decider, a route its import census names as going past it.
+
+**A scan job's inheritance is pinned exactly, not by membership.** The arm that a scan carries only the keys it may was true only while nothing stood between the scan and its template; asking whether the template appeared anywhere in the chain let a template in between add `allow_failure: true` to the release gate with every arm green. The same holds for an image build and the template that writes its registry login: the image and the step that writes the login must come from that template itself. Each scan job also refuses the text `allow_failure` on any line, since the key list could not see inside a `rules:` entry.
+
+**A scanner report the nightly plan is handed and cannot read is a refusal, never "no findings".** A scan job allowed to fail after another scan in the same job left the image report absent and the night planned with no OS package findings, paging nothing. The plan now exits 1 when one of its five scanner reports is absent or empty, and the existing failure path pages. The cache, ledger, ignore file and base pipeline stay optional because they are absent on ordinary nights.
+
+**The publish gate keeps refusing the reader's old path after the move.** It names a file that no longer exists, and it is load bearing: without it a published test loading the reader by its old path passes the gate and fails in every mirror clone, and the guard that derives stripped test names from that list loses the reader's.

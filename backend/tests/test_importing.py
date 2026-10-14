@@ -3190,3 +3190,68 @@ class TestTheBeltDoesNotReadACountAsAWidth:
         population excludes the field."""
         assert _belt_would_cut_to("categories") is None
         assert _belt_would_cut_to("title") == TITLE_MAX
+
+
+#: One matched Book per importer, each with a column its file fills, stored as
+#: the empty string rather than as NULL. The column is the importer's own: CSV
+#: and MARC fill `publisher`, OPDS fills `author` and nothing else.
+_FILLS_A_GAP: Final[dict[str, tuple[str, Callable[[Book], None]]]] = {
+    "csv": (
+        "publisher",
+        lambda book: importing._fill_gaps(
+            book, csv_import.ImportRow(title="Dune", publisher="Chilton")
+        ),
+    ),
+    "marc": (
+        "publisher",
+        lambda book: importing._fill_marc_gaps(
+            book, stored_record(Record(title="Dune", publisher="Chilton"))
+        ),
+    ),
+    "opds": (
+        "author",
+        lambda book: importing._fill_opds_gaps(
+            book, stored_record(Record(title="Dune", author="Frank Herbert"))
+        ),
+    ),
+}
+
+
+#: The same three fills, each file carrying `""` for the importer's column.
+_SENDS_AN_EMPTY_STRING: Final[dict[str, Callable[[Book], None]]] = {
+    "csv": lambda book: importing._fill_gaps(
+        book, csv_import.ImportRow(title="Dune", publisher="")
+    ),
+    "marc": lambda book: importing._fill_marc_gaps(
+        book, stored_record(Record(title="Dune", publisher=""))
+    ),
+    "opds": lambda book: importing._fill_opds_gaps(
+        book, stored_record(Record(title="Dune", author=""))
+    ),
+}
+
+
+class TestAStoredEmptyStringIsAGapToEveryImporter:
+    """Enrichment filled a stored `""` and the three importers did not, so one
+    Book took a publisher from Google and refused the same one from a file. Empty
+    is None or `""` for every policy now, which is `evidence.is_empty`."""
+
+    @pytest.mark.parametrize("importer", list(_FILLS_A_GAP))
+    def test_an_import_fills_a_column_stored_as_the_empty_string(self, importer):
+        column, fill = _FILLS_A_GAP[importer]
+        book = Book(title="Dune", ownership=OwnershipStatus.OWNED, **{column: ""})
+
+        fill(book)
+
+        assert getattr(book, column) not in (None, "")
+
+    @pytest.mark.parametrize("importer", list(_FILLS_A_GAP))
+    def test_an_import_skips_an_incoming_empty_string(self, importer):
+        """The other half of one definition: a file's `""` asserts nothing, so a
+        column holding nothing keeps holding None rather than taking `""`."""
+        column, _ = _FILLS_A_GAP[importer]
+        book = Book(title="Dune", ownership=OwnershipStatus.OWNED)
+
+        _SENDS_AN_EMPTY_STRING[importer](book)
+
+        assert getattr(book, column) is None

@@ -87,9 +87,11 @@ class TestTagging:
         res = bulk(client, admin["headers"], [book["id"]], "remove_tag", fiction_id)
         assert res.json()["unchanged"] == 1
 
-    def test_an_unknown_tag_is_a_404(self, client, admin, make_book):
+    def test_an_unknown_tag_is_a_400(self, client, admin, make_book):
+        """The id is in the body, so it is a 400, as `_checked_collection`
+        answers for a collection id; an id in the path answers 404."""
         book = make_book(admin["headers"])
-        assert bulk(client, admin["headers"], [book["id"]], "add_tag", 9999).status_code == 404
+        assert bulk(client, admin["headers"], [book["id"]], "add_tag", 9999).status_code == 400
 
     def test_a_missing_tag_id_is_a_400(self, client, admin, make_book):
         book = make_book(admin["headers"])
@@ -105,7 +107,7 @@ class TestATagIdPastTheDatabasesRangeIsRefused:
     this handler and `_checked_collection` as both doing the range check;
     only the second one did.
 
-    404 is the answer an id no row can carry deserves, and is what an id that
+    400 is the answer an id no row can carry deserves, and is what an id that
     merely does not exist already gets: the test above pins 9999.
     """
 
@@ -113,7 +115,7 @@ class TestATagIdPastTheDatabasesRangeIsRefused:
     TOO_BIG = 9_223_372_036_854_775_808
 
     @pytest.mark.parametrize("action", ["add_tag", "remove_tag"])
-    def test_a_tag_id_past_the_range_is_a_404_not_a_500(
+    def test_a_tag_id_past_the_range_is_a_400_not_a_500(
         self, client, admin, make_book, action: str
     ):
         """Both verbs reach `_require_tag`, so both had the defect."""
@@ -121,14 +123,14 @@ class TestATagIdPastTheDatabasesRangeIsRefused:
 
         res = bulk(client, admin["headers"], [book["id"]], action, self.TOO_BIG)
 
-        assert res.status_code == 404, res.text
+        assert res.status_code == 400, res.text
 
     def test_a_tag_at_the_largest_id_the_column_holds_is_still_applied(
         self, client, admin, make_book, db
     ):
         """The boundary itself, and it needs a row to be worth anything.
 
-        The first version of this asserted a 404 for `MAX_ROW_ID` with no such
+        The first version of this asserted a refusal for `MAX_ROW_ID` with no such
         tag, which cannot see the bound at all: `<= MAX_ROW_ID` mutated to
         `< MAX_ROW_ID` passed every test in this file, because a refusal and a
         lookup that finds nothing answer with the identical body. A design
@@ -150,7 +152,7 @@ class TestATagIdPastTheDatabasesRangeIsRefused:
         assert res.status_code == 200, res.text
         assert res.json()["updated"] == 1
 
-    def test_an_unused_id_at_the_boundary_is_the_ordinary_404(
+    def test_an_unused_id_at_the_boundary_is_the_ordinary_400(
         self, client, admin, make_book
     ):
         """The other side of it: the bound refuses what the column cannot hold
@@ -162,7 +164,7 @@ class TestATagIdPastTheDatabasesRangeIsRefused:
 
         res = bulk(client, admin["headers"], [book["id"]], "add_tag", MAX_ROW_ID)
 
-        assert res.status_code == 404, res.text
+        assert res.status_code == 400, res.text
 
     def test_a_real_tag_id_still_works(self, client, admin, make_book, fiction_id):
         """The diagonal: the refusal must not be the only thing the guard does."""

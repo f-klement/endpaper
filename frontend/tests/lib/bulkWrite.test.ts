@@ -30,6 +30,7 @@ import {
   sourceDirectories,
   sourceEntries,
 } from "../sourceModules";
+import { isNode, namesBoundBy, walk, type Node } from "../sourceReader";
 
 function items(count: number): string[] {
   return Array.from({ length: count }, (_, index) => `Book ${index + 1}`);
@@ -217,31 +218,6 @@ const FUNCTIONS = new Set([
   "ArrowFunctionExpression",
 ]);
 
-interface Node {
-  type: string;
-  [key: string]: unknown;
-}
-
-const isNode = (value: unknown): value is Node =>
-  typeof value === "object" &&
-  value !== null &&
-  typeof (value as Node).type === "string";
-
-/** Every name one parameter binds, destructuring included. */
-function boundBy(pattern: unknown, out: string[] = []): string[] {
-  if (!isNode(pattern)) return out;
-  if (pattern.type === "Identifier") {
-    out.push(pattern.name as string);
-    return out;
-  }
-  for (const key of Object.keys(pattern)) {
-    const child = pattern[key];
-    if (Array.isArray(child)) child.forEach((one) => boundBy(one, out));
-    else boundBy(child, out);
-  }
-  return out;
-}
-
 /**
  * The identifier an expression is reached through, or null where there is
  * none.
@@ -328,15 +304,12 @@ function somewhereInside(
   node: unknown,
   wanted: (one: Node) => boolean,
 ): boolean {
-  if (Array.isArray(node))
-    return node.some((one) => somewhereInside(one, wanted));
-  if (!isNode(node)) return false;
-  if (wanted(node)) return true;
-  return Object.keys(node).some((key) =>
-    key === "type" || key === "start" || key === "end"
-      ? false
-      : somewhereInside(node[key], wanted),
-  );
+  let found = false;
+  walk(node, (one) => {
+    if (found || wanted(one)) found = true;
+    return found ? false : undefined;
+  });
+  return found;
 }
 
 /**
@@ -362,12 +335,7 @@ function somewhereInside(
  */
 function writersIn(ast: Node): Set<string> {
   const names = new Set<string>();
-  const walk = (value: unknown): void => {
-    if (Array.isArray(value)) {
-      for (const one of value) walk(one);
-      return;
-    }
-    if (!isNode(value)) return;
+  walk(ast, (value) => {
     if (
       value.type === "FunctionDeclaration" &&
       isNode(value.id) &&
@@ -383,12 +351,7 @@ function writersIn(ast: Node): Set<string> {
       somewhereInside(value.init, isMutation)
     )
       names.add(value.id.name as string);
-    for (const key of Object.keys(value)) {
-      if (key === "type" || key === "start" || key === "end") continue;
-      walk(value[key]);
-    }
-  };
-  walk(ast);
+  });
   return names;
 }
 
@@ -406,25 +369,31 @@ function offences(
   lang: "ts" | "tsx",
   found: (node: Node, repeated: boolean, params: Set<string>) => void,
 ): void {
-  const ast = parsed(source, lang);
-  const walk = (
-    value: unknown,
-    repeated: boolean,
-    params: Set<string>,
-  ): void => {
-    if (Array.isArray(value)) {
-      for (const one of value) walk(one, repeated, params);
-      return;
-    }
-    if (!isNode(value)) return;
-
-    const inside = repeated || LOOPS.has(value.type);
+  // What each node hands the nodes it holds: whether they run more than once,
+  // and the names injected into the function around them. Kept by node rather
+  // than threaded through a recursion, so the walk is the one every rule reads.
+  const held = new Map<Node, { inside: boolean; bound: Set<string> }>();
+  walk(parsed(source, lang), (value, ancestors) => {
+    const parent = ancestors.at(-1);
+    const above = (parent && held.get(parent)) ?? {
+      inside: false,
+      bound: new Set<string>(),
+    };
+    // A function handed to a call that repeats its argument runs once per item.
+    const handedIn =
+      parent?.type === "CallExpression" &&
+      FUNCTIONS.has(value.type) &&
+      (parent.arguments as unknown[]).includes(value) &&
+      repeatsItsArgument(parent);
+    const inside = above.inside || handedIn || LOOPS.has(value.type);
     const bound = FUNCTIONS.has(value.type)
       ? new Set([
-          ...params,
-          ...((value.params as unknown[]) ?? []).flatMap((one) => boundBy(one)),
+          ...above.bound,
+          ...((value.params as unknown[]) ?? []).flatMap((one) =>
+            namesBoundBy(one),
+          ),
         ])
-      : params;
+      : above.bound;
 
     // **A name taken off an injected value is that injected value.**
     // `const { post } = hooks` and `const write = hooks.post` are one line of
@@ -445,26 +414,11 @@ function offences(
       rootOf(value.init) !== null &&
       bound.has(rootOf(value.init) as string)
     )
-      for (const name of boundBy(value.id)) bound.add(name);
+      for (const name of namesBoundBy(value.id)) bound.add(name);
 
     found(value, inside, bound);
-
-    for (const key of Object.keys(value)) {
-      if (key === "type" || key === "start" || key === "end") continue;
-      const child = value[key];
-      if (value.type === "CallExpression" && key === "arguments") {
-        const repeats = repeatsItsArgument(value);
-        for (const argument of child as unknown[]) {
-          const isFunction =
-            isNode(argument) && FUNCTIONS.has(argument.type) && repeats;
-          walk(argument, inside || isFunction, bound);
-        }
-        continue;
-      }
-      walk(child, inside, bound);
-    }
-  };
-  walk(ast, false, new Set());
+    held.set(value, { inside, bound });
+  });
 }
 
 /**

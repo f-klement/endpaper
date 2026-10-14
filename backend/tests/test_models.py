@@ -54,7 +54,7 @@ from models import (
 
 # One walk of the tree, shared, so a rule added here scans the corpus every
 # other rule scans. See its docstring for why the exclusion lives there.
-from tests.test_house_rules import _source_modules
+from tests.corpus import application_sources
 
 BACKEND = Path(__file__).resolve().parent.parent
 
@@ -1629,7 +1629,7 @@ class TestANoteReadIsNarrowedToItsReader:
 
     def test_every_function_returning_a_note_narrows_it(self):
         offenders = []
-        for name, source in _source_modules().items():
+        for name, source in application_sources().items():
             tree = ast.parse(source)
             aliases = _note_aliases(tree)
             for node in ast.walk(tree):
@@ -1653,7 +1653,7 @@ class TestANoteReadIsNarrowedToItsReader:
         walk's exclusion widened until it reached nothing.
         """
         found = []
-        for name, source in _source_modules().items():
+        for name, source in application_sources().items():
             tree = ast.parse(source)
             aliases = _note_aliases(tree)
             found += [

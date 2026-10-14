@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- **A failed write on a book's page is no longer hidden by another row's write.** A failed note
+  or quote edit or removal, progress removal, or tag or identifier removal used to go unreported
+  when a write on another row succeeded after it. It is reported now, and a failed tag delete is
+  reported at all, where before no error was shown for it.
+
+- **`POST /api/books/bulk` answers 400 rather than 404 for a tag id in the body that does not
+  exist, is out of range or that the caller may not see.** All three give one status and one
+  body, as before. An id in the path, as on `POST /api/books/{id}/tags`, still answers 404.
+  The route's OpenAPI entry no longer lists a 404.
+
+- **An import fills a field a book stores as empty text, and no longer writes an empty value from
+  the file.** CSV, MARC and OPDS imports treated only a missing value as a gap, so a book
+  holding an empty string kept it, and an empty cell from the file was written over a missing
+  value. Both now follow what enrichment already did.
+
 ## v0.18.0
 
 _2026-10-10_

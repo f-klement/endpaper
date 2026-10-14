@@ -11,9 +11,6 @@
  * agrees with a constant somebody typed is a bound that agrees with nothing.
  */
 
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-
 import { describe, expect, it } from "vitest";
 
 import { BookIdentifierScheme } from "../../src/api/generated/model";
@@ -27,29 +24,18 @@ import {
 import { MAX_PACKAGE_BYTES } from "../../src/lib/epub";
 import type { SourceRecord } from "../../src/lib/sourceRecord";
 import type { StoreIdentifierScheme } from "../../src/lib/stores";
+import { itemsOf, propertiesOf, statedBound } from "../committedSchema";
 
 // The one enumeration of `src/`, which refuses a corpus that is no longer the
 // tree. The pattern used to be written here, where narrowing it was one edit
 // in the file holding the rule it disarmed.
 import { sourceEntries as modules } from "../sourceModules";
 
-const SCHEMA = JSON.parse(
-  readFileSync(
-    fileURLToPath(new URL("../../openapi.json", import.meta.url)),
-    "utf-8",
-  ),
-) as {
-  components: {
-    schemas: {
-      BookCreate: { properties: Record<string, unknown> };
-      BookIdentifierIn: { properties: { value: { maxLength: number } } };
-    };
-  };
-};
-
 /** What the endpoint says an identifier may be, read back rather than typed. */
-const IDENTIFIER_CEILING =
-  SCHEMA.components.schemas.BookIdentifierIn.properties.value.maxLength;
+const IDENTIFIER_CEILING = statedBound(
+  propertiesOf("BookIdentifierIn")["value"],
+  "maxLength",
+);
 
 /**
  * How many the endpoint will take in one request, read back the same way.
@@ -57,11 +43,10 @@ const IDENTIFIER_CEILING =
  * A payload over this is a 422 for the whole book rather than for the extra
  * entry, so it is the fourth rule `boundIdentifiers` has to keep.
  */
-const IDENTIFIER_LIMIT = (
-  SCHEMA.components.schemas.BookCreate.properties as {
-    identifiers: { maxItems: number };
-  }
-).identifiers.maxItems;
+const IDENTIFIER_LIMIT = statedBound(
+  propertiesOf("BookCreate")["identifiers"],
+  "maxItems",
+);
 
 /**
  * The two numbers `boundCategories` has to keep, read off the committed schema.
@@ -77,17 +62,15 @@ const IDENTIFIER_LIMIT = (
  * Both a 422 for the **whole book** if they are exceeded, which is what makes
  * a drifted literal a lost book rather than a lost subject.
  */
-const CATEGORY_CEILING = (
-  SCHEMA.components.schemas.BookCreate.properties as {
-    categories: { items: { maxLength: number } };
-  }
-).categories.items.maxLength;
+const CATEGORY_CEILING = statedBound(
+  itemsOf(propertiesOf("BookCreate")["categories"]!),
+  "maxLength",
+);
 
-const CATEGORY_LIMIT = (
-  SCHEMA.components.schemas.BookCreate.properties as {
-    categories: { maxItems: number };
-  }
-).categories.maxItems;
+const CATEGORY_LIMIT = statedBound(
+  propertiesOf("BookCreate")["categories"],
+  "maxItems",
+);
 
 /**
  * A source that stated everything, and one that stated nothing.
@@ -126,9 +109,7 @@ describe("a source record as the request names its fields", () => {
     // The failure this catches is a field renamed on the schema and left here,
     // which passes the type check while the server ignores it. Asked of the
     // door rather than of a builder, because all three builders spread it.
-    const allowed = new Set(
-      Object.keys(SCHEMA.components.schemas.BookCreate.properties),
-    );
+    const allowed = new Set(Object.keys(propertiesOf("BookCreate")));
 
     expect(
       Object.keys(boundRecord(EVERYTHING_STATED)).filter(

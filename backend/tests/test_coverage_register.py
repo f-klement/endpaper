@@ -56,8 +56,8 @@ from pathlib import Path
 
 import pytest
 
-from tests.test_house_rules import _test_sources
-from tests.test_roster_counts import declares_itself_internal
+from tests.corpus import suite_modules
+from tests.declaration import declares_itself_internal
 
 TESTS = Path(__file__).resolve().parent
 REGISTER = TESTS / "COVERAGE.md"
@@ -1050,7 +1050,7 @@ class Census:
     #: `_excused` is handed the register to make.
     #:
     #: **Its own arming is beside the walk it comes from**, in
-    #: `test_house_rules::TestTheTestTreeIsStillTheTestTree`, because a
+    #: `test_corpus::TestThisCheckoutsPopulationsAreTheWholeOfIt`, because a
     #: narrowing written there takes this whole comparison quiet rather than
     #: red: `counts` reads `session.items` and this reads the shared walk, so
     #: the two disagree and a disagreement is handed to `pytest.skip`.
@@ -1076,7 +1076,7 @@ class Census:
             counts=counts,
             on_disk=frozenset(
                 path.relative_to(TESTS).as_posix()
-                for path in _test_sources()
+                for path in suite_modules()
                 if any(fnmatch(path.name, pattern) for pattern in patterns)
             ),
             test_names=tuple(session.config.getini("python_functions")),
@@ -1401,7 +1401,7 @@ def _refusal(census: Census, excused: frozenset[str]) -> str | None:
             f"This run collected {_files(len(unexpected))} the tree walk did "
             f"not return: {unexpected}. That is the walk going wrong rather "
             "than the run being narrowed, so the remedy is in "
-            "`test_house_rules::_test_sources` and not in the register. A row "
+            "`corpus.suite_modules` and not in the register. A row "
             "of 0 is refused for a file that collects."
         )
     return (
@@ -1870,12 +1870,12 @@ class TestTheCensusMeasuresRatherThanAgrees:
 
         **The complement by equality**, so a file the comprehension drops has
         to fail every pattern. It is not the walk's arm restated: a narrowing
-        written in `_test_sources` moves both sides of this equality together,
+        written in `suite_modules` moves both sides of this equality together,
         which is why that half is armed beside the shared reader instead, in
-        `test_house_rules::TestTheTestTreeIsStillTheTestTree`.
+        `test_corpus::TestThisCheckoutsPopulationsAreTheWholeOfIt`.
         """
         patterns = request.session.config.getini("python_files")
-        walked = {path.relative_to(TESTS).as_posix() for path in _test_sources()}
+        walked = {path.relative_to(TESTS).as_posix() for path in suite_modules()}
         named = {
             path
             for path in walked
@@ -1913,7 +1913,7 @@ class TestTheCensusMeasuresRatherThanAgrees:
         (tmp_path / "tests" / "test_planted.py").write_text("def test_nothing(): ...")
         (tmp_path / "tests" / "helpers.py").write_text("")
 
-        found = {path.name for path in _test_sources(tmp_path)}
+        found = {path.name for path in suite_modules(tmp_path)}
 
         assert found == {"test_planted.py", "helpers.py"}
 

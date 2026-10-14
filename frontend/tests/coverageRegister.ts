@@ -16,6 +16,7 @@ import { fileURLToPath } from "node:url";
 
 import { parseAst } from "vite";
 
+import { walk } from "./sourceReader";
 import { langOf } from "./withoutProse";
 
 export const BEGIN = "<!-- measured: begin -->";
@@ -117,13 +118,7 @@ function restated(
  */
 export function countWrittenOut(source: string, path: string): number {
   let count = 0;
-  const walk = (value: unknown): void => {
-    if (Array.isArray(value)) {
-      for (const item of value as unknown[]) walk(item);
-      return;
-    }
-    if (typeof value !== "object" || value === null) return;
-    const node = value as Record<string, unknown>;
+  const visit = (node: Record<string, unknown>): void => {
     if (node.type === "CallExpression") {
       const callee = node.callee as Record<string, unknown> | undefined;
       // The name is what decides. **The kind is a belt and is deliberately
@@ -136,10 +131,9 @@ export function countWrittenOut(source: string, path: string): number {
       )
         count += 1;
     }
-    for (const key of Object.keys(node)) walk(node[key]);
   };
   try {
-    walk(parseAst(source, { lang: langOf(path) }));
+    walk(parseAst(source, { lang: langOf(path) }), visit);
   } catch (error) {
     throw new Error(
       `${path} did not parse, so this run cannot count what it writes out: ` +
@@ -157,12 +151,18 @@ export function countWrittenOut(source: string, path: string): number {
  * import that one, and because a published file may not read the gate's script
  * to learn either. Both halves are the gate's, transcribed: the anchor allows a
  * short run of non alphanumerics, so a comment or a list marker in front of the
- * sentence still counts.
+ * sentence still counts. **The one copy in this tree**: `houseRules.test.ts`
+ * imports it, and pins the window there.
+ *
+ * **A wrong window is quiet rather than loud.** A narrower one keeps a
+ * document whose declaration sits below it; a wider one drops a document that
+ * merely discusses the convention, which is what the gate's bound protects.
  */
 const DECLARES_ITSELF_INTERNAL =
   /^[^A-Za-z0-9]{0,6}[ \t]*\*\*This file is internal\.\*\*/m;
-const HEADER_LINES = 30;
+export const HEADER_LINES = 30;
 
+/** Whether `source` declares itself internal within the gate's window, in lines. */
 export function declaresItselfInternal(source: string): boolean {
   return DECLARES_ITSELF_INTERNAL.test(
     source.split("\n").slice(0, HEADER_LINES).join("\n"),

@@ -28,7 +28,7 @@ import metadata
 import ratelimit
 import settings_store
 import sources
-from tests.test_house_rules import _source_modules
+from tests.corpus import application_sources
 
 #: A value shaped like a secret, for asserting that something does not print.
 #:
@@ -48,7 +48,7 @@ class _StubLogin:
 
 
 #: The module that is allowed to do the things below, spelled as
-#: `_source_modules()` keys it.
+#: `application_sources()` keys it.
 DOOR = "catalogue_access.py"
 
 #: Every public entry point in `metadata.py` that takes an `Access`.
@@ -203,7 +203,7 @@ class TestOnlyTheAccessDoorAsksACatalogue:
         end: a corpus that stopped being parsed, or a door set that stopped matching,
         leaves nothing to report and reads as clean.
         """
-        source = _source_modules()[DOOR]
+        source = application_sources()[DOOR]
 
         assert _references_to(source, "metadata", ASKING_DOORS), (
             f"{DOOR} asks no catalogue: the walk read nothing, so every other arm "
@@ -213,7 +213,7 @@ class TestOnlyTheAccessDoorAsksACatalogue:
     def test_no_other_module_asks_a_catalogue(self):
         offenders = [
             f"{name}:{line} reaches metadata.{door}"
-            for name, source in _source_modules().items()
+            for name, source in application_sources().items()
             if name != DOOR
             for door, line in _references_to(source, "metadata", ASKING_DOORS)
         ]
@@ -270,7 +270,7 @@ class TestOnlyTheAccessDoorBuildsAnAccess:
     def test_nothing_outside_the_door_constructs_one(self):
         offenders = [
             f"{name}:{line}"
-            for name, source in _source_modules().items()
+            for name, source in application_sources().items()
             if name != DOOR
             for _, line in _references_to(source, "metadata", frozenset({"Access"}))
         ]
@@ -288,7 +288,7 @@ class TestOnlyTheAccessDoorBuildsAnAccess:
 
         Named for a mention rather than a build, because that is what the matcher reads.
         """
-        assert _references_to(_source_modules()[DOOR], "metadata", frozenset({"Access"}))
+        assert _references_to(application_sources()[DOOR], "metadata", frozenset({"Access"}))
 
     def test_nothing_outside_the_door_builds_an_asking_type_by_hand(self):
         """The charge is in the constructor, so bypassing the constructor bypasses it.
@@ -310,7 +310,7 @@ class TestOnlyTheAccessDoorBuildsAnAccess:
         """
         offenders = [
             f"{name}:{line} names {what}"
-            for name, source in _source_modules().items()
+            for name, source in application_sources().items()
             if name != DOOR
             for what, line in _references_to(
                 source,
@@ -573,7 +573,7 @@ class TestTheDoorCannotReachABook:
         exactly that. Importing none is the property that makes the refusal survive a
         reader who disagrees with it.
         """
-        tree = ast.parse(_source_modules()[DOOR])
+        tree = ast.parse(application_sources()[DOOR])
         imported = {
             node.module
             for node in ast.walk(tree)
@@ -826,7 +826,7 @@ class TestAnUnauthenticatedCallerIsNeverToldAboutTheSettings:
     }
 
     def test_every_handler_behind_the_door_is_covered_above(self):
-        tree = ast.parse(_source_modules()["routers/books.py"])
+        tree = ast.parse(application_sources()["routers/books.py"])
         constructors = {"for_a_member_request", "for_a_batch_backfill"}
         reaching = {
             node.name

@@ -144,8 +144,9 @@ below.
 `categories` is stored as one delimited string because SQLite has no array type, and served
 as a list.
 **The delimiter is a semicolon, not a comma**, and that is load bearing: Google's own
-category names contain commas ("Fiction, general"). `google_books.join_categories` and
-`split_categories` are the only two places on the server that know this.
+category names contain commas ("Fiction, general"). `backend/categories.py` is the only
+place on the server that knows this: the separator, the codec, the count and width bounds,
+and what each producer does with a subject the column cannot hold.
 
 **A third place knows it, and it is in the browser.** `BookCreate` refuses an entry
 carrying the delimiter, and a `field_validator` raising refuses the whole request, so a
@@ -987,8 +988,9 @@ an instrument of its own.
 collection is named to a member when a book they can see is filed in it, when a book they can
 see in the trash is, or when no book at all is. The excluded case is the one that leaked: a shelf
 holding books none of which that member may see, whose name told them those books exist. Both
-the count and the row set apply the same question now; `backend/shelving.py` is the one place
-it is answered, for the list, for the rename and for every write that files a book.
+the count and the row set apply the same question now; `backend/disclosure.py` is the one place
+it is answered, for tags and custom fields as well, and `backend/shelving.py` asks it for the
+list, for the rename and for every write that files a book.
 
 An empty collection is named to everybody, because it names no book and so discloses none.
 That is also what keeps a shelf a member just made on the page they made it on, and it makes a

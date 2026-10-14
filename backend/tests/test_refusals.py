@@ -25,8 +25,8 @@ from starlette.exceptions import HTTPException
 
 import main
 import refusals
+from tests.corpus import BACKEND, application_modules
 from tests.test_errors import _constructions, _Module, _resolve, _status_of
-from tests.test_house_rules import BACKEND, _python_sources
 
 _REFUSAL_BODY = {"application/json": {"schema": {"$ref": "#/components/schemas/Refusal"}}}
 
@@ -35,7 +35,7 @@ type _Def = ast.FunctionDef | ast.AsyncFunctionDef
 
 @cache
 def _application_files() -> frozenset[Path]:
-    return frozenset(path.resolve() for path in _python_sources())
+    return frozenset(path.resolve() for path in application_modules())
 
 
 @cache
@@ -366,7 +366,7 @@ class TestEveryRouteDeclaresTheRefusalsItsCodeBuilds:
         }
         dead = [
             f"{path.relative_to(BACKEND).as_posix()}:{node.lineno} {node.name}"
-            for path in _python_sources()
+            for path in application_modules()
             for node in ast.walk(_parsed(path.resolve()))
             if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
             and any(

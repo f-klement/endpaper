@@ -1,6 +1,6 @@
 /**
- * Hooks that belong to no single page: the session, going back, which rows
- * have a write out, a write's failure, and returning a loan.
+ * Hooks that belong to no single page: the session, going back, a write
+ * pressed on one row of a list, and returning a loan.
  *
  * The session is hoisted to this level because App gates routing on it and
  * LoginPage writes it, so it belongs to neither.
@@ -22,11 +22,11 @@
  */
 
 import {
-  matchMutation,
+  useMutation,
   useMutationState,
   useQueryClient,
-  type MutationKey,
   type QueryClient,
+  type UseMutationOptions,
 } from "@tanstack/react-query";
 import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
@@ -36,15 +36,10 @@ import {
   useLogout,
   useMe,
 } from "../api/generated/endpoints/auth/auth";
-import {
-  getReturnLoanMutationKey,
-  useReturnLoan,
-  type ReturnLoanMutationVariables,
-} from "../api/generated/endpoints/loans/loans";
+import { getReturnLoanMutationOptions } from "../api/generated/endpoints/loans/loans";
 import { AuthMode, type UserOut } from "../api/generated/model";
 import { useInvalidate } from "../api/invalidate";
 import { clearSession, setSession } from "../api/mutator";
-import { pendingRows } from "../lib/pendingRow";
 
 const USER_KEY = "user";
 
@@ -263,68 +258,98 @@ type RowKey<TVariables> = {
   string;
 
 /**
- * The `key` of every call of these writes still out, so each row with a write
- * out is marked until that write answers.
- *
- * Read from the mutation cache rather than from the mutation hooks, because a
- * hook remembers only its latest call: pressing the same action on a second
- * row would unmark the first while its write is still out. The keys match as
- * react-query matches them, by prefix, and wherever the call was made, so a
- * write still out from another page marks its row here too.
- *
- * `TVariables` is the variables type of those writes, named at the call, and
- * `key` must be a number field of it, so a misspelt key fails the type check
- * rather than marking nothing. Left out, it is `unknown` and no key passes:
- * without `NoInfer` the compiler would infer a variables type from the key
- * itself, and any spelling would pass. That it names the same writes as the
- * keys is the caller's to keep true.
+ * A generated `get<Operation>MutationOptions`, which is what a row write is
+ * built from. The hook of the same name would hide the mutation key, and the
+ * key is what finds the calls still out.
  */
-export function usePendingRows<TVariables>(
-  key: NoInfer<RowKey<TVariables>>,
-  ...writes: readonly MutationKey[]
-): ReadonlySet<number> {
-  const calls = useMutationState({
-    filters: {
-      status: "pending",
-      predicate: (mutation) =>
-        writes.some((mutationKey) => matchMutation({ mutationKey }, mutation)),
-    },
-    select: (mutation) => mutation.state.variables,
-  });
-  return pendingRows(key, calls);
-}
+type WriteOptions<TData, TVariables> = (options?: {
+  mutation?: UseMutationOptions<TData, unknown, TVariables>;
+}) => UseMutationOptions<TData, unknown, TVariables>;
 
-export interface WriteFailure {
-  /** The failure to show, until the next press of the write. */
+/**
+ * What a write answers and what it is called with, read off its options.
+ *
+ * Read rather than inferred from `WriteOptions` at the call, because the
+ * generated getters are generic in their error and context types and the
+ * compiler then infers nothing at all for the other two.
+ */
+type Built<W> = W extends (...args: never) => infer R ? R : never;
+// Every position inferred: `UseMutationOptions` is invariant in its variables,
+// so matching one position against `unknown` would answer `never`.
+type Parts<W> =
+  Built<W> extends UseMutationOptions<infer D, infer E, infer V, infer C>
+    ? { data: D; variables: V; others: [E, C] }
+    : never;
+type DataOf<W> = Parts<W>["data"];
+type VariablesOf<W> = Parts<W>["variables"];
+
+export interface RowWrite<TVariables> {
+  mutate: (variables: TVariables) => void;
+  /** Every row with a call of this write out, so each such row shows it. */
+  pendingRows: ReadonlySet<number>;
+  /** The most recent failure of any call, until the next press. */
   error: unknown;
-  /** Spread into the write's `mutation` options. */
-  report: {
-    onMutate: () => undefined;
-    onError: (error: unknown) => void;
-  };
 }
 
 /**
- * A write's failure, whichever of its calls failed, for a page's error slot.
+ * A write pressed on one row of a list, whichever row it was pressed on.
  *
- * A mutation hook's `error` is its latest call's, so a failure on one row is
- * silent once the same write has been pressed on another row after it. The
- * callbacks in `report` go into the write's own options, which every call
- * keeps, so each failure is reported however many presses followed it. A press
- * clears it, as the latest call's `error` did, and a later failure replaces it:
- * the slot holds one failure, the most recent.
+ * A mutation hook's `error` and `isPending` describe its latest call only. So
+ * a write pressed on a second row while the first is out unmarks the first,
+ * and a failure on the first is silent once the second succeeds. This reads
+ * the calls out of the mutation cache instead, by the key of the mutation it
+ * runs, so the key cannot name a different write; and it reports failures
+ * from the write's own options, which every call keeps.
+ *
+ * The cache match is by prefix and from anywhere, so a call still out from
+ * another page marks its row here too. A press clears the failure, as the
+ * latest call's `error` did, and a later failure replaces it: the slot holds
+ * one failure, the most recent.
+ *
+ * `row` must be a number field of the write's variables, so a misspelt key
+ * fails the type check rather than marking nothing. Any number field passes,
+ * a sibling one too (`bookId` on a note's write), so which is the row is the
+ * caller's to pick. The row is that id alone: a write whose row is the pair of
+ * an id and a parent, such as a tag taken off one book, marks that id under
+ * every parent, since a tag's id is the same on every book that carries it.
  */
-export function useWriteFailure(): WriteFailure {
+export function useRowWrite<W extends (...args: never) => unknown>(
+  write: W & WriteOptions<DataOf<W>, VariablesOf<W>>,
+  row: RowKey<VariablesOf<W>>,
+  onSuccess?: (data: DataOf<W>, variables: VariablesOf<W>) => void,
+): RowWrite<VariablesOf<W>> {
+  const build: WriteOptions<DataOf<W>, VariablesOf<W>> = write;
   const [error, setError] = useState<unknown>(null);
-  const report = {
-    onMutate: () => {
-      setError(null);
-      return undefined;
+  const options = build({
+    mutation: {
+      onMutate: () => setError(null),
+      // An updater, because `setError` would call a thrown function as one.
+      onError: (failure) => setError(() => failure),
+      onSuccess: (data, variables) => onSuccess?.(data, variables),
     },
-    // An updater, because `setError` would call a thrown function as one.
-    onError: (failure: unknown) => setError(() => failure),
+  });
+  // Without a key the filter below matches every write in the app.
+  if (options.mutationKey === undefined)
+    throw new Error("A row write needs a mutation key");
+  const mutation = useMutation(options);
+  const calls = useMutationState({
+    filters: { mutationKey: options.mutationKey, status: "pending" },
+    select: (call) => call.state.variables,
+  });
+
+  const pendingRows = new Set<number>();
+  for (const call of calls) {
+    // Typed, but read from a cache any write can reach, so checked: a call
+    // with nothing under the key marks nothing, and row zero still marks.
+    const id: unknown = (call as Record<string, unknown> | undefined)?.[row];
+    if (typeof id === "number") pendingRows.add(id);
+  }
+
+  return {
+    mutate: (variables) => mutation.mutate(variables),
+    pendingRows,
+    error,
   };
-  return { error, report };
 }
 
 export interface UseLoanReturnResult {
@@ -343,18 +368,13 @@ export interface UseLoanReturnResult {
  */
 export function useLoanReturn(): UseLoanReturnResult {
   const invalidate = useInvalidate();
-  const failure = useWriteFailure();
-  const returnLoan = useReturnLoan({
-    mutation: { ...failure.report, onSuccess: () => invalidate.loans() },
-  });
-  const returningIds = usePendingRows<ReturnLoanMutationVariables>(
-    "loanId",
-    getReturnLoanMutationKey(),
+  const returning = useRowWrite(getReturnLoanMutationOptions, "loanId", () =>
+    invalidate.loans(),
   );
 
   return {
-    returningIds,
-    markReturned: (loanId) => returnLoan.mutate({ loanId }),
-    error: failure.error,
+    returningIds: returning.pendingRows,
+    markReturned: (loanId) => returning.mutate({ loanId }),
+    error: returning.error,
   };
 }

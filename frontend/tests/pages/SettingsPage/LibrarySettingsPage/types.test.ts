@@ -12,9 +12,6 @@
  * agrees with nothing.
  */
 
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-
 import { describe, expect, it } from "vitest";
 
 import {
@@ -28,22 +25,11 @@ import {
   storeToBookCreate,
   toBookCreate,
 } from "../../../../src/pages/SettingsPage/LibrarySettingsPage/types";
-
-const SCHEMA = JSON.parse(
-  readFileSync(
-    fileURLToPath(new URL("../../../../openapi.json", import.meta.url)),
-    "utf-8",
-  ),
-) as {
-  components: {
-    schemas: {
-      BookCreate: {
-        properties: Record<string, unknown>;
-        required?: string[];
-      };
-    };
-  };
-};
+import {
+  propertiesOf,
+  requiredOf,
+  statedBound,
+} from "../../../committedSchema";
 
 /**
  * How many the endpoint will take in one request, read back the same way.
@@ -51,11 +37,10 @@ const SCHEMA = JSON.parse(
  * A payload over this is a 422 for the whole book rather than for the extra
  * entry, so it is the fourth rule `boundIdentifiers` has to keep.
  */
-const IDENTIFIER_LIMIT = (
-  SCHEMA.components.schemas.BookCreate.properties as {
-    identifiers: { maxItems: number };
-  }
-).identifiers.maxItems;
+const IDENTIFIER_LIMIT = statedBound(
+  propertiesOf("BookCreate")["identifiers"],
+  "maxItems",
+);
 
 function book(overrides: Partial<CalibreBook> = {}): CalibreBook {
   return {
@@ -80,9 +65,7 @@ describe("one Calibre record as a request", () => {
   it("sends nothing the endpoint does not take", () => {
     // The failure this catches is a field renamed on the schema and left here,
     // which passes the type check while the server ignores it.
-    const allowed = new Set(
-      Object.keys(SCHEMA.components.schemas.BookCreate.properties),
-    );
+    const allowed = new Set(Object.keys(propertiesOf("BookCreate")));
 
     expect(
       Object.keys(toBookCreate(book())!).filter((k) => !allowed.has(k)),
@@ -189,7 +172,7 @@ describe("one Calibre record as a request", () => {
     // Calibre writes `Unknown` where nobody said, and `lib/calibre.ts` refuses
     // that by name. What is left has nothing to file it under, and reporting it
     // here is what stops a 422 halfway through nine hundred books.
-    expect(SCHEMA.components.schemas.BookCreate.required).toContain("title");
+    expect(requiredOf("BookCreate")).toContain("title");
     expect(toBookCreate(book({ title: null }))).toBeNull();
   });
 
@@ -284,9 +267,7 @@ describe("one store record as a request", () => {
     // The same failure the Calibre arm catches, and it has to be asked twice:
     // a field renamed on the schema passes the type check on both builders and
     // is ignored by the server on both.
-    const allowed = new Set(
-      Object.keys(SCHEMA.components.schemas.BookCreate.properties),
-    );
+    const allowed = new Set(Object.keys(propertiesOf("BookCreate")));
 
     expect(
       Object.keys(storeToBookCreate(storeBook(), true)!).filter(

@@ -26,7 +26,7 @@ repeat the argument.
 <!-- index: begin -->
 | Section | Entry | Words |
 |---|---|---|
-|  | [Backend](decisions.md#backend) | 33,353 |
+|  | [Backend](decisions.md#backend) | 33,350 |
 | Backend | [`bcrypt` directly, not `passlib`](decisions.md#bcrypt-directly-not-passlib) | 98 |
 | Backend | [Settings are functions, not module constants](decisions.md#settings-are-functions-not-module-constants) | 59 |
 | Backend | [`DATA_DIR` exists at all](decisions.md#data_dir-exists-at-all) | 22 |
@@ -60,7 +60,7 @@ repeat the argument.
 | Backend | [Lending willingness is a third axis, and it is on the book](decisions.md#lending-willingness-is-a-third-axis-and-it-is-on-the-book) | 178 |
 | Backend | [A book marked never lent is refused once, not forbidden](decisions.md#a-book-marked-never-lent-is-refused-once-not-forbidden) | 249 |
 | Backend | ["Ask me about this book" is on the member, and everybody can see it](decisions.md#ask-me-about-this-book-is-on-the-member-and-everybody-can-see-it) | 212 |
-| Backend | [`categories` is joined with a semicolon, not a comma](decisions.md#categories-is-joined-with-a-semicolon-not-a-comma) | 210 |
+| Backend | [`categories` is joined with a semicolon, not a comma](decisions.md#categories-is-joined-with-a-semicolon-not-a-comma) | 207 |
 | Backend | [A classification is stored whole, and its number is what gets matched](decisions.md#a-classification-is-stored-whole-and-its-number-is-what-gets-matched) | 329 |
 | Backend | [The DDC projection is a suggestion, and "suggestion" means pre-selected](decisions.md#the-ddc-projection-is-a-suggestion-and-suggestion-means-pre-selected) | 284 |
 | Backend | [Division level, not the full Dewey schedule](decisions.md#division-level-not-the-full-dewey-schedule) | 125 |
@@ -434,23 +434,23 @@ repeat the argument.
 |  | [A subject label keeps the place of its first occurrence](decisions.md#a-subject-label-keeps-the-place-of-its-first-occurrence) | 105 |
 |  | [The first `$0` is the authority file's number, and `Subfields.gnd_identifier` asks a different question](decisions.md#the-first-0-is-the-authority-files-number-and-subfieldsgnd_identifier-asks-a-different-question) | 316 |
 |  | [A label under two vocabularies is two subjects; a label restated undeclared is one](decisions.md#a-label-under-two-vocabularies-is-two-subjects-a-label-restated-undeclared-is-one) | 154 |
-|  | [`$2` means a vocabulary on a subject field and a Dewey edition on `082`](decisions.md#2-means-a-vocabulary-on-a-subject-field-and-a-dewey-edition-on-082) | 2,117 |
+|  | [`$2` means a vocabulary on a subject field and a Dewey edition on `082`](decisions.md#2-means-a-vocabulary-on-a-subject-field-and-a-dewey-edition-on-082) | 2,118 |
 | `$2` means a vocabulary on a subject field and a Dewey edition on `082` | [Every Python file is compiled, and the warning is recorded rather than raised](decisions.md#every-python-file-is-compiled-and-the-warning-is-recorded-rather-than-raised) | 448 |
-| `$2` means a vocabulary on a subject field and a Dewey edition on `082` | [Every field a request body carries is bounded, and the value comes from one place each](decisions.md#every-field-a-request-body-carries-is-bounded-and-the-value-comes-from-one-place-each) | 815 |
+| `$2` means a vocabulary on a subject field and a Dewey edition on `082` | [Every field a request body carries is bounded, and the value comes from one place each](decisions.md#every-field-a-request-body-carries-is-bounded-and-the-value-comes-from-one-place-each) | 816 |
 | `$2` means a vocabulary on a subject field and a Dewey edition on `082` | [The guard is three questions asked of every request body, not a table of fields](decisions.md#the-guard-is-three-questions-asked-of-every-request-body-not-a-table-of-fields) | 50 |
 | `$2` means a vocabulary on a subject field and a Dewey edition on `082` | [`BodySizeLimitMiddleware` promises a bound it does not apply, and the gap is stated](decisions.md#bodysizelimitmiddleware-promises-a-bound-it-does-not-apply-and-the-gap-is-stated) | 89 |
-| `$2` means a vocabulary on a subject field and a Dewey edition on `082` | [Two bounds this entry does not close](decisions.md#two-bounds-this-entry-does-not-close) | 154 |
+| `$2` means a vocabulary on a subject field and a Dewey edition on `082` | [Two bounds this entry does not close](decisions.md#two-bounds-this-entry-does-not-close) | 155 |
 | `$2` means a vocabulary on a subject field and a Dewey edition on `082` | [The roster count is guarded by a census with a verdict, not by a scan and not by a list](decisions.md#the-roster-count-is-guarded-by-a-census-with-a-verdict-not-by-a-scan-and-not-by-a-list) | 709 |
 | `$2` means a vocabulary on a subject field and a Dewey edition on `082` | [The hole a reviewer should know about](decisions.md#the-hole-a-reviewer-should-know-about) | 52 |
 |  | [A stale count outside the census grammar is fixed by rewriting the sentence, not by widening the census](decisions.md#a-stale-count-outside-the-census-grammar-is-fixed-by-rewriting-the-sentence-not-by-widening-the-census) | 278 |
 |  | [Four figures in the roster census are snapshots rather than recomputed, deliberately](decisions.md#four-figures-in-the-roster-census-are-snapshots-rather-than-recomputed-deliberately) | 172 |
-|  | [`merge_into` takes a `BookMatch`, not a dictionary](decisions.md#merge_into-takes-a-bookmatch-not-a-dictionary) | 183 |
+|  | [`merge_into` takes a `BookMatch`, not a dictionary](decisions.md#merge_into-takes-a-bookmatch-not-a-dictionary) | 190 |
 |  | [The enrichment door drops the field; the search door drops the row](decisions.md#the-enrichment-door-drops-the-field-the-search-door-drops-the-row) | 360 |
-|  | [The three doors over `books.categories`, and why they differ](decisions.md#the-three-doors-over-bookscategories-and-why-they-differ) | 2,290 |
+|  | [The three doors over `books.categories`, and why they differ](decisions.md#the-three-doors-over-bookscategories-and-why-they-differ) | 2,292 |
 | The three doors over `books.categories`, and why they differ | [The 422 is unreachable from an honest producer today, and that is a precondition rather than a note](decisions.md#the-422-is-unreachable-from-an-honest-producer-today-and-that-is-a-precondition-rather-than-a-note) | 141 |
 | The three doors over `books.categories`, and why they differ | [The frequency measurement was withdrawn, and where a split would live if it is ever run](decisions.md#the-frequency-measurement-was-withdrawn-and-where-a-split-would-live-if-it-is-ever-run) | 113 |
 | The three doors over `books.categories`, and why they differ | [The bound is two named factors, and both are literals](decisions.md#the-bound-is-two-named-factors-and-both-are-literals) | 263 |
-| The three doors over `books.categories`, and why they differ | [The write has an unwrite, and it is an empty list](decisions.md#the-write-has-an-unwrite-and-it-is-an-empty-list) | 344 |
+| The three doors over `books.categories`, and why they differ | [The write has an unwrite, and it is an empty list](decisions.md#the-write-has-an-unwrite-and-it-is-an-empty-list) | 343 |
 | The three doors over `books.categories`, and why they differ | [The second writer of a reshaped column arrives at a door with no refusal on it](decisions.md#the-second-writer-of-a-reshaped-column-arrives-at-a-door-with-no-refusal-on-it) | 184 |
 | The three doors over `books.categories`, and why they differ | [One demand declined, with the reason, because its only other home is deleted](decisions.md#one-demand-declined-with-the-reason-because-its-only-other-home-is-deleted) | 76 |
 | The three doors over `books.categories`, and why they differ | [`categories` is deliberately absent from the MARC importer's field list](decisions.md#categories-is-deliberately-absent-from-the-marc-importers-field-list) | 91 |
@@ -661,7 +661,7 @@ repeat the argument.
 |  | [Three GLOB rules, three different situations, one arm](decisions.md#three-glob-rules-three-different-situations-one-arm) | 445 |
 | Three GLOB rules, three different situations, one arm | [A character ceiling bounds no bytes](decisions.md#a-character-ceiling-bounds-no-bytes) | 102 |
 | Three GLOB rules, three different situations, one arm | [A literal anti vacuity floor is a stated bound wearing a measurement's clothes](decisions.md#a-literal-anti-vacuity-floor-is-a-stated-bound-wearing-a-measurements-clothes) | 121 |
-|  | [The local cover precedence is `covers.is_local` and nothing else](decisions.md#the-local-cover-precedence-is-coversis_local-and-nothing-else) | 200 |
+|  | [The local cover precedence is `covers.is_local` and nothing else](decisions.md#the-local-cover-precedence-is-coversis_local-and-nothing-else) | 203 |
 |  | [Outside evidence cannot claim to be this deployment's own file](decisions.md#outside-evidence-cannot-claim-to-be-this-deployments-own-file) | 120 |
 |  | [`COVER_HOSTS` entries are bare hosts, and two readers need them to be](decisions.md#cover_hosts-entries-are-bare-hosts-and-two-readers-need-them-to-be) | 73 |
 |  | [Escaping a CSV export cell is the default, and the exemption is the claim](decisions.md#escaping-a-csv-export-cell-is-the-default-and-the-exemption-is-the-claim) | 200 |
@@ -870,4 +870,15 @@ repeat the argument.
 |  | [A runner export that draws is found by parse, and the parse is held to the real export list](decisions.md#a-runner-export-that-draws-is-found-by-parse-and-the-parse-is-held-to-the-real-export-list) | 117 |
 |  | [A hand plant is a mode of the mutation sweep, run with the coverage registers off](decisions.md#a-hand-plant-is-a-mode-of-the-mutation-sweep-run-with-the-coverage-registers-off) | 210 |
 |  | [A bounded run's timeout is read off a marker, not off the timer's exit status](decisions.md#a-bounded-runs-timeout-is-read-off-a-marker-not-off-the-timers-exit-status) | 79 |
+|  | [One home for what this project wrote, and a ratchet on call sites instead of policing walks](decisions.md#one-home-for-what-this-project-wrote-and-a-ratchet-on-call-sites-instead-of-policing-walks) | 581 |
+|  | [The internal declaration rule has one copy per language, spelled for the pipeline's engine](decisions.md#the-internal-declaration-rule-has-one-copy-per-language-spelled-for-the-pipelines-engine) | 286 |
+|  | [Tests read the parse through one source reader](decisions.md#tests-read-the-parse-through-one-source-reader) | 182 |
+|  | [Test readers of `openapi.json` go through one module](decisions.md#test-readers-of-openapijson-go-through-one-module) | 239 |
+|  | [A write pressed on a row of a list goes through `useRowWrite`, and a page wide busy flag stays at its site](decisions.md#a-write-pressed-on-a-row-of-a-list-goes-through-userowwrite-and-a-page-wide-busy-flag-stays-at-its-site) | 308 |
+|  | [One module owns a Book's Categories column](decisions.md#one-module-owns-a-books-categories-column) | 122 |
+|  | [The Google adapter hands on a list, and the list is the split of the join](decisions.md#the-google-adapter-hands-on-a-list-and-the-list-is-the-split-of-the-join) | 156 |
+|  | [An id in the path is a 404, an id in the body is a 400](decisions.md#an-id-in-the-path-is-a-404-an-id-in-the-body-is-a-400) | 129 |
+|  | [One module applies outside evidence to an existing Book](decisions.md#one-module-applies-outside-evidence-to-an-existing-book) | 517 |
+|  | [One rule decides who may be told a vocabulary entry exists](decisions.md#one-rule-decides-who-may-be-told-a-vocabulary-entry-exists) | 455 |
+|  | [One reader for the pipeline file, and the shell runners keep theirs, held equal](decisions.md#one-reader-for-the-pipeline-file-and-the-shell-runners-keep-theirs-held-equal) | 386 |
 <!-- index: end -->

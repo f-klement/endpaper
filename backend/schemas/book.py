@@ -9,6 +9,14 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 import covers
 import isbn as isbn_utils
 from authors import split_authors
+from categories import (
+    CATEGORIES_MAX,
+    CATEGORY_MAX,
+    MAX_CATEGORIES_PER_BOOK,
+    rebound_categories,
+    refuse_separator,
+    split_categories,
+)
 from enums import (
     BookCondition,
     BookFormat,
@@ -18,7 +26,6 @@ from enums import (
     OwnershipStatus,
     ReadStatus,
 )
-from google_books import CATEGORY_SEPARATOR, join_categories, split_categories
 from models import (
     AUTHOR_LINE_MAX,
     COVER_URL_MAX,
@@ -81,68 +88,7 @@ MAX_PRICE_MINOR = 100_000_000
 # nothing stores it. See the field for the derivation.
 SOURCE_LABEL_MAX = 120
 
-#: How many subjects one book's list may carry, as a request states them.
-#:
-#: Here rather than in `models.py`, beside the three other per book request counts
-#: (`schemas/identifier.py`, `schemas/classification.py`, `schemas/digital.py`):
-#: `books.categories` is `Text`, so none of these three is a column width, and
-#: this module is their only consumer.
-#:
-#: 32 because the failure modes are asymmetric: too loose costs page weight, too
-#: tight drops a whole search result silently, since `routers/books._match_rows`
-#: builds the match inside a `try` that drops a **row** rather than a field. The
-#: widest shape measured in this tree is 14 headings, so it clears 2.3x.
-#:
-#: **That is why a producer caps rather than letting this refuse.**
-#: `catalogue.Record.as_match` passes this number to `join_categories`, so a
-#: catalogue record carrying more subjects loses the extra ones rather than its row.
-#:
-#: **The count only.** A record whose capped list still exceeds `CATEGORIES_MAX` is
-#: refused by that width and loses the row after all: measured, 32 subjects of 200
-#: characters join to 6,462. That loss is older than this cap and is pinned
-#: deliberately by
-#: `tests/routers/test_books_search.py::test_the_rest_of_the_page_survives_a_bad_record`,
-#: so widening anything to make the sentence unqualified would break an arm that is
-#: there on purpose.
-#:
-#: A client body on `POST /{book_id}/enrich/apply` has had nothing capped, so there
-#: the refusal stands and is a 422.
-MAX_CATEGORIES_PER_BOOK: Final = 32
-
-#: What one subject may be, as a request states it.
-#:
-#: **The literal rather than `models.CLASSIFICATION_NUMBER_MAX`, though the two
-#: are the same number today.** They are the same number because they are the same
-#: population measured, an access point with its subdivisions. Aliasing it would
-#: make that claim unfalsifiable and the coupling is live in the wrong direction:
-#: that constant is a **column** width, widened three times for column reasons
-#: (40, 80, 100, 120) by its own record, and each widening would silently widen
-#: every subject list this application accepts.
-#: `tests/schemas/test_book.py::test_the_two_widths_are_the_same_population` holds
-#: the equality as a measurement, so moving either has to be done twice.
-CATEGORY_MAX: Final = 120
-
-#: The longest subject list a client may write into `books.categories`.
-#:
-#: The second `Text` column on this table and on the **list** payload, so it
-#: inherits `DESCRIPTION_MAX`'s argument whole: an oversized value is paid for on
-#: every page of every listing, and the column stays `Text` so this bounds new
-#: writes without making a stored row unreadable. **A stated bound rather than
-#: something the column enforces**: SQLite ignores a declared width, and this one
-#: is `Text`, so nothing breaks at 3,903. It is a page weight control.
-#:
-#: **Computed, and the separator's width is read rather than retyped.** Writing
-#: the `2` as a literal put one fact in two modules: a **wider** separator would
-#: make this number too small and every widest list claim in this file false,
-#: which is the unsafe direction the previous note here did not mention. Reading
-#: `len(CATEGORY_SEPARATOR)` removes the second home rather than guarding it, and
-#: `tests/schemas/test_book.py::test_the_categories_ceiling_assumes_the_separator_it_is_derived_from`
-#: pins the width with literals so this line cannot be a restatement of itself.
-CATEGORIES_MAX: Final = MAX_CATEGORIES_PER_BOOK * CATEGORY_MAX + (
-    MAX_CATEGORIES_PER_BOOK - 1
-) * len(CATEGORY_SEPARATOR)
-
-#: One subject, as a request states it.
+#: One subject, as a request states it, at `categories.CATEGORY_MAX`.
 #:
 #: **120 here and no per subject width on `BookMatch`, over the same population,
 #: and the difference is what a refusal costs on each door.** Here the entry is a
@@ -150,7 +96,7 @@ CATEGORIES_MAX: Final = MAX_CATEGORIES_PER_BOOK * CATEGORY_MAX + (
 #: is a 422 a caller can read and act on. There the value is a catalogue's own
 #: heading that nobody can retype, and a refusal drops the field on an enrichment
 #: the member did not choose the value of, so that door bounds what it would store
-#: instead. `BookMatch.rejoin_categories` carries the measurement.
+#: instead. `categories.rebound_categories` carries the measurement.
 #:
 #: **An alias rather than a `max_length` in the validator**, and that is the
 #: whole reason it exists: `tests/schemas/test_book.py` reads a list field's
@@ -184,12 +130,7 @@ def subject_for_storage(entry: str) -> str | None:
     tidied = one_line_without_invisible_characters(entry)
     if not tidied:
         return None
-    if CATEGORY_SEPARATOR.strip() in tidied:
-        raise ValueError(
-            f"A subject may not contain {CATEGORY_SEPARATOR.strip()!r}, which "
-            "separates subjects in storage. Send them as separate entries."
-        )
-    return tidied
+    return refuse_separator(tidied)
 
 
 def normalised_subjects(value: object) -> object:
@@ -202,22 +143,10 @@ def normalised_subjects(value: object) -> object:
     paragraphs below are the argument for it, which is the thing that would
     have gone stale in the copy.
 
-    **The ground is that the value is unrepresentable, not that it is risky.**
-    `google_books.split_categories` splits on a **bare** separator, so a stored
-    `"Fiction; general"` is served as two subjects to every reader of this
-    column, including the member who typed it. So the refusal says "this column
-    cannot hold that value", which is true whoever produced it and however many
-    other writers exist.
-
-    **A 422 here and a drop at a parser is this tree's existing arrangement for
-    a body a caller composed, not a choice made for this field.**
-    `classifications.bounded_headings` states it: a bad entry is dropped and
-    logged there, because nothing in a record is worth failing a whole lookup
-    for, while `ClassificationIn.number` is a hard 422 on the create route.
-    `google_books.join_categories` drops a separator bearing subject for the two
-    upstream joins, and the scan flow's own file readers drop one in the browser
-    before the request is built, which is the parser layer this column used to
-    lack.
+    **This is the refuse policy of the four `categories` names**, and that
+    module carries why each producer gets the one it does. The ground is that
+    the value is unrepresentable, not that it is risky, so the refusal says
+    "this column cannot hold that value", which is true whoever produced it.
 
     **This refuses the whole request and not the entry**, which is what a
     `field_validator` raising means. That still costs nothing, because no honest
@@ -231,12 +160,6 @@ def normalised_subjects(value: object) -> object:
     lost book rather than a lost subject if that bound goes. **The update door
     has no producer at all yet**: nothing in the browser sends this field, so
     the only caller is one somebody wrote by hand.
-
-    `BookMatch.rejoin_categories` splits instead, and the divergence is
-    deliberate: **it is forced there rather than chosen.** That door is handed
-    one already joined string, in which the separator is structural and
-    indistinguishable from a typed one, so a refusal would refuse every record
-    carrying two or more subjects.
 
     **This is a correctness control, not a security control.** A hostile client
     can store any value the column holds through any door onto it.
@@ -295,7 +218,7 @@ def _a_cover_url_the_column_can_hold(url: str | None) -> str | None:
 
     `catalogue._AS_STORED` is the same rule on the catalogue path, where a
     record clears the field instead. Here there is a caller to tell, so this
-    raises: a 422 on both routes, and `routers/books._bounded_match` catches it
+    raises: a 422 on both routes, and `evidence._bounded_match` catches it
     and drops the field, which is the catalogue path's answer reached through
     this one rule rather than through a second copy of it.
 
@@ -830,8 +753,8 @@ class BookColumns(BaseModel):
 
         The separator is a semicolon, not a comma, and that is load bearing:
         Google's own category names contain commas ("Fiction, general"), so
-        splitting on one would shred them. `google_books.CATEGORY_SEPARATOR`
-        is the single definition of what was joined.
+        splitting on one would shred them. `categories` is the single
+        definition of what was joined.
 
         `mode="before"` because the attribute read off the model is a string
         and the field is a list, so this has to run ahead of validation rather
@@ -1012,15 +935,15 @@ class BookMatch(BaseModel):
     is a value a member chose rather than one a catalogue supplied.
 
     **And since 2026-09-03 it is the only way a catalogue value reaches a Book
-    column through `merge_into`**, which is a second reason for the same
-    bounds rather than a second rule. `google_books.merge_into` takes this
-    model rather than a dictionary, so `POST /api/books/{id}/enrich` builds one
-    through `routers/books._bounded_match` instead of handing over whatever
+    column on enrichment**, which is a second reason for the same bounds rather
+    than a second rule. `evidence` writes from this model rather than from a
+    dictionary, so `POST /api/books/{id}/enrich` builds one through
+    `evidence._bounded_match` instead of handing over whatever
     `Record.as_match()` assembled. Before that the ceilings applied on one
     route and not on its neighbour: the same oversized value was a 422 on
     apply and a stored row on enrich, same book, one route apart.
 
-    **Through `merge_into` was the whole of the claim, because a third route
+    **Through this model was the whole of the claim, because a third route
     did not go through it, and that closed on 2026-09-03 one layer below all
     three.** `PUT /api/books/{id}/refresh` assigns nine columns straight off the
     same `catalogue.Record` and builds no model at all, so a 9999 year and a
@@ -1060,7 +983,7 @@ class BookMatch(BaseModel):
     # the same two factors the other body states.
     #
     # **Naming, not writing**, and the distinction is a correction rather than
-    # pedantry: `google_books.merge_into` writes eleven of these plus
+    # pedantry: `evidence` writes eleven of these plus
     # `cover_url`, and `title` and `isbn13` are not among them. The rule that
     # picks their numbers is agreement with the other bodies writing that
     # column, which holds whether or not this route writes it.
@@ -1080,7 +1003,7 @@ class BookMatch(BaseModel):
     #: Which catalogue this row came from, for the label in the picker.
     #:
     #: The one field with no column behind it: `apply_enrichment` excludes it
-    #: and `merge_into` does not name it, so nothing stores it. The bound is
+    #: and `evidence` does not name it, so nothing stores it. The bound is
     #: therefore about the request rather than the row, and is derived from
     #: what the field can legitimately say: `catalogue.Record.sources` joins
     #: the answering catalogues with `+`, and the whole roster of nine
@@ -1111,13 +1034,13 @@ class BookMatch(BaseModel):
     #: The `isbn` column under another name, because a search row is one
     #: printing among several rather than the one asked for. So
     #: `BookCreate.isbn`'s 20, which is the agreement rule's number rather than
-    #: a column's: `merge_into` names neither `isbn13` nor `title`, so neither
+    #: a column's: `evidence` names neither `isbn13` nor `title`, so neither
     #: is written on this route at all. Both critic seats caught the earlier
     #: wording claiming a write that does not happen.
     isbn13: str | None = Field(default=None, max_length=ISBN_MAX)
     series_name: str | None = Field(default=None, max_length=SERIES_NAME_MAX)
     #: **The sharpest of the thirteen**, and a stored denial of service rather
-    #: than an oversized row. `merge_into` writes this column, and
+    #: than an oversized row. `evidence` writes this column, and
     #: `routers/books.list_series` computes `set(range(1, max(held) + 1))` over
     #: it under `Shelf.seen_by`, so every member pays. Measured twice, on
     #: different machines and by different seats: 70.5 bytes and 0.624 seconds
@@ -1128,7 +1051,7 @@ class BookMatch(BaseModel):
     #:
     #: **Both routes that write the column now go through here**, and the
     #: second one was closed on 2026-09-03. `POST /api/books/{id}/enrich` used
-    #: to hand `Record.as_match()` straight to `merge_into` and never build a
+    #: to hand `Record.as_match()` straight to the writer and never build a
     #: `BookMatch`, so a catalogue supplying `1e9` was stored with a 200 where
     #: the identical value here was a 422: measured end to end, same book, one
     #: route apart. It is reachable from a catalogue rather than only from an
@@ -1147,12 +1070,8 @@ class BookMatch(BaseModel):
     #: **The bound is on the signature rather than at the call site**, because
     #: a rule a caller has to remember is a rule the next caller forgets: this
     #: hole was one route failing to do what its neighbour did.
-    #: `google_books.merge_into` takes a `BookMatch`, so a dictionary fails
+    #: `evidence._apply_match` takes a `BookMatch`, so a dictionary fails
     #: mypy at any call site and raises on the first `getattr` at runtime.
-    #: The mutual import that costs is `TYPE_CHECKING` only and cannot be
-    #: otherwise: this module imports `split_categories` from `google_books`,
-    #: which is the cycle, and PEP 649 is why the annotation still needs no
-    #: quoting.
     series_index: float | None = Field(default=None, ge=0, le=MAX_SERIES_INDEX)
     #: Bounded for the same reason `year` is: this model is a request body, and
     #: `POST /api/books/{id}/enrich/apply` turns every entry into a row.
@@ -1198,76 +1117,15 @@ class BookMatch(BaseModel):
     def rejoin_categories(cls, value: str | None) -> str | None:
         """Bound the subjects inside the joined string, not just the string.
 
-        **This door splits where `BookCreate` refuses, and the split is forced
-        rather than chosen.** What arrives here is one already joined string, in
-        which the separator is structural: `catalogue.Record.as_match` joins with a
-        string containing the bare character, so a refusal would refuse every record
-        carrying two or more subjects. Nothing about a pre joined string
-        distinguishes a structural separator from a typed one, so this is the only
-        rule this door can implement. `normalised_subjects` carries why the two
-        request bodies refuse instead.
-
-        **The producer differs per path rather than per door, which is why the
-        forcing reason above is the one that holds.** `routers/books._bounded_match`
-        builds this model server side on `POST /enrich`, and
-        `POST /api/books/{book_id}/enrich/apply` validates a body the **client**
-        sent, which is the same producer class the other doors refuse. So a producer
-        argument would not separate these doors; the wire shape does.
-
-        **A correctness control, not a security control.** A hostile caller can
-        store any value the column holds through any door onto it. What this closes is
-        the looseness one route apart that `max_length` alone left: 3,902 characters
-        is 1,951 subjects when they are two characters each, against the 32 the
-        member's own door allows, and `merge_into` writes the column from here.
-
-        **The two bounds apply after the split and never before**, which is the
-        whole of why the field's own `max_length` is not enough: a pre joined
-        string satisfies any per subject width at once. The field stays a string
-        rather than becoming a list, because `google_books.merge_into` assigns
-        this column by name off `book_columns.WORK_DETAIL` and `as_match` joins
-        it, so a list here would move the reshaping to three sites instead of one.
-
-        **The second bound is the width of the rejoin, and not a per subject
-        width.** A per subject width would refuse a single long heading that is
-        inside this column's stated bound, which
-        `tests/routers/test_books_google.py::TestACatalogueCannotWriteWhatTheColumnsRefuse`
-        pins as the deliberate answer on this path: what the bound admits is stored.
-        And it is not the bound the column needs. Splitting on a bare separator and
-        rejoining with the two character one **lengthens** the value, so a payload
-        of exactly `CATEGORIES_MAX` carrying 31 bare separators is 32 subjects,
-        inside the count, and rejoins to 3,933, which is 31 past
-        `CATEGORIES_MAX`. Measured. The count alone therefore does not protect that
-        bound and the rejoin width does, exactly.
-
-        **`CATEGORIES_MAX` is a stated bound and not something the column
-        enforces**: `books.categories` is `Text` and SQLite ignores a declared width
-        anyway, so nothing breaks at 3,903. It is a page weight control, for the
-        reason its own definition carries, and the wording here says "past the
-        bound" rather than "more than the column can take" because the latter would
-        be a claim about the database.
+        **This door splits where `BookCreate` refuses**: it is the split and
+        re-bound policy, and `categories.rebound_categories` holds the rule and
+        the reason it is forced here. The field stays a string rather than
+        becoming a list, because `evidence` assigns this column
+        by name off `book_columns.WORK_DETAIL` and `catalogue.Record.as_match`
+        joins it, so a list here would move the reshaping to three sites
+        instead of one.
         """
-        subjects = split_categories(value)
-        if not subjects:
-            # `split_categories` answers `[]` for None and for a string with
-            # nothing in it, and `join_categories` answers None for `[]`, so an
-            # empty value stays a stored NULL rather than becoming "".
-            return None
-        if len(subjects) > MAX_CATEGORIES_PER_BOOK:
-            raise ValueError(
-                f"At most {MAX_CATEGORIES_PER_BOOK} subjects, and this carries "
-                f"{len(subjects)}"
-            )
-        # Rejoined rather than returned as parts, so what this model hands on is
-        # what the column stores, and the width below is measured against that
-        # rather than against what arrived. Idempotent by construction: no part
-        # it returns is empty, padded, or carries the separator.
-        rejoined = join_categories(subjects)
-        if rejoined is not None and len(rejoined) > CATEGORIES_MAX:
-            raise ValueError(
-                f"These subjects are stored joined, which is {len(rejoined)} "
-                f"characters against a bound of {CATEGORIES_MAX}"
-            )
-        return rejoined
+        return rebound_categories(value)
 
 
 class BookSearchOut(BaseModel):
@@ -1392,7 +1250,7 @@ class BookDetailsUpdate(BaseModel):
     #: **Empty clears and absent leaves alone, and null is not a spelling of
     #: either.** Every other field here is `X | None` because its column holds
     #: one value and a null is how that value goes away. This one arrives as a
-    #: list and is stored as one joined string, and `google_books.join_categories`
+    #: list and is stored as one joined string, and `categories.join_categories`
     #: already answers `None` for `[]`, so an empty list **is** the cleared
     #: column and a null beside it would be a second spelling of one act.
     #: Refused rather than accepted as a synonym: two spellings reaching one
@@ -1407,8 +1265,8 @@ class BookDetailsUpdate(BaseModel):
     #:
     #: **Why the column needed one at all.** Three writes and no removal: the
     #: create route, the catalogue gap fill and the merge's absorb. Even an
-    #: overwriting enrich cannot empty it, because `google_books.merge_into`
-    #: skips an incoming value in `(None, "", [])`. And it publishes:
+    #: overwriting enrich cannot empty it, because `evidence` skips an
+    #: incoming value that `evidence.is_empty`. And it publishes:
     #: `schemas/public.PublicBookOut` serves this field to a reader with no
     #: account, so flipping a book public and folding a private row into a
     #: public keeper each carry a subject across that boundary with no undo.
@@ -1815,7 +1673,7 @@ class IdentifierBackfillOut(BaseModel):
     **There is no `unchanged`, and a design critic is why.** One was declared,
     for books whose record answered and carried nothing new. It could not
     happen: a candidate is a Book with no `google_books_id`, every volume
-    resource carries one, and `merge_into` writes it, so every answered book
+    resource carries one, and `evidence` writes it, so every answered book
     gains at least that field. The only body that reached it was a 200 with no
     `id`, which `google_books.lookup_by_volume_id` now refuses as not a volume.
     A count that cannot be non zero is a fact about the code stated on the wire.

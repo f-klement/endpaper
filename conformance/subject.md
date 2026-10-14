@@ -222,7 +222,7 @@ which is the whole reason this domain is here.
 
 **The separator is pinned by its behaviour, not by its spelling.** The browser
 holds the character as a literal and the server reads it off
-`google_books.CATEGORY_SEPARATOR`. The two separator cases fail if either side
+`categories.CATEGORY_SEPARATOR`. The two separator cases fail if either side
 stops refusing `;`, and they cannot see the server's constant changing value
 with the browser's literal not following, except through the behaviour on `;`,
 which reddens on the server side first. The mechanism is named; the extent is

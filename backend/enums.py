@@ -485,8 +485,8 @@ class BookIdentifierScheme(StrEnum):
 
     **Not `books.google_books_id`, though `GOOGLE_BOOKS` names the same
     catalogue.** That column records which Google volume this row's *metadata*
-    was taken from, and `google_books.merge_into` is the only writer that takes
-    one from a catalogue: `overwrite=True` there retypes it. (Two others carry a
+    was taken from, and `evidence` is the only module that writes one from a
+    catalogue: `Policy.OVERWRITE` there retypes it. (Two others carry a
     value the library already holds, `_absorb_fields` on a merge and the copy
     route through `_WORK_FIELDS`, and `backup.restore` reinstates one. None of
     them is a fresh assertion, which is why the claim is about the catalogue
@@ -494,7 +494,7 @@ class BookIdentifierScheme(StrEnum):
     export said they **own**, which is a fact rather than a preference, and
     `models.AuthorIdentifier` already states that asymmetry for a person's
     name. Writing the store's assertion into the enrichment column would also
-    pre-empt enrichment, because `merge_into` skips a field that is already
+    pre-empt enrichment, because `evidence` fills only a field that is not already
     set, so a Play Books import would stop Google recording its own volume.
     """
 

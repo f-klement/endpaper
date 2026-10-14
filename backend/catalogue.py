@@ -36,7 +36,7 @@ from dataclasses import dataclass
 from typing import Any, Final, get_origin
 
 import covers
-import google_books
+from categories import join_categories
 from enums import AuthorityScheme, ClassificationScheme, HeadingKind
 from models import (
     AUTHOR_LINE_MAX,
@@ -52,7 +52,7 @@ from models import (
     SUBTITLE_MAX,
     TITLE_MAX,
 )
-from schemas.book import MAX_CATEGORIES_PER_BOOK, MAX_YEAR, MIN_YEAR
+from schemas.book import MAX_YEAR, MIN_YEAR
 from schemas.classification import MAX_CLASSIFICATIONS_PER_BOOK
 
 logger = logging.getLogger("endpaper.catalogue")
@@ -326,7 +326,7 @@ _REFUSED_AS_OUR_OWN: Final[dict[str, Callable[[str], bool]]] = {
 #: computes `set(range(1, max(held) + 1))` over the column, so a stored `1e9` is
 #: roughly 70 GB and ten minutes of work on every request by every Member. The
 #: refresh handler does not write that column, which is why this ticket is not
-#: that severity, but `google_books.merge_into` does and it is fed from here.
+#: that severity, but `evidence.apply_record` does and it is fed from here.
 _NUMBER_RANGES: Final[dict[str, tuple[float, float]]] = {
     "year": (MIN_YEAR, MAX_YEAR),
     "page_count": (1, MAX_PAGE_NUMBER_IN_A_BOOK),
@@ -377,7 +377,7 @@ def _drop_unstorable(record: Record) -> list[str]:
     """Clear every scalar the columns could not hold, and name them.
 
     **The field rather than the record**, which is the rule
-    `routers/books._bounded_match` settled: a catalogue value too wide loses
+    `evidence._bounded_match` settled: a catalogue value too wide loses
     that field, it does not lose the record and it never 422s a Member's own
     request. Here it is applied one layer earlier, so every consumer of a
     `Record` inherits it instead of each one remembering.
@@ -385,8 +385,8 @@ def _drop_unstorable(record: Record) -> list[str]:
     **`None` rather than a truncation.** A record says what a catalogue
     asserted, and half a title is an assertion nobody made. Absent is a state
     every consumer already handles: `filled_from` fills it from another
-    catalogue, `merge_into` skips it, and the refresh handler's `or book.title`
-    keeps what the Book already had.
+    catalogue, `evidence.apply_record` skips it when filling, and a refresh
+    keeps the Book's own `title` in its place.
 
     **A value of the wrong type is dropped in both loops, and that is a
     different rule from the one above it.** The paragraph above is about a value
@@ -531,7 +531,7 @@ class Record:
     series_name: str | None = None
     series_index: float | None = None
     #: Google's own volume id, which only Google supplies and only
-    #: `google_books.merge_into` stores.
+    #: `evidence.apply_record` stores.
     google_books_id: str | None = None
     #: What this book is about, in the catalogue's own words, each carrying the
     #: vocabulary the record declared and the identifier it gave. Feeds the tag
@@ -991,10 +991,9 @@ class Record:
         row is one printing among several rather than the one asked for, and
         carries the subjects joined into the single string a Book row stores.
 
-        **The join goes through `google_books.join_categories`.** That module
-        and its `split_categories` are the only two places that know the
-        separator is a semicolon, because Google's own category names contain
-        commas ("Fiction, general"). Calling it is not a third place that knows.
+        **The join goes through `categories.join_categories`**, which drops a
+        subject carrying the separator and caps the count: the catalogue policy
+        that module names.
 
         **The subject count is capped here, and it belongs to the shape rather
         than to the caller**, which is exactly `match_headings`' argument one
@@ -1005,7 +1004,8 @@ class Record:
         subjects join to 493 characters, far inside the column's bound, and
         returned zero rows. Capping in the search handler alone would leave
         `GET /{id}/enrich/candidates` on the same footing, since it is fed by the
-        same function.
+        same function. The cap is the join's default, so this call states
+        nothing it could forget.
 
         **The model keeps its own count bound**, because the other producer of
         that body is a client on `POST /{id}/enrich/apply`, where nothing has
@@ -1022,10 +1022,7 @@ class Record:
             "description": self.description,
             "page_count": self.page_count,
             "language": self.language,
-            "categories": google_books.join_categories(
-                self.subject_labels, limit=MAX_CATEGORIES_PER_BOOK
-            )
-            or None,
+            "categories": join_categories(self.subject_labels),
             "cover_url": self.cover_url,
             "isbn13": self.isbn,
             "series_name": self.series_name,

@@ -32,6 +32,7 @@ import custom_fields
 import ddc
 import deadline
 import downloads
+import evidence
 import folding
 import google_books
 import identity
@@ -49,6 +50,7 @@ from authorship import (
     IdentifierConflict,
     RecordedAssertions,
 )
+from categories import join_categories
 from classifications import add_headings, bounded_headings
 from dependencies import (
     BookForOwner,
@@ -93,7 +95,6 @@ from models import (
     AuthorIdentifier,
     Book,
     BookIdentifier,
-    Collection,
     CustomField,
     DigitalReference,
     Note,
@@ -352,7 +353,7 @@ def _no_such_custom_field() -> HTTPException:
     return HTTPException(status_code=404, detail="Custom field not found")
 
 
-def _custom_field(field_id: int, db: Session, fields: Fields) -> CustomField:
+def _custom_field(field_id: int, fields: Fields) -> CustomField:
     """The definition at this id, if this Member may be told it exists.
 
     **This is a privacy question, and this docstring said it was not.** It was
@@ -365,33 +366,13 @@ def _custom_field(field_id: int, db: Session, fields: Fields) -> CustomField:
     with `name` on every entry. `fields.Fields.addressable` records the rest.
 
     The absent id and the hidden one get the same 404, so the two cannot be
-    told apart **in the body or on a clock**.
-
-    **The gate is asked before the row is fetched, and that ordering is the
-    whole of the second half.** Written the other way round, `or` short
-    circuits: an absent id never reaches the three arms, so it costs **one**
-    statement where a hidden id costs several, and the two answers separate on
-    a timer by a factor, not a margin. Reordered, both paths issue the same
-    statements and the two medians sit within 1%, interleaved, 400 repetitions
-    each.
-
-    **The hidden path's absolute statement count is deliberately not written
-    here.** Two harnesses measured this question and got 4 and 5, and the claim
-    does not need the number: what it needs is that the two paths were unequal
-    and now are not.
-    `tests/routers/test_books_custom_fields.py::TestNamingAHiddenFieldByItsId::
-    test_an_absent_id_and_a_hidden_one_cost_the_same_statements` asserts the
-    **equality** rather than either count, and pins the cause rather than the
-    clock, because a timing assertion on a shared node is a flake.
-
-    **The condition is unchanged and must stay so.** `field is None` is still
-    what decides there is nothing to return, and the gate is a second refusal
-    beside it. Collapsing the two, so the gate alone answers, would let an id
-    no row carries past arm 3 and change what the door composes to.
+    told apart **in the body or on a clock**: `Fields.resolve` asks the gate
+    before it reads the row and reads it whatever the gate said, which is
+    `disclosure.Disclosure.resolve` and is counted at every id door by
+    `tests/test_disclosure.py`.
     """
-    may_be_told = fields.addressable(field_id)
-    field = db.get(CustomField, field_id)
-    if field is None or not may_be_told:
+    field = fields.resolve(field_id)
+    if field is None:
         raise _no_such_custom_field()
     return field
 
@@ -427,7 +408,7 @@ def _custom_field_out(field: CustomField, fields: Fields, is_admin: bool) -> Cus
     ever failing.
 
     What is true without a number: `renamable` reaches the author read where
-    `_may_be_told` short circuits on a field the viewer already has a value in,
+    the rule short circuits on a field the viewer already has a value in,
     which is the ordinary page, so this list costs **more** than it did, and
     the increase does not grow with the vocabulary. Count it against the pre
     branch shape with an arm before quoting a bound again.
@@ -445,7 +426,7 @@ def _any_custom_field(field_id: int, db: Session) -> CustomField:
     """The definition at this id whoever may see it, for the admin delete alone.
 
     **Deliberately ungated, and named so that the gated spelling is the
-    ordinary one.** `Shelving.assignable` makes the same exemption for the same
+    ordinary one.** `Shelving.resolve` makes the same exemption for the same
     reason: an admin has no privilege over another member's Private Books, so
     gating this would leave a field whose every value sits on those Books
     undeletable for good. Here that is sharper than it is for a collection,
@@ -621,7 +602,7 @@ def rename_custom_field(
     # second instance here would re-issue every arm the resolver had just
     # paid for, and `renamable` asks `addressable` again by construction.
     fields = Fields.seen_by(db, current_user.id)
-    field = _custom_field(field_id, db, fields)
+    field = _custom_field(field_id, fields)
     if not current_user.is_admin and not fields.renamable(field_id):
         raise HTTPException(
             status_code=403,
@@ -738,8 +719,8 @@ def _match_rows(
     comprehension, against one dropped row here. Every endpoint answering with
     matches inherits this guard rather than that hole.
 
-    `_bounded_match` builds the other one, from a single record, and drops the
-    **field** rather than the row.
+    `evidence._bounded_match` builds the other one, from a single record, and
+    drops the **field** rather than the row.
 
     **`title` is the one field where a record is still lost whole**, and it is
     lost before it reaches here: `metadata._merge_matches` skips a row without
@@ -769,40 +750,6 @@ def _match_rows(
             )
         rows.append(row)
     return rows
-
-
-def _bounded_match(fields: dict[str, Any]) -> BookMatch:
-    """One catalogue record as a bounded match, dropping what the columns cannot hold.
-
-    **The field rather than the record, which is the opposite of `_match_rows`
-    and is deliberate.** A search page can afford to lose one row of many; an
-    enrichment answer is about the book in hand, so losing it whole would answer
-    "nothing found" for a book the catalogue does hold. A cleared field is a gap
-    the member can see and fill; a dropped record is a question answered wrongly.
-    """
-    kept = dict(fields)
-    for _ in range(len(kept) + 1):
-        try:
-            return BookMatch(**kept)
-        except ValidationError as exc:
-            refused = {
-                str(error["loc"][0]) for error in exc.errors() if error["loc"]
-            } & kept.keys()
-            if not refused:
-                break
-            logger.info(
-                "Dropped %s from a record from %s: the column cannot hold it",
-                ", ".join(sorted(refused)),
-                clipped(fields.get("source")),
-            )
-            for name in refused:
-                del kept[name]
-
-    logger.info(
-        "Discarded a record from %s the schema refused whole",
-        clipped(fields.get("source")),
-    )
-    return BookMatch.model_construct()
 
 
 def _lookup_failure(result: metadata.Lookup) -> HTTPException:
@@ -1699,7 +1646,7 @@ def _checked_collection(db: Session, collection_id: int | None, viewer_id: int) 
     does not exist is a field in its body.
 
     **And the same 400 for a collection this caller may not be told about**,
-    which is `shelving.Shelving.assignable`. It is the harm this door carried
+    which is `shelving.Shelving.resolve`, at the same cost as an unknown one. It is the harm this door carried
     and it was the sharper half of the two: a tag attach against a guessed id
     hands back the book, and this hands back the **name**, through
     `collection_name` on the `BookOut` three of the four call sites return. So
@@ -1713,7 +1660,7 @@ def _checked_collection(db: Session, collection_id: int | None, viewer_id: int) 
 
     A fresh collection is still writable, which is what keeps the "make one and
     file this book into it in a single press" flow working: nothing carries it,
-    so `Shelving`'s third arm admits it.
+    so the rule's empty arm admits it.
 
     The range check is not redundant with the schemas that bound this field.
     `BulkRequest.value` is deliberately loose (`str | int | None`, because which
@@ -1726,9 +1673,7 @@ def _checked_collection(db: Session, collection_id: int | None, viewer_id: int) 
         return None
     if not 1 <= collection_id <= MAX_ROW_ID:
         raise HTTPException(status_code=400, detail="No such collection")
-    if db.get(Collection, collection_id) is None:
-        raise HTTPException(status_code=400, detail="No such collection")
-    if not Shelving.seen_by(db, viewer_id).assignable(collection_id):
+    if Shelving.seen_by(db, viewer_id).resolve(collection_id) is None:
         raise HTTPException(status_code=400, detail="No such collection")
     return collection_id
 
@@ -1814,7 +1759,7 @@ def _create_book(payload: BookCreate, current_user: User, db: Session, conflict:
         # Paired with the pop deliberately. A pop with no write is a 201 that
         # accepted a field and stored nothing, which is the quietest failure
         # available here, so the refusal named above holds both halves.
-        categories=google_books.join_categories(payload.categories),
+        categories=join_categories(payload.categories),
         added_by_user_id=current_user.id,
     )
     db.add(book)
@@ -1931,7 +1876,6 @@ def scan_add(payload: BookCreate, db: DbSession, current_user: CurrentUser) -> B
 
 
 @router.post("/bulk", response_model=BulkResult)
-@refuses(404)
 def bulk_action(
     payload: BulkRequest,
     db: DbSession,
@@ -2108,26 +2052,30 @@ def _require_tag(db: Session, value: str | int | None, viewer_id: int) -> Tag:
     `db.get` and raised `OverflowError` from inside the driver, which is a
     **500** to a number a member typed. See `MAX_ROW_ID`.
 
-    404 rather than a third answer, because an id the column cannot hold is an
-    id no row can carry: the caller learns exactly what they learn from an id
-    that is merely unused, which is also all there is to tell them.
+    A 400 rather than a 404, for the reason `_checked_collection` gives: the
+    id arrives in the request body, so what does not exist is a field of the
+    request. An id in the path, as on `add_book_tag`, answers 404.
 
-    **And the same 404 for a Tag this caller may not be told about**, which is
-    `tags.Vocabulary.writable`. Before it, a Tag whose every Book is hidden
+    The same 400 for an id the column cannot hold, because that is an id no
+    row can carry: the caller learns exactly what they learn from an id that
+    is merely unused, which is also all there is to tell them.
+
+    **And the same 400 for a Tag this caller may not be told about**, which is
+    `tags.Vocabulary.resolve`. Before it, a Tag whose every Book is hidden
     from the caller answered differently from an id nothing carries, so the
-    bulk verbs were an existence oracle over the whole table by id. The two
-    answers are now one, which is the sentence above made true rather than
-    extended.
+    bulk verbs were an existence oracle over the whole table by id. The three
+    cases give one answer with one body, at one cost, which is what keeps the
+    oracle shut.
     """
     try:
         tag_id = int(str(value))
     except (TypeError, ValueError):
         raise HTTPException(status_code=400, detail="A tag id is required") from None
     if not 1 <= tag_id <= MAX_ROW_ID:
-        raise HTTPException(status_code=404, detail="Tag not found")
-    tag = db.get(Tag, tag_id)
-    if tag is None or not Vocabulary.seen_by(db, viewer_id).writable(tag):
-        raise HTTPException(status_code=404, detail="Tag not found")
+        raise HTTPException(status_code=400, detail="Tag not found")
+    tag = Vocabulary.seen_by(db, viewer_id).resolve(tag_id)
+    if tag is None:
+        raise HTTPException(status_code=400, detail="Tag not found")
     return tag
 
 
@@ -3915,21 +3863,18 @@ async def backfill_from_identifiers(
             return "not_found"
         if not result.found or result.record is None:
             return "unavailable"
-        # Bounded here rather than trusted, exactly as `enrich_book` does it:
-        # this is whatever Google answered and `merge_into` writes twelve
-        # columns from it.
-        google_books.merge_into(
-            book, _bounded_match(result.record.as_match()), overwrite=False
-        )
+        # Bounded inside `evidence.apply_record`, exactly as for `enrich_book`:
+        # this is whatever Google answered, and it writes twelve columns.
+        evidence.apply_record(book, result.record, evidence.Policy.FILL_GAPS)
         # **Counted unconditionally, and `IdentifierBackfillOut` carries why.**
         # A candidate has no `google_books_id`; `google_books.lookup_by_volume_id`
         # answers only for a payload whose `id` **is a volume id**, so it is
-        # twelve characters and fits `GOOGLE_BOOKS_ID_MAX`; `merge_into` writes
+        # twelve characters and fits `GOOGLE_BOOKS_ID_MAX`; `evidence` writes
         # it. An answered book therefore always gains a field.
         #
         # **The middle clause is the one that has to be enforced rather than
         # stated, and it was stated first.** With only a type check on the `id`,
-        # a sixty character one was dropped by `BookMatch` before `merge_into`
+        # a sixty character one was dropped by `BookMatch` before `evidence`
         # saw it: nothing written, the Book still a candidate, `enriched: 1` on
         # every press for ever. Found by a design critic as the defect the
         # removal of `unchanged` had moved one layer up.
@@ -4028,7 +3973,7 @@ async def backfill_from_identifiers(
     # The unbroken examined run, which is the only thing the cursor may clear.
     #
     # **A book past the cut that did answer is still stored**, because its
-    # metered request is already paid for and `merge_into` writes
+    # metered request is already paid for and `evidence.apply_record` writes
     # `google_books_id`, which takes it out of the candidate set so the next
     # press does not spend another. It is counted in no bucket, so the reply
     # understates what this run did and never overstates it.
@@ -4872,14 +4817,14 @@ def add_book_tag(
     db: DbSession,
     current_user: CurrentUser,
 ) -> BookOut:
-    tag = db.get(Tag, tag_id)
     # **The name confirmation this route used to be.** `book_to_out` returns
     # the Book with its tags, so attaching a guessed id to a Book you own
     # handed back the name of a Tag whose every Book was hidden from you: a
     # stronger channel than the list ever was, because it answers for a chosen
-    # id rather than dumping the table. `tags.Vocabulary.writable` collapses
-    # that into the 404 an unused id already gets.
-    if tag is None or not Vocabulary.seen_by(db, current_user.id).writable(tag):
+    # id rather than dumping the table. `tags.Vocabulary.resolve` collapses
+    # that into the 404 an unused id already gets, at the same cost.
+    tag = Vocabulary.seen_by(db, current_user.id).resolve(tag_id)
+    if tag is None:
         raise HTTPException(status_code=404, detail="Tag not found")
     if tag not in book.tags:
         # **Refused rather than dropped, which is where this differs from the
@@ -4998,7 +4943,7 @@ def set_custom_field(
     `custom_fields.link_target` for the whole list and why it is re-checked on
     every read as well as here.
     """
-    field = _custom_field(field_id, db, Fields.seen_by(db, current_user.id))
+    field = _custom_field(field_id, Fields.seen_by(db, current_user.id))
     try:
         custom_fields.write(db, book, field, payload.value)
     except custom_fields.Refused as refusal:
@@ -5054,19 +4999,9 @@ async def refresh_metadata(book: BookForWrite, db: DbSession, current_user: Curr
     assert result.record is not None  # noqa: S101  narrowing, not validation
     record = result.record
 
-    # Nine columns written straight off the record, and the ceiling on all of
-    # them is `catalogue.Record.__post_init__`, which clears a scalar the column
-    # cannot hold before the record ever leaves `metadata.lookup`. Bounding it
-    # here instead would be a fourth door: this handler, `as_lookup`,
-    # `_match_rows` and `_bounded_match` all write from the same record, and
-    # three of them had a bound while this one had none.
-    #
-    # So a value too wide arrives as `None`, and the three rules below read it
-    # the way they already read a catalogue that carries no such field:
-    # `title`, `language` and `page_count` keep what the Book had; `subtitle`,
-    # `author`, `publisher`, `year` and `description` are cleared, which is what
-    # a refresh does with anything the source no longer asserts; and `cover_url`
-    # is cleared only where the Book is not carrying a locally uploaded cover.
+    # Nine columns, which ones and how is `evidence.Policy.REFRESH`. The
+    # ceiling on all of them is `catalogue.Record.__post_init__`, so a value too
+    # wide arrives as `None` and reads like a source without that field.
     #
     # **A dropped `author` also costs this record's authority assertions**, and
     # that is worth knowing because nothing reports it. The write at the bottom
@@ -5076,21 +5011,11 @@ async def refresh_metadata(book: BookForWrite, db: DbSession, current_user: Curr
     # which logs and deliberately leaves `refused` empty, so the response says
     # nothing either. The alternative is worse: writing a person into the
     # authority store off a credit line this Library never saw.
-    book.title = record.title or book.title
-    book.subtitle = record.subtitle
-    book.author = record.author
-    book.publisher = record.publisher
-    book.year = record.year
-    book.description = record.description
-
-    # Only ever filled in, never cleared: a refresh whose source lacks the page
-    # count should not delete the one already on the record.
-    book.language = record.language or book.language
-    book.page_count = record.page_count or book.page_count
-
-    # A cover the member uploaded outranks whatever the source offers.
-    if not covers.is_local(book.cover_url):
-        book.cover_url = record.cover_url
+    # Asked before the write: a member's upload is never fetched over, and
+    # whether the record's cover replaced the stored one is the policy's.
+    uploaded = covers.is_local(book.cover_url)
+    evidence.apply_record(book, record, evidence.Policy.REFRESH)
+    if not uploaded:
         # `to_thread` rather than a direct call: this handler is a coroutine, and
         # `resolve_and_store` runs its own event loop.
         await asyncio.to_thread(_store_cover, book)
@@ -5649,10 +5574,10 @@ async def enrich_book(
     # nothing is one answer, not two.
     enquiry.refuse_if_nothing_is_asked()
 
-    # `as_match()` on both paths, and it carries no Classifications by
-    # construction. That is ADR 0006 held by the type rather than by this
-    # handler remembering: an unattended write has nothing to write.
-    fields: dict[str, Any] | None = None
+    # A `Record` on every path, applied through `evidence.apply_record`, which
+    # writes no Classification under any policy. That is ADR 0006 held by the
+    # door rather than by this handler remembering.
+    found: catalogue.Record | None = None
     assertions: tuple[catalogue.AuthorityAssertion, ...] = ()
     recorded = RecordedAssertions(stored=[], refused=[])
     if book.isbn:
@@ -5664,20 +5589,21 @@ async def enrich_book(
         # question from its two siblings.
         if result.found:
             assert result.record is not None  # noqa: S101  narrowing, not validation
-            fields = result.record.as_match()
+            found = result.record
             # **Only on this branch.** A record found by the Book's own ISBN
             # asserts who wrote *this* Book; the title and author search below
             # asserts who wrote something with a similar name, which is a
             # candidate and reaches the store only through
-            # `POST /authors/identifiers`. `as_match()` carries no assertions,
-            # so the search branch has nothing to write even by mistake, which
-            # is the same property ADR 0006 gets from it for Classifications.
+            # `POST /authors/identifiers`. `evidence.apply_record` writes no
+            # assertions, so the search branch has nothing to write even by
+            # mistake, which is the property ADR 0006 gets from it for
+            # Classifications.
             #
             # Held rather than recorded here: the write happens below
-            # `merge_into`, once the Book's credit line is final.
+            # `evidence.apply_record`, once the Book's credit line is final.
             assertions = result.record.author_identifiers
 
-    if fields is None:
+    if found is None:
         # **Before the title search and after the ISBN, which is the whole
         # ordering.** A store's own identifier is an exact key, so it outranks
         # matching by title and author; an ISBN is an exact key the free
@@ -5694,45 +5620,48 @@ async def enrich_book(
                 # No `assertions`, unlike the ISBN branch above. `Record.
                 # author_identifiers` is empty for every source but the DNB, so
                 # there is nothing here to record even by mistake, and
-                # `as_match()` carries no Classifications by construction.
-                fields = volume.record.as_match()
+                # `evidence.apply_record` writes no Classification.
+                found = volume.record
 
-    if fields is None:
+    if found is None:
         # No ISBN, no resolvable store identifier, or nobody carries this
         # edition under either.
         query = " ".join(part for part in (book.title, book.author) if part)
         matches = await enquiry.search(query, limit=1)
         if matches:
-            fields = matches[0].as_match()
+            found = matches[0]
 
-    if fields is None:
+    if found is None:
         return BookEnrichmentOut(
             book=_with_refusals(book_to_out(book, current_user, db), recorded),
             updated_fields=[],
             found=False,
         )
 
-    # Bounded here rather than trusted: `fields` is whatever a catalogue
-    # answered, and `merge_into` writes twelve columns from it.
-    updated = google_books.merge_into(book, _bounded_match(fields), overwrite=overwrite)
-    # This route chooses no Catalogue record. Its classification evidence must
-    # not reach the Book or be reported as an updated field.
+    # Bounded inside `evidence.apply_record` rather than trusted: `found` is
+    # whatever a catalogue answered, and it writes twelve columns. This route
+    # chooses no Catalogue record, so no Classification reaches the Book.
+    updated = evidence.apply_record(
+        book,
+        found,
+        evidence.Policy.OVERWRITE if overwrite else evidence.Policy.FILL_GAPS,
+    )
     if updated:
         # `to_thread` because this handler is a coroutine. See refresh_metadata.
         await asyncio.to_thread(_store_cover, book)
         db.commit()
         db.refresh(book)
 
-    # **Below `merge_into`, and below the commit, and both matter.**
+    # **Below `evidence.apply_record`, and below the commit, and both matter.**
     #
-    # Below `merge_into` because it skips `author` whenever the Book already has
+    # Below `evidence.apply_record` because it skips `author` whenever the Book already has
     # one and `overwrite` is false, which is the default. Recorded above it, the
     # credit line was whatever it had been, the catalogue's spelling of the
     # author had never been adopted, and identifiers were filed under spellings
     # no Book carried: invisible, undeletable, reported as stored.
     #
     # Below the commit for the reason `refresh_metadata` states: this helper
-    # commits internally, so between `merge_into` and `db.commit()` it decided
+    # commits internally, so between the write and `db.commit()` it decided
     # the transaction boundary for the Book's own pending fields, with
     # `_store_cover` sitting in the gap. That is safe today only because
     # `covers.resolve_and_store` does not raise, which is a property of another
@@ -5771,16 +5700,17 @@ def apply_enrichment(
     Selecting the row also confirms its Classifications. Automatic enrichment
     and refresh do not have that confirmation.
     """
-    # The body goes in whole. `merge_into` takes a `BookMatch` and reads the
-    # twelve names it writes off it, so the three fields this used to exclude
-    # by hand (`source`, `suggested_tag_ids`, `classifications`) are excluded
-    # by it never naming them, and a field added to the schema cannot be
-    # written here by forgetting to list it.
-    updated = google_books.merge_into(book, payload, overwrite=overwrite)
-    # Already validated and already bounded by `BookMatch`, so the payload's
-    # own models go in rather than a second pass through `classifications.bounded_headings`.
-    if add_headings(book, payload.classifications, db):
-        updated.append("classifications")
+    # The body goes in whole. `evidence.confirm` reads the twelve names it
+    # writes off the `BookMatch`, so `source` and `suggested_tag_ids` are
+    # excluded by it never naming them, and a field added to the schema cannot
+    # be written here by forgetting to list it. The Classifications go in as
+    # the model validated them, and this is the only route they cross on.
+    updated = evidence.confirm(
+        book,
+        payload,
+        db,
+        evidence.Policy.OVERWRITE if overwrite else evidence.Policy.FILL_GAPS,
+    )
     if updated:
         _store_cover(book)
         db.commit()
@@ -5920,7 +5850,7 @@ def update_book_details(
     # `tests/schemas/test_book.py::TestEveryReshapedFieldIsWrittenAtTheRoute`
     # reads this function's source and holds both halves.
     if "categories" in reshaped:
-        book.categories = google_books.join_categories(payload.categories)
+        book.categories = join_categories(payload.categories)
 
     db.commit()
     db.refresh(book)

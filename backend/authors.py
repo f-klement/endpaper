@@ -20,7 +20,7 @@ an alias row   what a person **decided**. Anything else, including a
                full given name.
 
 The separator is a comma, and that is a different decision from the one
-`google_books.join_categories` made. Categories are joined with a semicolon
+`categories.join_categories` made. Categories are joined with a semicolon
 *because* Google's own category names contain commas; author names contain
 commas too ("Le Guin, Ursula K."), and the field is nonetheless comma
 separated, because every writer of it says so: `marc_fields.Fields.authors`,

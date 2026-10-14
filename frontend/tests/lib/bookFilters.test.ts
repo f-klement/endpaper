@@ -30,6 +30,7 @@ import {
   type ListFilterKey,
 } from "../../src/lib/bookFilters";
 import { DEFAULT_FILTERS, type BookFilters } from "../../src/pages/Home/types";
+import { operationById, parametersOf } from "../committedSchema";
 
 function read(search: string): BookFilters {
   return readFilters(new URLSearchParams(search));
@@ -403,43 +404,16 @@ describe("toggledFilter", () => {
   });
 });
 
-const SCHEMA = import.meta.glob("../../openapi.json", {
-  query: "?raw",
-  import: "default",
-  eager: true,
-}) as Record<string, string>;
-
-interface Parameter {
-  name: string;
-  in: string;
-}
-
-/** The query parameter names `GET /api/books` documents. */
+/**
+ * The query parameter names `GET /api/books` documents.
+ *
+ * Each `$ref` among them is followed, so a parameter declared by reference is
+ * a name here rather than a hole both comparisons below pass over.
+ */
 function apiFilterNames(): string[] {
-  const raw = SCHEMA["../../openapi.json"] ?? "";
-  // A glob that matched nothing would make every assertion below pass forever.
-  expect(raw.length).toBeGreaterThan(1000);
-
-  const schema = JSON.parse(raw) as {
-    paths: Record<
-      string,
-      Record<string, { operationId?: string; parameters?: Parameter[] }>
-    >;
-  };
-  const operations = Object.values(schema.paths).flatMap((methods) =>
-    Object.values(methods).filter(
-      (operation) => operation.operationId === "list_books",
-    ),
-  );
-  expect(operations).toHaveLength(1);
-
-  const names = (operations[0]!.parameters ?? [])
-    .filter((parameter) => parameter.in === "query")
-    .map((parameter) => parameter.name);
-  // An operation whose parameters moved into a $ref, or a listing that stopped
-  // taking filters, would leave both comparisons below asserting nothing.
-  expect(names.length).toBeGreaterThan(10);
-  return names;
+  return parametersOf(operationById("list_books").operation)
+    .filter((parameter) => parameter["in"] === "query")
+    .map((parameter) => String(parameter["name"]));
 }
 
 /** Every parameter name the app can put on a listing request. */

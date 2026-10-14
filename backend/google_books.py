@@ -19,24 +19,14 @@ a store import matched by title and one matched by identifier.
 
 import logging
 import re
-from typing import TYPE_CHECKING, Any, Final
+from typing import Any, Final
 
-import book_columns
 import covers
 import fetch
 import targets
+from categories import kept_categories
 from enums import CatalogueSource
 from isbn import parse as parse_isbn
-
-if TYPE_CHECKING:
-    # Under `TYPE_CHECKING` because the dependency is genuinely mutual:
-    # `schemas/book.py` imports `split_categories` from this module, so a
-    # runtime import here is a cycle and fails on the first import of either.
-    # `merge_into` only ever calls methods on the value, never the class, so
-    # the name is needed for the annotation and nowhere else, and PEP 649
-    # leaves an annotation unevaluated. Removing the guard is an ImportError
-    # rather than a subtle failure.
-    from schemas.book import BookMatch
 
 logger = logging.getLogger("endpaper.google_books")
 
@@ -47,71 +37,6 @@ _VOLUMES_URL: Final = targets.SEEDED[CatalogueSource.GOOGLE_BOOKS].base_url
 
 class GoogleBooksError(Exception):
     """Raised for anything the caller should be told about verbatim."""
-
-
-# Semicolon, not comma: Google's own category names contain commas ("Fiction,
-# general"), so a comma-joined list cannot be split back apart. Everything
-# that joins or splits this field goes through the two helpers below.
-CATEGORY_SEPARATOR: Final = "; "
-
-
-def join_categories(categories: list[str], *, limit: int | None = None) -> str | None:
-    """The stored form of a subject list, dropping one that carries the separator.
-
-    **Dropped here rather than at each producer, because this is the one place
-    that knows the separator and so reaches every writer of the column.** A
-    subject containing a bare `;` is not representable in this column:
-    `split_categories` below splits on that character, so storing one serves two
-    subjects to every reader and **manufactures** an assertion nobody made. Two
-    upstream joins build their value without looking inside a single subject
-    (`_volume_to_fields` here and `catalogue.Record.as_match`), which is what makes
-    that reachable. Dropping loses a subject, which asserts nothing false.
-
-    **Dropped and logged rather than raised**, which is
-    `classifications.bounded_headings`' arrangement for the same shape: this runs
-    inside a catalogue read, so raising would lose a whole record over one
-    subject. `schemas.book.normalised_subjects` is what refuses instead, at both
-    request bodies that carry this field, because there a caller chose the value
-    and there is somebody to tell.
-
-    **`limit` caps the count, and a caller that produces a value for `BookMatch`
-    has to pass it.** That model refuses past its own count, and
-    `routers/books._match_rows` builds it inside a `try` that drops the **row**,
-    so an unbounded producer costs a whole search result rather than a field.
-    `catalogue.Record.match_headings` carries the same rule for headings and the
-    incident that bought it. The number is not read here because it lives in
-    `schemas/book.py`, which imports this module.
-
-    **Dropped first and truncated second**, for `bounded_headings`' reason: slicing
-    to the limit before the drop would let the separator bearing entries at the
-    front hide good subjects behind them.
-    """
-    keepable = [
-        subject for subject in categories if CATEGORY_SEPARATOR.strip() not in subject
-    ]
-    if len(keepable) != len(categories):
-        logger.info(
-            "Dropped %d of %d subjects: this column stores them joined on %r, so "
-            "one carrying it would read back as two",
-            len(categories) - len(keepable),
-            len(categories),
-            CATEGORY_SEPARATOR.strip(),
-        )
-    if limit is not None and len(keepable) > limit:
-        logger.info(
-            "Kept the first %d of %d subjects: a producer's value may not exceed "
-            "what the request model accepts, or the model refuses the whole row",
-            limit,
-            len(keepable),
-        )
-        keepable = keepable[:limit]
-    return CATEGORY_SEPARATOR.join(keepable) or None
-
-
-def split_categories(value: str | None) -> list[str]:
-    if not value:
-        return []
-    return [part.strip() for part in value.split(CATEGORY_SEPARATOR.strip()) if part.strip()]
 
 
 def _mapping(value: object) -> dict[str, Any]:
@@ -152,13 +77,14 @@ def _volume_to_fields(volume: dict[str, Any]) -> dict[str, Any]:
 
     **Nothing here trusts a type.** See `_mapping`: this is somebody else's JSON
     and the accessors around it are the whole of what stops an odd payload being
-    a 500. The two collections are read through the helpers above, because they
-    are **joined** here rather than passed along, and a join is where a wrong
-    type stops being a wrong value and starts being an exception.
+    a 500. The two collections are read through the helpers above, because the
+    authors are **joined** here and the categories are tested for the separator,
+    and either is where a wrong type stops being a wrong value and starts being
+    an exception.
 
     **The scalars are left as they arrive because `catalogue._drop_unstorable`
     clears a value that is not text, and that sentence used to name the wrong
-    function.** It said `routers/books._bounded_match` bounds them, which is
+    function.** It said `evidence._bounded_match` bounds them, which is
     true of what it bounds and is not the first thing to touch them:
     `metadata._google_record` builds a `Record` first, and its `__post_init__`
     measured every text field with `len()`. A security critic measured 15 of 25
@@ -166,7 +92,7 @@ def _volume_to_fields(volume: dict[str, Any]) -> dict[str, Any]:
     """
     info = _mapping(volume.get("volumeInfo"))
 
-    categories = _strings(info.get("categories"))
+    subjects = _strings(info.get("categories"))
     identifiers = info.get("industryIdentifiers")
     isbn13 = next(
         (
@@ -202,10 +128,11 @@ def _volume_to_fields(volume: dict[str, Any]) -> dict[str, Any]:
         "description": info.get("description"),
         "page_count": info.get("pageCount"),
         "language": info.get("language"),
-        # Stored as one string rather than related rows: these are whatever the
-        # publisher supplied, not the curated Tag vocabulary the library picks
-        # from, and mixing the two would muddle both.
-        "categories": join_categories(categories),
+        # A list, and the joined form is not this module's business: the Record
+        # built from this carries subjects, and `catalogue.Record.as_match` joins
+        # them. Drop and cap with no cap, because `as_match` caps and a Record's
+        # other readers want every subject; see `categories` for the policy.
+        "categories": kept_categories(subjects, limit=None),
         # Google serves these over plain **http**, which is mixed content on an
         # https page: blocked by the browser, whatever the CSP says. Cleaned
         # here rather than only on the way into the database, because a search
@@ -605,7 +532,7 @@ async def lookup_by_volume_id(volume_id: str, api_key: str) -> dict[str, Any] | 
     # **`is_a_volume_id` and not `isinstance(..., str)`, and the difference is
     # the same defect one layer up.** `models.GOOGLE_BOOKS_ID_MAX` is 50, so an
     # `id` of 60 characters is a string, passes a type check, and is then
-    # dropped by `BookMatch` before `merge_into` sees it: nothing is written,
+    # dropped by `BookMatch` before `evidence` writes it: nothing is written,
     # the Book keeps no `google_books_id`, and it is a candidate again on the
     # next press. Measured through the route at the same shape: two presses,
     # `enriched: 1` both times, `google_books_id` still None. A volume
@@ -636,81 +563,3 @@ async def search(query: str, api_key: str, limit: int = 5) -> list[dict[str, Any
     )
     items = payload.get("items") or []
     return [_volume_to_fields(item) for item in items[:limit]]
-
-
-def merge_into(book: object, match: BookMatch, *, overwrite: bool) -> list[str]:
-    """Copy a validated match onto a book, returning the names actually changed.
-
-    By default only empty fields are filled. Enrichment is meant to add what is
-    missing, not to overrule what someone typed by hand: a member who corrected
-    a title should not have Google quietly undo it. `overwrite` is offered for
-    the case where the stored record is known to be wrong.
-
-    **A `BookMatch` rather than a dictionary, and that is the bound rather than
-    a tidier signature.** Every value written here came from outside the
-    library, on both of the two routes that reach this function, and until
-    2026-09-03 one of them validated its dictionary and the other did not:
-    `POST /{id}/enrich/apply` refused an oversized value with a 422 and
-    `POST /{id}/enrich` stored whatever a catalogue answered with a 200, one
-    route apart on the same book. `series_index` was the sharp one, and it is a
-    stored denial of service rather than an untidy row: `routers/books.list_series`
-    computes `set(range(1, max(held) + 1))` over the column under
-    `Shelf.seen_by`, so a stored `1e9` is roughly 70 GB and ten minutes on
-    every request by every member until somebody finds the row.
-
-    The type is what keeps that closed. A caller cannot hand this an unbounded
-    dictionary without failing mypy, and at runtime a dictionary raises on the
-    first `getattr` rather than writing twelve unchecked columns, so a third
-    call site inherits the bound instead of having to remember it. Twelve, not
-    eleven: the loop walks `book_columns.WORK_DETAIL` and `cover_url` is
-    assigned below it.
-
-    **The loop's set is asked for, not written out.** These are the descriptive
-    facts about the work, which is the same set the merge absorbs off a losing
-    row and the same one the MARC importer narrows to what its records carry;
-    `book_columns` refuses to import when a column of `books` is classified
-    nowhere, so a column added to the schema cannot quietly miss all three. The
-    two work facts it leaves out are `isbn`, which is one printing rather than
-    this copy, and `title`, whose spelling in a catalogue is often not this
-    library's: both are `book_columns.WORK_IDENTITY`.
-    """
-    changed: list[str] = []
-
-    for name in book_columns.WORK_DETAIL:
-        incoming = getattr(match, name)
-        if incoming in (None, "", []):
-            continue
-
-        current = getattr(book, name, None)
-        if current not in (None, "") and not overwrite:
-            continue
-        if current == incoming:
-            continue
-
-        setattr(book, name, incoming)
-        changed.append(name)
-
-    # A cover the member uploaded outranks a remote one, and `covers.is_local`
-    # is the only reader of the prefix that decides it. Spelling the prefix
-    # again here is how the two stop agreeing: a literal does not follow the
-    # constant, so the day it moves this writer keeps overruling an upload the
-    # refresh handler protects, with the stored row looking correct either way.
-    #
-    # The **predicate** is shared with the refresh handler and the precedence is
-    # not. That one clears a non local cover unconditionally; this one also asks
-    # whether the field is free to write and whether the value would change.
-    incoming_cover = match.cover_url
-    current_cover = getattr(book, "cover_url", None)
-    keeps_local_cover = covers.is_local(current_cover)
-    replaceable = not current_cover or overwrite
-
-    if (
-        incoming_cover
-        and not keeps_local_cover
-        and replaceable
-        and current_cover != incoming_cover
-    ):
-        book.cover_url = incoming_cover  # type: ignore[attr-defined]
-        changed.append("cover_url")
-
-    return changed

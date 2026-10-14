@@ -49,47 +49,26 @@ import {
   witness,
   type Repeated,
 } from "../property";
+import { boundOf, propertiesOf } from "../committedSchema";
 import { expectAnswer, type ValueDoor } from "./readerContract";
 import { boundedText, codePoint, points, repeatedTo } from "./textArbitrary";
 
-const SCHEMA = import.meta.glob("../../openapi.json", {
-  query: "?raw",
-  import: "default",
-  eager: true,
-}) as Record<string, string>;
-
-interface Constraint {
+/** One `DigitalReferenceIn` field's bounds, across its non null branches. */
+function bounds(field: string): {
   maxLength?: number;
   minLength?: number;
   maximum?: number;
   minimum?: number;
-  anyOf?: Constraint[];
-}
-
-/** A nullable field is `anyOf: [{the real thing}, {null}]`, so flatten first. */
-function flatten(property: Constraint): Constraint {
-  const parts = [property, ...(property.anyOf ?? [])];
+} {
+  const property = propertiesOf("DigitalReferenceIn")[field];
+  expect(property, `DigitalReferenceIn declares ${field}`).toBeDefined();
+  const where = `DigitalReferenceIn/${field}`;
   return {
-    maxLength: parts.find((part) => part.maxLength !== undefined)?.maxLength,
-    minLength: parts.find((part) => part.minLength !== undefined)?.minLength,
-    maximum: parts.find((part) => part.maximum !== undefined)?.maximum,
-    minimum: parts.find((part) => part.minimum !== undefined)?.minimum,
+    maxLength: boundOf(property!, "maxLength", where),
+    minLength: boundOf(property!, "minLength", where),
+    maximum: boundOf(property!, "maximum", where),
+    minimum: boundOf(property!, "minimum", where),
   };
-}
-
-/** `DigitalReferenceIn`'s properties, as the committed schema declares them. */
-function schema(): Record<string, Constraint> {
-  const raw = SCHEMA["../../openapi.json"] ?? "";
-  // A glob that matched nothing would make every assertion below pass forever.
-  expect(raw.length).toBeGreaterThan(1000);
-  const parsed = JSON.parse(raw) as {
-    components: {
-      schemas: Record<string, { properties: Record<string, Constraint> }>;
-    };
-  };
-  const model = parsed.components.schemas["DigitalReferenceIn"];
-  expect(model, "DigitalReferenceIn is in the committed schema").toBeDefined();
-  return model!.properties;
 }
 
 /**
@@ -265,9 +244,8 @@ describe("what the browser knew about the file itself", () => {
 
 describe("the bounds, read off the committed schema", () => {
   it("budgets the pair at the width the schema declares for each half", () => {
-    const properties = schema();
-    const root = flatten(properties["root_label"]!);
-    const beneath = flatten(properties["relative_path"]!);
+    const root = bounds("root_label");
+    const beneath = bounds("relative_path");
 
     expect(root.maxLength).toBe(PATH_BUDGET);
     expect(beneath.maxLength).toBe(PATH_BUDGET);
@@ -276,7 +254,7 @@ describe("the bounds, read off the committed schema", () => {
   });
 
   it("takes no size the schema refuses", () => {
-    const size = flatten(schema()["size_bytes"]!);
+    const size = bounds("size_bytes");
 
     expect(size.minimum).toBe(0);
     // The largest integer that survives being a JSON number, which is what the

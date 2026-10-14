@@ -14,7 +14,7 @@ import settings_store
 import sources
 import targets
 from enums import CatalogueSource, Locale, SettingKey
-from tests.test_house_rules import _source_modules
+from tests.corpus import application_sources
 
 
 class TestDefaults:
@@ -498,7 +498,7 @@ class TestTheKeyIsResolvedOncePerRequest:
 
 # ── The override table and the reader that has to see it ──────────────────────
 
-#: The module whose readers this rule is about, keyed as `_source_modules` keys it.
+#: The module whose readers this rule is about, keyed as `application_sources` keys it.
 _STORE: Final = "settings_store.py"
 
 #: The ORM name that means "this function touched the settings table".
@@ -840,7 +840,7 @@ def _module_index(corpus: dict[str, str]) -> dict[str, str]:
     """Dotted module name to corpus path, for every module the corpus holds.
 
     **It states its exclusion by inheriting one.** The corpus is
-    `_source_modules()`, so whatever is not in it resolves to nothing: the test
+    `application_sources()`, so whatever is not in it resolves to nothing: the test
     tree, the migrations, anything vendored, and everything outside `backend/`,
     the standard library and site-packages included. A reader re exported
     through a module none of those walks reach leaves the call on it silent,
@@ -1270,7 +1270,7 @@ def _planted(
     """
     return _reads_of_a_pinned_key(
         {
-            _STORE: store or _source_modules()[_STORE],
+            _STORE: store or application_sources()[_STORE],
             path: source,
             **(alongside or {}),
         },
@@ -1465,7 +1465,7 @@ class TestAnOverriddenSettingIsReadWhereItIsPinned:
     * The cross module resolution reaches the corpus and nothing else, and
       within it only a subject this module does not also bind by some other
       means. `helpers.get_bool(db, key)` is read when `helpers` is a module
-      `_source_modules()` returns and nothing here rebinds that name, and is
+      `application_sources()` returns and nothing here rebinds that name, and is
       silent otherwise; `_module_index` and `_rebound_here` are where the two
       halves of that are written down. Falling through to `_names_the_door`
       rather than resolving was tried and refused: measured against the rule as
@@ -1492,7 +1492,7 @@ class TestAnOverriddenSettingIsReadWhereItIsPinned:
     """
 
     def test_no_key_the_environment_can_pin_is_read_off_the_table(self):
-        offenders, _, _ = _reads_of_a_pinned_key(_source_modules())
+        offenders, _, _ = _reads_of_a_pinned_key(application_sources())
         assert not offenders, (
             "these read a key the environment can pin through a reader that "
             "cannot see it, so the settings screen and the routine that uses "
@@ -1505,7 +1505,7 @@ class TestAnOverriddenSettingIsReadWhereItIsPinned:
         Reported rather than skipped, because the evasion is free otherwise:
         put the key in a local and the rule above sees nothing.
         """
-        _, unreadable, _ = _reads_of_a_pinned_key(_source_modules())
+        _, unreadable, _ = _reads_of_a_pinned_key(application_sources())
         assert not unreadable, (
             "the key these read cannot be named from the source, so no rule of "
             f"this shape can see them: {unreadable}"
@@ -1545,7 +1545,7 @@ class TestAnOverriddenSettingIsReadWhereItIsPinned:
         whose text spells a qualified reader call has to contribute a call the
         syntax pass found.
         """
-        modules = _source_modules()
+        modules = application_sources()
         off_the_table, in_force = _keyed_readers(modules[_STORE])
         readers = off_the_table | in_force
 
@@ -1576,7 +1576,7 @@ class TestAnOverriddenSettingIsReadWhereItIsPinned:
         that had collapsed into one set is visible. Which readers are in each
         set is the module's business and deliberately not asserted here.
         """
-        off_the_table, in_force = _keyed_readers(_source_modules()[_STORE])
+        off_the_table, in_force = _keyed_readers(application_sources()[_STORE])
         assert "get_bool" in off_the_table, off_the_table
         assert "in_force" in in_force, in_force
         assert not off_the_table & in_force
@@ -1592,7 +1592,7 @@ class TestAnOverriddenSettingIsReadWhereItIsPinned:
         unreported: measured with `mailer` reading `MAIL_PORT` off the table,
         every arm of this class green.
         """
-        store = _source_modules()[_STORE].replace(
+        store = application_sources()[_STORE].replace(
             "    try:\n        value = int(get_raw(db, key).strip())",
             "    if config.env_override(key):\n"
             "        pass  # honoured in a later release\n"
@@ -1603,7 +1603,7 @@ class TestAnOverriddenSettingIsReadWhereItIsPinned:
         # the table and the planted read is already an offender, so both
         # assertions below pass with no mutation applied and this test retires
         # itself the day that body is refactored.
-        assert store != _source_modules()[_STORE], "the mutation anchor went stale"
+        assert store != application_sources()[_STORE], "the mutation anchor went stale"
 
         off_the_table, _ = _keyed_readers(store)
         assert "get_int" in off_the_table
@@ -1860,7 +1860,7 @@ class TestAnOverriddenSettingIsReadWhereItIsPinned:
         is the only arm that asks a verdict of the store rather than of a plant
         beside it.
         """
-        store = _source_modules()[_STORE] + (
+        store = application_sources()[_STORE] + (
             "\n\ndef get_flag(db: Session, key: SettingKey) -> bool:\n"
             "    return settings_store.get_bool(db, SettingKey.MAIL_USE_TLS)\n"
         )
@@ -1909,7 +1909,7 @@ class TestAnOverriddenSettingIsReadWhereItIsPinned:
 
         Same source as the first row of the diagonal with the subject module
         taken out of the corpus. Nothing in the tree says what a module
-        `_source_modules()` never returns hands out, so the call is silent, and
+        `application_sources()` never returns hands out, so the call is silent, and
         that is the boundary this resolution stops at.
         """
         _, unreadable, examined = _planted(
@@ -1921,7 +1921,7 @@ class TestAnOverriddenSettingIsReadWhereItIsPinned:
     def test_a_reader_added_later_is_classified_by_what_it_reaches(self):
         """The reason the split is derived. Both halves of a new type land
         where they belong with no edit to this file."""
-        store = _source_modules()[_STORE] + (
+        store = application_sources()[_STORE] + (
             "\n\ndef get_float(db: Session, key: SettingKey) -> float:\n"
             "    return float(get_raw(db, key))\n"
             "\n\ndef float_in_force(db: Session, key: SettingKey) -> float:\n"
@@ -1942,7 +1942,7 @@ class TestAnOverriddenSettingIsReadWhereItIsPinned:
         """`set_value` touches the same table and hands nothing back. Counting
         it would report every write of a pinned key, which `_refuse_if_pinned`
         answers with a 409 rather than this rule."""
-        off_the_table, in_force = _keyed_readers(_source_modules()[_STORE])
+        off_the_table, in_force = _keyed_readers(application_sources()[_STORE])
         assert "set_value" not in off_the_table | in_force
         assert "set_json" not in off_the_table | in_force
 

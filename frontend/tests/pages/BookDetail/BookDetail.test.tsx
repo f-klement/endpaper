@@ -24,6 +24,7 @@ import {
   makeNote,
   makeQuote,
   makeProgress,
+  makeTag,
   makeTagSet,
   resetIds,
 } from "../../factories";
@@ -347,6 +348,34 @@ describe("BookDetail", () => {
         expect(
           api.lastCall(`/api/books/1/tags/${tags[1]!.id}`, "DELETE"),
         ).toBeDefined(),
+      );
+    });
+
+    it("reports a tag delete the server refused", async () => {
+      // Library wide, so the reply is about the tag rather than this book, and
+      // it lands in the page's one error slot like every other write here.
+      const invented = makeTag({ name: "Loft finds" });
+      stubLoad({
+        book: makeBook({ id: 1, tags: [], added_by: OWNER }),
+        tags: [invented],
+      });
+      api.on(
+        `/api/books/tags/${invented.id}`,
+        { status: 404, body: { detail: "Tag not found" } },
+        "DELETE",
+      );
+      vi.spyOn(window, "confirm").mockReturnValue(true);
+      renderDetail(ADMIN);
+
+      const user = userEvent.setup();
+      await user.click(await screen.findByRole("button", { name: "+ Add" }));
+      await user.click(await screen.findByRole("button", { name: /Genre/ }));
+      await user.click(
+        await screen.findByRole("button", { name: "Delete Loft finds" }),
+      );
+
+      expect(await screen.findByRole("alert")).toHaveTextContent(
+        "Tag not found",
       );
     });
 

@@ -28,7 +28,7 @@ from sqlalchemy.pool import QueuePool
 
 import database
 from database import Base, engine, get_db
-from tests.test_house_rules import BACKEND, _python_sources
+from tests.corpus import BACKEND, application_modules
 
 #: A Postgres URL of the one spelling this project supports, for the arms that
 #: resolve connect arguments. Nothing dials it: `_connect_args` decides the
@@ -113,12 +113,12 @@ _ENGINE_BUILDERS: Final = frozenset(
 def _engine_calls() -> list[tuple[str, int, ast.Call]]:
     """Every engine built outside the tests, as (path, line, call).
 
-    The application corpus `_python_sources` walks, which leaves out
+    The application corpus `application_modules` walks, which leaves out
     `migrations/`, plus `migrations/env.py` by name: it builds the engine every
     revision runs on and is not itself a revision.
     """
     found = []
-    for path in [*_python_sources(), BACKEND / "migrations" / "env.py"]:
+    for path in [*application_modules(), BACKEND / "migrations" / "env.py"]:
         for node in ast.walk(ast.parse(path.read_text())):
             if not isinstance(node, ast.Call):
                 continue
@@ -153,7 +153,7 @@ class TestEveryEngineHidesItsParameters:
         build` would build an engine it never sees."""
         renamed = [
             f"{path.relative_to(BACKEND)}:{node.lineno}"
-            for path in [*_python_sources(), BACKEND / "migrations" / "env.py"]
+            for path in [*application_modules(), BACKEND / "migrations" / "env.py"]
             for node in ast.walk(ast.parse(path.read_text()))
             if isinstance(node, ast.ImportFrom)
             for alias in node.names

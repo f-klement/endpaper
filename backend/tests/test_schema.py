@@ -55,9 +55,9 @@ from migrations.versions import (
     f4a1c62d0b97_bind_every_text_ceiling_on_bytes_too as bind_every_text_ceiling,
 )
 from schemas.opds import OpdsServerIn
+from tests.corpus import BACKEND, application_modules
 from tests.test_dialect import ADDED_RULES, SWAP_CHAIN, THE_SWAPS, _swap_rows
 from tests.test_filing import CORPUS
-from tests.test_house_rules import BACKEND, _python_sources
 
 
 def drop_everything() -> None:
@@ -5303,7 +5303,7 @@ class TestTheBoundsThisRevisionPutOnBytes:
 
         `credentials.py` itself is excluded, being where the function lives.
 
-        **`_python_sources()` rather than a walk of this file's own**, which is
+        **`application_modules()` rather than a walk of this file's own**, which is
         the rule `test_house_rules.py` owns and which a first version of this
         broke: a module that recurses `backend/` and decides for itself what
         vendored means reads the pipeline's dependency cache as ours, green where
@@ -5313,7 +5313,7 @@ class TestTheBoundsThisRevisionPutOnBytes:
         import ast
 
         elsewhere: list[str] = []
-        for path in _python_sources():
+        for path in application_modules():
             if path.parent.name == "routers" or path.name == "credentials.py":
                 continue
             for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):

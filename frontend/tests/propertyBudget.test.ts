@@ -68,6 +68,13 @@ import {
   writeAll,
 } from "./property";
 import { sourceEntries } from "./sourceModules";
+import {
+  isNode,
+  namesBoundBy,
+  resolvePath,
+  walk,
+  type Node,
+} from "./sourceReader";
 import { testEntries, testEntriesBesides, testText } from "./testModules";
 import { langOf } from "./withoutProse";
 
@@ -133,38 +140,6 @@ const EXPORTS = (
   "uniqueArray uuid webAuthority webFragments webPath webQueryParameters " +
   "webSegment webUrl"
 ).split(" ");
-
-interface Node {
-  readonly type: string;
-  readonly [key: string]: unknown;
-}
-
-function isNode(value: unknown): value is Node {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    typeof (value as { type?: unknown }).type === "string"
-  );
-}
-
-/** Every node, with the chain of nodes above it, outermost first. */
-function walk(
-  node: unknown,
-  visit: (node: Node, ancestors: readonly Node[]) => void,
-  ancestors: Node[] = [],
-): void {
-  if (Array.isArray(node)) {
-    for (const child of node) walk(child, visit, ancestors);
-    return;
-  }
-  if (!isNode(node)) return;
-  visit(node, ancestors);
-  ancestors.push(node);
-  for (const [key, child] of Object.entries(node)) {
-    if (key !== "type") walk(child, visit, ancestors);
-  }
-  ancestors.pop();
-}
 
 function isFastCheck(source: unknown): boolean {
   return (
@@ -923,43 +898,20 @@ describe("no committed file pins the seed", () => {
  *
  * **Ends with the runner's path rather than equals it**, so a specifier
  * climbing past `frontend/` and back down, or an absolute path, is the runner
- * too. Counting a module as the runner is the loud direction: its properties
- * are then held to every arm here.
+ * too, and so is one carrying a query or a fragment, which is taken off.
+ * Counting a module as the runner is the loud direction: its properties are
+ * then held to every arm here.
  */
 function isRunner(specifier: unknown, path: string): boolean {
   if (typeof specifier !== "string") return false;
   if (!specifier.startsWith(".") && !specifier.startsWith("/")) return false;
-  const from = specifier.startsWith("/")
-    ? "file:///"
-    : `file:///tests/${path.slice(2)}`;
-  const resolved = new URL(specifier, from).pathname.replace(
-    /\.(?:[cm]?[jt]s|[jt]sx)$/,
-    "",
-  );
-  return resolved.endsWith("/tests/property");
-}
-
-/** The names a parameter binds, through any pattern it is written as. */
-function boundBy(pattern: unknown): string[] {
-  if (!isNode(pattern)) return [];
-  switch (pattern.type) {
-    case "Identifier":
-      return [pattern.name as string];
-    case "AssignmentPattern":
-      return boundBy(pattern.left);
-    case "RestElement":
-      return boundBy(pattern.argument);
-    case "TSParameterProperty":
-      return boundBy(pattern.parameter);
-    case "ArrayPattern":
-      return (pattern.elements as unknown[]).flatMap(boundBy);
-    case "ObjectPattern":
-      return (pattern.properties as Node[]).flatMap((one) =>
-        boundBy(one.type === "Property" ? one.value : one),
-      );
-    default:
-      return [];
-  }
+  const base = specifier.startsWith("/")
+    ? []
+    : ["tests", ...path.slice(2).split("/")].slice(0, -1);
+  const resolved = resolvePath(base, specifier.replace(/[?#].*$/, ""))
+    .join("/")
+    .replace(/\.(?:[cm]?[jt]s|[jt]sx)$/, "");
+  return `/${resolved}`.endsWith("/tests/property");
 }
 
 /**
@@ -984,7 +936,9 @@ function namesNoOuterValue(node: Node, ancestors: readonly Node[]): boolean {
     ancestors.some(
       (above) =>
         Array.isArray(above.params) &&
-        (above.params as unknown[]).flatMap(boundBy).includes(name),
+        (above.params as unknown[])
+          .flatMap((one) => namesBoundBy(one))
+          .includes(name),
     )
   );
 }

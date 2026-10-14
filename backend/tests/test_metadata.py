@@ -78,6 +78,7 @@ from metadata import (
 )
 from schemas import MAX_CLASSIFICATIONS_PER_BOOK
 from schemas.book import BookLookup
+from tests.corpus import application_modules
 from tests.helpers import (
     silence_catalogues,
     silence_covers,
@@ -99,7 +100,6 @@ from tests.strategies import (
     xml_characters,
     xml_of,
 )
-from tests.test_house_rules import _python_sources
 
 #: The `backend/` directory, so a doc guard can reach the repository root.
 BACKEND = Path(__file__).resolve().parent.parent
@@ -6336,7 +6336,7 @@ class TestTheCarrierTestIsTheOnlyWayIn:
     def _functions(root: Path = BACKEND) -> dict[str, set[str]]:
         """Every function under `root`, as `<path>::<name>`, by the names it calls.
 
-        **`root` is a parameter for the reason `_python_sources` takes one**: a
+        **`root` is a parameter for the reason `application_modules` takes one**: a
         walk asserted only against this checkout is a walk nobody has watched
         fail. `test_a_planted_parse_path_that_asks_nothing_is_reported` drives
         this one against a tree it builds, through this function rather than
@@ -6397,7 +6397,7 @@ class TestTheCarrierTestIsTheOnlyWayIn:
                         found.setdefault(f"{path}::{qualified}", set()).add(name)
                 visit(child, path, qualified, aliases)
 
-        for source in _python_sources(root):
+        for source in application_modules(root):
             tree = ast.parse(source.read_text(encoding="utf-8"))
             visit(
                 tree,
@@ -6486,7 +6486,7 @@ class TestTheCarrierTestIsTheOnlyWayIn:
 
     @staticmethod
     def _plant(root: Path, **modules: str) -> Path:
-        """A tree `_python_sources` will walk, holding the modules given."""
+        """A tree `application_modules` will walk, holding the modules given."""
         root.mkdir(parents=True, exist_ok=True)
         for name, source in modules.items():
             (root / f"{name}.py").write_text(source)

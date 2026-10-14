@@ -763,10 +763,11 @@ class Authorship:
         **`credited` is the Book's own credit line, and it is required.** Only
         an assertion naming somebody that line carries is stored, which is what
         makes `_evidenced_keys` reachable by construction rather than by
-        convention. It is not a formality: `google_books.merge_into` skips
-        `author` whenever the Book already has one and `overwrite` is false,
-        which is the default, so on the commonest enrichment there is the
-        catalogue's spelling **never reaches `books.author`**. Measured through
+        convention. It is not a formality: `evidence.apply_record` skips
+        `author` whenever the Book already has one under `Policy.FILL_GAPS`,
+        which the route picks when its `overwrite` is false, the default, so on
+        the commonest enrichment there is the catalogue's spelling **never
+        reaches `books.author`**. Measured through
         the real handler with a Book credited `S. P. Kane` and a DNB record
         spelling the same person `Kane, Sean P.`: one `POST /enrich` wrote a row
         under `sean p kane`, `listing()` and `identifiers_for` could not see it,
@@ -1264,10 +1265,11 @@ def _evidenced_keys(entry: AuthorEntry) -> set[str]:
 
     **That first clause used to say "files under the catalogue's own spelling,
     which reaches `books.author` on the same refresh", and it was false on the
-    commonest path there is.** `google_books.merge_into` skips `author`
-    whenever the Book already has one and `overwrite` is false, which is the
-    default, so an ordinary `POST /enrich` never adopts the catalogue's
-    spelling. Measured through the real handler: a Book credited `S. P. Kane`
+    commonest path there is.** `evidence.apply_record` skips `author`
+    whenever the Book already has one under `Policy.FILL_GAPS`, which the route
+    picks when its `overwrite` is false, the default, so an ordinary
+    `POST /enrich` never adopts the catalogue's spelling. Measured through the
+    real handler: a Book credited `S. P. Kane`
     enriched from a DNB record spelling the same person `Kane, Sean P.` wrote a
     row under `sean p kane`, which `listing()` and `identifiers_for` could not
     see, `forget_identifier` refused, and the response reported as stored.

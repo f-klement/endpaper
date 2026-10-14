@@ -34,13 +34,11 @@ sentence the whole module is built on. So the table's writers stay there and
 the question of who may be told stays here, which is the same split
 `shelving.py` makes against `collections`.
 
-**Beside `tags.Vocabulary` and `shelving.Shelving`, not behind either.** The
-three share a shape, a naming convention and an instrument, and differ in the
-three places that matter: a Tag has a seeded arm, a Collection has a published
-count, and a custom field has **neither**. `list_custom_fields` publishes no
-count on purpose and `docs/security.md` records why, so this class holds sets
-of ids where those two hold `dict[int, int]`. Generalising the three would have
-to start by deciding whether the base class counts.
+**The custom field arm of `disclosure.Disclosure`**, which owns the rule, its
+three reads and their order for every vocabulary. What a field adds is the
+definer arm and the absence of a count: `list_custom_fields` publishes none on
+purpose and `docs/security.md` records why, so the rule reads this vocabulary's
+visible arm as a set of ids, which `disclosure.Carrier.counted` decides.
 """
 
 from typing import Self, final
@@ -48,26 +46,18 @@ from typing import Self, final
 from sqlalchemy.orm import Session
 
 import custom_fields
-from models import Book, CustomField, CustomFieldValue
-from shelf import Shelf
+from disclosure import Carrier, Disclosure
+from models import CustomField
 
 
 @final
 class Fields:
     """The custom fields one Member may be told about, and may name by id.
 
-    One `Fields` per request. Each of the four reads below is issued **lazily
-    and once**, so a caller that asks about a single id pays only for the arms
-    that id reaches, and `listable()` over the whole table costs the same
+    One `Fields` per request, holding one `disclosure.Disclosure`. Every read
+    is lazy and cached, so `listable()` over the whole table costs the same
     whatever the number of definitions: one read of the table, plus the arms
     that ran, never one per definition.
-
-    **No figure is written here.** This sentence stated four and measured five:
-    the read it left out is `custom_fields.definitions`, which `listable`
-    issues from another module and which the word "below" excludes. The
-    invariance is what carries the claim, and an arm added or removed moves a
-    digit while leaving the invariance true, so the digit was the part that
-    rotted.
     `tests/test_fields.py::TestListingCostsTheSameWhateverTheNumberOfDefinitions`
     measures one definition against a library at the ceiling and asserts
     equality.
@@ -78,43 +68,32 @@ class Fields:
     numbers that double as the first arm. `CustomFieldOut` carries no count and
     `list_custom_fields` says why: a count over a field is drawn from Books the
     caller may not see, and a viewer scoped one in a delete confirmation would
-    understate what the delete is about to destroy. So arm 1 here is
-    `SELECT DISTINCT field_id`, which answers the arm and cannot become a
-    published number by somebody reaching for the attribute that was already
-    there.
+    understate what the delete is about to destroy. So the rule's first arm
+    here is `SELECT DISTINCT field_id`, which answers the arm and cannot become
+    a published number by somebody reaching for an attribute that was already
+    there: `Disclosure.counts` refuses this vocabulary.
 
-    ## Four arms, in cost order but for one stated exception
+    ## The arms
 
-    1. **A Book this Member can see holds a value in it.** `Shelf.seen_by`, so
-       the Member can already read the name off that Book: `CustomFieldValueOut`
-       carries `name` inline with every value, and the route serving it resolves
-       through `BookForRead`, which is this same predicate. The set this arm
-       admits and the set that payload can reach are therefore the same set by
-       construction rather than by agreement.
-    2. **A deleted Book this Member may see holds a value in it.**
-       `Shelf.trashed_by`, which is this Member's own trashed Books and every
-       Member's trashed public ones. A restore reinstates the value, so without
-       this arm trashing the last Book carrying a field takes the field off the
-       settings page of the Member who is about to restore it.
-       `in_trash_for` is not an ownership test and states so at its own site.
-    3. **No Book at all holds a value in it.** Unscoped, a set of ids and never
-       a count. A definition nothing carries discloses no Book, and this arm is
-       what makes defining a field still work: between `POST /custom-fields`
-       and the first value there is no carrier, so without it a Member would
-       define a field and watch it fail to appear.
+    The rule's own, in its order: a Book this Member can see holds a value in
+    it; a deleted Book this Member may see does; no Book at all does. For the
+    first, `CustomFieldValueOut` carries `name` inline with every value and the
+    route serving it resolves through `BookForRead`, which is the same
+    predicate, so the set the arm admits and the set that payload can reach
+    are the same set by construction. For the second, nothing serves a field
+    name off a Book in the trash, so the reason is the restore alone: it
+    reinstates the value, and without the arm trashing the last carrier takes
+    the field off the page of the Member about to bring it back.
 
-    4. **This Member defined it.** `CustomField.created_by_user_id`, read off
-       the class in one statement. Without it a Member who defines a field and
-       then has its only value land on somebody else's Private Book loses the
-       field from their own settings page, and retyping the name is a loop
-       rather than a recovery.
+    **And one of its own: this Member defined it.**
+    `CustomField.created_by_user_id`, read off the class in one statement.
+    Without it a Member who defines a field and then has its only value land
+    on somebody else's Private Book loses the field from their own settings
+    page, and retyping the name is a loop rather than a recovery. It runs
+    behind the two scoped arms and before the empty one, which is where the
+    rule puts a vocabulary's own arm, for the equality `disclosure` states.
 
-       **Numbered 4 and evaluated third**, which is not a slip: arm 3 short
-       circuits on an id no row carries, so an arm behind it runs for a hidden
-       id and not for an absent one and the two 404s separate on a clock. The
-       comment in `_may_be_told` carries it and names the test.
-
-    There is no fifth. `tags.Vocabulary` has a seeded arm because
+    There is no other. `tags.Vocabulary` has a seeded arm because
     `PREDEFINED_TAGS` is published by the mirror; nothing ships a custom field,
     so nothing here is public by construction.
 
@@ -156,9 +135,9 @@ class Fields:
 
     **And discovery leaves the product, for everybody but the definer.** A
     field whose every value is on other members' Private Books is gone from
-    the picker of a Member who ought to be filling it in. Arm 4 exempts the
-    one Member who can be named from the row and nobody else, so what replaces
-    it for the rest is a house agreeing a field name out loud, which is not a
+    the picker of a Member who ought to be filling it in. The definer arm
+    exempts the one Member who can be named from the row and nobody else, so
+    what replaces it for the rest is a house agreeing a field name out loud, which is not a
     mechanism this code can offer.
 
     ## The non monotonicity is the thing a reader will call a bug
@@ -183,7 +162,7 @@ class Fields:
       because it is a way back, which it is not.** That argument was made and
       is false: `define` returns the existing row and **writes nothing**, so
       no value moves, so this predicate answers exactly as it did, so the
-      write that was going to restore arm 1 answers 404. Retyping the name is
+      write that was going to restore the visible arm answers 404. Retyping the name is
       **a loop rather than a recoverable state**, which is the phrase
       `shelving.Shelving` already uses for the identical pair, measured a day
       earlier.
@@ -191,11 +170,11 @@ class Fields:
       test_retyping_the_name_is_a_loop_rather_than_a_recovery` drives both
       steps, because an arm on the write alone pins half of it.
 
-      **Who is in that loop narrowed when arm 4 arrived, and the loop itself
+      **Who is in that loop narrowed when the definer arm arrived, and the loop itself
       did not.** A Member recorded as a field's author does not enter it:
-      arm 4 admits their field whatever carries it, so there is nothing to
+      the definer arm admits their field whatever carries it, so there is nothing to
       retype. **Every other Member does, and on the morning of the upgrade
-      that is everybody**, because the migration backfills no author and arm 4
+      that is everybody**, because the migration backfills no author and the definer arm
       admits a matching id rather than a definer in the abstract. For them the
       way back is still an admin, whose only verb destroys every value under
       the row. Retyping remains a loop rather than a recovery, for a set that
@@ -211,15 +190,15 @@ class Fields:
     tell, and not closed here.
     """
 
-    __slots__ = ("_authors", "_carried", "_db", "_on_the_shelf", "_trashed", "_viewer_id")
+    __slots__ = ("_authors", "_db", "_rule", "_viewer_id")
 
     def __init__(self, db: Session, viewer_id: int) -> None:
         self._db = db
         self._viewer_id = viewer_id
-        self._on_the_shelf: frozenset[int] | None = None
-        self._trashed: frozenset[int] | None = None
-        self._carried: frozenset[int] | None = None
         self._authors: dict[int, int | None] | None = None
+        self._rule = Disclosure.seen_by(
+            db, viewer_id, Carrier.CUSTOM_FIELD_VALUES, self._defined_by
+        )
 
     @classmethod
     def seen_by(cls, db: Session, viewer_id: int) -> Self:
@@ -248,7 +227,7 @@ class Fields:
         return [
             row
             for row in custom_fields.definitions(self._db)
-            if self._may_be_told(row.id)
+            if self._rule.may_be_told(row.id)
         ]
 
     def addressable(self, field_id: int) -> bool:
@@ -259,7 +238,7 @@ class Fields:
         not be told about becomes indistinguishable from one that is not there.
 
         **Two callers and not three.** The delete is admin only and
-        deliberately ungated, for the reason `Shelving.assignable` gives and
+        deliberately ungated, for the reason `Shelving.resolve` gives and
         which is sharper here: an admin has no privilege over another member's
         Private Books, so gating it would leave a field whose every value sits
         on those Books undeletable for good, and the delete is the only verb
@@ -275,7 +254,17 @@ class Fields:
         definition time, this splits, and `tags.Vocabulary` is the shape to
         split it into.
         """
-        return self._may_be_told(field_id)
+        return self._rule.may_be_told(field_id)
+
+    def resolve(self, field_id: int) -> CustomField | None:
+        """The definition at this id, or None for an id no row carries and for
+        one this Member may not be told about alike, which the two id doors
+        answer with the same 404."""
+        return self._rule.resolve(field_id, self._row)
+
+    def _row(self, field_id: int) -> CustomField | None:
+        """The read `resolve` hands the rule, which asks it after the gate."""
+        return self._db.get(CustomField, field_id)
 
     def renamable(self, field_id: int) -> bool:
         """Whether this Member may relabel a field they may be told about.
@@ -307,153 +296,6 @@ class Fields:
         author = self._author_of.get(field_id)
         return author is None or author == self._viewer_id
 
-    def _may_be_told(self, field_id: int) -> bool:
-        """The one predicate both questions ask, four arms, in cost order.
-
-        **In cost order and short circuiting, which is the whole statement
-        budget.** Arm 1 is one statement and answers for every field this
-        Member has a value in, so the ordinary path pays one query. Arms 2, 3
-        and 4 fire only for a field the arms before them did not admit.
-
-        Keeping this one function rather than two is deliberate, and
-        `shelving.Shelving` gives the reason: two cooperating predicates over
-        one question is the shape that drifts, and the seam between them is
-        where the defect lands.
-        """
-        if field_id in self._on_a_book_this_member_sees:
-            return True
-        if field_id in self._in_the_trash_this_member_sees:
-            return True
-        # **Arm 4 is evaluated before arm 3, and the reason is an equality
-        # rather than a cost.** Arm 3 answers `True` for an id no row carries,
-        # so it short circuits on an **absent** field id. Arm 4 behind it
-        # would therefore run for a hidden id and not for an absent one, and
-        # the two 404s would separate by one statement on a clock, which is
-        # exactly the oracle `routers/books._custom_field` reordered its own
-        # two lines to close. Pinned by
-        # `tests/routers/test_books_custom_fields.py::
-        # TestNamingAHiddenFieldByItsId::
-        # test_an_absent_id_and_a_hidden_one_cost_the_same_statements`, which
-        # counts the whole request and fails on this order being reversed.
-        if field_id in self._defined_by_this_member:
-            return True
-        return field_id not in self._carried_by_any_book
-
-    @property
-    def _on_a_book_this_member_sees(self) -> frozenset[int]:
-        """The fields holding a value on a Book this Member can see.
-
-        **Joined to `books` through the Shelf, like every other query that
-        reads a Book owned table.** Unscoped it would answer for every Member's
-        Private Books, which is the disclosure this class exists to close.
-
-        **`field_id` and `distinct()`, so the number `list_custom_fields`
-        refuses is not computed here and cannot be read off this set.** That
-        number is how many Books carry a field, and producing it needs a
-        different statement: a count, or this read without the `distinct`.
-        Either is a changed statement, which is what the register entry in
-        `tests/test_shelf.py` is keyed on.
-
-        **What the set's own cardinality gives is a different number and is
-        not withheld**: how many definitions this Member may be told about,
-        which is the length of the list the route already returns. Claiming
-        more than that for this line was wrong and is corrected rather than
-        armed.
-        """
-        if self._on_the_shelf is None:
-            rows = (
-                Shelf.seen_by(self._db, self._viewer_id)
-                .select(CustomFieldValue.field_id)
-                .join(CustomFieldValue, CustomFieldValue.book_id == Book.id)
-                .distinct()
-                .all()
-            )
-            self._on_the_shelf = frozenset(row[0] for row in rows)
-        return self._on_the_shelf
-
-    @property
-    def _in_the_trash_this_member_sees(self) -> frozenset[int]:
-        """The fields holding a value on a deleted Book this Member may see.
-
-        **This Member's own trashed Books and every Member's trashed public
-        ones**, which is `in_trash_for` and is stated in full there. The name
-        reads as an ownership test and is not one.
-
-        **`tags.Vocabulary`'s reason for the same arm does not carry here, and
-        this docstring borrowed it.** That reason is that the Member is served
-        those Books in their trash listing, so the name is already readable off
-        one. True for a Tag: the listing's element type carries tags. False for
-        a custom field: `CustomFieldValueOut` is reached only through the two
-        `/{book_id}/custom-fields` routes, both resolving through
-        `BookForRead` or `BookForWrite`, and `visible_to` excludes a trashed
-        Book. So nothing serves a field name off a Book in the trash.
-
-        **The arm is right for its own reason**, which is the one its register
-        entry gives: a restore reinstates the value and the field is then arm
-        1, so without this arm trashing the last carrier takes the field off
-        the page of the Member who is about to bring it back. What it admits
-        is therefore a Book that **may become** a carrier the viewer can see,
-        not one whose name they can already read.
-
-        `Shelf.trashed_by` and not a flag on `seen_by`, for the reason that
-        method gives: a predicate meaning "on the shelf" or "in the trash"
-        depending on an argument is one a caller can get backwards, and
-        backwards here would answer this question over every Member's trash.
-        """
-        if self._trashed is None:
-            rows = (
-                Shelf.trashed_by(self._db, self._viewer_id)
-                .select(CustomFieldValue.field_id)
-                .join(CustomFieldValue, CustomFieldValue.book_id == Book.id)
-                .distinct()
-                .all()
-            )
-            self._trashed = frozenset(row[0] for row in rows)
-        return self._trashed
-
-    @property
-    def _carried_by_any_book(self) -> frozenset[int]:
-        """The fields some Book in the Library holds a value in, viewer or no
-        viewer.
-
-        **Deliberately unscoped, and the only read here that is.** Every other
-        read asks what one Member may see; this one asks whether a definition
-        has anything to disclose at all, and scoping it would answer "nothing"
-        for a field filled in all over somebody else's Private Books, which is
-        exactly the case arm 3 exists to separate from an unused definition.
-
-        **Ids, never a count and never a name.** What crosses is the set of
-        field ids that are carried, so nothing about how many hidden Books
-        carry one, or whose they are, can leave through it. That is the same
-        bound `shelf.collections_any_book_is_filed_in` states, and it is the
-        whole of what this class borrows from that precedent.
-
-        **It lives here rather than in `shelf.py`**, which is where that
-        precedent sits, and the difference is the table. That function reads
-        `books`, which is `shelf.py`'s rule whatever the rows come back as;
-        the house rule itself is about queries returning or counting **Books**
-        and this returns a field id.
-
-        **The decisive reason is the shape of the register, not the record.**
-        `shelf.py` is the one module
-        `test_shelf.py::TestTheShelfIsTheOnlyWayIn::
-        test_only_the_counted_statements_read_a_table_that_belongs_only_to_a_book`
-        does not walk, and it holds five book owned reads with no key in that
-        register at all, so this statement would have become a sixth
-        unreported one. What stands in front of those is a literal of three
-        function names with hand written caller counts: a fourth unscoped
-        function added there **reds nothing**. `BOOK_OWNED_READERS` is derived
-        from the tree with exact count equality and refuses a stale entry in
-        both directions, so keeping the statement here keeps it under a
-        derived register rather than moving it to a literal one, which is this
-        repository's standing remedy and not a preference. `tags.Vocabulary`
-        keeps the identical arm in its own module for the same reason.
-        """
-        if self._carried is None:
-            rows = self._db.query(CustomFieldValue.field_id).distinct().all()
-            self._carried = frozenset(row[0] for row in rows)
-        return self._carried
-
     @property
     def _author_of(self) -> dict[int, int | None]:
         """Who defined each definition, for the two questions that need it.
@@ -482,7 +324,7 @@ class Fields:
 
         **Unscoped, and it discloses nothing.** What crosses is a member id per
         definition id, for definitions this class decides separately whether to
-        admit: `listable` filters by `_may_be_told` and `renamable` is asked
+        admit: `listable` filters by the rule and `renamable` is asked
         only after `addressable` has. A viewer scoped version of this question
         is not available, because the question is who the author **is** rather
         than which Books carry the field.
@@ -500,24 +342,29 @@ class Fields:
             self._authors = {row[0]: row[1] for row in rows}
         return self._authors
 
+    def _defined_by(self, field_id: int) -> bool:
+        """The definer arm as the rule asks it, by id."""
+        return field_id in self._defined_by_this_member
+
     @property
     def _defined_by_this_member(self) -> frozenset[int]:
-        """The fields this Member defined. Arm 4.
+        """The fields this Member defined. The definer arm.
 
-        **The arm `CustomField` had no column for**, and the three above are
-        what made its absence a lockout rather than an inconvenience: a field
-        whose every value sits on another Member's Private Book fails arm 1,
-        fails arm 2, and is carried, so it fails arm 3. The Member who defined
-        it watched it leave their own settings page, and retyping the name is
-        a loop rather than a recovery, because `custom_fields.define` hands
-        back the existing row and writes nothing.
+        **The arm `CustomField` had no column for**, and the rule's other three
+        arms, in `disclosure.Disclosure`, are what made its absence a lockout
+        rather than an inconvenience: a field
+        whose every value sits on another Member's Private Book fails both
+        scoped arms and is carried, so it fails the empty arm. The Member who
+        defined it watched it leave their own settings page, and retyping the
+        name is a loop rather than a recovery, because `custom_fields.define`
+        hands back the existing row and writes nothing.
 
-        **Behind arms 1 and 2 and in front of arm 3.** Arm 1 answers for
-        every field this Member has a value in, which is the ordinary page
-        load, so a second statement in front of it would be paid on every
-        request to serve a case that is rare by construction. What puts it in
-        front of arm 3 is the statement count equality `_may_be_told`
-        explains, not the cost.
+        **Behind the two scoped arms and in front of the empty one.** The
+        visible arm answers for every field this Member has a value in, which
+        is the ordinary page load, so a statement in front of it would be paid
+        on every request to serve a case that is rare by construction. What
+        puts it in front of the empty arm is the statement count equality
+        `disclosure` states, not the cost.
         """
         return frozenset(
             field_id

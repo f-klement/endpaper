@@ -275,7 +275,7 @@ const SERVER_COLLAPSES = /[^\S\uFEFF]+/gu;
  * **A literal, and the one fact here that nothing recomputes today.**
  * `openapi.json` carries no `pattern` for this field, so unlike the two
  * numbers above it cannot be read off the wire. The server's own separator is
- * `google_books.CATEGORY_SEPARATOR`, and the refusal is on the **bare**
+ * `categories.CATEGORY_SEPARATOR` in the backend, and the refusal is on the **bare**
  * character rather than on the two character joined form, so a rule written
  * against `"; "` would refuse nothing.
  *
@@ -301,8 +301,9 @@ const SEPARATOR_INSIDE_A_SUBJECT = ";";
  * containing the separator, and a `field_validator` raising refuses the whole
  * request: one subject reading `Juvenile Fiction; General` costs a member the
  * book. So the rule is **drop**, never split and never fail the file. Splitting
- * would invent a boundary the file never stated; `google_books.join_categories`
- * drops for the two upstream joins, and this is the same rule's third producer.
+ * would invent a boundary the file never stated. This is the policy the backend's
+ * `categories` module names "drop in the browser", the same drop its catalogue
+ * producers apply, restated here because this side cannot import Python.
  * That is `boundIdentifiers`' lesson one field over, and its own comment says
  * it in as many words.
  *
@@ -314,7 +315,7 @@ const SEPARATOR_INSIDE_A_SUBJECT = ";";
  * which is the one ordering a reimplementation gets wrong in silence: slicing
  * to the count first lets bad entries at the front hide good subjects behind
  * them, and both orders are green against any fixture whose bad entries are at
- * the back. `join_categories` states the same reason on the server.
+ * the back. `categories.kept_categories` states the same reason on the server.
  *
  * **Drop rather than cut an over wide entry.** `lib/bookBounds.ts`' split: a
  * cut value has to still be an instance of what it was, and "Fiction / Science

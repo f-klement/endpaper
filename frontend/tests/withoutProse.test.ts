@@ -24,6 +24,7 @@
 import { describe, expect, it } from "vitest";
 import { parseAst } from "vite";
 
+import { walk } from "./sourceReader";
 import { langOf, withoutProse } from "./withoutProse";
 // The one enumeration of `src/`, which refuses a corpus that is no longer the
 // tree. The pattern used to be written here, where narrowing it was one edit
@@ -252,14 +253,8 @@ const MARKERS = ["//", "/*", "*/"];
  */
 function carriesAnInstrument(source: string, lang: "ts" | "tsx"): boolean {
   let carries = false;
-  const walk = (value: unknown): void => {
-    if (carries) return;
-    if (Array.isArray(value)) {
-      for (const item of value as unknown[]) walk(item);
-      return;
-    }
-    if (typeof value !== "object" || value === null) return;
-    const node = value as Record<string, unknown>;
+  walk(parseAst(source, { lang }), (node) => {
+    if (carries) return false;
     if (node.type === "Literal") {
       const regex = node.regex as { pattern: string; flags: string } | null;
       if (regex && reactsToAMarker(regex.pattern, regex.flags)) carries = true;
@@ -276,9 +271,7 @@ function carriesAnInstrument(source: string, lang: "ts" | "tsx"): boolean {
       if (typeof cooked === "string" && MARKERS.includes(cooked))
         carries = true;
     }
-    for (const key of Object.keys(node)) walk(node[key]);
-  };
-  walk(parseAst(source, { lang }));
+  });
   return carries;
 }
 

@@ -8,14 +8,10 @@ value reaches the column joined rather than as a list, which is an exception on
 the INSERT rather than a validation error.
 """
 
+from categories import CATEGORY_MAX, MAX_CATEGORIES_PER_BOOK
 from models import Book, Tag
 from schemas import POPPED_BEFORE_THE_ASSIGNMENT, POPPED_BEFORE_THE_CONSTRUCTOR
-from schemas.book import (
-    CATEGORY_MAX,
-    MAX_CATEGORIES_PER_BOOK,
-    BookCreate,
-    BookDetailsUpdate,
-)
+from schemas.book import BookCreate, BookDetailsUpdate
 
 SUBJECTS = ["Science Fiction", "Dystopia"]
 
@@ -215,7 +211,7 @@ class TestEditingTheSubjectsOfABookThatExists:
     """`PATCH /api/books/{id}`, which is the only route that removes a subject.
 
     The create route writes them, the catalogue gap fill and the merge's absorb
-    add them, and `google_books.merge_into` skips an empty incoming value, so
+    add them, and `evidence` skips an empty incoming value, so
     an overwriting enrich replaces and cannot clear. Before this door the only
     removal in the product was deleting the book, over a column
     `schemas/public.PublicBookOut` serves to a reader with no account.
@@ -261,7 +257,7 @@ class TestEditingTheSubjectsOfABookThatExists:
     ):
         """The half the response cannot show. A hand rolled join at the route
         would store `""`, which reads back as no subjects and sorts apart from
-        a row that never had any; `google_books.join_categories` answers `None`
+        a row that never had any; `categories.join_categories` answers `None`
         for an empty list, which is what the create door already stores."""
         book_id = self._a_book_with_subjects(client, admin)
 

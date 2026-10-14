@@ -12,7 +12,6 @@ import dataclasses
 import functools
 import importlib
 import inspect
-import os
 import re
 import sys
 import tomllib
@@ -21,7 +20,6 @@ import warnings
 from collections import Counter
 from collections.abc import Container, Iterable, Sequence
 from enum import StrEnum
-from fnmatch import fnmatch
 from pathlib import Path
 from typing import Any, Final, get_args
 
@@ -39,969 +37,18 @@ import sources
 import targets
 from database import Base
 from enums import CatalogueSource
+from tests.corpus import (
+    BACKEND,
+    application_modules,
+    application_sources,
+    every_python_file,
+    is_vendored,
+    markdown_files,
+    shipped_modules,
+    suite_modules,
+)
 from tests.helpers import silence_catalogues
 from tests.ignorefile import ignore_patterns, is_ignored
-
-BACKEND = Path(__file__).resolve().parent.parent
-
-
-#: Directories under `backend/` that hold Python this project did not write.
-#:
-#: **A name per tool is what this used to be, and it failed the moment a new tool
-#: appeared.** The list read `.venv` and `__pycache__`, which is every cache anybody had
-#: seen locally; CI sets `UV_CACHE_DIR` inside the build directory, so `.uv-cache/`
-#: appeared under `backend/` with `pydantic` and `cyclonedx` inside it, and the address
-#: rule below reported `cyclonedx/model/contact.py` for reading a member's address. The
-#: suite was green locally and red on every push, because the difference was the
-#: environment rather than the tree.
-#:
-#: So the rule is structural: **a leading dot means a tool owns it**, which covers
-#: `.venv`, `.uv-cache`, `.mypy_cache`, `.ruff_cache`, `.pytest_cache` and whatever is
-#: next without an edit here. `__pycache__`, `node_modules`, `site-packages` and
-#: `dist-packages` are the four that carry no dot and so still have to be named.
-#:
-#: **The last two are an environment rather than a tool, and the dot does not cover
-#: one.** A virtualenv is `.venv` by convention and by nothing else: `test_marc.py`
-#: records CI putting one inside `backend/` under another name, after which its walk
-#: read `pydantic`, `packaging`, `urllib3` and the standard library's own `xml` and
-#: reported them for breaking a rule about this application. What is closed about an
-#: environment is not its directory's name but that everything installed into it sits
-#: under `site-packages`, or `dist-packages` where Debian put it. Two modules reached
-#: that conclusion independently, `test_covers.py` and `test_marc.py`, which is the same
-#: signal this list already rests on for `__pycache__` and `node_modules`.
-#:
-#: **The stronger structural marker is deliberately not here.** An environment always
-#: carries a `pyvenv.cfg` at its root, whatever it is called, and `test_marc.py` tests
-#: for it when choosing which directories to descend. That is a filesystem question and
-#: this is a path predicate: the diagonal below drives it against constructed trees and
-#: `test_roster_counts.py` drives it against paths that need not exist. Naming the two
-#: directories keeps this answerable from the path alone.
-#:
-#: **`root` exists because the same lesson was learned twice.** This rule was written
-#: here, and `test_roster_counts.py` was written later with a name list of its own that
-#: did not include `.uv-cache`. It went red on ten of twenty pushes to `main` and never
-#: locally, on third party prose inside the cache: a Pygments lexer and a charset detector
-#: each carry a small number beside a word the census reads as a roster noun, and it had no
-#: verdict for either. Same environment difference, same enumeration, a different file.
-#: **The first draft of this comment quoted both phrases and the census then reported the
-#: comment**, which is the same recursion the dash table at the root records: a note about
-#: a count contains the count. It takes a root so one rule can serve a walk from
-#: `backend/` and a walk from the repository, rather than being stated twice and drifting
-#: twice.
-def _is_vendored(path: Path, root: Path = BACKEND) -> bool:
-    return any(
-        part.startswith(".")
-        or part in {"__pycache__", "node_modules", "site-packages", "dist-packages"}
-        for part in path.relative_to(root).parts
-    )
-
-
-def _python_sources(root: Path = BACKEND) -> list[Path]:
-    """Every backend module, excluding the tests and the generated migrations.
-
-    **`root` for the reason `_is_vendored` takes one**, one rung up: it is what
-    lets `test_every_walk_refuses_a_vendored_path_of_this_kind` drive this walk
-    against a tree it built. A walk asserted against this checkout is vacuous
-    wherever the vendored directory is absent, which is every machine but the
-    pipeline's, and that is the environment difference the comment above
-    records.
-
-    **The two names are matched against the path relative to that root**, not
-    against the whole of it. Asked absolutely, a checkout under a directory
-    called `tests` matched every file it held and the walk returned nothing.
-    """
-    return [
-        path
-        for path in root.rglob("*.py")
-        if not {"tests", "migrations"} & set(path.relative_to(root).parts)
-        and not _is_vendored(path, root)
-    ]
-
-
-class TestTheApplicationCorpusIsStillTheApplication:
-    """`_python_sources()` returns every top level directory the backend has.
-
-    **Beside the reader rather than inside any one rule**, because this corpus
-    is walked from test classes across many files and a narrowing takes every
-    one of them at once. **No count of them is written here**: the figure that
-    stood in this sentence was never derived before it was written, and two
-    derivations of it afterwards disagreed on both halves. The argument does
-    not need a number, only that the readers are more than one and are not all
-    in this file.
-
-    **It is here because the walk had no arming of its own and the nearest
-    thing to one is blind to half the class.**
-    `test_the_walk_reaches_every_group_and_leaves_no_remainder` compares
-    `_python_sources()` against `_every_python_file()`, so it reds on a filter
-    added inside `_python_sources` and **not** on the identical filter added
-    inside `_is_vendored`, which both instruments call: the two degrade
-    together, so there is no disagreement left to see.
-
-    Driven, 2026-10-01, with a real provenance violation planted and 156 arms
-    run per column. A narrowing written in `_is_vendored` to drop `routers/`
-    leaves the violation unreported and reds 11 unrelated guards that happen to
-    pin exact populations over this corpus; dropping `schemas/` reds 6; **and
-    dropping `scripts/` reds nothing at all**, corpus 96 of 98, every arm green,
-    the violation invisible. Which directory the token names decided whether
-    anything went red. This arm reds by name on all three.
-
-    **It reds on a legitimate new directory too, and that is wanted**: a new
-    package under `backend/` is a decision about what every one of those rules
-    reads, and one line here is where it is taken.
-    """
-
-    def test_the_walk_returns_every_package_the_backend_has(self) -> None:
-        directories = sorted(
-            {
-                path.relative_to(BACKEND).parts[0]
-                for path in _python_sources()
-                if len(path.relative_to(BACKEND).parts) > 1
-            }
-        )
-
-        assert directories == ["routers", "schemas", "scripts"], (
-            "the application corpus lost or gained a top level directory. Every "
-            "rule reading `_python_sources()` now reads a different tree: either "
-            "the walk was narrowed, or `backend/` grew a package and this line "
-            "is where somebody decides the rules should see it."
-        )
-
-    def test_the_modules_at_the_root_are_still_there(self) -> None:
-        """The other half, since the arm above is satisfied by a walk that
-        returns the three directories and nothing else.
-
-        **An equality against a second derivation**, and the arm this replaced
-        was a membership test on three names with a justification that
-        inverted its own comparison: it said a floor leaves room to decay,
-        where three names out of the root's modules leave far more room than a
-        floor would. What actually made it adequate is that the quiet route
-        cannot express the attack, since `_is_vendored` tests **part names**
-        and no part name drops the root of a tree. That is a property of the
-        helper rather than of the arm, so the arm is strengthened instead of
-        the sentence being rewritten.
-
-        **The glob does not route through `_is_vendored`**, which is what
-        makes it a second instrument rather than the same reading twice: the
-        walk under test prunes a dotted part and this does not, so the guard
-        below is what keeps the two comparable. Measured: the root holds no
-        dotted module today, so that guard is not what makes the equality
-        hold, and it is what stops the day one arrives being a failure of this
-        arm rather than a decision.
-        """
-        roots = {
-            path.name
-            for path in _python_sources()
-            if len(path.relative_to(BACKEND).parts) == 1
-        }
-        globbed = {
-            path.name for path in BACKEND.glob("*.py") if not path.name.startswith(".")
-        }
-
-        assert roots == globbed
-        assert {"models.py", "shelf.py", "main.py"} <= roots
-
-
-def _test_sources(root: Path = BACKEND) -> list[Path]:
-    """Every file in the test tree. `_python_sources` deliberately excludes it."""
-    return [path for path in (root / "tests").rglob("*.py") if not _is_vendored(path, root)]
-
-
-class TestTheTestTreeIsStillTheTestTree:
-    """`_test_sources()` returns every Python file under `backend/tests`.
-
-    **Beside the shared reader rather than inside any one rule**, for the
-    reason the class above `_test_sources` gives: this walk is read at many
-    sites across many files, and a narrowing takes every one of them at once.
-
-    **It is here because the one instrument that reads this walk's population
-    goes quiet rather than red when the walk narrows.** The coverage register
-    compares pytest's own collection against this walk and hands the
-    disagreement to `pytest.skip`, so a narrowing is not a wrong answer there,
-    it is no answer.
-
-    Driven, 2026-10-01 by a review seat, with the register's three count arms
-    as the subject: a narrowing in `_test_sources` dropping `*_guard.py`, none
-    of which carries a register row, left **no arm in that file red** and all
-    three count arms skipping; the identical narrowing written one function up
-    in `_is_vendored` did the same. The only reds either way were collateral,
-    in files the narrowing was not written in, and which arm fired moved with
-    where it was written.
-
-    **A top level directory arm does not close it**, which is the difference
-    from the class above: that narrowing left every directory in place. So
-    this is an equality against the glob, less an exclusion set stated by
-    equality rather than by a count.
-
-    **It reds on a new directory or a new file under `tests/` only if the walk
-    stops returning one**, since both sides see a legitimate addition.
-    """
-
-    def test_the_walk_returns_every_python_file_the_test_tree_has(self) -> None:
-        walked = {path.relative_to(BACKEND) for path in _test_sources()}
-        # The second derivation. It shares this walk's `rglob` and not its
-        # filter, so a narrowing written in `_test_sources` or in
-        # `_is_vendored` is a disagreement here rather than a smaller corpus
-        # nobody sees. What it cannot see is an edit to both at once.
-        globbed = {
-            path.relative_to(BACKEND) for path in (BACKEND / "tests").rglob("*.py")
-        }
-        excluded = sorted(str(path) for path in globbed - walked)
-
-        # **The exclusion stated by equality, and it is empty.** `_is_vendored`
-        # prunes a dotted part and the tool directory names beside it, and
-        # under `backend/tests` none of them holds a `.py` file: the bytecode
-        # cache
-        # holds `.pyc` only, and the virtualenv and the pipeline's cache sit
-        # beside `tests/` rather than inside it. A member arriving here is a
-        # decision about what every rule reading this walk sees, and this line
-        # is where somebody takes it.
-        assert excluded == [], (
-            "the test tree corpus lost files to an exclusion. Every rule "
-            f"reading `_test_sources()` now reads a different tree: {excluded}"
-        )
-        assert walked == globbed
-
-        # Vacuity. Every assertion above holds over an empty tree, and this
-        # file is in the walk it is asserting about.
-        assert Path(__file__).resolve() in {
-            path.resolve() for path in _test_sources()
-        }
-
-    def test_a_vendored_file_under_the_test_tree_is_the_difference(
-        self, tmp_path: Path
-    ) -> None:
-        """What the exclusion asserted above is an exclusion of, and anti
-        vacuity for it.
-
-        The two readings share an `rglob` on the real tree and the equality
-        alone cannot say the filter is doing anything, because the exclusion
-        there is empty. Planted rather than asserted of this checkout, since
-        an exclusion nobody has seen produce a member is a rule stated and not
-        measured.
-        """
-        (tmp_path / "tests" / ".tool").mkdir(parents=True)
-        (tmp_path / "tests" / "test_real.py").write_text("")
-        (tmp_path / "tests" / ".tool" / "vendored.py").write_text("")
-
-        walked = {path.name for path in _test_sources(tmp_path)}
-        globbed = {path.name for path in (tmp_path / "tests").rglob("*.py")}
-
-        assert walked == {"test_real.py"}
-        assert globbed - walked == {"vendored.py"}
-
-
-def _every_module_but_the_tests(root: Path = BACKEND) -> list[Path]:
-    """The application and its migrations, excluding the tests and anything vendored.
-
-    Wider than `_python_sources` by the migrations and narrower than
-    `_every_python_file` by the test tree. The rules that use it are about what
-    ships in the image, where a generated revision ships and a test does not.
-
-    **It exists because two rules that needed this walk each wrote their own**,
-    one a method on its test class and one inline in its loop, spelled
-    `"tests" not in path.parts and ".venv" not in path.parts` and its negation.
-    That is the enumeration the module level walks here replaced, one name short
-    in the same direction: it read the cache the pipeline creates under
-    `backend/` and reported `jeepney/bindgen.py` for parsing XML. Green on every
-    developer checkout and red in CI, which is the environment difference
-    `_python_sources` already records. The second copy held the `S101` census
-    and was latent rather than red, because nothing vendored here carries that
-    suppression; it was found by reading for the shape rather than by a failure.
-
-    **A method could not be reached by `_walk_names`**, which reads module
-    level functions, so the diagonal that drives every walk against a
-    constructed tree never saw it. Being a module level walk that reaches
-    `_is_vendored` is what puts it under that guard rather than beside it.
-    """
-    return [
-        path
-        for path in root.rglob("*.py")
-        if "tests" not in path.relative_to(root).parts and not _is_vendored(path, root)
-    ]
-
-
-def _every_python_file(root: Path = BACKEND) -> list[Path]:
-    """Every Python file under `backend/`, wider than both walks above.
-
-    The two above drop the tests, and `_python_sources` drops the migrations
-    too, because the rules that walk them are about application semantics and a
-    fixture or a generated revision has no share in those. The compile rule at
-    the foot of this file is the one exception, and the reason is that its
-    failure is at import: a file that will not compile takes whatever imports
-    it, so a migration stops `upgrade_to_head()` and a test module takes every
-    guard in it. Which walk returned the file changes nothing about that.
-
-    One walk and one exclusion, rather than `_python_sources() +
-    _test_sources() + something for the migrations`, which is a list of three
-    directory names whose fourth member nobody would remember to add.
-
-    **The boundary is `backend/` rather than the repository, and no count of
-    what lies outside it belongs here.** The one that stood in this paragraph
-    was measured once and was short by five the next time anybody counted,
-    which is the failure the class at the foot of this file already records
-    against its own corpus. Tracked Python outside `backend/` is compiled by a
-    guard of its own, which this file may not name: that guard is stripped from
-    the public mirror and this one publishes. The boundary stays here because
-    `BACKEND` anchors every walk in this file, and a rule reaching out of its
-    own tree would report against code this suite has no claim on, in a
-    checkout that may not even contain it.
-
-    **`rglob`, so this is the working tree and not what git tracks.** An
-    untracked file under `backend/` is compiled and reported, which is wanted:
-    the suite runner ships the working tree, so a defect is seen before it is
-    committed, where `git archive HEAD` cannot see it at all. The publishing
-    tooling uses "ships" for that opposite sense, which is why the name here says
-    `backend/` and the word is left to it.
-    """
-    return [path for path in root.rglob("*.py") if not _is_vendored(path, root)]
-
-
-def _source_modules(root: Path = BACKEND) -> dict[str, str]:
-    """`_python_sources()` read, keyed by path relative to `backend/`.
-
-    **Here rather than in `tests/test_shelf.py`, which is where it used to
-    live**, because the exclusion it rests on is `_is_vendored` and that is
-    defined above. The shelf rules import this one; the reverse would be a cycle
-    under `--import-mode=importlib`, since that module is imported for
-    `_is_vendored` before it defines anything of its own.
-
-    **The rules in other test modules that need this corpus import it**, and
-    three of them used to keep a copy, each spelling the exclusion as
-    `parts[0] not in {"tests", "migrations", ".venv"}`. That is the enumeration
-    `_is_vendored` exists to replace, and it held the name of the directory a
-    developer has rather than the one the pipeline creates.
-    `test_no_other_test_module_defines_one_of_these_walks` is what stops the
-    next copy of one of these being free to write, and its docstring says what
-    that does not cover.
-    """
-    return {
-        str(path.relative_to(root)): path.read_text() for path in _python_sources(root)
-    }
-
-
-def _every_file_a_tool_does_not_own(root: Path = BACKEND) -> list[Path]:
-    """Every file under `backend/` that no tool owns, of whatever suffix.
-
-    **A second instrument for the walk above, and the only reason it exists.**
-    `_every_python_file` states its corpus as an exclusion (not vendored, not
-    bytecode) and a rule stating an exclusion needs the complement to be
-    checkable: this is what lets
-    `test_the_walk_reaches_every_group_and_leaves_no_remainder` say that
-    everything left out is a tool's or is not a `.py` file, rather than
-    restating the filter it is testing.
-
-    `os.walk` and a pruned `dirnames`, where the walk above is an `rglob` and a
-    per path predicate. Different traversals, so a filter added to that
-    function shows up here as a difference. Pruning is also what keeps this
-    affordable: a `.venv` holds tens of thousands of files and neither walk
-    should descend one.
-
-    **It is NOT the same exclusion, and the difference is load bearing.** The
-    pruning asks `_is_vendored` about **directory names** and every filename
-    is then taken unfiltered. So the two instruments degrade **identically**
-    when a directory token is added to that helper, which is why the corpus
-    the application rules walk needed an arm of its own, and they degrade
-    **differently** when a **filename** token is added: the file leaves the
-    walk above and stays in this one, so it lands in the complement and reds
-    by name. **Making this walk ask `_is_vendored` about filenames too is six
-    words, reads as a consistency fix, and takes a live filename narrowing to
-    every arm green.** That is what the sentence this paragraph replaced
-    invited, by calling the two exclusions the same.
-    """
-    found: list[Path] = []
-    for directory, dirnames, filenames in os.walk(root):
-        here = Path(directory)
-        dirnames[:] = [name for name in dirnames if not _is_vendored(here / name, root)]
-        found += [here / name for name in filenames]
-    return found
-
-
-#: One vendored path of each kind the walks above have to refuse.
-#:
-#: **Planted in two places, and that is what makes the fixture cover every walk.** A
-#: walk that descends `tests/` alone never sees a directory beside it, so a fixture
-#: planting each kind at the root only hands that walk a clean verdict without ever
-#: putting a file in front of it. Measured on the first draft of this fixture: deleting
-#: the exclusion from `_test_sources` was reported by nothing.
-#:
-#: **A `.py` and a second suffix per kind.** The `.py` is all four `rglob` walks can
-#: see at all. The second is not what creates the detection, since the walk that prunes
-#: reaches `mod.py` too: it is there so that walk is put in front of a file its own
-#: suffix rule cannot excuse.
-#:
-#: A virtualenv and the pipeline's cache are both here because the enumeration this
-#: replaced held the first and not the second, and the tree where that mattered is the
-#: pipeline's rather than anybody's checkout. The last is the one no list of names can
-#: hold, and it is what makes the rule structural rather than a longer list.
-VENDORED_KINDS: Final = {
-    "a virtualenv": ".venv/lib/python3.14/site-packages/pydantic",
-    # The same packages one level out of reach of the dot. CI has already built
-    # an environment under `backend/` whose directory carried no dot, and the
-    # walk that went into it reported the standard library's own `xml` for
-    # breaking a rule about this application. `.venv` above is caught by its
-    # dot and would be caught with `site-packages` removed from the predicate,
-    # so it is this row that drives that half and not that one.
-    "an environment whose directory is not hidden": "env/lib/python3.14/site-packages/pydantic",
-    "the cache the pipeline creates under backend": ".uv-cache/cyclonedx/model",
-    "bytecode beside a module of ours": "routers/__pycache__",
-    "a dependency tree": "node_modules/marked/lib",
-    "a tool nobody has written yet": ".some-tool/wheel",
-}
-
-#: What the walks must still reach with all of that planted around them.
-#:
-#: One file per group the walks divide this tree into, so a walk that answered by
-#: returning nothing fails here rather than passing the refusal above.
-FIRST_PARTY: Final = (
-    "shelf.py",
-    "routers/loans.py",
-    # **Two packages and not one**, because four of the driven walks end in a
-    # floor asserting they reached `routers` and `schemas` rather than asserting
-    # a count: a count is satisfied by a walk that lost a whole directory. With
-    # one package planted those walks fail their own floor on this tree and
-    # cannot be driven at all, which would have left them out of the diagonal
-    # for a reason that reads as a property of the walk rather than of the
-    # fixture. See `test_accounts._sources` for the mutation behind the floor.
-    "schemas/book.py",
-    "tests/test_shelf.py",
-    "migrations/versions/a1.py",
-    "README.md",
-    # **A repository has one, and two of the driven walks refuse a tree with no
-    # ignore rule at all** rather than reading "no file" as "nothing ignored".
-    # It is a member here rather than a file the fixture plants quietly, because
-    # a walk reaching it is reaching something this tree owns: the refusal below
-    # reports anything outside this tuple, so a file the fixture creates and the
-    # tuple omits is reported as vendored code.
-    ".gitignore",
-)
-
-#: What each walk must reach out of that, keyed by the name it is called here.
-#:
-#: **Compared as a whole against the walks this file holds**, so a walk added later
-#: fails this until somebody says what it is for. Listing the walks was the shape the
-#: refusal test was written to avoid, and a vacuity check that quietly skipped the new
-#: walk would leave the refusal above as the only thing driving it, which is the half
-#: that a walk returning nothing passes.
-_THE_APP: Final = {"shelf.py", "routers/loans.py", "schemas/book.py"}
-
-WHAT_EACH_WALK_REACHES: Final = {
-    "test_house_rules::_python_sources": _THE_APP,
-    "test_house_rules::_source_modules": _THE_APP,
-    "test_house_rules::_test_sources": {"tests/test_shelf.py"},
-    "test_house_rules::_every_module_but_the_tests": _THE_APP
-    | {"migrations/versions/a1.py"},
-    "test_house_rules::_every_python_file": _THE_APP
-    | {"tests/test_shelf.py", "migrations/versions/a1.py"},
-    "test_house_rules::_every_file_a_tool_does_not_own": set(FIRST_PARTY),
-    # The four modules that own a walk of their own. Each reaches the shared
-    # predicate and none of them could be driven against a constructed tree
-    # until they took a root, which is what this table now says out loud: two
-    # of them answer exactly what `_python_sources` answers and are a second
-    # walk over one corpus, and that is visible here rather than only to
-    # somebody reading four files.
-    "test_accounts::_sources": _THE_APP,
-    "test_covers::_our_modules": _THE_APP,
-    "test_classifications::_modules": _THE_APP,
-    "test_decoders::_production_sources": _THE_APP | {"migrations/versions/a1.py"},
-    # The census's two, which walk the repository rather than `backend/` and are
-    # driven here for the same reason as the rest: `.uv-cache` is under
-    # `backend/` and the census reaches it. They answer alike on this tree
-    # because `scope` is `candidates` minus what declares itself internal, and
-    # nothing the fixture plants declares anything. The ignore file is out
-    # because its suffix is not one the census reads, which is that walk's own
-    # filter running before the predicate rather than the dot rule answering.
-    # The dot rule is still driven for these two by the planted environment and
-    # dependency directories, which they do reach.
-    "test_roster_counts::candidates": set(FIRST_PARTY) - {".gitignore"},
-    "test_roster_counts::scope": set(FIRST_PARTY) - {".gitignore"},
-}
-
-
-#: The sentence the publish gate demands of a file it strips. Spelled here as a
-#: cross check on the partition below and not as a second home for that rule,
-#: which is the gate's: a match broader than the gate's is the safe direction.
-INTERNAL_DECLARATION: Final = "**This file is internal.**"
-
-
-def _declares_itself_internal(module: str) -> bool:
-    source = (BACKEND / "tests" / f"{module.replace('.', '/')}.py").read_text(encoding="utf-8")
-    return INTERNAL_DECLARATION in (ast.get_docstring(ast.parse(source)) or "")
-
-
-def _the_whole_table(walks: frozenset[str]) -> dict[str, set[str]]:
-    """The table above, plus the row an internal module states about its own walk.
-
-    **This file publishes and a published file may not name a stripped one.** A
-    row keyed on an internal module's name fails in a mirror clone, printing a
-    path the mirror does not carry, and the publish gate cannot catch it: its
-    pointer arm matches path spellings and this is a bare stem. So an internal
-    module states what its own walk reaches, under this attribute name, and the
-    row is collected here rather than written here. The next internal guard
-    with a walk then needs no edit to a published file.
-
-    **Which modules those are is read off the declaration they already carry**
-    for the gate, never off a list, which is the coverage register's own answer
-    to the same question: a file earns a row or declares itself internal.
-
-    **The module states the expectation and this drives it**, which is weaker
-    than a published row and is not nothing. A walk that lost a group or
-    answered with nothing still fails here, and a module that states no row
-    fails the set comparison by name rather than dropping out of the diagonal.
-    """
-    table = dict(WHAT_EACH_WALK_REACHES)
-    for qualified in walks:
-        module, _, _ = qualified.partition("::")
-        if qualified in table or not _declares_itself_internal(module):
-            continue
-        stated = getattr(
-            importlib.import_module(f"tests.{module}"), "WHAT_MY_WALKS_REACH", {}
-        )
-        if qualified in stated:
-            table[qualified] = stated[qualified]
-    return table
-
-
-#: Both ways a module defines a function, because a rule reading one of them reads a
-#: subset of its own corpus and says nothing about it.
-#:
-#: Not hypothetical here: this test tree already holds module level `async def`, so a walk
-#: or a copy spelled that way is a shape the corpus contains rather than one nobody would
-#: write, and this file already pairs the two elsewhere. **Both facts, neither counted.**
-#: A count of either moves whenever somebody writes one more, this is a published file,
-#: and nothing here recomputes it. Which sites they are is in the history.
-_A_FUNCTION: Final = (ast.FunctionDef, ast.AsyncFunctionDef)
-
-
-def _names_for_the_tree(tree: ast.Module) -> set[str]:
-    """Every module level name in one module that holds a path.
-
-    A default of one of these is what says a function takes the tree even where
-    the parameter is not called `root`, which is the second half of the rule
-    `_walk_names` documents.
-
-    **Read off the module, never listed.** The first version of this was a
-    frozenset of the five spellings somebody had seen, and it was short on the
-    day it was written: `_REPO` is the tree constant in five guard modules and
-    was not in it. A helper there spelling its parameter `base` and defaulting
-    it to `_REPO` matched neither arm of the closure, so it never entered
-    `reaches` and was neither driven nor reported as undrivable. That is
-    verbatim the silent drop the default name clause exists to stop, one
-    spelling further out, and an inclusion list is what goes stale when the
-    repository grows a directory.
-
-    **Two passes, because one tree constant is derived from another and the
-    first pass could not see it.** `test_roster_counts.REPO` is `BACKEND.parent`
-    and holds no `Path(` call at all, so the `Path(` pass alone reported that
-    module's `BACKEND` and not its repository root, which is the root its two
-    driven walks default to. Both review seats found this independently, on a
-    rule whose whole subject is that a list goes stale: the same failure one
-    derivation out rather than one spelling out. So a name whose value is built
-    from a name already found joins it, to a fixed point.
-
-    **Over matching is the safe direction and is deliberate.** A name bound to
-    anything containing a `Path(` call counts, and so does anything derived
-    from one, so a constant that is not the tree still counts. The cost is that
-    a function defaulting to it joins `reaches` and must then be drivable or be
-    reported, which is louder than the rule needs rather than quieter.
-
-    **This whole function is stated rather than driven, and that is measured
-    rather than assumed.** Killing the `pathlib.Path` arm outright, so that
-    `test_decoders.BACKEND` is not found, leaves the suite green: every
-    function that reaches the predicate today spells its parameter `root`, so
-    the first arm of the closure carries all of them and the default name arm
-    decides nothing. It is here for the helper spelled `base`, which the tree
-    does not contain yet and has contained before. **Do not read a green run
-    over this as evidence it works**; the arm that has evidence behind it is
-    the parameter name.
-    """
-    bindings: list[tuple[set[str], ast.expr]] = []
-    for node in tree.body:
-        if not isinstance(node, ast.Assign | ast.AnnAssign) or node.value is None:
-            continue
-        targets = node.targets if isinstance(node, ast.Assign) else [node.target]
-        bindings.append(
-            ({one.id for one in targets if isinstance(one, ast.Name)}, node.value)
-        )
-
-    found: set[str] = set()
-    for names, value in bindings:
-        if any(
-            isinstance(call, ast.Call)
-            and (
-                (isinstance(call.func, ast.Name) and call.func.id == "Path")
-                or (isinstance(call.func, ast.Attribute) and call.func.attr == "Path")
-            )
-            for call in ast.walk(value)
-        ):
-            found |= names
-
-    growing = True
-    while growing:
-        growing = False
-        for names, value in bindings:
-            if names <= found:
-                continue
-            if any(
-                isinstance(inner, ast.Name) and inner.id in found
-                for inner in ast.walk(value)
-            ):
-                found |= names
-                growing = True
-    return found
-
-
-def _defines_walk(tree: ast.Module) -> bool:
-    """Whether this module defines a `walk` of its own, which is never the filesystem's.
-
-    One home, because the change that widened the diagonal across the test tree
-    wrote the same four line expression beside the one that was already here.
-    `_is_a_walk` takes the answer as a parameter, so the seam already existed.
-    """
-    return any(
-        isinstance(node, _A_FUNCTION) and node.name == "walk" for node in ast.walk(tree)
-    )
-
-
-def _a_backend_with_vendored_code_in_it(root: Path, vendored: str) -> None:
-    """Write a tree shaped like `backend/`, with one kind of vendored code in it.
-
-    **In the test tree as well as beside it.** Which of the two a walk can reach
-    is the walk's own business and not this function's, and a caller choosing
-    per walk would be the fixture deciding what it is about to test.
-    """
-    for relative in FIRST_PARTY:
-        path = root / relative
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text("x = 1\n")
-    # **Emptied after the loop above wrote `x = 1` into it.** The fixture is
-    # about vendored directories a walk has to refuse on its own, and an ignore
-    # file with entries in it would let a walk pass by reading the file instead
-    # of by applying the rule.
-    (root / ".gitignore").write_text("")
-    for directory in (root / vendored, root / "tests" / vendored):
-        for name in ("mod.py", "notes.md"):
-            path = directory / name
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text("x = 1\n")
-
-
-@functools.cache
-def _walk_names() -> tuple[frozenset[str], frozenset[str]]:
-    """The names in this module that decide what a walk reaches, as `(walks, all)`.
-
-    **Read off this file rather than listed**, which is the same rule the walks
-    themselves now follow: a list here would be a sixth name somebody has to
-    remember, and the diagonal would report five clean while the new one went
-    unexercised.
-
-    A **walk** is the subset taking nothing but a `root`, which is what makes it
-    drivable against a constructed tree. `_is_vendored` itself takes a path as
-    well and is driven by the two tests above.
-
-    **Every other name has to be a walk, and that is asserted rather than left
-    as the reason for a subtraction.** A function that reaches the predicate and
-    takes a second parameter, or spells its first `base`, would otherwise drop
-    out of both guards while their floors still passed: the matcher would see
-    one spelling and the tests would report on what it saw.
-
-    **Deciding what vendored means and consuming what one of these returns are
-    two different things, and only the first belongs here.** So a name joins on
-    a **call that passes an argument**, which is what forwarding a root looks
-    like, and not on a bare mention. A helper reading `_source_modules()` for
-    the corpus decides nothing, and under the looser rule it failed the
-    assertion above under a message describing a defect it did not have.
-
-    **Taking the tree puts a function in regardless**, which is the half the
-    call rule alone gets wrong: one that takes a root and then calls a walk
-    with no argument ignores it, and dropping it out would leave the diagonal
-    never driving it. In it, that walk reads this checkout instead of the
-    constructed tree and every kind is reported against it.
-
-    **Taking the tree is a parameter called `root` or a default that names the
-    tree, and the second is there because the first is one spelling.** The
-    parameter name is the caller's choice and open, so a helper spelling it
-    `base` and calling a walk with no argument satisfied neither arm and
-    dropped out silently, which is the failure this clause exists to stop, one
-    name over. Which names mean the tree is `_names_for_the_tree`, read off the
-    module rather than listed here: this file calls it `BACKEND` and is the
-    only module this function is asked about, but the same closure serves the
-    whole test tree, where five guard modules call it `_REPO`.
-
-    The cost is stated rather than discovered: a helper taking the tree and only
-    reading a corpus fires too. That is the same side as the rest of this rule,
-    and being told about it is cheaper than the walk nothing drives.
-    """
-    walks, reaches = _walks_reaching(
-        ast.parse(Path(__file__).read_text()), {"_is_vendored"}
-    )
-    assert walks == reaches, (
-        "these reach the vendored rule and cannot be driven against a tree, so "
-        f"nothing below covers them: {sorted(reaches - walks)}"
-    )
-    # **Frozen because this is cached**, so every caller holds the same object.
-    # Both review seats raised it on the same round: one `|=` or `discard` on a
-    # returned value would shrink the walk set for every later test in the run,
-    # silently, which is the failure this whole file exists to prevent. Nothing
-    # mutates them today and a word is cheaper than noticing when something does.
-    return frozenset(walks), frozenset(reaches | {"_is_vendored"})
-
-
-def _walks_reaching(tree: ast.Module, seed: set[str]) -> tuple[set[str], set[str]]:
-    """The closure of `seed` over one module, as `(drivable, all)`.
-
-    The body of `_walk_names` lifted so the same rule can be asked of a module
-    that is not this one. What counts as reaching is documented there. **What
-    counts as taking the tree is the one thing the lift changed**: the name a
-    module gives the tree is read off that module by `_names_for_the_tree`
-    rather than compared against `BACKEND`, which was this file's only spelling
-    and is not the test tree's.
-    """
-    for_the_tree = _names_for_the_tree(tree)
-    reaches = set(seed)
-    growing = True
-    while growing:
-        growing = False
-        for node in tree.body:
-            if not isinstance(node, _A_FUNCTION) or node.name in reaches:
-                continue
-            parameters = [
-                *node.args.posonlyargs,
-                *node.args.args,
-                *node.args.kwonlyargs,
-            ]
-            takes_the_tree = any(
-                argument.arg == "root" for argument in parameters
-            ) or any(
-                isinstance(default, ast.Name) and default.id in for_the_tree
-                for default in [
-                    *node.args.defaults,
-                    *(one for one in node.args.kw_defaults if one is not None),
-                ]
-            )
-            if any(
-                (
-                    isinstance(inner, ast.Call)
-                    and isinstance(inner.func, ast.Name)
-                    and inner.func.id in reaches
-                    and inner.args
-                )
-                or (
-                    takes_the_tree
-                    and isinstance(inner, ast.Name)
-                    and inner.id in reaches
-                )
-                for inner in ast.walk(node)
-            ):
-                reaches.add(node.name)
-                growing = True
-    drivable = {
-        node.name
-        for node in tree.body
-        if isinstance(node, _A_FUNCTION)
-        and node.name in reaches
-        and [argument.arg for argument in node.args.args] == ["root"]
-    }
-    return drivable, reaches - set(seed)
-
-
-def _module_of(path: Path) -> str:
-    """One test module's import name under `tests`, dotted, `.py` dropped.
-
-    **The key is the path and not the basename.** Spelled `path.stem` this
-    collapsed a nested module into its top level namesake: seven stems are
-    duplicated under `backend/tests/` today, one of them `test_covers`, whose
-    top level module owns the walk behind "only `covers.py` may know an image
-    host". `found` is a set, so a walk of the same name in `routers/` would
-    have collapsed into that key, left the expectation table matching, and gone
-    undriven, which is the state this whole rule exists to end.
-    """
-    return ".".join(path.resolve().relative_to(BACKEND / "tests").with_suffix("").parts)
-
-
-@functools.cache
-def _every_walk() -> frozenset[str]:
-    """Every walk in the **test tree** that reaches the vendored rule, `module::name`.
-
-    **The diagonal below drove one file, and the class it is for has gone red in
-    five.** `_walk_names` reads `Path(__file__)`, so a walk written in any other
-    test module was covered by its author calling `_is_vendored` and by nothing
-    that checks the call. Measured 2026-09-21 across the last 300 pipelines: of
-    37 failures, 13 were this class, repaired once per file over five separate
-    days, and 5 walks in 4 modules were structurally right and undriven at the
-    end of it.
-
-    **A module joins by importing from this file**, which is the same convention
-    the walks already follow and is what the two rules below, on a copy of a
-    walk and on a module walking without the shared rule, already enforce from the other
-    side. So the seed is what a module imports, and the closure from there is
-    this file's own rule asked of that module.
-
-    **A name that reaches the rule, walks, and takes no root is reported by
-    name** rather than being the quiet reason a walk is missing from the
-    diagonal. Undrivable is the state that produced the residue this was
-    written for.
-
-    **The rule here is not the rule this file applies to itself, and the
-    difference is stated rather than left to be found.** `_walk_names` asserts
-    that everything reaching the predicate is drivable, with no exemption. Here
-    a name that reaches it and contains no walk call is treated as a predicate:
-    neither driven nor reported, and covered only where a drivable walk in the
-    same module calls it. `test_classifications._is_this_app` is that shape and
-    is covered, because `_modules` calls it. **A predicate no drivable walk
-    calls is covered by nothing**, and deciding what vendored means against the
-    wrong root inside one is exactly the family this change claims to buy.
-    Separated by `_is_a_walk` rather than by a list, so the line is the one the
-    rest of this file draws between walking and deciding.
-
-    **Three things it does not see, none of which is loud.** A module reaching
-    this file by `import tests.test_house_rules` and attribute access yields an
-    empty seed and is skipped in silence, because the seed is read off
-    `ImportFrom` alone. A walk written as a method or inside another function
-    is invisible, because the closure reads `tree.body`: that is the same
-    limitation `_every_module_but_the_tests` records for this file, widened
-    here to every module. And a module that walks the tree without importing
-    from this file at all is out of scope by construction, which is what
-    `test_no_other_test_module_walks_a_tree_of_python_without_the_shared_rule`
-    covers from the other side for a walk that could yield a `.py` file, and
-    what nothing covers for one that could not.
-    """
-    mine = Path(__file__).resolve()
-    drivable, _ = _walk_names()
-    found = {f"{_module_of(mine)}::{name}" for name in drivable}
-
-    undrivable: list[str] = []
-    for path in sorted(_test_sources()):
-        if path.resolve() == mine:
-            continue
-        tree = ast.parse(path.read_text())
-        seed = {
-            alias.asname or alias.name
-            for node in ast.walk(tree)
-            if isinstance(node, ast.ImportFrom)
-            and node.module == f"tests.{_module_of(mine)}"
-            for alias in node.names
-        } & (drivable | {"_is_vendored"})
-        if not seed:
-            continue
-        theirs, reaches = _walks_reaching(tree, seed)
-        found |= {f"{_module_of(path)}::{name}" for name in theirs}
-        bodies = {
-            node.name: node
-            for node in tree.body
-            if isinstance(node, _A_FUNCTION) and node.name in reaches - theirs
-        }
-        # Hoisted, because it walks the whole module: asked inside the
-        # comprehension below it ran once per node of each body examined rather
-        # than once per module, which measured 0.134s on the one module with an
-        # undrivable body today and is quadratic in the next one.
-        defines = _defines_walk(tree)
-        undrivable += [
-            f"{_module_of(path)}::{name}"
-            for name, node in sorted(bodies.items())
-            if any(
-                isinstance(inner, ast.Call) and _is_a_walk(inner, defines)
-                for inner in ast.walk(node)
-            )
-        ]
-
-    assert not undrivable, (
-        "these reach the vendored rule and take no root, so the diagonal cannot "
-        f"drive them against a constructed tree: {sorted(undrivable)}"
-    )
-    # Frozen for the reason `_walk_names` gives: this is cached, so the caller
-    # that mutates it mutates every later caller's answer.
-    return frozenset(found)
-
-
-def _is_a_walk(node: ast.AST, defines_walk: bool = False) -> bool:
-    """Whether this call reads a tree of Python files rather than one directory.
-
-    **Read off the pattern and off the name `walk`, never off the receiver.** The
-    version this replaced asked for `rglob` or an attribute of `os`, so
-    `glob("**/*.py")`, `Path.walk()` and a bare `walk` imported from `os` all
-    walked past it. Measured against four planted modules: one reported, three
-    clean.
-
-    `walk` under any spelling, because `os.walk`, `pathlib.Path.walk` and a bare
-    import are one operation with three addresses, and which one a module reaches
-    for says nothing about what it reads.
-
-    **Whether the pattern could yield a `.py` file, never whether it ends in
-    one.** A second version asked `pattern.endswith(".py")`, which reads the file
-    kind off the tail exactly as the first read recursion off the method name:
-    `rglob("*")` and `glob("**/*")` filtered in Python afterwards walked past it,
-    and so did `rglob(pattern="*.py")`, whose `args` are empty. `fnmatch` answers
-    the real question, so `*.ts*` and `*.md` stay out because no Python file can
-    match them, and `*` and `**/*` come in because one can. A pattern this cannot
-    read at all counts as a walk: assuming otherwise would make naming it the
-    next evasion.
-
-    **Two things share that word and neither is a filesystem walk**, so both are
-    excluded by what the call is rather than by a list of the modules that have
-    one. `ast.walk` takes a parse tree, and every module that walks a directory
-    here also walks an `ast`, so a rule matching the bare word reports all of
-    them and is deleted within the week. And a **locally defined** `walk` is a
-    recursion helper over routes, JSON schemas or AST nodes: three modules in
-    this tree have one, none of them touches the filesystem, and all three were
-    reported by the first draft of this predicate.
-
-    So `walk` counts when it is somebody else's: an attribute on anything but
-    `ast`, or a bare call in a module that does not define `walk` itself, which
-    is what `from os import walk` looks like. `defines_walk` is that second half
-    and the caller supplies it, because it is a fact about the module rather than
-    about the call.
-    """
-    if not isinstance(node, ast.Call):
-        return False
-    if (
-        isinstance(node.func, ast.Attribute)
-        and isinstance(node.func.value, ast.Name)
-        and node.func.value.id == "ast"
-    ):
-        return False
-    name = (
-        node.func.attr
-        if isinstance(node.func, ast.Attribute)
-        else node.func.id
-        if isinstance(node.func, ast.Name)
-        else ""
-    )
-    if name == "walk":
-        return isinstance(node.func, ast.Attribute) or not defines_walk
-    if name not in {"glob", "rglob"}:
-        return False
-    given = node.args or [
-        keyword.value for keyword in node.keywords if keyword.arg == "pattern"
-    ]
-    if not given:
-        return True
-    pattern = given[0]
-    if not isinstance(pattern, ast.Constant) or not isinstance(pattern.value, str):
-        # A pattern this cannot read is reported rather than assumed shallow.
-        return True
-    could_be_python = fnmatch("one.py", pattern.value) or fnmatch(
-        "under/a/directory/one.py", pattern.value
-    )
-    return could_be_python and (name == "rglob" or "**" in pattern.value)
-
-
-def _reached(qualified: str, root: Path) -> set[str]:
-    """One walk's answer over `root`, as paths relative to it.
-
-    `_source_modules` hands back its corpus keyed by that same relative path and
-    the rest hand back paths, so the two shapes are levelled here rather than in
-    the caller, where levelling them would mean naming which walk is which.
-
-    **Keyed `module::name` because the walks are no longer all in this file.**
-    Resolved through `importlib` rather than through `globals()`, which reaches
-    this module and nothing else: a walk in `test_covers.py` was structurally
-    right and driven by nothing, because the diagonal could not name it.
-    """
-    module, _, name = qualified.partition("::")
-    found = getattr(importlib.import_module(f"tests.{module}"), name)(root)
-    if isinstance(found, dict):
-        return set(found)
-    return {str(path.relative_to(root)) for path in found}
 
 
 def _docstring_nodes(tree: ast.Module) -> set[ast.AST]:
@@ -1198,15 +245,18 @@ def _is_route_handler(
     return bool(_decorator_attributes(node) & decorators)
 
 
+#: Both ways a module defines a function: a reader of one alone reads a subset.
+_A_FUNCTION: Final = (ast.FunctionDef, ast.AsyncFunctionDef)
+
+
 def _route_handlers_declared_in(
     paths: Iterable[Path], root: Path
 ) -> dict[tuple[str, str], frozenset[str]]:
     """The parse and the collision refusal, over the modules handed to it.
 
-    **`paths` rather than a root to walk**, because a walk of a tree of Python
-    here has to be one of the shared ones above and carry a row in
-    `WHAT_EACH_WALK_REACHES`. This is the consumer of one, lifted out so the
-    refusal below can be driven against a tree a test builds: asserted over this
+    **`paths` rather than a root to walk**, because a corpus is asked of
+    `tests/corpus.py` by name and never walked here. This is the consumer of
+    one, lifted out so the refusal below can be driven against a tree a test builds: asserted over this
     checkout alone it was at the "measured once" rung, green on 142 handlers over
     142 names and never shown to fire.
 
@@ -1240,7 +290,7 @@ def _route_handlers_declared_in(
 def _declared_route_handlers() -> dict[tuple[str, str], frozenset[str]]:
     """Every handler this tree declares, `(module, function)` to its route decorators.
 
-    **Over `_python_sources()` and not `backend/routers/`.** `main.py` declares
+    **Over `application_modules()` and not `backend/routers/`.** `main.py` declares
     two handlers and is not in the route layer, so a population stopping at that
     directory cannot see `api_route` used at all and therefore cannot hold the
     member of `ROUTE_DECORATORS` that exists for it. Measured 2026-09-26:
@@ -1248,8 +298,8 @@ def _declared_route_handlers() -> dict[tuple[str, str], frozenset[str]]:
     at 141 of 142.
 
     **Which of the shared walks is chosen changes nothing today, and that is a
-    fact about the tree rather than about the choice.** `_python_sources` differs
-    from `_every_module_but_the_tests` by the migrations, and a generated revision
+    fact about the tree rather than about the choice.** `application_modules` differs
+    from `shipped_modules` by the migrations, and a generated revision
     declares no route, so the two answer alike here. Swapping them is a survivor
     of any sweep for that reason and not because the corpus is unimportant.
 
@@ -1261,7 +311,7 @@ def _declared_route_handlers() -> dict[tuple[str, str], frozenset[str]]:
     tuple; a clause reading `decorators` itself is the one change that would have
     to move this with it.
     """
-    return _route_handlers_declared_in(_python_sources(), BACKEND)
+    return _route_handlers_declared_in(application_modules(), BACKEND)
 
 
 def _registered_route_handlers() -> dict[tuple[str, str], list[str]]:
@@ -1521,321 +571,6 @@ class TestTheRouteHandlerPopulationIsDerivedTwice:
         }
 
 
-class TestTheSourceWalkSeesOnlyThisProject:
-    """Every rule in this file walks one of the source lists, so their reach is a rule too.
-
-    Written after `.uv-cache/` cost two red pipelines against a green local suite. Every
-    guard here reports a module by path, so a walk that reaches vendored code reports
-    somebody else's module for breaking a rule it has never heard of, and it does so only
-    in the environment where that directory exists.
-    """
-
-    def test_no_module_outside_this_project_is_walked(self) -> None:
-        # The failure this reproduces: `pydantic/networks.py` and
-        # `cyclonedx/model/contact.py` were reported for reading a member's address.
-        outside = [
-            str(path.relative_to(BACKEND))
-            for path in _python_sources() + _test_sources() + _every_python_file()
-            if path.suffix == ".py"
-            and any(
-                part.startswith(".") or part in {"__pycache__", "node_modules"}
-                for part in path.relative_to(BACKEND).parts
-            )
-        ]
-        assert not outside, f"the walk reached code this project did not write: {outside}"
-
-    def test_the_walk_still_finds_this_project(self) -> None:
-        # The other half. An exclusion that matched everything would satisfy the test
-        # above and silently retire every rule in this file, which is the failure mode
-        # a vacuity check exists for.
-        found = {path.name for path in _python_sources()}
-        assert "shelf.py" in found
-        assert "models.py" in found
-        assert len(found) > 30, f"only {len(found)} modules walked"
-
-    def test_a_tool_directory_is_excluded_by_shape_and_not_by_name(self, tmp_path: Path) -> None:
-        # The regression that matters: a cache nobody has seen yet is still excluded.
-        # A name per tool passes this only for the tools somebody thought of.
-        assert _is_vendored(BACKEND / ".some-tool-nobody-has-written-yet" / "mod.py")
-        assert _is_vendored(BACKEND / "__pycache__" / "mod.py")
-        assert not _is_vendored(BACKEND / "shelf.py")
-        assert not _is_vendored(BACKEND / "routers" / "loans.py")
-
-    def test_the_rule_holds_from_a_different_root(self) -> None:
-        """`root` is what lets the census reuse this instead of restating it.
-
-        The census walks from the repository, so it sees `backend/.uv-cache/...`
-        with the dotted part one level deeper than this file's own walk does.
-        Passing the wrong root is not a silent miss, it raises `ValueError`, so
-        the failure of a future caller is loud rather than vacuous.
-        """
-        repo = BACKEND.parent
-
-        assert _is_vendored(BACKEND / ".uv-cache" / "pygments" / "lexers.py", repo)
-        assert not _is_vendored(BACKEND / "shelf.py", repo)
-        assert not _is_vendored(repo / "frontend" / "src" / "main.tsx", repo)
-        with pytest.raises(ValueError, match="is not in the subpath of"):
-            _is_vendored(repo / "frontend" / "src" / "main.tsx")
-
-    @pytest.mark.parametrize("kind", sorted(VENDORED_KINDS))
-    def test_every_walk_refuses_a_vendored_path_of_this_kind(
-        self, kind: str, tmp_path: Path
-    ) -> None:
-        """Each kind against every walk, rather than each walk against its own kind.
-
-        The defect this is for was four walks passing four tests: three test
-        modules each carried a copy of this corpus and each named the vendored
-        directories it had heard of, so every one of them was green on the tree
-        its author ran it against. The kinds are the rows and the walks are the
-        columns, and a walk that refuses `.venv` and reads `.uv-cache` is a
-        cell rather than a file nobody thought to open.
-
-        **Against a tree this builds, not against this checkout.** The
-        directories in question are absent from a developer's `backend/` and
-        present in the pipeline's, so an assertion over the real tree is vacuous
-        in the place it is usually run.
-        """
-        root = tmp_path / "tests" / "backend"
-        _a_backend_with_vendored_code_in_it(root, VENDORED_KINDS[kind])
-        walks = _every_walk()
-        assert len(walks) >= len(WHAT_EACH_WALK_REACHES), (
-            f"the walks went missing from the tests: {walks}"
-        )
-
-        # Stated as "anything that is not one of ours", so a walk reaching a
-        # second file in that directory, or a directory above it, is reported
-        # too. Matching the planted names would only ever find what was planted.
-        read = sorted(
-            f"{name} read {relative}"
-            for name in walks
-            for relative in _reached(name, root)
-            if relative not in FIRST_PARTY
-        )
-        assert not read, f"{kind} was walked: {read}"
-
-    def test_the_walks_still_reach_this_project_with_that_planted_around_them(
-        self, tmp_path: Path
-    ) -> None:
-        """The other half, without which refusing everything scores five of five.
-
-        Per group rather than in total: the walks divide a backend into the
-        modules, the tests and the migrations, and a total is satisfied by a
-        walk that lost one of them.
-
-        **The whole table at once**, so a walk added to this file has to be
-        given a row here. Named one at a time, the new walk would be driven by
-        the refusal above and by nothing that notices it answering with nothing.
-        """
-        # **Under a directory called `tests`**, which is what says the two names
-        # are matched relative to the root. Asked of the whole path, the filter
-        # matches this ancestor and `_python_sources` returns nothing at all.
-        root = tmp_path / "tests" / "backend"
-        for vendored in VENDORED_KINDS.values():
-            _a_backend_with_vendored_code_in_it(root, vendored)
-        walks = _every_walk()
-        table = _the_whole_table(walks)
-
-        assert walks == set(table), (
-            "a walk was added or renamed and nothing says what it is for: "
-            f"{sorted(walks ^ set(table))}. A walk in a module that declares "
-            "itself internal says so in that module, under WHAT_MY_WALKS_REACH, "
-            "and not in the table here, which is published and may not name it."
-        )
-        assert {name: _reached(name, root) for name in walks} == table
-
-    def test_no_other_test_module_defines_one_of_these_walks(self) -> None:
-        """The next copy of this walk is what the diagonal cannot be run against.
-
-        Three test modules each defined their own `_source_modules`, and each
-        spelled the exclusion as a list of directory names holding `.venv` and
-        not the cache the pipeline creates. They import this one now, and this
-        is what says they still do: the names are read off the functions here
-        that reach `_is_vendored`, so one added later is covered with no edit.
-
-        **It matches by name, and what that leaves out is covered by the rule
-        below rather than by the tracker.** Other test modules walked
-        `backend/` for `*.py` under names of their own and filtered with a
-        directory list of their own, none of which held the cache the pipeline
-        creates; this reaches none of them, because it was written for the shape
-        that produced the defect, where the offending function in all three
-        cases carried the name it was copied from. It makes that paste expensive
-        rather than free, and
-        `test_no_other_test_module_walks_a_tree_of_python_without_the_shared_rule`
-        catches the class it cannot see.
-        """
-        _, names = _walk_names()
-        assert len(names) >= 7, f"the walks went missing from this file: {names}"
-        mine = Path(__file__).resolve()
-
-        copies = sorted(
-            f"{path.relative_to(BACKEND)}::{node.name}"
-            for path in _test_sources()
-            if path.resolve() != mine
-            for node in ast.parse(path.read_text()).body
-            if isinstance(node, _A_FUNCTION) and node.name in names
-        )
-        assert not copies, (
-            "these keep their own copy of a walk this file owns, so what counts "
-            f"as vendored is decided twice: {copies}"
-        )
-
-    def test_no_other_test_module_walks_a_tree_of_python_without_the_shared_rule(
-        self,
-    ) -> None:
-        """The rule the test above cannot state, which is about the shape rather
-        than the name.
-
-        **The subject is a walk of any tree, not of `backend/`.** `_is_a_walk`
-        reads the pattern and the name `walk` and never the receiver, so a module
-        recursing `frontend/`, `docs/` or the repository root for Python is
-        reported exactly as one recursing `backend/`. That is the live case and
-        not a spare one: `test_google_books.py` walks `frontend/src` for the
-        browser's own source, and it is out of this rule because it asks
-        `_is_vendored` rather than because of the tree it picked. **Naming one
-        tree in this rule is what invites a receiver check**, and a receiver
-        check drops that walk out of the population while every assertion here
-        stays green, which is the failure a stated reason narrower than the code
-        produces rather than prevents.
-
-        Nine test modules recursed `backend/` for `*.py` under names of their
-        own, each excluding a list of directory names it had heard of and **none
-        of them naming the cache the pipeline creates**. Two are security guards:
-        the rule that no module reads a catalogue's address off the roster table,
-        and the rule that keeps the password reset off HTTP. So a dependency
-        unpacked under `backend/` in the pipeline and nowhere else decided
-        whether either fired, which is green where it is written and red where it
-        is trusted.
-
-        **Recursion is read off the pattern, never off the method name**, and
-        that distinction is the whole rule. A first version matched `rglob` and
-        `os.walk` by name and said `glob` was safe because "a non recursive glob
-        reads one directory": `glob("**/*.py")` recurses and was passed unseen,
-        and so were `Path.walk()`, which 3.14 has, and a `walk` imported bare
-        from `os`. Measured on four planted modules, one control reported and
-        three evasions clean. So a call is a walk when its pattern carries `**`,
-        or when it is `rglob`, or when anything at all is called `walk`. What is
-        genuinely out is a `glob` whose pattern has no `**`, which reads one
-        directory and cannot enter a vendored tree at all. **How many sites are
-        that shape is deliberately not written here.** Nothing in this rule
-        asserts it, so a figure beside it is one nobody recomputes and the next
-        reader takes as current.
-
-        **Asked of the module rather than of the function**, and the cost is
-        stated rather than discovered: a module that walks in one place and asks
-        the predicate in an unrelated one passes. The tighter rule reports three
-        modules that are correct, `test_classifications.py` among them, where the
-        walk calls a helper that calls the predicate. Reporting a module for a
-        split it was right to make is worse than the residue, and the diagonal
-        above is what covers the predicate itself.
-        """
-        mine = Path(__file__).resolve()
-        offenders: list[str] = []
-        checked: set[str] = set()
-
-        for path in _test_sources():
-            if path.resolve() == mine:
-                continue
-            tree = ast.parse(path.read_text())
-            defines_walk = _defines_walk(tree)
-            walks = [
-                node.lineno
-                for node in ast.walk(tree)
-                if isinstance(node, ast.Call) and _is_a_walk(node, defines_walk)
-            ]
-            if not walks:
-                continue
-            checked.add(str(path.relative_to(BACKEND)))
-            # **Any of the shared walks, not the predicate by name.** A module
-            # that imports `_source_modules` or `_markdown_sources` has asked the
-            # shared rule as surely as one that calls `_is_vendored`, and asking
-            # for the one spelling reported three modules that were already
-            # right. The set is read off this file rather than listed, so a walk
-            # added here is accepted with no edit.
-            _, shared = _walk_names()
-            if any(
-                isinstance(node, ast.Name) and node.id in shared
-                for node in ast.walk(tree)
-            ):
-                continue
-            offenders += [f"{path.relative_to(BACKEND)}:{line}" for line in walks]
-
-        # A floor, because a matcher that stopped matching would report no
-        # offender and no walk. It counts the modules this examined, which is
-        # the population rather than the verdict.
-        assert len(checked) >= 8, f"the walks went missing from the tests: {checked}"
-        assert not offenders, (
-            "these recurse a tree of Python and decide what vendored means for "
-            f"themselves, so the pipeline's cache is read as ours: {offenders}"
-        )
-
-    @pytest.mark.parametrize(
-        ("call", "defines_walk", "recurses"),
-        [
-            ('BACKEND.rglob("*.py")', False, True),
-            ('BACKEND.glob("**/*.py")', False, True),
-            ("BACKEND.walk()", False, True),
-            ("walk(BACKEND)", False, True),
-            ("os.walk(BACKEND)", False, True),
-            ('BACKEND.glob("*.py")', False, False),
-            ("ast.walk(tree)", False, False),
-            ("walk(node)", True, False),
-            ("BACKEND.rglob(pattern)", False, True),
-            # Recursion with the file kind decided in Python afterwards, and the
-            # pattern handed over by keyword. These three are why this predicate
-            # asks `fnmatch` rather than reading the pattern's tail, and every
-            # one of them passed the version that read the tail.
-            ('BACKEND.rglob("*")', False, True),
-            ('BACKEND.glob("**/*")', False, True),
-            ('BACKEND.rglob(pattern="*.py")', False, True),
-            # **The row that actually drives the keyword arm.** The one above
-            # does not: with the arm removed the pattern is unreadable, and an
-            # unreadable pattern counts as a walk too, so both answers are
-            # `True` and deleting the arm stays green. Measured. Here the two
-            # answers differ, because a pattern that is read is judged.
-            ('DOCS.rglob(pattern="*.md")', False, False),
-            # Out of this rule's subject rather than evading it: no Python file
-            # can match either, so neither can reach vendored source.
-            ('FRONTEND.rglob("*.ts*")', False, False),
-            ('DOCS.rglob("*.md")', False, False),
-        ],
-    )
-    def test_what_counts_as_recursing_the_tree(
-        self, call: str, defines_walk: bool, recurses: bool
-    ) -> None:
-        """The predicate above, one spelling per row.
-
-        **Every row but the first is a spelling the tree does not hold**, which
-        is why this is here: the rule above is driven by ten real modules and
-        every one of them uses the first, so a matcher that had stopped reading
-        any of the rest would still pass it. Rows two, three and four are the
-        three evasions a critic measured against the version that matched
-        `rglob` and an attribute of `os` by name, and the three after the
-        unreadable pattern are the three it measured against the version that
-        asked whether the pattern ended in `.py`.
-
-        **Both sets came from the critic rather than from me**, and that is the
-        arrangement rather than an accident: the first draft of this table held
-        only the cases the rewrite had been designed against, so it scored clean
-        while `rglob("*")` sat outside it. A guard's author is the worst person
-        to choose its evasion.
-
-        **And for one round this docstring described five rows the table did not
-        have**, because the edit adding them died on a later assertion and wrote
-        nothing, and only the failing half was re-applied. Both halves of the fix
-        those rows exist for could then be reverted for `22 passed`. A comment
-        claiming a case is not the case: count the rows.
-
-        An unreadable pattern counts as a walk: a rule that assumed otherwise
-        would be evaded by naming the pattern. The last two rows are the other
-        side, and they are refusals of scope rather than misses: this rule is
-        about reaching vendored **Python**, and no Python file matches either.
-        """
-        statement = ast.parse(call).body[0]
-        assert isinstance(statement, ast.Expr)
-
-        assert _is_a_walk(statement.value, defines_walk) is recurses
-
-
 class TestEveryNumericQueryParamIsBoundedBothWays:
     """A numeric `Query()` needs `le` as well as `ge`.
 
@@ -1866,7 +601,7 @@ class TestEveryNumericQueryParamIsBoundedBothWays:
     def test_every_numeric_query_parameter_has_an_upper_bound(self) -> None:
         offenders: list[str] = []
 
-        for path in _python_sources():
+        for path in application_modules():
             source = path.read_text()
             tree = ast.parse(source)
             lines = source.splitlines()
@@ -2081,7 +816,7 @@ class TestEveryIntParameterFromTheOutsideIsBounded:
 
     def test_every_caller_supplied_int_is_bounded_at_both_ends(self) -> None:
         offenders = self._offenders(
-            {path: path.read_text() for path in _python_sources()}
+            {path: path.read_text() for path in application_modules()}
         )
 
         assert not offenders, (
@@ -2395,7 +1130,7 @@ class TestEveryRequestBodyRowIdIsBounded:
         Growing either number is fine; growing it without updating the sentence
         a reader believes is not.
         """
-        sources = {path: path.read_text() for path in _python_sources()}
+        sources = {path: path.read_text() for path in application_modules()}
         models = self._schema_models(sources)
         in_scope = self._body_models(sources, models)
 
@@ -2415,7 +1150,7 @@ class TestEveryRequestBodyRowIdIsBounded:
 
     def test_every_int_a_request_body_carries_is_bounded(self) -> None:
         offenders = self._offenders(
-            {path: path.read_text() for path in _python_sources()}
+            {path: path.read_text() for path in application_modules()}
         )
 
         assert not offenders, (
@@ -2493,7 +1228,7 @@ class TestEveryRequestBodyRowIdIsBounded:
     def test_the_guard_sees_the_models_a_route_takes(self) -> None:
         """The scope is the load-bearing half: too narrow and the rule inspects
         nothing, which is a green test that checks the empty set."""
-        sources = {path: path.read_text() for path in _python_sources()}
+        sources = {path: path.read_text() for path in application_modules()}
         models = self._schema_models(sources)
         in_scope = self._body_models(sources, models)
 
@@ -2775,11 +1510,11 @@ def column_mentions(tree: ast.Module, columns: Container[str]) -> list[ColumnMen
 
 
 def _application_module_names() -> list[str]:
-    """`_source_modules()` keys as dotted module names.
+    """`application_sources()` keys as dotted module names.
 
     The same corpus every rule here walks, said the way `importlib` takes it,
     so a narrowing of **that** walk narrows this and reds in
-    `TestTheApplicationCorpusIsStillTheApplication` by name.
+    `test_corpus.TestThisCheckoutsPopulationsAreTheWholeOfIt` by name.
 
     **This function is a third corpus layer and needs arming of its own**,
     which the sentence here used to deny. A skip written inside this loop
@@ -2788,17 +1523,15 @@ def _application_module_names() -> list[str]:
     they all shrink together and no equality between them can see it. Driven
     2026-10-02 with a live declaration planted: **one skip line here took the
     two rules and 504 arms to green.** `test_the_renaming_is_rebuilt_from_the_corpus`
-    is what reds on it, by rebuilding this answer from `_source_modules()`
+    is what reds on it, by rebuilding this answer from `application_sources()`
     rather than asserting anything about it.
 
-    **It takes no tree, deliberately**, which is what keeps it out of
-    `_walk_names`. A walk is driven against a constructed directory and this
-    one **imports** what it names: driven against a tmp tree it would reach
-    for modules that do not exist. It is a renaming of the corpus rather than
-    a reading of the disk.
+    **It takes no tree, deliberately**: it **imports** what it names, so
+    handed a planted tree it would reach for modules that do not exist. It is
+    a renaming of the corpus rather than a reading of the disk.
     """
     names: list[str] = []
-    for relative in _source_modules():
+    for relative in application_sources():
         parts = Path(relative).parts
         stem = parts[-1].removesuffix(".py")
         dotted = ".".join(parts[:-1] + ((stem,) if stem != "__init__" else ()))
@@ -3197,9 +1930,9 @@ class TestTheDeclarationReaderAndThePopulationItWalks:
     about the population, which is why the first arms exist at all.
 
     **Beside the reader rather than inside the two rules that use it**, for
-    the reason `TestTheApplicationCorpusIsStillTheApplication` gives one rung
-    down: a narrowing here takes both rules at once, and an arm living in
-    either of them leaves the other inheriting the hole.
+    the reason `tests/corpus.py` is one home for the walks one rung down: a
+    narrowing here takes both rules at once, and an arm living in either of
+    them leaves the other inheriting the hole.
 
     ## Every link under these two rules, and what reads each one
 
@@ -3220,12 +1953,10 @@ class TestTheDeclarationReaderAndThePopulationItWalks:
 
     Each link, and what reads it **without passing through it**:
 
-    * `_is_vendored`, by `TestTheSourceWalkSeesOnlyThisProject`, one rung
-      down, which this class does not restate.
-    * `_python_sources`, by `TestTheApplicationCorpusIsStillTheApplication`
-      and the complement walk beside it.
-    * `_source_modules`, by `test_the_renaming_is_rebuilt_from_the_corpus`,
-      whose other side reads `_python_sources` and so does not pass through
+    * `is_vendored` and `application_modules`, by `tests/test_corpus.py`,
+      one rung down, which this class does not restate.
+    * `application_sources`, by `test_the_renaming_is_rebuilt_from_the_corpus`,
+      whose other side reads `application_modules` and so does not pass through
       it. **It was omitted, and while it was the arm went through it on both
       sides**, which is the condition that arm exists to avoid one function
       up: one line in it took a live declaration to a whole file green.
@@ -3291,10 +2022,10 @@ class TestTheDeclarationReaderAndThePopulationItWalks:
         turns the corpus into dotted names, and every reading downstream
         starts from its answer, so an equality between any two of them moves
         together under a skip written inside it. This rebuilds the renaming
-        from `_source_modules()` by string surgery where the helper uses path
+        from `application_sources()` by string surgery where the helper uses path
         parts: the two degrade differently, so a skip is a disagreement.
 
-        **The other side reads `_python_sources`, not `_source_modules`.**
+        **The other side reads `application_modules`, not `application_sources`.**
         It read the latter, which the helper under test also reads, so the
         arm passed through it on both sides: exactly the condition it exists
         to avoid one function up, and one line in it took a live declaration
@@ -3302,12 +2033,11 @@ class TestTheDeclarationReaderAndThePopulationItWalks:
         clean tree and red under that skip.
 
         **Correctly silent on a narrowing one rung down.** A token added to
-        `_is_vendored` shrinks both sides equally and reds in
-        `TestTheApplicationCorpusIsStillTheApplication` instead, which is
-        where that decision belongs.
+        `is_vendored` shrinks both sides equally and reds in
+        `tests/test_corpus.py` instead, which is where that decision belongs.
         """
         rebuilt = set()
-        for path in _python_sources():
+        for path in application_modules():
             dotted = (
                 str(path.relative_to(BACKEND))
                 .removesuffix(".py")
@@ -3991,7 +2721,7 @@ class TestProvenanceColumnsAreNeverRead:
     def test_no_module_reads_a_provenance_column(self) -> None:
         marked, _unmarked = _declared_provenance()
         offenders: list[str] = []
-        for path in _python_sources():
+        for path in application_modules():
             offenders += _provenance_reads(
                 path.read_text(), str(path.relative_to(BACKEND))
             )
@@ -4720,7 +3450,7 @@ class TestNoExceptionInstanceIsShared:
     def test_no_module_shares_an_http_exception_instance(self) -> None:
         offenders = [
             hit
-            for path in _python_sources()
+            for path in application_modules()
             for hit in self._offenders(path.name, path.read_text())
         ]
         assert offenders == [], (
@@ -4767,7 +3497,7 @@ class TestNoDatabaseFoldIsComparedAgainstAPythonFold:
     def test_no_module_compares_a_sql_fold(self) -> None:
         offenders: list[str] = []
 
-        for path in _python_sources():
+        for path in application_modules():
             tree = ast.parse(path.read_text())
             for node in ast.walk(tree):
                 if not isinstance(node, ast.Compare):
@@ -4850,7 +3580,7 @@ class TestOnlyOneHelperTurnsForeignKeysOff:
 
     def test_no_test_writes_the_pragma_outside_the_helper(self) -> None:
         offenders: list[str] = []
-        for path in _test_sources():
+        for path in suite_modules():
             tree = ast.parse(path.read_text())
             allowed = {
                 node
@@ -5369,12 +4099,12 @@ class TestEveryEnumColumnIsConstrainedOrExemptWithAReason:
         the enumeration this file has been wrong about before.
 
         **Stated as an exclusion**: every Python file under `backend/` except
-        the test tree, which is `_every_python_file` less one name. The test tree
+        the test tree, which is `every_python_file` less one name. The test tree
         is out because `conftest._schema_once` calls `create_all` on purpose and
         asserts that the call builds nothing.
 
         **The revisions are in, and they are the reason this is not
-        `_python_sources`**, which drops them. A revision is the one module that
+        `application_modules`**, which drops them. A revision is the one module that
         runs at boot and can build tables from `Base.metadata`, and neither other
         arm can see it do so: it runs before `_schema_once`, so that fixture's
         count has nothing left to build, and Alembic stamps head itself, so the
@@ -5390,7 +4120,7 @@ class TestEveryEnumColumnIsConstrainedOrExemptWithAReason:
         """
         offenders = [
             f"{path.relative_to(BACKEND)}:{node.lineno}"
-            for path in _every_python_file()
+            for path in every_python_file()
             if "tests" not in path.relative_to(BACKEND).parts
             for node in ast.walk(ast.parse(path.read_text()))
             if isinstance(node, ast.Call)
@@ -5635,7 +4365,7 @@ class TestNoFixtureLooksLikeACredential:
 
     **These arms walk every Python file under `backend/`.** They walked
     `backend/tests/` alone until 2026-09-02, and the sentence here justified that
-    by saying `_test_sources()` was what they had. `_every_python_file()` landed
+    by saying `suite_modules()` was what they had. `every_python_file()` landed
     with the compile rule at the foot of this file and made that false, so the
     scope moved rather than the excuse: the application modules and the
     migrations ship to the mirror exactly as the fixtures do, and `models.py` is
@@ -5707,11 +4437,11 @@ class TestNoFixtureLooksLikeACredential:
     def test_no_published_file_contains_a_realistic_bot_token(self):
         pattern = re.compile(r"[0-9]{6,}:[A-Za-z0-9_-]{25,}")
         offenders: list[str] = []
-        paths = _every_python_file()
+        paths = every_python_file()
         # **The scope is asserted on the list this loop iterates**, not on a
         # fresh call, which would pin the helper's reach rather than this arm's
         # use of it. Both walks report zero today, so reverting this line to
-        # `_test_sources()` changes no verdict and silently drops the
+        # `suite_modules()` changes no verdict and silently drops the
         # application modules and the migrations. That is the same guard, and
         # the same reasoning, as `test_every_python_file_under_backend_compiles_clean`.
         assert any("migrations" in path.parts for path in paths)
@@ -5751,7 +4481,7 @@ class TestNoFixtureLooksLikeACredential:
 
     def test_no_published_file_carries_an_address_outside_reserved_space(self):
         offenders: list[str] = []
-        paths = _every_python_file()
+        paths = every_python_file()
         # Pinned the same way and for the same reason as the arm above.
         assert any("migrations" in path.parts for path in paths)
         assert any(path.name == "models.py" for path in paths)
@@ -5971,7 +4701,7 @@ class TestOnlyTheCatalogueBuildsAnUnfoldedRecord:
 
     def test_no_module_outside_the_catalogue_names_the_fold_flag(self) -> None:
         offenders = self._offenders_naming_the_flag(
-            _python_sources() + _test_sources()
+            application_modules() + suite_modules()
         )
         assert not offenders, (
             "`Record._folded` decides whether `__post_init__` deduplicates. "
@@ -5982,7 +4712,7 @@ class TestOnlyTheCatalogueBuildsAnUnfoldedRecord:
 
     def test_no_module_holding_a_record_replaces_a_field_on_one(self) -> None:
         offenders: list[str] = []
-        for path in _python_sources():
+        for path in application_modules():
             if _label(path) == self.ALLOWED:
                 continue
             tree = ast.parse(path.read_text())
@@ -6210,7 +4940,7 @@ class TestAnAddressIsServedOnlyWhereItIsNamed:
                     # from a walk, so what reaches it is whatever a dependency
                     # declared at import: a cache under `backend/` is as much a
                     # source of those as a virtualenv is.
-                    and not _is_vendored(source)
+                    and not is_vendored(source)
                 ):
                     found[subclass.__name__] = subclass
                 walk(subclass)
@@ -6301,7 +5031,7 @@ class TestAnAddressIsServedOnlyWhereItIsNamed:
     def test_no_module_outside_the_two_reads_an_address(self) -> None:
         offenders: list[str] = []
 
-        for path in _python_sources():
+        for path in application_modules():
             where = str(path.relative_to(BACKEND))
             if where in self.ADDRESS_READERS:
                 continue
@@ -6367,7 +5097,7 @@ class TestAnAddressIsServedOnlyWhereItIsNamed:
 
         readers = {
             str(path.relative_to(BACKEND))
-            for path in _python_sources()
+            for path in application_modules()
             if any(
                 isinstance(node, ast.Attribute) and node.attr == self.ADDRESS_FIELD
                 for node in ast.walk(ast.parse(path.read_text()))
@@ -6703,7 +5433,7 @@ class TestNoModuleHardCodesASourceOrder:
         names = {source.value for source in CatalogueSource}
         members = {source.name for source in CatalogueSource}
         found: dict[str, set[str]] = {}
-        for path in paths if paths is not None else _python_sources():
+        for path in paths if paths is not None else application_modules():
             module = path.name if paths is not None else str(path.relative_to(BACKEND))
             allowed = self.ALLOWED.get(module, set())
             tree = ast.parse(path.read_text())
@@ -7070,7 +5800,7 @@ _ALPHANUMERIC_PREDICATES: Final = frozenset(
 #: was: the name went in somewhere plausible and nobody was asked why.
 #:
 #: The call site counts below are measured 2026-09-06 over the modules
-#: `_python_sources` returns, by walking the `ast` for a call of that name.
+#: `application_modules` returns, by walking the `ast` for a call of that name.
 #: **The corpus is named and not counted**: how many modules it held on the day
 #: is not the measurement, and a size written beside a count is the figure that
 #: goes stale first. Read with the `ast` rather than with `grep`, which counts
@@ -7165,7 +5895,7 @@ class TestAnAlphanumericPredicateIsAlwaysNarrowedToAscii:
 
     **Scoped to backend modules and not the test tree**, which is where such a
     predicate over committed fixture data is ordinary and carries no external
-    input. `_python_sources` already draws that line for four rules above.
+    input. `application_modules` already draws that line for four rules above.
 
     **What it does not reach, said because the first version of this docstring
     claimed it did.** It said "every digit predicate in every backend module"
@@ -7175,7 +5905,7 @@ class TestAnAlphanumericPredicateIsAlwaysNarrowedToAscii:
     `re.fullmatch(r"\d{3}", "٣٣٠")` matches and `"²²²"` does not, so it admits
     the quiet half of this defect and refuses the crashing half. There are
     **16** string literals containing `\d` across **five** backend modules,
-    counted 2026-08-31 by walking the AST of everything `_python_sources`
+    counted 2026-08-31 by walking the AST of everything `application_modules`
     returns and excluding docstrings; `ddc._NOTATION` is the one whose match is
     **stored** rather than handed to `int()`.
 
@@ -7201,7 +5931,7 @@ class TestAnAlphanumericPredicateIsAlwaysNarrowedToAscii:
 
     def _offenders(self, paths: list[Path] | None = None) -> list[str]:
         found: list[str] = []
-        for path in paths if paths is not None else _python_sources():
+        for path in paths if paths is not None else application_modules():
             tree = ast.parse(path.read_text())
             parents: dict[ast.AST, ast.AST] = {}
             for node in ast.walk(tree):
@@ -7372,7 +6102,7 @@ class TestOneReaderPerAmbiguousSubfield:
 
     **Identity is the path, not `path.stem`.** That is the same defect one level
     down and it came through the rewrite untouched from the first version.
-    `_python_sources()` already holds **eight** colliding stems, `auth`,
+    `application_modules()` already holds **eight** colliding stems, `auth`,
     `backup`, `covers`, `imports`, `public`, `settings`, `sru` and `stats`, each
     a module at the root and one under `routers/` or `schemas/`. Neither
     `metadata` nor `marc` collides today, which is why nothing failed; a reader
@@ -7408,7 +6138,7 @@ class TestOneReaderPerAmbiguousSubfield:
 
     #: The subfield whose meaning depends on the field it sits in.
     #:
-    #: Spelled plainly, and needing no dodge: `_python_sources` excludes the
+    #: Spelled plainly, and needing no dodge: `application_modules` excludes the
     #: test tree, so this class cannot trip its own rule. That is worth saying
     #: rather than splitting the constant defensively, because a defence with no
     #: threat behind it is the kind of comment this file exists to stop.
@@ -7454,7 +6184,7 @@ class TestOneReaderPerAmbiguousSubfield:
 
     def test_only_the_two_named_sites_spell_the_subfield_code(self):
         found: list[tuple[str, str]] = []
-        for path in _python_sources():
+        for path in application_modules():
             found += self._sites_in(
                 path.read_text(), str(path.relative_to(BACKEND))
             )
@@ -7503,7 +6233,7 @@ class TestOneReaderPerAmbiguousSubfield:
         than leaving the next reader to trust it.
         """
         stems: dict[str, list[str]] = {}
-        for path in _python_sources():
+        for path in application_modules():
             stems.setdefault(path.stem, []).append(str(path.relative_to(BACKEND)))
         colliding = {stem for stem, paths in stems.items() if len(paths) > 1}
 
@@ -7645,9 +6375,9 @@ class TestEveryPythonFileCompilesWithoutAWarning:
     **The tests and the migrations are in scope, and that is the whole scope
     question.** This rule is about a file loading at all, and that failure does
     not care which walk returned it. The defect that bought the test was a `\d`
-    in a **docstring in this file**, which `_python_sources()` does not return,
+    in a **docstring in this file**, which `application_modules()` does not return,
     so a guard scoped to it could not have caught its own subject.
-    `_every_python_file` states the rest of the reasoning.
+    `every_python_file` states the rest of the reasoning.
 
     **Recorded, not raised, and the difference is not cosmetic.**
     `simplefilter("error", SyntaxWarning)` never surfaces a `SyntaxWarning`: the
@@ -7687,8 +6417,8 @@ class TestEveryPythonFileCompilesWithoutAWarning:
     **The corpus is stated as an exclusion and never as a total.** It is every
     file under `backend/` whose suffix is `.py` and whose path no tool owns:
     tests and migrations included, bytecode and a tool's own directory out.
-    `test_the_walk_reaches_every_group_and_leaves_no_remainder` recomputes that
-    from the walks rather than checking it against a number.
+    `tests/test_corpus.py` recomputes that from independent globs rather than
+    checking it against a number.
 
     **A total here is a number that stops being re-derived and starts being
     copied.** The one that stood in this docstring was measured once, was stale
@@ -7749,10 +6479,10 @@ class TestEveryPythonFileCompilesWithoutAWarning:
         return found
 
     def test_every_python_file_under_backend_compiles_clean(self) -> None:
-        walked = _every_python_file()
-        # Not a duplicate of the reach test below, which says the walk is wide.
-        # These two say **this run** used the wide one. Narrowing the line above
-        # to `_python_sources()` passes on a clean tree while silently dropping
+        walked = every_python_file()
+        # Not a duplicate of the reach test in `tests/test_corpus.py`, which
+        # says the walk is wide. These two say **this run** used the wide one. Narrowing the line above
+        # to `application_modules()` passes on a clean tree while silently dropping
         # the tests and the migrations, which is the scope the rule turns on.
         assert any("migrations" in path.parts for path in walked)
         assert any(path.name == "test_house_rules.py" for path in walked)
@@ -7762,58 +6492,6 @@ class TestEveryPythonFileCompilesWithoutAWarning:
             "scheduled to become a SyntaxError, at which point the file stops "
             "importing:\n  " + "\n  ".join(offences)
         )
-
-    def test_the_walk_reaches_every_group_and_leaves_no_remainder(self) -> None:
-        """Vacuity, plus the one hole the two narrower walks have between them.
-
-        `_python_sources` drops any path with `tests` among its parts and
-        `_test_sources` only descends `backend/tests`, so a file at
-        `backend/routers/tests/x.py` would be in neither. There is none today,
-        and the equality below is what would say so.
-
-        **The migrations are walked independently of the walk under test**, not
-        sieved out of it. Sieving is what the first draft of this line did, and
-        it made the claim circular: `_every_python_file` narrowed to drop
-        `migrations/` would have emptied both sides at once and passed.
-        """
-        walked = set(_every_python_file())
-        assert set(_python_sources()) <= walked
-        assert set(_test_sources()) <= walked
-        migrations = {
-            path
-            for path in (BACKEND / "migrations").rglob("*.py")
-            if not _is_vendored(path)
-        }
-        assert migrations, "the migrations are why this walk is wider than the two above"
-        assert walked == set(_python_sources()) | set(_test_sources()) | migrations
-
-        # **The exclusion, derived, where a total used to stand.** Everything
-        # under `backend/` that this walk leaves out is a tool's own (pruned by
-        # `_is_vendored` in both instruments) or is not a `.py` file, which for
-        # this corpus means bytecode, a lock file or a template. Stated as the
-        # complement rather than as a count, because a count is what goes stale
-        # without ever failing: the walk is whatever it returns, so a low number
-        # beside it is a weaker claim about a wider walk and stays green.
-        left_out = set(_every_file_a_tool_does_not_own()) - walked
-        missed = sorted(path for path in left_out if path.suffix == ".py")
-        assert not missed, (
-            "These are Python files under backend/ that no tool owns and that "
-            f"the walk did not return: {missed}. The corpus is every one of "
-            "them, and a walk that returns fewer says so nowhere else."
-        )
-        # Anti vacuity for the line above, which passes over an empty
-        # complement. There is always something under `backend/` that is not a
-        # `.py` file, so a `left_out` that has gone empty is the second walk
-        # failing rather than the tree being tidy.
-        assert left_out, "the second walk returned nothing the first did not"
-
-        # Vacuity, because every assertion above holds over an empty tree. Each
-        # group non empty, plus the file making the assertion, rather than a
-        # floor: a literal count here is the defect this class's docstring
-        # records, and one that has drifted low never fails.
-        assert set(_python_sources())
-        assert set(_test_sources())
-        assert Path(__file__).resolve() in {path.resolve() for path in walked}
 
     @pytest.mark.parametrize(
         ("shape", "source", "line", "category"),
@@ -7933,66 +6611,6 @@ class TestEveryPythonFileCompilesWithoutAWarning:
 
 
 
-#: Every Markdown file this repository versions.
-#:
-#: **An exclusion, because the inclusion it replaces went stale.** This globbed
-#: the repository root and `docs/*.md`, which reached **14** of the **18** files
-#: the publish gate publishes: measured 2026-09-06, `conformance/README.md` and
-#: three files under the two test trees sat outside it, and a document added in a
-#: directory nobody had thought of would have sat outside it too. A walk cannot
-#: be kept in step with a tree by remembering to edit it.
-#:
-#: **Then it went stale a second way, and a name list is what did it.** The
-#: replacement pruned a leading dot plus two names, which does not reach the
-#: publish tooling's output directory. Measured 2026-09-06 on a checkout where
-#: the gate had been run: **36** published files rather than 18, the extra 18
-#: being the first 18 one directory down, walked as though a build output were
-#: source. Adding that name would have been the third arm of the same list.
-#:
-#: **So the rule is what the repository versions**: not hidden, and not ignored.
-#: The gate exports a committed ref, so an ignored file cannot be published by
-#: construction, and the build output, the dependency trees, the caches, the
-#: wave plan and the wave's working notes all fall out at once. The leading dot
-#: stays beside it because `.gitignore` does not mention every hidden directory:
-#: `.claude/` is not in it and carries a worktree per agent.
-#:
-#: **A wave's own drafts leave the walk with it, and that is the trade taken.**
-#: An earlier version argued for keeping them, on the ground that a draft is what
-#: a fold reads. Giving them up is safe because a fold's destinations are
-#: versioned and still read here, so the fence that reaches a reader is still
-#: counted; what is lost is catching it one step earlier, in the draft.
-#:
-#: **Wider than what is published, deliberately.** An unbalanced fence renders
-#: everything after it as one code block for whoever opens the file next, and
-#: that is the defect whether the reader came from the mirror or from this
-#: checkout.
-#:
-#: **Pruned while walking rather than filtered afterwards**, so a directory that
-#: is out of scope is never descended.
-#:
-#: `root` is a parameter so the mechanism can be driven over a fixture tree
-#: rather than only over this one.
-def _markdown_sources(root: Path | None = None) -> list[Path]:
-    root = BACKEND.parent if root is None else root
-    patterns = ignore_patterns(root / ".gitignore", refuse_empty=False)
-    found: list[Path] = []
-    for directory, subdirectories, files in os.walk(root):
-        here = Path(directory)
-        subdirectories[:] = [
-            name
-            for name in subdirectories
-            if not name.startswith(".")
-            and not is_ignored((here / name).relative_to(root), patterns, is_dir=True)
-        ]
-        found += [
-            here / name
-            for name in files
-            if name.endswith(".md")
-            and not is_ignored((here / name).relative_to(root), patterns, is_dir=False)
-        ]
-    return sorted(found)
-
-
 def _floor_from_a_constructed_parse(root: Path, scratch: Path) -> set[Path]:
     """The two globs the Markdown walk replaced, minus the members an ignore entry
     that names a **file** in them excludes, read through a parse built here.
@@ -8018,7 +6636,7 @@ def _floor_from_a_constructed_parse(root: Path, scratch: Path) -> set[Path]:
 
     **What it leaves out, stated rather than bounded.** Both sides still share the
     matcher, so a defect in the matcher moves floor and walk together and is caught
-    by the fixture arms over `_markdown_sources`, not here. A line this walk
+    by the fixture arms over `markdown_files`, not here. A line this walk
     refuses outright names nothing in the floor, because the walk cannot honour it
     either. And an entry that ignores a member as a genuine file leaves with the
     walk, which is a correct green: the member is ignored and is not walked.
@@ -8089,7 +6707,7 @@ class TestEveryMarkdownFileHasBalancedCodeFences:
         repo = BACKEND.parent
         counts = {
             str(path.relative_to(repo)): len(_fence_lines(path.read_text(encoding="utf-8")))
-            for path in _markdown_sources()
+            for path in markdown_files()
         }
         odd = {name: n for name, n in counts.items() if n % 2}
         assert odd == {}, f"{odd}, of {len(counts)} files walked"
@@ -8134,11 +6752,11 @@ class TestEveryMarkdownFileHasBalancedCodeFences:
         repo = BACKEND.parent
         # The repository's own ignore file still parses to something. This used to
         # be described as what armed the comparison below, which it never was; it
-        # is kept because nothing else asserts it over that file, `_markdown_sources`
+        # is kept because nothing else asserts it over that file, `markdown_files`
         # passing `refuse_empty=False` so a fixture may hand it a silent one.
         assert ignore_patterns(repo / ".gitignore", refuse_empty=True)
         replaced = _floor_from_a_constructed_parse(repo, tmp_path)
-        walked = {path.relative_to(repo) for path in _markdown_sources()}
+        walked = {path.relative_to(repo) for path in markdown_files()}
         assert replaced, "the floor is empty, so this compares nothing"
         assert replaced <= walked, sorted(str(p) for p in replaced - walked)
         assert Path("CHANGELOG.md") in walked
@@ -8177,7 +6795,7 @@ class TestEveryMarkdownFileHasBalancedCodeFences:
                 is_dir=False,
             )
         }
-        walked = {path.relative_to(root) for path in _markdown_sources(root)}
+        walked = {path.relative_to(root) for path in markdown_files(root)}
 
         assert Path("docs/decisions.md") in constructed
         assert Path("docs/decisions.md") not in shared
@@ -8206,7 +6824,7 @@ class TestEveryMarkdownFileHasBalancedCodeFences:
         (root / "scratch-two.md").write_text("# ignored, suffix on the entry\n", encoding="utf-8")
 
         floor = _floor_from_a_constructed_parse(root, tmp_path / "scratch")
-        walked = {path.relative_to(root) for path in _markdown_sources(root)}
+        walked = {path.relative_to(root) for path in markdown_files(root)}
 
         assert floor == {Path("CHANGELOG.md")}, sorted(str(p) for p in floor)
         assert floor <= walked, sorted(str(p) for p in floor - walked)
@@ -8247,7 +6865,7 @@ class TestEveryMarkdownFileHasBalancedCodeFences:
         # unanchored pattern matches a name at any depth, which is git's rule and
         # the only thing the segment walk in the shared matcher buys.
         (tmp_path / "docs" / "scratch.md").write_text("# deeper than the pattern\n")
-        walked = {str(path.relative_to(tmp_path)) for path in _markdown_sources(tmp_path)}
+        walked = {str(path.relative_to(tmp_path)) for path in markdown_files(tmp_path)}
         assert walked == {"docs/real.md"}
 
     def test_a_directory_only_rule_does_not_drop_a_versioned_file_of_that_name(
@@ -8271,7 +6889,7 @@ class TestEveryMarkdownFileHasBalancedCodeFences:
         (tmp_path / "notes.md" / "inner.md").write_text("# inside the ignored directory\n")
         (tmp_path / "docs").mkdir()
         (tmp_path / "docs" / "notes.md").write_text("# a file, and this pattern says directory\n")
-        walked = {str(path.relative_to(tmp_path)) for path in _markdown_sources(tmp_path)}
+        walked = {str(path.relative_to(tmp_path)) for path in markdown_files(tmp_path)}
         assert walked == {"docs/notes.md"}
 
     def test_an_anchored_directory_only_rule_spares_a_file_at_that_path(
@@ -8291,7 +6909,7 @@ class TestEveryMarkdownFileHasBalancedCodeFences:
         (tmp_path / "build" / "out.md").write_text("# a file where a directory is ignored\n")
         (tmp_path / "docs").mkdir()
         (tmp_path / "docs" / "real.md").write_text("# real\n")
-        walked = {str(path.relative_to(tmp_path)) for path in _markdown_sources(tmp_path)}
+        walked = {str(path.relative_to(tmp_path)) for path in markdown_files(tmp_path)}
         assert walked == {"build/out.md", "docs/real.md"}
 
     def test_an_anchored_rule_stops_at_the_separator_rather_than_the_prefix(
@@ -8313,7 +6931,7 @@ class TestEveryMarkdownFileHasBalancedCodeFences:
         (tmp_path / "docs" / "note").mkdir(parents=True)
         (tmp_path / "docs" / "note" / "inner.md").write_text("# inside the ignored directory\n")
         (tmp_path / "docs" / "notes.md").write_text("# a sibling sharing the first characters\n")
-        walked = {str(path.relative_to(tmp_path)) for path in _markdown_sources(tmp_path)}
+        walked = {str(path.relative_to(tmp_path)) for path in markdown_files(tmp_path)}
         assert walked == {"docs/notes.md"}
 
     def test_a_hidden_directory_is_not_walked_even_where_the_ignore_file_is_silent(
@@ -8326,7 +6944,7 @@ class TestEveryMarkdownFileHasBalancedCodeFences:
         (tmp_path / ".claude" / "worktrees" / "other").mkdir(parents=True)
         (tmp_path / ".claude" / "worktrees" / "other" / "README.md").write_text("# x\n")
         (tmp_path / "README.md").write_text("# x\n")
-        walked = {str(path.relative_to(tmp_path)) for path in _markdown_sources(tmp_path)}
+        walked = {str(path.relative_to(tmp_path)) for path in markdown_files(tmp_path)}
         assert walked == {"README.md"}
 
     @pytest.mark.parametrize(
@@ -8377,7 +6995,7 @@ class TestEveryMarkdownFileHasBalancedCodeFences:
         """
         (tmp_path / ".gitignore").write_text(f"docs/\n{form}\n")
         with pytest.raises(SystemExit, match=re.escape("unsupported .gitignore form")) as refusal:
-            _markdown_sources(tmp_path)
+            markdown_files(tmp_path)
         assert term in str(refusal.value), str(refusal.value)
 
     @pytest.mark.parametrize(
@@ -8676,9 +7294,7 @@ def _loan_names(tree: ast.Module) -> set[str]:
     spelling `tests/test_shelf._entity_aliases` was written for after exactly
     that walked past it.
 
-    **A second, smaller resolver rather than that one**, because this file is
-    imported by that one for `_is_vendored` and importing back is a cycle under
-    `--import-mode=importlib`. Smaller in one way that is stated rather than
+    **A second, smaller resolver rather than that one.** Smaller in one way that is stated rather than
     hidden: it does not follow `aliased(Loan)`, which is a query construct and
     builds no row. The `AnnAssign` form is followed, because the annotated
     binding is the more idiomatic half of this backend and a resolver reading
@@ -8825,7 +7441,7 @@ class TestOneInstanceIssuesALoan:
       past a viewer, but the shape is an idiom rather than that file's quirk:
       `main.py` already writes a model through a `setattr` loop. A rule that saw
       these would watch the session at run time rather than read source.
-    * **The migrations**, which `_source_modules()` does not return. One
+    * **The migrations**, which `application_sources()` does not return. One
       revision already closes every open loan but the earliest per book with an
       `UPDATE`, clearing the way for `uq_loans_one_open_per_book` rather than
       ending anybody's loan, and a revision is a record of what was applied
@@ -8883,7 +7499,7 @@ class TestOneInstanceIssuesALoan:
     def test_the_places_that_write_a_loan_are_the_argued_ones(self):
         found = {
             f"{name}: {kind}"
-            for name, source in _source_modules().items()
+            for name, source in application_sources().items()
             for kind, _ in _loan_writes(source)
         }
         assert found == set(self.WRITES_A_LOAN), (
@@ -8906,7 +7522,7 @@ class TestOneInstanceIssuesALoan:
         """
         found = {
             source_of
-            for _, source in _source_modules().items()
+            for _, source in application_sources().items()
             for source_of in _issuers(source)
         }
         assert found == {"current_user.id"}, (
@@ -8922,7 +7538,7 @@ class TestOneInstanceIssuesALoan:
         finds nothing, which is what a rename of the model would produce."""
         found = [
             (name, kind)
-            for name, source in _source_modules().items()
+            for name, source in application_sources().items()
             for kind, _ in _loan_writes(source)
         ]
         assert len(found) >= 5
@@ -10434,7 +9050,7 @@ class TestOneDoorParsesAResponseBody:
 
     def test_no_module_that_fetches_parses_a_body_itself(self) -> None:
         offenders: dict[str, list[str]] = {}
-        for path in _python_sources():
+        for path in application_modules():
             if path.name == "fetch.py":
                 continue
             tree = ast.parse(path.read_text())
@@ -10455,7 +9071,7 @@ class TestOneDoorParsesAResponseBody:
 
         The companion above is an assertion that a set is empty, so it is also
         green when the walk finds nothing to look at: a renamed module, a
-        changed import spelling, or a `_python_sources` that stopped returning
+        changed import spelling, or a `application_modules` that stopped returning
         the modules that fetch. This names every module that does.
 
         **`covers.py` is here for its client and not for its bodies**, which is
@@ -10465,7 +9081,7 @@ class TestOneDoorParsesAResponseBody:
         nothing to be exempted from in the rule above.
         """
         fetchers = {
-            path.name for path in _python_sources() if _imports_fetch(ast.parse(path.read_text()))
+            path.name for path in application_modules() if _imports_fetch(ast.parse(path.read_text()))
         }
 
         assert fetchers == {
@@ -10896,7 +9512,7 @@ class TestEveryTextCeilingComesFromTheColumn:
         """
         return [
             (str(path.relative_to(BACKEND)), path.read_text())
-            for path in _python_sources()
+            for path in application_modules()
         ]
 
     def _offenders(
@@ -10987,7 +9603,7 @@ class TestEveryTextCeilingComesFromTheColumn:
     def test_the_rule_reports_both_shapes_it_claims_to_read(self) -> None:
         """The diagonal, because the tree reports zero either way.
 
-        Measured over all 84 modules `_python_sources()` returns: the rule
+        Measured over all 84 modules `application_modules()` returns: the rule
         answers `[]` with the parameter arm and `[]` without it, since every
         site already names a constant. A correct arm and a deleted arm are
         indistinguishable from this checkout, which is the rung this rule sat on
@@ -11093,7 +9709,7 @@ class TestEveryTextCeilingComesFromTheColumn:
     def test_the_bare_literal_rule_reads_more_than_one_file(self) -> None:
         """A tripwire on the walk, because a walk that returned one module would
         pass the rule for the same reason the narrow version did."""
-        names = {path.name for path in _python_sources()}
+        names = {path.name for path in application_modules()}
 
         assert {"book.py", "books.py", "public.py"} <= names
 
@@ -11114,7 +9730,7 @@ class TestEveryTextCeilingComesFromTheColumn:
         deduplication as the failure rather than leaving the reader to infer it
         from a length.
         """
-        walked = _python_sources()
+        walked = application_modules()
         sources = self._module_sources()
 
         assert len(sources) == len(walked)
@@ -11543,7 +10159,7 @@ class TestOnlyThreeModulesTurnOutsideXmlIntoATree:
 
     def test_the_corpus_it_walks_is_present(self) -> None:
         """The floor. An empty corpus, or a walk that reads no parse, passes below."""
-        modules = _every_module_but_the_tests()
+        modules = shipped_modules()
         assert len(modules) > 50, f"walked {len(modules)} application modules, expected many"
         parsing = sorted(
             path.name
@@ -11559,7 +10175,7 @@ class TestOnlyThreeModulesTurnOutsideXmlIntoATree:
         parsing = sorted(
             {
                 str(path.relative_to(BACKEND))
-                for path in _every_module_but_the_tests()
+                for path in shipped_modules()
                 if _xml_parse_calls(path.read_text())
             }
         )
@@ -11640,7 +10256,7 @@ class TestOnlyThreeModulesTurnOutsideXmlIntoATree:
         """The alias arm, which is the one `S314` does not give you."""
         offenders = [
             f"{path.relative_to(BACKEND)}:{line}: {name}"
-            for path in _every_module_but_the_tests()
+            for path in shipped_modules()
             for line, name in _xml_parse_calls(path.read_text())
             if name not in _PARSERS_THE_LINTER_SEES
         ]
@@ -11818,7 +10434,7 @@ def _xml_modules_of_the_census() -> list[str]:
     return sorted(
         {
             str(path.relative_to(BACKEND))
-            for path in _every_module_but_the_tests()
+            for path in shipped_modules()
             for _, module in _parse_sites(path.read_text())
             if module == _ELEMENTTREE
         }
@@ -11833,7 +10449,7 @@ class TestEveryByteDoorIsRegistered:
     def _found(self) -> set[str]:
         return {
             f"{path.relative_to(BACKEND)}::{scope}"
-            for path in _every_module_but_the_tests()
+            for path in shipped_modules()
             for scope, _ in _parse_sites(path.read_text())
         }
 
@@ -11850,7 +10466,7 @@ class TestEveryByteDoorIsRegistered:
         holds. A narrowing in either **resolver** reds here. The name set, the
         corpus walk and the module tuple are shared, so a narrowing in any of
         those shrinks both sides together; the name set is held by that rule's
-        literal call per member, the walk by `WHAT_EACH_WALK_REACHES`."""
+        literal call per member, the walk by `tests/test_corpus.py`."""
         assert _xml_modules_of_the_census() == sorted(_MODULES_THAT_PARSE_XML)
 
     def test_it_resolves_each_parser_by_any_import_spelling(self):
@@ -11975,7 +10591,7 @@ class TestNoModuleStartsAProcessTheLinterCannotSee:
     def test_no_application_module_names_one(self) -> None:
         found = [
             f"{path.relative_to(BACKEND)}:{line}"
-            for path in _every_module_but_the_tests()
+            for path in shipped_modules()
             for line in _names_an_unreported_process_call(path.read_text())
         ]
         assert found == [], (
@@ -12298,7 +10914,7 @@ class TestNothingStripsAnAssertOutOfTheImage:
             "targets.py": 1,
         }
         counted: dict[str, int] = {}
-        for path in _every_module_but_the_tests():
+        for path in shipped_modules():
             hits = sum(1 for line in path.read_text().splitlines() if "# noqa: S101" in line)
             if hits:
                 counted[str(path.relative_to(BACKEND))] = hits
@@ -12367,7 +10983,7 @@ class TestOnlyTheLendingDeskNamesReturnedAt:
       return selects a closed loan, and every rule here stays green: the
       attribute is never named. It is the reason `Loans.overdue` calls
       `notifications.overdue_clauses` rather than assembling clauses itself.
-    * **A test.** `_source_modules()` excludes `tests/`, and the suite spells
+    * **A test.** `application_sources()` excludes `tests/`, and the suite spells
       the column freely, because a test asserting what a closed loan looks like
       has to be able to write one.
 
@@ -12410,7 +11026,7 @@ class TestOnlyTheLendingDeskNamesReturnedAt:
     def test_the_modules_that_name_the_column_are_the_argued_ones(self):
         found = {
             name
-            for name, source in _source_modules().items()
+            for name, source in application_sources().items()
             if _names_returned_at(source)
         }
         assert found == set(self.NAMES_RETURNED_AT), (
@@ -12440,9 +11056,9 @@ class TestOnlyTheLendingDeskNamesReturnedAt:
         `reopen(loan)` writing `returned_at = None` takes the count to 8 and
         this is what fails, and a mutation of `is_open` takes it to 6 and this
         is what fails."""
-        found = _names_returned_at(_source_modules()["lending.py"])
+        found = _names_returned_at(application_sources()["lending.py"])
         assert len(found) == 7, found
-        assert set(self.NAMES_RETURNED_AT) < set(_source_modules())
+        assert set(self.NAMES_RETURNED_AT) < set(application_sources())
 
     @pytest.mark.parametrize(
         "spelling",
@@ -12523,7 +11139,7 @@ class TestTheLendingCycleStaysPlain:
     CYCLE = ("lending.py", "notifications.py")
 
     def test_neither_side_reaches_into_the_other_with_a_from_import(self):
-        sources = _source_modules()
+        sources = application_sources()
         offences = []
         for name in self.CYCLE:
             other = next(o for o in self.CYCLE if o != name).removesuffix(".py")
@@ -12543,7 +11159,7 @@ class TestTheLendingCycleStaysPlain:
         """Anti vacuity. With either import gone the rule above passes for a
         reason that has nothing to do with what it claims, and the next person
         to add a `from` form gets no warning."""
-        sources = _source_modules()
+        sources = application_sources()
         for name in self.CYCLE:
             other = next(o for o in self.CYCLE if o != name).removesuffix(".py")
             # The module body, not `ast.walk`, and the difference is what the
@@ -12573,9 +11189,9 @@ class TestNoDocstringCarriesTheCharacterItDescribes:
     description the OpenAPI document and the generated client are handed; but the
     reason the rule is the whole tree is the next reader, who copies the line.
 
-    **Measured 2026-09-26 over `_every_python_file`, which is the only walk that
+    **Measured 2026-09-26 over `every_python_file`, which is the only walk that
     sees all of it**: nine sites, seven test modules and two generated
-    revisions. `_python_sources` drops the migrations and two of the nine were
+    revisions. `application_modules` drops the migrations and two of the nine were
     there, which is why the arm below does not use the walk the layer's own rule
     used.
 
@@ -12590,7 +11206,7 @@ class TestNoDocstringCarriesTheCharacterItDescribes:
     def test_no_docstring_in_the_tree_carries_one(self) -> None:
         carried = [
             f"{path.relative_to(BACKEND)}:{line}"
-            for path in _every_python_file()
+            for path in every_python_file()
             for line in _docstrings_carrying_a_control_character(
                 path.read_text(encoding="utf-8")
             )
@@ -12636,12 +11252,12 @@ class TestNoDocstringCarriesTheCharacterItDescribes:
         """
         migrations = {
             path
-            for path in _every_python_file()
+            for path in every_python_file()
             if "migrations" in path.relative_to(BACKEND).parts
         }
         assert migrations, "no generated revision in the walk, so this arm reads nothing"
-        assert not migrations & set(_python_sources()), (
-            "`_python_sources` now reaches the migrations, so the reason this rule "
+        assert not migrations & set(application_modules()), (
+            "`application_modules` now reaches the migrations, so the reason this rule "
             "uses the wider walk no longer holds and the comment above is stale"
         )
 
@@ -12655,7 +11271,7 @@ def _user_construction_sites(sources: Iterable[Path]) -> dict[Path, list[int]]:
 
     **It takes the corpus rather than a root**, so it decides nothing about what
     a walk reaches and the caller says which modules are in scope. The rule
-    below hands it `_python_sources()`, which drops two things its own
+    below hands it `application_modules()`, which drops two things its own
     docstring names: the test tree, where the fixtures build `User` rows
     constantly, and the migrations, which call the model class nowhere.
 
@@ -12778,7 +11394,7 @@ class TestEveryDirectoryDoorWritesThroughOneFunnel:
         moves the census rather than hiding inside its path."""
         census = {
             path.relative_to(BACKEND).as_posix(): len(lines)
-            for path, lines in _user_construction_sites(_python_sources()).items()
+            for path, lines in _user_construction_sites(application_modules()).items()
         }
         expected = {path: door.sites for path, door in self.EXPECTED.items()}
 

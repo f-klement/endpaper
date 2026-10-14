@@ -39,7 +39,7 @@ from threading import Lock
 import pytest
 
 import z3950
-from tests.test_house_rules import _is_vendored
+from tests.corpus import BACKEND, shipped_modules
 from z3950 import Answer, Record, Syntax, Target
 
 TARGET = Target(host="catalogue.example", port=210, database="EXAMPLE")
@@ -713,33 +713,11 @@ class TestTheProvisionalClientIsReachedOnlyThroughTheSeam:
     MODULE = "z3950_provisional"
 
     def backend_modules(self) -> list[Path]:
-        root = Path(__file__).resolve().parent.parent
         # **Resolved paths, not basenames.** Excluding by name skipped any file called
         # `z3950.py` anywhere under `backend/`, so a copy in a subpackage would have been
         # exempt from the rule for its name alone.
-        exempt = {(root / name).resolve() for name in (f"{self.MODULE}.py", "z3950.py")}
-        # **What vendored means is `test_house_rules._is_vendored`.** This walk
-        # named `.venv` alone, so in the pipeline, which sets `UV_CACHE_DIR`
-        # inside `backend/`, it read third party source out of `.uv-cache/`.
-        #
-        # `tests` is matched relative to `root` rather than against the whole
-        # path, which is what this and the `.venv` clause both used to do: a
-        # checkout under a directory called `tests` emptied the walk, and here
-        # alone of the modules that had that defect the floor below turned it
-        # into a failure rather than a silent pass.
-        found = [
-            path
-            for path in sorted(root.rglob("*.py"))
-            if "tests" not in path.relative_to(root).parts
-            and not _is_vendored(path, root)
-            and path.resolve() not in exempt
-        ]
-        # **The packages it must cover, not a count.** `len(found) > 20` cannot
-        # go to zero, which is what it was written for, but it is satisfied by a
-        # walk that lost a whole directory: see `test_accounts._sources` for the
-        # mutation that made a floor of this shape look adequate.
-        assert {"routers", "schemas"} <= {path.parent.name for path in found}, found
-        return found
+        exempt = {(BACKEND / name).resolve() for name in (f"{self.MODULE}.py", "z3950.py")}
+        return [path for path in shipped_modules() if path.resolve() not in exempt]
 
     def test_no_backend_module_but_the_seam_imports_it(self):
         offenders = []

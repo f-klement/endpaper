@@ -7,14 +7,11 @@ that exists rather than adding one.
 
 import ast
 import getpass
-from pathlib import Path
 
 import recover
 from auth import verify_password
 from models import User
-from tests.test_house_rules import _is_vendored
-
-BACKEND = Path(__file__).resolve().parent.parent
+from tests.corpus import BACKEND, shipped_modules
 
 
 class TestNothingImportsIt:
@@ -26,22 +23,8 @@ class TestNothingImportsIt:
         an endpoint that sets anybody's password.
         """
         offenders: list[str] = []
-        # **What vendored means is `test_house_rules._is_vendored`.** This walk
-        # named `.venv` alone, so in the pipeline, which sets `UV_CACHE_DIR`
-        # inside `backend/`, it read third party source out of `.uv-cache/`;
-        # any dependency importing a module called `recover` would have failed
-        # the one rule that keeps a password reset off HTTP, in the environment
-        # where that rule is trusted and nowhere else.
-        #
-        # `tests` is matched relative to `BACKEND`, not against the whole path:
-        # asked absolutely, a checkout under a directory called `tests` empties
-        # this walk and the rule passes on nothing.
         read: set[str] = set()
-        for path in BACKEND.rglob("*.py"):
-            if _is_vendored(path, BACKEND):
-                continue
-            if "tests" in path.relative_to(BACKEND).parts:
-                continue
+        for path in shipped_modules():
             if path.name == "recover.py":
                 continue
             read.add(path.parent.name)

@@ -37,7 +37,7 @@ from tags import (
     room_on,
     tidy,
 )
-from tests.test_house_rules import BACKEND, _every_module_but_the_tests, _source_modules
+from tests.corpus import BACKEND, application_sources, shipped_modules
 from tests.test_importing import selects
 
 
@@ -655,7 +655,7 @@ class TestNothingElseDecidesATagFromAName:
     """
 
     def test_no_module_but_the_mint_and_the_seed_decides_a_tag(self) -> None:
-        corpus = _source_modules()
+        corpus = application_sources()
         offenders = outside(constructions_by_ast(corpus), MINTERS)
 
         assert not offenders, (
@@ -680,7 +680,7 @@ class TestNothingElseDecidesATagFromAName:
         differently are bought for. The token pass reports a file and a line
         like the other, so it feeds the same function.
         """
-        corpus = _source_modules()
+        corpus = application_sources()
         drifted = inside_but_unexempted(census(corpus), MINTERS, corpus)
 
         assert not drifted, "\n  ".join(["", *drifted])
@@ -688,7 +688,7 @@ class TestNothingElseDecidesATagFromAName:
     def test_the_second_instrument_agrees_on_the_tree(self) -> None:
         """Two readings that degrade differently, so a matcher that stopped
         matching is a disagreement rather than a clean run."""
-        corpus = _source_modules()
+        corpus = application_sources()
 
         assert not outside(constructions_by_token(corpus), MINTERS)
 
@@ -700,12 +700,12 @@ class TestNothingElseDecidesATagFromAName:
         of them missing. So it is compared against a second shared walk, which
         differs from it by the generated revisions and by nothing else.
 
-        **The two share `_is_vendored`**, so a change there moves both and the
+        **The two share `is_vendored`**, so a change there moves both and the
         equality holds while the corpus shrinks. What this catches is one walk
         drifting from the other, which is what happened to the three test
         modules that each kept a copy of one."""
-        corpus = set(_source_modules())
-        wider = {str(path.relative_to(BACKEND)) for path in _every_module_but_the_tests()}
+        corpus = set(application_sources())
+        wider = {str(path.relative_to(BACKEND)) for path in shipped_modules()}
 
         assert corpus == {path for path in wider if "migrations" not in Path(path).parts}
         assert {"tags.py", "main.py", "importing.py", "routers/books.py"} <= corpus
@@ -723,7 +723,7 @@ class TestNothingElseDecidesATagFromAName:
         hides that, because either instrument alone satisfies it.
         """
         narrowed = {path: entry for path, entry in MINTERS.items() if path != exempt}
-        corpus = _source_modules()
+        corpus = application_sources()
 
         reporting = set()
         for instrument, found in (
@@ -1190,11 +1190,11 @@ class TestNamingATagForAWriter:
     def test_a_name_it_has_already_handed_over_stays_handed_over(
         self, db, writer, mine
     ) -> None:
-        """**The false refusal a viewer introduces into every ordinary
-        upload.** `Vocabulary.counts` is read once, so the Book this writer
-        has just tagged is not in it, while `_carried_by_any_book` is live and
-        answers yes: without the memory the writer's own name is refused off
-        their own Book from the second row on.
+        """**The false refusal a live read would introduce into every
+        ordinary upload.** The rule reads each set once, before the attach, so
+        the name stays admitted by the arm that first admitted it. Read the
+        unscoped set live and it sees the writer's own Book carrying the name,
+        and refuses it from the second row on.
         """
         naming = Naming.for_member(db, writer.id)
         first = naming.tag("Holiday reads")
@@ -1207,9 +1207,9 @@ class TestNamingATagForAWriter:
     def test_and_a_later_unit_of_work_reaches_the_same_answer_without_it(
         self, db, writer, mine
     ) -> None:
-        """What says the memory is the true answer rather than a patch over a
-        stale read: a fresh Naming reads a fresh count, sees the Book on this
-        writer's own shelf, and admits the name on `writable`'s second arm."""
+        """What says the snapshot's answer is the true one rather than a stale
+        read: a fresh Naming reads fresh sets, sees the Book on this writer's
+        own shelf, and admits the name on the visible arm."""
         first = Naming.for_member(db, writer.id).tag("Holiday reads")
         assert first is not None
         attach(mine, first)
@@ -1281,19 +1281,6 @@ TAG_READERS: Final = {
             "learns is that an id they typed is in use.",
         ),
         (
-            "_require_tag: tag = db.get(Tag, tag_id)",
-            "the Tag a bulk verb names. **Gated on the next line** by "
-            "`Vocabulary.writable`, which is what collapses a Tag the caller "
-            "may not be told about into the 404 an unused id already gets.",
-        ),
-        (
-            "add_book_tag: tag = db.get(Tag, tag_id)",
-            "gated on the next line by `Vocabulary.writable`, "
-            "and it is the site that made the id an oracle: `book_to_out` "
-            "returns the Book with its tags, so attaching a guessed id used to "
-            "hand back the name.",
-        ),
-        (
             "remove_book_tag: tag = db.get(Tag, tag_id)",
             "**deliberately ungated**, with the measurement "
             "at its own site: this answers 200 with the unchanged Book whether "
@@ -1352,6 +1339,24 @@ TAG_READERS: Final = {
             "or this viewer's count admits it. The scoping is in the same "
             "statement as the read, which is what an entry here can check and "
             "a reader can see.",
+        ),
+        (
+            "_row: return self._db.get(Tag, tag_id)",
+            "the Tag an id door names, read only as the `fetch` "
+            "`Vocabulary.resolve` hands `disclosure.Disclosure.resolve`, which "
+            "asks the gate first and answers None for a Tag the caller may not "
+            "be told about exactly as for an unused id. The two doors that took "
+            "an id, the bulk verbs and the attach, read the row here instead of "
+            "beside their own gate.",
+        ),
+        (
+            "_is_seeded_id: rows = self._db.query(Tag.id, Tag.key)"
+            ".filter(Tag.key.isnot(None)).all()",
+            "the seeded arm by id, so the gate can run before the row is read. "
+            "**Two columns and never a name**, and every row it admits is one "
+            "whose name is in `PREDEFINED_TAGS`, which the mirror publishes. "
+            "The whole set in one statement, so the arm costs the same whatever "
+            "id is asked.",
         ),
     ],
 }
@@ -1551,7 +1556,7 @@ class TestNothingElseDecidesWhoMaySeeATag:
         return report
 
     def test_every_tag_reader_is_classified(self) -> None:
-        report = self._report(_source_modules())
+        report = self._report(application_sources())
 
         assert not report, (
             "A statement reads the Tag table, and either is not classified or "
@@ -1581,7 +1586,7 @@ class TestNothingElseDecidesWhoMaySeeATag:
         which is what the first version asserted instead: the plant adds a read
         rather than removing one.
         """
-        sources = dict(_source_modules())
+        sources = dict(application_sources())
         sources["tags.py"] += (
             "\n\ndef every_tag_there_is(db):\n"
             "    return db.query(Tag).order_by(Tag.category, Tag.name).all()\n"
@@ -1645,7 +1650,7 @@ class TestNothingElseDecidesWhoMaySeeATag:
 
         reaching = {
             name: sites
-            for name, source in _source_modules().items()
+            for name, source in application_sources().items()
             if name != self.OWNER and (sites := _reaches_private(source, private))
         }
 
@@ -1664,7 +1669,7 @@ class TestNothingElseDecidesWhoMaySeeATag:
         from under it, so the failure is the plant rather than an accident of
         the corpus holding exactly one spare offence.
         """
-        sources = dict(_source_modules())
+        sources = dict(application_sources())
         sources["tags.py"] += (
             "\n\ndef every_tag_there_is(db):\n"
             "    return db.query(Tag).all()\n"
@@ -1866,7 +1871,7 @@ class TestNothingElseIsHandedATagResolvedFromAName:
         return report
 
     def test_every_caller_of_the_mint_is_classified(self) -> None:
-        report = self._report(_source_modules())
+        report = self._report(application_sources())
 
         assert not report, (
             "a module outside `tags.py` is handed a Tag resolved from a name, "
@@ -1896,7 +1901,7 @@ class TestNothingElseIsHandedATagResolvedFromAName:
         because that count over a module with no source reads as a call that
         moved rather than as a file that did.
         """
-        sources = _source_modules()
+        sources = application_sources()
 
         stale = sorted(set(TAGS_RESOLVED_WITHOUT_A_VIEWER) - set(sources))
 

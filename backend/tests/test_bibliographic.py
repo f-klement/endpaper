@@ -31,8 +31,8 @@ from bibliographic import (
     strip_isbd_punctuation,
 )
 from models import MAX_PAGE_NUMBER_IN_A_BOOK
+from tests.corpus import BACKEND, application_modules
 from tests.strategies import text_around, witness
-from tests.test_house_rules import BACKEND, _python_sources
 
 #: The letter class `bibliographic._AN_INITIAL` scopes a flag out of, written
 #: here rather than parsed back out of that constant: the arm below is about
@@ -437,7 +437,7 @@ class TestTheProseRuleIsReachedOnlyThroughACarrierAwareDoor:
     def _callers(name: str, root: Path = BACKEND) -> set[str]:
         """Every function under `root` that calls `name`, by either spelling.
 
-        **`root` is a parameter for the reason `_python_sources` takes one**: a
+        **`root` is a parameter for the reason `application_modules` takes one**: a
         walk asserted only against this checkout is a walk nobody has watched
         fail. The test below drives it against a tree it builds.
         """
@@ -463,7 +463,7 @@ class TestTheProseRuleIsReachedOnlyThroughACarrierAwareDoor:
                         found.add(f"{path}::{qualified}")
                 visit(child, path, qualified)
 
-        for path in _python_sources(root):
+        for path in application_modules(root):
             tree = ast.parse(path.read_text(encoding="utf-8"))
             visit(tree, str(path.relative_to(root)), "<module>")
         return found
@@ -472,7 +472,7 @@ class TestTheProseRuleIsReachedOnlyThroughACarrierAwareDoor:
         """Every assertion below is about whatever the walk returns, so a wrong
         anchor makes them vacuous while staying green. `test_marc.py` records
         the pipeline where that happened."""
-        walked = {path.stem for path in _python_sources(BACKEND)}
+        walked = {path.stem for path in application_modules(BACKEND)}
         assert {"bibliographic", "metadata", "marc"} <= walked
         assert "site-packages" not in BACKEND.parts
 

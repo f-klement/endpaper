@@ -43,12 +43,12 @@ import fetch
 import sources
 
 # **Imported, not copied.** What counts as a module of this project is one fact
-# and `_is_vendored` is where it is decided. This walk used to be spelled out
+# and `is_vendored` is where it is decided. This walk used to be spelled out
 # here, excluding `{"tests", "migrations", ".venv"}` by name, which is the
 # directory a developer has and not the one the pipeline creates under
 # `backend/` for its uv cache.
+from tests.corpus import application_sources
 from tests.strategies import SURROGATE_CODECS
-from tests.test_house_rules import _source_modules
 
 # **Imported, not copied**, for the same reason one line up. "What does this
 # statement bind" is one fact, and `test_shelf.py`'s guard already answers it,
@@ -1173,7 +1173,7 @@ class TestThisIsTheOnlyDoorOutwards:
     def test_no_module_but_the_door_keepers_speaks_http(self):
         offenders = sorted(
             f"{name}:{where}"
-            for name, source in _source_modules().items()
+            for name, source in application_sources().items()
             if name not in DOOR_KEEPERS
             for where in _http_offences(source)
         )
@@ -1187,7 +1187,7 @@ class TestThisIsTheOnlyDoorOutwards:
         reader learns the wrong rule."""
         speaking = {
             name
-            for name, source in _source_modules().items()
+            for name, source in application_sources().items()
             if _http_offences(source)
         }
         assert speaking == DOOR_KEEPERS

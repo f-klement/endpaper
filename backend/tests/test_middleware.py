@@ -1,9 +1,10 @@
 """Tests for backend/middleware.py: the response hardening headers."""
 
 import re
-from pathlib import Path
 
 import pytest
+
+from tests.corpus import REPO, browser_modules
 
 
 @pytest.fixture
@@ -112,11 +113,9 @@ class TestContentSecurityPolicy:
         """
         import middleware
 
-        root = Path(__file__).resolve().parents[2]
-        source = root / "frontend" / "src"
         compilers = sorted(
-            path.relative_to(root).as_posix()
-            for path in source.rglob("*.ts*")
+            path.relative_to(REPO).as_posix()
+            for path in browser_modules()
             if re.search(r"^import\b.*\.wasm", path.read_text(encoding="utf-8"), re.MULTILINE)
         )
         granted = "'wasm-unsafe-eval'" in middleware._CSP

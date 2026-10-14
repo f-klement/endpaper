@@ -7,20 +7,16 @@
  */
 
 import {
-  getPurgeBookMutationKey,
-  getRestoreBookMutationKey,
+  getPurgeBookMutationOptions,
+  getRestoreBookMutationOptions,
   useEmptyTrash,
   useListTrash,
-  usePurgeBook,
-  useRestoreBook,
-  type PurgeBookMutationVariables,
-  type RestoreBookMutationVariables,
 } from "../../api/generated/endpoints/books/books";
 import type { BookOut } from "../../api/generated/model";
 import { useInvalidate } from "../../api/invalidate";
 import { useToast } from "../../app/toast";
 import { useTranslation } from "../../i18n";
-import { usePendingRows, useWriteFailure } from "../hooks";
+import { useRowWrite } from "../hooks";
 
 /** Rows per request. The trash is small and read top-down. */
 export const PAGE_SIZE = 50;
@@ -55,22 +51,13 @@ export function useTrash(): UseTrashResult {
   // the accounts or the settings: emptying the trash cannot touch either.
   const refresh = () => invalidate.catalogue();
 
-  // One slot each, so pressing one verb leaves the other's failure on screen,
-  // as reading each hook's own `error` did.
-  const restoreFailure = useWriteFailure();
-  const purgeFailure = useWriteFailure();
-  const restore = useRestoreBook({
-    mutation: {
-      ...restoreFailure.report,
-      onSuccess: () => {
-        refresh();
-        toast.show({ message: t("trash.restored") });
-      },
-    },
+  // One failure slot each, so pressing one verb leaves the other's failure on
+  // screen, as reading each hook's own `error` did.
+  const restore = useRowWrite(getRestoreBookMutationOptions, "bookId", () => {
+    refresh();
+    toast.show({ message: t("trash.restored") });
   });
-  const purge = usePurgeBook({
-    mutation: { ...purgeFailure.report, onSuccess: refresh },
-  });
+  const purge = useRowWrite(getPurgeBookMutationOptions, "bookId", refresh);
   const empty = useEmptyTrash({
     mutation: {
       onSuccess: (result) => {
@@ -79,16 +66,13 @@ export function useTrash(): UseTrashResult {
       },
     },
   });
-  const busyIds = usePendingRows<
-    RestoreBookMutationVariables | PurgeBookMutationVariables
-  >("bookId", getRestoreBookMutationKey(), getPurgeBookMutationKey());
+  const busyIds = new Set([...restore.pendingRows, ...purge.pendingRows]);
 
   return {
     books: trash.data?.items ?? [],
     total: trash.data?.total ?? 0,
     isLoading: trash.isPending,
-    error:
-      trash.error ?? restoreFailure.error ?? purgeFailure.error ?? empty.error,
+    error: trash.error ?? restore.error ?? purge.error ?? empty.error,
     refetch: () => void trash.refetch(),
 
     restore: (bookId) => restore.mutate({ bookId }),

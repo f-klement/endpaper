@@ -20,7 +20,7 @@ import marc_fields
 from catalogue import AuthorityAssertion, Heading
 from enums import AuthorityScheme, ClassificationScheme, HeadingKind
 from marc_fields import Fields
-from tests.test_house_rules import BACKEND, _python_sources
+from tests.corpus import BACKEND, application_modules
 
 
 def _marc_element(datafields: str) -> ElementTree.Element:
@@ -54,7 +54,7 @@ class TestTheNamespaceIsDefinedOnce:
         whenever anything above it is edited."""
         spellings = [
             str(path.relative_to(BACKEND))
-            for path in _python_sources(BACKEND)
+            for path in application_modules(BACKEND)
             for line in path.read_text(encoding="utf-8").splitlines()
             if marc_fields.NAMESPACE in line
         ]

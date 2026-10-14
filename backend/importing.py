@@ -56,6 +56,7 @@ from sqlalchemy.orm import Session
 
 import book_columns
 import csv_import
+import evidence
 import identity
 import marc
 import tags
@@ -632,16 +633,17 @@ def _fill_gaps(book: Book, row: csv_import.ImportRow) -> None:
 
     Never overwrites. A Book already here was scanned from a real catalogue or
     typed by hand, and both outrank a CSV from another service, on the same
-    principle as metadata enrichment.
+    principle as metadata enrichment. What counts as a gap is `evidence`'s.
     """
-    for attribute, value in (
-        ("publisher", row.publisher),
-        ("year", row.year),
-        ("page_count", row.pages),
-        ("format", row.format),
-    ):
-        if value is not None and getattr(book, attribute) is None:
-            setattr(book, attribute, value)
+    evidence.fill_gaps(
+        book,
+        {
+            "publisher": row.publisher,
+            "year": row.year,
+            "page_count": row.pages,
+            "format": row.format,
+        },
+    )
 
 
 # ── MARC ──────────────────────────────────────────────────────────────────────
@@ -1199,12 +1201,11 @@ def _fill_marc_gaps(book: Book, stored: Stored) -> None:
 
     Never overwrites: see `_MARC_GAP_FIELDS`. Takes a `Stored`, like every other
     reader of a record here, so a matched Book cannot be given a value the create
-    path would have cut.
+    path would have cut. What counts as a gap is `evidence`'s.
     """
-    for attribute in _MARC_GAP_FIELDS:
-        value = getattr(stored, attribute)
-        if value is not None and getattr(book, attribute) is None:
-            setattr(book, attribute, value)
+    evidence.fill_gaps(
+        book, {attribute: getattr(stored, attribute) for attribute in _MARC_GAP_FIELDS}
+    )
 
 
 # ── OPDS ──────────────────────────────────────────────────────────────────────
@@ -1398,7 +1399,7 @@ def _fill_opds_gaps(book: Book, stored: Stored) -> None:
     """Add what the member's server knows and this catalogue does not.
 
     **Never overwrites, and ownership is the one that needed a rule.** The other
-    two importers fill a column that is None; `books.ownership` is never None,
+    columns are filled where `evidence.is_empty`; `books.ownership` is never empty,
     so "the gap" has to be named, and it is `UNKNOWN`, which is the value
     `enums.OwnershipStatus` documents as "nobody has answered the question". A
     Book somebody set to NOT_OWNED is left alone: they answered, and a feed does
@@ -1411,9 +1412,8 @@ def _fill_opds_gaps(book: Book, stored: Stored) -> None:
     that carried it matched on its title, which is the weaker key, so this is
     also the case where the ISBN is least likely to be about the same book.
     """
-    for attribute in _OPDS_GAP_FIELDS:
-        value = getattr(stored, attribute)
-        if value is not None and getattr(book, attribute) is None:
-            setattr(book, attribute, value)
+    evidence.fill_gaps(
+        book, {attribute: getattr(stored, attribute) for attribute in _OPDS_GAP_FIELDS}
+    )
     if book.ownership == OwnershipStatus.UNKNOWN:
         book.ownership = OwnershipStatus.OWNED

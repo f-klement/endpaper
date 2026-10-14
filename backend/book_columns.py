@@ -43,15 +43,15 @@ WORK_IDENTITY: Final[tuple[str, ...]] = ("isbn", "title")
 #: The descriptive facts about the work, which every copy of it shares and which
 #: another row or an outside record may fill in where this row has nothing.
 #:
-#: Every gap filler reaches it: `google_books.merge_into` walks it,
+#: Every gap filler reaches it: `evidence._apply_match` walks it,
 #: `importing._MARC_GAP_FIELDS` narrows it to what a MARC record carries, and
 #: `folding._absorb_fields` walks `FILLABLE_FROM_ANOTHER_ROW`, which contains it.
 #:
-#: **Every name here is also a `schemas.BookMatch` field**, because `merge_into`
+#: **Every name here is also a `schemas.BookMatch` field**, because `evidence`
 #: reads each off the match by name: a column added here that a catalogue cannot
 #: assert raises `AttributeError` on the first enrichment. That is loud and it is
 #: caught in the suite rather than in production, by
-#: `tests/test_google_books.py::TestTheSignatureIsTheBound`, which partitions
+#: `tests/test_evidence.py::TestTheSignatureIsTheBound`, which partitions
 #: `BookMatch`'s own fields against the names this loop walks. A work fact no
 #: catalogue can assert belongs in `WORK_IDENTITY` or in a cell of its own.
 WORK_DETAIL: Final[tuple[str, ...]] = (
@@ -66,8 +66,8 @@ WORK_DETAIL: Final[tuple[str, ...]] = (
 #: thing. A cover this app holds is a file named by book id, so a second row
 #: pointing at the first one's file makes purging either blank the other:
 #: `routers/books.add_copy` calls `covers.duplicate` after the insert rather than
-#: carrying the column, and `google_books.merge_into` writes it below its loop
-#: under a precedence a member's upload wins.
+#: carrying the column, and `evidence` writes it below its loop under a
+#: precedence a member's upload wins.
 WORK_COVER: Final[tuple[str, ...]] = ("cover_url",)
 
 #: What this physical object is, where it is and what it cost.

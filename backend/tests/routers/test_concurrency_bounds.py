@@ -136,12 +136,8 @@ from types import ModuleType
 from typing import Final
 
 from routers import books
-from tests.test_house_rules import (
-    BACKEND,
-    _declared_route_handlers,
-    _is_route_handler,
-    _python_sources,
-)
+from tests.corpus import BACKEND, application_modules
+from tests.test_house_rules import _declared_route_handlers, _is_route_handler
 
 #: Where a concurrency primitive can come from, each entry standing for itself
 #: **and its submodules**, so `multiprocessing.pool` is inside `multiprocessing`
@@ -190,13 +186,13 @@ EXCLUDED: Final[dict[str, str]] = {
 def _route_modules() -> list[Path]:
     """Every module of the route layer, from the directory rather than a list.
 
-    One `glob` of one directory and deliberately not a recursion: the shared
-    walks in `tests/test_house_rules.py` are what may recurse a tree of Python
-    here, and the route layer is flat. A router in a subdirectory would be out
+    A filter over `application_modules` and deliberately not a walk of its own:
+    `tests/corpus.py` is what may recurse a tree of Python here, and the route
+    layer is flat. A router in a subdirectory would be out
     of this population, which is the cost of not writing a second walk.
     """
     routers = BACKEND / "routers"
-    return sorted(path for path in _python_sources() if path.parent == routers)
+    return sorted(path for path in application_modules() if path.parent == routers)
 
 
 def _terminal_name(callee: ast.expr) -> str | None:
@@ -612,7 +608,7 @@ class TestEveryConcurrencyBoundIsBuiltOnceForThePodAndNotPerRequest:
         """
         built: dict[str, list[str]] = {}
 
-        for path in _python_sources():
+        for path in application_modules():
             tree = ast.parse(path.read_text())
             imported = _concurrency_classes(tree)
             for node in ast.walk(tree):

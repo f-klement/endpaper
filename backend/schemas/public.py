@@ -50,6 +50,7 @@ from enum import StrEnum
 from pydantic import BaseModel, field_validator, model_validator
 
 from authors import split_authors
+from categories import split_categories
 from enums import (
     BookFormat,
     BookSort,
@@ -57,7 +58,6 @@ from enums import (
     HeadingKind,
     TagCategory,
 )
-from google_books import split_categories
 from schemas.tag import KnownTagKey
 
 
@@ -224,10 +224,9 @@ class PublicBookOut(BaseModel):
     def parse_categories(cls, value: object) -> object:
         """The stored "Fiction; Science Fiction" as a list.
 
-        A semicolon, never a comma: Google's own category names contain commas
-        ("Fiction, general"), so splitting on one shreds them. Same rule as
-        `BookOut.parse_categories`, and it has to be restated rather than
-        inherited because this model deliberately does not inherit.
+        `categories.split_categories` is the rule. Called here rather than
+        inherited from `BookColumns.parse_categories`, because this model
+        deliberately does not inherit.
         """
         if isinstance(value, str):
             return split_categories(value)

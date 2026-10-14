@@ -9,6 +9,7 @@ import {
   BookFormat,
   BookIdentifierScheme,
 } from "../../src/api/generated/model";
+import { propertiesOf } from "../committedSchema";
 // Every module, read as text, because the rules below are about the import
 // graph and a module's own exports, neither of which is visible from a value.
 // The one enumeration of `src/` refuses a corpus that is no longer the tree;
@@ -1122,12 +1123,6 @@ describe("what may name a scheme this app stores", () => {
   });
 });
 
-const SCHEMA = import.meta.glob("../../openapi.json", {
-  query: "?raw",
-  import: "default",
-  eager: true,
-}) as Record<string, string>;
-
 /**
  * A module's prose with every line break and comment marker flattened away.
  *
@@ -1213,19 +1208,8 @@ describe("what a reader says about a subject, and where it says it", () => {
   it("says the server takes no categories in no module at all", () => {
     // A machine oracle for the only checkable half of the old sentence, which is
     // whether the endpoint has the field. It does, so the claim may appear nowhere.
-    const raw = SCHEMA["../../openapi.json"] ?? "";
     expect(
-      raw,
-      "openapi.json was not read, so this arm proves nothing",
-    ).not.toBe("");
-    // Named rather than indexed, because an index signature is possibly
-    // undefined under this tsconfig and the arm is about one known body.
-    const schema = JSON.parse(raw) as {
-      components: { schemas: { BookCreate: { properties?: unknown } } };
-    };
-
-    expect(
-      schema.components.schemas.BookCreate.properties,
+      propertiesOf("BookCreate"),
       "the create body no longer carries the field, so this arm is about nothing",
     ).toHaveProperty("categories");
     expect(modulesCarrying(STALE_CLAIM)).toEqual([]);

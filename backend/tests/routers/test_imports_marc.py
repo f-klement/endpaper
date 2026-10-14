@@ -37,7 +37,7 @@ from models import (
 )
 from routers import books as books_router
 from schemas.classification import MAX_CLASSIFICATIONS_PER_BOOK
-from tests.test_house_rules import _python_sources
+from tests.corpus import application_modules
 
 MARCXML = "http://www.loc.gov/MARC21/slim"
 
@@ -790,8 +790,8 @@ class TestNoProductionModuleWritesAWholeCollection:
     stops nobody, so the rule is parsed rather than stated. `marc.stream` is
     what a route wants.
 
-    **The corpus is `test_house_rules._python_sources`** and not a walk of this
-    module's own. That module records what a private walk costs, twice: one
+    **The corpus is `corpus.application_modules`** and not a walk of this
+    module's own. Two private walks went wrong before it, in two ways: one
     spelled `"tests" not in path.parts and ".venv" not in path.parts` missed
     the cache the pipeline builds under `backend/`, and one asked absolutely
     returned nothing at all from a checkout under a directory called `tests`.
@@ -814,7 +814,7 @@ class TestNoProductionModuleWritesAWholeCollection:
 
     def production_modules(self, root: Path | None = None) -> list[Path]:
         """Every module the rule applies to: the app, minus the writer itself."""
-        sources = _python_sources(root) if root is not None else _python_sources()
+        sources = application_modules(root) if root is not None else application_modules()
         return [path for path in sources if path.resolve() != self.THE_WRITER]
 
     def calls_to_write(self, root: Path | None = None) -> list[str]:
@@ -850,7 +850,7 @@ class TestNoProductionModuleWritesAWholeCollection:
         # absent from the filtered list only restates the filter. What can go
         # wrong is the walk ceasing to return it, and then the exemption
         # quietly guards nothing and this test still passes.
-        assert self.THE_WRITER in {path.resolve() for path in _python_sources()}
+        assert self.THE_WRITER in {path.resolve() for path in application_modules()}
 
     def test_a_planted_call_is_reported_in_both_spellings(self, tmp_path):
         """The detector, driven against a tree built for it.

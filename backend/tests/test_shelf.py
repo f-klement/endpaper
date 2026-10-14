@@ -78,9 +78,10 @@ caught would prove nothing about the new one. What is *still* not caught:
 * **A variable this resolver cannot trace back to `Book`.** It follows
   `X = Book`, `X = models.Book` and `X = aliased(Book)`, in both the plain and
   the annotated form, and unpacks a tuple target. It does not follow a value
-  computed any other way: `backup.py` does `db.query(model)` over a loop, so no
-  rule reading the arguments to `query()` can see it. Asserted separately by
-  name instead, and listed in `INDIRECT_READERS`.
+  computed any other way: `backup.py` does `select(*columns)` over each table's
+  columns in a loop, so no rule reading the arguments to a query can see which
+  table it reads. Asserted separately by name instead, and listed in
+  `INDIRECT_READERS` and `PARAMETERISED_READERS`.
 * **Raw SQL.** `db.execute(text("SELECT location, count(*) FROM books ..."))`
   names no `Book` and no book-owned entity anywhere, and evades all four
   passes. `text()` is already used in the tree (`main.py:451`), and a location
@@ -92,7 +93,7 @@ caught would prove nothing about the new one. What is *still* not caught:
   has a viewer of its own. Re-measured 2026-10-01 by running this pass over the
   tree with that entity set: **41 statements across 10 modules**, or 36 across 9
   outside `shelf.py`, against **27 across 7** for the book-owned tables, or 22
-  across 6 outside it, out of the **98** modules `_source_modules()` returns.
+  across 6 outside it, out of the **98** modules `application_sources()` returns.
   **All four pairs are re-derived together, every time.** On this reading the
   user-carrying pair moved and the book-owned one did not: `routers/loans.py`
   fell from 2 to 1 when `_loan_with_relations` stopped building its own
@@ -185,15 +186,11 @@ caught would prove nothing about the new one. What is *still* not caught:
   with no predicate. Not caught by passes 1 to 3, and **the reason is a cost,
   measured**: `Book` in a narrowing clause is **14 statements across 5 modules**
   outside `shelf.py` and off a shelf-rooted chain, and **22 across 9** counting
-  those, measured 2026-09-17, against the **22 across 6** the fourth pass
-  carries, summed from `BOOK_OWNED_READERS` on 2026-10-01. That sum read 20
-  until `95693de`, where the three `.book_id.in_(loser_ids)` reads left
-  `routers/books.py` for `folding.py` and a shape rule took them, then 17, then
-  19 when `tags.py` gained the Tag index and two arms of the rule deciding who
-  may be told a Tag exists. The sixth module is `fields.py`, which is the same
-  rule again for a custom field definition and whose three arms are its three
-  entries. That is what a count of hand classified statements does when the
-  code moves. Extending the clause rule to
+  those, measured 2026-09-17, against what the fourth pass carries, which is
+  `BOOK_OWNED_READERS` and moves with the code: it lost three reads when the
+  merge moved to `folding.py` and six when the three vocabularies' arms moved
+  to `disclosure.py`, a shape rule taking each. That is what a count of hand
+  classified statements does when the code moves. Extending the clause rule to
   `Book` means classifying every one of them by hand.
 
   That last pair said **7 across 3** until 2026-09-10 and both halves were
@@ -300,13 +297,13 @@ from shelf import (
     rereading_filtered_rows,
     whole_table_for_uniqueness,
 )
+from tests.corpus import application_sources
 from tests.helpers import peak_rows, rows_at_the_engine
 
 # The corpus lives beside the rules it measures, in `tests/test_filing.py`, and
 # is read from here, from `tests/test_schema.py` and from `tests/test_backup.py`.
 # One list, so a shape added for one reader is a shape every reader gets.
 from tests.test_filing import CORPUS
-from tests.test_house_rules import _source_modules
 
 BACKEND = Path(__file__).resolve().parent.parent
 
@@ -348,10 +345,11 @@ JOIN_CALLERS = {"notifications.py"}
 #: Modules that read every row of `books` without naming `Book` in the query,
 #: so no rule of this shape can see them.
 #:
-#: One: `backup.py` iterates `_TABLES` and calls `db.query(model)` on a loop
-#: variable. An archive that omitted everyone else's Private Books would
-#: restore to a library missing rows, which is the one thing a backup must
-#: never do, so it is unfiltered on purpose and admin only for that reason.
+#: One: `backup.py` iterates `_TABLES` and reads each through
+#: `select(*columns)`, the columns of a table bound at run time. An archive
+#: that omitted everyone else's Private Books would restore to a library
+#: missing rows, which is the one thing a backup must never do, so it is
+#: unfiltered on purpose and admin only for that reason.
 #: `test_the_backup_is_the_third_way_past_a_viewer_and_says_so` is what holds
 #: that, since this rule structurally cannot.
 INDIRECT_READERS = {"backup.py"}
@@ -365,10 +363,14 @@ INDIRECT_READERS = {"backup.py"}
 #: present. It covered an entry rotting and not the set going short, so a second
 #: module written in this style was invisible to the fourth pass with nothing
 #: red and no record. An inclusion list is one of the four tells this repository
-#: names; `_parameterised_readers` states the rule and this states the classification.
+#: names; `_parameterised_reads` states the rule and this states the classification.
 #:
-#: Three, and they are three different things, which is why a person says which:
+#: Five, and they are five different things, which is why a person says which:
 #:
+#: * `backup.py` reads every row of every table through `select(*columns)`,
+#:   on purpose: it is the archive, `INDIRECT_READERS` says why it is
+#:   unfiltered, and `test_the_backup_is_the_third_way_past_a_viewer_and_says_so`
+#:   holds it admin only.
 #: * `folding.py` runs one transfer per child table of `books` and builds every
 #:   query on the model its policy was constructed with, so the entity name is
 #:   in an argument and never in a reading call. Its three merge statements used
@@ -387,10 +389,17 @@ INDIRECT_READERS = {"backup.py"}
 #:   `Session`. `_builds_a_query` matches `query` on any receiver on purpose,
 #:   and its docstring says why, so a naming coincidence lands here rather than
 #:   being excluded by a rule that would also excuse a real one.
+#: * `shelf.py` calls `db.query(carrier.entry)` in `entries_any_book_carries`,
+#:   the named way that reads past a viewer, with the column chosen by a
+#:   `disclosure.Carrier`. What bounds it is the type, which names one id column
+#:   per member, and the caller count in
+#:   `test_the_named_ways_past_a_viewer_have_the_callers_they_claim`.
 #:
 #: `test_a_parameterised_reader_is_genuinely_invisible_to_this_pass` is what
 #: stops an entry outliving the gap it describes.
-PARAMETERISED_READERS = frozenset({"folding.py", "serialisation.py", "targets.py"})
+PARAMETERISED_READERS = frozenset(
+    {"backup.py", "folding.py", "serialisation.py", "shelf.py", "targets.py"}
+)
 
 #: The entity the first three passes guard.
 _BOOK = frozenset({"Book"})
@@ -714,50 +723,6 @@ BOOK_OWNED_READERS = {
             "its own targets rather than a query with an audience.",
         ),
     ],
-    "fields.py": [
-        (
-            "rows = ( Shelf.seen_by(self._db, self._viewer_id) "
-            ".select(CustomFieldValue.field_id) .join(CustomFieldValue, "
-            "CustomFieldValue.book_id == Book.id) .distinct() .all() )",
-            "which definitions a Book **this Member can see** holds a value "
-            "in, written through `Shelf.select()` and joined to `books`. "
-            # Kept on one line, for the reason the `routers/stats.py` entry
-            # below states at its own copy of this marker.
-            "**Correct, and reported anyway**"
-            ", which is the cost this list pays for not trying to recognise a "
-            "correct join. What crosses is `field_id` and nothing else: no "
-            "value and no `book_id`. **`distinct()` rather than a count**, "
-            "which is the number `list_custom_fields` refuses to publish: how "
-            "many Books carry a field. Producing it needs a count or this read "
-            "without the `distinct`, and either is a changed statement, which "
-            "is what this key is on.",
-        ),
-        (
-            "rows = ( Shelf.trashed_by(self._db, self._viewer_id) "
-            ".select(CustomFieldValue.field_id) .join(CustomFieldValue, "
-            "CustomFieldValue.book_id == Book.id) .distinct() .all() )",
-            "the same read over `Shelf.trashed_by`, so the rows are this "
-            "Member's own trashed Books and every Member's trashed public "
-            "ones, which is `in_trash_for` and no wider. The arm exists "
-            "because a restore reinstates the value: without it, trashing the "
-            "last Book carrying a field takes the field off the settings page "
-            "of the Member who is about to bring it back. `field_id` and "
-            "nothing else crosses, as above.",
-        ),
-        (
-            "rows = self._db.query(CustomFieldValue.field_id).distinct().all()",
-            "**Unscoped on purpose, and the only statement here that is.** "
-            "The other two ask what one Member may see; this asks whether any "
-            "Book at all holds a value in a definition, which is the question "
-            "that separates a field naming somebody's hidden Book from a field "
-            "naming no Book. Scoping it would answer that question wrongly by "
-            "construction, and answering it wrongly hides a field from the "
-            "Member who has just defined it. It is a set of `field_id` and "
-            "never a count, so nothing about how many hidden Books carry one "
-            "can leave through it: the same bound "
-            "`shelf.collections_any_book_is_filed_in` states for collections.",
-        ),
-    ],
     "routers/books.py": [
         (
             "db.execute(book_tags.delete().where(book_tags.c.tag_id == tag_id))",
@@ -784,7 +749,7 @@ BOOK_OWNED_READERS = {
             "the shelf-wide listing. Written through `Shelf.select()` and joined "
             "outward to `books`, so the count is scoped by the same predicate as "
             "the rows: an unscoped total announces how many rows are hidden. "
-            "**Correct, and reported anyway**, like the Tag index in `tags.py`, and the "
+            "**Correct, and reported anyway**, like the statistics page's tag counts, and the "
             "join is the load bearing half here rather than the filter, since "
             "`Shelf.select()` documents that a missing one is a cartesian "
             "product and not an error.",
@@ -861,55 +826,9 @@ BOOK_OWNED_READERS = {
             # one: measured, the split cost this entry its line and the grep
             # answered one where the answer is two.
             "**Correct, and reported anyway**"
-            ", for the same reason as the Tag index in `tags.py` and verified "
-            "the same way.",
-        ),
-    ],
-    "tags.py": [
-        (
-            "self._counts = dict( Shelf.seen_by(self._db, self._viewer_id) "
-            ".select(book_tags.c.tag_id, func.count(book_tags.c.book_id)) "
-            ".join(book_tags, book_tags.c.book_id == Book.id) "
-            ".group_by(book_tags.c.tag_id) .all() )",
-            "the Tag index: every Tag with a count of the Books carrying it, "
-            "written through `Shelf.select()` and joined to `books`. "
-            # Kept on one line, for the reason the `routers/stats.py` entry
-            # below states at its own copy of this marker.
-            "**Correct, and reported anyway**"
             ", which is the cost this list pays for not trying to recognise a "
             "correct join. Verified by reading the SQL: the FROM is the "
-            "filtered `books` and the join is on `book_tags.book_id == "
-            "books.id`. It was `routers/books.list_tags`'s statement until the "
-            "tag disclosure work; it moved here because the row set beside it "
-            "needed the same scoping and four other readers needed the same "
-            "answer, and the entry moved with the statement.",
-        ),
-        (
-            "return bool( Shelf.trashed_by(self._db, self._viewer_id) "
-            ".select(func.count(book_tags.c.book_id)) "
-            ".join(book_tags, book_tags.c.book_id == Book.id) "
-            ".filter(book_tags.c.tag_id == tag.id) .scalar() )",
-            "whether a deleted Book **this Member may see** carries this "
-            "Tag, written through `Shelf.trashed_by()` and joined to `books`, "
-            "so the rows counted are this Member's own trashed Books and every "
-            "Member's trashed public ones, which is `in_trash_for` and no "
-            "wider. **Not \"this Member's own trash\"**, which this entry said "
-            "until 2026-09-30 and which no predicate here tests. The number "
-            "never leaves the method: `bool` is what the caller gets, so no "
-            "count of hidden Books is published even to the member whose trash "
-            "listing it describes.",
-        ),
-        (
-            "return bool( self._db.query(func.count(book_tags.c.book_id)) "
-            ".filter(book_tags.c.tag_id == tag.id) .limit(1) .scalar() )",
-            "**Unscoped on purpose, and the only statement here that is.** "
-            "Every other read asks what one Member may see; this asks whether "
-            "any Book at all carries the Tag, which is the question that "
-            "separates a Tag naming somebody's hidden Book from a Tag naming "
-            "no Book. Scoping it would answer that question wrongly by "
-            "construction. It is a `bool` and never a count, and it is reached "
-            "only after the two scoped arms have already declined, so nothing "
-            "about how many hidden Books carry the Tag can leave it.",
+            "filtered `books` and the join is on `book_tags.book_id == books.id`.",
         ),
     ],
 }
@@ -977,7 +896,7 @@ def _entries_off_their_statements(
 def _backend_module_names() -> frozenset[str]:
     """Every dotted name an import of a module in this backend can spell.
 
-    **Derived from `_source_modules()`, never listed.** An inclusion list is
+    **Derived from `application_sources()`, never listed.** An inclusion list is
     one of the four tells this repository names, and this one would go stale
     the day somebody adds a module.
 
@@ -997,7 +916,7 @@ def _backend_module_names() -> frozenset[str]:
     Parent packages are included because `routers` is importable even where
     the walk only ever saw `routers/books.py`.
 
-    **What it leaves out is what `_source_modules()` leaves out**: `tests/`,
+    **What it leaves out is what `application_sources()` leaves out**: `tests/`,
     `migrations/` and anything a tool owns. An entity imported from a test
     helper therefore still loses its alias. No module under `backend/` outside
     those directories imports one that way, and the subtraction is the safe
@@ -1015,7 +934,7 @@ def _backend_module_names() -> frozenset[str]:
     arm expecting none passes for the wrong reason. No arm does either today.
     """
     names: set[str] = set()
-    for path in _source_modules():
+    for path in application_sources():
         dotted = path.removesuffix(".py").replace("/", ".").removesuffix(".__init__")
         parts = dotted.split(".")
         names.update(".".join(parts[:cut]) for cut in range(1, len(parts) + 1))
@@ -1584,12 +1503,21 @@ def _module_level_names(tree: ast.Module) -> set[str]:
 
 
 def _parameterised_reads(source: str) -> list[int]:
-    """Lines where a query builder is handed a name bound at runtime.
+    """Statements where a query builder is handed a name bound at runtime.
 
     **This pass's own walk with the argument test inverted.** `_book_owned_offences`
     reports a call to `_builds_a_query` whose argument names a guarded entity; a
     call whose argument names a **local** is one this pass structurally cannot
     see, because the table is chosen when the function runs.
+
+    **A local anywhere in an argument, not a spelling of one.** Any `Name` in
+    any argument, positional or keyword, that is not bound at module level
+    reports the call: `db.query(model)`, `db.query(carrier.entry)`,
+    `db.query(func.count(carrier.entry))`, `select(*columns)`,
+    `db.query(cols[k])` and `db.query(getattr(model, name))` alike. `Book.id`
+    and `func.count(Book.id)` name only imports and are the first three
+    passes' business. A module level alias such as `COL = Carrier.BOOK_TAGS.entry`
+    is bound at import and is not reported.
 
     Over-reporting is the safe direction and is what the pinned set is for: a
     receiver that is not a `Session` lands here too, which is how `targets.py`
@@ -1599,18 +1527,26 @@ def _parameterised_reads(source: str) -> list[int]:
     tree = ast.parse(source)
     bound = _module_level_names(tree)
     select_names, module_names = _sqlalchemy_names(tree)
-    return sorted(
-        {
-            node.lineno
-            for node in ast.walk(tree)
-            if isinstance(node, ast.Call)
+    owner = _enclosing_statements(tree)
+
+    def runtime(argument: ast.expr) -> bool:
+        return any(
+            isinstance(node, ast.Name) and node.id not in bound
+            for node in ast.walk(argument)
+        )
+
+    found = set()
+    for node in ast.walk(tree):
+        if not (
+            isinstance(node, ast.Call)
             and _builds_a_query(node.func, select_names, module_names)
-            and any(
-                isinstance(argument, ast.Name) and argument.id not in bound
-                for argument in node.args
-            )
-        }
-    )
+        ):
+            continue
+        arguments = [*node.args, *(keyword.value for keyword in node.keywords)]
+        if any(runtime(argument) for argument in arguments):
+            statement = owner.get(id(node))
+            found.add(statement.lineno if statement is not None else node.lineno)
+    return sorted(found)
 
 
 #: Modules a `from ... import *` can launder a predicate out of.
@@ -1800,7 +1736,7 @@ class TestTheShelfIsTheOnlyWayIn:
         """
         offenders = sorted(
             f"{name}:{predicate}"
-            for name, source in _source_modules().items()
+            for name, source in application_sources().items()
             if name not in PREDICATE_IMPORTERS
             for predicate in _imported_predicates(source)
         )
@@ -1814,7 +1750,7 @@ class TestTheShelfIsTheOnlyWayIn:
         one that imported the wrong thing."""
         offenders = sorted(
             f"{name}:{line}"
-            for name, source in _source_modules().items()
+            for name, source in application_sources().items()
             if name not in QUERY_BUILDERS
             for line in _query_offences(source)
         )
@@ -1832,7 +1768,7 @@ class TestTheShelfIsTheOnlyWayIn:
         """
         offenders = sorted(
             f"{name}:{line}"
-            for name, source in _source_modules().items()
+            for name, source in application_sources().items()
             if name not in QUERY_BUILDERS | JOIN_CALLERS
             for line in _join_offences(source)
         )
@@ -1856,7 +1792,7 @@ class TestTheShelfIsTheOnlyWayIn:
         """
         sources = {
             name: source
-            for name, source in _source_modules().items()
+            for name, source in application_sources().items()
             if name not in QUERY_BUILDERS
         }
         found = {
@@ -2744,7 +2680,7 @@ class TestTheShelfIsTheOnlyWayIn:
         """
         derived = {
             name
-            for name, source in _source_modules().items()
+            for name, source in application_sources().items()
             if _parameterised_reads(source)
         }
         assert derived == set(PARAMETERISED_READERS), (
@@ -2756,34 +2692,65 @@ class TestTheShelfIsTheOnlyWayIn:
 
     def test_the_derivation_sees_a_runtime_entity_and_not_an_imported_one(self):
         """The rule, driven against two statements built here, because asking it
-        of the tree only restates the three modules that already answer."""
+        of the tree only restates the modules that already answer."""
         runtime = "def carry(db, model):\n    return db.query(model).all()\n"
+        attribute = "def carry(db, carrier):\n    return db.query(carrier.entry).all()\n"
         imported = (
             "from models import Book\n\ndef carry(db):\n    return db.query(Book).all()\n"
         )
 
         assert _parameterised_reads(runtime) == [2]
+        assert _parameterised_reads(attribute) == [2]
         assert _parameterised_reads(imported) == []
+
+    @pytest.mark.parametrize(
+        "source",
+        [
+            pytest.param(
+                "from sqlalchemy import func\n"
+                "def carry(db, carrier):\n"
+                "    return db.query(func.count(carrier.entry)).all()\n",
+                id="inside a call",
+            ),
+            pytest.param(
+                "def carry(db, columns):\n    return db.query(*columns).all()\n",
+                id="starred",
+            ),
+        ],
+    )
+    def test_a_runtime_name_anywhere_in_an_argument_is_reported(self, source):
+        """A local below the argument's root chooses the table at run time as
+        surely as one at it. Both shapes are the tree's own: `lending.py` wraps
+        a builder argument in `func.count`, and `backup.py` stars one."""
+        line = len(source.splitlines())
+
+        assert _parameterised_reads(source) == [line]
 
     def test_a_parameterised_reader_is_genuinely_invisible_to_this_pass(self):
         """The diagonal on `PARAMETERISED_READERS`, in the direction that rots.
 
-        A module listed there is excused nothing: it is recorded as unseeable.
-        If one of them starts naming an entity in a reading call, this pass can
-        see it again and the entry becomes a note about a gap that closed, which
-        is worse than no note. Reported here rather than waiting for somebody to
-        re-derive it.
+        A module listed there is excused nothing: its parameterised statements
+        are recorded as unseeable. If one of those statements starts naming an
+        entity this pass sees, the entry becomes a note about a gap that closed,
+        which is worse than no note. Asked per statement rather than per module,
+        because a listed module may hold other reads this pass sees by design:
+        the Shelf's own, and `backup.py`'s `book_tags.select()`.
         """
-        sources = _source_modules()
+        sources = application_sources()
         seen = {
-            name: _book_owned_offences(sources[name])
-            for name in PARAMETERISED_READERS
-            if _book_owned_offences(sources[name])
+            name: overlap
+            for name in sorted(PARAMETERISED_READERS)
+            if (
+                overlap := sorted(
+                    set(_parameterised_reads(sources[name]))
+                    & set(_book_owned_offences(sources[name]))
+                )
+            )
         }
         assert not seen, (
-            "these are named in PARAMETERISED_READERS as reads this pass cannot "
-            "see, and it can see them: give them entries in BOOK_OWNED_READERS "
-            f"and take them out of that set: {seen}"
+            "these statements are named in PARAMETERISED_READERS as reads this "
+            "pass cannot see, and it can see them: give them entries in "
+            f"BOOK_OWNED_READERS and say so beside that set: {seen}"
         )
 
     def test_the_book_owned_set_is_the_entities_those_tables_map_to(self):
@@ -2928,7 +2895,7 @@ class TestTheShelfIsTheOnlyWayIn:
         """
         offenders = sorted(
             f"{name}:{called}"
-            for name, source in _source_modules().items()
+            for name, source in application_sources().items()
             if name not in PREDICATE_IMPORTERS
             for called in _predicate_calls(source)
         )
@@ -3192,8 +3159,9 @@ class TestTheShelfIsTheOnlyWayIn:
         """`backup.py` is invisible to every rule in this file, so it is
         asserted rather than assumed.
 
-        It reads every row of every table through `db.query(model)` on a loop
-        variable, so no rule that reads the arguments to `query()` can see it.
+        It reads every row of every table through `select(*columns)` over a
+        table bound at run time, so no rule that reads a query's arguments can
+        see which table it reads.
         That is deliberate: a backup that omitted everyone else's Private Books
         would restore to a library missing rows. What holds it safe is that it
         is admin only, which is checked here because nothing else does.
@@ -3225,9 +3193,9 @@ class TestTheShelfIsTheOnlyWayIn:
         calls: dict[str, list[str]] = {
             "whole_table_for_uniqueness": [],
             "rereading_filtered_rows": [],
-            "collections_any_book_is_filed_in": [],
+            "entries_any_book_carries": [],
         }
-        for name, source in _source_modules().items():
+        for name, source in application_sources().items():
             if name == "shelf.py":
                 continue
             tree = ast.parse(source)
@@ -3254,12 +3222,12 @@ class TestTheShelfIsTheOnlyWayIn:
         assert len(calls["whole_table_for_uniqueness"]) == 4, calls
         assert len(calls["rereading_filtered_rows"]) == 1, calls
         # **One, and it is the arm that keeps the third way past a viewer
-        # narrow.** It answers whether a collection has anything to disclose at
-        # all, which is a question no viewer can be applied to without turning
+        # narrow.** It answers whether a vocabulary entry has anything to
+        # disclose at all, which is a question no viewer can be applied to without turning
         # it into a different one, and it hands back ids rather than a count so
         # nothing about how many hidden Books carry one crosses the boundary. A
         # second caller is a decision about that boundary rather than an edit.
-        assert len(calls["collections_any_book_is_filed_in"]) == 1, calls
+        assert len(calls["entries_any_book_carries"]) == 1, calls
 
 
 class TestWhoSeesWhat:
@@ -4169,7 +4137,7 @@ def _reachable_from(entry: str) -> dict[str, ast.FunctionDef]:
     Keyed `module:qualifier:name` so the report says where a body came from,
     and so two definitions of one name are two entries rather than one.
     """
-    sources = _source_modules()
+    sources = application_sources()
     tables = {name: _definitions(sources[name]) for name in _FOLLOWED_MODULES}
 
     # `cls` inside a classmethod is the class it is defined on, which is how
@@ -5214,7 +5182,7 @@ class TestOnlyTheShelfSaysWhatMayLeave:
       `schemas/public.py` records the id gap as a known one.
     * **Any construction that does not name the type**, which is the family
       `Outbound.__post_init__` exists to refuse rather than this rule.
-    * **A construction in a test**, since `_source_modules()` excludes `tests/`.
+    * **A construction in a test**, since `application_sources()` excludes `tests/`.
       That is not a hatch any more: `__post_init__` refuses a test like anything
       else, which `TestOnlyTheShelfCanMintOne` asserts, and nothing in the tree
       relies on minting one by hand.
@@ -5228,7 +5196,7 @@ class TestOnlyTheShelfSaysWhatMayLeave:
     def test_nothing_outside_the_shelf_constructs_one(self):
         offenders = sorted(
             f"{name}:{line}"
-            for name, source in _source_modules().items()
+            for name, source in application_sources().items()
             if name != "shelf.py"
             for line in _outbound_constructions(source)
         )
@@ -5544,7 +5512,7 @@ class TestTheSerialisersThatMayBuildAnOutboundPayload:
       off a shelf with no ownership arm, and the direction that would matter,
       putting unsafe rows *into* the type, is what `Outbound.__post_init__`
       refuses.
-    * **A serialiser in a test**, since `_source_modules()` excludes `tests/`.
+    * **A serialiser in a test**, since `application_sources()` excludes `tests/`.
     * **A second door of a kind already argued, in a module already argued.**
       The keys are module and kind, so a second `outbound_page` call inside
       `routers/public.py` adds none. What a new key says is that a module has
@@ -5586,7 +5554,7 @@ class TestTheSerialisersThatMayBuildAnOutboundPayload:
         # what it did buy was the one module where a serialiser could be put and
         # this rule would not see it.
         found: set[str] = set()
-        for name, source in _source_modules().items():
+        for name, source in application_sources().items():
             found |= {
                 f"{name}: {function} takes an Outbound"
                 for function in _outbound_signatures(source)
@@ -5674,17 +5642,17 @@ class TestTheSerialisersThatMayBuildAnOutboundPayload:
 class TestTheModulesTheseRulesWalk:
     """The corpus every rule in this file is asked about.
 
-    Every guard here is an absence over `_source_modules()`, so a walk that
+    Every guard here is an absence over `application_sources()`, so a walk that
     quietly returns the wrong set changes every verdict in the file with nothing
     to say so. Two ways that happens, and the second is the one that was live:
     it narrows and a rule stops seeing an offender, or it widens into a tool's
     own directory and a rule reports third party code nobody here can fix.
 
-    **The walk is `test_house_rules._source_modules` and this file no longer
+    **The walk is `corpus.application_sources` and this file no longer
     keeps its own.** The copy here excluded a tool's directory by naming `.venv`
     and nothing else, so a `.uv-cache/` under `backend/` in CI, which is where
     the pipeline puts it, was source as far as every rule in this file was
-    concerned. `_is_vendored` is the structural rule and it has its own tests
+    concerned. `is_vendored` is the structural rule and it has its own tests
     beside it.
     """
 
@@ -5692,5 +5660,5 @@ class TestTheModulesTheseRulesWalk:
         """Anti vacuity, and it names one module per shape the rules read: the
         seam itself, a router and a module reached only through a join."""
         assert {"shelf.py", "routers/books.py", "notifications.py"} <= set(
-            _source_modules()
+            application_sources()
         )

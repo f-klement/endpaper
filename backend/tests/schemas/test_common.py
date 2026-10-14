@@ -31,7 +31,7 @@ from schemas.common import (
     one_line_without_any_control_character,
     one_line_without_invisible_characters,
 )
-from tests.test_house_rules import BACKEND, _python_sources
+from tests.corpus import BACKEND, application_modules
 
 #: The module the API layer is required to ask, found through the function
 #: rather than by path, so moving the home moves the exemption with it.
@@ -73,14 +73,14 @@ def _declares_an_api(source: str) -> bool:
 def _api_layer() -> list[Path]:
     """Every module in that layer, through the walk this tree shares.
 
-    `_python_sources` rather than an `rglob` of our own, which is the rule
-    `test_house_rules.py` enforces over every test module: nine of them walked
+    `application_modules` rather than an `rglob` of our own, which is the rule
+    `tests/test_corpus.py` holds every test module to: nine of them walked
     `backend/` excluding a list of directory names each had heard of, and none
     of the lists held the cache the pipeline creates.
     """
     return sorted(
         path
-        for path in _python_sources()
+        for path in application_modules()
         if path.resolve() != _HOME and _declares_an_api(path.read_text())
     )
 

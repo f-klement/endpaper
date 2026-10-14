@@ -25,15 +25,7 @@
  */
 import { parseAst } from "vite";
 
-type Node = { type: string } & Record<string, unknown>;
-
-function isNode(value: unknown): value is Node {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    typeof (value as { type?: unknown }).type === "string"
-  );
-}
+import { walk } from "./sourceReader";
 
 /** What a path says about how to parse it. */
 export function langOf(path: string): "ts" | "tsx" {
@@ -60,21 +52,13 @@ const NOT_PROSE = new Set(["Literal", "TemplateElement", "JSXText"]);
 /** Which offsets of `source` sit inside one of those. */
 function insideALiteral(source: string, lang: "ts" | "tsx"): Uint8Array {
   const inside = new Uint8Array(source.length);
-  const walk = (value: unknown): void => {
-    if (Array.isArray(value)) {
-      for (const item of value as unknown[]) walk(item);
-      return;
-    }
-    if (!isNode(value)) return;
-    if (NOT_PROSE.has(value.type)) {
-      const { start, end } = value as { start?: unknown; end?: unknown };
-      if (typeof start === "number" && typeof end === "number")
-        inside.fill(1, start, end);
-      return;
-    }
-    for (const key of Object.keys(value)) walk(value[key]);
-  };
-  walk(parseAst(source, { lang }));
+  walk(parseAst(source, { lang }), (value) => {
+    if (!NOT_PROSE.has(value.type)) return;
+    const { start, end } = value as { start?: unknown; end?: unknown };
+    if (typeof start === "number" && typeof end === "number")
+      inside.fill(1, start, end);
+    return false;
+  });
   return inside;
 }
 

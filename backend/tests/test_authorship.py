@@ -1046,8 +1046,8 @@ class TestOnlyAnAssertionTheBookCreditsIsStored:
 
     Without it an assertion landed on whatever the catalogue spelled, which on
     an ordinary enrichment is a spelling the Library never adopted:
-    `google_books.merge_into` skips `author` when the Book has one and
-    `overwrite` is false.
+    `evidence.apply_record` skips `author` when the Book has one and the
+    policy is `FILL_GAPS`.
     """
 
     def test_a_spelling_the_book_does_not_carry_is_not_stored(self, db, user):

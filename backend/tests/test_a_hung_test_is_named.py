@@ -56,7 +56,7 @@ from xml.etree import ElementTree
 import pytest
 
 from tests import conftest
-from tests.test_house_rules import _test_sources
+from tests.corpus import suite_modules
 
 _BACKEND = Path(__file__).resolve().parents[1]
 _MANIFEST = _BACKEND / "pyproject.toml"
@@ -441,8 +441,8 @@ def declared_ceilings() -> list[DeclaredCeiling]:
     **The file set is the shared walk and not a recursion of this file's own.**
     A tree of Python walked here would read whatever the pipeline unpacks under
     `backend/`, which is green on every developer checkout and wrong in the one
-    environment that matters. `tests/test_house_rules.py` holds that rule and
-    enforces it on every other module, which is how this walk was caught.
+    environment that matters. `tests/corpus.py` holds that rule and
+    `tests/test_corpus.py` refuses a walk anywhere else.
 
     **What it leaves out, stated rather than left for the next reader.**
 
@@ -453,7 +453,7 @@ def declared_ceilings() -> list[DeclaredCeiling]:
       positionally. Those are invisible here and the global would cut them.
     """
     found: list[DeclaredCeiling] = []
-    for path in sorted(_test_sources()):
+    for path in sorted(suite_modules()):
         tree = ast.parse(path.read_text(), str(path))
         constants: dict[str, float] = {}
         for node in tree.body:

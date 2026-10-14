@@ -19,14 +19,14 @@ moves:
 
 - **scored against this file alone, 21 stay green**;
 - adding one arm from another file,
-  `test_google_books.py::TestTheSignatureIsTheBound::test_every_column_it_writes_is_a_field_the_model_bounds`,
+  `test_evidence.py::TestTheSignatureIsTheBound::test_every_column_it_writes_is_a_field_the_model_bounds`,
   takes it to **10**. That arm is a guard, not a behaviour test: it partitions
-  `BookMatch`'s fields against the names `merge_into` walks, so it sees every
-  column that **leaves** `WORK_DETAIL`, and every column arriving there except
-  `cover_url`, which `merge_into` already reads off the match by name below its
-  loop, so that one move leaves the partitioned set exactly where it was;
+  `BookMatch`'s fields against the names `evidence._apply_match` walks, so it
+  sees every column that **leaves** `WORK_DETAIL`, and every column arriving
+  there except `cover_url`, which it already reads off the match by name below
+  its loop, so that one move leaves the partitioned set exactly where it was;
 - adding `tests/routers/test_books_copies.py` and the rest of
-  `test_google_books.py` takes it to **5**.
+  `test_evidence.py` takes it to **5**.
 
 Recompute rather than copying: the first two fall out of
 `book_columns.PARTITION` and the predicates below with no suite run at all, the
@@ -75,7 +75,7 @@ from sqlalchemy.sql import visitors
 import book_columns
 import models
 from schemas.book import BookDetailsUpdate, BookMatch, CopyCreate
-from tests.test_house_rules import BACKEND, _every_python_file
+from tests.corpus import BACKEND, every_python_file
 
 BOOK_COLUMNS = Path(__file__).resolve().parent.parent / "book_columns.py"
 
@@ -109,7 +109,7 @@ def _sets_walked_by(module: ModuleType, function: str) -> list[object]:
     renamed is followed and a set written out again at the call site is not: the
     arms below assert **identity** with the module's own tuple, which a literal
     equal to it fails. Evaluated in the module's namespace for the reason
-    `tests/test_google_books.py::TestTheSignatureIsTheBound` gives about
+    `tests/test_evidence.py::TestTheSignatureIsTheBound` gives about
     `ast.unparse`, and a local name (`for loser in losers`) raises `NameError`
     there rather than needing a rule to exclude it.
     """
@@ -179,16 +179,14 @@ def _assigned_after_the_insert(module: ModuleType, function: str, constructor: s
 def _names_read_outside_the_tests() -> set[str]:
     """Every `book_columns` name read as code by a module that is not a test.
 
-    **The corpus is `_every_python_file`, not a walk of this file's own.**
-    `tests/test_house_rules.py` owns what counts as vendored, and its first
-    draft here excluded `.venv` by name, which is the enumeration that file
-    records going red on ten of twenty pushes when the pipeline unpacked
-    `.uv-cache/`. That rule fires on this module by name
-    (`TestTheSourceWalkSeesOnlyThisProject`), which is how the draft was caught.
-    The two exclusions left are ours and semantic rather than about vendored
-    code: the test tree, because the claim is about modules that are not tests,
-    and this module's own source. `migrations/` is in, deliberately, which is
-    why the wider walk is the one asked.
+    **The corpus is `every_python_file`, not a walk of this file's own.**
+    `tests/corpus.py` owns what counts as vendored. The first draft here
+    excluded `.venv` by name, which is the enumeration that went red on ten of
+    twenty pushes when the pipeline unpacked `.uv-cache/`. The two exclusions
+    left are ours and semantic rather than about vendored code: the test tree,
+    because the claim is about modules that are not tests, and this module's
+    own source. `migrations/` is in, deliberately, which is why the wider walk
+    is the one asked.
 
     Read as code, not matched: `WORK_IDENTITY` is named in two module docstrings
     and read by neither, and an `ast` walk sees that difference where a `grep`
@@ -208,7 +206,7 @@ def _names_read_outside_the_tests() -> set[str]:
     each is visible at its own call site in a way an alias is not.
     """
     names: set[str] = set()
-    for path in _every_python_file():
+    for path in every_python_file():
         if path == BOOK_COLUMNS or "tests" in path.relative_to(BACKEND).parts:
             continue
         tree = ast.parse(path.read_text())
@@ -378,7 +376,7 @@ class TestEachCellIsDerivableFromSomethingThatIsNotItself:
     def test_every_column_an_enrichment_writes_is_one_the_model_bounds(self):
         """The other direction on the same source, and it is the runtime bound.
 
-        `google_books.merge_into` reads each of these off a `BookMatch` by name,
+        `evidence._apply_match` reads each of these off a `BookMatch` by name,
         `WORK_DETAIL` in its loop and `WORK_COVER` below it, so a column in
         either that the model does not carry raises `AttributeError` on the
         first enrichment. The arm above says a catalogue's columns are work
@@ -540,12 +538,12 @@ class TestTheDoorsAreWhatTheWritersWalk:
             for walked in _sets_walked_by(routers.books, "add_copy")
         )
 
-    def test_google_enrichment_fills_the_work_detail(self):
-        import google_books
+    def test_enrichment_fills_the_work_detail(self):
+        import evidence
 
         assert any(
             walked is book_columns.WORK_DETAIL
-            for walked in _sets_walked_by(google_books, "merge_into")
+            for walked in _sets_walked_by(evidence, "_apply_match")
         )
 
     def test_nothing_outside_the_tests_reaches_past_those_three_names(self):

@@ -30,7 +30,7 @@ from enums import ClassificationScheme, HeadingKind
 from models import Book, Classification
 from schemas import MAX_CLASSIFICATIONS_PER_BOOK
 from schemas.classification import ClassificationIn
-from tests.test_house_rules import _is_vendored
+from tests.corpus import BACKEND, application_modules
 
 
 class TestReadingAKindOffARow:
@@ -380,18 +380,6 @@ class TestCorrectingAHeadingWrittenBeforeTheKindExisted:
         )
 
 
-#: `backend/`, whose modules the derivation below walks.
-BACKEND = pathlib.Path(__file__).resolve().parent.parent
-
-#: Directories under `backend/` the walk does not read, because they are this
-#: application's own and are still not source a catalogue reaches.
-#:
-#: `tests` holds fixtures that construct a `Heading` to arrange a case, which is
-#: not a source building one. `migrations` is a historical record: a revision
-#: describes the data as it was on the day it ran and is not a code path any
-#: catalogue reaches.
-_NOT_THIS_APP = frozenset({"tests", "migrations"})
-
 #: English for the small numbers this repository's prose spells out.
 _NUMERALS = {
     "two": 2, "three": 3, "four": 4, "five": 5, "six": 6,
@@ -410,49 +398,6 @@ def _catalogues_stated_in(prose: str) -> int | None:
     """
     found = re.search(r"concatenated up to (\w+) catalogues", " ".join(prose.split()))
     return _NUMERALS.get(found.group(1)) if found else None
-
-
-def _is_this_app(parts: tuple[str, ...], root: pathlib.Path = BACKEND) -> bool:
-    """Whether a path under `backend/` is this application's own source.
-
-    **`root` is the tree the parts are relative to**, and it is here so that
-    `_modules` can be driven against a constructed tree by the diagonal in
-    `test_house_rules.py`. Asked with the parts of one tree and the root of
-    another, this would answer about neither: the predicate has to move with
-    the walk that calls it.
-
-    **What is not ours is `test_house_rules._is_vendored`**, which is where the
-    incident this used to recount is written down: this file named `.venv` and
-    nothing else, CI sets `UV_CACHE_DIR` to `.uv-cache` **inside `backend/`**,
-    and the derivation then reported **every catalogue in the roster** as
-    feeding a heading against a docstring that says seven. It passed locally and
-    failed only in CI, which is the worst shape a guard can have.
-
-    **The dot rule this held is a subset of that one**, and the difference is
-    not academic: an environment's directory need not carry a dot, and this
-    walk read `site-packages` under one that did not until the shared predicate
-    grew that name. What is left here is the half that is genuinely this
-    file's: two directories that **are** ours and are still not source a
-    catalogue reaches.
-    """
-    if _NOT_THIS_APP & set(parts):
-        return False
-    return not _is_vendored(root.joinpath(*parts), root)
-
-
-def _modules(root: pathlib.Path = BACKEND) -> list[pathlib.Path]:
-    found = [
-        path
-        for path in root.rglob("*.py")
-        if _is_this_app(path.relative_to(root).parts, root)
-    ]
-    # The packages it must cover rather than a number, which is the floor its
-    # three sibling walks carry and this one did not: the anti-vacuity beside
-    # it is `assert walked` and `assert builds`, and one surviving file
-    # satisfies both. See `test_accounts._sources` for the mutation that left
-    # two guards of this shape green.
-    assert {"routers", "schemas"} <= {path.parent.name for path in found}, found
-    return found
 
 
 def _module_name(path: pathlib.Path, root: pathlib.Path = BACKEND) -> str:
@@ -783,7 +728,7 @@ def _graph_of(trees: Mapping[str, ast.Module]) -> tuple[dict[str, set[str]], set
 def _call_graph() -> tuple[dict[str, set[str]], set[str]]:
     """`_graph_of` this application."""
     return _graph_of(
-        {_module_name(path): ast.parse(path.read_text()) for path in _modules()}
+        {_module_name(path): ast.parse(path.read_text()) for path in application_modules()}
     )
 
 
@@ -1201,55 +1146,6 @@ class TestHowManyCataloguescanFeedOneBooksHeadings:
             if names & reaching
         }
 
-    def test_a_tooling_directory_is_not_read_however_a_tool_names_it(self):
-        """The evasion that broke this guard in CI, kept as a test.
-
-        The exclusion named `.venv` and nothing else, and CI sets `UV_CACHE_DIR`
-        to `.uv-cache` under `backend/`, so the walk read every vendored wheel
-        and reported **every catalogue in the roster** as feeding a heading,
-        where the docstring says seven. **This passed locally throughout**, because uv caches
-        outside the tree here.
-
-        So the rule is the leading dot rather than a list, and this fails if
-        anybody puts it back to a list: the third case is a name no list could
-        have held, because no tool has invented it yet.
-        """
-        assert not _is_this_app((".venv", "lib", "site.py"))
-        assert not _is_this_app((".uv-cache", "pkg", "vendored.py"))
-        assert not _is_this_app((".a-cache-no-tool-has-invented-yet", "x.py"))
-        assert _is_this_app(("metadata.py",))
-        assert _is_this_app(("routers", "books.py"))
-
-    def test_the_walk_applies_that_rule_to_this_checkout(self):
-        """The live half: that `_modules` **applies** the rule, not what it says.
-
-        **Asked against the unfiltered tree, because asking the filtered one
-        answers itself.** `_modules` excludes on the same predicate, so a check
-        that re-tests its output for a dotted part is empty by construction and
-        cannot go red on any checkout. Two versions of this were: one reading
-        the absolute path, which also went red wherever the checkout itself sat
-        under a dotted directory, and one reading the relative path, which was
-        simply vacuous.
-
-        What is left for it to catch is a `_modules` that stops filtering while
-        `_is_this_app` stays right, which the pure test above cannot see. The
-        count would eventually go red too, saying the number is wrong rather
-        than saying this walk read a virtualenv.
-        """
-        below = [path.relative_to(BACKEND) for path in BACKEND.rglob("*.py")]
-        tooling = [
-            path
-            for path in below
-            if any(part.startswith(".") for part in path.parts)
-        ]
-        if not tooling:
-            pytest.skip("no tooling directory in this checkout to exclude")
-
-        walked = {path.relative_to(BACKEND) for path in _modules()}
-
-        assert walked
-        assert not walked & set(tooling)
-
     def test_the_walk_finds_the_construction_sites_at_all(self):
         """Anti vacuity, and the first thing to break if `Heading` is renamed or
         the module layout moves: with an empty set every assertion below passes
@@ -1298,7 +1194,7 @@ class TestHowManyCataloguescanFeedOneBooksHeadings:
         silence."""
         functions = {
             name
-            for path in _modules()
+            for path in application_modules()
             for name, node in _definitions(
                 ast.parse(path.read_text()).body, _module_name(path)
             )

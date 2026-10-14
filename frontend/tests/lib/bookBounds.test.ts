@@ -36,55 +36,45 @@ import {
   QUERY_FLOOR,
   TEXT_CEILINGS,
 } from "../../src/lib/bookBounds";
-
-const SCHEMA = import.meta.glob("../../openapi.json", {
-  query: "?raw",
-  import: "default",
-  eager: true,
-}) as Record<string, string>;
+import {
+  boundOf,
+  operationById,
+  parametersOf,
+  propertiesOf,
+  statedBound,
+  type SchemaNode,
+} from "../committedSchema";
 
 interface Constraint {
   maxLength?: number;
   minimum?: number;
   maximum?: number;
+  /**
+   * **Carried so the list arm below can see it, and deliberately not merged
+   * into `maxLength`.** A list bound dropped here was a number this file
+   * claimed to recompute and could not reach. Merging an entry's width into
+   * `maxLength` would be worse: a subject list would read as a bounded string
+   * and be expected to join `TEXT_CEILINGS`.
+   */
   maxItems?: number;
-  items?: { maxLength?: number };
-  anyOf?: Constraint[];
 }
 
-/** A nullable field is `anyOf: [{the real thing}, {null}]`, so flatten first. */
-function flatten(property: Constraint): Constraint {
-  const parts = [property, ...(property.anyOf ?? [])];
-  return {
-    maxLength: parts.find((part) => part.maxLength !== undefined)?.maxLength,
-    minimum: parts.find((part) => part.minimum !== undefined)?.minimum,
-    maximum: parts.find((part) => part.maximum !== undefined)?.maximum,
-    // **Carried so the arm below can see them, and deliberately not merged into
-    // `maxLength`.** A list bound this flattener dropped was a number the file
-    // above claimed to recompute and could not reach. Merging `items.maxLength`
-    // into `maxLength` would be worse than dropping it: a subject list would
-    // read as a bounded string and be expected to join `TEXT_CEILINGS`.
-    maxItems: parts.find((part) => part.maxItems !== undefined)?.maxItems,
-    items: parts.find((part) => part.items !== undefined)?.items,
-  };
-}
-
+/** `BookCreate`'s fields, each bound read across its non null branches. */
 function bookCreate(): Record<string, Constraint> {
-  const raw = SCHEMA["../../openapi.json"] ?? "";
-  // A glob that matched nothing would make every assertion below pass forever.
-  expect(raw.length).toBeGreaterThan(1000);
-  const schema = JSON.parse(raw) as {
-    components: {
-      schemas: Record<string, { properties: Record<string, Constraint> }>;
-    };
-  };
-  const properties = schema.components.schemas.BookCreate?.properties;
-  expect(properties).toBeDefined();
   return Object.fromEntries(
-    Object.entries(properties!).map(([name, property]) => [
-      name,
-      flatten(property),
-    ]),
+    Object.entries(propertiesOf("BookCreate")).map(([name, property]) => {
+      const bound = (keyword: string) =>
+        boundOf(property, keyword, `BookCreate/${name}`);
+      return [
+        name,
+        {
+          maxLength: bound("maxLength"),
+          minimum: bound("minimum"),
+          maximum: bound("maximum"),
+          maxItems: bound("maxItems"),
+        },
+      ];
+    }),
   );
 }
 
@@ -243,30 +233,16 @@ describe("boundNumber", () => {
 
 /** The `q` parameter of `GET /api/books/search`, read off the schema. */
 function searchQueryConstraint(): { maxLength: number; minLength: number } {
-  const raw = SCHEMA["../../openapi.json"] ?? "";
-  // A glob that matched nothing would make both assertions below pass forever.
-  expect(raw.length).toBeGreaterThan(1000);
-  const schema = JSON.parse(raw) as {
-    paths: Record<
-      string,
-      {
-        get: {
-          parameters: {
-            name: string;
-            schema: { maxLength?: number; minLength?: number };
-          }[];
-        };
-      }
-    >;
-  };
-  const parameter = schema.paths["/api/books/search"]?.get.parameters.find(
-    (candidate) => candidate.name === "q",
+  const { operation } = operationById("search_books");
+  const parameter = parametersOf(operation).find(
+    (candidate) => candidate["name"] === "q",
   );
   expect(parameter).toBeDefined();
-  const { maxLength, minLength } = parameter!.schema;
-  expect(maxLength).toBeDefined();
-  expect(minLength).toBeDefined();
-  return { maxLength: maxLength!, minLength: minLength! };
+  const schema = parameter!["schema"] as SchemaNode;
+  return {
+    maxLength: statedBound(schema, "maxLength", "q"),
+    minLength: statedBound(schema, "minLength", "q"),
+  };
 }
 
 describe("the query bounds", () => {

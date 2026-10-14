@@ -137,16 +137,17 @@ lists at all is the next section.
 
 `backend/tests/test_custom_fields.py::TestOnlyABookReachesAValue` holds it in three passes. An
 **import** pass, so no module but `custom_fields.py`, `models.py`, `backup.py` and
-`fields.py` may hold `CustomFieldValue`. A **touch** pass over the module's own AST, reporting
+`disclosure.py` may hold `CustomFieldValue`. A **touch** pass over the module's own AST, reporting
 any public function whose body names the table and that takes no `Book`. And a **name** pass,
 so a parameter that mentions a book is annotated with `Book`.
 
 The fourth of those is the one that takes no `Book`, and it is a different question rather
-than an exemption. `backend/fields.py` asks which **definitions** a member may be told exist,
-which is the question in the section below; it reads `custom_field_values` three times and
-every one of them selects `field_id` and nothing else, so no value, no book and no count
-crosses out of it. Two of the three go through the Shelf. The third is unscoped on purpose
-and the module says why.
+than an exemption. `backend/disclosure.py` asks which entries of a vocabulary a member may be
+told exist, custom field **definitions** among them, which is the question in the section
+below. For custom fields it reads `custom_field_values` three times and every read selects
+`field_id` and nothing else, so no value, no book and no count crosses out of it. Two of the
+three go through the Shelf in `disclosure.py`. The third is `shelf.entries_any_book_carries`,
+unscoped on purpose, and its docstring says why.
 
 The touch pass is written that way because the version it replaced was not enforcement: it
 enumerated the two functions that existed by hand, so adding `values_of(db, book_ids)` passed
@@ -170,7 +171,8 @@ column existed. So for anybody else nothing in the row says who may be told abou
 name is free text somebody typed, and before this it was broadcast to every member on every
 page that drew the field picker.
 
-`backend/fields.py` answers it the way `backend/shelving.py` answers it for collections.
+`backend/disclosure.py` answers it for every vocabulary, and `backend/fields.py` is the custom
+field arm, as `backend/shelving.py` is the collection arm.
 `Fields.seen_by(db, viewer_id).listable()` admits a definition on four arms: a book the
 viewer can see holds a value in it, a book in the viewer's trash does, no book at all does, or
 **this member defined it**. That arm is one of the two things

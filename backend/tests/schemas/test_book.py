@@ -110,13 +110,17 @@ import models
 import routers
 import routers.books as books_router
 import schemas.book as schemas_book
-from enums import ReadStatus
-from google_books import CATEGORY_SEPARATOR, join_categories, split_categories
-from models import CLASSIFICATION_NUMBER_MAX, Book
-from schemas.book import (
+from categories import (
     CATEGORIES_MAX,
     CATEGORY_MAX,
+    CATEGORY_SEPARATOR,
     MAX_CATEGORIES_PER_BOOK,
+    join_categories,
+    split_categories,
+)
+from enums import ReadStatus
+from models import CLASSIFICATION_NUMBER_MAX, Book
+from schemas.book import (
     MERGE_BOOKS_MAX,
     BookCreate,
     BookMatch,
@@ -142,7 +146,7 @@ from schemas.book import (
 #: the two fields it named and wrong about the class it covered.
 #:
 #: `_require_tag` range checks against `MAX_ROW_ID` since 2026-09-03 and
-#: answers 404, which is what an unused id already got.
+#: answers 400, which is what an unused id gets.
 #: `tests/routers/test_books_bulk.py::TestATagIdPastTheDatabasesRangeIsRefused`
 #: holds it, for both verbs that reach the helper. **Three** of the seven verbs
 #: read this field as a row id and they reach **two** helpers, which is the
@@ -1490,7 +1494,7 @@ class TestNoBodyWrittenOntoARowCanClearAColumnThatRefusesNull:
 
     `BookMatch.title` is the other field in the tree naming a NOT NULL column
     and admitting null, and it is not here because nothing writes it:
-    `google_books.merge_into` walks `book_columns.WORK_DETAIL`, which holds the
+    `evidence._apply_match` walks `book_columns.WORK_DETAIL`, which holds the
     descriptive facts, and `title` is `WORK_IDENTITY`. That is a property of the
     writer rather than of the model, which is why this rule asks about the
     writer.
@@ -1774,7 +1778,7 @@ class TestTheTwoDoorsIntoTheCategoriesColumn:
         """The looseness one route apart, and its size.
 
         `POST /api/books/{book_id}/enrich/apply` takes this body from the client
-        and `merge_into` writes the column from it, so the count the create door
+        and `evidence.confirm` writes the column from it, so the count the create door
         states meant nothing here while the only bound was on the string.
         """
         stated = _stated_ceiling(BookMatch.model_fields["categories"])
@@ -1802,7 +1806,9 @@ class TestTheTwoDoorsIntoTheCategoriesColumn:
             "the payload no longer fits the field's own bound, so this arm would "
             "pass on that bound rather than on the ordering"
         )
-        rejoined = join_categories(split_categories(payload))
+        # Uncapped, because what is measured is the rejoin the door would store
+        # had it skipped the count, not the catalogue producer's capped join.
+        rejoined = join_categories(split_categories(payload), limit=None)
         assert rejoined is not None
         assert len(rejoined) > CATEGORIES_MAX
 
@@ -1822,7 +1828,7 @@ class TestTheTwoDoorsIntoTheCategoriesColumn:
         payload = CATEGORY_SEPARATOR.strip().join(["a"] * (MAX_CATEGORIES_PER_BOOK + 1))
         subjects = split_categories(payload)
         assert len(subjects) == MAX_CATEGORIES_PER_BOOK + 1
-        rejoined = join_categories(subjects)
+        rejoined = join_categories(subjects, limit=None)
         assert rejoined is not None, (
             "the driving value now trips the width bound too, so this arm would "
             "pass without the count bound existing"
