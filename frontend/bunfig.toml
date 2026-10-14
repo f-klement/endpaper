@@ -21,9 +21,10 @@
 #
 # **A stated consequence.** `bun install --frozen-lockfile` does no resolution,
 # so it is unaffected: verified exit 0 against the v0.9.0 lockfile in the pinned
-# image with this key set. A Renovate merge request landing a version under
-# three days old will now fail its install instead, loudly and in CI. That is
-# the intended direction; wait for the version to age rather than removing this.
+# image with this key set. Renovate is held to the same window, so it does not
+# propose a version this would refuse. A version under three days old reaching
+# an install anyway fails it, loudly and in CI: wait for it to age rather than
+# removing this.
 #
 # **This key is also the fallback, and the fallback can drift.** The unattended
 # release passes `--minimum-release-age` explicitly so the unattended path does not depend on
