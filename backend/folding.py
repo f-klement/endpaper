@@ -50,6 +50,7 @@ from models import (
     Note,
     Quote,
     ReadingProgress,
+    ReadwiseBook,
     book_tags,
     children_of_books,
 )
@@ -410,6 +411,10 @@ TRANSFERS: Final[tuple[_Transfer, ...]] = (
     # Book that survives and nothing collides: the key is the member and the
     # document, which a merge does not touch.
     _Transfer(_table(KosyncDocument.__tablename__), _moves_wholesale(KosyncDocument)),
+    # Which Book a member's Readwise book is follows the Book that survives,
+    # for the KOReader document's reason: the key is the member and Readwise's
+    # own book id, which a merge does not touch.
+    _Transfer(_table(ReadwiseBook.__tablename__), _moves_wholesale(ReadwiseBook)),
     _Transfer(_table(custom_fields.VALUES_TABLE), _carry_custom_field_values),
 )
 

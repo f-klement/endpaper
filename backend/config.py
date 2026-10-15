@@ -120,6 +120,18 @@ def overdue_ticker_enabled() -> bool:
     return os.getenv("ENABLE_OVERDUE_TICKER", "true").strip().lower() != "false"
 
 
+def readwise_ticker_enabled() -> bool:
+    """Whether the in-process daily Readwise pull runs.
+
+    On by default, for `overdue_ticker_enabled`'s reason: a pull that happens
+    only when somebody presses a button is not a sync. Set
+    `ENABLE_READWISE_TICKER=false` to turn it off; each member can still pull
+    from their account page. The test suite sets it false. See
+    `readwise.ticker`.
+    """
+    return os.getenv("ENABLE_READWISE_TICKER", "true").strip().lower() != "false"
+
+
 def serve_frontend() -> bool:
     """Whether the compiled SPA is mounted at `/`.
 

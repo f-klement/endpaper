@@ -48,6 +48,7 @@ function book(overrides: Partial<CalibreBook> = {}): CalibreBook {
     path: "Herbert, Frank/Dune (1)",
     title: "Dune",
     authors: ["Frank Herbert"],
+    authorsSeparated: true,
     identifiers: [],
     isbn: "9780441013593",
     publisher: "Chilton Books",

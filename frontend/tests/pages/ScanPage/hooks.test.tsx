@@ -3046,3 +3046,372 @@ describe("useRapidIntake and a file already in the library", () => {
     expect(FILES_PER_LOOKUP).toBe(boundOf(files, "maxItems"));
   });
 });
+
+/** An EPUB naming its ISBN and a thinner record than any catalogue's. */
+async function statingIsbn(
+  isbn = "9780441013593",
+  name = "dune.epub",
+  more = "",
+) {
+  const file = await epubFile(name, {
+    opf: packageDocument(
+      `<dc:identifier id="pub-id">urn:isbn:${isbn}</dc:identifier><dc:title>Dune (Calibre)</dc:title><dc:creator>Frank Herbert</dc:creator><dc:language>en</dc:language>${more}`,
+    ),
+  });
+  Object.defineProperty(file, "webkitRelativePath", {
+    value: `Books/${name}`,
+  });
+  return file;
+}
+
+/** The queue, once nothing in it is still being read. */
+async function readingDone(result: { current: { isReading: boolean } }) {
+  await waitFor(() => expect(result.current.isReading).toBe(false));
+}
+
+/** How many ISBN lookups the page has sent. */
+function lookupCalls(): number {
+  return api.calls.filter((call) => call.url.includes("/api/books/lookup"))
+    .length;
+}
+
+describe("useRapidIntake and a file that states its ISBN", () => {
+  it("offers the ISBN to the lookup rather than sending it at the pick", async () => {
+    const { result } = renderTheIntake();
+
+    const file = await statingIsbn();
+    act(() => result.current.pickFiles([file]));
+    await readingDone(result);
+
+    expect(result.current.entries[0]).toMatchObject({
+      state: "stated",
+      isbn: "9780441013593",
+    });
+    expect(result.current.figures.waiting).toBe(1);
+    expect(lookupCalls()).toBe(0);
+  });
+
+  it("fills the row from the catalogue, keeping the file's fields only where it had none", async () => {
+    api.on("/api/books/lookup", {
+      body: {
+        isbn: "9780441013593",
+        title: "Dune",
+        author: "Frank Herbert",
+        publisher: "Ace",
+        suggested_tag_ids: [],
+      },
+    });
+    const { result } = renderTheIntake();
+    const file = await statingIsbn();
+    act(() => result.current.pickFiles([file]));
+    await readingDone(result);
+
+    act(() => result.current.lookUpTheNames());
+
+    await waitFor(() => expect(result.current.entries[0]?.state).toBe("found"));
+    expect(result.current.entries[0]?.draft).toMatchObject({
+      title: "Dune",
+      publisher: "Ace",
+      language: "en",
+    });
+    expect(api.lastCall("/api/books/lookup")?.url).toContain("9780441013593");
+  });
+
+  it(
+    "asks about one stated ISBN at a time, at the fallback's pace",
+    async () => {
+      // **The metered half of the change.** A folder of five hundred stated
+      // ISBNs is five hundred lookups against the shared limiter, so they go
+      // through the one paced run and never all at once.
+      api.on("/api/books/lookup", (url) => ({
+        body: {
+          isbn: url.includes("9780060512750")
+            ? "9780060512750"
+            : "9780441013593",
+          title: "Dune",
+          suggested_tag_ids: [],
+        },
+      }));
+      const { result } = renderTheIntake();
+      const files = [
+        await statingIsbn("9780441013593", "dune.epub"),
+        await statingIsbn("9780060512750", "other.epub"),
+      ];
+      act(() => result.current.pickFiles(files));
+      await readingDone(result);
+
+      act(() => result.current.lookUpTheNames());
+      await waitFor(() =>
+        expect(result.current.entries[0]?.state).toBe("found"),
+      );
+
+      expect(lookupCalls()).toBe(1);
+      await waitFor(
+        () => expect(result.current.entries[1]?.state).toBe("found"),
+        { timeout: FALLBACK_INTERVAL_MS * 2 },
+      );
+      expect(lookupCalls()).toBe(2);
+    },
+    FALLBACK_INTERVAL_MS * 4,
+  );
+
+  it("keeps what the file described when no catalogue knows the ISBN", async () => {
+    api.on("/api/books/lookup", { status: 404, body: { detail: "unknown" } });
+    const { result } = renderTheIntake();
+    const file = await statingIsbn();
+    act(() => result.current.pickFiles([file]));
+    await readingDone(result);
+
+    act(() => result.current.lookUpTheNames());
+
+    await waitFor(() =>
+      expect(result.current.entries[0]?.reason).toEqual({
+        kind: "not-in-catalogues-as-stated",
+      }),
+    );
+    expect(result.current.entries[0]).toMatchObject({
+      state: "stated",
+      draft: { title: "Dune (Calibre)" },
+    });
+    expect(result.current.figures.waiting).toBe(0);
+  });
+
+  it("offers a stated ISBN again when the catalogues could not be reached", async () => {
+    api.on("/api/books/lookup", { status: 503, body: { detail: "down" } });
+    const { result } = renderTheIntake();
+    const file = await statingIsbn();
+    act(() => result.current.pickFiles([file]));
+    await readingDone(result);
+
+    act(() => result.current.lookUpTheNames());
+
+    await waitFor(() =>
+      expect(result.current.entries[0]?.reason).toEqual({
+        kind: "lookup-failed-as-stated",
+      }),
+    );
+    expect(result.current.entries[0]?.state).toBe("stated");
+    expect(result.current.figures.waiting).toBe(1);
+  });
+
+  it("asks no catalogue about a file the library already holds", async () => {
+    // The file holders lookup decides where the file goes before a catalogue
+    // is spent on it, so a re-picked folder of stated ISBNs costs no lookups.
+    api.on(
+      "/api/books/file-holders",
+      (_url, init) =>
+        holdersAnswering(
+          [{ book_id: 42, format: BookFormat.ebook }],
+          init?.body,
+        ),
+      "POST",
+    );
+    const { result } = renderTheIntake();
+    const file = await statingIsbn();
+    act(() => result.current.pickFiles([file]));
+
+    await waitFor(() =>
+      expect(result.current.entries[0]?.heldBy).toEqual({
+        bookId: 42,
+        lands: true,
+      }),
+    );
+    expect(result.current.figures.waiting).toBe(0);
+  });
+
+  it("holds a record whose title cannot be the file's, and keeps the file's description", async () => {
+    // **A wrong ISBN in a file**, naming a different work, would otherwise
+    // file the wrong book with this file's identifiers on it.
+    api.on("/api/books/lookup", {
+      body: {
+        isbn: "9780441013593",
+        title: "The Left Hand of Darkness",
+        suggested_tag_ids: [],
+      },
+    });
+    const { result } = renderTheIntake();
+    const file = await statingIsbn();
+    act(() => result.current.pickFiles([file]));
+    await readingDone(result);
+
+    act(() => result.current.lookUpTheNames());
+
+    await waitFor(() =>
+      expect(result.current.entries[0]?.reason).toEqual({
+        kind: "record-differs",
+      }),
+    );
+    expect(result.current.entries[0]).toMatchObject({
+      state: "stated",
+      draft: { title: "Dune (Calibre)" },
+      differentRecord: { title: "The Left Hand of Darkness" },
+    });
+    expect(result.current.figures.waiting).toBe(0);
+  });
+
+  it("adds a held row as the file describes it when nobody chose", async () => {
+    // The safe default: Add all does not skip a held row, and does not take
+    // the record nobody pressed for.
+    api.on("/api/books/lookup", {
+      body: {
+        isbn: "9780441013593",
+        title: "The Left Hand of Darkness",
+        suggested_tag_ids: [],
+      },
+    });
+    api.on("/api/books/scan", { body: makeBook() });
+    const { result } = renderTheIntake();
+    const file = await statingIsbn();
+    act(() => result.current.pickFiles([file]));
+    await readingDone(result);
+    act(() => result.current.lookUpTheNames());
+    await waitFor(() =>
+      expect(result.current.entries[0]?.differentRecord).toBeDefined(),
+    );
+
+    act(() => result.current.addAll());
+
+    await waitFor(() => expect(result.current.result?.added).toBe(1));
+    expect(api.lastCall("/api/books/scan", "POST")?.body).toMatchObject({
+      title: "Dune (Calibre)",
+    });
+  });
+
+  it("takes the held record when the member presses for it", async () => {
+    api.on("/api/books/lookup", {
+      body: {
+        isbn: "9780441013593",
+        title: "The Left Hand of Darkness",
+        suggested_tag_ids: [],
+      },
+    });
+    const { result } = renderTheIntake();
+    const file = await statingIsbn();
+    act(() => result.current.pickFiles([file]));
+    await readingDone(result);
+    act(() => result.current.lookUpTheNames());
+    await waitFor(() =>
+      expect(result.current.entries[0]?.differentRecord).toBeDefined(),
+    );
+
+    act(() => result.current.takeTheRecord(result.current.entries[0]!.key));
+
+    expect(result.current.entries[0]).toMatchObject({
+      state: "found",
+      draft: { title: "The Left Hand of Darkness", language: "en" },
+    });
+    expect(result.current.entries[0]?.differentRecord).toBeUndefined();
+  });
+
+  it("drops the held record and says so when the member keeps the file", async () => {
+    api.on("/api/books/lookup", {
+      body: {
+        isbn: "9780441013593",
+        title: "The Left Hand of Darkness",
+        suggested_tag_ids: [],
+      },
+    });
+    const { result } = renderTheIntake();
+    const file = await statingIsbn();
+    act(() => result.current.pickFiles([file]));
+    await readingDone(result);
+    act(() => result.current.lookUpTheNames());
+    await waitFor(() =>
+      expect(result.current.entries[0]?.differentRecord).toBeDefined(),
+    );
+
+    act(() => result.current.keepTheFile(result.current.entries[0]!.key));
+
+    expect(result.current.entries[0]).toMatchObject({
+      state: "stated",
+      reason: { kind: "kept-the-file" },
+      draft: { title: "Dune (Calibre)" },
+    });
+    expect(result.current.entries[0]?.differentRecord).toBeUndefined();
+  });
+
+  it("takes a name's ISBN record whole, with none of the name's guesses", async () => {
+    // `theIsbnWasRead` distrusts an ISBN found in a name, so its record is
+    // not mixed with the year the same name was guessed to carry.
+    api.on("/api/books/lookup", {
+      body: { isbn: "9780441013593", title: "Dune", suggested_tag_ids: [] },
+    });
+    const { result } = renderTheIntake();
+    act(() =>
+      result.current.pickFiles([
+        new File(["%PDF"], "Dune (1965) 9780441013593.pdf"),
+      ]),
+    );
+    await readingDone(result);
+    expect(result.current.entries[0]?.draft?.year).toBe(1965);
+
+    act(() => result.current.lookUpTheNames());
+
+    await waitFor(() => expect(result.current.entries[0]?.state).toBe("found"));
+    expect(result.current.entries[0]?.draft?.year).toBeUndefined();
+  });
+
+  it("keeps a subject dropped while the lookup was in flight dropped", async () => {
+    let release: (() => void) | undefined;
+    api.on("/api/books/lookup", () => {
+      return new Promise((resolve) => {
+        release = () =>
+          resolve({
+            body: {
+              isbn: "9780441013593",
+              title: "Dune",
+              suggested_tag_ids: [],
+            },
+          });
+      });
+    });
+    const { result } = renderTheIntake();
+    const file = await statingIsbn(
+      "9780441013593",
+      "dune.epub",
+      "<dc:subject>Fiction</dc:subject><dc:subject>Science Fiction</dc:subject>",
+    );
+    act(() => result.current.pickFiles([file]));
+    await readingDone(result);
+    act(() => result.current.lookUpTheNames());
+    await waitFor(() => expect(release).toBeDefined());
+
+    act(() =>
+      result.current.dropSubject(result.current.entries[0]!.key, "Fiction"),
+    );
+    act(() => release!());
+
+    await waitFor(() => expect(result.current.entries[0]?.state).toBe("found"));
+    expect(result.current.entries[0]?.draft?.categories).toEqual([
+      "Science Fiction",
+    ]);
+  });
+
+  it(
+    "spends no lookup on a row removed while the run is going",
+    async () => {
+      api.on("/api/books/lookup", {
+        body: { isbn: "9780441013593", title: "Dune", suggested_tag_ids: [] },
+      });
+      const { result } = renderTheIntake();
+      const files = [
+        await statingIsbn("9780441013593", "dune.epub"),
+        await statingIsbn("9780060512750", "other.epub"),
+      ];
+      act(() => result.current.pickFiles(files));
+      await readingDone(result);
+
+      act(() => result.current.lookUpTheNames());
+      await waitFor(() =>
+        expect(result.current.entries[0]?.state).toBe("found"),
+      );
+      act(() => result.current.remove(result.current.entries[1]!.key));
+
+      await waitFor(() => expect(result.current.isLookingUp).toBe(false), {
+        timeout: FALLBACK_INTERVAL_MS * 2,
+      });
+      expect(lookupCalls()).toBe(1);
+    },
+    FALLBACK_INTERVAL_MS * 4,
+  );
+});

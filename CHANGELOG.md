@@ -2,6 +2,35 @@
 
 ## Unreleased
 
+- **A book file's own ISBN is looked up in the catalogue.** A book file that states its own ISBN is
+  offered the catalogue lookup a scanned barcode gets, through the same paced press as the file
+  name lookup. The catalogue's record wins every field it answers, and the file's own fields fill
+  only what the record leaves blank. A record whose title shares no significant word with the
+  file's is shown on the row rather than taken, and the member uses it or keeps the file's own
+  description.
+
+- **Readwise highlights.** A member saves their own Readwise access token on the account page and
+  their highlights are pulled once a day, or now from the same page. Pull only: nothing of the
+  library leaves the server, only the token, the time of the last pull and the page cursor and
+  book ids Readwise itself gave. Highlights arrive private, on the book they belong to, matched by
+  an ASIN on exactly one book or else by exactly one book with the same title and first author;
+  any other Readwise book is listed on the account page rather than guessed, and a pull stopped
+  part way through the export resumes from its page cursor. Deletions at Readwise remove the row,
+  and a highlight moved to another book is private again. The token is checked with Readwise
+  before it is saved, sealed with the catalogue key, never served back, and goes with its member.
+  `ENABLE_READWISE_TICKER=false` stops the daily pull.
+
+- **An author a file writes surname first stays one person.** A file credited `Tolkien, J. R. R.`
+  used to add two authors, `Tolkien` and `J. R. R.`, because the credit line is split on commas. A
+  file picked on the scan page (EPUB, FB2, MOBI, CBZ, or a PDF whose metadata lists its creators)
+  and a Calibre, Kindle or Digital Editions import now send their authors one by one, and the
+  library stores that one as `J. R. R. Tolkien`. Kobo, Apple Books, Moon+ Reader, a PDF's single
+  author field and an audiobook's artist tag keep one author line, which may name several people,
+  and are read as before. A name whose comma comes before a suffix or a company designator such as
+  `Martin Luther King, Jr.` or `Acme, Inc.` is no longer reordered on any import and is stored as
+  written, so it still reads as two authors until merged. The API takes the list as `authors` on
+  `POST /api/books`; sent beside `author`, the two have to agree.
+
 - **KOReader highlights.** Settings, Your library has a card that imports the metadata files
   KOReader keeps beside each book (`metadata.<ext>.lua`), in both the current `annotations`
   shape and the older `bookmarks` and `highlight` pair. The files are read in the browser;

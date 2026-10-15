@@ -5,7 +5,7 @@
  * plain values and callbacks.
  */
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { useQueryClient } from "@tanstack/react-query";
 
@@ -35,6 +35,7 @@ import {
 import { BookFormat } from "../../api/generated/model";
 import { useGoogleBooksReady } from "../../app/hooks";
 import type {
+  BookLookup,
   BookMatch,
   BookOut,
   BookSearchOut,
@@ -77,6 +78,8 @@ import {
   draftFromName,
   draftFromMatch,
   draftFromLookup,
+  enrichedDraft,
+  titlesCouldAgree,
   toCopyRequest,
   toScanRequest,
   type BookDraft,
@@ -646,7 +649,11 @@ export type NamedScanReason =
   | "kept-the-name"
   | "kept-for-now"
   | "unreachable"
-  | "held-in-another-format";
+  | "held-in-another-format"
+  | "not-in-catalogues-as-stated"
+  | "lookup-failed-as-stated"
+  | "record-differs"
+  | "kept-the-file";
 
 /**
  * Why a row is where it is, as a name rather than as a sentence.
@@ -787,11 +794,18 @@ export interface ScannedEntry {
    * name, and a row carrying what the name said is added by `addAll` rather
    * than skipped. It is the same call the OPDS sync makes for a holding with no
    * description: reported as created, because it is.
+   *
+   * **`stated` is a file that named its own title and ISBN**, and is `found`
+   * in every way but one: no catalogue has been asked about that ISBN. It is
+   * added as the file describes it unless the paced lookup is pressed, which
+   * asks what a scanned barcode is asked and keeps the file's own fields only
+   * where the record has none (`types.enrichedDraft`).
    */
   state:
     | "looking-up"
     | "reading"
     | "derived"
+    | "stated"
     | "searching"
     | "choosing"
     | "found"
@@ -817,13 +831,15 @@ export interface ScannedEntry {
   matches?: BookMatch[];
   /**
    * What the catalogue answered, where the answer left the row under its own
-   * name.
+   * name or, for a `stated` row, as its file describes it.
    *
    * **Values rather than one flag**, because the ways a row keeps its file name
    * are different sentences to the member. `"nothing"` is a catalogue with no
    * record, which for a title that exists only as a file is the ordinary
    * outcome and is what `fallback.aboutEbooks` explains. `"records"` is a
-   * catalogue that had some and a member who preferred the name, and saying
+   * catalogue that had some and a member who preferred the name (or, on a
+   * `stated` row, a record for its ISBN whose title shares no significant
+   * word with the file's), and saying
    * anything about ebooks to them would describe something that did not happen.
    * `"records-for-now"` is the same records and a member who was clearing the
    * queue rather than answering about this book, so the row can be asked
@@ -914,17 +930,34 @@ export interface ScannedEntry {
    *
    * **Carried rather than read off the state, because the state deliberately
    * stops saying it.** `lookUpTheName` promotes a row to `found` whenever the
-   * ISBN lookup answers, and every row reaching that line is one standing under
-   * its own name, so after a successful lookup `found` covers a file that
+   * ISBN lookup answers, for a row standing under its name and for a `stated`
+   * file alike, so after a successful lookup `found` covers a file that
    * stated its identifier and a name that happened to contain one. The comment
    * there says as much: a name carrying an ISBN takes the route a barcode
    * takes. That collapse is right for the lookup and wrong for anything asking
    * where the identifier came from.
    *
    * Set by `fromTheName` and cleared by `chooseFor`, which are the only two
-   * places that know. `theIsbnWasRead` is the one reader.
+   * places that know. Read by `theIsbnWasRead`, and by `lookUpTheName`, which
+   * takes the record for such an ISBN whole rather than filling it from the
+   * name's guesses.
    */
   isbnFromTheName?: true;
+  /**
+   * The catalogue's record for a `stated` row's ISBN, where its title shares
+   * no significant word with the title the file stated.
+   *
+   * **Held, not taken.** A file's ISBN can be a stranger's or a publisher
+   * template's, and taking a record that names a different work would file
+   * the wrong book with this file's identifiers, subjects and location on it,
+   * with nothing on screen saying so. `titlesCouldAgree` says which records
+   * are held and which it lets through, a same series volume among them. So the row stays as the file describes it,
+   * which is what `addAll` adds, and the member takes the record
+   * (`takeTheRecord`) or refuses it (`keepTheFile`). The raw record rather
+   * than a merged draft, so a subject dropped meanwhile stays dropped when it
+   * is taken. Set only beside the `record-differs` reason.
+   */
+  differentRecord?: BookLookup;
   /**
    * The book this row's ISBN already belongs to, where that book is a
    * different kind of object from the file.
@@ -1025,8 +1058,9 @@ function foldersOf(file: File): string[] {
  *
  * **Three facts and not one flag per predicate.** Each is something a state
  * either is or is not, and the predicates below are conjunctions over them and
- * the fields beside them. `derived` is `standsUnderItsName` without `deciding`,
- * which is a reading of the two rather than a third entry: two fields that
+ * the fields beside them. `derived` is `askable` without `deciding`,
+ * which is a reading of the two rather than a third entry (`stated` reads the
+ * same, and `ROW_LINE` is what tells the two apart): two fields that
  * agree by construction and by nothing else are what `ScannedEntry.claims`
  * refuses one level down.
  */
@@ -1039,14 +1073,14 @@ interface QueueStateRules {
    */
   readonly stillReading: boolean;
   /**
-   * The row is standing under the name its file carried, so a catalogue has
-   * something to be asked about it.
+   * A catalogue has something to be asked about this row, and its answer
+   * would replace or fill the draft the row carries.
    *
-   * True of a row nothing has been offered for and of a row with records on
-   * screen: both carry a draft made from the name, which is what the queue
-   * draws and what a lookup would replace.
+   * True of a row standing under its file's name, whether nothing has been
+   * offered for it or records are on screen, and of a `stated` row, whose
+   * file named an ISBN that no catalogue has been asked about.
    */
-  readonly standsUnderItsName: boolean;
+  readonly askable: boolean;
   /** Records are offered on this row and the member has neither taken nor refused them. */
   readonly deciding: boolean;
 }
@@ -1054,24 +1088,25 @@ interface QueueStateRules {
 const QUEUE_STATES: Record<ScannedEntry["state"], QueueStateRules> = {
   "looking-up": {
     stillReading: false,
-    standsUnderItsName: false,
+    askable: false,
     deciding: false,
   },
-  reading: { stillReading: true, standsUnderItsName: false, deciding: false },
-  derived: { stillReading: false, standsUnderItsName: true, deciding: false },
+  reading: { stillReading: true, askable: false, deciding: false },
+  derived: { stillReading: false, askable: true, deciding: false },
+  stated: { stillReading: false, askable: true, deciding: false },
   searching: {
     stillReading: false,
-    standsUnderItsName: false,
+    askable: false,
     deciding: false,
   },
-  choosing: { stillReading: false, standsUnderItsName: true, deciding: true },
-  found: { stillReading: false, standsUnderItsName: false, deciding: false },
+  choosing: { stillReading: false, askable: true, deciding: true },
+  found: { stillReading: false, askable: false, deciding: false },
   "not-found": {
     stillReading: false,
-    standsUnderItsName: false,
+    askable: false,
     deciding: false,
   },
-  failed: { stillReading: false, standsUnderItsName: false, deciding: false },
+  failed: { stillReading: false, askable: false, deciding: false },
 };
 
 /**
@@ -1274,7 +1309,7 @@ class HeldInAnotherFormat extends Error {
  *
  * **The first draft read `state === "found"` and did not refuse that case at
  * all.** `lookUpTheName` promotes a row to `found` on a successful ISBN lookup,
- * and every row reaching that call is one standing under its own name, so the
+ * and every row standing under its own name reaches that call, so the
  * one provenance this refuses was the one being promoted past it. A state that
  * two paths deliberately collapse cannot answer a question about which path it
  * came from. `ScannedEntry.isbnFromTheName` carries it from the site that
@@ -1319,6 +1354,53 @@ const OFFERED_AGAIN: Record<CatalogueAnswer, boolean> = {
 };
 
 /**
+ * What a row the catalogue did not settle says, by which draft it went back to.
+ *
+ * **Two sentences per outcome and not one**, because "kept under its file
+ * name" is false of a `stated` row, which keeps what the file described.
+ * `unknown` is a 404, nobody knowing the ISBN; `unreachable` is every other
+ * failure to ask, which `lookUpTheName` reads apart.
+ */
+const UNSETTLED = {
+  derived: { unknown: "not-in-catalogues", unreachable: "lookup-failed" },
+  stated: {
+    unknown: "not-in-catalogues-as-stated",
+    unreachable: "lookup-failed-as-stated",
+  },
+} as const satisfies Record<
+  "derived" | "stated",
+  Record<"unknown" | "unreachable", NamedScanReason>
+>;
+
+/**
+ * What one row becomes once the catalogue has a record for its ISBN.
+ *
+ * **A name's ISBN takes the record whole**: `theIsbnWasRead` distrusts that
+ * provenance, so a stranger's record is not mixed with the name's guessed
+ * author and year. **A file's stated ISBN keeps the file's fields where the
+ * record has none**, `types.enrichedDraft`, unless the two titles cannot be
+ * one book, when the record is held for the member
+ * (`ScannedEntry.differentRecord`) and the row stays as the file describes
+ * it.
+ */
+function answeredByIsbn(one: ScannedEntry, lookup: BookLookup): ScannedEntry {
+  if (one.isbnFromTheName) {
+    return { ...one, state: "found", draft: draftFromLookup(lookup) };
+  }
+  const own = one.draft?.title ?? "";
+  if (one.draft !== null && !titlesCouldAgree(lookup.title, own)) {
+    return {
+      ...one,
+      state: "stated",
+      answered: "records",
+      reason: { kind: "record-differs" },
+      differentRecord: lookup,
+    };
+  }
+  return { ...one, state: "found", draft: enrichedDraft(lookup, one.draft) };
+}
+
+/**
  * An entry the catalogue has not been asked about and could be.
  *
  * One predicate rather than a filter written twice, because the count on the
@@ -1335,10 +1417,12 @@ const OFFERED_AGAIN: Record<CatalogueAnswer, boolean> = {
 function needsALookup(entry: ScannedEntry): boolean {
   const state = QUEUE_STATES[entry.state];
   return (
-    state.standsUnderItsName &&
+    state.askable &&
     !state.deciding &&
     entry.answered === undefined &&
-    // A file already in the library has nothing to ask a catalogue.
+    // A file already in the library has nothing to ask a catalogue, `stated`
+    // rows included. Known only once the file holders answer has arrived: a
+    // press before it, or after that call failed, looks the row up anyway.
     !entry.heldBy &&
     (entry.isbn !== "" || entry.query !== undefined)
   );
@@ -1355,7 +1439,7 @@ function needsALookup(entry: ScannedEntry): boolean {
 function canBeAskedAgain(entry: ScannedEntry): boolean {
   const state = QUEUE_STATES[entry.state];
   return (
-    state.standsUnderItsName &&
+    state.askable &&
     !state.deciding &&
     entry.answered !== undefined &&
     OFFERED_AGAIN[entry.answered] &&
@@ -1383,7 +1467,10 @@ function canBeAskedAgain(entry: ScannedEntry): boolean {
  * a pace the run it starts does not keep.
  */
 export interface QueueFigures {
-  /** Files whose name is all that is left to ask the catalogue about. */
+  /**
+   * Files a catalogue has not been asked about yet: a name with nothing else
+   * behind it, or an ISBN the file stated.
+   */
   readonly waiting: number;
   /**
    * Files with records offered and neither taken nor refused.
@@ -1468,7 +1555,8 @@ export interface UseRapidIntakeResult {
   /** What the queue adds up to, for every control that quotes a figure. */
   figures: QueueFigures;
   /**
-   * Ask the catalogue about every file that has only its name.
+   * Ask the catalogue about every file that has only its name, and about every
+   * ISBN a file stated.
    *
    * **Offered, never automatic**, and it is one press for the queue as it stood
    * when it was pressed. Two reasons, and the second is the one that decides it:
@@ -1524,6 +1612,10 @@ export interface UseRapidIntakeResult {
   chooseFor: (key: string, match: BookMatch) => void;
   /** Reject all of them and keep what the name said. */
   keepTheName: (key: string) => void;
+  /** Take the record held on a `stated` row whose title differed. */
+  takeTheRecord: (key: string) => void;
+  /** Refuse that record and keep what the file described. */
+  keepTheFile: (key: string) => void;
   /**
    * Clear every row still being decided, keeping the names **for now**.
    *
@@ -1632,6 +1724,12 @@ export function useRapidIntake(): UseRapidIntakeResult {
   // A ref rather than state: the paced run reads it between calls, and a state
   // read inside a running loop is the value it started with.
   const stopRequested = useRef(false);
+  // The queue as last rendered, for the paced run, which otherwise reads the
+  // render it started in. Written after each commit, never during a render.
+  const liveEntries = useRef<ScannedEntry[]>([]);
+  useEffect(() => {
+    liveEntries.current = entries;
+  });
   // The batch's own stop, for the same reason and not the same flag: the paced
   // lookup and the write are two runs with two buttons, and one flag would let
   // stopping either halt the other.
@@ -1900,7 +1998,16 @@ export function useRapidIntake(): UseRapidIntakeResult {
         } else if (reading) {
           const draft = draftFromFile(reading.metadata);
           if (draft.title !== "") {
-            settle(key, { state: "found", isbn: draft.isbn, draft, reference });
+            // **A stated ISBN is offered the catalogue, never sent to it
+            // here.** The paced run is what asks, one press for the queue, so
+            // a folder of five hundred is not five hundred metered lookups at
+            // the moment it is picked.
+            settle(key, {
+              state: draft.isbn === "" ? "found" : "stated",
+              isbn: draft.isbn,
+              draft,
+              reference,
+            });
             continue;
           }
           // The file opened and named no title, so what is left is its name.
@@ -2121,8 +2228,10 @@ export function useRapidIntake(): UseRapidIntakeResult {
    * Ask the catalogue about one file, and never twice about the same one.
    *
    * **One call per file, which is what makes the pace's arithmetic true.** A
-   * name carrying an ISBN takes the route a barcode takes, because an ISBN is an
-   * identifier rather than a guess; anything else is a title search. Neither
+   * name carrying an ISBN, and a file stating one, take the route a barcode
+   * takes, because an ISBN is an identifier rather than a guess; anything else
+   * is a title search. The record found is filled from the row's own draft
+   * where it left a field blank, `types.enrichedDraft`. Neither
    * falls back to the other on a miss, since a second call per file would double
    * a budget that was priced on one.
    *
@@ -2139,7 +2248,14 @@ export function useRapidIntake(): UseRapidIntakeResult {
           queryFn: () => lookupIsbn({ isbn: entry.isbn }),
           staleTime: 60_000,
         });
-        settle(entry.key, { state: "found", draft: draftFromLookup(lookup) });
+        // **Over the row as it stands now, not as the run found it**, which is
+        // why this is not `settle`: a subject dropped while the lookup was in
+        // flight would otherwise come back from the run's own copy.
+        setEntries((current) =>
+          current.map((one) =>
+            one.key === entry.key ? answeredByIsbn(one, lookup) : one,
+          ),
+        );
         return;
       }
       if (!entry.query) return;
@@ -2173,10 +2289,13 @@ export function useRapidIntake(): UseRapidIntakeResult {
       // the two offered the retry that buys nothing and withheld the one that
       // does.
       const unknown = error instanceof ApiError && error.status === 404;
+      // A `stated` row goes back to its file's draft and says so; only a row
+      // standing under its name is said to be kept under it.
+      const back = entry.state === "stated" ? "stated" : "derived";
       settle(entry.key, {
-        state: "derived",
+        state: back,
         answered: unknown ? "nothing" : undefined,
-        reason: { kind: unknown ? "not-in-catalogues" : "lookup-failed" },
+        reason: { kind: UNSETTLED[back][unknown ? "unknown" : "unreachable"] },
       });
     }
   }
@@ -2227,6 +2346,10 @@ export function useRapidIntake(): UseRapidIntakeResult {
     try {
       for (const [index, entry] of walking.entries()) {
         if (stopRequested.current) break;
+        // **A row removed since the press is not asked about.** The run walks
+        // the queue as it stood, so without this a removed row, or a whole
+        // discarded queue, still spends one metered lookup each.
+        if (!liveEntries.current.some((one) => one.key === entry.key)) continue;
         // **The note and the answer go with the state.** A row being asked
         // about has no answer and is not standing under its name for a reason
         // it can still state: leaving either behind renders a list of catalogue
@@ -2610,6 +2733,34 @@ export function useRapidIntake(): UseRapidIntakeResult {
         // missing. Deleting it fails no test, which is the honest rung.
         isbnFromTheName: undefined,
       }),
+    takeTheRecord: (key) =>
+      setEntries((current) =>
+        current.map((one) =>
+          one.key === key && one.differentRecord !== undefined
+            ? {
+                ...one,
+                state: "found",
+                // Merged now, over the draft as it stands, for the reason
+                // `answeredByIsbn` holds the raw record.
+                draft: enrichedDraft(one.differentRecord, one.draft),
+                differentRecord: undefined,
+                reason: undefined,
+              }
+            : one,
+        ),
+      ),
+    keepTheFile: (key) =>
+      setEntries((current) =>
+        current.map((one) =>
+          one.key === key && one.differentRecord !== undefined
+            ? {
+                ...one,
+                differentRecord: undefined,
+                reason: { kind: "kept-the-file" },
+              }
+            : one,
+        ),
+      ),
     keepTheName: (key) =>
       settle(key, {
         state: "derived",

@@ -19,6 +19,7 @@ import * as kosync from "../../src/api/generated/endpoints/kosync/kosync";
 import * as loans from "../../src/api/generated/endpoints/loans/loans";
 import * as opds from "../../src/api/generated/endpoints/opds/opds";
 import * as publicCatalogue from "../../src/api/generated/endpoints/public/public";
+import * as readwise from "../../src/api/generated/endpoints/readwise/readwise";
 import * as settings from "../../src/api/generated/endpoints/settings/settings";
 import * as stats from "../../src/api/generated/endpoints/stats/stats";
 import * as system from "../../src/api/generated/endpoints/system/system";
@@ -150,6 +151,11 @@ const KEYS: Record<string, readonly unknown[]> = {
   getKosyncAccount: kosync.getGetKosyncAccountQueryKey(),
   listKosyncInbox: kosync.getListKosyncInboxQueryKey(),
   listKosyncDocuments: kosync.getListKosyncDocumentsQueryKey(7),
+  // The member's Readwise token state and the books waiting for a Book. Not
+  // under `/api/books`, so a catalogue write leaves it; the save, remove and
+  // pull hooks refresh it themselves. A book gaining a match shows here only
+  // after the next pull, which is when the server learns of it too.
+  getReadwiseAccount: readwise.getGetReadwiseAccountQueryKey(),
 };
 
 /**
@@ -267,7 +273,10 @@ describe("the inventory is complete", () => {
     // 60 on 2026-10-15, counted with that same command: a book's highlights
     // (one key) and KOReader sync (three: the account, the inbox and a book's
     // documents) arrived together.
-    expect(Object.keys(KEYS).length).toBe(60);
+    //
+    // 61 on 2026-10-15, counted with that same command: the Readwise pull,
+    // four routes, one of them a read.
+    expect(Object.keys(KEYS).length).toBe(61);
   });
 });
 

@@ -226,6 +226,8 @@ describe("a Kobo becomes the record the import writes from", () => {
       seriesIndex: 1,
       format: "ebook",
       ownership: "owned",
+      // `Attribution` is one string, which may name several people.
+      authorsSeparated: false,
     });
   });
 
@@ -383,6 +385,7 @@ describe("a Play Books export becomes the same record", () => {
       "Frank Herbert",
       "Brian Herbert",
     ]);
+    expect(library.books[0]?.authorsSeparated).toBe(true);
   });
 
   it("falls back to the index's one author where the file names none", async () => {
@@ -401,6 +404,8 @@ describe("a Play Books export becomes the same record", () => {
     );
 
     expect(library.books[0]?.authors).toEqual(["Only In The Index"]);
+    // The index's author is one string, so it is a line and not a name.
+    expect(library.books[0]?.authorsSeparated).toBe(false);
   });
 
   it("counts a book the export named and could not open", async () => {
@@ -508,6 +513,20 @@ describe("what a store calls a book, where that is not an ISBN", () => {
       { scheme: "asin", value: "B000000001" },
     ]);
     expect(library.books[0]?.isbn).toBeNull();
+  });
+
+  it("says a Kindle catalogue separates its authors", async () => {
+    const library = libraryIn(
+      await STORES.kindle.open(
+        new File([KINDLE_CATALOGUE], "KindleSyncMetadataCache.xml"),
+      ),
+    );
+
+    expect(library.books[0]?.authorsSeparated).toBe(true);
+  });
+
+  it("says a Digital Editions record separates its authors", async () => {
+    expect((await adobeBook("9780441013593")).authorsSeparated).toBe(true);
   });
 
   // **One assertion an arm.** A mutation putting the raw identifier in the match
@@ -1960,4 +1979,60 @@ describe("any file a member picks for a store", () => {
         patches.length === 0 && !spec.notAZip && "bomb" in spec.index,
     });
   });
+});
+
+describe("which stores hand over an author line rather than names", () => {
+  /** A generated Apple Books or Moon+ library, by store. */
+  const lineStore = fc.oneof(
+    FUZZ.appleBooks.spec.map((spec) => ({
+      store: "appleBooks" as const,
+      spec,
+    })),
+    FUZZ.moonReader.spec.map((spec) => ({
+      store: "moonReader" as const,
+      spec,
+    })),
+  );
+
+  /**
+   * Every book either store reads, over generated libraries. Both keep one
+   * author column per book, so its value may name several people and must not
+   * travel as one name: the server would read `Terry Pratchett, Neil Gaiman` as
+   * one person written surname first.
+   */
+  it(
+    "says every Apple Books and Moon+ book's authors are one line",
+    PROPERTY,
+    async () => {
+      expect(
+        await holds(
+          lineStore,
+          async (picked) => {
+            // Padded and bombed specs are passed over, as `readsOne` does:
+            // neither is a library and either is costly to open.
+            const probe = picked.spec as { padTo?: unknown; index?: unknown };
+            const bombed =
+              typeof probe.index === "object" &&
+              probe.index !== null &&
+              "bomb" in probe.index;
+            if (probe.padTo !== undefined || bombed) return 0;
+            const fuzz = FUZZ[picked.store] as StoreFuzz<typeof picked.spec>;
+            const reading = await STORES[picked.store].open(
+              new File([await fuzz.build(picked.spec)], "library"),
+            );
+            if (!reading.ok) return 0;
+            for (const book of reading.library.books) {
+              expect(book.authorsSeparated).toBe(false);
+            }
+            return reading.library.books.length;
+          },
+          {
+            // Not vacuous: a generator that stopped reaching a readable
+            // library would otherwise pass this with no book asked.
+            "read a book out of a library": (_picked, books) => books > 0,
+          },
+        ),
+      ).toBe(PROFILE.runs);
+    },
+  );
 });

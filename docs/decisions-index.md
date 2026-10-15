@@ -894,4 +894,10 @@ repeat the argument.
 |  | [A highlight is its own table, private by default, and identified at its source](decisions.md#a-highlight-is-its-own-table-private-by-default-and-identified-at-its-source) | 656 |
 |  | [KOReader progress sync is served here, under `/kosync`](decisions.md#koreader-progress-sync-is-served-here-under-kosync) | 725 |
 |  | [A digital copy is requested and granted, not lent](decisions.md#a-digital-copy-is-requested-and-granted-not-lent) | 459 |
+|  | [A file's stated ISBN is offered to the catalogue, and the catalogue wins per field](decisions.md#a-files-stated-isbn-is-offered-to-the-catalogue-and-the-catalogue-wins-per-field) | 349 |
+|  | [A Readwise deletion removes the row rather than hiding it](decisions.md#a-readwise-deletion-removes-the-row-rather-than-hiding-it) | 90 |
+|  | [A Readwise book is matched by ASIN or title and first author, and only when one Book answers](decisions.md#a-readwise-book-is-matched-by-asin-or-title-and-first-author-and-only-when-one-book-answers) | 158 |
+|  | [A 429 from Readwise ends the pull rather than waiting it out](decisions.md#a-429-from-readwise-ends-the-pull-rather-than-waiting-it-out) | 113 |
+|  | [A member's Readwise token is not counted on the key screen](decisions.md#a-members-readwise-token-is-not-counted-on-the-key-screen) | 109 |
+|  | [Authors a source separated travel as a list, and the server joins them](decisions.md#authors-a-source-separated-travel-as-a-list-and-the-server-joins-them) | 530 |
 <!-- index: end -->

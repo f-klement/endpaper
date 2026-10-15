@@ -168,18 +168,21 @@ class TestTheseAreTheConstraintsWithTwoSpellings:
             ("highlights", "ck_highlights_bounds"),
             ("kosync_documents", "ck_kosync_documents_bounds"),
             ("kosync_documents", "ck_kosync_documents_document"),
+            ("member_logins", "ck_member_logins_envelope"),
+            ("member_logins", "ck_member_logins_resume_cursor"),
             ("opds_servers", "ck_opds_servers_base_url"),
             ("opds_servers", "ck_opds_servers_credential_key"),
             ("opds_servers", "ck_opds_servers_name"),
             ("quotes", "ck_quotes_text_bounds"),
+            ("readwise_books", "ck_readwise_books_bounds"),
         }
 
-    def test_eleven_of_the_twenty_five_tables_carry_one(self):
+    def test_thirteen_of_the_twenty_seven_tables_carry_one(self):
         """The other half of the ADR's sentence, from the same source. A set of
         names and a count of tables are two different claims, and stating both
         here is what stopped the first one going out with the wrong number."""
-        assert len({table for table, _, _ in _dialect_checks()}) == 11
-        assert len(Base.metadata.tables) == 25
+        assert len({table for table, _, _ in _dialect_checks()}) == 13
+        assert len(Base.metadata.tables) == 27
 
 
 class TestTheStringifierIsNotAnEngine:

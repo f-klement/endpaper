@@ -1255,7 +1255,7 @@ const REACHING: Readonly<Record<string, number>> = {
   "./lib/pdf.test.ts": 1,
   "./lib/schemaArbitrary.test.ts": 1,
   "./lib/sqlite.test.ts": 1,
-  "./lib/stores.test.ts": 1,
+  "./lib/stores.test.ts": 2,
   "./lib/takeout.test.ts": 1,
   "./lib/zip.test.ts": 1,
   "./pages/AuthorsPage/AuthorsPage.test.tsx": 1,

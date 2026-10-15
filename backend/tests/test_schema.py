@@ -3218,6 +3218,12 @@ _TEXT_CEILINGS: tuple[tuple[str, str, dict[str, object]], ...] = (
         "progress",
         {"user_id": 1, "document": "a", "percentage": 0.5, "device": "d", "timestamp": 0},
     ),
+    ("readwise_books", "title", {"user_id": 1, "user_book_id": 1}),
+    (
+        "member_logins",
+        "resume_cursor",
+        {"user_id": 1, "service": "readwise", "envelope": "v2." + "a" * 40},
+    ),
 )
 
 #: Which constraint each of those columns is bounded by.
@@ -3233,6 +3239,8 @@ _CEILING_CONSTRAINTS: dict[tuple[str, str], str] = {
     ("opds_servers", "name"): "ck_opds_servers_name",
     ("highlights", "chapter"): "ck_highlights_bounds",
     ("kosync_documents", "progress"): "ck_kosync_documents_bounds",
+    ("readwise_books", "title"): "ck_readwise_books_bounds",
+    ("member_logins", "resume_cursor"): "ck_member_logins_resume_cursor",
 }
 
 
@@ -3554,6 +3562,10 @@ class TestEveryTextCeilingIsInstalledWithItsByteArm:
             "ck_catalogue_credentials_envelope",
             "ck_catalogue_targets_base_url",
             "ck_catalogue_targets_indexes",
+            # No `String(n)` to read a budget off either, for the catalogue
+            # envelope's reason. Probed with a lead byte by
+            # `tests/test_readwise.py::TestTheEnvelopeCeilingIsOnBytes`.
+            "ck_member_logins_envelope",
         }
 
         assert set(_byte_armed_constraints()) == probed, (

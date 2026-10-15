@@ -47,8 +47,10 @@ from enums import (
     HeadingKind,
     HighlightSource,
     LendingWillingness,
+    MemberLoginService,
     OwnershipStatus,
     ReadStatus,
+    ReadwiseOutcome,
     TagCategory,
     member_or,
 )
@@ -2161,8 +2163,7 @@ class Highlight(Base):
     source_key)` is unique, so re-running an import finds the row it wrote
     and updates it. KOReader gives an annotation no id, so its key is derived
     from the file and the creation time: `highlights.koreader_source_key` says
-    how.
-    A Readwise highlight will carry Readwise's own id.
+    how. A Readwise highlight carries Readwise's own id, as decimal text.
 
     **Per copy**, like quotes and notes: a position is a fact about one file.
 
@@ -2248,6 +2249,8 @@ class Highlight(Base):
     #: so this column stores those digits as given and is the one `DateTime`
     #: here that is not UTC. Converting would need a zone nothing supplied;
     #: the schema returns it as the same text so no client reads it as UTC.
+    #: A Readwise row is the exception: Readwise records a zone, so its value
+    #: is converted to UTC and stored to the second.
     highlighted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     #: Whether whoever can see the Book may read this highlight. False is the
     #: owner's rule for every new row. A re-import onto the same Book keeps
@@ -2907,8 +2910,10 @@ class BookIdentifier(Base):
     updates a Book it already added, is named in `identifiers.py` and is not
     written.
 
-    **Nothing matches on it**, stated because an identifier no query reads is a
-    column that goes stale in silence. What reads it today is `BookOut`, which
+    **One reader matches on it: the Readwise pull**, which links a Readwise
+    book carrying an ASIN to the one Book the member can see with that ASIN
+    (`readwise.Index`). It writes nothing to a Book, only which Book a member's
+    highlights land on. Otherwise what reads it is `BookOut`, which
     carries it on every Book a member fetches, the book detail page, which
     renders it as text beside the ISBN, the archive, which holds it, and the
     merge, which moves it. What deliberately does not: `books.isbn` stays the
@@ -4214,4 +4219,195 @@ class OpdsServer(Base):
     #: `new_opds_credential_key` for why it is random.
     credential_key: Mapped[str] = mapped_column(
         String(32), nullable=False, unique=True, default=new_opds_credential_key
+    )
+
+
+#: The longest Readwise access token this application will store.
+#:
+#: Chosen, not measured against Readwise: the tokens it issues are 50
+#: characters, and the ceiling is room for a longer format without being an
+#: unbounded write. `schemas/readwise.py` bounds the request with it.
+READWISE_TOKEN_MAX = 200
+
+#: The longest Readwise page cursor kept to resume a walk. Chosen, not
+#: measured: Readwise's cursors are short opaque values, and one longer than
+#: this is not kept, so that walk restarts rather than resumes.
+READWISE_CURSOR_MAX = 512
+
+#: The widest envelope `credentials.seal_member_login` can write, in bytes.
+#:
+#: **Derived from the token's bound, not chosen.** A token is ASCII by its
+#: request pattern, so at most `READWISE_TOKEN_MAX` bytes of plaintext;
+#: AES-GCM adds a 16 byte tag, base64 without padding of 216 bytes is 288
+#: characters, and `v2`, the eight character generation tag, the sixteen
+#: character nonce and three separators make 29 more.
+#: `tests/test_readwise.py` seals a token at the ceiling and measures it.
+MEMBER_LOGIN_ENVELOPE_MAX_BYTES = 317
+
+
+class MemberLogin(Base):
+    """A member's own login at a service elsewhere, sealed, and theirs alone.
+
+    **The third kind of secret `credentials.py` names**: not the deployment's
+    and not the library's, but one member's account with a third party, held so
+    this server can act for them. So it is owned by one member, replaced or
+    removed only by that member, never served back once saved, and deleted
+    with them: the foreign key cascades, which is the whole of that rule, since
+    no path deletes a member today.
+
+    **Its own table rather than a column on `catalogue_credentials`**, for the
+    reason `credentials.py` gives: ownership changes the deletion rule, the
+    visibility rule and the read path, and one table answering two access
+    questions is how the answer to one gets applied to the other. The envelope
+    is sealed over associated data naming this kind, the service and the
+    member (`credentials.seal_member_login`), so a ciphertext copied onto
+    another member's row, or into the catalogue table, fails to open.
+
+    **The pull's own state sits beside the token** (`synced_through`,
+    `last_run_at`, `last_outcome`), because it means nothing without it:
+    replacing the token clears the cursor, since a new token may be another
+    account, and removing it removes both.
+    """
+
+    __tablename__ = "member_logins"
+
+    __table_args__ = (
+        Index("uq_member_logins_user_service", "user_id", "service", unique=True),
+        CheckConstraint(_enum_check("service", MemberLoginService), name="ck_member_logins_service"),
+        CheckConstraint(
+            _enum_check("last_outcome", ReadwiseOutcome, nullable=True),
+            name="ck_member_logins_last_outcome",
+        ),
+        # The envelope's shape and ceiling. The ceiling is a byte count for the
+        # reason `ck_catalogue_credentials_envelope` gives at length, and needs
+        # no NUL clause for the same one: `length(CAST(... AS BLOB))` counts the
+        # whole value whatever is in it, and the prefix test can only fail on a
+        # truncated value. `credentials.unseal_member_login` is the parser.
+        CheckConstraint(
+            DialectSQL(
+                sqlite=(
+                    "substr(envelope, 1, 3) = 'v2.' AND length(envelope) >= 40 "
+                    f"AND length(CAST(envelope AS BLOB)) <= {MEMBER_LOGIN_ENVELOPE_MAX_BYTES}"
+                ),
+                postgresql=(
+                    "substr(envelope, 1, 3) = 'v2.' AND length(envelope) >= 40 "
+                    f"AND octet_length(envelope) <= {MEMBER_LOGIN_ENVELOPE_MAX_BYTES}"
+                ),
+            ),
+            name="ck_member_logins_envelope",
+        ),
+        # The byte arm beside the character arm for the reason
+        # `ck_digital_references_bounds` gives. No `IS NULL` arm: a null
+        # passes a CHECK already, and a top level OR would bind nothing.
+        CheckConstraint(
+            DialectSQL(
+                sqlite=(
+                    f"length(resume_cursor) <= {READWISE_CURSOR_MAX} "
+                    f"AND length(CAST(resume_cursor AS BLOB)) <= {4 * READWISE_CURSOR_MAX}"
+                ),
+                postgresql=(
+                    f"length(resume_cursor) <= {READWISE_CURSOR_MAX} "
+                    f"AND octet_length(resume_cursor) <= {4 * READWISE_CURSOR_MAX}"
+                ),
+            ),
+            name="ck_member_logins_resume_cursor",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    # No `index=True`: `uq_member_logins_user_service` leads with it.
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    service: Mapped[MemberLoginService] = mapped_column(String(16), nullable=False)
+    envelope: Mapped[str] = mapped_column(Text, nullable=False)
+    #: When the member last saved this token.
+    set_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    #: What the next pull asks for: changes after this instant, UTC. Null
+    #: until a pull has read every page, so the first one reads everything.
+    synced_through: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    #: When a pull last started, UTC, whatever its outcome. The daily job
+    #: reads it to decide who is due.
+    last_run_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_outcome: Mapped[ReadwiseOutcome | None] = mapped_column(String(16), nullable=True)
+    #: Where a walk a bound stopped picks up: Readwise's own page cursor, and
+    #: when that walk first started, which becomes the cursor once it ends.
+    #: Both null when no walk is part way.
+    resume_cursor: Mapped[str | None] = mapped_column(String(READWISE_CURSOR_MAX), nullable=True)
+    walk_started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class ReadwiseBook(Base):
+    """One book in a member's Readwise account, and which Book it is here.
+
+    **Readwise carries no ISBN**, so the link is made by `readwise.Index`: an
+    ASIN on exactly one Book the member can see, else exactly one Book with the
+    same title and first author. Anything else leaves `book_id` null, and the
+    row is what the account page lists as waiting. A row is kept for exactly
+    that reason: an incremental pull never sends a book's old highlights
+    again, so a book matched later is asked for again by its Readwise id, and
+    `whole_pending` holds that debt until it is paid.
+
+    **Private to its member by construction**, keyed by member and Readwise's
+    `user_book_id`, like `kosync_documents`. `SET NULL` on the Book for the
+    reason that table gives: purging a Book returns the row to waiting.
+
+    Only Readwise's `books` category is stored. An article or a tweet is never
+    a Book here, and listing every one as waiting would bury the books.
+    """
+
+    __tablename__ = "readwise_books"
+
+    __table_args__ = (
+        Index("uq_readwise_books_user_book", "user_id", "user_book_id", unique=True),
+        # The byte arm beside each character arm for the reason
+        # `ck_digital_references_bounds` gives: `backup.restore` writes through
+        # Core and SQLite's `length()` stops at a NUL.
+        CheckConstraint(
+            DialectSQL(
+                sqlite=(
+                    "user_book_id > 0 "
+                    f"AND length(title) <= {TITLE_MAX} "
+                    f"AND length(CAST(title AS BLOB)) <= {4 * TITLE_MAX} "
+                    f"AND (author IS NULL OR (length(author) <= {AUTHOR_LINE_MAX} "
+                    f"AND length(CAST(author AS BLOB)) <= {4 * AUTHOR_LINE_MAX})) "
+                    f"AND (asin IS NULL OR (length(asin) <= {BOOK_IDENTIFIER_MAX} "
+                    f"AND length(CAST(asin AS BLOB)) <= {4 * BOOK_IDENTIFIER_MAX}))"
+                ),
+                postgresql=(
+                    "user_book_id > 0 "
+                    f"AND length(title) <= {TITLE_MAX} "
+                    f"AND octet_length(title) <= {4 * TITLE_MAX} "
+                    f"AND (author IS NULL OR (length(author) <= {AUTHOR_LINE_MAX} "
+                    f"AND octet_length(author) <= {4 * AUTHOR_LINE_MAX})) "
+                    f"AND (asin IS NULL OR (length(asin) <= {BOOK_IDENTIFIER_MAX} "
+                    f"AND octet_length(asin) <= {4 * BOOK_IDENTIFIER_MAX}))"
+                ),
+            ),
+            name="ck_readwise_books_bounds",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    # No `index=True`: `uq_readwise_books_user_book` leads with it.
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    #: Readwise's id for the book in this member's account. 64 bits because
+    #: Readwise does not bound it and PostgreSQL's `integer` is 32.
+    user_book_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    #: What Readwise calls the book, clipped to the Book's own widths, so the
+    #: waiting list is recognisable and a later match reads the same values.
+    title: Mapped[str] = mapped_column(String(TITLE_MAX), nullable=False)
+    author: Mapped[str | None] = mapped_column(String(AUTHOR_LINE_MAX), nullable=True)
+    asin: Mapped[str | None] = mapped_column(String(BOOK_IDENTIFIER_MAX), nullable=True)
+    book_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("books.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    #: True from the moment a Book is matched on a page that did not carry the
+    #: book's whole history until a pull by its id reaches the last page. State
+    #: rather than an inference from `book_id`, which is committed first: a pull
+    #: stopping between the two would otherwise never ask again.
+    whole_pending: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="0"
     )

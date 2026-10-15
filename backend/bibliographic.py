@@ -44,8 +44,10 @@ and `catalogue.Record` is the thing they are rules about.
 """
 
 import re
+from collections.abc import Iterable
 from typing import Final
 
+from authors import CREDIT_SEPARATOR
 from models import MAX_PAGE_NUMBER_IN_A_BOOK
 
 #: ISO 639-2/B, which is what every MARC derived source emits, to the 639-1
@@ -385,6 +387,58 @@ _PERSON_NOISE: Final = re.compile(
 )
 
 
+#: What may follow a name's one comma without the name being surname first.
+#:
+#: A generational suffix (`Martin Luther King, Jr.`) or a corporate designator
+#: (`Acme, Inc.`) in display order carries the same single comma as
+#: `Tolkien, J. R. R.`, and flipping it writes `Jr Martin Luther King` or
+#: `Inc Acme`, a name nobody wrote, which then folds to a different author key.
+#:
+#: **Only words that cannot be a person's initials.** Initials are written
+#: dotted, spaced or run together (`Erickson, J.R.`, `Tomlin, J R`,
+#: `Barnett, AG`), so the part after the comma is compared as written, with at
+#: most one trailing full stop off and case folded, and never with its inner
+#: punctuation squashed: squashed, `J. R.` read as `jr`. For the same reason no
+#: two letter designator is here (`AG`, `KG`, `SA`, `NV`, `BV`, `Co`), and
+#: `_is_a_designator` reads `JR` and `SR` in capitals as initials. `V` and the
+#: dotted `M.D.` and `L.L.C.` are absent because initials spell them too.
+_NOT_A_FORENAME: Final = frozenset(
+    {
+        "jr",
+        "jnr",
+        "junior",
+        "sr",
+        "snr",
+        "senior",
+        "ii",
+        "iii",
+        "iv",
+        "esq",
+        "phd",
+        "inc",
+        "incorporated",
+        "ltd",
+        "limited",
+        "llc",
+        "llp",
+        "plc",
+        "gmbh",
+        "corp",
+        "corporation",
+        "company",
+    }
+)
+
+
+def _is_a_designator(part: str) -> bool:
+    """Whether the text after a name's one comma is in `_NOT_A_FORENAME`."""
+    word = part.strip()
+    word = word.removesuffix(".")
+    if word in {"JR", "SR"}:
+        return False
+    return word.casefold() in _NOT_A_FORENAME
+
+
 def _strip_person_noise(raw: str) -> str:
     """Drop life dates and role words from a catalogue person string.
 
@@ -422,7 +476,9 @@ def flip_catalogue_name(raw: str) -> str:
     """`Williams, John` becomes `John Williams`.
 
     One comma means a person in catalogue order. None, or more than one, means
-    something else (a corporate body, a compound credit) and is left alone.
+    something else (a corporate body, a compound credit) and is left alone, and
+    so is one comma followed by a suffix or a designator (`King, Jr.`,
+    `Acme, Inc.`): see `_NOT_A_FORENAME`.
 
     **Left alone means the order and the full stop, not the noise and not the
     spacing.** Life dates and a role word are not part of a corporate name
@@ -443,7 +499,38 @@ def flip_catalogue_name(raw: str) -> str:
     # Nothing trims a trailing comma here: `_strip_person_noise` rstrips `,;`
     # on its own first pass, so a second one at this site would be dead.
     name = _strip_person_noise(" ".join(raw.split()))
-    if name.count(",") != 1:
+    if name.count(",") != 1 or _is_a_designator(name.split(",")[1]):
         return name
     surname, forenames = (part.strip() for part in _drop_isbd_stop(name).split(","))
     return f"{forenames} {surname}" if surname and forenames else name
+
+
+def credit_line(names: Iterable[str]) -> str | None:
+    """Names a source gave one by one, as the credit line `books.author` holds.
+
+    **Each name is flipped before the join, never after**, which is the rule
+    `flip_catalogue_name` can only be applied under: over a joined line its one
+    comma is also what "Terry Pratchett, Neil Gaiman" has. So `Tolkien, J. R. R.`
+    arrives as one name and is stored as `J. R. R. Tolkien`, where joined first it
+    would be stored as two people.
+
+    **A name that is blank once flipped is dropped**, because `", , Jane Doe"` is
+    a credit nobody wrote and `flip_catalogue_name(",")` is the empty string.
+    `None` when nothing is left, which is what a book with nobody credited
+    stores.
+
+    **What still splits is every name that keeps a comma**, stored as written
+    and read by `authors.split_authors` as several people, as on every other
+    import path, and repaired by merging: a name with two commas once its dates
+    and roles are off (`Springer, Berlin, Heidelberg`, `King, Martin Luther,
+    Jr.`), and a display order name whose one comma precedes a suffix or a
+    designator (`Martin Luther King, Jr.`, `Acme, Inc.`), which
+    `flip_catalogue_name` leaves alone rather than writing a name nobody wrote.
+    **And one wrong answer remains**: a name whose one comma precedes a suffix
+    or designator that list does not name is reordered as if it were surname
+    first: a person's `M.D.`, `2nd` or `VI`, and a company's `S.A.`, `AG`,
+    `Co.`, `Pty Ltd`, `SRL` or `AB`. Each is a spelling initials share, which
+    the list may not carry, or one it does not carry yet.
+    """
+    flipped = (flip_catalogue_name(name) for name in names)
+    return CREDIT_SEPARATOR.join(name for name in flipped if name) or None

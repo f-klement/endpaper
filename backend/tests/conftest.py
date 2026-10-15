@@ -240,6 +240,9 @@ os.environ.setdefault("APP_ENV", "dev")
 # depend on how long the run took. `notifications.run_digest` is driven
 # directly instead, and the wiring is pinned in tests/test_main.py.
 os.environ.setdefault("ENABLE_OVERDUE_TICKER", "false")
+# The daily Readwise pull, for the same reason; `readwise.run_due` is driven
+# directly and the wiring is pinned in tests/test_main.py.
+os.environ.setdefault("ENABLE_READWISE_TICKER", "false")
 # The backend is imported flat ("from models import Book"), the way uvicorn
 # imports it with backend/ as the working directory.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))

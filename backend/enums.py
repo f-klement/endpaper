@@ -1123,9 +1123,41 @@ class HighlightSource(StrEnum):
 
     #: A KOReader sidecar, `metadata.<ext>.lua`, read in the member's browser.
     KOREADER = "koreader"
-    #: Readwise's own highlight id. Reserved for the Readwise pull, which
-    #: writes into the same table; nothing writes it yet.
+    #: Readwise's own highlight id, written by the pull in `readwise.py`.
     READWISE = "readwise"
+
+
+class MemberLoginService(StrEnum):
+    """A service where a member holds a login of their own, sealed in
+    `member_logins`.
+
+    `models.MemberLogin` says why this kind of secret has a table to itself.
+    """
+
+    #: An access token from `readwise.io/access_token`, read by `readwise.py`.
+    READWISE = "readwise"
+
+
+class ReadwiseOutcome(StrEnum):
+    """How the last pull of one member's Readwise highlights ended.
+
+    Stored on the member's login so the account page can say it, and so the
+    daily job can tell a member who needs to act from one who does not.
+    """
+
+    #: Every page was read and applied, so the cursor moved.
+    SYNCED = "synced"
+    #: A bound ended the walk early. What was read is kept; the cursor stays,
+    #: so the next run reads those pages again.
+    INCOMPLETE = "incomplete"
+    #: Readwise answered 401: the token was revoked or mistyped.
+    REFUSED = "token_refused"
+    #: Readwise answered 429. The next run tries again.
+    RATE_LIMITED = "rate_limited"
+    #: Readwise could not be reached or answered something unreadable.
+    UNAVAILABLE = "unavailable"
+    #: The sealed token cannot be opened here: no key, or a different one.
+    UNREADABLE = "unreadable"
 
 
 @overload

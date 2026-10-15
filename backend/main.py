@@ -24,6 +24,7 @@ from starlette.types import Scope
 import kosync as kosync_protocol
 import metadata
 import notifications
+import readwise as readwise_pull
 import refusals
 import targets
 from config import (
@@ -31,6 +32,7 @@ from config import (
     cors_origins,
     ensure_data_dirs,
     overdue_ticker_enabled,
+    readwise_ticker_enabled,
     serve_frontend,
     validate_auth_config,
     validate_secret_key,
@@ -56,6 +58,7 @@ from routers import (
     loans,
     opds,
     public,
+    readwise,
     settings,
     sru,
     stats,
@@ -353,7 +356,7 @@ init_db()
 
 @contextlib.asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
-    """Start the overdue ticker with the app, and stop it with the app.
+    """Start the overdue and Readwise tickers with the app, and stop them with it.
 
     One task, started here rather than from a module-level `create_task`,
     because there is no running event loop at import time and because a task
@@ -364,17 +367,21 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     "Task was destroyed but it is pending" on every container stop.
 
     Off entirely when `ENABLE_OVERDUE_TICKER=false`, which is what the test
-    suite sets and what a deployment running the digest from cron sets.
+    suite sets and what a deployment running the digest from cron sets; the
+    Readwise one likewise under `ENABLE_READWISE_TICKER=false`.
     """
-    task: asyncio.Task[None] | None = None
+    tasks: list[asyncio.Task[None]] = []
     if overdue_ticker_enabled():
-        task = asyncio.create_task(notifications.ticker())
+        tasks.append(asyncio.create_task(notifications.ticker()))
         logger.info("Overdue reminder ticker started")
+    if readwise_ticker_enabled():
+        tasks.append(asyncio.create_task(readwise_pull.ticker()))
+        logger.info("Readwise ticker started")
 
     try:
         yield
     finally:
-        if task is not None:
+        for task in tasks:
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await task
@@ -451,6 +458,7 @@ app.include_router(opds.router)
 # answer without a session, which is why its own module opens by naming the
 # four rules that apply to it.
 app.include_router(public.router)
+app.include_router(readwise.router)
 # The second router whose routes answer without a session, and it borrows the
 # first one's gate rather than carrying its own: see `routers/sru.py`. Before
 # the SPA mount for the reason `/robots.txt` is, since `/sru` is likewise a path

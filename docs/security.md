@@ -547,6 +547,33 @@ other path under proxy auth trusts the identity header the proxy sets; nothing u
 Everything a device reports is its member's own: a document row is keyed by member, and a
 Book is reached only through the shelf for that member.
 
+### A Readwise token leaves only for Readwise
+
+A member may save their own Readwise access token, so this server can pull their
+highlights. **Pull only: nothing of the library leaves.** A GET to `readwise.io` carries
+the token as an `Authorization` header, the time of the last pull as `updatedAfter`, and
+Readwise's own values handed back to it: the `pageCursor` it gave and the book ids it gave,
+as `ids`. No passage, note, title or Book is sent anywhere.
+
+The token is checked with Readwise before it is stored, sealed in `member_logins`, and never
+returned by any route: the account answer says only whether one is saved. The header is
+attached per request and only for Readwise's own origin (`readwise.Token.header_for`), on
+top of the outbound door's refusal to follow a redirect off host. A refused token, a
+rate limit and an unreachable Readwise are each recorded as the pull's outcome and shown to
+the member, never as a 500.
+
+**An operator holding the recovery phrase and an archive can open every member's token.**
+The envelope is sealed with the one deployment key, and its associated data is computable
+from the row, so "never returned by any route" is a property of the application and not of
+the operator. The same holds for every catalogue login.
+
+**What arrives is private.** Every highlight lands with `is_shared` false, on a Book the
+member can see, chosen by an ASIN on exactly one such Book or else by exactly one Book with
+the same title and first author. A Readwise book matching none, or more than one, is listed
+to the member and nothing is written for it; a private Book of another member is never a
+candidate, because the candidates are read through `Shelf.seen_by`. A deletion reported by
+Readwise removes the row, shared or not.
+
 ### The Google Books API key is never returned
 
 `GET /api/settings` returns a masked preview plus a boolean, never the key. The masking is
@@ -1592,11 +1619,15 @@ wholesale.
 |---|---|---|---|---|
 | The app's own | the deployment | `settings`, plaintext | any admin | nothing happens |
 | A catalogue account | the library | `catalogue_credentials`, sealed | any admin | nothing happens |
-| A member's own login elsewhere | one member | its own table, when it exists | that member | deleted with them |
+| A member's own login elsewhere | one member | `member_logins`, sealed | that member | deleted with them |
 
-The third does not exist yet and will **not** be a nullable column on the second's table:
-ownership changes the deletion rule, the visibility rule and the read path, and one table
-answering two access-control questions is how the answer to one gets applied to the other.
+The third is **not** a nullable column on the second's table: ownership changes the
+deletion rule, the visibility rule and the read path, and one table answering two
+access-control questions is how the answer to one gets applied to the other. Its rows
+cascade from the member's own, and its envelope is sealed with the same key under
+associated data naming its own kind, the service and the member, so it opens on no other
+member's row and in no other table. *A Readwise token leaves only for Readwise* says what
+the one such login today is used for.
 The distinction is enforced rather than described. Every sealed value is bound to
 additional authenticated data naming its kind, its subject and the origin it may be sent to
 (`endpaper/v2/catalogue-credential/<source>/<origin>`), so a ciphertext moved between rows,

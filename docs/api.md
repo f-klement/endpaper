@@ -2132,6 +2132,27 @@ waits in the member's inbox until they link it from the book's page.
 | PUT | `/api/kosync/books/{id}/documents/{document}` | read | Link one, and apply where it is now. 404 for a document the caller never pushed |
 | DELETE | `/api/kosync/books/{id}/documents/{document}` | read | 204, back to the inbox. The log rows it wrote stay |
 
+### Readwise highlights
+
+A member's own Readwise access token, and the pull it allows. Pull only: the token, the
+time of the last pull, and the page cursor and book ids Readwise itself gave go to
+`readwise.io`; nothing of the library does. A pull stopped part way through the export resumes from its
+page cursor on the next; one stopped while asking for books by id asks for them again. A pull
+reads Readwise's `/api/v2/export/` from where the last complete one left off, with
+deletions, and runs once a day by itself (`ENABLE_READWISE_TICKER`) as well as on request.
+Highlights arrive private, with `source` `readwise` and Readwise's highlight id as the
+source key; a deletion at Readwise removes the row, and a row moved to another Book is
+private again. A Readwise book is put on a Book the member can see by an ASIN on exactly one,
+else by exactly one with the same title and first author; any other waits, listed on the
+account, and is asked for again once a Book matches.
+
+| Method | Path | Access | Notes |
+|---|---|---|---|
+| GET | `/api/readwise/account` | member | `has_token`, `token_set_at`, `last_run_at`, `last_outcome`, `waiting_count` and the first 100 `waiting` books. Never the token |
+| PUT | `/api/readwise/token` | member | Checked with Readwise, then sealed. **400** `token_refused`, **502** `unavailable`, **409** `no_key` without an encryption key. Replacing one starts the pull over. Import rate limit, checked first |
+| DELETE | `/api/readwise/token` | member | 204. Removes the token and the pull's state; the highlights stay |
+| POST | `/api/readwise/sync` | member | Pull now. 200 with `outcome` and the counts whatever Readwise answered; **409** `no_token`, **409** `sync_running`. Import rate limit |
+
 ## System
 
 | Method | Path | Access | Notes |

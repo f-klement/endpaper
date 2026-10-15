@@ -134,6 +134,11 @@ describe("the authors", () => {
     expect(record?.authors).toEqual(["Fred Leise", "Kate Mertes"]);
   });
 
+  it("say they are separate, so each travels as one name", () => {
+    const record = readOpf(epub3(`<dc:creator>Tolkien, J. R. R.</dc:creator>`));
+    expect(record?.authorsSeparated).toBe(true);
+  });
+
   it("keep an EPUB 2 creator with an author role and drop an illustrator", () => {
     const record = readOpf(
       epub2(`

@@ -618,6 +618,37 @@ export const de: Messages = {
   "kosync.book.couldNotSave":
     "Die Verknüpfung konnte nicht gespeichert werden.",
 
+  // ── Readwise ──────────────────────────────────────────────────────────────
+  "readwise.title": "Readwise-Markierungen",
+  "readwise.hint":
+    "Endpaper kann die eigenen Markierungen einmal am Tag aus Readwise holen. Jede kommt privat an, beim Buch, zu dem sie gehört. Nur das Token und die eigenen Verweise von Readwise werden an Readwise gesendet; nichts aus der Bibliothek geht zurück. Das Token steht unter readwise.io/access_token.",
+  "readwise.token": "Readwise-Zugriffstoken",
+  "readwise.save": "Token speichern",
+  "readwise.replace": "Token ersetzen",
+  "readwise.remove": "Token entfernen",
+  "readwise.sync": "Jetzt holen",
+  "readwise.none": "Es ist kein Readwise-Token gespeichert.",
+  "readwise.notYet":
+    "Ein Token ist gespeichert. Markierungen werden einmal am Tag geholt, oder jetzt mit dem Knopf.",
+  "readwise.lastRun": "Zuletzt geholt am {date}: {outcome}",
+  "readwise.outcome.synced": "alles ist angekommen.",
+  "readwise.outcome.incomplete":
+    "nur ein Teil ist angekommen. Der Rest kommt beim nächsten Holen.",
+  "readwise.outcome.tokenRefused":
+    "Readwise hat das Token abgelehnt. Ein neues speichern.",
+  "readwise.outcome.rateLimited":
+    "Readwise bat zu warten. Das nächste Holen versucht es erneut.",
+  "readwise.outcome.unavailable": "Readwise war nicht erreichbar.",
+  "readwise.outcome.unreadable":
+    "das gespeicherte Token kann hier nicht mehr gelesen werden. Es erneut speichern.",
+  "readwise.pulled":
+    "Neu: {created}. Geändert: {updated}. Entfernt: {deleted}.",
+  "readwise.waiting":
+    "Bücher in Readwise ohne genau ein passendes Buch hier: {count}. Die Markierungen dazu kommen, sobald genau ein Buch in der Bibliothek passt, über die ASIN oder Titel und Autor.",
+  "readwise.waitingBook": "{title}, {author}",
+  "readwise.couldNotSave": "Das Token konnte nicht gespeichert werden.",
+  "readwise.couldNotSync": "Die Markierungen konnten nicht geholt werden.",
+
   "theme.hint": "Wird im Konto gespeichert und gilt auf allen Geräten.",
   "theme.light": "Hell",
   "theme.dark": "Dunkel",
@@ -1132,7 +1163,7 @@ export const de: Messages = {
   // ── Bücher aus ihren Dateien hinzufügen ─────────────────────────────────
   "file.title": "Aus einer Datei hinzufügen",
   "file.explain":
-    "Buchdateien oder einen ganzen Ordner auswählen, dann liest Endpaper heraus, was in den Dateien steht. Was eine Datei nicht sagt, wird über den Dateinamen gesucht. Die Dateien werden hier im Browser gelesen und niemals hochgeladen. Bei einem Ordner wird für ein Buch aus einer einzigen Datei auch deren Name samt der Ordner darüber und ein Fingerabdruck der Datei beim Buch gespeichert, damit die Datei wiederzufinden ist, und alle, die das Buch sehen, sehen auch das. Der Fingerabdruck wird hier aus bis zu 12 KiB der Datei berechnet. Auch die Schlagwörter aus der Datei werden beim Buch gespeichert: bei einem einzelnen Buch lassen sie sich vorher entfernen, bei einem ganzen Ordner geht das hinterher nur noch, indem das Buch entfernt wird.",
+    "Buchdateien oder einen ganzen Ordner auswählen, dann liest Endpaper heraus, was in den Dateien steht. Was eine Datei nicht sagt, wird über den Dateinamen gesucht, und eine Datei, die eine ISBN nennt, lässt sich darüber nachschlagen wie ein gescannter Barcode. Die Dateien werden hier im Browser gelesen und niemals hochgeladen. Bei einem Ordner wird für ein Buch aus einer einzigen Datei auch deren Name samt der Ordner darüber und ein Fingerabdruck der Datei beim Buch gespeichert, damit die Datei wiederzufinden ist, und alle, die das Buch sehen, sehen auch das. Der Fingerabdruck wird hier aus bis zu 12 KiB der Datei berechnet. Auch die Schlagwörter aus der Datei werden beim Buch gespeichert: bei einem einzelnen Buch lassen sie sich vorher entfernen, bei einem ganzen Ordner geht das hinterher nur noch, indem das Buch entfernt wird.",
   "file.pickLabel": "Buchdateien",
   "file.readingFiles": "Die ausgewählten Dateien werden gelesen...",
   "file.notAnEpub": "Keine EPUB-Datei.",
@@ -1154,9 +1185,9 @@ export const de: Messages = {
   // ── Rückfall auf Dateiname und Ordner ───────────────────────────────────
   "fallback.skipped":
     "{count} übersprungen, weil Endpaper kein Format davon liest.",
-  "fallback.lookUp": "{count} über den Dateinamen suchen",
+  "fallback.lookUp": "{count} in den Katalogen nachschlagen",
   "fallback.pace":
-    "Die Dateinamen gehen an die Kataloge, in denen Endpaper sucht, die Dateien selbst nicht. Zeitlich gestreckt, damit ein einzelner Ordner nicht das ganze Budget einer Bibliothek auf einmal verbraucht. Ungefähr {minutes} min.",
+    "Die Dateinamen und jede ISBN, die eine Datei nennt, gehen an die Kataloge, in denen Endpaper sucht, die Dateien selbst nicht. Zeitlich gestreckt, damit ein einzelner Ordner nicht das ganze Budget einer Bibliothek auf einmal verbraucht. Ungefähr {minutes} min.",
   "fallback.paceAgain":
     "Dieselben Dateinamen gehen ein zweites Mal an dieselben Kataloge, die Dateien selbst weiterhin nicht. Genauso zeitlich gestreckt. Ungefähr {minutes} min.",
   "fallback.stop": "Suche beenden",
@@ -1166,11 +1197,15 @@ export const de: Messages = {
     "In keinem Katalog gefunden, bleibt unter dem Dateinamen.",
   "fallback.lookupFailed":
     "Die Kataloge waren nicht erreichbar, bleibt unter dem Dateinamen.",
+  "fallback.notInCataloguesAsStated":
+    "In keinem Katalog gefunden, bleibt so, wie die Datei es beschreibt.",
+  "fallback.lookupFailedAsStated":
+    "Die Kataloge waren nicht erreichbar, bleibt so, wie die Datei es beschreibt.",
   "fallback.keptTheName": "Bleibt unter dem Dateinamen.",
   "fallback.keptForNow":
     "Bleibt vorerst unter dem Dateinamen und lässt sich erneut suchen.",
   "fallback.aboutEbooks":
-    "Die meisten Kataloge führen gedruckte Bücher. Ein Buch, das nur als Datei existiert, steht deshalb oft in keinem davon. Nichts ist fehlgeschlagen: solche Bücher werden mit dem Namen übernommen, den die Datei hatte, und lassen sich danach bearbeiten.",
+    "Die meisten Kataloge führen gedruckte Bücher. Ein Buch, das nur als Datei existiert, steht deshalb oft in keinem davon. Nichts ist fehlgeschlagen: solche Bücher werden mit dem Namen übernommen, den die Datei hatte, oder so, wie die Datei sie beschreibt, und lassen sich danach bearbeiten.",
   "fallback.matches": "Mögliche Treffer: {count}",
   "fallback.stillToDecide":
     "{count} noch zu entscheiden. Alle hinzufügen lässt diese in der Liste.",
@@ -1293,6 +1328,12 @@ export const de: Messages = {
   "files.forgetFailed": "Dieser Ort konnte nicht vergessen werden.",
   "rapid.heldInAnotherFormat":
     "Schon in einer anderen Ausgabe in der Bibliothek, die Datei wurde deshalb nicht dort eingetragen.",
+  "rapid.recordDiffers":
+    "Der Katalog führt diese ISBN unter einem anderen Titel, möglicherweise ein anderes Buch, es bleibt deshalb so, wie die Datei es beschreibt.",
+  "rapid.keptTheFile": "Bleibt so, wie die Datei es beschreibt.",
+  "rapid.theRecord": "Der Eintrag im Katalog: {record}",
+  "rapid.keepTheFile": "Die Beschreibung der Datei behalten",
+  "rapid.keepTheFileFor": "Die Beschreibung der Datei für {label} behalten",
   "rapid.addAsCopy": "Als eigenes Exemplar hinzufügen ({format})",
   "rapid.addAsCopyFor": "{label} als eigenes Exemplar hinzufügen",
   "format.filterAll": "Jede Ausgabe",

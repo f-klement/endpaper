@@ -192,7 +192,7 @@ describe("ScanPage", () => {
 
       await waitFor(() =>
         expect(
-          screen.getByRole("button", { name: "Look up 1 by name" }),
+          screen.getByRole("button", { name: "Look up 1 in the catalogues" }),
         ).toBeInTheDocument(),
       );
       expect(api.lastCall("/api/books/search")).toBeUndefined();

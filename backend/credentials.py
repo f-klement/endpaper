@@ -15,7 +15,7 @@ there would sit unmasked in every archive an admin can download.
 |---|---|---|---|---|
 | The app's own | the deployment | `settings`, plaintext | any admin | nothing |
 | **An account elsewhere** | the library | here, sealed | any admin | nothing |
-| A member's own login | one member | **its own table** | that member | deleted with them |
+| A member's own login | one member | **`member_logins`** | that member | deleted with them |
 
 **Distinguished by construction rather than by being named.** Every envelope is
 sealed against an additional-authenticated-data string carrying its kind, its
@@ -35,10 +35,11 @@ unopenable at an address it was not sealed for **whichever writer moved the
 row**, rather than only through the one route that was measured.
 `backup._without_household_logins` stays as the belt to this brace.
 
-**The third kind gets its own table when it arrives, not a nullable column
+**The third kind has its own table, `member_logins`, not a nullable column
 here.** Ownership changes the deletion rule, the visibility rule and the read
 path, all three; one table answering two access-control questions is how the
-answer to one of them gets applied to the other.
+answer to one of them gets applied to the other. `seal_member_login` seals it
+with this key under associated data of its own kind.
 
 ## Four levels, one walk, and the shipped one is at the bottom
 
@@ -1124,6 +1125,63 @@ def unseal(material: bytes, source: str, base_url: str, envelope: str) -> str:
         raise UnreadableCredential("The stored credential could not be read. Enter it again.") from error
 
 
+#: The associated data's purpose for a member's own login, the third kind.
+#:
+#: **A different kind word from the catalogue's, and that is the separation.**
+#: A member's envelope opens only under its own service, its own member id and
+#: its own origin, so one copied onto another member's row, or into
+#: `catalogue_credentials`, fails authentication instead of acting for
+#: somebody else. `models.MemberLogin` says why the kind has its own table.
+_MEMBER_LOGIN_PURPOSE: Final = "endpaper/v2/member-login/{service}/{member_id}/{origin}"
+
+
+def _member_associated(material: bytes, service: str, member_id: int, base_url: str) -> bytes:
+    origin = origin_of(base_url)
+    if not origin or not is_safe_source(service):
+        raise CredentialError("A member's login needs a service and an address it is for.")
+    purpose = _MEMBER_LOGIN_PURPOSE.format(service=service, member_id=member_id, origin=origin)
+    return f"{VERSION}.{generation_of_key(material)}.{purpose}".encode()
+
+
+def seal_member_login(
+    material: bytes, service: str, member_id: int, base_url: str, secret: str
+) -> str:
+    """One member's login at `service`, sealed as `seal` seals a catalogue's.
+
+    The same envelope shape, key and generation tag, over associated data of
+    its own kind (`_MEMBER_LOGIN_PURPOSE`).
+    """
+    nonce = secrets.token_bytes(_NONCE_BYTES)
+    associated = _member_associated(material, service, member_id, base_url)
+    box = AESGCM(_expand(material, _ENCRYPTION_INFO, 32))
+    sealed = box.encrypt(nonce, secret.encode("utf-8"), associated)
+    return ".".join((VERSION, generation_of_key(material), _b64(nonce), _b64(sealed)))
+
+
+def unseal_member_login(
+    material: bytes, service: str, member_id: int, base_url: str, envelope: str
+) -> str:
+    """The member's login back, or the refusal `unseal` would raise.
+
+    No superseded version is opened: this kind was first written under
+    `VERSION`, so anything else is unreadable rather than carried forward.
+    """
+    parts = envelope.split(".")
+    if len(parts) != 4 or parts[0] != VERSION:
+        raise UnreadableCredential("The stored login is not in a known format.")
+    _version, generation, nonce, sealed = parts
+    if generation != generation_of_key(material):
+        raise WrongKeyGeneration(
+            "This login was stored under a different encryption key and cannot be read. Enter it again."
+        )
+    associated = _member_associated(material, service, member_id, base_url)
+    box = AESGCM(_expand(material, _ENCRYPTION_INFO, 32))
+    try:
+        return box.decrypt(_unb64(nonce), _unb64(sealed), associated).decode("utf-8")
+    except (InvalidTag, ValueError, UnicodeDecodeError) as error:
+        raise UnreadableCredential("The stored login could not be read. Enter it again.") from error
+
+
 def origin_of(url: str) -> str:
     """Scheme, host and port, as the one string a credential is bound to.
 
@@ -1770,6 +1828,12 @@ def unreadable_sources(db: Session, state: KeyState | None = None) -> list[str]:
 
     Sources rather than a count, so a screen can say which. A count beside a
     list is the same fact twice.
+
+    **Catalogue logins only: a member's own token in `member_logins` is not
+    counted**, so neither `generate_key`'s refusal nor the key screen's count
+    includes one. A token a new key cannot open is reported to its member, as
+    the pull's `unreadable` outcome on their account page, and they save it
+    again; the admin is not the person who can retype it.
     """
     resolved = key_state() if state is None else state
     stranded: list[str] = []

@@ -104,6 +104,7 @@ describe("reading a library", () => {
       path: "Herbert, Frank/Dune (1)",
       title: "Dune",
       authors: ["Frank Herbert"],
+      authorsSeparated: true,
       identifiers: [{ type: "isbn", value: "9780441013593" }],
       isbn: "9780441013593",
       publisher: "Chilton Books",
@@ -124,6 +125,7 @@ describe("reading a library", () => {
     );
 
     expect(book!.authors).toEqual(["Terry Pratchett", "Neil Gaiman"]);
+    expect(book!.authorsSeparated).toBe(true);
   });
 
   it("carries every identifier, not only the ISBN", async () => {
@@ -342,6 +344,7 @@ describe("a Calibre that moved its own schema", () => {
           path: "x",
           title: "Dune",
           authors: [],
+          authorsSeparated: true,
           identifiers: [],
           isbn: null,
           publisher: null,
@@ -442,6 +445,7 @@ const A_BOOK: CalibreBook = {
   path: "x",
   title: "Dune",
   authors: ["Frank Herbert"],
+  authorsSeparated: true,
   identifiers: [],
   isbn: null,
   publisher: null,
@@ -457,6 +461,7 @@ const A_FILE: FileMetadata = {
   title: "Dune",
   subtitle: null,
   authors: ["Frank Herbert"],
+  authorsSeparated: true,
   categories: [],
   identifiers: [],
   isbn: null,

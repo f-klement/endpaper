@@ -111,6 +111,7 @@ describe("reading a FictionBook's description", () => {
       title: "Назад в юность",
       subtitle: null,
       authors: ["Александр Юрьевич Санфиров"],
+      authorsSeparated: true,
       categories: ["sf"],
       identifiers: [{ scheme: "isbn", value: "978-5-9922-1663-9" }],
       isbn: "9785992216639",
@@ -135,6 +136,7 @@ describe("reading a FictionBook's description", () => {
     );
 
     expect(record?.authors).toEqual(["Аркадий Стругацкий", "Борис Стругацкий"]);
+    expect(record?.authorsSeparated).toBe(true);
   });
 
   it("keeps an author who has only a nickname", () => {

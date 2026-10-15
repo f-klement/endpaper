@@ -620,6 +620,8 @@ export async function readMobi(file: Blob): Promise<MobiReading> {
       title: readTitle(record, exth, decode),
       subtitle: null,
       authors: readAuthors(exth, decode),
+      // One EXTH creator record per person.
+      authorsSeparated: true,
       categories: readSubjects(exth, decode),
       identifiers: readIdentifiers(exth, decode),
       isbn: readIsbn(exth, decode),

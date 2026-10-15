@@ -418,6 +418,8 @@ export function readOpf(xml: string): FileMetadata | null {
     title,
     subtitle,
     authors: readAuthors(metadata, index),
+    // One `dc:creator` per person.
+    authorsSeparated: true,
     categories: readSubjects(metadata),
     identifiers,
     isbn: readIsbn(identifiers),

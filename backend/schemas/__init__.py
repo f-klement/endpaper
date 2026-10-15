@@ -132,6 +132,12 @@ from schemas.public import (
     PublicTagOut,
 )
 from schemas.quote import QuoteCreate, QuoteOut, QuoteWithBookOut
+from schemas.readwise import (
+    ReadwiseAccountOut,
+    ReadwiseSyncOut,
+    ReadwiseTokenIn,
+    ReadwiseWaitingOut,
+)
 from schemas.settings import (
     CatalogueSourceOut,
     CatalogueSourcePreference,
@@ -314,6 +320,10 @@ __all__ = [
     "QuoteCreate",
     "QuoteOut",
     "QuoteWithBookOut",
+    "ReadwiseAccountOut",
+    "ReadwiseSyncOut",
+    "ReadwiseTokenIn",
+    "ReadwiseWaitingOut",
     "RecoveryPhraseIn",
     "RecoveryPhraseOut",
     "RefusedAssertionOut",

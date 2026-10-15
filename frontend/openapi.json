@@ -1153,6 +1153,23 @@
             ],
             "title": "Author"
           },
+          "authors": {
+            "anyOf": [
+              {
+                "items": {
+                  "maxLength": 500,
+                  "type": "string"
+                },
+                "maxItems": 167,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The credited names one by one, for a source that separated them. Each name is reordered from surname first where it has one comma and is not followed by a suffix such as Jr. or a designator such as Inc., and the names are stored joined with ', ' in place of author. Sent with author, author must be these names joined with ', ', or blank when they name nobody; anything else is refused.",
+            "title": "Authors"
+          },
           "categories": {
             "default": [],
             "items": {
@@ -6373,6 +6390,169 @@
         ],
         "title": "ReadStatus",
         "type": "string"
+      },
+      "ReadwiseAccountOut": {
+        "description": "Whether this member has a token saved, and how the last pull went.",
+        "properties": {
+          "has_token": {
+            "title": "Has Token",
+            "type": "boolean"
+          },
+          "last_outcome": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReadwiseOutcome"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "last_run_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Run At"
+          },
+          "token_set_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Token Set At"
+          },
+          "waiting": {
+            "items": {
+              "$ref": "#/components/schemas/ReadwiseWaitingOut"
+            },
+            "title": "Waiting",
+            "type": "array"
+          },
+          "waiting_count": {
+            "title": "Waiting Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "has_token",
+          "token_set_at",
+          "last_run_at",
+          "last_outcome",
+          "waiting_count",
+          "waiting"
+        ],
+        "title": "ReadwiseAccountOut",
+        "type": "object"
+      },
+      "ReadwiseOutcome": {
+        "description": "How the last pull of one member's Readwise highlights ended.\n\nStored on the member's login so the account page can say it, and so the\ndaily job can tell a member who needs to act from one who does not.",
+        "enum": [
+          "synced",
+          "incomplete",
+          "token_refused",
+          "rate_limited",
+          "unavailable",
+          "unreadable"
+        ],
+        "title": "ReadwiseOutcome",
+        "type": "string"
+      },
+      "ReadwiseSyncOut": {
+        "description": "What one pull did, over the highlights it was sent.",
+        "properties": {
+          "created": {
+            "title": "Created",
+            "type": "integer"
+          },
+          "deleted": {
+            "title": "Deleted",
+            "type": "integer"
+          },
+          "outcome": {
+            "$ref": "#/components/schemas/ReadwiseOutcome"
+          },
+          "skipped": {
+            "title": "Skipped",
+            "type": "integer"
+          },
+          "unchanged": {
+            "title": "Unchanged",
+            "type": "integer"
+          },
+          "updated": {
+            "title": "Updated",
+            "type": "integer"
+          },
+          "waiting_count": {
+            "title": "Waiting Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "outcome",
+          "created",
+          "updated",
+          "unchanged",
+          "deleted",
+          "skipped",
+          "waiting_count"
+        ],
+        "title": "ReadwiseSyncOut",
+        "type": "object"
+      },
+      "ReadwiseTokenIn": {
+        "description": "The access token from `readwise.io/access_token`.\n\n**Letters, digits, `_` and `-` only**, which every token Readwise issues\nis: the value goes into a request header, and a character outside that set\nis either a paste error or a header injection.",
+        "properties": {
+          "token": {
+            "maxLength": 200,
+            "minLength": 8,
+            "pattern": "^[A-Za-z0-9_-]+$",
+            "title": "Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token"
+        ],
+        "title": "ReadwiseTokenIn",
+        "type": "object"
+      },
+      "ReadwiseWaitingOut": {
+        "description": "A Readwise book no Book here matched, so its highlights wait.",
+        "properties": {
+          "author": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Author"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "author"
+        ],
+        "title": "ReadwiseWaitingOut",
+        "type": "object"
       },
       "RecoveryPhraseIn": {
         "description": "A key typed back in, on a new machine or after it was lost.\n\nWhitespace and case are the caller's problem to get wrong and this\napplication's to absorb: `credentials.normalise_phrase` NFKD-normalises,\nlowercases and re-joins, because the encoder rejects an uppercase phrase\noutright and a person pasting from a document that capitalised the first\nword has not made a mistake.",
@@ -16246,6 +16426,165 @@
         ]
       }
     },
+    "/api/readwise/account": {
+      "get": {
+        "description": "Whether the caller has saved a token, how their last pull went, and\nwhich Readwise books wait for a Book. The token itself is never served.",
+        "operationId": "get_readwise_account",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReadwiseAccountOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Get Readwise Account",
+        "tags": [
+          "readwise"
+        ]
+      }
+    },
+    "/api/readwise/sync": {
+      "post": {
+        "description": "Pull the caller's changed highlights now, as the daily job does.\n\nHow it ended is the answer's `outcome`, never a status: a refused token or\na Readwise that cannot be reached is a 200 saying so, recorded on the\naccount as the daily job's would be. 409 `no_token` without a saved token,\n409 `sync_running` while the caller's pull is already under way. Rate\nlimited on the import limiter, with the other bulk writes.",
+        "operationId": "sync_readwise",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReadwiseSyncOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Sync Readwise",
+        "tags": [
+          "readwise"
+        ]
+      }
+    },
+    "/api/readwise/token": {
+      "delete": {
+        "description": "Remove the caller's token and the pull's state. Needs no key, so a\ntoken nobody can open can still be removed. Highlights already pulled\nstay; each is the member's to share or keep.\n\n**`async def`, so the check and the removal run on the event loop with no\nawait between them**: a pull starts on the same loop, so none can start\nbetween the two and write after the token is gone.",
+        "operationId": "forget_readwise_token",
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Forget Readwise Token",
+        "tags": [
+          "readwise"
+        ]
+      },
+      "put": {
+        "description": "Check the token with Readwise, then seal it as the caller's.\n\n**Checked before it is stored**, so a mistyped token is refused here rather\nthan discovered by the first pull: 400 `token_refused` when Readwise says\nno, 502 `unavailable` when it cannot be asked. 409 `no_key` when this\nlibrary has no encryption key to seal it with.\n\nReplacing a token starts the next pull from the beginning, since the new\none may be another Readwise account. The first pull runs with the daily\njob, or from the sync button.\n\n**Rate limited first, before anything is checked**, on the import limiter\nthe pull shares: each save asks Readwise once, and a saved token starts the\npull over.",
+        "operationId": "save_readwise_token",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReadwiseTokenIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReadwiseAccountOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Save Readwise Token",
+        "tags": [
+          "readwise"
+        ]
+      }
+    },
     "/api/settings": {
       "get": {
         "operationId": "get_settings",
@@ -16523,7 +16862,7 @@
     },
     "/api/settings/credential-key": {
       "delete": {
-        "description": "Drop the key this machine holds, so a new one can be made.\n\n**The way back from closing the tab without writing the words down.**\nWithout this, `POST` refuses because a key exists, `PUT` wants a phrase\nnobody has, and the deployment is stuck behind a key protecting nothing.\n\n**It strands whatever the key was opening, and the response says how many**\nrather than this route hiding it: `unreadable_credentials` on the way out is\nthe count of stored logins that now have to be typed again. Removing those\nlogins first is the way to reach a clean state, and `DELETE` on a source's\ncredential needs no key for exactly that reason.\n\n409 when a store holding the key cannot be cleared from here, naming it:\nthe environment, because a process cannot unset a variable for its own next\nstart; a key file this process cannot remove; or a keychain that kept the\nkey.",
+        "description": "Drop the key this machine holds, so a new one can be made.\n\n**The way back from closing the tab without writing the words down.**\nWithout this, `POST` refuses because a key exists, `PUT` wants a phrase\nnobody has, and the deployment is stuck behind a key protecting nothing.\n\n**It strands whatever the key was opening, and the response says how many**\nrather than this route hiding it: `unreadable_credentials` on the way out is\nthe count of stored catalogue logins that now have to be typed again. A\nmember's own Readwise token is not in that count: its member is told on\ntheir account page and saves it again. Removing those\nlogins first is the way to reach a clean state, and `DELETE` on a source's\ncredential needs no key for exactly that reason.\n\n409 when a store holding the key cannot be cleared from here, naming it:\nthe environment, because a process cannot unset a variable for its own next\nstart; a key file this process cannot remove; or a keychain that kept the\nkey.",
         "operationId": "forget_credential_key",
         "responses": {
           "200": {

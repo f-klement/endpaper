@@ -6,12 +6,14 @@ import SettingsSubPage from "../components/SettingsSubPage";
 import AddressField from "./components/AddressField";
 import KosyncAccount from "./components/KosyncAccount";
 import MemberAddresses from "./components/MemberAddresses";
+import ReadwiseAccount from "./components/ReadwiseAccount";
 import SecurityRecord from "./components/SecurityRecord";
 import {
   useKosyncAccount,
   useMemberEmails,
   useMyEmail,
   useMySecurity,
+  useReadwiseAccount,
 } from "./hooks";
 
 interface AccountSettingsPageProps {
@@ -27,8 +29,9 @@ interface AccountSettingsPageProps {
 }
 
 /**
- * The member's own account: their address, its history, and the password
- * their KOReader signs in with.
+ * The member's own account: their address, its history, the password their
+ * KOReader signs in with, and the Readwise token their highlights are pulled
+ * with.
  *
  * A route of its own rather than a section on an existing screen, because none
  * of the six fits: Appearance is what the app looks like, and Data and accounts
@@ -48,6 +51,7 @@ export default function AccountSettingsPage({
   const members = useMemberEmails(currentUser.is_admin);
   const security = useMySecurity();
   const kosync = useKosyncAccount();
+  const readwise = useReadwiseAccount();
 
   return (
     <SettingsSubPage icon="user" title={t("settings.account.title")}>
@@ -108,6 +112,10 @@ export default function AccountSettingsPage({
 
       <SettingsSection title={t("kosync.title")} icon="user">
         <KosyncAccount state={kosync} />
+      </SettingsSection>
+
+      <SettingsSection title={t("readwise.title")} icon="user">
+        <ReadwiseAccount state={readwise} />
       </SettingsSection>
 
       <MemberAddresses state={members} />

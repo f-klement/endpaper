@@ -94,7 +94,11 @@ candidate was made of, lists them, and offers to file them separately.
 **A file whose own metadata says nothing is offered a catalogue lookup**, under
 its own name and the folders above it. Offered rather than automatic, and paced,
 so a folder of three hundred does not spend a morning's search budget in a
-minute.
+minute. **A file that states its ISBN is offered the lookup a scanned barcode
+gets**, through the same paced press: the catalogue's record wins, and the
+file's own fields fill only what the record leaves blank. A record whose title
+shares no significant word with the file's is shown rather than taken, and the member
+chooses between the two.
 
 **From another app's export**: Goodreads, LibraryThing, StoryGraph, Libib and
 Openreads. **This file is uploaded and read on the server**, unlike the book
@@ -177,6 +181,11 @@ password made for it on your account page, and your devices keep each other's pl
 while the book's reading log fills itself in, a row a day as you move, with the book
 marked read when you reach the end. A file whose fingerprint was taken when you added it
 is matched to its book by itself; any other waits for you to link it once.
+
+**Readwise highlights**: save your Readwise token on your account page and your
+highlights arrive once a day, private, on the book they belong to, with deletions
+following. A Readwise book that matches no book in the library, or more than one, is
+listed for you rather than guessed. Nothing from your library is sent to Readwise: only your token and Readwise's own references.
 
 **Notes** and **quotes** hang off a book. A quote is verbatim text with an
 optional page and your own remark beside it, kept separate so one is not

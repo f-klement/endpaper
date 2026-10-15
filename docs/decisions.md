@@ -21992,3 +21992,74 @@ Owner ruling, 2026-10-15: "maybe in their case lending is not the right term, be
 - **A grant shares no file.** Endpaper holds none, and a digital reference's path is on whichever member's machine recorded it. The grantee is told who granted it; the hand over is outside the app.
 - **No uniqueness index.** The route refuses a second waiting or granted request from the same member. A race or a merge can leave two waiting rows, which the holder answers like any other; an index would have needed a merge rule to resolve the collision, for no benefit to a household.
 - **Existing open loans on digital rows are left alone**: no migration closes them, and they still return.
+
+## A file's stated ISBN is offered to the catalogue, and the catalogue wins per field
+
+A picked file whose metadata names an ISBN is queued as `stated` and asked about only when the member presses the paced lookup, the press the file name fallback already has: one start per `FALLBACK_INTERVAL_MS`, half of the per member metadata limit, so a folder of five hundred is never five hundred lookups at the pick. A row removed after the press is skipped and spends nothing.
+
+When the record arrives it wins every field it answers, which is the barcode path's rule; the file's own value survives only where the record left the field blank (absent, an empty string or an empty list), and `identifiers` and `categories` always survive because no lookup answers them. `notFound` is never carried over. The rule is the total record `WHO_WINS` in `ScanPage/types.ts`.
+
+**Unless the record names a different work.** A file's ISBN can be a stranger's or a publisher template's. When the record's title and the file's share no significant word (four letters or more, not a generic word such as "novel", "roman", "edition" or "band", case and accents folded, "ß" as "ss"; a title of only short words cannot be judged and passes), the record is held on the row and not taken: the row stays as the file describes it, which is what the batch adds, and the member uses the record or keeps the file. **What it does not catch:** another volume of the same series shares the series word and is taken, as before. A false hold on the same work under other words ("1984" against "Nineteen Eighty Four") costs one press.
+
+**An ISBN read from a file name takes its record whole.** `theIsbnWasRead` already distrusts that provenance, so its record is not mixed with the name's guessed author and year.
+
+A 404 or an unreachable catalogue sends a `stated` row back to what the file described, with a sentence saying so rather than "kept under its file name". A file the file holders lookup already places is not offered, so the landing rule still decides where its reference goes; that holds once the holders answer has arrived.
+
+## A Readwise deletion removes the row rather than hiding it
+
+Owner's ruling, 2026-10-15, on the Readwise pull allowed either removing a highlight Readwise
+reports deleted, or unsharing and hiding it. **Removed.** A hidden row is a passage the
+member deleted at its source and that this server still holds, and if it had been shared,
+the unshare has to be remembered by a flag nothing else reads. Removing is what the member
+did. The cost: a highlight deleted in Readwise by mistake and restored there comes back
+as a new row, private, and its sharing has to be chosen again.
+
+## A Readwise book is matched by ASIN or title and first author, and only when one Book answers
+
+Readwise carries no ISBN. An ASIN on exactly one Book the member can see decides first;
+an ASIN on two Books is no answer, and the title is not asked. Otherwise exactly one Book with the same `identity.work_key`, the catalogue transfer's
+predicate, because a wrong answer here puts a member's highlights on a Book with a
+different audience. **Two answers are no answer**: a copy and its original both match a
+Readwise book, and picking one would be the guess Owner's ruling, 2026-10-15, forbids. Such a book
+waits on the account page beside the books nothing matched. A waiting book is asked for
+again by its Readwise id once a Book matches, because an incremental pull never sends a
+book's old highlights again, which is why the mapping is a table (`readwise_books`) and
+not a computation. Articles, tweets and podcasts are not stored at all: none is ever a
+Book here, and listing them would bury the books.
+
+## A 429 from Readwise ends the pull rather than waiting it out
+
+Readwise names a wait in `Retry-After`. The pull records `rate_limited` and stops: the
+button answers with what arrived rather than holding its request open for the wait (a pull
+can still hold it for up to its own 600 second bound), and the daily job's next attempt is a
+day later, past any wait Readwise names. The cursor does not move, an export walk part way resumes
+from its page cursor (a pull stopped while asking for books by id asks for them again
+from the first), and a book matched before its history was asked for keeps
+`readwise_books.whole_pending` until a pull by its id reaches the last page, so nothing is
+lost.
+
+## A member's Readwise token is not counted on the key screen
+
+`credentials.unreadable_sources`, and so `generate_key`'s refusal and the key screen's count,
+reads catalogue logins only. A member token a new key cannot open is reported to its member
+as the pull's `unreadable` outcome, and the member saves it again: the admin is not the
+person who can retype it, and listing it there would put a member's login on an admin
+screen. The route docstrings say so.
+
+A resumed page cursor Readwise refuses with an error is dropped and the next walk restarts.
+One it answers with 200 and an empty page would end the walk as complete; Readwise's
+documentation says nothing about expired cursors, so that case is unverified.
+
+## Authors a source separated travel as a list, and the server joins them
+
+`BookCreate.authors` carries authors sent separately. `books.author` stays one comma separated line; only the join moved to the server.
+
+- **The server reorders each name, then joins** (`bibliographic.credit_line`), the rule every server side import already follows. One author results for a name written surname first, `Tolkien, J. R. R.`, stored as `J. R. R. Tolkien`.
+- **What is still wrong, stated exactly.** Split into two people: a name keeping two commas once dates and roles are off (`King, Martin Luther, Jr.`, `Springer, Berlin, Heidelberg`), and a display order name whose one comma precedes a listed suffix or designator (`Martin Luther King, Jr.`, `Acme, Inc.`), which `flip_catalogue_name` now leaves as written on every path that calls it, rather than writing `Jr Martin Luther King`. Reordered into a name nobody wrote: a name whose one comma precedes a suffix or designator the list does not name (`M.D.`, `2nd`, `VI`, `S.A.`, `AG`, `Co.`, `Pty Ltd`, `SRL`).
+- **The list holds only words initials cannot spell**, compared as written with one trailing full stop off: squashing punctuation read `Erickson, J.R.` as `jr`, and Kindle writes initials undotted (`Barnett, AG`), so no two letter designator is listed and `JR` in capitals is initials. Measured against the rule switched off, over 704 BnF `dc:creator` names, 1,101 DNB MARC `$a`, 70 LoC MODS and 947 distinct Kindle authors: 0 changed, so 0 made wrong and none rescued in those samples.
+- **Only a source that separated its names sends them** (`SourceRecord.authorsSeparated`, required on every reader): EPUB, FB2, MOBI, CBZ, PDF XMP creators, Calibre, Kindle, Digital Editions. Kobo, Apple Books, Moon+ Reader, the Play Books index author, a PDF's `/Author` and an audiobook's artist tag hold one line that may name several people; sent as one name, `Terry Pratchett, Neil Gaiman` would be stored as one invented person.
+- **A body carrying both must agree, or it is refused** (422): `author` is `authors` joined with `", "`, character for character, or both name nobody. Checked before the blank rule, so a blank line beside named people is a disagreement. Picking either half silently stores a credit somebody was not shown; the agreeing pair is accepted because the scan page draws the joined line and its draft carries both. What is stored differs from what was drawn only by the reordering.
+- **The browser sends the names only while the line is still them** (`lib/bookRequest.authorsAgreeing`, in `boundRecord` and again at `toScanRequest`): a line cut to 500 characters, edited on the confirm step or replaced by a catalogue goes alone.
+- **Bounds**: each name at the line's width (500), the count at the most one character names a 500 character line holds (167, blank entries counting), and the joined line at 500 after reordering.
+- **Kept out of the constructor's dump by `exclude=True`**, and the create partition accepts an excluded field only when `FOLDED_INTO_ANOTHER_FIELD` names it, so an excluded field the tuple does not name is refused at import (that a named field is really folded is the validator's test, not the guard's).
+- **Only the create body takes it.** `BookDetailsUpdate` carries a line a member typed, the copy route inherits the work's credit, and the bulk route carries no author.

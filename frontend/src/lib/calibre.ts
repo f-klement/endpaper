@@ -703,6 +703,8 @@ export function readCalibreLibrary(db: SqliteDatabase): CalibreReading {
       path: text(row["path"]) ?? "",
       title: title !== null && CALIBRE_PLACEHOLDER.title(title) ? null : title,
       authors: authors.get(id) ?? [],
+      // One `authors` row per person, linked to the book.
+      authorsSeparated: true,
       identifiers: ownIdentifiers,
       isbn: readIsbn(ownIdentifiers),
       publisher: publishers.get(id)?.[0] ?? null,
@@ -920,6 +922,8 @@ export function crossCheck(
       ...book,
       title: gap(book.title, opf.title),
       authors,
+      authorsSeparated:
+        book.authors.length > 0 ? book.authorsSeparated : opf.authorsSeparated,
       isbn: book.isbn ?? opf.isbn,
       publisher: gap(book.publisher, opf.publisher),
       year: gap(book.year, opf.year),

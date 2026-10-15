@@ -587,6 +587,8 @@ function fromKobo(library: KoboLibrary): StoreLibrary {
       key: book.contentId,
       title: book.title,
       authors: book.authors,
+      // `Attribution` is one string, so the element may name several people.
+      authorsSeparated: false,
       isbn: book.isbn,
       // **None, and `contentId` is not one.** `kobo.ts::KoboBook.contentId`
       // says what that column can hold, and nothing on the row says which it
@@ -713,6 +715,12 @@ function fromTakeout(library: TakeoutLibrary): StoreLibrary {
           : book.author === null
             ? []
             : [book.author],
+      // The sidecar's own author is one string; the file's are what its
+      // reader says they are.
+      authorsSeparated:
+        book.metadata.authors.length > 0
+          ? book.metadata.authorsSeparated
+          : false,
       isbn: book.metadata.isbn,
       publisher: book.metadata.publisher,
       year: book.metadata.year,
@@ -760,6 +768,8 @@ function fromAppleBooks(library: AppleBooksLibrary): StoreLibrary {
       key: book.assetId,
       title: book.title,
       authors: book.authors,
+      // One author column per book, so the element may name several people.
+      authorsSeparated: false,
       isbn: book.isbn,
       // **None, and `assetId` is not one**, `fromKobo`'s rule for the same
       // shape of column. `appleBooks.ts` says that value is the library's own
@@ -813,6 +823,8 @@ function fromKindle(library: KindleLibrary): StoreLibrary {
       key: book.asin,
       title: book.title,
       authors: book.authors,
+      // One `<author>` element per person.
+      authorsSeparated: true,
       // The catalogue has no element for one: `kindle.ts` measured 0 of 1,032.
       isbn: null,
       // The ASIN, which every entry carries and which is why this route was
@@ -858,6 +870,8 @@ function fromDigitalEditions(library: DigitalEditionsLibrary): StoreLibrary {
       key: String(book.record),
       title: book.title,
       authors: book.authors,
+      // One `dc:creator` per person.
+      authorsSeparated: true,
       // **The ISBN where the record's `dc:identifier` was one**, which
       // `adobeDigitalEditions.readIsbn` decides on the value because the
       // catalogue publishes no scheme to decide on.
@@ -964,6 +978,8 @@ function fromMoonReader(library: MoonReaderLibrary): StoreLibrary {
       key: book.path,
       title: book.title,
       authors: book.authors,
+      // One author column per book, so the element may name several people.
+      authorsSeparated: false,
       // Neither published reading of this database has a column for any of
       // these. `moonReader.ts` lists what the app does not record.
       isbn: null,

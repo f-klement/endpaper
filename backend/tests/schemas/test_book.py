@@ -110,6 +110,7 @@ import models
 import routers
 import routers.books as books_router
 import schemas.book as schemas_book
+from authors import CREDIT_SEPARATOR
 from categories import (
     CATEGORIES_MAX,
     CATEGORY_MAX,
@@ -2196,10 +2197,9 @@ class TestEveryCreateFieldEitherReachesTheConstructorOrIsPopped:
             schemas_book._unconstructable_fields(
                 schemas_book.CARRIED_AS_CHILD_ROWS,
                 schemas_book.RESHAPED_FOR_ITS_COLUMN,
-                {
-                    name: field.annotation
-                    for name, field in BookCreate.model_fields.items()
-                },
+                schemas_book.dumped_fields(
+                    BookCreate, schemas_book.FOLDED_INTO_ANOTHER_FIELD
+                ),
                 _book_columns(),
             )
             == {}
@@ -2793,3 +2793,76 @@ class TestABlankIsStoredAsNull:
             assert field in BookCreate.model_fields
             assert field in schemas_book.BookDetailsUpdate.model_fields
             assert Book.__table__.c[field].nullable
+
+
+class TestTheNamesAreTheCreditLine:
+    """`BookCreate.authors` reaches the row only as `author`."""
+
+    def test_the_names_become_the_line_and_leave_the_dump(self):
+        """The create route hands the constructor `model_dump()`, and `books`
+        has no `authors` column: the list in the dump would fail the insert."""
+        book = BookCreate(title="t", authors=["Tolkien, J. R. R.", "Christopher Tolkien"])
+
+        assert book.author == "J. R. R. Tolkien, Christopher Tolkien"
+        assert "authors" not in book.model_dump()
+
+    def test_the_partition_reads_the_dump_and_not_the_body(self):
+        """`_unconstructable_fields` is handed what the constructor is: a field
+        left out of the dump is no fault of the route's."""
+        assert "authors" in BookCreate.model_fields
+        assert "authors" not in schemas_book.dumped_fields(
+            BookCreate, schemas_book.FOLDED_INTO_ANOTHER_FIELD
+        )
+
+    def test_an_excluded_field_nobody_folds_is_refused(self):
+        """Excluded and unnamed is input the writer never sees: a 201 that
+        stored nothing."""
+
+        class Body(BaseModel):
+            kept: str = ""
+            dropped: str = Field(default="", exclude=True)
+
+        with pytest.raises(RuntimeError, match="dropped"):
+            schemas_book.dumped_fields(Body, ())
+
+    def test_a_folded_name_that_is_not_excluded_is_refused(self):
+        """It would reach the constructor, which has no column for it."""
+
+        class Body(BaseModel):
+            kept: str = ""
+
+        with pytest.raises(RuntimeError, match="kept"):
+            schemas_book.dumped_fields(Body, ("kept",))
+
+    def test_a_list_of_blank_names_stores_nobody(self):
+        """`author`'s blank rule, read per name."""
+        assert BookCreate(title="t", authors=["", "   "]).author is None
+
+    def test_an_absent_list_leaves_the_line_alone(self):
+        assert BookCreate(title="t", author="Tolkien, J. R. R.").author == "Tolkien, J. R. R."
+
+    def test_a_pair_that_disagrees_is_refused(self):
+        with pytest.raises(ValidationError, match="name different credits"):
+            BookCreate(title="t", author="J. R. R. Tolkien", authors=["Tolkien, J. R. R."])
+
+    def test_a_blank_line_beside_named_people_is_a_disagreement(self):
+        """`a_blank_is_null` would make the blank line look absent, so the
+        agreement is checked on what arrived."""
+        with pytest.raises(ValidationError, match="name different credits"):
+            BookCreate(title="t", author="   ", authors=["Frank Herbert"])
+
+    def test_a_blank_line_beside_nobody_agrees(self):
+        assert BookCreate(title="t", author=" ", authors=["", "  "]).author is None
+
+    def test_an_empty_list_beside_a_line_is_a_disagreement(self):
+        """The list says nobody and the line says somebody."""
+        with pytest.raises(ValidationError, match="name different credits"):
+            BookCreate(title="t", author="Frank Herbert", authors=[])
+
+    def test_the_count_refuses_no_list_whose_line_would_fit(self):
+        """The narrowest names a line can hold, one character each, fill it
+        exactly at the count."""
+        names = ["x"] * schemas_book.MAX_AUTHORS_PER_BOOK
+
+        assert len(BookCreate(title="t", authors=names).author or "") <= models.AUTHOR_LINE_MAX
+        assert len(CREDIT_SEPARATOR.join([*names, "x"])) > models.AUTHOR_LINE_MAX

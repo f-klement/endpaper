@@ -346,6 +346,18 @@ describe("a title the file carries but this reader will not use", () => {
     if (!reading.ok) return;
     expect(reading.metadata.authors).toEqual(["Peter Bruce;Andrew Bruce"]);
   });
+
+  it("says a dictionary author is a line rather than a name", async () => {
+    // `/Author` may name several people, and the request must not send it as
+    // one name: the server reads one comma in a name as surname first.
+    const reading = await read(
+      withInfo("/Title (Good Omens) /Author (Terry Pratchett, Neil Gaiman)"),
+    );
+
+    expect(reading.ok).toBe(true);
+    if (!reading.ok) return;
+    expect(reading.metadata.authorsSeparated).toBe(false);
+  });
 });
 
 describe("the XMP packet", () => {
@@ -466,6 +478,17 @@ describe("the XMP packet", () => {
       "Michael R. Berthold",
       "Christian Borgelt",
     ]);
+  });
+
+  it("says a creator sequence separates its names", async () => {
+    const reading = await withXmp(
+      xmpPacket({ creator: ["Michael R. Berthold", "Christian Borgelt"] }),
+      "/Title (Guide to Intelligent Data Science)",
+    );
+
+    expect(reading.ok).toBe(true);
+    if (!reading.ok) return;
+    expect(reading.metadata.authorsSeparated).toBe(true);
   });
 
   it("reads a packet whose RDF prefix is not rdf", async () => {

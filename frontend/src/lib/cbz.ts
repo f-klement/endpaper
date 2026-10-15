@@ -179,6 +179,7 @@ function nothing(): FileMetadata {
     title: null,
     subtitle: null,
     authors: [],
+    authorsSeparated: true,
     categories: [],
     identifiers: [],
     isbn: null,
@@ -357,6 +358,9 @@ export function readComicInfo(xml: string): FileMetadata | null {
     // this module's docstring for why that took two attempts to get right.
     subtitle: null,
     authors: readWriters(root),
+    // `readWriters` has already split `Writer` on its commas, so no element
+    // holds one and the server has nothing to reorder.
+    authorsSeparated: true,
     // One element, reported as written. This module's docstring carries why it
     // is not split on its comma the way `Writer` is.
     categories: readGenre(root),

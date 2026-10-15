@@ -70,6 +70,10 @@ const REASONS: Record<NamedScanReason, MessageKey> = {
   "kept-for-now": "fallback.keptForNow",
   unreachable: "common.cannotReachServer",
   "held-in-another-format": "rapid.heldInAnotherFormat",
+  "not-in-catalogues-as-stated": "fallback.notInCataloguesAsStated",
+  "lookup-failed-as-stated": "fallback.lookupFailedAsStated",
+  "record-differs": "rapid.recordDiffers",
+  "kept-the-file": "rapid.keptTheFile",
 };
 
 /**
@@ -146,6 +150,19 @@ const ROW_LINE: Record<
   // the file itself could not say.
   derived: (entry, t) => namedDraftLine(entry, t),
   choosing: (entry, t) => namedDraftLine(entry, t),
+  // What the file said, under its own title rather than "from the file name",
+  // and why it is still that after a lookup that did not settle it.
+  stated: (entry, t) => (
+    <span className="text-paper-800 dark:text-paper-100">
+      {entry.draft?.title}
+      {entry.reason && (
+        <span className="text-paper-600 dark:text-paper-400">
+          {" "}
+          {reasonText(entry.reason, t)}
+        </span>
+      )}
+    </span>
+  ),
   // Named, not counted. After a shelf of thirty, "six could not be added" is
   // unrecoverable: this says which six and why, and they stay in the queue so
   // they can be retried or dropped.
@@ -187,7 +204,9 @@ function namedDraftLine(entry: ScannedEntry, t: Translate): ReactNode {
  * Empty where a record names nothing at all, which the caller reads as its
  * signal to fall back to the file's own label.
  */
-function recordLine(match: BookMatch): string {
+function recordLine(
+  match: Pick<BookMatch, "title" | "author" | "year">,
+): string {
   // **Built from the parts that are there**, rather than from three fragments
   // that assume the one before them. A `BookMatch.title` is nullable, and
   // composing the separators into each fragment printed `, Frank Herbert
@@ -228,12 +247,16 @@ interface RapidQueueProps {
   onStopLookUp: () => void;
   onChoose: (key: string, match: BookMatch) => void;
   onKeepName: (key: string) => void;
+  /** Take the record held on a row whose stated ISBN named another title. */
+  onTakeRecord: (key: string) => void;
+  /** Refuse that record and keep what the file described. */
+  onKeepFile: (key: string) => void;
   /**
    * Keep the file name on every row still being decided, for now.
    *
    * **The one control on this screen whose effect is undone by pressing another
    * one**: the rows it clears become rows the lookup offers again, so the queue
-   * grows a "Look up N by name" button back the moment it is pressed. That is
+   * grows a "Look up N in the catalogues" button back the moment it is pressed. That is
    * what the member is being told by `fallback.keepAllNote`, and it is the
    * reason this is not the refused "Keep every name".
    */
@@ -290,6 +313,8 @@ export default function RapidQueue({
   onStopLookUp,
   onChoose,
   onKeepName,
+  onTakeRecord,
+  onKeepFile,
   onKeepAllForNow,
   onLookUpKept,
   onSplit,
@@ -393,8 +418,9 @@ export default function RapidQueue({
       </p>
 
       {/* Offered, never automatic. A folder of several hundred files is
-          several hundred catalogue fan outs, which is not something a page may
-          spend because somebody pointed at a directory. */}
+          several hundred catalogue calls, a name's fan out or a stated ISBN's
+          lookup, which is not something a page may spend because somebody
+          pointed at a directory. */}
       {waiting > 0 && !isLookingUp && (
         <div>
           <button
@@ -564,6 +590,51 @@ export default function RapidQueue({
                   </details>
                 </div>
               )}
+
+            {/* **The record a stated ISBN found, when its title cannot be the
+                file's.** Shown rather than taken: the row is added as the file
+                describes it unless the member takes this, so a wrong ISBN in a
+                file never files the wrong book in silence. */}
+            {entry.differentRecord !== undefined && (
+              <div className="mt-2 space-y-1 text-xs">
+                <p className="text-paper-700 dark:text-paper-200">
+                  {t("rapid.theRecord", {
+                    record:
+                      recordLine(entry.differentRecord) ||
+                      entry.differentRecord.isbn,
+                  })}
+                </p>
+                <div className="flex gap-3">
+                  <button
+                    type="button"
+                    onClick={() => onTakeRecord(entry.key)}
+                    disabled={busy}
+                    aria-label={t("fallback.useFor", {
+                      // The visible line's own fallback, so the name heard
+                      // is the line seen.
+                      record:
+                        recordLine(entry.differentRecord) ||
+                        entry.differentRecord.isbn,
+                      label: entry.label,
+                    })}
+                    className="font-medium text-accent-600 underline hover:text-accent-700 disabled:opacity-50 dark:text-accent-400 dark:hover:text-accent-300"
+                  >
+                    {t("fallback.use")}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onKeepFile(entry.key)}
+                    disabled={busy}
+                    aria-label={t("rapid.keepTheFileFor", {
+                      label: entry.label,
+                    })}
+                    className="text-paper-600 underline hover:text-paper-800 disabled:opacity-50 dark:text-paper-400 dark:hover:text-paper-200"
+                  >
+                    {t("rapid.keepTheFile")}
+                  </button>
+                </div>
+              </div>
+            )}
 
             {/* Accept or reject, per file. The ranking already put the likeliest
                 record first, and the rest are here to be disagreed with.

@@ -235,6 +235,60 @@ class TestTheCreditLineOnABook:
         assert body["authors"] == []
 
 
+class TestNamesSentSeparately:
+    """`BookCreate.authors`, for a client whose source separated its names."""
+
+    def test_a_name_in_catalogue_order_is_one_author(self, client, admin):
+        """The defect the field exists for. Sent as a joined line, the comma in
+        `Tolkien, J. R. R.` was a separator and the shelf gained two people."""
+        created = client.post(
+            "/api/books",
+            json={"title": "The Hobbit", "authors": ["Tolkien, J. R. R."]},
+            headers=admin["headers"],
+        )
+
+        assert created.status_code == 201
+        assert created.json()["authors"] == ["J. R. R. Tolkien"]
+        body = client.get(AUTHORS, headers=admin["headers"]).json()
+        assert [row["name"] for row in body] == ["J. R. R. Tolkien"]
+
+    def test_a_line_that_is_the_names_joined_is_accepted(self, client, admin):
+        """What the browser sends: it draws the line and carries the names."""
+        created = client.post(
+            "/api/books/scan",
+            json={
+                "title": "Unfinished Tales",
+                "author": "Tolkien, J. R. R., Christopher Tolkien",
+                "authors": ["Tolkien, J. R. R.", "Christopher Tolkien"],
+            },
+            headers=admin["headers"],
+        )
+
+        assert created.status_code == 201
+        assert created.json()["author"] == "J. R. R. Tolkien, Christopher Tolkien"
+
+    def test_a_line_naming_another_credit_is_refused(self, client, admin):
+        """Either half chosen silently stores a credit somebody was not shown."""
+        refused = client.post(
+            "/api/books",
+            json={"title": "Dune", "author": "Frank Herbert", "authors": ["Brian Herbert"]},
+            headers=admin["headers"],
+        )
+
+        assert refused.status_code == 422
+        assert client.get(AUTHORS, headers=admin["headers"]).json() == []
+
+    def test_names_wider_than_the_column_together_are_refused(self, client, admin):
+        """Each name fits, the line they join into does not."""
+        refused = client.post(
+            "/api/books",
+            json={"title": "Wide", "authors": ["x" * 300, "y" * 300]},
+            headers=admin["headers"],
+        )
+
+        assert refused.status_code == 422
+
+
 class TestSuggestions:
     def test_a_catalogue_order_split_is_offered_beside_the_whole_name(
         self, client, admin, make_book

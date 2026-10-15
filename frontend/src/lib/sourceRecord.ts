@@ -52,6 +52,20 @@ export interface SourceRecord {
    * request joins them with, and it is the separator the server splits on.
    */
   readonly authors: readonly string[];
+  /**
+   * Whether the source gave each name as its own value.
+   *
+   * **`false` where `authors` holds a line the source wrote**, as one element:
+   * a store's author column, a PDF's `/Author`. Such a line may name several
+   * people, `Terry Pratchett, Neil Gaiman`, and the server reads one comma in a
+   * name as surname first, so sending it as one name would store one invented
+   * person. Only a separated list travels as names beside the line:
+   * `lib/bookRequest.creditedSeparately`.
+   *
+   * **Required rather than defaulted**, so a new reader has to say which it
+   * read, and a reader that is wrong about it costs a two author book.
+   */
+  readonly authorsSeparated: boolean;
   /** Canonical ISBN-13, from whichever spelling the source carried one in. */
   readonly isbn: string | null;
   readonly publisher: string | null;

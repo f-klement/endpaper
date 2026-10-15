@@ -28,11 +28,20 @@ import {
   useMintKosyncPassword,
   useRevokeKosyncPassword,
 } from "../../../api/generated/endpoints/kosync/kosync";
+import {
+  getGetReadwiseAccountQueryKey,
+  useForgetReadwiseToken,
+  useGetReadwiseAccount,
+  useSaveReadwiseToken,
+  useSyncReadwise,
+} from "../../../api/generated/endpoints/readwise/readwise";
 import type {
   KosyncAccountOut,
   KosyncPasswordOut,
   MemberEmailOut,
   MySecurityOut,
+  ReadwiseAccountOut,
+  ReadwiseSyncOut,
 } from "../../../api/generated/model";
 import { ApiError } from "../../../api/mutator";
 
@@ -240,5 +249,69 @@ export function useKosyncAccount(): UseKosyncAccountResult {
     revoke: () => revoke.mutate(),
     isSaving: mint.isPending || revoke.isPending,
     saveError: mint.error ?? revoke.error,
+  };
+}
+
+export interface UseReadwiseAccountResult {
+  account: ReadwiseAccountOut | undefined;
+  isLoading: boolean;
+  error: unknown;
+  /** `onSaved` runs once the server took it, so a refusal keeps the field. */
+  save: (token: string, onSaved: () => void) => void;
+  remove: () => void;
+  sync: () => void;
+  /** What the last pull from this page did, held only in this hook's memory. */
+  synced: ReadwiseSyncOut | undefined;
+  isSaving: boolean;
+  isSyncing: boolean;
+  saveError: unknown;
+  syncError: unknown;
+}
+
+/**
+ * The member's Readwise token, their pull, and the books waiting for a Book.
+ *
+ * **The token goes in and never comes back**: the account answer says only
+ * whether one is saved, so the field is always empty and saving replaces.
+ * Saving, removing and pulling each answer with or refresh the account, which
+ * is the one key this page reads.
+ */
+export function useReadwiseAccount(): UseReadwiseAccountResult {
+  const queryClient = useQueryClient();
+  const query = useGetReadwiseAccount();
+  const refresh = () =>
+    void queryClient.invalidateQueries({
+      queryKey: getGetReadwiseAccountQueryKey(),
+    });
+  const save = useSaveReadwiseToken({
+    mutation: {
+      onSuccess: (account: ReadwiseAccountOut) =>
+        queryClient.setQueryData(getGetReadwiseAccountQueryKey(), account),
+    },
+  });
+  const sync = useSyncReadwise({ mutation: { onSuccess: refresh } });
+  const remove = useForgetReadwiseToken({
+    mutation: {
+      onSuccess: () => {
+        sync.reset();
+        refresh();
+      },
+    },
+  });
+
+  return {
+    account: query.data,
+    isLoading: query.isLoading,
+    error: query.error,
+    // `mutate`, not `mutateAsync`: nothing awaits these.
+    save: (token: string, onSaved: () => void) =>
+      save.mutate({ data: { token } }, { onSuccess: onSaved }),
+    remove: () => remove.mutate(),
+    sync: () => sync.mutate(),
+    synced: sync.data,
+    isSaving: save.isPending || remove.isPending,
+    isSyncing: sync.isPending,
+    saveError: save.error ?? remove.error,
+    syncError: sync.error,
   };
 }

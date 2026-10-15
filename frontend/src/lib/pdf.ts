@@ -1826,6 +1826,8 @@ export async function readPdf(file: Blob): Promise<PdfReading> {
     const title =
       usableTitle(await field("Title")) ?? usableTitle(xmp?.title ?? null);
     const description = (await field("Subject")) ?? xmp?.description ?? null;
+    const author = await field("Author");
+    const authors = readAuthors(author, xmp);
 
     return {
       ok: true,
@@ -1835,7 +1837,11 @@ export async function readPdf(file: Blob): Promise<PdfReading> {
         // title is reliably one: `Practical Guide to: Oracle SQL` is a whole
         // title with a colon in it.
         subtitle: null,
-        authors: readAuthors(await field("Author"), xmp),
+        authors,
+        // `/Author` is one string and may name several people; XMP's
+        // `dc:creator` is a sequence. `readAuthors` takes the first that has
+        // a name, so the list is separated exactly when `/Author` had none.
+        authorsSeparated: usableAuthor(author) === null,
         // **The one reader of the five that states no subject, and the
         // exclusion is worth keeping exact.** `/Subject` is this format's
         // description and is read as one six lines above; a reader taking

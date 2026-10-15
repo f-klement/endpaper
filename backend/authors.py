@@ -177,6 +177,14 @@ class _Budget:
 #: find. A library that writes "A & B" gets one author and can merge it.
 _SEPARATOR = ","
 
+#: What every writer of `books.author` puts between two names.
+#:
+#: The comma `split_authors` splits on, and the space a reader expects after it.
+#: `lib/bookBounds.AUTHOR_SEPARATOR` is the browser's copy, and
+#: `schemas.book.BookCreate` refuses a body whose `author` is not its `authors`
+#: joined with this, so the two have to agree.
+CREDIT_SEPARATOR = _SEPARATOR + " "
+
 _PUNCTUATION = re.compile(r"[^\w\s]", flags=re.UNICODE)
 _WHITESPACE = re.compile(r"\s+")
 

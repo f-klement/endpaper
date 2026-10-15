@@ -36,6 +36,7 @@ function library(
       key: `book-${index}`,
       title: `Book ${index}`,
       authors: [],
+      authorsSeparated: false,
       isbn: null,
       identifiers: [],
       publisher: null,

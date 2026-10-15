@@ -27,7 +27,9 @@ import {
   blankPending,
   draftFromAudiobook,
   draftFromFile,
+  enrichedDraft,
   identifiersFromFile,
+  titlesCouldAgree,
   toCopyRequest,
   toScanRequest,
   type BookDraft,
@@ -80,6 +82,7 @@ const DRAFT: { [K in keyof BookDraft]-?: BookDraft[K] } = {
   suggested_tag_ids: [7],
   identifiers: [{ scheme: BookIdentifierScheme.asin, value: "B000R34YKC" }],
   categories: ["Fiction"],
+  authors: ["Frank Herbert"],
   notFound: false,
 };
 
@@ -178,6 +181,29 @@ describe("toScanRequest", () => {
     );
     expect(request).not.toHaveProperty("notFound");
     expect(request).not.toHaveProperty("suggested_tag_ids");
+  });
+
+  it("sends the names beside the line while the line is still them", () => {
+    const draft = {
+      ...DRAFT,
+      author: "Tolkien, J. R. R., Christopher Tolkien",
+      authors: ["Tolkien, J. R. R.", "Christopher Tolkien"],
+    };
+
+    expect(toScanRequest(pending({ draft })).authors).toEqual([
+      "Tolkien, J. R. R.",
+      "Christopher Tolkien",
+    ]);
+  });
+
+  it("sends the line alone once a member edited it", () => {
+    // The server refuses a pair naming two credits, so the edit wins and the
+    // book is not lost to a 422.
+    const draft = { ...DRAFT, author: "J. R. R. Tolkien" };
+    const request = toScanRequest(pending({ draft }));
+
+    expect(request.author).toBe("J. R. R. Tolkien");
+    expect(request.authors).toBeNull();
   });
 
   it("normalises the shelf", () => {
@@ -515,6 +541,7 @@ const RECORD: { [K in keyof FileMetadata]-?: FileMetadata[K] } = {
   title: "Dune",
   subtitle: "A Novel",
   authors: ["Frank Herbert", "Brian Herbert"],
+  authorsSeparated: true,
   categories: ["Fiction", "Science Fiction"],
   identifiers: [{ scheme: "ISBN", value: "9780441013593" }],
   isbn: "9780441013593",
@@ -576,6 +603,14 @@ describe("draftFromFile", () => {
     // `backend/authors.py` splits an author line on a comma and on nothing
     // else, so this is the one join that round trips.
     expect(draftFromFile(record()).author).toBe("Frank Herbert, Brian Herbert");
+  });
+
+  it("keeps a creator with a comma of its own as one name", () => {
+    // `dc:creator` written in catalogue order: joined, the server would split
+    // it into two people, so the names travel beside the line.
+    expect(
+      draftFromFile(record({ authors: ["Tolkien, J. R. R."] })).authors,
+    ).toEqual(["Tolkien, J. R. R."]);
   });
 
   it("sends an empty ISBN rather than none, which the server reads as absent", () => {
@@ -927,6 +962,117 @@ describe("which of a file's labels reach the endpoint", () => {
  * evasion: any name the module spells is held, wherever it sits.
  */
 
+describe("enrichedDraft", () => {
+  /** What a file stating its ISBN drafts: thin, and partly spelled its own way. */
+  const FILE: BookDraft = {
+    isbn: "9780441013593",
+    title: "Dune (Calibre)",
+    author: "Herbert, Frank",
+    language: "en",
+    description: "",
+    classifications: [],
+    suggested_tag_ids: [],
+    categories: ["Science fiction"],
+    identifiers: [{ scheme: BookIdentifierScheme.asin, value: "B00B7NPRY8" }],
+    notFound: true,
+  };
+
+  /** What the catalogue answers for that ISBN. */
+  const LOOKUP = {
+    isbn: "9780441013593",
+    title: "Dune",
+    author: "Frank Herbert",
+    publisher: "Ace",
+    description: "Desert planet politics.",
+    suggested_tag_ids: [],
+  };
+
+  it("takes the catalogue's value wherever it gave one", () => {
+    expect(enrichedDraft(LOOKUP, FILE)).toMatchObject({
+      title: "Dune",
+      author: "Frank Herbert",
+      publisher: "Ace",
+      description: "Desert planet politics.",
+    });
+  });
+
+  it("keeps the file's own value where the catalogue left the field blank", () => {
+    const enriched = enrichedDraft(LOOKUP, FILE);
+
+    expect(enriched.language).toBe("en");
+    // No lookup answers these, so they are always the file's.
+    expect(enriched.categories).toEqual(["Science fiction"]);
+    expect(enriched.identifiers).toEqual(FILE.identifiers);
+  });
+
+  it("never carries the file's notFound onto a record that was found", () => {
+    expect(enrichedDraft(LOOKUP, FILE).notFound).toBeUndefined();
+  });
+
+  it("takes the file's value where the catalogue answered a blank string or an empty list", () => {
+    const classified: BookDraft = {
+      ...FILE,
+      classifications: [{ scheme: ClassificationScheme.ddc, number: "813.54" }],
+    };
+
+    const enriched = enrichedDraft(
+      { ...LOOKUP, author: "", classifications: [] },
+      classified,
+    );
+
+    expect(enriched.author).toBe("Herbert, Frank");
+    expect(enriched.classifications).toEqual(classified.classifications);
+  });
+
+  it("is the catalogue's record whole for a row with no draft of its own", () => {
+    expect(enrichedDraft(LOOKUP, null)).toEqual(LOOKUP);
+  });
+});
+
+describe("titlesCouldAgree", () => {
+  it("lets a record through that shares a significant word with the file", () => {
+    expect(titlesCouldAgree("Dune: Deluxe Edition", "Dune (Calibre)")).toBe(
+      true,
+    );
+  });
+
+  it("lets another volume of the same series through, on the series word", () => {
+    // The limit of the rule, pinned so nobody reads more into it.
+    expect(titlesCouldAgree("Dune Messiah", "Dune")).toBe(true);
+  });
+
+  it("refuses two titles sharing only a word under four letters", () => {
+    expect(titlesCouldAgree("The Silmarillion", "The Hobbit")).toBe(false);
+  });
+
+  it("refuses two titles sharing only a generic word", () => {
+    expect(titlesCouldAgree("Hyperion: A Novel", "Foundation: A Novel")).toBe(
+      false,
+    );
+    expect(titlesCouldAgree("Tannöd: Roman", "Der Schwarm: Roman")).toBe(false);
+  });
+
+  it("spells a sharp s as ss before comparing", () => {
+    expect(titlesCouldAgree("Die Strasse", "Die Straße")).toBe(true);
+  });
+
+  it("cannot judge a record made only of short words, so lets it through", () => {
+    expect(titlesCouldAgree("IT", "Dune")).toBe(true);
+  });
+
+  it("refuses a record whose title shares no significant word", () => {
+    expect(titlesCouldAgree("The Left Hand of Darkness", "Dune")).toBe(false);
+  });
+
+  it("folds case and accents before comparing", () => {
+    expect(titlesCouldAgree("LES MISÉRABLES", "Les Miserables")).toBe(true);
+  });
+
+  it("cannot judge a title made only of short words, so lets it through", () => {
+    expect(titlesCouldAgree("Dune", "It")).toBe(true);
+  });
+});
+
 describe("draftFromAudiobook", () => {
   /** One candidate book, as `groupAudiobooks` describes it. */
   function group(over: Partial<AudiobookGroup> = {}): AudiobookGroup {
@@ -989,6 +1135,17 @@ describe("draftFromAudiobook", () => {
     const long = draftFromAudiobook(group({ authors: ["y".repeat(600)] }));
 
     expect(long?.author).toHaveLength(500);
+  });
+
+  it("sends an artist tag as a line, never as one name", () => {
+    // A tagger writes two authors into one artist tag, and the server would
+    // read one comma in a name as surname first.
+    const pair = draftFromAudiobook(
+      group({ authors: ["Terry Pratchett, Neil Gaiman"] }),
+    );
+
+    expect(pair?.author).toBe("Terry Pratchett, Neil Gaiman");
+    expect(pair).not.toHaveProperty("authors");
   });
 
   it("names no year, because an audio tag's year is the recording's", () => {

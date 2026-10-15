@@ -506,6 +506,8 @@ export function readFb2Description(xml: string): FileMetadata | null {
     // FB2 has no second title element. See this module's docstring.
     subtitle: null,
     authors: readAuthors(titleInfo),
+    // One `<author>` element per person.
+    authorsSeparated: true,
     categories: readGenres(titleInfo),
     identifiers,
     isbn: firstIsbn(identifiers),

@@ -13,6 +13,7 @@ import ast
 import inspect
 import re
 import string
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
@@ -21,9 +22,11 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 import bibliographic
+from authors import split_authors
 from bibliographic import (
     BIBLIOGRAPHIC_CODES,
     LANGUAGES,
+    credit_line,
     flip_catalogue_name,
     is_placeholder_title,
     pages_from_extent,
@@ -251,6 +254,59 @@ class TestAPersonNameInCatalogueOrder:
     def test_leaves_an_ordinary_name_alone(self):
         assert flip_catalogue_name("Mann, Thomas") == "Thomas Mann"
 
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "Martin Luther King, Jr.",
+            "Walter M. Miller, Jr",
+            "Martin Luther King, Junior",
+            "Henry Ford, Sr.",
+            "Henry Ford, Snr",
+            "John Smith, III",
+            "Davis Love, iv",
+            "John Smith, Esq.",
+        ],
+    )
+    def test_leaves_a_name_ending_in_a_generational_suffix_alone(self, name):
+        """One comma, and it is no surname first: flipped, `Jr Martin Luther
+        King` is a name nobody wrote."""
+        assert flip_catalogue_name(name) == name
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "Acme, Inc.",
+            "Penguin Random House, LLC",
+            "Springer, GmbH",
+            "Faber, Ltd",
+            "Baz, CORP",
+        ],
+    )
+    def test_leaves_a_name_ending_in_a_corporate_designator_alone(self, name):
+        assert flip_catalogue_name(name) == name
+
+    @pytest.mark.parametrize(
+        ("name", "flipped"),
+        [
+            ("Tolkien, J. R. R.", "J. R. R. Tolkien"),
+            ("Erickson, J.R.", "J.R. Erickson"),
+            ("Tomlin, J R", "J R Tomlin"),
+            ("Tomlin, JR", "JR Tomlin"),
+            ("Barnett, AG", "AG Barnett"),
+            ("Asthana, S. A.", "S. A. Asthana"),
+            ("Gogol, N. V.", "N. V. Gogol"),
+            ("Ewing, J. R., 1950-", "J. R. Ewing"),
+        ],
+    )
+    def test_still_flips_initials_that_spell_a_suffix_or_a_designator(
+        self, name, flipped
+    ):
+        """Initials dotted, spaced or run together spell `jr`, `sa` or `ag`
+        once their punctuation is squashed, so the part after the comma is
+        read as written. `Erickson`, `Tomlin, J R`, `Barnett` and `Asthana`
+        are real, from the Kindle captures `kindle.ts` cites."""
+        assert flip_catalogue_name(name) == flipped
+
     def test_leaves_a_corporate_name_alone(self):
         """Two commas is not "Surname, Forenames" and reordering would mangle it."""
         assert (
@@ -263,6 +319,37 @@ class TestAPersonNameInCatalogueOrder:
             flip_catalogue_name("Springer, Berlin, Heidelberg")
             == "Springer, Berlin, Heidelberg"
         )
+
+
+class TestACreditLineFromSeparateNames:
+    """Names a source separated, joined into what `books.author` holds."""
+
+    def test_a_name_in_catalogue_order_stays_one_person(self):
+        """The defect the list exists for: joined first, the comma inside the
+        name is a separator and the stored line names two people."""
+        assert credit_line(["Tolkien, J. R. R."]) == "J. R. R. Tolkien"
+        assert split_authors(credit_line(["Tolkien, J. R. R."])) == ["J. R. R. Tolkien"]
+
+    def test_joins_several_names_with_the_stored_separator(self):
+        assert (
+            credit_line(["Pratchett, Terry", "Neil Gaiman"])
+            == "Terry Pratchett, Neil Gaiman"
+        )
+
+    def test_drops_a_name_that_is_blank_once_flipped(self):
+        """`flip_catalogue_name(",")` is empty, so blankness is read after it."""
+        assert credit_line(["  ", ",", "Jane Doe"]) == "Jane Doe"
+
+    def test_a_name_with_a_suffix_still_splits_as_written(self):
+        """Left alone rather than reordered, so the stored line reads as two
+        people, as it did before the list; merging repairs it."""
+        line = credit_line(["Martin Luther King, Jr."])
+        assert line == "Martin Luther King, Jr."
+        assert split_authors(line) == ["Martin Luther King", "Jr."]
+
+    def test_answers_none_for_nobody(self):
+        assert credit_line([]) is None
+        assert credit_line(["", " "]) is None
 
 
 class TestOnlyTheBranchThatFlipsACellMayTakeItsFullStop:
@@ -644,6 +731,8 @@ def _text_arguments(function) -> list[Any] | None:
             strategies.append(_TEXT)
         elif parameter.annotation == (str | None):
             strategies.append(_MAYBE_TEXT)
+        elif parameter.annotation == Iterable[str]:
+            strategies.append(st.lists(_TEXT, max_size=5))
         else:
             return None
     return strategies

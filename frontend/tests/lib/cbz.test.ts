@@ -455,6 +455,7 @@ describe("the document itself", () => {
     );
 
     expect(record?.authors).toEqual(["Alan Moore", "Dave Gibbons"]);
+    expect(record?.authorsSeparated).toBe(true);
   });
 
   it("reads nobody but the writer", () => {

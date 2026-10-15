@@ -114,6 +114,7 @@ describe("reading a Kindle or Mobipocket file", () => {
       "Amy Brown",
       "Greg Wilson",
     ]);
+    expect(reading.ok && reading.metadata.authorsSeparated).toBe(true);
   });
 
   it("says the same author once", async () => {

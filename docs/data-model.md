@@ -410,6 +410,12 @@ is two columns on `users`, `kosync_key_digest` and `kosync_key_set_at`. The pass
 is stored nowhere; its digest travels in an admin's backup archive with the rest of
 `users`, as `password_hash` does.
 
+**`readwise_books`.** Which Book each book in one member's Readwise account is: Readwise's
+`user_book_id`, the `title`, `author` and `asin` Readwise gave it, and `book_id`, null while
+no Book matches and the book waits on the member's account page. Keyed on `(user_id,
+user_book_id)`, private to that member by construction, and `SET NULL` when the Book is
+purged, as `kosync_documents` is. How a Book is chosen is `readwise.Index`.
+
 **`access_requests`.** A member asking the holder of a digital copy for access, and the
 answer. `granted`, `decided_by_user_id` and `decided_at` are null while the request
 waits and all set once it is answered, which `ck_access_requests_decision` holds. The status
@@ -516,9 +522,10 @@ in [decisions.md](decisions.md).
 **`highlights`.** A passage a member marked on a reading device and their note on it:
 `text`, `note`, `chapter`, `page`, `highlighted_at`, and `is_shared`, false by default.
 `source` and `source_key` say where it came from and what that source calls it, and are
-unique per member, which is what makes every import repeatable. `highlighted_at` is the
-device's wall clock with no zone, the one `DateTime` column that is not UTC. Its privacy
-rule is under *A highlight carries the second one too*.
+unique per member, which is what makes every import repeatable. A KOReader row's
+`highlighted_at` is the device's wall clock with no zone, the one `DateTime` value that is
+not UTC; a Readwise row's is UTC, since Readwise records a zone. Its privacy rule is under
+*A highlight carries the second one too*.
 
 **`book_identifiers`.** What a store calls a book, where that is not an ISBN: a `scheme`,
 a `value`, and the book it hangs off. `asin`, `B00J4YQKHY` is one row; `google_books`,
@@ -720,6 +727,15 @@ Core, so a constraint would let one credential for a source a later release drop
 entire restore. Two check constraints refuse what the application could never have written,
 which is what makes an archive's word on this column safe to put in a URL. See
 [decisions.md](decisions.md) and `backend/credentials.py`.
+
+**`member_logins`.** A member's own login at a service elsewhere, sealed: today a Readwise
+access token. The third kind of secret beside the deployment's own and the library's
+catalogue logins: owned by one member, replaced or removed only by them, never served back,
+and deleted with them, which the foreign key's `ON DELETE CASCADE` carries. The envelope is
+sealed with the catalogue key under associated data naming this kind, the service and the
+member, so it does not open on another member's row. Beside it, the Readwise pull's state:
+`synced_through`, the cursor the next pull asks from, and `last_run_at` and `last_outcome`.
+`models.MemberLogin` says why it is not a column on `catalogue_credentials`.
 
 **`opds_servers`.** One OPDS catalogue a household runs, as a row: a `name` for a screen, a
 `base_url` a sync walks, and a `credential_key` naming this server's row in
@@ -1116,7 +1132,8 @@ Deleting a book removes its `user_books`, `loans`, `access_requests`, `notes`, `
 `digital_references` and `custom_field_values` rows. Deleting a custom field definition removes its values, and
 `custom_fields.remove` does that itself rather than trusting the cascade, for the reason
 `delete_tag` clears its association rows: SQLite enforces a foreign key only while
-`PRAGMA foreign_keys` is on, and a migration's connection does not have it. Books,
+`PRAGMA foreign_keys` is on, and a migration's connection does not have it. A member's `member_logins` and `readwise_books` rows cascade from `users`, the rule that a
+member's own login goes with them; no path deletes a member today. Books,
 tags, collections and users are never cascade-deleted by anything else: deleting a
 collection sets `books.collection_id` to null and leaves every book where it was. There is no delete-account
 endpoint, test accounts included: removing a member means deciding what happens to the
@@ -1220,7 +1237,9 @@ one must narrow it. Named for what it grants, so the default reads as the safe v
 A highlight hangs off the **book row**, like a quote, because its position is a fact about one
 file. It is unique on `(user_id, source, source_key)` and not on the book, so a merge moves
 every row without a collision and re-importing a sidecar finds the rows it wrote. No path
-deletes a member, so its foreign key to `users` carries no rule.
+deletes a member, so its foreign key to `users` carries no rule. A Readwise row is removed
+when Readwise reports the highlight deleted; a KOReader sidecar carries no deletions, so an
+import never removes one. A row moved to another Book by either source is private again.
 
 ### A private book never leaves the instance
 

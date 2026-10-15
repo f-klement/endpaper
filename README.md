@@ -310,6 +310,7 @@ Environment variables:
 | `MAIL_SERVER`, `MAIL_PORT`, `MAIL_USERNAME`, `MAIL_PASSWORD`, `MAIL_USE_TLS`, `MAIL_USE_SSL`, `MAIL_DEFAULT_SENDER` | none, `587`, none, none, `true`, `false`, none | The seven standard mail names, for reminders sent by email. `MAIL_DEBUG` is deliberately not honoured: smtplib writes the AUTH exchange to stderr under it |
 | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | none | For reminders sent to a Telegram chat |
 | `ENABLE_OVERDUE_TICKER` | `true` | `false` stops the hourly overdue digest. Set it when running more than one web process, or when driving `POST /api/loans/overdue/notify` from cron instead |
+| `ENABLE_READWISE_TICKER` | `true` | `false` stops the daily Readwise pull; members can still pull from their account page. Set it when running more than one web process. A pull needs outbound HTTPS to `readwise.io` |
 | `SERVE_FRONTEND` | `true` | `false` runs the API without mounting the compiled frontend. For a host with no reader; an unmatched path is then a plain 404, because there are no client routes to serve the shell for |
 | `CREDENTIAL_ENCRYPTION_KEY` | none | The 24 word recovery phrase that encrypts catalogue logins. Leave it unset and the app makes one for itself the first time you ask it to |
 | `CREDENTIAL_ENCRYPTION_KEY_FILE` | `$DATA_DIR/credential-key` | Read the phrase from this file instead. A Docker secret and a Kubernetes Secret both arrive this way |

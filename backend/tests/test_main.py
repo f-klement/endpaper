@@ -335,6 +335,32 @@ class TestTheOverdueTicker:
         assert notifications.TICK_SECONDS == 3600
 
 
+class TestTheReadwiseTicker:
+    """The daily pull is started by the same lifespan, under its own switch.
+    What a pull does is pinned in `tests/routers/test_readwise.py`."""
+
+    async def test_it_starts_with_the_app_when_switched_on(self, monkeypatch):
+        import asyncio
+
+        import main
+        import readwise
+
+        started: list[str] = []
+
+        async def fake_ticker() -> None:
+            started.append("started")
+            await asyncio.sleep(3600)
+
+        monkeypatch.setattr(readwise, "ticker", fake_ticker)
+        monkeypatch.setenv("ENABLE_OVERDUE_TICKER", "false")
+        monkeypatch.setenv("ENABLE_READWISE_TICKER", "true")
+
+        async with main.lifespan(main.app):
+            await asyncio.sleep(0)
+
+        assert started == ["started"]
+
+
 SHELL_MARKER = "<title>Endpaper</title>"
 
 # A browser navigating, and a script or a fetch asking for the same URL. The

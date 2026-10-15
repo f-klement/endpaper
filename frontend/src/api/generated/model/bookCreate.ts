@@ -12,6 +12,8 @@ import type { OwnershipStatus } from "./ownershipStatus.ts";
 
 export interface BookCreate {
   author?: string | null;
+  /** The credited names one by one, for a source that separated them. Each name is reordered from surname first where it has one comma and is not followed by a suffix such as Jr. or a designator such as Inc., and the names are stored joined with ', ' in place of author. Sent with author, author must be these names joined with ', ', or blank when they name nobody; anything else is refused. */
+  authors?: string[] | null;
   /**
    * @maxItems 32
    * @items.maxLength 120

@@ -147,6 +147,8 @@ export default function ScanPage() {
             onStopLookUp={rapid.stopLookingUp}
             onChoose={rapid.chooseFor}
             onKeepName={rapid.keepTheName}
+            onTakeRecord={rapid.takeTheRecord}
+            onKeepFile={rapid.keepTheFile}
             onKeepAllForNow={rapid.keepEveryNameForNow}
             onLookUpKept={rapid.lookUpTheKeptNames}
             onSplit={rapid.splitApart}

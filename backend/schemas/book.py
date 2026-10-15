@@ -8,7 +8,8 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 import covers
 import isbn as isbn_utils
-from authors import split_authors
+from authors import CREDIT_SEPARATOR, split_authors
+from bibliographic import credit_line
 from categories import (
     CATEGORIES_MAX,
     CATEGORY_MAX,
@@ -107,6 +108,21 @@ SOURCE_LABEL_MAX = 120
 #: however narrow the validator is. `schemas/common.RowIdField` is the house
 #: spelling of the same move.
 CategoryField = Annotated[str, Field(max_length=CATEGORY_MAX)]
+
+#: One credited name, as a client that read its names separately sends it.
+#:
+#: **The credit line's width rather than `authors.AUTHOR_NAME_MAX`**: a name is
+#: never wider than the line it becomes, and a narrower bound here would refuse
+#: a book whose one corporate author fits the column, which `author` takes. The
+#: line's own width is checked after the join, by `BookCreate`.
+AuthorField = Annotated[str, Field(max_length=AUTHOR_LINE_MAX)]
+
+#: More names than a credit line could ever hold: one character each, with
+#: `authors.CREDIT_SEPARATOR` between them, in `AUTHOR_LINE_MAX`. Derived rather
+#: than chosen, so it refuses no list of non blank names whose line would fit. A
+#: blank entry counts toward it and adds nothing to the line; the browser drops
+#: blanks before sending.
+MAX_AUTHORS_PER_BOOK = (AUTHOR_LINE_MAX + len(CREDIT_SEPARATOR)) // (1 + len(CREDIT_SEPARATOR))
 
 
 def subject_for_storage(entry: str) -> str | None:
@@ -281,6 +297,33 @@ class BookCreate(BaseModel):
     title: str = Field(min_length=1, max_length=TITLE_MAX)
     subtitle: str | None = Field(default=None, max_length=SUBTITLE_MAX)
     author: str | None = Field(default=None, max_length=AUTHOR_LINE_MAX)
+    #: The credited names one by one, for a client whose source separated them.
+    #:
+    #: **Taken over `author` when present**, because `authors.split_authors`
+    #: splits the stored line on every comma: a file crediting
+    #: `Tolkien, J. R. R.` as one `dc:creator` sent as a joined line became two
+    #: people. `bibliographic.credit_line` turns the list into the line the
+    #: column holds, so what is stored is still one string and the alias index
+    #: reads it unchanged.
+    #:
+    #: **`exclude` keeps it out of `model_dump`**, which is what the create route
+    #: hands the `Book` constructor: the value reaches the row only through
+    #: `author`, which `a_list_is_the_credit_line` below sets from it.
+    #:
+    #: Sent together with `author` it has to agree with it: see that validator.
+    authors: list[AuthorField] | None = Field(
+        default=None,
+        max_length=MAX_AUTHORS_PER_BOOK,
+        exclude=True,
+        description=(
+            "The credited names one by one, for a source that separated them. "
+            "Each name is reordered from surname first where it has one comma "
+            "and is not followed by a suffix such as Jr. or a designator such "
+            "as Inc., and the names are stored joined with ', ' in place of "
+            "author. Sent with author, author must be these names joined with "
+            "', ', or blank when they name nobody; anything else is refused."
+        ),
+    )
     publisher: str | None = Field(default=None, max_length=PUBLISHER_MAX)
     year: int | None = Field(default=None, ge=MIN_YEAR, le=MAX_YEAR)
     description: str | None = Field(default=None, max_length=DESCRIPTION_MAX)
@@ -436,6 +479,63 @@ class BookCreate(BaseModel):
         copy of that paragraph is the fact in two files the writing rule is
         about."""
         return normalised_subjects(value)
+
+    @model_validator(mode="before")
+    @classmethod
+    def a_pair_names_one_credit(cls, data: object) -> object:
+        """Refuse `author` and `authors` that name two different credits.
+
+        **Refused rather than resolved**, because it means the line a client
+        showed and the names it sent have come apart, and picking either half
+        stores a credit the member was not shown. **An agreeing pair is
+        accepted** rather than refusing both together, because the browser
+        draws the joined line on the confirm step and so its draft carries
+        both. Agreeing means `author` is `authors` joined with
+        `authors.CREDIT_SEPARATOR`, character for character, as sent, or both
+        name nobody. What is stored is still not quite what was drawn: each
+        name is reordered by `bibliographic.credit_line`, which is the point of
+        the list.
+
+        **Before the field validators**, because `a_blank_is_null` turns a
+        blank `author` into the same null as an absent one, and a blank line
+        beside named people is a disagreement. A value of the wrong type is
+        passed on for pydantic to refuse by name, and so is a list over
+        `MAX_AUTHORS_PER_BOOK`, so an unbounded list is never joined here.
+        """
+        if not isinstance(data, dict):
+            return data
+        line, names = data.get("author"), data.get("authors")
+        if not isinstance(line, str) or not isinstance(names, list):
+            return data
+        if len(names) > MAX_AUTHORS_PER_BOOK or not all(isinstance(n, str) for n in names):
+            return data
+        if line == CREDIT_SEPARATOR.join(names):
+            return data
+        if blank_as_none(line) is None and all(blank_as_none(n) is None for n in names):
+            return data
+        raise ValueError(
+            "author and authors name different credits: send authors alone, or "
+            f"author as authors joined with {CREDIT_SEPARATOR!r}"
+        )
+
+    @model_validator(mode="after")
+    def a_list_is_the_credit_line(self) -> BookCreate:
+        """`author` from `authors`, which `a_pair_names_one_credit` has agreed.
+
+        **The blank rule is `author`'s**: a blank name is dropped, by
+        `bibliographic.credit_line`, and a list with nothing left in it stores
+        null. The line is bounded after the names are reordered and joined,
+        since that is the string the column holds.
+        """
+        if self.authors is None:
+            return self
+        line = credit_line(self.authors)
+        if line is not None and len(line) > AUTHOR_LINE_MAX:
+            raise ValueError(
+                f"authors join to more than the {AUTHOR_LINE_MAX} characters a credit line holds"
+            )
+        self.author = line
+        return self
 
 
 #: Fields of `BookCreate` the `Book` constructor is never handed, because every
@@ -598,6 +698,35 @@ def _unconstructable_fields(
     return faults
 
 
+#: Fields of `BookCreate` that its own validator folds into another field, and
+#: that `exclude=True` keeps out of the dump the constructor is handed.
+#: `authors` reaches the row as the `author` `a_list_is_the_credit_line` writes.
+FOLDED_INTO_ANOTHER_FIELD: Final[tuple[str, ...]] = ("authors",)
+
+
+def dumped_fields(model: type[BaseModel], folded: Iterable[str]) -> dict[str, object]:
+    """Every field `model_dump` carries, with its annotation.
+
+    **An excluded field is left out only when `folded` names it**, and raises
+    otherwise, in both directions. An excluded field nobody folds is input the
+    writer never sees, a 201 that stored nothing, and a folded name that is not
+    excluded reaches the constructor as a field `books` has no column for.
+    """
+    excluded = {name for name, field in model.model_fields.items() if field.exclude}
+    if excluded != set(folded):
+        raise RuntimeError(
+            f"`{model.__name__}` excludes {sorted(excluded)} from its dump and "
+            f"{sorted(folded)} are named as folded into another field: an "
+            "excluded field needs a validator writing its value into one that "
+            "is dumped, and a name in that tuple."
+        )
+    return {
+        name: field.annotation
+        for name, field in model.model_fields.items()
+        if name not in excluded
+    }
+
+
 #: Refused at import, not at the first create.
 #:
 #: A check at the first create fires on somebody's library, and the two faults
@@ -610,7 +739,7 @@ def _unconstructable_fields(
 _UNCONSTRUCTABLE = _unconstructable_fields(
     CARRIED_AS_CHILD_ROWS,
     RESHAPED_FOR_ITS_COLUMN,
-    {name: field.annotation for name, field in BookCreate.model_fields.items()},
+    dumped_fields(BookCreate, FOLDED_INTO_ANOTHER_FIELD),
     Book.__table__.c.keys(),
 )
 if _UNCONSTRUCTABLE:

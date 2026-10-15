@@ -440,6 +440,7 @@ BOOK_CHILDREN = frozenset(
         "notes",
         "quotes",
         "reading_progress",
+        "readwise_books",
         "user_books",
     }
 )
@@ -740,6 +741,18 @@ BOOK_OWNED_READERS = {
             "another member contributes no row and the document stays in the "
             "inbox as it would for no Book. It returns ids, at most two, and "
             "only to decide whether exactly one Book holds the file.",
+        ),
+    ],
+    "readwise.py": [
+        (
+            "asins = ( shelf.select(BookIdentifier.value, Book.id) "
+            ".join(BookIdentifier, BookIdentifier.book_id == Book.id) "
+            ".filter(BookIdentifier.scheme == BookIdentifierScheme.ASIN) .all() )",
+            "which Book a member's Readwise book is, by an ASIN, for that member "
+            "alone. `shelf` is `Shelf.seen_by` the member and the join runs outward "
+            "to `books`, so a private Book of another member contributes no row. "
+            "The pairs never leave the process: they decide only whether exactly "
+            "one Book carries the ASIN, and nothing is published from them.",
         ),
     ],
     "routers/books.py": [

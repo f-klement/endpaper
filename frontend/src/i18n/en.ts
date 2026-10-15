@@ -717,6 +717,38 @@ export const en = {
   "kosync.book.unnamed": "A document",
   "kosync.book.couldNotSave": "The link could not be saved.",
 
+  // ── Readwise ──────────────────────────────────────────────────────────────
+  //
+  // The member's Readwise token and the pull it allows, on the account page.
+  "readwise.title": "Readwise highlights",
+  "readwise.hint":
+    "Endpaper can fetch your highlights from Readwise once a day. They arrive private, on the book they belong to. Only your token and Readwise's own references are sent to Readwise; nothing from your library goes back. Your token is at readwise.io/access_token.",
+  "readwise.token": "Readwise access token",
+  "readwise.save": "Save token",
+  "readwise.replace": "Replace token",
+  "readwise.remove": "Remove token",
+  "readwise.sync": "Fetch now",
+  "readwise.none": "No Readwise token is saved.",
+  "readwise.notYet":
+    "A token is saved. Highlights are fetched once a day, or now with the button.",
+  "readwise.lastRun": "Last fetched on {date}: {outcome}",
+  "readwise.outcome.synced": "everything arrived.",
+  "readwise.outcome.incomplete":
+    "only part arrived. The rest comes with the next fetch.",
+  "readwise.outcome.tokenRefused":
+    "Readwise refused the token. Save a new one.",
+  "readwise.outcome.rateLimited":
+    "Readwise asked to wait. The next fetch tries again.",
+  "readwise.outcome.unavailable": "Readwise could not be reached.",
+  "readwise.outcome.unreadable":
+    "the saved token can no longer be read here. Save it again.",
+  "readwise.pulled": "New: {created}. Changed: {updated}. Removed: {deleted}.",
+  "readwise.waiting":
+    "Books in Readwise that match no single book here: {count}. Their highlights arrive once exactly one book in the library matches, by its ASIN or its title and author.",
+  "readwise.waitingBook": "{title}, {author}",
+  "readwise.couldNotSave": "The token could not be saved.",
+  "readwise.couldNotSync": "The highlights could not be fetched.",
+
   "theme.hint": "Saved to your account, so it follows you between devices.",
   "theme.light": "Light",
   "theme.dark": "Dark",
@@ -1325,7 +1357,7 @@ export const en = {
   // between those two outcomes: one book at a time is reversible before the
   // press, a folder is not reversible afterwards at all.
   "file.explain":
-    "Pick book files, or a whole folder, and Endpaper reads what it can out of them. Anything a file does not say is looked up by its name. The files are read here in your browser and are never uploaded. From a folder, a book that is one file also gets that file's name, the folders above it and a fingerprint of the file saved on it, so you can find it again, and everyone who can see the book can see them. The fingerprint is computed here from up to 12 KiB of the file. A file's own subject words are saved on the book too: adding one book at a time you can take them off first, and from a folder the only way to take one off afterwards is to remove the book.",
+    "Pick book files, or a whole folder, and Endpaper reads what it can out of them. Anything a file does not say is looked up by its name, and a file that names its ISBN can be looked up by it, as a scanned barcode is. The files are read here in your browser and are never uploaded. From a folder, a book that is one file also gets that file's name, the folders above it and a fingerprint of the file saved on it, so you can find it again, and everyone who can see the book can see them. The fingerprint is computed here from up to 12 KiB of the file. A file's own subject words are saved on the book too: adding one book at a time you can take them off first, and from a folder the only way to take one off afterwards is to remove the book.",
   "file.pickLabel": "Book files",
   "file.readingFiles": "Reading the files you picked...",
   "file.notAnEpub": "Not an EPUB file.",
@@ -1346,13 +1378,14 @@ export const en = {
   // this catalogue has no plural rules and is not getting any.
   "fallback.skipped":
     "{count} passed over, because Endpaper reads no format of theirs.",
-  "fallback.lookUp": "Look up {count} by name",
+  "fallback.lookUp": "Look up {count} in the catalogues",
   // **The disclosure lives on the control that does it.** The panel above says
   // the files are never uploaded, which is true and, read next to a button
   // offering a lookup, invites the reading that the lookup is local too. It is
-  // not: the names go to the same public catalogues a title search reaches.
+  // not: the names, and any ISBN a file states, go to the same public
+  // catalogues a title search and a scanned barcode reach.
   "fallback.pace":
-    "The file names, not the files, are sent to the catalogues Endpaper searches. Paced, so that one folder cannot spend a whole library's budget at once. Roughly {minutes} min.",
+    "The file names, and any ISBN a file states, are sent to the catalogues Endpaper searches; the files are not. Paced, so that one folder cannot spend a whole library's budget at once. Roughly {minutes} min.",
   // **Written to stand alone, because that is how it usually renders.** The bulk
   // keep clears the queue, so nothing is waiting and the paragraph above is off
   // the screen: every fact this press discloses is in this string on its own,
@@ -1369,6 +1402,10 @@ export const en = {
     "Not in the catalogues, kept under its file name.",
   "fallback.lookupFailed":
     "The catalogues could not be reached, kept under its file name.",
+  "fallback.notInCataloguesAsStated":
+    "Not in the catalogues, kept as the file describes it.",
+  "fallback.lookupFailedAsStated":
+    "The catalogues could not be reached, kept as the file describes it.",
   "fallback.keptTheName": "Kept under its file name.",
   // **The two sentences a member has to be able to tell apart**, and they differ
   // by the words "for now": the one above is an answer about that book and is
@@ -1376,7 +1413,7 @@ export const en = {
   "fallback.keptForNow":
     "Kept under its file name for now, and can be looked up again.",
   "fallback.aboutEbooks":
-    "Most catalogues list printed books, so a book that exists only as a file is often in none of them. Nothing has failed: those are added with the name they had, and can be edited afterwards.",
+    "Most catalogues list printed books, so a book that exists only as a file is often in none of them. Nothing has failed: those are added under the name they had, or as their file describes them, and can be edited afterwards.",
   "fallback.matches": "Possible matches: {count}",
   "fallback.stillToDecide":
     "{count} still to decide. Add all leaves those in the queue.",
@@ -1533,6 +1570,12 @@ export const en = {
   "files.forgetFailed": "That location could not be forgotten.",
   "rapid.heldInAnotherFormat":
     "Already in the library in another format, so the file was not attached to it.",
+  "rapid.recordDiffers":
+    "The catalogue lists this ISBN under another title, which may be a different book, so it is kept as the file describes it.",
+  "rapid.keptTheFile": "Kept as the file describes it.",
+  "rapid.theRecord": "The catalogue's record: {record}",
+  "rapid.keepTheFile": "Keep the file's description",
+  "rapid.keepTheFileFor": "Keep the file's description of {label}",
   "rapid.addAsCopy": "Add as its own copy ({format})",
   "rapid.addAsCopyFor": "Add {label} as its own copy",
   "format.filterAll": "Any format",

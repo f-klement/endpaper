@@ -84,6 +84,8 @@ function renderQueue(
     onStopLookUp: vi.fn<RapidQueueProps["onStopLookUp"]>(),
     onChoose: vi.fn<RapidQueueProps["onChoose"]>(),
     onKeepName: vi.fn<RapidQueueProps["onKeepName"]>(),
+    onTakeRecord: vi.fn<RapidQueueProps["onTakeRecord"]>(),
+    onKeepFile: vi.fn<RapidQueueProps["onKeepFile"]>(),
     onKeepAllForNow: vi.fn<RapidQueueProps["onKeepAllForNow"]>(),
     onLookUpKept: vi.fn<RapidQueueProps["onLookUpKept"]>(),
     onSplit: vi.fn<RapidQueueProps["onSplit"]>(),
@@ -222,6 +224,77 @@ describe("RapidQueue", () => {
     );
 
     expect(props.onSplit).toHaveBeenCalledWith(props.entries[0]!.key);
+  });
+
+  it("draws a file that stated its ISBN under its own title, not its file name", () => {
+    // A row the catalogue did not settle keeps what the file described, so
+    // "From the file name" would describe something that did not happen.
+    renderQueue({
+      entries: [
+        picked(
+          {
+            state: "stated",
+            draft: {
+              isbn: "9780441013593",
+              title: "Dune",
+              suggested_tag_ids: [],
+            },
+            answered: "nothing",
+            reason: { kind: "not-in-catalogues-as-stated" },
+          },
+          "dune.epub",
+        ),
+      ],
+    });
+
+    expect(screen.getByText("Dune")).toBeInTheDocument();
+    expect(
+      screen.getByText("Not in the catalogues, kept as the file describes it."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/From the file name/)).toBeNull();
+  });
+
+  it("shows a record under another title, and offers to use it or keep the file", async () => {
+    const props = renderQueue({
+      entries: [
+        picked(
+          {
+            state: "stated",
+            draft: {
+              isbn: "9780441013593",
+              title: "Dune",
+              suggested_tag_ids: [],
+            },
+            answered: "records",
+            reason: { kind: "record-differs" },
+            differentRecord: {
+              isbn: "9780441013593",
+              title: "The Left Hand of Darkness",
+              author: "Ursula K. Le Guin",
+            },
+          },
+          "dune.epub",
+        ),
+      ],
+    });
+
+    expect(
+      screen.getByText(
+        "The catalogue's record: The Left Hand of Darkness, Ursula K. Le Guin",
+      ),
+    ).toBeInTheDocument();
+    await userEvent.click(
+      screen.getByRole("button", {
+        name: "Use the record The Left Hand of Darkness, Ursula K. Le Guin for dune.epub",
+      }),
+    );
+    await userEvent.click(
+      screen.getByRole("button", {
+        name: "Keep the file's description of dune.epub",
+      }),
+    );
+    expect(props.onTakeRecord).toHaveBeenCalledWith("file:dune.epub:10:0");
+    expect(props.onKeepFile).toHaveBeenCalledWith("file:dune.epub:10:0");
   });
 
   it("shows the subjects a picked file stated, and how many", () => {
@@ -949,7 +1022,7 @@ describe("RapidQueue and a book taken from its file name", () => {
     renderQueue({ entries: [derived], waiting: 1, paceMinutes: 3 });
 
     expect(
-      screen.getByRole("button", { name: "Look up 1 by name" }),
+      screen.getByRole("button", { name: "Look up 1 in the catalogues" }),
     ).toBeInTheDocument();
     expect(screen.getByText(/Roughly 3 min/)).toBeInTheDocument();
   });
@@ -1336,7 +1409,9 @@ describe("RapidQueue and a book taken from its file name", () => {
     });
 
     expect(
-      screen.getAllByText(/The file names, not the files, are sent/),
+      screen.getAllByText(
+        /The file names, and any ISBN a file states, are sent/,
+      ),
     ).toHaveLength(1);
     expect(
       screen.getAllByText(/The same file names go to the same catalogues/),

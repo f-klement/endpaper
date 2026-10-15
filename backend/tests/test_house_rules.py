@@ -931,7 +931,7 @@ class TestEveryRequestBodyRowIdIsBounded:
     Only int-shaped fields are the question. A `str` bound by `max_length` is a
     different rule, and a `float` cannot overflow the driver.
 
-    Measured on the tree as it stands: **137** models under `schemas/`, **49** of
+    Measured on the tree as it stands: **141** models under `schemas/`, **50** of
     them reachable from a request.
 
     **What those two numbers count, because a bare number is what rots.** The
@@ -6104,9 +6104,9 @@ class TestOneReaderPerAmbiguousSubfield:
 
     **Identity is the path, not `path.stem`.** That is the same defect one level
     down and it came through the rewrite untouched from the first version.
-    `application_modules()` already holds **ten** colliding stems, `auth`,
-    `backup`, `covers`, `imports`, `kosync`, `opds`, `public`, `settings`, `sru`
-    and `stats`, each
+    `application_modules()` already holds **eleven** colliding stems, `auth`,
+    `backup`, `covers`, `imports`, `kosync`, `opds`, `public`, `readwise`,
+    `settings`, `sru` and `stats`, each
     a module at the root and one under `routers/` or `schemas/`. Neither
     `metadata` nor `marc` collides today, which is why nothing failed; a reader
     added to `routers/metadata.py` would have been indistinguishable from the
@@ -6215,7 +6215,7 @@ class TestOneReaderPerAmbiguousSubfield:
         assert set(found) == {("metadata.py", "_subject_vocabulary")}
 
     def test_two_files_of_one_stem_are_two_sites(self):
-        """`path.stem` was the identity and ten stems already collide.
+        """`path.stem` was the identity and eleven stems already collide.
 
         `metadata` is not one of them today, so nothing failed; a reader added
         to `routers/metadata.py` would have been indistinguishable from the
@@ -6230,9 +6230,9 @@ class TestOneReaderPerAmbiguousSubfield:
     def test_the_stems_that_already_collide_are_still_only_these(self):
         """A count in prose does not recount itself, so this recounts it.
 
-        The docstring names ten, and it named seven until `sru.py` arrived
-        beside `routers/sru.py`, eight until `opds.py` and nine until
-        `kosync.py` did. If an eleventh
+        The docstring names eleven, and it named seven until `sru.py` arrived
+        beside `routers/sru.py`, eight until `opds.py`, nine until `kosync.py`
+        and ten until `readwise.py` did. If a twelfth
         appears the number above is stale, and this says so at the rule rather
         than leaving the next reader to trust it.
         """
@@ -6249,6 +6249,7 @@ class TestOneReaderPerAmbiguousSubfield:
             "kosync",
             "opds",
             "public",
+            "readwise",
             "settings",
             "sru",
             "stats",
@@ -9095,6 +9096,7 @@ class TestOneDoorParsesAResponseBody:
             "google_books.py",
             "opds.py",
             "covers.py",
+            "readwise.py",
         }
 
 

@@ -71,11 +71,13 @@ from models import (
     Highlight,
     KosyncDocument,
     Loan,
+    MemberLogin,
     Note,
     OpdsServer,
     PasswordResetRequest,
     Quote,
     ReadingProgress,
+    ReadwiseBook,
     Setting,
     Tag,
     User,
@@ -146,6 +148,10 @@ _TABLES: tuple[tuple[str, Any, Table], ...] = tuple(
         # Where each member's devices last were, after both parents. Absent from
         # `_REQUIRED_TABLES`, like every table added after `FORMAT_VERSION` 1.
         ("kosync_documents", KosyncDocument),
+        # Which Book each of a member's Readwise books is, after both parents.
+        # Absent from `_REQUIRED_TABLES`, like every table added after
+        # `FORMAT_VERSION` 1.
+        ("readwise_books", ReadwiseBook),
         ("loans", Loan),
         # After the loans it replaces for a digital copy. Both parents are
         # inserted by here. Absent from `_REQUIRED_TABLES` for the reason
@@ -321,6 +327,13 @@ _TABLES: tuple[tuple[str, Any, Table], ...] = tuple(
         # Absent from `_REQUIRED_TABLES`, like every table added after
         # `FORMAT_VERSION` 1.
         ("password_reset_requests", PasswordResetRequest),
+        # Members' own logins elsewhere, sealed. Its only foreign key is
+        # `users`. **Carried for `catalogue_credentials`' reason and with its
+        # cost**: the archive holds ciphertext and never the key, so a restore
+        # onto a machine without that key brings each token back unreadable,
+        # and its member enters it again on their account page. Absent from
+        # `_REQUIRED_TABLES`, like every table added after `FORMAT_VERSION` 1.
+        ("member_logins", MemberLogin),
         ("settings", Setting),
     )
 )

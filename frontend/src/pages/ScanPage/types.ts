@@ -6,7 +6,7 @@ import type {
   BookMatch,
   CopyCreate,
 } from "../../api/generated/model";
-import { AUTHOR_SEPARATOR, boundNumber, boundText } from "../../lib/bookBounds";
+import { boundNumber, boundText } from "../../lib/bookBounds";
 import { normaliseLocation } from "../../lib/lastLocation";
 import type { FileIdentifier, FileMetadata } from "../../lib/fileReaders";
 import type { StoreIdentifier, StoreIdentifierScheme } from "../../lib/stores";
@@ -15,9 +15,11 @@ import type { StoreIdentifier, StoreIdentifierScheme } from "../../lib/stores";
 // that read each other's source text.
 import { storeIdentifier } from "../../lib/stores";
 import {
+  authorsAgreeing,
   boundCategories,
   boundIdentifiers,
   boundRecord,
+  creditLine,
 } from "../../lib/bookRequest";
 import type { NameClues } from "../../lib/fileName";
 import type { AudiobookGroup } from "../../lib/audiobookGroups";
@@ -68,6 +70,15 @@ export interface BookDraft extends BookLookup {
    * would have shown nobody anything.
    */
   categories?: string[];
+  /**
+   * The names `author` was joined from, where a file gave them one by one.
+   *
+   * **Sent only while `author` is still them joined**, because the confirm step
+   * edits the line and a catalogue answer replaces it, and the server refuses
+   * a pair that disagrees. `toScanRequest` applies that test at the one door,
+   * rather than every edit site remembering to clear this.
+   */
+  authors?: string[] | null;
 }
 
 /**
@@ -156,6 +167,7 @@ export function toScanRequest(
 
   return {
     ...fields,
+    authors: authorsAgreeing(fields.author, fields.authors),
     is_private: pending.isPrivate,
     location: normaliseLocation(pending.location) || null,
     format: pending.format || null,
@@ -192,6 +204,156 @@ export function toCopyRequest(pending: PendingBook): CopyCreate {
 
 export function draftFromLookup(lookup: BookLookup): BookDraft {
   return { ...lookup };
+}
+
+/**
+ * Which side a field of an enriched draft is taken from.
+ *
+ * `catalogue first` takes the catalogue's value and falls back to the row's own
+ * where the catalogue has none. `catalogue alone` never falls back.
+ */
+type FieldSource = "catalogue first" | "catalogue alone";
+
+/**
+ * Per field, who wins when a catalogue record meets the draft a row already
+ * carried.
+ *
+ * **The catalogue wins wherever it answers**, which is the barcode path's rule:
+ * `draftFromLookup` takes the record whole and a scanned ISBN has nothing of its
+ * own to keep. A file's metadata was written by whoever produced the file, and
+ * the enrichment exists because that is often thin; a field it fills is
+ * one the catalogue left empty, never one the catalogue spelled differently.
+ * `identifiers` and `categories` are a file's alone, since no lookup answers
+ * either, so they always survive.
+ *
+ * **`notFound` alone never falls back**: the catalogue did answer, and carrying
+ * the file's `true` would put the confirm step into the editable form for a
+ * record that was found.
+ *
+ * A total record, so a field added to `BookDraft` is a compile error until
+ * somebody has said who wins it.
+ */
+const WHO_WINS: { readonly [Field in keyof BookDraft]-?: FieldSource } = {
+  isbn: "catalogue first",
+  title: "catalogue first",
+  subtitle: "catalogue first",
+  author: "catalogue first",
+  publisher: "catalogue first",
+  year: "catalogue first",
+  description: "catalogue first",
+  cover_url: "catalogue first",
+  language: "catalogue first",
+  page_count: "catalogue first",
+  series_name: "catalogue first",
+  series_index: "catalogue first",
+  classifications: "catalogue first",
+  suggested_tag_ids: "catalogue first",
+  identifiers: "catalogue first",
+  categories: "catalogue first",
+  // A catalogue never answers one, so the file's list always survives, and
+  // `toScanRequest` drops it where the catalogue's line replaced the file's.
+  authors: "catalogue first",
+  notFound: "catalogue alone",
+};
+
+/** Nothing a member would read as a value: absent, blank, or an empty list. */
+function isBlank(value: BookDraft[keyof BookDraft]): boolean {
+  if (value === undefined || value === null || value === "") return true;
+  // The only objects a draft holds are its lists, which the type narrows to.
+  return typeof value === "object" && value.length === 0;
+}
+
+/** Copy one field across where the catalogue left it blank. */
+function fillBlank<Field extends keyof BookDraft>(
+  into: BookDraft,
+  from: BookDraft,
+  field: Field,
+): void {
+  if (isBlank(into[field]) && !isBlank(from[field])) into[field] = from[field];
+}
+
+/**
+ * A catalogue record for a row's ISBN, filled from what the row already said.
+ *
+ * **The rapid queue's ISBN lookup and nothing else.** A barcode's row has no
+ * draft when its answer arrives, so this is `draftFromLookup` for it; a file
+ * that stated its ISBN, or a name that carried one, keeps what the catalogue
+ * did not answer. `WHO_WINS` is the rule per field.
+ */
+export function enrichedDraft(
+  lookup: BookLookup,
+  own: BookDraft | null,
+): BookDraft {
+  const enriched = draftFromLookup(lookup);
+  if (own === null) return enriched;
+  for (const field of Object.keys(WHO_WINS) as (keyof BookDraft)[]) {
+    if (WHO_WINS[field] === "catalogue first") fillBlank(enriched, own, field);
+  }
+  return enriched;
+}
+
+/**
+ * Words of four letters or more that say what kind of thing a book is
+ * rather than which book, in the two languages this app speaks.
+ *
+ * Without them "Foundation: A Novel" and "Hyperion: A Novel" share a word.
+ */
+const GENERIC_WORDS = new Set([
+  "novel",
+  "roman",
+  "edition",
+  "ausgabe",
+  "book",
+  "buch",
+  "volume",
+  "band",
+  "teil",
+  "part",
+  "werke",
+  "trilogy",
+  "saga",
+]);
+
+/**
+ * The words of a title that say which book it is: four letters or more, not
+ * generic, case and accents folded, and `ß` spelled `ss`, which NFKD leaves.
+ *
+ * **Four letters rather than a stop word list per language**: it drops the
+ * articles and short function words of every language at once, so two titles
+ * sharing only "the" do not agree. What it costs is a title made only of
+ * short words, which cannot be judged, and `titlesCouldAgree` lets it through.
+ */
+function significantWords(title: string): Set<string> {
+  return new Set(
+    title
+      .normalize("NFKD")
+      .replace(/\p{M}/gu, "")
+      .toLowerCase()
+      .replaceAll("ß", "ss")
+      .split(/[^\p{L}\p{N}]+/u)
+      .filter((word) => word.length >= 4 && !GENERIC_WORDS.has(word)),
+  );
+}
+
+/**
+ * Whether a catalogue's title could name the book a file describes.
+ *
+ * **False only when both have a significant word and they share none**, which
+ * is a record naming a different work: a stranger's ISBN, a publisher
+ * template's, or an omnibus titled apart from the file. Its record would
+ * otherwise replace the file's title in silence.
+ *
+ * **What it lets through, stated so nobody reads more into it:** any shared
+ * significant word passes, so a subtitle or an edition passes, and so does
+ * another volume of the same series ("Dune" against "Dune Messiah"), which
+ * shares the series word. A hold on a title that is the same work in other
+ * words ("1984" against "Nineteen Eighty Four") costs the member one press.
+ */
+export function titlesCouldAgree(record: string, own: string): boolean {
+  const ours = significantWords(own);
+  const theirs = significantWords(record);
+  if (ours.size === 0 || theirs.size === 0) return true;
+  return [...ours].some((word) => theirs.has(word));
 }
 
 export function blankDraft(isbn: string): BookDraft {
@@ -492,7 +654,7 @@ export function draftFromName(clues: NameClues): BookDraft {
  *
  * **Every distinct artist, joined**, because a collection is one audiobook by
  * ten writers and taking the first would file nine of them under the wrong one.
- * `boundText` cuts the line at what `BookCreate.author` holds.
+ * `creditLine` cuts the line at what `BookCreate.author` holds.
  *
  * **`null` when the files named no book**, and the caller then derives the same
  * draft from the folder's name instead. Returning a blank title here would be a
@@ -508,7 +670,9 @@ export function draftFromAudiobook(group: AudiobookGroup): BookDraft | null {
   return {
     isbn: "",
     title,
-    author: boundText("author", group.authors.join(AUTHOR_SEPARATOR)),
+    // No `authors` beside it: an artist tag is one string a tagger wrote, and
+    // may name several people.
+    author: creditLine(group.authors),
     classifications: [],
     suggested_tag_ids: [],
     notFound: true,

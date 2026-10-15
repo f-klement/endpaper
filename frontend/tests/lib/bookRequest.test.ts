@@ -15,9 +15,11 @@ import { describe, expect, it } from "vitest";
 
 import { BookIdentifierScheme } from "../../src/api/generated/model";
 import {
+  authorsAgreeing,
   boundCategories,
   boundIdentifiers,
   boundRecord,
+  creditedSeparately,
 } from "../../src/lib/bookRequest";
 // The reader's own cap, so the element count below is derived from the bound
 // a package document actually has rather than from a number written here.
@@ -83,6 +85,7 @@ const CATEGORY_LIMIT = statedBound(
 const EVERYTHING_STATED: SourceRecord = {
   title: "Dune",
   authors: ["Frank Herbert"],
+  authorsSeparated: true,
   isbn: "9780441013593",
   publisher: "Chilton Books",
   year: 1965,
@@ -95,6 +98,7 @@ const EVERYTHING_STATED: SourceRecord = {
 const NOTHING_STATED: SourceRecord = {
   title: null,
   authors: [],
+  authorsSeparated: false,
   isbn: null,
   publisher: null,
   year: null,
@@ -138,10 +142,61 @@ describe("a source record as the request names its fields", () => {
   it("answers one request field a record field, neither more nor fewer", () => {
     // The anchor the arm above cannot be: a fixture that lost its fields would
     // report nothing unread. Both sides are counted rather than written down,
-    // so a field added to one and not the other fails here.
+    // so a field added to one and not the other fails here. `authors` becomes
+    // the line and `authorsSeparated` decides the names beside it.
     expect(Object.keys(boundRecord(EVERYTHING_STATED))).toHaveLength(
       Object.keys(EVERYTHING_STATED).length,
     );
+  });
+
+  it("sends the names beside the line they were joined into", () => {
+    const bound = boundRecord({
+      ...EVERYTHING_STATED,
+      authors: ["Tolkien, J. R. R.", "Christopher Tolkien"],
+    });
+
+    expect(bound.authors).toEqual(["Tolkien, J. R. R.", "Christopher Tolkien"]);
+    expect(bound.author).toBe("Tolkien, J. R. R., Christopher Tolkien");
+  });
+
+  it("trims each name and drops a blank one before either is sent", () => {
+    const bound = boundRecord({
+      ...EVERYTHING_STATED,
+      authors: [" Frank Herbert ", "  ", "Brian Herbert"],
+    });
+
+    expect(bound.authors).toEqual(["Frank Herbert", "Brian Herbert"]);
+    expect(bound.author).toBe("Frank Herbert, Brian Herbert");
+  });
+
+  it("sends no names where the line had to be cut", () => {
+    // A cut line is no longer the names joined, and the server refuses a pair
+    // that disagrees: the book would be a 422 instead of a cut credit.
+    const bound = boundRecord({
+      ...EVERYTHING_STATED,
+      authors: ["y".repeat(300), "z".repeat(300)],
+    });
+
+    expect(bound.author).toHaveLength(500);
+    expect(bound.authors).toBeNull();
+  });
+
+  it("sends a line a store wrote as a line, never as one name", () => {
+    // One element holding two people: the server reads one comma in a name as
+    // surname first, so sent as a name this would store one invented person.
+    const bound = boundRecord({
+      ...EVERYTHING_STATED,
+      authors: ["Terry Pratchett, Neil Gaiman"],
+      authorsSeparated: false,
+    });
+
+    expect(bound.authors).toBeNull();
+    expect(bound.author).toBe("Terry Pratchett, Neil Gaiman");
+  });
+
+  it("sends no names for a source that named nobody", () => {
+    expect(boundRecord(NOTHING_STATED).authors).toBeNull();
+    expect(creditedSeparately(["", "  "])).toBeNull();
   });
 
   it("joins authors with the separator the server splits on", () => {
@@ -384,9 +439,14 @@ describe("the mapping from a source record to the wire has one home", () => {
       (one) => one.name === "boundRecord",
     );
 
+    // `authors` is the one field bounded by no key of its own: it is the names
+    // the `author` line was joined from, kept only while they agree, so its
+    // bound is that line's and the arms on `authorsAgreeing` pin it.
     expect(door).toBeDefined();
     expect(boundsApplied(door!.body)).toEqual(
-      Object.keys(boundRecord(EVERYTHING_STATED)),
+      Object.keys(boundRecord(EVERYTHING_STATED)).filter(
+        (name) => name !== "authors",
+      ),
     );
   });
 
@@ -969,5 +1029,23 @@ describe("the identifiers a source gave, bounded for the wire", () => {
 
   it("drops an empty value", () => {
     expect(boundIdentifiers([{ scheme: "asin", value: "   " }])).toEqual([]);
+  });
+});
+
+describe("the names beside an author line", () => {
+  it("keeps names that join to the line exactly", () => {
+    expect(authorsAgreeing("A, B", ["A", "B"])).toEqual(["A", "B"]);
+  });
+
+  it("drops names once the line says something else", () => {
+    // A member's edit on the confirm step, or a catalogue's line replacing
+    // the file's: the server refuses the pair, so the line goes alone.
+    expect(authorsAgreeing("Frank Herbert", ["Herbert, Frank"])).toBeNull();
+  });
+
+  it("sends nothing beside a missing line or an empty list", () => {
+    expect(authorsAgreeing(null, ["A"])).toBeNull();
+    expect(authorsAgreeing("A", [])).toBeNull();
+    expect(authorsAgreeing("A", undefined)).toBeNull();
   });
 });

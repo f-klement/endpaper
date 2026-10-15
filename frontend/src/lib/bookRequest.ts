@@ -83,6 +83,7 @@ export type BoundRecord = Omit<
     BookCreate,
     | "title"
     | "author"
+    | "authors"
     | "isbn"
     | "publisher"
     | "year"
@@ -93,6 +94,55 @@ export type BoundRecord = Omit<
   >,
   "title"
 > & { title: string | null };
+
+/**
+ * The names a source credited, trimmed, with the blank ones gone.
+ *
+ * Trimmed one by one rather than as a joined line, so the line `boundRecord`
+ * sends is exactly these joined and `authorsAgreeing` can compare the two.
+ */
+export function creditedNames(authors: readonly string[]): string[] {
+  return authors.map((name) => name.trim()).filter((name) => name !== "");
+}
+
+/**
+ * The names to send beside an author line, or `null` where they would disagree.
+ *
+ * **`BookCreate.authors` exists because a joined line loses which comma was a
+ * name's own**: the server splits `author` on every comma, so a file crediting
+ * `Tolkien, J. R. R.` as one creator became two people. Sent as a list, the
+ * server flips each name and joins them itself.
+ *
+ * **The server refuses a body whose `author` is not `authors` joined with
+ * `AUTHOR_SEPARATOR`**, so this is the one test every sender applies rather
+ * than a rule each restates. It answers `null`, which sends the line alone,
+ * where the line was cut to fit, where a member edited it, and where a
+ * catalogue replaced it: in each the names no longer describe what is sent.
+ */
+export function authorsAgreeing(
+  author: string | null | undefined,
+  authors: readonly string[] | null | undefined,
+): string[] | null {
+  if (!author || !authors || authors.length === 0) return null;
+  return authors.join(AUTHOR_SEPARATOR) === author ? [...authors] : null;
+}
+
+/** The names joined into the one line `BookCreate.author` holds, bounded. */
+export function creditLine(authors: readonly string[]): string | null {
+  return boundText("author", creditedNames(authors).join(AUTHOR_SEPARATOR));
+}
+
+/**
+ * The names `creditLine` joined, or `null` where the line no longer is them.
+ *
+ * A function of the names alone, so `boundRecord` states each field once and
+ * in order, which is what its test reads.
+ */
+export function creditedSeparately(
+  authors: readonly string[],
+): string[] | null {
+  return authorsAgreeing(creditLine(authors), creditedNames(authors));
+}
 
 /**
  * A source's record, bounded and renamed for the request.
@@ -114,7 +164,15 @@ export type BoundRecord = Omit<
 export function boundRecord(record: SourceRecord): BoundRecord {
   return {
     title: boundText("title", record.title),
-    author: boundText("author", record.authors.join(AUTHOR_SEPARATOR)),
+    // `creditLine` spelled out, so the key this field is bounded by is on the
+    // line that sends it, where `tests/lib/bookRequest.test.ts` reads it.
+    author: boundText(
+      "author",
+      creditedNames(record.authors).join(AUTHOR_SEPARATOR),
+    ),
+    authors: record.authorsSeparated
+      ? creditedSeparately(record.authors)
+      : null,
     isbn: boundText("isbn", record.isbn),
     publisher: boundText("publisher", record.publisher),
     year: boundNumber("year", record.year),

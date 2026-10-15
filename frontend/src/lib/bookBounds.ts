@@ -86,10 +86,19 @@ export const KEPT_WHOLE: ReadonlySet<BoundedText> = new Set<BoundedText>([
  * **`backend/authors.py` splits on a comma and on nothing else**, so this is
  * the separator that survives the round trip rather than a formatting choice.
  *
- * **The exclusion, because it is real**: a creator whose own name contains a
- * comma arrives as two authors. Measured over 79 real EPUB files, 2 of 79
- * creator strings contained one and both were the same corporate name. The fix
- * is a wire field carrying authors separately, which is a schema change.
+ * **A name with a comma of its own is split by this join**, so a source that
+ * separated its names also sends them one by one
+ * (`lib/bookRequest.creditedSeparately`), and the server reorders each before
+ * joining. That makes one author of a name written surname first,
+ * `Tolkien, J. R. R.`. It does not save a name that keeps its comma: one with
+ * two, or one whose comma precedes a suffix or a designator,
+ * `Martin Luther King, Jr.` or `Acme, Inc.`, which the server leaves as
+ * written and which still reads as two. And a name whose one comma precedes a
+ * suffix or designator the server's list does not name is reordered as if it
+ * were surname first: `M.D.`, `2nd`, `S.A.`, `AG`, `Co.`, `Pty Ltd`, because
+ * initials share some of those spellings. Measured over 79
+ * real EPUB files, 2 of 79 creator strings contained a comma, both the same
+ * corporate name.
  *
  * **Here rather than in a page folder, because two of them had it.** The scan
  * page's file path and the Calibre import each declared it, each restating the

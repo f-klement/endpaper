@@ -51,6 +51,63 @@ beforeEach(() => {
     body: { username: "kim", has_password: false, password_set_at: null },
   });
   api.on("/api/kosync/inbox", { body: [] });
+  api.on("/api/readwise/account", { body: READWISE_NONE });
+});
+
+const READWISE_NONE = {
+  has_token: false,
+  token_set_at: null,
+  last_run_at: null,
+  last_outcome: null,
+  waiting_count: 0,
+  waiting: [],
+};
+
+describe("AccountSettingsPage Readwise", () => {
+  it("sends the token once and keeps no copy of it on the page", async () => {
+    const user = userEvent.setup();
+    api.on(
+      "/api/readwise/token",
+      {
+        body: {
+          ...READWISE_NONE,
+          has_token: true,
+          token_set_at: "2026-10-15T08:00:00Z",
+        },
+      },
+      "PUT",
+    );
+    render();
+
+    const field = await screen.findByLabelText("Readwise access token");
+    await user.type(field, "rw0123456789abcdef");
+    await user.click(screen.getByRole("button", { name: "Save token" }));
+
+    await screen.findByRole("button", { name: "Fetch now" });
+    expect(api.lastCall("/api/readwise/token", "PUT")?.body).toEqual({
+      token: "rw0123456789abcdef",
+    });
+    expect(field).toHaveValue("");
+  });
+
+  it("lists the Readwise books no book here matched", async () => {
+    api.on("/api/readwise/account", {
+      body: {
+        ...READWISE_NONE,
+        has_token: true,
+        last_run_at: "2026-10-15T08:00:00Z",
+        last_outcome: "synced",
+        waiting_count: 1,
+        waiting: [{ title: "Dune", author: "Frank Herbert" }],
+      },
+    });
+    render();
+
+    expect(await screen.findByText("Dune, Frank Herbert")).toBeInTheDocument();
+    expect(
+      screen.getByText(/match no single book here: 1\./),
+    ).toBeInTheDocument();
+  });
 });
 
 describe("AccountSettingsPage KOReader sync", () => {
