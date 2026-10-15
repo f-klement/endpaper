@@ -32,6 +32,7 @@ from starlette.requests import ClientDisconnect
 import main
 from errors import AnswerUnhandledErrors, is_api_path, render_error_page
 from refusals import DECLARED
+from tests.bindings import ModuleNames
 from tests.corpus import BACKEND, application_modules
 
 HTML = {"Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"}
@@ -641,18 +642,9 @@ def _resolve(expression: ast.expr, module: Any) -> Any:
     **Resolved rather than matched as text.** `422` and
     `status.HTTP_422_UNPROCESSABLE_CONTENT` are two spellings of one number and
     the next one written will be a third, so nothing here knows how a constant
-    is spelled: it is looked up in the module's own globals.
+    is spelled: `tests/bindings.py` looks it up in the module's own globals.
     """
-    steps: list[str] = []
-    while isinstance(expression, ast.Attribute):
-        steps.append(expression.attr)
-        expression = expression.value
-    if not isinstance(expression, ast.Name):
-        return None
-    found: Any = getattr(module, expression.id, None)
-    for step in reversed(steps):
-        found = getattr(found, step, None)
-    return found
+    return ModuleNames(module).value(expression)
 
 
 def _one_status(expression: ast.expr, module: Any) -> set[int] | None:

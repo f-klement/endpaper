@@ -4,19 +4,30 @@ The match level rule, the bound on a record, the refresh policy's column set and
 the importers' door. What each route does around it is in the router tests.
 """
 
+import ast
+import importlib
 import logging
+import symtable
+from collections import Counter
+from collections.abc import Iterable
+from types import ModuleType
 from typing import Any, Final
 
 import pytest
+from sqlalchemy.orm.attributes import set_committed_value
 
+import classifications
 import covers
 import evidence
-from catalogue import Record
+import models
+from catalogue import Record, Subject
 from categories import join_categories
 from evidence import Policy, _apply_match, _bounded_match
 from google_books import _volume_to_fields
 from models import Book
 from schemas import BookMatch
+from tests.bindings import SourceNames, source_of
+from tests.corpus import BACKEND, shipped_modules
 from tests.test_google_books import VOLUME
 
 
@@ -396,12 +407,51 @@ class TestBoundingOneRecord:
         assert "dnb" in caplog.text
 
 
-class TestEmptyIsNoneOrAnEmptyString:
+def _stored_blank(value: str) -> Book:
+    """A Book whose `publisher` was read from the database holding `value`.
+
+    Loaded rather than constructed, because `Book`'s own hook nulls a blank on
+    construction: a row from before revision d3f8a1c6b250 is the shape that
+    still reaches evidence holding one."""
+    book = Book(title="Dune")
+    set_committed_value(book, "publisher", value)
+    return book
+
+
+class TestEmptyIsNoneOrABlankString:
     def test_a_stored_empty_string_is_filled_from_a_match(self):
-        book = Book(title="Dune", publisher="")
+        book = _stored_blank("")
 
         assert "publisher" in _apply_match(book, _as_match(VOLUME), Policy.FILL_GAPS)
         assert book.publisher == "Chilton"
+
+    def test_a_stored_whitespace_value_is_a_gap_too(self):
+        book = _stored_blank("  ")
+
+        assert "publisher" in _apply_match(book, _as_match(VOLUME), Policy.FILL_GAPS)
+        assert book.publisher == "Chilton"
+
+    def test_an_incoming_whitespace_value_asserts_nothing(self):
+        book = Book(title="Dune")
+
+        assert evidence.fill_gaps(book, {"publisher": " \t"}) == []
+        assert book.publisher is None
+
+    @pytest.mark.parametrize("blank", ["", "   "])
+    def test_a_refresh_clears_to_null_rather_than_to_the_blank(self, blank):
+        """A source answering a blank clears the column as silence does: null
+        afterwards, and a second refresh with the same blank changes nothing.
+        `Book`'s hook would null a blank written back anyway; what the second
+        refresh measures is that evidence compares the null, so it does not
+        report a column changed that was not."""
+        book = Book(title="Dune", author="Frank Herbert")
+
+        evidence.apply_record(book, Record(author=blank), Policy.REFRESH)
+
+        assert book.author is None
+        assert "author" not in evidence.apply_record(
+            book, Record(author=blank), Policy.REFRESH
+        )
 
     @pytest.mark.parametrize(
         ("column", "value"), [("isbn", "9780441013593"), ("collection_id", 1)]
@@ -428,19 +478,29 @@ _ASSERTED: Final[dict[str, Any]] = {
     "language": "en", "page_count": 412, "series_name": "Dune Chronicles",
     "series_index": 2.0, "google_books_id": "gbid00000001",
     "cover_url": "https://covers.openlibrary.org/b/id/1-L.jpg",
+    "subjects": (Subject("Science fiction"),),
 }
 
 
-class TestARefreshWritesExactlyItsNineColumns:
-    """Pinned as it stands: why it writes `title` and skips `categories`, the
-    series fields and `google_books_id` is a decision still to be taken."""
+#: Spelled out rather than read off `evidence.REFRESHED`, so a column joining or
+#: leaving that tuple is a diff here as well as there. A refresh writing one of
+#: the four it skips past the tuple reddens too: `_ASSERTED` asserts each of
+#: them, `categories` through its subject. Why these nine and not `categories`,
+#: the series fields or `google_books_id` is in `docs/decisions.md`.
+_REFRESHED_NINE: Final = frozenset({
+    "title", "subtitle", "author", "publisher", "year", "description",
+    "language", "page_count", "cover_url",
+})
 
+
+class TestARefreshWritesExactlyItsNineColumns:
     def test_it_writes_the_nine_and_nothing_else(self):
         book = Book(**_HELD)
 
         changed = evidence.apply_record(book, Record(**_ASSERTED), Policy.REFRESH)
 
-        assert sorted(changed) == sorted([*evidence.REFRESHED, "cover_url"])
+        assert sorted(changed) == sorted(_REFRESHED_NINE)
+        assert {*evidence.REFRESHED, "cover_url"} == _REFRESHED_NINE
         assert (book.categories, book.series_name, book.series_index) == (
             "Held", "Held", 1.0,
         )
@@ -463,3 +523,411 @@ class TestARefreshWritesExactlyItsNineColumns:
         changed = evidence.apply_record(book, Record(**_ASSERTED), Policy.REFRESH)
 
         assert "cover_url" not in changed
+
+
+#: Each function that names a heading writer, and how many times.
+#:
+#: **A heading writer** is `classifications.add_headings`, the `Classification`
+#: constructor, and the two doors here that call the first. Equality keyed by
+#: the enclosing function, so a new site reds by name, and so does one removed
+#: or moved without its row.
+HEADING_WRITES: Final[dict[str, dict[str, dict[str, int]]]] = {
+    # The writer itself: the ceiling and the dedupe live around this one row.
+    "classifications.py": {"add_headings": {"models.Classification": 1}},
+    "evidence.py": {
+        # The doors' own import.
+        "<module>": {"classifications.add_headings": 1},
+        # ADR 0006's route, `POST /{book_id}/enrich/apply`, through this door.
+        "confirm": {"classifications.add_headings": 1},
+        # The owner's ruling on the MARC importer: choosing the file is the
+        # confirmation.
+        "confirm_file_headings": {"classifications.add_headings": 1},
+    },
+    # A MARC file a Member chose to import, through its door.
+    "importing.py": {"MarcImport._apply_one": {"evidence.confirm_file_headings": 1}},
+    "routers/books.py": {
+        # For `_create_book` alone, the one function here that calls it.
+        "<module>": {"classifications.add_headings": 1},
+        # A NEW Book, not an existing one: this function constructs it with
+        # `Book(...)` and adds it a few lines above the call, so the Book holds
+        # no row before these, and the headings are those the Member sent in
+        # the create body.
+        "_create_book": {"classifications.add_headings": 1},
+        # `POST /{book_id}/enrich/apply`: the record row a Member selected.
+        "apply_enrichment": {"evidence.confirm": 1},
+    },
+}
+
+#: Named anywhere, called or not, so a writer handed on is seen where it is
+#: handed: an import, a `partial`, an attribute holding it, a decorator, a
+#: re-export under any name.
+_NAMED: Final[tuple[tuple[object, str], ...]] = (
+    (classifications.add_headings, "classifications.add_headings"),
+    (evidence.confirm, "evidence.confirm"),
+    (evidence.confirm_file_headings, "evidence.confirm_file_headings"),
+)
+#: Called, because most names of the model are reads: a query's entity, a
+#: column, the restore's table list.
+_CALLED: Final[tuple[tuple[object, str], ...]] = (
+    (models.Classification, "models.Classification"),
+)
+
+
+def _module(name: str) -> ModuleType | None:
+    """The module `name` imports, or None where it is not one."""
+    try:
+        return importlib.import_module(name)
+    except (ImportError, TypeError, ValueError):
+        return None
+
+
+def _writer(meaning: str, writers: tuple[tuple[object, str], ...]) -> str | None:
+    """The one of `writers` a dotted name holds, as Python would look it up, or None.
+
+    Looked up rather than compared as text, so a re-export (`from evidence
+    import add_headings`) is the writer it holds. Only a name ending in one of
+    the writers' own names is looked up, which keeps imports to those, and is
+    why a name re-exported under a new name is not the writer here. A writer
+    in `_NAMED` so re-exported reds where the re-export is made, which names
+    it; the constructor so re-exported is not seen.
+    """
+    if meaning.rsplit(".", 1)[-1] not in {label.rsplit(".", 1)[-1] for _, label in writers}:
+        return None
+    parts = meaning.split(".")
+    for cut in range(len(parts), 0, -1):
+        found: object = _module(".".join(parts[:cut]))
+        if found is None:
+            continue
+        for part in parts[cut:]:
+            found = getattr(found, part, None)
+        return next((label for writer, label in writers if writer is found), None)
+    return None
+
+
+def _scope(table: symtable.SymbolTable, name: str, line: int) -> symtable.SymbolTable:
+    """The scope `table` opens for the function, class or lambda `name` at `line`."""
+    return next(
+        (
+            child
+            for child in table.get_children()
+            if child.get_name() == name and child.get_lineno() == line
+        ),
+        table,
+    )
+
+
+def _global(name: str, table: symtable.SymbolTable, bound: frozenset[str]) -> bool:
+    """Whether a bare `name` read in `table` is the module's binding.
+
+    Read the way the compiler reads it. `bound` holds the comprehension
+    variables around the read, because an inlined comprehension leaves none of
+    its own in the table.
+    """
+    if name in bound:
+        return False
+    if table.get_type() == symtable.SymbolTableType.MODULE:
+        return True
+    try:
+        return table.lookup(name).is_global()
+    except KeyError:
+        return True
+
+
+def _heading_writes(
+    source: str, package: str | None = None, module: str | None = None
+) -> dict[str, dict[str, int]]:
+    """The heading writes in `source`, counted by enclosing function.
+
+    Keyed by the dotted names of the classes and functions around a site,
+    `<module>` outside all of them. A writer in `_NAMED` counts each time a
+    name holds it, `_CALLED` each time it is called, whatever the name is
+    spelled through: an alias, the module, a rebinding, a re-export (for
+    `_CALLED`, one under its own name). `module` is the dotted name `source` is
+    imported under, so a bare name it defines is seen too: `add_headings`
+    called inside `classifications`. A bare name bound in its own scope, a
+    parameter, a local, a class attribute or a comprehension variable, is
+    neither the module's nor what the module imports under that name: without
+    that, `def apply_record(db, confirm=False)` in `evidence` would name a
+    door. So a writer imported inside a function counts at the import alone.
+    """
+    names = SourceNames(source, package=package, star=_module)
+    counts: dict[str, Counter[str]] = {}
+
+    def count(
+        around: tuple[str, ...], meanings: Iterable[str], writers: tuple[tuple[object, str], ...]
+    ) -> None:
+        for label in {w for m in meanings if (w := _writer(m, writers))}:
+            counts.setdefault(".".join(around) or "<module>", Counter())[label] += 1
+
+    def visit(
+        node: ast.AST, around: tuple[str, ...], table: symtable.SymbolTable, bound: frozenset[str]
+    ) -> None:
+        if isinstance(node, ast.Import | ast.ImportFrom):
+            alone = SourceNames(
+                ast.Module(body=[node], type_ignores=[]), package=package, star=_module
+            )
+            count(around, {binding.target for binding in alone.bindings}, _NAMED)
+        elif isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Load):
+            count(around, names.means(node), _NAMED)
+        elif (
+            isinstance(node, ast.Name)
+            and isinstance(node.ctx, ast.Load)
+            and _global(node.id, table, bound)
+        ):
+            own = {f"{module}.{node.id}"} if module else set()
+            count(around, names.means(node) | own, _NAMED)
+        elif isinstance(node, ast.Call):
+            count(around, names.means(node.func), _CALLED)
+        # Only a body runs in the new scope; decorators, defaults and bases run
+        # in the one around it.
+        inner: symtable.SymbolTable = table
+        body: tuple[ast.AST, ...] = ()
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+            around = (*around, node.name)
+            inner, body = _scope(table, node.name, node.lineno), tuple(node.body)
+        elif isinstance(node, ast.Lambda):
+            inner, body = _scope(table, "lambda", node.lineno), (node.body,)
+        elif isinstance(node, ast.ListComp | ast.SetComp | ast.DictComp | ast.GeneratorExp):
+            bound |= {
+                name.id
+                for generator in node.generators
+                for name in ast.walk(generator.target)
+                if isinstance(name, ast.Name)
+            }
+        for child in ast.iter_child_nodes(node):
+            visit(child, around, inner if any(child is b for b in body) else table, bound)
+
+    visit(ast.parse(source), (), symtable.symtable(source, module or "<source>", "exec"), frozenset())
+    return {where: dict(found) for where, found in counts.items()}
+
+
+class TestClassificationsReachAnExistingBookOnlyThroughEvidence:
+    """ADR 0006: only the functions in `HEADING_WRITES` reach a heading writer.
+
+    Every shipped module is read, the application and its migrations, and a
+    name is resolved the way Python resolves it. What this lets through:
+
+    * a row moved by repointing its `book_id`, which is how a merge carries the
+      losers' headings (`folding`);
+    * an edit to a stored row's columns, which is how a merge keeps a losing
+      caption (`folding._absorb_heading`): only a row's creation counts;
+    * a write that constructs nothing, a Core `insert` or a
+      `bulk_insert_mappings` anywhere, of which a restore's whole library
+      (`backup`) is the one live member;
+    * the model handed on uncalled, such as `partial(Classification, ...)`,
+      because the constructor is counted by call;
+    * a caller of a function that is itself in the table, such as a module
+      re-exporting a writer under a new name once its row is stated;
+    * a writer reached through a name built at run time (`getattr` with a
+      string, `importlib`), which takes a deliberate act.
+    """
+
+    def test_only_the_stated_functions_reach_a_heading_writer(self) -> None:
+        found: dict[str, dict[str, dict[str, int]]] = {}
+        for path in shipped_modules():
+            relative = path.relative_to(BACKEND)
+            package = ".".join(relative.parent.parts) or None
+            module = ".".join(relative.with_suffix("").parts).removesuffix(".__init__")
+            if writes := _heading_writes(source_of(path), package, module):
+                found[relative.as_posix()] = writes
+
+        assert found == HEADING_WRITES, (
+            "a function reaches a Classifications writer, or stopped. A Book that "
+            "exists takes them through `evidence` (ADR 0006); state a new door here."
+        )
+
+    @pytest.mark.parametrize(
+        ("source", "writes"),
+        [
+            (
+                "from classifications import add_headings\n"
+                "def f(book, db):\n    add_headings(book, [], db)",
+                {"<module>": {"classifications.add_headings": 1},
+                 "f": {"classifications.add_headings": 1}},
+            ),
+            (
+                "from classifications import add_headings as more\n"
+                "def f(book, db):\n    more(book, [], db)",
+                {"<module>": {"classifications.add_headings": 1},
+                 "f": {"classifications.add_headings": 1}},
+            ),
+            (
+                "import classifications\n"
+                "def f(book, db):\n    classifications.add_headings(book, [], db)",
+                {"f": {"classifications.add_headings": 1}},
+            ),
+            (
+                "import classifications as c\n"
+                "class C:\n    def m(self, book, db):\n        c.add_headings(book, [], db)",
+                {"C.m": {"classifications.add_headings": 1}},
+            ),
+            (
+                "from evidence import add_headings\n"
+                "def f(book, db):\n    add_headings(book, [], db)",
+                {"<module>": {"classifications.add_headings": 1},
+                 "f": {"classifications.add_headings": 1}},
+            ),
+            (
+                "import evidence\n"
+                "def f(book, db):\n    evidence.add_headings(book, [], db)",
+                {"f": {"classifications.add_headings": 1}},
+            ),
+            (
+                "from classifications import add_headings\nwrite = add_headings\n"
+                "def f(book, db):\n    write(book, [], db)",
+                {"<module>": {"classifications.add_headings": 2},
+                 "f": {"classifications.add_headings": 1}},
+            ),
+            (
+                "import classifications\nfrom functools import partial\n"
+                "def f(book, db):\n    partial(classifications.add_headings, db=db)(book, [])",
+                {"f": {"classifications.add_headings": 1}},
+            ),
+            (
+                "import classifications\nclass C:\n    def __init__(self):\n"
+                "        self.write = classifications.add_headings",
+                {"C.__init__": {"classifications.add_headings": 1}},
+            ),
+            (
+                "import classifications\n"
+                "@classifications.add_headings\ndef f():\n    pass",
+                {"f": {"classifications.add_headings": 1}},
+            ),
+            (
+                "from classifications import add_headings as attach_headings",
+                {"<module>": {"classifications.add_headings": 1}},
+            ),
+            (
+                "import evidence\ndef f(run):\n    run(evidence.confirm)",
+                {"f": {"evidence.confirm": 1}},
+            ),
+            (
+                "from models import Classification\n"
+                "def f(book):\n    book.classifications.append(Classification(number='004'))",
+                {"f": {"models.Classification": 1}},
+            ),
+            (
+                "import models\n"
+                "def f(book):\n    book.classifications = [models.Classification(number='004')]",
+                {"f": {"models.Classification": 1}},
+            ),
+            (
+                "import evidence\n"
+                "def f(book, db):\n    evidence.confirm_file_headings(book, [], db)",
+                {"f": {"evidence.confirm_file_headings": 1}},
+            ),
+            (
+                "from models import Classification\n"
+                "def f(db):\n    return db.query(Classification.number).all()",
+                {},
+            ),
+            ("from classifications import bounded_headings\nimport evidence", {}),
+            ("def add_headings(*args):\n    pass\ndef f():\n    add_headings()", {}),
+            ("import catalogue\ndef f(db):\n    db.confirm()\n    catalogue.confirm()", {}),
+            (
+                "from helpers import attach_headings\n"
+                "def f(book, db):\n    attach_headings(book, [], db)",
+                {},
+            ),
+            (
+                "from sqlalchemy import insert\nfrom models import Classification\n"
+                "def f(db, rows):\n    db.execute(insert(Classification), rows)",
+                {},
+            ),
+            (
+                "from models import Classification\n"
+                "def f(db, rows):\n    db.execute(Classification.__table__.insert(), rows)",
+                {},
+            ),
+            (
+                "from models import Classification\n"
+                "def f(db, rows):\n    db.bulk_insert_mappings(Classification, rows)",
+                {},
+            ),
+        ],
+        ids=[
+            "imported",
+            "imported under another name",
+            "off the module",
+            "off the module under another name, in a method",
+            "re-exported by evidence",
+            "off evidence",
+            "rebound",
+            "handed to partial",
+            "held by an instance attribute",
+            "a decorator",
+            "re-exported under a new name, where it is made",
+            "a door handed on, not called",
+            "a row appended to an existing Book",
+            "a row assigned through the module",
+            "the file door",
+            "a column read, not a write",
+            "another name from the writer's module, and the doors' module",
+            "a function of the same name defined elsewhere",
+            "a method of the same name on something else",
+            "miss: a consumer of a re-export under a new name",
+            "miss: a Core insert",
+            "miss: the table's own insert",
+            "miss: bulk_insert_mappings",
+        ],
+    )
+    def test_what_counts_as_a_heading_write(
+        self, source: str, writes: dict[str, dict[str, int]]
+    ) -> None:
+        assert _heading_writes(source) == writes
+
+    def test_a_writer_named_bare_in_its_own_module_counts(self) -> None:
+        """A name a module binds by `def` means nothing to `SourceNames`, so a
+        second caller inside `classifications` is seen only through `module`."""
+        source = (
+            "def add_headings(book, headings, db):\n    pass\n"
+            "def f(book, db):\n    add_headings(book, [], db)"
+        )
+
+        assert _heading_writes(source, module="classifications") == {
+            "f": {"classifications.add_headings": 1}
+        }
+
+    @pytest.mark.parametrize(
+        ("source", "writes"),
+        [
+            ("def apply_record(db, confirm=False):\n    if confirm:\n        pass", {}),
+            ("def f():\n    confirm = True\n    return confirm", {}),
+            ("class C:\n    confirm = False\n    later = confirm", {}),
+            ("def f(xs):\n    return [confirm for confirm in xs]", {}),
+            ("def f(xs):\n    return lambda confirm: confirm", {}),
+            (
+                "def f(book, db):\n    confirm(book, db)",
+                {"f": {"evidence.confirm": 1}},
+            ),
+            (
+                "def f(confirm=confirm):\n    return confirm",
+                {"f": {"evidence.confirm": 1}},
+            ),
+            (
+                "from classifications import add_headings\n"
+                "def f():\n    add_headings = None\n    return add_headings",
+                {"<module>": {"classifications.add_headings": 1}},
+            ),
+            (
+                "def f(book, db):\n    from classifications import add_headings\n"
+                "    add_headings(book, [], db)",
+                {"f": {"classifications.add_headings": 1}},
+            ),
+        ],
+        ids=[
+            "a parameter of a door's name",
+            "a local of a door's name",
+            "a class attribute of a door's name",
+            "a comprehension variable of a door's name",
+            "a lambda parameter of a door's name",
+            "the module's own door, read from a function",
+            "the module's own door as a default, read around the function",
+            "a local shadowing an imported writer",
+            "a writer imported inside a function, counted at the import",
+        ],
+    )
+    def test_a_name_bound_in_its_own_scope_is_not_the_modules(
+        self, source: str, writes: dict[str, dict[str, int]]
+    ) -> None:
+        assert _heading_writes(source, module="evidence") == writes

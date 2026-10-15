@@ -28,6 +28,7 @@ from enums import (
 )
 from models import (
     AUTHOR_LINE_MAX,
+    BLANK_IS_NULL,
     COVER_URL_MAX,
     CURRENCY_LENGTH,
     DESCRIPTION_MAX,
@@ -43,6 +44,7 @@ from models import (
     SUBTITLE_MAX,
     TITLE_MAX,
     Book,
+    blank_as_none,
 )
 from schemas.author import RefusedAssertionOut
 from schemas.classification import (
@@ -369,6 +371,17 @@ class BookCreate(BaseModel):
     #: missing was any way for a client to say it, so every store import wrote
     #: `owned` whether or not its store had established one.
     ownership: OwnershipStatus = OwnershipStatus.OWNED
+
+    @field_validator(*BLANK_IS_NULL, mode="before")
+    @classmethod
+    def a_blank_is_null(cls, value: object) -> object:
+        """A blank string is stored as null: see `models.blank_as_none`.
+
+        The model's hook would store the same null, and this one is still
+        needed: it runs before `max_length`, so a blank wider than the column
+        is null rather than a 422.
+        """
+        return blank_as_none(value)
 
     @field_validator("cover_url")
     @classmethod
@@ -1292,6 +1305,16 @@ class BookDetailsUpdate(BaseModel):
         the paragraph a reader checks is the one at the older door.
         """
         return normalised_subjects(value)
+
+    @field_validator(*BLANK_IS_NULL, mode="before")
+    @classmethod
+    def a_blank_is_null(cls, value: object) -> object:
+        """A blank string clears, exactly as a null does: see `models.blank_as_none`.
+
+        The field stays in `model_fields_set`, so the route writes the null
+        rather than leaving the stored value alone.
+        """
+        return blank_as_none(value)
 
     @field_validator("purchase_currency")
     @classmethod

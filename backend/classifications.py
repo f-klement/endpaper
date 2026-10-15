@@ -9,7 +9,7 @@ depositing a heading twice.
 
 **A module rather than three private functions in `routers/books.py`, which is
 where all three were.** They gained a second caller when MARC import arrived:
-`importing.py` writes a Book's headings out of an uploaded catalogue record and
+MARC import writes a Book's headings out of an uploaded catalogue record and
 has to obey the same ceiling, the same ordering and the same drop rule. A
 router is the wrong place for a rule a domain module needs, and a second copy
 of a ceiling is a ceiling that has stopped being one. The lookup path and the
@@ -154,7 +154,7 @@ def bounded_headings(entries: Iterable[Heading]) -> list[ClassificationIn]:
 
     **Catalogues rather than sources, because a catalogue is not the only
     thing that builds one.** `marc._record` builds headings out of an uploaded
-    file and `routers/imports` hands them straight to this function, so a claim
+    file and `evidence.confirm_file_headings` hands them to this function, so a claim
     about every *source* was false by one. The count itself is derived rather
     than restated, by `tests/test_classifications.py`.
     """

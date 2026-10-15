@@ -42,19 +42,15 @@ import respx
 import fetch
 import sources
 
-# **Imported, not copied.** What counts as a module of this project is one fact
-# and `is_vendored` is where it is decided. This walk used to be spelled out
-# here, excluding `{"tests", "migrations", ".venv"}` by name, which is the
+# **Imported, not copied.** What a name means and what a statement binds are
+# each one fact, answered in `tests/bindings.py`, and what counts as a module of
+# this project is another, decided by `is_vendored`. This walk used to be spelled
+# out here, excluding `{"tests", "migrations", ".venv"}` by name, which is the
 # directory a developer has and not the one the pipeline creates under
 # `backend/` for its uv cache.
+from tests.bindings import SourceNames, assignments
 from tests.corpus import application_sources
 from tests.strategies import SURROGATE_CODECS
-
-# **Imported, not copied**, for the same reason one line up. "What does this
-# statement bind" is one fact, and `test_shelf.py`'s guard already answers it,
-# including the `AnnAssign` half that a second implementation would have got
-# wrong for the reason its docstring measures. Two rules, one resolver.
-from tests.test_shelf import _bindings
 
 URL = "https://catalogue.test/sru"
 
@@ -163,29 +159,6 @@ def _client() -> httpx.AsyncClient:
     return fetch.catalogue_client()
 
 
-def _module_aliases(tree: ast.Module, module: str) -> set[str]:
-    """Every local name bound to one imported module.
-
-    `import httpx as h` is one line and defeats a rule that looks for the
-    literal word, which is what the first version of this guard did. The second
-    version resolved httpx that way and then hardcoded `"fetch"` beside it, so
-    `import fetch as f` walked through the half that had just been fixed. One
-    function, called for both.
-    """
-    names = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            names |= {a.asname or a.name for a in node.names if a.name == module}
-        for target, value in _bindings(node):
-            if (
-                isinstance(target, ast.Name)
-                and isinstance(value, ast.Name)
-                and value.id in names
-            ):
-                names.add(target.id)
-    return names
-
-
 @dataclass(frozen=True)
 class _Names:
     """What one module calls the things this rule cares about.
@@ -211,63 +184,28 @@ class _Names:
 
 
 def _resolve(tree: ast.Module) -> _Names:
-    """Every local spelling of httpx, of the door, and of what they hand out."""
-    httpx_names = _module_aliases(tree, "httpx")
-    door_names = _module_aliases(tree, "fetch")
-    constructors: set[str] = set()
-    handle_makers: set[str] = set()
-    verbs: set[str] = set()
-    transports: set[str] = set()
+    """Every local spelling of httpx, of the door, and of what they hand out.
 
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.ImportFrom):
-            continue
-        if node.module == "httpx":
-            for alias in node.names:
-                if alias.name in CLIENT_CLASSES:
-                    constructors.add(alias.asname or alias.name)
-                    if alias.name in TRANSPORT_CLASSES:
-                        transports.add(alias.asname or alias.name)
-                elif alias.name in REQUEST_VERBS:
-                    verbs.add(alias.asname or alias.name)
-        elif node.module == "fetch":
-            handle_makers |= {
-                a.asname or a.name for a in node.names if a.name in DOOR_HANDLE_SOURCES
-            }
+    **Asked of `tests/bindings.py`**, which follows an alias and a rebinding
+    wherever either sits. `import httpx as h` defeated the first version of this
+    rule, and the second resolved httpx and then hardcoded `"fetch"` beside it,
+    so `import fetch as f` walked through the half just fixed.
+    """
+    names = SourceNames(tree)
 
-    # A second pass, because a rebinding may sit above or below its import and
-    # this rule does not care which.
-    qualified = httpx_names | door_names
-    for node in ast.walk(tree):
-        for target, value in _bindings(node):
-            if not isinstance(target, ast.Name):
-                continue
-            if isinstance(value, ast.Name):
-                if value.id in constructors:
-                    constructors.add(target.id)
-                elif value.id in handle_makers:
-                    handle_makers.add(target.id)
-                elif value.id in verbs:
-                    verbs.add(target.id)
-            elif (
-                isinstance(value, ast.Attribute)
-                and isinstance(value.value, ast.Name)
-                and value.value.id in qualified
-            ):
-                if value.attr in CLIENT_CLASSES:
-                    constructors.add(target.id)
-                elif value.attr in DOOR_HANDLE_SOURCES:
-                    handle_makers.add(target.id)
-                elif value.attr in REQUEST_VERBS and value.value.id in httpx_names:
-                    verbs.add(target.id)
+    def bound(module: str, members: frozenset[str]) -> set[str]:
+        return names.bound_to(*(f"{module}.{member}" for member in members))
 
+    # A client class reached through the door module counts too, as it did when
+    # this rule qualified both modules alike.
+    constructors = bound("httpx", CLIENT_CLASSES) | bound("fetch", CLIENT_CLASSES)
     return _Names(
-        httpx=httpx_names,
-        door=door_names,
+        httpx=names.bound_to("httpx"),
+        door=names.bound_to("fetch"),
         constructors=constructors,
-        handle_makers=handle_makers | constructors,
-        verbs=verbs,
-        transports=transports,
+        handle_makers=bound("fetch", DOOR_HANDLE_SOURCES) | constructors,
+        verbs=bound("httpx", REQUEST_VERBS),
+        transports=bound("httpx", TRANSPORT_CLASSES),
     )
 
 
@@ -314,7 +252,7 @@ def _client_handles(tree: ast.Module, names: _Names) -> set[str]:
                     arg.annotation, names
                 ):
                     handles.add(arg.arg)
-        for target, value in _bindings(node):
+        for target, value in assignments(node):
             if isinstance(target, ast.Name) and _is_client_expression(value, names):
                 handles.add(target.id)
     return handles

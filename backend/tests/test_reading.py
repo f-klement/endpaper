@@ -26,10 +26,6 @@ backstop, so the one pass has to be right. `EVASIONS` pins it.
 **What the proxy does not catch**, stated because a guard whose limits are
 undocumented gets read as a guarantee it never made:
 
-* `models.UserBook` reached through `import models`. Nothing this rule covers
-  imports `models` as a module, and the same shape evades `test_shelf.py`'s
-  import pass too, where it is caught by the query pass instead. Here it would
-  not be.
 * Raw SQL naming `user_books`. Invisible to any rule that reads names.
 * `book.user_books` or `user.user_books`, the relationships on the two parent
   models. Those are a lazy load off a row somebody already holds, not a query
@@ -67,6 +63,7 @@ from shelf import Shelf
 # here, excluding `{"tests", "migrations", ".venv"}` by name, which is the
 # directory a developer has and not the one the pipeline creates under
 # `backend/` for its uv cache.
+from tests.bindings import SourceNames
 from tests.corpus import application_sources
 
 #: Where `UserBook` may be imported.
@@ -89,7 +86,8 @@ _STAR_SOURCES = {name.removesuffix(".py") for name in READING_RECORD_READERS}
 
 
 def _imported_names(source: str) -> set[str]:
-    """Every name one module imports, under both its spellings.
+    """Every name one module imports, under both its spellings, or reads off a module
+    that may hold it, so `import models; models.UserBook` reaches it too.
 
     **The imported name and the local alias**, not one or the other.
     `alias.asname or alias.name` is the idiom this started with and it is the
@@ -101,27 +99,23 @@ def _imported_names(source: str) -> set[str]:
     **A star import is expanded, from any module on the allowlist.** Not from
     `models` alone: a module that imports `UserBook` re-exports it, so
     `from shelf import *` binds the name just as `from models import *` does,
-    and measured at the tip `UserBook` is in `dir()` of all four allowlisted
-    modules. `_STAR_SOURCES` is derived from `READING_RECORD_READERS` so the
-    two cannot drift.
+    and `UserBook` is a public global of all four allowlisted modules, which is
+    what a star binds where no `__all__` says otherwise. `_STAR_SOURCES` is
+    derived from `READING_RECORD_READERS` so the two cannot drift.
     """
-    names: set[str] = set()
-    for node in ast.walk(ast.parse(source)):
-        if not isinstance(node, ast.Import | ast.ImportFrom):
-            continue
-        for alias in node.names:
-            if alias.name == "*":
-                # `dir()` is the right expansion only because none of these
-                # modules declares an `__all__`; if one ever does, a star import
-                # binds that list instead and this over-reports rather than
-                # under-, which is the safe direction for a guard.
-                if isinstance(node, ast.ImportFrom) and node.module in _STAR_SOURCES:
-                    names |= set(dir(importlib.import_module(node.module)))
-                continue
-            names.add(alias.name)
-            if alias.asname is not None:
-                names.add(alias.asname)
-    return names
+    tree = ast.parse(source)
+    names = SourceNames(
+        tree,
+        star=lambda module: importlib.import_module(module) if module in _STAR_SOURCES else None,
+    )
+    reached = {
+        meaning.split(".")[1]
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Attribute)
+        for meaning in names.means(node)
+        if meaning.split(".")[0] in _STAR_SOURCES
+    }
+    return names.imported() | reached
 
 
 @pytest.fixture
@@ -162,6 +156,10 @@ EVASIONS = {
     "aliased": "from models import UserBook as UB\n",
     "star": "from models import *\n",
     "star from a re-exporter": "from shelf import *\n",
+    "through the module": "import models\nmodels.UserBook.id\n",
+    "through an aliased module": "import models as m\nm.UserBook\n",
+    "through the module bound to a local": "import models\nm = models\nm.UserBook\n",
+    "through a re-exporter": "import shelf\nshelf.UserBook\n",
 }
 
 #: Spellings that must **not** be reported, so the pass cannot be satisfied by
@@ -170,6 +168,8 @@ NOT_OFFENCES = {
     "another model": "from models import Book\n",
     "a star from a module with no reading record in it": "from enums import *\n",
     "a name that merely contains it": "from models import UserBookmark\n",
+    "another model through the module": "import models\nmodels.Book\n",
+    "a module that may not hold it": "import enums\nenums.UserBook\n",
 }
 
 

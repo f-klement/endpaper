@@ -5,17 +5,17 @@ file is evidence: somebody else's statement about a Book this Library already
 holds (ADR 0004). Five writers used to apply one, each with its own rules, and two
 definitions of empty between them. This module is the one place that decides:
 
-- **what empty is**: `is_empty`, None or the empty string, for every policy. A
-  stored `""` is a gap to fill, and an incoming `""` asserts nothing;
+- **what empty is**: `is_empty`, None or a blank string, for every policy. A
+  stored blank is a gap to fill, an incoming blank asserts nothing, and a column
+  a refresh clears is written null, never blank;
 - **which columns evidence may reach**: cells of `book_columns`, never
   `WORK_IDENTITY` outside a refresh, never what a row claims about the Library;
 - **bounding**: a record is held to `BookMatch` field by field before it writes;
 - **cover precedence**: a cover a Member uploaded outranks any remote one;
-- **whether a Catalogue record's Classifications cross**: only on `confirm`, the
-  door for a record a Member selected, which is ADR 0006 held by which door a
-  caller can reach. A MARC file's own headings are the other path onto a
-  matched Book: `importing.MarcImport` adds them after its gap fill, outside
-  this module.
+- **whether Classifications cross**: only through a door a Member's choice
+  opened, which is ADR 0006 held by which door a caller can reach. `confirm`
+  is the door for a record a Member selected, and `confirm_file_headings` for
+  a MARC file a Member chose to import.
 
 What stays with the caller: fetching the cover (`routers/books._store_cover`,
 which the create paths share and which runs on a thread from a coroutine) and the
@@ -24,7 +24,7 @@ commit. Ownership on an OPDS sync stays with `importing`, because its gap is
 """
 
 import logging
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from enum import Enum
 from typing import Any, Final
 
@@ -33,10 +33,10 @@ from sqlalchemy.orm import Session
 
 import book_columns
 import covers
-from catalogue import Record
-from classifications import add_headings
+from catalogue import Heading, Record
+from classifications import add_headings, bounded_headings
 from logvalues import clipped
-from models import Book
+from models import Book, blank_as_none
 from schemas import BookMatch
 
 logger = logging.getLogger("endpaper.evidence")
@@ -57,13 +57,12 @@ class Policy(Enum):
     REFRESH = "refresh"
 
 
-#: The columns a refresh rewrites besides the cover, which with it are the nine
-#: the refresh handler wrote by hand before this module.
+#: The columns a refresh rewrites besides the cover, which with it are nine.
 #:
-#: **Exactly those nine, and why it skips `categories`, the series fields and
-#: `google_books_id` is not decided here.** It writes `title`, which the other
-#: policies leave alone as work identity, because the record was found by this
-#: Book's own verified ISBN. The rest is recorded as it stands, not argued.
+#: It writes `title`, which the other policies leave alone as work identity,
+#: because the record was found by this Book's own ISBN. Why it skips
+#: `categories`, the series fields and `google_books_id` is in
+#: `docs/decisions.md`.
 REFRESHED: Final[tuple[str, ...]] = (
     "title", "subtitle", "author", "publisher", "year", "description",
     "language", "page_count",
@@ -87,14 +86,15 @@ _FILLABLE: Final = frozenset(book_columns.WORK_DETAIL) | {"format"}
 
 
 def is_empty(value: object) -> bool:
-    """Whether a value is absent: None or the empty string, for every policy.
+    """Whether a value is absent: None or a blank string, for every policy.
 
-    A stored `""` is a gap rather than a value somebody chose, and an incoming
-    `""` asserts nothing. Before this, enrichment held that and the importers
+    A stored blank is a gap rather than a value somebody chose, and an incoming
+    blank asserts nothing. Before this, enrichment held that and the importers
     held only None, so one Book took a publisher from Google and refused the same
-    one from a file.
+    one from a file. Blank is `models.blank_as_none`'s, the rule every write of
+    a `Book` stores by, so a record and a request cannot disagree on it.
     """
-    return value is None or value == ""
+    return blank_as_none(value) is None
 
 
 def apply_record(book: Book, record: Record, policy: Policy) -> list[str]:
@@ -124,9 +124,8 @@ def confirm(book: Book, match: BookMatch, db: Session, policy: Policy) -> list[s
 
     Of the writers applying a catalogue's answer, the one door through which a
     Catalogue record's Classifications reach an existing Book (ADR 0006):
-    selecting the row confirms the whole record. A MARC import adds a file's
-    headings to a matched Book outside this module, in `importing.MarcImport`.
-    The body arrives validated by `BookMatch`, so its headings go in as they are.
+    selecting the row confirms the whole record. The body arrives validated by
+    `BookMatch`, so its headings go in as they are.
 
     `REFRESH` is refused: a refresh selects no record, and its policy reads a
     `Record` rather than a match.
@@ -137,6 +136,22 @@ def confirm(book: Book, match: BookMatch, db: Session, policy: Policy) -> list[s
     if add_headings(book, match.classifications, db):
         changed.append("classifications")
     return changed
+
+
+def confirm_file_headings(
+    book: Book, headings: Sequence[Heading], db: Session
+) -> list[str]:
+    """Add an imported MARC file's headings to `book`, returning the numbers changed.
+
+    The importer's door for Classifications, matched Book or created one.
+    Choosing the file is the confirmation, as selecting a picker row is for
+    `confirm`, so nothing waits on a Member afterwards.
+
+    `bounded_headings` drops an entry the column cannot hold and `add_headings`
+    counts what the Book already carries, so neither a long caption nor a
+    repeated import can push a Book past the ceiling.
+    """
+    return add_headings(book, bounded_headings(headings), db)
 
 
 def fill_gaps(book: Book, values: Mapping[str, object]) -> list[str]:
@@ -185,6 +200,10 @@ def _write(book: Book, values: Mapping[str, object], policy: Policy) -> list[str
             # source's silence as the source no longer asserting it.
             if not (policy is Policy.REFRESH and name in _CLEARED_BY_REFRESH):
                 continue
+            # Compared as null, which is what `Book` stores for a blank:
+            # compared as the blank, a column already null would be reported
+            # changed on every refresh.
+            incoming = None
         elif policy is Policy.FILL_GAPS and not is_empty(current):
             continue
         if current == incoming:

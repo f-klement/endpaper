@@ -61,7 +61,6 @@ import identity
 import marc
 import tags
 from catalogue import Record
-from classifications import add_headings, bounded_headings
 from enums import OwnershipStatus, ReadStatus
 from models import Book, Note
 from reading import Reading, Records
@@ -1156,10 +1155,7 @@ class MarcImport:
 
         # After the create and after the gap fill, so a matched Book gains the
         # headings it lacked as well as a new one getting all of them.
-        # `bounded_headings` drops an entry the column cannot hold and
-        # `add_headings` counts what the Book already carries, so neither a
-        # long caption nor a repeated import can push a Book past the ceiling.
-        add_headings(book, bounded_headings(record.headings), self._db)
+        evidence.confirm_file_headings(book, record.headings, self._db)
 
     def _create(self, stored: Stored, index: MarcIndex) -> Book:
         """Add a Book the file catalogues and this Library does not hold.

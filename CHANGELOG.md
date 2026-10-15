@@ -17,6 +17,12 @@
   holding an empty string kept it, and an empty cell from the file was written over a missing
   value. Both now follow what enrichment already did.
 
+- **A subtitle, author, publisher, description or series name that is empty or only spaces is
+  stored as no value.** Every write of a book does this, including a book created from a MARC,
+  OPDS or CSV import and a restored backup, so a cleared field and one never set are the same
+  value. Text with something in it keeps its spaces. Blank ones already stored are converted on
+  upgrade, and clearing the manual author box on the scan page sends no value.
+
 ## v0.18.0
 
 _2026-10-10_

@@ -9776,7 +9776,7 @@ in this register is a copy nobody recounts, and this entry was one for a day.
 
 ---
 
-## `merge_into` takes a `BookMatch`, not a dictionary
+## `evidence._apply_match` takes a `BookMatch`, not a dictionary
 
 Two routes write catalogue scalars onto a Book, and until 2026-09-03 only one of them
 passed the bounds. `POST /api/books/{id}/enrich/apply` takes a `BookMatch` as its body, so
@@ -9981,7 +9981,7 @@ reaching one column is how the two of them eventually reach it differently, and 
 the create body and the update body different types for one field in the generated client.
 
 **What has not changed is the rest of the write side**, which is why the removal mattered:
-`evidence` still skips an incoming value that `is_empty`, None or the empty string, so
+`evidence` still skips an incoming value that `is_empty`, None or a blank string, so
 an enrich apply with `overwrite` replaces the value and cannot clear it, and
 `folding._absorb_fields` only ever fills a gap. So the hand edit route is the **only** removal,
 and before it the only removal was deleting the book.
@@ -21708,17 +21708,37 @@ Settled by the owner. `_checked_collection` already answered 400 for a collectio
 
 ## One module applies outside evidence to an existing Book
 
-`backend/evidence.py` is the only writer that applies a Catalogue record, a selected candidate or an imported row to a Book that already exists. Three named policies: `FILL_GAPS`, `OVERWRITE`, `REFRESH`. Three doors: `apply_record` (enrichment, the identifier backfill and refresh; bounds the record through `BookMatch` field by field first, writes no Classification), `confirm` (`enrich/apply` only; of the catalogue routes, the one door through which a Catalogue record's Classifications cross, ADR 0006), and `fill_gaps` (the three importers). `is_empty` is the one definition of empty; it writes nothing.
+`backend/evidence.py` is the only writer that applies a Catalogue record, a selected candidate or an imported row to a Book that already exists. Three named policies: `FILL_GAPS`, `OVERWRITE`, `REFRESH`. Four doors: `apply_record` (enrichment, the identifier backfill and refresh; bounds the record through `BookMatch` field by field first, writes no Classification), `confirm` (`enrich/apply` only; of the catalogue routes, the one door through which a Catalogue record's Classifications cross, ADR 0006), `confirm_file_headings` (the MARC importer's headings, which it also calls on a Book it created), and `fill_gaps` (the three importers). `is_empty` is the one definition of empty; it writes nothing.
 
-**A MARC import's headings are the exception, and stay outside the module.** The MARC importer adds a file's own headings to a matched existing Book after its gap fill, as it did before this module. Moving that in is not part of this change, and neither is the ADR's wording against that path.
+**A MARC import's headings cross through `confirm_file_headings`.** Choosing the file is the confirmation ADR 0006 asks for, as selecting a picker row is for `confirm`: the Member picked this file to transfer a catalogue. So there is no prompt and no pending state, and the importer writes what it wrote before, in the same order, through the same `bounded_headings` and `add_headings`. A test shuts that door and reds if a heading of any of three schemes still reaches a matched Book. It drives the MARC importer only; whether another module writes headings to an existing Book is measured by [The one writer rule is held by a ratchet on references, not by the MARC arm alone](#the-one-writer-rule-is-held-by-a-ratchet-on-references-not-by-the-marc-arm-alone).
 
-**Empty is None or `""` for every policy.** Before, the merge held that and the three importers held only None, so a stored `""` was filled by enrichment and never by an import, and an incoming `""` was written by an import. Now a stored `""` is a gap to every importer, and an incoming `""` is skipped by every policy except where a refresh clears. Both halves are pinned per importer. Whether `""` should be storable at all is a separate question.
+**Empty is None or a blank string for every policy.** Before, the merge held that and the three importers held only None, so a stored `""` was filled by enrichment and never by an import, and an incoming `""` was written by an import. Now a stored blank is a gap to every importer, and an incoming blank is skipped by every policy except where a refresh clears. Both halves are pinned per importer. Whether a blank should be storable at all is answered by [A blank text column is null](#a-blank-text-column-is-null).
 
-**Refresh keeps exactly its nine columns:** `title`, `subtitle`, `author`, `publisher`, `year`, `description`, `language`, `page_count`, `cover_url`. It writes `title` and skips `categories`, the series fields and `google_books_id`, recorded as it stands. Its per column rules are unchanged: five cleared when the source is silent, `title`, `language` and `page_count` kept, the cover replaced or cleared unless the Member uploaded one. The cover writes through the same rule as the scalars, as a column a refresh clears, below its upload guard.
+**Refresh keeps exactly its nine columns:** `title`, `subtitle`, `author`, `publisher`, `year`, `description`, `language`, `page_count`, `cover_url`. Why those nine is [Refresh rewrites nine columns and leaves four](#refresh-rewrites-nine-columns-and-leaves-four). Its per column rules are unchanged: five cleared when the source is silent, `title`, `language` and `page_count` kept, the cover replaced or cleared unless the Member uploaded one. The cover writes through the same rule as the scalars, as a column a refresh clears, below its upload guard.
 
 **`fill_gaps` refuses a name outside `WORK_DETAIL` and `format`.** That is what the three importers name: CSV publisher, year, page_count and format, MARC a subset of `WORK_DETAIL`, OPDS `author`. The CSV importer fills `format`, a copy detail, because a Member's own shelf export describes their copy, so `WORK_DETAIL` alone would refuse a write the tree makes today. The copy's other details are refused: no importer names one, and a file naming `collection_id` or a location on a matched Book would be filing it, possibly another Member's public one. The first version admitted every column another row may fill less the cover, so an importer naming `collection_id` passed with every arm green. `format` is spelled as a literal rather than read through `COPY_DETAIL`, because the book columns test holds the documented inert moves on no module reading another cell. Which columns each importer names stays at the importer.
 
 **What stays with the caller, and why.** Fetching the cover and the commit: the create and copy paths share the cover store, and two callers run it on a thread from a coroutine while one runs it inline. The refresh handler still asks `covers.is_local` before the write, to decide whether to fetch, which is what it did before. OPDS ownership stays in the OPDS filler: its gap is `UNKNOWN`, not an empty value.
+
+## Refresh rewrites nine columns and leaves four
+
+`PUT /{id}/refresh` rewrites the nine columns listed in [One module applies outside evidence to an existing Book](#one-module-applies-outside-evidence-to-an-existing-book), from the record the Book's own ISBN finds, and leaves `categories`, `series_name`, `series_index` and `google_books_id` as they are. A test holds the nine against a literal and gives the record a value for each of the four, so a column joining or leaving a refresh is a diff to it.
+
+* **`categories`**: a refresh selects no Catalogue record, so what that record says about the subject stays evidence until a Member confirms one in the picker. This reason is the refresh's own: enrichment from an unselected first match does write `categories`, which is an open question for the owner. The same rule holds the record's Classifications out of a refresh: see [The Library of Congress is fetched over plaintext HTTP, knowingly](#the-library-of-congress-is-fetched-over-plaintext-http-knowingly) and [The Catalogue record is a type, and the two dialects are gone](#the-catalogue-record-is-a-type-and-the-two-dialects-are-gone).
+* **`series_name` and `series_index`**: often curated by hand, and a source's grouping is not better than the Member's. A refresh is a rewrite rather than a gap fill, so writing them would undo that curation on every press.
+* **`google_books_id`**: an identity, naming which volume the Book is linked to, not a fact about the work for a source to correct.
+
+**`title` is written, although `_apply_match` leaves it alone as work identity.** `_apply_match` (enrichment and the picker, under `FILL_GAPS` or `OVERWRITE`) walks `book_columns.WORK_DETAIL`, which holds no `title`, because its record may be a candidate met on a title and an author, and an outside catalogue's spelling of the title is often not this library's. A refresh's record was found by this Book's own ISBN, so it describes this printing. The per column rule in the entry above says which of them are cleared when the source is silent.
+
+## A blank text column is null
+
+`subtitle`, `author`, `publisher`, `description` and `series_name` hold no empty or whitespace only string. `models.BLANK_IS_NULL` names them and `models.blank_as_none` is the rule, with four callers: `Book`'s `@validates` hook for every ORM write (the request bodies, evidence, and the MARC, OPDS and CSV creates, which build a `Book` from a record with no request body), the two request bodies' `mode="before"` validators, `backup._parse_row` for a restore, and `evidence.is_empty`. Revision d3f8a1c6b250 nulled the stored ones.
+
+* **Only all whitespace changes.** Text keeps its spaces, because trimming is a second rule nobody asked for. Whitespace is `str.isspace`'s 29 characters on both engines; a character that looks blank and is not whitespace (zero width space, Hangul filler, byte order mark, Mongolian vowel separator U+180E, which left the whitespace set in Unicode 6.3) is a value and is kept. A test runs every one of the 29 and the four lookalikes through the revision on SQLite in CI; PostgreSQL 18 was measured by hand, because the `test:postgres` selection does not include that file.
+* **Why the model is the home.** It is the one hook every ORM write passes, so a new writer is covered without knowing the rule. It does not fire on a Core insert or `Query.update`, so the restore calls the function itself, as it does `covers.storable` for `cover_url`; no `Query.update` or bulk write touches the five columns today.
+* **Why the request bodies keep their validators.** They run before `max_length`, so a blank wider than the column is null rather than a 422. They call the same function over the same tuple, so it is one rule at two sites, not two rules.
+
+Reason: a clear and a field never set meant the same thing and were stored two ways, so every reader had to treat both ([the empty rule in the evidence entry](#one-module-applies-outside-evidence-to-an-existing-book)) and one writer (the scan form) produced the second by accident.
 
 ## One rule decides who may be told a vocabulary entry exists
 
@@ -21741,3 +21761,25 @@ The pipeline file had several readers in the internal tooling, each answering a 
 **A scanner report the nightly plan is handed and cannot read is a refusal, never "no findings".** A scan job allowed to fail after another scan in the same job left the image report absent and the night planned with no OS package findings, paging nothing. The plan now exits 1 when one of its five scanner reports is absent or empty, and the existing failure path pages. The cache, ledger, ignore file and base pipeline stay optional because they are absent on ordinary nights.
 
 **The publish gate keeps refusing the reader's old path after the move.** It names a file that no longer exists, and it is load bearing: without it a published test loading the reader by its old path passes the gate and fails in every mirror clone, and the guard that derives stripped test names from that list loses the reader's.
+
+## The one writer rule is held by a ratchet on references, not by the MARC arm alone
+
+ADR 0006 says Classifications reach an existing Book through the evidence module. `test_evidence.HEADING_WRITES` lists each function that names `add_headings` or an evidence door, called or not, and each that calls the `Classification` constructor, resolved the way Python resolves a name, scopes included, so a parameter or local that merely shares a writer's name is not the writer. References rather than calls, because every way of handing a writer on (a `partial`, an attribute, a decorator, a re-export under a new name) starts with naming it, so one rule closes the family where a call census needed a spelling each; measured at the change, the shipped tree held 7 such references and none outside the stated functions. The constructor stays counted by call, because most of its names are reads, so the model handed on uncalled or re-exported under a new name is not seen. The create route is listed because its Book is constructed in the same function and holds nothing before the call. A merge repointing stored rows or editing their columns, and a write constructing nothing (a Core or bulk insert, of which restore is the one live member), are outside it and stated. The doors it protects are in [One module applies outside evidence to an existing Book](#one-module-applies-outside-evidence-to-an-existing-book).
+
+## The internal declaration rule stays in three copies, held equal by a pin
+
+The publish gate, the Python reader (`backend/tests/declaration.py`) and the TypeScript reader each spell the rule that a file declaring itself internal must not survive the strip, as [the declaration rule's per language copies](#the-internal-declaration-rule-has-one-copy-per-language-spelled-for-the-pipelines-engine) already say. A single published data file all three load was considered and refused by the owner on 2026-10-14. No one regex reads the same in the gate's POSIX engine, Python and JavaScript, so a shared file would hold components each language rebuilds, and the gate is leak prevention tooling whose every change needs the owner's confirmation. What made it unnecessary is a pin that runs the gate's own pattern and window through busybox and compares the answer with the Python reader's: the copies cannot drift without that arm going red. Measured when refused: the readers and the CI gate disagree on 0 of 1264 files.
+
+The pin copies the gate's `grep -qE`, while the post strip check uses `-qIE`, which skips binary files. They agree on every tracked file today; if they ever disagree, the gate's `-qIE` is the authority, because it is what decides what publishes.
+
+## A name's meaning is answered by one resolver, and a test that reads an import alias itself is counted per function
+
+`backend/tests/bindings.py` answers which local names mean a thing; `test_bindings.py` holds every other test function to the import alias reads it still makes, by equality per enclosing function. Per function rather than per module because a per module count let one resolver be deleted and another written beside it unseen. A stripped module states its own per function count (`ASNAME_READS_OF_MY_OWN`), because a published row cannot name it. The ratchet sees a resolver that reads an alias and not one that reads only the imported name; the latter is a review question.
+
+## A meaning is never derived through the same refining assignment twice; a plain rename is not counted
+
+The resolver is flow insensitive, so a name rebound through itself (`os = os.path`) would derive meanings forever without a cut. The cut is keyed on the assignment rather than the local, because a local is legitimately refined through itself (`x = mod; x = x.sub`), and on refinements only (a value that is an attribute chain with something after the root), because carrying plain renames made a ring of six names run for minutes. A plain rename changes no meaning and is deduplicated by local, meaning and use alone, so a cycle of renames ends on the meanings found. What it misses is a meaning only one assignment applied twice would give, as a loop running `x = x.parent` does. What it costs is factorial in the refining assignments among locals that rename each other in a cycle: four at most in this tree, and two locals with five each already give 32826 meanings in 0.44 s.
+
+## No ratchet on import node handling
+
+A ratchet on test functions that read `ast.Import`, `ast.ImportFrom` or `ast.alias` was measured and not built. Of 28 such functions that read no `.asname`, none resolves a local name; 20 ask which modules a file imports, the commonest legitimate guard, which such a ratchet would refuse until a row is written. The honest mistake left is a resolver answering "which local names mean X" from `alias.name`, which is a review question and which [the alias ratchet](#a-names-meaning-is-answered-by-one-resolver-and-a-test-that-reads-an-import-alias-itself-is-counted-per-function) already says it does not see.

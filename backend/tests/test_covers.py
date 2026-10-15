@@ -28,6 +28,7 @@ import respx
 import cover_store
 import covers
 import fetch
+from tests.bindings import SourceNames
 from tests.conftest import REAL_RESOLVE_AND_STORE
 from tests.corpus import BACKEND, application_modules
 from tests.helpers import (
@@ -553,19 +554,23 @@ class TestNoOtherModuleDecidesWhetherACoverIsLocal:
 
     @classmethod
     def _names_the_constant(cls, tree: ast.AST) -> list[int]:
-        """Line numbers where an expression names the constant.
+        """Line numbers where an expression names the constant or means it.
 
-        The three nodes that can carry the name: the import itself, which
-        catches an `as` alias because it reads the imported name; a bare use of
-        what that import bound; and the `covers.` attribute spelling, which is
-        how every other module in this tree reaches the module.
+        The import itself, which catches an `as` alias because it reads the
+        imported name; the name and the `covers.` attribute, spelled out; and a
+        read of a local `tests/bindings.py` says means `covers.LOCAL_COVER_PREFIX`,
+        so the use of an alias or of a rebinding is reported at its own line too.
         """
+        names = SourceNames(tree)
+        meant = f"covers.{cls.PREFIX_NAME}"
         found: list[int] = []
         for node in ast.walk(tree):
             if isinstance(node, ast.ImportFrom):
                 named = any(a.name == cls.PREFIX_NAME for a in node.names)
             elif isinstance(node, ast.Name):
-                named = node.id == cls.PREFIX_NAME
+                named = node.id == cls.PREFIX_NAME or (
+                    isinstance(node.ctx, ast.Load) and meant in names.means(node)
+                )
             elif isinstance(node, ast.Attribute):
                 named = node.attr == cls.PREFIX_NAME
             else:
@@ -591,6 +596,11 @@ class TestNoOtherModuleDecidesWhetherACoverIsLocal:
         because an `as` alias is a second way into it, so dropping any branch
         names a case here rather than passing quietly."""
         assert self._names_the_constant(ast.parse(source)) == [1]
+
+    def test_an_alias_is_reported_where_it_is_used(self):
+        source = "from covers import LOCAL_COVER_PREFIX as p\nlocal = url.startswith(p)"
+
+        assert self._names_the_constant(ast.parse(source)) == [1, 2]
 
     @pytest.mark.parametrize(
         "source",

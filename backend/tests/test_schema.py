@@ -6034,3 +6034,131 @@ class TestACustomFieldRecordsWhoDefinedIt:
 
         keys = inspect(engine).get_foreign_keys("custom_field_values")
         assert {key["referred_table"] for key in keys} == {"books", "custom_fields"}
+
+
+class TestABlankTextColumnIsNull:
+    """Revision d3f8a1c6b250, which rewrites data rather than schema.
+
+    The request bodies store a blank as null from now on, but that fires on a
+    write, and a row already holding `""` is not going to be written again.
+    Each row below carries one value in all five columns, so every column is
+    read against every shape.
+
+    **Engine neutral SQL on purpose**: the revision's `trim(value, characters)`
+    is `btrim` on PostgreSQL and could disagree with SQLite's about a character
+    outside ASCII. This class passes on PostgreSQL 18 when run there by hand;
+    the `test:postgres` selection does not include this file, so CI runs it on
+    SQLite only and the PostgreSQL result is a by hand measurement.
+    """
+
+    PREVIOUS = "c7b41e92f80a"
+    COLUMNS: Final = ("subtitle", "author", "publisher", "description", "series_name")
+
+    #: Title to the value each of its five columns holds before the upgrade.
+    BLANK: Final = {
+        "Empty": "",
+        "Spaces": "   ",
+        "Breaks": "\t\r\n",
+        "Ideographic": "　",
+        "NoBreak": "  ",
+    }
+    KEPT: Final = {"Text": "Dune", "Padded": "  Dune  ", "Null": None}
+
+    #: Every character `str.isspace` admits, one row each and doubled, titled by
+    #: code point. Derived as the revision derives its set, so what it measures is
+    #: the engine's `trim` against Python's, not the set against a list.
+    EVERY_WHITESPACE: Final = {
+        f"U+{ord(c):04X}": c * 2
+        for c in map(chr, range(sys.maxunicode + 1)) if c.isspace()
+    }
+    #: Characters that look blank and are not whitespace to `str.isspace`: zero
+    #: width space, the Hangul filler, the byte order mark, and the Mongolian vowel
+    #: separator, which left the whitespace set in Unicode 6.3.
+    LOOKALIKES: Final = {
+        f"U+{code:04X}": chr(code) for code in (0x200B, 0x3164, 0xFEFF, 0x180E)
+    }
+
+    def build_database_with_blanks(
+        self, rows: dict[str, str | None] | None = None
+    ) -> None:
+        drop_everything()
+        schema.upgrade_to(self.PREVIOUS)
+        with engine.connect() as connection:
+            for title, value in (rows or {**self.BLANK, **self.KEPT}).items():
+                connection.execute(
+                    text(
+                        "INSERT INTO books (title, subtitle, author, publisher, "
+                        "description, series_name) VALUES (:t, :v, :v, :v, :v, :v)"
+                    ),
+                    {"t": title, "v": value},
+                )
+            connection.commit()
+
+    def columns_of(self, title: str) -> tuple[str | None, ...]:
+        with engine.connect() as connection:
+            row = connection.execute(
+                text(
+                    "SELECT subtitle, author, publisher, description, series_name "
+                    "FROM books WHERE title = :t"
+                ),
+                {"t": title},
+            ).one()
+        return tuple(row)
+
+    @pytest.mark.parametrize("title", sorted(BLANK))
+    def test_a_blank_becomes_null_in_every_column(self, title):
+        self.build_database_with_blanks()
+
+        schema.upgrade_to_head()
+
+        assert self.columns_of(title) == (None,) * len(self.COLUMNS)
+
+    @pytest.mark.parametrize("title", sorted(KEPT))
+    def test_a_value_with_text_or_a_null_is_untouched(self, title):
+        """`Padded` is the one that would catch a trim: only an all whitespace
+        value changes, the rule the request bodies follow."""
+        self.build_database_with_blanks()
+
+        schema.upgrade_to_head()
+
+        assert self.columns_of(title) == (self.KEPT[title],) * len(self.COLUMNS)
+
+    def test_every_whitespace_character_is_null_and_a_lookalike_is_kept(self):
+        """One build for all of them rather than one per character: each build
+        runs the whole chain, and this is the arm worth running on `backend-pg`."""
+        self.build_database_with_blanks({**self.EVERY_WHITESPACE, **self.LOOKALIKES})
+
+        schema.upgrade_to_head()
+
+        assert {title: self.columns_of(title) for title in self.EVERY_WHITESPACE} == (
+            dict.fromkeys(self.EVERY_WHITESPACE, (None,) * len(self.COLUMNS))
+        )
+        assert {title: self.columns_of(title) for title in self.LOOKALIKES} == {
+            title: (value,) * len(self.COLUMNS)
+            for title, value in self.LOOKALIKES.items()
+        }
+
+    def test_the_fixture_agrees_with_the_request_bodies_rule(self):
+        """The fixture's blanks are blanks to `blank_as_none` and its kept values
+        are not, so the arms above hold the revision to the rule the request
+        bodies and `Book` store by, over the same columns."""
+        from models import BLANK_IS_NULL, blank_as_none
+
+        assert BLANK_IS_NULL == self.COLUMNS
+        for blank in [*self.BLANK.values(), *self.EVERY_WHITESPACE.values()]:
+            assert blank_as_none(blank) is None
+        for kept in [*self.KEPT.values(), *self.LOOKALIKES.values()]:
+            assert blank_as_none(kept) == kept
+
+    def test_the_downgrade_leaves_the_nulls(self):
+        """Nothing records which rows held a blank, and nothing read one
+        differently from a null, so there is nothing to put back."""
+        from alembic import command
+
+        self.build_database_with_blanks()
+        schema.upgrade_to_head()
+
+        command.downgrade(schema._alembic_config(), self.PREVIOUS)
+
+        assert self.columns_of("Empty") == (None,) * len(self.COLUMNS)
+        assert self.columns_of("Text") == ("Dune",) * len(self.COLUMNS)

@@ -95,7 +95,7 @@ import typing
 from collections.abc import Collection
 from datetime import date, datetime
 from enum import Enum
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Final, Literal
 
 import pytest
 from annotated_types import MaxLen
@@ -1287,12 +1287,77 @@ class TestAColumnRewrittenOnWriteIsBoundedAfterTheRewrite:
         column this whole class stops covering **in silence**. Equality rather
         than containment, because a name in the table that no validator backs is
         a probe measuring a rewrite nobody performs.
+
+        Widened by one hook, `Book._a_blank_is_null`: it replaces a blank with
+        null and returns anything else as it came, so the stored form is never
+        longer than the value bounded. Excluded by the function rather than by
+        its column names, so a lengthening validator on any column stays in.
         """
-        assert set(catalogue._AS_STORED) == set(Book.__mapper__.validators), (
+        # SQLAlchemy annotates the stored method as `str`; at run time it is the
+        # function, which is what the identity check reads.
+        rewriting = {
+            column
+            for column, (validator, _) in Book.__mapper__.validators.items()
+            if typing.cast(object, validator) is not Book._a_blank_is_null
+        }
+        assert set(catalogue._AS_STORED) == rewriting, (
             "`Book`'s validators and `catalogue._AS_STORED` disagree. A new "
             "validator goes in that table when it rewrites the value; when it "
             "only refuses one, widen this test and say so here."
         )
+
+    #: Characters NFKC would expand: a ligature (3), a squared unit (3 or more),
+    #: a roman numeral (4), and U+FDFA, which is one character and 18 after it.
+    _COMPATIBILITY = "\ufb03\u3392\u2167\ufdfa"
+
+    @staticmethod
+    def _a_compatibility_value(column: str) -> str:
+        """A value of compatibility characters filling `column` to its width, or
+        to a hundred characters for the one column that states none."""
+        width = _column_widths().get(column, 100)
+        text = TestAColumnRewrittenOnWriteIsBoundedAfterTheRewrite._COMPATIBILITY
+        return (text * width)[:width]
+
+    def test_the_hook_excluded_above_stores_a_non_blank_value_as_it_came(
+        self, bodies: dict[str, type[BaseModel]]
+    ) -> None:
+        """The premise of the exclusion, pinned. It is excluded by identity, and
+        identity says nothing about the body: an edit to `blank_as_none` that
+        also normalised (a plausible "while we are here", `folding.py` already
+        does Unicode work) would lengthen `\ufdfa` to 18 characters, store it
+        over the column on PostgreSQL, and leave the identity check green.
+
+        Every column the hook covers, through the hook and through the request
+        bodies that call the same function. A Hypothesis text arm would rarely
+        draw these code points, and `unicodedata.normalize` returns the same
+        object for input that is already normal, so `is` on "Dune" is blind too.
+        """
+        from models import BLANK_IS_NULL
+
+        for column in BLANK_IS_NULL:
+            value = self._a_compatibility_value(column)
+
+            assert getattr(Book(**{column: value}), column) == value, column
+            for name in ("BookCreate", "BookDetailsUpdate"):
+                model = bodies[name]
+                payload: dict[str, Any] = {column: value}
+                for other, field in model.model_fields.items():
+                    if other != column and field.is_required():
+                        payload[other] = "x"
+                assert getattr(model(**payload), column) == value, (name, column)
+
+    def test_the_value_the_premise_uses_is_one_normalisation_would_lengthen(
+        self,
+    ) -> None:
+        """Without this the arm above passes on a value NFKC leaves alone."""
+        import unicodedata
+
+        from models import BLANK_IS_NULL
+
+        for column in BLANK_IS_NULL:
+            value = self._a_compatibility_value(column)
+
+            assert len(unicodedata.normalize("NFKC", value)) > len(value), column
 
     def test_every_rewritten_column_has_a_seed_here(self) -> None:
         """The arming step. A column added to the rewrite table with no seed
@@ -2688,3 +2753,45 @@ class TestTheSizeAgreesWithTheMembership:
             DuplicateGroup(
                 key="k", size=MERGE_BOOKS_MAX - 1, books=self._members(MERGE_BOOKS_MAX)
             )
+
+
+class TestABlankIsStoredAsNull:
+    """A string that is empty or whitespace only is null on both bodies that
+    write the five free text columns, so a clear and a field never set are one
+    value. The stored rows are `d3f8a1c6b250`'s, in `tests/test_schema.py`."""
+
+    BLANKS: Final = ("", "   ", "\t\n", "　")
+
+    @pytest.mark.parametrize("blank", BLANKS)
+    @pytest.mark.parametrize("field", models.BLANK_IS_NULL)
+    def test_the_create_body_stores_a_blank_as_null(self, field: str, blank: str):
+        assert getattr(BookCreate(title="Dune", **{field: blank}), field) is None
+
+    @pytest.mark.parametrize("blank", BLANKS)
+    @pytest.mark.parametrize("field", models.BLANK_IS_NULL)
+    def test_the_update_body_reads_a_blank_as_a_clear(self, field: str, blank: str):
+        """Still in `model_fields_set`: a blank dropped from the set would leave
+        the stored value alone rather than clear it."""
+        update = schemas_book.BookDetailsUpdate(**{field: blank})
+
+        assert update.model_dump(exclude_unset=True) == {field: None}
+
+    @pytest.mark.parametrize("field", models.BLANK_IS_NULL)
+    def test_a_value_with_text_keeps_its_spaces(self, field: str):
+        """Only an all whitespace value changes. Trimming is not this rule."""
+        assert getattr(BookCreate(title="Dune", **{field: "  Dune  "}), field) == "  Dune  "
+
+    def test_a_blank_wider_than_the_column_is_null_rather_than_refused(self):
+        """The validator runs before the width, so a blank cannot cost a 422."""
+        wide = " " * (models.SERIES_NAME_MAX + 1)
+
+        assert BookCreate(title="Dune", series_name=wide).series_name is None
+
+    def test_the_five_are_the_nullable_free_text_columns_both_bodies_write(self):
+        """`title` is the sixth free text column of the work and is out: its
+        column refuses null. A column joining both bodies later is a diff here
+        and a data step in a later revision."""
+        for field in models.BLANK_IS_NULL:
+            assert field in BookCreate.model_fields
+            assert field in schemas_book.BookDetailsUpdate.model_fields
+            assert Book.__table__.c[field].nullable

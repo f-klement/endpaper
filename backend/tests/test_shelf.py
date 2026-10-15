@@ -297,6 +297,7 @@ from shelf import (
     rereading_filtered_rows,
     whole_table_for_uniqueness,
 )
+from tests.bindings import SourceNames, assignments
 from tests.corpus import application_sources
 from tests.helpers import peak_rows, rows_at_the_engine
 
@@ -950,9 +951,11 @@ def _entity_aliases(
     a name this rule would otherwise never look for.
 
     **One resolver for every rule in this file**, and it takes the entities and
-    the module rather than naming `Book` and `models`, for the reason `_bindings`
-    gives one paragraph down: a second implementation of "which names mean this
-    thing" is a second thing to get the `AnnAssign` half of wrong. `_BOOK` is
+    the module rather than naming `Book` and `models`, for the reason
+    `tests/bindings.py` gives: a second implementation of "which names mean this
+    thing" is a second thing to get the `AnnAssign` half of wrong. The imports and
+    the plain rebindings are resolved there; what is this rule's own is the bare
+    root seeding, the subtraction below and `aliased(...)`. `_BOOK` is
     what the three original passes hand it, `BOOK_OWNED` is what the fourth does,
     and `_OUTBOUND` with `module="shelf"` is what the fifth does. That fifth rule
     read the import and not the rebinding when it was written on its own, and
@@ -1001,22 +1004,16 @@ def _entity_aliases(
     mechanism is what is written down; the extent is not claimed.
     """
     names = set(roots)
-    from_this_module = {
-        alias.asname or alias.name
-        for node in ast.walk(tree)
-        if isinstance(node, ast.ImportFrom) and node.module == module
-        for alias in node.names
-        if alias.name in roots
-    }
-    # A relative import cannot leave this backend, so `level` alone settles it
-    # and `node.module` is None exactly there.
+    resolved = SourceNames(tree)
+    from_this_module = resolved.bound_to(*(f"{module}.{root}" for root in roots))
+    # A relative import cannot leave this backend, so its unresolved leading dot
+    # alone settles it.
     from_outside_the_backend = {
-        alias.asname or alias.name
-        for node in ast.walk(tree)
-        if isinstance(node, ast.ImportFrom)
-        and node.level == 0
-        and node.module not in _backend_module_names()
-        for alias in node.names
+        binding.local
+        for binding in resolved.bindings
+        if binding.from_module is not None
+        and not binding.from_module.startswith(".")
+        and binding.from_module not in _backend_module_names()
     }
     names -= from_outside_the_backend - from_this_module
     names |= from_this_module
@@ -1024,48 +1021,10 @@ def _entity_aliases(
     # A second pass, because an alias may be assigned above or below the import
     # in file order and this rule does not care which.
     for node in ast.walk(tree):
-        for target, value in _bindings(node):
+        for target, value in assignments(node):
             if isinstance(target, ast.Name) and _is_guarded_entity(value, names):
                 names.add(target.id)
     return names
-
-
-def _bindings(node: ast.AST) -> list[tuple[ast.expr, ast.expr]]:
-    """The `(target, value)` pairs one statement binds.
-
-    **`tests/test_fetch.py` imports this**, for the rule that keeps every HTTP
-    request behind `fetch.py`. Narrowing it for the shelf rule would weaken that
-    one silently, in a different file, with nothing here to say so. Widening it
-    is free. It is imported rather than copied because "what does this statement
-    bind" is one fact, and the `AnnAssign` half below is exactly the part a
-    second implementation gets wrong.
-
-    **`AnnAssign` as well as `Assign`, and that is not a completeness flourish.**
-    The annotated form is the more idiomatic half of this backend: counted over
-    the tree excluding tests and migrations, **125** module-level `AnnAssign`
-    against **140** `Assign`, and every module-level binding in `shelf.py`
-    itself is annotated. A resolver that read only `Assign` would have followed
-    the less-used spelling, which is the shape of a guard that looks thorough
-    and is not.
-
-    A tuple target is unpacked element by element against a tuple value, so
-    `M, N = Book, Tag` binds `M` and not `N`.
-    """
-    if isinstance(node, ast.AnnAssign):
-        return [] if node.value is None else [(node.target, node.value)]
-    if not isinstance(node, ast.Assign):
-        return []
-    pairs: list[tuple[ast.expr, ast.expr]] = []
-    for target in node.targets:
-        if (
-            isinstance(target, ast.Tuple)
-            and isinstance(node.value, ast.Tuple)
-            and len(target.elts) == len(node.value.elts)
-        ):
-            pairs.extend(zip(target.elts, node.value.elts, strict=True))
-        else:
-            pairs.append((target, node.value))
-    return pairs
 
 
 def _is_guarded_entity(value: ast.expr, names: set[str]) -> bool:

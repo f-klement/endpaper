@@ -38,6 +38,7 @@ from migrations.versions import (
     b7d4e6f01a95_a_catalogue_source_becomes_a_row as a_catalogue_source_becomes_a_row,
 )
 from models import (
+    BLANK_IS_NULL,
     AuthorAlias,
     Book,
     CatalogueCredential,
@@ -1329,6 +1330,67 @@ class TestRestoringPreHttpsCovers:
 
         db.expire_all()
         assert db.query(Book).count() > 0
+
+
+class TestRestoringABlankTextColumn:
+    """A restore inserts through Core, so `Book`'s hook that nulls a blank never
+    fires. An archive taken before revision d3f8a1c6b250 holds the blanks that
+    revision nulled, and restoring it must not put them back.
+
+    **And it must not null anything else.** The first book of the archive gets
+    the blank in all five columns and every other book gets text, padded and
+    ending in an ideographic space, so a restore that nulls the whole column
+    (the one failure a blank only arm cannot see, and a silent loss of every
+    author) reddens on the kept values."""
+
+    KEPT = {
+        "subtitle": "  A subtitle  ",
+        "author": "Frank Herbert",
+        "publisher": "Ace\u3000",
+        "description": "\n  Two lines\nof text \t",
+        "series_name": "\u3000Dune",
+    }
+
+    @pytest.mark.parametrize("blank", ["", " \t"])
+    def test_a_blank_in_the_archive_is_restored_as_null_and_text_is_kept(
+        self, client, admin, library, blank
+    ):
+        assert tuple(self.KEPT) == BLANK_IS_NULL
+        data = client.get("/api/backup", headers=admin["headers"]).content
+        manifest = read_manifest(data)
+        rows = sorted(manifest["tables"]["books"], key=lambda row: row["id"])
+        assert len(rows) > 1
+        rows[0].update(dict.fromkeys(BLANK_IS_NULL, blank))
+        for row in rows[1:]:
+            row.update(self.KEPT)
+        titles = {row["id"]: row["title"] for row in rows}
+
+        response = client.post(
+            "/api/backup/restore",
+            params={"confirm": True},
+            files={"file": ("backup.zip", rewrite(data, manifest), "application/zip")},
+            headers=admin["headers"],
+        )
+        assert response.status_code == 200, response.text
+
+        session = SessionLocal()
+        try:
+            restored = {
+                book.id: (
+                    book.title,
+                    {name: getattr(book, name) for name in BLANK_IS_NULL},
+                )
+                for book in session.query(Book)
+            }
+        finally:
+            session.close()
+        assert restored == {
+            row["id"]: (
+                titles[row["id"]],
+                dict.fromkeys(BLANK_IS_NULL) if row is rows[0] else self.KEPT,
+            )
+            for row in rows
+        }
 
 
 class TestADecompressionBomb:

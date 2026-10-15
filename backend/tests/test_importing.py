@@ -31,15 +31,17 @@ from typing import Any, Final, cast, get_args
 import annotated_types
 import pytest
 from sqlalchemy import event
+from sqlalchemy.orm.attributes import set_committed_value
 
 import book_columns
 import catalogue
 import csv_import
+import evidence
 import importing
 import marc
 import tags
 from catalogue import Record
-from enums import OwnershipStatus, ReadStatus, TagCategory
+from enums import ClassificationScheme, OwnershipStatus, ReadStatus, TagCategory
 from importing import (
     _MARC_RECORD_FIELDS,
     Import,
@@ -50,7 +52,7 @@ from importing import (
     _settle_one,
     stored_record,
 )
-from models import TITLE_MAX, Book, Note, Tag, User, UserBook
+from models import BLANK_IS_NULL, TITLE_MAX, Book, Note, Tag, User, UserBook
 from schemas.book import BookCreate, admits_a_container
 from schemas.tag import MAX_TAG_NAME
 
@@ -1384,6 +1386,53 @@ class TestTheMarcPrivateBookOracle:
         )
 
         assert (result.matched, result.created, result.skipped) == (1, 0, 0)
+
+
+class TestAFilesHeadingsCrossOnlyThroughEvidence:
+    """ADR 0006 holds for a MARC import because the evidence module is the one
+    writer of its headings: choosing the file confirms them, and
+    `evidence.confirm_file_headings` writes them.
+
+    The second arm shuts that door, so a write anywhere else in the importer
+    reddens it. It patches the module attribute, which is how `importing` calls
+    every evidence door; a `from evidence import` of the door would read as a
+    write outside it."""
+
+    #: One heading of each of the four schemes, so a write limited to some of
+    #: them, as `classifications.KIND_ORDER` already sorts them, is seen by arm 2.
+    _HEADINGS: Final = (
+        catalogue.Heading(ClassificationScheme.DDC, "823.914"),
+        catalogue.Heading(ClassificationScheme.LCC, "PR6066.R34"),
+        catalogue.Heading(ClassificationScheme.GND, "4026894-9", "Informatik"),
+        catalogue.Heading(ClassificationScheme.LCSH, "Discworld (Imaginary place)"),
+    )
+
+    def _import_onto_a_matched_book(self, db, member) -> Book:
+        book = Book(title="Small Gods", isbn="9780552152976",
+                    added_by_user_id=member.id)
+        db.add(book)
+        db.commit()
+        MarcImport.for_member(db, member.id).apply(one_marc_file(
+            Record(source="marc", title="Small Gods", isbn="9780552152976",
+                   headings=self._HEADINGS)
+        ))
+        db.refresh(book)
+        return book
+
+    def test_a_matched_book_gains_the_files_headings(self, db, member):
+        book = self._import_onto_a_matched_book(db, member)
+
+        assert {(c.scheme, c.number) for c in book.classifications} == {
+            ("ddc", "823.914"), ("lcc", "PR6066.R34"), ("gnd", "4026894-9"),
+            ("lcsh", "Discworld (Imaginary place)"),
+        }
+
+    def test_with_the_door_shut_no_heading_reaches_it(self, db, member, monkeypatch):
+        monkeypatch.setattr(evidence, "confirm_file_headings", lambda *_, **__: [])
+
+        book = self._import_onto_a_matched_book(db, member)
+
+        assert book.classifications == []
 
 
 class _TakenIsbns:
@@ -3234,12 +3283,15 @@ _SENDS_AN_EMPTY_STRING: Final[dict[str, Callable[[Book], None]]] = {
 class TestAStoredEmptyStringIsAGapToEveryImporter:
     """Enrichment filled a stored `""` and the three importers did not, so one
     Book took a publisher from Google and refused the same one from a file. Empty
-    is None or `""` for every policy now, which is `evidence.is_empty`."""
+    is None or a blank string for every policy now, which is `evidence.is_empty`."""
 
     @pytest.mark.parametrize("importer", list(_FILLS_A_GAP))
     def test_an_import_fills_a_column_stored_as_the_empty_string(self, importer):
         column, fill = _FILLS_A_GAP[importer]
-        book = Book(title="Dune", ownership=OwnershipStatus.OWNED, **{column: ""})
+        book = Book(title="Dune", ownership=OwnershipStatus.OWNED)
+        # Loaded rather than constructed: `Book`'s hook nulls a blank on
+        # construction, and a row from before revision d3f8a1c6b250 still holds one.
+        set_committed_value(book, column, "")
 
         fill(book)
 
@@ -3255,3 +3307,25 @@ class TestAStoredEmptyStringIsAGapToEveryImporter:
         _SENDS_AN_EMPTY_STRING[importer](book)
 
         assert getattr(book, column) is None
+
+
+class TestACreatedBookStoresABlankAsNull:
+    """The MARC and OPDS importers build a `Book` from a record and send no
+    request body, so `Book`'s own hook is what nulls a whitespace only value
+    there. A subfield of spaces is truthy, so no decoder drops it first."""
+
+    def test_a_marc_record_creates_nulls_rather_than_blanks(self, db, member):
+        MarcImport.for_member(db, member.id).apply(one_marc_file(Record(
+            source="marc", title="Small Gods", subtitle="   ", author=" \t",
+            publisher="\u3000", description="\n", series_name="  ",
+        )))
+
+        book = db.query(Book).one()
+        assert {name: getattr(book, name) for name in BLANK_IS_NULL} == dict.fromkeys(
+            BLANK_IS_NULL
+        )
+
+    def test_an_opds_entry_creates_a_null_author(self, db, member):
+        OpdsImport.for_member(db, member.id).apply([held("Small Gods", author="   ")])
+
+        assert db.query(Book).one().author is None

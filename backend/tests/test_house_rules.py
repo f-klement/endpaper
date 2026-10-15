@@ -37,6 +37,7 @@ import sources
 import targets
 from database import Base
 from enums import CatalogueSource
+from tests.bindings import SourceNames
 from tests.corpus import (
     BACKEND,
     application_modules,
@@ -3221,19 +3222,17 @@ _HTTP_EXCEPTION_NAMES = frozenset({"HTTPException", "StarletteHTTPException"})
 def _http_exception_aliases(tree: ast.Module) -> set[str]:
     """Every local name in one module that means an HTTP exception class.
 
-    Resolves `from fastapi import HTTPException as HE` the way
-    `test_shelf.py::_entity_aliases` resolves a guarded model, which is the
-    resolver this one is copied from. The attribute form
+    Asked of `tests/bindings.py`, so `from fastapi import HTTPException as HE`
+    and `E = HTTPException` both count. Matched on the class's own name rather
+    than its module, because two frameworks export one. The attribute form
     (`fastapi.HTTPException(...)`) is handled at the call instead, since it
     binds no local name.
     """
-    names = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import | ast.ImportFrom):
-            for alias in node.names:
-                if alias.name in _HTTP_EXCEPTION_NAMES:
-                    names.add(alias.asname or alias.name)
-    return names
+    return {
+        binding.local
+        for binding in SourceNames(tree).bindings
+        if binding.target.rpartition(".")[2] in _HTTP_EXCEPTION_NAMES
+    }
 
 
 def _walk_outside_lambdas(node: ast.AST):
@@ -3382,6 +3381,9 @@ class TestNoExceptionInstanceIsShared:
             "except Exception:\n    _NF = None\n"
         ),
         "inside a list": "from fastapi import HTTPException\n_E = [HTTPException(404)]\n",
+        "the class bound to a local first": (
+            "from fastapi import HTTPException\nE = HTTPException\n_NF = E(404)\n"
+        ),
         "inside an except handler": (
             "from fastapi import HTTPException\ntry:\n    x = 1\n"
             "except Exception:\n    _NF = HTTPException(404)\n"

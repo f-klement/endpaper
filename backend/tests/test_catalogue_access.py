@@ -28,6 +28,7 @@ import metadata
 import ratelimit
 import settings_store
 import sources
+from tests.bindings import SourceNames
 from tests.corpus import application_sources
 
 #: A value shaped like a secret, for asserting that something does not print.
@@ -68,26 +69,6 @@ DOORS_TAKING_AN_ACCESS = frozenset({"lookup", "search", "title_search", "candida
 DOORS_TAKING_THEM_APART = frozenset({"lookup_volume"})
 
 ASKING_DOORS = DOORS_TAKING_AN_ACCESS | DOORS_TAKING_THEM_APART
-
-
-def _module_aliases(tree: ast.AST, module: str) -> set[str]:
-    """Every local name that refers to `module`, however it was imported.
-
-    **The half of the retired walk that had to survive.** `import metadata as m`
-    evades a matcher keyed on the literal name `metadata`, and that evasion is
-    recorded in this tree rather than hypothetical: it is what the first version of
-    the walk this replaces missed. Deleting that walk's dataflow half is exactly where
-    this gets thrown out with it.
-    """
-    aliases: set[str] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            aliases |= {
-                (entry.asname or entry.name)
-                for entry in node.names
-                if entry.name == module
-            }
-    return aliases
 
 
 #: The named constructors, which are the one legitimate way to mention an asking type.
@@ -153,14 +134,13 @@ def _references_to(
     local binding.
     """
     tree = ast.parse(source)
-    aliases = _module_aliases(tree, module)
-    bare = {
-        (entry.asname or entry.name)
-        for node in ast.walk(tree)
-        if isinstance(node, ast.ImportFrom) and node.module == module
-        for entry in node.names
-        if entry.name in wanted
-    }
+    # `import metadata as m` evades a matcher keyed on the literal module name,
+    # and `m = metadata` evades one keyed on the import alone: the first is the
+    # spelling a retired version of this rule missed. `tests/bindings.py`
+    # answers both, and the names imported directly, under any alias.
+    names = SourceNames(tree)
+    aliases = names.bound_to(module)
+    bare = names.bound_to(*(f"{module}.{name}" for name in wanted))
     exempt = {
         id(node.value)
         for node in ast.walk(tree)
@@ -230,12 +210,14 @@ class TestOnlyTheAccessDoorAsksACatalogue:
             "import metadata as m\nasync def r(e):\n    await m.lookup(1, access=e)\n",
             "from metadata import lookup as g\nasync def r(e):\n    await g(1, access=e)\n",
             "import metadata\nasync def r(e):\n    d = metadata.lookup\n    await d(1, access=e)\n",
+            "import metadata\nm = metadata\nasync def r(e):\n    await m.lookup(1, access=e)\n",
         ],
         ids=[
             "a plain module import",
             "an aliased module import",
             "a name imported directly",
             "a door bound to a local first",
+            "the module bound to a local first",
         ],
     )
     def test_a_door_is_found_however_it_is_reached(self, spelling):

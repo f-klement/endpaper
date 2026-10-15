@@ -661,6 +661,34 @@ describe("ScanPage", () => {
     expect(await screen.findByLabelText("ISBN")).toBeInTheDocument();
     expect(screen.queryByText("by Frank Herbert")).not.toBeInTheDocument();
   });
+
+  it("sends a cleared manual author as null rather than an empty string", async () => {
+    // The column holds "no author" as null, and so does every other field the
+    // frontend clears; `""` was the one second spelling of it.
+    api.on("/api/books/lookup", {
+      status: 404,
+      body: { detail: "Book not found" },
+    });
+    api.on("/api/books/scan", { body: makeBook({ id: 12 }) });
+    renderWithProviders(<ScanPage />);
+
+    const user = await scan();
+    fireEvent.change(await screen.findByLabelText("Title *"), {
+      target: { value: "Dune" },
+    });
+    const author = screen.getByLabelText("Author");
+    fireEvent.change(author, { target: { value: "Frank Herbert" } });
+    fireEvent.change(author, { target: { value: "" } });
+    await user.click(screen.getByRole("button", { name: "Add to Library" }));
+
+    await waitFor(() =>
+      expect(api.lastCall("/api/books/scan", "POST")).toBeDefined(),
+    );
+    expect(api.lastCall("/api/books/scan", "POST")!.body).toMatchObject({
+      title: "Dune",
+      author: null,
+    });
+  });
 });
 
 /**

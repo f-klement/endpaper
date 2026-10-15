@@ -53,6 +53,7 @@ from config import ALLOWED_IMAGE_EXTENSIONS
 from database import Base
 from enums import VerificationProvenance
 from models import (
+    BLANK_IS_NULL,
     OPDS_CREDENTIAL_PREFIX,
     AuthorAlias,
     AuthorIdentifier,
@@ -76,6 +77,7 @@ from models import (
     Tag,
     User,
     UserBook,
+    blank_as_none,
     book_tags,
     fold_collection_name,
 )
@@ -387,6 +389,7 @@ def _parse_row(
     parsed = dict(row)
     _parse_dates(parsed, parsers)
     _storable_cover(parsed)
+    _blank_text_is_null(parsed, table)
     _fold_name(parsed, table)
     _blank_tag_key(parsed, table)
     _file_classification(parsed, table)
@@ -434,6 +437,21 @@ def _storable_cover(parsed: dict[str, Any]) -> None:
                 cover[:120],
             )
         parsed["cover_url"] = stored
+
+
+def _blank_text_is_null(parsed: dict[str, Any], table: Table) -> None:
+    """A book's blank free text columns, stored as null as every ORM write does.
+
+    `Book._a_blank_is_null` is a `@validates` hook, which a Core insert never
+    fires, so without this an archive taken before revision d3f8a1c6b250, or
+    edited by hand, would put back the blanks that revision nulled. Keyed on
+    the table rather than on the column names: the rule is a fact about
+    `books`, and a column of the same name elsewhere would not carry it.
+    """
+    if table.name == Book.__tablename__:
+        for name in BLANK_IS_NULL:
+            if name in parsed:
+                parsed[name] = blank_as_none(parsed[name])
 
 
 def _fold_name(parsed: dict[str, Any], table: Table) -> None:

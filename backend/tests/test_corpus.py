@@ -16,6 +16,7 @@ from typing import Final
 import pytest
 
 from tests import corpus
+from tests.bindings import SourceNames, source_of, stated
 from tests.corpus import (
     BACKEND,
     application_modules,
@@ -240,9 +241,7 @@ class TestThisCheckoutsPopulationsAreTheWholeOfIt:
 #: a row here is a walk that cannot, and says why.
 #:
 #: **A module the mirror strips states its own count, in `WALKS_OF_MY_OWN`**,
-#: because this file publishes and a row naming a stripped module would fail
-#: in a mirror clone, which does not carry it. Which modules those are is read
-#: off the declaration the publish gate already demands of them.
+#: for the reason `tests.bindings.stated` gives.
 WALKS: Final = {
     # The home.
     "corpus.py": 1,
@@ -251,90 +250,46 @@ WALKS: Final = {
     "test_corpus.py": 2,
 }
 
-def _source(path: Path) -> str:
-    """A module's text with its line endings as written.
-
-    `_stated` asks `declares` of it, which follows the gate in ending a line only
-    at a newline. Universal newlines would turn a bare carriage return into one,
-    and call internal a module the gate publishes.
-    """
-    return path.read_text(encoding="utf-8", newline="")
-
 
 def _stated(source: str, relative: str) -> int:
-    """How many walks a module is allowed: its row here, or its own statement if it is internal."""
-    if not declares(source.encode("utf-8")):
-        return WALKS.get(relative, 0)
-    tree = ast.parse(source)
-    for node in tree.body:
-        if (
-            isinstance(node, ast.AnnAssign | ast.Assign)
-            and "WALKS_OF_MY_OWN"
-            in [
-                target.id
-                for target in (node.targets if isinstance(node, ast.Assign) else [node.target])
-                if isinstance(target, ast.Name)
-            ]
-            and isinstance(node.value, ast.Constant)
-            and isinstance(node.value.value, int)
-        ):
-            return node.value.value
-    return 0
+    """How many walks a module is allowed: its row in `WALKS`, or its own if it is internal."""
+    return stated(source, relative, WALKS, "WALKS_OF_MY_OWN", 0)
 
 
 def _walk_calls(source: str) -> int:
     """How many calls in `source` read a tree rather than one directory.
 
-    **By name, and plain about it**: `rglob`; `walk` on anything but `ast`, or
-    bare where `os` gave it; `glob` or `iglob` whose pattern is a `**` literal
-    or is not a literal at all. **A pattern this cannot read counts**, because a
-    named constant or an f-string is the first spelling an author writes, and
-    assuming it does not recurse would make naming it the evasion.
-
-    A bare `glob` or `iglob` imported from `glob` is asked the same question,
-    under whatever name the import binds.
+    **The callee is asked of `tests/bindings.py`**, so an import alias or a
+    rebinding of `os.walk`, `glob.glob` or `glob.iglob` is the function it
+    stands for. A callee nothing imported, such as `path.rglob` on a local, is
+    read by its own attribute name. `rglob` counts, and so does `walk` on
+    anything but `ast`; `glob` or `iglob` counts where its pattern is a `**`
+    literal or not a literal at all. **A pattern this cannot read counts**,
+    because a named constant or an f-string is the first spelling an author
+    writes, and assuming it does not recurse would make naming it the evasion.
 
     Past it: a hand rolled `iterdir` or `scandir` recursion, `os.fwalk`,
-    `pkgutil.walk_packages`, a bound method held in a variable or handed to
-    `functools.partial` or `map`, and a `git ls-files` subprocess. Each takes a
-    deliberate act rather than the line a guard's author writes first. The
-    import spellings this reads by name close structurally with a name
-    resolver rather than with a further spelling here.
+    `pkgutil.walk_packages`, a bound method held in a variable unless its
+    receiver was imported, a bound method handed to `functools.partial` or
+    `map`, and a `git ls-files` subprocess. Each takes a deliberate act rather
+    than the line a guard's author writes first.
     """
     tree = ast.parse(source)
-    from_os = {
-        alias.asname or alias.name
-        for node in ast.walk(tree)
-        if isinstance(node, ast.ImportFrom) and node.module == "os"
-        for alias in node.names
-        if alias.name == "walk"
-    }
-    from_glob = {
-        alias.asname or alias.name
-        for node in ast.walk(tree)
-        if isinstance(node, ast.ImportFrom) and node.module == "glob"
-        for alias in node.names
-        if alias.name in {"glob", "iglob"}
-    }
+    names = SourceNames(tree)
     count = 0
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
-        if isinstance(node.func, ast.Name):
-            if node.func.id in from_os:
-                count += 1
-            elif node.func.id in from_glob:
-                count += _may_recurse(node)
-            continue
-        if not isinstance(node.func, ast.Attribute):
-            continue
-        name = node.func.attr
-        receiver = node.func.value
-        if name == "rglob":
+        meanings = names.means(node.func)
+        if meanings:
+            verbs = {meaning.rpartition(".")[2] for meaning in meanings - {"ast.walk"}}
+        elif isinstance(node.func, ast.Attribute):
+            verbs = {node.func.attr}
+        else:
+            verbs = set()
+        if verbs & {"rglob", "walk"}:
             count += 1
-        elif name == "walk":
-            count += not (isinstance(receiver, ast.Name) and receiver.id == "ast")
-        elif name in {"glob", "iglob"}:
+        elif verbs & {"glob", "iglob"}:
             count += _may_recurse(node)
     return count
 
@@ -348,33 +303,33 @@ def _may_recurse(call: ast.Call) -> bool:
     return "**" in pattern.value
 
 
-def _private_reads(source: str) -> list[str]:
-    """Every private name of `tests/corpus.py` that `source` imports or reads.
+def _private_reads(source: str, package: str = "tests") -> list[str]:
+    """Every private name of `tests/corpus.py` that `source` imports or reads off an import of it.
 
-    By the two spellings the tree uses, `from tests.corpus import ...` and an
-    attribute on the module bound by `from tests import corpus`, under any
-    alias. Only a name that import binds is asked, so a local variable called
-    `corpus` is not. Past it: `import tests.corpus` with or without an alias,
-    and a relative import, which close with a name resolver rather than a
-    spelling here; `getattr`, `importlib` and `__dict__`, which are deliberate.
+    **Asked of `tests/bindings.py`**, so any import of `tests.corpus` counts
+    under any alias, relative ones resolved against `package`, and so does a
+    plain rebinding of it. A local variable called `corpus` bound by anything else is
+    not the module. Each import of a private name counts once and each attribute
+    read once. Past it: a re-export of the module from another test module, and
+    `getattr`, `importlib` and `__dict__`, which are deliberate.
     """
     tree = ast.parse(source)
-    bound: set[str] = set()
-    found: list[str] = []
+    names = SourceNames(tree, package=package)
+
+    def private(target: str) -> str | None:
+        rest = target.removeprefix("tests.corpus.")
+        if rest == target or "." in rest or not rest.startswith("_") or rest.startswith("__"):
+            return None
+        return rest
+
+    found = sorted(
+        name
+        for binding in names.bindings
+        if binding.written is not None and (name := private(binding.target))
+    )
     for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom) and node.module == "tests":
-            bound |= {alias.asname or alias.name for alias in node.names if alias.name == "corpus"}
-        elif isinstance(node, ast.ImportFrom) and node.module == "tests.corpus":
-            found += [alias.name for alias in node.names if alias.name.startswith("_")]
-    for node in ast.walk(tree):
-        if (
-            isinstance(node, ast.Attribute)
-            and isinstance(node.value, ast.Name)
-            and node.value.id in bound
-            and node.attr.startswith("_")
-            and not node.attr.startswith("__")
-        ):
-            found.append(node.attr)
+        if isinstance(node, ast.Attribute):
+            found += sorted(name for target in names.means(node) if (name := private(target)))
     return found
 
 
@@ -391,7 +346,7 @@ class TestOnlyTheCorpusWalks:
     def test_only_the_stated_modules_walk_a_tree(self) -> None:
         tests = BACKEND / "tests"
         sources = {
-            path.relative_to(tests).as_posix(): _source(path)
+            path.relative_to(tests).as_posix(): source_of(path)
             for path in suite_modules()
         }
         wrong = {
@@ -421,7 +376,7 @@ class TestOnlyTheCorpusWalks:
         module.write_bytes(written.encode("utf-8"))
 
         assert not declares(module.read_bytes())
-        assert _stated(_source(module), "test_walks.py") == 0
+        assert _stated(source_of(module), "test_walks.py") == 0
         # The same module with newlines is internal, so the fixture can tell.
         assert _stated(written.replace("\r", "\n"), "test_walks.py") == 2
 
@@ -430,10 +385,15 @@ class TestOnlyTheCorpusWalks:
         decides for itself what is vendored, and the count above cannot see it."""
         tests = BACKEND / "tests"
         reaching = {
-            relative: names
+            relative.as_posix(): names
             for path in suite_modules()
-            if (relative := path.relative_to(tests).as_posix()) not in {"corpus.py", "test_corpus.py"}
-            and (names := _private_reads(path.read_text(encoding="utf-8")))
+            if (relative := path.relative_to(tests)).as_posix() not in {"corpus.py", "test_corpus.py"}
+            and (
+                names := _private_reads(
+                    path.read_text(encoding="utf-8"),
+                    ".".join(("tests", *relative.parent.parts)),
+                )
+            )
         }
 
         assert reaching == {}, reaching
@@ -447,10 +407,21 @@ class TestOnlyTheCorpusWalks:
             ("from tests.corpus import project_files", []),
             ("from tests import corpus\ncorpus.__name__", []),
             ("corpus = load()\ncorpus._private", []),
+            ("import tests.corpus\ntests.corpus._walk(root, prune)", ["_walk"]),
+            ("import tests.corpus as c\nc._walk(root, prune)", ["_walk"]),
+            ("from . import corpus\ncorpus._walk(root, prune)", ["_walk"]),
+            ("from .corpus import _walk", ["_walk"]),
+            ("from tests import corpus\nc = corpus\nc._walk(root, prune)", ["_walk"]),
         ],
     )
     def test_what_counts_as_reaching_past(self, source: str, names: list[str]) -> None:
         assert _private_reads(source) == names
+
+    def test_a_relative_import_resolves_from_the_package_it_sits_in(self) -> None:
+        """Two dots from a module under `tests/routers` is the test tree itself."""
+        source = "from .. import corpus\ncorpus._walk(root, prune)"
+
+        assert _private_reads(source, "tests.routers") == ["_walk"]
 
     def test_an_internal_module_states_its_own_count(self) -> None:
         """The stated count is read off the module, and only off one the gate strips."""
@@ -459,6 +430,10 @@ class TestOnlyTheCorpusWalks:
 
         assert _stated(internal, "test_x.py") == 2
         assert _stated(published, "test_x.py") == 0
+
+    def test_a_flag_is_not_a_count(self) -> None:
+        """`True` is an `int` to `isinstance`, so it read as one walk allowed."""
+        assert _stated(f'"""{SENTENCE}"""\nWALKS_OF_MY_OWN = True\n', "test_x.py") == 0
 
     @pytest.mark.parametrize(
         ("source", "calls"),
@@ -476,7 +451,13 @@ class TestOnlyTheCorpusWalks:
             ("from glob import iglob as g\ng(P)", 1),
             ('from glob import glob\nglob("*.py")', 0),
             ('BACKEND.glob("*.py")', 0),
-            ("ast.walk(tree)", 0),
+            ("import ast\nast.walk(tree)", 0),
+            ("import ast as a\na.walk(tree)", 0),
+            ("import os as o\nw = o.walk\nw(BACKEND)", 1),
+            ('from tests.corpus import BACKEND\nfind = BACKEND.rglob\nfind("*.py")', 1),
+            ("import os\nw = os\nw = w.walk\nw(BACKEND)", 1),
+            ('from tests.corpus import BACKEND\nfind = BACKEND\nfind = find.rglob\nfind("*.py")', 1),
+            ('ROOT = Path(__file__).parent\nfind = ROOT.rglob\nfind("*.py")', 0),
             ("def walk(node):\n    pass\nwalk(node)", 0),
         ],
     )

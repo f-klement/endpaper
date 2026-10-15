@@ -22,7 +22,9 @@ from schemas.common import one_line
 #: page.
 #:
 #: **Both capped writers, and there are exactly two of those.**
-#: `classifications.add_headings` serves the create and selected enrichment paths.
+#: `classifications.add_headings` serves the create route directly, and the
+#: evidence module's two doors: `evidence.confirm` for a selected enrichment and
+#: `evidence.confirm_file_headings` for a MARC import.
 #: The merge transfer in `folding.py` serves a merge. `backup.restore` is a third writer of
 #: this table (`backup.py`, through `_TABLES`) and is deliberately uncapped: it
 #: reinstates a whole database rather than adding to one, it is admin only, and

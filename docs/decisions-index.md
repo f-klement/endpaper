@@ -444,7 +444,7 @@ repeat the argument.
 | `$2` means a vocabulary on a subject field and a Dewey edition on `082` | [The hole a reviewer should know about](decisions.md#the-hole-a-reviewer-should-know-about) | 52 |
 |  | [A stale count outside the census grammar is fixed by rewriting the sentence, not by widening the census](decisions.md#a-stale-count-outside-the-census-grammar-is-fixed-by-rewriting-the-sentence-not-by-widening-the-census) | 278 |
 |  | [Four figures in the roster census are snapshots rather than recomputed, deliberately](decisions.md#four-figures-in-the-roster-census-are-snapshots-rather-than-recomputed-deliberately) | 172 |
-|  | [`merge_into` takes a `BookMatch`, not a dictionary](decisions.md#merge_into-takes-a-bookmatch-not-a-dictionary) | 190 |
+|  | [`evidence._apply_match` takes a `BookMatch`, not a dictionary](decisions.md#evidence_apply_match-takes-a-bookmatch-not-a-dictionary) | 190 |
 |  | [The enrichment door drops the field; the search door drops the row](decisions.md#the-enrichment-door-drops-the-field-the-search-door-drops-the-row) | 360 |
 |  | [The three doors over `books.categories`, and why they differ](decisions.md#the-three-doors-over-bookscategories-and-why-they-differ) | 2,292 |
 | The three doors over `books.categories`, and why they differ | [The 422 is unreachable from an honest producer today, and that is a precondition rather than a note](decisions.md#the-422-is-unreachable-from-an-honest-producer-today-and-that-is-a-precondition-rather-than-a-note) | 141 |
@@ -878,7 +878,14 @@ repeat the argument.
 |  | [One module owns a Book's Categories column](decisions.md#one-module-owns-a-books-categories-column) | 122 |
 |  | [The Google adapter hands on a list, and the list is the split of the join](decisions.md#the-google-adapter-hands-on-a-list-and-the-list-is-the-split-of-the-join) | 156 |
 |  | [An id in the path is a 404, an id in the body is a 400](decisions.md#an-id-in-the-path-is-a-404-an-id-in-the-body-is-a-400) | 129 |
-|  | [One module applies outside evidence to an existing Book](decisions.md#one-module-applies-outside-evidence-to-an-existing-book) | 517 |
+|  | [One module applies outside evidence to an existing Book](decisions.md#one-module-applies-outside-evidence-to-an-existing-book) | 598 |
+|  | [Refresh rewrites nine columns and leaves four](decisions.md#refresh-rewrites-nine-columns-and-leaves-four) | 299 |
+|  | [A blank text column is null](decisions.md#a-blank-text-column-is-null) | 312 |
 |  | [One rule decides who may be told a vocabulary entry exists](decisions.md#one-rule-decides-who-may-be-told-a-vocabulary-entry-exists) | 455 |
 |  | [One reader for the pipeline file, and the shell runners keep theirs, held equal](decisions.md#one-reader-for-the-pipeline-file-and-the-shell-runners-keep-theirs-held-equal) | 386 |
+|  | [The one writer rule is held by a ratchet on references, not by the MARC arm alone](decisions.md#the-one-writer-rule-is-held-by-a-ratchet-on-references-not-by-the-marc-arm-alone) | 211 |
+|  | [The internal declaration rule stays in three copies, held equal by a pin](decisions.md#the-internal-declaration-rule-stays-in-three-copies-held-equal-by-a-pin) | 181 |
+|  | [A name's meaning is answered by one resolver, and a test that reads an import alias itself is counted per function](decisions.md#a-names-meaning-is-answered-by-one-resolver-and-a-test-that-reads-an-import-alias-itself-is-counted-per-function) | 90 |
+|  | [A meaning is never derived through the same refining assignment twice; a plain rename is not counted](decisions.md#a-meaning-is-never-derived-through-the-same-refining-assignment-twice-a-plain-rename-is-not-counted) | 158 |
+|  | [No ratchet on import node handling](decisions.md#no-ratchet-on-import-node-handling) | 82 |
 <!-- index: end -->

@@ -326,3 +326,29 @@ class TestOneRowCannotCostEveryMemberTheRequest:
         assert 1 in row["missing_indexes"]
         assert 2 not in row["missing_indexes"]
         assert row["missing_indexes"][-1] == MAX_SERIES_INDEX
+
+
+class TestABlankIsStoredAsNull:
+    """Over HTTP, the two doors the scan form and the editor use. The rule and
+    its other arms are in `tests/schemas/test_book.py`."""
+
+    def test_a_cleared_box_on_the_edit_form_clears_the_column(
+        self, client, admin, make_book
+    ):
+        book = make_book(admin["headers"], author="Frank Herbert")
+
+        res = patch_details(client, admin["headers"], book["id"], author="")
+
+        assert res.status_code == 200
+        assert res.json()["author"] is None
+
+    def test_a_scan_with_a_blank_author_stores_null(self, client, admin):
+        """The scan form's manual author box sent `""` once typed in and emptied."""
+        res = client.post(
+            "/api/books/scan",
+            json={"title": "Dune", "author": "", "publisher": "  "},
+            headers=admin["headers"],
+        )
+
+        assert res.status_code == 201
+        assert (res.json()["author"], res.json()["publisher"]) == (None, None)

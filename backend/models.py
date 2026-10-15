@@ -993,6 +993,39 @@ CURRENCY_LENGTH = 3
 BORROWER_NAME_MAX = 120
 
 
+#: The free text columns of `books` where a blank string and a null would
+#: otherwise be two spellings of "nothing here". An ORM write and a restore
+#: both store a blank as null (`blank_as_none`), so a clear and a field never
+#: set are one value. `title` is not here:
+#: its column refuses null, and `min_length` is its rule.
+BLANK_IS_NULL: Final[tuple[str, ...]] = (
+    "subtitle", "author", "publisher", "description", "series_name",
+)
+
+
+def blank_as_none[T](value: T) -> T | None:
+    """`None` for a string that is empty or whitespace only, anything else unchanged.
+
+    **Only an all whitespace value changes.** A value with text in it keeps its
+    surrounding spaces: trimming it would be a second rule nobody asked for, and
+    a field a Member typed is theirs to the character.
+
+    Whitespace is `str.strip`'s, so the Alembic revision that nulled the stored
+    blanks (`d3f8a1c6b250`) tests the same characters this does. Anything that
+    is not a string passes through: the request bodies call this as a
+    `mode="before"` validator, where pydantic then refuses it by name.
+
+    Four callers hold one rule: `Book._a_blank_is_null` for every ORM write,
+    the request bodies (so a blank wider than the column is null rather than a
+    422), `backup._parse_row` for a restore's Core insert, and
+    `evidence.is_empty`, so a catalogue record's blank is a gap on the same
+    terms as a request's.
+    """
+    if isinstance(value, str) and not value.strip():
+        return None
+    return value
+
+
 class Book(Base):
     __tablename__ = "books"
 
@@ -1287,6 +1320,16 @@ class Book(Base):
         cascade="all, delete-orphan",
         order_by="DigitalReference.id",
     )
+
+    @validates(*BLANK_IS_NULL)
+    def _a_blank_is_null(self, _key: str, value: str | None) -> str | None:
+        """A blank string is stored as null: see `blank_as_none`.
+
+        Here because the MARC, OPDS and CSV importers build a `Book` from a
+        record and pass no request body. A Core insert does not fire this, so
+        `backup._parse_row` calls `blank_as_none` itself.
+        """
+        return blank_as_none(value)
 
     @validates("cover_url")
     def _store_covers_over_https(self, _key: str, url: str | None) -> str | None:

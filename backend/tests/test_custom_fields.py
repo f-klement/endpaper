@@ -52,9 +52,6 @@ undocumented gets read as a guarantee it never made:
   string as a link without re-checking it. Nothing does; `values_on` is the
   only reader.
 * Raw SQL naming `custom_field_values`. Invisible to any rule that reads names.
-* `models.CustomFieldValue` reached through `import models`. Nothing in the
-  tree imports `models` as a module, and the same shape evades
-  `test_reading.py`'s pass too.
 * A reader keyed on something that is neither a Book nor a book-shaped name:
   `def values_under(db, field: CustomField)` names the table, takes no Book and
   would be reported by pass two, so the exemption list is where such a thing
@@ -105,6 +102,7 @@ from models import Book, CustomField, CustomFieldValue, User
 # here, excluding `{"tests", "migrations", ".venv"}` by name, which is the
 # directory a developer has and not the one the pipeline creates under
 # `backend/` for its uv cache.
+from tests.bindings import SourceNames
 from tests.corpus import application_sources
 
 BACKEND = Path(__file__).resolve().parent.parent
@@ -141,6 +139,10 @@ EVASIONS = {
     "aliased": "from models import CustomFieldValue as V\n",
     "star": "from models import *\n",
     "star from a re-exporter": "from custom_fields import *\n",
+    "through the module": "import models\nmodels.CustomFieldValue.id\n",
+    "through an aliased module": "import models as m\nm.CustomFieldValue\n",
+    "through the module bound to a local": "import models\nm = models\nm.CustomFieldValue\n",
+    "through a re-exporter": "import custom_fields\ncustom_fields.CustomFieldValue\n",
 }
 
 #: Spellings that must **not** be reported, so the pass cannot be satisfied by
@@ -151,45 +153,37 @@ NOT_OFFENCES = {
     "another model": "from models import Book\n",
     "a star with no value in it": "from enums import *\n",
     "a name that merely contains it": "from models import CustomFieldValueOut\n",
+    "another model through the module": "import models\nmodels.CustomField\n",
+    "a module that may not hold it": "import enums\nenums.CustomFieldValue\n",
 }
 
 
 def _imported_names(source: str) -> set[str]:
-    """Every name one module imports, under both its spellings.
+    """Every name one module imports, under both its spellings, or reads off a module
+    that may hold it, so `import models; models.CustomFieldValue` reaches it too.
 
-    **Both, not `alias.asname or alias.name`, and that one word is the rule.**
-    The question here is "does this module reach a custom field value", and the
-    answer to that is the name it **imported**: `from models import
-    CustomFieldValue as CFV` binds `CFV` and imports `CustomFieldValue`, so
-    taking the local alias alone lets one rename walk past the guard. The local
-    name is kept too, because the star expansion below binds names rather than
-    importing them. `test_reading.py` states the same reasoning about `UserBook`.
+    **Both, and that is the rule**: the question is "does this module reach a
+    custom field value", and `from models import CustomFieldValue as CFV`
+    reaches it under a name the local alias alone would miss.
+    `SourceNames.imported` holds the reasoning.
 
-    That reason is written out here rather than left to be inferred from
-    `test_reading.py`. It arrived as correct code with no argument attached, and
-    correct code with no argument is what gets tidied into `asname or name` by
-    somebody reading it as a verbose idiom. `test_shelf.py` had exactly that
-    tidied form and one aliased import evaded it; verified on 2026-08-28, this
-    file and `test_reading.py` did not.
-
-    Its own copy rather than `test_reading.py`'s, and that is not duplication
-    for its own sake: that one expands a star against **its** allowlist, so
-    importing it here would ask whether `shelf.py` re-exports a custom field.
-    The one line that differs is the one that decides what the rule covers.
+    The star is expanded against **this** rule's allowlist, which is the one
+    line that differs from `test_reading.py`'s rule and the one that decides
+    what this rule covers.
     """
-    names: set[str] = set()
-    for node in ast.walk(ast.parse(source)):
-        if not isinstance(node, ast.Import | ast.ImportFrom):
-            continue
-        for alias in node.names:
-            if alias.name == "*":
-                if isinstance(node, ast.ImportFrom) and node.module in _STAR_SOURCES:
-                    names |= set(dir(importlib.import_module(node.module)))
-                continue
-            names.add(alias.name)
-            if alias.asname is not None:
-                names.add(alias.asname)
-    return names
+    tree = ast.parse(source)
+    names = SourceNames(
+        tree,
+        star=lambda module: importlib.import_module(module) if module in _STAR_SOURCES else None,
+    )
+    reached = {
+        meaning.split(".")[1]
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Attribute)
+        for meaning in names.means(node)
+        if meaning.split(".")[0] in _STAR_SOURCES
+    }
+    return names.imported() | reached
 
 
 #: The two public names allowed to touch a value without being handed a Book.
