@@ -39,6 +39,7 @@ from database import Base
 from enums import BookIdentifierScheme, ClassificationScheme
 from logvalues import clipped
 from models import (
+    MAX_ONLINE_LINKS_PER_BOOK,
     AccessRequest,
     Book,
     BookIdentifier,
@@ -48,6 +49,7 @@ from models import (
     KosyncDocument,
     Loan,
     Note,
+    OnlineLink,
     Quote,
     ReadingProgress,
     ReadwiseBook,
@@ -159,7 +161,7 @@ def _deduplicated(
     ceiling: int,
     absorb: Callable[[Any, Any], None] | None = None,
 ) -> Carry:
-    """The three capped tables, whose unique index would refuse the flush.
+    """The capped tables, whose unique index would refuse the flush.
 
     One algorithm rather than three copies of it: order the losers' rows by id,
     key them, resolve a row the survivor already holds, refuse past the ceiling,
@@ -396,6 +398,18 @@ TRANSFERS: Final[tuple[_Transfer, ...]] = (
             held=lambda book: book.identifiers,
             key=lambda row: (BookIdentifierScheme(row.scheme).value, row.value),
             ceiling=MAX_IDENTIFIERS_PER_BOOK,
+        ),
+    ),
+    # Two rows for one Book imported from one MARC file carry the same links,
+    # and `uq_online_links_book_url` would refuse the flush. A repeat URL is
+    # dropped; its text and relation are the same record's.
+    _Transfer(
+        _table(OnlineLink.__tablename__),
+        _deduplicated(
+            OnlineLink,
+            held=lambda book: book.online_links,
+            key=lambda row: row.url,
+            ceiling=MAX_ONLINE_LINKS_PER_BOOK,
         ),
     ),
     _Transfer(_table(Loan.__tablename__), _carry_loans),

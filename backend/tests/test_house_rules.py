@@ -931,7 +931,7 @@ class TestEveryRequestBodyRowIdIsBounded:
     Only int-shaped fields are the question. A `str` bound by `max_length` is a
     different rule, and a `float` cannot overflow the driver.
 
-    Measured on the tree as it stands: **141** models under `schemas/`, **50** of
+    Measured on the tree as it stands: **146** models under `schemas/`, **52** of
     them reachable from a request.
 
     **What those two numbers count, because a bare number is what rots.** The
@@ -6127,6 +6127,12 @@ class TestOneReaderPerAmbiguousSubfield:
     it. A function whose entire docstring is `"2"` is exempt and harmless, since
     a docstring reads nothing. The test tree is not scanned, which is what lets
     the checks below build offending source at all.
+
+    **One false refusal, answered without a site.** An indicator value is not a
+    subfield code, but `856`'s second indicator `"2"` reads as one here. The
+    two indicator maps (`marc_fields._LINK_RELATIONS`, `marc._LINK_INDICATORS`)
+    derive their values from `LinkRelationship`'s order instead; do not add a
+    `<module>` site, which would admit every module level `"2"`.
     """
 
     #: The only two places in the backend that may spell the subfield code.

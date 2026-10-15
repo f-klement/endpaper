@@ -29,6 +29,7 @@ import CopyPanel from "./components/CopyPanel";
 import ClassificationPanel from "./components/ClassificationPanel";
 import CustomFieldsPanel from "./components/CustomFieldsPanel";
 import DigitalReferencesPanel from "./components/DigitalReferencesPanel";
+import OnlineLinksPanel from "./components/OnlineLinksPanel";
 import EnrichPicker from "./components/EnrichPicker";
 import ShelfPanel from "./components/ShelfPanel";
 import StatusPicker from "./components/StatusPicker";
@@ -263,6 +264,13 @@ export default function BookDetail({ currentUser }: BookDetailProps) {
                 claim, and the whole reason this is stored as a scheme, a number
                 and a caption is that flattening them loses which is which. */}
             <ClassificationPanel classifications={book.classifications ?? []} />
+
+            {/* Beside the classification: both are a catalogue's statements
+                about the book, kept apart from the household's own. */}
+            <OnlineLinksPanel
+              links={book.online_links ?? []}
+              onRemove={actions.removeOnlineLink}
+            />
 
             {/* Under the shelf, because both answer "where does this one
                 live": one physically, one in this library's own filing. */}

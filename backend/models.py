@@ -47,6 +47,7 @@ from enums import (
     HeadingKind,
     HighlightSource,
     LendingWillingness,
+    LinkRelationship,
     MemberLoginService,
     OwnershipStatus,
     ReadStatus,
@@ -1350,6 +1351,14 @@ class Book(Base):
         back_populates="book",
         cascade="all, delete-orphan",
         order_by="DigitalReference.id",
+    )
+    # Cascaded like the identifiers: a purged book's links describe a book
+    # nobody holds. Ordered by id, which is the order the record listed them.
+    online_links: Mapped[list[OnlineLink]] = relationship(
+        "OnlineLink",
+        back_populates="book",
+        cascade="all, delete-orphan",
+        order_by="OnlineLink.id",
     )
 
     @validates(*BLANK_IS_NULL)
@@ -3072,6 +3081,90 @@ class BookIdentifier(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     book: Mapped[Book] = relationship("Book", back_populates="identifiers")
+
+
+#: The most bytes an online link's URL may take as a record writes it,
+#: escaped, which is what a page pays: `catalogue.Link.of` on the way in and
+#: `ck_online_links_bounds` at the column (`_URL_AS_WRITTEN`). What eight of them
+#: cost a page is measured at `marc.EXPORT_PAGE_RECORDS` and in
+#: `docs/security.md` §SRU.
+ONLINE_LINK_URL_MAX_BYTES = 2048
+
+#: The URL as a MARCXML record writes it: `ElementTree` escapes exactly these
+#: three in text, as `xml.sax.saxutils.escape` does. Bounding this rather than
+#: the stored bytes makes the column hold what `catalogue.Link.of` holds, so a
+#: restored row the export would drop is refused at the insert instead.
+_URL_AS_WRITTEN = "replace(replace(replace(url, '&', '&amp;'), '<', '&lt;'), '>', '&gt;')"
+
+#: The longest link text. Cut rather than refused on import: it is a label.
+ONLINE_LINK_LABEL_MAX = 200
+
+#: How many links one Book keeps. MARC repeats `856` freely; past this an
+#: import keeps the first ones the record listed.
+MAX_ONLINE_LINKS_PER_BOOK = 8
+
+
+class OnlineLink(Base):
+    """A catalogue record's link to an online resource: MARC 856. **Never fetched.**
+
+    **Not a file reference.** `DigitalReference` is where a Member says their
+    own file is, and it never leaves this application; a row here is what a
+    catalogue said is online, and it is the only thing the MARC export writes
+    to `856`. The owner's ruling of 2026-10-15 keeps the two apart.
+
+    **Book owned, with no Member of its own**, for `BookIdentifier`'s reason:
+    its visibility is the Book's entirely. Named in `BOOK_OWNED_TABLES` in
+    `tests/test_shelf.py`.
+
+    **The URL is `http` or `https` with a host, held three times**:
+    `custom_fields.web_link` on the way in, `ck_online_links_scheme` for a row
+    `backup.restore` writes through Core, and `safeHref` in the browser before
+    any of it becomes an `href`.
+    """
+
+    __tablename__ = "online_links"
+
+    __table_args__ = (
+        # A record listing one URL twice, or a second import of the same file,
+        # finds the row instead of doubling it. Leads with `book_id`, so that
+        # column needs no index of its own.
+        Index("uq_online_links_book_url", "book_id", "url", unique=True),
+        CheckConstraint(
+            "url LIKE 'http://%' OR url LIKE 'https://%'",
+            name="ck_online_links_scheme",
+        ),
+        CheckConstraint(
+            _enum_check("relation", LinkRelationship, nullable=True),
+            name="ck_online_links_relation",
+        ),
+        CheckConstraint(
+            DialectSQL(
+                sqlite=(
+                    f"length(CAST({_URL_AS_WRITTEN} AS BLOB)) <= {ONLINE_LINK_URL_MAX_BYTES} "
+                    f"AND (label IS NULL OR (length(label) <= {ONLINE_LINK_LABEL_MAX} "
+                    f"AND length(CAST(label AS BLOB)) <= {4 * ONLINE_LINK_LABEL_MAX}))"
+                ),
+                postgresql=(
+                    f"octet_length({_URL_AS_WRITTEN}) <= {ONLINE_LINK_URL_MAX_BYTES} "
+                    f"AND (label IS NULL OR (length(label) <= {ONLINE_LINK_LABEL_MAX} "
+                    f"AND octet_length(label) <= {4 * ONLINE_LINK_LABEL_MAX}))"
+                ),
+            ),
+            name="ck_online_links_bounds",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    book_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("books.id", ondelete="CASCADE"), nullable=False
+    )
+    url: Mapped[str] = mapped_column(String(ONLINE_LINK_URL_MAX_BYTES), nullable=False)
+    label: Mapped[str | None] = mapped_column(String(ONLINE_LINK_LABEL_MAX), nullable=True)
+    # Not `relationship`, which would shadow SQLAlchemy's in this class body.
+    relation: Mapped[LinkRelationship | None] = mapped_column(String(10), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+    book: Mapped[Book] = relationship("Book", back_populates="online_links")
 
 
 #: The longest name a Library may give one of its own fields.

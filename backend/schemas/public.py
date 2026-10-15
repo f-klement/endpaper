@@ -56,6 +56,7 @@ from enums import (
     BookSort,
     ClassificationScheme,
     HeadingKind,
+    LinkRelationship,
     TagCategory,
 )
 from schemas.tag import KnownTagKey
@@ -103,6 +104,20 @@ class PublicBookSort(StrEnum):
         would be a `ValueError` at the first request rather than a wrong order.
         """
         return BookSort(self.value)
+
+
+class PublicOnlineLinkOut(BaseModel):
+    """A catalogue's online link, MARC 856: a fact about the object as a record.
+
+    Its own model rather than `OnlineLinkOut`, for `PublicClassificationOut`'s
+    reason below: a field added there must not reach a public reader unreviewed.
+    """
+
+    model_config = {"from_attributes": True}
+
+    url: str
+    label: str | None = None
+    relation: LinkRelationship | None = None
 
 
 class PublicClassificationOut(BaseModel):
@@ -195,6 +210,9 @@ class PublicBookOut(BaseModel):
     #: **This is what library mode is for**, so it is the one addition the
     #: public payload makes over a plain bibliographic record.
     classifications: list[PublicClassificationOut] = []
+    #: A catalogue's online links: a fact about the object as a catalogue
+    #: record, so visible exactly when the Book is.
+    online_links: list[PublicOnlineLinkOut] = []
 
     model_config = {"from_attributes": True}
 

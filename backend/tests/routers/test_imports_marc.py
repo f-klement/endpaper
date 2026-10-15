@@ -13,6 +13,7 @@ import ast
 import inspect
 from pathlib import Path
 from xml.etree import ElementTree
+from xml.sax.saxutils import escape
 
 import pytest
 from fastapi.responses import StreamingResponse
@@ -21,25 +22,49 @@ from fastapi.testclient import TestClient
 import main
 import marc
 import settings_store
-from enums import SettingKey
+from enums import LinkRelationship, SettingKey
 from models import (
     AUTHOR_LINE_MAX,
     CLASSIFICATION_LABEL_MAX,
     CLASSIFICATION_NUMBER_MAX,
     DESCRIPTION_MAX,
     ISBN_MAX,
+    MAX_ONLINE_LINKS_PER_BOOK,
+    ONLINE_LINK_LABEL_MAX,
+    ONLINE_LINK_URL_MAX_BYTES,
     PUBLISHER_MAX,
     SERIES_NAME_MAX,
     SUBTITLE_MAX,
     TITLE_MAX,
     Book,
     Classification,
+    OnlineLink,
 )
 from routers import books as books_router
 from schemas.classification import MAX_CLASSIFICATIONS_PER_BOOK
 from tests.corpus import application_modules
 
 MARCXML = "http://www.loc.gov/MARC21/slim"
+
+
+def widest_links(fill: str) -> list[OnlineLink]:
+    """`MAX_ONLINE_LINKS_PER_BOOK` links, each URL at its byte cap as a record
+    writes it (escaped, `catalogue.Link`) and each label at its ceiling.
+
+    The fill goes in the query, which `web_link` leaves as it is, after a
+    serial that keeps the URLs distinct for `uq_online_links_book_url`.
+    """
+    rows = []
+    for serial in range(MAX_ONLINE_LINKS_PER_BOOK):
+        prefix = f"https://a.example/?{serial}"
+        room = ONLINE_LINK_URL_MAX_BYTES - len(prefix.encode())
+        width = len(escape(fill).encode())
+        # Padded with `w` to the byte, so every URL writes exactly the cap.
+        url = prefix + fill * (room // width) + "w" * (room % width)
+        rows.append(
+            OnlineLink(url=url, label=fill * ONLINE_LINK_LABEL_MAX, relation=LinkRelationship.RELATED)
+        )
+    return rows
 
 
 def library_mode(db, on: bool = True) -> None:
@@ -548,7 +573,7 @@ class TestThePageSizeThatBoundsTheExport:
     `AUTHOR_LINE_MAX`, so the same 500 characters is one name or 250 of them
     and each extra one costs its scaffolding rather than its bytes. A fixture
     with one long name produces the fewest `700` fields there can be, which is
-    none, and is 36% under the real worst case.
+    none, and the real worst case is 27% over it.
 
     **The line this fixture draws is what a write through the API can produce,
     and it is drawn once.** `language`, `year`, `page_count` and
@@ -579,7 +604,7 @@ class TestThePageSizeThatBoundsTheExport:
 
     #: What a full page of the widest records weighs, to the byte.
     #:
-    #: 102,107 bytes for one such record and 103 for the wrapper. **A tripwire
+    #: 127,379 bytes for one such record and 103 for the wrapper. **A tripwire
     #: on the record's shape and not a platform limit**: nothing enforces it at
     #: runtime and no deployment was measured against it.
     #:
@@ -606,7 +631,7 @@ class TestThePageSizeThatBoundsTheExport:
     #: here, so it is named rather than left for somebody to discover through
     #: this arm. It is the **second** difference from the SRU page's own
     #: figure, which stores its rows; the serial is the first.
-    PAGE_BYTES = 10_210_803
+    PAGE_BYTES = 12_738_003
 
     #: The fills, and what each is here to show. `w` is the number a careless
     #: version of this class would have taken; `&` is what escaping does to the
@@ -644,9 +669,10 @@ class TestThePageSizeThatBoundsTheExport:
         "520",
         "650",
         "700",
+        "856",
     )
 
-    def widest_book(self, fill: str, credits: int = 1) -> Book:
+    def widest_book(self, fill: str, credits: int = 1, links: bool = True) -> Book:
         """Every length bounded field at its maximum, and `credits` names.
 
         `credits` is separate from the fill because the two answer the two
@@ -689,11 +715,12 @@ class TestThePageSizeThatBoundsTheExport:
             )
             for _ in range(MAX_CLASSIFICATIONS_PER_BOOK)
         ]
+        book.online_links = widest_links(fill) if links else []
         return book
 
-    def page_bytes(self, fill: str, credits: int = 1) -> int:
+    def page_bytes(self, fill: str, credits: int = 1, links: bool = True) -> int:
         page = [
-            self.widest_book(fill, credits)
+            self.widest_book(fill, credits, links)
             for _ in range(marc.EXPORT_PAGE_RECORDS)
         ]
         written = "".join(marc.stream([page]))
@@ -703,8 +730,8 @@ class TestThePageSizeThatBoundsTheExport:
     def test_a_full_page_of_the_widest_records_is_what_the_constant_says(self):
         """The assertion is on the finished page, which is not the peak.
 
-        Building it holds every record's string and the joined result at once:
-        measured, 24.01 MiB for this 9.74 MiB page, 2.47 times. The route
+        Building it holds every record's string and the joined result at once,
+        so the peak is a multiple of this figure. The route
         level table at `marc.EXPORT_PAGE_RECORDS` is a typical page rather
         than this one, so it is the shelf independence it demonstrates and not
         the worst case. What this number bounds is the record's shape.
@@ -746,8 +773,15 @@ class TestThePageSizeThatBoundsTheExport:
         )
 
     def test_the_fill_character_is_part_of_what_decides_the_page(self):
-        """The first of the two questions: a `max_length` is characters."""
-        one_byte, two_byte, escaped = (self.page_bytes(fill) for fill in self.FILLS)
+        """The first of the two questions: a `max_length` is characters.
+
+        **Without the links.** Their URLs are bounded in written bytes, so a URL
+        weighs the same in every fill and only dilutes the ratio this arm is
+        about, which is the one `max_length` columns owe.
+        """
+        one_byte, two_byte, escaped = (
+            self.page_bytes(fill, links=False) for fill in self.FILLS
+        )
 
         assert one_byte < two_byte < escaped
         assert escaped > 4 * one_byte
@@ -970,6 +1004,79 @@ class TestTheImport:
     def test_an_empty_file_is_refused(self, client, admin, db):
         library_mode(db)
         assert upload(client, admin["headers"], b"").status_code == 400
+
+
+def link_field(url: str, text: str | None = None, ind2: str = " ") -> str:
+    inner = f'<subfield code="u">{url}</subfield>'
+    if text:
+        inner += f'<subfield code="y">{text}</subfield>'
+    return f'<datafield tag="856" ind1="4" ind2="{ind2}">{inner}</datafield>'
+
+
+class TestAnOnlineLinkIsKeptOnTheBook:
+    """MARC 856 on import becomes a link on the Book (owner's ruling, 2026-10-15)."""
+
+    def test_the_link_is_served_on_the_book(self, client, admin, db):
+        library_mode(db)
+        upload(
+            client, admin["headers"],
+            collection(
+                record(field("245", ("a", "Stoner")), link_field("https://a.example/x", "Volltext", "0"))
+            ),
+        )
+        book = db.query(Book).filter(Book.title == "Stoner").one()
+
+        res = client.get(f"/api/books/{book.id}", headers=admin["headers"])
+
+        [served] = res.json()["online_links"]
+        assert served == {
+            "id": book.online_links[0].id,
+            "url": "https://a.example/x",
+            "label": "Volltext",
+            "relation": "resource",
+        }
+
+    def test_a_matched_book_gains_a_link_it_lacked_and_no_repeat(self, client, admin, db):
+        library_mode(db)
+        first = record(field("245", ("a", "Stoner")), link_field("https://a.example/x"))
+        second = record(
+            field("245", ("a", "Stoner")),
+            link_field("https://a.example/x"),
+            link_field("https://b.example/y"),
+        )
+
+        upload(client, admin["headers"], collection(first))
+        upload(client, admin["headers"], collection(second))
+
+        book = db.query(Book).filter(Book.title == "Stoner").one()
+        assert [link.url for link in book.online_links] == [
+            "https://a.example/x",
+            "https://b.example/y",
+        ]
+
+    def test_a_record_past_the_cap_keeps_the_first_eight(self, client, admin, db):
+        library_mode(db)
+        urls = [f"https://a{n}.example/" for n in range(MAX_ONLINE_LINKS_PER_BOOK + 2)]
+        upload(
+            client, admin["headers"],
+            collection(record(field("245", ("a", "Stoner")), *(link_field(url) for url in urls))),
+        )
+
+        book = db.query(Book).filter(Book.title == "Stoner").one()
+        assert [link.url for link in book.online_links] == urls[:MAX_ONLINE_LINKS_PER_BOOK]
+
+    def test_the_export_writes_the_stored_link_back(self, client, admin, db):
+        library_mode(db)
+        upload(
+            client, admin["headers"],
+            collection(record(field("245", ("a", "Stoner")), link_field("https://a.example/x"))),
+        )
+
+        exported = client.get(
+            "/api/books/export", params={"format": "marcxml"}, headers=admin["headers"]
+        ).text
+
+        assert marc.read(exported.encode("utf-8")).links[0][0].url == "https://a.example/x"
 
 
 class TestImportingTwiceDoesNotDoubleTheCatalogue:

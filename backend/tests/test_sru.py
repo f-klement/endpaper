@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
 from xml.etree import ElementTree
+from xml.sax.saxutils import escape
 
 import pytest
 from hypothesis import given
@@ -27,14 +28,18 @@ import marc
 import sru
 from bibliographic import BIBLIOGRAPHIC_CODES
 from catalogue import _TEXT_CEILINGS
-from enums import ClassificationScheme, HeadingKind, TagCategory
+from enums import ClassificationScheme, HeadingKind, LinkRelationship, TagCategory
 from models import (
     AUTHOR_LINE_MAX,
     CLASSIFICATION_LABEL_MAX,
     CLASSIFICATION_NUMBER_MAX,
     DESCRIPTION_MAX,
+    MAX_ONLINE_LINKS_PER_BOOK,
+    ONLINE_LINK_LABEL_MAX,
+    ONLINE_LINK_URL_MAX_BYTES,
     Book,
     Classification,
+    OnlineLink,
     Tag,
     copy_group_token,
 )
@@ -838,7 +843,7 @@ class TestTheCostOfTheWidestLegalResponseIsBounded:
     #:
     #: Measured rather than rounded, and asserted as equality. It names
     #: nothing on its own: see the class docstring, and the arms beside it.
-    WIDEST_RESPONSE_BYTES = 5_117_485
+    WIDEST_RESPONSE_BYTES = 6_381_085
 
     #: How many digits of row identifier the figure above carries, in `001`.
     #:
@@ -873,6 +878,7 @@ class TestTheCostOfTheWidestLegalResponseIsBounded:
         "520",
         "655",
         "700",
+        "856",
     )
 
     #: The language the fixture's records carry, in the column's own spelling.
@@ -1017,7 +1023,7 @@ class TestTheCostOfTheWidestLegalResponseIsBounded:
         """Digits enough to tell `count` things apart."""
         return len(str(count - 1))
 
-    def widest_book(self, fill: str, credits: int, group: str) -> Book:
+    def widest_book(self, fill: str, credits: int, group: str, links: bool = True) -> Book:
         """Every column a fill can widen at its write bound, and `credits` names.
 
         **Two values for `credits`, and a third is refused rather than
@@ -1066,7 +1072,29 @@ class TestTheCostOfTheWidestLegalResponseIsBounded:
             )
             for k in range(MAX_CLASSIFICATIONS_PER_BOOK)
         ]
+        book.online_links = self.widest_links(fill) if links else []
         return book
+
+    @staticmethod
+    def widest_links(fill: str) -> list[OnlineLink]:
+        """`MAX_ONLINE_LINKS_PER_BOOK` links, URL at its byte cap as a record
+        writes it (escaped, `catalogue.Link`) and label at its ceiling. The
+        fill goes in the query, which `web_link` leaves as it is, after a
+        serial that keeps the URLs distinct."""
+        rows = []
+        for serial in range(MAX_ONLINE_LINKS_PER_BOOK):
+            prefix = f"https://a.example/?{serial}"
+            room = ONLINE_LINK_URL_MAX_BYTES - len(prefix.encode())
+            width = len(escape(fill).encode())
+            rows.append(
+                OnlineLink(
+                    # Padded with `w` to the byte, so every URL writes exactly the cap.
+                    url=prefix + fill * (room // width) + "w" * (room % width),
+                    label=fill * ONLINE_LINK_LABEL_MAX,
+                    relation=LinkRelationship.RELATED,
+                )
+            )
+        return rows
 
     @staticmethod
     def empty_the_shelf(db: Any) -> None:
@@ -1077,14 +1105,17 @@ class TestTheCostOfTheWidestLegalResponseIsBounded:
         document nobody wrote.
         """
         db.query(Classification).delete()
+        db.query(OnlineLink).delete()
         db.query(Book).delete()
         db.commit()
 
-    def page_bytes(self, db: Any, admin: dict, fill: str, credits: int = 1) -> int:
+    def page_bytes(
+        self, db: Any, admin: dict, fill: str, credits: int = 1, links: bool = True
+    ) -> int:
         self.empty_the_shelf(db)
         group = copy_group_token()
         books = [
-            self.widest_book(fill, credits, group) for _ in range(sru.MAX_RECORDS)
+            self.widest_book(fill, credits, group, links) for _ in range(sru.MAX_RECORDS)
         ]
         for book in books:
             book.added_by_user_id = admin["user"]["id"]
@@ -1303,8 +1334,8 @@ class TestTheCostOfTheWidestLegalResponseIsBounded:
         the identifiers; this one says the document moved.
 
         The assertion is on the finished document, which is not the peak:
-        `_serialise` holds the `ElementTree` and the string at once, measured at
-        2.47 times for the export's own page.
+        `_serialise` holds the `ElementTree` and the string at once, which
+        `marc.EXPORT_PAGE_RECORDS` says of the export's own page.
         """
         measured = self.page_bytes(db, admin, "&", self.MOST_CREDITS)
         assert measured == self.WIDEST_RESPONSE_BYTES, (
@@ -1317,9 +1348,14 @@ class TestTheCostOfTheWidestLegalResponseIsBounded:
         )
 
     def test_the_fill_character_is_part_of_what_decides_the_page(self, db, admin):
-        """A `max_length` is characters and a response is bytes."""
+        """A `max_length` is characters and a response is bytes.
+
+        **Without the links.** Their URLs are bounded in written bytes, so a URL
+        weighs the same in every fill and only dilutes the ratio this arm is
+        about, which is the one `max_length` columns owe.
+        """
         one_byte, two_byte, escaped = (
-            self.page_bytes(db, admin, fill) for fill in self.FILLS
+            self.page_bytes(db, admin, fill, links=False) for fill in self.FILLS
         )
 
         assert one_byte < two_byte < escaped

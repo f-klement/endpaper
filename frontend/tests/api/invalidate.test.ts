@@ -79,6 +79,13 @@ const KEYS: Record<string, readonly unknown[]> = {
   // screen that first does has to decide whether trashing a book drops it here
   // as well; this line is where that decision belongs when it is taken.
   listMissingDigitalReferences: books.getListMissingDigitalReferencesQueryKey(),
+  // The references under one root, read only by a folder sweep, which calls
+  // the fetcher directly and caches nothing. Placed with its siblings: it
+  // changes when a reference is written through its own routes.
+  listDigitalReferencesUnderRoot:
+    books.getListDigitalReferencesUnderRootQueryKey({
+      root_label: "Books",
+    }),
   // The requests for access to one digital copy that the viewer holds or made.
   // A child of `/api/books/{id}` classified with notes and quotes: it changes
   // only when a request is made or answered, through `useBookAccess`, which
@@ -276,7 +283,10 @@ describe("the inventory is complete", () => {
     //
     // 61 on 2026-10-15, counted with that same command: the Readwise pull,
     // four routes, one of them a read.
-    expect(Object.keys(KEYS).length).toBe(61);
+    //
+    // 62 on 2026-10-15, counted with that same command: the references under
+    // one root, read by a folder sweep.
+    expect(Object.keys(KEYS).length).toBe(62);
   });
 });
 

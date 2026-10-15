@@ -12,7 +12,7 @@
  * one fact and a 403 changes nothing else on the screen.
  */
 
-import { screen } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
 import fc from "fast-check";
 import { beforeEach, describe, expect, it } from "vitest";
 
@@ -60,6 +60,29 @@ describe("LibrarySettingsPage", () => {
       },
     });
   }
+
+  it("checks the files saved from the Calibre library folder when it is picked", async () => {
+    // The scan page's Calibre door by another way in, and the same sweep.
+    stubLibraryMode(true);
+    api.on(
+      "/api/books/digital-references",
+      { body: { items: [], total: 0, page: 1, page_size: 200 } },
+      "GET",
+    );
+    const file = new File(["text"], "metadata.opf");
+    Object.defineProperty(file, "webkitRelativePath", {
+      value: "Calibre Library/metadata.opf",
+    });
+    render();
+
+    fireEvent.change(await screen.findByLabelText("Pick the library folder"), {
+      target: { files: [file] },
+    });
+
+    await waitFor(() =>
+      expect(api.lastCall("root_label=Calibre", "GET")).toBeDefined(),
+    );
+  });
 
   it("offers the store import to every member, not only in library mode", async () => {
     // The card the whole store surface hangs from. Two readers shipped before

@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- **A MARC record's online links come in, show on the book page and go back out.** An imported
+  record's `856` fields are kept on the book as links: the address, the record's link text and
+  whether the link is the book itself, a version of it or something related. They show on the
+  book page under the classification, open in a new tab, and are never fetched. Anybody who may
+  edit the book can remove one, after a question; importing the record again puts it back. Only
+  addresses starting `http://` or `https://` with a host are kept, at most eight to a book and
+  each at most 2,048 bytes as a record writes it. The MARC export writes them back as `856`, and
+  writes nothing else there: a member's own file locations never leave in an export. A book on
+  the public catalogue carries its links too.
+
+- Picking a folder again on the scan page, or the Calibre library folder in Settings, checks the files Endpaper saved from any folder of that name, whoever saved them. Each one still there is confirmed, and its fingerprint is filled in where none was saved but never replaced. The ones not found are listed, each linked to its book, and are marked missing only when you press "Mark these as missing"; nothing is ever removed. A file moved inside the folder is found by its fingerprint and not listed, and a folder holding none of the saved files is taken for a different folder with the same name, so nothing is checked. Two routes back it: `GET /api/books/digital-references?root_label=` and `POST /api/books/digital-references/sweep`.
+
 - **A member deletes their own highlight on the book page, and it stays deleted.** Each of a
   member's own highlights has a delete control, which asks first. The deletion is remembered by
   the highlight's source and key, so a later KOReader import of the same file leaves it out and

@@ -64,6 +64,7 @@ from schemas.identifier import (
     BookIdentifierIn,
     BookIdentifierOut,
 )
+from schemas.online_link import OnlineLinkOut
 from schemas.tag import TagOut
 from schemas.user import UserOut
 
@@ -866,6 +867,10 @@ class BookColumns(BaseModel):
     #:
     #: Withheld from `PublicBookOut`: see `tests/schemas/test_public.py`.
     identifiers: list[BookIdentifierOut] = []
+
+    #: A catalogue's `856` links, in record order, batched like the
+    #: identifiers. Never a member's file reference: see `models.OnlineLink`.
+    online_links: list[OnlineLinkOut] = []
 
     series_name: str | None = None
     series_index: float | None = None

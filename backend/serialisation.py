@@ -332,10 +332,10 @@ def books_to_out(books: list[Book], current_user: User, db: Session) -> list[Boo
     """Serialise a page of books, adding the per-request fields.
 
     **The cost, measured rather than counted off the source.** This function is
-    **8** statements, constant in the size of the page.
+    **9** statements, constant in the size of the page.
 
-    **9 when the page holds a copy**, because the copy count issues its statement
-    only when there is one, and **9 when the page holds a book filed in a
+    **10 when the page holds a copy**, because the copy count issues its statement
+    only when there is one, and **10 when the page holds a book filed in a
     collection**, for the same reason. **Plus one per distinct `added_by` the
     session has not already loaded.**
 
@@ -365,8 +365,8 @@ def books_to_out(books: list[Book], current_user: User, db: Session) -> list[Boo
     #
     # `classifications` rides along for the same reason and costs one more
     # SELECT for the whole page, not one per book: `selectinload` issues a
-    # statement per relationship, so this option is why the count above is 8
-    # and not 6.
+    # statement per relationship, so each option here is one statement of the
+    # count above.
     #
     # `identifiers` is the third and the eighth statement. Same shape, same
     # reason, and the same trade stated plainly: a Book's store identifiers are
@@ -382,6 +382,9 @@ def books_to_out(books: list[Book], current_user: User, db: Session) -> list[Boo
         selectinload(Book.tags),
         selectinload(Book.classifications),
         selectinload(Book.identifiers),
+        # The ninth, for `identifiers`' reason; `MAX_ONLINE_LINKS_PER_BOOK`
+        # bounds the rows.
+        selectinload(Book.online_links),
     ).all()
 
     # One statement for the whole page, which is why the door is plural: the
@@ -479,9 +482,10 @@ def books_to_public_out(books: Outbound) -> list[PublicBookOut]:
     is what holds that, because it is a property of the signature and the
     signature is the only place it can be read off.
 
-    **Zero statements**, provided the caller loaded the two collections
-    (`Loading.PUBLISHED`). Without it `model_validate` reads `book.tags` and
-    `book.classifications` lazily and the page costs two statements per Book,
+    **Zero statements**, provided the caller loaded the three collections
+    (`Loading.PUBLISHED`). Without it `model_validate` reads `book.tags`,
+    `book.classifications` and `book.online_links` lazily and the page costs
+    three statements per Book,
     which is the N+1 `books_to_out` exists to avoid, arrived at through the
     door that has no batching helper to reach for.
     """

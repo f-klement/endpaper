@@ -8,6 +8,7 @@
 
 export { default as BookCard } from "./BookCard";
 export { default as CoverImage } from "./CoverImage";
+export { default as FolderSweepNotice } from "./FolderSweepNotice";
 export { default as LoanRow } from "./LoanRow";
 export { default as LoanRowSkeleton } from "./LoanRowSkeleton";
 export { default as LocationField } from "./LocationField";

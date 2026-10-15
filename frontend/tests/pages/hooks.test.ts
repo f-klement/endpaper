@@ -13,11 +13,16 @@ import {
 import { AuthMode, type UserOut } from "../../src/api/generated/model";
 import {
   FILES_PER_LOOKUP,
+  markMissing,
   readStoredUser,
+  REFERENCES_PER_PAGE,
+  sweepFolder,
+  useFolderSweep,
   useGoBack,
   useRowWrite,
   useSession,
 } from "../../src/pages/hooks";
+import { partialMd5 } from "../../src/lib/fileDigest";
 import { boundOf, propertiesOf } from "../committedSchema";
 import { makeUser, resetIds } from "../factories";
 import {
@@ -660,5 +665,274 @@ describe("asking which Book already holds a file", () => {
     const files = propertiesOf("HoldersIn")["files"]!;
 
     expect(FILES_PER_LOOKUP).toBe(boundOf(files, "maxItems"));
+  });
+});
+
+/** A file as a folder pick hands it over, under the folder `Books`. */
+function picked(path: string, bytes = "bytes"): File {
+  const file = new File([bytes], path.split("/").at(-1)!);
+  Object.defineProperty(file, "webkitRelativePath", {
+    value: `Books/${path}`,
+  });
+  return file;
+}
+
+function stored(
+  id: number,
+  path: string,
+  fields: { size_bytes?: number; partial_md5?: string } = {},
+) {
+  return {
+    id,
+    book_id: id * 10,
+    root_label: "Books",
+    relative_path: path,
+    root_confirmed: true,
+    size_bytes: null,
+    file_modified_at: null,
+    partial_md5: null,
+    created_at: "2026-10-01T00:00:00Z",
+    confirmed_at: "2026-10-01T00:00:00Z",
+    missing_since: null,
+    ...fields,
+  };
+}
+
+type Sent = { seen: { reference_id: number }[]; missing: number[] };
+
+describe("sweepFolder", () => {
+  const UNDER = "/api/books/digital-references";
+  const SWEEP = "/api/books/digital-references/sweep";
+
+  /** The server holding these references under `Books`, served in pages of
+   * `REFERENCES_PER_PAGE`, answering a sweep with every id it was sent. */
+  function holding(...references: ReturnType<typeof stored>[]) {
+    api.on(
+      UNDER,
+      (url) => {
+        const page = Number(new URL(url, "http://x").searchParams.get("page"));
+        const start = (page - 1) * REFERENCES_PER_PAGE;
+        return {
+          body: {
+            items: references.slice(start, start + REFERENCES_PER_PAGE),
+            total: references.length,
+            page,
+            page_size: REFERENCES_PER_PAGE,
+          },
+        };
+      },
+      "GET",
+    );
+    api.on(
+      SWEEP,
+      (_url, init) => {
+        const body = JSON.parse(String(init?.body)) as Sent;
+        return {
+          body: {
+            seen: body.seen.map((one) => one.reference_id),
+            missing: body.missing,
+          },
+        };
+      },
+      "POST",
+    );
+  }
+
+  function sweeps(): Sent[] {
+    return api.calls
+      .filter((call) => call.url.includes(SWEEP))
+      .map((call) => call.body as Sent);
+  }
+
+  it("confirms a file still there and lists one that is gone without marking it", async () => {
+    holding(stored(1, "Le Guin/Dune.epub"), stored(2, "Gone.epub"));
+
+    const [swept] = await sweepFolder([picked("Le Guin/Dune.epub")]);
+
+    expect(sweeps()).toEqual([
+      {
+        root_label: "Books",
+        seen: [expect.objectContaining({ reference_id: 1 })],
+        missing: [],
+      },
+    ]);
+    expect(swept).toEqual({
+      kind: "checked",
+      root: "Books",
+      seen: 1,
+      moved: 0,
+      notFound: [{ referenceId: 2, bookId: 20, path: "Gone.epub" }],
+      marked: null,
+      bookIds: [10],
+    });
+  });
+
+  it("sends a sighting with the fingerprint read from the file", async () => {
+    holding(stored(1, "Dune.epub"));
+
+    await sweepFolder([picked("Dune.epub")]);
+
+    expect(sweeps()[0]!.seen).toEqual([
+      expect.objectContaining({ reference_id: 1, size_bytes: 5 }),
+    ]);
+  });
+
+  it("asks nothing for files picked one at a time", async () => {
+    const swept = await sweepFolder([new File(["bytes"], "Dune.epub")]);
+
+    expect(swept).toEqual([]);
+    expect(api.calls).toEqual([]);
+  });
+
+  it("sweeps nothing under a folder with nothing saved", async () => {
+    holding();
+
+    expect(await sweepFolder([picked("Dune.epub")])).toEqual([]);
+    expect(sweeps()).toEqual([]);
+  });
+
+  it("takes a folder holding none of the saved paths for a different one", async () => {
+    // Two members' Calibre libraries share Calibre's default name, so a pick of
+    // one would otherwise list every file of the other as gone.
+    holding(stored(1, "Theirs/Dune.epub"), stored(2, "Theirs/Emma.epub"));
+
+    const swept = await sweepFolder([picked("Mine/Kindred.epub")]);
+
+    expect(swept).toEqual([{ kind: "different", root: "Books", saved: 2 }]);
+    expect(sweeps()).toEqual([]);
+  });
+
+  it("reads every page of the references under the folder", async () => {
+    const many = Array.from({ length: REFERENCES_PER_PAGE + 1 }, (_, at) =>
+      stored(at + 1, `${at}.epub`),
+    );
+    holding(...many);
+
+    const [swept] = await sweepFolder([picked(`${REFERENCES_PER_PAGE}.epub`)]);
+
+    expect(swept).toMatchObject({ seen: 1 });
+    expect(sweeps()[0]!.seen).toEqual([
+      expect.objectContaining({ reference_id: REFERENCES_PER_PAGE + 1 }),
+    ]);
+  });
+
+  it("sends no more sightings in one request than the schema takes", async () => {
+    const many = Array.from({ length: FILES_PER_LOOKUP + 1 }, (_, at) =>
+      stored(at + 1, `${at}.epub`),
+    );
+    holding(...many);
+
+    await sweepFolder(many.map((one) => picked(one.relative_path)));
+
+    expect(sweeps().map((sent) => sent.seen.length)).toEqual([
+      FILES_PER_LOOKUP,
+      1,
+    ]);
+  });
+
+  it("finds a file moved inside the folder by its fingerprint and does not list it", async () => {
+    const moved = picked("Sorted/Dune.epub", "the bytes of dune");
+    const digest = await partialMd5(moved);
+    holding(
+      stored(1, "Kept.epub"),
+      stored(2, "Dune.epub", { size_bytes: moved.size, partial_md5: digest }),
+    );
+
+    const [swept] = await sweepFolder([picked("Kept.epub"), moved]);
+
+    expect(swept).toMatchObject({ moved: 1, notFound: [] });
+  });
+
+  it("lists a gone file beside a file of its size with other bytes", async () => {
+    // The digest decides, not the size: a size match alone is any other book.
+    const gone = picked("Gone.epub", "the bytes of dune");
+    const digest = await partialMd5(gone);
+    holding(
+      stored(1, "Kept.epub"),
+      stored(2, "Gone.epub", { size_bytes: gone.size, partial_md5: digest }),
+    );
+
+    const [swept] = await sweepFolder([
+      picked("Kept.epub"),
+      picked("Other.epub", "the bytes of emma"),
+    ]);
+
+    expect(swept).toMatchObject({
+      moved: 0,
+      notFound: [{ referenceId: 2, bookId: 20, path: "Gone.epub" }],
+    });
+  });
+
+  it("marks the files not found only when asked, and says which it marked", async () => {
+    holding(stored(2, "Gone.epub"));
+
+    const marked = await markMissing("Books", [
+      { referenceId: 2, bookId: 20, path: "Gone.epub" },
+    ]);
+
+    expect(marked).toEqual([2]);
+    expect(sweeps()).toEqual([{ root_label: "Books", seen: [], missing: [2] }]);
+  });
+});
+
+/** One file in a folder of this name. */
+function inFolder(root: string): File {
+  const file = new File(["bytes"], "Dune.epub");
+  Object.defineProperty(file, "webkitRelativePath", {
+    value: `${root}/Dune.epub`,
+  });
+  return file;
+}
+
+describe("useFolderSweep", () => {
+  it("shows the latest pick's answer when an earlier one finishes last", async () => {
+    const first = heldOpen();
+    api.on(/root_label=Old/, first.respond, "GET");
+    api.on(
+      /root_label=New/,
+      {
+        body: {
+          items: [{ ...stored(1, "Dune.epub"), root_label: "New" }],
+          total: 1,
+          page: 1,
+          page_size: REFERENCES_PER_PAGE,
+        },
+      },
+      "GET",
+    );
+    api.on(
+      "/api/books/digital-references/sweep",
+      { body: { seen: [1], missing: [] } },
+      "POST",
+    );
+    const { result } = renderHookWithProviders(() => useFolderSweep());
+
+    act(() => result.current.sweep([inFolder("Old")]));
+    act(() => result.current.sweep([inFolder("New")]));
+    await waitFor(() => expect(result.current.swept).not.toBeNull());
+    first.release({
+      body: {
+        items: [{ ...stored(9, "Dune.epub"), root_label: "Old" }],
+        total: 1,
+        page: 1,
+        page_size: REFERENCES_PER_PAGE,
+      },
+    });
+    // The earlier pick's own sweep has been sent and answered, so its result
+    // has had the chance to land.
+    await waitFor(() =>
+      expect(
+        api.calls.some(
+          (call) =>
+            call.method === "POST" &&
+            (call.body as { root_label: string }).root_label === "Old",
+        ),
+      ).toBe(true),
+    );
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(result.current.swept?.map((one) => one.root)).toEqual(["New"]);
   });
 });

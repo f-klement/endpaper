@@ -572,6 +572,15 @@ published catalogue withholds them, because where a household shops is not a fac
 work. A row carries no member: its visibility is the book's entirely, which is what puts it
 in `BOOK_OWNED_TABLES`.
 
+**`online_links`.** What a catalogue record says is online about a book: MARC `856`, a
+`url`, the record's link text in `label`, and `relation` from the second indicator
+(`resource`, `version`, `related`, or null where the record states none). Written only by
+the MARC import and written back only by the MARC export; **never fetched**, and never a
+member's file reference, which the export never writes. The URL is `http` or `https` with
+a host (`custom_fields.web_link`, then `ck_online_links_scheme`), at most eight to a book.
+A row carries no member, so it is in `BOOK_OWNED_TABLES` and on the published catalogue:
+it is a fact about the object as a catalogue record.
+
 **`digital_references`.** Where a member says one of their book files is: a `root_label`,
 a `relative_path` beneath it, and a fingerprint. **Never the file.** Endpaper takes no
 custody of a member's book file, so no bytes reach the server on this path and nothing in

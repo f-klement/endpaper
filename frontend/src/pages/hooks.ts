@@ -1,7 +1,7 @@
 /**
  * Hooks that belong to no single page: the session, going back, a write
- * pressed on one row of a list, returning a loan, and asking which Book
- * already holds a file.
+ * pressed on one row of a list, returning a loan, asking which Book already
+ * holds a file, and re-checking the files saved from a re-picked folder.
  *
  * The session is hoisted to this level because App gates routing on it and
  * LoginPage writes it, so it belongs to neither.
@@ -37,14 +37,22 @@ import {
   useLogout,
   useMe,
 } from "../api/generated/endpoints/auth/auth";
-import { findFileHolders } from "../api/generated/endpoints/books/books";
+import {
+  findFileHolders,
+  getListDigitalReferencesQueryKey,
+  getListMissingDigitalReferencesQueryKey,
+  listDigitalReferencesUnderRoot,
+  sweepDigitalReferences,
+} from "../api/generated/endpoints/books/books";
 import { getReturnLoanMutationOptions } from "../api/generated/endpoints/loans/loans";
 import {
   AuthMode,
   type BookFormat,
   type BookOut,
   type DigitalReferenceIn,
+  type DigitalReferenceOut,
   type HoldersOut,
+  type SightingIn,
   type UserOut,
 } from "../api/generated/model";
 import { useInvalidate } from "../api/invalidate";
@@ -597,7 +605,8 @@ export async function askWhoHolds(
 
 /**
  * Every reference onto one Book, one after another, stopping at the first the
- * server refuses and rethrowing it.
+ * server refuses and rethrowing it. A folder sweep sends its chunks through it
+ * too, for the same one writer.
  *
  * **One after another, through the loop every bulk write here shares**, for
  * that loop's reason (one SQLite writer) and for the per book ceiling: the
@@ -605,9 +614,9 @@ export async function askWhoHolds(
  * once is the client that makes it race. What was reported before a refusal
  * stays reported; each sighting is idempotent on its location.
  */
-export async function reportEach(
-  references: readonly DigitalReferenceIn[],
-  post: (reference: DigitalReferenceIn) => Promise<unknown>,
+export async function reportEach<T = DigitalReferenceIn>(
+  references: readonly T[],
+  post: (reference: T) => Promise<unknown>,
 ): Promise<void> {
   // An object rather than a `let`: the loop's callbacks set it, and a
   // narrowed `let` reads `undefined` after the await whatever they did.
@@ -623,4 +632,338 @@ export async function reportEach(
     stopped: () => refusal.refused,
   });
   if (refusal.refused) throw refusal.thrown;
+}
+
+/** The most references one page of the listing under a root carries. */
+export const REFERENCES_PER_PAGE = 200;
+
+/** A stored reference a re-pick did not find, as the member is shown it. */
+export interface NotFound {
+  readonly referenceId: number;
+  readonly bookId: number;
+  /** The raw stored path. Rendered through `plainName`, never as it is. */
+  readonly path: string;
+}
+
+/**
+ * What re-picking one folder found among the files saved under its name.
+ *
+ * `checked`: sightings were written, and `notFound` waits for the member's
+ * press before any of it is marked. `different`: the pick held none of the
+ * saved paths, so it is taken for another folder sharing the name and
+ * nothing was written.
+ */
+export type FolderSweep =
+  | {
+      readonly kind: "checked";
+      readonly root: string;
+      /** References whose file the pick held, so they were confirmed again. */
+      readonly seen: number;
+      /** Absent by path, found by fingerprint under another path. */
+      readonly moved: number;
+      readonly notFound: readonly NotFound[];
+      /** How many the member's press marked, or `null` before the press. */
+      readonly marked: number | null;
+      /** Every Book whose references the sweep wrote, for the caches. */
+      readonly bookIds: readonly number[];
+    }
+  | {
+      readonly kind: "different";
+      readonly root: string;
+      readonly saved: number;
+    };
+
+/**
+ * Every reference the member can see under one root, from this page on.
+ *
+ * Page after page rather than together, because the total is learned from
+ * the first answer. Ends on a short page as well as on the total, so a total
+ * that moved under the walk cannot keep it asking.
+ */
+async function storedUnder(
+  root: string,
+  page = 1,
+): Promise<DigitalReferenceOut[]> {
+  const answer = await listDigitalReferencesUnderRoot({
+    root_label: root,
+    page,
+    page_size: REFERENCES_PER_PAGE,
+  });
+  const done =
+    answer.items.length < REFERENCES_PER_PAGE ||
+    page * REFERENCES_PER_PAGE >= answer.total;
+  return done
+    ? answer.items
+    : [...answer.items, ...(await storedUnder(root, page + 1))];
+}
+
+/** Items in runs of `FILES_PER_LOOKUP`, the most one sweep request takes. */
+function inChunks<T>(items: readonly T[]): T[][] {
+  const chunks: T[][] = [];
+  for (let start = 0; start < items.length; start += FILES_PER_LOOKUP) {
+    chunks.push(items.slice(start, start + FILES_PER_LOOKUP));
+  }
+  return chunks;
+}
+
+/**
+ * The absent references whose file the pick holds under another path.
+ *
+ * Matched on KOReader's digest, read only for a held file at no saved path
+ * whose size equals an absent reference's: a size that matches nothing
+ * cannot carry the digest, so a large folder is not read through for one
+ * moved file.
+ */
+async function movedAmong(
+  absent: readonly DigitalReferenceOut[],
+  unclaimed: readonly File[],
+): Promise<Set<number>> {
+  const sized = absent.filter(
+    (one) => one.partial_md5 != null && one.size_bytes != null,
+  );
+  const sizes = new Set(sized.map((one) => one.size_bytes));
+  const candidates = unclaimed.filter((file) => sizes.has(file.size));
+  const digests = new Set(
+    await Promise.all(
+      candidates.map((file) => partialMd5(file).catch(() => null)),
+    ),
+  );
+  return new Set(
+    sized.filter((one) => digests.has(one.partial_md5!)).map((one) => one.id),
+  );
+}
+
+/**
+ * Compare one root's saved references with the files a pick holds under it,
+ * and write the sightings.
+ *
+ * **A file is matched by its path beneath the root, as raw text**, the same
+ * text `referenceFor` sent when the reference was written.
+ *
+ * **Misses are not written here.** A root is only a folder name, and two
+ * members' folders can share one (Calibre names every library alike), so a
+ * pick cannot tell another member's file from a file that is gone. The
+ * absent ones are returned for a person to mark. A pick holding none of the
+ * saved paths is taken for a different folder and writes nothing at all.
+ *
+ * Sent in chunks of `FILES_PER_LOOKUP`, one after another, for the reason
+ * `reportEach` is sequential: one SQLite writer.
+ */
+async function sweepRoot(
+  root: string,
+  held: ReadonlyMap<string, File>,
+): Promise<FolderSweep | null> {
+  const stored = await storedUnder(root);
+  if (stored.length === 0) return null;
+  const present = stored.filter((one) => held.has(one.relative_path));
+  if (present.length === 0) {
+    return { kind: "different", root, saved: stored.length };
+  }
+  const absent = stored.filter((one) => !held.has(one.relative_path));
+  const saved = new Set(stored.map((one) => one.relative_path));
+  const unclaimed = [...held]
+    .filter(([path]) => !saved.has(path))
+    .map(([, file]) => file);
+
+  const [sightings, moved] = await Promise.all([
+    Promise.all(
+      present.map(async (one): Promise<SightingIn> => {
+        const look = await locate(held.get(one.relative_path)!);
+        return {
+          reference_id: one.id,
+          size_bytes: look?.size_bytes ?? null,
+          file_modified_at: look?.file_modified_at ?? null,
+          partial_md5: look?.partial_md5 ?? null,
+        };
+      }),
+    ),
+    movedAmong(absent, unclaimed),
+  ]);
+
+  const byId = new Map(stored.map((one) => [one.id, one]));
+  const seen: number[] = [];
+  await reportEach(inChunks(sightings), async (chunk) => {
+    const answer = await sweepDigitalReferences({
+      root_label: root,
+      seen: chunk,
+      missing: [],
+    });
+    seen.push(...answer.seen);
+  });
+
+  return {
+    kind: "checked",
+    root,
+    seen: seen.length,
+    moved: moved.size,
+    notFound: absent
+      .filter((one) => !moved.has(one.id))
+      .map((one) => ({
+        referenceId: one.id,
+        bookId: one.book_id,
+        path: one.relative_path,
+      })),
+    marked: null,
+    bookIds: [
+      ...new Set(
+        seen.flatMap((id) => {
+          const bookId = byId.get(id)?.book_id;
+          return bookId === undefined ? [] : [bookId];
+        }),
+      ),
+    ],
+  };
+}
+
+/**
+ * Re-check the references saved under each folder this pick names, writing
+ * the sightings and returning what was not found.
+ *
+ * **Only a folder pick has a root**, so a pick of single files sweeps
+ * nothing: `referenceFor` answers `null` for a file with no path, and a
+ * browser that ignores `webkitdirectory` hands over exactly those.
+ *
+ * A root with nothing saved under it answers no sweep at all, so a first
+ * pick of a folder says nothing.
+ */
+export async function sweepFolder(
+  files: readonly File[],
+): Promise<FolderSweep[]> {
+  const roots = new Map<string, Map<string, File>>();
+  for (const file of files) {
+    const where = referenceFor(file);
+    if (where === null) continue;
+    const under = roots.get(where.root_label) ?? new Map<string, File>();
+    under.set(where.relative_path, file);
+    roots.set(where.root_label, under);
+  }
+  const swept: FolderSweep[] = [];
+  await reportEach([...roots], async ([root, held]) => {
+    const one = await sweepRoot(root, held);
+    if (one !== null) swept.push(one);
+  });
+  return swept;
+}
+
+/**
+ * Mark what a sweep did not find as missing, on the member's press.
+ *
+ * The server writes only references under `root` on Books the member may
+ * write; the answer is the ids it flagged. A flag never deletes.
+ */
+export async function markMissing(
+  root: string,
+  notFound: readonly NotFound[],
+): Promise<number[]> {
+  const marked: number[] = [];
+  await reportEach(
+    inChunks(notFound.map((one) => one.referenceId)),
+    async (chunk) => {
+      const answer = await sweepDigitalReferences({
+        root_label: root,
+        seen: [],
+        missing: chunk,
+      });
+      marked.push(...answer.missing);
+    },
+  );
+  return marked;
+}
+
+export interface UseFolderSweepResult {
+  /** Sweep the folders a pick names. Fire and forget. */
+  sweep: (files: readonly File[]) => void;
+  /** What the last sweep found, or `null` before one has finished. */
+  swept: readonly FolderSweep[] | null;
+  /** Mark what one root's sweep did not find as missing. */
+  markMissing: (root: string) => void;
+  isMarking: boolean;
+  /** The last sweep or press stopped on a refusal; what it wrote stays. */
+  failed: boolean;
+}
+
+/**
+ * A re-picked folder confirms the files still in it and lists the ones that
+ * are not, for the member to mark as missing.
+ *
+ * Shared by every door that takes a folder of book files, so the scan page
+ * and the Calibre card sweep the same way.
+ *
+ * **Only the latest pick's answer is shown.** Two picks close together race,
+ * and the earlier one finishing last would otherwise replace the later one's
+ * notice with a stale one.
+ */
+export function useFolderSweep(): UseFolderSweepResult {
+  const queryClient = useQueryClient();
+  const [swept, setSwept] = useState<readonly FolderSweep[] | null>(null);
+  const [failed, setFailed] = useState(false);
+  const [isMarking, setIsMarking] = useState(false);
+  const latest = useRef(0);
+
+  const refresh = useCallback(
+    (bookIds: Iterable<number>) => {
+      for (const bookId of new Set(bookIds)) {
+        void queryClient.invalidateQueries({
+          queryKey: getListDigitalReferencesQueryKey(bookId),
+        });
+      }
+      void queryClient.invalidateQueries({
+        queryKey: getListMissingDigitalReferencesQueryKey(),
+      });
+    },
+    [queryClient],
+  );
+
+  const sweep = useCallback(
+    (files: readonly File[]) => {
+      const pick = (latest.current += 1);
+      setSwept(null);
+      setFailed(false);
+      sweepFolder(files).then(
+        (result) => {
+          if (pick !== latest.current) return;
+          setSwept(result);
+          refresh(
+            result.flatMap((one) =>
+              one.kind === "checked" ? one.bookIds : [],
+            ),
+          );
+        },
+        () => {
+          if (pick === latest.current) setFailed(true);
+        },
+      );
+    },
+    [refresh],
+  );
+
+  const mark = useCallback(
+    (root: string) => {
+      const one = swept?.find(
+        (each) => each.kind === "checked" && each.root === root,
+      );
+      if (one?.kind !== "checked" || one.notFound.length === 0) return;
+      const pick = latest.current;
+      setIsMarking(true);
+      setFailed(false);
+      markMissing(root, one.notFound)
+        .then(
+          (ids) => {
+            if (pick !== latest.current) return;
+            const done = { ...one, marked: ids.length };
+            setSwept((current) =>
+              (current ?? []).map((each) => (each === one ? done : each)),
+            );
+            refresh(one.notFound.map((file) => file.bookId));
+          },
+          () => {
+            if (pick === latest.current) setFailed(true);
+          },
+        )
+        .finally(() => setIsMarking(false));
+    },
+    [swept, refresh],
+  );
+
+  return { sweep, swept, markMissing: mark, isMarking, failed };
 }

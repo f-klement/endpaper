@@ -34,10 +34,12 @@ import logging
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from typing import Any, Final, get_origin
+from xml.sax.saxutils import escape
 
 import covers
 from categories import join_categories
-from enums import AuthorityScheme, ClassificationScheme, HeadingKind
+from custom_fields import web_link
+from enums import AuthorityScheme, ClassificationScheme, HeadingKind, LinkRelationship
 from models import (
     AUTHOR_LINE_MAX,
     COVER_URL_MAX,
@@ -47,6 +49,8 @@ from models import (
     LANGUAGE_MAX,
     MAX_PAGE_NUMBER_IN_A_BOOK,
     MAX_SERIES_INDEX,
+    ONLINE_LINK_LABEL_MAX,
+    ONLINE_LINK_URL_MAX_BYTES,
     PUBLISHER_MAX,
     SERIES_NAME_MAX,
     SUBTITLE_MAX,
@@ -143,6 +147,38 @@ class Subject:
     label: str
     vocabulary: str | None = None
     identifier: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class Link:
+    """One online resource a catalogue record names: MARC 856, already bounded.
+
+    Built through `Link.of` only, which is what makes holding one mean the URL
+    is `http` or `https` with a host (`custom_fields.web_link`) and fits
+    `models.ONLINE_LINK_URL_MAX_BYTES`. A label too wide is cut, being text; a
+    URL too wide is dropped, since a cut URL points somewhere else.
+
+    **The cap is on the URL as a record writes it, escaped**, because that is
+    the unit an export page and an SRU response pay in: `&` is five bytes
+    there, and a query string is mostly `&`. Measured on the SRU page of 50,
+    a cap on the stored bytes alone let eight links nearly double the widest
+    response. `ck_online_links_bounds` measures the same escaped form, so the
+    column and this agree on every row.
+    """
+
+    url: str
+    label: str | None = None
+    relation: LinkRelationship | None = None
+
+    @classmethod
+    def of(
+        cls, url: str, label: str | None, relation: LinkRelationship | None
+    ) -> Link | None:
+        """The link, or None where the URL is not one this app will render."""
+        target = web_link(url)
+        if target is None or len(escape(target).encode()) > ONLINE_LINK_URL_MAX_BYTES:
+            return None
+        return cls(target, (label or "")[:ONLINE_LINK_LABEL_MAX] or None, relation)
 
 
 @dataclass(frozen=True, slots=True)

@@ -210,6 +210,15 @@ def link_target(kind: CustomFieldKind, value: str) -> str | None:
     """
     if kind is not CustomFieldKind.URL:
         return None
+    return web_link(value)
+
+
+def web_link(value: str) -> str | None:
+    """`link_target`'s refusals and rebuild, for any URL this app will render.
+
+    Separate from the kind gate so a catalogue's `856 $u` (`marc_fields`) is
+    held to the same seven refusals as a value a member typed.
+    """
     # Before anything is parsed. Both characters make Python and a browser read
     # a **different host** out of the same string, so a value carrying one can
     # never be reconciled and is refused rather than repaired. A backslash ends

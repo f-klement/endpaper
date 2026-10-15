@@ -79,6 +79,7 @@ import type {
   KoreaderImportIn,
   ListAuthorSuggestionsParams,
   ListBooksParams,
+  ListDigitalReferencesUnderRootParams,
   ListMissingDigitalReferencesParams,
   ListQuotesParams,
   ListTrashParams,
@@ -89,6 +90,7 @@ import type {
   NoteOut,
   OwnershipUpdate,
   PageBookOut,
+  PageDigitalReferenceOut,
   PageMissingDigitalReferenceOut,
   PageQuoteWithBookOut,
   PrivacyUpdate,
@@ -100,6 +102,8 @@ import type {
   Refusal,
   SearchBooksParams,
   SeriesOut,
+  SweepIn,
+  SweepOut,
   TagCreate,
   TagOut,
 } from "../../model";
@@ -3024,6 +3028,206 @@ export const useRenameCustomField = <
 > => {
   return useMutation(getRenameCustomFieldMutationOptions(options), queryClient);
 };
+export const getListDigitalReferencesUnderRootUrl = (
+  params: ListDigitalReferencesUnderRootParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : String(value));
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/books/digital-references?${stringifiedParams}`
+    : `/api/books/digital-references`;
+};
+
+/**
+ * Every reference the caller can see under one root, for a sweep of it.
+ *
+ * A re-picked folder knows which files it holds and nothing about which it
+ * used to: that is this listing. The client compares the two and answers
+ * through `POST /digital-references/sweep`.
+ *
+ * **Scoped by the Shelf, as the missing listing is and for its reason**: a
+ * reference carries no Member of its own. Paginated, oldest first, so a
+ * client walking the pages meets each row once.
+ * @summary List Digital References Under Root
+ */
+export const listDigitalReferencesUnderRoot = async (
+  params: ListDigitalReferencesUnderRootParams,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<PageDigitalReferenceOut> => {
+  return customFetch<PageDigitalReferenceOut>(
+    getListDigitalReferencesUnderRootUrl(params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getListDigitalReferencesUnderRootQueryKey = (
+  params?: ListDigitalReferencesUnderRootParams,
+) => {
+  return [
+    `/api/books/digital-references`,
+    ...(params ? [params] : []),
+  ] as const;
+};
+
+export const getListDigitalReferencesUnderRootQueryOptions = <
+  TData = Awaited<ReturnType<typeof listDigitalReferencesUnderRoot>>,
+  TError = Refusal | HTTPValidationError,
+>(
+  params: ListDigitalReferencesUnderRootParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listDigitalReferencesUnderRoot>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getListDigitalReferencesUnderRootQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listDigitalReferencesUnderRoot>>
+  > = ({ signal }) =>
+    listDigitalReferencesUnderRoot(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listDigitalReferencesUnderRoot>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type ListDigitalReferencesUnderRootQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listDigitalReferencesUnderRoot>>
+>;
+export type ListDigitalReferencesUnderRootQueryError =
+  Refusal | HTTPValidationError;
+
+export function useListDigitalReferencesUnderRoot<
+  TData = Awaited<ReturnType<typeof listDigitalReferencesUnderRoot>>,
+  TError = Refusal | HTTPValidationError,
+>(
+  params: ListDigitalReferencesUnderRootParams,
+  options: {
+    query: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listDigitalReferencesUnderRoot>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listDigitalReferencesUnderRoot>>,
+          TError,
+          Awaited<ReturnType<typeof listDigitalReferencesUnderRoot>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useListDigitalReferencesUnderRoot<
+  TData = Awaited<ReturnType<typeof listDigitalReferencesUnderRoot>>,
+  TError = Refusal | HTTPValidationError,
+>(
+  params: ListDigitalReferencesUnderRootParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listDigitalReferencesUnderRoot>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listDigitalReferencesUnderRoot>>,
+          TError,
+          Awaited<ReturnType<typeof listDigitalReferencesUnderRoot>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useListDigitalReferencesUnderRoot<
+  TData = Awaited<ReturnType<typeof listDigitalReferencesUnderRoot>>,
+  TError = Refusal | HTTPValidationError,
+>(
+  params: ListDigitalReferencesUnderRootParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listDigitalReferencesUnderRoot>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/**
+ * @summary List Digital References Under Root
+ */
+
+export function useListDigitalReferencesUnderRoot<
+  TData = Awaited<ReturnType<typeof listDigitalReferencesUnderRoot>>,
+  TError = Refusal | HTTPValidationError,
+>(
+  params: ListDigitalReferencesUnderRootParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listDigitalReferencesUnderRoot>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+} {
+  const queryOptions = getListDigitalReferencesUnderRootQueryOptions(
+    params,
+    options,
+  );
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
 export const getListMissingDigitalReferencesUrl = (
   params?: ListMissingDigitalReferencesParams,
 ) => {
@@ -3267,6 +3471,147 @@ export function useListMissingDigitalReferences<
   return withQueryKey(query, queryOptions.queryKey);
 }
 
+export const getSweepDigitalReferencesUrl = () => {
+  return `/api/books/digital-references/sweep`;
+};
+
+/**
+ * Record what a re-picked folder found: each sighting, and each miss.
+ *
+ * The two per reference routes in one request. A miss is the per reference
+ * flag's rule unchanged: `missing_since` set once, the row never deleted. A
+ * sighting clears `missing_since` and confirms the row, and writes its
+ * fingerprint only where `_fingerprint_agrees`. A sweep of a few hundred
+ * files is then a request or two rather than a request a file.
+ *
+ * **The client sends sightings at the pick and misses only on a press**,
+ * because a root is only a folder name: one member's pick of their own
+ * "Calibre Library" would otherwise flag every file another member saved
+ * from theirs.
+ *
+ * **Who may flag a reference is who may write its Book**, the rule
+ * `dependencies.book_for_write` states for the per reference routes. That
+ * rule is every Book on the caller's shelf, so the rows are resolved through
+ * `Shelf.seen_by`: a reference on another member's private Book is not
+ * reached, and answers exactly as an id that does not exist.
+ *
+ * **Only references under `root_label` are written.** A sweep is one
+ * folder's account of itself, and a file under another root is not one it
+ * looked for.
+ * @summary Sweep Digital References
+ */
+export const sweepDigitalReferences = async (
+  sweepIn: SweepIn,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<SweepOut> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+  return customFetch<SweepOut>(getSweepDigitalReferencesUrl(), {
+    ...options,
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...getHeaders(options?.headers),
+    },
+    body: JSON.stringify(sweepIn),
+  });
+};
+
+export const getSweepDigitalReferencesMutationKey = () =>
+  ["sweepDigitalReferences"] as const;
+
+export const getSweepDigitalReferencesMutationOptions = <
+  TError = Refusal | HTTPValidationError,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof sweepDigitalReferences>>,
+    TError,
+    SweepDigitalReferencesMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof sweepDigitalReferences>>,
+  TError,
+  SweepDigitalReferencesMutationVariables,
+  TContext
+> => {
+  const mutationKey = getSweepDigitalReferencesMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof sweepDigitalReferences>>,
+    SweepDigitalReferencesMutationVariables
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return sweepDigitalReferences(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type SweepDigitalReferencesMutationResult = NonNullable<
+  Awaited<ReturnType<typeof sweepDigitalReferences>>
+>;
+export type SweepDigitalReferencesMutationBody = SweepIn;
+export type SweepDigitalReferencesMutationError = Refusal | HTTPValidationError;
+export type SweepDigitalReferencesMutationVariables = { data: SweepIn };
+
+/**
+ * @summary Sweep Digital References
+ */
+export const useSweepDigitalReferences = <
+  TError = Refusal | HTTPValidationError,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof sweepDigitalReferences>>,
+      TError,
+      SweepDigitalReferencesMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof sweepDigitalReferences>>,
+  TError,
+  SweepDigitalReferencesMutationVariables,
+  TContext
+> => {
+  return useMutation(
+    getSweepDigitalReferencesMutationOptions(options),
+    queryClient,
+  );
+};
 export const getListDuplicatesUrl = () => {
   return `/api/books/duplicates`;
 };
@@ -9481,6 +9826,111 @@ export const useEditNote = <
   TContext
 > => {
   return useMutation(getEditNoteMutationOptions(options), queryClient);
+};
+export const getForgetOnlineLinkUrl = (bookId: number, linkId: number) => {
+  return `/api/books/${bookId}/online-links/${linkId}`;
+};
+
+/**
+ * Remove a wrong or unwanted catalogue link from a book.
+ *
+ * The only correction there is, `forget_book_identifier`'s trade: any member
+ * who may import a MARC file can add links to a book they may see, so one who
+ * may write the book can take one off. Importing the record again puts it
+ * back. Whoever may write the book; a book the caller cannot see is 404, and
+ * so is a link belonging to a different book.
+ *
+ * **Looked up in the book's own links**, one load of at most eight rows,
+ * rather than by a query on the link id, so the pairing with this book is the
+ * collection itself.
+ * @summary Forget Online Link
+ */
+export const forgetOnlineLink = async (
+  bookId: number,
+  linkId: number,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<void> => {
+  return customFetch<void>(getForgetOnlineLinkUrl(bookId, linkId), {
+    ...options,
+    method: "DELETE",
+  });
+};
+
+export const getForgetOnlineLinkMutationKey = () =>
+  ["forgetOnlineLink"] as const;
+
+export const getForgetOnlineLinkMutationOptions = <
+  TError = Refusal | HTTPValidationError,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof forgetOnlineLink>>,
+    TError,
+    ForgetOnlineLinkMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof forgetOnlineLink>>,
+  TError,
+  ForgetOnlineLinkMutationVariables,
+  TContext
+> => {
+  const mutationKey = getForgetOnlineLinkMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof forgetOnlineLink>>,
+    ForgetOnlineLinkMutationVariables
+  > = (props) => {
+    const { bookId, linkId } = props ?? {};
+
+    return forgetOnlineLink(bookId, linkId, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ForgetOnlineLinkMutationResult = NonNullable<
+  Awaited<ReturnType<typeof forgetOnlineLink>>
+>;
+
+export type ForgetOnlineLinkMutationError = Refusal | HTTPValidationError;
+export type ForgetOnlineLinkMutationVariables = {
+  bookId: number;
+  linkId: number;
+};
+
+/**
+ * @summary Forget Online Link
+ */
+export const useForgetOnlineLink = <
+  TError = Refusal | HTTPValidationError,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof forgetOnlineLink>>,
+      TError,
+      ForgetOnlineLinkMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof forgetOnlineLink>>,
+  TError,
+  ForgetOnlineLinkMutationVariables,
+  TContext
+> => {
+  return useMutation(getForgetOnlineLinkMutationOptions(options), queryClient);
 };
 export const getSetOwnershipUrl = (bookId: number) => {
   return `/api/books/${bookId}/ownership`;

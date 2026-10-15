@@ -2,13 +2,14 @@ import { useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { Button, ErrorState, Icon, Spinner } from "../../components";
-import { LocationField } from "../components";
+import { FolderSweepNotice, LocationField } from "../components";
 import { useTranslation, type MessageKey } from "../../i18n";
 import { parseIsbn } from "../../lib/isbn";
 import BarcodeScanner from "./components/BarcodeScanner";
 import FilePickPanel from "./components/FilePickPanel";
 import SearchPanel from "./components/SearchPanel";
 import GoogleBooksHelp from "../components/GoogleBooksHelp";
+import { useFolderSweep } from "../hooks";
 import LookupResult from "./components/LookupResult";
 import RapidQueue from "./components/RapidQueue";
 import { useBookSearch, useRapidIntake, useScanFlow } from "./hooks";
@@ -19,6 +20,7 @@ export default function ScanPage() {
   const scan = useScanFlow((bookId) => navigate(`/book/${bookId}`));
   const search = useBookSearch();
   const rapid = useRapidIntake();
+  const folderSweep = useFolderSweep();
   const [showSearchHelp, setShowSearchHelp] = useState(false);
   const [manualIsbn, setManualIsbn] = useState("");
   const [manualError, setManualError] = useState<MessageKey | null>(null);
@@ -256,10 +258,22 @@ export default function ScanPage() {
               same queue as rapid scanning: a file answers the same question a
               barcode does. */}
           <FilePickPanel
-            onPick={rapid.pickFiles}
+            onPick={(files) => {
+              rapid.pickFiles(files);
+              // A re-picked folder is also a look at every file saved from a
+              // folder of its name: the ones not found are listed beside the
+              // queue, for the member to mark.
+              folderSweep.sweep(files);
+            }}
             isReading={rapid.isReading}
             skipped={rapid.skipped}
             libraryNotice={rapid.libraryNotice}
+          />
+          <FolderSweepNotice
+            swept={folderSweep.swept}
+            failed={folderSweep.failed}
+            isMarking={folderSweep.isMarking}
+            onMarkMissing={folderSweep.markMissing}
           />
         </>
       )}

@@ -2,7 +2,8 @@ import { useNavigate } from "react-router-dom";
 
 import { useLibraryMode } from "../../../app/hooks";
 import { useTranslation } from "../../../i18n";
-import { SettingsSection } from "../../components";
+import { FolderSweepNotice, SettingsSection } from "../../components";
+import { useFolderSweep } from "../../hooks";
 import SettingsSubPage from "../components/SettingsSubPage";
 import { useSettings } from "../hooks";
 import CalibreImport from "./components/CalibreImport";
@@ -68,6 +69,7 @@ export default function LibrarySettingsPage() {
   const customFields = useCustomFields();
   const marcImport = useMarcImport();
   const calibreImport = useCalibreImport();
+  const folderSweep = useFolderSweep();
   const storeImport = useStoreImport();
   const highlightImport = useKoreaderHighlightImport();
   // **The card is drawn only in library mode, and the server refuses the route
@@ -107,10 +109,21 @@ export default function LibrarySettingsPage() {
           failure={calibreImport.failure}
           error={calibreImport.error}
           onChoose={calibreImport.choose}
-          onCrossCheck={calibreImport.crossCheck}
+          onCrossCheck={(files) => {
+            calibreImport.crossCheck(files);
+            // The library folder is the scan page's Calibre door by another
+            // way in: the same root, so the same sweep.
+            folderSweep.sweep(files);
+          }}
           onConfirm={calibreImport.confirm}
           onStop={calibreImport.stop}
           onCancel={calibreImport.reset}
+        />
+        <FolderSweepNotice
+          swept={folderSweep.swept}
+          failed={folderSweep.failed}
+          isMarking={folderSweep.isMarking}
+          onMarkMissing={folderSweep.markMissing}
         />
       </SettingsSection>
 

@@ -91,6 +91,7 @@ from lending import Loans
 from logvalues import clipped
 from models import (
     AUTHOR_KEY_MAX,
+    DIGITAL_REFERENCE_PATH_MAX,
     ISBN_MAX,
     LOCATION_MAX,
     MAX_SERIES_INDEX,
@@ -192,6 +193,9 @@ from schemas import (
     QuoteWithBookOut,
     RefusedAssertionOut,
     SeriesOut,
+    SightingIn,
+    SweepIn,
+    SweepOut,
     TagCreate,
     TagOut,
 )
@@ -4409,6 +4413,146 @@ def list_missing_digital_references(
     )
 
 
+# ── The references under one root, and a sweep of them ───────────────────────
+#
+# Declared on this side of `/{book_id}` for the reason the listing above is:
+# `/digital-references` is one segment, so declared below it this would be a
+# request for the book with id "digital-references".
+
+
+@router.get("/digital-references", response_model=Page[DigitalReferenceOut])
+def list_digital_references_under_root(
+    # No NUL, the body's rule (`schemas.digital._a_path_without_a_null`) for a
+    # value that meets no model: a 422 rather than the 500 a NUL in a text
+    # parameter is on PostgreSQL.
+    root_label: Annotated[
+        str,
+        Query(min_length=1, max_length=DIGITAL_REFERENCE_PATH_MAX, pattern=r"^[^\x00]*$"),
+    ],
+    db: DbSession,
+    current_user: CurrentUser,
+    paging: Paging,
+) -> Page[DigitalReferenceOut]:
+    """Every reference the caller can see under one root, for a sweep of it.
+
+    A re-picked folder knows which files it holds and nothing about which it
+    used to: that is this listing. The client compares the two and answers
+    through `POST /digital-references/sweep`.
+
+    **Scoped by the Shelf, as the missing listing is and for its reason**: a
+    reference carries no Member of its own. Paginated, oldest first, so a
+    client walking the pages meets each row once.
+    """
+    shelf = Shelf.seen_by(db, current_user.id)
+    under = DigitalReference.root_label == root_label
+
+    total = (
+        shelf.select(func.count(DigitalReference.id))
+        .join(DigitalReference, DigitalReference.book_id == Book.id)
+        .filter(under)
+        .scalar()
+        or 0
+    )
+    rows = (
+        shelf.select(DigitalReference)
+        .join(DigitalReference, DigitalReference.book_id == Book.id)
+        .filter(under)
+        .order_by(DigitalReference.id)
+        .offset(paging.offset)
+        .limit(paging.limit)
+        .all()
+    )
+    return Page[DigitalReferenceOut](
+        items=[DigitalReferenceOut.model_validate(row) for row in rows],
+        total=total,
+        page=paging.page,
+        page_size=paging.page_size,
+    )
+
+
+def _fingerprint_agrees(reference: DigitalReference, sighting: SightingIn) -> bool:
+    """Whether a sweep's sighting may write its fingerprint onto this row.
+
+    **Only where every stored half is unset or the same as the one sent**, so a
+    write adds what was missing and never changes what another look recorded.
+    A root is only a folder name, and two members' folders can share it and a
+    path beneath it: without this, one member's pick replaces the other's
+    size, time and digest with those of a different file, and the holder
+    lookup stops finding the first file by its own digest.
+    """
+    pairs = (
+        (reference.size_bytes, sighting.size_bytes),
+        (reference.file_modified_at, sighting.file_modified_at),
+        (reference.partial_md5, sighting.partial_md5),
+    )
+    return all(stored is None or stored == sent for stored, sent in pairs)
+
+
+@router.post("/digital-references/sweep", response_model=SweepOut)
+def sweep_digital_references(
+    payload: SweepIn,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> SweepOut:
+    """Record what a re-picked folder found: each sighting, and each miss.
+
+    The two per reference routes in one request. A miss is the per reference
+    flag's rule unchanged: `missing_since` set once, the row never deleted. A
+    sighting clears `missing_since` and confirms the row, and writes its
+    fingerprint only where `_fingerprint_agrees`. A sweep of a few hundred
+    files is then a request or two rather than a request a file.
+
+    **The client sends sightings at the pick and misses only on a press**,
+    because a root is only a folder name: one member's pick of their own
+    "Calibre Library" would otherwise flag every file another member saved
+    from theirs.
+
+    **Who may flag a reference is who may write its Book**, the rule
+    `dependencies.book_for_write` states for the per reference routes. That
+    rule is every Book on the caller's shelf, so the rows are resolved through
+    `Shelf.seen_by`: a reference on another member's private Book is not
+    reached, and answers exactly as an id that does not exist.
+
+    **Only references under `root_label` are written.** A sweep is one
+    folder's account of itself, and a file under another root is not one it
+    looked for.
+    """
+    sightings = {sighting.reference_id: sighting for sighting in payload.seen}
+    asked = set(sightings) | set(payload.missing)
+    rows = (
+        Shelf.seen_by(db, current_user.id)
+        .select(DigitalReference)
+        .join(DigitalReference, DigitalReference.book_id == Book.id)
+        .filter(
+            DigitalReference.id.in_(asked),
+            DigitalReference.root_label == payload.root_label,
+        )
+        .all()
+    )
+
+    seen: list[int] = []
+    missing: list[int] = []
+    for reference in sorted(rows, key=lambda row: row.id):
+        sighting = sightings.get(reference.id)
+        if sighting is not None:
+            # A sighting wins over a miss naming the same id: something looked
+            # and found it, which is the only evidence against a miss.
+            reference.root_confirmed = True
+            if _fingerprint_agrees(reference, sighting):
+                reference.size_bytes = sighting.size_bytes
+                reference.file_modified_at = sighting.file_modified_at
+                reference.partial_md5 = sighting.partial_md5
+            reference.confirmed_at = func.now()
+            reference.missing_since = None
+            seen.append(reference.id)
+        else:
+            if reference.missing_since is None:
+                reference.missing_since = func.now()
+            missing.append(reference.id)
+    db.commit()
+    return SweepOut(seen=seen, missing=missing)
+
+
 # ── Which Books already hold these files ──────────────────────────────────────
 #
 # Declared on this side of `/{book_id}` for the reason the listing above is.
@@ -5981,6 +6125,38 @@ def forget_book_identifier(
     an identifier belonging to a different book.
     """
     db.delete(_book_identifier_for(book, identifier_id, db))
+    db.commit()
+
+
+# ── Online links ──────────────────────────────────────────────────────────────
+
+
+@router.delete(
+    "/{book_id}/online-links/{link_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+@refuses(404)
+def forget_online_link(
+    link_id: RowId,
+    book: BookForWrite,
+    db: DbSession,
+) -> None:
+    """Remove a wrong or unwanted catalogue link from a book.
+
+    The only correction there is, `forget_book_identifier`'s trade: any member
+    who may import a MARC file can add links to a book they may see, so one who
+    may write the book can take one off. Importing the record again puts it
+    back. Whoever may write the book; a book the caller cannot see is 404, and
+    so is a link belonging to a different book.
+
+    **Looked up in the book's own links**, one load of at most eight rows,
+    rather than by a query on the link id, so the pairing with this book is the
+    collection itself.
+    """
+    link = next((row for row in book.online_links if row.id == link_id), None)
+    if link is None:
+        raise HTTPException(status_code=404, detail="Link not found")
+    book.online_links.remove(link)
     db.commit()
 
 

@@ -463,6 +463,25 @@ class HeadingKind(StrEnum):
     CARRIER = "carrier"
 
 
+class LinkRelationship(StrEnum):
+    """What an online link is to the Book that carries it: MARC 856's second indicator.
+
+    **Only the three values the indicator states.** A blank and `8` ("no
+    display constant generated") say nothing about the relationship, so they
+    are stored as null rather than as a fourth member that would read as a
+    fact. Declaration order is compared by `_enum_check`'s guard, so a new
+    member is a revision.
+    """
+
+    #: `0`: the link is the resource itself, a born digital title.
+    RESOURCE = "resource"
+    #: `1`: a version of the resource, such as the EPUB of a print edition
+    #: catalogued from the print record.
+    VERSION = "version"
+    #: `2`: a related resource, such as a table of contents or a review.
+    RELATED = "related"
+
+
 class BookIdentifierScheme(StrEnum):
     """Who is naming a Book, where that name is not an ISBN.
 

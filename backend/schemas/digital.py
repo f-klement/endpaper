@@ -18,7 +18,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 from enums import BookFormat
 from models import DIGITAL_REFERENCE_MAX_SIZE, DIGITAL_REFERENCE_PATH_MAX, PARTIAL_MD5_HEX
-from schemas.common import UtcDateTime, UtcDateTimeIn
+from schemas.common import RowIdField, UtcDateTime, UtcDateTimeIn
 
 #: The most file references one book may carry.
 #:
@@ -301,3 +301,64 @@ class HoldersOut(BaseModel):
     """
 
     holders: list[HolderOut]
+
+
+class SightingIn(BaseModel):
+    """One stored reference a folder pick found, with what the browser saw.
+
+    The fingerprint fields are `DigitalReferenceIn`'s and replace the stored
+    ones whole, for that route's reason: a row says what one client saw in one
+    look.
+    """
+
+    reference_id: RowIdField
+    size_bytes: int | None = Field(default=None, ge=0, le=DIGITAL_REFERENCE_MAX_SIZE)
+    file_modified_at: UtcDateTimeIn | None = None
+    partial_md5: PartialMd5 | None = None
+
+
+class SweepIn(BaseModel):
+    """What a re-picked folder said about the references stored under it.
+
+    `seen` are references whose file the pick held and `missing` those it did
+    not. A reference under another root is not this folder's to judge, so the
+    route skips one that does not carry `root_label`.
+
+    **Bounded as the holder lookup is**, at `MAX_FILES_PER_LOOKUP` references
+    in one request together: a client sweeping a larger root sends it in
+    chunks, and no request makes the database match an unbounded list.
+    """
+
+    root_label: str = Field(min_length=1, max_length=DIGITAL_REFERENCE_PATH_MAX)
+    # Each list alone at the joint ceiling as well, so the bound is visible on
+    # the field; `_bounded` below is what holds the two together.
+    seen: list[SightingIn] = Field(default_factory=list, max_length=MAX_FILES_PER_LOOKUP)
+    missing: list[RowIdField] = Field(default_factory=list, max_length=MAX_FILES_PER_LOOKUP)
+
+    @field_validator("root_label")
+    @classmethod
+    def _no_nulls(cls, value: str) -> str:
+        return _a_path_without_a_null(value)
+
+    @model_validator(mode="after")
+    def _bounded(self) -> SweepIn:
+        asked = len(self.seen) + len(self.missing)
+        if asked == 0:
+            raise ValueError("A sweep names at least one reference")
+        if asked > MAX_FILES_PER_LOOKUP:
+            raise ValueError(
+                f"A sweep names at most {MAX_FILES_PER_LOOKUP} references at once"
+            )
+        return self
+
+
+class SweepOut(BaseModel):
+    """The references the sweep wrote, by id.
+
+    A reference the caller cannot see, or one under another root, is in
+    neither list: it was not written, and saying so per id would confirm that
+    the id exists.
+    """
+
+    seen: list[int]
+    missing: list[int]

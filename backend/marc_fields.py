@@ -44,8 +44,8 @@ from bibliographic import (
     split_title_statement,
     strip_isbd_punctuation,
 )
-from catalogue import AuthorityAssertion, Heading, Subject
-from enums import AuthorityScheme, ClassificationScheme, HeadingKind
+from catalogue import AuthorityAssertion, Heading, Link, Subject
+from enums import AuthorityScheme, ClassificationScheme, HeadingKind, LinkRelationship
 from isbn import parse as parse_isbn
 
 #: MARCXML's namespace, defined once for the reader and the writer.
@@ -723,6 +723,17 @@ def _marc_carrier_is_book(record: ElementTree.Element) -> bool:
     )
 
 
+#: `856`'s second indicator, where it states a relation. Blank and `8` do not.
+#:
+#: Derived from `LinkRelationship`'s declaration order, which is MARC's `0`,
+#: `1`, `2`, rather than spelled: a literal `"2"` in this module is a reader of
+#: the ambiguous subfield as far as
+#: `test_house_rules.py::TestOneReaderPerAmbiguousSubfield` can tell.
+_LINK_RELATIONS: Final[dict[str, LinkRelationship]] = {
+    str(position): relation for position, relation in enumerate(LinkRelationship)
+}
+
+
 class Fields:
     """One MARC record's datafields, and every question this app asks of them.
 
@@ -756,6 +767,37 @@ class Fields:
         two schemes no catalogue here sends.
         """
         return self._fields.get(tag, [])
+
+    def online_links(self) -> list[Link]:
+        """Every `856 $u` as a link, in record order, repeats and refusals dropped.
+
+        **Every `$u`, not the first.** The field repeats and so does `$u`
+        within it (mirrors of one resource); each is its own link carrying the
+        field's text. The text is `$y`, MARC's link text, then `$3`, the
+        materials it covers (`Inhaltsverzeichnis`), then `$z`, a public note:
+        Koha's order, and never derived from the URL. The second indicator is
+        the relation (`_LINK_RELATIONS`); anything else there is no statement.
+
+        Read off the node rather than `get`, because `Subfields` keeps no
+        indicators.
+        """
+        links: list[Link] = []
+        seen: set[str] = set()
+        for datafield in self._record.findall(f"{_MARC}datafield"):
+            if datafield.get("tag") != "856":
+                continue
+            entry = Subfields(
+                (subfield.get("code") or "", _marc_text(subfield.text))
+                for subfield in datafield.findall(f"{_MARC}subfield")
+            )
+            label = entry.get("y") or entry.get("3") or entry.get("z") or None
+            relation = _LINK_RELATIONS.get(datafield.get("ind2") or " ")
+            for url in entry.all("u"):
+                link = Link.of(url, label, relation)
+                if link is not None and link.url not in seen:
+                    seen.add(link.url)
+                    links.append(link)
+        return links
 
     def title_statement(self) -> tuple[str, str | None, str | None, float | None]:
         """The 245 field as title, subtitle, series name and series number.

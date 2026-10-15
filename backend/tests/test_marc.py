@@ -30,8 +30,8 @@ from hypothesis import strategies as st
 import marc
 import marc_fields
 import xml_parse
-from catalogue import Heading
-from enums import ClassificationScheme, HeadingKind
+from catalogue import Heading, Link
+from enums import ClassificationScheme, HeadingKind, LinkRelationship
 from models import AUTHOR_LINE_MAX
 from tests.corpus import application_modules
 from tests.strategies import (
@@ -101,6 +101,8 @@ def a_book(**overrides):
         "series_name": None,
         "series_index": None,
         "classifications": [],
+        "online_links": [],
+        "digital_references": [],
     } | overrides
     return types.SimpleNamespace(**fields)
 
@@ -427,6 +429,110 @@ class TestEveryFieldMapsBothWays:
             352,
         )
         assert len(record.headings) == 2
+
+
+def a_link(url, label=None, relation=None):
+    """A stand-in for an `OnlineLink` row, carrying what the writer reads."""
+    return types.SimpleNamespace(url=url, label=label, relation=relation)
+
+
+class TestOnlineLinksMapBothWays:
+    """MARC 856: read into links, written back from them and from nothing else."""
+
+    def test_an_856_is_read_with_its_text_and_relation(self):
+        parsed = marc.read(
+            a_record(
+                datafield("245", ("a", "Stoner")),
+                datafield(
+                    "856",
+                    ("u", "https://d-nb.info/1234/04"),
+                    ("3", "Inhaltsverzeichnis"),
+                    ind1="4",
+                    ind2="2",
+                ),
+                datafield("856", ("u", "http://example.org/a"), ("u", "http://example.org/b")),
+            )
+        )
+
+        assert parsed.links == (
+            (
+                Link("https://d-nb.info/1234/04", "Inhaltsverzeichnis", LinkRelationship.RELATED),
+                Link("http://example.org/a"),
+                Link("http://example.org/b"),
+            ),
+        )
+
+    def test_link_text_is_y_before_3_before_z(self):
+        parsed = marc.read(
+            a_record(
+                datafield("245", ("a", "Stoner")),
+                datafield(
+                    "856", ("z", "note"), ("3", "part"), ("y", "text"), ("u", "https://a.example/")
+                ),
+                datafield("856", ("z", "note"), ("3", "part"), ("u", "https://b.example/")),
+                datafield("856", ("z", "note"), ("u", "https://c.example/")),
+            )
+        )
+
+        assert [link.label for link in parsed.links[0]] == ["text", "part", "note"]
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "javascript:alert(1)",
+            "data:text/html,<b>x</b>",
+            "ftp://example.org/file",
+            "//example.org/x",
+            "https://user:pw@example.org/",
+            "https://example.org/" + "a" * 2048,
+            # Within the cap as stored and past it as written: `&` escapes to five.
+            "https://example.org/?" + "&" * 500,
+        ],
+    )
+    def test_a_url_this_app_will_not_render_is_dropped(self, url):
+        escaped = url.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        parsed = marc.read(
+            a_record(datafield("245", ("a", "Stoner")), datafield("856", ("u", escaped)))
+        )
+
+        assert parsed.records[0].title == "Stoner"
+        assert parsed.links == ((),)
+
+    def test_links_survive_the_round_trip(self):
+        book = a_book(
+            online_links=[
+                a_link("https://a.example/x", "Volltext", LinkRelationship.RESOURCE),
+                a_link("https://b.example/y"),
+            ]
+        )
+
+        parsed = marc.read(marc.write([book]).encode("utf-8"))
+
+        assert parsed.links == (
+            (
+                Link("https://a.example/x", "Volltext", LinkRelationship.RESOURCE),
+                Link("https://b.example/y"),
+            ),
+        )
+
+    def test_a_stored_url_the_export_would_not_render_is_not_written(self):
+        """A restored row reaches the writer past the import's check."""
+        book = a_book(online_links=[a_link("javascript:alert(1)"), a_link("https://b.example/y")])
+
+        parsed = marc.read(marc.write([book]).encode("utf-8"))
+
+        assert parsed.links == ((Link("https://b.example/y"),),)
+        assert "javascript" not in marc.write([book])
+
+    def test_a_file_reference_is_never_written(self):
+        """The owner's ruling: a member's own file path would publish their disk
+        layout in a file that leaves the app."""
+        reference = types.SimpleNamespace(root_label="Books", relative_path="secret/Stoner.epub")
+        written = marc.write([a_book(digital_references=[reference])])
+
+        assert "A Title" in written
+        assert "856" not in written
+        assert "secret" not in written
 
 
 class TestWhatTheRoundTripCannotCarry:

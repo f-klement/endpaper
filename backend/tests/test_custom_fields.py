@@ -431,15 +431,15 @@ class TestOnlyABookReachesAValue:
         that found no functions satisfies for ever.
 
         Three numbers, and the middle one is the reason this test grew a third
-        assertion. Measured at the tip: **10** functions in the walk, **8** of
+        assertion. Measured at the tip: **11** functions in the walk, **9** of
         them public, and **4** touching the table. The walk deliberately covers
         more than the public surface (see `_module_functions`), so asserting
         only the total would pass just as well if the private half went missing
         again.
         """
         functions = _module_functions()
-        assert len(functions) >= 10, sorted(functions)
-        assert len(_public_names(functions)) == 8, _public_names(functions)
+        assert len(functions) >= 11, sorted(functions)
+        assert len(_public_names(functions)) == 9, _public_names(functions)
         touching = [name for name, node in functions.items() if _touches_the_table(node)]
         assert sorted(touching) == ["remove", "resolve_merge", "values_on", "write"]
 

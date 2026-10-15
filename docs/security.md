@@ -825,11 +825,12 @@ The bounds above are all about what a query costs to compile and run. None of th
 many bytes leave, and the response is assembled as one string before it is sent, so the peak
 is the document plus the tree it was printed from. What a single request with no session can
 ask for is `maximumRecords` rows of whatever the MARCXML writer produces, and at the widest
-a write through the API can produce that is **5,117,485 bytes for a page of 50**, measured
-rather than estimated. Widest counts two things a member may legitimately post and an
+a write through the API can produce that is **6,381,085 bytes for a page of 50**, measured
+rather than estimated. Widest counts three things a member may legitimately post and an
 earlier version of this figure left out: a heading whose kind is declared, which lengthens
-the vocabulary code on every heading, and a page of rows declared to be copies of one
-title, which share an ISBN and so each carry one at its full length. The suite holds the
+the vocabulary code on every heading, a page of rows declared to be copies of one
+title, which share an ISBN and so each carry one at its full length, and the eight online
+links a MARC import may keep on a book, each URL at 2,048 bytes as the record writes it. The suite holds the
 figure to the byte and with no headroom, and reads it back out of this document, so
 widening a column bound or raising the page size fails a test before it reaches a
 deployment. A field added to the record fails a different test, which watches the fields the widest

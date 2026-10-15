@@ -7,6 +7,7 @@
  */
 import type { BookFormat } from "./bookFormat.ts";
 import type { PublicClassificationOut } from "./publicClassificationOut.ts";
+import type { PublicOnlineLinkOut } from "./publicOnlineLinkOut.ts";
 import type { PublicTagOut } from "./publicTagOut.ts";
 
 /**
@@ -28,6 +29,7 @@ export interface PublicBookOut {
   id: number;
   isbn?: string | null;
   language?: string | null;
+  online_links?: PublicOnlineLinkOut[];
   page_count?: number | null;
   publisher?: string | null;
   series_index?: number | null;

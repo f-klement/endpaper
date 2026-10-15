@@ -7469,13 +7469,14 @@ percent: serialising the records is where the time goes either way.
 **The page is a query page and what it costs at the worst is measured**, because the
 worst case is not the long description anybody pictures. It is two questions. How wide a
 field may be is a `max_length`, which counts characters where a page counts bytes:
-`ElementTree` writes `&` as `&amp;`, so the same declared maximum is 16,611 bytes a record
-in ASCII and 74,971 in ampersands. **How many fields a record has is not a length at all**:
-`700` repeats once per credited name, the author column is split on commas, and nothing
-bounds the count inside its 500 characters, so the real worst is 250 names at 102,107 bytes
-a record, 36% over a ceiling taken on the escaping alone. Both were found by a critic seat
-attacking a fixture that had just been fixed for the other one.
-`marc.EXPORT_PAGE_RECORDS` carries the table and the byte pin taken from it.
+`ElementTree` writes `&` as `&amp;`, so the same declared maximum costs several times as
+many bytes in ampersands as in ASCII. **How many fields a record has is not a length at
+all**: `700` repeats once per credited name, the author column is split on commas, and
+nothing bounds the count inside its 500 characters, so the real worst is 250 names, well
+over a ceiling taken on the escaping alone. Both were found by attacking a
+fixture that had just been fixed for the other one. The figures for each row are the table
+at `marc.EXPORT_PAGE_RECORDS`, which the pin in
+`TestThePageSizeThatBoundsTheExport.PAGE_BYTES` holds to the byte.
 
 **Refusing would have been the same shape as the entry above and is wrong here.** An
 upload is volume a stranger chose and the cataloguer can split the file. A shelf is the
@@ -10892,8 +10893,10 @@ recorded as having reached the table that way.
 
 **So the record has a derivable worst case and the constant was not derived from it.** Measured
 through `sru.respond` on a stored page of fifty, every column a fill can widen filled at what an
-API write holds it to, escaped fill, 250 credited names, a declared heading kind and a declared
-copy group: **5,117,485 bytes**.
+API write holds it to, escaped fill, 250 credited names, a declared heading kind, a declared
+copy group and eight online links at their cap. The figure is
+`test_sru.py::TestTheCostOfTheWidestLegalResponseIsBounded.WIDEST_RESPONSE_BYTES`, which the
+suite holds to the byte and reads back out of `docs/security.md` §SRU.
 
 **Widest is easy to under measure, and two things a member may legitimately post were missed on
 the first pass.** A heading carries a declared kind, which moves `$2` from `gnd` to
@@ -22114,3 +22117,49 @@ The Settings card has no queue and so no press to add a copy. A book whose files
 on a 409, only a Book of another kind holds is counted and skipped there, neither created nor
 attached, and the add page door offers the copy. A duplicate 409 with a copy of the files' kind
 attaches the files to it, as on the add page.
+
+## A re-picked folder: sightings at the pick, misses on a press
+
+A reference's root is only the picked folder's name, and the table records nobody as its reporter. So two folders sharing a name are one root, and the common case is not rare: Calibre names every library "Calibre Library", and two members each importing their own share it. A pick of one would list every file of the other as gone.
+
+So a pick writes only what it proves. A file the pick holds at a saved path is a sighting, written at once: it confirms the row and fills in a fingerprint where none was saved, and it never replaces a different one, because the same path under the same name can be another member's different file. A saved path the pick does not hold is listed, each linked to its book, and marked missing only on the member's press, since only a person looking at the list can tell a file that is gone from a file in somebody else's folder. A pick holding none of the saved paths is taken for a different folder and writes nothing. A held file at no saved path whose size and partial MD5 match an absent reference is counted as moved and not listed.
+
+Who may flag a reference is who may write its Book (`book_for_write`), which on this shared shelf is every Book the member can see; both routes start from `Shelf.seen_by`, so a reference on another member's private Book is neither listed nor written.
+
+A sighting also clears `missing_since` whatever the fingerprint says, so a pick can clear another member's missing mark on a shared path even when its file's fingerprint differs from the one saved. Accepted: a path held under the folder name is evidence that something is there, a mark is a prompt for a person rather than a record, and refusing the clear on a different fingerprint would leave a mark that no pick can ever clear once a file is legitimately rewritten (Calibre rewrites an EPUB when it embeds metadata). The fingerprint itself is kept, so the other member's copy is still found by its own digest.
+
+What this does not solve: two folders of one name that share some paths still confirm each other's rows, and the press can still flag another member's files if the member presses it. Scoping misses to the member's own references needs a reporter column, which overturns the recorded decision against one on `digital_references`; that is the owner's call and is filed as a ticket rather than taken here.
+
+## A catalogue's 856 links are their own table, and the only thing the export writes to 856
+
+Owner's ruling, 2026-10-15: an 856 online link is kept on the Book, shown on
+the book page apart from file references and never fetched; the export writes only those links,
+never a member's file references, which would publish their disk layout.
+
+- **A table, `online_links`, not a column.** 856 repeats, which is Koha's `biblioitems.url`
+  lesson already recorded for `digital_references`.
+- **Beside `Record`, not on it.** `marc.ParsedMarc.links` holds each record's links at the
+  record's position. A `Record` field would join every catalogue merge, fold and the collection
+  guards in `catalogue.py` for a value only the file import keeps. The catalogue lookup path
+  (`metadata._dnb_record`, `_k10plus_record`) does not keep 856 yet.
+- **One URL rule.** `custom_fields.web_link` is `link_target`'s body without the kind gate, so a
+  catalogue's URL faces the same seven refusals as one a member typed; `ck_online_links_scheme`
+  and the browser's `safeHref` hold it again for a restored row, and the export runs
+  `catalogue.Link.of` again over every stored row.
+- **The URL cap is 2,048 bytes as a record writes it, escaped, not as stored.** Measured on the
+  widest SRU page of fifty, a cap on the stored bytes let eight links take it to 9,625,885
+  bytes, 88% over the figure before links, because `&` is five bytes written and a query string
+  is mostly `&`. On the written bytes the growth is about a quarter, which is what the pins now
+  hold. `ck_online_links_bounds` measures the same escaped form (`models._URL_AS_WRITTEN`), so a
+  restored row the export would drop is refused at the insert rather than served on the page and
+  missing from the export. The cost is that a real URL carrying many `&` is refused at a shorter
+  stored length. Label 200 characters, cut; eight a Book.
+- **Published.** Links are a fact about the object as a catalogue record, so `PublicBookOut`
+  carries them through its own `PublicOnlineLinkOut`, and SRU records carry `856`.
+- **Removable, by whoever may write the Book**, `forget_book_identifier`'s trade: any library
+  mode member's import can add links to a Book they can see, so a wrong one must come off.
+  Importing the record again puts it back.
+- **Link text is `$y`, then `$3`, then `$z`**, Koha's order, and is written back as `$y`. The
+  second indicator `0`, `1`, `2` is stored; blank and `8` are null. The indicator maps derive
+  from `LinkRelationship`'s order because the subfield `$2` house rule falsely refuses a literal
+  indicator `"2"`; recorded in that guard's docstring.

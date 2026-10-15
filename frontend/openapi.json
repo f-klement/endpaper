@@ -984,6 +984,14 @@
             ],
             "title": "Location"
           },
+          "online_links": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/OnlineLinkOut"
+            },
+            "title": "Online Links",
+            "type": "array"
+          },
           "ownership": {
             "$ref": "#/components/schemas/OwnershipStatus",
             "default": "owned"
@@ -2337,6 +2345,14 @@
           "my_wants_to_discuss": {
             "title": "My Wants To Discuss",
             "type": "boolean"
+          },
+          "online_links": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/OnlineLinkOut"
+            },
+            "title": "Online Links",
+            "type": "array"
           },
           "ownership": {
             "$ref": "#/components/schemas/OwnershipStatus",
@@ -4520,6 +4536,16 @@
         "title": "LendingWillingness",
         "type": "string"
       },
+      "LinkRelationship": {
+        "description": "What an online link is to the Book that carries it: MARC 856's second indicator.\n\n**Only the three values the indicator states.** A blank and `8` (\"no\ndisplay constant generated\") say nothing about the relationship, so they\nare stored as null rather than as a fourth member that would read as a\nfact. Declaration order is compared by `_enum_check`'s guard, so a new\nmember is a revision.",
+        "enum": [
+          "resource",
+          "version",
+          "related"
+        ],
+        "title": "LinkRelationship",
+        "type": "string"
+      },
       "LoanCreate": {
         "properties": {
           "acknowledge_not_lendable": {
@@ -5289,6 +5315,46 @@
         "title": "NoteOut",
         "type": "object"
       },
+      "OnlineLinkOut": {
+        "description": "The URL, the link text the record gave, and what the link is to the Book.\n\nA fact about the object as a catalogue record, so it is visible exactly\nwhen the Book is: `PublicBookOut` carries the same three fields as\n`schemas.public.PublicOnlineLinkOut`. The client renders `url` only through\n`safeHref`.",
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "relation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LinkRelationship"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "url"
+        ],
+        "title": "OnlineLinkOut",
+        "type": "object"
+      },
       "OpdsCredentialIn": {
         "description": "A login at one household server.\n\nBoth halves are required. `credentials.put` refuses a blank either way and\nrefuses a colon in the username, because RFC 7617 forbids one in a Basic\nuser-id and this application keeps one representation of the pair.",
         "properties": {
@@ -5610,6 +5676,41 @@
           "page_size"
         ],
         "title": "Page[BookOut]",
+        "type": "object"
+      },
+      "Page_DigitalReferenceOut_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/DigitalReferenceOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "page": {
+            "minimum": 1.0,
+            "title": "Page",
+            "type": "integer"
+          },
+          "page_size": {
+            "maximum": 200.0,
+            "minimum": 1.0,
+            "title": "Page Size",
+            "type": "integer"
+          },
+          "total": {
+            "minimum": 0.0,
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "page",
+          "page_size"
+        ],
+        "title": "Page[DigitalReferenceOut]",
         "type": "object"
       },
       "Page_LoanOut_": {
@@ -5984,6 +6085,14 @@
             ],
             "title": "Language"
           },
+          "online_links": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/PublicOnlineLinkOut"
+            },
+            "title": "Online Links",
+            "type": "array"
+          },
           "page_count": {
             "anyOf": [
               {
@@ -6120,6 +6229,41 @@
           "number"
         ],
         "title": "PublicClassificationOut",
+        "type": "object"
+      },
+      "PublicOnlineLinkOut": {
+        "description": "A catalogue's online link, MARC 856: a fact about the object as a record.\n\nIts own model rather than `OnlineLinkOut`, for `PublicClassificationOut`'s\nreason below: a field added there must not reach a public reader unreviewed.",
+        "properties": {
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "relation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LinkRelationship"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "title": "PublicOnlineLinkOut",
         "type": "object"
       },
       "PublicTagOut": {
@@ -7523,6 +7667,59 @@
         "title": "SettingsUpdate",
         "type": "object"
       },
+      "SightingIn": {
+        "description": "One stored reference a folder pick found, with what the browser saw.\n\nThe fingerprint fields are `DigitalReferenceIn`'s and replace the stored\nones whole, for that route's reason: a row says what one client saw in one\nlook.",
+        "properties": {
+          "file_modified_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File Modified At"
+          },
+          "partial_md5": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{32}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Partial Md5"
+          },
+          "reference_id": {
+            "maximum": 9.223372036854776e+18,
+            "minimum": 1.0,
+            "title": "Reference Id",
+            "type": "integer"
+          },
+          "size_bytes": {
+            "anyOf": [
+              {
+                "maximum": 9007199254740991.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Size Bytes"
+          }
+        },
+        "required": [
+          "reference_id"
+        ],
+        "title": "SightingIn",
+        "type": "object"
+      },
       "SourceCredentialIn": {
         "description": "A username and a password for one catalogue, on their way to being sealed.\n\n**No `source` field**: the source is the path, so a body cannot name a row\nother than the one the route resolved and checked.\n\nA colon in the username is refused rather than accepted and mangled. RFC\n7617 forbids one in a Basic user-id, and the sealed pair uses the same\nseparator, so accepting one would store a credential that comes back\ndifferent from the one that was typed.",
         "properties": {
@@ -7636,6 +7833,65 @@
         ],
         "title": "SuggestionReason",
         "type": "string"
+      },
+      "SweepIn": {
+        "description": "What a re-picked folder said about the references stored under it.\n\n`seen` are references whose file the pick held and `missing` those it did\nnot. A reference under another root is not this folder's to judge, so the\nroute skips one that does not carry `root_label`.\n\n**Bounded as the holder lookup is**, at `MAX_FILES_PER_LOOKUP` references\nin one request together: a client sweeping a larger root sends it in\nchunks, and no request makes the database match an unbounded list.",
+        "properties": {
+          "missing": {
+            "items": {
+              "maximum": 9.223372036854776e+18,
+              "minimum": 1.0,
+              "type": "integer"
+            },
+            "maxItems": 500,
+            "title": "Missing",
+            "type": "array"
+          },
+          "root_label": {
+            "maxLength": 4094,
+            "minLength": 1,
+            "title": "Root Label",
+            "type": "string"
+          },
+          "seen": {
+            "items": {
+              "$ref": "#/components/schemas/SightingIn"
+            },
+            "maxItems": 500,
+            "title": "Seen",
+            "type": "array"
+          }
+        },
+        "required": [
+          "root_label"
+        ],
+        "title": "SweepIn",
+        "type": "object"
+      },
+      "SweepOut": {
+        "description": "The references the sweep wrote, by id.\n\nA reference the caller cannot see, or one under another root, is in\nneither list: it was not written, and saying so per id would confirm that\nthe id exists.",
+        "properties": {
+          "missing": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Missing",
+            "type": "array"
+          },
+          "seen": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Seen",
+            "type": "array"
+          }
+        },
+        "required": [
+          "seen",
+          "missing"
+        ],
+        "title": "SweepOut",
+        "type": "object"
       },
       "TagCategory": {
         "description": "The groups tags are presented in throughout the UI.\n\nThe first three are the curated vocabulary, seeded at boot and the same in\nevery deployment. CUSTOM is everything a library invents for itself.\n\nKeeping them apart, rather than making every tag free-form as Jelu and\nOpenreads do, is deliberate: the curated list is what makes the tag picker\nuseful on the first day, before anybody has typed anything. What was wrong\nwas having no way past it.",
@@ -9582,6 +9838,95 @@
         ]
       }
     },
+    "/api/books/digital-references": {
+      "get": {
+        "description": "Every reference the caller can see under one root, for a sweep of it.\n\nA re-picked folder knows which files it holds and nothing about which it\nused to: that is this listing. The client compares the two and answers\nthrough `POST /digital-references/sweep`.\n\n**Scoped by the Shelf, as the missing listing is and for its reason**: a\nreference carries no Member of its own. Paginated, oldest first, so a\nclient walking the pages meets each row once.",
+        "operationId": "list_digital_references_under_root",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "root_label",
+            "required": true,
+            "schema": {
+              "maxLength": 4094,
+              "minLength": 1,
+              "pattern": "^[^\\x00]*$",
+              "title": "Root Label",
+              "type": "string"
+            }
+          },
+          {
+            "description": "1-based page number",
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "description": "1-based page number",
+              "maximum": 1000000,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows per page",
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "description": "Rows per page",
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_DigitalReferenceOut_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "List Digital References Under Root",
+        "tags": [
+          "books"
+        ]
+      }
+    },
     "/api/books/digital-references/missing": {
       "get": {
         "description": "Every file the caller can see that a client looked for and did not find.\n\nThe reader for `missing_since`. Without it the flag is answerable only one\nbook at a time, so finding every flagged file is one request per book across\nthe whole catalogue, and almost every book holds none.\n\n**Scoped by the Shelf and by nothing else, which is the table's own rule\nrather than a choice made here**: a reference is an ordinary field on a Book\nand carries no Member of its own, so its visibility is the Book's entirely.\n`models.DigitalReference` says that at the column, and it is why there is no\n`added_by_user_id` to scope by.\n\n**A narrower scope was written first and removed, and the reason is worth\nkeeping.** The arm was `Book.added_by_user_id == current_user.id`, meant to\ngive a member their own references and nobody else's. It cannot: any member\nwho may read a Book may report a file on it, so the row's reporter is not\nthe Book's adder and is recorded nowhere. That arm hid a member's own misses\non Books somebody else added, which is the ordinary household case and the\nfeature's main one, while still showing another member's paths on Books the\ncaller added. A filter whose key is not the thing its reason names is not a\nnarrowing, and \"my own references\" needs a reporter column on the table,\nwhich is a migration and not this route.\n\n**So say plainly what a row discloses**, since nothing here prevents it: a\nreference is `root_label` plus `relative_path`, an unverified path on\nsomebody's machine, and the flag adds that a client could not reach it. This\nlisting hands the caller every such row on the shelf they can see in one\nrequest, where reading them per book is one request each. It is the same\ndisclosure at a different price, because a Book the caller cannot see is not\non this shelf and its references are unreachable here as they are anywhere\nelse.\n\nRows are references, not books, and that is the decision this route makes\nrather than discovers. The flag is per location: a book at three paths with\none gone is not a missing book, and a listing of books cannot say which of\nthe three to go and look at. \"Which of my books have gone missing\" is read\noff the book column here; the reverse needs a request per book, which is the\ncost this route exists to remove.\n\nNewest miss first. A miss reported minutes ago is the one whose cause a\nmember can still name (a drive unplugged, a folder moved this morning), and\na client sweeping a directory posts its misses in one burst, so the burst\narrives as a block rather than scattered down the tail. **Tied on the id**,\nbecause that burst shares one `CURRENT_TIMESTAMP` value: without the\ntiebreak two pages of one burst can repeat a row and drop another.\n\nTrashed books are absent, and that falls out of `Shelf.seen_by` rather than\nbeing a clause here.\n\nThe total counts references, like the rows: a member with one book at three\nmissing locations has three. It is scoped for the reason the quotes listing\nscopes its own, since an unscoped total announces how many rows are hidden.",
@@ -9654,6 +9999,63 @@
           }
         ],
         "summary": "List Missing Digital References",
+        "tags": [
+          "books"
+        ]
+      }
+    },
+    "/api/books/digital-references/sweep": {
+      "post": {
+        "description": "Record what a re-picked folder found: each sighting, and each miss.\n\nThe two per reference routes in one request. A miss is the per reference\nflag's rule unchanged: `missing_since` set once, the row never deleted. A\nsighting clears `missing_since` and confirms the row, and writes its\nfingerprint only where `_fingerprint_agrees`. A sweep of a few hundred\nfiles is then a request or two rather than a request a file.\n\n**The client sends sightings at the pick and misses only on a press**,\nbecause a root is only a folder name: one member's pick of their own\n\"Calibre Library\" would otherwise flag every file another member saved\nfrom theirs.\n\n**Who may flag a reference is who may write its Book**, the rule\n`dependencies.book_for_write` states for the per reference routes. That\nrule is every Book on the caller's shelf, so the rows are resolved through\n`Shelf.seen_by`: a reference on another member's private Book is not\nreached, and answers exactly as an id that does not exist.\n\n**Only references under `root_label` are written.** A sweep is one\nfolder's account of itself, and a file under another root is not one it\nlooked for.",
+        "operationId": "sweep_digital_references",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SweepIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SweepOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Sweep Digital References",
         "tags": [
           "books"
         ]
@@ -12927,6 +13329,80 @@
           }
         ],
         "summary": "Edit Note",
+        "tags": [
+          "books"
+        ]
+      }
+    },
+    "/api/books/{book_id}/online-links/{link_id}": {
+      "delete": {
+        "description": "Remove a wrong or unwanted catalogue link from a book.\n\nThe only correction there is, `forget_book_identifier`'s trade: any member\nwho may import a MARC file can add links to a book they may see, so one who\nmay write the book can take one off. Importing the record again puts it\nback. Whoever may write the book; a book the caller cannot see is 404, and\nso is a link belonging to a different book.\n\n**Looked up in the book's own links**, one load of at most eight rows,\nrather than by a query on the link id, so the pairing with this book is the\ncollection itself.",
+        "operationId": "forget_online_link",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "link_id",
+            "required": true,
+            "schema": {
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "title": "Link Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "book_id",
+            "required": true,
+            "schema": {
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "title": "Book Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Forget Online Link",
         "tags": [
           "books"
         ]

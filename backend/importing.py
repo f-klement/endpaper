@@ -60,9 +60,9 @@ import evidence
 import identity
 import marc
 import tags
-from catalogue import Record
+from catalogue import Link, Record
 from enums import OwnershipStatus, ReadStatus
-from models import Book, Note
+from models import MAX_ONLINE_LINKS_PER_BOOK, Book, Note, OnlineLink
 from reading import Reading, Records
 from schemas import ImportResultOut
 from schemas.book import BookCreate, admits_a_container
@@ -1081,8 +1081,8 @@ class MarcImport:
         index = MarcIndex.build(self._db, self._member_id)
         tally = _Tally()
 
-        for record in parsed.records:
-            self._apply_one(record, index, tally, create_missing)
+        for record, links in parsed.entries():
+            self._apply_one(record, index, tally, create_missing, links)
 
         self._db.commit()
 
@@ -1110,6 +1110,7 @@ class MarcImport:
         index: MarcIndex,
         tally: _Tally,
         create_missing: bool,
+        links: Sequence[Link],
     ) -> None:
         # Once, before anything reads a value: matching and writing have to see
         # the same strings or a truncated record cannot match itself. See
@@ -1156,6 +1157,7 @@ class MarcImport:
         # After the create and after the gap fill, so a matched Book gains the
         # headings it lacked as well as a new one getting all of them.
         evidence.confirm_file_headings(book, record.headings, self._db)
+        _keep_links(book, links)
 
     def _create(self, stored: Stored, index: MarcIndex) -> Book:
         """Add a Book the file catalogues and this Library does not hold.
@@ -1190,6 +1192,25 @@ class MarcImport:
         self._db.flush()
         index.remember(book)
         return book
+
+
+def _keep_links(book: Book, links: Sequence[Link]) -> None:
+    """Add the record's online links the Book lacks, up to the per Book cap.
+
+    A matched Book gains them as a new one does, as with the headings: a link
+    is catalogue evidence, not a value a member typed over. Never fetched.
+    """
+    if not links:
+        return
+    held = {row.url for row in book.online_links}
+    for link in links:
+        if len(book.online_links) >= MAX_ONLINE_LINKS_PER_BOOK:
+            return
+        if link.url not in held:
+            held.add(link.url)
+            book.online_links.append(
+                OnlineLink(url=link.url, label=link.label, relation=link.relation)
+            )
 
 
 def _fill_marc_gaps(book: Book, stored: Stored) -> None:

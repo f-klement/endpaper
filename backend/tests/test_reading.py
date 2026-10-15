@@ -268,7 +268,8 @@ class TestReadingIsTheOnlyWayIn:
 #: drops. So a caller binding a `Reading` to a local (`reading = Reading.by(
 #: ...)` and then `reading.of(...)`) reddens, which is the spelling an
 #: inclusion list would have missed.
-NOT_A_READING = {"_AliasIndex"}
+#: `Link` is `catalogue.Link.of`, the constructor that bounds a MARC 856 link.
+NOT_A_READING = {"_AliasIndex", "Link"}
 
 
 def _receiver_root(node: ast.expr) -> str | None:

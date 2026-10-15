@@ -93,6 +93,9 @@ from schemas.digital import (
     HoldersIn,
     HoldersOut,
     MissingDigitalReferenceOut,
+    SightingIn,
+    SweepIn,
+    SweepOut,
 )
 from schemas.highlight import (
     MAX_HIGHLIGHTS_PER_IMPORT,
@@ -117,6 +120,7 @@ from schemas.imports import (
 from schemas.kosync import KosyncAccountOut, KosyncDocumentOut, KosyncPasswordOut
 from schemas.loan import LoanCreate, LoanOut, MyOverdueOut
 from schemas.note import NoteCreate, NoteOut
+from schemas.online_link import OnlineLinkOut
 from schemas.opds import (
     OpdsCredentialIn,
     OpdsServerIn,
@@ -300,6 +304,7 @@ __all__ = [
     "MySecurityOut",
     "NoteCreate",
     "NoteOut",
+    "OnlineLinkOut",
     "OpdsCredentialIn",
     "OpdsServerIn",
     "OpdsServerOut",
@@ -338,8 +343,11 @@ __all__ = [
     "SeriesOut",
     "SettingsOut",
     "SettingsUpdate",
+    "SightingIn",
     "SourceCredentialIn",
     "StatsOut",
+    "SweepIn",
+    "SweepOut",
     "TagCreate",
     "TagOut",
     "TagStat",

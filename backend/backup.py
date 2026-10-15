@@ -74,6 +74,7 @@ from models import (
     Loan,
     MemberLogin,
     Note,
+    OnlineLink,
     OpdsServer,
     PasswordResetRequest,
     Quote,
@@ -208,6 +209,10 @@ _TABLES: tuple[tuple[str, Any, Table], ...] = tuple(
         # an archive taken before this table existed restores with none, which
         # is the state it was written in.
         ("book_identifiers", BookIdentifier),
+        # Beside the identifiers, the other catalogue fact hanging off a Book.
+        # Absent from `_REQUIRED_TABLES` for their reason: an archive taken
+        # before this table existed restores with none.
+        ("online_links", OnlineLink),
         # The author merge decisions. Its only foreign key is `users`, which is
         # first in this tuple, so it could sit anywhere after that; it is here
         # beside the other tables that hold what members decided rather than

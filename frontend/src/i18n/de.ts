@@ -163,6 +163,13 @@ export const de: Messages = {
   "classification.scheme.lcsh": "Schlagwort",
   "classification.kind.content": "Inhaltstyp",
   "classification.kind.carrier": "Datenträgertyp",
+  "onlineLinks.section": "Verweise im Netz",
+  "onlineLinks.relation.resource": "Die Ressource selbst",
+  "onlineLinks.relation.version": "Eine Fassung davon",
+  "onlineLinks.remove": "{link} entfernen",
+  "onlineLinks.removeConfirm":
+    "Den Verweis {link} entfernen? Ein erneuter Import des Datensatzes fügt ihn wieder hinzu.",
+  "onlineLinks.relation.related": "Verwandt",
 
   // ── Buchdetails ─────────────────────────────────────────────────────────
   "book.uploadCover": "Cover hochladen",
@@ -1163,7 +1170,7 @@ export const de: Messages = {
   // ── Bücher aus ihren Dateien hinzufügen ─────────────────────────────────
   "file.title": "Aus einer Datei hinzufügen",
   "file.explain":
-    "Buchdateien oder einen ganzen Ordner auswählen, dann liest Endpaper heraus, was in den Dateien steht. Was eine Datei nicht sagt, wird über den Dateinamen gesucht, und eine Datei, die eine ISBN nennt, lässt sich darüber nachschlagen wie ein gescannter Barcode. Die Dateien werden hier im Browser gelesen und niemals hochgeladen. Bei einem Ordner wird für ein Buch aus einer einzigen Datei auch deren Name samt der Ordner darüber und ein Fingerabdruck der Datei beim Buch gespeichert, damit die Datei wiederzufinden ist, und alle, die das Buch sehen, sehen auch das. Der Fingerabdruck wird hier aus bis zu 12 KiB der Datei berechnet. Auch die Schlagwörter aus der Datei werden beim Buch gespeichert: bei einem einzelnen Buch lassen sie sich vorher entfernen, bei einem ganzen Ordner geht das hinterher nur noch, indem das Buch entfernt wird. Ein Ordner, in dem oben die metadata.db einer Calibre-Bibliothek liegt, wird stattdessen über diesen Index gelesen: ein Buch für jedes Buch der Bibliothek, mit jeder seiner Dateien. Lässt sich der Index nicht lesen, wird der Ordner Datei für Datei gelesen, und diese Seite sagt das.",
+    "Buchdateien oder einen ganzen Ordner auswählen, dann liest Endpaper heraus, was in den Dateien steht. Was eine Datei nicht sagt, wird über den Dateinamen gesucht, und eine Datei, die eine ISBN nennt, lässt sich darüber nachschlagen wie ein gescannter Barcode. Die Dateien werden hier im Browser gelesen und niemals hochgeladen. Bei einem Ordner wird für ein Buch aus einer einzigen Datei auch deren Name samt der Ordner darüber und ein Fingerabdruck der Datei beim Buch gespeichert, damit die Datei wiederzufinden ist, und alle, die das Buch sehen, sehen auch das. Der Fingerabdruck wird hier aus bis zu 12 KiB der Datei berechnet. Auch die Schlagwörter aus der Datei werden beim Buch gespeichert: bei einem einzelnen Buch lassen sie sich vorher entfernen, bei einem ganzen Ordner geht das hinterher nur noch, indem das Buch entfernt wird. Ein Ordner, in dem oben die metadata.db einer Calibre-Bibliothek liegt, wird stattdessen über diesen Index gelesen: ein Buch für jedes Buch der Bibliothek, mit jeder seiner Dateien. Lässt sich der Index nicht lesen, wird der Ordner Datei für Datei gelesen, und diese Seite sagt das. Wird ein Ordner erneut gewählt, werden die aus jedem Ordner dieses Namens gespeicherten Dateien geprüft, gleich wer sie gespeichert hat: eine noch vorhandene gilt als gefunden, die nicht gefundenen werden aufgeführt, jeweils mit dem Buch verknüpft, und erst auf Knopfdruck als fehlend markiert. Ein Ordner, der keine davon enthält, gilt als anderer Ordner mit demselben Namen.",
   "file.indexUnread":
     "Dieser Ordner enthält eine metadata.db, die sich nicht als Index einer Calibre-Bibliothek lesen ließ. Deshalb wurden die Dateien einzeln gelesen, und ein Buch in mehreren Formaten kann für jede Datei einmal erscheinen. So liest sich eine Bibliothek, in die gerade geschrieben wurde: eine Kopie des Bibliotheksordners wählen, die angelegt wurde, während Calibre und alles andere, was hineinschreibt, geschlossen war.",
   "file.unindexed":
@@ -1330,6 +1337,18 @@ export const de: Messages = {
   "files.loadFailed":
     "Wo die Dateien dieses Buchs liegen, konnte nicht geladen werden.",
   "files.forgetFailed": "Dieser Ort konnte nicht vergessen werden.",
+  "files.swept":
+    "Die aus einem Ordner namens {root} gespeicherten Dateien wurden geprüft: {seen} noch vorhanden, {missing} nicht gefunden.",
+  "files.sweptMoved":
+    "{count} Dateien, die nicht am gespeicherten Ort lagen, wurden über den Fingerabdruck an anderer Stelle in diesem Ordner gefunden und sind nicht aufgeführt.",
+  "files.sweptNotFound": "Nicht gefunden ({count})",
+  "files.markMissing": "Als fehlend markieren",
+  "files.markedMissing":
+    "Beim jeweiligen Buch als fehlend markiert ({count}). Nichts wurde entfernt; wird der Ordner mit der Datei darin erneut gewählt, verschwindet die Markierung.",
+  "files.sweptDifferent":
+    "Keine der {count} aus einem Ordner namens {root} gespeicherten Dateien liegt in diesem, daher gilt er als anderer Ordner mit demselben Namen, und nichts wurde geprüft oder markiert.",
+  "files.sweepFailed":
+    "Die aus diesem Ordner gespeicherten Dateien konnten nicht alle geprüft oder markiert werden. Was bereits geschehen ist, bleibt.",
   "rapid.heldInAnotherFormat":
     "Schon in einer anderen Ausgabe in der Bibliothek, die Datei wurde deshalb nicht dort eingetragen.",
   "rapid.recordDiffers":
@@ -1457,7 +1476,7 @@ export const de: Messages = {
   "calibre.withFile": "{count} haben eine Datei in der Bibliothek.",
   "calibre.crossCheck": "Den Bibliotheksordner wählen",
   "calibre.crossCheckHint":
-    "Optional. Den Bibliotheksordner wählen. Jede metadata.opf darin ergänzt, was der Index offen gelassen hat, und für jede Buchdatei, die der Index nennt, wird beim Buch gespeichert, wo sie liegt: der Dateiname, die Ordner darüber und ein Fingerabdruck, der hier aus bis zu 12 KiB der Datei berechnet wird, damit die Datei wiederzufinden ist. Alle, die das Buch sehen, sehen auch das. Keine Datei wird hochgeladen. Der Browser fragt nach, bevor er einen so großen Ordner freigibt.",
+    "Optional. Den Bibliotheksordner wählen. Jede metadata.opf darin ergänzt, was der Index offen gelassen hat, und für jede Buchdatei, die der Index nennt, wird beim Buch gespeichert, wo sie liegt: der Dateiname, die Ordner darüber und ein Fingerabdruck, der hier aus bis zu 12 KiB der Datei berechnet wird, damit die Datei wiederzufinden ist. Alle, die das Buch sehen, sehen auch das. Keine Datei wird hochgeladen. Der Browser fragt nach, bevor er einen so großen Ordner freigibt. Wird der Ordner erneut gewählt, werden die aus jedem Ordner dieses Namens gespeicherten Dateien geprüft und die nicht gefundenen aufgeführt, um sie mit einem Knopfdruck als fehlend zu markieren; nichts wird entfernt.",
   "calibre.crossCheckResult":
     "Bei {checked} Büchern lag eine Datei daneben: {filled} Felder ergänzt, {disagreed} mit abweichendem Wert, bei denen der Index behalten wurde.",
   "calibre.progress": "{done} von {total}",

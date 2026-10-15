@@ -11,6 +11,7 @@ import type { BookIdentifierOut } from "./bookIdentifierOut.ts";
 import type { ClassificationOut } from "./classificationOut.ts";
 import type { LendingWillingness } from "./lendingWillingness.ts";
 import type { LoanOut } from "./loanOut.ts";
+import type { OnlineLinkOut } from "./onlineLinkOut.ts";
 import type { OwnershipStatus } from "./ownershipStatus.ts";
 import type { ReadStatus } from "./readStatus.ts";
 import type { RefusedAssertionOut } from "./refusedAssertionOut.ts";
@@ -67,6 +68,7 @@ export interface BookOut {
   my_started_at: string | null;
   my_status: ReadStatus;
   my_wants_to_discuss: boolean;
+  online_links?: OnlineLinkOut[];
   ownership?: OwnershipStatus;
   page_count?: number | null;
   publisher: string | null;

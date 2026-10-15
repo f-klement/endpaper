@@ -33,8 +33,8 @@ import bibliographic
 import marc_fields
 import metadata
 import xml_parse
-from catalogue import Heading, Record
-from enums import ClassificationScheme, HeadingKind
+from catalogue import Heading, Link, Record
+from enums import ClassificationScheme, HeadingKind, LinkRelationship
 from marc_fields import Fields, Subfields
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -106,10 +106,16 @@ ALLOCATION_FACTOR: Final = 32
 #:
 #: | a record of | one record | a page of 100 |
 #: |---|---|---|
-#: | `w`, one byte a character | 16,611 B | 1.58 MiB |
-#: | `ä`, two | 31,201 B | 2.98 MiB |
-#: | `&`, which `ElementTree` writes as five | 74,971 B | 7.15 MiB |
-#: | `&` and 250 credited names | 102,107 B | 9.74 MiB |
+#: | `w`, one byte a character | 35,483 B | 3.38 MiB |
+#: | `ä`, two | 51,673 B | 4.93 MiB |
+#: | `&`, which `ElementTree` writes as five | 100,243 B | 9.56 MiB |
+#: | `&` and 250 credited names | 127,379 B | 12.15 MiB |
+#:
+#: Every row carries `MAX_ONLINE_LINKS_PER_BOOK` `856` fields, each URL at
+#: `ONLINE_LINK_URL_MAX_BYTES` as written and each label at its ceiling, which
+#: is 25,272 bytes of the last row. The URL cap is on the escaped bytes
+#: (`catalogue.Link`), so a URL weighs the same in every fill; the label, cut
+#: at 200 characters, does not.
 #:
 #: **Widest is two questions, and the second is the one that bites.** How wide
 #: a field may be is a `max_length`, and a `max_length` counts characters
@@ -118,7 +124,7 @@ ALLOCATION_FACTOR: Final = 32
 #: name, `_credited_names` splits `author` on commas, and nothing bounds the
 #: count inside `AUTHOR_LINE_MAX`, so 500 characters is up to 250 names and
 #: each one costs its scaffolding rather than its bytes. That is the last row,
-#: 36% over a ceiling taken on the third, and both critic seats found it
+#: 27% over the third, which is where a ceiling was once taken, and both critic seats found it
 #: independently in the round that had just fixed the first question.
 #:
 #: **The pin is on the record's shape, not a platform limit.** Nothing
@@ -131,18 +137,18 @@ ALLOCATION_FACTOR: Final = 32
 #: 129,050 bytes moved with no arm red. A field fed by a relation this fixture
 #: leaves empty renders nothing and is outside both.
 #:
-#: **It leaves no room at all, and the room was the defect.** The ceiling read
-#: 12 MiB against a 10,210,803 byte page, and the arm was green on both a
+#: **It leaves no room at all, and the room was the defect.** The ceiling once
+#: read 12 MiB against what was then a 10,210,803 byte page, and the arm was green on both a
 #: small field added to the writer and `SUBTITLE_MAX` widened tenfold, because
 #: 2,372,109 bytes of slack absorbed each of them. The pin is an equality now,
 #: at `TestThePageSizeThatBoundsTheExport.PAGE_BYTES`.
 #:
 #: **The page's bytes are not its peak.** Building it holds every record's
-#: string and the joined result at once, measured at 24.01 MiB for the 9.74
-#: MiB worst case, 2.47 times. The route table below is a typical page rather
-#: than this one, so the worst case for one export is of the order of 25 MB of
-#: strings plus its page of rows, and it does not move with the shelf, which
-#: is the property the paging is for.
+#: string and the joined result at once, so the peak is a multiple of the
+#: page above. The route table below is a typical page rather than this one,
+#: so the worst case for one export is that multiple of the last row plus its
+#: page of rows, and it does not move with the shelf, which is the property
+#: the paging is for.
 #:
 #: **A stored row beats all of it, and the bound is on writes.** Two of these
 #: numbers are ceilings the API applies and the restore path does not, because
@@ -368,6 +374,7 @@ def _record_element(book: Book) -> ElementTree.Element:
     | `650 #7 $a $0 $2` | a `gnd` or `lcsh` subject | `Fields.controlled_subjects`, this module |
     | `655 #7 $a $0 $2` | a `gnd` content or carrier term | `Fields.controlled_subjects` |
     | `700 0# $a $4` | every credited name after the first | `Fields.authors` |
+    | `856 4# $u $y` | an `online_links` row, never a file reference | `Fields.online_links` |
 
     **`100` and `700` carry first indicator `0`, "forename".** That is the
     specification's name for a personal name in direct order, which is what
@@ -434,11 +441,41 @@ def _record_element(book: Book) -> ElementTree.Element:
             _datafield("700", "0", " ", [("a", name), ("4", "aut")])
             for name in names[1:]
         ),
+        *_online_links(book),
     ]
     for field in fields:
         if field is not None:
             record.append(field)
     return record
+
+
+#: `856`'s second indicator for each relation; a null is blank, no statement.
+#: Declaration order is MARC's `0`, `1`, `2`, as `marc_fields` reads it.
+_LINK_INDICATORS: Final[dict[LinkRelationship, str]] = {
+    relation: str(position) for position, relation in enumerate(LinkRelationship)
+}
+
+
+def _online_links(book: Book) -> Iterator[ElementTree.Element | None]:
+    """The Book's catalogue links as `856`, first indicator `4`, HTTP.
+
+    **Only `book.online_links`.** A Member's file references
+    (`DigitalReference`) are never written: a path on their disk would leave
+    the app in a file anybody may be handed (owner's ruling, 2026-10-15). A
+    stored row goes through `Link.of` again, the import's own rule and cap,
+    since a restore writes through Core.
+    """
+    for row in book.online_links:
+        relation = LinkRelationship(row.relation) if row.relation else None
+        link = Link.of(row.url, row.label, relation)
+        if link is None:
+            continue
+        yield _datafield(
+            "856",
+            "4",
+            _LINK_INDICATORS[relation] if relation else " ",
+            [("u", link.url), ("y", link.label)],
+        )
 
 
 def _series_number(index: float | None) -> str | None:
@@ -699,10 +736,23 @@ class ParsedMarc:
 
     records: tuple[Record, ...]
     skipped: int
+    #: Each record's `856` links, at the same position as the record. Beside
+    #: `Record` rather than on it: links are this upload's to keep on the Book
+    #: (owner's ruling, 2026-10-15), and a `Record` field would join every
+    #: catalogue merge and fold that never reads one. Empty means none for all.
+    links: tuple[tuple[Link, ...], ...] = ()
+
+    def __post_init__(self) -> None:
+        if self.links and len(self.links) != len(self.records):
+            raise ValueError("one tuple of links per record, or none at all")
 
     @property
     def total(self) -> int:
         return len(self.records) + self.skipped
+
+    def entries(self) -> Iterator[tuple[Record, tuple[Link, ...]]]:
+        """Each record with its links."""
+        return zip(self.records, self.links or ((),) * len(self.records), strict=True)
 
 
 #: How much of the file is sniffed for the two shapes that are refused outright.
@@ -945,13 +995,16 @@ def read(content: bytes) -> ParsedMarc:
         )
 
     records = []
+    links = []
     skipped = 0
     for node in nodes:
-        record = _record(Fields(node))
+        fields = Fields(node)
+        record = _record(fields)
         if record is None:
             skipped += 1
         else:
             records.append(record)
+            links.append(tuple(fields.online_links()))
     if skipped:
         logger.info("Skipped %d MARC records with no title", skipped)
-    return ParsedMarc(records=tuple(records), skipped=skipped)
+    return ParsedMarc(records=tuple(records), skipped=skipped, links=tuple(links))

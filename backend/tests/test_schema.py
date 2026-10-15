@@ -3219,6 +3219,7 @@ _TEXT_CEILINGS: tuple[tuple[str, str, dict[str, object]], ...] = (
         {"user_id": 1, "document": "a", "percentage": 0.5, "device": "d", "timestamp": 0},
     ),
     ("readwise_books", "title", {"user_id": 1, "user_book_id": 1}),
+    ("online_links", "label", {"book_id": 1, "url": "https://a.example/"}),
     (
         "member_logins",
         "resume_cursor",
@@ -3240,6 +3241,7 @@ _CEILING_CONSTRAINTS: dict[tuple[str, str], str] = {
     ("highlights", "chapter"): "ck_highlights_bounds",
     ("kosync_documents", "progress"): "ck_kosync_documents_bounds",
     ("readwise_books", "title"): "ck_readwise_books_bounds",
+    ("online_links", "label"): "ck_online_links_bounds",
     ("member_logins", "resume_cursor"): "ck_member_logins_resume_cursor",
 }
 

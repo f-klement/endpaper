@@ -116,9 +116,10 @@ from shelf import Shelf
 #:
 #: **"On any page" was re-measured 2026-09-17 and the two critic seats took it
 #: independently**: deleting `joinedload(Loan.loaned_to)` alone gives 10
-#: statements at three loans and 17 at ten, against a baseline of 7 at both, on
-#: the loans list **and** on the `active_only=false` page, and the same +3 and
-#: +10 on the overdue page against its 9. Until 2026-09-16 the last two rows
+#: statements at three loans and 17 at ten, against a baseline of 7 at both
+#: then (8 since `online_links` joined), on the loans list **and** on the
+#: `active_only=false` page, and the same +3 and +10 on the overdue page
+#: against its 9 then (10 now). Until 2026-09-16 the last two rows
 #: read "on a page holding returned loans", because a second `books_to_out`
 #: pass fetched every active loan with both users joinedloaded; that pass went
 #: with `LoanOut.book`, and two test docstrings went on saying otherwise until
@@ -130,10 +131,11 @@ from shelf import Shelf
 #: Dropping the entire first option lazy loads the Book as well, two per loan,
 #: which is +6 and +20. Both are real; they answer different questions.
 #:
-#: **The three collection options are the batching a second `books_to_out` pass
+#: **The four collection options are the batching a second `books_to_out` pass
 #: used to supply**, and that pass went with `LoanOut.book` narrowing to
 #: `BookColumns`. Without them every collection on the nested Book lazy loads
-#: one SELECT per Book: measured, 13 statements for 3 loans against 34 for 10.
+#: one SELECT per Book: measured with the three options as they stood on
+#: 2026-09-17, 13 statements for 3 loans against 34 for 10.
 #:
 #: What pins all of it is the pair of exact statement counts in
 #: `tests/routers/test_loans.py`, measured at two page lengths on both routes,
@@ -143,6 +145,7 @@ RENDERED: Final[tuple[Any, ...]] = (
     joinedload(Loan.book).selectinload(Book.tags),
     joinedload(Loan.book).selectinload(Book.classifications),
     joinedload(Loan.book).selectinload(Book.identifiers),
+    joinedload(Loan.book).selectinload(Book.online_links),
     joinedload(Loan.loaned_to),
     joinedload(Loan.loaned_by),
 )

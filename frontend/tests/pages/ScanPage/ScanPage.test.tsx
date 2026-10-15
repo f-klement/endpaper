@@ -81,6 +81,28 @@ async function scan(code = "9780441013593") {
 }
 
 describe("ScanPage", () => {
+  it("checks the files saved from a folder when the folder is picked again", async () => {
+    // The sweep is the page's, beside the queue, so the hook's own tests
+    // cannot see whether this door calls it.
+    api.on(
+      "/api/books/digital-references",
+      { body: { items: [], total: 0, page: 1, page_size: 200 } },
+      "GET",
+    );
+    const user = userEvent.setup();
+    const file = new File(["text"], "notes.txt");
+    Object.defineProperty(file, "webkitRelativePath", {
+      value: "Books/notes.txt",
+    });
+    renderWithProviders(<ScanPage />);
+
+    await user.upload(screen.getByLabelText("A whole folder of books"), file);
+
+    await waitFor(() =>
+      expect(api.lastCall("root_label=Books", "GET")).toBeDefined(),
+    );
+  });
+
   it("offers manual ISBN entry alongside the camera", () => {
     renderWithProviders(<ScanPage />);
     expect(screen.getByLabelText("ISBN")).toBeInTheDocument();

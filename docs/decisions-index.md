@@ -482,7 +482,7 @@ repeat the argument.
 |  | [The column boundary for a MARC record is `marc.py`'s field mapping, and it is now pinned](decisions.md#the-column-boundary-for-a-marc-record-is-marcpys-field-mapping-and-it-is-now-pinned) | 173 |
 |  | [Masking is supported because SQLite's LIKE does not backtrack](decisions.md#masking-is-supported-because-sqlites-like-does-not-backtrack) | 304 |
 |  | [The query bound is a cost budget, because a count of predicates is not a cost](decisions.md#the-query-bound-is-a-cost-budget-because-a-count-of-predicates-is-not-a-cost) | 238 |
-|  | [The SRU response bound is charged in bytes, and the row count is not that bound](decisions.md#the-sru-response-bound-is-charged-in-bytes-and-the-row-count-is-not-that-bound) | 1,006 |
+|  | [The SRU response bound is charged in bytes, and the row count is not that bound](decisions.md#the-sru-response-bound-is-charged-in-bytes-and-the-row-count-is-not-that-bound) | 1,028 |
 |  | [An integer the storage engine cannot hold was three unauthenticated 500s](decisions.md#an-integer-the-storage-engine-cannot-hold-was-three-unauthenticated-500s) | 216 |
 |  | [A filter is a read of its column, and only the record writer was guarded](decisions.md#a-filter-is-a-read-of-its-column-and-only-the-record-writer-was-guarded) | 93 |
 |  | [`explain` reads the `Host` header directly, and not `request.url`](decisions.md#explain-reads-the-host-header-directly-and-not-requesturl) | 170 |
@@ -902,4 +902,6 @@ repeat the argument.
 |  | [Authors a source separated travel as a list, and the server joins them](decisions.md#authors-a-source-separated-travel-as-a-list-and-the-server-joins-them) | 530 |
 |  | [A highlight is deleted by hand only, and its key is remembered so no import brings it back](decisions.md#a-highlight-is-deleted-by-hand-only-and-its-key-is-remembered-so-no-import-brings-it-back) | 270 |
 |  | [A Calibre library's files are recorded from the index, through both doors](decisions.md#a-calibre-librarys-files-are-recorded-from-the-index-through-both-doors) | 296 |
+|  | [A re-picked folder: sightings at the pick, misses on a press](decisions.md#a-re-picked-folder-sightings-at-the-pick-misses-on-a-press) | 420 |
+|  | [A catalogue's 856 links are their own table, and the only thing the export writes to 856](decisions.md#a-catalogues-856-links-are-their-own-table-and-the-only-thing-the-export-writes-to-856) | 403 |
 <!-- index: end -->

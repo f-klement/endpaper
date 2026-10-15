@@ -128,6 +128,13 @@ export const en = {
   "classification.scheme.lcsh": "Subject heading",
   "classification.kind.content": "Content type",
   "classification.kind.carrier": "Carrier type",
+  "onlineLinks.section": "Online links",
+  "onlineLinks.relation.resource": "The resource itself",
+  "onlineLinks.relation.version": "A version of it",
+  "onlineLinks.remove": "Remove {link}",
+  "onlineLinks.removeConfirm":
+    "Remove the link {link}? Importing the record again puts it back.",
+  "onlineLinks.relation.related": "Related",
 
   // ── Book detail ─────────────────────────────────────────────────────────
   "book.uploadCover": "Upload Cover",
@@ -1357,7 +1364,7 @@ export const en = {
   // between those two outcomes: one book at a time is reversible before the
   // press, a folder is not reversible afterwards at all.
   "file.explain":
-    "Pick book files, or a whole folder, and Endpaper reads what it can out of them. Anything a file does not say is looked up by its name, and a file that names its ISBN can be looked up by it, as a scanned barcode is. The files are read here in your browser and are never uploaded. From a folder, a book that is one file also gets that file's name, the folders above it and a fingerprint of the file saved on it, so you can find it again, and everyone who can see the book can see them. The fingerprint is computed here from up to 12 KiB of the file. A file's own subject words are saved on the book too: adding one book at a time you can take them off first, and from a folder the only way to take one off afterwards is to remove the book. A folder with a Calibre library's metadata.db at its top is read through that index instead: one book for each book in the library, with every one of its files. If the index cannot be read, the folder is read file by file and this page says so.",
+    "Pick book files, or a whole folder, and Endpaper reads what it can out of them. Anything a file does not say is looked up by its name, and a file that names its ISBN can be looked up by it, as a scanned barcode is. The files are read here in your browser and are never uploaded. From a folder, a book that is one file also gets that file's name, the folders above it and a fingerprint of the file saved on it, so you can find it again, and everyone who can see the book can see them. The fingerprint is computed here from up to 12 KiB of the file. A file's own subject words are saved on the book too: adding one book at a time you can take them off first, and from a folder the only way to take one off afterwards is to remove the book. A folder with a Calibre library's metadata.db at its top is read through that index instead: one book for each book in the library, with every one of its files. If the index cannot be read, the folder is read file by file and this page says so. Picking a folder again checks the files saved from any folder of that name, whoever saved them: one still there is noted as found, and the ones not found are listed, each linked to its book, and marked missing only when you press to. A folder holding none of them is taken for a different folder with the same name.",
   "file.indexUnread":
     "This folder holds a metadata.db that could not be read as a Calibre library's index, so its files were read one by one and a book with several formats may appear once for each file. A library caught while something was writing to it reads like this: pick a copy of the library folder taken while Calibre and anything else writing to it were closed.",
   "file.unindexed":
@@ -1572,6 +1579,18 @@ export const en = {
     "Forget that this book's file is at {path}? Picking that folder again when scanning records it again.",
   "files.loadFailed": "Where this book's files are could not be loaded.",
   "files.forgetFailed": "That location could not be forgotten.",
+  "files.swept":
+    "Checked the files saved from a folder named {root}: {seen} still there, {missing} not found.",
+  "files.sweptMoved":
+    "{count} not at their saved place were found elsewhere in this folder by their fingerprint, so they are not listed.",
+  "files.sweptNotFound": "Not found ({count})",
+  "files.markMissing": "Mark these as missing",
+  "files.markedMissing":
+    "Marked as missing on their books ({count}). Nothing was removed; picking the folder again with a file in it clears its mark.",
+  "files.sweptDifferent":
+    "None of the {count} files saved from a folder named {root} is in this one, so it was taken for a different folder with the same name and nothing was checked or marked.",
+  "files.sweepFailed":
+    "The files saved from this folder could not all be checked or marked. What was already done is kept.",
   "rapid.heldInAnotherFormat":
     "Already in the library in another format, so the file was not attached to it.",
   "rapid.recordDiffers":
@@ -1692,7 +1711,7 @@ export const en = {
   "calibre.withFile": "{count} have a file in the library.",
   "calibre.crossCheck": "Pick the library folder",
   "calibre.crossCheckHint":
-    "Optional. Point at the library folder. Every metadata.opf in it fills in what the index left empty, and each book file the index lists is saved on its book: the file's name, the folders above it and a fingerprint computed here from up to 12 KiB of the file, so you can find it again. Everyone who can see the book can see them. No file is uploaded. The browser will ask before it hands over a folder this large.",
+    "Optional. Point at the library folder. Every metadata.opf in it fills in what the index left empty, and each book file the index lists is saved on its book: the file's name, the folders above it and a fingerprint computed here from up to 12 KiB of the file, so you can find it again. Everyone who can see the book can see them. No file is uploaded. The browser will ask before it hands over a folder this large. Picking the folder again checks the files saved from any folder of that name and lists the ones not found, to mark as missing with one press; nothing is removed.",
   "calibre.crossCheckResult":
     "{checked} books had a file beside them: {filled} fields filled in, {disagreed} where the two disagreed and the index was kept.",
   "calibre.progress": "{done} of {total}",

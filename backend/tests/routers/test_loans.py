@@ -556,7 +556,9 @@ class TestTheNestedBook:
         # The route stopped running every book on the page through
         # `books_to_out` a second time, eight statements, and took three
         # `selectinload`s of its own instead. Measured at both lengths.
-        assert long_cost == 7, f"{long_cost} selects for 10 loans"
+        # **7 until 2026-10-15**, when the nested book gained `online_links`
+        # and `lending.RENDERED` a fourth collection load.
+        assert long_cost == 8, f"{long_cost} selects for 10 loans"
 
     def test_a_page_of_returned_loans_costs_the_same_whatever_its_length(
         self, client, admin, make_book, password_hash
@@ -592,7 +594,7 @@ class TestTheNestedBook:
             f"{short_cost} selects for 3 returned loans and {long_cost} for 10: "
             "the cost moves with the page, which is the N+1 this exists to catch"
         )
-        assert long_cost == 7, f"{long_cost} selects for 10 returned loans"
+        assert long_cost == 8, f"{long_cost} selects for 10 returned loans"
 
 
 class TestOneOpenLoanPerBook:
@@ -1124,7 +1126,7 @@ class TestListOverdue:
         # base moved to 12 when `books_to_out` gained the identifier load, and
         # the number moved in the commit that moved the code, which is the only
         # way a stated cost stays a measurement.
-        assert long_cost == 9, f"{long_cost} selects for 10 overdue loans"
+        assert long_cost == 10, f"{long_cost} selects for 10 overdue loans"
 
 
 class TestLibraryModeAndWhoReadsWhichLoan:
@@ -1652,12 +1654,12 @@ class TestTheSingleLoanHelperIsScoped:
         the viewer and drops `rendered()` is caught here rather than by a page
         cost test that does not run this route.
 
-        **Four, and it is exact rather than a ceiling**, for the reason the two
+        **Five, and it is exact rather than a ceiling**, for the reason the two
         page costs in this file are: a smaller count is a weaker inequality, so
         a bound stops guarding without ever failing. Measured on builder,
-        2026-10-01: the loan with its book, uploader and both people joined,
-        and one `selectinload` each for the book's tags, classifications and
-        identifiers. What a dropped `rendered()` costs on this route is
+        2026-10-15: the loan with its book, uploader and both people joined,
+        and one `selectinload` each for the book's tags, classifications,
+        identifiers and online links. What a dropped `rendered()` costs on this route is
         deliberately not stated: it is a lazy load per relation `LoanOut`
         reaches and nobody has measured it here, so the arm is the equality
         rather than a comparison with a figure somebody reasoned to.
@@ -1679,7 +1681,7 @@ class TestTheSingleLoanHelperIsScoped:
             event.remove(engine, "before_cursor_execute", record)
 
         assert seen, "nothing was counted, so this arm measured nothing"
-        assert len(seen) == 4, (
+        assert len(seen) == 5, (
             f"{len(seen)} statements for one loan: the single loan helper is "
             "lazy loading what `lending.RENDERED` is for"
         )

@@ -10,6 +10,7 @@ import type { BookFormat } from "./bookFormat.ts";
 import type { BookIdentifierOut } from "./bookIdentifierOut.ts";
 import type { ClassificationOut } from "./classificationOut.ts";
 import type { LendingWillingness } from "./lendingWillingness.ts";
+import type { OnlineLinkOut } from "./onlineLinkOut.ts";
 import type { OwnershipStatus } from "./ownershipStatus.ts";
 import type { TagOut } from "./tagOut.ts";
 import type { UserOut } from "./userOut.ts";
@@ -44,6 +45,7 @@ export interface BookColumns {
   language?: string | null;
   lending?: LendingWillingness | null;
   location?: string | null;
+  online_links?: OnlineLinkOut[];
   ownership?: OwnershipStatus;
   page_count?: number | null;
   publisher: string | null;

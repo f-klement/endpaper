@@ -102,7 +102,7 @@ class Loading(Enum):
     * `NOTHING`: one.
     * `SERIALISED`: one. `added_by` is a many to one and rides on the row.
     * `EXPORTED`: two. `collection` joins; `tags` costs one for the whole page.
-    * `PUBLISHED`: three. Two collections, one statement each per page.
+    * `PUBLISHED`: four. Three collections, one statement each per page.
 
     **`SERIALISED` deliberately does not load `tags` and `EXPORTED` does.** A Book
     fetched with `SERIALISED` and then serialised goes through `books_to_out`,
@@ -112,9 +112,9 @@ class Loading(Enum):
 
     **The stronger sentence is false**, and it was the one written here until it
     was measured: "everything fetched with `SERIALISED` is serialised by
-    `books_to_out`" is falsified by **32 of the 49 routes** reaching
+    `books_to_out`" is falsified by **33 of the 50 routes** reaching
     `book_for_read` or `book_in_trash`. **22** serialise a sub-resource and never
-    the book, **9** answer 204 and serialise nothing at all, and `add_copy`
+    the book, **10** answer 204 and serialise nothing at all, and `add_copy`
     serialises the copy rather than the book it read.
 
     **Those numbers are recomputed from the routers** by
@@ -142,11 +142,13 @@ _LOADING_OPTIONS: dict[Loading, tuple[Any, ...]] = {
     Loading.SERIALISED: (joinedload(Book.added_by),),
     # No `added_by`, and that omission is the point rather than an economy:
     # `PublicBookOut` has no member on it, so loading the User who added a Book
-    # would fetch a row nothing may render. Three statements in all: the rows,
-    # then one each for the two collections.
+    # would fetch a row nothing may render. Four statements in all: the rows,
+    # then one each for the three collections.
     Loading.PUBLISHED: (
         selectinload(Book.tags),
         selectinload(Book.classifications),
+        # `marc._online_links` writes `856` from it on both MARC doors.
+        selectinload(Book.online_links),
     ),
     Loading.EXPORTED: (
         joinedload(Book.added_by),

@@ -2642,6 +2642,7 @@ VALID_ROWS: dict[str, dict[str, object]] = {
         "credential_key": "opds-aa00",
     },
     "book_identifiers": {"book_id": None, "scheme": "asin", "value": "B000123456"},
+    "online_links": {"book_id": None, "url": "https://d-nb.info/1234/04", "label": "Volltext"},
 }
 
 #: A NUL, spelled once. Every case using it is a value the tree records.
@@ -2762,6 +2763,15 @@ REFUSED: tuple[Refusal, ...] = (
     Refusal("book_identifiers", "value", "", "the floor"),
     Refusal("book_identifiers", "value", "x" * 61, "the ceiling"),
     Refusal("book_identifiers", "scheme", "kindle", "a scheme this release does not have"),
+    # ── online_links.url: rendered as an href on the book page ──
+    Refusal("online_links", "url", "javascript:alert(1)", "a scheme that runs code"),
+    Refusal("online_links", "url", "data:text/html,x", "a scheme that carries a page"),
+    Refusal("online_links", "url", "https://a.example/" + "x" * 2031, "one byte past the cap"),
+    Refusal(
+        "online_links", "url", "https://a.example/?" + "&" * 406,
+        "425 bytes stored and 2,049 written, which the export would drop",
+    ),
+    Refusal("online_links", "relation", "mirror", "a relation this release does not have"),
 )
 
 

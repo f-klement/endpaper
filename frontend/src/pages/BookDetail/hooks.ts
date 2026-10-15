@@ -39,6 +39,7 @@ import {
   getEditNoteMutationOptions,
   getEditQuoteMutationOptions,
   getForgetBookIdentifierMutationOptions,
+  getForgetOnlineLinkMutationOptions,
   getForgetDigitalReferenceMutationOptions,
   getListDigitalReferencesQueryKey,
   getRemoveBookTagMutationOptions,
@@ -107,6 +108,7 @@ import type {
   BookMatch,
   BookDetailsUpdate,
   BookIdentifierOut,
+  OnlineLinkOut,
   CollectionOut,
   DigitalReferenceOut,
   CustomFieldOut,
@@ -180,6 +182,8 @@ export interface UseBookActionsResult {
   removeTag: (tagId: number) => void;
   /** Take one store identifier off the book, after confirming. */
   removeIdentifier: (identifier: BookIdentifierOut) => void;
+  /** Take one catalogue link off the book, after confirming. */
+  removeOnlineLink: (link: OnlineLinkOut) => void;
   uploadCover: (file: File) => void;
   refreshMetadata: () => void;
   setOwnership: (ownership: OwnershipStatus) => void;
@@ -255,6 +259,13 @@ export function useBookActions(
   const removeIdentifier = useRowWrite(
     getForgetBookIdentifierMutationOptions,
     "identifierId",
+    invalidateBook,
+  );
+  // The book's own invalidation, for the identifiers' reason: listings carry
+  // the links too.
+  const removeOnlineLink = useRowWrite(
+    getForgetOnlineLinkMutationOptions,
+    "linkId",
     invalidateBook,
   );
   const cover = useUploadCover({ mutation });
@@ -355,6 +366,14 @@ export function useBookActions(
       if (confirm(t("identifier.removeConfirm", { value: identifier.value })))
         removeIdentifier.mutate({ bookId, identifierId: identifier.id });
     },
+    removeOnlineLink: (link) => {
+      if (
+        confirm(
+          t("onlineLinks.removeConfirm", { link: link.label ?? link.url }),
+        )
+      )
+        removeOnlineLink.mutate({ bookId, linkId: link.id });
+    },
     uploadCover: (file) => cover.mutate({ bookId, data: { file } }),
     refreshMetadata: () => refresh.mutate({ bookId }),
     setRating: (value) => rating.mutate({ bookId, data: { rating: value } }),
@@ -386,6 +405,7 @@ export function useBookActions(
       createTag.error ??
       removeTag.error ??
       removeIdentifier.error ??
+      removeOnlineLink.error ??
       deleteTag.error ??
       cover.error ??
       ownership.error ??

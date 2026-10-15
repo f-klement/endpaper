@@ -438,6 +438,7 @@ BOOK_CHILDREN = frozenset(
         "kosync_documents",
         "loans",
         "notes",
+        "online_links",
         "quotes",
         "reading_progress",
         "readwise_books",
@@ -485,6 +486,8 @@ BOOK_CHILDREN = frozenset(
 #: row says what a store calls a Book and carries no member: which store the
 #: file came from is not stored, and `models.BookIdentifier` says why. So there
 #: is nothing on a row to scope it by and its privacy is the Book's entirely.
+#: `online_links` is the sixth, for the same reason: what a catalogue said is
+#: online, carrying no member (`models.OnlineLink`).
 BOOK_OWNED_TABLES = frozenset(
     {
         "book_identifiers",
@@ -492,6 +495,7 @@ BOOK_OWNED_TABLES = frozenset(
         "classifications",
         "custom_field_values",
         "digital_references",
+        "online_links",
     }
 )
 
@@ -800,6 +804,34 @@ BOOK_OWNED_READERS = {
             "machine, and why a per reporter view would need a column the table "
             "deliberately does not have. Paginated, so it is bounded like every "
             "other many-book query here.",
+        ),
+        (
+            "total = ( shelf.select(func.count(DigitalReference.id)) .join(DigitalReference, "
+            "DigitalReference.book_id == Book.id) .filter(under) .scalar() or 0 )",
+            "counts the references under one root on the Books the caller may "
+            "see, for the listing a folder sweep reads. Written through "
+            "`Shelf.select()` and joined outward to `books`, so the total is "
+            "scoped by the same predicate as the rows below it.",
+        ),
+        (
+            "rows = ( shelf.select(DigitalReference) .join(DigitalReference, "
+            "DigitalReference.book_id == Book.id) .filter(under) .order_by(DigitalReference.id) "
+            ".offset(paging.offset) .limit(paging.limit) .all() )",
+            "the rows of that listing: every reference under one root on a Book "
+            "the caller may see. Scoped by the Shelf and by nothing else, the "
+            "missing listing's rule for the same table, and paginated.",
+        ),
+        (
+            "rows = ( Shelf.seen_by(db, current_user.id) .select(DigitalReference) "
+            ".join(DigitalReference, DigitalReference.book_id == Book.id) .filter( "
+            "DigitalReference.id.in_(asked), DigitalReference.root_label == payload.root_label, "
+            ") .all() )",
+            "resolves the references a sweep names, so the route can flag or "
+            "refresh them. Written through `Shelf.select()` and joined outward to "
+            "`books`, so an id on a Book the caller may not see, and therefore "
+            "may not write, resolves to no row. The request bounds the id list "
+            "at `MAX_FILES_PER_LOOKUP`; the rows are written and only their ids "
+            "are returned.",
         ),
         (
             "held = ( Shelf.seen_by(db, current_user.id) .select( DigitalReference.id, "
@@ -2767,6 +2799,7 @@ class TestTheShelfIsTheOnlyWayIn:
             "Classification",
             "CustomFieldValue",
             "DigitalReference",
+            "OnlineLink",
             "book_tags",
         }, (
             "The guarded entities no longer match BOOK_OWNED_TABLES. If a table "
@@ -3712,8 +3745,8 @@ class TestStatementCost:
         export()
         assert len(self._count(db, export)) == 2
 
-    def test_published_loading_costs_three_statements(self, db, user):
-        """The fourth member. One for the rows and one for each of the two
+    def test_published_loading_costs_four_statements(self, db, user):
+        """The fourth member. One for the rows and one for each of the three
         collections; `added_by` is not loaded at all, because the public
         payload names no member.
 
@@ -3735,9 +3768,10 @@ class TestStatementCost:
             assert len(books) == 5
             assert all(book.tags == [] for book in books)
             assert all(book.classifications == [] for book in books)
+            assert all(book.online_links == [] for book in books)
 
         read()
-        assert len(self._count(db, read)) == 3
+        assert len(self._count(db, read)) == 4
 
     def test_nothing_loading_costs_one_statement(self, db, user):
         """The first member, pinned through `all()` rather than only through

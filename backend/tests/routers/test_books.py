@@ -3343,7 +3343,10 @@ class TestTheCostOfAListing:
             f"{short_cost} selects for 5 books and {long_cost} for 25: "
             "the cost moves with the page, which is the N+1 this exists to catch"
         )
-        assert long_cost == 12, f"{long_cost} selects for 25 books"
+        # **12 until 2026-10-15**, when `books_to_out` gained one batched
+        # `selectinload(Book.online_links)`: one statement for the page, as
+        # the equal short and long costs above show.
+        assert long_cost == 13, f"{long_cost} selects for 25 books"
 
 
 class TestACatalogueLoginLeavesTheDeploymentWithItsRequest:

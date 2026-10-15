@@ -1528,6 +1528,8 @@ route here and nothing the server stores has been read, opened or checked by it.
 |---|---|---|---|
 | GET | `/api/books/digital-references/missing` | signed in | Every flagged reference on the shelf the caller can see, newest miss first, paginated |
 | POST | `/api/books/file-holders` | signed in | Which books the caller can see already hold each of up to 500 files; a read |
+| GET | `/api/books/digital-references?root_label=` | signed in | Every reference under one root on the shelf the caller can see, oldest first, paginated |
+| POST | `/api/books/digital-references/sweep` | signed in | Sightings and misses under one root, up to 500 together; a miss flags, never deletes |
 | GET | `/api/books/{id}/digital-references` | read | In insertion order |
 | POST | `/api/books/{id}/digital-references` | write | 200; a report, not a create |
 | POST | `/api/books/{id}/digital-references/{reference_id}/missing` | write | 200; flags, never deletes |
@@ -1621,6 +1623,27 @@ one `{"holders": [...]}` per file in the order asked, each holder giving `book_i
 `same_partial_md5` or both. **A book the caller cannot see answers as no book does**, an
 empty list, because the lookup starts from the caller's shelf; trashed books are absent for
 the same reason. A POST because up to 500 paths do not fit a query string; it writes nothing.
+
+**A re-picked folder sweeps the references under its root.** The client lists them with
+`GET /api/books/digital-references?root_label=`, compares each `relative_path` with the files
+the pick holds, and answers through `POST /api/books/digital-references/sweep` with
+`{"root_label", "seen": [...], "missing": [...]}`: each sighting is a `reference_id` with the
+fingerprint read now, each miss a `reference_id`, 1 to 500 of them together. A miss follows
+the per reference flag's rules, so it never deletes. A sighting clears `missing_since`, sets
+`root_confirmed`, and writes its fingerprint **only where each stored half is unset or the same
+as the one sent**, so it fills a gap and never replaces what another look recorded. **Who may
+flag a reference is who may write its book**, and on this shared shelf that is every book the
+caller can see, so both routes start from the caller's shelf: an id on a book the caller
+cannot see, or under another root, is written to by nothing and is absent from the answer,
+which lists the ids it did write as `seen` and `missing`.
+
+**A root is only a folder name**, so two folders sharing one, such as two members' Calibre
+libraries under Calibre's default name, are one root here, and a pick of either lists the
+other's files as not found. The browser client therefore writes sightings at the pick and
+sends misses only when the member presses to mark the files it lists, each linked to its
+book; a pick holding none of the saved paths is taken for a different folder and writes
+nothing. Telling two such folders apart needs a record of who saved each reference, which
+the table does not keep.
 
 ### Store identifiers
 
