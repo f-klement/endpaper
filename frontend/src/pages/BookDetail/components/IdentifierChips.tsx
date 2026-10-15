@@ -20,6 +20,7 @@ import type { Translate } from "../../../i18n";
 const SCHEME_LABEL: Record<BookIdentifierScheme, MessageKey> = {
   [BookIdentifierScheme.asin]: "identifier.asin",
   [BookIdentifierScheme.google_books]: "identifier.google_books",
+  [BookIdentifierScheme.calibre_uuid]: "identifier.calibre_uuid",
 };
 
 /**

@@ -534,9 +534,10 @@ deletion by hand outlasts a sidecar or a Readwise book that still carries the ma
 KOReader key already names the file by its fingerprint. Not keyed on a Book, so a merge
 leaves it alone.
 
-**`book_identifiers`.** What a store calls a book, where that is not an ISBN: a `scheme`,
-a `value`, and the book it hangs off. `asin`, `B00J4YQKHY` is one row; `google_books`,
-`zyTCAlFPjgYC` is another.
+**`book_identifiers`.** What a store, or a Calibre library, calls a book, where that is
+not an ISBN: a `scheme`, a `value`, and the book it hangs off. `asin`, `B00J4YQKHY` is one
+row; `google_books`, `zyTCAlFPjgYC` is another; `calibre_uuid` carries a Calibre record's
+`books.uuid`, which an add matches on.
 
 **Not `books.isbn`, and that is the whole reason the table exists.** That column is the
 importer's match key and the lookup key, and every path into it check digits its input.

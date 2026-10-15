@@ -87,6 +87,7 @@ export const CALIBRE_SCHEMA = [
      pubdate TIMESTAMP DEFAULT '0101-01-01 00:00:00+00:00',
      series_index REAL NOT NULL DEFAULT 1.0,
      path TEXT NOT NULL DEFAULT '',
+     uuid TEXT,
      has_cover BOOL DEFAULT 0
    )`,
   `CREATE TABLE authors (id INTEGER PRIMARY KEY, name TEXT NOT NULL, sort TEXT)`,

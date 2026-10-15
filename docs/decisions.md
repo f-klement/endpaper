@@ -22163,3 +22163,31 @@ never a member's file references, which would publish their disk layout.
   second indicator `0`, `1`, `2` is stored; blank and `8` are null. The indicator maps derive
   from `LinkRelationship`'s order because the subfield `$2` house rule falsely refuses a literal
   indicator `"2"`; recorded in that guard's docstring.
+
+## A Calibre record's uuid is a match key, and stays inside the app
+
+Owner's ruling, 2026-10-15. `books.uuid` in a Calibre library is stored as a
+`book_identifiers` row under the `calibre_uuid` scheme, and an add carrying one is
+refused with 409 where a Book the member can see carries it.
+
+**Why it may be a match key when an ASIN may not.** An ASIN or a volume id names
+an edition, and two Books may honestly carry one, a copy and its original. A
+Calibre uuid names one record in one library for that record's life, so a
+second add carrying it is the same record arriving again.
+
+**Matched through the Shelf, not across the table**, which is the opposite of
+the ISBN walk. The ISBN is unique across `books`, so a hidden holder is a clash
+the insert hits anyway. Nothing makes a uuid unique, so refusing on a hidden
+holder would only tell a member that somebody else holds that record. A hidden
+or trashed holder answers as no Book and the add goes ahead.
+
+**Checked on the server rather than looked up by the client.** `_create_book`
+is the one door both Calibre imports post through, and a 409 there is a shape
+both already handle as "already in the catalogue". A client lookup would have
+been a new route and a second request per book for the same answer.
+
+**No export carries it.** The CSV, plain text and MARCXML exports carry no
+identifier of any scheme, and the uuid is an internal key that means nothing
+outside the library it came from. The backup archive does carry it, as it
+carries every row, because a restore that dropped it would lose the recognition
+it exists for. `PublicBookOut` withholds it with the other identifiers.

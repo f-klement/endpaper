@@ -7,7 +7,10 @@ what is pinned here is the round trip a member gets and the boundary that made
 this a second field rather than a wider one.
 """
 
+from sqlalchemy import event
+
 import settings_store
+from database import engine
 from enums import SettingKey
 from models import Book, BookIdentifier
 from routers.public import PUBLIC_PREFIX
@@ -671,3 +674,105 @@ class TestRemovingOne:
 
         assert again.status_code == 409
         assert identifiers(book["id"], db) == []
+
+
+CALIBRE_UUID = "3f2a6c1e-8b4d-4e2a-9c7f-1d5e0b6a2c94"
+
+
+class TestACalibreRecordIsRecognisedByItsUuid:
+    """A Calibre record with no file and no ISBN has nothing else to be
+    recognised by when the library is imported again."""
+
+    def calibre_add(self, client, headers, **overrides):
+        return client.post(
+            "/api/books/scan",
+            json={
+                "title": "A record with no file",
+                "identifiers": [{"scheme": "calibre_uuid", "value": CALIBRE_UUID}],
+            }
+            | overrides,
+            headers=headers,
+        )
+
+    def test_a_second_add_of_the_record_answers_409_naming_the_book(self, client, admin):
+        first = self.calibre_add(client, admin["headers"])
+
+        again = self.calibre_add(client, admin["headers"])
+
+        assert again.status_code == 409
+        assert again.json()["detail"]["book_id"] == first.json()["id"]
+
+    def test_a_book_the_caller_cannot_see_answers_as_no_book(self, client, admin, member):
+        """Refusing on a hidden holder would confirm somebody else holds that
+        record, and nothing makes a uuid unique the way an ISBN is."""
+        self.calibre_add(client, admin["headers"], is_private=True)
+
+        res = self.calibre_add(client, member["headers"])
+
+        assert res.status_code == 201
+
+    def test_a_hidden_or_trashed_holder_answers_exactly_as_no_holder(
+        self, client, admin, member
+    ):
+        """Same status, same body and the same statements as a uuid nobody
+        holds, so the answer carries nothing about the holder. Trashed is the
+        caller's own Book: the Shelf excludes the trash, so a re-import beside
+        it makes a new Book rather than reviving it."""
+        hidden = CALIBRE_UUID
+        trashed = CALIBRE_UUID[:-1] + "5"
+        absent = CALIBRE_UUID[:-1] + "6"
+        self.calibre_add(client, admin["headers"], is_private=True)
+        own = self.calibre_add(
+            client,
+            member["headers"],
+            identifiers=[{"scheme": "calibre_uuid", "value": trashed}],
+        ).json()
+        client.delete(f"/api/books/{own['id']}", headers=member["headers"])
+        # Warms whatever a member's first request loads, so the three below
+        # are compared on the lookup alone.
+        client.get("/api/books", headers=member["headers"])
+
+        def answer(uuid):
+            statements = []
+
+            def record(_conn, _cursor, statement, *_rest):
+                statements.append(statement)
+
+            event.listen(engine, "before_cursor_execute", record)
+            try:
+                res = self.calibre_add(
+                    client,
+                    member["headers"],
+                    identifiers=[{"scheme": "calibre_uuid", "value": uuid}],
+                )
+            finally:
+                event.remove(engine, "before_cursor_execute", record)
+            body = res.json()
+            return (
+                res.status_code,
+                body["title"],
+                [(one["scheme"], one["value"] == uuid) for one in body["identifiers"]],
+                len(statements),
+            )
+
+        nobody = answer(absent)
+        assert nobody[0] == 201
+        assert answer(hidden) == nobody
+        assert answer(trashed) == nobody
+
+    def test_the_uuid_holder_answers_where_the_isbn_names_another_book(
+        self, client, admin
+    ):
+        """Asked before the ISBN walk, so the 409 names the Book this record
+        already is rather than one that merely shares its ISBN."""
+        client.post(
+            "/api/books",
+            json={"title": "Dune", "isbn": "9780441013593"},
+            headers=admin["headers"],
+        )
+        record = self.calibre_add(client, admin["headers"]).json()
+
+        again = self.calibre_add(client, admin["headers"], isbn="9780441013593")
+
+        assert again.status_code == 409
+        assert again.json()["detail"]["book_id"] == record["id"]

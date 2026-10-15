@@ -192,6 +192,7 @@ export const de: Messages = {
   // ── Wie ein Shop ein Buch nennt ───────────────────────────────────────────
   "identifier.asin": "Amazon-Referenz: {value}",
   "identifier.google_books": "Google-Books-Referenz: {value}",
+  "identifier.calibre_uuid": "Calibre-Referenz: {value}",
   "identifier.other": "{scheme}-Referenz: {value}",
   "identifier.remove": "{identifier} entfernen",
   "identifier.removeConfirm":

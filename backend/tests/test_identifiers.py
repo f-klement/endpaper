@@ -54,7 +54,10 @@ class TestAddingThem:
         )
         db.commit()
 
-        assert {row.scheme for row in book.identifiers} == set(BookIdentifierScheme)
+        assert {row.scheme for row in book.identifiers} == {
+            BookIdentifierScheme.ASIN,
+            BookIdentifierScheme.GOOGLE_BOOKS,
+        }
 
 
 class TestItAddsRatherThanReplaces:

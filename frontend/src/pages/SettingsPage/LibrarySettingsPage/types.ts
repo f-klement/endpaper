@@ -30,7 +30,7 @@ import { BookFormat, OwnershipStatus } from "../../../api/generated/model";
 import { boundIdentifiers, boundRecord } from "../../../lib/bookRequest";
 import {
   formatOf,
-  identifiersWithScheme,
+  identifiersOf,
   type CalibreBook,
 } from "../../../lib/calibre";
 import type {
@@ -73,18 +73,19 @@ export function toBookCreate(book: CalibreBook): BookCreate | null {
     // already takes.
     classifications: [],
     // **Calibre's `identifiers` table is a real one and this is where it
-    // arrives.** Which of its type strings is which scheme is the reader's
-    // decision and is made in `lib/calibre.identifiersWithScheme`; what is left
-    // here is the one door every request's identifiers go through.
+    // arrives, after the record's own uuid.** Which of its type strings is
+    // which scheme is the reader's decision and is made in
+    // `lib/calibre.identifiersOf`; what is left here is the one door every
+    // request's identifiers go through.
     //
     // **`IDENTIFIER_LIMIT` is the bound that binds on this path**, and the
-    // other three do not: that reader keeps 10 and 12 character values out of a
-    // closed alphabet, which is inside the width and cannot hold an invisible
+    // other three do not: that reader keeps 10, 12 and 36 character values out
+    // of a closed alphabet, which is inside the width and cannot hold an invisible
     // character or be empty. It is unbounded in **entries**, one per matching
     // row, and a library filing an ASIN under nine marketplaces would otherwise
     // be a 422 for the whole book. `STORE_SCHEMES`, inside this call, is the
     // other half: it is where a scheme becomes the endpoint's own name for one.
-    identifiers: boundIdentifiers(identifiersWithScheme(book.identifiers)),
+    identifiers: boundIdentifiers(identifiersOf(book)),
   };
 }
 

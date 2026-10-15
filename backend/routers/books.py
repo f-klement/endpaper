@@ -1709,9 +1709,21 @@ def _create_book(payload: BookCreate, current_user: User, db: Session, conflict:
     # somebody else's private book is still a clash. That also means it sees
     # **trashed** rows, which is the trap soft deletion introduces and
     # `_freeable` exists to resolve.
-    # Before the ISBN walk below, which purges trashed rows to free the number.
-    # A bad collection id refused afterwards would have destroyed them first.
+    # Before the ISBN walk below, which purges trashed rows to free the number,
+    # so a bad collection id is refused before any purge is flushed. The other
+    # order would lose nothing: the purge is flushed and not committed, so a
+    # refusal rolls it back with the request.
     _checked_collection(db, payload.collection_id, current_user.id)
+
+    # Before the ISBN walk too, so a 409 names the Book this record already is
+    # rather than one that only shares its ISBN.
+    # `test_the_uuid_holder_answers_where_the_isbn_names_another_book` pins it.
+    calibre_holder = _calibre_holder(payload, current_user, db)
+    if calibre_holder is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=_conflict_detail(_CALIBRE_CONFLICT, calibre_holder, current_user),
+        )
 
     freed: list[int] = []
     if payload.isbn:
@@ -1810,6 +1822,54 @@ def _create_book(payload: BookCreate, current_user: User, db: Session, conflict:
         db.commit()
         db.refresh(book)
     return book_to_out(book, current_user, db)
+
+
+#: The 409 message for a Calibre record a visible Book already carries.
+_CALIBRE_CONFLICT = "Book from this Calibre record already in catalog"
+
+
+def _calibre_holder(payload: BookCreate, current_user: User, db: Session) -> Book | None:
+    """The lowest id Book the caller can see that carries one of this add's
+    `calibre_uuid` identifiers, or None.
+
+    **What recognises a Calibre record with no file and no ISBN on a second
+    import.** The file lookup has no file to ask by and the ISBN walk has no
+    ISBN, so without this the record became a second Book every time the
+    library was imported. `books.uuid` is the one key Calibre keeps for a
+    record for life, which is what makes it a match key where a store's
+    identifier is not: `enums.BookIdentifierScheme.CALIBRE_UUID`.
+
+    **Through the Shelf, so a Book the caller cannot see answers as no Book**,
+    and the add goes ahead. That is the opposite of the ISBN walk's choice, and
+    the reason is the index: the ISBN is unique across the table, so a hidden
+    holder is a clash the insert would hit anyway, while nothing makes a uuid
+    unique, so refusing on a hidden holder would only confirm that somebody
+    else holds that record. Trashed Books are off the Shelf too, the caller's
+    own included, so a re-import beside one makes a new Book rather than
+    reviving it, where the ISBN walk purges the trashed row instead.
+    """
+    uuids = [
+        entry.value
+        for entry in payload.identifiers
+        if entry.scheme == BookIdentifierScheme.CALIBRE_UUID
+    ]
+    if not uuids:
+        return None
+    shelf = Shelf.seen_by(db, current_user.id)
+    holder_id = (
+        shelf.select(Book.id)
+        .join(BookIdentifier, BookIdentifier.book_id == Book.id)
+        .filter(
+            BookIdentifier.scheme == BookIdentifierScheme.CALIBRE_UUID,
+            BookIdentifier.value.in_(uuids),
+        )
+        .order_by(Book.id)
+        .limit(1)
+        .scalar()
+    )
+    if holder_id is None:
+        return None
+    return shelf.where(Book.id == holder_id).first()
 
 
 def _conflict_detail(message: str, holder: Book, current_user: User) -> str | dict[str, object]:

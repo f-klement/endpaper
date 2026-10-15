@@ -172,6 +172,7 @@ export const en = {
   // would hide the value it is there to show.
   "identifier.asin": "Amazon reference: {value}",
   "identifier.google_books": "Google Books reference: {value}",
+  "identifier.calibre_uuid": "Calibre reference: {value}",
   "identifier.other": "{scheme} reference: {value}",
   // The chip's own sentence goes in the placeholder, and what that buys is a
   // control a reader can place: "Remove B00J4YQKHY" says nothing about which

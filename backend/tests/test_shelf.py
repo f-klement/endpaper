@@ -766,6 +766,18 @@ BOOK_OWNED_READERS = {
             "reported for the `where` clause on it rather than for being one.",
         ),
         (
+            "holder_id = ( shelf.select(Book.id) .join(BookIdentifier, "
+            "BookIdentifier.book_id == Book.id) .filter( BookIdentifier.scheme == "
+            "BookIdentifierScheme.CALIBRE_UUID, BookIdentifier.value.in_(uuids), ) "
+            ".order_by(Book.id) .limit(1) .scalar() )",
+            "which Book an add's Calibre uuid already names, for the caller "
+            "alone. `shelf` is `Shelf.seen_by` the caller and the join runs "
+            "outward to `books`, so a private Book of another member "
+            "contributes no row and the add goes ahead as for no Book. It "
+            "returns one id, which reaches the caller only as the 409's "
+            "`book_id` on a Book the caller can already open.",
+        ),
+        (
             "shelf = Shelf.seen_by(db, current_user.id).where( Book.id > after_id, "
             "Book.isbn.is_(None), Book.google_books_id.is_(None), Book.identifiers.any( "
             "BookIdentifier.scheme == BookIdentifierScheme.GOOGLE_BOOKS ), )",

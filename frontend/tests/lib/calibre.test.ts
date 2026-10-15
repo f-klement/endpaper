@@ -79,8 +79,9 @@ async function booksIn(...rows: string[]) {
 }
 
 const ONE_BOOK = [
-  `INSERT INTO books (id, title, pubdate, series_index, path)
-     VALUES (1, 'Dune', '1965-08-01 00:00:00+00:00', 1.0, 'Herbert, Frank/Dune (1)')`,
+  `INSERT INTO books (id, title, pubdate, series_index, path, uuid)
+     VALUES (1, 'Dune', '1965-08-01 00:00:00+00:00', 1.0, 'Herbert, Frank/Dune (1)',
+             '3f2a6c1e-8b4d-4e2a-9c7f-1d5e0b6a2c94')`,
   `INSERT INTO authors (id, name) VALUES (1, 'Frank Herbert')`,
   `INSERT INTO books_authors_link (book, author) VALUES (1, 1)`,
 ];
@@ -103,6 +104,7 @@ describe("reading a library", () => {
     expect(book).toEqual({
       id: 1,
       path: "Herbert, Frank/Dune (1)",
+      uuid: "3f2a6c1e-8b4d-4e2a-9c7f-1d5e0b6a2c94",
       title: "Dune",
       authors: ["Frank Herbert"],
       authorsSeparated: true,
@@ -343,6 +345,7 @@ describe("a Calibre that moved its own schema", () => {
         {
           id: 1,
           path: "x",
+          uuid: null,
           title: "Dune",
           authors: [],
           authorsSeparated: true,
@@ -478,6 +481,7 @@ describe("finding the file beside a book", () => {
 const A_BOOK: CalibreBook = {
   id: 1,
   path: "x",
+  uuid: null,
   title: "Dune",
   authors: ["Frank Herbert"],
   authorsSeparated: true,
@@ -957,6 +961,37 @@ describe("the placeholder set, refused at both of a library's doors", () => {
  * column is somebody else's data and a fixture that handed the function an
  * array would not be reading a library at all.
  */
+describe("the record's own uuid", () => {
+  const UUID = "3f2a6c1e-8b4d-4e2a-9c7f-1d5e0b6a2c94";
+  const asins = Array.from({ length: 9 }, (_, at) => ({
+    type: "amazon",
+    value: `B00000000${at}`,
+  }));
+
+  it("is sent first, so the request's ceiling never drops it", () => {
+    // Nine store identifiers fill the eight slots `boundIdentifiers` keeps,
+    // and the uuid is the one the server matches a re-import on.
+    const sent = calibre.identifiersOf({
+      ...A_BOOK,
+      uuid: UUID,
+      identifiers: asins,
+    });
+
+    expect(sent[0]).toEqual({ scheme: "calibre_uuid", value: UUID });
+    expect(sent).toHaveLength(10);
+  });
+
+  it("is dropped where calibre did not write it, and the book keeps the rest", () => {
+    expect(
+      calibre.identifiersOf({
+        ...A_BOOK,
+        uuid: UUID.toUpperCase(),
+        identifiers: asins.slice(0, 1),
+      }),
+    ).toEqual([{ scheme: "asin", value: "B000000000" }]);
+  });
+});
+
 describe("which of a library's identifiers reach the endpoint", () => {
   /** What one book's `identifiers` rows become, as a request would take them. */
   async function schemed(...rows: string[]) {

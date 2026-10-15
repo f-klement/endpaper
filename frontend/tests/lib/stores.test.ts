@@ -719,6 +719,7 @@ describe("what a scheme's own producers write", () => {
   const SAMPLE: Record<StoreIdentifierScheme, string> = {
     asin: "B000R34YKC",
     google_books: "s7NIrgEACAAJ",
+    calibre_uuid: "3f2a6c1e-8b4d-4e2a-9c7f-1d5e0b6a2c94",
   };
 
   const DIGITS = "0123456789";
@@ -744,6 +745,7 @@ describe("what a scheme's own producers write", () => {
   const ALPHABET: Record<StoreIdentifierScheme, string> = {
     asin: DIGITS + UPPER + LOWER,
     google_books: `-${DIGITS}${UPPER}_${LOWER}`,
+    calibre_uuid: `-${DIGITS}abcdef`,
   };
 
   it("carries a shape for every scheme the union names", () => {
@@ -755,6 +757,7 @@ describe("what a scheme's own producers write", () => {
     expect(SHAPES.length).toBeGreaterThan(1);
     expect(SHAPES.map(([scheme]) => scheme).sort()).toEqual([
       "asin",
+      "calibre_uuid",
       "google_books",
     ]);
   });
@@ -848,7 +851,8 @@ describe("what a scheme's own producers write", () => {
 
     expect(admitted).toEqual(ALPHABET);
     // The count as well, so the boundary argument above stays attached to
-    // something that fails: 62 is the alphanumerics, 64 the URL safe set.
+    // something that fails: 17 is lower case hex and the hyphen, 62 the
+    // alphanumerics, 64 the URL safe set.
     //
     // **Sorted numerically and not by the default comparator**, which sorts
     // lexicographically: `[9, 62, 64].sort()` is `[62, 64, 9]`, so a scheme
@@ -858,7 +862,7 @@ describe("what a scheme's own producers write", () => {
       Object.values(ALPHABET)
         .map((one) => one.length)
         .sort((a, b) => a - b),
-    ).toEqual([62, 64]);
+    ).toEqual([17, 62, 64]);
     expect(
       ["\u00e9", "\u00fc", "\u4e2d", "\u{1f600}", "\u00a0"].filter((one) =>
         SHAPES.some(([scheme]) =>

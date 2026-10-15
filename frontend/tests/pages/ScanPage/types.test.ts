@@ -26,6 +26,7 @@ import type { AudiobookGroup } from "../../../src/lib/audiobookGroups";
 import {
   blankPending,
   draftFromAudiobook,
+  draftFromCalibre,
   draftFromFile,
   enrichedDraft,
   identifiersFromFile,
@@ -35,7 +36,10 @@ import {
   type BookDraft,
   type PendingBook,
 } from "../../../src/pages/ScanPage/types";
-import { identifiersWithScheme } from "../../../src/lib/calibre";
+import {
+  identifiersWithScheme,
+  type CalibreBook,
+} from "../../../src/lib/calibre";
 // The value rule both walks apply, asked directly, so the arm below can say
 // this walk consults it rather than that two literals match.
 import { producedValue } from "../../../src/lib/stores";
@@ -556,6 +560,33 @@ const RECORD: { [K in keyof FileMetadata]-?: FileMetadata[K] } = {
 function record(patch: Partial<FileMetadata> = {}): FileMetadata {
   return { ...RECORD, ...patch };
 }
+
+describe("draftFromCalibre", () => {
+  it("carries the record's own uuid, which a re-import is recognised by", () => {
+    const uuid = "3f2a6c1e-8b4d-4e2a-9c7f-1d5e0b6a2c94";
+    const book: CalibreBook = {
+      id: 1,
+      path: "x",
+      uuid,
+      title: "A record with no file",
+      authors: [],
+      authorsSeparated: true,
+      identifiers: [],
+      isbn: null,
+      publisher: null,
+      year: null,
+      language: null,
+      description: null,
+      seriesName: null,
+      seriesIndex: null,
+      files: [],
+    };
+
+    expect(draftFromCalibre(book).identifiers).toEqual([
+      { scheme: BookIdentifierScheme.calibre_uuid, value: uuid },
+    ]);
+  });
+});
 
 describe("draftFromFile", () => {
   it("carries what the file said into the confirm step", () => {

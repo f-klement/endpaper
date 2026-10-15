@@ -904,4 +904,5 @@ repeat the argument.
 |  | [A Calibre library's files are recorded from the index, through both doors](decisions.md#a-calibre-librarys-files-are-recorded-from-the-index-through-both-doors) | 296 |
 |  | [A re-picked folder: sightings at the pick, misses on a press](decisions.md#a-re-picked-folder-sightings-at-the-pick-misses-on-a-press) | 420 |
 |  | [A catalogue's 856 links are their own table, and the only thing the export writes to 856](decisions.md#a-catalogues-856-links-are-their-own-table-and-the-only-thing-the-export-writes-to-856) | 403 |
+|  | [A Calibre record's uuid is a match key, and stays inside the app](decisions.md#a-calibre-records-uuid-is-a-match-key-and-stays-inside-the-app) | 282 |
 <!-- index: end -->

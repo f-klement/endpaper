@@ -79,9 +79,9 @@ class BookIdentifierIn(BaseModel):
         order worth keeping, because it is what stops an unbounded string
         reaching the scan below, and `ClassificationIn.tidy_number` is arranged
         the same way. What it costs is small and measured: the widest identifier
-        any reader here produces is 12 characters, so a payload would have to
-        carry 48 characters of whitespace around one before the trim would have
-        saved it.
+        any reader here produces is a Calibre uuid at 36 characters, so a
+        payload would have to carry 24 characters of whitespace around one
+        before the trim would have saved it.
 
         **Refused rather than collapsed, and that is where this parts company
         with `ClassificationIn.tidy_number` beside it.** A call number

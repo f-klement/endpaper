@@ -223,6 +223,12 @@ export interface CalibreBook extends SourceRecord {
    * one thing the OPF cannot supply about itself.
    */
   readonly path: string;
+  /**
+   * `books.uuid`: the key Calibre gives a record for life, or `null` where the
+   * row carries none. **What recognises a record with no file and no ISBN on
+   * a second import**, `identifiersOf` says how it travels.
+   */
+  readonly uuid: string | null;
   readonly identifiers: readonly CalibreIdentifier[];
   /**
    * The files `data` names for this book, one a format.
@@ -482,8 +488,11 @@ function readIsbn(identifiers: readonly CalibreIdentifier[]): string | null {
  * turns out to carry it. An empty list is a real answer and says Calibre has no
  * type for that scheme.
  *
- * Both entries were read off calibre master on 2026-09-11, from the plugin that
- * writes the type rather than from a library that carries one:
+ * `calibre` is empty because its value is not a row of that table at all:
+ * `identifiersOf` reads it off `books.uuid`.
+ *
+ * The other two were read off calibre master on 2026-09-11, from the plugin
+ * that writes the type rather than from a library that carries one:
  * `sources/amazon.py:get_domain_and_asin` reads `amazon` and `asin` as the US
  * marketplace, and `sources/google.py` writes `google` and resolves it at
  * `books.google.com/books?id=`.
@@ -491,6 +500,7 @@ function readIsbn(identifiers: readonly CalibreIdentifier[]): string | null {
 const CALIBRE_TYPES: Record<StoreIdentifierScheme, readonly string[]> = {
   asin: ["amazon", "asin"],
   google_books: ["google"],
+  calibre_uuid: [],
 };
 
 /** Every Calibre type that names a scheme, without its marketplace suffix. */
@@ -610,6 +620,24 @@ export function identifiersWithScheme(
 }
 
 /**
+ * Every identifier one book sends: the record's own uuid, then
+ * `identifiersWithScheme` over its `identifiers` rows.
+ *
+ * **The uuid first, because it is the one the server matches on**:
+ * `lib/bookRequest.boundIdentifiers` keeps the first eight and drops the rest,
+ * so a library filing nine store identifiers on one book would otherwise lose
+ * the key that recognises it on the next import. A uuid not in the shape
+ * calibre writes is dropped, `stores.storeIdentifier`'s rule, and the book is
+ * not.
+ */
+export function identifiersOf(book: CalibreBook): StoreIdentifier[] {
+  const own =
+    book.uuid === null ? null : storeIdentifier("calibre_uuid", book.uuid);
+  const stored = identifiersWithScheme(book.identifiers);
+  return own === null ? stored : [own, ...stored];
+}
+
+/**
  * Elements whose text is not the text of the document.
  *
  * **`<script>` is the one that matters and it is not about execution.** The
@@ -702,6 +730,7 @@ export function readCalibreLibrary(db: SqliteDatabase): CalibreReading {
   const rows = db.query(
     `SELECT id, title,
             ${has("path") ? "path" : "'' AS path"},
+            ${has("uuid") ? "uuid" : "NULL AS uuid"},
             ${has("pubdate") ? "pubdate" : "NULL AS pubdate"},
             ${has("series_index") ? "series_index" : "NULL AS series_index"}
        FROM books ORDER BY id`,
@@ -805,6 +834,7 @@ export function readCalibreLibrary(db: SqliteDatabase): CalibreReading {
     books.push({
       id,
       path: text(row["path"]) ?? "",
+      uuid: text(row["uuid"]),
       title: title !== null && CALIBRE_PLACEHOLDER.title(title) ? null : title,
       authors: authors.get(id) ?? [],
       // One `authors` row per person, linked to the book.

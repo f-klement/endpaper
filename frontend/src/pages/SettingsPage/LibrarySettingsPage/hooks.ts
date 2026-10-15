@@ -889,8 +889,9 @@ export function useCalibreImport(): UseCalibreImportResult {
           });
         }
       } catch (refused) {
-        // **A duplicate names the book the ISBN belongs to**, and the files
-        // land on the copy of it the landing rule admits. Where no copy is
+        // **A duplicate names the book the ISBN, or the Calibre record's
+        // uuid, belongs to**, and the files land on the copy of it the
+        // landing rule admits. Where no copy is
         // the files' kind, an EPUB carrying the household's hardcover ISBN,
         // the book is the other format case the lookup path counts, and says
         // so in the same words rather than "already in the catalogue". Copies

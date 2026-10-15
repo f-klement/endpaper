@@ -391,6 +391,12 @@ TRANSFERS: Final[tuple[_Transfer, ...]] = (
     # two ASINs and both survive: that is the merge saying which editions were
     # folded together, where keying on the scheme alone would have made it an
     # `IntegrityError` instead of a fact.
+    #
+    # **A loser's `calibre_uuid` row is dropped like any other at the ceiling**, so
+    # a keeper already carrying eight identifiers loses the uuid a re-import is
+    # recognised by, and that record would be added once more. Not given a
+    # preference, because keeping it means deleting one of the keeper's stored
+    # rows instead, which is a loss of a fact too; the drop is logged.
     _Transfer(
         _table(BookIdentifier.__tablename__),
         _deduplicated(

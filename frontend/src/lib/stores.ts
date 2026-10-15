@@ -135,7 +135,7 @@ export type StoreOwnership = "owned" | "unknown";
  * than a value the endpoint's enum does not have, answered with a 422 in the
  * middle of somebody's import.
  */
-export type StoreIdentifierScheme = "asin" | "google_books";
+export type StoreIdentifierScheme = "asin" | "google_books" | "calibre_uuid";
 
 /** One identifier a store gave a book, with what the adapter says it is. */
 export interface StoreIdentifier {
@@ -254,6 +254,13 @@ export const PRODUCED_VALUE: Record<StoreIdentifierScheme, RegExp> = {
   // suffix. A bound rather than a list of spellings. Calibre's own `google`
   // fixture, `s7NIrgEACAAJ`, is one.
   google_books: /^[A-Za-z0-9_-]{12}$/,
+  // Calibre's `books.uuid`, which calibre writes as `str(uuid.uuid4())`: 36
+  // characters, lower case hex and four hyphens. One class rather than the
+  // hyphens at their positions, because that is the form this table admits;
+  // what it admits beyond a uuid is a value calibre did not write, which costs
+  // a row matching nothing. Upper case is refused rather than folded, because
+  // calibre never writes it.
+  calibre_uuid: /^[0-9a-f-]{36}$/,
 };
 
 /**

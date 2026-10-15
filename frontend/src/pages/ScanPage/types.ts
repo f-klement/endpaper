@@ -8,7 +8,7 @@ import type {
 } from "../../api/generated/model";
 import { boundNumber, boundText } from "../../lib/bookBounds";
 import { normaliseLocation } from "../../lib/lastLocation";
-import { identifiersWithScheme, type CalibreBook } from "../../lib/calibre";
+import { identifiersOf, type CalibreBook } from "../../lib/calibre";
 import type { FileIdentifier, FileMetadata } from "../../lib/fileReaders";
 import type { StoreIdentifier, StoreIdentifierScheme } from "../../lib/stores";
 // The value rule, beside the scheme whose property it is. This module spelled
@@ -446,6 +446,9 @@ export function draftFromMatch(match: BookMatch): BookDraft {
  *
  * - `uuid` in either case, `calibre` and `URI`. No reader here produces a value
  *   anything consumes, which is `BookIdentifierScheme`'s own gate on a member.
+ *   The `calibre_uuid` scheme is not that: its value is read off `metadata.db`,
+ *   where `books.uuid` is known to be the record's key, and a label a file
+ *   wrote says only what its producer chose to call a value.
  * - The four ISBN spellings. An ISBN belongs in `books.isbn`, and
  *   `opf.readIsbn` already puts it there having tested its check digit.
  * - `GOODREADS` and `BARNESNOBLE`, for the reason `goodreads` was refused a
@@ -474,6 +477,8 @@ export function draftFromMatch(match: BookMatch): BookDraft {
 const LABELS_OF_SCHEME: Record<StoreIdentifierScheme, readonly string[]> = {
   asin: ["asin", "amazon", "mobi-asin"],
   google_books: ["google"],
+  // None, and the list above says why.
+  calibre_uuid: [],
 };
 
 /**
@@ -616,7 +621,7 @@ export function draftFromFile(record: FileMetadata): BookDraft {
  * `draftFromFile`'s sibling for a library folder picked on the scan page, and
  * built from the same two rules the Settings import's `toBookCreate` uses:
  * `boundRecord` for what every source states, and
- * `calibre.identifiersWithScheme` for which identifiers reach the endpoint.
+ * `calibre.identifiersOf` for which identifiers reach the endpoint.
  * So a library read through either door files the same book.
  *
  * No subtitle and no subjects, because the index is not read for either.
@@ -629,7 +634,7 @@ export function draftFromCalibre(book: CalibreBook): BookDraft {
     title: bound.title ?? "",
     classifications: [],
     suggested_tag_ids: [],
-    identifiers: boundIdentifiers(identifiersWithScheme(book.identifiers)),
+    identifiers: boundIdentifiers(identifiersOf(book)),
     notFound: true,
   };
 }

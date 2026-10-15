@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- **A Calibre record with no file and no ISBN is recognised when the library is imported again.**
+  Both Calibre doors, the Settings import and a library folder picked on the scan page, now read
+  each record's `books.uuid` and send it as a `calibre_uuid` identifier. An add carrying one answers
+  409, naming the Book, where a Book you can see already carries it. A Book you cannot see, or one
+  in your trash, answers as no Book. The identifier shows on the book page as "Calibre reference"
+  and can be removed like any other.
+
+- **Books imported before this release carry no uuid, and none can be filled in afterwards**: the
+  uuid exists only in your `metadata.db`. So the first import after upgrading adds each record
+  with no file and no ISBN once more. Merging the pair moves the uuid onto the Book you keep, and
+  from then on that record is recognised.
+
 - **Calibre file references, four fixes.** A book whose files two Books already hold refreshes
   each file on the Book holding it, rather than recording every file again on one of them. On the
   Settings Calibre card, a book already in the library whose files would take it past its sixteen

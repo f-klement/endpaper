@@ -79,7 +79,8 @@ export function statusOf(thrown: unknown): number | null {
 }
 
 /**
- * What the server answers for a book whose ISBN is already on the shelf.
+ * What the server answers for a book whose ISBN is already on the shelf, or
+ * whose Calibre record a Book the member can see already carries.
  *
  * Named because it is the ordinary outcome rather than an error: importing the
  * same library twice is what a second run is, and a member who reads "could not

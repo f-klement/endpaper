@@ -200,6 +200,7 @@ export function boundRecord(record: SourceRecord): BoundRecord {
 const STORE_SCHEMES: Record<StoreIdentifierScheme, BookIdentifierScheme> = {
   asin: BookIdentifierScheme.asin,
   google_books: BookIdentifierScheme.google_books,
+  calibre_uuid: BookIdentifierScheme.calibre_uuid,
 };
 
 /**
@@ -251,6 +252,8 @@ const CANONICAL_VALUE: Record<
 > = {
   asin: (value) => value.replace(/[a-z]/g, (one) => one.toUpperCase()),
   google_books: (value) => value,
+  // The value rule admits lower case alone, which is all calibre writes.
+  calibre_uuid: (value) => value,
 };
 
 /**
@@ -585,8 +588,8 @@ const REFUSED_INSIDE_AN_IDENTIFIER = /[\s\p{Cc}\p{Cf}]/u;
  * measures what arrived and this measures what it is about to send. Trimming
  * here is therefore the thing that makes a padded value survive at all, rather
  * than a copy of the server's order. The two agree on every value inside the
- * budget, which is every value any reader here produces: the widest is 12
- * characters.
+ * budget, which is every value any reader here produces: the widest is a
+ * Calibre uuid at 36 characters.
  *
  * **Whitespace inside is dropped rather than removed**, which is the server's
  * rule and the reason for it: an identifier is an opaque token, so whitespace

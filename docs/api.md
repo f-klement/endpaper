@@ -83,7 +83,7 @@ is discarded, and only a token naming a test account does. See [security.md](sec
 | Method | Path | Access | Notes |
 |---|---|---|---|
 | GET | `/api/books` | user | Paginated. Filter with `q`, `status`, `ownership`, `format`, `lending`, `discuss`, `series`, `author`, `location`, `collection_id`, `unfiled`, `unrated`, `tags`, `sort` |
-| POST | `/api/books` | user | **409** on an ISBN already in the catalogue |
+| POST | `/api/books` | user | **409** on an ISBN already in the catalogue, or on a Calibre record (`calibre_uuid` identifier) a Book the caller can see already carries |
 | POST | `/api/books/scan` | user | Same, named for the scan flow |
 | GET | `/api/books/tags` | user | The seeded vocabulary plus the invented tags the caller can already see |
 | POST | `/api/books/tags` | user | Invent a tag. Returns the existing one on a name clash |

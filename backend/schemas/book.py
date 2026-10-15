@@ -856,14 +856,9 @@ class BookColumns(BaseModel):
     #: no statement per book.
     classifications: list[ClassificationOut] = []
 
-    #: What a store calls this Book, in insertion order. Batched with the tags
-    #: and the headings in `books_to_out`, so it costs no statement per book.
-    #:
-    #: **This is the whole of what reads the table today**, which
-    #: `models.BookIdentifier` states rather than leaves to be discovered: no
-    #: query matches on an identifier and nothing renders one yet. It is here so
-    #: that the fact a member's own import wrote is readable back through the
-    #: API rather than only through the archive.
+    #: What a store, or Calibre, calls this Book, in insertion order. Batched
+    #: with the tags and the headings in `books_to_out`, so it costs no
+    #: statement per book. `models.BookIdentifier` lists every other reader.
     #:
     #: Withheld from `PublicBookOut`: see `tests/schemas/test_public.py`.
     identifiers: list[BookIdentifierOut] = []

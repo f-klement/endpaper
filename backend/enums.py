@@ -502,10 +502,11 @@ class BookIdentifierScheme(StrEnum):
 
     **A member here has to be a value some reader can produce**, which is
     `AuthorityScheme`'s rule and its reason: a scheme nothing reads an
-    identifier out of is a row that lies. Both below are produced today, in the
-    browser, by the two store readers that measured an identifier and no ISBN,
-    and a Calibre library's own `identifiers` table reaches them through
-    `frontend/src/lib/calibre.identifiersWithScheme`.
+    identifier out of is a row that lies. All three below are produced today,
+    in the browser: the first two by the two store readers that measured an
+    identifier and no ISBN, which a Calibre library's own `identifiers` table
+    also reaches through `frontend/src/lib/calibre.identifiersWithScheme`, and
+    the third by the Calibre reader alone.
 
     **`goodreads` is the member that rule has refused**, and a Calibre library
     carries the type: nothing here produces the value. `csv_import.py` reads a
@@ -538,6 +539,18 @@ class BookIdentifierScheme(StrEnum):
     #: identifier that archive carries: `frontend/src/lib/takeout.ts` says the
     #: EPUB identifiers beside it are UUIDs and Project Gutenberg URLs.
     GOOGLE_BOOKS = "google_books"
+    #: Calibre's own permanent key for one record, `books.uuid` in a library's
+    #: `metadata.db`, read by `frontend/src/lib/calibre.ts`. **Not a store's
+    #: name for an edition but the one key a Calibre record keeps for life**,
+    #: so it is what recognises a record with no file and no ISBN when the
+    #: library is imported again: `routers/books._calibre_holder` matches on
+    #: it. An internal key, so no export carries it.
+    #:
+    #: **Named for the value and not `calibre`**, because the file readers say
+    #: Calibre in their own code, `opf.ts` reading `calibre:series`, and
+    #: `frontend/tests/lib/fileReaders.test.ts` refuses any module a reader
+    #: reaches that spells a stored scheme.
+    CALIBRE_UUID = "calibre_uuid"
 
 
 class AuthorityScheme(StrEnum):

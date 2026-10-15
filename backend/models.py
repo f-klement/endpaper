@@ -2963,8 +2963,9 @@ class BookIdentifier(Base):
     reader who meets the road alone believes a promise. Importing the store
     file again offers a second Book, and `folding.fold` moves that Book's
     rows onto this one. It offers nothing when this Book already holds the ISBN
-    the file carries: `_create_book` answers **409** rather than making a
-    second Book, and an export carrying both an ISBN and a store identifier is
+    the file carries, or the `calibre_uuid` row a Calibre library's record carries:
+    `_create_book` answers **409** rather than making a second Book, and an
+    export carrying both an ISBN and a store identifier is
     the ordinary case rather than a corner, which is what a Play Books Takeout
     is. `backup.restore` reinstates this table with the rest of a database and
     is not a road anybody takes for one row. `schemas/identifier.py` is the
@@ -2976,14 +2977,18 @@ class BookIdentifier(Base):
     updates a Book it already added, is named in `identifiers.py` and is not
     written.
 
-    **One reader matches on it: the Readwise pull**, which links a Readwise
-    book carrying an ASIN to the one Book the member can see with that ASIN
-    (`readwise.Index`). It writes nothing to a Book, only which Book a member's
-    highlights land on. Otherwise what reads it is `BookOut`, which
+    **Two readers match on it.** The Readwise pull links a Readwise book
+    carrying an ASIN to the one Book the member can see with that ASIN
+    (`readwise.Index`), and writes nothing to a Book, only which Book a
+    member's highlights land on. And an add carrying a `calibre_uuid` row answers
+    409 where a Book the member can see already carries it
+    (`routers/books._calibre_holder`), which is how a Calibre record with no
+    file and no ISBN is recognised on a second import. Otherwise what reads it
+    is `BookOut`, which
     carries it on every Book a member fetches, the book detail page, which
     renders it as text beside the ISBN, the archive, which holds it, and the
-    merge, which moves it. What deliberately does not: `books.isbn` stays the
-    importer's only match key, `/duplicates` still groups on a normalised title
+    merge, which moves it. What deliberately does not: no store's identifier is
+    a match key on an add, `/duplicates` still groups on a normalised title
     and author, and `PublicBookOut` withholds it, so a public shelf does not
     announce which stores the house buys from. See `docs/decisions.md` for what
     each of those would have cost.
@@ -3013,6 +3018,11 @@ class BookIdentifier(Base):
             "value",
             unique=True,
         ),
+        # **The lookup by value**, which the unique index above cannot serve
+        # because it leads with `book_id`: `routers/books._calibre_holder` asks
+        # it once per add, so an import of nine hundred books asks it nine
+        # hundred times.
+        Index("ix_book_identifiers_scheme_value", "scheme", "value"),
         # Built from the enum rather than written out, `ck_author_identifiers_
         # scheme`'s rule: the literal list left a value the application accepts
         # and the database rejects every time the enum grew, and the failure
@@ -3074,9 +3084,8 @@ class BookIdentifier(Base):
     # opaque token, so `zyTCAlFPjgYC` and `ZYTCALFPJGYC` are two different
     # volumes rather than two spellings of one. Folding would collapse them.
     #
-    # **Deliberately not indexed on its own.** Nothing looks a Book up by this,
-    # which the class docstring states rather than leaves to be discovered, and
-    # an index with no reader is a second B-tree written on every insert.
+    # Indexed with the scheme by `ix_book_identifiers_scheme_value`, for the
+    # one lookup by value the class docstring names.
     value: Mapped[str] = mapped_column(String(BOOK_IDENTIFIER_MAX), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 

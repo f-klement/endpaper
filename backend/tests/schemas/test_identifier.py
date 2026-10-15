@@ -44,9 +44,9 @@ class TestTheValueIsTrimmedAndThenTested:
 
         What it costs is a value whose padding carries it past the ceiling,
         refused rather than trimmed into range. The exclusion is small and
-        measured: the widest identifier any reader here produces is a Google
-        volume id at 12 characters, so a payload would have to carry 48
-        characters of whitespace around one before this bites.
+        measured: the widest identifier any reader here produces is a Calibre
+        uuid at 36 characters, so a payload would have to carry 24 characters
+        of whitespace around one before this bites.
         """
         padded = "  " + "B" * BOOK_IDENTIFIER_MAX + "  "
 

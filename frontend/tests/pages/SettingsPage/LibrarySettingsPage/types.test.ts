@@ -45,6 +45,7 @@ function book(overrides: Partial<CalibreBook> = {}): CalibreBook {
   return {
     id: 1,
     path: "Herbert, Frank/Dune (1)",
+    uuid: null,
     title: "Dune",
     authors: ["Frank Herbert"],
     authorsSeparated: true,
@@ -101,6 +102,14 @@ describe("one Calibre record as a request", () => {
     ).toEqual([
       { scheme: BookIdentifierScheme.asin, value: "B000R34YKC" },
       { scheme: BookIdentifierScheme.google_books, value: "s7NIrgEACAAJ" },
+    ]);
+  });
+
+  it("carries the record's own uuid, which a re-import is recognised by", () => {
+    const uuid = "3f2a6c1e-8b4d-4e2a-9c7f-1d5e0b6a2c94";
+
+    expect(toBookCreate(book({ uuid }))!.identifiers).toEqual([
+      { scheme: BookIdentifierScheme.calibre_uuid, value: uuid },
     ]);
   });
 

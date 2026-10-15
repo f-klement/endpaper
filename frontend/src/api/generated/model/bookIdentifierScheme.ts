@@ -26,10 +26,11 @@
  *
  * **A member here has to be a value some reader can produce**, which is
  * `AuthorityScheme`'s rule and its reason: a scheme nothing reads an
- * identifier out of is a row that lies. Both below are produced today, in the
- * browser, by the two store readers that measured an identifier and no ISBN,
- * and a Calibre library's own `identifiers` table reaches them through
- * `frontend/src/lib/calibre.identifiersWithScheme`.
+ * identifier out of is a row that lies. All three below are produced today,
+ * in the browser: the first two by the two store readers that measured an
+ * identifier and no ISBN, which a Calibre library's own `identifiers` table
+ * also reaches through `frontend/src/lib/calibre.identifiersWithScheme`, and
+ * the third by the Calibre reader alone.
  *
  * **`goodreads` is the member that rule has refused**, and a Calibre library
  * carries the type: nothing here produces the value. `csv_import.py` reads a
@@ -58,4 +59,5 @@ export type BookIdentifierScheme =
 export const BookIdentifierScheme = {
   asin: "asin",
   google_books: "google_books",
+  calibre_uuid: "calibre_uuid",
 } as const;

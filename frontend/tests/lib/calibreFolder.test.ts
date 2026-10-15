@@ -14,6 +14,7 @@ function picked(path: string): File {
 const DUNE: CalibreBook = {
   id: 1,
   path: "Frank Herbert/Dune (1)",
+  uuid: null,
   title: "Dune",
   authors: ["Frank Herbert"],
   authorsSeparated: true,
