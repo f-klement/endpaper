@@ -7,11 +7,13 @@
  */
 
 import {
+  HighlightSource,
   ReadStatus,
   TagCategory,
   TagKey,
   type BookOut,
   type CollectionOut,
+  type HighlightOut,
   type LoanOut,
   type NoteOut,
   type PageBookOut,
@@ -199,6 +201,28 @@ export function makeQuote(overrides: Partial<QuoteOut> = {}): QuoteOut {
     text: "A line worth keeping",
     page: null,
     note: null,
+    created_at: "2026-03-01T12:00:00Z",
+    updated_at: "2026-03-01T12:00:00Z",
+    author: makeUser(),
+    ...overrides,
+  };
+}
+
+/** A highlight the caller wrote and has not shared, from a KOReader import. */
+export function makeHighlight(
+  overrides: Partial<HighlightOut> = {},
+): HighlightOut {
+  return {
+    id: id(),
+    book_id: 1,
+    user_id: 1,
+    source: HighlightSource.koreader,
+    text: "Fear is the mind-killer.",
+    note: null,
+    chapter: null,
+    page: null,
+    highlighted_at: "2026-03-01 22:15:09",
+    is_shared: false,
     created_at: "2026-03-01T12:00:00Z",
     updated_at: "2026-03-01T12:00:00Z",
     author: makeUser(),

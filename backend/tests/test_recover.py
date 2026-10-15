@@ -8,6 +8,7 @@ that exists rather than adding one.
 import ast
 import getpass
 
+import kosync
 import recover
 from auth import verify_password
 from models import User
@@ -62,6 +63,18 @@ class TestSettingAPassword:
         db.refresh(user)
         assert verify_password("newpassword1", user.password_hash or "")
         assert user.sessions_valid_from is not None
+
+    def test_it_signs_every_koreader_device_out(self, monkeypatch, db, member) -> None:
+        user = db.query(User).filter(User.username == "member").one()
+        kosync.mint(user)
+        db.commit()
+        typed = iter(["newpassword1", "newpassword1"])
+        monkeypatch.setattr(getpass, "getpass", lambda _: next(typed))
+
+        assert recover.main(["recover", "member"]) == 0
+
+        db.refresh(user)
+        assert user.kosync_key_digest is None
 
     def test_a_mismatch_changes_nothing(self, monkeypatch, db, member) -> None:
         typed = iter(["newpassword1", "typo"])

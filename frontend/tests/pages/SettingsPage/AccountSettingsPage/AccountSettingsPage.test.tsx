@@ -47,6 +47,51 @@ beforeEach(() => {
   // Stubbed as a 403 so that a member reaching it would meet the real answer.
   // Nothing should reach it: see the request count assertion below.
   api.on("/api/users/emails", { status: 403, body: { detail: "Admins only" } });
+  api.on("/api/kosync/account", {
+    body: { username: "kim", has_password: false, password_set_at: null },
+  });
+  api.on("/api/kosync/inbox", { body: [] });
+});
+
+describe("AccountSettingsPage KOReader sync", () => {
+  it("shows a minted password once, beside the username a device uses", async () => {
+    const user = userEvent.setup();
+    api.on(
+      "/api/kosync/account/password",
+      { status: 201, body: { username: "kim", password: "abcdefghjkmnpqrs" } },
+      "POST",
+    );
+    render();
+
+    await user.click(
+      await screen.findByRole("button", { name: "Make a sync password" }),
+    );
+
+    expect(await screen.findByText("abcdefghjkmnpqrs")).toBeInTheDocument();
+    expect(screen.getByText(/shown only this once/)).toBeInTheDocument();
+  });
+
+  it("counts the documents waiting for a book", async () => {
+    api.on("/api/kosync/inbox", {
+      body: [
+        {
+          document: "0123456789abcdef0123456789abcdef",
+          percentage: 0.1,
+          device: "Kobo",
+          pushed_at: "2026-10-15T08:00:00Z",
+          title: null,
+          authors: null,
+          filename: null,
+          book_id: null,
+        },
+      ],
+    });
+    render();
+
+    expect(
+      await screen.findByText(/Documents waiting for a book: 1\./),
+    ).toBeInTheDocument();
+  });
 });
 
 describe("AccountSettingsPage", () => {

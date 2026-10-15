@@ -19,8 +19,8 @@ on the host, which is a worse disclosure than the one this is repairing.
 Everything a redemption does, this does too, and for the same reasons: it refuses
 an account a directory authenticates, the hash is written through
 `auth.hash_password`, so the 72 byte bcrypt bound is the one the rest of the app
-applies, and `sessions_valid_from` moves, so a token somebody else is holding on
-this account stops working. Confirming an account is
+applies, and `accounts.end_every_session` runs, so a token or a KOReader sync
+password somebody else is holding on this account stops working. Confirming an account is
 **not** one of the jobs here: the first account in a library is never gated, so
 a sole admin cannot be waiting on one.
 """
@@ -28,7 +28,7 @@ a sole admin cannot be waiting on one.
 import getpass
 import sys
 
-from accounts import now
+from accounts import end_every_session
 from auth import hash_password
 from database import SessionLocal
 from models import User, app_holds_the_password
@@ -72,11 +72,14 @@ def main(argv: list[str]) -> int:
             )
             return 1
         user.password_hash = hash_password(password)
-        # The same clock every naive UTC column in this schema is written from.
-        user.sessions_valid_from = now()
+        # Every token and the KOReader sync password, as a redemption ends them.
+        end_every_session(user)
         db.commit()
 
-    print(f"Password set for {username}. Every session on that account is over.")
+    print(
+        f"Password set for {username}. Every session and every KOReader device "
+        "on that account is signed out."
+    )
     return 0
 
 

@@ -1485,12 +1485,12 @@ class TestNoteVisibility:
 #: Local names that mean `models.Note`, per module, so a `from models import
 #: Note as N` cannot walk out of the rule. The same evasion `test_shelf.py`
 #: measured on `visible_to as _v`.
-def _note_aliases(tree: ast.AST) -> set[str]:
-    names = {"Note"}
+def _note_aliases(tree: ast.AST, model: str = "Note") -> set[str]:
+    names = {model}
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom) and node.module == "models":
             for alias in node.names:
-                if alias.name == "Note" and alias.asname:
+                if alias.name == model and alias.asname:
                     names.add(alias.asname)
     return names
 
@@ -1575,7 +1575,9 @@ def _reads_and_returns_a_note(
 
 
 def _narrows_to_its_reader(
-    function: ast.FunctionDef | ast.AsyncFunctionDef, aliases: set[str]
+    function: ast.FunctionDef | ast.AsyncFunctionDef,
+    aliases: set[str],
+    predicate: str = "note_visible_to",
 ) -> bool:
     """Whether `note_visible_to` appears in this function's own body.
 
@@ -1591,9 +1593,59 @@ def _narrows_to_its_reader(
     wrongly.
     """
     return any(
-        isinstance(node, ast.Name) and node.id == "note_visible_to"
+        isinstance(node, ast.Name) and node.id == predicate
         for node in _own_body(function)
     )
+
+
+class TestAHighlightReadIsNarrowedToItsReader:
+    """The note rule below, asked of `Highlight` and `highlight_visible_to`.
+
+    The same shape and the same blind spots, which that class lists; its
+    sensitivity arms exercise the helpers both share. What is asked here is
+    the one fact a highlight is private by: every function handing highlights
+    back says who is reading.
+    """
+
+    @staticmethod
+    def _population() -> dict[str, bool]:
+        found = {}
+        for name, source in application_sources().items():
+            tree = ast.parse(source)
+            aliases = _note_aliases(tree, "Highlight")
+            for node in ast.walk(tree):
+                if isinstance(
+                    node, ast.FunctionDef | ast.AsyncFunctionDef
+                ) and _reads_and_returns_a_note(node, aliases):
+                    found[f"{name}:{node.name}"] = _narrows_to_its_reader(
+                        node, aliases, "highlight_visible_to"
+                    )
+        return found
+
+    def test_every_function_returning_a_highlight_narrows_it(self):
+        offenders = sorted(name for name, narrowed in self._population().items() if not narrowed)
+        assert offenders == [], (
+            "These read highlights and return them without saying who is "
+            f"reading, so a private highlight reaches whoever asked: {offenders}"
+        )
+
+    def test_the_population_is_not_empty(self):
+        assert sorted(self._population()) == [
+            "routers/books.py:_highlight_for_sharing",
+            "routers/books.py:get_highlights",
+        ]
+
+    def test_a_highlight_query_that_forgot_the_predicate_is_reported(self):
+        source = (
+            "from models import Highlight\n"
+            "def get_highlights(db) -> list[Highlight]:\n"
+            "    return db.query(Highlight).filter(Highlight.book_id == 1).all()\n"
+        )
+        tree = ast.parse(source)
+        aliases = _note_aliases(tree, "Highlight")
+        function = next(node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef))
+        assert _reads_and_returns_a_note(function, aliases)
+        assert not _narrows_to_its_reader(function, aliases, "highlight_visible_to")
 
 
 class TestANoteReadIsNarrowedToItsReader:

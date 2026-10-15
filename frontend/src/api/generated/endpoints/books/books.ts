@@ -70,9 +70,13 @@ import type {
   EnrichBookParams,
   ExportBooksParams,
   HTTPValidationError,
+  HighlightImportOut,
+  HighlightOut,
+  HighlightSharingIn,
   HoldersIn,
   HoldersOut,
   IdentifierBackfillOut,
+  KoreaderImportIn,
   ListAuthorSuggestionsParams,
   ListBooksParams,
   ListMissingDigitalReferencesParams,
@@ -4210,7 +4214,7 @@ export const getMergeBooksUrl = () => {
  * ISBN, a page count. It never overwrites a value it already holds, on the
  * same principle as enrichment, since the kept row is the one a person chose.
  *
- * Tags, notes, quotes, loans and reading statuses are repointed rather than
+ * Tags, notes, quotes, highlights, loans and reading statuses are repointed rather than
  * dropped. A status collision (both rows read by the same person) keeps the
  * one on the survivor, because deleting somebody's reading history to
  * satisfy a unique index is not an acceptable way to resolve it.
@@ -8344,6 +8348,432 @@ export function useEnrichmentCandidates<
   return withQueryKey(query, queryOptions.queryKey);
 }
 
+export const getGetHighlightsUrl = (bookId: number) => {
+  return `/api/books/${bookId}/highlights`;
+};
+
+/**
+ * The highlights on this book the caller may read: their own, and the ones
+ * other members shared. In the device's page order, then as they were made.
+ * @summary Get Highlights
+ */
+export const getHighlights = async (
+  bookId: number,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<HighlightOut[]> => {
+  return customFetch<HighlightOut[]>(getGetHighlightsUrl(bookId), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetHighlightsQueryKey = (bookId: number) => {
+  return [`/api/books/${bookId}/highlights`] as const;
+};
+
+export const getGetHighlightsQueryOptions = <
+  TData = Awaited<ReturnType<typeof getHighlights>>,
+  TError = Refusal | HTTPValidationError,
+>(
+  bookId: number,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof getHighlights>>, TError, TData>
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetHighlightsQueryKey(bookId);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getHighlights>>> = ({
+    signal,
+  }) => getHighlights(bookId, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: bookId !== null && bookId !== undefined,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getHighlights>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type GetHighlightsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getHighlights>>
+>;
+export type GetHighlightsQueryError = Refusal | HTTPValidationError;
+
+export function useGetHighlights<
+  TData = Awaited<ReturnType<typeof getHighlights>>,
+  TError = Refusal | HTTPValidationError,
+>(
+  bookId: number,
+  options: {
+    query: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof getHighlights>>, TError, TData>
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getHighlights>>,
+          TError,
+          Awaited<ReturnType<typeof getHighlights>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useGetHighlights<
+  TData = Awaited<ReturnType<typeof getHighlights>>,
+  TError = Refusal | HTTPValidationError,
+>(
+  bookId: number,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof getHighlights>>, TError, TData>
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getHighlights>>,
+          TError,
+          Awaited<ReturnType<typeof getHighlights>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useGetHighlights<
+  TData = Awaited<ReturnType<typeof getHighlights>>,
+  TError = Refusal | HTTPValidationError,
+>(
+  bookId: number,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof getHighlights>>, TError, TData>
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/**
+ * @summary Get Highlights
+ */
+
+export function useGetHighlights<
+  TData = Awaited<ReturnType<typeof getHighlights>>,
+  TError = Refusal | HTTPValidationError,
+>(
+  bookId: number,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof getHighlights>>, TError, TData>
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+} {
+  const queryOptions = getGetHighlightsQueryOptions(bookId, options);
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+export const getImportKoreaderHighlightsUrl = (bookId: number) => {
+  return `/api/books/${bookId}/highlights/koreader`;
+};
+
+/**
+ * Write one KOReader sidecar's highlights onto this book, as the caller's.
+ *
+ * Repeatable: a highlight already imported is updated rather than doubled.
+ * Its sharing is left as the member set it while it stays on this book; one
+ * the import moves here from another book is private again. `highlights`
+ * says how a KOReader highlight is identified and what an import never does.
+ *
+ * **409 `not_held` unless this book holds a file carrying the sidecar's
+ * fingerprint**, so a sidecar lands only on a Book its fingerprint matched
+ * and never on one a client guessed. Read off the Book's own references,
+ * which `BookForRead` has already scoped.
+ * @summary Import Koreader Highlights
+ */
+export const importKoreaderHighlights = async (
+  bookId: number,
+  koreaderImportIn: KoreaderImportIn,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<HighlightImportOut> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+  return customFetch<HighlightImportOut>(
+    getImportKoreaderHighlightsUrl(bookId),
+    {
+      ...options,
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...getHeaders(options?.headers),
+      },
+      body: JSON.stringify(koreaderImportIn),
+    },
+  );
+};
+
+export const getImportKoreaderHighlightsMutationKey = () =>
+  ["importKoreaderHighlights"] as const;
+
+export const getImportKoreaderHighlightsMutationOptions = <
+  TError = Refusal | HTTPValidationError,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof importKoreaderHighlights>>,
+    TError,
+    ImportKoreaderHighlightsMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof importKoreaderHighlights>>,
+  TError,
+  ImportKoreaderHighlightsMutationVariables,
+  TContext
+> => {
+  const mutationKey = getImportKoreaderHighlightsMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof importKoreaderHighlights>>,
+    ImportKoreaderHighlightsMutationVariables
+  > = (props) => {
+    const { bookId, data } = props ?? {};
+
+    return importKoreaderHighlights(bookId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ImportKoreaderHighlightsMutationResult = NonNullable<
+  Awaited<ReturnType<typeof importKoreaderHighlights>>
+>;
+export type ImportKoreaderHighlightsMutationBody = KoreaderImportIn;
+export type ImportKoreaderHighlightsMutationError =
+  Refusal | HTTPValidationError;
+export type ImportKoreaderHighlightsMutationVariables = {
+  bookId: number;
+  data: KoreaderImportIn;
+};
+
+/**
+ * @summary Import Koreader Highlights
+ */
+export const useImportKoreaderHighlights = <
+  TError = Refusal | HTTPValidationError,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof importKoreaderHighlights>>,
+      TError,
+      ImportKoreaderHighlightsMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof importKoreaderHighlights>>,
+  TError,
+  ImportKoreaderHighlightsMutationVariables,
+  TContext
+> => {
+  return useMutation(
+    getImportKoreaderHighlightsMutationOptions(options),
+    queryClient,
+  );
+};
+export const getSetHighlightSharingUrl = (
+  bookId: number,
+  highlightId: number,
+) => {
+  return `/api/books/${bookId}/highlights/${highlightId}/sharing`;
+};
+
+/**
+ * Share one of the caller's highlights with whoever can see the book, or
+ * withdraw it.
+ *
+ * **409 `too_long_to_share` for a passage past `QUOTE_TEXT_MAX`**, the
+ * ceiling a passage shown to the shelf already has. Storage takes longer
+ * marks so an import refuses none; showing one is the act that ceiling binds.
+ * Withdrawing is never refused.
+ * @summary Set Highlight Sharing
+ */
+export const setHighlightSharing = async (
+  bookId: number,
+  highlightId: number,
+  highlightSharingIn: HighlightSharingIn,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<HighlightOut> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+  return customFetch<HighlightOut>(
+    getSetHighlightSharingUrl(bookId, highlightId),
+    {
+      ...options,
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        ...getHeaders(options?.headers),
+      },
+      body: JSON.stringify(highlightSharingIn),
+    },
+  );
+};
+
+export const getSetHighlightSharingMutationKey = () =>
+  ["setHighlightSharing"] as const;
+
+export const getSetHighlightSharingMutationOptions = <
+  TError = Refusal | HTTPValidationError,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof setHighlightSharing>>,
+    TError,
+    SetHighlightSharingMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof setHighlightSharing>>,
+  TError,
+  SetHighlightSharingMutationVariables,
+  TContext
+> => {
+  const mutationKey = getSetHighlightSharingMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof setHighlightSharing>>,
+    SetHighlightSharingMutationVariables
+  > = (props) => {
+    const { bookId, highlightId, data } = props ?? {};
+
+    return setHighlightSharing(bookId, highlightId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type SetHighlightSharingMutationResult = NonNullable<
+  Awaited<ReturnType<typeof setHighlightSharing>>
+>;
+export type SetHighlightSharingMutationBody = HighlightSharingIn;
+export type SetHighlightSharingMutationError = Refusal | HTTPValidationError;
+export type SetHighlightSharingMutationVariables = {
+  bookId: number;
+  highlightId: number;
+  data: HighlightSharingIn;
+};
+
+/**
+ * @summary Set Highlight Sharing
+ */
+export const useSetHighlightSharing = <
+  TError = Refusal | HTTPValidationError,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof setHighlightSharing>>,
+      TError,
+      SetHighlightSharingMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof setHighlightSharing>>,
+  TError,
+  SetHighlightSharingMutationVariables,
+  TContext
+> => {
+  return useMutation(
+    getSetHighlightSharingMutationOptions(options),
+    queryClient,
+  );
+};
 export const getForgetBookIdentifierUrl = (
   bookId: number,
   identifierId: number,

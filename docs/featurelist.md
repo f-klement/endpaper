@@ -172,6 +172,12 @@ person rather than per book.
 audiobook, as many times as you like. Recording progress on a book you had
 abandoned returns it to reading; nothing deletes the log.
 
+**KOReader progress sync**: point KOReader's progress sync at your library with a
+password made for it on your account page, and your devices keep each other's place
+while the book's reading log fills itself in, a row a day as you move, with the book
+marked read when you reach the end. A file whose fingerprint was taken when you added it
+is matched to its book by itself; any other waits for you to link it once.
+
 **Notes** and **quotes** hang off a book. A quote is verbatim text with an
 optional page and your own remark beside it, kept separate so one is not
 mistaken for the other.

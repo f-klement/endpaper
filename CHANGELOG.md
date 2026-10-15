@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+- **KOReader highlights.** Settings, Your library has a card that imports the metadata files
+  KOReader keeps beside each book (`metadata.<ext>.lua`), in both the current `annotations`
+  shape and the older `bookmarks` and `highlight` pair. The files are read in the browser;
+  only the passages, notes and positions are sent. Each file is matched to the one book
+  holding the same file by KOReader's fingerprint, and a file no book holds, or more than one
+  does, is reported rather than guessed. Highlights arrive private; the book page lists your
+  own and those other members shared, and you share or withdraw your own there. Running the
+  import again updates the highlights you changed and adds new ones; a highlight deleted in
+  KOReader is not deleted here.
+
+- **KOReader keeps your place, and your reading log fills itself in.** Point KOReader's
+  progress sync at `/kosync` on your library, signing in with your username and a sync
+  password made on your account page; the password is shown once and is never your login.
+  Devices pull each other's position as KOReader expects. Once a document is linked to a book,
+  a move of a whole percent adds a row to that book's reading log, at most one a day, and
+  arriving at the end marks the book read. A password reset signs every device out, and an
+  admin can sign a member out of every session and device. A file fingerprinted on exactly
+  one book before a device first reports it links itself; any other waits on the book's page
+  to be linked once. Everything a device reports is yours alone.
+
 - **Picking a folder again adds nothing twice.** Before anything is added, the scan queue asks
   which books already hold each picked file, by where it is or by its fingerprint, and a row
   already in the library says so. Adding refreshes where that file is on the book that holds it

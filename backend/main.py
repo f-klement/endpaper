@@ -21,6 +21,7 @@ from starlette.responses import Response
 from starlette.routing import BaseRoute
 from starlette.types import Scope
 
+import kosync as kosync_protocol
 import metadata
 import notifications
 import refusals
@@ -51,6 +52,7 @@ from routers import (
     collections,
     covers,
     imports,
+    kosync,
     loans,
     opds,
     public,
@@ -433,6 +435,14 @@ app.include_router(backup.router)
 app.include_router(books.router)
 app.include_router(collections.router)
 app.include_router(imports.router)
+app.include_router(kosync.member)
+# The third router answering without a session: KOReader's own protocol, at
+# `/kosync` because that is the address a member types into the device. Before
+# the SPA mount for the reason `/sru` is. Its refusals are the reference
+# server's `message` and `code` rather than this application's `detail`, so
+# they have a handler of their own, which only its routes raise to.
+app.include_router(kosync.device)
+app.add_exception_handler(kosync_protocol.Refused, kosync.refused_answer)
 app.include_router(loans.router)
 app.include_router(opds.router)
 # Before the SPA mount, like every router, and that matters more here than

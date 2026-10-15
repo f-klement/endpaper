@@ -3769,6 +3769,156 @@
         "title": "HeadingKind",
         "type": "string"
       },
+      "HighlightImportOut": {
+        "description": "What one import did, in three disjoint counts over the rows it named.",
+        "properties": {
+          "created": {
+            "title": "Created",
+            "type": "integer"
+          },
+          "unchanged": {
+            "title": "Unchanged",
+            "type": "integer"
+          },
+          "updated": {
+            "title": "Updated",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "created",
+          "updated",
+          "unchanged"
+        ],
+        "title": "HighlightImportOut",
+        "type": "object"
+      },
+      "HighlightOut": {
+        "description": "One highlight the caller may read: their own, or one shared with them.",
+        "properties": {
+          "author": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UserOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "book_id": {
+            "title": "Book Id",
+            "type": "integer"
+          },
+          "chapter": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chapter"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "highlighted_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Highlighted At"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "is_shared": {
+            "title": "Is Shared",
+            "type": "boolean"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Page"
+          },
+          "source": {
+            "$ref": "#/components/schemas/HighlightSource"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "user_id": {
+            "title": "User Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "book_id",
+          "user_id",
+          "source",
+          "text",
+          "is_shared",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "HighlightOut",
+        "type": "object"
+      },
+      "HighlightSharingIn": {
+        "properties": {
+          "is_shared": {
+            "title": "Is Shared",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "is_shared"
+        ],
+        "title": "HighlightSharingIn",
+        "type": "object"
+      },
+      "HighlightSource": {
+        "description": "Where a highlight came from, which is half of what names it there.\n\n`highlights.source_key` is only unique within one source, so the pair is\nthe identity an import re-finds a row by: `models.Highlight` says what each\nsource's key is.",
+        "enum": [
+          "koreader",
+          "readwise"
+        ],
+        "title": "HighlightSource",
+        "type": "string"
+      },
       "HolderOut": {
         "description": "One visible Book holding a reference to the file, and how it matched.",
         "properties": {
@@ -4103,6 +4253,239 @@
           "skipped"
         ],
         "title": "ImportResultOut",
+        "type": "object"
+      },
+      "KoreaderHighlightIn": {
+        "description": "One highlight out of a KOReader sidecar, as the browser read it.\n\n**Identified by the file and `highlighted_at`**, KOReader's creation time,\nwhich adjusting a mark does not change; by the positions too where that\ntime is missing or shared (`highlights.koreader_source_key`). A reflowable\nbook's positions are XPointers; a fixed layout one's are coordinate\ntables, which the browser writes as one canonical string. They are hashed,\nnever stored.",
+        "properties": {
+          "chapter": {
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chapter"
+          },
+          "highlighted_at": {
+            "anyOf": [
+              {
+                "pattern": "^\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Highlighted At"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 10000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "page": {
+            "anyOf": [
+              {
+                "maximum": 100000.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Page"
+          },
+          "pos0": {
+            "maxLength": 4096,
+            "minLength": 1,
+            "title": "Pos0",
+            "type": "string"
+          },
+          "pos1": {
+            "maxLength": 4096,
+            "minLength": 1,
+            "title": "Pos1",
+            "type": "string"
+          },
+          "text": {
+            "maxLength": 10000,
+            "minLength": 1,
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "pos0",
+          "pos1",
+          "text"
+        ],
+        "title": "KoreaderHighlightIn",
+        "type": "object"
+      },
+      "KoreaderImportIn": {
+        "description": "The highlights of one sidecar, for the one Book holding its file.",
+        "properties": {
+          "highlights": {
+            "items": {
+              "$ref": "#/components/schemas/KoreaderHighlightIn"
+            },
+            "maxItems": 5000,
+            "minItems": 1,
+            "title": "Highlights",
+            "type": "array"
+          },
+          "partial_md5": {
+            "pattern": "^[0-9a-f]{32}$",
+            "title": "Partial Md5",
+            "type": "string"
+          }
+        },
+        "required": [
+          "partial_md5",
+          "highlights"
+        ],
+        "title": "KoreaderImportIn",
+        "type": "object"
+      },
+      "KosyncAccountOut": {
+        "description": "Whether this member can sign a device in, and as whom.",
+        "properties": {
+          "has_password": {
+            "title": "Has Password",
+            "type": "boolean"
+          },
+          "password_set_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Password Set At"
+          },
+          "username": {
+            "title": "Username",
+            "type": "string"
+          }
+        },
+        "required": [
+          "username",
+          "has_password",
+          "password_set_at"
+        ],
+        "title": "KosyncAccountOut",
+        "type": "object"
+      },
+      "KosyncDocumentOut": {
+        "description": "One document a device has reported, as its owner sees it.",
+        "properties": {
+          "authors": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Authors"
+          },
+          "book_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Book Id"
+          },
+          "device": {
+            "title": "Device",
+            "type": "string"
+          },
+          "document": {
+            "title": "Document",
+            "type": "string"
+          },
+          "filename": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Filename"
+          },
+          "percentage": {
+            "title": "Percentage",
+            "type": "number"
+          },
+          "pushed_at": {
+            "format": "date-time",
+            "title": "Pushed At",
+            "type": "string"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          }
+        },
+        "required": [
+          "document",
+          "percentage",
+          "device",
+          "pushed_at",
+          "title",
+          "authors",
+          "filename",
+          "book_id"
+        ],
+        "title": "KosyncDocumentOut",
+        "type": "object"
+      },
+      "KosyncPasswordOut": {
+        "description": "A sync password just minted, served this once and never again.",
+        "properties": {
+          "password": {
+            "title": "Password",
+            "type": "string"
+          },
+          "username": {
+            "title": "Username",
+            "type": "string"
+          }
+        },
+        "required": [
+          "username",
+          "password"
+        ],
+        "title": "KosyncPasswordOut",
         "type": "object"
       },
       "LendingWillingness": {
@@ -9438,7 +9821,7 @@
     },
     "/api/books/merge": {
       "post": {
-        "description": "Fold several catalogue entries into one.\n\nThe survivor absorbs anything the others have and it lacks: a cover, an\nISBN, a page count. It never overwrites a value it already holds, on the\nsame principle as enrichment, since the kept row is the one a person chose.\n\nTags, notes, quotes, loans and reading statuses are repointed rather than\ndropped. A status collision (both rows read by the same person) keeps the\none on the survivor, because deleting somebody's reading history to\nsatisfy a unique index is not an acceptable way to resolve it.",
+        "description": "Fold several catalogue entries into one.\n\nThe survivor absorbs anything the others have and it lacks: a cover, an\nISBN, a page count. It never overwrites a value it already holds, on the\nsame principle as enrichment, since the kept row is the one a person chose.\n\nTags, notes, quotes, highlights, loans and reading statuses are repointed rather than\ndropped. A status collision (both rows read by the same person) keeps the\none on the survivor, because deleting somebody's reading history to\nsatisfy a unique index is not an acceptable way to resolve it.",
         "operationId": "merge_books",
         "requestBody": {
           "content": {
@@ -11624,6 +12007,261 @@
           }
         ],
         "summary": "Enrichment Candidates",
+        "tags": [
+          "books"
+        ]
+      }
+    },
+    "/api/books/{book_id}/highlights": {
+      "get": {
+        "description": "The highlights on this book the caller may read: their own, and the ones\nother members shared. In the device's page order, then as they were made.",
+        "operationId": "get_highlights",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "book_id",
+            "required": true,
+            "schema": {
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "title": "Book Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/HighlightOut"
+                  },
+                  "title": "Response Get Highlights",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Get Highlights",
+        "tags": [
+          "books"
+        ]
+      }
+    },
+    "/api/books/{book_id}/highlights/koreader": {
+      "post": {
+        "description": "Write one KOReader sidecar's highlights onto this book, as the caller's.\n\nRepeatable: a highlight already imported is updated rather than doubled.\nIts sharing is left as the member set it while it stays on this book; one\nthe import moves here from another book is private again. `highlights`\nsays how a KOReader highlight is identified and what an import never does.\n\n**409 `not_held` unless this book holds a file carrying the sidecar's\nfingerprint**, so a sidecar lands only on a Book its fingerprint matched\nand never on one a client guessed. Read off the Book's own references,\nwhich `BookForRead` has already scoped.",
+        "operationId": "import_koreader_highlights",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "book_id",
+            "required": true,
+            "schema": {
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "title": "Book Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KoreaderImportIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HighlightImportOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Import Koreader Highlights",
+        "tags": [
+          "books"
+        ]
+      }
+    },
+    "/api/books/{book_id}/highlights/{highlight_id}/sharing": {
+      "put": {
+        "description": "Share one of the caller's highlights with whoever can see the book, or\nwithdraw it.\n\n**409 `too_long_to_share` for a passage past `QUOTE_TEXT_MAX`**, the\nceiling a passage shown to the shelf already has. Storage takes longer\nmarks so an import refuses none; showing one is the act that ceiling binds.\nWithdrawing is never refused.",
+        "operationId": "set_highlight_sharing",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "highlight_id",
+            "required": true,
+            "schema": {
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "title": "Highlight Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "book_id",
+            "required": true,
+            "schema": {
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "title": "Book Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HighlightSharingIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HighlightOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Set Highlight Sharing",
         "tags": [
           "books"
         ]
@@ -13993,6 +14631,451 @@
         "summary": "Preview Import",
         "tags": [
           "imports"
+        ]
+      }
+    },
+    "/api/kosync/account": {
+      "get": {
+        "description": "Whether the caller has a sync password, and the username a device uses.",
+        "operationId": "get_kosync_account",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KosyncAccountOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Get Kosync Account",
+        "tags": [
+          "kosync"
+        ]
+      }
+    },
+    "/api/kosync/account/password": {
+      "delete": {
+        "description": "Sign every device out. What they already pushed stays.",
+        "operationId": "revoke_kosync_password",
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Revoke Kosync Password",
+        "tags": [
+          "kosync"
+        ]
+      },
+      "post": {
+        "description": "A new sync password, shown in this answer and never again.\n\nReplaces any the caller had, so every device signed in with the old one is\nrefused from its next call.",
+        "operationId": "mint_kosync_password",
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KosyncPasswordOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Mint Kosync Password",
+        "tags": [
+          "kosync"
+        ]
+      }
+    },
+    "/api/kosync/books/{book_id}/documents": {
+      "get": {
+        "description": "The caller's documents linked to one Book they can see.",
+        "operationId": "list_kosync_documents",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "book_id",
+            "required": true,
+            "schema": {
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "title": "Book Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/KosyncDocumentOut"
+                  },
+                  "title": "Response List Kosync Documents",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "List Kosync Documents",
+        "tags": [
+          "kosync"
+        ]
+      }
+    },
+    "/api/kosync/books/{book_id}/documents/{document}": {
+      "delete": {
+        "description": "Send a document linked to this Book back to the inbox.\n\nWhat it already wrote to the reading log stays: those rows say where the\nmember was on a day, which a wrong link does not make false.",
+        "operationId": "unlink_kosync_document",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "document",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9_]+$",
+              "title": "Document",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "book_id",
+            "required": true,
+            "schema": {
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "title": "Book Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Unlink Kosync Document",
+        "tags": [
+          "kosync"
+        ]
+      },
+      "put": {
+        "description": "Link one of the caller's documents to this Book, and remember it.\n\nApplies where the device is now, so a document finished before it was\nlinked marks the Book read. 404 for a document the caller's devices never\npushed, the answer for one that is somebody else's.",
+        "operationId": "link_kosync_document",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "document",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9_]+$",
+              "title": "Document",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "book_id",
+            "required": true,
+            "schema": {
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "title": "Book Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KosyncDocumentOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Link Kosync Document",
+        "tags": [
+          "kosync"
+        ]
+      }
+    },
+    "/api/kosync/inbox": {
+      "get": {
+        "description": "The caller's documents that no Book is linked to, newest push first.\n\nAt most `INBOX_SHOWN`. Only the caller's own: nobody else's device is\nanybody's business.",
+        "operationId": "list_kosync_inbox",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/KosyncDocumentOut"
+                  },
+                  "title": "Response List Kosync Inbox",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "List Kosync Inbox",
+        "tags": [
+          "kosync"
+        ]
+      }
+    },
+    "/api/kosync/members/{user_id}/password": {
+      "delete": {
+        "description": "Sign one member out everywhere, devices included, for an admin.\n\n**The way to shut a person out under proxy or directory auth**, where\nremoving them from the directory does not reach this library: a sync\npassword is this library's, the sign in proxy does not stand in front of\n`/kosync/`, and under directory auth a token already issued stays good\nfor its week without asking the directory again. So it ends their tokens\nas well, through `accounts.end_every_session`, or a live one would mint a\nnew sync password the moment the old one went. What their devices already\npushed stays.",
+        "operationId": "revoke_member_kosync_password",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "title": "User Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Revoke Member Kosync Password",
+        "tags": [
+          "kosync"
         ]
       }
     },

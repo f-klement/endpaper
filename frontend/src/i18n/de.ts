@@ -590,6 +590,34 @@ export const de: Messages = {
   "account.security.directory":
     "Dieses Konto wird von einem Verzeichnis angemeldet, es gibt hier keine Adresse zu bestätigen.",
 
+  // ── KOReader sync ───────────────────────────────────────────────────────
+  "kosync.title": "KOReader-Synchronisierung",
+  "kosync.hint":
+    "KOReader auf dem E-Reader kann die Leseposition zwischen Geräten abgleichen und das Lesen hier festhalten. In KOReader unter Fortschrittssynchronisierung einen eigenen Server wählen und sich mit diesen Angaben anmelden.",
+  "kosync.server": "Server",
+  "kosync.username": "Benutzername",
+  "kosync.password": "Passwort",
+  "kosync.none": "Noch kein Synchronisierungspasswort.",
+  "kosync.since": "Das Synchronisierungspasswort wurde am {date} erstellt.",
+  "kosync.shownOnce":
+    "Das Passwort jetzt kopieren: Es wird nur dieses eine Mal angezeigt. Ein neues meldet jedes Gerät mit dem alten ab.",
+  "kosync.mint": "Synchronisierungspasswort erstellen",
+  "kosync.remint": "Neues Synchronisierungspasswort erstellen",
+  "kosync.revoke": "Alle Geräte abmelden",
+  "kosync.waiting":
+    "Dokumente ohne Buch: {count}. Das Buch öffnen und sie dort verknüpfen.",
+  "kosync.couldNotSave":
+    "Das Synchronisierungspasswort konnte nicht geändert werden.",
+  "kosync.book.title": "KOReader",
+  "kosync.book.linked": "Mit diesem Buch verknüpft",
+  "kosync.book.waiting": "Warten auf ein Buch",
+  "kosync.book.link": "Dieses Buch",
+  "kosync.book.unlink": "Lösen",
+  "kosync.book.document": "{name}, {percent} % auf {device}, {date}",
+  "kosync.book.unnamed": "Ein Dokument",
+  "kosync.book.couldNotSave":
+    "Die Verknüpfung konnte nicht gespeichert werden.",
+
   "theme.hint": "Wird im Konto gespeichert und gilt auf allen Geräten.",
   "theme.light": "Hell",
   "theme.dark": "Dunkel",
@@ -1707,4 +1735,29 @@ export const de: Messages = {
     "Zu langsam für eine schnelle Suche. Wird nur gefragt, wenn jemand gründlicher sucht.",
   "providers.slowLegend":
     "Ein als langsam markierter Katalog kann eine Titelsuche nicht innerhalb der Frist beantworten, die die schnelle Suche zulässt. Er bleibt deshalb bei dieser außen vor und wird nur gefragt, wenn jemand danach verlangt. Einen Scan beantwortet er genauso wie die anderen.",
+  // ── Highlights: marked on a reading device, imported from KOReader ──────
+  "highlights.title": "Markierungen",
+  "highlights.private": "Nur für mich sichtbar",
+  "highlights.shared": "Geteilt",
+  "highlights.share": "Teilen",
+  "highlights.unshare": "Nicht mehr teilen",
+  "highlights.tooLongToShare": "Zu lang zum Teilen",
+  "highlights.importTitle": "KOReader Markierungen",
+  "highlights.importIntro":
+    "Gewählt werden die Metadatendateien, die KOReader neben jedem Buch ablegt, etwa metadata.epub.lua im .sdr Ordner des Buchs. Jede wird über den Fingerabdruck, den KOReader speichert, dem Buch zugeordnet, das dieselbe Datei hält. Markierungen kommen privat an und werden auf der Seite des Buchs geteilt. Ein erneuter Lauf aktualisiert geänderte Markierungen und fügt neue hinzu. Eine in KOReader gelöschte Markierung wird hier nicht gelöscht.",
+  "highlights.importChoose": "Metadatendateien wählen",
+  "highlights.importReading": "Wird gelesen und importiert...",
+  "highlights.outcomeImported":
+    "Neu: {created}. Aktualisiert: {updated}. Unverändert: {unchanged}.",
+  "highlights.outcomeOversized": "Als zu lang ausgelassen: {count}.",
+  "highlights.outcomeUnmatched":
+    "Kein sichtbares Buch hält diese Datei. Erst die Datei auf der Scan Seite hinzufügen, dann erneut importieren.",
+  "highlights.outcomeAmbiguous":
+    "Mehr als ein Buch hält diese Datei, deshalb wurde nichts importiert.",
+  "highlights.outcomeUnreadable": "Keine KOReader Metadatendatei.",
+  "highlights.outcomeTooLarge": "Zu groß zum Lesen.",
+  "highlights.outcomeNoFingerprint":
+    "Die Datei enthält keinen Fingerabdruck des Buchs und kann daher nicht zugeordnet werden.",
+  "highlights.outcomeEmpty": "Die Datei enthält keine Markierungen.",
+  "highlights.outcomeFailed": "Der Import dieser Datei ist fehlgeschlagen.",
 };

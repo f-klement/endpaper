@@ -1113,6 +1113,21 @@ class CredentialProvenance(StrEnum):
     SHIPPED = "shipped"
 
 
+class HighlightSource(StrEnum):
+    """Where a highlight came from, which is half of what names it there.
+
+    `highlights.source_key` is only unique within one source, so the pair is
+    the identity an import re-finds a row by: `models.Highlight` says what each
+    source's key is.
+    """
+
+    #: A KOReader sidecar, `metadata.<ext>.lua`, read in the member's browser.
+    KOREADER = "koreader"
+    #: Readwise's own highlight id. Reserved for the Readwise pull, which
+    #: writes into the same table; nothing writes it yet.
+    READWISE = "readwise"
+
+
 @overload
 def member_or[E: StrEnum](
     enum: type[E], stored: object, default: E, *, context: str | None = None

@@ -11,6 +11,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 import accounts
+import kosync
 import settings_store
 from enums import AuthMode, SettingKey, VerificationProvenance
 from models import PasswordResetRequest, User
@@ -314,6 +315,71 @@ class TestAResetEndsEverySessionOnTheAccount:
         )
         assert res.status_code == 204
         assert res.content == b""
+
+
+    def test_the_koreader_sync_password_stops_working(self, client, admin, member) -> None:
+        """A device is a second way in that no token governs, so a recovery
+        that left it would let whoever held a session keep one."""
+        minted = client.post("/api/kosync/account/password", headers=member["headers"])
+        device = {
+            "x-auth-user": "member",
+            "x-auth-key": kosync.device_key(minted.json()["password"]),
+        }
+        assert client.get("/kosync/users/auth", headers=device).status_code == 200
+
+        client.post("/auth/reset/request", json={"username": "member"})
+        code = client.post(
+            f"/api/users/password-resets/{member['user']['id']}/approve",
+            headers=admin["headers"],
+        ).json()["code"]
+        client.post(
+            "/auth/reset/redeem",
+            json={"username": "member", "code": code, "new_password": "brandnew1"},
+        )
+
+        assert client.get("/kosync/users/auth", headers=device).status_code == 401
+
+
+class TestEndingEverySession:
+    """`accounts.end_every_session` is the one function setting the cutoff on an
+    account.
+
+    It is where every way into an account is revoked together, so a second
+    such writer would end the sessions and leave the KOReader sync password.
+    Reads every assignment to the attribute and every call keyword naming the
+    column, in the functions of every application module. **What it does not
+    see**: a dict row handed to `insert()`, which is how `backup.restore` writes
+    the column back from an archive; a dict keyed update such as
+    `.values({User.sessions_valid_from: ...})` or `query.update({...})`; a
+    migration, which is not an application module; and any `setattr`, a
+    literal name included.
+    """
+
+    def test_no_function_but_end_every_session_writes_the_cutoff(self) -> None:
+        writers: set[tuple[str, str]] = set()
+        for path in application_modules():
+            tree = ast.parse(path.read_text())
+            for function in ast.walk(tree):
+                if not isinstance(function, ast.FunctionDef | ast.AsyncFunctionDef):
+                    continue
+                for node in ast.walk(function):
+                    targets: list[ast.expr] = []
+                    if isinstance(node, ast.Assign):
+                        targets = node.targets
+                    elif isinstance(node, ast.AugAssign | ast.AnnAssign):
+                        targets = [node.target]
+                    named = any(
+                        isinstance(target, ast.Attribute)
+                        and target.attr == "sessions_valid_from"
+                        for target in targets
+                    ) or (
+                        isinstance(node, ast.Call)
+                        and any(k.arg == "sessions_valid_from" for k in node.keywords)
+                    )
+                    if named:
+                        writers.add((str(path.relative_to(BACKEND)), function.name))
+
+        assert writers == {("accounts.py", "end_every_session")}
 
 
 class TestTheMemberIsToldWhoApproved:

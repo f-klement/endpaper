@@ -68,6 +68,8 @@ from models import (
     CustomFieldValue,
     DegradingEnum,
     DigitalReference,
+    Highlight,
+    KosyncDocument,
     Loan,
     Note,
     OpdsServer,
@@ -141,6 +143,9 @@ _TABLES: tuple[tuple[str, Any, Table], ...] = tuple(
         # (users, books) are already inserted by this point, which is the
         # only ordering this tuple actually constrains.
         ("reading_progress", ReadingProgress),
+        # Where each member's devices last were, after both parents. Absent from
+        # `_REQUIRED_TABLES`, like every table added after `FORMAT_VERSION` 1.
+        ("kosync_documents", KosyncDocument),
         ("loans", Loan),
         # After the loans it replaces for a digital copy. Both parents are
         # inserted by here. Absent from `_REQUIRED_TABLES` for the reason
@@ -152,6 +157,10 @@ _TABLES: tuple[tuple[str, Any, Table], ...] = tuple(
         # quotes existed restores with none, which is the state it was written
         # in.
         ("quotes", Quote),
+        # After the quotes it sits beside; both parents are inserted by here.
+        # Absent from `_REQUIRED_TABLES` for the reason `quotes` is: an archive
+        # taken before highlights existed restores with none.
+        ("highlights", Highlight),
         # After the quotes, which it sits beside for the same reason: its only
         # foreign key is `books`, which is long since inserted by here.
         #

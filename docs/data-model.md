@@ -399,6 +399,17 @@ CASCADE`, like `book_tags` and unlike `notes`: a heading means nothing without i
 row is one moment somebody recorded a position, and nothing ever updates one. See
 *Progress is a log* below.
 
+**`kosync_documents`.** Where one member's KOReader last was in one document: the
+position string, the percentage, the device and the server's timestamp, exactly as the last
+push left them, so the protocol's GET is answered from this row. Keyed on `(user_id,
+document)`, and private to that member by construction. `book_id` is the Book the
+document is, null while it waits in the member's inbox, and `SET NULL` when that Book is
+purged so the document returns there. Not a log: `reading_progress` is the log, and a push
+writes a percent row there only by the rule in `kosync.apply`. The member's sync password
+is two columns on `users`, `kosync_key_digest` and `kosync_key_set_at`. The password itself
+is stored nowhere; its digest travels in an admin's backup archive with the rest of
+`users`, as `password_hash` does.
+
 **`access_requests`.** A member asking the holder of a digital copy for access, and the
 answer. `granted`, `decided_by_user_id` and `decided_at` are null while the request
 waits and all set once it is answered, which `ck_access_requests_decision` holds. The status
@@ -501,6 +512,13 @@ about an edition. It is visible to whoever can see the book, like a **shared** n
 unlike reading progress, and it carries no privacy flag of its own: a quote is a
 transcription of the book's words where a note is the member's own. Both choices are argued
 in [decisions.md](decisions.md).
+
+**`highlights`.** A passage a member marked on a reading device and their note on it:
+`text`, `note`, `chapter`, `page`, `highlighted_at`, and `is_shared`, false by default.
+`source` and `source_key` say where it came from and what that source calls it, and are
+unique per member, which is what makes every import repeatable. `highlighted_at` is the
+device's wall clock with no zone, the one `DateTime` column that is not UTC. Its privacy
+rule is under *A highlight carries the second one too*.
 
 **`book_identifiers`.** What a store calls a book, where that is not an ISBN: a `scheme`,
 a `value`, and the book it hangs off. `asin`, `B00J4YQKHY` is one row; `google_books`,
@@ -1190,6 +1208,19 @@ Every note in an existing database was written into a shared library and has bee
 the other members since it was saved. Reviews an earlier import wrote are not
 retro-privatised, because nothing on the row records that a note came from an import; each is
 its author's own note and they can delete it.
+
+### A highlight carries the second one too
+
+`highlights.is_shared` is `notes.is_private` the other way round: false, the default and what
+every import writes, means visible to its author alone. `highlight_visible_to(user_id)` in
+`models.py` is the predicate, applied on top of the book's rule as the note's is, and the same
+structural guard covers it: any function under `backend/` that queries `Highlight` and returns
+one must narrow it. Named for what it grants, so the default reads as the safe value.
+
+A highlight hangs off the **book row**, like a quote, because its position is a fact about one
+file. It is unique on `(user_id, source, source_key)` and not on the book, so a merge moves
+every row without a collision and re-importing a sidecar finds the rows it wrote. No path
+deletes a member, so its foreign key to `users` carries no rule.
 
 ### A private book never leaves the instance
 

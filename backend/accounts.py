@@ -48,6 +48,7 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+import kosync
 import mailer
 import settings_store
 from auth import hash_password, verify_password
@@ -426,6 +427,26 @@ def dismiss_reset(db: Session, request: PasswordResetRequest, admin: User) -> No
     )
 
 
+def end_every_session(user: User) -> None:
+    """Refuse every way into this account that was handed out before now.
+
+    Every token issued earlier, through `sessions_valid_from`, **and the sync
+    password a KOReader device signs in with**, which is a second way in that
+    no token governs. A recovery that ended the sessions and left it would let
+    whoever held a session beforehand mint one and keep reading and writing the
+    member's positions afterwards.
+
+    **The one place a cutoff is set on one account**, so a new way in is
+    revoked here or nowhere: `tests/test_accounts.py::TestEndingEverySession`
+    refuses another such writer. `backup.restore` is the other writer of the
+    column and is right not to come here: it writes every `users` column back
+    as archived, the sync digest beside the password hash it belongs with, and
+    ends every session in the library through the token epoch instead.
+    """
+    user.sessions_valid_from = now()
+    kosync.revoke(user)
+
+
 def redeem_reset(db: Session, username: str, code: str, new_password: str) -> bool:
     """Set a new password if the code was this account's live approved one.
 
@@ -435,10 +456,10 @@ def redeem_reset(db: Session, username: str, code: str, new_password: str) -> bo
     Three writes, and all three are the point:
 
     * the password becomes the one the member just chose;
-    * `sessions_valid_from` moves to now, so **every** token on the account stops
-      working, including one an admin minted for themselves after resetting it,
-      and including the member's own, which is what makes the reset impossible to
-      miss;
+    * `end_every_session` moves `sessions_valid_from` to now, so **every** token
+      on the account stops working, including one an admin minted for themselves
+      after resetting it, and including the member's own, which is what makes the
+      reset impossible to miss, and it revokes the KOReader sync password;
     * the request is marked complete rather than deleted, so the account keeps
       the record of when it happened and which admin approved it.
 
@@ -461,7 +482,7 @@ def redeem_reset(db: Session, username: str, code: str, new_password: str) -> bo
         return False
 
     user.password_hash = hash_password(new_password)
-    user.sessions_valid_from = now()
+    end_every_session(user)
     request.completed_at = now()
     # A single use code, gone the moment it is spent: without this the row still
     # carries a working hash until its hour is up.

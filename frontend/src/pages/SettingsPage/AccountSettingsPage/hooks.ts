@@ -21,7 +21,16 @@ import {
   useSetMemberEmail,
   useSetMyEmail,
 } from "../../../api/generated/endpoints/users/users";
+import {
+  getGetKosyncAccountQueryKey,
+  useGetKosyncAccount,
+  useListKosyncInbox,
+  useMintKosyncPassword,
+  useRevokeKosyncPassword,
+} from "../../../api/generated/endpoints/kosync/kosync";
 import type {
+  KosyncAccountOut,
+  KosyncPasswordOut,
   MemberEmailOut,
   MySecurityOut,
 } from "../../../api/generated/model";
@@ -175,5 +184,61 @@ export function useMySecurity(): UseMySecurityResult {
     security: query.data,
     isLoading: query.isLoading,
     error: query.error,
+  };
+}
+
+export interface UseKosyncAccountResult {
+  account: KosyncAccountOut | undefined;
+  /** The address a member types into KOReader as its sync server. */
+  server: string;
+  /** How many documents wait in the inbox for a book. */
+  waiting: number;
+  isLoading: boolean;
+  error: unknown;
+  /** The password just minted, held only in this hook's memory. */
+  minted: KosyncPasswordOut | undefined;
+  mint: () => void;
+  revoke: () => void;
+  isSaving: boolean;
+  saveError: unknown;
+}
+
+/**
+ * The member's KOReader sync password, and how much waits for a book.
+ *
+ * **A minted password lives in the mutation's result and nowhere else**: it is
+ * shown once, never cached under a query key, and gone on the next visit,
+ * because the server cannot give it back either. Revoking clears it.
+ */
+export function useKosyncAccount(): UseKosyncAccountResult {
+  const queryClient = useQueryClient();
+  const query = useGetKosyncAccount();
+  const inbox = useListKosyncInbox();
+  const refresh = () =>
+    void queryClient.invalidateQueries({
+      queryKey: getGetKosyncAccountQueryKey(),
+    });
+  const mint = useMintKosyncPassword({ mutation: { onSuccess: refresh } });
+  const revoke = useRevokeKosyncPassword({
+    mutation: {
+      onSuccess: () => {
+        mint.reset();
+        refresh();
+      },
+    },
+  });
+
+  return {
+    account: query.data,
+    server: `${window.location.origin}/kosync`,
+    waiting: inbox.data?.length ?? 0,
+    isLoading: query.isLoading,
+    error: query.error,
+    minted: mint.data,
+    // `mutate`, not `mutateAsync`: nothing awaits these.
+    mint: () => mint.mutate(),
+    revoke: () => revoke.mutate(),
+    isSaving: mint.isPending || revoke.isPending,
+    saveError: mint.error ?? revoke.error,
   };
 }

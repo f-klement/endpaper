@@ -8,6 +8,7 @@ import { useSettings } from "../hooks";
 import CalibreImport from "./components/CalibreImport";
 import CoversSection from "./components/CoversSection";
 import CustomFieldsSection from "./components/CustomFieldsSection";
+import KoreaderHighlightImport from "./components/KoreaderHighlightImport";
 import LibraryImport from "./components/LibraryImport";
 import MarcImport from "./components/MarcImport";
 import StoreIdentifiersSection from "./components/StoreIdentifiersSection";
@@ -16,6 +17,7 @@ import {
   useCalibreImport,
   useCoverBackfill,
   useCustomFields,
+  useKoreaderHighlightImport,
   useLibraryImport,
   useMarcImport,
   useStoreIdentifierBackfill,
@@ -67,6 +69,7 @@ export default function LibrarySettingsPage() {
   const marcImport = useMarcImport();
   const calibreImport = useCalibreImport();
   const storeImport = useStoreImport();
+  const highlightImport = useKoreaderHighlightImport();
   // **The card is drawn only in library mode, and the server refuses the route
   // in any case.** Hiding a control is advice to one client; the 403 is the
   // guarantee. What this decides is whether a household is shown an exchange
@@ -123,6 +126,16 @@ export default function LibrarySettingsPage() {
           onConfirm={storeImport.confirm}
           onStop={storeImport.stop}
           onCancel={storeImport.reset}
+        />
+      </SettingsSection>
+
+      {/* After the book imports: a sidecar's marks land only on a Book that
+          already holds the file, so the books come in first. */}
+      <SettingsSection title={t("highlights.importTitle")} icon="book">
+        <KoreaderHighlightImport
+          rows={highlightImport.rows}
+          isRunning={highlightImport.isRunning}
+          onChoose={highlightImport.choose}
         />
       </SettingsSection>
 

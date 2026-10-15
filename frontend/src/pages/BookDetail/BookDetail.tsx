@@ -13,12 +13,14 @@ import GoogleBooksHelp from "../components/GoogleBooksHelp";
 import BookHeader from "./components/BookHeader";
 import DiscussToggle from "./components/DiscussToggle";
 import EnrichPanel from "./components/EnrichPanel";
+import HighlightList from "./components/HighlightList";
 import ReadingPanel from "./components/ReadingPanel";
 import LoanBadge from "./components/LoanBadge";
 import AccessPanel from "./components/AccessPanel";
 import LoanPanel from "./components/LoanPanel";
 import NoteList from "./components/NoteList";
 import OwnershipPicker from "./components/OwnershipPicker";
+import KosyncDocuments from "./components/KosyncDocuments";
 import ProgressPanel from "./components/ProgressPanel";
 import QuoteList from "./components/QuoteList";
 import CollectionPicker from "./components/CollectionPicker";
@@ -43,6 +45,8 @@ import {
   useBookCustomFields,
   useBookEnrichment,
   useBookFiles,
+  useBookHighlights,
+  useBookKosync,
   useBookLoan,
   useBookNotes,
   useBookProgress,
@@ -96,9 +100,11 @@ export default function BookDetail({ currentUser }: BookDetailProps) {
   const actions = useBookActions(bookId, () => navigate("/"));
   const notes = useBookNotes(bookId);
   const quotes = useBookQuotes(bookId);
+  const highlights = useBookHighlights(bookId);
   const loan = useBookLoan(bookId);
   const access = useBookAccess(bookId, book?.format);
   const progress = useBookProgress(bookId);
+  const kosync = useBookKosync(bookId);
   const enrichment = useBookEnrichment(bookId);
   const copies = useBookCopies(bookId);
   const files = useBookFiles(bookId);
@@ -130,6 +136,7 @@ export default function BookDetail({ currentUser }: BookDetailProps) {
     actions.error ??
     notes.error ??
     quotes.error ??
+    highlights.error ??
     loan.error ??
     access.error ??
     progress.error;
@@ -208,6 +215,16 @@ export default function BookDetail({ currentUser }: BookDetailProps) {
               isRecording={progress.isRecording}
               onRecord={progress.record}
               onRemove={progress.remove}
+            />
+
+            {/* Under the log it writes to: a linked device adds a row there. */}
+            <KosyncDocuments
+              linked={kosync.linked}
+              waiting={kosync.waiting}
+              onLink={kosync.link}
+              onUnlink={kosync.unlink}
+              isSaving={kosync.isSaving}
+              error={kosync.error}
             />
           </CollapsibleSection>
 
@@ -363,6 +380,16 @@ export default function BookDetail({ currentUser }: BookDetailProps) {
               onAdd={quotes.add}
               onEdit={quotes.edit}
               onRemove={quotes.remove}
+            />
+
+            {/* Below the quotes it resembles: a highlight is marked on a
+                device rather than typed here, so it offers no form and is
+                drawn only when there is one. */}
+            <HighlightList
+              highlights={highlights.highlights}
+              currentUser={currentUser}
+              pendingIds={highlights.pendingIds}
+              onSetShared={highlights.setShared}
             />
           </CollapsibleSection>
 

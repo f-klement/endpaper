@@ -158,6 +158,21 @@ UNAUTHENTICATED: dict[str, str] = {
     "GET /covers/login_bg.{extension}": "the sign in background's bytes",
     "GET /robots.txt": "what a crawler is told, which must answer either way",
     "GET /sru": "the SRU base URL, gated by the same publish switch",
+    # KOReader's progress sync. A device cannot hold a session, so it signs in
+    # on every call with a sync password; every route but these two answers 401
+    # to a caller without one. See `routers/kosync.py`.
+    "GET /kosync/users/auth": "a device checking its sync password, 401 without one",
+    "PUT /kosync/syncs/progress": "a device pushing its position, 401 without a password",
+    "GET /kosync/syncs/progress/{document}": (
+        "a device pulling its member's own position, 401 without a password"
+    ),
+    "POST /kosync/users/create": "registration, which answers 402 to everybody",
+    "GET /kosync/healthcheck": "the protocol's liveness answer, reading no table",
+    "DELETE /kosync/{rest:path}": "the protocol's own 404, so an unknown path is not the SPA",
+    "GET /kosync/{rest:path}": "the same",
+    "PATCH /kosync/{rest:path}": "the same",
+    "POST /kosync/{rest:path}": "the same",
+    "PUT /kosync/{rest:path}": "the same",
     "DELETE /api/{rest:path}": "the API's own 404, so an unknown path is not the SPA",
     "GET /api/{rest:path}": "the same",
     "PATCH /api/{rest:path}": "the same",

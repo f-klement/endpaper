@@ -14,6 +14,8 @@ import {
   ReadStatus,
   type CustomFieldOut,
   type DigitalReferenceOut,
+  type HighlightOut,
+  type KosyncDocumentOut,
   type UserOut,
 } from "../../../src/api/generated/model";
 import { de, en } from "../../../src/i18n";
@@ -22,6 +24,7 @@ import { BOOK_SECTIONS } from "../../../src/pages/BookDetail/hooks";
 import { writeSectionChoice } from "../../../src/lib/sectionState";
 import {
   makeBook,
+  makeHighlight,
   makeLoan,
   makeNote,
   makeQuote,
@@ -77,6 +80,9 @@ function stubLoad({
   // missing from it with nothing to report that.
   customFields = [] as CustomFieldOut[],
   references = [] as DigitalReferenceOut[],
+  highlights = [] as HighlightOut[],
+  kosyncLinked = [] as KosyncDocumentOut[],
+  kosyncWaiting = [] as KosyncDocumentOut[],
   customFieldValues = [] as {
     field_id: number;
     name: string;
@@ -87,6 +93,7 @@ function stubLoad({
 } = {}) {
   api.on("/api/books/1/notes", { body: notes });
   api.on("/api/books/1/quotes", { body: quotes });
+  api.on("/api/books/1/highlights", { body: highlights });
   api.on("/api/books/1/progress", { body: progress });
   // The custom fields panel asks for both. Two requests rather than one: the
   // definitions are library wide and shared across every book page, the values
@@ -97,6 +104,8 @@ function stubLoad({
   // the only one, and that is what the endpoint answers.
   api.on("/api/books/1/copies", { body: [book] });
   api.on("/api/books/1/digital-references", { body: references });
+  api.on("/api/kosync/books/1/documents", { body: kosyncLinked });
+  api.on("/api/kosync/inbox", { body: kosyncWaiting });
   api.on("/api/books/tags", { body: tags });
   api.on("/api/collections", { body: [] });
   api.on("/api/users", { body: users });
@@ -783,6 +792,63 @@ describe("BookDetail", () => {
     });
   });
 
+  describe("highlights", () => {
+    it("shares one of the caller's own private highlights", async () => {
+      const mine = makeHighlight({ user_id: OWNER.id, author: OWNER });
+      stubLoad({ highlights: [mine] });
+      api.on(
+        `/api/books/1/highlights/${mine.id}/sharing`,
+        { body: { ...mine, is_shared: true } },
+        "PUT",
+      );
+      renderDetail();
+      await openSection("Notes and quotes");
+
+      await userEvent.click(
+        await screen.findByRole("button", { name: "Share" }),
+      );
+
+      expect(
+        api.lastCall(`/api/books/1/highlights/${mine.id}/sharing`, "PUT")?.body,
+      ).toEqual({ is_shared: true });
+    });
+
+    it("counts the share limit in code points, as the server does", async () => {
+      // 1,500 astral characters: 3,000 UTF-16 units, under the 2,000 the
+      // server counts in code points.
+      stubLoad({
+        highlights: [
+          makeHighlight({
+            user_id: OWNER.id,
+            author: OWNER,
+            text: "\u{1F600}".repeat(1500),
+          }),
+        ],
+      });
+      renderDetail();
+      await openSection("Notes and quotes");
+
+      expect(
+        await screen.findByRole("button", { name: "Share" }),
+      ).toBeInTheDocument();
+    });
+
+    it("offers no control on another member's shared highlight", async () => {
+      stubLoad({
+        highlights: [
+          makeHighlight({ user_id: OTHER.id, author: OTHER, is_shared: true }),
+        ],
+      });
+      renderDetail();
+      await openSection("Notes and quotes");
+
+      const passage = await screen.findByText("Fear is the mind-killer.");
+      const card = passage.closest("div")!;
+      expect(within(card).queryByRole("button")).toBeNull();
+      expect(within(card).getByText(/other/)).toBeInTheDocument();
+    });
+  });
+
   describe("notes", () => {
     it("says so when there are none", async () => {
       stubLoad({ notes: [] });
@@ -1456,6 +1522,82 @@ describe("BookDetail lending with a due date", () => {
   });
 });
 
+describe("BookDetail KOReader documents", () => {
+  const DOCUMENT: KosyncDocumentOut = {
+    document: "0123456789abcdef0123456789abcdef",
+    percentage: 0.42,
+    device: "Kobo_clara",
+    pushed_at: "2026-10-15T08:00:00Z",
+    title: "Dune",
+    authors: null,
+    filename: null,
+    book_id: null,
+  };
+
+  it("says nothing to a member whose devices reported nothing", async () => {
+    stubLoad();
+    renderDetail(OWNER);
+
+    await screen.findByRole("heading", { name: "Dune" });
+    expect(screen.queryByText("KOReader")).not.toBeInTheDocument();
+  });
+
+  it("links a waiting document to the book being viewed", async () => {
+    const user = userEvent.setup();
+    stubLoad({ kosyncWaiting: [DOCUMENT] });
+    const path = `/api/kosync/books/1/documents/${DOCUMENT.document}`;
+    api.on(path, { body: { ...DOCUMENT, book_id: 1 } }, "PUT");
+    renderDetail(OWNER);
+
+    const waiting = await screen.findByRole("region", {
+      name: "Waiting for a book",
+    });
+    expect(
+      within(waiting).getByText(/^Dune, 42% on Kobo_clara, /),
+    ).toBeInTheDocument();
+    await user.click(
+      within(waiting).getByRole("button", { name: "This book" }),
+    );
+
+    await waitFor(() => expect(api.lastCall(path, "PUT")).toBeDefined());
+  });
+
+  it("shows a percentage the protocol let past its range at the nearer end", async () => {
+    // The schema property's counterexample: a document pushed with a
+    // percentage of -1.797693134862316e306 drew "-∞%".
+    stubLoad({
+      kosyncWaiting: [
+        {
+          ...DOCUMENT,
+          title: null,
+          device: "",
+          percentage: -1.797693134862316e306,
+        },
+      ],
+    });
+    renderDetail(OWNER);
+
+    expect(
+      await screen.findByText(/^A document, 0% on , /),
+    ).toBeInTheDocument();
+  });
+
+  it("unlinks a document linked to this book", async () => {
+    const user = userEvent.setup();
+    stubLoad({ kosyncLinked: [{ ...DOCUMENT, book_id: 1 }] });
+    const path = `/api/kosync/books/1/documents/${DOCUMENT.document}`;
+    api.on(path, { status: 204 }, "DELETE");
+    renderDetail(OWNER);
+
+    const linked = await screen.findByRole("region", {
+      name: "Linked to this book",
+    });
+    await user.click(within(linked).getByRole("button", { name: "Unlink" }));
+
+    await waitFor(() => expect(api.lastCall(path, "DELETE")).toBeDefined());
+  });
+});
+
 describe("BookDetail reading progress", () => {
   it("records a page against the book being viewed", async () => {
     const user = userEvent.setup();
@@ -1872,7 +2014,10 @@ describe("BookDetail over any answer the schema permits", () => {
             ["list_collections", empty],
             ["get_notes", { status: 422, body: {} }],
             ["get_quotes", empty],
+            ["get_highlights", empty],
             ["list_progress", empty],
+            ["list_kosync_documents", empty],
+            ["list_kosync_inbox", empty],
             [
               "get_feature_flags",
               {

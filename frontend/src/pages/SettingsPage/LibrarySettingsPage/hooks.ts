@@ -15,7 +15,10 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useMemo, useRef, useState } from "react";
 
 import {
+  findFileHolders,
+  getGetHighlightsQueryKey,
   getListCustomFieldsQueryKey,
+  importKoreaderHighlights,
   useBackfillCovers,
   useBackfillFromIdentifiers,
   useDefineCustomField,
@@ -37,10 +40,17 @@ import type {
   CustomFieldOut,
   ImportPreviewOut,
   ImportResultOut,
+  KoreaderHighlightIn,
   MarcPreviewOut,
 } from "../../../api/generated/model";
 import { useInvalidate } from "../../../api/invalidate";
 import type { CalibreBook, CalibreFailure } from "../../../lib/calibre";
+import {
+  readSidecar,
+  type SidecarHighlight,
+  type SidecarReading,
+} from "../../../lib/koreaderSidecar";
+import { MAX_SOURCE_LENGTH } from "../../../lib/luaTable";
 import type { SqliteFailure } from "../../../lib/sqlite";
 import {
   STORE_IDS,
@@ -1078,6 +1088,272 @@ export function useStoreImport(): UseStoreImportResult {
       setSources({});
       setResult(null);
       setProgress(null);
+    },
+  };
+}
+
+/** What became of one picked sidecar. */
+export type SidecarOutcome =
+  | {
+      readonly kind: "imported";
+      readonly created: number;
+      readonly updated: number;
+      readonly unchanged: number;
+      /** Marks left out as past what the server stores. */
+      readonly oversized: number;
+    }
+  | {
+      readonly kind:
+        | "unmatched"
+        | "ambiguous"
+        | "unreadable"
+        | "too-large"
+        | "no-fingerprint"
+        | "empty"
+        | "failed";
+    };
+
+export interface SidecarRow {
+  /**
+   * Which file of the pick this row is, fixed when the pick is read. Not the
+   * name: every KOReader sidecar is called `metadata.<ext>.lua`. Not the
+   * digest: two sidecars of one file share it, and an unreadable one has none.
+   */
+  readonly key: string;
+  readonly name: string;
+  /** The book's title as the sidecar records it, to name the row. */
+  readonly title: string | null;
+  readonly outcome: SidecarOutcome;
+}
+
+export interface UseKoreaderHighlightImportResult {
+  /** One row per picked file, in the order picked; null before a pick. */
+  rows: readonly SidecarRow[] | null;
+  isRunning: boolean;
+  choose: (files: readonly File[]) => void;
+}
+
+/** `MAX_FILES_PER_LOOKUP` on the server: how many digests one lookup names. */
+const DIGESTS_PER_LOOKUP = 500;
+/** `MAX_HIGHLIGHTS_PER_IMPORT` on the server: how many marks one request carries. */
+const HIGHLIGHTS_PER_REQUEST = 5000;
+
+/**
+ * Which visible Books hold each digest, or undefined for a digest whose
+ * lookup failed. One lookup per `DIGESTS_PER_LOOKUP`, never one per file.
+ */
+async function holdersOf(
+  digests: readonly string[],
+): Promise<Map<string, ReadonlySet<number> | undefined>> {
+  const chunks: string[][] = [];
+  for (let start = 0; start < digests.length; start += DIGESTS_PER_LOOKUP)
+    chunks.push(digests.slice(start, start + DIGESTS_PER_LOOKUP));
+  const answered = await Promise.all(
+    chunks.map((chunk) =>
+      findFileHolders({
+        files: chunk.map((digest) => ({ partial_md5: digest })),
+      }).catch(() => undefined),
+    ),
+  );
+  const found = new Map<string, ReadonlySet<number> | undefined>();
+  chunks.forEach((chunk, which) =>
+    chunk.forEach((digest, index) => {
+      const answer = answered[which]?.[index];
+      found.set(
+        digest,
+        answer === undefined
+          ? undefined
+          : new Set(answer.holders.map((holder) => holder.book_id)),
+      );
+    }),
+  );
+  return found;
+}
+
+/**
+ * The most bytes one request's marks may encode to: under the server's 5 MiB
+ * body cap with room for the envelope, so a heavily marked book is split
+ * rather than refused whole.
+ */
+export const BYTES_PER_REQUEST = 4 * 1024 * 1024;
+
+const ENCODER = new TextEncoder();
+
+function asRequested(mark: SidecarHighlight): KoreaderHighlightIn {
+  return {
+    pos0: mark.pos0,
+    pos1: mark.pos1,
+    text: mark.text,
+    note: mark.note,
+    chapter: mark.chapter,
+    page: mark.page,
+    highlighted_at: mark.highlightedAt,
+  };
+}
+
+/**
+ * One sidecar's marks as request bodies, each under both bounds: the count
+ * the server takes and `BYTES_PER_REQUEST`. A single mark is always far under
+ * the byte bound, since every field of it is bounded.
+ *
+ * **Marks made in the same second travel together.** The server tells a pair
+ * apart only when both are in one request (`highlights.keyed`); split, each
+ * would be keyed on the time alone and one would overwrite the other. A
+ * second's marks are a handful, far under either bound, so a group is only
+ * ever moved whole to the next request, never split.
+ */
+export function requestChunks(
+  highlights: readonly SidecarHighlight[],
+): KoreaderHighlightIn[][] {
+  const groups = new Map<string, KoreaderHighlightIn[]>();
+  highlights.forEach((mark, index) => {
+    const second = mark.highlightedAt ?? `no time ${index}`;
+    const group = groups.get(second) ?? [];
+    group.push(asRequested(mark));
+    groups.set(second, group);
+  });
+  const chunks: KoreaderHighlightIn[][] = [];
+  let current: KoreaderHighlightIn[] = [];
+  let bytes = 0;
+  for (const group of groups.values()) {
+    const size = group.reduce(
+      (total, wire) => total + ENCODER.encode(JSON.stringify(wire)).length + 1,
+      0,
+    );
+    if (
+      current.length > 0 &&
+      (current.length + group.length > HIGHLIGHTS_PER_REQUEST ||
+        bytes + size > BYTES_PER_REQUEST)
+    ) {
+      chunks.push(current);
+      current = [];
+      bytes = 0;
+    }
+    current.push(...group);
+    bytes += size;
+  }
+  if (current.length > 0) chunks.push(current);
+  return chunks;
+}
+
+/**
+ * One sidecar's marks onto one Book, in as many requests as it takes, at
+ * once: the server answers a race on one key by updating, so neither the
+ * chunks nor two sidecars of one file need to wait for each other.
+ */
+async function sendTo(
+  bookId: number,
+  partialMd5: string,
+  highlights: readonly SidecarHighlight[],
+): Promise<{ created: number; updated: number; unchanged: number }> {
+  const answers = await Promise.all(
+    requestChunks(highlights).map((chunk) =>
+      importKoreaderHighlights(bookId, {
+        partial_md5: partialMd5,
+        highlights: chunk,
+      }),
+    ),
+  );
+  return answers.reduce(
+    (total, counts) => ({
+      created: total.created + counts.created,
+      updated: total.updated + counts.updated,
+      unchanged: total.unchanged + counts.unchanged,
+    }),
+    { created: 0, updated: 0, unchanged: 0 },
+  );
+}
+
+/**
+ * Import the highlights in KOReader sidecars the member picked.
+ *
+ * **Matched by fingerprint and nothing else.** Each sidecar's
+ * `partial_md5_checksum` is looked up among the file references on Books the
+ * member can see; exactly one Book holding it is where its marks go. None,
+ * or more than one, is reported and nothing is written: a title is never
+ * used to guess. The server refuses a Book not holding the digest as well.
+ *
+ * **Repeatable**: the server keys every mark, so a second run of the same
+ * files reports them unchanged.
+ *
+ * Only the sidecar's highlights leave the browser, never the book file.
+ */
+export function useKoreaderHighlightImport(): UseKoreaderHighlightImportResult {
+  const queryClient = useQueryClient();
+  const [rows, setRows] = useState<readonly SidecarRow[] | null>(null);
+  const [isRunning, setRunning] = useState(false);
+
+  async function run(files: readonly File[]): Promise<void> {
+    const read = await Promise.all(
+      files.map(async (file, picked) => ({
+        key: `${picked}:${file.name}`,
+        name: file.name,
+        reading:
+          file.size > MAX_SOURCE_LENGTH
+            ? ({ ok: false, reason: "too-large" } as const)
+            : await file.text().then(readSidecar, () => ({
+                ok: false as const,
+                reason: "unreadable" as const,
+              })),
+      })),
+    );
+    const digests = [
+      ...new Set(
+        read.flatMap(({ reading }) =>
+          reading.ok && reading.highlights.length > 0
+            ? [reading.partialMd5]
+            : [],
+        ),
+      ),
+    ];
+    const holders = await holdersOf(digests);
+
+    const outcomeOf = async (
+      reading: SidecarReading & { ok: true },
+    ): Promise<SidecarOutcome> => {
+      if (reading.highlights.length === 0) return { kind: "empty" };
+      const books = holders.get(reading.partialMd5);
+      if (books === undefined) return { kind: "failed" };
+      if (books.size === 0) return { kind: "unmatched" };
+      if (books.size > 1) return { kind: "ambiguous" };
+      const [bookId] = [...books] as [number];
+      try {
+        const counts = await sendTo(
+          bookId,
+          reading.partialMd5,
+          reading.highlights,
+        );
+        void queryClient.invalidateQueries({
+          queryKey: getGetHighlightsQueryKey(bookId),
+        });
+        return { kind: "imported", ...counts, oversized: reading.oversized };
+      } catch {
+        return { kind: "failed" };
+      }
+    };
+    const done: SidecarRow[] = await Promise.all(
+      read.map(async ({ key, name, reading }) =>
+        reading.ok
+          ? {
+              key,
+              name,
+              title: reading.title,
+              outcome: await outcomeOf(reading),
+            }
+          : { key, name, title: null, outcome: { kind: reading.reason } },
+      ),
+    );
+    setRows(done);
+  }
+
+  return {
+    rows,
+    isRunning,
+    choose: (files) => {
+      if (files.length === 0) return;
+      setRunning(true);
+      setRows(null);
+      void run(files).finally(() => setRunning(false));
     },
   };
 }

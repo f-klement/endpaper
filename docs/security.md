@@ -514,6 +514,39 @@ accepting one the next sign in would revert. The log line records that an addres
 or cleared and never the address itself, for the reason `mailer._deliver` logs a count of
 refused recipients rather than a list.
 
+### A KOReader device signs in with a password minted for it, at one unauthenticated path
+
+KOReader cannot complete a sign in page, so `/kosync/` answers without a session and a
+device sends the member's username and `md5(password)` on every call. **The password is a
+sync password this library mints, never the member's login**: sixteen characters drawn at
+random from 31, about 79 bits, shown once and stored only as SHA-256 of what the device
+sends. A fast hash is enough because nothing about it was chosen by a person, so there is
+no dictionary to walk, and a push arrives every few minutes against a 5 second budget.
+Minting another or revoking it refuses every device using the old one from its next call.
+**A password reset and the operator's recovery revoke it too**, through the one function
+that sets an account's session cutoff (`accounts.end_every_session`), so whoever held a
+session before the recovery cannot keep a device signed in after it. A restore is the other
+writer of that cutoff: it brings back every `users` column as archived, the sync digest
+with the password hash, and ends every session in the library by the token epoch. An admin
+can sign any member out of every session and device at once, which is how a person removed
+from a directory is shut out: under directory auth a token already issued stays good for its
+week without asking the directory, so revoking the sync password alone would let it mint
+another.
+
+**Who exists is not disclosed.** An unknown username, a wrong key and a member with no sync
+password are the same 401 with the same body, and each compares a digest. Each refusal is
+logged once at warning with the username clipped and the client's address, never the key,
+so a run of guesses reaches the log; nothing limits them, because sixteen random
+characters are not guessed. The MD5 the
+protocol sends is the only confidentiality the scheme has besides TLS, which is why the
+password is a throwaway rather than anything reused.
+
+**Behind a sign in proxy, the exemption is the `/kosync/` prefix and nothing wider.** Every
+other path under proxy auth trusts the identity header the proxy sets; nothing under
+`/kosync/` reads one, so the exemption grants a caller the protocol and nothing else.
+Everything a device reports is its member's own: a document row is keyed by member, and a
+Book is reached only through the shelf for that member.
+
 ### The Google Books API key is never returned
 
 `GET /api/settings` returns a masked preview plus a boolean, never the key. The masking is

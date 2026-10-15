@@ -1322,16 +1322,26 @@ Storing it alongside the page would be the same fact twice, and the two would pa
 the first time a metadata refresh corrected a page count. Clamped at 100 because a
 provider's page count is off by one often enough that the last page computes to 101.
 
-### Recording progress promotes to `reading` and never to `read`
+### Recording progress promotes to `reading`; only a reading device's end sets `read`
 
 Saying where you are in a book is the same claim the READING button makes, arrived at from
 the other direction, so a first entry on an unstarted book promotes it and stamps
 `started_at`. The transition goes through `_stamp_reading_dates`, which owns those rules;
 duplicating them in the progress endpoint is how the two would drift.
 
-It never sets `read`, however high the page number. `page_count` is a provider's figure and
-is wrong often enough that "reached the last page" is not a reliable finish signal, and
-finishing already has an explicit control.
+**A typed entry never sets `read`, however high the page number.** `page_count` is a
+provider's figure and is wrong often enough that "reached the last page" is not a reliable
+finish signal, and finishing already has an explicit control.
+
+**A KOReader push crossing into 100 percent does set it.** Owner's ruling, 2026-10-15,
+reversing the earlier rule that progress never changes read status: the device's percentage
+is its own position in the very file being read, so its last page is the book's end, which a
+typed page number checked against a provider's count is not. **Only the crossing**, from a
+stored position below 100 percent or none: a device resting on the last page pushes 100 on
+every suspend, and a member who peeked at the end and set the status back must not be
+overruled by the next one. Linking a document already at its end counts as a crossing,
+because the link is the member's own act. It goes through `Reading.finish`, so `reading.py`
+still owns the row, and a Book already `read` is left alone, dates included.
 
 ### A status change never deletes progress rows
 
@@ -21863,6 +21873,113 @@ Two landing edge cases:
   and nothing reaches the 409. When the ebook has never been told about this file the lookup
   cannot see it, because it keys on the file and not on the ISBN; that half stays with the 409
   path and would need copies listed across every book carrying the ISBN.
+
+## A highlight is its own table, private by default, and identified at its source
+
+Owner's rulings, 2026-10-15. A highlight is a passage a
+member marked on a device, so it is private until its author shares it: `highlights.is_shared`
+defaults to false and `highlight_visible_to()` is composed with the book's rule exactly as
+`note_visible_to()` is. It is not a quote, because a quote is visible to whoever can see the
+book and that decision stands.
+
+**The identity is the source's.** Unique on `(user_id, source, source_key)`, not on the book,
+so a re-import finds its rows and a merge moves them without a collision. KOReader gives an
+annotation no id, and adjusting a mark rewrites its ends in place, so the positions are not
+stable. Its `datetime` is: the creation time, which KOReader does not change. So the key is
+SHA-256 over the file's partial MD5 and that time, and an adjusted mark re-imports as an
+update. A mark with no time, and two marks of one request made in the same second, are keyed
+on their two positions as well; adjusting one of those does make a new row, and so does a
+second mark appearing in the second of one already imported. Deleting one of such a pair
+leaves the other its row: alone in its second, it looks up the key it had. The count is per
+request, so the browser keeps every mark of one second in one request. The digest is in
+every key because a time or a position is only meaningful inside one file, and a re-converted
+book has a new fingerprint, so its highlights arrive as new rows. Readwise will key on its own
+id.
+
+**An import never deletes, and a highlight that changes book is private again.** KOReader
+keeps no tombstones, so an absent highlight may be deleted or may live on another device;
+nothing can tell which, and a mark deleted in KOReader stays here (deleting a highlight is a
+separate change). Sharing survives a re-import onto the same book. On every path that changes a
+highlight's book, an import that moves it and a merge that folds its book into another, it
+arrives private: sharing chose one book's readers, and the other book's readers were never
+chosen. Owner's ruling, 2026-10-15; notes keep their sharing on a merge, highlights do not.
+
+**Two members holding the same file is ambiguous, always.** The browser imports only where
+exactly one visible book holds the sidecar's fingerprint, so a household whose two members
+each catalogued one shared file gets "more than one book" and nothing is written. That follows
+the ruling that nothing is guessed; preferring the caller's own copy is a later choice.
+
+**A racing import updates rather than fails.** Two imports of the same marks both read no
+row and both insert; the loser meets the unique index, rolls back and writes again, which now
+updates. Each retry finds at least the rows that beat it, so a few sidecars of one file sent
+at once settle; the bound is five attempts, past which a collision is not a race.
+
+**The time is stored as the device wrote it.** KOReader records local wall clock time with no
+zone, so `highlighted_at` holds those digits naive and is returned as the same text rather than as a
+`date-time`, which would need an offset; it is the one `DateTime` column that is not UTC. Converting would need a zone nothing supplied.
+
+**Sharing is held to the quote ceiling, storage is not.** A highlight stores up to 10,000
+characters so an import refuses no long mark; sharing one past 2,000 is a 409, because shown to
+the shelf it is the thing that ceiling bounds.
+
+**Matching is by fingerprint only, and the server checks it too.** The browser looks the
+sidecar's `partial_md5_checksum` up through the file holders lookup; none or several holders is
+reported, never guessed from a title. The import route refuses a book holding no file with that
+digest, so a client cannot land a sidecar elsewhere.
+
+## KOReader progress sync is served here, under `/kosync`
+
+Owner's rulings, 2026-10-15, from the reading tools research.
+
+- **Inside Endpaper, implementing KOReader's protocol as the reference server answers it**,
+  rather than running the reference server beside it: one store, one privacy rule, no second
+  service. Registration answers 402 code 2005. The answers were checked against
+  `kosync.koplugin`'s `main.lua`, `KOSyncClient.lua` and `api.json` and against
+  `koreader-sync-server`'s `syncs_controller.lua`, `errors.lua` and `routes.lua`.
+- **A sync password minted per member, never the login.** Under proxy or directory auth there
+  is no login here to give, and a device stores what it is given in plain text. Shown once,
+  stored as SHA-256 of the MD5 the device sends: sixteen random characters from 31 leave no
+  dictionary to walk, so a password hash would buy nothing but time against a 5 second budget.
+- **401 is the only refusal of identity, and one answer for all three causes.** Any other
+  status makes a device queue the push and send it again once, at its next connection;
+  telling an unknown name from a wrong key would say who has an account. A refusal is logged
+  once at warning with the name clipped and the address, never the key; nothing rate limits
+  it, because sixteen random characters are not guessed.
+- **Ending every session revokes the sync password too.** `accounts.end_every_session` is the
+  one function setting an account's session cutoff and revokes the sync password with it, so
+  a password reset and the operator's recovery shut out a device minted by whoever held a
+  session before. A restore is the other writer of the cutoff and rightly does not go
+  through it: it writes every `users` column back as archived, the sync digest beside the
+  password hash, and ends every session in the library by the token epoch.
+- **An admin can sign a member out of every session and device at once**, which is how a
+  person removed from a directory is shut out: the sign in proxy does not stand in front of
+  `/kosync/`, and under directory auth an issued token stays good for its week without
+  asking the directory, so revoking only the sync password would let it mint another.
+- **The username header is decoded again as UTF-8.** KOReader sends the name's bytes and the
+  server reads headers as latin-1, so a name outside ASCII would never match.
+- **The `Accept` header is not required.** The reference answers 412 without its vendor type;
+  every client sends it, and refusing a request that lacks it protects nothing.
+- **A latest state table, not the log**, answers a pull byte for byte: the position string,
+  the percentage as the float pushed, the device and the server's epoch seconds. The log
+  cannot hold an XPointer and its integer percent cannot round trip KOReader's float.
+- **A percent row when the whole percent moved, at most one a day per Book**, against the
+  member's latest row for that Book from any source. A device pushes every few minutes and the
+  log is of sittings, so the day's first move is kept; a typed row that day is the day's row.
+  A push at 0 percent writes nothing and promotes nothing: a book opened and closed has not
+  moved. The day is the server's UTC date.
+- **A document is linked by the partial MD5 on a file reference when exactly one Book the
+  member can see carries it, at its first push only.** Two or more leave it in the inbox
+  rather than guessing between copies. The link is a column on the document row and is
+  remembered; an unlink is remembered the same way, because a later push never links again;
+  purging the Book sets it null and the document returns to the inbox.
+- **Two first pushes of one document at once** meet the unique index: the second insert runs
+  in a savepoint, is refused alone, and updates the row that won.
+- **The timestamp is 64 bits**, because PostgreSQL's `integer` ends in January 2038.
+- **The inbox is linked from each book's page**, where the book is already chosen: one press,
+  where a picker in Settings would be a search across the catalogue. Settings holds the
+  password and counts what waits.
+- **Linking applies where the device is now**, so a book finished before it was linked is
+  marked read by the link rather than by a push that may never come.
 
 ## A digital copy is requested and granted, not lent
 

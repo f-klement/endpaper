@@ -25,7 +25,9 @@ import {
   getGetCustomFieldsQueryKey,
   getListAccessRequestsQueryKey,
   getListCustomFieldsQueryKey,
+  getGetHighlightsQueryKey,
   getGetNotesQueryKey,
+  getSetHighlightSharingMutationOptions,
   getGetQuotesQueryKey,
   getListQuotesQueryKey,
   getListProgressQueryKey,
@@ -55,6 +57,7 @@ import {
   useEnrichmentCandidates,
   useGetBook,
   useGetCustomFields,
+  useGetHighlights,
   useGetNotes,
   useGetQuotes,
   useListLocations,
@@ -84,6 +87,14 @@ import {
   useReturnLoan,
 } from "../../api/generated/endpoints/loans/loans";
 import { useListUsers } from "../../api/generated/endpoints/users/users";
+import {
+  getListKosyncDocumentsQueryKey,
+  getListKosyncInboxQueryKey,
+  useLinkKosyncDocument,
+  useListKosyncDocuments,
+  useListKosyncInbox,
+  useUnlinkKosyncDocument,
+} from "../../api/generated/endpoints/kosync/kosync";
 import { useGoogleBooksReady } from "../../app/hooks";
 import { useToast } from "../../app/toast";
 import type { Borrower } from "./components/LoanPanel";
@@ -99,6 +110,7 @@ import type {
   DigitalReferenceOut,
   CustomFieldOut,
   CustomFieldValueOut,
+  HighlightOut,
   LocationOut,
   BookEnrichmentOut,
   BookOut,
@@ -111,6 +123,7 @@ import type {
   ReadStatus,
   TagOut,
   UserOut,
+  KosyncDocumentOut,
 } from "../../api/generated/model";
 import { BookFormat } from "../../api/generated/model";
 
@@ -557,6 +570,41 @@ export function useBookQuotes(bookId: number): UseBookQuotesResult {
   };
 }
 
+export interface UseBookHighlightsResult {
+  highlights: HighlightOut[];
+  /** Share one of the caller's own highlights, or withdraw it. */
+  setShared: (highlightId: number, isShared: boolean) => void;
+  /** Every highlight with a sharing change out. */
+  pendingIds: ReadonlySet<number>;
+  error: unknown;
+}
+
+/**
+ * The highlights on this book the caller may read: their own, private or
+ * shared, and those other members shared. Written by an import on the library
+ * settings page; the only write here is sharing.
+ */
+export function useBookHighlights(bookId: number): UseBookHighlightsResult {
+  const queryClient = useQueryClient();
+  const highlights = useGetHighlights(bookId);
+  const sharing = useRowWrite(
+    getSetHighlightSharingMutationOptions,
+    "highlightId",
+    () =>
+      void queryClient.invalidateQueries({
+        queryKey: getGetHighlightsQueryKey(bookId),
+      }),
+  );
+
+  return {
+    highlights: highlights.data ?? [],
+    setShared: (highlightId, isShared) =>
+      sharing.mutate({ bookId, highlightId, data: { is_shared: isShared } }),
+    pendingIds: sharing.pendingRows,
+    error: highlights.error ?? sharing.error,
+  };
+}
+
 export interface UseBookLoanResult {
   lend: (
     borrower: Borrower,
@@ -847,6 +895,62 @@ export function useBookEnrichment(bookId: number): UseBookEnrichmentResult {
     result: apply.data ?? null,
     error: apply.error ?? candidates.error,
     dismiss: () => apply.reset(),
+  };
+}
+
+export interface UseBookKosyncResult {
+  /** The member's KOReader documents linked to this book. */
+  linked: KosyncDocumentOut[];
+  /** Their documents no book is linked to yet. */
+  waiting: KosyncDocumentOut[];
+  link: (document: string) => void;
+  unlink: (document: string) => void;
+  isSaving: boolean;
+  error: unknown;
+}
+
+/**
+ * The member's KOReader documents, as this book sees them.
+ *
+ * **The inbox is linked from here rather than from a picker in Settings**,
+ * because here the book is already chosen: linking is one press, where a
+ * picker would be a search across the whole catalogue. Both lists are only
+ * ever the caller's own.
+ *
+ * A link writes the reading log and may mark the book read, so it refreshes
+ * the book and its log along with the two lists.
+ */
+export function useBookKosync(bookId: number): UseBookKosyncResult {
+  const queryClient = useQueryClient();
+  const invalidate = useInvalidate();
+  const linked = useListKosyncDocuments(bookId);
+  const waiting = useListKosyncInbox();
+
+  const mutation = {
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: getListKosyncDocumentsQueryKey(bookId),
+      });
+      void queryClient.invalidateQueries({
+        queryKey: getListKosyncInboxQueryKey(),
+      });
+      void queryClient.invalidateQueries({
+        queryKey: getListProgressQueryKey(bookId),
+      });
+      invalidate.book(bookId);
+    },
+  };
+  const link = useLinkKosyncDocument({ mutation });
+  const unlink = useUnlinkKosyncDocument({ mutation });
+
+  return {
+    linked: linked.data ?? [],
+    waiting: waiting.data ?? [],
+    // `mutate`, not `mutateAsync`: nothing awaits these.
+    link: (document) => link.mutate({ bookId, document }),
+    unlink: (document) => unlink.mutate({ bookId, document }),
+    isSaving: link.isPending || unlink.isPending,
+    error: link.error ?? unlink.error,
   };
 }
 

@@ -165,18 +165,21 @@ class TestTheseAreTheConstraintsWithTwoSpellings:
             ("custom_fields", "ck_custom_fields_name_bounds"),
             ("digital_references", "ck_digital_references_bounds"),
             ("digital_references", "ck_digital_references_partial_md5"),
+            ("highlights", "ck_highlights_bounds"),
+            ("kosync_documents", "ck_kosync_documents_bounds"),
+            ("kosync_documents", "ck_kosync_documents_document"),
             ("opds_servers", "ck_opds_servers_base_url"),
             ("opds_servers", "ck_opds_servers_credential_key"),
             ("opds_servers", "ck_opds_servers_name"),
             ("quotes", "ck_quotes_text_bounds"),
         }
 
-    def test_nine_of_the_twenty_three_tables_carry_one(self):
+    def test_eleven_of_the_twenty_five_tables_carry_one(self):
         """The other half of the ADR's sentence, from the same source. A set of
         names and a count of tables are two different claims, and stating both
         here is what stopped the first one going out with the wrong number."""
-        assert len({table for table, _, _ in _dialect_checks()}) == 9
-        assert len(Base.metadata.tables) == 23
+        assert len({table for table, _, _ in _dialect_checks()}) == 11
+        assert len(Base.metadata.tables) == 25
 
 
 class TestTheStringifierIsNotAnEngine:
@@ -889,6 +892,8 @@ class TestEveryNulArmDroppedOnACharacterColumn:
                 "ck_digital_references_partial_md5",
                 "partial_md5",
             ),
+            ("highlights", "ck_highlights_bounds", "source_key"),
+            ("kosync_documents", "ck_kosync_documents_document", "document"),
             ("opds_servers", "ck_opds_servers_base_url", "base_url"),
             ("opds_servers", "ck_opds_servers_credential_key", "credential_key"),
         }
@@ -993,6 +998,8 @@ class TestNoSqliteArmLostAClause:
             "ck_catalogue_targets_base_url": 1,
             "ck_catalogue_credentials_source": 1,
             "ck_digital_references_partial_md5": 1,
+            "ck_highlights_bounds": 1,
+            "ck_kosync_documents_document": 1,
             "ck_opds_servers_credential_key": 1,
             "ck_opds_servers_base_url": 1,
         }

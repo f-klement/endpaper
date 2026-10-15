@@ -44,6 +44,8 @@ from models import (
     BookIdentifier,
     Classification,
     DigitalReference,
+    Highlight,
+    KosyncDocument,
     Loan,
     Note,
     Quote,
@@ -256,6 +258,20 @@ def _absorb_digest(survivor: DigitalReference, losing: DigitalReference) -> None
         survivor.partial_md5 = losing.partial_md5
 
 
+def _carry_highlights(fold: _Fold) -> None:
+    """Every highlight travels, and arrives private.
+
+    **A highlight that changes Book is private again, on every path.** Sharing
+    chose one Book's readers; the survivor's are another audience, which its
+    author never chose, and folding a private Book into a public one would
+    otherwise publish every mark shared on it. `highlights.import_koreader`
+    applies the same rule to a re-import that moves a row.
+    """
+    for row in fold.db.query(Highlight).filter(Highlight.book_id.in_(fold.loser_ids)).all():
+        row.book_id = fold.keeper.id
+        row.is_shared = False
+
+
 def _carry_loans(fold: _Fold) -> None:
     """Loans move whole, and then the survivor is left with one open loan.
 
@@ -346,6 +362,11 @@ TRANSFERS: Final[tuple[_Transfer, ...]] = (
     # different printing, which is the standing cost of merging two rows that
     # were two editions: the alternative is refusing the merge.
     _Transfer(_table(Quote.__tablename__), _moves_wholesale(Quote)),
+    # Highlights move whatever their author or sharing, as notes do: a rule
+    # that skipped a private one would delete it. Nothing to resolve, because
+    # `uq_highlights_member_source_key` does not name the Book. Unlike notes,
+    # each moved one is private again: see `_carry_highlights`.
+    _Transfer(_table(Highlight.__tablename__), _carry_highlights),
     # `uq_digital_references_location` would refuse the flush where the keeper
     # and a loser were catalogued from the same file, which is the **likely**
     # case rather than an edge: two rows for one Book are commonly two imports
@@ -385,6 +406,10 @@ TRANSFERS: Final[tuple[_Transfer, ...]] = (
     # Book are two histories of one Book.
     _Transfer(_table(ReadingProgress.__tablename__), _moves_wholesale(ReadingProgress)),
     _Transfer(_table(reading.RECORDS_TABLE), _carry_reading_records),
+    # A device's document names the file, not the Book, so the link follows the
+    # Book that survives and nothing collides: the key is the member and the
+    # document, which a merge does not touch.
+    _Transfer(_table(KosyncDocument.__tablename__), _moves_wholesale(KosyncDocument)),
     _Transfer(_table(custom_fields.VALUES_TABLE), _carry_custom_field_values),
 )
 

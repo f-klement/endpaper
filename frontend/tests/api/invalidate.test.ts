@@ -15,6 +15,7 @@ import * as backup from "../../src/api/generated/endpoints/backup/backup";
 import * as books from "../../src/api/generated/endpoints/books/books";
 import * as collections from "../../src/api/generated/endpoints/collections/collections";
 import * as covers from "../../src/api/generated/endpoints/covers/covers";
+import * as kosync from "../../src/api/generated/endpoints/kosync/kosync";
 import * as loans from "../../src/api/generated/endpoints/loans/loans";
 import * as opds from "../../src/api/generated/endpoints/opds/opds";
 import * as publicCatalogue from "../../src/api/generated/endpoints/public/public";
@@ -84,6 +85,11 @@ const KEYS: Record<string, readonly unknown[]> = {
   // by moving requests onto the survivor, and merging duplicates calls
   // `everything()`, which covers it.
   listAccessRequests: books.getListAccessRequestsQueryKey(7),
+  // A book's highlights, a child of `/api/books/{id}` classified with notes
+  // and quotes: an import or a sharing change writes them through
+  // `useBookHighlights` and the import hook, which invalidate this key. A merge
+  // moves them onto the survivor, and merging calls `everything()`.
+  getHighlights: books.getGetHighlightsQueryKey(7),
   listAuthors: books.getListAuthorsQueryKey(),
   listAuthorSuggestions: books.getListAuthorSuggestionsQueryKey(),
   listSeries: books.getListSeriesQueryKey(),
@@ -137,6 +143,13 @@ const KEYS: Record<string, readonly unknown[]> = {
   // already here.
   listServers: opds.getListServersQueryKey(),
   listSyncableServers: opds.getListSyncableServersQueryKey(),
+  // KOReader sync. The account is the member's own configuration; the inbox and
+  // a book's linked documents move when a device pushes, which no write in this
+  // app causes, or through the link and unlink hooks, which invalidate their
+  // own keys. None is under `/api/books`, so a catalogue write leaves them.
+  getKosyncAccount: kosync.getGetKosyncAccountQueryKey(),
+  listKosyncInbox: kosync.getListKosyncInboxQueryKey(),
+  listKosyncDocuments: kosync.getListKosyncDocumentsQueryKey(7),
 };
 
 /**
@@ -250,7 +263,11 @@ describe("the inventory is complete", () => {
     //
     // 56 on 2026-10-15: requests for access to a digital copy, three routes,
     // one of them a read.
-    expect(Object.keys(KEYS).length).toBe(56);
+    //
+    // 60 on 2026-10-15, counted with that same command: a book's highlights
+    // (one key) and KOReader sync (three: the account, the inbox and a book's
+    // documents) arrived together.
+    expect(Object.keys(KEYS).length).toBe(60);
   });
 });
 
@@ -363,6 +380,8 @@ describe("the catalogue is everything derived from the books table", () => {
       "enrichmentCandidates",
       "getCustomFields",
       "listAccessRequests",
+      "getHighlights",
+      "listKosyncDocuments",
     ]) {
       expect(isCatalogueQuery(query(KEYS[name]!)), name).toBe(false);
     }
@@ -402,6 +421,8 @@ describe("the catalogue is everything derived from the books table", () => {
       "authConfig",
       "me",
       "healthz",
+      "getKosyncAccount",
+      "listKosyncInbox",
     ]) {
       expect(isCatalogueQuery(query(KEYS[name]!)), name).toBe(false);
     }

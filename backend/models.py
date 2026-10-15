@@ -6,6 +6,7 @@ from enum import StrEnum
 from typing import Final, TypeGuard
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     CheckConstraint,
     Column,
@@ -44,6 +45,7 @@ from enums import (
     ClassificationScheme,
     CustomFieldKind,
     HeadingKind,
+    HighlightSource,
     LendingWillingness,
     OwnershipStatus,
     ReadStatus,
@@ -782,6 +784,9 @@ class Tag(Base):
 #: every revision here gives.
 USERNAME_MAX = 50
 
+#: SHA-256 written in hex, which is what `users.kosync_key_digest` holds.
+KOSYNC_KEY_DIGEST_HEX = 64
+
 
 class User(Base):
     __tablename__ = "users"
@@ -939,6 +944,21 @@ class User(Base):
     # `accounts.session_is_live` states which and why rather than the reasoning
     # being restated here.
     sessions_valid_from: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    # ── KOReader progress sync ────────────────────────────────────────────
+    #
+    # The member's sync password, as SHA-256 of what a device sends, and when
+    # it was minted. Null when they have none, which refuses every device.
+    # `kosync.py` says why a fast hash is enough here and a password's is not.
+    #
+    # Columns rather than a table for the reason the appearance columns give:
+    # one at a time, no history, and minting a second replaces the first.
+    # **Deliberately NOT on `UserOut`**, like the address: that schema is
+    # served inside every book payload.
+    kosync_key_digest: Mapped[str | None] = mapped_column(
+        String(KOSYNC_KEY_DIGEST_HEX), nullable=True
+    )
+    kosync_key_set_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     books_added: Mapped[list[Book]] = relationship("Book", back_populates="added_by")
     user_books: Mapped[list[UserBook]] = relationship("UserBook", back_populates="user")
@@ -1289,6 +1309,10 @@ class Book(Base):
     quotes: Mapped[list[Quote]] = relationship(
         "Quote", back_populates="book", cascade="all, delete-orphan"
     )
+    # Cascaded like the quotes: a passage marked in a purged book marks nothing.
+    highlights: Mapped[list[Highlight]] = relationship(
+        "Highlight", back_populates="book", cascade="all, delete-orphan"
+    )
     # Ordered by id, which is insertion order, so a book classified by two
     # catalogues reads the same way twice. Cascaded like the notes and the
     # quotes: a purged book's headings describe nothing.
@@ -1531,6 +1555,124 @@ class ReadingProgress(Base):
 
     user: Mapped[User] = relationship("User")
     book: Mapped[Book] = relationship("Book", back_populates="progress")
+
+
+#: The longest document name a device may push. KOReader sends 32 hex digits
+#: under either checksum method; the slack is for other clients of the protocol.
+KOSYNC_DOCUMENT_MAX = 64
+#: The longest position string. An XPointer is a path through the book's markup,
+#: well under this for any book measured; past it is not a position.
+KOSYNC_PROGRESS_MAX = 2048
+#: The device's name and its opaque id.
+KOSYNC_DEVICE_MAX = 255
+#: The file name a device sends with `metadata` when the member turned that on.
+KOSYNC_FILENAME_MAX = 255
+
+
+class KosyncDocument(Base):
+    """Where one Member's KOReader last was in one document, and which Book it is.
+
+    **The latest state, not a log.** A push replaces the row, so a GET can be
+    answered with exactly what the last push said: the position string byte for
+    byte and the percentage as the float it arrived as. `reading_progress` is
+    the log and cannot do that, `kosync.py` says when a push also writes there.
+
+    **Private to its Member by construction**: every read filters on
+    `user_id`, and a document is keyed by member, so two members reading one
+    file hold two rows.
+
+    `book_id` is null for a document nobody has linked yet, which is the inbox.
+    `SET NULL` rather than a cascade: purging a Book must not lose where the
+    device is, and the document returns to the inbox instead.
+    """
+
+    __tablename__ = "kosync_documents"
+
+    __table_args__ = (
+        Index("uq_kosync_documents_user_document", "user_id", "document", unique=True),
+        # The name a GET can route, and nothing wider, because a document a PUT
+        # stores and a GET cannot name is a position the device never gets
+        # back. `instr` because `GLOB` stops at a NUL.
+        CheckConstraint(
+            DialectSQL(
+                sqlite=(
+                    f"length(document) BETWEEN 1 AND {KOSYNC_DOCUMENT_MAX} "
+                    "AND instr(document, char(0)) = 0 "
+                    "AND document NOT GLOB '*[^A-Za-z0-9_]*'"
+                ),
+                postgresql=(
+                    f"length(document) BETWEEN 1 AND {KOSYNC_DOCUMENT_MAX} "
+                    "AND (document COLLATE \"C\") !~ '[^A-Za-z0-9_]'"
+                ),
+            ),
+            name="ck_kosync_documents_document",
+        ),
+        # The byte arm beside each character arm for the reason
+        # `ck_digital_references_bounds` gives: `backup.restore` writes through
+        # Core and SQLite's `length()` stops at a NUL.
+        CheckConstraint(
+            DialectSQL(
+                sqlite=(
+                    f"length(progress) <= {KOSYNC_PROGRESS_MAX} "
+                    f"AND length(CAST(progress AS BLOB)) <= {4 * KOSYNC_PROGRESS_MAX} "
+                    f"AND length(device) <= {KOSYNC_DEVICE_MAX} "
+                    f"AND length(CAST(device AS BLOB)) <= {4 * KOSYNC_DEVICE_MAX} "
+                    f"AND (device_id IS NULL OR (length(device_id) <= {KOSYNC_DEVICE_MAX} "
+                    f"AND length(CAST(device_id AS BLOB)) <= {4 * KOSYNC_DEVICE_MAX})) "
+                    f"AND (title IS NULL OR (length(title) <= {TITLE_MAX} "
+                    f"AND length(CAST(title AS BLOB)) <= {4 * TITLE_MAX})) "
+                    f"AND (authors IS NULL OR (length(authors) <= {AUTHOR_LINE_MAX} "
+                    f"AND length(CAST(authors AS BLOB)) <= {4 * AUTHOR_LINE_MAX})) "
+                    f"AND (filename IS NULL OR (length(filename) <= {KOSYNC_FILENAME_MAX} "
+                    f"AND length(CAST(filename AS BLOB)) <= {4 * KOSYNC_FILENAME_MAX})) "
+                    "AND timestamp >= 0"
+                ),
+                postgresql=(
+                    f"length(progress) <= {KOSYNC_PROGRESS_MAX} "
+                    f"AND octet_length(progress) <= {4 * KOSYNC_PROGRESS_MAX} "
+                    f"AND length(device) <= {KOSYNC_DEVICE_MAX} "
+                    f"AND octet_length(device) <= {4 * KOSYNC_DEVICE_MAX} "
+                    f"AND (device_id IS NULL OR (length(device_id) <= {KOSYNC_DEVICE_MAX} "
+                    f"AND octet_length(device_id) <= {4 * KOSYNC_DEVICE_MAX})) "
+                    f"AND (title IS NULL OR (length(title) <= {TITLE_MAX} "
+                    f"AND octet_length(title) <= {4 * TITLE_MAX})) "
+                    f"AND (authors IS NULL OR (length(authors) <= {AUTHOR_LINE_MAX} "
+                    f"AND octet_length(authors) <= {4 * AUTHOR_LINE_MAX})) "
+                    f"AND (filename IS NULL OR (length(filename) <= {KOSYNC_FILENAME_MAX} "
+                    f"AND octet_length(filename) <= {4 * KOSYNC_FILENAME_MAX})) "
+                    "AND timestamp >= 0"
+                ),
+            ),
+            name="ck_kosync_documents_bounds",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
+    #: What the device names the file by: KOReader's partial MD5 of it, or the
+    #: MD5 of its name under the other checksum method.
+    document: Mapped[str] = mapped_column(String(KOSYNC_DOCUMENT_MAX), nullable=False)
+    #: An XPointer for a reflowable book, a page number as text for a paged one.
+    #: Stored and returned as the string it arrived as.
+    progress: Mapped[str] = mapped_column(String(KOSYNC_PROGRESS_MAX), nullable=False)
+    #: 0 to 1 from KOReader, though the protocol does not bound it.
+    percentage: Mapped[float] = mapped_column(Float, nullable=False)
+    device: Mapped[str] = mapped_column(String(KOSYNC_DEVICE_MAX), nullable=False)
+    #: Null when the device sent none, so a GET omits it as the reference does.
+    device_id: Mapped[str | None] = mapped_column(String(KOSYNC_DEVICE_MAX), nullable=True)
+    #: Epoch seconds by this server's clock at the push. An integer because
+    #: that is what the device compares against its own clock; 64 bits because
+    #: PostgreSQL's `integer` runs out in January 2038.
+    timestamp: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    #: What the device said the file is, kept from the last push that said it,
+    #: so the inbox can show something recognisable. Sent only when the member
+    #: switched it on in KOReader.
+    title: Mapped[str | None] = mapped_column(String(TITLE_MAX), nullable=True)
+    authors: Mapped[str | None] = mapped_column(String(AUTHOR_LINE_MAX), nullable=True)
+    filename: Mapped[str | None] = mapped_column(String(KOSYNC_FILENAME_MAX), nullable=True)
+    book_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("books.id", ondelete="SET NULL"), nullable=True, index=True
+    )
 
 
 #: A loan names exactly one borrower, in SQL.
@@ -1982,6 +2124,144 @@ class Quote(Base):
     )
 
     book: Mapped[Book] = relationship("Book", back_populates="quotes")
+    author: Mapped[User] = relationship("User")
+
+
+#: The longest highlighted passage stored. Far past `QUOTE_TEXT_MAX`, because a
+#: reader marks whole paragraphs and an import refused for one long mark would
+#: lose the rest. `QUOTE_TEXT_MAX` binds **sharing** instead: see
+#: `Highlight.is_shared`.
+HIGHLIGHT_TEXT_MAX = 10_000
+
+#: The longest note on a highlight, which is the member's own words and is
+#: bounded like a note.
+HIGHLIGHT_NOTE_MAX = 10_000
+
+#: The longest chapter title a highlight carries, which is display text only.
+HIGHLIGHT_CHAPTER_MAX = 1_000
+
+#: The widest source key. A KOReader key is 64 hex digits; a Readwise id is a
+#: decimal integer and far shorter.
+HIGHLIGHT_SOURCE_KEY_MAX = 64
+
+
+class Highlight(Base):
+    """A passage one member marked in a book on a reading device, and their note.
+
+    **Private by default, shared per row**: `is_shared` is visibility and
+    `user_id` is authorship, the split `Note` records, and
+    `highlight_visible_to()` is the rule. It sits inside the Book's own rule,
+    so a highlight is read only on a Book the viewer can already see.
+
+    **Not a quote.** A quote is visible to whoever can see the Book, which is
+    recorded and argued on `Quote`; a highlight is a private act of marking,
+    so it is its own table rather than a flag that would reverse that decision.
+
+    **Identified at its source, never by its text.** `(user_id, source,
+    source_key)` is unique, so re-running an import finds the row it wrote
+    and updates it. KOReader gives an annotation no id, so its key is derived
+    from the file and the creation time: `highlights.koreader_source_key` says
+    how.
+    A Readwise highlight will carry Readwise's own id.
+
+    **Per copy**, like quotes and notes: a position is a fact about one file.
+
+    **A member is never deleted**: no path deletes a user, which is why the
+    foreign key carries no rule. The day one does, a highlight goes with its
+    author, since it is theirs alone until they share it.
+    """
+
+    __tablename__ = "highlights"
+
+    __table_args__ = (
+        # The book page reads one Book's highlights in page order. `book_id`
+        # carries no index of its own for the reason `ix_quotes_book_page`
+        # gives.
+        Index("ix_highlights_book_page", "book_id", "page"),
+        # What makes every import repeatable: one member's mark at one source is
+        # one row. Not keyed on the Book, so a merge moves rows without a
+        # collision and a re-import that now matches another copy finds the
+        # row rather than doubling it.
+        Index(
+            "uq_highlights_member_source_key",
+            "user_id",
+            "source",
+            "source_key",
+            unique=True,
+        ),
+        CheckConstraint(_enum_check("source", HighlightSource), name="ck_highlights_source"),
+        CheckConstraint(
+            f"page IS NULL OR (page > 0 AND page <= {MAX_PAGE_NUMBER_IN_A_BOOK})",
+            name="ck_highlights_page_bounds",
+        ),
+        # Every text ceiling with its byte arm, for the reason
+        # `ck_quotes_text_bounds` gives at length: `backup.restore` writes
+        # through Core and SQLite's `length()` stops at a NUL.
+        CheckConstraint(
+            DialectSQL(
+                sqlite=(
+                    f"length(text) > 0 AND length(text) <= {HIGHLIGHT_TEXT_MAX} "
+                    f"AND length(CAST(text AS BLOB)) <= {4 * HIGHLIGHT_TEXT_MAX} "
+                    f"AND (note IS NULL OR (length(note) <= {HIGHLIGHT_NOTE_MAX} "
+                    f"AND length(CAST(note AS BLOB)) <= {4 * HIGHLIGHT_NOTE_MAX})) "
+                    f"AND (chapter IS NULL OR (length(chapter) <= {HIGHLIGHT_CHAPTER_MAX} "
+                    f"AND length(CAST(chapter AS BLOB)) <= {4 * HIGHLIGHT_CHAPTER_MAX})) "
+                    f"AND length(source_key) > 0 "
+                    f"AND length(source_key) <= {HIGHLIGHT_SOURCE_KEY_MAX} "
+                    "AND instr(source_key, char(0)) = 0 "
+                    f"AND length(CAST(source_key AS BLOB)) <= {4 * HIGHLIGHT_SOURCE_KEY_MAX}"
+                ),
+                postgresql=(
+                    f"length(text) > 0 AND length(text) <= {HIGHLIGHT_TEXT_MAX} "
+                    f"AND octet_length(text) <= {4 * HIGHLIGHT_TEXT_MAX} "
+                    f"AND (note IS NULL OR (length(note) <= {HIGHLIGHT_NOTE_MAX} "
+                    f"AND octet_length(note) <= {4 * HIGHLIGHT_NOTE_MAX})) "
+                    f"AND (chapter IS NULL OR (length(chapter) <= {HIGHLIGHT_CHAPTER_MAX} "
+                    f"AND octet_length(chapter) <= {4 * HIGHLIGHT_CHAPTER_MAX})) "
+                    f"AND length(source_key) > 0 "
+                    f"AND length(source_key) <= {HIGHLIGHT_SOURCE_KEY_MAX} "
+                    f"AND octet_length(source_key) <= {4 * HIGHLIGHT_SOURCE_KEY_MAX}"
+                ),
+            ),
+            name="ck_highlights_bounds",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    # No `index=True`: `ix_highlights_book_page` leads with this column.
+    book_id: Mapped[int] = mapped_column(Integer, ForeignKey("books.id"), nullable=False)
+    # No `index=True`: `uq_highlights_member_source_key` leads with it.
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
+    source: Mapped[HighlightSource] = mapped_column(String(16), nullable=False)
+    source_key: Mapped[str] = mapped_column(String(HIGHLIGHT_SOURCE_KEY_MAX), nullable=False)
+    # The book's words, verbatim, apart from the member's own for the reason
+    # `Quote` keeps `text` and `note` apart.
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    chapter: Mapped[str | None] = mapped_column(String(HIGHLIGHT_CHAPTER_MAX), nullable=True)
+    # The page the device showed, for display and order only: a reflowed book
+    # numbers its pages by the device's layout, not by a printed edition.
+    page: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    #: When the mark was made, **on the device's wall clock, with no zone**.
+    #:
+    #: KOReader writes local time as `%Y-%m-%d %H:%M:%S` and records no zone,
+    #: so this column stores those digits as given and is the one `DateTime`
+    #: here that is not UTC. Converting would need a zone nothing supplied;
+    #: the schema returns it as the same text so no client reads it as UTC.
+    highlighted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    #: Whether whoever can see the Book may read this highlight. False is the
+    #: owner's rule for every new row. A re-import onto the same Book keeps
+    #: it; one that moves the row to another Book clears it, since that Book's
+    #: readers were never chosen (`highlights.import_koreader`). Only a passage within
+    #: `QUOTE_TEXT_MAX` may be shared, the ceiling a passage shown to the shelf
+    #: already has: enforced at the route that shares.
+    is_shared: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now()
+    )
+
+    book: Mapped[Book] = relationship("Book", back_populates="highlights")
     author: Mapped[User] = relationship("User")
 
 
@@ -3250,6 +3530,21 @@ def note_visible_to(user_id: int) -> ColumnElement[bool]:
     every row.
     """
     return or_(Note.is_private.is_(False), Note.user_id == user_id)
+
+
+def highlight_visible_to(user_id: int) -> ColumnElement[bool]:
+    """Filter predicate for the highlights a given account is allowed to read.
+
+    Shared, or written by this account: `note_visible_to()` with the flag the
+    other way round, and the same two consequences. It decides who reads a
+    highlight on a Book they can already see, so a caller has got past
+    `book_for_read` first; and it carries **no admin arm**, for the reason that
+    function gives.
+
+    `.is_(True)` rather than a truthiness test, for the reason `visible_to()`
+    states.
+    """
+    return or_(Highlight.is_shared.is_(True), Highlight.user_id == user_id)
 
 
 #: How wide either index name on a catalogue target may be, in **bytes and in

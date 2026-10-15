@@ -26,7 +26,7 @@ repeat the argument.
 <!-- index: begin -->
 | Section | Entry | Words |
 |---|---|---|
-|  | [Backend](decisions.md#backend) | 33,350 |
+|  | [Backend](decisions.md#backend) | 33,495 |
 | Backend | [`bcrypt` directly, not `passlib`](decisions.md#bcrypt-directly-not-passlib) | 98 |
 | Backend | [Settings are functions, not module constants](decisions.md#settings-are-functions-not-module-constants) | 59 |
 | Backend | [`DATA_DIR` exists at all](decisions.md#data_dir-exists-at-all) | 22 |
@@ -85,7 +85,7 @@ repeat the argument.
 | Backend | [Reading progress is a log, not a `current_page` column](decisions.md#reading-progress-is-a-log-not-a-current_page-column) | 132 |
 | Backend | [Two units on `reading_progress`, exactly one per row](decisions.md#two-units-on-reading_progress-exactly-one-per-row) | 102 |
 | Backend | [The displayed percentage is derived, never stored](decisions.md#the-displayed-percentage-is-derived-never-stored) | 82 |
-| Backend | [Recording progress promotes to `reading` and never to `read`](decisions.md#recording-progress-promotes-to-reading-and-never-to-read) | 92 |
+| Backend | [Recording progress promotes to `reading`; only a reading device's end sets `read`](decisions.md#recording-progress-promotes-to-reading-only-a-reading-devices-end-sets-read) | 234 |
 | Backend | [A status change never deletes progress rows](decisions.md#a-status-change-never-deletes-progress-rows) | 80 |
 | Backend | [The progress endpoints sit beside `/{book_id}/status`, not before `/{book_id}`](decisions.md#the-progress-endpoints-sit-beside-book_idstatus-not-before-book_id) | 92 |
 | Backend | [`pages_by_month` is computed in Python, and covers page-tracked books only](decisions.md#pages_by_month-is-computed-in-python-and-covers-page-tracked-books-only) | 236 |
@@ -891,5 +891,7 @@ repeat the argument.
 |  | [The scanner has no flipped decode for a mirrored camera](decisions.md#the-scanner-has-no-flipped-decode-for-a-mirrored-camera) | 157 |
 |  | [A file's location lands on an existing book only when the formats agree](decisions.md#a-files-location-lands-on-an-existing-book-only-when-the-formats-agree) | 240 |
 |  | [A file is recognised by its location or by KOReader's fingerprint, asked before the add](decisions.md#a-file-is-recognised-by-its-location-or-by-koreaders-fingerprint-asked-before-the-add) | 746 |
+|  | [A highlight is its own table, private by default, and identified at its source](decisions.md#a-highlight-is-its-own-table-private-by-default-and-identified-at-its-source) | 656 |
+|  | [KOReader progress sync is served here, under `/kosync`](decisions.md#koreader-progress-sync-is-served-here-under-kosync) | 725 |
 |  | [A digital copy is requested and granted, not lent](decisions.md#a-digital-copy-is-requested-and-granted-not-lent) | 459 |
 <!-- index: end -->

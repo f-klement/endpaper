@@ -688,6 +688,35 @@ export const en = {
   "account.security.directory":
     "A directory signs this account in, so there is no address for this library to confirm.",
 
+  // ── KOReader sync ───────────────────────────────────────────────────────
+  //
+  // The member's sync password on the account page, and the documents their
+  // devices reported on each book's page.
+  "kosync.title": "KOReader sync",
+  "kosync.hint":
+    "KOReader on your e-reader can keep your place across devices and record your reading here. In KOReader, open Progress sync, choose a custom sync server, and log in with these details.",
+  "kosync.server": "Server",
+  "kosync.username": "Username",
+  "kosync.password": "Password",
+  "kosync.none": "You have no sync password yet.",
+  "kosync.since": "Your sync password was made on {date}.",
+  "kosync.shownOnce":
+    "Copy the password now: it is shown only this once. Making a new one signs out every device using the old one.",
+  "kosync.mint": "Make a sync password",
+  "kosync.remint": "Make a new sync password",
+  "kosync.revoke": "Sign out every device",
+  "kosync.waiting":
+    "Documents waiting for a book: {count}. Open the book and link them there.",
+  "kosync.couldNotSave": "The sync password could not be changed.",
+  "kosync.book.title": "KOReader",
+  "kosync.book.linked": "Linked to this book",
+  "kosync.book.waiting": "Waiting for a book",
+  "kosync.book.link": "This book",
+  "kosync.book.unlink": "Unlink",
+  "kosync.book.document": "{name}, {percent}% on {device}, {date}",
+  "kosync.book.unnamed": "A document",
+  "kosync.book.couldNotSave": "The link could not be saved.",
+
   "theme.hint": "Saved to your account, so it follows you between devices.",
   "theme.light": "Light",
   "theme.dark": "Dark",
@@ -1965,6 +1994,31 @@ export const en = {
   // not given a paragraph about something it does not have.
   "providers.slowLegend":
     "A catalogue marked slow cannot answer a title search inside the deadline the quick search allows, so it is left out of that one and asked only when somebody asks for it. It answers a scan exactly as the others do.",
+  // ── Highlights: marked on a reading device, imported from KOReader ──────
+  "highlights.title": "Highlights",
+  "highlights.private": "Only visible to me",
+  "highlights.shared": "Shared",
+  "highlights.share": "Share",
+  "highlights.unshare": "Stop sharing",
+  "highlights.tooLongToShare": "Too long to share",
+  "highlights.importTitle": "KOReader highlights",
+  "highlights.importIntro":
+    "Pick the metadata files KOReader keeps beside each book, such as metadata.epub.lua in the book's .sdr folder. Each one is matched to the book holding the same file, by the fingerprint KOReader records. Highlights arrive private, and you share them from the book page. Running it again updates the highlights you changed and adds new ones. A highlight you delete in KOReader is not deleted here.",
+  "highlights.importChoose": "Choose metadata files",
+  "highlights.importReading": "Reading and importing...",
+  "highlights.outcomeImported":
+    "New: {created}. Updated: {updated}. Unchanged: {unchanged}.",
+  "highlights.outcomeOversized": "Left out as too long: {count}.",
+  "highlights.outcomeUnmatched":
+    "No book you can see holds this file. Add the file from the scan page, then import again.",
+  "highlights.outcomeAmbiguous":
+    "More than one book holds this file, so nothing was imported.",
+  "highlights.outcomeUnreadable": "Not a KOReader metadata file.",
+  "highlights.outcomeTooLarge": "Too large to read.",
+  "highlights.outcomeNoFingerprint":
+    "It records no fingerprint of its book, so it cannot be matched.",
+  "highlights.outcomeEmpty": "It holds no highlights.",
+  "highlights.outcomeFailed": "The import of this file failed.",
 } as const;
 
 /** Every message key. Adding one here requires a German translation. */

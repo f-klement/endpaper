@@ -227,7 +227,8 @@ both and neither are a **422**. A percent exists for an audiobook and for a book
 restore does not go through this schema.
 
 Recording progress on an unstarted book **promotes it to `reading`** and stamps
-`started_at`. It never sets `read`, whatever the page number: `page_count` comes from a
+`started_at`. A typed entry never sets `read`, whatever the page number (a KOReader
+device reaching its last page does: see *KOReader progress sync*): `page_count` comes from a
 metadata provider and is off by one often enough that the last page is not a finish
 signal, and there is already an explicit control for finishing. A status change never
 deletes progress rows, unlike the reading dates, which are derived and are cleared.
@@ -1473,6 +1474,47 @@ page.
 A `quote_id` belonging to a different book returns 404, for the same reason a `note_id`
 does.
 
+### Highlights
+
+A passage a member marked on a reading device, and their note on it. **Private by default**:
+a highlight is visible to its author, and to whoever can see the book once its author
+shares it. There is no admin arm, on reading or on sharing.
+
+| Method | Path | Access | Notes |
+|---|---|---|---|
+| GET | `/api/books/{id}/highlights` | read | The caller's own and the shared ones, in page order |
+| POST | `/api/books/{id}/highlights/koreader` | read | One KOReader sidecar's highlights, as the caller's |
+| PUT | `/api/books/{id}/highlights/{highlight_id}/sharing` | author | `{"is_shared": bool}`; **404** for one the caller cannot read, **403** for another member's shared one |
+
+**The import is repeatable.** Each highlight is unique on its author, its source and a key
+the source gives it, so a second run of the same sidecar answers every row `unchanged`, an
+edited note or an adjusted mark answers `updated`, and a new mark is `created`. KOReader gives
+an annotation no id: the key is SHA-256 over the file's partial MD5 and the mark's creation
+time, which KOReader does not change when a mark is adjusted. A mark with no creation time, or
+two in one request made in the same second, is keyed on its start and end positions as well,
+so adjusting one of those makes a new row, and so does a second mark appearing in the second
+of one already imported; deleting one of such a pair leaves the other its row. The browser
+sends every mark of one second in one request. A re-converted book has a new fingerprint, so
+its highlights arrive as new rows. **An import never deletes**: a mark deleted in KOReader
+stays here. Sharing is kept on a re-import onto the same book. **A highlight that changes book
+is private again, on every path**: one an import moves to another book, and every one a merge
+moves to the survivor, because that book's readers are not the audience its author chose.
+
+**The sidecar must match the book by fingerprint.** `partial_md5` is the sidecar's
+`partial_md5_checksum`, and the book must hold a file reference carrying it, or the answer is
+**409** `not_held`. The browser finds the book through `POST /api/books/file-holders` and
+reports a sidecar no visible book holds, or more than one does, rather than guessing.
+
+**`highlighted_at` is the device's wall clock with no zone**, because KOReader records none:
+it is stored as the digits the sidecar gave and returned as the same text,
+`YYYY-MM-DD HH:MM:SS`, rather than as a `date-time`, which would need an offset.
+
+Bounds: `text` 1 to 10,000 characters, `note` up to 10,000, `chapter` up to 1,000, `page` 1
+to 100,000, each position up to 4,096, no NUL in any of them, and up to 5,000 highlights per
+request. **Sharing is held to the quote ceiling**: a passage longer than 2,000 characters,
+counted in code points, answers **409** `too_long_to_share`, since a shared highlight is shown
+to the shelf as a quote is.
+
 ### Digital references
 
 Where a member says one of their book files is. **Endpaper never receives the file**: the
@@ -2035,6 +2077,60 @@ rule: `a or b and c` is `(a or b) and c`. Parentheses are how a client says othe
 
 The records are `marc.py`'s, so they carry exactly the fields the MARC export does, which
 is a subset of what `PublicBookOut` publishes. See [security.md](security.md).
+
+### KOReader progress sync
+
+KOReader's progress sync plugin talks to this library at `/kosync`, which the member types
+into the device as a custom sync server. The protocol is KOReader's own, so it is answered
+the way the reference `koreader-sync-server` answers it, status and body, and it is **not**
+in the OpenAPI schema. It has no session: a device sends `x-auth-user`, the member's
+username, and `x-auth-key`, the lower case MD5 of a sync password minted below, on every
+call. A deployment behind a sign in proxy has to let `/kosync/` through unauthenticated,
+and nothing else.
+
+| Method | Path | Answer |
+|---|---|---|
+| POST | `/kosync/users/create` | **402**, code 2005: registration is off |
+| GET | `/kosync/users/auth` | 200 `{"authorized": "OK"}` |
+| PUT | `/kosync/syncs/progress` | 200 `{"document", "timestamp"}` |
+| GET | `/kosync/syncs/progress/{document}` | 200 with the last push, or **200 `{}`** for a document never pushed |
+| GET | `/kosync/healthcheck` | 200 `{"state": "OK"}` |
+| any | any other path under `/kosync/` | 404 in the same envelope, never the app's page |
+
+A refusal is `{"message", "code"}`, the reference's envelope. **401, code 2001, is the only
+answer to a missing member, a wrong key or a member with no sync password**, and the three
+are not told apart. Every other refusal makes a device queue the push and send it again
+once, at its next connection, so they are kept to what the reference refuses: a missing or colon carrying
+`document` is 403 code 2004, a `document` outside `[A-Za-z0-9_]` or past 64 characters is
+403 code 2007 (a pull could not name it), a missing `progress` or `device` or a
+`percentage` that is not a number is 403 code 2003, and a body that is not a JSON object
+is 400.
+
+A pull returns `document`, `progress` byte for byte, `percentage` as the float pushed,
+`device`, `device_id` when one was pushed, and `timestamp`, epoch seconds by this server's
+clock. The last push wins. `metadata`, when the member turns it on in KOReader, is kept for
+the inbox and is never required.
+
+**What a push does to the reading record**, once the document is linked to a Book the
+member can see: a `percent` row in the reading log when the whole percent moved since the
+member's latest row for that Book, at most one a day, promoting an unstarted Book to
+`reading` (a push at 0 percent writes nothing); and a push that crosses into 100 percent
+from below, or a first push or a link at 100 percent, marks the Book `read`, so a member who sets the status back is not overruled
+by the device resting on its last page. The fingerprint links a document only when its
+first push arrives, so an unlinked document stays unlinked. A document is linked by the
+partial MD5 on a file reference when exactly one visible Book carries it; otherwise it
+waits in the member's inbox until they link it from the book's page.
+
+| Method | Path | Access | Notes |
+|---|---|---|---|
+| GET | `/api/kosync/account` | member | `username`, `has_password`, `password_set_at`. Never the password |
+| POST | `/api/kosync/account/password` | member | 201 `{username, password}`, shown this once. Replaces any earlier one |
+| DELETE | `/api/kosync/account/password` | member | 204. Every device is refused from its next call |
+| DELETE | `/api/kosync/members/{id}/password` | admin | 204. Ends that member's sessions and revokes their sync password: under proxy or directory auth, removing somebody from the directory signs out neither their devices nor a token already issued |
+| GET | `/api/kosync/inbox` | member | The caller's documents no Book is linked to, newest push first, at most 100 |
+| GET | `/api/kosync/books/{id}/documents` | read | The caller's documents linked to this Book |
+| PUT | `/api/kosync/books/{id}/documents/{document}` | read | Link one, and apply where it is now. 404 for a document the caller never pushed |
+| DELETE | `/api/kosync/books/{id}/documents/{document}` | read | 204, back to the inbox. The log rows it wrote stay |
 
 ## System
 

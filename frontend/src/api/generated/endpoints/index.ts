@@ -4,6 +4,7 @@ export * from "./books/books.ts";
 export * from "./collections/collections.ts";
 export * from "./covers/covers.ts";
 export * from "./imports/imports.ts";
+export * from "./kosync/kosync.ts";
 export * from "./loans/loans.ts";
 export * from "./opds/opds.ts";
 export * from "./public/public.ts";

@@ -89,8 +89,9 @@ caught would prove nothing about the new one. What is *still* not caught:
 * **A join through a relationship**, `db.query(Loan).join(Loan.book)`, which
   names no `Book` at all.
 * **A child table that carries a user.** `notes`, `quotes`, `user_books`,
-  `reading_progress` and `loans` are outside the fourth pass on purpose: each
-  has a viewer of its own. Re-measured 2026-10-01 by running this pass over the
+  `reading_progress`, `loans` and `highlights` are outside the fourth pass on
+  purpose: each has a viewer of its own. The figures that follow predate
+  `highlights` and were not re-derived when it joined. Re-measured 2026-10-01 by running this pass over the
   tree with that entity set: **41 statements across 10 modules**, or 36 across 9
   outside `shelf.py`, against **27 across 7** for the book-owned tables, or 22
   across 6 outside it, out of the **98** modules `application_sources()` returns.
@@ -433,6 +434,8 @@ BOOK_CHILDREN = frozenset(
         "classifications",
         "custom_field_values",
         "digital_references",
+        "highlights",
+        "kosync_documents",
         "loans",
         "notes",
         "quotes",
@@ -723,6 +726,20 @@ BOOK_OWNED_READERS = {
             "the argument and so part of the key**: every row it reads is "
             "deleted or repointed on the spot, so this is a write that reads "
             "its own targets rather than a query with an audience.",
+        ),
+    ],
+    "kosync.py": [
+        (
+            "holders = { book_id for (book_id,) in Shelf.seen_by(db, member_id) "
+            ".select(DigitalReference.book_id) .join(DigitalReference, "
+            "DigitalReference.book_id == Book.id) .filter(DigitalReference.partial_md5 "
+            "== document) .distinct() .limit(2) .all() }",
+            "which Book a KOReader document is, by the fingerprint on a file "
+            "reference, for the device's own member. Written through "
+            "`Shelf.select()` and joined outward to `books`, so a private Book of "
+            "another member contributes no row and the document stays in the "
+            "inbox as it would for no Book. It returns ids, at most two, and "
+            "only to decide whether exactly one Book holds the file.",
         ),
     ],
     "routers/books.py": [

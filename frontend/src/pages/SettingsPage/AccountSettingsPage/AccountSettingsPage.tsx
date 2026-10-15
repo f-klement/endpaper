@@ -4,9 +4,15 @@ import { useTranslation } from "../../../i18n";
 import { SettingsSection } from "../../components";
 import SettingsSubPage from "../components/SettingsSubPage";
 import AddressField from "./components/AddressField";
+import KosyncAccount from "./components/KosyncAccount";
 import MemberAddresses from "./components/MemberAddresses";
 import SecurityRecord from "./components/SecurityRecord";
-import { useMemberEmails, useMyEmail, useMySecurity } from "./hooks";
+import {
+  useKosyncAccount,
+  useMemberEmails,
+  useMyEmail,
+  useMySecurity,
+} from "./hooks";
 
 interface AccountSettingsPageProps {
   /**
@@ -21,7 +27,8 @@ interface AccountSettingsPageProps {
 }
 
 /**
- * The member's own account, which today is one field.
+ * The member's own account: their address, its history, and the password
+ * their KOReader signs in with.
  *
  * A route of its own rather than a section on an existing screen, because none
  * of the six fits: Appearance is what the app looks like, and Data and accounts
@@ -40,6 +47,7 @@ export default function AccountSettingsPage({
   const mine = useMyEmail();
   const members = useMemberEmails(currentUser.is_admin);
   const security = useMySecurity();
+  const kosync = useKosyncAccount();
 
   return (
     <SettingsSubPage icon="user" title={t("settings.account.title")}>
@@ -96,6 +104,10 @@ export default function AccountSettingsPage({
           isLoading={security.isLoading}
           error={security.error}
         />
+      </SettingsSection>
+
+      <SettingsSection title={t("kosync.title")} icon="user">
+        <KosyncAccount state={kosync} />
       </SettingsSection>
 
       <MemberAddresses state={members} />

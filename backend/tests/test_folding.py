@@ -342,9 +342,10 @@ def _unbounded_reads(source: str) -> list[int]:
 #: spelling, failed that pass until a person described it. `_unbounded_reads`
 #: refuses a shape and asks nobody to look, so the looking is this number's job.
 #:
-#: Eleven: four queries, two `Session.delete`s of a row in hand, three `flush`es
-#: and the two plain Python calls in `NOT_A_DATABASE_READ`.
-READ_ROOTS = 11
+#: Twelve: five queries, two `Session.delete`s of a row in hand, three
+#: `flush`es and the two plain Python calls in `NOT_A_DATABASE_READ`. The fifth
+#: query is `_carry_highlights`, bounded to the losers' ids.
+READ_ROOTS = 12
 
 #: Calls the derived reading set matches that touch no table, and why.
 #:

@@ -3199,6 +3199,25 @@ _TEXT_CEILINGS: tuple[tuple[str, str, dict[str, object]], ...] = (
             "credential_key": "opds-0123456789abcdef",
         },
     ),
+    # The chapter, because it is the one `String(n)` column the constraint
+    # bounds without a NUL clause; `text` and `note` are `Text` and carry no
+    # width to probe against.
+    (
+        "highlights",
+        "chapter",
+        {
+            "book_id": 1,
+            "user_id": 1,
+            "source": "koreader",
+            "source_key": "k",
+            "text": "a line",
+        },
+    ),
+    (
+        "kosync_documents",
+        "progress",
+        {"user_id": 1, "document": "a", "percentage": 0.5, "device": "d", "timestamp": 0},
+    ),
 )
 
 #: Which constraint each of those columns is bounded by.
@@ -3212,6 +3231,8 @@ _CEILING_CONSTRAINTS: dict[tuple[str, str], str] = {
     ("custom_fields", "name"): "ck_custom_fields_name_bounds",
     ("custom_field_values", "value"): "ck_custom_field_values_bounds",
     ("opds_servers", "name"): "ck_opds_servers_name",
+    ("highlights", "chapter"): "ck_highlights_bounds",
+    ("kosync_documents", "progress"): "ck_kosync_documents_bounds",
 }
 
 
@@ -5638,6 +5659,14 @@ _CONFINEMENT_PROBES: Final[
         "digital_references",
         "partial_md5",
         {"book_id": 1, "root_label": "Books", "relative_path": "a.epub"},
+        b"",
+        "",
+    ),
+    (
+        "ck_kosync_documents_document",
+        "kosync_documents",
+        "document",
+        {"user_id": 1, "progress": "p", "percentage": 0.5, "device": "d", "timestamp": 0},
         b"",
         "",
     ),

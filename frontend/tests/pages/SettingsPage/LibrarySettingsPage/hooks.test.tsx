@@ -41,6 +41,9 @@ import { useBookCustomFields } from "../../../../src/pages/BookDetail/hooks";
 import {
   useCalibreImport,
   useCustomFields,
+  BYTES_PER_REQUEST,
+  requestChunks,
+  useKoreaderHighlightImport,
   useLibraryImport,
   useMarcImport,
   useStoreImport,
@@ -1305,5 +1308,164 @@ describe("which custom field failure the section is told about", () => {
     expect((result.current.error as ApiError).message).toBe(
       "Only an admin can delete a field.",
     );
+  });
+});
+
+const SIDECAR_DIGEST = "0123456789abcdef0123456789abcdef";
+
+function sidecar(name = "metadata.epub.lua"): File {
+  return new File(
+    [
+      `return {
+  ["partial_md5_checksum"] = "${SIDECAR_DIGEST}",
+  ["doc_props"] = { ["title"] = "Dune" },
+  ["annotations"] = {
+    [1] = {
+      ["drawer"] = "lighten",
+      ["pos0"] = "/body/p[1]/text().0",
+      ["pos1"] = "/body/p[1]/text().9",
+      ["text"] = "Fear is the mind-killer.",
+      ["datetime"] = "2026-03-01 22:15:09",
+    },
+  },
+}`,
+    ],
+    name,
+  );
+}
+
+function holders(bookIds: number[]) {
+  return [
+    {
+      holders: bookIds.map((bookId) => ({
+        book_id: bookId,
+        reference_id: bookId,
+        format: null,
+        same_location: false,
+        same_partial_md5: true,
+      })),
+    },
+  ];
+}
+
+async function pick(files: File[]) {
+  const { result } = renderHookWithProviders(() =>
+    useKoreaderHighlightImport(),
+  );
+  act(() => result.current.choose(files));
+  await waitFor(() => expect(result.current.rows).not.toBeNull());
+  return result;
+}
+
+/** One keyable mark at a position, highlighted at `time`. */
+function mark(time: string, at: string) {
+  return {
+    pos0: `/p[${at}]`,
+    pos1: `/p[${at}]/text().9`,
+    text: "a line",
+    note: null,
+    chapter: null,
+    page: null,
+    highlightedAt: time,
+  };
+}
+
+describe("importing KOReader highlights", () => {
+  it("sends the marks to the one book holding the file", async () => {
+    const api = mockApi();
+    api.on("/api/books/file-holders", { body: holders([7]) }, "POST");
+    api.on(
+      "/api/books/7/highlights/koreader",
+      { body: { created: 1, updated: 0, unchanged: 0 } },
+      "POST",
+    );
+
+    const result = await pick([sidecar()]);
+
+    expect(
+      api.lastCall("/api/books/7/highlights/koreader", "POST")?.body,
+    ).toEqual({
+      partial_md5: SIDECAR_DIGEST,
+      highlights: [
+        {
+          pos0: "/body/p[1]/text().0",
+          pos1: "/body/p[1]/text().9",
+          text: "Fear is the mind-killer.",
+          note: null,
+          chapter: null,
+          page: null,
+          highlighted_at: "2026-03-01 22:15:09",
+        },
+      ],
+    });
+    expect(result.current.rows?.[0]?.outcome).toEqual({
+      kind: "imported",
+      created: 1,
+      updated: 0,
+      unchanged: 0,
+      oversized: 0,
+    });
+  });
+
+  it("reports a file no visible book holds and sends nothing", async () => {
+    const api = mockApi();
+    api.on("/api/books/file-holders", { body: holders([]) }, "POST");
+
+    const result = await pick([sidecar()]);
+
+    expect(result.current.rows?.[0]?.outcome).toEqual({ kind: "unmatched" });
+    expect(
+      api.calls.filter((call) => call.url.includes("/highlights/")),
+    ).toEqual([]);
+  });
+
+  it("splits a heavily marked book under the request's byte bound", () => {
+    const long = {
+      pos0: "/p[1]",
+      pos1: "/p[2]",
+      text: "\u00e9".repeat(10_000),
+      note: "\u00e9".repeat(10_000),
+      chapter: null,
+      page: null,
+      highlightedAt: null,
+    };
+    const chunks = requestChunks(Array.from({ length: 200 }, () => long));
+
+    expect(chunks.length).toBeGreaterThan(1);
+    expect(chunks.flat()).toHaveLength(200);
+    for (const chunk of chunks)
+      expect(
+        new TextEncoder().encode(JSON.stringify(chunk)).length,
+      ).toBeLessThanOrEqual(BYTES_PER_REQUEST);
+  });
+
+  it("keeps two marks of one second in one request across the count bound", () => {
+    const marks = [
+      ...Array.from({ length: 4999 }, (_, index) =>
+        mark(`unique ${index}`, String(index)),
+      ),
+      mark("2026-03-01 22:15:09", "a"),
+      mark("2026-03-01 22:15:09", "b"),
+    ];
+
+    const chunks = requestChunks(marks);
+
+    const holding = chunks.filter((chunk) =>
+      chunk.some((wire) => wire.highlighted_at === "2026-03-01 22:15:09"),
+    );
+    expect(holding).toHaveLength(1);
+    expect(chunks.flat()).toHaveLength(5001);
+  });
+
+  it("does not guess between two books holding the file", async () => {
+    const api = mockApi();
+    api.on("/api/books/file-holders", { body: holders([7, 8]) }, "POST");
+
+    const result = await pick([sidecar()]);
+
+    expect(result.current.rows?.[0]?.outcome).toEqual({ kind: "ambiguous" });
+    expect(
+      api.calls.filter((call) => call.url.includes("/highlights/")),
+    ).toEqual([]);
   });
 });

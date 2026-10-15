@@ -328,6 +328,19 @@ class Reading:
             return self._mark(records, book_id, ReadStatus.READING)
         return records.open(book_id)
 
+    def finish(self, book_id: int) -> UserBook:
+        """Mark a Book READ because a reading device reached its end.
+
+        `mark` with READ, named because the caller is not a person pressing a
+        button: KOReader's progress sync at 100 percent, the one place a
+        position sets READ (`kosync.apply` says why). A Book already READ is
+        left alone, dates included.
+        """
+        records = self._records_for(book_id)
+        if records.status_of(book_id) is ReadStatus.READ:
+            return records.open(book_id)
+        return self._mark(records, book_id, ReadStatus.READ)
+
     def rate(self, book_id: int, rating: int | None) -> UserBook:
         """Rate a Book out of five, or clear the rating with None.
 

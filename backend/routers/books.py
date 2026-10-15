@@ -37,6 +37,7 @@ import downloads
 import evidence
 import folding
 import google_books
+import highlights
 import identity
 import isbn as isbn_utils
 import lending
@@ -93,6 +94,7 @@ from models import (
     ISBN_MAX,
     LOCATION_MAX,
     MAX_SERIES_INDEX,
+    QUOTE_TEXT_MAX,
     SERIES_NAME_MAX,
     AccessRequest,
     AuthorIdentifier,
@@ -100,6 +102,7 @@ from models import (
     BookIdentifier,
     CustomField,
     DigitalReference,
+    Highlight,
     Note,
     Quote,
     ReadingProgress,
@@ -107,6 +110,7 @@ from models import (
     User,
     book_tags,
     copy_group_token,
+    highlight_visible_to,
     note_visible_to,
 )
 from ratelimit import (
@@ -164,10 +168,14 @@ from schemas import (
     DuplicateMember,
     DuplicateReport,
     HeadingFacetOut,
+    HighlightImportOut,
+    HighlightOut,
+    HighlightSharingIn,
     HolderOut,
     HoldersIn,
     HoldersOut,
     IdentifierBackfillOut,
+    KoreaderImportIn,
     LocationOut,
     MergeRequest,
     MissingDigitalReferenceOut,
@@ -3049,7 +3057,7 @@ def merge_books(
     ISBN, a page count. It never overwrites a value it already holds, on the
     same principle as enrichment, since the kept row is the one a person chose.
 
-    Tags, notes, quotes, loans and reading statuses are repointed rather than
+    Tags, notes, quotes, highlights, loans and reading statuses are repointed rather than
     dropped. A status collision (both rows read by the same person) keeps the
     one on the survivor, because deleting somebody's reading history to
     satisfy a unique index is not an acceptable way to resolve it.
@@ -5393,6 +5401,130 @@ def delete_quote(
 ) -> None:
     db.delete(_quote_for_edit(quote_id, book, current_user, db))
     db.commit()
+
+
+# ── Highlights ────────────────────────────────────────────────────────────────
+#
+# A passage a member marked on a reading device, private until its author
+# shares it. Two predicates on every read, as notes have: `BookForRead` for the
+# Book, `highlight_visible_to` for the row. `models.Highlight` says why this is
+# not a quote.
+
+#: The `detail.code` on the 409 when the Book holds no file with the sidecar's
+#: fingerprint.
+NOT_HELD: Final = "not_held"
+#: The `detail.code` on the 409 when a passage is past the length the shelf is
+#: shown.
+TOO_LONG_TO_SHARE: Final = "too_long_to_share"
+
+
+@router.get("/{book_id}/highlights", response_model=list[HighlightOut])
+def get_highlights(
+    book: BookForRead, db: DbSession, current_user: CurrentUser
+) -> list[Highlight]:
+    """The highlights on this book the caller may read: their own, and the ones
+    other members shared. In the device's page order, then as they were made."""
+    return (
+        db.query(Highlight)
+        .options(joinedload(Highlight.author))
+        .filter(Highlight.book_id == book.id, highlight_visible_to(current_user.id))
+        .order_by(
+            nullslast(Highlight.page.asc()),
+            nullslast(Highlight.highlighted_at.asc()),
+            Highlight.id,
+        )
+        .all()
+    )
+
+
+@router.post("/{book_id}/highlights/koreader", response_model=HighlightImportOut)
+def import_koreader_highlights(
+    payload: KoreaderImportIn,
+    book: BookForRead,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> HighlightImportOut:
+    """Write one KOReader sidecar's highlights onto this book, as the caller's.
+
+    Repeatable: a highlight already imported is updated rather than doubled.
+    Its sharing is left as the member set it while it stays on this book; one
+    the import moves here from another book is private again. `highlights`
+    says how a KOReader highlight is identified and what an import never does.
+
+    **409 `not_held` unless this book holds a file carrying the sidecar's
+    fingerprint**, so a sidecar lands only on a Book its fingerprint matched
+    and never on one a client guessed. Read off the Book's own references,
+    which `BookForRead` has already scoped.
+    """
+    if not any(
+        reference.partial_md5 == payload.partial_md5
+        for reference in book.digital_references
+    ):
+        raise _conflict(
+            NOT_HELD, "This book holds no file with that KOReader fingerprint."
+        )
+    counts = highlights.import_koreader(
+        db, book, current_user.id, payload.partial_md5, payload.highlights
+    )
+    return HighlightImportOut(
+        created=counts.created, updated=counts.updated, unchanged=counts.unchanged
+    )
+
+
+def _highlight_for_sharing(
+    highlight_id: int, book: Book, current_user: User, db: Session
+) -> Highlight:
+    """A highlight on this book that the caller wrote.
+
+    **404 for one the caller cannot read, 403 for one they can**, the rule
+    `_note_for_edit` states: a shared highlight's existence is no secret, a
+    private one's is. **No admin arm**: sharing speaks for the author, and
+    nobody else may publish or withdraw their marks.
+    """
+    highlight = (
+        db.query(Highlight)
+        .options(joinedload(Highlight.author))
+        .filter(
+            Highlight.id == highlight_id,
+            Highlight.book_id == book.id,
+            highlight_visible_to(current_user.id),
+        )
+        .first()
+    )
+    if highlight is None:
+        raise HTTPException(status_code=404, detail="Highlight not found")
+    if highlight.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not allowed to share this highlight")
+    return highlight
+
+
+@router.put("/{book_id}/highlights/{highlight_id}/sharing", response_model=HighlightOut)
+@refuses(403, 404)
+def set_highlight_sharing(
+    highlight_id: RowId,
+    payload: HighlightSharingIn,
+    book: BookForRead,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> Highlight:
+    """Share one of the caller's highlights with whoever can see the book, or
+    withdraw it.
+
+    **409 `too_long_to_share` for a passage past `QUOTE_TEXT_MAX`**, the
+    ceiling a passage shown to the shelf already has. Storage takes longer
+    marks so an import refuses none; showing one is the act that ceiling binds.
+    Withdrawing is never refused.
+    """
+    highlight = _highlight_for_sharing(highlight_id, book, current_user, db)
+    if payload.is_shared and len(highlight.text) > QUOTE_TEXT_MAX:
+        raise _conflict(
+            TOO_LONG_TO_SHARE,
+            f"A highlight longer than {QUOTE_TEXT_MAX} characters stays private.",
+        )
+    highlight.is_shared = payload.is_shared
+    db.commit()
+    db.refresh(highlight)
+    return highlight
 
 
 # ── Access to a digital copy ──────────────────────────────────────────────────

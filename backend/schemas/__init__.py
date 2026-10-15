@@ -94,6 +94,14 @@ from schemas.digital import (
     HoldersOut,
     MissingDigitalReferenceOut,
 )
+from schemas.highlight import (
+    MAX_HIGHLIGHTS_PER_IMPORT,
+    HighlightImportOut,
+    HighlightOut,
+    HighlightSharingIn,
+    KoreaderHighlightIn,
+    KoreaderImportIn,
+)
 from schemas.identifier import (
     MAX_IDENTIFIERS_PER_BOOK,
     BookIdentifierIn,
@@ -106,6 +114,7 @@ from schemas.imports import (
     MarcPreviewOut,
     MarcPreviewRow,
 )
+from schemas.kosync import KosyncAccountOut, KosyncDocumentOut, KosyncPasswordOut
 from schemas.loan import LoanCreate, LoanOut, MyOverdueOut
 from schemas.note import NoteCreate, NoteOut
 from schemas.opds import (
@@ -180,6 +189,7 @@ __all__ = [
     "MAX_CLASSIFICATIONS_PER_BOOK",
     "MAX_DIGITAL_REFERENCES_PER_BOOK",
     "MAX_FILES_PER_LOOKUP",
+    "MAX_HIGHLIGHTS_PER_IMPORT",
     "MAX_IDENTIFIERS_PER_BOOK",
     "MAX_PAGE_SIZE",
     "MAX_ROW_ID",
@@ -250,6 +260,9 @@ __all__ = [
     "EmailUpdate",
     "FeatureFlagsOut",
     "HeadingFacetOut",
+    "HighlightImportOut",
+    "HighlightOut",
+    "HighlightSharingIn",
     "HolderOut",
     "HoldersIn",
     "HoldersOut",
@@ -260,6 +273,11 @@ __all__ = [
     # The tag key rule as a type. Exported because `schemas/stats.py` annotates
     # with it. The function inside it is `known_key`, sorted far below this.
     "KnownTagKey",
+    "KoreaderHighlightIn",
+    "KoreaderImportIn",
+    "KosyncAccountOut",
+    "KosyncDocumentOut",
+    "KosyncPasswordOut",
     "LoanCreate",
     "LoanOut",
     "LocationOut",
