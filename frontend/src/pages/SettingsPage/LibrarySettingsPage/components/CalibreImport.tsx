@@ -218,6 +218,7 @@ export default function CalibreImport({
               ["already", "calibre.already"],
               ["otherFormat", "calibre.otherFormat"],
               ["unreferenced", "calibre.unreferenced"],
+              ["atCeiling", "calibre.atCeiling"],
             ] as const
           ).map(
             ([count, message]) =>

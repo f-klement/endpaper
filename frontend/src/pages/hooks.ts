@@ -459,6 +459,16 @@ export const FILES_PER_LOOKUP = 500;
 export interface Held {
   readonly bookId: number;
   readonly lands: boolean;
+  /**
+   * Files of this book that another Book already holds and may take, by
+   * `locationOf`, with that Book: `reportHeld` refreshes each there.
+   */
+  readonly elsewhere?: ReadonlyMap<string, number>;
+}
+
+/** Where a reference says a file is, as one key. */
+function locationOf(reference: DigitalReferenceIn): string {
+  return JSON.stringify([reference.root_label, reference.relative_path]);
 }
 
 /** Holders in the shape `whereItLands` reads. */
@@ -584,23 +594,63 @@ export async function askWhoHolds(
       }).catch(() => undefined),
     ),
   );
-  const byKey = new Map<string, (Held | null | undefined)[]>();
+  type Answered = {
+    readonly reference: DigitalReferenceIn;
+    readonly answer: Held | null | undefined;
+  };
+  const byKey = new Map<string, Answered[]>();
   chunks.forEach((chunk, at) => {
     const answers = answered[at];
     const usable = answers !== undefined && answers.length === chunk.length;
-    chunk.forEach(({ question }, index) => {
+    chunk.forEach(({ question, reference }, index) => {
       const answer = usable
         ? holderOf(answers[index]!, question.format)
         : undefined;
-      byKey.set(question.key, [...(byKey.get(question.key) ?? []), answer]);
+      byKey.set(question.key, [
+        ...(byKey.get(question.key) ?? []),
+        { reference, answer },
+      ]);
     });
   });
   const held = new Map<string, Held | null>();
-  for (const [key, answers] of byKey) {
-    const one = oneAnswer(answers);
-    if (one !== undefined) held.set(key, one);
+  for (const [key, ofThisBook] of byKey) {
+    const one = oneAnswer(ofThisBook.map(({ answer }) => answer));
+    if (one === undefined) continue;
+    // **A file held by another Book stays on it.** Written onto the one
+    // chosen, it became a second reference to the same file on a second
+    // Book.
+    const elsewhere = new Map(
+      ofThisBook.flatMap(({ reference, answer }) =>
+        one !== null && answer?.lands && answer.bookId !== one.bookId
+          ? [[locationOf(reference), answer.bookId] as const]
+          : [],
+      ),
+    );
+    held.set(
+      key,
+      one !== null && elsewhere.size > 0 ? { ...one, elsewhere } : one,
+    );
   }
   return held;
+}
+
+/**
+ * Every file of a book already held: each onto the Book `held.elsewhere`
+ * names for it, the rest onto `held.bookId`, one after another through
+ * `reportEach`, stopping at the first refusal and rethrowing it.
+ */
+export async function reportHeld(
+  held: Held,
+  references: readonly DigitalReferenceIn[],
+  post: (bookId: number, reference: DigitalReferenceIn) => Promise<unknown>,
+): Promise<void> {
+  await reportEach(
+    references.map((reference) => ({
+      reference,
+      bookId: held.elsewhere?.get(locationOf(reference)) ?? held.bookId,
+    })),
+    ({ bookId, reference }) => post(bookId, reference),
+  );
 }
 
 /**

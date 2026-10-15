@@ -16,6 +16,7 @@ import {
   markMissing,
   readStoredUser,
   REFERENCES_PER_PAGE,
+  reportEach,
   sweepFolder,
   useFolderSweep,
   useGoBack,
@@ -665,6 +666,32 @@ describe("asking which Book already holds a file", () => {
     const files = propertiesOf("HoldersIn")["files"]!;
 
     expect(FILES_PER_LOOKUP).toBe(boundOf(files, "maxItems"));
+  });
+});
+
+describe("reportEach", () => {
+  it("sends the next reference only once the one before it is answered", async () => {
+    // The per book ceiling is held on the server whatever arrives; a client
+    // sending a book's files at once is the client that makes it race.
+    let answer!: () => void;
+    const post = vi.fn<(reference: string) => Promise<void>>(
+      () =>
+        new Promise<void>((resolve) => {
+          answer = resolve;
+        }),
+    );
+
+    const sending = reportEach(["first", "second"], post);
+    await vi.waitFor(() => expect(post).toHaveBeenCalledTimes(1));
+    answer();
+    await vi.waitFor(() => expect(post).toHaveBeenCalledTimes(2));
+    answer();
+    await sending;
+
+    expect(post.mock.calls.map(([reference]) => reference)).toEqual([
+      "first",
+      "second",
+    ]);
   });
 });
 

@@ -21,6 +21,7 @@ from fastapi import (
 from fastapi.responses import StreamingResponse
 from pydantic import ValidationError
 from sqlalchemy import func, nullslast, or_, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Query as RowQuery
 from sqlalchemy.orm import Session, joinedload
 
@@ -5978,22 +5979,29 @@ def report_digital_reference(
     count follows the insert. It binds a **new** location only, so a book
     already at the ceiling can still re-confirm what it holds.
     """
-    existing = (
-        db.query(DigitalReference)
-        .filter(
-            DigitalReference.book_id == book.id,
-            DigitalReference.root_label == payload.root_label,
-            DigitalReference.relative_path == payload.relative_path,
-        )
-        .first()
+    at_this_location = db.query(DigitalReference).filter(
+        DigitalReference.book_id == book.id,
+        DigitalReference.root_label == payload.root_label,
+        DigitalReference.relative_path == payload.relative_path,
     )
+    existing = at_this_location.first()
     if existing is None:
-        existing = DigitalReference(
-            book_id=book.id,
-            root_label=payload.root_label,
-            relative_path=payload.relative_path,
-        )
-        _add_within_the_ceiling(db, existing)
+        try:
+            existing = DigitalReference(
+                book_id=book.id,
+                root_label=payload.root_label,
+                relative_path=payload.relative_path,
+            )
+            _add_within_the_ceiling(db, existing)
+        except IntegrityError:
+            # Another report of this location inserted it between the lookup
+            # and this insert, and `uq_digital_references_location` refused
+            # the second row. It is the same sighting, so it refreshes that
+            # row; uncaught, the loser of the race answered 500.
+            db.rollback()
+            existing = at_this_location.first()
+            if existing is None:
+                raise
 
     existing.root_confirmed = payload.root_confirmed
     existing.size_bytes = payload.size_bytes

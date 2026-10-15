@@ -76,6 +76,7 @@ import {
   askWhoHolds,
   locate,
   reportEach,
+  reportHeld,
   whereItLands,
   type Held,
   type HolderQuestion,
@@ -1183,6 +1184,28 @@ async function booksIn(index: File): Promise<readonly CalibreBook[] | null> {
 }
 
 /**
+ * A library's books checked against the folder beside them, with the pairing
+ * of books to files, or `null` where either step failed.
+ *
+ * **The folder reader is a chunk of its own, and a chunk can fail to load**
+ * (a deploy since the page was opened, a dropped connection). Caught here
+ * with the index's own failures, so it leaves the folder read file by file:
+ * uncaught, the library's pending row stood over nothing for ever.
+ */
+async function readIndexed(index: File, files: readonly File[]) {
+  const books = await booksIn(index);
+  if (books === null) return null;
+  try {
+    const { crossCheckFolder, filesOfEachBook } =
+      await import("../../lib/calibreFolder");
+    const { books: checked } = await crossCheckFolder(books, files);
+    return { checked, filesOfEachBook };
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Thrown by one row of `addAll` when its ISBN belongs to a book of another
  * format, so the failure mapping can offer the copy rather than state the 409.
  *
@@ -1887,8 +1910,8 @@ export function useRapidIntake(): UseRapidIntakeResult {
     index: File,
     pendingKey: string,
   ) {
-    const books = await booksIn(index);
-    if (books === null) {
+    const read = await readIndexed(index, files);
+    if (read === null) {
       setEntries((current) =>
         current.filter((entry) => entry.key !== pendingKey),
       );
@@ -1897,9 +1920,7 @@ export function useRapidIntake(): UseRapidIntakeResult {
       return;
     }
 
-    const { crossCheckFolder, filesOfEachBook } =
-      await import("../../lib/calibreFolder");
-    const { books: checked } = await crossCheckFolder(books, files);
+    const { checked, filesOfEachBook } = read;
     const paired = filesOfEachBook(checked, files);
     const indexed = new Set([...paired.values()].flat());
     // Not under a folder whose name starts with a dot at the library's root:
@@ -2508,7 +2529,9 @@ export function useRapidIntake(): UseRapidIntakeResult {
         // **Already in the library, so this is a sighting and not a book.**
         // Thrown on a refusal like any row, because nothing was added and the
         // row should stay where a member can see it did not take.
-        await reportFiles(known.bookId, entry);
+        await reportHeld(known, filesOf(entry), (bookId, data) =>
+          reportReference.mutateAsync({ bookId, data }),
+        );
         already += 1;
         return;
       }

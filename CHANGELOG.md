@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **Calibre file references, four fixes.** A book whose files two Books already hold refreshes
+  each file on the Book holding it, rather than recording every file again on one of them. On the
+  Settings Calibre card, a book already in the library whose files would take it past its sixteen
+  file references is counted and said as such, rather than listed as already in the catalogue. On
+  the add page, a library folder whose reader cannot be loaded is read file by file, as a folder
+  whose index cannot be read is. Two reports of the same new file location at once both succeed,
+  rather than one of them failing with a server error.
+
 - **A MARC record's online links come in, show on the book page and go back out.** An imported
   record's `856` fields are kept on the book as links: the address, the record's link text and
   whether the link is the book itself, a version of it or something related. They show on the

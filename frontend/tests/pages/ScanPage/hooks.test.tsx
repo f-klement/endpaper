@@ -9,7 +9,7 @@
 import { act, waitFor } from "@testing-library/react";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { BookFormat, type BookMatch } from "../../../src/api/generated/model";
 import {
@@ -19,12 +19,18 @@ import {
   useRapidIntake,
   useScanFlow,
 } from "../../../src/pages/ScanPage/hooks";
+import * as calibreFolder from "../../../src/lib/calibreFolder";
 import { partialMd5 } from "../../../src/lib/fileDigest";
 import { makeBook, resetIds } from "../../factories";
 import { epubFile, packageDocument } from "../../zipFixtures";
 import { id3v2, mp3, plainFrame } from "../../audioFixtures";
 import { mockApi, renderHookWithProviders, type MockApi } from "../../utils";
 import { CALIBRE_SCHEMA, databaseOf } from "../../lib/sqliteFixtures";
+import {
+  lazyImportsOf,
+  loadLazyImportsOf,
+  unloadable,
+} from "../../lazyImports";
 
 /**
  * One chapter of an audiobook, tagged the way the measured LibriVox files are.
@@ -61,6 +67,42 @@ async function epubInFolder() {
   });
   return file;
 }
+
+// The cold `import()` a pick reaches would otherwise be paid inside a
+// `settled`: `tests/lazyImports.ts`.
+beforeAll(() => loadLazyImportsOf("pages/ScanPage/hooks.ts"));
+
+describe("the modules the scan page loads lazily", () => {
+  it("each have a loader, so none is first loaded inside a test", () => {
+    // Exact rather than a subset, so a walk that stopped short of what these
+    // tests reach is red too, not only a module with no loader.
+    expect({
+      reached: lazyImportsOf("pages/ScanPage/hooks.ts"),
+      unloadable: unloadable("pages/ScanPage/hooks.ts"),
+    }).toEqual({
+      reached: [
+        "lib/adobeDigitalEditions.ts",
+        "lib/appleBooks.ts",
+        "lib/audiobook.ts",
+        "lib/audiobookGroups.ts",
+        "lib/calibreFolder.ts",
+        "lib/cbz.ts",
+        "lib/epub.ts",
+        "lib/fb2.ts",
+        "lib/fileReaders.ts",
+        "lib/kindle.ts",
+        "lib/kobo.ts",
+        "lib/mobi.ts",
+        "lib/moonReader.ts",
+        "lib/pdf.ts",
+        "lib/sqlite.ts",
+        "lib/takeout.ts",
+        "lib/zip.ts",
+      ],
+      unloadable: [],
+    });
+  });
+});
 
 let api: MockApi;
 
@@ -3535,6 +3577,79 @@ describe("useRapidIntake and a Calibre library folder", () => {
       ]),
     );
     expect(result.current.libraryNotice).toEqual({ kind: "index-unread" });
+  });
+
+  it("reads a library file by file when its folder reader rejects", async () => {
+    // Drives the catch through `crossCheckFolder` rejecting. The import
+    // itself is inside the same `try` and is not driven here: making it
+    // reject needs a module mock, which this suite refuses.
+    const failing = vi
+      .spyOn(calibreFolder, "crossCheckFolder")
+      .mockRejectedValue(
+        new Error("Failed to fetch dynamically imported module"),
+      );
+    try {
+      const { result } = renderTheIntake();
+
+      const picked = await folder(DUNE, "Books/Dune.pdf");
+      act(() => result.current.pickFiles(picked));
+      await waitFor(() =>
+        expect(result.current.entries.map((entry) => entry.label)).toEqual([
+          "Dune.pdf",
+        ]),
+      );
+      expect(result.current.libraryNotice).toEqual({ kind: "index-unread" });
+    } finally {
+      failing.mockRestore();
+    }
+  });
+
+  it("refreshes each file of a held book on the Book that holds it", async () => {
+    api.on(
+      HOLDERS,
+      (_url, init) => {
+        const asked = JSON.parse(String(init?.body)) as {
+          files: { relative_path: string }[];
+        };
+        return {
+          body: asked.files.map((file) => ({
+            holders: [
+              {
+                book_id: file.relative_path.endsWith(".epub") ? 7 : 8,
+                format: BookFormat.ebook,
+                reference_id: 1,
+                same_location: true,
+                same_partial_md5: true,
+              },
+            ],
+          })),
+        };
+      },
+      "POST",
+    );
+    api.on("/api/books/7/digital-references", { body: {} });
+    api.on("/api/books/8/digital-references", { body: {} });
+    const { result } = renderTheIntake();
+
+    const picked = await folder(DUNE, ...DUNE_FILES);
+    act(() => result.current.pickFiles(picked));
+    await waitFor(() =>
+      expect(result.current.entries[0]?.heldBy).toMatchObject({ bookId: 7 }),
+    );
+    act(() => result.current.addAll());
+    await waitFor(() => expect(result.current.result).not.toBeNull());
+
+    expect(
+      api.calls
+        .filter((call) => call.url.endsWith("/digital-references"))
+        .map((call) => [
+          call.url,
+          (call.body as { relative_path: string }).relative_path,
+        ]),
+    ).toEqual([
+      ["/api/books/7/digital-references", DUNE_FILES[0]],
+      ["/api/books/8/digital-references", DUNE_FILES[1]],
+    ]);
   });
 
   it("counts a book file the index names for no book, and leaves it out", async () => {

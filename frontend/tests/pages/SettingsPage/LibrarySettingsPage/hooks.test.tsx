@@ -27,7 +27,7 @@
 import { act, waitFor, type RenderHookResult } from "@testing-library/react";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type {
   CustomFieldOut,
@@ -52,6 +52,11 @@ import {
 import { CALIBRE_SCHEMA, databaseOf } from "../../../lib/sqliteFixtures";
 import { mockApi, renderHookWithProviders, type MockApi } from "../../../utils";
 import { sourceText } from "../../../sourceModules";
+import {
+  lazyImportsOf,
+  loadLazyImportsOf,
+  unloadable,
+} from "../../../lazyImports";
 import { partialMd5 } from "../../../../src/lib/fileDigest";
 
 const require = createRequire(import.meta.url);
@@ -66,16 +71,55 @@ const posted: Posted[] = [];
 let answers: (number | null)[] = [];
 /** The Books the holder lookup names for every file it is asked about. */
 let holdersAnswer: { book_id: number; format: string | null }[] = [];
+/** The Books it names for one file, by its path; `holdersAnswer` by default. */
+let holdersFor: (path: string) => typeof holdersAnswer = () => holdersAnswer;
 /** The Book a 409 names, and that Book's copies, for the duplicate arm. */
 let conflict: {
   holder: number;
   copies: { id: number; format: string | null }[];
 } | null = null;
 
+// The cold `import()` a pick reaches would otherwise be paid inside a
+// `waitFor`: `tests/lazyImports.ts`.
+beforeAll(() =>
+  loadLazyImportsOf("pages/SettingsPage/LibrarySettingsPage/hooks.ts"),
+);
+
+describe("the modules the library settings load lazily", () => {
+  it("each have a loader, so none is first loaded inside a test", () => {
+    // Exact rather than a subset, so a walk that stopped short of what these
+    // tests reach is red too, not only a module with no loader.
+    expect({
+      reached: lazyImportsOf("pages/SettingsPage/LibrarySettingsPage/hooks.ts"),
+      unloadable: unloadable("pages/SettingsPage/LibrarySettingsPage/hooks.ts"),
+    }).toEqual({
+      reached: [
+        "lib/adobeDigitalEditions.ts",
+        "lib/appleBooks.ts",
+        "lib/calibre.ts",
+        "lib/calibreFolder.ts",
+        "lib/cbz.ts",
+        "lib/epub.ts",
+        "lib/fb2.ts",
+        "lib/kindle.ts",
+        "lib/kobo.ts",
+        "lib/mobi.ts",
+        "lib/moonReader.ts",
+        "lib/pdf.ts",
+        "lib/sqlite.ts",
+        "lib/takeout.ts",
+        "lib/zip.ts",
+      ],
+      unloadable: [],
+    });
+  });
+});
+
 beforeEach(() => {
   posted.length = 0;
   answers = [];
   holdersAnswer = [];
+  holdersFor = () => holdersAnswer;
   conflict = null;
   vi.stubGlobal(
     "fetch",
@@ -100,14 +144,14 @@ beforeEach(() => {
           : {};
       posted.push({ url, body });
       if (url.endsWith("/api/books/file-holders")) {
-        const asked = (body as { files: unknown[] }).files;
+        const asked = (body as { files: { relative_path: string }[] }).files;
         return {
           ok: true,
           status: 200,
           headers: new Headers({ "content-type": "application/json" }),
           json: async () =>
-            asked.map(() => ({
-              holders: holdersAnswer.map((holder, index) => ({
+            asked.map((file) => ({
+              holders: holdersFor(file.relative_path).map((holder, index) => ({
                 book_id: holder.book_id,
                 format: holder.format,
                 reference_id: index + 1,
@@ -351,6 +395,7 @@ describe("writing the library", () => {
       already: 0,
       otherFormat: 0,
       unreferenced: 0,
+      atCeiling: 0,
     });
   });
 
@@ -392,6 +437,7 @@ describe("writing the library", () => {
       already: 0,
       otherFormat: 0,
       unreferenced: 0,
+      atCeiling: 0,
     });
   });
 
@@ -475,6 +521,36 @@ describe("recording where the library's files are", () => {
       "Author/Book 1 (1)/Book 1.pdf",
     ]);
     expect(result.current.result).toMatchObject({ added: 0, already: 1 });
+  });
+
+  it("refreshes a file another Book already holds on that Book, not on the one chosen", async () => {
+    holdersFor = (path) => [
+      { book_id: path.endsWith(".epub") ? 7 : 8, format: "ebook" },
+    ];
+
+    await importWithItsFile(["EPUB", "PDF"]);
+
+    expect(
+      posted
+        .filter((one) => one.url.endsWith("/digital-references"))
+        .map((one) => [one.url, one.body["relative_path"]]),
+    ).toEqual([
+      ["/api/books/7/digital-references", "Author/Book 1 (1)/Book 1.epub"],
+      ["/api/books/8/digital-references", "Author/Book 1 (1)/Book 1.pdf"],
+    ]);
+  });
+
+  it("says a book already in the library whose files met the ceiling is that, not already in the catalogue", async () => {
+    holdersAnswer = [{ book_id: 7, format: "ebook" }];
+    answers = [409];
+
+    const { result } = await importWithItsFile();
+
+    expect(result.current.result).toMatchObject({
+      already: 0,
+      atCeiling: 1,
+      failures: [],
+    });
   });
 
   it("counts a book added whose files could not be recorded", async () => {

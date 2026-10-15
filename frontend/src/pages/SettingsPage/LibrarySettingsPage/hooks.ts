@@ -66,6 +66,7 @@ import {
   type StoreLibrary,
 } from "../../../lib/stores";
 import {
+  statusOf,
   writeBooks,
   type ImportFailureRow,
   type ImportOutcome,
@@ -80,6 +81,7 @@ import {
   askWhoHolds,
   locate,
   reportEach,
+  reportHeld,
   whereItLands,
   type Held,
   type HolderQuestion,
@@ -509,12 +511,15 @@ export type CalibreFailureRow = ImportFailureRow;
  * another kind holds, by a file or by the ISBN: the landing rule refuses the
  * files there, and this card has no press to add the book as its own copy, so
  * it adds neither. `unreferenced` is books
- * added whose files were not all recorded.
+ * added whose files were not all recorded. `atCeiling` is books already held
+ * whose files the server refused past its per book ceiling: not added, and
+ * not every file recorded.
  */
 export interface CalibreResult extends ImportOutcome {
   readonly already: number;
   readonly otherFormat: number;
   readonly unreferenced: number;
+  readonly atCeiling: number;
 }
 
 /** One row of the sample the preview shows, so a wrong reading is visible. */
@@ -836,6 +841,7 @@ export function useCalibreImport(): UseCalibreImportResult {
     let already = 0;
     let otherFormat = 0;
     let unreferenced = 0;
+    let atCeiling = 0;
 
     /** Every reference onto one Book: `pages/hooks.reportEach`. */
     async function report(
@@ -857,7 +863,19 @@ export function useCalibreImport(): UseCalibreImportResult {
           otherFormat += 1;
           return;
         }
-        await report(known.bookId, files.references);
+        try {
+          await reportHeld(known, files.references, (bookId, data) =>
+            reportReference.mutateAsync({ bookId, data }),
+          );
+        } catch (refused) {
+          // The book is in the library, and the one 409 a reference route
+          // answers is its ceiling, not a duplicate: thrown on, the card
+          // listed it as "already in the catalogue" and said nothing of its
+          // files.
+          if (statusOf(refused) !== 409) throw refused;
+          atCeiling += 1;
+          return;
+        }
         already += 1;
         return;
       }
@@ -908,10 +926,11 @@ export function useCalibreImport(): UseCalibreImportResult {
       ...outcome,
       // The shared loop counts every book that did not throw, and a book
       // already in the library returns without one being made.
-      added: outcome.added - already - otherFormat,
+      added: outcome.added - already - otherFormat - atCeiling,
       already,
       otherFormat,
       unreferenced,
+      atCeiling,
     });
     if (!outcome.stopped) {
       setBooks(null);

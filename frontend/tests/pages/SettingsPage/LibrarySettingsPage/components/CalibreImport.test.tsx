@@ -43,6 +43,7 @@ function outcome(overrides: Partial<CalibreResult> = {}): CalibreResult {
     already: 0,
     otherFormat: 0,
     unreferenced: 0,
+    atCeiling: 0,
     ...overrides,
   };
 }

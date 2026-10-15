@@ -1497,6 +1497,8 @@ export const de: Messages = {
     "{count} sind schon als ein anderes Exemplar in der Bibliothek, etwa als gedrucktes Buch, deshalb wurden weder das Buch noch der Ort seiner Dateien hinzugefügt. Den Bibliotheksordner auf der Seite Scannen wählen, um jedes als eigenes Exemplar hinzuzufügen.",
   "calibre.unreferenced":
     "{count} davon wurden hinzugefügt, ohne dass gespeichert wurde, wo alle Dateien liegen. Ein erneuter Import mit gewähltem Bibliotheksordner holt das nach.",
+  "calibre.atCeiling":
+    "{count} waren schon in der Bibliothek und haben bereits so viele Dateiorte, wie ein Buch haben kann. Wo einige der Dateien liegen, wurde deshalb nicht gespeichert.",
   "calibre.failureNotADatabase": "Diese Datei ist keine SQLite-Datenbank.",
   "calibre.failureDamaged":
     "Diese Kopie ist beschädigt. So sieht eine Kopie aus, die entstand, während in die Bibliothek geschrieben wurde: bitte eine neue anlegen.",

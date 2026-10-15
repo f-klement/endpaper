@@ -338,7 +338,8 @@ class TestTheCeilingIsCountedPerBookAndNotPerRequest:
 
 class TestTwoReportsAtOnceStayWithinTheCeiling:
     """The count and the insert are one guarded step, so two reports racing for
-    the last place cannot both take it."""
+    the last place cannot both take it, and two racing for one location are one
+    sighting. The class is in the pipeline's Postgres selection."""
 
     def test_two_concurrent_new_locations_on_a_book_one_short_add_one(
         self, client, admin, make_book
@@ -381,6 +382,39 @@ class TestTwoReportsAtOnceStayWithinTheCeiling:
             len(listing(client, admin["headers"], book["id"]).json())
             == MAX_DIGITAL_REFERENCES_PER_BOOK
         )
+
+    def test_two_concurrent_reports_of_one_new_location_both_answer(
+        self, client, admin, make_book
+    ):
+        """Both look the location up before either inserts, so the second
+        insert meets the unique constraint: it is the same sighting, and
+        answers as one rather than as a 500."""
+        book = make_book(admin["headers"])
+        both_looked = threading.Barrier(2, timeout=2)
+
+        class Racing(Session):
+            def add(self, instance, _warn=True):
+                with contextlib.suppress(threading.BrokenBarrierError):
+                    both_looked.wait()
+                super().add(instance, _warn)
+
+        def one(size):
+            with Racing(bind=engine, autoflush=False) as db:
+                held = db.get(Book, book["id"])
+                assert held is not None
+                report_digital_reference(
+                    DigitalReferenceIn(
+                        root_label="/books", relative_path="x.epub", size_bytes=size
+                    ),
+                    held,
+                    db,
+                )
+
+        with ThreadPoolExecutor(2) as pool:
+            list(pool.map(one, [1, 2]))
+
+        rows = listing(client, admin["headers"], book["id"]).json()
+        assert [row["relative_path"] for row in rows] == ["x.epub"]
 
 
 class TestTheShelfReachesAReference:

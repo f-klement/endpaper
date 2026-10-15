@@ -874,11 +874,12 @@ BOOK_OWNED_READERS = {
             "`Book` the dependency resolved.",
         ),
         (
-            "existing = ( db.query(DigitalReference) .filter( DigitalReference.book_id == book.id, "
-            "DigitalReference.root_label == payload.root_label, DigitalReference.relative_path == "
-            "payload.relative_path, ) .first() )",
+            "at_this_location = db.query(DigitalReference).filter( DigitalReference.book_id == "
+            "book.id, DigitalReference.root_label == payload.root_label, "
+            "DigitalReference.relative_path == payload.relative_path, )",
             "looks up the reference at the location a client has just reported, "
-            "to decide whether that is a refresh or a new row. Narrowed to a "
+            "to decide whether that is a refresh or a new row, and again after a "
+            "concurrent report of the same location won the insert. Narrowed to a "
             "`Book` the dependency resolved; the two payload values narrow it "
             "further and neither of them can widen it.",
         ),

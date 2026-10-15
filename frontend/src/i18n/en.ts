@@ -1731,6 +1731,8 @@ export const en = {
     "{count} are already in your library as another kind of copy, such as a printed book, so neither the book nor where its files are was added. Pick the library folder on the Scan page to add each as its own copy.",
   "calibre.unreferenced":
     "{count} of those were added without where all of their files are. Importing again with the library folder picked records it.",
+  "calibre.atCeiling":
+    "{count} were already in your library and already hold as many file locations as a book can, so where some of their files are was not recorded.",
   "calibre.failureNotADatabase": "That file is not a SQLite database.",
   "calibre.failureDamaged":
     "That copy is damaged. A copy taken while the library was being written to looks like this: take another one.",
