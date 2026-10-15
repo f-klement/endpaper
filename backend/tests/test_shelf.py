@@ -834,6 +834,14 @@ BOOK_OWNED_READERS = {
             "`custom_fields.py` makes twice above.",
         ),
         (
+            "held = ( db.query(func.count(DigitalReference.id)) .filter(DigitalReference.book_id == "
+            "reference.book_id) .scalar() )",
+            "counts one Book's references against the per book ceiling, after "
+            "the new one is inserted. Publishes no rows and no values, only how "
+            "many that Book holds, and its only caller builds `reference` on the "
+            "`Book` the dependency resolved.",
+        ),
+        (
             "existing = ( db.query(DigitalReference) .filter( DigitalReference.book_id == book.id, "
             "DigitalReference.root_label == payload.root_label, DigitalReference.relative_path == "
             "payload.relative_path, ) .first() )",
@@ -841,13 +849,6 @@ BOOK_OWNED_READERS = {
             "to decide whether that is a refresh or a new row. Narrowed to a "
             "`Book` the dependency resolved; the two payload values narrow it "
             "further and neither of them can widen it.",
-        ),
-        (
-            "held = ( db.query(func.count(DigitalReference.id)) .filter(DigitalReference.book_id == "
-            "book.id) .scalar() )",
-            "counts one Book's references against the per book ceiling. "
-            "Publishes no rows and no values, only how many that Book holds, "
-            "and the Book is one the dependency resolved.",
         ),
         (
             "identifier = ( db.query(BookIdentifier) .filter( BookIdentifier.id == identifier_id, "

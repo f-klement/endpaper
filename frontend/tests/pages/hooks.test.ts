@@ -12,11 +12,13 @@ import {
 } from "../../src/api/generated/endpoints/books/books";
 import { AuthMode, type UserOut } from "../../src/api/generated/model";
 import {
+  FILES_PER_LOOKUP,
   readStoredUser,
   useGoBack,
   useRowWrite,
   useSession,
 } from "../../src/pages/hooks";
+import { boundOf, propertiesOf } from "../committedSchema";
 import { makeUser, resetIds } from "../factories";
 import {
   createTestQueryClient,
@@ -650,5 +652,13 @@ describe("useRowWrite", () => {
       ]),
     );
     held.release({ body: {} });
+  });
+});
+
+describe("asking which Book already holds a file", () => {
+  it("asks in chunks no larger than the schema takes", () => {
+    const files = propertiesOf("HoldersIn")["files"]!;
+
+    expect(FILES_PER_LOOKUP).toBe(boundOf(files, "maxItems"));
   });
 });

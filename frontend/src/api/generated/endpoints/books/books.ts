@@ -7403,8 +7403,9 @@ export const getReportDigitalReferenceUrl = (bookId: number) => {
  *
  * The per book ceiling is counted here rather than trusted to the payload,
  * which bounds one request and not the total: see
- * `MAX_DIGITAL_REFERENCES_PER_BOOK`. It binds a **new** location only, so a
- * book already at the ceiling can still re-confirm what it holds.
+ * `MAX_DIGITAL_REFERENCES_PER_BOOK`, and `_add_within_the_ceiling` for why the
+ * count follows the insert. It binds a **new** location only, so a book
+ * already at the ceiling can still re-confirm what it holds.
  * @summary Report Digital Reference
  */
 export const reportDigitalReference = async (
@@ -8505,10 +8506,11 @@ export const getImportKoreaderHighlightsUrl = (bookId: number) => {
 /**
  * Write one KOReader sidecar's highlights onto this book, as the caller's.
  *
- * Repeatable: a highlight already imported is updated rather than doubled.
- * Its sharing is left as the member set it while it stays on this book; one
- * the import moves here from another book is private again. `highlights`
- * says how a KOReader highlight is identified and what an import never does.
+ * Repeatable: a highlight already imported is updated rather than doubled,
+ * and one the caller deleted here stays deleted. Its sharing is left as the
+ * member set it while it stays on this book; one the import moves here from
+ * another book is private again. `highlights` says how a KOReader highlight
+ * is identified and what an import never does.
  *
  * **409 `not_held` unless this book holds a file carrying the sidecar's
  * fingerprint**, so a sidecar lands only on a Book its fingerprint matched
@@ -8635,6 +8637,105 @@ export const useImportKoreaderHighlights = <
     getImportKoreaderHighlightsMutationOptions(options),
     queryClient,
   );
+};
+export const getDeleteHighlightUrl = (bookId: number, highlightId: number) => {
+  return `/api/books/${bookId}/highlights/${highlightId}`;
+};
+
+/**
+ * Delete one of the caller's own highlights, and keep it deleted: a later
+ * KOReader import or Readwise pull still carrying the mark leaves it out.
+ *
+ * **404 for any highlight the caller did not write**, shared with them or
+ * not, and for one on another book. No admin arm, for the reason sharing has
+ * none: the marks are their author's alone.
+ * @summary Delete Highlight
+ */
+export const deleteHighlight = async (
+  bookId: number,
+  highlightId: number,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<void> => {
+  return customFetch<void>(getDeleteHighlightUrl(bookId, highlightId), {
+    ...options,
+    method: "DELETE",
+  });
+};
+
+export const getDeleteHighlightMutationKey = () => ["deleteHighlight"] as const;
+
+export const getDeleteHighlightMutationOptions = <
+  TError = Refusal | HTTPValidationError,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof deleteHighlight>>,
+    TError,
+    DeleteHighlightMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof deleteHighlight>>,
+  TError,
+  DeleteHighlightMutationVariables,
+  TContext
+> => {
+  const mutationKey = getDeleteHighlightMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof deleteHighlight>>,
+    DeleteHighlightMutationVariables
+  > = (props) => {
+    const { bookId, highlightId } = props ?? {};
+
+    return deleteHighlight(bookId, highlightId, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type DeleteHighlightMutationResult = NonNullable<
+  Awaited<ReturnType<typeof deleteHighlight>>
+>;
+
+export type DeleteHighlightMutationError = Refusal | HTTPValidationError;
+export type DeleteHighlightMutationVariables = {
+  bookId: number;
+  highlightId: number;
+};
+
+/**
+ * @summary Delete Highlight
+ */
+export const useDeleteHighlight = <
+  TError = Refusal | HTTPValidationError,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof deleteHighlight>>,
+      TError,
+      DeleteHighlightMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof deleteHighlight>>,
+  TError,
+  DeleteHighlightMutationVariables,
+  TContext
+> => {
+  return useMutation(getDeleteHighlightMutationOptions(options), queryClient);
 };
 export const getSetHighlightSharingUrl = (
   bookId: number,

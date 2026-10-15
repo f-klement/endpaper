@@ -8,6 +8,7 @@ import type {
 } from "../../api/generated/model";
 import { boundNumber, boundText } from "../../lib/bookBounds";
 import { normaliseLocation } from "../../lib/lastLocation";
+import { identifiersWithScheme, type CalibreBook } from "../../lib/calibre";
 import type { FileIdentifier, FileMetadata } from "../../lib/fileReaders";
 import type { StoreIdentifier, StoreIdentifierScheme } from "../../lib/stores";
 // The value rule, beside the scheme whose property it is. This module spelled
@@ -605,6 +606,30 @@ export function draftFromFile(record: FileMetadata): BookDraft {
     // which scheme a label names is this flow's decision and what may cross the
     // wire is one door both flows pass.
     identifiers: boundIdentifiers(identifiersFromFile(record.identifiers)),
+    notFound: true,
+  };
+}
+
+/**
+ * The confirm step, prefilled from one book of a Calibre library's index.
+ *
+ * `draftFromFile`'s sibling for a library folder picked on the scan page, and
+ * built from the same two rules the Settings import's `toBookCreate` uses:
+ * `boundRecord` for what every source states, and
+ * `calibre.identifiersWithScheme` for which identifiers reach the endpoint.
+ * So a library read through either door files the same book.
+ *
+ * No subtitle and no subjects, because the index is not read for either.
+ */
+export function draftFromCalibre(book: CalibreBook): BookDraft {
+  const bound = boundRecord(book);
+  return {
+    ...bound,
+    isbn: bound.isbn ?? "",
+    title: bound.title ?? "",
+    classifications: [],
+    suggested_tag_ids: [],
+    identifiers: boundIdentifiers(identifiersWithScheme(book.identifiers)),
     notFound: true,
   };
 }

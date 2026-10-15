@@ -18,6 +18,7 @@ interface HighlightListProps {
   currentUser: UserOut;
   pendingIds: ReadonlySet<number>;
   onSetShared: (highlightId: number, isShared: boolean) => void;
+  onDelete: (highlightId: number) => void;
 }
 
 /**
@@ -27,6 +28,9 @@ interface HighlightListProps {
  * rows carry the control and say which state they are in; another member's
  * row is here only because it was shared, so it carries their name instead.
  * There is no admin arm: sharing speaks for the author.
+ *
+ * **Deleting asks first**, because it is for good: the server remembers the
+ * mark, so no later import brings it back.
  *
  * **The date is the device's own day**, read off its wall clock with no zone,
  * so only the date part is shown and nothing is converted.
@@ -39,6 +43,7 @@ export default function HighlightList({
   currentUser,
   pendingIds,
   onSetShared,
+  onDelete,
 }: HighlightListProps) {
   const { t, locale } = useTranslation();
   if (highlights.length === 0) return null;
@@ -111,6 +116,18 @@ export default function HighlightList({
                         {t("highlights.share")}
                       </button>
                     )}
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => {
+                        if (confirm(t("highlights.deleteConfirm")))
+                          onDelete(highlight.id);
+                      }}
+                      // The rungs QuoteList's delete names, for its reason.
+                      className="text-xs text-danger-500 hover:text-danger-600 disabled:opacity-50 dark:text-danger-300 dark:hover:text-danger-100"
+                    >
+                      {t("common.delete")}
+                    </button>
                   </span>
                 )}
               </div>

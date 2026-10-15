@@ -259,6 +259,7 @@ export default function ScanPage() {
             onPick={rapid.pickFiles}
             isReading={rapid.isReading}
             skipped={rapid.skipped}
+            libraryNotice={rapid.libraryNotice}
           />
         </>
       )}

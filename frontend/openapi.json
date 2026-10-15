@@ -3787,10 +3787,14 @@
         "type": "string"
       },
       "HighlightImportOut": {
-        "description": "What one import did, in three disjoint counts over the rows it named.",
+        "description": "What one import did, in four disjoint counts over the marks it named.",
         "properties": {
           "created": {
             "title": "Created",
+            "type": "integer"
+          },
+          "left_deleted": {
+            "title": "Left Deleted",
             "type": "integer"
           },
           "unchanged": {
@@ -3805,7 +3809,8 @@
         "required": [
           "created",
           "updated",
-          "unchanged"
+          "unchanged",
+          "left_deleted"
         ],
         "title": "HighlightImportOut",
         "type": "object"
@@ -11631,7 +11636,7 @@
         ]
       },
       "post": {
-        "description": "A client reporting that it found this book's file at this location.\n\n**Idempotent on the location, and that is the design rather than a\nconvenience.** A reference is identified by where the file is, so the same\nreport twice is one reference: re-importing a folder somebody imported last\nmonth refreshes those rows instead of doubling them, which at the scale this\nruns at (a directory pick is hundreds of files in one gesture) is the\ndifference between a feature and a mess.\n\n**200 rather than 201** for the same reason: the route is not a create. What\nhappened to a given location is answerable by reading the list back, and a\nstatus that varied would be one more thing for a client committing 300\nfiles to branch on.\n\n**The report replaces the fingerprint whole rather than filling in the gaps\nin it.** A row says what one client saw in one look. Merging a new size with\nan old modification time would produce a fingerprint that no client ever\nreported and that no re-check could ever match.\n\n**A sighting clears `missing_since`.** Something has now looked and found\nit, which is the only evidence that ever contradicts a miss.\n\nThe per book ceiling is counted here rather than trusted to the payload,\nwhich bounds one request and not the total: see\n`MAX_DIGITAL_REFERENCES_PER_BOOK`. It binds a **new** location only, so a\nbook already at the ceiling can still re-confirm what it holds.",
+        "description": "A client reporting that it found this book's file at this location.\n\n**Idempotent on the location, and that is the design rather than a\nconvenience.** A reference is identified by where the file is, so the same\nreport twice is one reference: re-importing a folder somebody imported last\nmonth refreshes those rows instead of doubling them, which at the scale this\nruns at (a directory pick is hundreds of files in one gesture) is the\ndifference between a feature and a mess.\n\n**200 rather than 201** for the same reason: the route is not a create. What\nhappened to a given location is answerable by reading the list back, and a\nstatus that varied would be one more thing for a client committing 300\nfiles to branch on.\n\n**The report replaces the fingerprint whole rather than filling in the gaps\nin it.** A row says what one client saw in one look. Merging a new size with\nan old modification time would produce a fingerprint that no client ever\nreported and that no re-check could ever match.\n\n**A sighting clears `missing_since`.** Something has now looked and found\nit, which is the only evidence that ever contradicts a miss.\n\nThe per book ceiling is counted here rather than trusted to the payload,\nwhich bounds one request and not the total: see\n`MAX_DIGITAL_REFERENCES_PER_BOOK`, and `_add_within_the_ceiling` for why the\ncount follows the insert. It binds a **new** location only, so a book\nalready at the ceiling can still re-confirm what it holds.",
         "operationId": "report_digital_reference",
         "parameters": [
           {
@@ -12268,7 +12273,7 @@
     },
     "/api/books/{book_id}/highlights/koreader": {
       "post": {
-        "description": "Write one KOReader sidecar's highlights onto this book, as the caller's.\n\nRepeatable: a highlight already imported is updated rather than doubled.\nIts sharing is left as the member set it while it stays on this book; one\nthe import moves here from another book is private again. `highlights`\nsays how a KOReader highlight is identified and what an import never does.\n\n**409 `not_held` unless this book holds a file carrying the sidecar's\nfingerprint**, so a sidecar lands only on a Book its fingerprint matched\nand never on one a client guessed. Read off the Book's own references,\nwhich `BookForRead` has already scoped.",
+        "description": "Write one KOReader sidecar's highlights onto this book, as the caller's.\n\nRepeatable: a highlight already imported is updated rather than doubled,\nand one the caller deleted here stays deleted. Its sharing is left as the\nmember set it while it stays on this book; one the import moves here from\nanother book is private again. `highlights` says how a KOReader highlight\nis identified and what an import never does.\n\n**409 `not_held` unless this book holds a file carrying the sidecar's\nfingerprint**, so a sidecar lands only on a Book its fingerprint matched\nand never on one a client guessed. Read off the Book's own references,\nwhich `BookForRead` has already scoped.",
         "operationId": "import_koreader_highlights",
         "parameters": [
           {
@@ -12341,6 +12346,80 @@
           }
         ],
         "summary": "Import Koreader Highlights",
+        "tags": [
+          "books"
+        ]
+      }
+    },
+    "/api/books/{book_id}/highlights/{highlight_id}": {
+      "delete": {
+        "description": "Delete one of the caller's own highlights, and keep it deleted: a later\nKOReader import or Readwise pull still carrying the mark leaves it out.\n\n**404 for any highlight the caller did not write**, shared with them or\nnot, and for one on another book. No admin arm, for the reason sharing has\nnone: the marks are their author's alone.",
+        "operationId": "delete_highlight",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "highlight_id",
+            "required": true,
+            "schema": {
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "title": "Highlight Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "book_id",
+            "required": true,
+            "schema": {
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "title": "Book Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Delete Highlight",
         "tags": [
           "books"
         ]

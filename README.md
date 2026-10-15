@@ -90,9 +90,13 @@ Then open **server-ip:port** you set in your yml in your browser (or your local 
   saved, and a title your old app says you deleted is not brought back
 - **Calibre import**: point it at a copy of a Calibre library's `metadata.db` and the whole
   library is read in your own browser, with the ISBN, the series and the position in it that
-  a feed does not carry. The file beside each book is an optional second pass that fills in
-  what the index left blank. The file itself never leaves your browser, only the records it
-  turned out to hold, and nothing is written to the library
+  a feed does not carry. Picking the library folder as well fills in what the index left
+  blank from the file beside each book, and records where each book's files are: each file's
+  name, the folders above it and a fingerprint computed from up to 12 KiB of it, which
+  everyone who can see the book can see. A library folder picked on the add page is read
+  through its index the same way. No file leaves
+  your browser, only the records it turned out to hold, and nothing is written to the
+  library
 - **Add a book from its own file**: point the add page at book files or a whole folder and
   Endpaper drafts the rows out of them. EPUB, MOBI, AZW, FictionBook, CBZ, PDF, and M4B or
   tagged MP3 for audiobooks, where a folder of chapter files is read as one book rather

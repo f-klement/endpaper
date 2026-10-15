@@ -28,6 +28,7 @@ import {
   getGetHighlightsQueryKey,
   getGetNotesQueryKey,
   getSetHighlightSharingMutationOptions,
+  getDeleteHighlightMutationOptions,
   getGetQuotesQueryKey,
   getListQuotesQueryKey,
   getListProgressQueryKey,
@@ -574,7 +575,9 @@ export interface UseBookHighlightsResult {
   highlights: HighlightOut[];
   /** Share one of the caller's own highlights, or withdraw it. */
   setShared: (highlightId: number, isShared: boolean) => void;
-  /** Every highlight with a sharing change out. */
+  /** Delete one of the caller's own highlights, for good: no import brings it back. */
+  remove: (highlightId: number) => void;
+  /** Every highlight with a sharing change or a delete out. */
   pendingIds: ReadonlySet<number>;
   error: unknown;
 }
@@ -582,26 +585,33 @@ export interface UseBookHighlightsResult {
 /**
  * The highlights on this book the caller may read: their own, private or
  * shared, and those other members shared. Written by an import on the library
- * settings page; the only write here is sharing.
+ * settings page; the writes here are sharing and deleting the caller's own.
  */
 export function useBookHighlights(bookId: number): UseBookHighlightsResult {
   const queryClient = useQueryClient();
   const highlights = useGetHighlights(bookId);
+  const refresh = () =>
+    void queryClient.invalidateQueries({
+      queryKey: getGetHighlightsQueryKey(bookId),
+    });
   const sharing = useRowWrite(
     getSetHighlightSharingMutationOptions,
     "highlightId",
-    () =>
-      void queryClient.invalidateQueries({
-        queryKey: getGetHighlightsQueryKey(bookId),
-      }),
+    refresh,
+  );
+  const removal = useRowWrite(
+    getDeleteHighlightMutationOptions,
+    "highlightId",
+    refresh,
   );
 
   return {
     highlights: highlights.data ?? [],
     setShared: (highlightId, isShared) =>
       sharing.mutate({ bookId, highlightId, data: { is_shared: isShared } }),
-    pendingIds: sharing.pendingRows,
-    error: highlights.error ?? sharing.error,
+    remove: (highlightId) => removal.mutate({ bookId, highlightId }),
+    pendingIds: new Set([...sharing.pendingRows, ...removal.pendingRows]),
+    error: highlights.error ?? sharing.error ?? removal.error,
   };
 }
 

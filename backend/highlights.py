@@ -11,6 +11,10 @@ or may live on another one, and nothing here can tell which. `is_shared` is the
 member's own choice and survives every re-run on the same Book; a row an
 import moves to another Book is private again (`import_koreader`).
 
+**A member deletes their own highlight here, by hand** (`delete_own`), and the
+key is remembered in `deleted_highlights`, so neither a KOReader import nor a
+Readwise pull still carrying the mark brings it back (`deleted_keys`).
+
 Reading a highlight out is the router's, under `highlight_visible_to`.
 """
 
@@ -22,9 +26,10 @@ from datetime import datetime
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.exc import StaleDataError
 
 from enums import HighlightSource
-from models import Book, Highlight
+from models import Book, DeletedHighlight, Highlight
 from schemas import KoreaderHighlightIn
 from schemas.highlight import KOREADER_DATETIME_FORMAT
 
@@ -107,6 +112,66 @@ class ImportCounts:
     created: int
     updated: int
     unchanged: int
+    #: Marks the member deleted here, which the import leaves deleted.
+    left_deleted: int
+
+
+def deleted_keys(
+    db: Session, member_id: int, source: HighlightSource, keys: Sequence[str]
+) -> set[str]:
+    """Which of these keys the member deleted here, so an import of `source`
+    leaves them deleted."""
+    found: set[str] = set()
+    for start in range(0, len(keys), _LOOKUP_CHUNK):
+        found.update(
+            key
+            for (key,) in db.query(DeletedHighlight.source_key).filter(
+                DeletedHighlight.user_id == member_id,
+                DeletedHighlight.source == source,
+                DeletedHighlight.source_key.in_(keys[start : start + _LOOKUP_CHUNK]),
+            )
+        )
+    return found
+
+
+def delete_own(db: Session, book: Book, member_id: int, highlight_id: int) -> bool:
+    """Delete `member_id`'s own highlight on `book`, remember its key, and
+    commit. False when there is no such row.
+
+    **Only the author's row**, shared or not: another member's highlight, even
+    one shared with this member, is no row of theirs to delete.
+
+    **Two deletes of one row racing** both find it, and the second commit meets
+    the unique index on the remembered key. The first has then deleted the row,
+    so the second answers as though it had found none.
+    """
+    row = (
+        db.query(Highlight)
+        .filter(
+            Highlight.id == highlight_id,
+            Highlight.book_id == book.id,
+            Highlight.user_id == member_id,
+        )
+        .one_or_none()
+    )
+    if row is None:
+        return False
+    try:
+        if not deleted_keys(db, member_id, row.source, [row.source_key]):
+            db.add(
+                DeletedHighlight(
+                    user_id=member_id, source=row.source, source_key=row.source_key
+                )
+            )
+        # Flushed before the row goes, so a lost race is the unique index
+        # refusing the key, never a delete matching no row.
+        db.flush()
+        db.query(Highlight).filter(Highlight.id == row.id).delete(synchronize_session=False)
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        return False
+    return True
 
 
 def _wall_clock(value: str | None) -> datetime | None:
@@ -145,12 +210,16 @@ def import_koreader(
     them: the race costs a retry, never a 500. Each retry finds at least the
     rows that beat it, so a few imports of one file at once settle within
     `_ATTEMPTS`; past that the collision is not a race, and raises.
+
+    **A hand delete racing it** removes a row this import is updating, so the
+    update matches no row. That is a retry as well, and the retry finds the
+    key remembered and leaves the mark out.
     """
     wanted = keyed(partial_md5, marks)
     for _ in range(_ATTEMPTS - 1):
         try:
             return _write(db, book, member_id, partial_md5, wanted)
-        except IntegrityError:
+        except (IntegrityError, StaleDataError):
             db.rollback()
     return _write(db, book, member_id, partial_md5, wanted)
 
@@ -183,6 +252,9 @@ def _write(
         if (former := _alone_in_its_second(partial_md5, key, mark)) is not None
     }
     keys = [*wanted, *earlier.values()]
+    # A mark keyed afresh because the other of its pair is gone was deleted
+    # under the key it had, so either key keeps it deleted.
+    gone = deleted_keys(db, member_id, HighlightSource.KOREADER, keys)
     held: dict[str, Highlight] = {}
     for start in range(0, len(keys), _LOOKUP_CHUNK):
         chunk = keys[start : start + _LOOKUP_CHUNK]
@@ -195,8 +267,11 @@ def _write(
             )
         )
 
-    created = updated = unchanged = 0
+    created = updated = unchanged = left_deleted = 0
     for key, mark in wanted.items():
+        if key in gone or earlier.get(key) in gone:
+            left_deleted += 1
+            continue
         fields: dict[str, object] = {
             "book_id": book.id,
             "text": mark.text,
@@ -229,4 +304,6 @@ def _write(
         else:
             unchanged += 1
     db.commit()
-    return ImportCounts(created=created, updated=updated, unchanged=unchanged)
+    return ImportCounts(
+        created=created, updated=updated, unchanged=unchanged, left_deleted=left_deleted
+    )

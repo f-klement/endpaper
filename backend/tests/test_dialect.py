@@ -163,6 +163,7 @@ class TestTheseAreTheConstraintsWithTwoSpellings:
             ("catalogue_targets", "ck_catalogue_targets_use_attribute"),
             ("custom_field_values", "ck_custom_field_values_bounds"),
             ("custom_fields", "ck_custom_fields_name_bounds"),
+            ("deleted_highlights", "ck_deleted_highlights_bounds"),
             ("digital_references", "ck_digital_references_bounds"),
             ("digital_references", "ck_digital_references_partial_md5"),
             ("highlights", "ck_highlights_bounds"),
@@ -177,12 +178,12 @@ class TestTheseAreTheConstraintsWithTwoSpellings:
             ("readwise_books", "ck_readwise_books_bounds"),
         }
 
-    def test_thirteen_of_the_twenty_seven_tables_carry_one(self):
+    def test_fourteen_of_the_twenty_eight_tables_carry_one(self):
         """The other half of the ADR's sentence, from the same source. A set of
         names and a count of tables are two different claims, and stating both
         here is what stopped the first one going out with the wrong number."""
-        assert len({table for table, _, _ in _dialect_checks()}) == 13
-        assert len(Base.metadata.tables) == 27
+        assert len({table for table, _, _ in _dialect_checks()}) == 14
+        assert len(Base.metadata.tables) == 28
 
 
 class TestTheStringifierIsNotAnEngine:
@@ -890,6 +891,7 @@ class TestEveryNulArmDroppedOnACharacterColumn:
             ("catalogue_targets", "ck_catalogue_targets_base_url", "base_url"),
             ("catalogue_targets", "ck_catalogue_targets_indexes", "isbn_index"),
             ("catalogue_targets", "ck_catalogue_targets_indexes", "title_index"),
+            ("deleted_highlights", "ck_deleted_highlights_bounds", "source_key"),
             (
                 "digital_references",
                 "ck_digital_references_partial_md5",
@@ -1000,6 +1002,7 @@ class TestNoSqliteArmLostAClause:
             "ck_book_identifiers_bounds": 1,
             "ck_catalogue_targets_base_url": 1,
             "ck_catalogue_credentials_source": 1,
+            "ck_deleted_highlights_bounds": 1,
             "ck_digital_references_partial_md5": 1,
             "ck_highlights_bounds": 1,
             "ck_kosync_documents_document": 1,

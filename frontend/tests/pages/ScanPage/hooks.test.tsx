@@ -7,23 +7,24 @@
  */
 
 import { act, waitFor } from "@testing-library/react";
+import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { BookFormat, type BookMatch } from "../../../src/api/generated/model";
 import {
   FALLBACK_INTERVAL_MS,
   FALLBACK_STARTS_PER_MINUTE,
-  FILES_PER_LOOKUP,
   useBookSearch,
   useRapidIntake,
   useScanFlow,
 } from "../../../src/pages/ScanPage/hooks";
 import { partialMd5 } from "../../../src/lib/fileDigest";
-import { boundOf, propertiesOf } from "../../committedSchema";
 import { makeBook, resetIds } from "../../factories";
 import { epubFile, packageDocument } from "../../zipFixtures";
 import { id3v2, mp3, plainFrame } from "../../audioFixtures";
 import { mockApi, renderHookWithProviders, type MockApi } from "../../utils";
+import { CALIBRE_SCHEMA, databaseOf } from "../../lib/sqliteFixtures";
 
 /**
  * One chapter of an audiobook, tagged the way the measured LibriVox files are.
@@ -3039,12 +3040,6 @@ describe("useRapidIntake and a file already in the library", () => {
     act(() => result.current.addAll());
     await waitFor(() => expect(result.current.result?.added).toBe(1));
   });
-
-  it("asks in chunks no larger than the schema takes", () => {
-    const files = propertiesOf("HoldersIn")["files"]!;
-
-    expect(FILES_PER_LOOKUP).toBe(boundOf(files, "maxItems"));
-  });
 });
 
 /** An EPUB naming its ISBN and a thinner record than any catalogue's. */
@@ -3414,4 +3409,236 @@ describe("useRapidIntake and a file that states its ISBN", () => {
     },
     FALLBACK_INTERVAL_MS * 4,
   );
+});
+
+describe("useRapidIntake and a Calibre library folder", () => {
+  const HOLDERS = "/api/books/file-holders";
+
+  /**
+   * The shipped engine, served where `lib/sqlite.ts` fetches it, and every
+   * other request handed to `api`. `mockApi`'s responses carry no
+   * `arrayBuffer`, which the engine's load needs.
+   */
+  function servingTheEngine() {
+    const wasm = readFileSync(
+      createRequire(import.meta.url).resolve(
+        "sql.js/dist/sql-wasm-browser.wasm",
+      ),
+    );
+    const passOn = api.fetch;
+    vi.stubGlobal(
+      "fetch",
+      async (input: RequestInfo | URL, init?: RequestInit) =>
+        String(input).endsWith(".wasm")
+          ? ({
+              ok: true,
+              status: 200,
+              arrayBuffer: async () =>
+                wasm.buffer.slice(
+                  wasm.byteOffset,
+                  wasm.byteOffset + wasm.byteLength,
+                ),
+            } as unknown as Response)
+          : passOn(input, init),
+    );
+  }
+
+  /** A picked folder: an index built from these rows, and these files. */
+  async function folder(rows: readonly string[], ...paths: string[]) {
+    const index = new File([await databaseOf(...rows)], "metadata.db");
+    Object.defineProperty(index, "webkitRelativePath", {
+      value: "Calibre/metadata.db",
+    });
+    return [
+      index,
+      ...paths.map((path) =>
+        pickedInFolder(path.split("/").pop()!, `Calibre/${path}`),
+      ),
+    ];
+  }
+
+  /** Dune with an EPUB and a PDF, and a record Calibre left untitled. */
+  const DUNE = [
+    ...CALIBRE_SCHEMA,
+    `INSERT INTO books (id, title, path) VALUES (1, 'Dune', 'Frank Herbert/Dune (1)'), (2, 'Unknown', 'Unknown/Unknown (2)')`,
+    `INSERT INTO identifiers (book, type, val) VALUES (1, 'isbn', '9780441013593')`,
+    `INSERT INTO data (book, format, name) VALUES (1, 'EPUB', 'Dune'), (1, 'PDF', 'Dune')`,
+  ];
+  const DUNE_FILES = [
+    "Frank Herbert/Dune (1)/Dune.epub",
+    "Frank Herbert/Dune (1)/Dune.pdf",
+  ];
+
+  beforeEach(() => {
+    servingTheEngine();
+    api.on(HOLDERS, (_url, init) => holdersAnswering([], init?.body), "POST");
+  });
+
+  it("queues one row a book, carrying each of its files", async () => {
+    const { result } = renderTheIntake();
+
+    const picked = await folder(DUNE, ...DUNE_FILES);
+    act(() => result.current.pickFiles(picked));
+    await waitFor(() => expect(result.current.entries).toHaveLength(2));
+    await waitFor(() => expect(result.current.isReading).toBe(false));
+
+    const [dune, untitled] = result.current.entries;
+    expect(dune).toMatchObject({
+      state: "stated",
+      isbn: "9780441013593",
+      format: BookFormat.ebook,
+      draft: { title: "Dune" },
+      reference: { root_label: "Calibre", relative_path: DUNE_FILES[0] },
+      moreReferences: [{ relative_path: DUNE_FILES[1] }],
+    });
+    expect(untitled).toMatchObject({
+      state: "failed",
+      reason: { kind: "no-title" },
+    });
+  });
+
+  it("adds the book once and says where every one of its files is", async () => {
+    api.on("/api/books/scan", { body: makeBook({ id: 50 }) });
+    api.on("/api/books/50/digital-references", { body: {} });
+    const { result } = renderTheIntake();
+
+    const picked = await folder(DUNE, ...DUNE_FILES);
+    act(() => result.current.pickFiles(picked));
+    await waitFor(() => expect(result.current.entries).toHaveLength(2));
+    await waitFor(() => expect(result.current.entries[0]?.heldBy).toBeNull());
+    act(() => result.current.addAll());
+    await waitFor(() => expect(result.current.result).not.toBeNull());
+
+    expect(
+      api.calls.filter((call) => call.url.endsWith("/api/books/scan")),
+    ).toHaveLength(1);
+    expect(
+      api.calls
+        .filter((call) => call.url.endsWith("/digital-references"))
+        .map((call) => (call.body as { relative_path: string }).relative_path),
+    ).toEqual(DUNE_FILES);
+    expect(result.current.result).toMatchObject({ added: 1, unreferenced: 0 });
+  });
+
+  it("reads a folder whose metadata.db is not Calibre's file by file", async () => {
+    // Nothing a member picked is lost because the index was not one.
+    const { result } = renderTheIntake();
+
+    const picked = await folder(
+      ["CREATE TABLE notes (id INTEGER)"],
+      "Books/Dune.pdf",
+    );
+    act(() => result.current.pickFiles(picked));
+    await waitFor(() =>
+      expect(result.current.entries.map((entry) => entry.label)).toEqual([
+        "Dune.pdf",
+      ]),
+    );
+    expect(result.current.libraryNotice).toEqual({ kind: "index-unread" });
+  });
+
+  it("counts a book file the index names for no book, and leaves it out", async () => {
+    const { result } = renderTheIntake();
+
+    // Calibre's own trash is not a book the member forgot to add.
+    const picked = await folder(
+      DUNE,
+      ...DUNE_FILES,
+      "Stray/Other.epub",
+      ".caltrash/Old (9)/Old.epub",
+    );
+    act(() => result.current.pickFiles(picked));
+    await waitFor(() => expect(result.current.entries).toHaveLength(2));
+
+    expect(result.current.libraryNotice).toEqual({
+      kind: "unindexed",
+      count: 1,
+    });
+  });
+
+  it("queues a library once when it is picked twice while it is read", async () => {
+    const { result } = renderTheIntake();
+
+    const picked = await folder(DUNE, ...DUNE_FILES);
+    act(() => {
+      result.current.pickFiles(picked);
+      result.current.pickFiles(picked);
+    });
+    await waitFor(() => expect(result.current.isReading).toBe(false));
+    await waitFor(() => expect(result.current.entries).toHaveLength(2));
+
+    expect(api.calls.filter((call) => call.url.endsWith(HOLDERS))).toHaveLength(
+      1,
+    );
+  });
+
+  it("finds a book held by its second file when its first has changed", async () => {
+    // Calibre rewrites a format when it embeds metadata, so the EPUB's
+    // fingerprint and the folder's name can both have moved while the PDF
+    // is the file the library already holds.
+    api.on(
+      HOLDERS,
+      (_url, init) => {
+        const asked = JSON.parse(String(init?.body)) as {
+          files: { relative_path: string }[];
+        };
+        return {
+          body: asked.files.map((file) => ({
+            holders: file.relative_path.endsWith(".pdf")
+              ? [
+                  {
+                    book_id: 42,
+                    format: BookFormat.ebook,
+                    reference_id: 1,
+                    same_location: true,
+                    same_partial_md5: true,
+                  },
+                ]
+              : [],
+          })),
+        };
+      },
+      "POST",
+    );
+    const { result } = renderTheIntake();
+
+    const picked = await folder(DUNE, ...DUNE_FILES);
+    act(() => result.current.pickFiles(picked));
+
+    await waitFor(() =>
+      expect(result.current.entries[0]?.heldBy).toEqual({
+        bookId: 42,
+        lands: true,
+      }),
+    );
+  });
+
+  it("refreshes every file of a book already in the library", async () => {
+    api.on(
+      HOLDERS,
+      (_url, init) =>
+        holdersAnswering(
+          [{ book_id: 42, format: BookFormat.ebook }],
+          init?.body,
+        ),
+      "POST",
+    );
+    api.on("/api/books/42/digital-references", { body: {} });
+    const { result } = renderTheIntake();
+
+    const picked = await folder(DUNE, ...DUNE_FILES);
+    act(() => result.current.pickFiles(picked));
+    await waitFor(() =>
+      expect(result.current.entries[0]?.heldBy).toMatchObject({ bookId: 42 }),
+    );
+    act(() => result.current.addAll());
+    await waitFor(() => expect(result.current.result).not.toBeNull());
+
+    expect(
+      api.calls
+        .filter((call) => call.url.endsWith("/api/books/42/digital-references"))
+        .map((call) => (call.body as { relative_path: string }).relative_path),
+    ).toEqual(DUNE_FILES);
+    expect(result.current.result).toMatchObject({ added: 0, already: 1 });
+  });
 });

@@ -15,11 +15,19 @@ the ticket was not a column.
   `TestTheShelfWideReaderOfTheFlag`.
 """
 
+import contextlib
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 
+from fastapi import HTTPException
+from sqlalchemy.orm import Session
+
+from database import engine
 from main import app, iter_api_routes
-from models import DIGITAL_REFERENCE_PATH_MAX, DigitalReference
-from schemas.digital import MAX_DIGITAL_REFERENCES_PER_BOOK
+from models import DIGITAL_REFERENCE_PATH_MAX, Book, DigitalReference
+from routers.books import report_digital_reference
+from schemas.digital import MAX_DIGITAL_REFERENCES_PER_BOOK, DigitalReferenceIn
 
 URL = "/api/books/{}/digital-references"
 
@@ -326,6 +334,53 @@ class TestTheCeilingIsCountedPerBookAndNotPerRequest:
         full, other = make_book(admin["headers"]), make_book(admin["headers"])
         self._fill(client, admin["headers"], full["id"])
         assert report(client, admin["headers"], other["id"]).status_code == 200
+
+
+class TestTwoReportsAtOnceStayWithinTheCeiling:
+    """The count and the insert are one guarded step, so two reports racing for
+    the last place cannot both take it."""
+
+    def test_two_concurrent_new_locations_on_a_book_one_short_add_one(
+        self, client, admin, make_book
+    ):
+        """Each report runs in its own session and thread, and both reach the
+        insert before either commits: a count taken before the insert reads 15
+        in both and stores 17."""
+        book = make_book(admin["headers"])
+        for index in range(MAX_DIGITAL_REFERENCES_PER_BOOK - 1):
+            report(client, admin["headers"], book["id"], root_label=f"/r{index}")
+        both_counted = threading.Barrier(2, timeout=2)
+
+        class Racing(Session):
+            def add(self, instance, _warn=True):
+                # On Postgres the advisory lock holds the second report back
+                # before this point, so the barrier breaks and both go on.
+                with contextlib.suppress(threading.BrokenBarrierError):
+                    both_counted.wait()
+                super().add(instance, _warn)
+
+        def one(label):
+            with Racing(bind=engine, autoflush=False) as db:
+                held = db.get(Book, book["id"])
+                assert held is not None
+                try:
+                    report_digital_reference(
+                        DigitalReferenceIn(root_label=label, relative_path="x.epub"),
+                        held,
+                        db,
+                    )
+                except HTTPException as refused:
+                    return refused.status_code
+                return 200
+
+        with ThreadPoolExecutor(2) as pool:
+            answers = sorted(pool.map(one, ["/first", "/second"]))
+
+        assert answers == [200, 409]
+        assert (
+            len(listing(client, admin["headers"], book["id"]).json())
+            == MAX_DIGITAL_REFERENCES_PER_BOOK
+        )
 
 
 class TestTheShelfReachesAReference:

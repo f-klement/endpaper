@@ -165,10 +165,10 @@
     // `docs/decisions.md` records. A parser following a chain whose next offset
     // the last read gives, or a stream read chunk by chunk, in `lib/pdf.ts`,
     // `lib/audiobook.ts` and `lib/zip.ts`. Files read in order, one at a time,
-    // in `lib/takeout.ts` and the scan and library settings hooks. A lookup
+    // in `lib/takeout.ts` and the scan hooks. A lookup
     // paced against a rate limit, in the scan hooks. And the test tree,
     // awaiting its own fixtures and steps in the order the arm is about.
-    "no-await-in-loop": "off", // 61
+    "no-await-in-loop": "off", // 60
 
     // Argued from its sites. In `lib/safeHref.ts` the U+0000 to U+0020
     // character class IS the URL sanitisation logic, so the rule fires on the

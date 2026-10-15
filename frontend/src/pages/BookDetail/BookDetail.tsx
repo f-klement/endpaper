@@ -390,6 +390,7 @@ export default function BookDetail({ currentUser }: BookDetailProps) {
               currentUser={currentUser}
               pendingIds={highlights.pendingIds}
               onSetShared={highlights.setShared}
+              onDelete={highlights.remove}
             />
           </CollapsibleSection>
 

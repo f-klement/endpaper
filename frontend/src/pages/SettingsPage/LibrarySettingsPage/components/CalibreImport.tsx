@@ -139,6 +139,11 @@ export default function CalibreImport({
             <p className="text-xs text-paper-600 dark:text-paper-400">
               {t("calibre.withFile", { count: preview.withFile })}
             </p>
+            {preview.located > 0 && (
+              <p className="text-xs text-paper-600 dark:text-paper-400">
+                {t("calibre.located", { count: preview.located })}
+              </p>
+            )}
             {preview.crossChecked > 0 && (
               <p className="text-xs text-paper-600 dark:text-paper-400">
                 {t("calibre.crossCheckResult", {
@@ -205,7 +210,28 @@ export default function CalibreImport({
 
       <ImportError error={error} />
 
-      {result && <OutcomePanel outcome={result} messages={OUTCOME_MESSAGES} />}
+      {result && (
+        <>
+          <OutcomePanel outcome={result} messages={OUTCOME_MESSAGES} />
+          {(
+            [
+              ["already", "calibre.already"],
+              ["otherFormat", "calibre.otherFormat"],
+              ["unreferenced", "calibre.unreferenced"],
+            ] as const
+          ).map(
+            ([count, message]) =>
+              result[count] > 0 && (
+                <p
+                  key={count}
+                  className="text-xs text-paper-600 dark:text-paper-400"
+                >
+                  {t(message, { count: result[count] })}
+                </p>
+              ),
+          )}
+        </>
+      )}
     </div>
   );
 }

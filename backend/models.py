@@ -2268,6 +2268,63 @@ class Highlight(Base):
     author: Mapped[User] = relationship("User")
 
 
+class DeletedHighlight(Base):
+    """A highlight its member deleted here, remembered so an import leaves it
+    deleted.
+
+    **An import never deletes, so a deletion is the member's own act on the book
+    page**, and a sidecar or a Readwise pull still carrying the mark would
+    otherwise bring it back on the next run. The row holds the identity
+    `Highlight` is unique on and nothing of the passage: a KOReader key already
+    names the file by its fingerprint (`highlights.koreader_source_key`), and a
+    Readwise key is Readwise's own id.
+
+    **Not a child of `books`**: the identity does not name a Book, so a merge
+    or a purge leaves it alone and a re-import that now matches another copy is
+    still refused. No path deletes a member, for the reason `Highlight` gives.
+    """
+
+    __tablename__ = "deleted_highlights"
+
+    __table_args__ = (
+        Index(
+            "uq_deleted_highlights_member_source_key",
+            "user_id",
+            "source",
+            "source_key",
+            unique=True,
+        ),
+        CheckConstraint(
+            _enum_check("source", HighlightSource), name="ck_deleted_highlights_source"
+        ),
+        # The byte arm and the NUL clause for the reason `ck_highlights_bounds`
+        # carries them: `backup.restore` writes through Core.
+        CheckConstraint(
+            DialectSQL(
+                sqlite=(
+                    "length(source_key) > 0 "
+                    f"AND length(source_key) <= {HIGHLIGHT_SOURCE_KEY_MAX} "
+                    "AND instr(source_key, char(0)) = 0 "
+                    f"AND length(CAST(source_key AS BLOB)) <= {4 * HIGHLIGHT_SOURCE_KEY_MAX}"
+                ),
+                postgresql=(
+                    "length(source_key) > 0 "
+                    f"AND length(source_key) <= {HIGHLIGHT_SOURCE_KEY_MAX} "
+                    f"AND octet_length(source_key) <= {4 * HIGHLIGHT_SOURCE_KEY_MAX}"
+                ),
+            ),
+            name="ck_deleted_highlights_bounds",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    # No `index=True`: `uq_deleted_highlights_member_source_key` leads with it.
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
+    source: Mapped[HighlightSource] = mapped_column(String(16), nullable=False)
+    source_key: Mapped[str] = mapped_column(String(HIGHLIGHT_SOURCE_KEY_MAX), nullable=False)
+    deleted_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
 #: How wide either half of a digital reference's path may be.
 #:
 #: **Derived from the filesystem rather than chosen.** `getconf PATH_MAX /` on

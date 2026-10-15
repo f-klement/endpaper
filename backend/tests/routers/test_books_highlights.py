@@ -4,7 +4,7 @@ The import is reached as the browser reaches it, after the Book's file
 reference carries the sidecar's fingerprint.
 """
 
-from models import QUOTE_TEXT_MAX, Highlight
+from models import QUOTE_TEXT_MAX, DeletedHighlight, Highlight
 
 DIGEST = "0123456789abcdef0123456789abcdef"
 OTHER_DIGEST = "fedcba9876543210fedcba9876543210"
@@ -46,6 +46,10 @@ def listed(client, headers, book_id):
     return res.json()
 
 
+def delete(client, headers, book_id, highlight_id):
+    return client.delete(f"/api/books/{book_id}/highlights/{highlight_id}", headers=headers)
+
+
 def share(client, headers, book_id, highlight_id, is_shared=True):
     return client.put(
         f"/api/books/{book_id}/highlights/{highlight_id}/sharing",
@@ -62,10 +66,10 @@ class TestAnImportRunsAgainSafely:
         holding(client, member["headers"], book["id"])
 
         assert send(client, member["headers"], book["id"]).json() == {
-            "created": 1, "updated": 0, "unchanged": 0,
+            "created": 1, "updated": 0, "unchanged": 0, "left_deleted": 0,
         }
         assert send(client, member["headers"], book["id"]).json() == {
-            "created": 0, "updated": 0, "unchanged": 1,
+            "created": 0, "updated": 0, "unchanged": 1, "left_deleted": 0,
         }
         assert db.query(Highlight).count() == 1
 
@@ -76,7 +80,7 @@ class TestAnImportRunsAgainSafely:
 
         res = send(client, member["headers"], book["id"], mark(note="the litany"))
 
-        assert res.json() == {"created": 0, "updated": 1, "unchanged": 0}
+        assert res.json() == {"created": 0, "updated": 1, "unchanged": 0, "left_deleted": 0}
         assert [h["note"] for h in listed(client, member["headers"], book["id"])] == [
             "the litany"
         ]
@@ -127,7 +131,7 @@ class TestAnAdjustedMarkKeepsItsRow:
             ),
         )
 
-        assert res.json() == {"created": 0, "updated": 1, "unchanged": 0}
+        assert res.json() == {"created": 0, "updated": 1, "unchanged": 0, "left_deleted": 0}
         assert db.query(Highlight).count() == 1
 
     def test_two_marks_made_in_one_second_stay_two(self, client, member, make_book):
@@ -369,5 +373,157 @@ class TestAPairMadeInOneSecond:
 
         res = send(client, member["headers"], book["id"], mark())
 
-        assert res.json() == {"created": 0, "updated": 0, "unchanged": 1}
+        assert res.json() == {"created": 0, "updated": 0, "unchanged": 1, "left_deleted": 0}
         assert db.query(Highlight).count() == 2
+
+
+class TestAMemberDeletesTheirOwn:
+    def test_a_deleted_highlight_leaves_the_book(self, client, member, make_book):
+        book = make_book(member["headers"])
+        holding(client, member["headers"], book["id"])
+        send(client, member["headers"], book["id"])
+        [highlight] = listed(client, member["headers"], book["id"])
+
+        assert delete(client, member["headers"], book["id"], highlight["id"]).status_code == 204
+
+        assert listed(client, member["headers"], book["id"]) == []
+
+    def test_a_reimport_still_carrying_it_leaves_it_deleted(
+        self, client, member, make_book, db
+    ):
+        book = make_book(member["headers"])
+        holding(client, member["headers"], book["id"])
+        send(client, member["headers"], book["id"])
+        [highlight] = listed(client, member["headers"], book["id"])
+        delete(client, member["headers"], book["id"], highlight["id"])
+
+        res = send(client, member["headers"], book["id"], mark(note="edited on the device"))
+
+        assert res.json() == {"created": 0, "updated": 0, "unchanged": 0, "left_deleted": 1}
+        assert db.query(Highlight).count() == 0
+
+    def test_the_survivor_of_a_pair_deleted_here_stays_deleted_once_alone(
+        self, client, member, make_book, db
+    ):
+        """Deleted under the time and position key a pair has; alone in its
+        second it is keyed on its time, and the old key still holds it."""
+        book = make_book(member["headers"])
+        holding(client, member["headers"], book["id"])
+        other = mark(pos0="/body/p[9]/text().0", pos1="/body/p[9]/text().5", text="other")
+        send(client, member["headers"], book["id"], mark(), other)
+        [first] = [
+            h for h in listed(client, member["headers"], book["id"]) if h["text"] != "other"
+        ]
+        delete(client, member["headers"], book["id"], first["id"])
+
+        res = send(client, member["headers"], book["id"], mark())
+
+        assert res.json()["left_deleted"] == 1
+        assert [h.text for h in db.query(Highlight)] == ["other"]
+
+    def test_another_member_importing_the_same_mark_keeps_theirs(
+        self, client, member, other_user, make_book
+    ):
+        """The key is remembered per member: one member's deletion is nothing
+        to another's import of the same file."""
+        book = make_book(member["headers"])
+        holding(client, member["headers"], book["id"])
+        send(client, member["headers"], book["id"])
+        send(client, other_user["headers"], book["id"])
+        [mine] = listed(client, member["headers"], book["id"])
+        delete(client, member["headers"], book["id"], mine["id"])
+
+        res = send(client, other_user["headers"], book["id"])
+
+        assert res.json()["unchanged"] == 1
+        assert len(listed(client, other_user["headers"], book["id"])) == 1
+
+    def test_a_shared_highlight_of_another_member_is_not_found_and_stays(
+        self, client, member, other_user, make_book
+    ):
+        book = make_book(member["headers"])
+        holding(client, member["headers"], book["id"])
+        send(client, member["headers"], book["id"])
+        [highlight] = listed(client, member["headers"], book["id"])
+        share(client, member["headers"], book["id"], highlight["id"])
+
+        res = delete(client, other_user["headers"], book["id"], highlight["id"])
+
+        assert res.status_code == 404
+        assert [h["id"] for h in listed(client, other_user["headers"], book["id"])] == [
+            highlight["id"]
+        ]
+
+    def test_an_admin_cannot_delete_a_member_s_highlight(
+        self, client, admin, member, make_book, db
+    ):
+        book = make_book(member["headers"])
+        holding(client, member["headers"], book["id"])
+        send(client, member["headers"], book["id"])
+        [highlight] = listed(client, member["headers"], book["id"])
+        share(client, member["headers"], book["id"], highlight["id"])
+
+        assert delete(client, admin["headers"], book["id"], highlight["id"]).status_code == 404
+        assert db.query(DeletedHighlight).count() == 0
+
+    def test_through_another_book_it_is_not_found(self, client, member, make_book):
+        book = make_book(member["headers"])
+        elsewhere = make_book(member["headers"], title="Emma")
+        holding(client, member["headers"], book["id"])
+        send(client, member["headers"], book["id"])
+        [highlight] = listed(client, member["headers"], book["id"])
+
+        assert delete(client, member["headers"], elsewhere["id"], highlight["id"]).status_code == 404
+        assert len(listed(client, member["headers"], book["id"])) == 1
+
+    def test_on_a_book_the_caller_cannot_see_it_is_not_found(
+        self, client, member, other_user, make_book
+    ):
+        book = make_book(other_user["headers"], is_private=True)
+        holding(client, other_user["headers"], book["id"])
+        send(client, other_user["headers"], book["id"])
+        [highlight] = listed(client, other_user["headers"], book["id"])
+
+        assert delete(client, member["headers"], book["id"], highlight["id"]).status_code == 404
+
+
+class TestTheDeleteRefusalSaysNothing:
+    def test_another_member_s_highlight_an_absent_id_and_a_hidden_book_answer_alike(
+        self, client, member, other_user, make_book
+    ):
+        """The same body and the same statements for another member's private
+        highlight and an absent id, so neither the answer nor its cost says the
+        highlight exists. A hidden book stops at the book rule, with that
+        rule's own 404 and one statement sooner, which says only what every
+        route on that book already says."""
+        from sqlalchemy import event
+
+        from database import engine
+
+        book = make_book(member["headers"])
+        holding(client, member["headers"], book["id"])
+        send(client, member["headers"], book["id"])
+        [theirs] = listed(client, member["headers"], book["id"])
+        hidden = make_book(member["headers"], is_private=True, title="Emma")
+
+        def refused(book_id, highlight_id):
+            statements: list[str] = []
+
+            def record(conn, cursor, statement, *rest):
+                statements.append(statement)
+
+            event.listen(engine, "before_cursor_execute", record)
+            try:
+                res = delete(client, other_user["headers"], book_id, highlight_id)
+            finally:
+                event.remove(engine, "before_cursor_execute", record)
+            return res.status_code, res.json(), len(statements)
+
+        another = refused(book["id"], theirs["id"])
+        absent = refused(book["id"], theirs["id"] + 1000)
+        on_hidden = refused(hidden["id"], theirs["id"])
+
+        assert another == absent
+        assert another[:2] == (404, {"detail": "Highlight not found"})
+        assert on_hidden[:2] == (404, {"detail": "Book not found"})
+        assert on_hidden[2] == another[2] - 1

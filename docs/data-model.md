@@ -527,6 +527,13 @@ unique per member, which is what makes every import repeatable. A KOReader row's
 not UTC; a Readwise row's is UTC, since Readwise records a zone. Its privacy rule is under
 *A highlight carries the second one too*.
 
+**`deleted_highlights`.** A highlight a member deleted on the book page: their `user_id`
+and the `source` and `source_key` the row had, unique together, and `deleted_at`. Nothing of
+the passage. Every import and every Readwise pull leaves a key listed here deleted, so a
+deletion by hand outlasts a sidecar or a Readwise book that still carries the mark. A
+KOReader key already names the file by its fingerprint. Not keyed on a Book, so a merge
+leaves it alone.
+
 **`book_identifiers`.** What a store calls a book, where that is not an ISBN: a `scheme`,
 a `value`, and the book it hangs off. `asin`, `B00J4YQKHY` is one row; `google_books`,
 `zyTCAlFPjgYC` is another.
@@ -1239,7 +1246,8 @@ file. It is unique on `(user_id, source, source_key)` and not on the book, so a 
 every row without a collision and re-importing a sidecar finds the rows it wrote. No path
 deletes a member, so its foreign key to `users` carries no rule. A Readwise row is removed
 when Readwise reports the highlight deleted; a KOReader sidecar carries no deletions, so an
-import never removes one. A row moved to another Book by either source is private again.
+import never removes one. A member deletes their own by hand, and `deleted_highlights`
+keeps it deleted. A row moved to another Book by either source is private again.
 
 ### A private book never leaves the instance
 

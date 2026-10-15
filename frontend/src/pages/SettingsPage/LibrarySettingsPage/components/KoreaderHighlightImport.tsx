@@ -87,6 +87,11 @@ export default function KoreaderHighlightImport({
                         updated: row.outcome.updated,
                         unchanged: row.outcome.unchanged,
                       }),
+                      row.outcome.left_deleted > 0
+                        ? t("highlights.outcomeLeftDeleted", {
+                            count: row.outcome.left_deleted,
+                          })
+                        : null,
                       row.outcome.oversized > 0
                         ? t("highlights.outcomeOversized", {
                             count: row.outcome.oversized,

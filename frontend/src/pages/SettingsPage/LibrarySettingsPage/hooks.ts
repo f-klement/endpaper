@@ -19,12 +19,14 @@ import {
   getGetHighlightsQueryKey,
   getListCustomFieldsQueryKey,
   importKoreaderHighlights,
+  listCopies,
   useBackfillCovers,
   useBackfillFromIdentifiers,
   useDefineCustomField,
   useDeleteCustomField,
   useListCustomFields,
   useRenameCustomField,
+  useReportDigitalReference,
   useScanAdd,
 } from "../../../api/generated/endpoints/books/books";
 import {
@@ -34,16 +36,20 @@ import {
   usePreviewMarc,
 } from "../../../api/generated/endpoints/imports/imports";
 import type {
+  BookCreate,
   CoverBackfillOut,
   IdentifierBackfillOut,
   CustomFieldKind,
   CustomFieldOut,
+  DigitalReferenceIn,
+  HighlightImportOut,
   ImportPreviewOut,
   ImportResultOut,
   KoreaderHighlightIn,
   MarcPreviewOut,
 } from "../../../api/generated/model";
 import { useInvalidate } from "../../../api/invalidate";
+import { ApiError } from "../../../api/mutator";
 import type { CalibreBook, CalibreFailure } from "../../../lib/calibre";
 import {
   readSidecar,
@@ -70,6 +76,14 @@ import {
   toBookCreate,
   type StoreBookFromSource,
 } from "./types";
+import {
+  askWhoHolds,
+  locate,
+  reportEach,
+  whereItLands,
+  type Held,
+  type HolderQuestion,
+} from "../../hooks";
 
 /**
  * What a two step import offers its card, over the two things that differ.
@@ -484,7 +498,24 @@ export function useMarcImport(): UseMarcImportResult {
  */
 export type CalibreProgress = ImportProgress;
 export type CalibreFailureRow = ImportFailureRow;
-export type CalibreResult = ImportOutcome;
+
+/**
+ * What the Calibre write did, which is the shared outcome and three counts
+ * only a library with files can produce.
+ *
+ * `added` is books made. `already` is books whose files a Book the member can
+ * see already held, so nothing was added and where the files are was
+ * recorded there. `otherFormat` is books carrying files that only a Book of
+ * another kind holds, by a file or by the ISBN: the landing rule refuses the
+ * files there, and this card has no press to add the book as its own copy, so
+ * it adds neither. `unreferenced` is books
+ * added whose files were not all recorded.
+ */
+export interface CalibreResult extends ImportOutcome {
+  readonly already: number;
+  readonly otherFormat: number;
+  readonly unreferenced: number;
+}
 
 /** One row of the sample the preview shows, so a wrong reading is visible. */
 export interface CalibrePreviewRow {
@@ -508,6 +539,8 @@ export interface CalibrePreview {
   readonly withIsbn: number;
   readonly withSeries: number;
   readonly withFile: number;
+  /** Books whose files the picked folder holds, so where they are is recorded. */
+  readonly located: number;
   /** Books that had a `metadata.opf` beside them and were checked against it. */
   readonly crossChecked: number;
   /** Fields the files supplied where the database had none. */
@@ -545,7 +578,7 @@ const PREVIEW_ROWS = 5;
  */
 export interface UseCalibreImportResult {
   /** What the write did. Null until it finishes. */
-  result: ImportOutcome | null;
+  result: CalibreResult | null;
   /**
    * What the index turned out to hold.
    *
@@ -578,7 +611,10 @@ export interface UseCalibreImportResult {
   error: unknown;
   /** Read a picked database file. Writes nothing. */
   choose: (file: File) => void;
-  /** The optional second pick: the `metadata.opf` beside each book. */
+  /**
+   * The optional second pick, the library folder: the `metadata.opf` beside
+   * each book, and each book's own files.
+   */
   crossCheck: (files: readonly File[]) => void;
   /** Write what was read. Does nothing with no library read, or mid write. */
   confirm: () => void;
@@ -597,12 +633,19 @@ export interface UseCalibreImportResult {
  * would have to break it.
  *
  * Two picks and the second is optional. The database is the primary route and
- * carries the identifiers this route was chosen for; the per book `metadata.opf`
- * is a cross check that fills what the database left empty. **They are two picks
- * rather than one folder** because a directory picker hands the browser every
- * book file as well, which on this library is nine hundred prompts worth of
- * dialog for a step that most imports do not need. Whoever wants the cross check
- * asks for it.
+ * carries the identifiers this route was chosen for. The second is the library
+ * folder: its `metadata.opf` files fill what the database left empty, and each
+ * book's own files are recorded on the book as references, with KOReader's
+ * fingerprint, which is how the household's files come to be found again.
+ * **They are two picks rather than one folder** because a directory picker
+ * hands the browser every book file, which is a large grant to ask for on a
+ * step not every import needs. The scan page takes the other shape: a folder
+ * holding `metadata.db` at its root is read as a library in one pick.
+ *
+ * **A file already in the library is recognised before anything is added**,
+ * by the lookup the scan page asks (`pages/hooks.askWhoHolds`): a book whose
+ * file a Book the member can see holds is a sighting there, not a second Book,
+ * and the landing rule decides whether the file may land on it.
  *
  * Nothing is written until `confirm`, for `useLibraryImport`'s reason: a library
  * read wrong is invisible until afterwards, and afterwards the fix is finding
@@ -612,7 +655,14 @@ export function useCalibreImport(): UseCalibreImportResult {
   const invalidate = useInvalidate();
   const scanAdd = useScanAdd();
 
+  const reportReference = useReportDigitalReference();
+
   const [books, setBooks] = useState<readonly CalibreBook[] | null>(null);
+  // Where each book's files are, by Calibre id, taken while the folder's
+  // `File`s are in hand: the fingerprint cannot be read after the pick.
+  const [located, setLocated] = useState<
+    ReadonlyMap<number, readonly DigitalReferenceIn[]>
+  >(new Map());
   const [preview, setPreview] = useState<CalibrePreview | null>(null);
   const [failure, setFailure] = useState<CalibreIntakeFailure | null>(null);
   const [error, setError] = useState<unknown>(null);
@@ -626,6 +676,7 @@ export function useCalibreImport(): UseCalibreImportResult {
 
   function summarise(
     read: readonly CalibreBook[],
+    locatedBooks: number,
     crossChecked: number,
     filled: number,
     disagreed: number,
@@ -635,7 +686,8 @@ export function useCalibreImport(): UseCalibreImportResult {
       importable: read.filter((book) => toBookCreate(book) !== null).length,
       withIsbn: read.filter((book) => book.isbn !== null).length,
       withSeries: read.filter((book) => book.seriesName !== null).length,
-      withFile: read.filter((book) => book.formats.length > 0).length,
+      withFile: read.filter((book) => book.files.length > 0).length,
+      located: locatedBooks,
       crossChecked,
       filled,
       disagreed,
@@ -661,6 +713,7 @@ export function useCalibreImport(): UseCalibreImportResult {
     setError(null);
     setResult(null);
     setBooks(null);
+    setLocated(new Map());
     setPreview(null);
     try {
       const [{ openSqliteFile }, { readCalibreLibrary }] = await Promise.all([
@@ -679,7 +732,7 @@ export function useCalibreImport(): UseCalibreImportResult {
           return;
         }
         setBooks(reading.books);
-        setPreview(summarise(reading.books, 0, 0, 0));
+        setPreview(summarise(reading.books, 0, 0, 0, 0));
       } finally {
         // Always, including on the failure paths above: the engine holds the
         // whole file in WebAssembly memory until it is told not to.
@@ -693,71 +746,44 @@ export function useCalibreImport(): UseCalibreImportResult {
   }
 
   /**
-   * Check what was read against the `metadata.opf` beside each book.
+   * Read the library folder: the `metadata.opf` beside each book, and where
+   * each book's own files are.
    *
-   * **One file's failure is never the library's.** A file that is not a package
-   * document, or that is larger than this will read, leaves that book with what
-   * the database said, which is what the database being the primary route
-   * means.
+   * `lib/calibreFolder.ts` does both, the same way for the scan page's door.
+   * **The fingerprints are read here, while the `File`s are in hand**: twelve
+   * small slices a file, together, and a file whose slices cannot be read
+   * keeps its location without one.
    */
   async function check(files: readonly File[]) {
     if (books === null) return;
     setIsReading(true);
     setError(null);
     try {
-      const [{ indexOpfFiles, crossCheck, MAX_OPF_BYTES }, { readOpf }] =
-        await Promise.all([
-          import("../../../lib/calibre"),
-          import("../../../lib/opf"),
-        ]);
-      const index = indexOpfFiles(files);
+      const { crossCheckFolder, filesOfEachBook } =
+        await import("../../../lib/calibreFolder");
+      const merged = await crossCheckFolder(books, files, (done, total) =>
+        setProgress({ done, total }),
+      );
+      const references = new Map<number, DigitalReferenceIn[]>();
+      await Promise.all(
+        [...filesOfEachBook(merged.books, files)].map(async ([id, held]) => {
+          const found = await Promise.all(held.map(locate));
+          const usable = found.filter((one) => one !== undefined);
+          if (usable.length > 0) references.set(id, usable);
+        }),
+      );
 
-      /**
-       * The package document beside one book, or `null` for every way there is
-       * not one.
-       *
-       * **Its own `try`, because one file's failure is never the library's.**
-       * The read can reject on its own: a file removed between the pick and the
-       * pass, or a share that went away. Without this the throw reaches the
-       * caller's catch and the whole cross check is lost, on a screen that then
-       * says every book was left with what the index held.
-       */
-      async function readBeside(file: File | undefined) {
-        if (file === undefined || file.size > MAX_OPF_BYTES) return null;
-        try {
-          return readOpf(await file.text());
-        } catch {
-          return null;
-        }
-      }
-
-      const checked: CalibreBook[] = [];
-      let crossChecked = 0;
-      let filled = 0;
-      let disagreed = 0;
-
-      setProgress({ done: 0, total: books.length });
-      for (const [position, book] of books.entries()) {
-        const file = index.get(book.path.normalize("NFC"));
-        const opf = await readBeside(file);
-        if (opf === null) {
-          checked.push(book);
-        } else {
-          const merged = crossCheck(book, opf);
-          crossChecked += 1;
-          filled += merged.filled;
-          disagreed += merged.disagreed;
-          checked.push(merged.book);
-        }
-        // Every fifty rather than every book: a set on each of nine hundred
-        // iterations is nine hundred renders of a screen showing one number.
-        if (position % 50 === 0) {
-          setProgress({ done: position, total: books.length });
-        }
-      }
-
-      setBooks(checked);
-      setPreview(summarise(checked, crossChecked, filled, disagreed));
+      setBooks(merged.books);
+      setLocated(references);
+      setPreview(
+        summarise(
+          merged.books,
+          references.size,
+          merged.crossChecked,
+          merged.filled,
+          merged.disagreed,
+        ),
+      );
     } catch (thrown) {
       setError(thrown);
     } finally {
@@ -766,19 +792,109 @@ export function useCalibreImport(): UseCalibreImportResult {
     }
   }
 
-  /** Write them, through the loop every import on this page shares. */
+  /**
+   * Write them, through the loop every import on this page shares, and say
+   * where each book's files are.
+   */
   async function confirm() {
     if (books === null || isImporting) return;
     stopped.current = false;
     setIsImporting(true);
     setResult(null);
 
-    const bodies = books
-      .map((book) => toBookCreate(book))
-      .filter((body): body is NonNullable<typeof body> => body !== null);
+    // Keyed by the body, which is what the shared loop hands back.
+    const filesOf = new Map<
+      BookCreate,
+      {
+        readonly key: string;
+        readonly references: readonly DigitalReferenceIn[];
+      }
+    >();
+    const bodies: BookCreate[] = [];
+    for (const book of books) {
+      const body = toBookCreate(book);
+      if (body === null) continue;
+      bodies.push(body);
+      const references = located.get(book.id);
+      if (references !== undefined) {
+        filesOf.set(body, { key: String(book.id), references });
+      }
+    }
+
+    // **Asked once for the batch, before anything is added**, so a library
+    // imported twice adds nothing twice, whatever its books carry. Every file
+    // of a book is asked about, in the same batched requests.
+    const questions: HolderQuestion[] = [...filesOf].map(
+      ([body, { key, references }]) => ({
+        key,
+        references,
+        format: body.format ?? "",
+      }),
+    );
+    const held: ReadonlyMap<string, Held | null> = await askWhoHolds(questions);
+
+    let already = 0;
+    let otherFormat = 0;
+    let unreferenced = 0;
+
+    /** Every reference onto one Book: `pages/hooks.reportEach`. */
+    async function report(
+      bookId: number,
+      references: readonly DigitalReferenceIn[],
+    ) {
+      await reportEach(references, (data) =>
+        reportReference.mutateAsync({ bookId, data }),
+      );
+    }
+
+    async function addOne(body: BookCreate) {
+      const files = filesOf.get(body);
+      const known = files === undefined ? undefined : held.get(files.key);
+      if (files !== undefined && known) {
+        // The landing rule: a Book of another kind takes no file of this
+        // one, and this card has no press for the copy the scan page offers.
+        if (!known.lands) {
+          otherFormat += 1;
+          return;
+        }
+        await report(known.bookId, files.references);
+        already += 1;
+        return;
+      }
+      try {
+        const book = await scanAdd.mutateAsync({ data: body });
+        if (files !== undefined) {
+          // Its own `catch`: the book exists by now, and a throw reaching
+          // the loop would record a created book as failed.
+          await report(book.id, files.references).catch(() => {
+            unreferenced += 1;
+          });
+        }
+      } catch (refused) {
+        // **A duplicate names the book the ISBN belongs to**, and the files
+        // land on the copy of it the landing rule admits. Where no copy is
+        // the files' kind, an EPUB carrying the household's hardcover ISBN,
+        // the book is the other format case the lookup path counts, and says
+        // so in the same words rather than "already in the catalogue". Copies
+        // that cannot be read leave the 409 as it was.
+        const holder = refused instanceof ApiError ? refused.bookId : undefined;
+        if (holder !== undefined && files !== undefined) {
+          const copies = await listCopies(holder).catch(() => undefined);
+          if (copies !== undefined) {
+            const target = whereItLands(copies, body.format ?? "");
+            if (target === undefined) {
+              otherFormat += 1;
+              return;
+            }
+            await report(target, files.references).catch(() => undefined);
+          }
+        }
+        throw refused;
+      }
+    }
 
     const outcome = await writeBooks(bodies, {
-      post: (body) => scanAdd.mutateAsync({ data: body }),
+      post: addOne,
       onProgress: setProgress,
       stopped: () => stopped.current,
     });
@@ -788,9 +904,18 @@ export function useCalibreImport(): UseCalibreImportResult {
     invalidate.catalogue();
     setProgress(null);
     setIsImporting(false);
-    setResult(outcome);
+    setResult({
+      ...outcome,
+      // The shared loop counts every book that did not throw, and a book
+      // already in the library returns without one being made.
+      added: outcome.added - already - otherFormat,
+      already,
+      otherFormat,
+      unreferenced,
+    });
     if (!outcome.stopped) {
       setBooks(null);
+      setLocated(new Map());
       setPreview(null);
     }
   }
@@ -812,6 +937,7 @@ export function useCalibreImport(): UseCalibreImportResult {
     reset: () => {
       stopped.current = false;
       setBooks(null);
+      setLocated(new Map());
       setPreview(null);
       setResult(null);
       setFailure(null);
@@ -1099,6 +1225,8 @@ export type SidecarOutcome =
       readonly created: number;
       readonly updated: number;
       readonly unchanged: number;
+      /** Marks the member deleted on the book page, which stay deleted. */
+      readonly left_deleted: number;
       /** Marks left out as past what the server stores. */
       readonly oversized: number;
     }
@@ -1245,7 +1373,7 @@ async function sendTo(
   bookId: number,
   partialMd5: string,
   highlights: readonly SidecarHighlight[],
-): Promise<{ created: number; updated: number; unchanged: number }> {
+): Promise<HighlightImportOut> {
   const answers = await Promise.all(
     requestChunks(highlights).map((chunk) =>
       importKoreaderHighlights(bookId, {
@@ -1259,8 +1387,9 @@ async function sendTo(
       created: total.created + counts.created,
       updated: total.updated + counts.updated,
       unchanged: total.unchanged + counts.unchanged,
+      left_deleted: total.left_deleted + counts.left_deleted,
     }),
-    { created: 0, updated: 0, unchanged: 0 },
+    { created: 0, updated: 0, unchanged: 0, left_deleted: 0 },
   );
 }
 

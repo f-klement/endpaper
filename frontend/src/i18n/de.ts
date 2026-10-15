@@ -1163,7 +1163,11 @@ export const de: Messages = {
   // ── Bücher aus ihren Dateien hinzufügen ─────────────────────────────────
   "file.title": "Aus einer Datei hinzufügen",
   "file.explain":
-    "Buchdateien oder einen ganzen Ordner auswählen, dann liest Endpaper heraus, was in den Dateien steht. Was eine Datei nicht sagt, wird über den Dateinamen gesucht, und eine Datei, die eine ISBN nennt, lässt sich darüber nachschlagen wie ein gescannter Barcode. Die Dateien werden hier im Browser gelesen und niemals hochgeladen. Bei einem Ordner wird für ein Buch aus einer einzigen Datei auch deren Name samt der Ordner darüber und ein Fingerabdruck der Datei beim Buch gespeichert, damit die Datei wiederzufinden ist, und alle, die das Buch sehen, sehen auch das. Der Fingerabdruck wird hier aus bis zu 12 KiB der Datei berechnet. Auch die Schlagwörter aus der Datei werden beim Buch gespeichert: bei einem einzelnen Buch lassen sie sich vorher entfernen, bei einem ganzen Ordner geht das hinterher nur noch, indem das Buch entfernt wird.",
+    "Buchdateien oder einen ganzen Ordner auswählen, dann liest Endpaper heraus, was in den Dateien steht. Was eine Datei nicht sagt, wird über den Dateinamen gesucht, und eine Datei, die eine ISBN nennt, lässt sich darüber nachschlagen wie ein gescannter Barcode. Die Dateien werden hier im Browser gelesen und niemals hochgeladen. Bei einem Ordner wird für ein Buch aus einer einzigen Datei auch deren Name samt der Ordner darüber und ein Fingerabdruck der Datei beim Buch gespeichert, damit die Datei wiederzufinden ist, und alle, die das Buch sehen, sehen auch das. Der Fingerabdruck wird hier aus bis zu 12 KiB der Datei berechnet. Auch die Schlagwörter aus der Datei werden beim Buch gespeichert: bei einem einzelnen Buch lassen sie sich vorher entfernen, bei einem ganzen Ordner geht das hinterher nur noch, indem das Buch entfernt wird. Ein Ordner, in dem oben die metadata.db einer Calibre-Bibliothek liegt, wird stattdessen über diesen Index gelesen: ein Buch für jedes Buch der Bibliothek, mit jeder seiner Dateien. Lässt sich der Index nicht lesen, wird der Ordner Datei für Datei gelesen, und diese Seite sagt das.",
+  "file.indexUnread":
+    "Dieser Ordner enthält eine metadata.db, die sich nicht als Index einer Calibre-Bibliothek lesen ließ. Deshalb wurden die Dateien einzeln gelesen, und ein Buch in mehreren Formaten kann für jede Datei einmal erscheinen. So liest sich eine Bibliothek, in die gerade geschrieben wurde: eine Kopie des Bibliotheksordners wählen, die angelegt wurde, während Calibre und alles andere, was hineinschreibt, geschlossen war.",
+  "file.unindexed":
+    "Buchdateien in diesem Ordner, die der Index der Bibliothek nicht nennt, wurden ausgelassen ({count}). Einzeln wählen, um sie hinzuzufügen.",
   "file.pickLabel": "Buchdateien",
   "file.readingFiles": "Die ausgewählten Dateien werden gelesen...",
   "file.notAnEpub": "Keine EPUB-Datei.",
@@ -1451,9 +1455,9 @@ export const de: Messages = {
   "calibre.withIsbn": "{count} haben eine ISBN.",
   "calibre.withSeries": "{count} gehören zu einer Reihe.",
   "calibre.withFile": "{count} haben eine Datei in der Bibliothek.",
-  "calibre.crossCheck": "Mit den Dateien neben den Büchern abgleichen",
+  "calibre.crossCheck": "Den Bibliotheksordner wählen",
   "calibre.crossCheckHint":
-    "Optional. Den Bibliotheksordner wählen, dann wird jede metadata.opf darin gelesen und ergänzt, was der Index offen gelassen hat. Der Browser fragt nach, bevor er einen so großen Ordner freigibt.",
+    "Optional. Den Bibliotheksordner wählen. Jede metadata.opf darin ergänzt, was der Index offen gelassen hat, und für jede Buchdatei, die der Index nennt, wird beim Buch gespeichert, wo sie liegt: der Dateiname, die Ordner darüber und ein Fingerabdruck, der hier aus bis zu 12 KiB der Datei berechnet wird, damit die Datei wiederzufinden ist. Alle, die das Buch sehen, sehen auch das. Keine Datei wird hochgeladen. Der Browser fragt nach, bevor er einen so großen Ordner freigibt.",
   "calibre.crossCheckResult":
     "Bei {checked} Büchern lag eine Datei daneben: {filled} Felder ergänzt, {disagreed} mit abweichendem Wert, bei denen der Index behalten wurde.",
   "calibre.progress": "{done} von {total}",
@@ -1466,6 +1470,14 @@ export const de: Messages = {
   "calibre.resultFailures": "{count} konnten nicht hinzugefügt werden:",
   "calibre.duplicate": "bereits im Katalog",
   "calibre.notAdded": "nicht hinzugefügt",
+  "calibre.located":
+    "Bei {count} liegen die Dateien im gewählten Ordner, und beim Buch wird gespeichert, wo jede Datei liegt.",
+  "calibre.already":
+    "{count} waren schon in der Bibliothek und wurden nicht noch einmal hinzugefügt. Wo die Dateien liegen, wurde gespeichert.",
+  "calibre.otherFormat":
+    "{count} sind schon als ein anderes Exemplar in der Bibliothek, etwa als gedrucktes Buch, deshalb wurden weder das Buch noch der Ort seiner Dateien hinzugefügt. Den Bibliotheksordner auf der Seite Scannen wählen, um jedes als eigenes Exemplar hinzuzufügen.",
+  "calibre.unreferenced":
+    "{count} davon wurden hinzugefügt, ohne dass gespeichert wurde, wo alle Dateien liegen. Ein erneuter Import mit gewähltem Bibliotheksordner holt das nach.",
   "calibre.failureNotADatabase": "Diese Datei ist keine SQLite-Datenbank.",
   "calibre.failureDamaged":
     "Diese Kopie ist beschädigt. So sieht eine Kopie aus, die entstand, während in die Bibliothek geschrieben wurde: bitte eine neue anlegen.",
@@ -1783,9 +1795,12 @@ export const de: Messages = {
   "highlights.share": "Teilen",
   "highlights.unshare": "Nicht mehr teilen",
   "highlights.tooLongToShare": "Zu lang zum Teilen",
+  "highlights.deleteConfirm":
+    "Diese Markierung löschen? Ein späterer Import bringt sie nicht zurück.",
+  "highlights.outcomeLeftDeleted": "Als hier gelöscht ausgelassen: {count}.",
   "highlights.importTitle": "KOReader Markierungen",
   "highlights.importIntro":
-    "Gewählt werden die Metadatendateien, die KOReader neben jedem Buch ablegt, etwa metadata.epub.lua im .sdr Ordner des Buchs. Jede wird über den Fingerabdruck, den KOReader speichert, dem Buch zugeordnet, das dieselbe Datei hält. Markierungen kommen privat an und werden auf der Seite des Buchs geteilt. Ein erneuter Lauf aktualisiert geänderte Markierungen und fügt neue hinzu. Eine in KOReader gelöschte Markierung wird hier nicht gelöscht.",
+    "Gewählt werden die Metadatendateien, die KOReader neben jedem Buch ablegt, etwa metadata.epub.lua im .sdr Ordner des Buchs. Jede wird über den Fingerabdruck, den KOReader speichert, dem Buch zugeordnet, das dieselbe Datei hält. Markierungen kommen privat an und werden auf der Seite des Buchs geteilt. Ein erneuter Lauf aktualisiert geänderte Markierungen und fügt neue hinzu. Eine in KOReader gelöschte Markierung wird hier nicht gelöscht, und eine auf der Seite des Buchs gelöschte bleibt gelöscht.",
   "highlights.importChoose": "Metadatendateien wählen",
   "highlights.importReading": "Wird gelesen und importiert...",
   "highlights.outcomeImported":

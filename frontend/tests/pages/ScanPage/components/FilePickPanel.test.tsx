@@ -20,6 +20,7 @@ function renderPanel(
       onPick={onPick}
       isReading={false}
       skipped={0}
+      libraryNotice={null}
       {...overrides}
     />,
   );
@@ -124,5 +125,26 @@ describe("FilePickPanel", () => {
   it("says nothing about passing anything over when it passed nothing", () => {
     renderPanel();
     expect(screen.queryByText(/passed over/)).not.toBeInTheDocument();
+  });
+
+  it("says a library's index could not be read, and what to pick instead", () => {
+    // One row per file is what the library door replaces; without this the
+    // queue looks as it did before with nothing saying why.
+    renderPanel({ libraryNotice: { kind: "index-unread" } });
+
+    expect(
+      screen.getByText(/could not be read as a Calibre library's index/),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/pick a copy of the library folder/),
+    ).toBeInTheDocument();
+  });
+
+  it("counts the book files a library's index names for no book", () => {
+    renderPanel({ libraryNotice: { kind: "unindexed", count: 4 } });
+
+    expect(
+      screen.getByText(/the library's index does not name were left out \(4\)/),
+    ).toBeInTheDocument();
   });
 });

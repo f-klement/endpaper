@@ -1357,7 +1357,11 @@ export const en = {
   // between those two outcomes: one book at a time is reversible before the
   // press, a folder is not reversible afterwards at all.
   "file.explain":
-    "Pick book files, or a whole folder, and Endpaper reads what it can out of them. Anything a file does not say is looked up by its name, and a file that names its ISBN can be looked up by it, as a scanned barcode is. The files are read here in your browser and are never uploaded. From a folder, a book that is one file also gets that file's name, the folders above it and a fingerprint of the file saved on it, so you can find it again, and everyone who can see the book can see them. The fingerprint is computed here from up to 12 KiB of the file. A file's own subject words are saved on the book too: adding one book at a time you can take them off first, and from a folder the only way to take one off afterwards is to remove the book.",
+    "Pick book files, or a whole folder, and Endpaper reads what it can out of them. Anything a file does not say is looked up by its name, and a file that names its ISBN can be looked up by it, as a scanned barcode is. The files are read here in your browser and are never uploaded. From a folder, a book that is one file also gets that file's name, the folders above it and a fingerprint of the file saved on it, so you can find it again, and everyone who can see the book can see them. The fingerprint is computed here from up to 12 KiB of the file. A file's own subject words are saved on the book too: adding one book at a time you can take them off first, and from a folder the only way to take one off afterwards is to remove the book. A folder with a Calibre library's metadata.db at its top is read through that index instead: one book for each book in the library, with every one of its files. If the index cannot be read, the folder is read file by file and this page says so.",
+  "file.indexUnread":
+    "This folder holds a metadata.db that could not be read as a Calibre library's index, so its files were read one by one and a book with several formats may appear once for each file. A library caught while something was writing to it reads like this: pick a copy of the library folder taken while Calibre and anything else writing to it were closed.",
+  "file.unindexed":
+    "Book files in this folder that the library's index does not name were left out ({count}). Pick them on their own to add them.",
   "file.pickLabel": "Book files",
   "file.readingFiles": "Reading the files you picked...",
   "file.notAnEpub": "Not an EPUB file.",
@@ -1686,9 +1690,9 @@ export const en = {
   "calibre.withIsbn": "{count} carry an ISBN.",
   "calibre.withSeries": "{count} are part of a series.",
   "calibre.withFile": "{count} have a file in the library.",
-  "calibre.crossCheck": "Check against the files beside the books",
+  "calibre.crossCheck": "Pick the library folder",
   "calibre.crossCheckHint":
-    "Optional. Point at the library folder and every metadata.opf in it is read, filling in what the index left empty. The browser will ask before it hands over a folder this large.",
+    "Optional. Point at the library folder. Every metadata.opf in it fills in what the index left empty, and each book file the index lists is saved on its book: the file's name, the folders above it and a fingerprint computed here from up to 12 KiB of the file, so you can find it again. Everyone who can see the book can see them. No file is uploaded. The browser will ask before it hands over a folder this large.",
   "calibre.crossCheckResult":
     "{checked} books had a file beside them: {filled} fields filled in, {disagreed} where the two disagreed and the index was kept.",
   "calibre.progress": "{done} of {total}",
@@ -1700,6 +1704,14 @@ export const en = {
   "calibre.resultFailures": "{count} could not be added:",
   "calibre.duplicate": "already in the catalogue",
   "calibre.notAdded": "not added",
+  "calibre.located":
+    "{count} have their files in the folder you picked, and where each file is will be saved on its book.",
+  "calibre.already":
+    "{count} were already in your library, so they were not added again. Where their files are was recorded.",
+  "calibre.otherFormat":
+    "{count} are already in your library as another kind of copy, such as a printed book, so neither the book nor where its files are was added. Pick the library folder on the Scan page to add each as its own copy.",
+  "calibre.unreferenced":
+    "{count} of those were added without where all of their files are. Importing again with the library folder picked records it.",
   "calibre.failureNotADatabase": "That file is not a SQLite database.",
   "calibre.failureDamaged":
     "That copy is damaged. A copy taken while the library was being written to looks like this: take another one.",
@@ -2044,9 +2056,12 @@ export const en = {
   "highlights.share": "Share",
   "highlights.unshare": "Stop sharing",
   "highlights.tooLongToShare": "Too long to share",
+  "highlights.deleteConfirm":
+    "Delete this highlight? A later import will not bring it back.",
+  "highlights.outcomeLeftDeleted": "Left out as deleted here: {count}.",
   "highlights.importTitle": "KOReader highlights",
   "highlights.importIntro":
-    "Pick the metadata files KOReader keeps beside each book, such as metadata.epub.lua in the book's .sdr folder. Each one is matched to the book holding the same file, by the fingerprint KOReader records. Highlights arrive private, and you share them from the book page. Running it again updates the highlights you changed and adds new ones. A highlight you delete in KOReader is not deleted here.",
+    "Pick the metadata files KOReader keeps beside each book, such as metadata.epub.lua in the book's .sdr folder. Each one is matched to the book holding the same file, by the fingerprint KOReader records. Highlights arrive private, and you share them from the book page. Running it again updates the highlights you changed and adds new ones. A highlight you delete in KOReader is not deleted here, and one you delete on the book page stays deleted.",
   "highlights.importChoose": "Choose metadata files",
   "highlights.importReading": "Reading and importing...",
   "highlights.outcomeImported":

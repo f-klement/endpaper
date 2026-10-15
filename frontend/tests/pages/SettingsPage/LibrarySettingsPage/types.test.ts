@@ -21,7 +21,6 @@ import {
 import type { CalibreBook } from "../../../../src/lib/calibre";
 import type { StoreBook } from "../../../../src/lib/stores";
 import {
-  formatOf,
   storeToBookCreate,
   toBookCreate,
 } from "../../../../src/pages/SettingsPage/LibrarySettingsPage/types";
@@ -57,7 +56,7 @@ function book(overrides: Partial<CalibreBook> = {}): CalibreBook {
     description: "A desert planet.",
     seriesName: "Dune Chronicles",
     seriesIndex: 1,
-    formats: ["EPUB"],
+    files: [{ format: "EPUB", name: "Dune" }],
     ...overrides,
   };
 }
@@ -198,47 +197,6 @@ describe("one Calibre record as a request", () => {
       is_private: false,
       classifications: [],
     });
-  });
-});
-
-describe("what kind of object the copy is", () => {
-  it("is an ebook when the library holds a file for it", () => {
-    expect(formatOf(book({ formats: ["EPUB", "PDF"] }))).toBe("ebook");
-  });
-
-  it("is an audiobook when every file it holds is a recording", () => {
-    expect(formatOf(book({ formats: ["M4B"] }))).toBe("audiobook");
-  });
-
-  it("is an ebook when the library holds both", () => {
-    // A book with a readable file is a book to read. Calling the pair an
-    // audiobook because one of the two is would be the wrong half.
-    expect(formatOf(book({ formats: ["EPUB", "M4B"] }))).toBe("ebook");
-  });
-
-  it("is a comic when every file it holds is a comic archive", () => {
-    // The same file picked on the scan page is a comic, and one question with
-    // two answers is what this stops. `lib/fileName.FORMAT_FOR_EXTENSION` is
-    // the other half.
-    expect(formatOf(book({ formats: ["CBZ"] }))).toBe("comic");
-  });
-
-  it("calls a CBR a comic although nothing here will parse one", () => {
-    // This answers what the copy is, not what can be read. The refusal in
-    // `lib/cbz.ts` is a refusal of a parser rather than of the format.
-    expect(formatOf(book({ formats: ["CBR"] }))).toBe("comic");
-  });
-
-  it("is an ebook when the library holds a readable file and a comic", () => {
-    // The same rule the audio pair follows: a record with a readable file is a
-    // book to read, and one comic file among several does not rename it.
-    expect(formatOf(book({ formats: ["EPUB", "CBZ"] }))).toBe("ebook");
-  });
-
-  it("says nothing for a record with no file at all", () => {
-    // Not an ebook. A Calibre record with no file is a book somebody
-    // catalogued, and answering `ebook` asserts something the library does not.
-    expect(formatOf(book({ formats: [] }))).toBeNull();
   });
 });
 

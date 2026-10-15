@@ -113,10 +113,15 @@ starts and finishes into another.
 **From a Calibre library's own index.** Choose a copy of `metadata.db` and every
 book in it is read in your own browser, with the ISBN, the series and the
 position in it, the publisher, the language, the description and whether the
-book has a file. The `metadata.opf` beside each book is an optional second pick
-that fills in what the index left empty; where the two disagree the index is
-kept, and the count is shown before anything is written rather than left for
-you to find. Nothing is written until the counts have been shown, and nothing is
+book has a file. The library folder is an optional second pick: the
+`metadata.opf` beside each book fills in what the index left empty, where the
+two disagree the index is kept, and the count is shown before anything is
+written rather than left for you to find. Each book file the index lists is
+recorded on its book, its location and a fingerprint as for a file picked from a
+folder, and a book whose file is already in your library is recognised rather
+than added twice. A folder holding `metadata.db` at its top, picked on the add
+page, is read through the index the same way: one row for each book, carrying
+every one of its files. Nothing is written until the counts have been shown, and nothing is
 ever written back to the library. **Copy the file first and import the copy**: a
 Calibre library has exactly one writer, and the card says so where you are
 standing.

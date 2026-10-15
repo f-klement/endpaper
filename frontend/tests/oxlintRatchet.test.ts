@@ -854,7 +854,6 @@ const SITED: Record<string, string[]> = {
     "src/lib/takeout.ts",
     "src/lib/zip.ts",
     "src/pages/ScanPage/hooks.ts",
-    "src/pages/SettingsPage/LibrarySettingsPage/hooks.ts",
     "tests/api/mutator.test.ts",
     "tests/houseRules.test.ts",
     "tests/lib/adobeDigitalEditions.test.ts",

@@ -20,7 +20,7 @@ from fastapi import (
 )
 from fastapi.responses import StreamingResponse
 from pydantic import ValidationError
-from sqlalchemy import func, nullslast, or_
+from sqlalchemy import func, nullslast, or_, text
 from sqlalchemy.orm import Query as RowQuery
 from sqlalchemy.orm import Session, joinedload
 
@@ -5446,10 +5446,11 @@ def import_koreader_highlights(
 ) -> HighlightImportOut:
     """Write one KOReader sidecar's highlights onto this book, as the caller's.
 
-    Repeatable: a highlight already imported is updated rather than doubled.
-    Its sharing is left as the member set it while it stays on this book; one
-    the import moves here from another book is private again. `highlights`
-    says how a KOReader highlight is identified and what an import never does.
+    Repeatable: a highlight already imported is updated rather than doubled,
+    and one the caller deleted here stays deleted. Its sharing is left as the
+    member set it while it stays on this book; one the import moves here from
+    another book is private again. `highlights` says how a KOReader highlight
+    is identified and what an import never does.
 
     **409 `not_held` unless this book holds a file carrying the sidecar's
     fingerprint**, so a sidecar lands only on a Book its fingerprint matched
@@ -5467,8 +5468,32 @@ def import_koreader_highlights(
         db, book, current_user.id, payload.partial_md5, payload.highlights
     )
     return HighlightImportOut(
-        created=counts.created, updated=counts.updated, unchanged=counts.unchanged
+        created=counts.created,
+        updated=counts.updated,
+        unchanged=counts.unchanged,
+        left_deleted=counts.left_deleted,
     )
+
+
+@router.delete(
+    "/{book_id}/highlights/{highlight_id}", status_code=status.HTTP_204_NO_CONTENT
+)
+@refuses(404)
+def delete_highlight(
+    highlight_id: RowId,
+    book: BookForRead,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> None:
+    """Delete one of the caller's own highlights, and keep it deleted: a later
+    KOReader import or Readwise pull still carrying the mark leaves it out.
+
+    **404 for any highlight the caller did not write**, shared with them or
+    not, and for one on another book. No admin arm, for the reason sharing has
+    none: the marks are their author's alone.
+    """
+    if not highlights.delete_own(db, book, current_user.id, highlight_id):
+        raise HTTPException(status_code=404, detail="Highlight not found")
 
 
 def _highlight_for_sharing(
@@ -5726,6 +5751,55 @@ def list_digital_references(book: BookForRead, db: DbSession) -> list[DigitalRef
     )
 
 
+#: Postgres advisory lock class for one book's file references, so the key
+#: space shares nothing with any other advisory lock this database is given.
+_REFERENCE_CEILING_LOCK = 0x45_4E_44_50
+
+
+def _add_within_the_ceiling(db: Session, reference: DigitalReference) -> None:
+    """Add a new reference to its book, or refuse it with 409 past the ceiling.
+
+    **The count is taken after the insert, inside the same transaction, and
+    that order is the guard.** A count taken first and an insert after it is a
+    gap two concurrent reports both pass, each reading the same count and each
+    inserting, so a book lands past the ceiling and a later merge of it is
+    refused (`folding.py`). Counted after the insert, the row is already in the
+    count, so the second of two racing reports sees the first:
+
+    * **SQLite** serialises writers. The insert takes the write lock and holds
+      it to the commit, so the other report's insert waits on `busy_timeout`
+      and its count then includes this row.
+    * **Postgres** at READ COMMITTED does not: two uncommitted inserts never see
+      each other. A transaction scoped advisory lock on the book serialises the
+      two, released by the commit or the rollback that ends the request.
+
+    Narrowed to this book, and that narrowing **is** the ceiling: without it the
+    count is the whole library's and one member filling their own shelf refuses
+    everybody else's next reference.
+    """
+    if db.get_bind().dialect.name == "postgresql":
+        db.execute(
+            text("SELECT pg_advisory_xact_lock(:space, :book)"),
+            {"space": _REFERENCE_CEILING_LOCK, "book": reference.book_id},
+        )
+    db.add(reference)
+    db.flush()
+    held = (
+        db.query(func.count(DigitalReference.id))
+        .filter(DigitalReference.book_id == reference.book_id)
+        .scalar()
+    )
+    if held > MAX_DIGITAL_REFERENCES_PER_BOOK:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "This book already holds "
+                f"{MAX_DIGITAL_REFERENCES_PER_BOOK} file references"
+            ),
+        )
+
+
 @router.post("/{book_id}/digital-references", response_model=DigitalReferenceOut)
 def report_digital_reference(
     payload: DigitalReferenceIn,
@@ -5756,8 +5830,9 @@ def report_digital_reference(
 
     The per book ceiling is counted here rather than trusted to the payload,
     which bounds one request and not the total: see
-    `MAX_DIGITAL_REFERENCES_PER_BOOK`. It binds a **new** location only, so a
-    book already at the ceiling can still re-confirm what it holds.
+    `MAX_DIGITAL_REFERENCES_PER_BOOK`, and `_add_within_the_ceiling` for why the
+    count follows the insert. It binds a **new** location only, so a book
+    already at the ceiling can still re-confirm what it holds.
     """
     existing = (
         db.query(DigitalReference)
@@ -5769,28 +5844,12 @@ def report_digital_reference(
         .first()
     )
     if existing is None:
-        # Narrowed to this book, and that narrowing **is** the ceiling: without
-        # it the count is the whole library's and one member filling their own
-        # shelf refuses everybody else's next reference.
-        held = (
-            db.query(func.count(DigitalReference.id))
-            .filter(DigitalReference.book_id == book.id)
-            .scalar()
-        )
-        if held >= MAX_DIGITAL_REFERENCES_PER_BOOK:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=(
-                    "This book already holds "
-                    f"{MAX_DIGITAL_REFERENCES_PER_BOOK} file references"
-                ),
-            )
         existing = DigitalReference(
             book_id=book.id,
             root_label=payload.root_label,
             relative_path=payload.relative_path,
         )
-        db.add(existing)
+        _add_within_the_ceiling(db, existing)
 
     existing.root_confirmed = payload.root_confirmed
     existing.size_bytes = payload.size_bytes

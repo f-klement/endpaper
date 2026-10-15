@@ -22063,3 +22063,54 @@ documentation says nothing about expired cursors, so that case is unverified.
 - **Bounds**: each name at the line's width (500), the count at the most one character names a 500 character line holds (167, blank entries counting), and the joined line at 500 after reordering.
 - **Kept out of the constructor's dump by `exclude=True`**, and the create partition accepts an excluded field only when `FOLDED_INTO_ANOTHER_FIELD` names it, so an excluded field the tuple does not name is refused at import (that a named field is really folded is the validator's test, not the guard's).
 - **Only the create body takes it.** `BookDetailsUpdate` carries a line a member typed, the copy route inherits the work's credit, and the bulk route carries no author.
+
+## A highlight is deleted by hand only, and its key is remembered so no import brings it back
+
+Owner's ruling, 2026-10-15, on whether a KOReader import should mirror the sidecar and delete
+the marks it no longer carries. **No: an import never deletes.** A sidecar does not say which
+device wrote it, so mirroring one file would delete marks made on a second device. A member
+deletes their own highlight on the book page instead, and `deleted_highlights` keeps the
+member, source and key it had. **The owner confirmed the consequence the same day: a deleted
+highlight stays deleted on every later import, even while KOReader still has the mark.** There
+is nothing to delete twice; the device's copy is simply never imported again.
+
+**Remembered for Readwise as well**, because a pull that starts over (a replaced token, a book
+matched later) sends a book's whole history again and would otherwise restore the row.
+Readwise's own deletions still remove rows as they did.
+
+**For the same file only.** A KOReader key includes the file's fingerprint, so the memory is
+of a mark in one file: the same passage in a re-converted file has a new fingerprint and
+arrives as a new highlight.
+
+The cost: a mark deleted here by mistake does not come back from any import. A mark with a
+creation time can be made again on the device, where it gets a new time and so a new key, and
+imports. **A mark with no creation time (very old KOReader) is keyed on its positions**, so the
+same passage marked again in the same file has the same key and stays left out. Nothing in the
+interface undoes a deletion, which is why the control asks first.
+
+## A Calibre library's files are recorded from the index, through both doors
+
+Owner's ruling, 2026-10-15: both the Settings Calibre card and a
+library folder picked on the add page write references. Both read `metadata.db` in the browser
+from the picked file (sql.js in memory), so the one writer rule holds by construction; neither
+calls calibre-web. A book's files are found by Calibre's layout, `books.path` plus `data.name`
+with the format lower cased as extension, compared with `webkitRelativePath`, never by opening
+a book file; only the fingerprint reads its twelve KiB.
+
+One row per Calibre book on the add page, not one per file, because the index already says
+which files are one book. The holder lookup asks by every file of a book in the same batched
+requests: Calibre rewrites one format when it embeds metadata, so the first file alone can call a
+held book new. A holder the file may land on wins over one it may not.
+
+A book's references are sent one after another, and the server counts after inserting under one
+guard (SQLite's single writer; a transaction scoped advisory lock on Postgres), because a count
+taken before the insert let two concurrent reports both take a book's last place.
+
+An index the add page cannot read leaves an ordinary folder, read file by file, with a notice:
+the member is likely to pick the live library, and a structurally torn index is refused rather
+than read.
+
+The Settings card has no queue and so no press to add a copy. A book whose files, or whose ISBN
+on a 409, only a Book of another kind holds is counted and skipped there, neither created nor
+attached, and the add page door offers the copy. A duplicate 409 with a copy of the files' kind
+attaches the files to it, as on the add page.

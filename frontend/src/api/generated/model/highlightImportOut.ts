@@ -7,10 +7,11 @@
  */
 
 /**
- * What one import did, in three disjoint counts over the rows it named.
+ * What one import did, in four disjoint counts over the marks it named.
  */
 export interface HighlightImportOut {
   created: number;
+  left_deleted: number;
   unchanged: number;
   updated: number;
 }

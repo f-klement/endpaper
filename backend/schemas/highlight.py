@@ -105,11 +105,14 @@ class KoreaderImportIn(BaseModel):
 
 
 class HighlightImportOut(BaseModel):
-    """What one import did, in three disjoint counts over the rows it named."""
+    """What one import did, in four disjoint counts over the marks it named."""
 
     created: int
     updated: int
     unchanged: int
+    #: Marks the member deleted on the book page, which the import leaves
+    #: deleted.
+    left_deleted: int
 
 
 class HighlightSharingIn(BaseModel):

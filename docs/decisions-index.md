@@ -900,4 +900,6 @@ repeat the argument.
 |  | [A 429 from Readwise ends the pull rather than waiting it out](decisions.md#a-429-from-readwise-ends-the-pull-rather-than-waiting-it-out) | 113 |
 |  | [A member's Readwise token is not counted on the key screen](decisions.md#a-members-readwise-token-is-not-counted-on-the-key-screen) | 109 |
 |  | [Authors a source separated travel as a list, and the server joins them](decisions.md#authors-a-source-separated-travel-as-a-list-and-the-server-joins-them) | 530 |
+|  | [A highlight is deleted by hand only, and its key is remembered so no import brings it back](decisions.md#a-highlight-is-deleted-by-hand-only-and-its-key-is-remembered-so-no-import-brings-it-back) | 270 |
+|  | [A Calibre library's files are recorded from the index, through both doors](decisions.md#a-calibre-librarys-files-are-recorded-from-the-index-through-both-doors) | 296 |
 <!-- index: end -->

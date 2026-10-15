@@ -813,6 +813,73 @@ describe("BookDetail", () => {
       ).toEqual({ is_shared: true });
     });
 
+    it("deletes one of the caller's own highlights once they confirm", async () => {
+      vi.spyOn(window, "confirm").mockReturnValue(true);
+      const mine = makeHighlight({ user_id: OWNER.id, author: OWNER });
+      stubLoad({ highlights: [mine] });
+      api.on(`/api/books/1/highlights/${mine.id}`, { status: 204 }, "DELETE");
+      renderDetail();
+      await openSection("Notes and quotes");
+
+      const passage = await screen.findByText("Fear is the mind-killer.");
+      await userEvent.click(
+        within(passage.closest("div")!).getByRole("button", { name: "Delete" }),
+      );
+
+      expect(window.confirm).toHaveBeenCalledWith(
+        "Delete this highlight? A later import will not bring it back.",
+      );
+      await waitFor(() =>
+        expect(
+          api.lastCall(`/api/books/1/highlights/${mine.id}`, "DELETE"),
+        ).toBeDefined(),
+      );
+    });
+
+    it("deletes nothing when the member declines the confirm", async () => {
+      vi.spyOn(window, "confirm").mockReturnValue(false);
+      const mine = makeHighlight({ user_id: OWNER.id, author: OWNER });
+      stubLoad({ highlights: [mine] });
+      api.on(`/api/books/1/highlights/${mine.id}`, { status: 204 }, "DELETE");
+      renderDetail();
+      await openSection("Notes and quotes");
+
+      const passage = await screen.findByText("Fear is the mind-killer.");
+      await userEvent.click(
+        within(passage.closest("div")!).getByRole("button", { name: "Delete" }),
+      );
+
+      expect(window.confirm).toHaveBeenCalled();
+      expect(
+        api.lastCall(`/api/books/1/highlights/${mine.id}`, "DELETE"),
+      ).toBeUndefined();
+      expect(screen.getByText("Fear is the mind-killer.")).toBeInTheDocument();
+    });
+
+    it("draws the list again once a highlight is deleted", async () => {
+      // The delete invalidates the list. Without it the passage stays drawn
+      // until the cache goes stale, and Delete reads as a press that did
+      // nothing.
+      vi.spyOn(window, "confirm").mockReturnValue(true);
+      const mine = makeHighlight({ user_id: OWNER.id, author: OWNER });
+      stubLoad({ highlights: [mine] });
+      api.on(`/api/books/1/highlights/${mine.id}`, { status: 204 }, "DELETE");
+      renderDetail();
+      await openSection("Notes and quotes");
+      const passage = await screen.findByText("Fear is the mind-killer.");
+
+      api.on("/api/books/1/highlights", { body: [] }, "GET");
+      await userEvent.click(
+        within(passage.closest("div")!).getByRole("button", { name: "Delete" }),
+      );
+
+      await waitFor(() =>
+        expect(
+          screen.queryByText("Fear is the mind-killer."),
+        ).not.toBeInTheDocument(),
+      );
+    });
+
     it("counts the share limit in code points, as the server does", async () => {
       // 1,500 astral characters: 3,000 UTF-16 units, under the 2,000 the
       // server counts in code points.

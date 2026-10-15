@@ -1485,10 +1485,12 @@ shares it. There is no admin arm, on reading or on sharing.
 | GET | `/api/books/{id}/highlights` | read | The caller's own and the shared ones, in page order |
 | POST | `/api/books/{id}/highlights/koreader` | read | One KOReader sidecar's highlights, as the caller's |
 | PUT | `/api/books/{id}/highlights/{highlight_id}/sharing` | author | `{"is_shared": bool}`; **404** for one the caller cannot read, **403** for another member's shared one |
+| DELETE | `/api/books/{id}/highlights/{highlight_id}` | author | 204. Deletes it and remembers its key, so no later import or Readwise pull brings it back; **404** for any highlight the caller did not write, shared or not |
 
 **The import is repeatable.** Each highlight is unique on its author, its source and a key
-the source gives it, so a second run of the same sidecar answers every row `unchanged`, an
-edited note or an adjusted mark answers `updated`, and a new mark is `created`. KOReader gives
+the source gives it, so a second run of the same sidecar answers `unchanged` for every row the first wrote, an
+edited note or an adjusted mark answers `updated`, a new mark is `created`, and a mark the
+member deleted here is `left_deleted`. KOReader gives
 an annotation no id: the key is SHA-256 over the file's partial MD5 and the mark's creation
 time, which KOReader does not change when a mark is adjusted. A mark with no creation time, or
 two in one request made in the same second, is keyed on its start and end positions as well,
@@ -1496,7 +1498,8 @@ so adjusting one of those makes a new row, and so does a second mark appearing i
 of one already imported; deleting one of such a pair leaves the other its row. The browser
 sends every mark of one second in one request. A re-converted book has a new fingerprint, so
 its highlights arrive as new rows. **An import never deletes**: a mark deleted in KOReader
-stays here. Sharing is kept on a re-import onto the same book. **A highlight that changes book
+stays here. A member deletes their own highlight by hand instead, and it stays deleted on
+every later import, even while KOReader still has the mark. Sharing is kept on a re-import onto the same book. **A highlight that changes book
 is private again, on every path**: one an import moves to another book, and every one a merge
 moves to the survivor, because that book's readers are not the audience its author chose.
 
@@ -2141,8 +2144,8 @@ page cursor on the next; one stopped while asking for books by id asks for them 
 reads Readwise's `/api/v2/export/` from where the last complete one left off, with
 deletions, and runs once a day by itself (`ENABLE_READWISE_TICKER`) as well as on request.
 Highlights arrive private, with `source` `readwise` and Readwise's highlight id as the
-source key; a deletion at Readwise removes the row, and a row moved to another Book is
-private again. A Readwise book is put on a Book the member can see by an ASIN on exactly one,
+source key; a deletion at Readwise removes the row, a highlight the member deleted here is
+left out and counted in `skipped`, and a row moved to another Book is private again. A Readwise book is put on a Book the member can see by an ASIN on exactly one,
 else by exactly one with the same title and first author; any other waits, listed on the
 account, and is asked for again once a Book matches.
 

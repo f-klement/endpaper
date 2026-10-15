@@ -3,6 +3,7 @@ import { useId, type ChangeEvent } from "react";
 import { Icon } from "../../../components";
 import { useTranslation } from "../../../i18n";
 import { SUPPORTED_EXTENSIONS } from "../../../lib/fileName";
+import type { LibraryNotice } from "../hooks";
 
 interface FilePickPanelProps {
   /** Hand the picked files to the queue. Reading them is the hook's business. */
@@ -17,6 +18,8 @@ interface FilePickPanelProps {
    * appears next to entries would be absent in exactly the case it is for.
    */
   skipped: number;
+  /** What the last pick said about a Calibre library in it, beside `skipped`. */
+  libraryNotice: LibraryNotice | null;
 }
 
 /**
@@ -73,6 +76,7 @@ export default function FilePickPanel({
   onPick,
   isReading,
   skipped,
+  libraryNotice,
 }: FilePickPanelProps) {
   const { t } = useTranslation();
   // Generated rather than written, because two of these on one page would give
@@ -139,6 +143,16 @@ export default function FilePickPanel({
           className="text-xs text-amber-700 bg-amber-50 rounded-lg px-3 py-2 mt-2 dark:text-amber-300 dark:bg-amber-950/40"
         >
           {t("fallback.skipped", { count: skipped })}
+        </p>
+      )}
+      {libraryNotice && (
+        <p
+          role="status"
+          className="text-xs text-amber-700 bg-amber-50 rounded-lg px-3 py-2 mt-2 dark:text-amber-300 dark:bg-amber-950/40"
+        >
+          {libraryNotice.kind === "index-unread"
+            ? t("file.indexUnread")
+            : t("file.unindexed", { count: libraryNotice.count })}
         </p>
       )}
       {isReading && (

@@ -87,7 +87,7 @@ const KEYS: Record<string, readonly unknown[]> = {
   // `everything()`, which covers it.
   listAccessRequests: books.getListAccessRequestsQueryKey(7),
   // A book's highlights, a child of `/api/books/{id}` classified with notes
-  // and quotes: an import or a sharing change writes them through
+  // and quotes: an import, a sharing change or a delete writes them through
   // `useBookHighlights` and the import hook, which invalidate this key. A merge
   // moves them onto the survivor, and merging calls `everything()`.
   getHighlights: books.getGetHighlightsQueryKey(7),

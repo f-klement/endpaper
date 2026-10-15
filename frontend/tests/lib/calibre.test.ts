@@ -14,6 +14,7 @@ import { describe, expect, it } from "vitest";
 import * as calibre from "../../src/lib/calibre";
 import {
   CALIBRE_PLACEHOLDER,
+  formatOf,
   crossCheck,
   indexOpfFiles,
   identifiersWithScheme,
@@ -113,7 +114,7 @@ describe("reading a library", () => {
       description: "A desert planet.",
       seriesName: "Dune Chronicles",
       seriesIndex: 1,
-      formats: ["EPUB"],
+      files: [{ format: "EPUB", name: "Dune" }],
     });
   });
 
@@ -353,10 +354,33 @@ describe("a Calibre that moved its own schema", () => {
           description: null,
           seriesName: null,
           seriesIndex: null,
-          formats: [],
+          files: [],
         },
       ],
     });
+  });
+});
+
+describe("a library whose data table names no file", () => {
+  it("keeps each format and says it cannot be found", async () => {
+    // A `data` table without its `name` column is a schema this reader was
+    // not written against, and reading the column regardless lost the books.
+    const reading = await openSqlite(
+      await databaseOf(
+        ...CALIBRE_SCHEMA.filter((table) => !table.includes("TABLE data ")),
+        `CREATE TABLE data (id INTEGER PRIMARY KEY, book INTEGER, format TEXT)`,
+        ...ONE_BOOK,
+        `INSERT INTO data (book, format) VALUES (1, 'EPUB')`,
+      ),
+      engine,
+    );
+    if (!reading.ok) throw new Error(reading.failure);
+    const read = readCalibreLibrary(reading.database);
+    reading.database.close();
+
+    expect(read.ok && read.books[0]!.files).toEqual([
+      { format: "EPUB", name: null },
+    ]);
   });
 });
 
@@ -392,6 +416,17 @@ describe("finding the file beside a book", () => {
     expect(libraryPathOf(picked("Calibre/Herbert/Dune (1)/metadata.opf"))).toBe(
       "Herbert/Dune (1)/metadata.opf",
     );
+  });
+
+  it("finds the library's index at the root of the folder and nowhere else", () => {
+    const index = picked("Calibre/metadata.db");
+
+    expect(
+      calibre.libraryIndexIn([picked("Calibre/Old/metadata.db"), index]),
+    ).toBe(index);
+    expect(
+      calibre.libraryIndexIn([picked("Calibre/Old/metadata.db")]),
+    ).toBeUndefined();
   });
 
   it("is null for a file that came from an ordinary picker", () => {
@@ -454,7 +489,7 @@ const A_BOOK: CalibreBook = {
   description: null,
   seriesName: null,
   seriesIndex: null,
-  formats: ["EPUB"],
+  files: [{ format: "EPUB", name: "Dune" }],
 };
 
 const A_FILE: FileMetadata = {
@@ -472,6 +507,71 @@ const A_FILE: FileMetadata = {
   seriesName: null,
   seriesIndex: null,
 };
+
+/** A book holding one file of each of these formats. */
+function holding(...formats: string[]): CalibreBook {
+  return {
+    ...A_BOOK,
+    files: formats.map((format) => ({ format, name: "Dune" })),
+  };
+}
+
+describe("what kind of object the copy is", () => {
+  it("is an ebook when the library holds a file for it", () => {
+    expect(formatOf(holding("EPUB", "PDF"))).toBe("ebook");
+  });
+
+  it("is an audiobook when every file it holds is a recording", () => {
+    expect(formatOf(holding("M4B"))).toBe("audiobook");
+  });
+
+  it("is an ebook when the library holds both", () => {
+    // A book with a readable file is a book to read. Calling the pair an
+    // audiobook because one of the two is would be the wrong half.
+    expect(formatOf(holding("EPUB", "M4B"))).toBe("ebook");
+  });
+
+  it("is a comic when every file it holds is a comic archive", () => {
+    // The same file picked on the scan page is a comic, and one question with
+    // two answers is what this stops. `lib/fileName.FORMAT_FOR_EXTENSION` is
+    // the other half.
+    expect(formatOf(holding("CBZ"))).toBe("comic");
+  });
+
+  it("calls a CBR a comic although nothing here will parse one", () => {
+    // This answers what the copy is, not what can be read. The refusal in
+    // `lib/cbz.ts` is a refusal of a parser rather than of the format.
+    expect(formatOf(holding("CBR"))).toBe("comic");
+  });
+
+  it("is an ebook when the library holds a readable file and a comic", () => {
+    // The same rule the audio pair follows: a record with a readable file is a
+    // book to read, and one comic file among several does not rename it.
+    expect(formatOf(holding("EPUB", "CBZ"))).toBe("ebook");
+  });
+
+  it("says nothing for a record with no file at all", () => {
+    // Not an ebook. A Calibre record with no file is a book somebody
+    // catalogued, and answering `ebook` asserts something the library does not.
+    expect(formatOf(holding())).toBeNull();
+  });
+});
+
+describe("where a book's files sit in the library", () => {
+  it("is the book's directory and each file's name, the format its extension", () => {
+    const book = { ...A_BOOK, path: "Herbert, Frank/Dune (1)" };
+
+    expect(
+      book.files.map((file) => calibre.libraryFilePath(book, file)),
+    ).toEqual(["Herbert, Frank/Dune (1)/Dune.epub"]);
+  });
+
+  it("is nothing for a file whose row carries no name", () => {
+    expect(
+      calibre.libraryFilePath(A_BOOK, { format: "EPUB", name: null }),
+    ).toBeNull();
+  });
+});
 
 describe("checking a book against the file beside it", () => {
   it("fills a field the database left empty", () => {
@@ -1209,7 +1309,7 @@ const intake: Door<DatabaseSpec, CalibreReading | SqliteFailure> = {
           book.description,
           book.seriesName,
           ...book.authors,
-          ...book.formats,
+          ...book.files.flatMap(({ format, name }) => [format, name]),
           ...book.identifiers.flatMap(({ type, value }) => [type, value]),
         ];
         for (const field of fields) {

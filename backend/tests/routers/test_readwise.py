@@ -312,6 +312,24 @@ class TestAPull:
         assert pull(client, linked["headers"])["deleted"] == 1
         assert db.query(Highlight).count() == 0
 
+    def test_a_highlight_deleted_here_is_not_pulled_back(
+        self, client, linked, make_book, fake, db
+    ):
+        book = dune(make_book, linked["headers"])
+        fake.put(entry())
+        pull(client, linked["headers"])
+        row = db.query(Highlight).one()
+        res = client.delete(
+            f"/api/books/{book['id']}/highlights/{row.id}", headers=linked["headers"]
+        )
+        assert res.status_code == 204
+        fake.put(entry(7, mark(note="edited at Readwise", updated_at=now())))
+
+        counts = pull(client, linked["headers"])
+
+        assert (counts["created"], counts["skipped"]) == (0, 1)
+        assert db.query(Highlight).count() == 0
+
     def test_a_deletion_under_a_book_moved_out_of_books_removes_the_row(
         self, client, linked, make_book, fake, db
     ):

@@ -1,6 +1,7 @@
 /**
  * Hooks that belong to no single page: the session, going back, a write
- * pressed on one row of a list, and returning a loan.
+ * pressed on one row of a list, returning a loan, and asking which Book
+ * already holds a file.
  *
  * The session is hoisted to this level because App gates routing on it and
  * LoginPage writes it, so it belongs to neither.
@@ -36,10 +37,21 @@ import {
   useLogout,
   useMe,
 } from "../api/generated/endpoints/auth/auth";
+import { findFileHolders } from "../api/generated/endpoints/books/books";
 import { getReturnLoanMutationOptions } from "../api/generated/endpoints/loans/loans";
-import { AuthMode, type UserOut } from "../api/generated/model";
+import {
+  AuthMode,
+  type BookFormat,
+  type BookOut,
+  type DigitalReferenceIn,
+  type HoldersOut,
+  type UserOut,
+} from "../api/generated/model";
 import { useInvalidate } from "../api/invalidate";
 import { clearSession, setSession } from "../api/mutator";
+import { writeOneAtATime } from "../lib/bulkWrite";
+import { referenceFor } from "../lib/digitalReference";
+import { partialMd5 } from "../lib/fileDigest";
 
 const USER_KEY = "user";
 
@@ -377,4 +389,238 @@ export function useLoanReturn(): UseLoanReturnResult {
     markReturned: (loanId) => returning.mutate({ loanId }),
     error: returning.error,
   };
+}
+
+// ── Which Book already holds a file ─────────────────────────────────────────
+//
+// **Here because two pages ask it**: a folder picked on the scan page, and the
+// Calibre import on the library settings page. Both follow one landing rule,
+// so it has one home.
+
+/**
+ * Which copy of the title a file's ISBN already belongs to takes the file's
+ * location, or `undefined` where none may.
+ *
+ * **A copy of the same kind of object, or one nobody said the kind of.**
+ * Owner's ruling, 2026-10-15. A reference says where the file of
+ * *this row* is, and `books.format` is per row, so which row carries it already
+ * states the relationship: an EPUB carrying its print ISBN, which Calibre
+ * produces often, used to land as a file location on the household's
+ * hardcover. Where no copy matches, the file is a new copy in its own format,
+ * and that is a press the member makes (`addAsCopy`), never one this page
+ * guesses.
+ *
+ * **Every copy and not only the one the 409 names.** The server names the
+ * lowest id holder, and a copy shares its ISBN, so after `addAsCopy` made the
+ * ebook beside a hardcover every later 409 still names the hardcover. Asking
+ * that row alone offered the copy again on a re-pick, and the press made a
+ * duplicate ebook.
+ *
+ * An exact format first, then an unset one, so a recorded ebook beats a row
+ * nobody described. `copies` is in id order with the holder in it, which is
+ * what `GET /{id}/copies` answers. A row whose own format is blank matches
+ * only an unset copy; no file row is blank today, because every extension in
+ * `fileName.FORMAT_FOR_EXTENSION` answers a format.
+ */
+export function whereItLands(
+  copies: readonly Pick<BookOut, "id" | "format">[],
+  fileFormat: BookFormat | "",
+): number | undefined {
+  const exact = copies.find(
+    (copy) => copy.format != null && copy.format === fileFormat,
+  );
+  return (exact ?? copies.find((copy) => copy.format == null))?.id;
+}
+
+/**
+ * How many files one `POST /api/books/file-holders` may name.
+ *
+ * The schema's `maxItems` on `HoldersIn.files`, which
+ * `tests/pages/hooks.test.ts` recomputes from `openapi.json`. A pick
+ * larger than this is asked in chunks of it.
+ */
+export const FILES_PER_LOOKUP = 500;
+
+/**
+ * A Book already holding a file, and whether the file may land on it.
+ *
+ * `lands` is the landing rule's answer: the Book is the file's format or has
+ * none recorded. A holder of another format is a match the file may not be
+ * attached to, which is a reference left on a print row before that rule.
+ */
+export interface Held {
+  readonly bookId: number;
+  readonly lands: boolean;
+}
+
+/** Holders in the shape `whereItLands` reads. */
+function asCopies(holders: HoldersOut["holders"]) {
+  return holders.map((holder) => ({
+    id: holder.book_id,
+    format: holder.format,
+  }));
+}
+
+/**
+ * Which of the Books holding a file the row stands for, or `null` for none.
+ *
+ * **Only a holder the landing rule admits takes the file**, owner's ruling,
+ * 2026-10-15, whether it matched by location or by fingerprint: a match on a
+ * print row alone would otherwise write a new reference onto it. That case
+ * answers the first holder with `lands` false, and the add offers the file
+ * as its own copy, as a 409 of another format does.
+ *
+ * **Among the admitted, a holder at this very location first**, so a file
+ * whose sighting is on an unset copy is refreshed there rather than gaining a
+ * second reference on an exact copy that carries the same bytes elsewhere.
+ */
+function holderOf(
+  answer: HoldersOut,
+  fileFormat: BookFormat | "",
+): Held | null {
+  const first = answer.holders[0];
+  if (first === undefined) return null;
+  // `whereItLands` admits only the file's format or an unset one, which is
+  // the landing rule, so a print holder is never picked here.
+  const landing =
+    whereItLands(
+      asCopies(answer.holders.filter((holder) => holder.same_location)),
+      fileFormat,
+    ) ?? whereItLands(asCopies(answer.holders), fileFormat);
+  return landing === undefined
+    ? { bookId: first.book_id, lands: false }
+    : { bookId: landing, lands: true };
+}
+
+/**
+ * Where this file is, now with its fingerprint, while the `File` is in hand.
+ *
+ * **Only for a file that has a location**: a file picked one at a time has no
+ * reference to carry the digest, so nothing is read for it. A digest that
+ * cannot be read leaves the reference without one rather than losing it.
+ */
+export async function locate(
+  file: File,
+): Promise<DigitalReferenceIn | undefined> {
+  if (referenceFor(file) === null) return undefined;
+  const digest = await partialMd5(file).catch(() => null);
+  return referenceFor(file, digest) ?? undefined;
+}
+
+/**
+ * One book to ask about: its key, where each of its files is, and what format
+ * it would be.
+ *
+ * **Every file and not the first alone.** A Calibre book is a file per format,
+ * and the first may have been rewritten since the library was last picked
+ * (Calibre's metadata embedding does that) while the second is unchanged, so
+ * asking by one file calls a held book new.
+ */
+export interface HolderQuestion {
+  readonly key: string;
+  readonly references: readonly DigitalReferenceIn[];
+  readonly format: BookFormat | "";
+}
+
+/**
+ * The one answer a book's files add up to, or `undefined` for a book that was
+ * not answered.
+ *
+ * A holder the file may land on first, then any holder, so a book held in its
+ * own format is never reported as another kind's because one of its files is
+ * also held by a print copy. `null` only where every file was answered and none is held: one
+ * unanswered file leaves the book unasked rather than new.
+ */
+function oneAnswer(
+  answers: readonly (Held | null | undefined)[],
+): Held | null | undefined {
+  const held = answers.filter((one) => one != null);
+  const chosen = held.find((one) => one.lands) ?? held[0];
+  if (chosen !== undefined) return chosen;
+  return answers.every((one) => one === null) ? null : undefined;
+}
+
+/**
+ * Which Book already holds each of these books' files, by key.
+ *
+ * **One request a `FILES_PER_LOOKUP` files**, every file of every book, sent
+ * together.
+ *
+ * **A key missing from the answer was not answered**, because a chunk holding
+ * one of its files failed. What that means is the caller's: the scan page
+ * leaves the row unasked and asks again before it adds; the Settings import
+ * asks once and adds such a book as new, where a duplicate ISBN still answers
+ * 409. Never a reason to refuse the add: the lookup only stops a duplicate,
+ * and the add is what the member pressed.
+ */
+export async function askWhoHolds(
+  questions: readonly HolderQuestion[],
+): Promise<Map<string, Held | null>> {
+  const files = questions.flatMap((question) =>
+    question.references.map((reference) => ({ question, reference })),
+  );
+  const chunks: (typeof files)[] = [];
+  for (let start = 0; start < files.length; start += FILES_PER_LOOKUP) {
+    chunks.push(files.slice(start, start + FILES_PER_LOOKUP));
+  }
+  // Together rather than one after another: each is a read, and a pick
+  // needing more than one is a few thousand files.
+  const answered = await Promise.all(
+    chunks.map((chunk) =>
+      findFileHolders({
+        files: chunk.map(({ reference }) => ({
+          root_label: reference.root_label,
+          relative_path: reference.relative_path,
+          partial_md5: reference.partial_md5 ?? null,
+        })),
+      }).catch(() => undefined),
+    ),
+  );
+  const byKey = new Map<string, (Held | null | undefined)[]>();
+  chunks.forEach((chunk, at) => {
+    const answers = answered[at];
+    const usable = answers !== undefined && answers.length === chunk.length;
+    chunk.forEach(({ question }, index) => {
+      const answer = usable
+        ? holderOf(answers[index]!, question.format)
+        : undefined;
+      byKey.set(question.key, [...(byKey.get(question.key) ?? []), answer]);
+    });
+  });
+  const held = new Map<string, Held | null>();
+  for (const [key, answers] of byKey) {
+    const one = oneAnswer(answers);
+    if (one !== undefined) held.set(key, one);
+  }
+  return held;
+}
+
+/**
+ * Every reference onto one Book, one after another, stopping at the first the
+ * server refuses and rethrowing it.
+ *
+ * **One after another, through the loop every bulk write here shares**, for
+ * that loop's reason (one SQLite writer) and for the per book ceiling: the
+ * server holds it whatever arrives, and a client sending a book's files at
+ * once is the client that makes it race. What was reported before a refusal
+ * stays reported; each sighting is idempotent on its location.
+ */
+export async function reportEach(
+  references: readonly DigitalReferenceIn[],
+  post: (reference: DigitalReferenceIn) => Promise<unknown>,
+): Promise<void> {
+  // An object rather than a `let`: the loop's callbacks set it, and a
+  // narrowed `let` reads `undefined` after the await whatever they did.
+  const refusal: { refused: boolean; thrown?: unknown } = { refused: false };
+  await writeOneAtATime(references, {
+    post: (reference) =>
+      post(reference).catch((thrown: unknown) => {
+        refusal.refused = true;
+        refusal.thrown = thrown;
+        throw thrown;
+      }),
+    onProgress: () => {},
+    stopped: () => refusal.refused,
+  });
+  if (refusal.refused) throw refusal.thrown;
 }

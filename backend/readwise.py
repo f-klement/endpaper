@@ -16,6 +16,9 @@ a sync rather than an import that only ever adds.
 deleted at its source stored here and shared if they had shared it; removing it
 is what the member did.
 
+**A highlight the member deleted here stays deleted**, whatever a later page
+carries: `highlights.deleted_keys` says which, and it is counted as skipped.
+
 **Which Book a Readwise book is**: `Index` says. A book nothing matches waits,
 listed on the account page, and is never guessed onto a Book. Its highlights are
 not stored while it waits; once a Book matches it, the next pull asks Readwise
@@ -50,6 +53,7 @@ from sqlalchemy.orm import Session
 import credentials
 import errors
 import fetch
+import highlights
 import identity
 from database import SessionLocal
 from deadline import in_, left
@@ -371,7 +375,11 @@ def _write(
     marks: Sequence[ReadwiseHighlight],
     counts: Counts,
 ) -> None:
-    usable = [mark for mark in marks if mark.text is not None]
+    readable = [mark for mark in marks if mark.text is not None]
+    gone = highlights.deleted_keys(
+        db, member_id, HighlightSource.READWISE, [str(mark.id) for mark in readable]
+    )
+    usable = [mark for mark in readable if str(mark.id) not in gone]
     counts.skipped += len(marks) - len(usable)
     keys = [str(mark.id) for mark in usable]
     held: dict[str, Highlight] = {}

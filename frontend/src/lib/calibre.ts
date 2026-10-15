@@ -8,9 +8,10 @@
  * the network route rather than instead of it, and it is recorded in
  * `docs/decisions.md`.
  *
- * Pure: it takes something that answers SQL and returns records. It knows
- * nothing about files, WebAssembly or the API. `sqlite.ts` opens the database
- * and says why it could not; `bookBounds.ts` decides what the API will hold.
+ * Pure: it takes something that answers SQL and returns records. It reads no
+ * file, loads no WebAssembly and makes no request. `sqlite.ts` opens the
+ * database and says why it could not; `bookBounds.ts` decides what the API
+ * will hold; `calibreFolder.ts` pairs what this says with a picked folder.
  *
  * **A member supplied `metadata.db` is untrusted input.** Nothing here believes
  * the file about its own shape: every table and column is checked against
@@ -31,7 +32,7 @@
  *   nothing to be stored as and a row claiming one would lie.
  *   `identifiersWithScheme` is where a type becomes a scheme, and it states
  *   what each decline was measured against.
- * - **Tags, ratings and the book files themselves.** The reason is scope
+ * - **Tags and ratings.** The reason is scope
  *   rather than cost: this module returns records, and what an import writes is
  *   the import flow's decision. **Measured 2026-09-25**, the cost a tag puts on
  *   that flow is not one extra request a book. The import is one
@@ -54,9 +55,10 @@
  *   decline a subject because no field of their own record holds one, and a
  *   file's genre is uncontrolled free text either way, where a `tags` row is the
  *   vocabulary the member curated in their own library and the two routes above
- *   take it, so what is declined here is the writing rather than the names. The
- *   `data` table is still read, for the one fact it settles that the OPF cannot:
- *   whether a book has a file at all.
+ *   take it, so what is declined here is the writing rather than the names.
+ *   The book files are not declined: `data` names each one, and
+ *   `libraryFilePath` says where it sits, which is how an import records a
+ *   reference to it without opening it.
  * - **Custom columns.** They live in tables named per library
  *   (`custom_column_3`), so reading them means reading `custom_columns` first
  *   and mapping names a household invented onto fields this one defines.
@@ -85,6 +87,7 @@
  * the set has three members today rather than why it may only ever have three.
  */
 
+import { BookFormat } from "../api/generated/model";
 import { leadingYear } from "./year";
 import { parseIsbn } from "./isbn";
 import { stripIsbnPrefix } from "./isbnLabel";
@@ -148,6 +151,18 @@ export function libraryPathOf(file: File): string | null {
 }
 
 /**
+ * The library's index in a pick, or `undefined` for a pick that is not a
+ * library folder.
+ *
+ * **At the root of the folder picked and nowhere else**, because that is where
+ * Calibre keeps it and what makes every `books.path` relative to the folder.
+ * A folder holding a library one level down is an ordinary folder of files.
+ */
+export function libraryIndexIn(files: readonly File[]): File | undefined {
+  return files.find((file) => libraryPathOf(file) === DATABASE_FILENAME);
+}
+
+/**
  * The `metadata.opf` beside each book, keyed by the book's own directory.
  *
  * Keyed by directory rather than matched by title, because the directory is
@@ -181,6 +196,18 @@ export interface CalibreIdentifier {
 }
 
 /**
+ * One row of Calibre's `data` table: a file the library holds for a book.
+ *
+ * `format` is upper case as Calibre writes it. `name` is the file's name
+ * without its extension, and `null` where the row carried none, which leaves a
+ * file the library has and nothing here can find.
+ */
+export interface CalibreFile {
+  readonly format: string;
+  readonly name: string | null;
+}
+
+/**
  * What one row of `books` and everything linked to it asserts.
  *
  * The `SourceRecord` fields are the ones a picked file and a store's catalogue
@@ -198,13 +225,82 @@ export interface CalibreBook extends SourceRecord {
   readonly path: string;
   readonly identifiers: readonly CalibreIdentifier[];
   /**
-   * The formats `data` names for this book, upper case as Calibre writes them.
+   * The files `data` names for this book, one a format.
    *
    * The one fact the database settles that the file beside the book cannot: a
    * `metadata.opf` names no book file, so an OPF only library cannot say
    * whether a record is a book on a shelf or a book somebody wrote down.
    */
-  readonly formats: readonly string[];
+  readonly files: readonly CalibreFile[];
+}
+
+/**
+ * Where one of a book's files sits, relative to the library root, or `null`
+ * where the row does not say.
+ *
+ * **Calibre's layout, read as a fact about the files on disk**: a book's
+ * directory is `books.path`, and each format is `data.name` with the format
+ * lower cased as its extension. Normalised to NFC for `libraryPathOf`'s reason,
+ * so the two compare.
+ */
+export function libraryFilePath(
+  book: CalibreBook,
+  file: CalibreFile,
+): string | null {
+  if (book.path === "" || file.name === null) return null;
+  return `${book.path}/${file.name}.${file.format.toLowerCase()}`.normalize(
+    "NFC",
+  );
+}
+
+/**
+ * Calibre formats that mean a recording rather than a book to read.
+ *
+ * Calibre files an audiobook as an ordinary book with an audio file attached,
+ * so the format column is the only thing that separates the two. Everything
+ * else with a file is an ebook, and a record with no file at all is neither:
+ * see `formatOf`.
+ */
+const AUDIO_FORMATS = new Set(["M4A", "M4B", "MP3", "OGG", "OPUS", "AAC"]);
+
+/**
+ * Calibre formats that mean a comic rather than a book to read.
+ *
+ * The same shape as the audio set above and for the same reason: Calibre files
+ * a comic as an ordinary book with a comic file attached, so the format column
+ * is the only thing that separates it. **`CBR` is here although this app will
+ * not parse one**, because `formatOf` is answering what a copy is rather than
+ * what can be read: the refusal in `lib/cbz.ts` is a refusal of a parser, and
+ * `csv_import.FORMAT_GUESSES` already reads the word the same way.
+ */
+const COMIC_FORMATS = new Set(["CBZ", "CBR", "CB7", "CBT"]);
+
+/**
+ * What kind of object this copy is, or `null` when the library does not say.
+ *
+ * **Here rather than in a page**, because both doors a library comes in by ask
+ * it: the Settings import and a library folder picked on the scan page.
+ *
+ * **A book with no file is not an ebook**, and answering `ebook` for one would
+ * assert something the library does not: a Calibre record with no file is a
+ * book somebody catalogued, which is exactly what an unowned record looks like
+ * here. `null` is the value the column takes for "not said".
+ */
+export function formatOf(book: CalibreBook): BookFormat | null {
+  if (book.files.length === 0) return null;
+  const every = (kinds: ReadonlySet<string>) =>
+    book.files.every((file) => kinds.has(file.format.trim().toUpperCase()));
+
+  // **`every`, not `some`, for both**, which is the rule the audio arm already
+  // had: a record carrying an EPUB and a CBZ is a book that also has a comic
+  // file, and calling the whole record a comic on the strength of one file
+  // would be answering about the file rather than about the copy.
+  if (every(AUDIO_FORMATS)) return BookFormat.audiobook;
+  // Without this a CBZ imported from a Calibre library is an ebook while the
+  // same file picked on the scan page is a comic, which is one question with
+  // two answers. `lib/fileName.FORMAT_FOR_EXTENSION` is the other half.
+  if (every(COMIC_FORMATS)) return BookFormat.comic;
+  return BookFormat.ebook;
 }
 
 /** Why a database yielded no library. Closed, one sentence each on screen. */
@@ -675,8 +771,16 @@ export function readCalibreLibrary(db: SqliteDatabase): CalibreReading {
   const files = relation(
     tables,
     "data",
-    () => db.query("SELECT book, format FROM data"),
-    (row) => text(row["format"]),
+    () =>
+      db.query(
+        `SELECT book, format,
+                ${columnsIn(db, "data").has("name") ? "name" : "NULL AS name"}
+           FROM data`,
+      ),
+    (row): CalibreFile | null => {
+      const format = text(row["format"]);
+      return format === null ? null : { format, name: text(row["name"]) };
+    },
   );
 
   const identifiers = relation(
@@ -716,7 +820,7 @@ export function readCalibreLibrary(db: SqliteDatabase): CalibreReading {
       // every row, so reading it unconditionally files every standalone book
       // as the first volume of nothing.
       seriesIndex: seriesName === null ? null : decimal(row["series_index"]),
-      formats: files.get(id) ?? [],
+      files: files.get(id) ?? [],
     });
   }
 

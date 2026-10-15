@@ -56,8 +56,8 @@ class ReadwiseSyncOut(BaseModel):
     unchanged: int
     #: Rows removed because Readwise reported the highlight or its book deleted.
     deleted: int
-    #: Highlights Readwise sent that could not be stored: no text, or past the
-    #: length a highlight may have.
+    #: Highlights Readwise sent that were not stored: no text, past the length
+    #: a highlight may have, or deleted here by the member.
     skipped: int
     #: Books matching no Book here after this pull.
     waiting_count: int

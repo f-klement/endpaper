@@ -15,7 +15,6 @@ import { useInvalidate } from "../../api/invalidate";
 import { ApiError } from "../../api/mutator";
 
 import {
-  findFileHolders,
   getLookupIsbnQueryKey,
   getSearchBooksQueryKey,
   listCopies,
@@ -37,18 +36,21 @@ import { useGoogleBooksReady } from "../../app/hooks";
 import type {
   BookLookup,
   BookMatch,
-  BookOut,
   BookSearchOut,
   CatalogueSource,
   DigitalReferenceIn,
-  HoldersOut,
   LocationOut,
   TagOut,
 } from "../../api/generated/model";
 import { QUERY_FLOOR } from "../../lib/bookBounds";
 import { writeOneAtATime, type BulkProgress } from "../../lib/bulkWrite";
 import { referenceFor } from "../../lib/digitalReference";
-import { partialMd5 } from "../../lib/fileDigest";
+import {
+  formatOf,
+  libraryIndexIn,
+  readCalibreLibrary,
+  type CalibreBook,
+} from "../../lib/calibre";
 import { useTranslation } from "../../i18n";
 import type { FileFailure } from "../../lib/fileReaders";
 import type { AudioFailure, AudioTags } from "../../lib/audiobook";
@@ -71,9 +73,18 @@ import {
   rememberLastLocation,
 } from "../../lib/lastLocation";
 import {
+  askWhoHolds,
+  locate,
+  reportEach,
+  whereItLands,
+  type Held,
+  type HolderQuestion,
+} from "../hooks";
+import {
   blankDraft,
   blankPending,
   draftFromAudiobook,
+  draftFromCalibre,
   draftFromFile,
   draftFromName,
   draftFromMatch,
@@ -914,6 +925,16 @@ export interface ScannedEntry {
    */
   reference?: DigitalReferenceIn;
   /**
+   * Where this row's other files are, for a book that is several files.
+   *
+   * **Only a Calibre library's row has one**: Calibre keeps one book as one
+   * record with a file per format, so the row is one book and each of its
+   * files is a reference on it. Reported wherever `reference` is, after it;
+   * the holder lookup asks by `reference` alone, because Calibre keeps every
+   * format of a book in one directory and they move together.
+   */
+  moreReferences?: readonly DigitalReferenceIn[];
+  /**
    * The Book that already holds this row's file, `null` where none the member
    * can see does, and absent until somebody has asked.
    *
@@ -1004,6 +1025,25 @@ function claimedKeys(entries: readonly ScannedEntry[]): Set<string> {
  */
 function isAudio(extension: SupportedExtension): boolean {
   return FORMAT_FOR_EXTENSION[extension] === BookFormat.audiobook;
+}
+
+/**
+ * What a library folder's pick could not do the way it meant to, said beside
+ * the picker as `skipped` is.
+ *
+ * `index-unread`: the folder held a Calibre index this could not read, so its
+ * files were read one by one and a book with several formats may be a row
+ * per file. `unindexed`: book files the index names for no book, left out.
+ */
+export type LibraryNotice =
+  | { readonly kind: "index-unread" }
+  | { readonly kind: "unindexed"; readonly count: number };
+
+/** Every file a row says where it is, its own reference first. */
+function filesOf(entry: ScannedEntry): DigitalReferenceIn[] {
+  return entry.reference === undefined
+    ? []
+    : [entry.reference, ...(entry.moreReferences ?? [])];
 }
 
 /** The queue key for a scanned barcode. One book, one ISBN, one entry. */
@@ -1123,157 +1163,23 @@ export function isBeingDecided(entry: ScannedEntry): boolean {
 }
 
 /**
- * Which copy of the title a file's ISBN already belongs to takes the file's
- * location, or `undefined` where none may.
- *
- * **A copy of the same kind of object, or one nobody said the kind of.**
- * Owner's ruling, 2026-10-15. A reference says where the file of
- * *this row* is, and `books.format` is per row, so which row carries it already
- * states the relationship: an EPUB carrying its print ISBN, which Calibre
- * produces often, used to land as a file location on the household's
- * hardcover. Where no copy matches, the file is a new copy in its own format,
- * and that is a press the member makes (`addAsCopy`), never one this page
- * guesses.
- *
- * **Every copy and not only the one the 409 names.** The server names the
- * lowest id holder, and a copy shares its ISBN, so after `addAsCopy` made the
- * ebook beside a hardcover every later 409 still names the hardcover. Asking
- * that row alone offered the copy again on a re-pick, and the press made a
- * duplicate ebook.
- *
- * An exact format first, then an unset one, so a recorded ebook beats a row
- * nobody described. `copies` is in id order with the holder in it, which is
- * what `GET /{id}/copies` answers. A row whose own format is blank matches
- * only an unset copy; no file row is blank today, because every extension in
- * `fileName.FORMAT_FOR_EXTENSION` answers a format.
+ * The books a library's index holds, or `null` for an index this cannot
+ * read, whatever the reason: `readLibrary` treats every one alike.
  */
-function whereItLands(
-  copies: readonly Pick<BookOut, "id" | "format">[],
-  fileFormat: BookFormat | "",
-): number | undefined {
-  const exact = copies.find(
-    (copy) => copy.format != null && copy.format === fileFormat,
-  );
-  return (exact ?? copies.find((copy) => copy.format == null))?.id;
-}
-
-/**
- * How many files one `POST /api/books/file-holders` may name.
- *
- * The schema's `maxItems` on `HoldersIn.files`, which
- * `tests/pages/ScanPage/hooks.test.tsx` recomputes from `openapi.json`. A pick
- * larger than this is asked in chunks of it.
- */
-export const FILES_PER_LOOKUP = 500;
-
-/**
- * A Book already holding a file, and whether the file may land on it.
- *
- * `lands` is the landing rule's answer: the Book is the file's format or has
- * none recorded. A holder of another format is a match the file may not be
- * attached to, which is a reference left on a print row before that rule.
- */
-export interface Held {
-  readonly bookId: number;
-  readonly lands: boolean;
-}
-
-/**
- * Which of the Books holding a file the row stands for, or `null` for none.
- *
- * **Only a holder the landing rule admits takes the file**, owner's ruling,
- * 2026-10-15, whether it matched by location or by fingerprint: a match on a
- * print row alone would otherwise write a new reference onto it. That case
- * answers the first holder with `lands` false, and the add offers the file
- * as its own copy, as a 409 of another format does.
- *
- * **Among the admitted, a holder at this very location first**, so a file
- * whose sighting is on an unset copy is refreshed there rather than gaining a
- * second reference on an exact copy that carries the same bytes elsewhere.
- */
-/** Holders in the shape `whereItLands` reads. */
-function asCopies(holders: HoldersOut["holders"]) {
-  return holders.map((holder) => ({
-    id: holder.book_id,
-    format: holder.format,
-  }));
-}
-
-function holderOf(
-  answer: HoldersOut,
-  fileFormat: BookFormat | "",
-): Held | null {
-  const first = answer.holders[0];
-  if (first === undefined) return null;
-  // `whereItLands` admits only the file's format or an unset one, which is
-  // the landing rule, so a print holder is never picked here.
-  const landing =
-    whereItLands(
-      asCopies(answer.holders.filter((holder) => holder.same_location)),
-      fileFormat,
-    ) ?? whereItLands(asCopies(answer.holders), fileFormat);
-  return landing === undefined
-    ? { bookId: first.book_id, lands: false }
-    : { bookId: landing, lands: true };
-}
-
-/**
- * Where this file is, now with its fingerprint, while the `File` is in hand.
- *
- * **Only for a file that has a location**: a file picked one at a time has no
- * reference to carry the digest, so nothing is read for it. A digest that
- * cannot be read leaves the reference without one rather than losing it.
- */
-async function locate(file: File): Promise<DigitalReferenceIn | undefined> {
-  if (referenceFor(file) === null) return undefined;
-  const digest = await partialMd5(file).catch(() => null);
-  return referenceFor(file, digest) ?? undefined;
-}
-
-/** One file to ask about: its row, where it is, and what format it would be. */
-interface HolderQuestion {
-  readonly key: string;
-  readonly reference: DigitalReferenceIn;
-  readonly format: BookFormat | "";
-}
-
-/**
- * Which Book already holds each of these files, by row key.
- *
- * **A key missing from the answer was not answered**, because its chunk
- * failed; the caller leaves that row unasked rather than calling it new, and
- * the batch asks again. Never a reason to refuse the add: the lookup only
- * stops a duplicate, and the add is what the member pressed.
- */
-async function askWhoHolds(
-  questions: readonly HolderQuestion[],
-): Promise<Map<string, Held | null>> {
-  const held = new Map<string, Held | null>();
-  const chunks: (readonly HolderQuestion[])[] = [];
-  for (let start = 0; start < questions.length; start += FILES_PER_LOOKUP) {
-    chunks.push(questions.slice(start, start + FILES_PER_LOOKUP));
+async function booksIn(index: File): Promise<readonly CalibreBook[] | null> {
+  try {
+    const { openSqliteFile } = await import("../../lib/sqlite");
+    const opened = await openSqliteFile(index);
+    if (!opened.ok) return null;
+    try {
+      const reading = readCalibreLibrary(opened.database);
+      return reading.ok ? reading.books : null;
+    } finally {
+      opened.database.close();
+    }
+  } catch {
+    return null;
   }
-  // Together rather than one after another: each is a read, and a pick
-  // needing more than one is a few thousand files.
-  const answered = await Promise.all(
-    chunks.map((chunk) =>
-      findFileHolders({
-        files: chunk.map(({ reference }) => ({
-          root_label: reference.root_label,
-          relative_path: reference.relative_path,
-          partial_md5: reference.partial_md5 ?? null,
-        })),
-      }).catch(() => undefined),
-    ),
-  );
-  chunks.forEach((chunk, at) => {
-    const answers = answered[at];
-    if (answers === undefined || answers.length !== chunk.length) return;
-    chunk.forEach((question, index) =>
-      held.set(question.key, holderOf(answers[index]!, question.format)),
-    );
-  });
-  return held;
 }
 
 /**
@@ -1552,6 +1458,8 @@ export interface UseRapidIntakeResult {
    * the same folder twice does not count it twice.
    */
   skipped: number;
+  /** What the last pick said about a Calibre library in it, or `null`. */
+  libraryNotice: LibraryNotice | null;
   /** What the queue adds up to, for every control that quotes a figure. */
   figures: QueueFigures;
   /**
@@ -1721,6 +1629,11 @@ export function useRapidIntake(): UseRapidIntakeResult {
   // rest of the session. A count of the last pick is also the one a member can
   // act on, since it is the pick they just made.
   const [skipped, setSkipped] = useState(0);
+  // What the last pick said about a Calibre library in it, for the same
+  // reason and with the same lifetime as `skipped`.
+  const [libraryNotice, setLibraryNotice] = useState<LibraryNotice | null>(
+    null,
+  );
   // A ref rather than state: the paced run reads it between calls, and a state
   // read inside a running loop is the value it started with.
   const stopRequested = useRef(false);
@@ -1769,6 +1682,17 @@ export function useRapidIntake(): UseRapidIntakeResult {
       current.map((entry) =>
         entry.key === key ? { ...entry, ...patch } : entry,
       ),
+    );
+  }
+
+  /**
+   * Every file of a row onto one Book: its `reference`, then each of its
+   * `moreReferences`, one after another and stopping at the first the server
+   * refuses (`pages/hooks.reportEach`).
+   */
+  async function reportFiles(bookId: number, entry: ScannedEntry) {
+    await reportEach(filesOf(entry), (data) =>
+      reportReference.mutateAsync({ bookId, data }),
     );
   }
 
@@ -1843,11 +1767,25 @@ export function useRapidIntake(): UseRapidIntakeResult {
    * render counting twice.
    */
   function pickFiles(files: readonly File[]) {
+    // **A Calibre library is read through its index, not file by file**, the
+    // way the Settings import reads it: one row a book, with every format
+    // file on it, rather than a row per file the index already describes.
+    const index = libraryIndexIn(files);
+    if (index !== undefined) {
+      pickLibrary(files, index);
+      return;
+    }
+    walkFiles(files);
+  }
+
+  /** The ordinary walk: one row per file, or per audiobook. */
+  function walkFiles(files: readonly File[]) {
     const walked = files.map((file) => ({
       file,
       extension: supportedExtension(file.name),
     }));
     setSkipped(walked.filter((walk) => walk.extension === null).length);
+    setLibraryNotice(null);
 
     const supported = walked.filter(
       (walk): walk is { file: File; extension: SupportedExtension } =>
@@ -1893,6 +1831,147 @@ export function useRapidIntake(): UseRapidIntakeResult {
         })),
       ];
     });
+  }
+
+  /**
+   * Queue a Calibre library folder: one row while its index is read, then a
+   * row for each of its books.
+   *
+   * Keyed by the folder's name, so picking the same library again while it
+   * is read queues nothing, and its books by their Calibre id under it, so a
+   * second pick afterwards queues only books not already in the queue.
+   */
+  function pickLibrary(files: readonly File[], index: File) {
+    setSkipped(0);
+    setLibraryNotice(null);
+    const root = index.webkitRelativePath.split("/")[0]!;
+    const key = `calibre:${root}`;
+    setEntries((current) => {
+      if (current.some((entry) => entry.key === key)) return current;
+      void readLibrary(files, index, key);
+      return [
+        ...current,
+        {
+          key,
+          label: plainName(root),
+          isbn: "",
+          format: "",
+          state: "reading",
+          draft: null,
+        },
+      ];
+    });
+  }
+
+  /**
+   * Read a library folder through its index and queue its books.
+   *
+   * **Read only, by construction**: the index is a `File` the browser read
+   * into memory, and `lib/sqlite.ts` refuses a copy torn structurally, which
+   * a live library caught mid write can be; a copy whose pages agree but
+   * whose rows are mid transaction is read as it stands. **An index this
+   * cannot read leaves an ordinary folder**, so its files are read one by one
+   * as any folder's are, and `libraryNotice` says so: one row per file is
+   * what this door exists to replace, so the member is told why it is back.
+   *
+   * **A book file the index names for no book is left out and counted**, the
+   * walk's own rule for what it passes over.
+   *
+   * Each book is `draftFromCalibre`'s, checked against the `metadata.opf`
+   * beside it, and carries a reference for each of its files the folder holds,
+   * with the fingerprint read now, while the files are in hand. Then the
+   * holder lookup, once, as `readFiles` asks it.
+   */
+  async function readLibrary(
+    files: readonly File[],
+    index: File,
+    pendingKey: string,
+  ) {
+    const books = await booksIn(index);
+    if (books === null) {
+      setEntries((current) =>
+        current.filter((entry) => entry.key !== pendingKey),
+      );
+      walkFiles(files.filter((file) => file !== index));
+      setLibraryNotice({ kind: "index-unread" });
+      return;
+    }
+
+    const { crossCheckFolder, filesOfEachBook } =
+      await import("../../lib/calibreFolder");
+    const { books: checked } = await crossCheckFolder(books, files);
+    const paired = filesOfEachBook(checked, files);
+    const indexed = new Set([...paired.values()].flat());
+    // Not under a folder whose name starts with a dot at the library's root:
+    // Calibre keeps deleted books' files in `.caltrash`, and inviting the
+    // member to add them back would be the wrong sentence.
+    const unindexed = files.filter(
+      (file) =>
+        supportedExtension(file.name) !== null &&
+        !indexed.has(file) &&
+        !file.webkitRelativePath.split("/")[1]?.startsWith("."),
+    ).length;
+    if (unindexed > 0)
+      setLibraryNotice({ kind: "unindexed", count: unindexed });
+    const located = new Map(
+      await Promise.all(
+        [...paired].map(
+          async ([id, held]) =>
+            [
+              id,
+              (await Promise.all(held.map(locate))).filter(
+                (one) => one !== undefined,
+              ),
+            ] as const,
+        ),
+      ),
+    );
+
+    const rows: ScannedEntry[] = [];
+    const questions: HolderQuestion[] = [];
+    for (const book of checked) {
+      const key = `${pendingKey}:${book.id}`;
+      const format = formatOf(book) ?? "";
+      const draft = draftFromCalibre(book);
+      if (draft.title === "") {
+        // The one field the API requires, which `Unknown` in the index is
+        // not. Said on the row, as for a file that named no title.
+        rows.push({
+          key,
+          label: plainName(book.path.split("/").at(-1) || pendingKey),
+          isbn: "",
+          format,
+          state: "failed",
+          reason: { kind: "no-title" },
+          draft: null,
+        });
+        continue;
+      }
+      const [reference, ...more] = located.get(book.id) ?? [];
+      rows.push({
+        key,
+        label: plainName(draft.title),
+        isbn: draft.isbn,
+        format,
+        // `readFiles`' rule: a stated ISBN is offered the catalogue lookup,
+        // never sent to it at the pick.
+        state: draft.isbn === "" ? "found" : "stated",
+        draft,
+        reference,
+        moreReferences: more.length > 0 ? more : undefined,
+      });
+      if (reference) {
+        questions.push({ key, references: [reference, ...more], format });
+      }
+    }
+    setEntries((current) => {
+      const queued = new Set(current.map((entry) => entry.key));
+      return [
+        ...current.filter((entry) => entry.key !== pendingKey),
+        ...rows.filter((row) => !queued.has(row.key)),
+      ];
+    });
+    await recordHolders(questions);
   }
 
   /**
@@ -1981,7 +2060,7 @@ export function useRapidIntake(): UseRapidIntakeResult {
         const extension = supportedExtension(file.name);
         questions.push({
           key,
-          reference,
+          references: [reference],
           format: extension ? FORMAT_FOR_EXTENSION[extension] : "",
         });
       }
@@ -2407,7 +2486,7 @@ export function useRapidIntake(): UseRapidIntakeResult {
     // lookup at the pick is what lets the queue say so beforehand.
     const unasked = ready.flatMap((entry) =>
       entry.reference !== undefined && entry.heldBy === undefined
-        ? [{ key: entry.key, reference: entry.reference, format: entry.format }]
+        ? [{ key: entry.key, references: filesOf(entry), format: entry.format }]
         : [],
     );
     const heldNow = await askWhoHolds(unasked);
@@ -2429,10 +2508,7 @@ export function useRapidIntake(): UseRapidIntakeResult {
         // **Already in the library, so this is a sighting and not a book.**
         // Thrown on a refusal like any row, because nothing was added and the
         // row should stay where a member can see it did not take.
-        await reportReference.mutateAsync({
-          bookId: known.bookId,
-          data: entry.reference,
-        });
+        await reportFiles(known.bookId, entry);
         already += 1;
         return;
       }
@@ -2464,10 +2540,7 @@ export function useRapidIntake(): UseRapidIntakeResult {
           // pick is six hundred requests against one SQLite writer, which is
           // the reason the loop this runs in is sequential.
           try {
-            await reportReference.mutateAsync({
-              bookId: book.id,
-              data: entry.reference,
-            });
+            await reportFiles(book.id, entry);
           } catch {
             // Counted rather than swallowed. A member who pointed at a folder
             // so the library would know where their files are should not be
@@ -2500,9 +2573,7 @@ export function useRapidIntake(): UseRapidIntakeResult {
           if (target === undefined) throw new HeldInAnotherFormat(holder);
           // The row is a failure whichever way this goes, and it carries its
           // reason on screen, so a refusal here is not counted a second time.
-          await reportReference
-            .mutateAsync({ bookId: target, data: entry.reference })
-            .catch(() => undefined);
+          await reportFiles(target, entry).catch(() => undefined);
         }
         // Rethrown rather than reported here: the row is the loop's to record,
         // and swallowing it would count a book that is not in the catalogue.
@@ -2596,10 +2667,9 @@ export function useRapidIntake(): UseRapidIntakeResult {
   async function addAsCopy(key: string) {
     const entry = entries.find((one) => one.key === key);
     if (entry?.copyOf === undefined || entry.reference === undefined) return;
-    const reference = entry.reference;
     setIsAddingCopy(true);
     try {
-      await copyTheRow(key, entry.copyOf, entry.format, reference);
+      await copyTheRow(key, entry.copyOf, entry);
     } finally {
       setIsAddingCopy(false);
     }
@@ -2609,9 +2679,9 @@ export function useRapidIntake(): UseRapidIntakeResult {
   async function copyTheRow(
     key: string,
     holderId: number,
-    format: ScannedEntry["format"],
-    reference: DigitalReferenceIn,
+    entry: ScannedEntry,
   ) {
+    const format = entry.format;
     let copyId: number;
     try {
       const copy = await addAnotherCopy.mutateAsync({
@@ -2631,12 +2701,10 @@ export function useRapidIntake(): UseRapidIntakeResult {
       settle(key, { reason: reasonForError(error) });
       return;
     }
-    const referenced = await reportReference
-      .mutateAsync({ bookId: copyId, data: reference })
-      .then(
-        () => true,
-        () => false,
-      );
+    const referenced = await reportFiles(copyId, entry).then(
+      () => true,
+      () => false,
+    );
     // A copy is a new book, the reason `useScanFlow.addCopy` gives.
     invalidate.catalogue();
     setEntries((current) => current.filter((one) => one.key !== key));
@@ -2806,7 +2874,9 @@ export function useRapidIntake(): UseRapidIntakeResult {
       // The count goes with the queue it described. Leaving it would tell
       // somebody starting again what happened to a pick they discarded.
       setSkipped(0);
+      setLibraryNotice(null);
     },
+    libraryNotice,
     addAll: () => void addAll(),
     isAdding,
     addAsCopy: (key) => void addAsCopy(key),

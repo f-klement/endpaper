@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+- **A member deletes their own highlight on the book page, and it stays deleted.** Each of a
+  member's own highlights has a delete control, which asks first. The deletion is remembered by
+  the highlight's source and key, so a later KOReader import of the same file leaves it out and
+  reports how many it left out, and a Readwise pull that still carries the mark leaves it out
+  and counts it among the highlights it skipped. An import still never deletes anything, and
+  another member's highlights, shared or not, are untouched.
+
+- **A Calibre library brings where its files are.** Picking the library folder on the Settings
+  Calibre card now records each book file the index lists on its book: the file's location in the
+  library and KOReader's fingerprint, as for a file picked from a folder on the add page. A book
+  whose file is already in the library is recognised before anything is added and its location
+  refreshed instead, and a file is never recorded on a book of another kind, such as the
+  household's hardcover, whether the file or the ISBN found it: such books are counted and left
+  for the add page, which offers each as its own copy. A folder with `metadata.db` at its top,
+  picked on the add page, is read through that index the same way: one row for each book, carrying
+  every one of its files, through the same queue, holder lookup and landing rule as any picked
+  folder. An index that cannot be read leaves an ordinary folder, read file by file, and the page
+  says so. Nothing opens the library for writing: the index is read in the browser from the picked
+  file. One book's file references are now counted and stored as one step on the server, so two
+  reports at once cannot take a book past its sixteen.
+
 - **A book file's own ISBN is looked up in the catalogue.** A book file that states its own ISBN is
   offered the catalogue lookup a scanned barcode gets, through the same paced press as the file
   name lookup. The catalogue's record wins every field it answers, and the file's own fields fill

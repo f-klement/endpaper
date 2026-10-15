@@ -594,6 +594,7 @@ const FILE_READERS = [
   "lib/adobeDigitalEditions.ts",
   "lib/audiobook.ts",
   "lib/calibre.ts",
+  "lib/calibreFolder.ts",
   "lib/cbz.ts",
   "lib/epub.ts",
   "lib/fb2.ts",

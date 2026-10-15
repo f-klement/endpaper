@@ -3566,6 +3566,10 @@ class TestEveryTextCeilingIsInstalledWithItsByteArm:
             # envelope's reason. Probed with a lead byte by
             # `tests/test_readwise.py::TestTheEnvelopeCeilingIsOnBytes`.
             "ck_member_logins_envelope",
+            # Its one column refuses a NUL outright, so it cannot be a row in
+            # `_TEXT_CEILINGS`. Probed with a lead byte by
+            # `tests/test_highlights.py::TestTheRememberedKeyIsBoundedInBytes`.
+            "ck_deleted_highlights_bounds",
         }
 
         assert set(_byte_armed_constraints()) == probed, (

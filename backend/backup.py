@@ -67,6 +67,7 @@ from models import (
     CustomField,
     CustomFieldValue,
     DegradingEnum,
+    DeletedHighlight,
     DigitalReference,
     Highlight,
     KosyncDocument,
@@ -167,6 +168,11 @@ _TABLES: tuple[tuple[str, Any, Table], ...] = tuple(
         # Absent from `_REQUIRED_TABLES` for the reason `quotes` is: an archive
         # taken before highlights existed restores with none.
         ("highlights", Highlight),
+        # After the highlights whose deletions it remembers; its only foreign
+        # key is `users`. An archive that left it out would restore a library
+        # whose next import brings back every highlight a member deleted.
+        # Absent from `_REQUIRED_TABLES` for the reason `quotes` is.
+        ("deleted_highlights", DeletedHighlight),
         # After the quotes, which it sits beside for the same reason: its only
         # foreign key is `books`, which is long since inserted by here.
         #

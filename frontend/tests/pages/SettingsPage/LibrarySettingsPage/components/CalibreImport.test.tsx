@@ -26,6 +26,7 @@ function preview(overrides: Partial<CalibrePreview> = {}): CalibrePreview {
     withIsbn: 568,
     withSeries: 120,
     withFile: 880,
+    located: 0,
     crossChecked: 0,
     filled: 0,
     disagreed: 0,
@@ -35,7 +36,15 @@ function preview(overrides: Partial<CalibrePreview> = {}): CalibrePreview {
 }
 
 function outcome(overrides: Partial<CalibreResult> = {}): CalibreResult {
-  return { added: 890, failures: [], stopped: false, ...overrides };
+  return {
+    added: 890,
+    failures: [],
+    stopped: false,
+    already: 0,
+    otherFormat: 0,
+    unreferenced: 0,
+    ...overrides,
+  };
 }
 
 type Props = React.ComponentProps<typeof CalibreImport>;
@@ -126,7 +135,7 @@ describe("CalibreImport", () => {
     renderCard({ preview: null });
     expect(
       screen.queryByRole("button", {
-        name: "Check against the files beside the books",
+        name: "Pick the library folder",
       }),
     ).not.toBeInTheDocument();
   });
@@ -135,7 +144,7 @@ describe("CalibreImport", () => {
     renderCard({ preview: preview() });
     expect(
       screen.getByRole("button", {
-        name: "Check against the files beside the books",
+        name: "Pick the library folder",
       }),
     ).toBeInTheDocument();
   });
@@ -144,12 +153,12 @@ describe("CalibreImport", () => {
     renderCard({ preview: preview() });
     const opened = vi.fn<() => void>();
     screen
-      .getByLabelText("Check against the files beside the books")
+      .getByLabelText("Pick the library folder")
       .addEventListener("click", opened);
 
     await userEvent.setup().click(
       screen.getByRole("button", {
-        name: "Check against the files beside the books",
+        name: "Pick the library folder",
       }),
     );
 
@@ -164,9 +173,7 @@ describe("CalibreImport", () => {
     expect(
       screen.getByLabelText("Choose a copy of metadata.db"),
     ).toBeDisabled();
-    expect(
-      screen.getByLabelText("Check against the files beside the books"),
-    ).toBeDisabled();
+    expect(screen.getByLabelText("Pick the library folder")).toBeDisabled();
   });
 
   it("counts the books it would write, not the rows it read", () => {
@@ -221,6 +228,30 @@ describe("CalibreImport", () => {
       screen.getByText(/Dune · already in the catalogue/),
     ).toBeInTheDocument();
     expect(screen.getByText(/Solaris · not added/)).toBeInTheDocument();
+  });
+
+  it("says how many books' files the folder holds before anything is written", () => {
+    renderCard({ preview: preview({ located: 880 }) });
+
+    expect(
+      screen.getByText(/880 have their files in the folder you picked/),
+    ).toBeInTheDocument();
+  });
+
+  it("says which books were not added because the library already had them", () => {
+    // Neither is a failure, and neither is in `added`: a member importing a
+    // library twice is checking that nothing was doubled.
+    renderCard({
+      result: outcome({ added: 0, already: 880, otherFormat: 3 }),
+    });
+
+    expect(
+      screen.getByText(/880 were already in your library/),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/3 are already in your library as another kind of copy/),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/without where all/)).not.toBeInTheDocument();
   });
 
   it("says it was stopped rather than reporting a short count as the whole", () => {

@@ -52,6 +52,7 @@ import {
 import { CALIBRE_SCHEMA, databaseOf } from "../../../lib/sqliteFixtures";
 import { mockApi, renderHookWithProviders, type MockApi } from "../../../utils";
 import { sourceText } from "../../../sourceModules";
+import { partialMd5 } from "../../../../src/lib/fileDigest";
 
 const require = createRequire(import.meta.url);
 
@@ -63,10 +64,19 @@ interface Posted {
 const posted: Posted[] = [];
 /** Statuses to answer with, one per request, `null` for the ordinary 201. */
 let answers: (number | null)[] = [];
+/** The Books the holder lookup names for every file it is asked about. */
+let holdersAnswer: { book_id: number; format: string | null }[] = [];
+/** The Book a 409 names, and that Book's copies, for the duplicate arm. */
+let conflict: {
+  holder: number;
+  copies: { id: number; format: string | null }[];
+} | null = null;
 
 beforeEach(() => {
   posted.length = 0;
   answers = [];
+  holdersAnswer = [];
+  conflict = null;
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {
@@ -89,20 +99,54 @@ beforeEach(() => {
           ? (JSON.parse(init.body) as Record<string, unknown>)
           : {};
       posted.push({ url, body });
+      if (url.endsWith("/api/books/file-holders")) {
+        const asked = (body as { files: unknown[] }).files;
+        return {
+          ok: true,
+          status: 200,
+          headers: new Headers({ "content-type": "application/json" }),
+          json: async () =>
+            asked.map(() => ({
+              holders: holdersAnswer.map((holder, index) => ({
+                book_id: holder.book_id,
+                format: holder.format,
+                reference_id: index + 1,
+                same_location: true,
+                same_partial_md5: true,
+              })),
+            })),
+        } as unknown as Response;
+      }
+      if (conflict !== null && url.endsWith(`/${conflict.holder}/copies`)) {
+        const { copies } = conflict;
+        return {
+          ok: true,
+          status: 200,
+          headers: new Headers({ "content-type": "application/json" }),
+          json: async () => copies,
+        } as unknown as Response;
+      }
       const status = answers.shift() ?? null;
+      const detail =
+        status === 409 && conflict !== null
+          ? { message: "no", book_id: conflict.holder }
+          : "no";
       return {
         ok: status === null,
         status: status ?? 201,
         headers: new Headers({ "content-type": "application/json" }),
         json: async () =>
-          status === null ? { id: posted.length } : { detail: "no" },
+          status === null ? { id: posted.length } : { detail },
       } as unknown as Response;
     }),
   );
 });
 
 /** A library with `count` books, the odd ones carrying an ISBN and a series. */
-async function libraryFile(count: number): Promise<File> {
+async function libraryFile(
+  count: number,
+  formats: readonly string[] = ["EPUB"],
+): Promise<File> {
   const rows: string[] = [];
   for (let id = 1; id <= count; id += 1) {
     rows.push(
@@ -111,7 +155,10 @@ async function libraryFile(count: number): Promise<File> {
                  'Author/Book ${id} (${id})')`,
       `INSERT INTO authors (id, name) VALUES (${id}, 'Author ${id}')`,
       `INSERT INTO books_authors_link (book, author) VALUES (${id}, ${id})`,
-      `INSERT INTO data (book, format, name) VALUES (${id}, 'EPUB', 'Book ${id}')`,
+      ...formats.map(
+        (format) =>
+          `INSERT INTO data (book, format, name) VALUES (${id}, '${format}', 'Book ${id}')`,
+      ),
     );
     if (id % 2 === 1) {
       rows.push(
@@ -301,6 +348,9 @@ describe("writing the library", () => {
       added: 3,
       failures: [],
       stopped: false,
+      already: 0,
+      otherFormat: 0,
+      unreferenced: 0,
     });
   });
 
@@ -339,6 +389,9 @@ describe("writing the library", () => {
       added: 2,
       failures: [{ title: "Book 2", status: 409 }],
       stopped: false,
+      already: 0,
+      otherFormat: 0,
+      unreferenced: 0,
     });
   });
 
@@ -358,6 +411,134 @@ describe("writing the library", () => {
     // The preview survives a stop, which is what lets somebody press again
     // rather than picking the file a second time.
     expect(result.current.preview).not.toBeNull();
+  });
+});
+
+/** A book file as a directory picker hands it over, under the library root. */
+function bookFile(path: string): File {
+  const file = new File(["PK the bytes of a book"], path.split("/").pop()!);
+  Object.defineProperty(file, "webkitRelativePath", {
+    value: `Calibre/${path}`,
+  });
+  return file;
+}
+
+describe("recording where the library's files are", () => {
+  /** Read one book, pick the folder holding its files, and import it. */
+  async function importWithItsFile(formats: readonly string[] = ["EPUB"]) {
+    const { result } = importHook();
+    await act(async () => result.current.choose(await libraryFile(1, formats)));
+    await waitFor(() => expect(result.current.preview).not.toBeNull());
+    const files = formats.map((format) =>
+      bookFile(`Author/Book 1 (1)/Book 1.${format.toLowerCase()}`),
+    );
+    const file = files[0]!;
+    await act(async () => result.current.crossCheck(files));
+    await waitFor(() => expect(result.current.preview?.located).toBe(1));
+    await act(async () => result.current.confirm());
+    await waitFor(() => expect(result.current.result).not.toBeNull());
+    return { result, file };
+  }
+
+  it("says where each book's file is, with its fingerprint, once the book exists", async () => {
+    const { result, file } = await importWithItsFile();
+
+    const reported = posted.filter((one) =>
+      one.url.endsWith("/digital-references"),
+    );
+    expect(reported).toHaveLength(1);
+    expect(reported[0]!.body).toEqual({
+      root_label: "Calibre",
+      relative_path: "Author/Book 1 (1)/Book 1.epub",
+      root_confirmed: true,
+      size_bytes: file.size,
+      file_modified_at: expect.any(String),
+      partial_md5: await partialMd5(file),
+    });
+    expect(result.current.result).toMatchObject({ added: 1, unreferenced: 0 });
+  });
+
+  it("adds no second book for a library imported twice, and refreshes where each file is", async () => {
+    holdersAnswer = [{ book_id: 7, format: "ebook" }];
+
+    const { result } = await importWithItsFile(["EPUB", "PDF"]);
+
+    expect(posted.some((one) => one.url.endsWith("/api/books/scan"))).toBe(
+      false,
+    );
+    expect(
+      posted
+        .filter((one) => one.url.endsWith("/api/books/7/digital-references"))
+        .map((one) => one.body["relative_path"]),
+    ).toEqual([
+      "Author/Book 1 (1)/Book 1.epub",
+      "Author/Book 1 (1)/Book 1.pdf",
+    ]);
+    expect(result.current.result).toMatchObject({ added: 0, already: 1 });
+  });
+
+  it("counts a book added whose files could not be recorded", async () => {
+    // The book is in, the reference refused: a member told nothing would
+    // believe the library knows where the file is.
+    answers = [null, 500];
+
+    const { result } = await importWithItsFile();
+
+    expect(result.current.result).toMatchObject({ added: 1, unreferenced: 1 });
+  });
+
+  it("puts the files of a duplicate ISBN on the copy of their own kind", async () => {
+    answers = [409];
+    conflict = {
+      holder: 7,
+      copies: [
+        { id: 7, format: "hardcover" },
+        { id: 9, format: "ebook" },
+      ],
+    };
+
+    const { result } = await importWithItsFile();
+
+    expect(
+      posted
+        .filter((one) => one.url.endsWith("/digital-references"))
+        .map((one) => one.url),
+    ).toEqual(["/api/books/9/digital-references"]);
+    expect(result.current.result?.failures).toEqual([
+      { title: "Book 1", status: 409 },
+    ]);
+  });
+
+  it("says a duplicate ISBN held only by another kind of copy is that, not already in the catalogue", async () => {
+    answers = [409];
+    conflict = { holder: 7, copies: [{ id: 7, format: "hardcover" }] };
+
+    const { result } = await importWithItsFile();
+
+    expect(result.current.result).toMatchObject({
+      added: 0,
+      otherFormat: 1,
+      failures: [],
+    });
+    expect(
+      posted.filter((one) => one.url.endsWith("/digital-references")),
+    ).toEqual([]);
+  });
+
+  it("puts no file on a book of another kind, and adds no book beside it", async () => {
+    // The landing rule: the EPUB is not where the household's hardcover is.
+    holdersAnswer = [{ book_id: 7, format: "hardcover" }];
+
+    const { result } = await importWithItsFile();
+
+    expect(
+      posted.filter(
+        (one) =>
+          one.url.endsWith("/api/books/scan") ||
+          one.url.endsWith("/digital-references"),
+      ),
+    ).toEqual([]);
+    expect(result.current.result).toMatchObject({ added: 0, otherFormat: 1 });
   });
 });
 
@@ -1376,7 +1557,7 @@ describe("importing KOReader highlights", () => {
     api.on("/api/books/file-holders", { body: holders([7]) }, "POST");
     api.on(
       "/api/books/7/highlights/koreader",
-      { body: { created: 1, updated: 0, unchanged: 0 } },
+      { body: { created: 1, updated: 0, unchanged: 0, left_deleted: 1 } },
       "POST",
     );
 
@@ -1403,6 +1584,7 @@ describe("importing KOReader highlights", () => {
       created: 1,
       updated: 0,
       unchanged: 0,
+      left_deleted: 1,
       oversized: 0,
     });
   });
