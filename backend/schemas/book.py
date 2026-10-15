@@ -1685,8 +1685,9 @@ class IdentifierBackfillOut(BaseModel):
 
     **The four outcomes are four different things to do next**, which is the
     whole reason this is not one number. `enriched` is books that gained at
-    least one field. `not_found` is Google saying it has no such volume, which
-    is permanent and means the identifier is stale or the book was delisted.
+    least one field. `not_found` is Google saying it has no such volume, or
+    serving one under a different id, which is permanent and means the
+    identifier is stale or the book was delisted.
     `unavailable` is Google not answering, which is transient and worth pressing
     again. `unresolvable` is a stored value that is not a volume id and so was
     never asked about at all: also permanent, and **not** Google's answer, which
@@ -1696,8 +1697,10 @@ class IdentifierBackfillOut(BaseModel):
     **There is no `unchanged`, and a design critic is why.** One was declared,
     for books whose record answered and carried nothing new. It could not
     happen: a candidate is a Book with no `google_books_id`, every volume
-    resource carries one, and `evidence` writes it, so every answered book
-    gains at least that field. The only body that reached it was a 200 with no
+    resource carries one, a resource carrying another id than the one asked
+    for counts as `not_found`, and `evidence` writes the id of every other,
+    so every answered book gains at least that field. The only body that
+    reached it was a 200 with no
     `id`, which `google_books.lookup_by_volume_id` now refuses as not a volume.
     A count that cannot be non zero is a fact about the code stated on the wire.
 

@@ -9,7 +9,9 @@ definitions of empty between them. This module is the one place that decides:
   stored blank is a gap to fill, an incoming blank asserts nothing, and a column
   a refresh clears is written null, never blank;
 - **which columns evidence may reach**: cells of `book_columns`, never
-  `WORK_IDENTITY` outside a refresh, never what a row claims about the Library;
+  `WORK_IDENTITY` outside a refresh, never `SELECTED_ONLY` from a record no
+  Member selected (but `google_books_id` from a lookup by that same id,
+  `apply_own_volume`), never what a row claims about the Library;
 - **bounding**: a record is held to `BookMatch` field by field before it writes;
 - **cover precedence**: a cover a Member uploaded outranks any remote one;
 - **whether Classifications cross**: only through a door a Member's choice
@@ -68,6 +70,17 @@ REFRESHED: Final[tuple[str, ...]] = (
     "language", "page_count",
 )
 
+#: The work's details a record nobody selected does not write: `categories`, the
+#: series fields and `google_books_id`. Such a record writes what a refresh
+#: writes and no more, owner's ruling of 2026-10-15, with one exception:
+#: `apply_own_volume` writes `google_books_id` when it equals the id looked up.
+#: The id is an identity claim, which volume this Book is, and a wrong one
+#: silently drops the Book out of the identifier backfill's candidates. Derived
+#: from `REFRESHED` so the two unselected paths cannot drift apart.
+SELECTED_ONLY: Final[tuple[str, ...]] = tuple(
+    name for name in book_columns.WORK_DETAIL if name not in REFRESHED
+)
+
 #: The columns a refresh clears when the source no longer asserts them: five of
 #: `REFRESHED`, and the cover unless the Member uploaded it. The other three keep
 #: what the Book had: `title` because the column is not nullable, `language` and
@@ -103,8 +116,9 @@ def apply_record(book: Book, record: Record, policy: Policy) -> list[str]:
     No Classification crosses, under any policy: nobody selected this record.
     `as_match()` carries none and this door reads none.
 
-    `FILL_GAPS` and `OVERWRITE` write `book_columns.WORK_DETAIL` and the cover,
-    off the record bounded by `BookMatch` one field at a time. `REFRESH` writes
+    `FILL_GAPS` and `OVERWRITE` write `book_columns.WORK_DETAIL` less
+    `SELECTED_ONLY`, and the cover, off the record bounded by `BookMatch` one
+    field at a time. `REFRESH` writes
     `REFRESHED` and the cover straight off the record: `Record.__post_init__`
     already cleared every scalar the columns cannot hold, so a value too wide
     arrives as None and is read like a source that carries no such field.
@@ -116,7 +130,35 @@ def apply_record(book: Book, record: Record, policy: Policy) -> list[str]:
         if _write_cover(book, record.cover_url, policy):
             changed.append("cover_url")
         return changed
-    return _apply_match(book, _bounded_match(record.as_match()), policy)
+    return _apply_match(book, _unselected(record, SELECTED_ONLY), policy)
+
+
+def apply_own_volume(
+    book: Book, record: Record, volume_id: str, policy: Policy
+) -> list[str]:
+    """Apply the record a lookup by the Book's own `volume_id` returned.
+
+    The door for the identifier backfill and for `POST /{id}/enrich` when the
+    volume id is what found the record. What `apply_record` writes, and
+    `google_books_id` as well, **only where the record's id is `volume_id`**:
+    then the id is the one the Member's own import carried rather than a
+    guess. Compared here rather than trusted to the caller, because
+    `google_books.lookup_by_volume_id` checks that the payload's id is a
+    volume id, not that it is the one asked for, and a caller's flag is one
+    edit from covering a title search. Writing it is what takes the Book out
+    of the backfill's candidate set.
+
+    `REFRESH` is refused, for `confirm`'s reason: it reads a `Record` whole
+    rather than through a match.
+    """
+    if policy is Policy.REFRESH:
+        raise ValueError("A refresh is found by ISBN, not by a volume id")
+    withheld = tuple(
+        name
+        for name in SELECTED_ONLY
+        if name != "google_books_id" or record.google_books_id != volume_id
+    )
+    return _apply_match(book, _unselected(record, withheld), policy)
 
 
 def confirm(book: Book, match: BookMatch, db: Session, policy: Policy) -> list[str]:
@@ -188,6 +230,17 @@ def _apply_match(book: Book, match: BookMatch, policy: Policy) -> list[str]:
     if _write_cover(book, match.cover_url, policy):
         changed.append("cover_url")
     return changed
+
+
+def _unselected(record: Record, withheld: tuple[str, ...]) -> BookMatch:
+    """A record nobody selected, bounded, asserting nothing about `withheld`.
+
+    Cleared on the match rather than skipped in `_apply_match`'s loop, so that
+    loop stays the one set `confirm` writes. A cleared field asserts nothing
+    under `FILL_GAPS` and `OVERWRITE` alike, which `_write` already holds.
+    """
+    match = _bounded_match(record.as_match())
+    return match.model_copy(update=dict.fromkeys(withheld))
 
 
 def _write(book: Book, values: Mapping[str, object], policy: Policy) -> list[str]:

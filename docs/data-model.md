@@ -517,8 +517,11 @@ entries a member declared the same book are two ASINs, and a key on the scheme a
 answer that with an `IntegrityError` instead of keeping the fact.
 
 **Not `books.google_books_id` either**, though that column holds the same kind of value.
-It records which Google volume this row's *metadata* came from, enrichment is the only writer
-that takes one from a catalogue, and a refresh with overwrite on retypes it. A row here
+It records which Google volume this row's *metadata* came from. Only a candidate a Member
+picked and a lookup by the book's own volume id (the identifier backfill, or enrichment when
+that id found the record, and only where the record carries that id) take one from a
+catalogue. A picked candidate with overwrite on retypes it, and so does enrichment with
+overwrite on when the book's own volume id found the record. A row here
 records which volume a member's own export says they own, which is a claim rather than a
 preference.
 

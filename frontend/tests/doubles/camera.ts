@@ -21,18 +21,31 @@ export const stopTrack = vi.fn<MediaStreamTrack["stop"]>();
 export const getUserMedia = vi.fn<MediaDevices["getUserMedia"]>();
 
 /**
+ * What a phone's back camera reports from `getSettings()`.
+ *
+ * The default, so every scanner test that does not ask about the camera's
+ * direction runs on the path a phone takes. A laptop's front camera reports
+ * `user`, or nothing: pass `{}` for that.
+ */
+const REAR_CAMERA: MediaTrackSettings = { facingMode: "environment" };
+
+/**
  * A stream with one video track.
  *
  * `capabilities` is what `getCapabilities()` reports, which is how the
  * component decides whether to offer the torch: a camera with no `torch` key
- * has no light, and the control must not appear.
+ * has no light, and the control must not appear. `settings` is what
+ * `getSettings()` reports, which is how it decides whether the camera may be
+ * facing the member.
  */
 export function fakeStream(
   capabilities: Record<string, unknown> = {},
+  settings: MediaTrackSettings = REAR_CAMERA,
 ): MediaStream {
   const track = {
     stop: stopTrack,
     getCapabilities: () => capabilities,
+    getSettings: () => settings,
     applyConstraints: vi
       .fn<MediaStreamTrack["applyConstraints"]>()
       .mockResolvedValue(undefined),

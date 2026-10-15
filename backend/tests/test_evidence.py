@@ -525,6 +525,73 @@ class TestARefreshWritesExactlyItsNineColumns:
         assert "cover_url" not in changed
 
 
+#: Spelled out for `_REFRESHED_NINE`'s reason. A record no Member selected
+#: writes what a refresh writes, less `title`, which is work identity outside a
+#: refresh. Owner's ruling of 2026-10-15.
+_ENRICHED_EIGHT: Final = _REFRESHED_NINE - {"title"}
+_SELECTED_ONLY: Final = frozenset(
+    {"categories", "series_name", "series_index", "google_books_id"}
+)
+
+
+class TestARecordNobodySelectedWritesWhatARefreshWrites:
+    @pytest.mark.parametrize(
+        ("policy", "held"),
+        [(Policy.FILL_GAPS, {"title": "Held"}), (Policy.OVERWRITE, _HELD)],
+        ids=["fill_gaps", "overwrite"],
+    )
+    def test_enrichment_writes_the_eight_and_nothing_else(self, policy, held):
+        book = Book(**held)
+
+        changed = evidence.apply_record(book, Record(**_ASSERTED), policy)
+
+        assert sorted(changed) == sorted(_ENRICHED_EIGHT)
+        assert set(evidence.SELECTED_ONLY) == _SELECTED_ONLY
+        assert book.title == "Held"
+        assert (
+            book.categories, book.series_name, book.series_index, book.google_books_id
+        ) == tuple(held.get(name) for name in (
+            "categories", "series_name", "series_index", "google_books_id"
+        ))
+
+    def test_an_own_volume_record_writes_the_eight_and_the_volume_id(self):
+        book = Book(title="Held")
+
+        changed = evidence.apply_own_volume(
+            book, Record(**_ASSERTED), "gbid00000001", Policy.FILL_GAPS
+        )
+
+        assert sorted(changed) == sorted(_ENRICHED_EIGHT | {"google_books_id"})
+        assert book.google_books_id == "gbid00000001"
+        assert (book.categories, book.series_name, book.series_index) == (
+            None, None, None,
+        )
+
+    def test_a_record_carrying_another_id_than_the_one_looked_up_writes_no_id(self):
+        book = Book(title="Held")
+
+        changed = evidence.apply_own_volume(
+            book, Record(**_ASSERTED), "otherotherid", Policy.FILL_GAPS
+        )
+
+        assert sorted(changed) == sorted(_ENRICHED_EIGHT)
+        assert book.google_books_id is None
+
+    def test_a_selected_record_writes_the_four(self, db):
+        """The picker is now the only door for them, so its half is pinned."""
+        book = Book(title="Held")
+
+        changed = evidence.confirm(
+            book, BookMatch(**Record(**_ASSERTED).as_match()), db, Policy.FILL_GAPS
+        )
+
+        assert set(changed) >= _SELECTED_ONLY
+        assert (book.series_name, book.series_index, book.google_books_id) == (
+            "Dune Chronicles", 2.0, "gbid00000001",
+        )
+        assert book.categories
+
+
 #: Each function that names a heading writer, and how many times.
 #:
 #: **A heading writer** is `classifications.add_headings`, the `Classification`

@@ -19,7 +19,6 @@ import httpx
 import pytest
 import respx
 
-from categories import CATEGORIES_MAX
 from enums import SettingKey
 from models import DESCRIPTION_MAX, TITLE_MAX, Classification
 from schemas import MAX_CLASSIFICATIONS_PER_BOOK
@@ -304,33 +303,15 @@ class TestEnrichmentCandidates:
 class TestCategoriesSerialisation:
     """`categories` is one string in the database and a list on the wire."""
 
-    def test_served_as_a_list(self, client, admin, make_book, google_enabled):
-        with respx.mock(assert_all_called=False) as mock:
-            mock.get(GOOGLE_BOOKS).mock(
-                return_value=httpx.Response(
-                    200, json={"items": [volume(categories=["Fiction", "Fantasy"])]}
-                )
-            )
-            silence_catalogues(mock)
-            book = make_book(admin["headers"])
-            client.post(f"/api/books/{book['id']}/enrich", headers=admin["headers"])
+    def test_served_as_a_list(self, client, admin, make_book):
+        book = make_book(admin["headers"], categories=["Fiction", "Fantasy"])
 
         res = client.get(f"/api/books/{book['id']}", headers=admin["headers"])
 
         assert res.json()["categories"] == ["Fiction", "Fantasy"]
 
-    def test_a_comma_inside_a_category_is_not_split(
-        self, client, admin, make_book, google_enabled
-    ):
-        with respx.mock(assert_all_called=False) as mock:
-            mock.get(GOOGLE_BOOKS).mock(
-                return_value=httpx.Response(
-                    200, json={"items": [volume(categories=["Fiction, general"])]}
-                )
-            )
-            silence_catalogues(mock)
-            book = make_book(admin["headers"])
-            client.post(f"/api/books/{book['id']}/enrich", headers=admin["headers"])
+    def test_a_comma_inside_a_category_is_not_split(self, client, admin, make_book):
+        book = make_book(admin["headers"], categories=["Fiction, general"])
 
         res = client.get(f"/api/books/{book['id']}", headers=admin["headers"])
 
@@ -581,99 +562,51 @@ class TestACatalogueCannotWriteWhatTheColumnsRefuse:
     refusing it whole would report `found=False` about a book they did find.
     """
 
-    def test_a_series_index_past_the_ceiling_is_not_stored(
-        self, client, admin, make_book, google_enabled
-    ):
-        """The sharp one. `list_series` computes `set(range(1, max + 1))` over
-        this column for every member on every request, so a stored `1e9` is
-        tens of gigabytes and tens of minutes until somebody finds the row.
-
-        Reachable from a title alone: `_series_from_title` matches the shape
-        below and calls `float()` on the digits, which is the same door
-        `marc_fields.Fields.title_statement` opens from `245 $n`.
-        """
-        book = make_book(admin["headers"])
-
-        with only_google_answering(
-            volume_with(title="Dune (Dune Chronicles #1000000000)")
-        ):
-            res = client.post(
-                f"/api/books/{book['id']}/enrich", headers=admin["headers"]
-            )
-
-        assert res.status_code == 200, res.text
-        assert res.json()["found"] is True
-        assert res.json()["book"]["series_index"] is None
-        assert "series_index" not in res.json()["updated_fields"]
-
     def test_the_rest_of_the_record_still_lands(
         self, client, admin, make_book, google_enabled
     ):
         """Dropping the field rather than the record is the whole difference
         between this and `_match_rows`, so it is pinned rather than described.
-        The series **name** is read off the same title as the refused index.
         """
         book = make_book(admin["headers"])
 
-        with only_google_answering(
-            volume_with(title="Dune (Dune Chronicles #1000000000)")
-        ):
-            res = client.post(
-                f"/api/books/{book['id']}/enrich", headers=admin["headers"]
-            )
-
-        assert res.json()["book"]["page_count"] == 412
-        assert res.json()["book"]["series_name"] == "Dune Chronicles"
-
-    def test_a_series_index_the_column_holds_is_still_stored(
-        self, client, admin, make_book, google_enabled
-    ):
-        """The diagonal. A guard that refuses everything is not a guard, and
-        1000 is the ceiling itself rather than a value comfortably under it.
-        """
-        book = make_book(admin["headers"])
-
-        with only_google_answering(volume_with(title="Dune (Dune Chronicles #1000)")):
-            res = client.post(
-                f"/api/books/{book['id']}/enrich", headers=admin["headers"]
-            )
-
-        assert res.json()["book"]["series_index"] == 1000
-        assert "series_index" in res.json()["updated_fields"]
-
-    def test_categories_past_the_column_are_dropped_and_the_book_still_fills(
-        self, client, admin, make_book, google_enabled
-    ):
-        """`CATEGORIES_MAX` is read in one place, `BookMatch.categories`, and
-        this route did not pass through it. Nothing caps the subject list
-        upstream: `metadata._OPEN_LIBRARY_MAX_SUBJECTS` is the only slice in
-        that module, and the lookup fold unions two records' subjects.
-        """
-        book = make_book(admin["headers"])
-
-        with only_google_answering(
-            volume_with(categories=["s" * (CATEGORIES_MAX + 1)])
-        ):
+        with only_google_answering(volume_with(publishedDate="9999-01-01")):
             res = client.post(
                 f"/api/books/{book['id']}/enrich", headers=admin["headers"]
             )
 
         assert res.status_code == 200, res.text
-        assert res.json()["book"]["categories"] == []
+        assert res.json()["book"]["year"] is None
         assert res.json()["book"]["page_count"] == 412
 
-    def test_categories_the_column_holds_are_still_stored(
+
+class TestOneClickEnrichmentLeavesWhatAMemberMustChoose:
+    """Categories, the series and the volume id need a picked candidate.
+
+    Owner's ruling of 2026-10-15: `POST /{id}/enrich` chooses its record for the
+    Member, so it writes what a refresh writes. The column set is pinned in
+    `tests/test_evidence.py`; this pins that the route goes through that door.
+    """
+
+    def test_a_volume_carrying_all_three_writes_none_of_them(
         self, client, admin, make_book, google_enabled
     ):
-        """The other half of the diagonal, at the ceiling rather than under it."""
         book = make_book(admin["headers"])
 
-        with only_google_answering(volume_with(categories=["s" * CATEGORIES_MAX])):
+        with only_google_answering(
+            volume_with(title="Dune (Dune Chronicles #1)", categories=["Fiction"])
+        ):
             res = client.post(
                 f"/api/books/{book['id']}/enrich", headers=admin["headers"]
             )
 
-        assert res.json()["book"]["categories"] == ["s" * CATEGORIES_MAX]
+        written = res.json()["book"]
+        assert res.json()["found"] is True
+        assert written["page_count"] == 412
+        assert (
+            written["categories"], written["series_name"], written["series_index"],
+            written["google_books_id"],
+        ) == ([], None, None, None)
 
 
 class TestTheTwoRoutesAgreeAboutOneVolume:

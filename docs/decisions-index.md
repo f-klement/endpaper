@@ -879,7 +879,7 @@ repeat the argument.
 |  | [The Google adapter hands on a list, and the list is the split of the join](decisions.md#the-google-adapter-hands-on-a-list-and-the-list-is-the-split-of-the-join) | 156 |
 |  | [An id in the path is a 404, an id in the body is a 400](decisions.md#an-id-in-the-path-is-a-404-an-id-in-the-body-is-a-400) | 129 |
 |  | [One module applies outside evidence to an existing Book](decisions.md#one-module-applies-outside-evidence-to-an-existing-book) | 598 |
-|  | [Refresh rewrites nine columns and leaves four](decisions.md#refresh-rewrites-nine-columns-and-leaves-four) | 299 |
+|  | [Refresh rewrites nine columns and leaves four](decisions.md#refresh-rewrites-nine-columns-and-leaves-four) | 495 |
 |  | [A blank text column is null](decisions.md#a-blank-text-column-is-null) | 312 |
 |  | [One rule decides who may be told a vocabulary entry exists](decisions.md#one-rule-decides-who-may-be-told-a-vocabulary-entry-exists) | 455 |
 |  | [One reader for the pipeline file, and the shell runners keep theirs, held equal](decisions.md#one-reader-for-the-pipeline-file-and-the-shell-runners-keep-theirs-held-equal) | 386 |
@@ -888,4 +888,5 @@ repeat the argument.
 |  | [A name's meaning is answered by one resolver, and a test that reads an import alias itself is counted per function](decisions.md#a-names-meaning-is-answered-by-one-resolver-and-a-test-that-reads-an-import-alias-itself-is-counted-per-function) | 90 |
 |  | [A meaning is never derived through the same refining assignment twice; a plain rename is not counted](decisions.md#a-meaning-is-never-derived-through-the-same-refining-assignment-twice-a-plain-rename-is-not-counted) | 158 |
 |  | [No ratchet on import node handling](decisions.md#no-ratchet-on-import-node-handling) | 82 |
+|  | [The scanner has no flipped decode for a mirrored camera](decisions.md#the-scanner-has-no-flipped-decode-for-a-mirrored-camera) | 157 |
 <!-- index: end -->

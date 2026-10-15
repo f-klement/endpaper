@@ -258,6 +258,8 @@ export const de: Messages = {
   "scan.title": "Barcode scannen",
   "scan.pointAtBarcode": "Auf den Barcode richten",
   "scan.torch": "Kameralicht",
+  "scan.holdFurtherBack":
+    "Noch nichts erkannt? Das Buch weiter weg halten, damit die Kamera scharf stellt.",
   "scan.startScanning": "Scannen starten",
   "scan.stopScanning": "Scannen beenden",
   "scan.cameraIdle": "Die Kamera ist aus",

@@ -779,8 +779,8 @@ def _google_record(fields: dict[str, Any], isbn: str | None = None) -> Record:
     here beside the other five, so a reader comparing what the sources supply
     has one file to read.
 
-    `google_books_id` is carried because it is the one field only Google has and
-    `evidence.apply_record` writes it onto the Book. The categories arrive as
+    `google_books_id` is carried because it is the one field only Google has, and
+    `evidence.confirm` and `evidence.apply_own_volume` write it onto the Book. The categories arrive as
     the list `categories.kept_categories` made, and `Record.as_match` joins them.
     """
     return Record(

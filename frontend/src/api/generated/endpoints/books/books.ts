@@ -3645,8 +3645,13 @@ export const getBackfillFromIdentifiersUrl = (
  * is an exact key the free catalogues answer to, and spending a metered
  * request on one would be the bill for nothing that
  * `sources.Plan.lookup_together` refuses. No volume recorded, because that
- * column is what enrichment from Google writes, so a book that has been
- * enriched stops being a candidate and this is safe to run twice.
+ * column is what this writes, so a book it has filled in stops being a
+ * candidate and this is safe to run twice.
+ *
+ * It fills gaps and nothing a Member must choose: categories and the series
+ * stay empty here, as they do for `POST /{id}/enrich`, because nobody picked
+ * this record. `POST /{id}/enrich` records the volume id the same way when
+ * that id is what found the record.
  *
  * **Scoped to the books the caller can see**, like the cover backfill and for
  * that route's stated reason: `visible_to` has no admin bypass, so each member
@@ -7379,7 +7384,14 @@ export const getEnrichBookUrl = (bookId: number, params?: EnrichBookParams) => {
  *
  * Only empty scalar fields are filled unless `overwrite` is set: enrichment
  * adds what is missing, it does not overrule what somebody typed.
- * Classifications need a selected candidate through `enrich/apply`.
+ *
+ * **It writes what a refresh writes, less the title.**
+ * Categories, the series, the Google Books volume id and Classifications
+ * need a selected candidate through `enrich/apply`: this record was chosen by
+ * no Member. The volume id says which volume this book is, and a wrong one
+ * silently drops the book out of the identifier backfill. The one exception
+ * is a record found by the book's own volume id and carrying that id, which
+ * records it, as the identifier backfill does.
  * @summary Enrich Book
  */
 export const enrichBook = async (
@@ -7500,8 +7512,10 @@ export const getApplyEnrichmentUrl = (
  * the client's: only empty fields are filled unless `overwrite` is set, so a
  * publisher somebody typed in by hand is never quietly replaced.
  *
- * Selecting the row also confirms its Classifications. Automatic enrichment
- * and refresh do not have that confirmation.
+ * Selecting the row also confirms its categories, series, Google Books
+ * volume id and Classifications. Automatic enrichment and refresh do not have
+ * that confirmation, so they write none of them, but for the volume id a
+ * lookup by the book's own id found and that carries it.
  * @summary Apply Enrichment
  */
 export const applyEnrichment = async (

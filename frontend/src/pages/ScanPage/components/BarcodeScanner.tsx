@@ -94,6 +94,34 @@ function supportsTorch(track: MediaStreamTrack | undefined): boolean {
   return capabilities.torch === true;
 }
 
+/**
+ * Whether this camera is known to face away from the member.
+ *
+ * Only a rear camera says so, by reporting `environment`; a front camera
+ * reports `user`, and a browser may report nothing (how many do is
+ * unmeasured). Everything that is not known to be rear, a track without
+ * `getSettings` included, gets the front camera treatment,
+ * a mirrored preview and the focus hint, neither of which touches decoding.
+ *
+ * There is deliberately no flipped decode for a camera that delivers mirrored
+ * frames: ZXing's one dimensional readers already retry every row reversed,
+ * which for a barcode is a horizontal flip. See docs/decisions.md.
+ */
+function facesAway(track: MediaStreamTrack | undefined): boolean {
+  if (!track || typeof track.getSettings !== "function") return false;
+  return track.getSettings().facingMode === "environment";
+}
+
+/**
+ * How long a camera that may face the member goes without a read before the
+ * scanner suggests holding the book further back.
+ *
+ * A fixed focus webcam, which many laptops are assumed to have (unmeasured
+ * here), blurs a barcode held close enough to fill the frame beyond what any
+ * decoder recovers, and nothing on screen says so.
+ */
+const HOLD_FURTHER_BACK_AFTER_MS = 6000;
+
 interface BarcodeScannerProps {
   onDetected: (isbn: string) => void;
   active: boolean;
@@ -121,6 +149,9 @@ export default function BarcodeScanner({
   const [scanning, setScanning] = useState(false);
   const [hasTorch, setHasTorch] = useState(false);
   const [torchOn, setTorchOn] = useState(false);
+  const [mirrored, setMirrored] = useState(false);
+  const [holdFurtherBack, setHoldFurtherBack] = useState(false);
+  const hintTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Held in a ref so the effect below does not list them as dependencies.
   // ScanPage passes inline callbacks, and depending on them would tear the
@@ -136,9 +167,13 @@ export default function BarcodeScanner({
     // indicator stays lit after leaving the page.
     streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
+    if (hintTimer.current) clearTimeout(hintTimer.current);
+    hintTimer.current = null;
     setScanning(false);
     setTorchOn(false);
     setHasTorch(false);
+    setMirrored(false);
+    setHoldFurtherBack(false);
   }, []);
 
   useEffect(() => {
@@ -155,6 +190,15 @@ export default function BarcodeScanner({
     readerRef.current = reader;
     setError(null);
 
+    /** Start, or restart, the wait before the hold further back hint. */
+    function armHint() {
+      if (hintTimer.current) clearTimeout(hintTimer.current);
+      hintTimer.current = setTimeout(
+        () => setHoldFurtherBack(true),
+        HOLD_FURTHER_BACK_AFTER_MS,
+      );
+    }
+
     async function start() {
       const video = videoRef.current;
       if (!video) return;
@@ -168,9 +212,27 @@ export default function BarcodeScanner({
         }
         streamRef.current = stream;
 
-        setHasTorch(supportsTorch(stream.getVideoTracks()[0]));
+        const [track] = stream.getVideoTracks();
+        setHasTorch(supportsTorch(track));
+
+        // A camera that reports itself rear facing gets no hint timer and no
+        // mirrored preview.
+        const facingMember = !facesAway(track);
+        if (facingMember) {
+          setMirrored(true);
+          armHint();
+        }
 
         void reader.decodeFromStream(stream, video, (result, err) => {
+          // The library can deliver a frame after stop(). A closed scanner
+          // reports nothing from it: no book to the page, and no hint timer,
+          // which would outlive the scanner and show its hint on the next
+          // camera, even a rear one, which never clears it.
+          if (cancelled) return;
+          if (result && facingMember) {
+            setHoldFurtherBack(false);
+            armHint();
+          }
           if (result) {
             const text = result.getText();
             // Report the canonical form, not the raw scan, so an ISBN-10
@@ -231,10 +293,12 @@ export default function BarcodeScanner({
       {/* object-contain, not object-cover. Cover crops the frame, so the guide
           box below sits over a picture that is narrower than what is actually
           being decoded, and a barcode lined up inside the box can be outside
-          the part of the image the reader ever sees. */}
+          the part of the image the reader ever sees. The mirror is for display
+          only, the way a member expects to see a camera that faces them: the
+          decoder reads the stream, never this element's transform. */}
       <video
         ref={videoRef}
-        className="w-full h-full object-contain"
+        className={`w-full h-full object-contain${mirrored ? " -scale-x-100" : ""}`}
         muted
         playsInline
       />
@@ -248,8 +312,13 @@ export default function BarcodeScanner({
             <div className="absolute bottom-0 right-0 w-5 h-5 border-b-4 border-r-4 border-accent-400 rounded-br" />
             <div className="absolute inset-x-0 top-1/2 h-px bg-accent-400 opacity-60 animate-pulse" />
           </div>
-          <p className="absolute bottom-4 text-white text-sm font-medium">
-            {t("scan.pointAtBarcode")}
+          <p
+            aria-live="polite"
+            className="absolute bottom-4 inset-x-0 px-4 text-center text-white text-sm font-medium"
+          >
+            {holdFurtherBack
+              ? t("scan.holdFurtherBack")
+              : t("scan.pointAtBarcode")}
           </p>
         </div>
       )}

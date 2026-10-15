@@ -528,9 +528,13 @@ Neither ever takes the ISBN: a chosen printing's ISBN is not this copy's, and th
 unique among uncopied rows so writing one could collide with a book already here.
 
 Candidates are read only evidence. A Member selects one through `POST /enrich/apply` before
-its Classifications can add a row or complete a caption. Automatic enrichment and Refresh
-Metadata change scalar fields only. They neither write Classifications nor report them in
-`updated_fields`.
+its categories, series, Google Books volume id or Classifications reach the book. Automatic
+enrichment writes what Refresh Metadata writes, less the title: subtitle, author, publisher,
+year, description, language, page count and cover. Neither writes the others nor reports
+them in `updated_fields`, because nobody chose the record. The volume id says which volume
+the book is, and a wrong one silently drops the book out of the store identifier backfill.
+The exception is a record found by the book's own Google Books volume id and carrying that
+id: it records it.
 
 The candidates endpoint deliberately carries no `suggested_tag_ids`: that book already has
 tags, and they are somebody's deliberate choice.

@@ -325,8 +325,9 @@ _REFUSED_AS_OUR_OWN: Final[dict[str, Callable[[str], bool]]] = {
 #: `series_index` is the one with teeth beyond an untidy row. `routers/books.list_series`
 #: computes `set(range(1, max(held) + 1))` over the column, so a stored `1e9` is
 #: roughly 70 GB and ten minutes of work on every request by every Member. The
-#: refresh handler does not write that column, which is why this ticket is not
-#: that severity, but `evidence.apply_record` does and it is fed from here.
+#: refresh handler and one-click enrichment do not write that column, but a
+#: candidate a Member selects through `evidence.confirm` does, and the picker's
+#: candidates are fed from here.
 _NUMBER_RANGES: Final[dict[str, tuple[float, float]]] = {
     "year": (MIN_YEAR, MAX_YEAR),
     "page_count": (1, MAX_PAGE_NUMBER_IN_A_BOOK),
@@ -530,8 +531,10 @@ class Record:
     cover_url: str | None = None
     series_name: str | None = None
     series_index: float | None = None
-    #: Google's own volume id, which only Google supplies and only
-    #: `evidence.apply_record` stores.
+    #: Google's own volume id, which only Google supplies. Stored from a
+    #: candidate a Member selected or through `evidence.apply_own_volume` from
+    #: a lookup by that same id, never by `evidence.apply_record`: see
+    #: `evidence.SELECTED_ONLY`.
     google_books_id: str | None = None
     #: What this book is about, in the catalogue's own words, each carrying the
     #: vocabulary the record declared and the identifier it gave. Feeds the tag

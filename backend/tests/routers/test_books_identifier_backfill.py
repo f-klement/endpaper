@@ -15,6 +15,7 @@ than asserted in prose.
 """
 
 import asyncio
+import logging
 from collections.abc import Awaitable
 
 import httpx
@@ -412,6 +413,32 @@ class TestTheSingleBookBranch:
         assert route.call_count == 1
         assert res.json()["book"]["page_count"] == 412
 
+    def test_the_volume_branch_records_the_id_and_leaves_what_a_member_chooses(
+        self, client, admin, make_book, google_enabled, catalogues
+    ):
+        """The id it looked up is the id it writes, so it cannot be the wrong
+        volume; categories and the series still need a picked candidate."""
+        book = imported_book(client, admin["headers"], make_book)
+        volume_route(
+            catalogues,
+            response=httpx.Response(
+                200,
+                json=volume_body(
+                    title="Dune (Dune Chronicles #1)", categories=["Fiction"]
+                ),
+            ),
+        )
+
+        res = client.post(
+            f"/api/books/{book['id']}/enrich", headers=admin["headers"]
+        )
+
+        written = res.json()["book"]
+        assert written["google_books_id"] == VOLUME_ID
+        assert (
+            written["categories"], written["series_name"], written["series_index"]
+        ) == ([], None, None)
+
     def test_a_miss_falls_through_to_the_title_search(
         self, client, admin, make_book, google_enabled, catalogues
     ):
@@ -431,6 +458,30 @@ class TestTheSingleBookBranch:
         # One volume request, then the whole search roster, derived for the
         # reason the fan out above is.
         assert catalogues.calls.call_count == 1 + len(sources.DEFAULT_PLAN.searched)
+
+    def test_a_title_hit_after_a_miss_records_no_volume_id(
+        self, client, admin, make_book, google_enabled, catalogues
+    ):
+        """The id the search found is not the Book's own, whoever set a flag."""
+        book = imported_book(client, admin["headers"], make_book)
+        # Both before `silence_catalogues`: the first matching route wins.
+        catalogues.get(f"{GOOGLE_BOOKS}/{VOLUME_ID}").mock(
+            return_value=httpx.Response(404)
+        )
+        catalogues.get(GOOGLE_BOOKS).mock(
+            return_value=httpx.Response(
+                200, json={"items": [volume_body(OTHER_VOLUME_ID)]}
+            )
+        )
+        silence_catalogues(catalogues)
+
+        res = client.post(
+            f"/api/books/{book['id']}/enrich", headers=admin["headers"]
+        )
+
+        assert res.json()["found"] is True
+        assert res.json()["book"]["page_count"] == 412
+        assert res.json()["book"]["google_books_id"] is None
 
     def test_google_switched_off_asks_nothing_and_still_searches(
         self, client, admin, make_book, catalogues
@@ -755,6 +806,27 @@ class TestTheBackfill:
 
         assert body["examined"] == 0
         assert route.call_count == 0
+
+    def test_a_volume_served_under_another_id_is_counted_as_not_found(
+        self, client, admin, make_book, google_enabled, catalogues, caplog
+    ):
+        book = imported_book(client, admin["headers"], make_book)
+        volume_route(
+            catalogues,
+            response=httpx.Response(200, json=volume_body(OTHER_VOLUME_ID)),
+        )
+
+        with caplog.at_level(logging.INFO, logger="endpaper.books"):
+            res = client.post(
+                "/api/books/identifiers/backfill", headers=admin["headers"]
+            )
+
+        assert res.json()["not_found"] == 1
+        assert res.json()["enriched"] == 0
+        assert f"served volume {OTHER_VOLUME_ID!r} for requested volume" in caplog.text
+        stored = client.get(f"/api/books/{book['id']}", headers=admin["headers"])
+        assert stored.json()["google_books_id"] is None
+        assert stored.json()["page_count"] is None
 
     def test_it_does_not_overrule_what_somebody_typed(
         self, client, admin, make_book, google_enabled, catalogues

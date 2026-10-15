@@ -50,6 +50,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.restoreAllMocks();
 });
 
@@ -453,5 +454,167 @@ describe("the camera light", () => {
       ).not.toBeInTheDocument(),
     );
     expect(screen.queryByText("Camera unavailable")).not.toBeInTheDocument();
+  });
+});
+
+/** The hint a camera that may face the member shows after a quiet wait. */
+const HOLD_FURTHER_BACK =
+  "Nothing yet? Hold the book further back so the camera can focus.";
+
+/**
+ * A camera that does not say it is rear facing, as a laptop's front camera
+ * reports `user` or nothing at all.
+ */
+function frontCamera(settings: MediaTrackSettings = {}): void {
+  getUserMedia.mockResolvedValue(fakeStream({}, settings));
+}
+
+describe("a camera that may be facing the member", () => {
+  it.each([
+    ["reports user", { facingMode: "user" }],
+    ["reports no direction", {}],
+  ] as const)("shows the preview mirrored when it %s", async (_, settings) => {
+    frontCamera(settings);
+    const { container } = renderLocalised(
+      <BarcodeScanner active onDetected={vi.fn<OnDetected>()} />,
+    );
+
+    await waitFor(() =>
+      expect(container.querySelector("video")).toHaveClass("-scale-x-100"),
+    );
+  });
+
+  it("suggests holding the book further back after a few seconds without a read", async () => {
+    frontCamera();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    renderLocalised(<BarcodeScanner active onDetected={vi.fn<OnDetected>()} />);
+    await act(async () => {});
+    expect(decodeFromStream).toHaveBeenCalled();
+
+    act(() => vi.advanceTimersByTime(6000));
+
+    expect(screen.getByText(HOLD_FURTHER_BACK)).toBeInTheDocument();
+  });
+
+  it("withdraws the suggestion once a barcode reads", async () => {
+    frontCamera();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    renderLocalised(<BarcodeScanner active onDetected={vi.fn<OnDetected>()} />);
+    await act(async () => {});
+    act(() => vi.advanceTimersByTime(6000));
+    expect(screen.getByText(HOLD_FURTHER_BACK)).toBeInTheDocument();
+
+    act(() => emitBarcode("9780441013593"));
+
+    expect(screen.getByText("Point at barcode")).toBeInTheDocument();
+  });
+
+  it("suggests it again after a few more seconds without the next read", async () => {
+    // In rapid mode the scanner stays open across books, so the wait has to
+    // start over after every read rather than end at the first.
+    frontCamera();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    renderLocalised(<BarcodeScanner active onDetected={vi.fn<OnDetected>()} />);
+    await act(async () => {});
+    act(() => vi.advanceTimersByTime(6000));
+    act(() => emitBarcode("9780441013593"));
+
+    act(() => vi.advanceTimersByTime(5999));
+    expect(screen.queryByText(HOLD_FURTHER_BACK)).not.toBeInTheDocument();
+    act(() => vi.advanceTimersByTime(1));
+
+    expect(screen.getByText(HOLD_FURTHER_BACK)).toBeInTheDocument();
+  });
+
+  it("treats a camera that cannot report its direction as one that may face the member", async () => {
+    const track = { stop: stopTrack, getCapabilities: () => ({}) };
+    getUserMedia.mockResolvedValue({
+      getTracks: () => [track],
+      getVideoTracks: () => [track],
+    } as unknown as MediaStream);
+    const { container } = renderLocalised(
+      <BarcodeScanner active onDetected={vi.fn<OnDetected>()} />,
+    );
+
+    await waitFor(() =>
+      expect(container.querySelector("video")).toHaveClass("-scale-x-100"),
+    );
+  });
+
+  it("forgets the wait when the scanner closes before it ends", async () => {
+    // Otherwise the hint appears on the next camera, even a rear one, which
+    // never clears it.
+    getUserMedia.mockResolvedValueOnce(fakeStream({}, {}));
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const { rerender } = renderLocalised(
+      <BarcodeScanner active onDetected={vi.fn<OnDetected>()} />,
+    );
+    await act(async () => {});
+    rerender(
+      <BarcodeScanner active={false} onDetected={vi.fn<OnDetected>()} />,
+    );
+    act(() => vi.advanceTimersByTime(6000));
+
+    rerender(<BarcodeScanner active onDetected={vi.fn<OnDetected>()} />);
+    await act(async () => {});
+
+    expect(screen.getByText("Point at barcode")).toBeInTheDocument();
+  });
+
+  it("ignores a read that arrives after the scanner closed", async () => {
+    // The library can deliver one more frame after stop(); restarting the
+    // wait then would leave the hint for the next camera.
+    getUserMedia.mockResolvedValueOnce(fakeStream({}, {}));
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const { rerender } = renderLocalised(
+      <BarcodeScanner active onDetected={vi.fn<OnDetected>()} />,
+    );
+    await act(async () => {});
+    rerender(
+      <BarcodeScanner active={false} onDetected={vi.fn<OnDetected>()} />,
+    );
+    act(() => emitBarcode("9780441013593"));
+    act(() => vi.advanceTimersByTime(6000));
+
+    rerender(<BarcodeScanner active onDetected={vi.fn<OnDetected>()} />);
+    await act(async () => {});
+
+    expect(screen.getByText("Point at barcode")).toBeInTheDocument();
+  });
+
+  it("reports no book from a read that arrives after the scanner closed", async () => {
+    // Otherwise a page that has moved on is handed a book it did not ask for.
+    const onDetected = vi.fn<OnDetected>();
+    const { rerender } = renderLocalised(
+      <BarcodeScanner active onDetected={onDetected} />,
+    );
+    await waitFor(() => expect(decodeFromStream).toHaveBeenCalled());
+    rerender(<BarcodeScanner active={false} onDetected={onDetected} />);
+
+    act(() => emitBarcode("9780441013593"));
+
+    expect(onDetected).not.toHaveBeenCalled();
+  });
+});
+
+describe("a rear camera", () => {
+  it("shows the preview the right way round", async () => {
+    const { container } = renderLocalised(
+      <BarcodeScanner active onDetected={vi.fn<OnDetected>()} />,
+    );
+    await screen.findByText("Point at barcode");
+
+    expect(container.querySelector("video")).not.toHaveClass("-scale-x-100");
+  });
+
+  it("never suggests holding the book further back", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    renderLocalised(<BarcodeScanner active onDetected={vi.fn<OnDetected>()} />);
+    await act(async () => {});
+    expect(decodeFromStream).toHaveBeenCalled();
+
+    act(() => vi.advanceTimersByTime(60000));
+
+    expect(screen.getByText("Point at barcode")).toBeInTheDocument();
   });
 });

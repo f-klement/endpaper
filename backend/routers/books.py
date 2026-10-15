@@ -3760,8 +3760,13 @@ async def backfill_from_identifiers(
     is an exact key the free catalogues answer to, and spending a metered
     request on one would be the bill for nothing that
     `sources.Plan.lookup_together` refuses. No volume recorded, because that
-    column is what enrichment from Google writes, so a book that has been
-    enriched stops being a candidate and this is safe to run twice.
+    column is what this writes, so a book it has filled in stops being a
+    candidate and this is safe to run twice.
+
+    It fills gaps and nothing a Member must choose: categories and the series
+    stay empty here, as they do for `POST /{id}/enrich`, because nobody picked
+    this record. `POST /{id}/enrich` records the volume id the same way when
+    that id is what found the record.
 
     **Scoped to the books the caller can see**, like the cover backfill and for
     that route's stated reason: `visible_to` has no admin bypass, so each member
@@ -3857,20 +3862,42 @@ async def backfill_from_identifiers(
         finally:
             _BACKFILL_LOOKUPS_AT_ONCE.release()
 
-    def store(book: Book, result: metadata.Lookup) -> _Bucket:
+    def store(book: Book, volume_id: str, result: metadata.Lookup) -> _Bucket:
         """Fold one answer into its Book, and name the outcome it counts as."""
         if result.outcome is metadata.Outcome.NOT_FOUND:
             return "not_found"
         if not result.found or result.record is None:
             return "unavailable"
-        # Bounded inside `evidence.apply_record`, exactly as for `enrich_book`:
-        # this is whatever Google answered, and it writes twelve columns.
-        evidence.apply_record(book, result.record, evidence.Policy.FILL_GAPS)
-        # **Counted unconditionally, and `IdentifierBackfillOut` carries why.**
+        # **A volume served under another id is not proven this Book's**, and
+        # counts as Google having none, before anything is written. `evidence`
+        # would write its other columns and withhold the id, leaving the Book a
+        # candidate that reports `enriched` on every press; and those columns
+        # would commit only when some other Book of the batch enriched.
+        #
+        # **Whether Google ever does this is unmeasured**, for a merged or a
+        # canonical volume say, and the log line is how it gets measured. Where
+        # it does, those Books stay candidates reported `not_found` rather than
+        # being written.
+        if result.record.google_books_id != volume_id:
+            logger.info(
+                "Google served volume %s for requested volume %s; not written",
+                clipped(result.record.google_books_id),
+                clipped(volume_id),
+            )
+            return "not_found"
+        # Bounded inside `evidence`, exactly as for `enrich_book`: this is
+        # whatever Google answered. `apply_own_volume` rather than
+        # `apply_record`, because the candidate rule above needs
+        # `google_books_id` written and nothing else of this record's that a
+        # Member never selected.
+        evidence.apply_own_volume(
+            book, result.record, volume_id, evidence.Policy.FILL_GAPS
+        )
         # A candidate has no `google_books_id`; `google_books.lookup_by_volume_id`
         # answers only for a payload whose `id` **is a volume id**, so it is
         # twelve characters and fits `GOOGLE_BOOKS_ID_MAX`; `evidence` writes
-        # it. An answered book therefore always gains a field.
+        # it. An answered book whose record carries the asked id therefore
+        # always gains a field.
         #
         # **The middle clause is the one that has to be enforced rather than
         # stated, and it was stated first.** With only a type check on the `id`,
@@ -3962,19 +3989,20 @@ async def backfill_from_identifiers(
         # with nothing asked, and `metadata._within_deadline`'s docstring records
         # that defect shipping once.
         answers = await asyncio.gather(*(resolve(value) for _, _, value in asked))
-        for (offset, book, _), answer in zip(asked, answers, strict=True):
+        for (offset, book, value), answer in zip(asked, answers, strict=True):
             if answer is None:
                 cut_short = True
                 continue
-            buckets[offset] = store(book, answer)
+            buckets[offset] = store(book, value, answer)
         if cut_short:
             break
 
     # The unbroken examined run, which is the only thing the cursor may clear.
     #
     # **A book past the cut that did answer is still stored**, because its
-    # metered request is already paid for and `evidence.apply_record` writes
-    # `google_books_id`, which takes it out of the candidate set so the next
+    # metered request is already paid for and `evidence.apply_own_volume`
+    # writes `google_books_id` (`store` has already refused a record carrying
+    # another id), which takes it out of the candidate set so the next
     # press does not spend another. It is counted in no bucket, so the reply
     # understates what this run did and never overstates it.
     cleared = buckets[
@@ -5560,7 +5588,14 @@ async def enrich_book(
 
     Only empty scalar fields are filled unless `overwrite` is set: enrichment
     adds what is missing, it does not overrule what somebody typed.
-    Classifications need a selected candidate through `enrich/apply`.
+
+    **It writes what a refresh writes, less the title.**
+    Categories, the series, the Google Books volume id and Classifications
+    need a selected candidate through `enrich/apply`: this record was chosen by
+    no Member. The volume id says which volume this book is, and a wrong one
+    silently drops the book out of the identifier backfill. The one exception
+    is a record found by the book's own volume id and carrying that id, which
+    records it, as the identifier backfill does.
     """
     # One `Enquiry` for all three paths below, because they must not be able to
     # ask different sets of catalogues or send a different login. It holds the
@@ -5574,10 +5609,15 @@ async def enrich_book(
     # nothing is one answer, not two.
     enquiry.refuse_if_nothing_is_asked()
 
-    # A `Record` on every path, applied through `evidence.apply_record`, which
-    # writes no Classification under any policy. That is ADR 0006 held by the
-    # door rather than by this handler remembering.
+    # A `Record` on every path, applied through `evidence.apply_record` or
+    # `evidence.apply_own_volume`, neither of which writes a Classification
+    # under any policy. That is ADR 0006 held by the doors rather than by this
+    # handler remembering.
     found: catalogue.Record | None = None
+    # The volume id that found `found`, if one did, which picks the door below.
+    # The door compares it with the record's own id, so a value left here by
+    # mistake on another branch writes no id.
+    own_volume: str | None = None
     assertions: tuple[catalogue.AuthorityAssertion, ...] = ()
     recorded = RecordedAssertions(stored=[], refused=[])
     if book.isbn:
@@ -5620,8 +5660,9 @@ async def enrich_book(
                 # No `assertions`, unlike the ISBN branch above. `Record.
                 # author_identifiers` is empty for every source but the DNB, so
                 # there is nothing here to record even by mistake, and
-                # `evidence.apply_record` writes no Classification.
+                # `evidence.apply_own_volume` writes no Classification.
                 found = volume.record
+                own_volume = volume_id
 
     if found is None:
         # No ISBN, no resolvable store identifier, or nobody carries this
@@ -5638,14 +5679,16 @@ async def enrich_book(
             found=False,
         )
 
-    # Bounded inside `evidence.apply_record` rather than trusted: `found` is
-    # whatever a catalogue answered, and it writes twelve columns. This route
-    # chooses no Catalogue record, so no Classification reaches the Book.
-    updated = evidence.apply_record(
-        book,
-        found,
-        evidence.Policy.OVERWRITE if overwrite else evidence.Policy.FILL_GAPS,
-    )
+    # Bounded inside `evidence` rather than trusted: `found` is whatever a
+    # catalogue answered. No Member chose it, so it writes neither a
+    # Classification nor `evidence.SELECTED_ONLY`, except `google_books_id`
+    # where the Book's own volume id found it and the record carries that id,
+    # as the backfill writes it.
+    policy = evidence.Policy.OVERWRITE if overwrite else evidence.Policy.FILL_GAPS
+    if own_volume is not None:
+        updated = evidence.apply_own_volume(book, found, own_volume, policy)
+    else:
+        updated = evidence.apply_record(book, found, policy)
     if updated:
         # `to_thread` because this handler is a coroutine. See refresh_metadata.
         await asyncio.to_thread(_store_cover, book)
@@ -5697,8 +5740,10 @@ def apply_enrichment(
     the client's: only empty fields are filled unless `overwrite` is set, so a
     publisher somebody typed in by hand is never quietly replaced.
 
-    Selecting the row also confirms its Classifications. Automatic enrichment
-    and refresh do not have that confirmation.
+    Selecting the row also confirms its categories, series, Google Books
+    volume id and Classifications. Automatic enrichment and refresh do not have
+    that confirmation, so they write none of them, but for the volume id a
+    lookup by the book's own id found and that carries it.
     """
     # The body goes in whole. `evidence.confirm` reads the twelve names it
     # writes off the `BookMatch`, so `source` and `suggested_tag_ids` are

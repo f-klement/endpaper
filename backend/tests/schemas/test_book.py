@@ -1961,10 +1961,8 @@ class TestTheTwoDoorsIntoTheCategoriesColumn:
 
         A catalogue heading wider than one entry of the create body's list is
         still a value this column holds, and on this path what the column can hold
-        is stored:
-        `tests/routers/test_books_google.py::TestACatalogueCannotWriteWhatTheColumnsRefuse`
-        pins that as the answer for every field. So the bound here is the width of
-        the rejoin and not a width per subject.
+        is stored. So the bound here is the width of the rejoin and not a width
+        per subject.
         """
         widest = "s" * CATEGORIES_MAX
 

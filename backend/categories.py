@@ -222,7 +222,7 @@ def rebound_categories(value: str | None) -> str | None:
     **The second bound is the width of the rejoin, and not a per subject width.** A
     per subject width would refuse a single long heading that is inside the
     column's stated bound, which
-    `tests/routers/test_books_google.py::TestACatalogueCannotWriteWhatTheColumnsRefuse`
+    `tests/schemas/test_book.py::test_the_enrichment_door_stores_one_subject_the_column_can_hold`
     pins as the deliberate answer on this path. And splitting on a bare separator
     then rejoining with the two character one **lengthens** the value: a payload of
     exactly `CATEGORIES_MAX` carrying 31 bare separators is 32 subjects, inside the

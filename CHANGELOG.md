@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- **Filling a book in automatically no longer sets its categories, series or Google Books
+  reference.** `POST /api/books/{id}/enrich` chooses the record itself, so it now writes what
+  Refresh Metadata writes, less the title. Those three come only from an edition a Member picks. A
+  book found by its own Google Books id, by that button or by looking books up by their store id,
+  still records that id when Google's record carries it, and no longer gets categories or series.
+  A store id lookup that Google answers with a different volume is counted as not found and
+  changes nothing.
+
+- **The scanner works better with a laptop's front camera.** A camera not known to be rear
+  facing shows its preview mirrored and, after six seconds without a read, suggests holding the
+  book further back. A camera that reports itself rear facing is unchanged.
+
 - **A failed write on a book's page is no longer hidden by another row's write.** A failed note
   or quote edit or removal, progress removal, or tag or identifier removal used to go unreported
   when a write on another row succeeded after it. It is reported now, and a failed tag delete is

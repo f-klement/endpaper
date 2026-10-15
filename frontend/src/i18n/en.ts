@@ -278,6 +278,8 @@ export const en = {
   "scan.title": "Scan Barcode",
   "scan.pointAtBarcode": "Point at barcode",
   "scan.torch": "Camera light",
+  "scan.holdFurtherBack":
+    "Nothing yet? Hold the book further back so the camera can focus.",
   "scan.startScanning": "Start scanning",
   "scan.stopScanning": "Stop scanning",
   "scan.cameraIdle": "The camera is off",
