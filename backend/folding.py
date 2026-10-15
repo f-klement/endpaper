@@ -39,6 +39,7 @@ from database import Base
 from enums import BookIdentifierScheme, ClassificationScheme
 from logvalues import clipped
 from models import (
+    AccessRequest,
     Book,
     BookIdentifier,
     Classification,
@@ -175,9 +176,9 @@ def _deduplicated(
     **Keeper first, then losers in id order**, so what survives is what was
     already stored. Same tie break as `classifications.add_headings`.
 
-    `absorb` is what a repeat gives up before it goes, and the two tables
-    without one are the difference worth reading: a caption where there was none
-    is strictly more than before, and a second report of a file path is not.
+    `absorb` is what a repeat gives up before it goes, and the table without
+    one is the difference worth reading: a caption or a fingerprint where there
+    was none is strictly more than before, and a second exact identifier is not.
 
     **The overflow is deleted and logged.** It is a loss: the value came from a
     Member or from a catalogue and nothing regenerates it. `clipped`, because
@@ -232,6 +233,27 @@ def _absorb_heading(survivor: Classification, losing: Classification) -> None:
         survivor.label = losing.label
     if survivor.kind is None and losing.kind is not None:
         survivor.kind = losing.kind
+
+
+def _absorb_digest(survivor: DigitalReference, losing: DigitalReference) -> None:
+    """A repeat of the same file keeps its fingerprint if the survivor has none.
+
+    Nothing regenerates one on the server: it is computed in a browser holding
+    the file, so dropping the loser's would leave the file unrecognised by its
+    bytes until somebody picks it again.
+
+    **Only where the two looks saw the same size and modification time.** A
+    row is one client's one look, the rule a report keeps by replacing it
+    whole, so a digest from a look at a file that has since changed beside the
+    survivor's size would describe a file nobody saw.
+    """
+    if (
+        survivor.partial_md5 is None
+        and losing.partial_md5 is not None
+        and survivor.size_bytes == losing.size_bytes
+        and survivor.file_modified_at == losing.file_modified_at
+    ):
+        survivor.partial_md5 = losing.partial_md5
 
 
 def _carry_loans(fold: _Fold) -> None:
@@ -327,8 +349,8 @@ TRANSFERS: Final[tuple[_Transfer, ...]] = (
     # `uq_digital_references_location` would refuse the flush where the keeper
     # and a loser were catalogued from the same file, which is the **likely**
     # case rather than an edge: two rows for one Book are commonly two imports
-    # of one library. A repeat is dropped and nothing is lost, because two
-    # reports of one file are two accounts of the same thing.
+    # of one library. A repeat is dropped, keeping only a fingerprint the
+    # survivor lacks: see `_absorb_digest`.
     _Transfer(
         _table(DigitalReference.__tablename__),
         _deduplicated(
@@ -336,6 +358,7 @@ TRANSFERS: Final[tuple[_Transfer, ...]] = (
             held=lambda book: book.digital_references,
             key=lambda row: (row.root_label, row.relative_path),
             ceiling=MAX_DIGITAL_REFERENCES_PER_BOOK,
+            absorb=_absorb_digest,
         ),
     ),
     # **Only an exact repeat is a duplicate here**, which is the difference from
@@ -354,6 +377,9 @@ TRANSFERS: Final[tuple[_Transfer, ...]] = (
         ),
     ),
     _Transfer(_table(Loan.__tablename__), _carry_loans),
+    # Requests carry no uniqueness, so every row travels. Two open requests
+    # from one member can result, which the holder answers like any other.
+    _Transfer(_table(AccessRequest.__tablename__), _moves_wholesale(AccessRequest)),
     # Progress carries no uniqueness, so unlike the reading records below there
     # is nothing to resolve: two Members' readings of what turned out to be one
     # Book are two histories of one Book.

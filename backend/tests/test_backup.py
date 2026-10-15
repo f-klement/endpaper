@@ -39,6 +39,7 @@ from migrations.versions import (
 )
 from models import (
     BLANK_IS_NULL,
+    AccessRequest,
     AuthorAlias,
     Book,
     CatalogueCredential,
@@ -485,6 +486,29 @@ class TestRoundTrip:
         db.expire_all()
         assert [(q.text, q.page) for q in db.query(Quote).all()] == [
             ("Fear is the mind-killer", 214)
+        ]
+
+    def test_a_granted_access_request_comes_back_with_its_holder(
+        self, client, admin, member, make_book, db
+    ):
+        ebook = make_book(admin["headers"], title="A file", format="ebook")
+        url = f"/api/books/{ebook['id']}/access-requests"
+        asked = client.post(url, headers=member["headers"]).json()
+        client.put(f"{url}/{asked['id']}", json={"granted": True}, headers=admin["headers"])
+        data = client.get("/api/backup", headers=admin["headers"]).content
+        db.query(AccessRequest).delete()
+        db.commit()
+
+        client.post(
+            "/api/backup/restore",
+            params={"confirm": True},
+            files={"file": ("backup.zip", data, "application/zip")},
+            headers=admin["headers"],
+        )
+
+        db.expire_all()
+        assert [(r.holder_user_id, r.granted) for r in db.query(AccessRequest).all()] == [
+            (admin["user"]["id"], True)
         ]
 
     def test_an_archive_from_before_quotes_existed_still_restores(

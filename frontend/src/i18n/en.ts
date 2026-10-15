@@ -1251,6 +1251,12 @@ export const en = {
   // than as a retry, because there is no control that retries one.
   "rapid.unreferenced":
     "{count} of those were added without where their file is. Picking the folder again records it.",
+  // **Says what the batch did instead**, because a member who picked the same
+  // folder twice is checking that nothing was doubled.
+  "rapid.alreadyHeld":
+    "{count} were already in your library, so they were not added again. Where their files are was recorded.",
+  "rapid.inYourLibrary":
+    "Already in your library. Adding only records where its file is and adds no book.",
   "rapid.removeFromQueue": "Remove {label} from the queue",
   // **The words say what cannot be undone later, because this row is where it
   // still can be.** No route clears the column once a book is written, so
@@ -1290,7 +1296,7 @@ export const en = {
   // between those two outcomes: one book at a time is reversible before the
   // press, a folder is not reversible afterwards at all.
   "file.explain":
-    "Pick book files, or a whole folder, and Endpaper reads what it can out of them. Anything a file does not say is looked up by its name. The files are read here in your browser and are never uploaded. From a folder, a book that is one file also gets that file's name and the folders above it saved on it, so you can find it again, and everyone who can see the book can see them. A file's own subject words are saved on the book too: adding one book at a time you can take them off first, and from a folder the only way to take one off afterwards is to remove the book.",
+    "Pick book files, or a whole folder, and Endpaper reads what it can out of them. Anything a file does not say is looked up by its name. The files are read here in your browser and are never uploaded. From a folder, a book that is one file also gets that file's name, the folders above it and a fingerprint of the file saved on it, so you can find it again, and everyone who can see the book can see them. The fingerprint is computed here from up to 12 KiB of the file. A file's own subject words are saved on the book too: adding one book at a time you can take them off first, and from a folder the only way to take one off afterwards is to remove the book.",
   "file.pickLabel": "Book files",
   "file.readingFiles": "Reading the files you picked...",
   "file.notAnEpub": "Not an EPUB file.",
@@ -1482,6 +1488,24 @@ export const en = {
   "copies.addFailed": "That copy could not be added.",
   "copies.loadFailed": "The other copies of this book could not be loaded.",
   "copies.badge": "{count} copies",
+
+  // ── Where this copy's files are, and a file held in another format ──────
+  // The Files panel on the book page and the copy offer on the scan queue.
+  "files.title": "Book files",
+  "files.hint":
+    "Where a browser last said this book's files are. Endpaper stores the place, never the file.",
+  "files.reported": "Last reported {date}",
+  "files.missing": "Not found since {date}",
+  "files.forget": "Forget",
+  "files.forgetFor": "Forget {path}",
+  "files.forgetConfirm":
+    "Forget that this book's file is at {path}? Picking that folder again when scanning records it again.",
+  "files.loadFailed": "Where this book's files are could not be loaded.",
+  "files.forgetFailed": "That location could not be forgotten.",
+  "rapid.heldInAnotherFormat":
+    "Already in the library in another format, so the file was not attached to it.",
+  "rapid.addAsCopy": "Add as its own copy ({format})",
+  "rapid.addAsCopyFor": "Add {label} as its own copy",
   "format.filterAll": "Any format",
 
   // ── Willing to lend, and willing to talk ────────────────────────────────
@@ -1493,6 +1517,22 @@ export const en = {
   "lending.never": "Never lent",
   "lending.neverWarning": "This book is marked as never lent.",
   "lending.lendAnyway": "Lend it anyway",
+  // Access requests: an ebook, or an audiobook carrying a digital reference, is
+  // requested and granted rather than lent.
+  "access.title": "Access to this copy",
+  "access.explain":
+    "A digital copy is not lent: ask its holder for access. Endpaper holds no file, so the copy itself is handed over outside the app.",
+  "access.request": "Request access",
+  "access.pending": "You asked {holder} for access. Waiting for an answer.",
+  "access.granted": "{holder} granted you access. Ask them for the file.",
+  "access.declined": "{holder} declined. You can ask again.",
+  "access.noHolder": "Nobody else holds this copy to ask.",
+  "access.none": "Nobody has asked for access.",
+  "access.waiting": "{name} is waiting for an answer",
+  "access.grantedTo": "Access granted to {name}",
+  "access.declinedFor": "Declined for {name}",
+  "access.grant": "Grant",
+  "access.decline": "Decline",
   "discuss.toggle": "I would like to talk about this book, ask me about it",
   "discuss.label": "Ask about it",
   "discuss.badge": "Talk about it",

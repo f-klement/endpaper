@@ -69,6 +69,7 @@ const REASONS: Record<NamedScanReason, MessageKey> = {
   "kept-the-name": "fallback.keptTheName",
   "kept-for-now": "fallback.keptForNow",
   unreachable: "common.cannotReachServer",
+  "held-in-another-format": "rapid.heldInAnotherFormat",
 };
 
 /**
@@ -205,6 +206,7 @@ interface RapidQueueProps {
     added: number;
     failed: number;
     unreferenced: number;
+    already: number;
     stopped: boolean;
   } | null;
   onRemove: (key: string) => void;
@@ -254,6 +256,12 @@ interface RapidQueueProps {
    * out is to remove the row and pick the files one at a time.
    */
   onSplit: (key: string) => void;
+  /**
+   * File a row held in another format as its own copy of the book its ISBN
+   * belongs to. Offered on exactly the rows carrying `copyOf`.
+   */
+  onAddAsCopy: (key: string) => void;
+  isAddingCopy: boolean;
 }
 
 /**
@@ -286,6 +294,8 @@ export default function RapidQueue({
   onLookUpKept,
   onSplit,
   onDropSubject,
+  onAddAsCopy,
+  isAddingCopy,
 }: RapidQueueProps) {
   const { t } = useTranslation();
   // Read out here so every figure below is spelled the way the hook spells it.
@@ -309,7 +319,9 @@ export default function RapidQueue({
   // left in the component, and a second reading is a second place for this
   // sentence to appear beside a queue it is not true of.
   const anyEmptyAnswer = emptyAnswers > 0;
-  const busy = isAdding || isLookingUp;
+  // A copy in flight counts: a batch started then re-walks the row it is
+  // filing, and its verdict would overwrite the copy's.
+  const busy = isAdding || isLookingUp || isAddingCopy;
   // Rows standing under their names with somewhere to go back to, and no run in
   // the way. Read three times below, so it is named once.
   const showKept = keptForNow > 0 && !isLookingUp;
@@ -353,6 +365,13 @@ export default function RapidQueue({
         {result.unreferenced > 0 && (
           <span className="block mt-1">
             {t("rapid.unreferenced", { count: result.unreferenced })}
+          </span>
+        )}
+        {/* Its own sentence for the reason the one above is: these rows are
+          neither added nor failed, and the member asked for neither. */}
+        {result.already > 0 && (
+          <span className="block mt-1">
+            {t("rapid.alreadyHeld", { count: result.already })}
           </span>
         )}
       </p>
@@ -427,6 +446,34 @@ export default function RapidQueue({
                 ×
               </button>
             </div>
+
+            {/* **Said before the press**, so a member re-picking a folder sees
+                which rows the batch will not add again. */}
+            {entry.heldBy?.lands === true && (
+              <p className="mt-1 text-xs text-paper-600 dark:text-paper-400">
+                {t("rapid.inYourLibrary")}
+              </p>
+            )}
+
+            {/* **The press the landing rule leaves to the member.** The file's
+                ISBN belongs to a book of another format, so its location was
+                not written there; making this file its own copy is a decision
+                about the household's shelf, and the page does not take it.
+                The format is named on the button because it is what the copy
+                will be. */}
+            {entry.copyOf !== undefined && (
+              <button
+                type="button"
+                onClick={() => onAddAsCopy(entry.key)}
+                disabled={busy}
+                aria-label={t("rapid.addAsCopyFor", { label: entry.label })}
+                className="mt-1.5 text-xs font-medium text-accent-600 underline hover:text-accent-700 disabled:opacity-50 dark:text-accent-400 dark:hover:text-accent-300"
+              >
+                {t("rapid.addAsCopy", {
+                  format: t(`copy.format.${entry.format || "unset"}`),
+                })}
+              </button>
+            )}
 
             {/* **What a candidate is made of, and the way out of it.** For
                 every other format one file is one book, so a row that stands

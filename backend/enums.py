@@ -169,6 +169,18 @@ class LendingWillingness(StrEnum):
     HAPPY = "happy"
 
 
+class AccessStatus(StrEnum):
+    """Where one request for access to a digital copy stands.
+
+    Never stored: `models.AccessRequest` keeps who decided and when, and this
+    is read off those columns, so the two cannot disagree.
+    """
+
+    PENDING = "pending"
+    GRANTED = "granted"
+    DECLINED = "declined"
+
+
 class TagCategory(StrEnum):
     """The groups tags are presented in throughout the UI.
 

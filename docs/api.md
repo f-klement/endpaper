@@ -1210,7 +1210,7 @@ likes, including one outside the covers directory.
 | Method | Path | Access | Notes |
 |---|---|---|---|
 | GET | `/api/loans?active_only=&overdue_only=` | user | Paginated; defaults to active only |
-| POST | `/api/loans` | user | Exactly one borrower. Optional `due_at`. **422** for both or neither borrower, **409** if already out **or** marked never lent, **404** for an unknown or invisible book |
+| POST | `/api/loans` | user | Exactly one borrower. Optional `due_at`. **422** for both or neither borrower, **409** if already out, marked never lent, **or** a digital copy (`code: digital_copy`, see below), **404** for an unknown or invisible book |
 | PUT | `/api/loans/{id}/return` | user | **400** if already returned |
 | GET | `/api/loans/overdue` | user | The overdue loans themselves, paginated, most overdue first. **Narrower than `?overdue_only=true`**: see below |
 | GET | `/api/loans/overdue/mine` | user | The in app reminder: how many overdue loans this member is being chased about |
@@ -1397,6 +1397,31 @@ on the next run. The in app notice ignores that column entirely, in both directi
 does not stamp it, and it does not read it, because a loan is on the member's screen for as
 long as it is overdue.
 
+### Access to a digital copy
+
+A digital copy is not lent, because nothing comes back: a member asks its holder for
+access, and the holder grants or declines. A digital copy is an ebook, or an audiobook that
+carries a digital reference; an audiobook with none is a disc, which the CSV import files
+under that format, and is lent. **The holder is the member who added the book
+when the request was made**, stored on the request and never changed, so merging the book
+into another member's entry hands the request to nobody new. A grant records who gave
+access and when; it never expires and is never returned. **It shares no file**: Endpaper
+holds none, and a digital reference's path is on whichever member's machine recorded it,
+so the copy itself is handed over outside the app.
+
+A loan already open on a digital copy is left as it was and can still be returned. Only a
+new one is refused.
+
+| Method | Path | Access | Notes |
+|---|---|---|---|
+| GET | `/api/books/{id}/access-requests` | read | The requests the caller holds or made, oldest first |
+| POST | `/api/books/{id}/access-requests` | read | 201, `status: pending`. **409** with `code` `not_digital`, `no_holder` (the caller added the book, or nobody did; nothing is stored) or `already_requested` (one waiting or granted) |
+| PUT | `/api/books/{id}/access-requests/{request_id}` | holder | Body `{"granted": bool}`. **403** for the requester, **404** for anybody else, **409** `already_answered` |
+
+A request is read only by its requester and the holder, and only on a book the caller can
+see, so an invisible book is a 404 on every route here. A declined request may be followed
+by a new one.
+
 ### Notes
 
 | Method | Path | Access | Notes |
@@ -1457,6 +1482,7 @@ route here and nothing the server stores has been read, opened or checked by it.
 | Method | Path | Access | Notes |
 |---|---|---|---|
 | GET | `/api/books/digital-references/missing` | signed in | Every flagged reference on the shelf the caller can see, newest miss first, paginated |
+| POST | `/api/books/file-holders` | signed in | Which books the caller can see already hold each of up to 500 files; a read |
 | GET | `/api/books/{id}/digital-references` | read | In insertion order |
 | POST | `/api/books/{id}/digital-references` | write | 200; a report, not a create |
 | POST | `/api/books/{id}/digital-references/{reference_id}/missing` | write | 200; flags, never deletes |
@@ -1480,7 +1506,7 @@ not 201** for the same reason: the route is not a create. A report replaces the 
 whole rather than filling gaps in it, because a row is what one client saw in one look.
 
 **What the server knows, and what it only stores.** `root_label`, `relative_path`,
-`root_confirmed`, `size_bytes` and `file_modified_at` are a client's claim and are accepted
+`root_confirmed`, `size_bytes`, `file_modified_at` and `partial_md5` are a client's claim and are accepted
 as one. `created_at`, `confirmed_at` and `missing_since` are the server's clock and **a
 client cannot set any of them**: a payload naming one is ignored. `confirmed_at` is when
 this server was last **told** the file was there, not when anybody looked; the server
@@ -1533,6 +1559,23 @@ exactly on the byte bound.
 One book holds at most 16 references, counted **per book rather than per request**, and the
 ceiling is a 409. It binds a new location only, so a book already at the ceiling can still
 re-confirm what it holds.
+
+**`partial_md5` is KOReader's fingerprint of the file**, nullable, and exactly 32 lower case
+hex digits where present (422 otherwise, and `ck_digital_references_partial_md5` on the
+column). The browser computes it at the pick from twelve 1 KiB windows at offsets 0 and 1,024
+times 4 to the powers 0 to 10, which is KOReader's `util.partialMD5`; it is not a content
+hash, since the file's length is no input. It is the key KOReader's progress sync names a
+document by, which is why it is this digest and not a full one.
+
+**`POST /api/books/file-holders` asks which books already hold some files**, so a scan queue
+adds nothing twice. The body is `{"files": [...]}`, 1 to 500 entries, each a location
+(`root_label` and `relative_path`, both or neither, bounded as a report's are), a
+`partial_md5`, or both; an entry naming nothing is a 422. The answer is
+one `{"holders": [...]}` per file in the order asked, each holder giving `book_id`,
+`reference_id`, the book's `format`, and whether it matched on `same_location`,
+`same_partial_md5` or both. **A book the caller cannot see answers as no book does**, an
+empty list, because the lookup starts from the caller's shelf; trashed books are absent for
+the same reason. A POST because up to 500 paths do not fit a query string; it writes nothing.
 
 ### Store identifiers
 

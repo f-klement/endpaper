@@ -2,6 +2,37 @@
 
 ## Unreleased
 
+- **Picking a folder again adds nothing twice.** Before anything is added, the scan queue asks
+  which books already hold each picked file, by where it is or by its fingerprint, and a row
+  already in the library says so. Adding refreshes where that file is on the book that holds it
+  instead of making a second book, which a file with no ISBN used to do on every re-pick. The
+  fingerprint is KOReader's partial MD5, computed in the browser from at most twelve 1 KiB
+  samples of the file and stored beside its location, where everyone who can see the book can
+  see it; no byte of the file is sent. A moved or renamed file is recognised by it. A file held
+  only by a book of another format is offered as its own copy, as an ISBN match already is.
+  `POST /api/books/file-holders` answers the question for up to 500 files at once, from the
+  books the caller can see.
+
+- **A book's page shows where its files are.** The Copies group lists each location a folder pick
+  reported for this copy: the picked folder and the path beneath it, when it was last reported,
+  and since when a browser could not find it. Forget removes one, after asking. Nothing new is
+  stored or sent: the list is the one the book's file location routes already served.
+
+- **A picked file no longer lands on a book of another format that shares its ISBN.** An EPUB
+  carrying its print ISBN used to have its location written onto the household's hardcover. The
+  location is now written to a copy of that book in the file's format, or to one whose format is
+  not recorded; otherwise the scan queue says the book is in the library in another format and
+  offers to add the file as its own copy, with the location recorded on that copy. Picking the
+  same folder again then finds that copy rather than offering another.
+
+- **A digital copy is no longer lent.** A digital copy is an ebook, or an audiobook carrying a
+  file reference; an audiobook without one is a disc (the CSV import files audio CDs there) and
+  lends as before. A member asks the holder for access, and the holder grants or declines; nothing
+  is returned and nothing expires. The holder is the member who added the book when the request
+  was made, and stays so if the book is merged into another entry. A grant shares no file: the
+  copy changes hands outside Endpaper. A loan already open on a digital copy can still be
+  returned. A new loan on one is refused with a 409 carrying `code: digital_copy`.
+
 - **Filling a book in automatically no longer sets its categories, series or Google Books
   reference.** `POST /api/books/{id}/enrich` chooses the record itself, so it now writes what
   Refresh Metadata writes, less the title. Those three come only from an edition a Member picks. A

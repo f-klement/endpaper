@@ -46,6 +46,7 @@ import { BookFormat } from "../../src/api/generated/model";
 // not hold. The glob this replaced answered the empty string on a miss, so a
 // rename of the module turned the rule below into a rule about nothing.
 import { sourceText } from "../sourceModules";
+import { namesSpelled } from "../carriesABook";
 import {
   holds,
   PROFILE,
@@ -415,9 +416,16 @@ describe("the module cannot see a file", () => {
     // **The same literal as `tests/pages/ScanPage/types.test.ts`**, which
     // asserts that it is: a `File` is a `Blob`, and the two guards named
     // different sets for one commit until both critic seats found the gap.
-    expect(withoutProse(source)).not.toMatch(
-      /\b(?:DataView|(?:[A-Z]\w*)?(?:Array|Blob|Buffer|Stream)\w*|File(?!Metadata|Naming|Identifier|Failure|Reading|PickPanel|Picker)\w*)\b/,
-    );
+    //
+    // **Over the names the module spells, not its text**, so a word in a
+    // string, such as a folder labelled `"Files"`, is not taken for a type.
+    const carries =
+      /\b(?:DataView|(?:[A-Z]\w*)?(?:Array|Blob|Buffer|Stream)\w*|File(?!Metadata|Naming|Identifier|Failure|Reading|PickPanel|Picker)\w*)\b/;
+    expect(
+      namesSpelled(source, "ts")
+        .map(({ name }) => name)
+        .filter((name) => carries.test(name)),
+    ).toEqual([]);
   });
 
   it("has no way to read bytes at all", () => {

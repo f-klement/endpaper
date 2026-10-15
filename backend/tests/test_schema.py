@@ -5633,6 +5633,14 @@ _CONFINEMENT_PROBES: Final[
         b"opds-",
         "opds-",
     ),
+    (
+        "ck_digital_references_partial_md5",
+        "digital_references",
+        "partial_md5",
+        {"book_id": 1, "root_label": "Books", "relative_path": "a.epub"},
+        b"",
+        "",
+    ),
 )
 
 

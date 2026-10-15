@@ -164,18 +164,19 @@ class TestTheseAreTheConstraintsWithTwoSpellings:
             ("custom_field_values", "ck_custom_field_values_bounds"),
             ("custom_fields", "ck_custom_fields_name_bounds"),
             ("digital_references", "ck_digital_references_bounds"),
+            ("digital_references", "ck_digital_references_partial_md5"),
             ("opds_servers", "ck_opds_servers_base_url"),
             ("opds_servers", "ck_opds_servers_credential_key"),
             ("opds_servers", "ck_opds_servers_name"),
             ("quotes", "ck_quotes_text_bounds"),
         }
 
-    def test_nine_of_the_twenty_two_tables_carry_one(self):
+    def test_nine_of_the_twenty_three_tables_carry_one(self):
         """The other half of the ADR's sentence, from the same source. A set of
         names and a count of tables are two different claims, and stating both
         here is what stopped the first one going out with the wrong number."""
         assert len({table for table, _, _ in _dialect_checks()}) == 9
-        assert len(Base.metadata.tables) == 22
+        assert len(Base.metadata.tables) == 23
 
 
 class TestTheStringifierIsNotAnEngine:
@@ -883,6 +884,11 @@ class TestEveryNulArmDroppedOnACharacterColumn:
             ("catalogue_targets", "ck_catalogue_targets_base_url", "base_url"),
             ("catalogue_targets", "ck_catalogue_targets_indexes", "isbn_index"),
             ("catalogue_targets", "ck_catalogue_targets_indexes", "title_index"),
+            (
+                "digital_references",
+                "ck_digital_references_partial_md5",
+                "partial_md5",
+            ),
             ("opds_servers", "ck_opds_servers_base_url", "base_url"),
             ("opds_servers", "ck_opds_servers_credential_key", "credential_key"),
         }
@@ -986,6 +992,7 @@ class TestNoSqliteArmLostAClause:
             "ck_book_identifiers_bounds": 1,
             "ck_catalogue_targets_base_url": 1,
             "ck_catalogue_credentials_source": 1,
+            "ck_digital_references_partial_md5": 1,
             "ck_opds_servers_credential_key": 1,
             "ck_opds_servers_base_url": 1,
         }

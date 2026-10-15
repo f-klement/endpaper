@@ -189,8 +189,15 @@ function sizeOf(picked: PickedEntry): number | null {
  * different file. The asymmetry to keep is that a value **rendered** on screen
  * goes through `fileName.plainName` first, which is where a bidirectional
  * override in a folder name is debris rather than a name.
+ *
+ * **`partialMd5` arrives as a string**, computed by `lib/fileDigest.ts` from
+ * the file itself, so this module still names no read. Null where it was not
+ * computed, and sent as null rather than guessed.
  */
-export function referenceFor(picked: PickedEntry): DigitalReferenceIn | null {
+export function referenceFor(
+  picked: PickedEntry,
+  partialMd5: string | null = null,
+): DigitalReferenceIn | null {
   const path = picked.webkitRelativePath;
   if (typeof path !== "string" || path === "") return null;
 
@@ -216,5 +223,6 @@ export function referenceFor(picked: PickedEntry): DigitalReferenceIn | null {
     root_confirmed: true,
     size_bytes: sizeOf(picked),
     file_modified_at: modifiedAt(picked),
+    partial_md5: partialMd5,
   };
 }

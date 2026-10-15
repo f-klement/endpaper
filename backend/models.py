@@ -34,6 +34,7 @@ from authors import AUTHOR_NAME_MAX
 from database import Base
 from dialect import DialectSQL
 from enums import (
+    AccessStatus,
     AuthMode,
     AuthorityProvenance,
     AuthorityScheme,
@@ -1277,6 +1278,10 @@ class Book(Base):
         "ReadingProgress", back_populates="book", cascade="all, delete-orphan"
     )
     loans: Mapped[list[Loan]] = relationship("Loan", back_populates="book", cascade="all, delete-orphan")
+    # Cascaded like the loans: a purged book's requests ask for nothing.
+    access_requests: Mapped[list[AccessRequest]] = relationship(
+        "AccessRequest", back_populates="book", cascade="all, delete-orphan"
+    )
     tags: Mapped[list[Tag]] = relationship("Tag", secondary=book_tags)
     notes: Mapped[list[Note]] = relationship("Note", back_populates="book", cascade="all, delete-orphan")
     # Cascaded like the notes beside them: purging a book from the trash takes
@@ -1686,6 +1691,86 @@ class Loan(Base):
     )
 
 
+#: A request is undecided, or carries all three halves of its decision.
+ACCESS_DECISION_SQL = (
+    "(granted IS NULL) = (decided_at IS NULL) "
+    "AND (granted IS NULL) = (decided_by_user_id IS NULL)"
+)
+
+
+class AccessRequest(Base):
+    """A member asking the holder of a digital copy for access, and the answer.
+
+    **A digital copy is not lent** (`lending.is_requested_not_lent`): it needs no
+    return, so a loan's open state, due date and overdue reminders describe
+    nothing about it. What it needs is a request and a decision. A grant is a
+    record that access was given, by whom and when; it never expires and is
+    never returned.
+
+    **A grant carries no file.** Endpaper holds none, and a `DigitalReference`
+    path is on whichever member's machine recorded it, so the hand over happens
+    outside the app.
+
+    **A table of its own rather than a kind column on `loans`.** Every rule on
+    `loans` is wrong for this row: `uq_loans_one_open_per_book` allows one open
+    loan per book where any number of members may hold access at once,
+    `ck_loans_one_borrower` admits a borrower with no account where only a
+    member can ask, and the overdue digest, the banner and the merge's single
+    open loan rule would each need a filter they would one day be missing.
+
+    **The holder is the member who added the book when the request was made**,
+    stored on the row and never changed afterwards. Read live from `books`, a
+    merge into another member's entry would hand the request to that member, who
+    could then read it, or grant their own. Visible to the requester and the
+    holder only, and the Book through the Shelf first.
+
+    No uniqueness index: the route refuses a second open request from the same
+    member, and a merge may leave two, which the holder answers like any other.
+    """
+
+    __tablename__ = "access_requests"
+
+    __table_args__ = (
+        CheckConstraint(ACCESS_DECISION_SQL, name="ck_access_requests_decision"),
+        # A member never asks themselves: the route refuses it first, and this
+        # holds it for a restore.
+        CheckConstraint(
+            "holder_user_id <> requested_by_user_id", name="ck_access_requests_two_parties"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    book_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("books.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    requested_by_user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id"), nullable=False, index=True
+    )
+    holder_user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id"), nullable=False, index=True
+    )
+    requested_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    # Null while undecided. `ck_access_requests_decision` holds the three
+    # together, so a decision is never half recorded.
+    granted: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    decided_by_user_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("users.id"), nullable=True, index=True
+    )
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    book: Mapped[Book] = relationship("Book", back_populates="access_requests")
+    requested_by: Mapped[User] = relationship("User", foreign_keys=[requested_by_user_id])
+    holder: Mapped[User] = relationship("User", foreign_keys=[holder_user_id])
+    decided_by: Mapped[User | None] = relationship("User", foreign_keys=[decided_by_user_id])
+
+    @property
+    def status(self) -> AccessStatus:
+        """Read off the decision rather than stored beside it."""
+        if self.granted is None:
+            return AccessStatus.PENDING
+        return AccessStatus.GRANTED if self.granted else AccessStatus.DECLINED
+
+
 class Note(Base):
     """What one Member thought about one Book, shared or kept to themselves.
 
@@ -1932,6 +2017,10 @@ DIGITAL_REFERENCE_PATH_MAX = 4094
 #: which is 2**63 and would store the rounded value as though it meant something.
 DIGITAL_REFERENCE_MAX_SIZE = 2**53 - 1
 
+#: How many hex digits KOReader's partial MD5 is: an MD5 digest, 16 bytes,
+#: written lower case. `DigitalReference.partial_md5` says what it samples.
+PARTIAL_MD5_HEX = 32
+
 
 class DigitalReference(Base):
     """Where a Member says one of their book files is. **Never the file.**
@@ -2092,6 +2181,24 @@ class DigitalReference(Base):
             ),
             name="ck_digital_references_bounds",
         ),
+        # **Exactly the digest's shape or null**, because the column's only
+        # reader is an equality lookup and a value of any other shape matches
+        # nothing while looking like it might. A positive pattern of 32 classes
+        # rather than a length and a negated class, so there is no `length()`
+        # term for a NUL to shorten; `GLOB` still stops at a NUL, which is the
+        # `instr` conjunct. On a null both conjuncts are null and the row passes.
+        CheckConstraint(
+            DialectSQL(
+                sqlite=(
+                    "instr(partial_md5, char(0)) = 0 "
+                    f"AND partial_md5 GLOB '{'[0-9a-f]' * PARTIAL_MD5_HEX}'"
+                ),
+                postgresql=(
+                    f"(partial_md5 COLLATE \"C\") ~ '^[0-9a-f]{{{PARTIAL_MD5_HEX}}}$'"
+                ),
+            ),
+            name="ck_digital_references_partial_md5",
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
@@ -2152,6 +2259,24 @@ class DigitalReference(Base):
     #: `File.lastModified` as last reported. The other half, and the half that
     #: moves when somebody edits the file's metadata in place.
     file_modified_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    #: KOReader's partial MD5 of the file, as this browser computed it at the
+    #: pick, or null where it did not.
+    #:
+    #: **Not a content hash.** KOReader's `util.partialMD5` hashes twelve 1 KiB
+    #: windows at offsets 0 and 1024 times 4 to the powers 0 to 10, so two files
+    #: agreeing on those windows collide and the file's length is no input. It
+    #: is this digest rather than a full one because it is the key KOReader's
+    #: progress sync names a document by, and a full hash would match nothing a
+    #: device sends.
+    #:
+    #: **On the reference, not on the Book**: it identifies bytes, and one
+    #: Book's copies differ by bytes whenever a tool rewrites the file's
+    #: metadata. Indexed because its reader is a lookup by value across the
+    #: shelf, which `uq_digital_references_location` cannot serve.
+    partial_md5: Mapped[str | None] = mapped_column(
+        String(PARTIAL_MD5_HEX), nullable=True, index=True
+    )
 
     # ── What this server knows ───────────────────────────────────────────
     #

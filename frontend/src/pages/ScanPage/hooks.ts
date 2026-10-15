@@ -15,8 +15,10 @@ import { useInvalidate } from "../../api/invalidate";
 import { ApiError } from "../../api/mutator";
 
 import {
+  findFileHolders,
   getLookupIsbnQueryKey,
   getSearchBooksQueryKey,
+  listCopies,
   lookupIsbn,
   searchBooks,
   useAddBookTag,
@@ -34,15 +36,18 @@ import { BookFormat } from "../../api/generated/model";
 import { useGoogleBooksReady } from "../../app/hooks";
 import type {
   BookMatch,
+  BookOut,
   BookSearchOut,
   CatalogueSource,
   DigitalReferenceIn,
+  HoldersOut,
   LocationOut,
   TagOut,
 } from "../../api/generated/model";
 import { QUERY_FLOOR } from "../../lib/bookBounds";
 import { writeOneAtATime, type BulkProgress } from "../../lib/bulkWrite";
 import { referenceFor } from "../../lib/digitalReference";
+import { partialMd5 } from "../../lib/fileDigest";
 import { useTranslation } from "../../i18n";
 import type { FileFailure } from "../../lib/fileReaders";
 import type { AudioFailure, AudioTags } from "../../lib/audiobook";
@@ -640,7 +645,8 @@ export type NamedScanReason =
   | "lookup-failed"
   | "kept-the-name"
   | "kept-for-now"
-  | "unreachable";
+  | "unreachable"
+  | "held-in-another-format";
 
 /**
  * Why a row is where it is, as a name rather than as a sentence.
@@ -892,6 +898,18 @@ export interface ScannedEntry {
    */
   reference?: DigitalReferenceIn;
   /**
+   * The Book that already holds this row's file, `null` where none the member
+   * can see does, and absent until somebody has asked.
+   *
+   * **Asked by the file and not by its ISBN**: a location or KOReader's
+   * fingerprint, through `POST /api/books/file-holders`. So a re-picked folder
+   * is recognised whatever its files say, including the ones with no ISBN,
+   * which a create would otherwise file a second time. A held row is never
+   * added: where `lands`, `addAll` refreshes its sighting on that Book, and
+   * otherwise the row is offered as its own copy, by the landing rule.
+   */
+  heldBy?: Held | null;
+  /**
    * Whether this row's ISBN was read out of the file's **name**.
    *
    * **Carried rather than read off the state, because the state deliberately
@@ -907,6 +925,16 @@ export interface ScannedEntry {
    * places that know. `theIsbnWasRead` is the one reader.
    */
   isbnFromTheName?: true;
+  /**
+   * The book this row's ISBN already belongs to, where that book is a
+   * different kind of object from the file.
+   *
+   * **Set only beside the `held-in-another-format` reason, by the one site
+   * that sets that reason**, which is the failure mapping in `addAll`. It is
+   * what `addAsCopy` copies, and it is cleared there for every other outcome,
+   * so a row that later fails for another reason stops offering the copy.
+   */
+  copyOf?: number;
 }
 
 /**
@@ -1060,6 +1088,175 @@ export function isBeingDecided(entry: ScannedEntry): boolean {
 }
 
 /**
+ * Which copy of the title a file's ISBN already belongs to takes the file's
+ * location, or `undefined` where none may.
+ *
+ * **A copy of the same kind of object, or one nobody said the kind of.**
+ * Owner's ruling, 2026-10-15. A reference says where the file of
+ * *this row* is, and `books.format` is per row, so which row carries it already
+ * states the relationship: an EPUB carrying its print ISBN, which Calibre
+ * produces often, used to land as a file location on the household's
+ * hardcover. Where no copy matches, the file is a new copy in its own format,
+ * and that is a press the member makes (`addAsCopy`), never one this page
+ * guesses.
+ *
+ * **Every copy and not only the one the 409 names.** The server names the
+ * lowest id holder, and a copy shares its ISBN, so after `addAsCopy` made the
+ * ebook beside a hardcover every later 409 still names the hardcover. Asking
+ * that row alone offered the copy again on a re-pick, and the press made a
+ * duplicate ebook.
+ *
+ * An exact format first, then an unset one, so a recorded ebook beats a row
+ * nobody described. `copies` is in id order with the holder in it, which is
+ * what `GET /{id}/copies` answers. A row whose own format is blank matches
+ * only an unset copy; no file row is blank today, because every extension in
+ * `fileName.FORMAT_FOR_EXTENSION` answers a format.
+ */
+function whereItLands(
+  copies: readonly Pick<BookOut, "id" | "format">[],
+  fileFormat: BookFormat | "",
+): number | undefined {
+  const exact = copies.find(
+    (copy) => copy.format != null && copy.format === fileFormat,
+  );
+  return (exact ?? copies.find((copy) => copy.format == null))?.id;
+}
+
+/**
+ * How many files one `POST /api/books/file-holders` may name.
+ *
+ * The schema's `maxItems` on `HoldersIn.files`, which
+ * `tests/pages/ScanPage/hooks.test.tsx` recomputes from `openapi.json`. A pick
+ * larger than this is asked in chunks of it.
+ */
+export const FILES_PER_LOOKUP = 500;
+
+/**
+ * A Book already holding a file, and whether the file may land on it.
+ *
+ * `lands` is the landing rule's answer: the Book is the file's format or has
+ * none recorded. A holder of another format is a match the file may not be
+ * attached to, which is a reference left on a print row before that rule.
+ */
+export interface Held {
+  readonly bookId: number;
+  readonly lands: boolean;
+}
+
+/**
+ * Which of the Books holding a file the row stands for, or `null` for none.
+ *
+ * **Only a holder the landing rule admits takes the file**, owner's ruling,
+ * 2026-10-15, whether it matched by location or by fingerprint: a match on a
+ * print row alone would otherwise write a new reference onto it. That case
+ * answers the first holder with `lands` false, and the add offers the file
+ * as its own copy, as a 409 of another format does.
+ *
+ * **Among the admitted, a holder at this very location first**, so a file
+ * whose sighting is on an unset copy is refreshed there rather than gaining a
+ * second reference on an exact copy that carries the same bytes elsewhere.
+ */
+/** Holders in the shape `whereItLands` reads. */
+function asCopies(holders: HoldersOut["holders"]) {
+  return holders.map((holder) => ({
+    id: holder.book_id,
+    format: holder.format,
+  }));
+}
+
+function holderOf(
+  answer: HoldersOut,
+  fileFormat: BookFormat | "",
+): Held | null {
+  const first = answer.holders[0];
+  if (first === undefined) return null;
+  // `whereItLands` admits only the file's format or an unset one, which is
+  // the landing rule, so a print holder is never picked here.
+  const landing =
+    whereItLands(
+      asCopies(answer.holders.filter((holder) => holder.same_location)),
+      fileFormat,
+    ) ?? whereItLands(asCopies(answer.holders), fileFormat);
+  return landing === undefined
+    ? { bookId: first.book_id, lands: false }
+    : { bookId: landing, lands: true };
+}
+
+/**
+ * Where this file is, now with its fingerprint, while the `File` is in hand.
+ *
+ * **Only for a file that has a location**: a file picked one at a time has no
+ * reference to carry the digest, so nothing is read for it. A digest that
+ * cannot be read leaves the reference without one rather than losing it.
+ */
+async function locate(file: File): Promise<DigitalReferenceIn | undefined> {
+  if (referenceFor(file) === null) return undefined;
+  const digest = await partialMd5(file).catch(() => null);
+  return referenceFor(file, digest) ?? undefined;
+}
+
+/** One file to ask about: its row, where it is, and what format it would be. */
+interface HolderQuestion {
+  readonly key: string;
+  readonly reference: DigitalReferenceIn;
+  readonly format: BookFormat | "";
+}
+
+/**
+ * Which Book already holds each of these files, by row key.
+ *
+ * **A key missing from the answer was not answered**, because its chunk
+ * failed; the caller leaves that row unasked rather than calling it new, and
+ * the batch asks again. Never a reason to refuse the add: the lookup only
+ * stops a duplicate, and the add is what the member pressed.
+ */
+async function askWhoHolds(
+  questions: readonly HolderQuestion[],
+): Promise<Map<string, Held | null>> {
+  const held = new Map<string, Held | null>();
+  const chunks: (readonly HolderQuestion[])[] = [];
+  for (let start = 0; start < questions.length; start += FILES_PER_LOOKUP) {
+    chunks.push(questions.slice(start, start + FILES_PER_LOOKUP));
+  }
+  // Together rather than one after another: each is a read, and a pick
+  // needing more than one is a few thousand files.
+  const answered = await Promise.all(
+    chunks.map((chunk) =>
+      findFileHolders({
+        files: chunk.map(({ reference }) => ({
+          root_label: reference.root_label,
+          relative_path: reference.relative_path,
+          partial_md5: reference.partial_md5 ?? null,
+        })),
+      }).catch(() => undefined),
+    ),
+  );
+  chunks.forEach((chunk, at) => {
+    const answers = answered[at];
+    if (answers === undefined || answers.length !== chunk.length) return;
+    chunk.forEach((question, index) =>
+      held.set(question.key, holderOf(answers[index]!, question.format)),
+    );
+  });
+  return held;
+}
+
+/**
+ * Thrown by one row of `addAll` when its ISBN belongs to a book of another
+ * format, so the failure mapping can offer the copy rather than state the 409.
+ *
+ * **A thrown value rather than a flag beside the row**, because the shared
+ * loop in `lib/bulkWrite.ts` records a row as failed by its throw and by
+ * nothing else, and this row is not in the catalogue as itself.
+ */
+class HeldInAnotherFormat extends Error {
+  constructor(readonly holderId: number) {
+    super("Held in another format");
+    this.name = "HeldInAnotherFormat";
+  }
+}
+
+/**
  * Whether this row's ISBN is good enough to write a location onto somebody
  * else's book.
  *
@@ -1141,6 +1338,8 @@ function needsALookup(entry: ScannedEntry): boolean {
     state.standsUnderItsName &&
     !state.deciding &&
     entry.answered === undefined &&
+    // A file already in the library has nothing to ask a catalogue.
+    !entry.heldBy &&
     (entry.isbn !== "" || entry.query !== undefined)
   );
 }
@@ -1347,6 +1546,12 @@ export interface UseRapidIntakeResult {
   addAll: () => void;
   isAdding: boolean;
   /**
+   * Add a row held in another format as its own copy of the book its ISBN
+   * already belongs to. Does nothing for a row not offering that.
+   */
+  addAsCopy: (key: string) => void;
+  isAddingCopy: boolean;
+  /**
    * Stop the batch after the book in flight.
    *
    * **The same stop the camera and the paced lookup each already had**, and the
@@ -1383,6 +1588,10 @@ export interface UseRapidIntakeResult {
    * `file.explain` scopes what it promises to a book that is one file for that
    * reason.
    *
+   * `already` is rows whose file a Book the member can see already held, so
+   * nothing was added for them and their sighting was refreshed there. Not in
+   * `added`, which would otherwise claim books the batch did not make.
+   *
    * `stopped` says the run ended because the member ended it, so a count far
    * short of the queue is not read as damage. The rows it never reached are
    * still in the queue, which is the other half of the same sentence.
@@ -1391,6 +1600,7 @@ export interface UseRapidIntakeResult {
     added: number;
     failed: number;
     unreferenced: number;
+    already: number;
     stopped: boolean;
   } | null;
 }
@@ -1435,6 +1645,7 @@ export function useRapidIntake(): UseRapidIntakeResult {
     added: number;
     failed: number;
     unreferenced: number;
+    already: number;
     stopped: boolean;
   } | null>(null);
 
@@ -1442,6 +1653,11 @@ export function useRapidIntake(): UseRapidIntakeResult {
   const invalidate = useInvalidate();
   const scanAdd = useScanAdd();
   const reportReference = useReportDigitalReference();
+  const addAnotherCopy = useAddCopy();
+  // **The whole of `addAsCopy`, not the copy request's own pending flag.** That
+  // flag drops when the copy exists, and a batch started during the reference
+  // request after it would re-walk the row and overwrite the copy's verdict.
+  const [isAddingCopy, setIsAddingCopy] = useState(false);
   const locations = useKnownLocations();
   // **The locale, and nothing else this hook says to a member.** Every reason a
   // row carries is a name now, and the last `t` went with them; this is for the
@@ -1641,10 +1857,36 @@ export function useRapidIntake(): UseRapidIntakeResult {
     };
   }
 
+  /** Mark each asked row with the Book holding its file, or with none. */
+  async function recordHolders(questions: readonly HolderQuestion[]) {
+    if (questions.length === 0) return;
+    const held = await askWhoHolds(questions);
+    if (held.size === 0) return;
+    setEntries((current) =>
+      current.map((entry) =>
+        held.has(entry.key) ? { ...entry, heldBy: held.get(entry.key) } : entry,
+      ),
+    );
+  }
+
   async function readFiles(files: readonly File[]) {
     const { readerFor } = await import("../../lib/fileReaders");
-    for (const file of files) {
+    const questions: HolderQuestion[] = [];
+    // Every fingerprint first, together: twelve small slices a file, so a
+    // pick of hundreds holds a few megabytes at most, and the read loop below
+    // stays the one sequential step.
+    const located = await Promise.all(files.map(locate));
+    for (const [position, file] of files.entries()) {
       const key = pickedKey(file);
+      const reference = located[position];
+      if (reference) {
+        const extension = supportedExtension(file.name);
+        questions.push({
+          key,
+          reference,
+          format: extension ? FORMAT_FOR_EXTENSION[extension] : "",
+        });
+      }
       let note: ScanReason | undefined;
       try {
         // **Which reader opens this is `lib/fileReaders.ts`'s question, not
@@ -1658,7 +1900,7 @@ export function useRapidIntake(): UseRapidIntakeResult {
         } else if (reading) {
           const draft = draftFromFile(reading.metadata);
           if (draft.title !== "") {
-            settle(key, { state: "found", isbn: draft.isbn, draft });
+            settle(key, { state: "found", isbn: draft.isbn, draft, reference });
             continue;
           }
           // The file opened and named no title, so what is left is its name.
@@ -1669,11 +1911,15 @@ export function useRapidIntake(): UseRapidIntakeResult {
         // entry, and the name is still a signal.
         note = { kind: "unreadable" };
       }
-      settle(
-        key,
-        fromTheName({ name: file.name, folders: foldersOf(file) }, note),
-      );
+      settle(key, {
+        ...fromTheName({ name: file.name, folders: foldersOf(file) }, note),
+        reference,
+      });
     }
+    // **Once for the pick, after every file is read**, so a re-picked folder
+    // says which of its rows are already in the library before anybody
+    // presses add, at one request per `FILES_PER_LOOKUP` files.
+    await recordHolders(questions);
   }
 
   /**
@@ -2030,6 +2276,18 @@ export function useRapidIntake(): UseRapidIntakeResult {
     setResult(null);
     const shelf = normaliseLocation(location);
     let unreferenced = 0;
+    let already = 0;
+
+    // **Asked again for every row nobody has asked about yet**, which is a
+    // row whose pick lookup failed or had not answered when this was pressed.
+    // This is the guarantee that a re-picked folder adds nothing twice; the
+    // lookup at the pick is what lets the queue say so beforehand.
+    const unasked = ready.flatMap((entry) =>
+      entry.reference !== undefined && entry.heldBy === undefined
+        ? [{ key: entry.key, reference: entry.reference, format: entry.format }]
+        : [],
+    );
+    const heldNow = await askWhoHolds(unasked);
 
     /**
      * One row: the book, and then where its file is.
@@ -2040,6 +2298,21 @@ export function useRapidIntake(): UseRapidIntakeResult {
      */
     async function addOne(entry: ScannedEntry) {
       const draft = entry.draft!;
+      const known = heldNow.get(entry.key) ?? entry.heldBy;
+      if (known && entry.reference) {
+        // Held only by a Book of another format: the copy offer, never a
+        // reference on that Book and never a second Book of its own.
+        if (!known.lands) throw new HeldInAnotherFormat(known.bookId);
+        // **Already in the library, so this is a sighting and not a book.**
+        // Thrown on a refusal like any row, because nothing was added and the
+        // row should stay where a member can see it did not take.
+        await reportReference.mutateAsync({
+          bookId: known.bookId,
+          data: entry.reference,
+        });
+        already += 1;
+        return;
+      }
       try {
         // The same request builder as the one-book flow, so a field added
         // there cannot quietly go missing from a rapid run. Everything a rapid
@@ -2094,10 +2367,18 @@ export function useRapidIntake(): UseRapidIntakeResult {
         // `addCopy` applies before offering to copy it.
         const holder = error instanceof ApiError ? error.bookId : undefined;
         if (holder !== undefined && entry.reference && theIsbnWasRead(entry)) {
+          // **Asked rather than assumed**: the 409 names one book and not its
+          // format, nor its other copies. Copies that cannot be read are not
+          // written to, because the rule below cannot be answered for them,
+          // and the row keeps the 409's own reason.
+          const copies = await listCopies(holder).catch(() => undefined);
+          if (copies === undefined) throw error;
+          const target = whereItLands(copies, entry.format);
+          if (target === undefined) throw new HeldInAnotherFormat(holder);
           // The row is a failure whichever way this goes, and it carries its
           // reason on screen, so a refusal here is not counted a second time.
           await reportReference
-            .mutateAsync({ bookId: holder, data: entry.reference })
+            .mutateAsync({ bookId: target, data: entry.reference })
             .catch(() => undefined);
         }
         // Rethrown rather than reported here: the row is the loop's to record,
@@ -2127,7 +2408,21 @@ export function useRapidIntake(): UseRapidIntakeResult {
     const failed = new Map(
       outcome.failures.map(({ item, thrown }) => [
         item.key,
-        { ...item, state: "failed" as const, reason: reasonForError(thrown) },
+        thrown instanceof HeldInAnotherFormat
+          ? {
+              ...item,
+              state: "failed" as const,
+              reason: { kind: "held-in-another-format" as const },
+              copyOf: thrown.holderId,
+            }
+          : {
+              ...item,
+              state: "failed" as const,
+              reason: reasonForError(thrown),
+              // Cleared, because the spread carries it from a previous run and
+              // the offer would outlive the reason it was made for.
+              copyOf: undefined,
+            },
       ]),
     );
     // **Only the ones that landed leave the queue, and that means the ones that
@@ -2150,11 +2445,85 @@ export function useRapidIntake(): UseRapidIntakeResult {
     setIsAdding(false);
     setAddProgress(null);
     setResult({
-      added: outcome.added,
+      // The shared loop counts every row that did not throw, and a row already
+      // in the library returns without a book being made.
+      added: outcome.added - already,
       failed: outcome.failures.length,
       unreferenced,
+      already,
       stopped: outcome.stopped,
     });
+  }
+
+  /**
+   * File one row as its own copy of the book its ISBN belongs to, and say
+   * where the file is on that copy.
+   *
+   * **The press `whereItLands` refuses to make for the member.** The copy
+   * route is the one the single book flow's "add as another copy" uses, with
+   * the same body builder, so a copy made here inherits the work, the tags and
+   * the privacy of the holder exactly as one made there does. The format is
+   * the file's, which is the whole point of the copy.
+   *
+   * The row leaves the queue once the copy exists, whatever the reference
+   * does, for the reason `addOne` gives: a created book put back as a failure
+   * is added again into a duplicate. The verdict above the queue moves by one
+   * row, so it keeps describing what is left beneath it.
+   */
+  async function addAsCopy(key: string) {
+    const entry = entries.find((one) => one.key === key);
+    if (entry?.copyOf === undefined || entry.reference === undefined) return;
+    const reference = entry.reference;
+    setIsAddingCopy(true);
+    try {
+      await copyTheRow(key, entry.copyOf, entry.format, reference);
+    } finally {
+      setIsAddingCopy(false);
+    }
+  }
+
+  /** `addAsCopy`'s requests, between the hold being taken and released. */
+  async function copyTheRow(
+    key: string,
+    holderId: number,
+    format: ScannedEntry["format"],
+    reference: DigitalReferenceIn,
+  ) {
+    let copyId: number;
+    try {
+      const copy = await addAnotherCopy.mutateAsync({
+        bookId: holderId,
+        data: toCopyRequest({
+          ...blankPending(normaliseLocation(location)),
+          format,
+        }),
+      });
+      copyId = copy.id;
+      // The offer goes the moment the copy exists, so a second press while
+      // the reference is in flight cannot post a second copy.
+      settle(key, { copyOf: undefined });
+    } catch (error) {
+      // The offer stays, so the press can be made again; the reason says why
+      // this one did not take.
+      settle(key, { reason: reasonForError(error) });
+      return;
+    }
+    const referenced = await reportReference
+      .mutateAsync({ bookId: copyId, data: reference })
+      .then(
+        () => true,
+        () => false,
+      );
+    // A copy is a new book, the reason `useScanFlow.addCopy` gives.
+    invalidate.catalogue();
+    setEntries((current) => current.filter((one) => one.key !== key));
+    setResult((last) => ({
+      added: (last?.added ?? 0) + 1,
+      failed: Math.max(0, (last?.failed ?? 0) - 1),
+      unreferenced: (last?.unreferenced ?? 0) + (referenced ? 0 : 1),
+      already: last?.already ?? 0,
+      stopped: last?.stopped ?? false,
+    }));
   }
 
   // One filter, read twice. Two would let the count on the button and the
@@ -2289,6 +2658,8 @@ export function useRapidIntake(): UseRapidIntakeResult {
     },
     addAll: () => void addAll(),
     isAdding,
+    addAsCopy: (key) => void addAsCopy(key),
+    isAddingCopy,
     stopAdding: () => {
       // No wait to interrupt, unlike the paced lookup: the write has no floor
       // between books, so the next check is one request away.

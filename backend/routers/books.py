@@ -2,6 +2,7 @@ import asyncio
 import csv
 import io
 import logging
+from collections import defaultdict
 from collections.abc import Callable, Iterator
 from concurrent.futures import Future, wait
 from datetime import UTC, datetime
@@ -19,7 +20,8 @@ from fastapi import (
 )
 from fastapi.responses import StreamingResponse
 from pydantic import ValidationError
-from sqlalchemy import func, nullslast
+from sqlalchemy import func, nullslast, or_
+from sqlalchemy.orm import Query as RowQuery
 from sqlalchemy.orm import Session, joinedload
 
 import authority
@@ -92,6 +94,7 @@ from models import (
     LOCATION_MAX,
     MAX_SERIES_INDEX,
     SERIES_NAME_MAX,
+    AccessRequest,
     AuthorIdentifier,
     Book,
     BookIdentifier,
@@ -120,6 +123,8 @@ from schemas import (
     MERGE_BOOKS_MAX,
     POPPED_BEFORE_THE_ASSIGNMENT,
     POPPED_BEFORE_THE_CONSTRUCTOR,
+    AccessDecision,
+    AccessRequestOut,
     AuthorBatchMergeOut,
     AuthorIdentifierOut,
     AuthorIdentifierRequest,
@@ -159,6 +164,9 @@ from schemas import (
     DuplicateMember,
     DuplicateReport,
     HeadingFacetOut,
+    HolderOut,
+    HoldersIn,
+    HoldersOut,
     IdentifierBackfillOut,
     LocationOut,
     MergeRequest,
@@ -4393,6 +4401,102 @@ def list_missing_digital_references(
     )
 
 
+# ── Which Books already hold these files ──────────────────────────────────────
+#
+# Declared on this side of `/{book_id}` for the reason the listing above is.
+
+
+@router.post("/file-holders", response_model=list[HoldersOut])
+def find_file_holders(
+    payload: HoldersIn,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> list[HoldersOut]:
+    """Which Books the caller can see already hold each of these files.
+
+    One answer per file, in the order asked. A file is named by its location,
+    by KOReader's partial MD5, or both, and a reference matching **either** is a
+    holder: a location is what a folder pick knows for certain, and a digest is
+    what survives the file being moved and is all a KOReader device sends.
+
+    **Scoped by the Shelf, so a Book the caller cannot see answers exactly as no
+    Book does**: an empty list, never a refusal that would confirm it exists.
+    Trashed Books are absent for the same reason.
+
+    **A read, sent as a POST** because the question is a list of up to
+    `MAX_FILES_PER_LOOKUP` paths, each up to a path's length, which no query
+    string carries.
+
+    One statement for the whole list, and the location is matched in Python on
+    the rows it returns. The statement narrows on the path alone, because a
+    path and a root can only be paired in SQL by row value comparisons whose
+    spelling differs between the two engines; the root is then compared here.
+    """
+    asked_paths = {
+        file.relative_path for file in payload.files if file.relative_path is not None
+    }
+    asked_digests = {
+        file.partial_md5 for file in payload.files if file.partial_md5 is not None
+    }
+    held = (
+        Shelf.seen_by(db, current_user.id)
+        .select(
+            DigitalReference.id,
+            DigitalReference.book_id,
+            DigitalReference.root_label,
+            DigitalReference.relative_path,
+            DigitalReference.partial_md5,
+            Book.format,
+        )
+        .join(DigitalReference, DigitalReference.book_id == Book.id)
+        .filter(
+            or_(
+                DigitalReference.relative_path.in_(asked_paths),
+                DigitalReference.partial_md5.in_(asked_digests),
+            )
+        )
+        .all()
+    )
+
+    by_location: dict[tuple[str, str], list[Any]] = defaultdict(list)
+    by_digest: dict[str, list[Any]] = defaultdict(list)
+    for row in held:
+        by_location[(row.root_label, row.relative_path)].append(row)
+        if row.partial_md5 is not None:
+            by_digest[row.partial_md5].append(row)
+
+    answers: list[HoldersOut] = []
+    for file in payload.files:
+        located = (
+            by_location.get((file.root_label, file.relative_path), [])
+            if file.root_label is not None and file.relative_path is not None
+            else []
+        )
+        digested = by_digest.get(file.partial_md5, []) if file.partial_md5 else []
+        at = {row.id for row in located}
+        carrying = {row.id for row in digested}
+        # A reference matching on both keys is one holder, not two.
+        rows = sorted(
+            {row.id: row for row in [*located, *digested]}.values(),
+            key=lambda row: (row.book_id, row.id),
+        )
+        answers.append(
+            HoldersOut(
+                holders=[
+                    HolderOut(
+                        book_id=row.book_id,
+                        reference_id=row.id,
+                        format=row.format,
+                        same_location=row.id in at,
+                        same_partial_md5=row.id in carrying,
+                    )
+                    for row in rows
+                ]
+            )
+        )
+    return answers
+
+
 # ── Single book ───────────────────────────────────────────────────────────────
 
 
@@ -5291,6 +5395,140 @@ def delete_quote(
     db.commit()
 
 
+# ── Access to a digital copy ──────────────────────────────────────────────────
+#
+# A digital copy (`lending.is_requested_not_lent`) is requested and granted
+# rather than lent: `models.AccessRequest` says why, and `routers/loans.py`
+# refuses a new loan on one. **The holder is stored on the row** when the request
+# is made: the member who added the book then. A request is read by its
+# requester and its holder and by nobody else, on a Book the Shelf has already
+# let the caller see.
+
+#: The `detail.code` on the 409 a request for a copy that is not digital meets.
+NOT_DIGITAL: Final = "not_digital"
+#: The 409 when nobody but the caller holds the copy, so there is nobody to ask.
+NO_HOLDER: Final = "no_holder"
+#: The 409 when the caller already has a request waiting or granted.
+ALREADY_REQUESTED: Final = "already_requested"
+#: The 409 when the holder answers a request a second time.
+ALREADY_ANSWERED: Final = "already_answered"
+
+
+def _access_requests(book: Book, viewer: User, db: Session) -> RowQuery[AccessRequest]:
+    """The requests on this Book the viewer is party to, as requester or holder.
+
+    Keyed on the row's own two members and never on `books.added_by_user_id`,
+    so a merge that moves a request onto another member's entry hands it to
+    nobody new.
+    """
+    return (
+        db.query(AccessRequest)
+        .options(
+            joinedload(AccessRequest.requested_by),
+            joinedload(AccessRequest.holder),
+            joinedload(AccessRequest.decided_by),
+        )
+        .filter(
+            AccessRequest.book_id == book.id,
+            or_(
+                AccessRequest.requested_by_user_id == viewer.id,
+                AccessRequest.holder_user_id == viewer.id,
+            ),
+        )
+    )
+
+
+def _conflict(code: str, message: str) -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail={"message": message, "code": code},
+    )
+
+
+@router.get("/{book_id}/access-requests", response_model=list[AccessRequestOut])
+def list_access_requests(
+    book: BookForRead, db: DbSession, current_user: CurrentUser
+) -> list[AccessRequest]:
+    """The requests for access to this copy that the caller is party to.
+
+    Those the caller holds and those the caller made, oldest first.
+    """
+    return (
+        _access_requests(book, current_user, db)
+        .order_by(AccessRequest.requested_at, AccessRequest.id)
+        .all()
+    )
+
+
+@router.post(
+    "/{book_id}/access-requests",
+    response_model=AccessRequestOut,
+    status_code=status.HTTP_201_CREATED,
+)
+def request_access(
+    book: BookForRead, db: DbSession, current_user: CurrentUser
+) -> AccessRequest | None:
+    """Ask the holder of a digital copy for access to it.
+
+    The holder is the member who added the book, recorded now and never
+    changed. Refused with `no_holder` and stored nowhere when that is the
+    caller or nobody: a request nobody can answer is not a request.
+
+    A grant records that access was given and shares no file: Endpaper holds
+    none, so the copy itself changes hands outside the app.
+    """
+    if not lending.is_requested_not_lent(book):
+        raise _conflict(NOT_DIGITAL, "Only a digital copy is requested.")
+    holder = book.added_by_user_id
+    if holder is None or holder == current_user.id:
+        raise _conflict(NO_HOLDER, "Nobody else holds this copy to ask.")
+    # A declined request may be asked again; a waiting or granted one may not.
+    open_or_granted = (
+        _access_requests(book, current_user, db)
+        .filter(
+            AccessRequest.requested_by_user_id == current_user.id,
+            or_(AccessRequest.granted.is_(None), AccessRequest.granted.is_(True)),
+        )
+        .first()
+    )
+    if open_or_granted is not None:
+        raise _conflict(ALREADY_REQUESTED, "You have already asked for this copy.")
+    created = AccessRequest(
+        book_id=book.id, requested_by_user_id=current_user.id, holder_user_id=holder
+    )
+    db.add(created)
+    db.commit()
+    return _access_requests(book, current_user, db).filter(AccessRequest.id == created.id).first()
+
+
+@router.put("/{book_id}/access-requests/{request_id}", response_model=AccessRequestOut)
+@refuses(403, 404)
+def decide_access(
+    request_id: RowId,
+    payload: AccessDecision,
+    book: BookForRead,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> AccessRequest | None:
+    """The holder grants or declines a waiting request. Nothing expires and
+    nothing is returned, so a decision is final.
+
+    404 for a request the caller is not party to; 403 for its requester.
+    """
+    found = _access_requests(book, current_user, db).filter(AccessRequest.id == request_id).first()
+    if found is None:
+        raise HTTPException(status_code=404, detail="Request not found")
+    if found.holder_user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Only the holder answers a request")
+    if found.granted is not None:
+        raise _conflict(ALREADY_ANSWERED, "This request has already been answered.")
+    found.granted = payload.granted
+    found.decided_by_user_id = current_user.id
+    found.decided_at = datetime.now(UTC).replace(tzinfo=None)
+    db.commit()
+    return _access_requests(book, current_user, db).filter(AccessRequest.id == found.id).first()
+
+
 # ── Digital references ────────────────────────────────────────────────────────
 #
 # Where a Member says one of their book files is. **No bytes reach this server
@@ -5425,6 +5663,7 @@ def report_digital_reference(
     existing.root_confirmed = payload.root_confirmed
     existing.size_bytes = payload.size_bytes
     existing.file_modified_at = payload.file_modified_at
+    existing.partial_md5 = payload.partial_md5
     # The database's clock, not the client's, and not the client's word for when
     # it looked. This column records when this server was told.
     existing.confirmed_at = func.now()

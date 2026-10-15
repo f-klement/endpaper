@@ -428,6 +428,47 @@ class TestMergingTwoBooksKeepsTheirReferences:
         assert res.status_code == 200
         assert len(listing(client, admin["headers"], keeper["id"]).json()) == 1
 
+    def test_the_same_file_keeps_the_fingerprint_only_the_loser_had(
+        self, client, admin, make_book
+    ):
+        """Nothing on the server can compute it again, so dropping the loser's
+        row whole would lose it."""
+        digest = "0123456789abcdef0123456789abcdef"
+        keeper = make_book(admin["headers"], title="One")
+        loser = make_book(admin["headers"], title="Two")
+        report(client, admin["headers"], keeper["id"])
+        report(client, admin["headers"], loser["id"], partial_md5=digest)
+        client.post(
+            "/api/books/merge",
+            json={"book_ids": [keeper["id"], loser["id"]], "keep_id": keeper["id"]},
+            headers=admin["headers"],
+        )
+        [kept] = listing(client, admin["headers"], keeper["id"]).json()
+        assert kept["partial_md5"] == digest
+
+    def test_a_fingerprint_from_a_different_look_is_not_kept(
+        self, client, admin, make_book
+    ):
+        """A loser that saw another size saw another file, so its digest does
+        not join the survivor's sighting."""
+        keeper = make_book(admin["headers"], title="One")
+        loser = make_book(admin["headers"], title="Two")
+        report(client, admin["headers"], keeper["id"], size_bytes=100)
+        report(
+            client,
+            admin["headers"],
+            loser["id"],
+            size_bytes=200,
+            partial_md5="0123456789abcdef0123456789abcdef",
+        )
+        client.post(
+            "/api/books/merge",
+            json={"book_ids": [keeper["id"], loser["id"]], "keep_id": keeper["id"]},
+            headers=admin["headers"],
+        )
+        [kept] = listing(client, admin["headers"], keeper["id"]).json()
+        assert kept["partial_md5"] is None
+
 
 MISSING_URL = "/api/books/digital-references/missing"
 

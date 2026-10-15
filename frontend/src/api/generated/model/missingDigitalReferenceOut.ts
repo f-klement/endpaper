@@ -33,6 +33,7 @@ export interface MissingDigitalReferenceOut {
   file_modified_at: string | null;
   id: number;
   missing_since: string;
+  partial_md5?: string | null;
   relative_path: string;
   root_confirmed: boolean;
   root_label: string;

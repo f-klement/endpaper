@@ -100,7 +100,18 @@ describe("the reference a picked file makes", () => {
       root_confirmed: true,
       size_bytes: 10,
       file_modified_at: "1970-01-01T00:00:00.000Z",
+      partial_md5: null,
     });
+  });
+
+  it("carries the fingerprint it was handed", () => {
+    const digest = "0123456789abcdef0123456789abcdef";
+    const reference = referenceFor(
+      picked("Dune.epub", "Books/Dune.epub"),
+      digest,
+    );
+
+    expect(reference?.partial_md5).toBe(digest);
   });
 
   it("says the root was confirmed, because a member picked the folder", () => {

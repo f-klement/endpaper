@@ -1,6 +1,89 @@
 {
   "components": {
     "schemas": {
+      "AccessDecision": {
+        "description": "The holder's answer to one request: granted, or declined.",
+        "properties": {
+          "granted": {
+            "title": "Granted",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "granted"
+        ],
+        "title": "AccessDecision",
+        "type": "object"
+      },
+      "AccessRequestOut": {
+        "description": "One request for access to a digital copy, as its requester or holder reads it.\n\n`holder` is who the request is addressed to, fixed when it was made. A\ngrant shares no file: the copy is handed over outside Endpaper, so this\nnames who to ask for it.",
+        "properties": {
+          "book_id": {
+            "title": "Book Id",
+            "type": "integer"
+          },
+          "decided_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decided At"
+          },
+          "decided_by": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UserOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "holder": {
+            "$ref": "#/components/schemas/UserOut"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "requested_at": {
+            "format": "date-time",
+            "title": "Requested At",
+            "type": "string"
+          },
+          "requested_by": {
+            "$ref": "#/components/schemas/UserOut"
+          },
+          "status": {
+            "$ref": "#/components/schemas/AccessStatus"
+          }
+        },
+        "required": [
+          "id",
+          "book_id",
+          "status",
+          "requested_by",
+          "holder",
+          "requested_at"
+        ],
+        "title": "AccessRequestOut",
+        "type": "object"
+      },
+      "AccessStatus": {
+        "description": "Where one request for access to a digital copy stands.\n\nNever stored: `models.AccessRequest` keeps who decided and when, and this\nis read off those columns, so the two cannot disagree.",
+        "enum": [
+          "pending",
+          "granted",
+          "declined"
+        ],
+        "title": "AccessStatus",
+        "type": "string"
+      },
       "AppearanceOut": {
         "description": "One member's own appearance. Never another member's.\n\nDeliberately not part of `UserOut`, which is served inside every book\npayload and the member list: appearance on that schema would tell everyone\nin the library what everyone else's library looks like.\n\nEvery field is nullable and null means \"has not chosen\", which is what a\nnew account and every directory shadow account start as. The client then\nfollows the system for the mode, uses the house palette, and picks a\ndifferent wallpaper each visit.",
         "properties": {
@@ -79,6 +162,51 @@
           }
         },
         "title": "AppearanceUpdate",
+        "type": "object"
+      },
+      "AskedFileIn": {
+        "description": "One file a client holds, named by where it is, by its digest, or both.\n\n**Either key alone is a question worth asking.** A location is what a\nfolder pick knows for certain; a digest is what survives the file being\nmoved or renamed, and it is the only thing a KOReader device names a\ndocument by. A file named by neither asks nothing, so it is refused.\n\nThe location is bounded as `DigitalReferenceIn` bounds it: each half, the\npair, and no NUL in either. Its two halves arrive together or not at all:\nhalf a location names no file.",
+        "properties": {
+          "partial_md5": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{32}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Partial Md5"
+          },
+          "relative_path": {
+            "anyOf": [
+              {
+                "maxLength": 4094,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Relative Path"
+          },
+          "root_label": {
+            "anyOf": [
+              {
+                "maxLength": 4094,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Root Label"
+          }
+        },
+        "title": "AskedFileIn",
         "type": "object"
       },
       "AuthConfigOut": {
@@ -3211,6 +3339,18 @@
             ],
             "title": "File Modified At"
           },
+          "partial_md5": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{32}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Partial Md5"
+          },
           "relative_path": {
             "maxLength": 4094,
             "minLength": 1,
@@ -3293,6 +3433,17 @@
               }
             ],
             "title": "Missing Since"
+          },
+          "partial_md5": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Partial Md5"
           },
           "relative_path": {
             "title": "Relative Path",
@@ -3617,6 +3768,82 @@
         ],
         "title": "HeadingKind",
         "type": "string"
+      },
+      "HolderOut": {
+        "description": "One visible Book holding a reference to the file, and how it matched.",
+        "properties": {
+          "book_id": {
+            "title": "Book Id",
+            "type": "integer"
+          },
+          "format": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BookFormat"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reference_id": {
+            "title": "Reference Id",
+            "type": "integer"
+          },
+          "same_location": {
+            "title": "Same Location",
+            "type": "boolean"
+          },
+          "same_partial_md5": {
+            "title": "Same Partial Md5",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "book_id",
+          "reference_id",
+          "format",
+          "same_location",
+          "same_partial_md5"
+        ],
+        "title": "HolderOut",
+        "type": "object"
+      },
+      "HoldersIn": {
+        "description": "The files whose holders a client wants to know, in the order it asks.",
+        "properties": {
+          "files": {
+            "items": {
+              "$ref": "#/components/schemas/AskedFileIn"
+            },
+            "maxItems": 500,
+            "minItems": 1,
+            "title": "Files",
+            "type": "array"
+          }
+        },
+        "required": [
+          "files"
+        ],
+        "title": "HoldersIn",
+        "type": "object"
+      },
+      "HoldersOut": {
+        "description": "The holders of one file, in Book id order, and empty where there are none.\n\n**Empty is also the answer for a Book the caller cannot see**, by\nconstruction rather than by a branch: the lookup starts from the caller's\nshelf, so a hidden Book never reaches the rows this is built from.",
+        "properties": {
+          "holders": {
+            "items": {
+              "$ref": "#/components/schemas/HolderOut"
+            },
+            "title": "Holders",
+            "type": "array"
+          }
+        },
+        "required": [
+          "holders"
+        ],
+        "title": "HoldersOut",
+        "type": "object"
       },
       "IdentifierBackfillOut": {
         "description": "What one run of the store identifier backfill managed.\n\nThe same shape as `CoverBackfillOut` above, and deliberately so: it is the\nsame job on a different column, so a member who has run one knows how to\nread the other and the screen draws them the same way.\n\n**The four outcomes are four different things to do next**, which is the\nwhole reason this is not one number. `enriched` is books that gained at\nleast one field. `not_found` is Google saying it has no such volume, or\nserving one under a different id, which is permanent and means the\nidentifier is stale or the book was delisted.\n`unavailable` is Google not answering, which is transient and worth pressing\nagain. `unresolvable` is a stored value that is not a volume id and so was\nnever asked about at all: also permanent, and **not** Google's answer, which\nis why it is not folded into `not_found`. `remaining` is how many candidates\nare left beyond this batch.\n\n**There is no `unchanged`, and a design critic is why.** One was declared,\nfor books whose record answered and carried nothing new. It could not\nhappen: a candidate is a Book with no `google_books_id`, every volume\nresource carries one, a resource carrying another id than the one asked\nfor counts as `not_found`, and `evidence` writes the id of every other,\nso every answered book gains at least that field. The only body that\nreached it was a 200 with no\n`id`, which `google_books.lookup_by_volume_id` now refuses as not a volume.\nA count that cannot be non zero is a fact about the code stated on the wire.\n\n**`examined` is the sum of the four and not a fifth outcome**, so a client\ncan check the arithmetic rather than trust it.\n\n**`examined` counts the books this run has an outcome for, which is not\nalways every book it looked at.** The run is bounded in wall clock, so a slow\nor busy catalogue can leave it short. The counts then describe the books it\nreached, and `next_after_id` clears exactly those.\n\n**Nothing here says whether a run was cut short, and that is deliberate.** An\nearlier version of this paragraph told a client to compare `examined` against\nthe batch size, which this reply does not carry and no request sets, so the\ncomparison was not one a client could make. There is no flag either: a\nclient's action is to press again while `remaining` is above zero, which is\nthe same action whether the run was cut short or finished its batch, and the\ncursor is what makes pressing again safe. A field would also make this diverge\nfrom `CoverBackfillOut`, which is bounded in wall clock the same way and says\nthe same nothing about it.\n\nA book the run resolved after the cut is stored and counted in neither\nnumber, so this understates what the run did and never overstates it; that\nbook stops being a candidate, so the next press does not spend another\nmetered request on it.\n\n**`remaining` counts candidates, not books this will fix.** The candidate\nquery narrows on carrying a `google_books` identifier and cannot narrow on\nthe identifier being shaped like one, so a library whose rows are all\nunresolvable reports them here and then reports them as `unresolvable` as\nthe cursor clears them. Honest either way, and worth saying: the number is\nhow much work is left, not how many books will improve.\n\n`next_after_id` is the cursor, and it is here for exactly the reason\n`CoverBackfillOut` carries one: a book that could not be resolved stays a\ncandidate, so without a cursor it sits at the front of every subsequent run\nfor ever. 0 means this run reached the end. It is the last book of the\nunbroken examined run rather than the last book of the batch, so a run cut\nshort cannot skip the books it never reached, and it comes back unchanged\nwhere the run reached none of them.",
@@ -4432,6 +4659,17 @@
             "format": "date-time",
             "title": "Missing Since",
             "type": "string"
+          },
+          "partial_md5": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Partial Md5"
           },
           "relative_path": {
             "title": "Relative Path",
@@ -8964,6 +9202,67 @@
         ]
       }
     },
+    "/api/books/file-holders": {
+      "post": {
+        "description": "Which Books the caller can see already hold each of these files.\n\nOne answer per file, in the order asked. A file is named by its location,\nby KOReader's partial MD5, or both, and a reference matching **either** is a\nholder: a location is what a folder pick knows for certain, and a digest is\nwhat survives the file being moved and is all a KOReader device sends.\n\n**Scoped by the Shelf, so a Book the caller cannot see answers exactly as no\nBook does**: an empty list, never a refusal that would confirm it exists.\nTrashed Books are absent for the same reason.\n\n**A read, sent as a POST** because the question is a list of up to\n`MAX_FILES_PER_LOOKUP` paths, each up to a path's length, which no query\nstring carries.\n\nOne statement for the whole list, and the location is matched in Python on\nthe rows it returns. The statement narrows on the path alone, because a\npath and a root can only be paired in SQL by row value comparisons whose\nspelling differs between the two engines; the root is then compared here.",
+        "operationId": "find_file_holders",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HoldersIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/HoldersOut"
+                  },
+                  "title": "Response Find File Holders",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Find File Holders",
+        "tags": [
+          "books"
+        ]
+      }
+    },
     "/api/books/identifiers/backfill": {
       "post": {
         "description": "Fill in books that carry a store's own identifier and no ISBN.\n\n**This is what a Google Play Books import needs, and nothing else supplies\nit.** That export carries a Google Books volume id for every book and no\nISBN anywhere, so a book arrives with a title, an author and an exact key,\nand the only enrichment available to it was a search by that title. One\nvolume id resolves to one record, with no ranking and no guess.\n\n**Amazon is deliberately absent.** Amazon publishes no catalogue API, so\nthere is no request an ASIN could become. A book carrying only an ASIN is\nnot a candidate here and is not reported as one.\n\n**Candidates are books with no ISBN, no Google volume already recorded, and\na Google Books identifier.** No ISBN, because an ISBN\nis an exact key the free catalogues answer to, and spending a metered\nrequest on one would be the bill for nothing that\n`sources.Plan.lookup_together` refuses. No volume recorded, because that\ncolumn is what this writes, so a book it has filled in stops being a\ncandidate and this is safe to run twice.\n\nIt fills gaps and nothing a Member must choose: categories and the series\nstay empty here, as they do for `POST /{id}/enrich`, because nobody picked\nthis record. `POST /{id}/enrich` records the volume id the same way when\nthat id is what found the record.\n\n**Scoped to the books the caller can see**, like the cover backfill and for\nthat route's stated reason: `visible_to` has no admin bypass, so each member\nrepairs their own shelf rather than the privacy rule being bent to make an\noperator action work.\n\n**Refuses with 409 when this library does not ask Google Books**, rather\nthan examining nothing and reporting a clean run. The cause is a switch and\na key in Settings, and the reply names both.\n\nBatched and resumable. `next_after_id` carries on past what this run\nexamined, and comes back as 0 at the end of the library so pressing again\nstarts over and re-tries whatever has since become resolvable.\n\n**Bounded in wall clock as well as in books**, so a slow or busy Google\nleaves the batch short rather than holding the request open. A short run\nanswers with whatever resolved, counts only the books it has an outcome for,\nand moves the cursor over exactly those, so pressing again resumes at the\nfirst book this one did not reach. The reply does not distinguish a short run\nfrom a complete one and does not need to: press again while `remaining` is\nabove zero.",
@@ -9967,6 +10266,249 @@
           }
         ],
         "summary": "Update Book Details",
+        "tags": [
+          "books"
+        ]
+      }
+    },
+    "/api/books/{book_id}/access-requests": {
+      "get": {
+        "description": "The requests for access to this copy that the caller is party to.\n\nThose the caller holds and those the caller made, oldest first.",
+        "operationId": "list_access_requests",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "book_id",
+            "required": true,
+            "schema": {
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "title": "Book Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AccessRequestOut"
+                  },
+                  "title": "Response List Access Requests",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "List Access Requests",
+        "tags": [
+          "books"
+        ]
+      },
+      "post": {
+        "description": "Ask the holder of a digital copy for access to it.\n\nThe holder is the member who added the book, recorded now and never\nchanged. Refused with `no_holder` and stored nowhere when that is the\ncaller or nobody: a request nobody can answer is not a request.\n\nA grant records that access was given and shares no file: Endpaper holds\nnone, so the copy itself changes hands outside the app.",
+        "operationId": "request_access",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "book_id",
+            "required": true,
+            "schema": {
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "title": "Book Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccessRequestOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Request Access",
+        "tags": [
+          "books"
+        ]
+      }
+    },
+    "/api/books/{book_id}/access-requests/{request_id}": {
+      "put": {
+        "description": "The holder grants or declines a waiting request. Nothing expires and\nnothing is returned, so a decision is final.\n\n404 for a request the caller is not party to; 403 for its requester.",
+        "operationId": "decide_access",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "request_id",
+            "required": true,
+            "schema": {
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "title": "Request Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "book_id",
+            "required": true,
+            "schema": {
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "title": "Book Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccessDecision"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccessRequestOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Decide Access",
         "tags": [
           "books"
         ]

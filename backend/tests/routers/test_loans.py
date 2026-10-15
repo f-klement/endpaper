@@ -1683,3 +1683,52 @@ class TestTheSingleLoanHelperIsScoped:
             f"{len(seen)} statements for one loan: the single loan helper is "
             "lazy loading what `lending.RENDERED` is for"
         )
+
+
+class TestADigitalCopyIsNotLent:
+    """An ebook, or an audiobook carrying a digital reference, is requested instead."""
+
+    def lend(self, client, admin, member, book):
+        return client.post(
+            "/api/loans",
+            json={"book_id": book["id"], "loaned_to_user_id": member["user"]["id"]},
+            headers=admin["headers"],
+        )
+
+    def test_a_new_loan_on_an_ebook_is_refused_with_a_code(
+        self, client, admin, member, make_book
+    ):
+        res = self.lend(client, admin, member, make_book(admin["headers"], format="ebook"))
+        assert res.status_code == 409
+        assert res.json()["detail"]["code"] == "digital_copy"
+
+    def test_an_audiobook_with_a_file_is_refused(self, client, admin, member, make_book):
+        book = make_book(admin["headers"], format="audiobook")
+        client.post(
+            f"/api/books/{book['id']}/digital-references",
+            json={"root_label": "/audio", "relative_path": "a/b.m4b"},
+            headers=admin["headers"],
+        )
+        assert self.lend(client, admin, member, book).status_code == 409
+
+    def test_an_audiobook_with_no_file_is_a_disc_and_lends(
+        self, client, admin, member, make_book
+    ):
+        """The CSV import folds "audio cd" onto audiobook."""
+        book = make_book(admin["headers"], format="audiobook")
+        assert self.lend(client, admin, member, book).status_code == 201
+
+    def test_an_open_loan_from_before_the_rule_still_closes(
+        self, client, admin, member, make_book
+    ):
+        book = make_book(admin["headers"], format="paperback")
+        loan = client.post(
+            "/api/loans",
+            json={"book_id": book["id"], "loaned_to_user_id": member["user"]["id"]},
+            headers=admin["headers"],
+        ).json()
+        client.patch(
+            f"/api/books/{book['id']}", json={"format": "ebook"}, headers=admin["headers"]
+        )
+        res = client.put(f"/api/loans/{loan['id']}/return", headers=admin["headers"])
+        assert res.status_code == 200

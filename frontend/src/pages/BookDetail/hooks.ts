@@ -23,6 +23,7 @@ import {
 
 import {
   getGetCustomFieldsQueryKey,
+  getListAccessRequestsQueryKey,
   getListCustomFieldsQueryKey,
   getGetNotesQueryKey,
   getGetQuotesQueryKey,
@@ -35,10 +36,16 @@ import {
   getEditNoteMutationOptions,
   getEditQuoteMutationOptions,
   getForgetBookIdentifierMutationOptions,
+  getForgetDigitalReferenceMutationOptions,
+  getListDigitalReferencesQueryKey,
   getRemoveBookTagMutationOptions,
   useAddBookTag,
   useAddCopy,
+  useDecideAccess,
+  useListAccessRequests,
+  useListDigitalReferences,
   useListCopies,
+  useRequestAccess,
   useAddProgress,
   useListProgress,
   useAddNote,
@@ -81,12 +88,15 @@ import { useGoogleBooksReady } from "../../app/hooks";
 import { useToast } from "../../app/toast";
 import type { Borrower } from "./components/LoanPanel";
 import { useRowWrite } from "../hooks";
+import { isRequestedNotLent } from "./types";
 import { tagName, useSortedByName, useTranslation } from "../../i18n";
 import type {
+  AccessRequestOut,
   BookMatch,
   BookDetailsUpdate,
   BookIdentifierOut,
   CollectionOut,
+  DigitalReferenceOut,
   CustomFieldOut,
   CustomFieldValueOut,
   LocationOut,
@@ -102,6 +112,7 @@ import type {
   TagOut,
   UserOut,
 } from "../../api/generated/model";
+import { BookFormat } from "../../api/generated/model";
 
 export interface UseBookResult {
   book: BookOut | undefined;
@@ -588,6 +599,61 @@ export function useBookLoan(bookId: number): UseBookLoanResult {
   };
 }
 
+export interface UseBookAccessResult {
+  /** Whether this copy is asked for rather than lent (`isRequestedNotLent`). */
+  isRequested: boolean;
+  /** The requests on this copy the viewer holds or made, oldest first. Empty
+   * for a copy that is lent. */
+  requests: AccessRequestOut[];
+  request: () => void;
+  decide: (requestId: number, granted: boolean) => void;
+  isBusy: boolean;
+  error: unknown;
+}
+
+/**
+ * Asking the holder of a digital copy for access, and the holder's answer.
+ *
+ * An audiobook's references are read to tell a file from a disc; nothing is
+ * read for any other format, and the request list is read only for a copy
+ * that is asked for.
+ */
+export function useBookAccess(
+  bookId: number,
+  format: BookFormat | null | undefined,
+): UseBookAccessResult {
+  const queryClient = useQueryClient();
+  const references = useListDigitalReferences(bookId, {
+    query: { enabled: format === BookFormat.audiobook },
+  });
+  const isRequested = isRequestedNotLent(
+    format,
+    (references.data ?? []).length > 0,
+  );
+  const requests = useListAccessRequests(bookId, {
+    query: { enabled: isRequested },
+  });
+  const mutation = {
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: getListAccessRequestsQueryKey(bookId),
+      });
+    },
+  };
+  const ask = useRequestAccess({ mutation });
+  const answer = useDecideAccess({ mutation });
+
+  return {
+    isRequested,
+    requests: requests.data ?? [],
+    request: () => ask.mutate({ bookId }),
+    decide: (requestId, granted) =>
+      answer.mutate({ bookId, requestId, data: { granted } }),
+    isBusy: ask.isPending || answer.isPending,
+    error: requests.error ?? ask.error ?? answer.error,
+  };
+}
+
 export interface UseBookCopiesResult {
   /** Every copy of this title the caller may see, this one included. */
   copies: BookOut[];
@@ -635,6 +701,60 @@ export function useBookCopies(bookId: number): UseBookCopiesResult {
     isAdding: add.isPending,
     error: add.error,
     listError: copies.error,
+  };
+}
+
+export interface UseBookFilesResult {
+  /** Where this book's files were reported to be, oldest report first. */
+  references: DigitalReferenceOut[];
+  /** Forget one location, after confirming. `shownAs` is the path as drawn. */
+  forget: (reference: DigitalReferenceOut, shownAs: string) => void;
+  /** The references being forgotten right now, by id. */
+  forgetting: ReadonlySet<number>;
+  /** Why the list could not be read, apart from why a forget failed: the
+   * first would otherwise be a panel quietly claiming there are no files. */
+  listError: unknown;
+  error: unknown;
+}
+
+/**
+ * Where this book's files have been said to be.
+ *
+ * **Read only through the per book route**, so a reference reaches this page
+ * exactly when its book does: the route answers 404 for a book the reader
+ * cannot see, and the privacy rule is the book query's rather than anything
+ * here. Its own request rather than a field on `BookOut`, for the reason the
+ * route's docstring gives.
+ *
+ * Forget is the only write. Reporting a location is the scan page's folder
+ * pick, and flagging one missing is for a re-check that does not exist yet.
+ */
+export function useBookFiles(bookId: number): UseBookFilesResult {
+  const queryClient = useQueryClient();
+  const { t } = useTranslation();
+  const references = useListDigitalReferences(bookId);
+
+  const forget = useRowWrite(
+    getForgetDigitalReferenceMutationOptions,
+    "referenceId",
+    () => {
+      void queryClient.invalidateQueries({
+        queryKey: getListDigitalReferencesQueryKey(bookId),
+      });
+    },
+  );
+
+  return {
+    references: references.data ?? [],
+    forget: (reference, shownAs) => {
+      // Asked, where removing a tag is not: the way back is picking that
+      // folder again on the scan page, which is nowhere near this button.
+      if (confirm(t("files.forgetConfirm", { path: shownAs })))
+        forget.mutate({ bookId, referenceId: reference.id });
+    },
+    forgetting: forget.pendingRows,
+    listError: references.error,
+    error: forget.error,
   };
 }
 

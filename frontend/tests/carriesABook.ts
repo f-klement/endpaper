@@ -1,3 +1,7 @@
+import { parseAst } from "vite";
+
+import { walk } from "./sourceReader";
+
 /**
  * What a value has to be typed as to carry a member's book.
  *
@@ -71,15 +75,16 @@
  *
  * **Nothing is exempted that the tree does not spell.** `FileResponse` was on
  * the list and occurs in `src/` only inside a docstring, which the census
- * strips, so removing it changed nothing: an exemption covering nothing is one
+ * does not read, so removing it changed nothing: an exemption covering nothing is one
  * waiting to cover something, and the backend returns a `FileResponse` from
  * `routers/covers.py`, so a generated model of that name would have arrived
  * admitted. It is refused now, and the census names it the day it is code.
  *
  * **The exception list is pinned against the tree rather than trusted.**
  * `tests/houseRules.test.ts::sorts every File name the source spells onto one
- * side or the other` recomputes both sides from `src/` with comments stripped,
- * so a name arriving on neither fails there and says which it is.
+ * side or the other` recomputes both sides from the names `src/` spells and
+ * from its module paths, read by `fileNamesIn` there, so a name arriving on
+ * neither fails there and says which it is.
  *
  * ## What it does not see, as a property rather than as a list
  *
@@ -96,20 +101,43 @@
  * the same type on both sides of the line: `Array<number>` is refused because
  * `Array` is a name, and `number[]` is admitted.
  *
- * **A bracket arm was proposed and refused, and the reason is not the obvious
- * one.** An array of a carrier is already refused on its element name:
- * `Uint8Array[]`, `Blob[]` and `File[]` all match as they stand. What such an
- * arm would newly reach is `number[]`, which is bytes by convention only, and
- * which this tree spells as `tagIds: number[]` in `pages/ScanPage/types.ts`,
- * a module one of these guards reads a line at a time. So it adds no carrier
- * and costs a false positive.
- *
- * And spelled inside the word boundaries this pattern is wrapped in it would
- * add nothing whatever: `]` is not a word character, so the trailing `\b`
- * wants one after it and there never is one. Measured both ways, because the
- * first draft of this paragraph argued the false positive from a reading taken
- * on the bare arm and the dead arm from a reading taken on the wrapped one,
- * and stated them as though they were one measurement.
+ * **There is no bracket arm, because a bracket is never a name.** An array of
+ * a carrier is already refused on its element name: `Uint8Array[]`, `Blob[]`
+ * and `File[]` all match as they stand. Every guard applying this pattern
+ * tests the names a module spells (`namesSpelled` below), and `number[]`
+ * spells none, so such an arm would reach nothing. Nor would it inside the
+ * word boundaries this pattern is wrapped in: `]` is not a word character, so
+ * the trailing `\b` wants one after it and there never is one.
  */
 export const CARRIES_A_BOOK =
   /\b(?:DataView|(?:[A-Z]\w*)?(?:Array|Blob|Buffer|Stream)\w*|File(?!Metadata|Naming|Identifier|Failure|Reading|PickPanel|Picker)\w*)\b/;
+
+/**
+ * Every name a module spells as code, with the offset it starts at.
+ *
+ * **Names, not words**, which is what every guard testing a source against
+ * `CARRIES_A_BOOK` wants: a type is spelled as an identifier, a JSX tag or a
+ * private name, and those are the nodes carrying a string `name`. A string
+ * literal, a template chunk, the text between two JSX tags and a comment are
+ * words, and read as text a label such as `"Files"` is refused as a type.
+ *
+ * **What it lets through**: a name written only inside a string, such as
+ * `window["FileSystemHandle"]` or a quoted object key. Reaching a type that
+ * way is a deliberate act rather than a slip.
+ */
+export function namesSpelled(
+  source: string,
+  lang: "ts" | "tsx",
+): { name: string; at: number }[] {
+  return namesUnder(parseAst(source, { lang }));
+}
+
+/** The same, under one node of a parse already taken. */
+export function namesUnder(root: unknown): { name: string; at: number }[] {
+  const names: { name: string; at: number }[] = [];
+  walk(root, (value) => {
+    if (typeof value.name === "string" && typeof value.start === "number")
+      names.push({ name: value.name, at: value.start });
+  });
+  return names;
+}

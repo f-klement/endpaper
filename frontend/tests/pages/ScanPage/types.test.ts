@@ -39,7 +39,7 @@ import { identifiersWithScheme } from "../../../src/lib/calibre";
 import { producedValue } from "../../../src/lib/stores";
 import { TEXT_CEILINGS } from "../../../src/lib/bookBounds";
 import type { FileMetadata } from "../../../src/lib/fileReaders";
-import { CARRIES_A_BOOK } from "../../carriesABook";
+import { CARRIES_A_BOOK, namesSpelled } from "../../carriesABook";
 import {
   operationById,
   propertiesOf,
@@ -909,9 +909,9 @@ describe("which of a file's labels reach the endpoint", () => {
  * would compile, would pass every other test in the tree, and would put a
  * member's book one spread away from a request body. That guard stays. This one
  * is the same property over the whole module, and the two are not one check
- * twice: that one reads a parameter list, this one reads every line, so a
- * builder holding a file through a closure or a field is refused here and
- * invisible there.
+ * twice: that one reads a parameter list, this one reads every name the
+ * module spells and reports the line each sits on, so a builder holding a file
+ * through a closure or a field is refused here and invisible there.
  *
  * **It is about a mention, not about custody.** A `File` does reach
  * `toScanRequest` and `toCopyRequest`, inside `PendingBook.coverFile`, and the
@@ -922,16 +922,9 @@ describe("which of a file's labels reach the endpoint", () => {
  * **What counts as carrying a book is `CARRIES_A_BOOK`, in `tests/carriesABook.ts`
  * and explained there**, once, and imported by every rule that applies it.
  *
- * **Written as the one line rather than as a parser, because the parser was
- * evaded twice.** This block shipped for one commit matching
- * `export function \w+\(([^)]*)\)` and asserting the match count against a
- * second reading. Both arms went green on `(clues: NameClues, done: () => void,
- * cover: File)`, since `[^)]*` stops at the first bracket and truncates what it
- * captures without changing how many matches there are; and both went green on
- * `export const draftFromBytes = (file: File) => ...`, since the "second
- * reading" anchored on the same literal `export function` and so was the same
- * instrument twice. A count of one string over the source has no signature to
- * parse and no spelling to enumerate.
+ * **Every name, not one signature.** It reads no function shape, so a
+ * parameter list it cannot capture or a builder spelled as an arrow is no
+ * evasion: any name the module spells is held, wherever it sits.
  */
 
 describe("draftFromAudiobook", () => {
@@ -1011,6 +1004,29 @@ describe("this module names a File exactly once", () => {
     return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*/g, "");
   }
 
+  /**
+   * Each line of `source` holding a name `CARRIES_A_BOOK` refuses, once per
+   * line and in order, without the comment trailing it.
+   *
+   * **Names, not words**: read off the parse by `namesSpelled`, so a string
+   * such as a `"Files"` label is not a type. **One entry per line, keyed on
+   * where the line starts**, so a line holding two refused names counts once
+   * and two identical lines in sibling types count twice.
+   */
+  function linesNaming(source: string): string[] {
+    const starts = new Set(
+      namesSpelled(source, "ts")
+        .filter(({ name }) => CARRIES_A_BOOK.test(name))
+        .map(({ at }) => source.lastIndexOf("\n", at) + 1),
+    );
+    return [...starts].map((start) => {
+      const end = source.indexOf("\n", start);
+      return withoutProse(
+        source.slice(start, end === -1 ? undefined : end),
+      ).trim();
+    });
+  }
+
   // **Two armed corpora rather than one glob over both trees.** The pattern
   // this replaced was an array naming a module and a sibling test, and both
   // halves were read with a lookup defaulting to the empty string, which is
@@ -1049,11 +1065,27 @@ describe("this module names a File exactly once", () => {
     // because the predicate exempts this tree's own `File` types by name.
     // Asserted as the line rather than as a count, because a count that stays
     // right while the line moves is a guard that has stopped watching.
-    const named = code()
-      .split("\n")
-      .filter((line) => CARRIES_A_BOOK.test(line))
-      .map((line) => line.trim());
+    const named = linesNaming(sourceText("pages/ScanPage/types.ts"));
 
     expect(named).toEqual(["coverFile: File | null;"]);
+  });
+
+  it("reports two identical lines naming a File twice", () => {
+    const twice =
+      "interface A {\n  coverFile: File | null;\n}\n" +
+      "interface B {\n  coverFile: File | null;\n}\n";
+    expect(linesNaming(twice)).toEqual([
+      "coverFile: File | null;",
+      "coverFile: File | null;",
+    ]);
+  });
+
+  it("reports a line without the comment trailing it", () => {
+    const commented = "interface A {\n  coverFile: File | null; // sent\n}\n";
+    expect(linesNaming(commented)).toEqual(["coverFile: File | null;"]);
+  });
+
+  it("does not take a word in a string for a type", () => {
+    expect(linesNaming('interface A {\n  kind: "Files";\n}\n')).toEqual([]);
   });
 });

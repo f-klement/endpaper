@@ -34,7 +34,7 @@ import { declarePreference } from "../src/lib/preference";
 
 // The refusal this file and the ScanPage guard both apply, in one home: the
 // module says why it is not a copy per guard.
-import { CARRIES_A_BOOK } from "./carriesABook";
+import { CARRIES_A_BOOK, namesSpelled, namesUnder } from "./carriesABook";
 
 // The committed schema, read once, which is where the dated field names come
 // from. `committedSchema.ts` says why there is one reader rather than one per
@@ -597,6 +597,7 @@ const FILE_READERS = [
   "lib/cbz.ts",
   "lib/epub.ts",
   "lib/fb2.ts",
+  "lib/fileDigest.ts",
   "lib/fileReaders.ts",
   "lib/kindle.ts",
   "lib/mobi.ts",
@@ -2397,6 +2398,84 @@ describe("a table driven rule group is held by a pin on one declaration", () => 
   });
 });
 
+const FILE_NAME = /\bFile\w*\b/g;
+
+/**
+ * The `File` names one module spells as code: the names `namesSpelled` reads
+ * off its parse, and its path below `src/`.
+ *
+ * **The path is read because a module named for a type is a name before
+ * anything imports it**, and the import specifier naming it is a string. Every
+ * segment counts, so a directory named `Files/` puts `Files` in the census for
+ * each module under it.
+ */
+function fileNamesIn(path: string, source: string): string[] {
+  return [
+    ...(path.match(FILE_NAME) ?? []),
+    ...namesSpelled(source, langOf(path)).flatMap(
+      ({ name }) => name.match(FILE_NAME) ?? [],
+    ),
+  ];
+}
+
+/** Every `File` name the application tree spells, by `fileNamesIn`. */
+function fileNamesSpelled(): Set<string> {
+  return new Set(
+    entries().flatMap(([path, source]) => fileNamesIn(path, source)),
+  );
+}
+
+describe("the File name census reads names, not words", () => {
+  it("passes a string literal spelling one", () => {
+    expect(
+      fileNamesIn("i18n/x.ts", `const m = { "files.title": "Files" };`),
+    ).toEqual([]);
+  });
+
+  it("passes JSX text spelling one", () => {
+    expect(
+      fileNamesIn("x.tsx", "export const A = () => <h2>Files</h2>;"),
+    ).toEqual([]);
+  });
+
+  it("passes a template literal spelling one", () => {
+    expect(fileNamesIn("x.ts", "const t = `Files`;")).toEqual([]);
+  });
+
+  it("passes a comment spelling one", () => {
+    expect(
+      fileNamesIn("x.ts", "// FilesPanel lists them\nconst n = 1;"),
+    ).toEqual([]);
+  });
+
+  it("counts an identifier", () => {
+    expect(fileNamesIn("x.ts", "export function FilesPanel() {}")).toEqual([
+      "FilesPanel",
+    ]);
+  });
+
+  it("counts a name used only in a type annotation", () => {
+    expect(fileNamesIn("x.ts", "let h: FileSystemFileHandle;")).toEqual([
+      "FileSystemFileHandle",
+    ]);
+  });
+
+  it("counts a component named in a JSX tag", () => {
+    expect(
+      fileNamesIn("x.tsx", "export const A = () => <FilesPanel />;"),
+    ).toEqual(["FilesPanel"]);
+  });
+
+  it("counts a file name", () => {
+    expect(
+      fileNamesIn(
+        "pages/BookDetail/components/FilesPanel.tsx",
+        "export default 1;",
+      ),
+    ).toEqual(["FilesPanel"]);
+  });
+});
+
 describe("a member's book file cannot leave the browser", () => {
   it("keeps every reader out of reach of the network", () => {
     // The decision on the digital copies ticket is that no bytes reach the
@@ -2655,6 +2734,11 @@ describe("a member's book file cannot leave the browser", () => {
       "export function elsewhere(file: File): Request {}",
       false,
     ],
+    [
+      "a word in a default value is admitted: a string is not a type",
+      'export function draftFromX(record: FileMetadata, label = "Files"): BookDraft {}',
+      false,
+    ],
   ];
 
   it.each(SHAPES)("%s", (_label, source, refused) => {
@@ -2684,6 +2768,7 @@ describe("a member's book file cannot leave the browser", () => {
       "a builder taking the parsed record is admitted | export function draftFromX(record: FileMetadata): BookDraft {} | false",
       "a parameter merely named for an array is admitted: a name is not a type | export function draftFromX(bookArray: NameClues): BookDraft {} | false",
       "a function that builds no draft is admitted | export function elsewhere(file: File): Request {} | false",
+      'a word in a default value is admitted: a string is not a type | export function draftFromX(record: FileMetadata, label = "Files"): BookDraft {} | false',
     ]);
   });
 
@@ -2701,19 +2786,10 @@ describe("a member's book file cannot leave the browser", () => {
    * would empty the refused set while leaving an admitted set that still read
    * correctly, so the admitted half alone cannot see the rule switch off.
    *
-   * Comments are stripped first: `Files` and `FileResponse` appear in this
-   * tree in prose only, and a census over the raw text asks somebody to
-   * classify a word in a sentence.
+   * It reads names, not words: `fileNamesIn` says which.
    */
   it("sorts every File name the source spells onto one side or the other", () => {
-    const names = new Set<string>();
-    for (const [path, source] of entries())
-      for (const name of withoutProse(source, langOf(path)).match(
-        /\bFile\w*\b/g,
-      ) ?? [])
-        names.add(name);
-
-    const sorted = [...names].sort();
+    const sorted = [...fileNamesSpelled()].sort();
     expect(sorted.filter((name) => CARRIES_A_BOOK.test(name))).toEqual([
       // The type itself.
       "File",
@@ -2743,7 +2819,7 @@ describe("a member's book file cannot leave the browser", () => {
    *
    * **A dead exemption is one waiting to cover something**, and this one had
    * one: `FileResponse` was exempted and occurs in `src/` only inside a
-   * docstring, which the census above strips, so the census could not see it
+   * docstring, which the census above does not read, so the census could not see it
    * was dead. The backend returns a `FileResponse` from `routers/covers.py`,
    * so a generated model of that name would have arrived already admitted.
    * Both critic seats found it independently, which is what that costs.
@@ -2760,12 +2836,7 @@ describe("a member's book file cannot leave the browser", () => {
     const exemptions = lookahead![1]!.split("|");
     expect(exemptions.length).toBeGreaterThan(0);
 
-    const spelled = new Set<string>();
-    for (const [path, source] of entries())
-      for (const name of withoutProse(source, langOf(path)).match(
-        /\bFile\w*\b/g,
-      ) ?? [])
-        spelled.add(name);
+    const spelled = fileNamesSpelled();
 
     const dead = exemptions.filter(
       (exemption) =>
@@ -2830,7 +2901,10 @@ type DraftBuilder = {
   name: string | null;
   /** Found by its name rather than by its return type. */
   byName: boolean;
-  /** Each parameter as it is written, annotation included. */
+  /**
+   * The names each parameter spells, one string per parameter: every name
+   * under it, a default value's included; a string in it is a word.
+   */
   params: string[];
 };
 
@@ -2867,11 +2941,12 @@ function takesABook(one: DraftBuilder): boolean {
  * kinds that do the binding. A callable bound by neither is anonymous, and is a
  * member only by what it returns.
  *
- * **Parsed rather than matched, and the parameter is taken as source text.**
- * The shape is what matters and not how the line is spelled, and a default
- * value with a bracket in it truncates a captured parameter list without
- * changing how many matches there are. Both are evasions this tree measured
- * against the regex that stood here.
+ * **Parsed rather than matched, and a parameter is taken as the names it
+ * spells.** The shape is what matters and not how the line is spelled, and a
+ * default value with a bracket in it truncates a captured parameter list
+ * without changing how many matches there are. Both are evasions this tree
+ * measured against the regex that stood here. Names rather than the parameter's
+ * text, so a default value such as `label = "Files"` is a word and not a type.
  *
  * **The exclusions, which are what this does not close.** A builder both
  * renamed and left with no return annotation is in neither derivation. A
@@ -2904,7 +2979,11 @@ function buildersIn(source: string, lang: "ts" | "tsx"): DraftBuilder[] {
       path: "",
       name,
       byName,
-      params: (node.params as unknown[]).filter(isNode).map(slice),
+      params: (node.params as unknown[]).filter(isNode).map((param) =>
+        namesUnder(param)
+          .map((one) => one.name)
+          .join(" "),
+      ),
     });
   };
   walk(parseAst(source, { lang }), (value, ancestors) => {

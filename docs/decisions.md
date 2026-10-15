@@ -21787,3 +21787,91 @@ A ratchet on test functions that read `ast.Import`, `ast.ImportFrom` or `ast.ali
 ## The scanner has no flipped decode for a mirrored camera
 
 A laptop camera that delivers mirrored frames needs no second, flipped decode, because ZXing's one dimensional readers already retry every scanned row reversed (`OneDReader.doDecode`, unconditionally), and for a barcode a reversed row is a horizontal flip. Measured with a throwaway bun probe against the real `@zxing/library` 0.23.0, on synthetic 1080p frames, not in a browser and not on a phone or a laptop: a mirrored EAN-13 decoded on the normal path in 7.3 ms median, while a flipped decode would have added 20.8 ms to every empty frame (against 26.7 ms for the normal empty frame), with a browser's canvas draw and readback on top. So a camera not known to be rear facing gets only what is about the member, not the decoder: a mirrored preview and, after a few seconds without a read, the hint to hold the book further back, on the assumption, not measured, that fixed focus blur is the other likely cause.
+
+## A file's location lands on an existing book only when the formats agree
+
+When a picked file's ISBN already belongs to a book, its location is written to a copy of that
+title in the file's format, or failing that to one whose format is not recorded. Only when no copy
+fits does the scan queue offer to add the file as its own copy, and nothing is written until a
+Member presses it. Owner's ruling, 2026-10-15.
+
+The reason is that `books.format` is per row: which row carries a location already states what
+the file is a copy of. An EPUB that carries its print ISBN, which Calibre produces often, would
+otherwise become a file location on the hardcover, a row whose format says it has no file.
+Creating the ebook copy automatically was refused for the reason the copy route exists at all:
+a copy is a deliberate press, and the common cause of a duplicate ISBN is a second pass over the
+same shelf.
+
+Every copy is read, with a second request after the 409, because the 409 names one book and not
+its format. One book is not enough: the server names the lowest id holder, which stays the
+hardcover after an ebook copy is made beside it, so asking that row alone offered the copy again on
+a re-pick and made a duplicate. Copies that cannot be read are written to by neither route: the
+rule cannot be answered for them, and the row keeps the 409's own reason.
+
+## A file is recognised by its location or by KOReader's fingerprint, asked before the add
+
+Owner's rulings, 2026-10-15: the fingerprint is KOReader's partial MD5, computed in the browser
+at the pick, nullable, on the reference rather than the book; and one batched lookup by location
+or fingerprint runs before the queue adds anything.
+
+- **KOReader's digest and not a full one.** It is the key a KOReader device names a document by,
+  so the same column serves progress sync; a full SHA-256 would read every byte of every file and
+  match nothing a device sends. It is not a content hash: twelve 1 KiB windows at offsets 0 and
+  1024 times 4 to the powers 0 to 10, the file's length no input. **The first offset is 0, not
+  256**: KOReader writes `lshift(1024, 2*i)` from `i = -1`, and LuaJIT's shift takes its count
+  modulo 32 in 32 bits, so `1024 << 30` overflows to 0. The fixture in
+  `tests/lib/fileDigest.test.ts` was hashed outside this repository from that reading of
+  `frontend/util.lua` and again in the test by `node:crypto`.
+- **MD5 written in `lib/fileDigest.ts` rather than taken as a dependency.** WebCrypto has none,
+  and the digest guards nothing: it is an identifier KOReader chose. Sixty lines checked against
+  RFC 1321's vectors cost less than a supply chain entry.
+- **On the reference.** It identifies bytes, and one book's copies differ by bytes whenever a
+  tool rewrites the file's metadata, which is the cardinality `digital_references` already has.
+- **A report replaces it with the rest of the sighting**, so a report without one clears it. A
+  row is one client's one look; keeping an old digest beside a new size would describe a file no
+  client saw.
+- **Either key matches.** A location is what a folder pick knows for certain; a digest survives a
+  move or a rename and is all a device sends. A match on either is a holder, and the answer says
+  which matched.
+- **A read sent as a POST**, because up to 500 paths each up to `PATH_MAX` long fit no query
+  string. Bounded at 500 per request; the queue asks in chunks of that.
+- **Scoped by the shelf, so a hidden book answers as no book does.** A holder here would confirm
+  that another member privately holds that exact file.
+- **Asked at the pick and again at the add for rows nobody answered.** The pick lookup lets a
+  row say it is already in the library before the press; the add lookup is the guarantee, since
+  a failed or late pick lookup would otherwise add a duplicate. A failed lookup never refuses an
+  add: it only stops a duplicate.
+- **A match by location or fingerprint follows the landing rule too**: the file lands only on a
+  holder of its own format or of none recorded, and among those on one already at this location
+  first. A file held only by a book of another format, such as a reference left on a hardcover
+  before the landing rule, is offered as its own copy and is neither written onto that book nor
+  made a second book by itself. Owner's ruling, 2026-10-15.
+- **A merge keeps a repeat's fingerprint** when the surviving reference has none, because no
+  server can compute one again.
+- **A digest is a client claim**, like every column on the reference: any member may put any
+  digest on a public book's reference, which would make other members' later picks of that file
+  a sighting there. That is within the shared shelf, where any member may edit a public book.
+
+Two landing edge cases:
+
+- **A location on an unset format copy stays there after an exact format copy appears.** The
+  lookup finds the unset copy by the location and refreshes the sighting there, ranked ahead of
+  an exact copy matching only by fingerprint, so the file no longer lands on both rows. It is not moved: an unset format copy is a
+  legitimate landing under the ruling, and moving a reference is a member's Forget and re-pick, not a guess.
+- **An ungrouped book sharing the ISBN hid another copy group's ebook from the 409 path.** When
+  that ebook already holds the file, by location or by fingerprint, the lookup finds it directly
+  and nothing reaches the 409. When the ebook has never been told about this file the lookup
+  cannot see it, because it keys on the file and not on the ISBN; that half stays with the 409
+  path and would need copies listed across every book carrying the ISBN.
+
+## A digital copy is requested and granted, not lent
+
+Owner ruling, 2026-10-15: "maybe in their case lending is not the right term, because the digital copy doesn't need to be returned, but it requires a request for access ... (we are not going this deep and implementing something like that, just reframing the lending dynamic)".
+
+- **A table of its own, `access_requests`, rather than a kind column on `loans`.** Each rule on `loans` is wrong for a grant: one open loan per book (many members may hold access at once), a borrower with no account (only a member can ask), the overdue digest, the banner and the merge's single open loan rule. A kind column would need a filter at every one of those readers, and the reader that forgot it would show a grant as overdue.
+- **Which copies: an ebook always, an audiobook only when it carries a digital reference.** The CSV import folds "audio cd" onto AUDIOBOOK, so refusing the format alone stopped a physical disc being lent. A reference says somebody holds the copy as a file. `lending.is_requested_not_lent` is the rule; the frontend mirrors it, and each side has a test walking every format with and without a file against the same table.
+- **The holder is stored on the row when the request is made**: the member who added the book then. Read live from `books.added_by_user_id`, a merge (any member may merge public books they can see, keeper of their choosing) handed requests to the keeper's adder: a third member could read and answer them, and a requester merging the held book into their own entry could grant themselves. Stored, a merge carries the row and its two parties unchanged. Any member may record a loan on a visible book, so "whoever may lend it" was not taken as the holder: it would make every viewer a holder. An admin is not a holder.
+- **A request with no other holder is refused, not stored** (409 `no_holder`): when the book has no adder, or the adder is the caller. A request nobody can answer is not a request, and `ck_access_requests_two_parties` refuses requester equal to holder for a restore.
+- **A grant shares no file.** Endpaper holds none, and a digital reference's path is on whichever member's machine recorded it. The grantee is told who granted it; the hand over is outside the app.
+- **No uniqueness index.** The route refuses a second waiting or granted request from the same member. A race or a merge can leave two waiting rows, which the holder answers like any other; an index would have needed a merge rule to resolve the collision, for no benefit to a household.
+- **Existing open loans on digital rows are left alone**: no migration closes them, and they still return.

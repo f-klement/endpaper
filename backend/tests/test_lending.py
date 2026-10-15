@@ -15,7 +15,8 @@ import pytest
 import lending
 import notifications
 from database import Base
-from models import Book, Loan
+from enums import BookFormat
+from models import Book, DigitalReference, Loan
 from tests.corpus import application_sources
 
 
@@ -667,3 +668,21 @@ class TestOnlyTheDeskBuildsAScope:
         # The receiver arm, which is what keeps `shelf.py` and `sru.py` off the
         # list without either of them being named anywhere.
         assert _reaches_around_the_door("rows = self._query.all()\n") == []
+
+
+class TestWhichCopiesAreAskedForRatherThanLent:
+    def test_every_format_with_and_without_a_file(self):
+        """The same table as the frontend's `pages/BookDetail/types.test.ts`
+        walks for `isRequestedNotLent`; the two are held together by agreeing
+        with it."""
+        requested = []
+        for format in BookFormat:
+            for has_file in (False, True):
+                book = Book(title="t", format=format)
+                if has_file:
+                    book.digital_references.append(
+                        DigitalReference(root_label="/r", relative_path="f")
+                    )
+                if lending.is_requested_not_lent(book):
+                    requested.append(f"{format.value}:{str(has_file).lower()}")
+        assert requested == ["ebook:false", "ebook:true", "audiobook:true"]

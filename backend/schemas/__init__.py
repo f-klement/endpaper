@@ -12,6 +12,7 @@ raises `PydanticUndefinedAnnotation`, and FastAPI would fail at startup rather
 than at request time.
 """
 
+from schemas.access import AccessDecision, AccessRequestOut
 from schemas.author import (
     AuthorBatchMergeOut,
     AuthorIdentifierOut,
@@ -84,8 +85,13 @@ from schemas.custom_field import (
 )
 from schemas.digital import (
     MAX_DIGITAL_REFERENCES_PER_BOOK,
+    MAX_FILES_PER_LOOKUP,
+    AskedFileIn,
     DigitalReferenceIn,
     DigitalReferenceOut,
+    HolderOut,
+    HoldersIn,
+    HoldersOut,
     MissingDigitalReferenceOut,
 )
 from schemas.identifier import (
@@ -173,6 +179,7 @@ __all__ = [
     "DUPLICATE_BOOKS_SHOWN",
     "MAX_CLASSIFICATIONS_PER_BOOK",
     "MAX_DIGITAL_REFERENCES_PER_BOOK",
+    "MAX_FILES_PER_LOOKUP",
     "MAX_IDENTIFIERS_PER_BOOK",
     "MAX_PAGE_SIZE",
     "MAX_ROW_ID",
@@ -182,8 +189,11 @@ __all__ = [
     # than spelling one pop per name.
     "POPPED_BEFORE_THE_ASSIGNMENT",
     "POPPED_BEFORE_THE_CONSTRUCTOR",
+    "AccessDecision",
+    "AccessRequestOut",
     "AppearanceOut",
     "AppearanceUpdate",
+    "AskedFileIn",
     "AuthConfigOut",
     "AuthorBatchMergeOut",
     "AuthorIdentifierOut",
@@ -240,6 +250,9 @@ __all__ = [
     "EmailUpdate",
     "FeatureFlagsOut",
     "HeadingFacetOut",
+    "HolderOut",
+    "HoldersIn",
+    "HoldersOut",
     "IdentifierBackfillOut",
     "ImportPreviewOut",
     "ImportPreviewRow",

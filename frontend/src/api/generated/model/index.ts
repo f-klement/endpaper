@@ -6,9 +6,13 @@
  * OpenAPI spec version: 1.0.0
  */
 
+export * from "./accessDecision.ts";
+export * from "./accessRequestOut.ts";
+export * from "./accessStatus.ts";
 export * from "./appearanceOut.ts";
 export * from "./appearanceUpdate.ts";
 export * from "./applyEnrichmentParams.ts";
+export * from "./askedFileIn.ts";
 export * from "./authConfigOut.ts";
 export * from "./authMode.ts";
 export * from "./authorAuthorityParams.ts";
@@ -93,6 +97,9 @@ export * from "./featureFlagsOut.ts";
 export * from "./headingFacetOut.ts";
 export * from "./headingKind.ts";
 export * from "./healthz200.ts";
+export * from "./holderOut.ts";
+export * from "./holdersIn.ts";
+export * from "./holdersOut.ts";
 export * from "./hTTPValidationError.ts";
 export * from "./identifierBackfillOut.ts";
 export * from "./importCsvParams.ts";

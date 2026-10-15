@@ -1092,6 +1092,10 @@ export const de: Messages = {
     "Angehalten. {count} hinzugefügt, {failed} nicht. Alles Übrige steht weiterhin in der Liste.",
   "rapid.unreferenced":
     "Bei {count} davon wurde nicht gespeichert, wo die Datei liegt. Den Ordner noch einmal auswählen speichert es.",
+  "rapid.alreadyHeld":
+    "{count} waren schon in der Bibliothek und wurden nicht noch einmal hinzugefügt. Wo die Dateien liegen, wurde gespeichert.",
+  "rapid.inYourLibrary":
+    "Schon in der Bibliothek. Hinzufügen speichert nur, wo die Datei liegt, und legt kein Buch an.",
   "rapid.removeFromQueue": "{label} aus der Liste entfernen",
   "rapid.subjects": "Schlagwörter aus der Datei: {count}. Anzeigen.",
   "rapid.removeSubject": "Das Schlagwort {subject} von {label} entfernen",
@@ -1100,7 +1104,7 @@ export const de: Messages = {
   // ── Bücher aus ihren Dateien hinzufügen ─────────────────────────────────
   "file.title": "Aus einer Datei hinzufügen",
   "file.explain":
-    "Buchdateien oder einen ganzen Ordner auswählen, dann liest Endpaper heraus, was in den Dateien steht. Was eine Datei nicht sagt, wird über den Dateinamen gesucht. Die Dateien werden hier im Browser gelesen und niemals hochgeladen. Bei einem Ordner wird für ein Buch aus einer einzigen Datei auch deren Name samt der Ordner darüber beim Buch gespeichert, damit die Datei wiederzufinden ist, und alle, die das Buch sehen, sehen auch das. Auch die Schlagwörter aus der Datei werden beim Buch gespeichert: bei einem einzelnen Buch lassen sie sich vorher entfernen, bei einem ganzen Ordner geht das hinterher nur noch, indem das Buch entfernt wird.",
+    "Buchdateien oder einen ganzen Ordner auswählen, dann liest Endpaper heraus, was in den Dateien steht. Was eine Datei nicht sagt, wird über den Dateinamen gesucht. Die Dateien werden hier im Browser gelesen und niemals hochgeladen. Bei einem Ordner wird für ein Buch aus einer einzigen Datei auch deren Name samt der Ordner darüber und ein Fingerabdruck der Datei beim Buch gespeichert, damit die Datei wiederzufinden ist, und alle, die das Buch sehen, sehen auch das. Der Fingerabdruck wird hier aus bis zu 12 KiB der Datei berechnet. Auch die Schlagwörter aus der Datei werden beim Buch gespeichert: bei einem einzelnen Buch lassen sie sich vorher entfernen, bei einem ganzen Ordner geht das hinterher nur noch, indem das Buch entfernt wird.",
   "file.pickLabel": "Buchdateien",
   "file.readingFiles": "Die ausgewählten Dateien werden gelesen...",
   "file.notAnEpub": "Keine EPUB-Datei.",
@@ -1244,6 +1248,25 @@ export const de: Messages = {
   "copies.loadFailed":
     "Die anderen Exemplare dieses Buchs konnten nicht geladen werden.",
   "copies.badge": "{count} Exemplare",
+
+  // ── Where this copy's files are, and a file held in another format ──────
+  // The Files panel on the book page and the copy offer on the scan queue.
+  "files.title": "Buchdateien",
+  "files.hint":
+    "Wo ein Browser die Dateien dieses Buchs zuletzt gemeldet hat. Endpaper speichert den Ort, nie die Datei.",
+  "files.reported": "Zuletzt gemeldet am {date}",
+  "files.missing": "Nicht gefunden seit {date}",
+  "files.forget": "Vergessen",
+  "files.forgetFor": "{path} vergessen",
+  "files.forgetConfirm":
+    "Vergessen, dass die Datei dieses Buchs unter {path} liegt? Wird der Ordner beim Scannen erneut gewählt, ist der Ort wieder erfasst.",
+  "files.loadFailed":
+    "Wo die Dateien dieses Buchs liegen, konnte nicht geladen werden.",
+  "files.forgetFailed": "Dieser Ort konnte nicht vergessen werden.",
+  "rapid.heldInAnotherFormat":
+    "Schon in einer anderen Ausgabe in der Bibliothek, die Datei wurde deshalb nicht dort eingetragen.",
+  "rapid.addAsCopy": "Als eigenes Exemplar hinzufügen ({format})",
+  "rapid.addAsCopyFor": "{label} als eigenes Exemplar hinzufügen",
   "format.filterAll": "Jede Ausgabe",
 
   // ── Herborgen und drüber reden ──────────────────────────────────────────
@@ -1256,6 +1279,24 @@ export const de: Messages = {
   "lending.neverWarning":
     'Dieses Buch ist als "wird nicht hergeborgt" markiert.',
   "lending.lendAnyway": "Trotzdem herborgen",
+  // Access requests: an ebook, or an audiobook carrying a digital reference, is
+  // requested and granted rather than lent.
+  "access.title": "Zugang zu diesem Exemplar",
+  "access.explain":
+    "Ein digitales Exemplar wird nicht verliehen, sondern auf Anfrage freigegeben. Endpaper speichert keine Datei, die Übergabe geschieht also außerhalb der App.",
+  "access.request": "Zugang anfragen",
+  "access.pending":
+    "Zugang bei {holder} angefragt. Die Antwort steht noch aus.",
+  "access.granted":
+    "{holder} hat Zugang gewährt und gibt die Datei außerhalb der App weiter.",
+  "access.declined": "{holder} hat abgelehnt. Eine neue Anfrage ist möglich.",
+  "access.noHolder": "Niemand sonst hat dieses Exemplar.",
+  "access.none": "Niemand hat um Zugang gebeten.",
+  "access.waiting": "{name} wartet auf eine Antwort",
+  "access.grantedTo": "Zugang gewährt für {name}",
+  "access.declinedFor": "Abgelehnt für {name}",
+  "access.grant": "Gewähren",
+  "access.decline": "Ablehnen",
   "discuss.toggle": "Über dieses Buch rede ich gern, einfach danach fragen",
   "discuss.label": "Ansprechpartner",
   "discuss.badge": "Gesprächsstoff",

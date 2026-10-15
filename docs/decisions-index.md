@@ -889,4 +889,7 @@ repeat the argument.
 |  | [A meaning is never derived through the same refining assignment twice; a plain rename is not counted](decisions.md#a-meaning-is-never-derived-through-the-same-refining-assignment-twice-a-plain-rename-is-not-counted) | 158 |
 |  | [No ratchet on import node handling](decisions.md#no-ratchet-on-import-node-handling) | 82 |
 |  | [The scanner has no flipped decode for a mirrored camera](decisions.md#the-scanner-has-no-flipped-decode-for-a-mirrored-camera) | 157 |
+|  | [A file's location lands on an existing book only when the formats agree](decisions.md#a-files-location-lands-on-an-existing-book-only-when-the-formats-agree) | 240 |
+|  | [A file is recognised by its location or by KOReader's fingerprint, asked before the add](decisions.md#a-file-is-recognised-by-its-location-or-by-koreaders-fingerprint-asked-before-the-add) | 746 |
+|  | [A digital copy is requested and granted, not lent](decisions.md#a-digital-copy-is-requested-and-granted-not-lent) | 459 |
 <!-- index: end -->

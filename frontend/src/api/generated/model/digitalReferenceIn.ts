@@ -17,6 +17,7 @@
  */
 export interface DigitalReferenceIn {
   file_modified_at?: string | null;
+  partial_md5?: string | null;
   /**
    * @minLength 1
    * @maxLength 4094

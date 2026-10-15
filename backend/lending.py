@@ -93,6 +93,7 @@ from sqlalchemy.orm import Query, Session, joinedload
 from sqlalchemy.sql.elements import UnaryExpression
 
 import notifications
+from enums import BookFormat
 from models import Book, Loan
 from shelf import Shelf
 
@@ -386,6 +387,23 @@ class Loans:
         `tests/test_house_rules.py` reads every module and not only this one.
         """
         return self._query
+
+
+def is_requested_not_lent(book: Book) -> bool:
+    """Whether this copy is a file a member asks for rather than an object lent.
+
+    **An ebook always; an audiobook only when it carries a digital reference.**
+    The CSV import folds "audio cd" onto `AUDIOBOOK`, so the format alone would
+    stop a physical disc being lent. A reference says somebody has the copy as
+    a file. Such a copy takes no new loan (`routers/loans.py`) and is asked for
+    through `models.AccessRequest` instead.
+
+    Reads `book.digital_references`, one statement on a Book that has not loaded
+    them; every caller holds one Book.
+    """
+    if book.format == BookFormat.EBOOK:
+        return True
+    return book.format == BookFormat.AUDIOBOOK and bool(book.digital_references)
 
 
 def close(loan: Loan, now: datetime) -> None:

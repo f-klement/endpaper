@@ -55,6 +55,7 @@ from enums import VerificationProvenance
 from models import (
     BLANK_IS_NULL,
     OPDS_CREDENTIAL_PREFIX,
+    AccessRequest,
     AuthorAlias,
     AuthorIdentifier,
     Book,
@@ -141,6 +142,10 @@ _TABLES: tuple[tuple[str, Any, Table], ...] = tuple(
         # only ordering this tuple actually constrains.
         ("reading_progress", ReadingProgress),
         ("loans", Loan),
+        # After the loans it replaces for a digital copy. Both parents are
+        # inserted by here. Absent from `_REQUIRED_TABLES` for the reason
+        # `quotes` is: an older archive restores with no requests.
+        ("access_requests", AccessRequest),
         ("notes", Note),
         # After notes, which it is shaped after and has no relationship with.
         # Deliberately absent from `_REQUIRED_TABLES`: an archive taken before

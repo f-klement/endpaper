@@ -88,6 +88,8 @@ function renderQueue(
     onLookUpKept: vi.fn<RapidQueueProps["onLookUpKept"]>(),
     onSplit: vi.fn<RapidQueueProps["onSplit"]>(),
     onDropSubject: vi.fn<RapidQueueProps["onDropSubject"]>(),
+    onAddAsCopy: vi.fn<RapidQueueProps["onAddAsCopy"]>(),
+    isAddingCopy: false,
     ...rest,
   };
   const { container, rerender } = renderLocalised(<RapidQueue {...props} />, {
@@ -414,6 +416,66 @@ describe("RapidQueue", () => {
     expect(screen.getByText(/broken.epub/)).toBeInTheDocument();
   });
 
+  it("offers a file held in another format as its own copy, in the file's format", async () => {
+    // The landing rule's other half: the location was not written onto the
+    // hardcover, so the row has to say why and offer the press that files it.
+    const queue = renderQueue({
+      entries: [
+        {
+          ...picked(
+            {
+              state: "failed",
+              draft: {
+                isbn: "9780441013593",
+                title: "Dune",
+                suggested_tag_ids: [],
+              },
+              reason: { kind: "held-in-another-format" },
+              copyOf: 77,
+            },
+            "dune.epub",
+          ),
+          isbn: "9780441013593",
+        },
+      ],
+    });
+
+    expect(
+      screen.getByText(/Already in the library in another format/),
+    ).toBeInTheDocument();
+    const offer = screen.getByRole("button", {
+      name: "Add dune.epub as its own copy",
+    });
+    expect(offer).toHaveTextContent("Add as its own copy (Ebook)");
+    await userEvent.click(offer);
+    expect(queue.onAddAsCopy).toHaveBeenCalledWith("file:dune.epub:10:0");
+  });
+
+  it("holds Add all while a row is being added as its own copy", () => {
+    renderQueue({ entries: [found], isAddingCopy: true });
+
+    expect(screen.getByRole("button", { name: "Add all" })).toBeDisabled();
+  });
+
+  it("offers no copy on a failed row that is not held in another format", () => {
+    renderQueue({
+      entries: [
+        picked(
+          {
+            state: "failed",
+            draft: { isbn: "", title: "Dune", suggested_tag_ids: [] },
+            reason: { kind: "server-said", message: "Refused" },
+          },
+          "dune.epub",
+        ),
+      ],
+    });
+
+    expect(
+      screen.queryByRole("button", { name: /as its own copy/ }),
+    ).not.toBeInTheDocument();
+  });
+
   it("names a removal by the label rather than by the ISBN", () => {
     renderQueue({
       entries: [picked({ state: "reading", draft: null }, "dune.epub")],
@@ -430,7 +492,13 @@ describe("RapidQueue", () => {
 
   it("reports the outcome, failures included", () => {
     renderQueue({
-      result: { added: 12, failed: 2, unreferenced: 0, stopped: false },
+      result: {
+        added: 12,
+        failed: 2,
+        unreferenced: 0,
+        already: 0,
+        stopped: false,
+      },
     });
     expect(screen.getByRole("status")).toHaveTextContent("12 added");
   });
@@ -440,7 +508,13 @@ describe("RapidQueue", () => {
     // The hook's own arms drive the number; nothing rendered it, so the whole
     // block could be deleted with every test green.
     renderQueue({
-      result: { added: 12, failed: 0, unreferenced: 2, stopped: false },
+      result: {
+        added: 12,
+        failed: 0,
+        unreferenced: 2,
+        already: 0,
+        stopped: false,
+      },
     });
 
     expect(
@@ -454,10 +528,88 @@ describe("RapidQueue", () => {
     // Every batch of barcodes, and every pick of single files. A sentence that
     // appeared at zero would report an absence as a loss.
     renderQueue({
-      result: { added: 12, failed: 0, unreferenced: 0, stopped: false },
+      result: {
+        added: 12,
+        failed: 0,
+        unreferenced: 0,
+        already: 0,
+        stopped: false,
+      },
     });
 
     expect(screen.queryByText(/without where their file is/)).toBeNull();
+  });
+
+  it("says how many picked files were already in the library", () => {
+    renderQueue({
+      result: {
+        added: 1,
+        failed: 0,
+        unreferenced: 0,
+        already: 2,
+        stopped: false,
+      },
+    });
+
+    expect(
+      screen.getByText(
+        "2 were already in your library, so they were not added again. Where their files are was recorded.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("says nothing about the library for a batch that found nothing in it", () => {
+    renderQueue({
+      result: {
+        added: 1,
+        failed: 0,
+        unreferenced: 0,
+        already: 0,
+        stopped: false,
+      },
+    });
+
+    expect(screen.queryByText(/already in your library/)).toBeNull();
+  });
+
+  it("marks a row whose file a book of its format already holds", () => {
+    // Said before the press, so a re-pick shows what the batch will not add.
+    renderQueue({
+      entries: [
+        picked(
+          {
+            state: "derived",
+            draft: { isbn: "", title: "Dune", suggested_tag_ids: [] },
+            heldBy: { bookId: 42, lands: true },
+          },
+          "dune.epub",
+        ),
+        picked(
+          {
+            state: "derived",
+            draft: { isbn: "", title: "Emma", suggested_tag_ids: [] },
+            heldBy: null,
+          },
+          "emma.epub",
+        ),
+        // Held only in another format: the batch offers a copy, so the row
+        // must not say adding records anything.
+        picked(
+          {
+            state: "derived",
+            draft: { isbn: "", title: "Ulysses", suggested_tag_ids: [] },
+            heldBy: { bookId: 77, lands: false },
+          },
+          "ulysses.epub",
+        ),
+      ],
+    });
+
+    expect(
+      screen.getAllByText(
+        "Already in your library. Adding only records where its file is and adds no book.",
+      ),
+    ).toHaveLength(1);
   });
 
   it("names the books that could not be added, and why", () => {
@@ -481,7 +633,13 @@ describe("RapidQueue", () => {
           },
         }),
       ],
-      result: { added: 12, failed: 1, unreferenced: 0, stopped: false },
+      result: {
+        added: 12,
+        failed: 1,
+        unreferenced: 0,
+        already: 0,
+        stopped: false,
+      },
     });
 
     expect(screen.getByText(/Dune/)).toBeInTheDocument();
@@ -526,7 +684,13 @@ describe("RapidQueue", () => {
     // environment has no layout engine.
     renderQueue({
       entries: [found],
-      result: { added: 1, failed: 0, unreferenced: 0, stopped: true },
+      result: {
+        added: 1,
+        failed: 0,
+        unreferenced: 0,
+        already: 0,
+        stopped: true,
+      },
     });
 
     const discard = screen.getByRole("button", { name: "Discard" });
@@ -564,7 +728,13 @@ describe("RapidQueue", () => {
     // should be watching for.
     const props = renderQueue({
       entries: [found],
-      result: { added: 1, failed: 2, unreferenced: 1, stopped: true },
+      result: {
+        added: 1,
+        failed: 2,
+        unreferenced: 1,
+        already: 0,
+        stopped: true,
+      },
     });
 
     const verdict = screen.getByRole("status");
@@ -647,7 +817,13 @@ describe("RapidQueue", () => {
       entries: [found],
       isAdding: true,
       progress: { done: 1, total: 2 },
-      result: { added: 40, failed: 0, unreferenced: 0, stopped: true },
+      result: {
+        added: 40,
+        failed: 0,
+        unreferenced: 0,
+        already: 0,
+        stopped: true,
+      },
     });
 
     expect(screen.queryByRole("status")).toBeNull();
@@ -665,7 +841,13 @@ describe("RapidQueue", () => {
       entries: [found],
       isAdding: false,
       progress: { done: 3, total: 3 },
-      result: { added: 3, failed: 0, unreferenced: 0, stopped: false },
+      result: {
+        added: 3,
+        failed: 0,
+        unreferenced: 0,
+        already: 0,
+        stopped: false,
+      },
     });
 
     expect(screen.getByRole("status")).toBeInTheDocument();
@@ -677,7 +859,13 @@ describe("RapidQueue", () => {
     // reach are still there: both halves in one sentence, because a member
     // reading "40 added" over a queue of three hundred assumes the worst.
     renderQueue({
-      result: { added: 40, failed: 0, unreferenced: 0, stopped: true },
+      result: {
+        added: 40,
+        failed: 0,
+        unreferenced: 0,
+        already: 0,
+        stopped: true,
+      },
     });
 
     expect(screen.getByRole("status")).toHaveTextContent(
@@ -695,7 +883,13 @@ describe("RapidQueue", () => {
           reason: { kind: "server-said", message: "Nope" },
         }),
       ],
-      result: { added: 1, failed: 1, unreferenced: 0, stopped: false },
+      result: {
+        added: 1,
+        failed: 1,
+        unreferenced: 0,
+        already: 0,
+        stopped: false,
+      },
     });
 
     expect(screen.getByRole("status")).toBeInTheDocument();

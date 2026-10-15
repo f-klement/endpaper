@@ -190,6 +190,12 @@ def list_loans(
 NOT_LENDABLE: Final = "not_lendable"
 
 
+#: The `detail.code` on the 409 a digital copy answers with: such a copy is
+#: requested and granted on its book, never lent. Which copies those are is
+#: `lending.is_requested_not_lent`.
+DIGITAL_COPY: Final = "digital_copy"
+
+
 @router.post("", response_model=LoanOut, status_code=status.HTTP_201_CREATED)
 @refuses(404)
 def create_loan(payload: LoanCreate, db: DbSession, current_user: CurrentUser) -> LoanOut:
@@ -221,6 +227,21 @@ def create_loan(payload: LoanCreate, db: DbSession, current_user: CurrentUser) -
     # after it.
     if payload.loaned_to_user_id is not None and db.get(User, payload.loaned_to_user_id) is None:
         raise HTTPException(status_code=404, detail="User not found")
+
+    # Refused outright, unlike `lending = never`: there is nothing to return,
+    # so a loan would stay open for ever. Only a **new** loan is refused; one
+    # recorded before this rule still closes through `return_loan`.
+    if lending.is_requested_not_lent(book):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "message": (
+                    "A digital copy is not lent. Request access to it from "
+                    "its holder instead."
+                ),
+                "code": DIGITAL_COPY,
+            },
+        )
 
     # A book the library said it does not lend. Refused once, then allowed:
     # see `_refuse_unless_acknowledged`.

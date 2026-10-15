@@ -151,6 +151,8 @@ export default function ScanPage() {
             onLookUpKept={rapid.lookUpTheKeptNames}
             onSplit={rapid.splitApart}
             onDropSubject={rapid.dropSubject}
+            onAddAsCopy={rapid.addAsCopy}
+            isAddingCopy={rapid.isAddingCopy}
           />
         </>
       )}

@@ -15,6 +15,7 @@ import DiscussToggle from "./components/DiscussToggle";
 import EnrichPanel from "./components/EnrichPanel";
 import ReadingPanel from "./components/ReadingPanel";
 import LoanBadge from "./components/LoanBadge";
+import AccessPanel from "./components/AccessPanel";
 import LoanPanel from "./components/LoanPanel";
 import NoteList from "./components/NoteList";
 import OwnershipPicker from "./components/OwnershipPicker";
@@ -25,6 +26,7 @@ import CopiesPanel from "./components/CopiesPanel";
 import CopyPanel from "./components/CopyPanel";
 import ClassificationPanel from "./components/ClassificationPanel";
 import CustomFieldsPanel from "./components/CustomFieldsPanel";
+import DigitalReferencesPanel from "./components/DigitalReferencesPanel";
 import EnrichPicker from "./components/EnrichPicker";
 import ShelfPanel from "./components/ShelfPanel";
 import StatusPicker from "./components/StatusPicker";
@@ -35,10 +37,12 @@ import {
   hasAbout,
   sectionDefaults,
   useBook,
+  useBookAccess,
   useBookActions,
   useBookCopies,
   useBookCustomFields,
   useBookEnrichment,
+  useBookFiles,
   useBookLoan,
   useBookNotes,
   useBookProgress,
@@ -93,9 +97,11 @@ export default function BookDetail({ currentUser }: BookDetailProps) {
   const notes = useBookNotes(bookId);
   const quotes = useBookQuotes(bookId);
   const loan = useBookLoan(bookId);
+  const access = useBookAccess(bookId, book?.format);
   const progress = useBookProgress(bookId);
   const enrichment = useBookEnrichment(bookId);
   const copies = useBookCopies(bookId);
+  const files = useBookFiles(bookId);
   const customFields = useBookCustomFields(bookId);
   const showGoodreadsLink = useGoodreadsLookup();
   const [showEnrichHelp, setShowEnrichHelp] = useState(false);
@@ -125,6 +131,7 @@ export default function BookDetail({ currentUser }: BookDetailProps) {
     notes.error ??
     quotes.error ??
     loan.error ??
+    access.error ??
     progress.error;
 
   return (
@@ -287,6 +294,17 @@ export default function BookDetail({ currentUser }: BookDetailProps) {
               listError={copies.listError}
               onAdd={copies.add}
             />
+
+            {/* In this group because a file location is a fact about this
+                row, the object, which is what `books.format` beside it says:
+                an ebook copy's files are not its hardcover sibling's. */}
+            <DigitalReferencesPanel
+              references={files.references}
+              forgetting={files.forgetting}
+              listError={files.listError}
+              error={files.error}
+              onForget={files.forget}
+            />
           </CollapsibleSection>
 
           <CollapsibleSection
@@ -295,15 +313,28 @@ export default function BookDetail({ currentUser }: BookDetailProps) {
             isOpen={sections.isOpen("lending")}
             onToggle={() => sections.toggle("lending")}
           >
-            <LoanPanel
-              book={book}
-              members={otherMembers}
-              isBusy={loan.isBusy}
-              isSavingDetails={actions.isSavingDetails}
-              onSaveLending={actions.updateDetails}
-              onLend={loan.lend}
-              onMarkReturned={loan.markReturned}
-            />
+            {/* A digital copy is requested rather than lent. One already out
+                on a loan from before that rule keeps the return button. */}
+            {access.isRequested && !book.active_loan ? (
+              <AccessPanel
+                book={book}
+                currentUserId={currentUser.id}
+                requests={access.requests}
+                isBusy={access.isBusy}
+                onRequest={access.request}
+                onDecide={access.decide}
+              />
+            ) : (
+              <LoanPanel
+                book={book}
+                members={otherMembers}
+                isBusy={loan.isBusy}
+                isSavingDetails={actions.isSavingDetails}
+                onSaveLending={actions.updateDetails}
+                onLend={loan.lend}
+                onMarkReturned={loan.markReturned}
+              />
+            )}
           </CollapsibleSection>
 
           <CollapsibleSection

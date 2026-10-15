@@ -7,11 +7,13 @@ import fc from "fast-check";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  BookFormat,
   BookIdentifierScheme,
   Locale,
   OwnershipStatus,
   ReadStatus,
   type CustomFieldOut,
+  type DigitalReferenceOut,
   type UserOut,
 } from "../../../src/api/generated/model";
 import { de, en } from "../../../src/i18n";
@@ -74,6 +76,7 @@ function stubLoad({
   // loosely is a stub that cannot be wrong: a field the model requires can go
   // missing from it with nothing to report that.
   customFields = [] as CustomFieldOut[],
+  references = [] as DigitalReferenceOut[],
   customFieldValues = [] as {
     field_id: number;
     name: string;
@@ -93,6 +96,7 @@ function stubLoad({
   // One element rather than none: a book with one copy is a copy, it is just
   // the only one, and that is what the endpoint answers.
   api.on("/api/books/1/copies", { body: [book] });
+  api.on("/api/books/1/digital-references", { body: references });
   api.on("/api/books/tags", { body: tags });
   api.on("/api/collections", { body: [] });
   api.on("/api/users", { body: users });
@@ -448,6 +452,68 @@ describe("BookDetail", () => {
       expect(
         within(select).queryByRole("option", { name: "owner" }),
       ).not.toBeInTheDocument();
+    });
+
+    it("asks for access to a digital copy instead of lending it", async () => {
+      stubLoad({
+        book: makeBook({ id: 1, added_by: OWNER, format: BookFormat.ebook }),
+      });
+      api.on("/api/books/1/access-requests", { body: [] });
+      renderDetail(OTHER);
+      await openSection("Lending this copy");
+
+      expect(
+        await screen.findByRole("button", { name: "Request access" }),
+      ).toBeInTheDocument();
+      expect(screen.queryByLabelText("Loan to")).not.toBeInTheDocument();
+    });
+
+    it("still offers the return of a loan on a digital copy from before the rule", async () => {
+      stubLoad({
+        book: makeBook({
+          id: 1,
+          added_by: OWNER,
+          format: BookFormat.ebook,
+          active_loan: makeLoan({ id: 9 }),
+        }),
+      });
+      api.on("/api/books/1/access-requests", { body: [] });
+      renderDetail(OWNER);
+      await openSection("Lending this copy");
+
+      expect(
+        await screen.findByRole("button", { name: "Mark as Returned" }),
+      ).toBeInTheDocument();
+    });
+
+    it("asks for access to an audiobook that is a file", async () => {
+      stubLoad({
+        book: makeBook({
+          id: 1,
+          added_by: OWNER,
+          format: BookFormat.audiobook,
+        }),
+      });
+      const file: DigitalReferenceOut = {
+        id: 1,
+        book_id: 1,
+        root_label: "/audio",
+        relative_path: "a.m4b",
+        root_confirmed: false,
+        size_bytes: null,
+        file_modified_at: null,
+        created_at: "2026-10-15T09:00:00Z",
+        confirmed_at: "2026-10-15T09:00:00Z",
+        missing_since: null,
+      };
+      api.on("/api/books/1/digital-references", { body: [file] });
+      api.on("/api/books/1/access-requests", { body: [] });
+      renderDetail(OTHER);
+      await openSection("Lending this copy");
+
+      expect(
+        await screen.findByRole("button", { name: "Request access" }),
+      ).toBeInTheDocument();
     });
 
     it("records a loan", async () => {
@@ -855,6 +921,88 @@ describe("BookDetail", () => {
         expect(api.lastCall(/\/api\/books\/1$/, "DELETE")).toBeDefined(),
       );
       expect(confirmSpy).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("the files a folder pick located", () => {
+    const located: DigitalReferenceOut = {
+      id: 5,
+      book_id: 1,
+      root_label: "Books",
+      relative_path: "Dune.epub",
+      root_confirmed: true,
+      size_bytes: null,
+      file_modified_at: null,
+      created_at: "2026-10-01T09:00:00Z",
+      confirmed_at: "2026-10-12T09:00:00Z",
+      missing_since: null,
+    };
+
+    function stubLocated() {
+      stubLoad({ references: [located] });
+      // Open, because a book with one copy arrives with this group folded.
+      writeSectionChoice("bookDetailSections", "copies", true);
+      api.on(
+        /\/api\/books\/1\/digital-references\/5$/,
+        { status: 204 },
+        "DELETE",
+      );
+    }
+
+    it("forgets the location the member confirmed", async () => {
+      stubLocated();
+      const asked = vi.spyOn(window, "confirm").mockReturnValue(true);
+      renderDetail();
+
+      await userEvent
+        .setup()
+        .click(
+          await screen.findByRole("button", { name: "Forget Books/Dune.epub" }),
+        );
+
+      expect(asked).toHaveBeenCalledWith(
+        expect.stringContaining("Books/Dune.epub"),
+      );
+      await waitFor(() =>
+        expect(
+          api.lastCall("/api/books/1/digital-references/5", "DELETE"),
+        ).toBeDefined(),
+      );
+    });
+
+    it("draws the list again once a location is forgotten", async () => {
+      // The forget invalidates the list. Without it the row stays drawn
+      // until the cache goes stale, and Forget reads as a press that did
+      // nothing.
+      stubLocated();
+      vi.spyOn(window, "confirm").mockReturnValue(true);
+      renderDetail();
+      const forgetButton = await screen.findByRole("button", {
+        name: "Forget Books/Dune.epub",
+      });
+
+      api.on(/\/api\/books\/1\/digital-references$/, { body: [] }, "GET");
+      await userEvent.setup().click(forgetButton);
+
+      await waitFor(() =>
+        expect(
+          screen.queryByRole("button", { name: "Forget Books/Dune.epub" }),
+        ).not.toBeInTheDocument(),
+      );
+    });
+
+    it("forgets nothing when the member declines", async () => {
+      stubLocated();
+      vi.spyOn(window, "confirm").mockReturnValue(false);
+      renderDetail();
+
+      await userEvent
+        .setup()
+        .click(
+          await screen.findByRole("button", { name: "Forget Books/Dune.epub" }),
+        );
+
+      expect(api.calls.some((call) => call.method === "DELETE")).toBe(false);
     });
   });
 
@@ -1733,6 +1881,7 @@ describe("BookDetail over any answer the schema permits", () => {
               },
             ],
             ["list_copies", empty],
+            ["list_digital_references", empty],
             ["list_custom_fields", empty],
             [
               "get_custom_fields",

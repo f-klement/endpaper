@@ -9,14 +9,17 @@
 import { act, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { BookMatch } from "../../../src/api/generated/model";
+import { BookFormat, type BookMatch } from "../../../src/api/generated/model";
 import {
   FALLBACK_INTERVAL_MS,
   FALLBACK_STARTS_PER_MINUTE,
+  FILES_PER_LOOKUP,
   useBookSearch,
   useRapidIntake,
   useScanFlow,
 } from "../../../src/pages/ScanPage/hooks";
+import { partialMd5 } from "../../../src/lib/fileDigest";
+import { boundOf, propertiesOf } from "../../committedSchema";
 import { makeBook, resetIds } from "../../factories";
 import { epubFile, packageDocument } from "../../zipFixtures";
 import { id3v2, mp3, plainFrame } from "../../audioFixtures";
@@ -45,6 +48,15 @@ function chapterFile(index: number, album: string) {
   );
   Object.defineProperty(file, "webkitRelativePath", {
     value: `${album}/chapter ${index}.mp3`,
+  });
+  return file;
+}
+
+/** An EPUB that states its own ISBN, picked out of a folder. */
+async function epubInFolder() {
+  const file = await epubFile("dune.epub");
+  Object.defineProperty(file, "webkitRelativePath", {
+    value: "Books/dune.epub",
   });
   return file;
 }
@@ -553,6 +565,7 @@ describe("useRapidIntake", () => {
         added: 0,
         failed: 1,
         unreferenced: 0,
+        already: 0,
         stopped: false,
       }),
     );
@@ -699,6 +712,7 @@ describe("stopping a rapid add", () => {
       added: 1,
       failed: 0,
       unreferenced: 0,
+      already: 0,
       stopped: true,
     });
   });
@@ -787,6 +801,7 @@ describe("stopping a rapid add", () => {
       added: 3,
       failed: 0,
       unreferenced: 0,
+      already: 0,
       stopped: false,
     });
     expect(result.current.entries).toEqual([]);
@@ -1305,6 +1320,7 @@ describe("useRapidIntake and a file with no usable metadata", () => {
       added: 1,
       failed: 0,
       unreferenced: 1,
+      already: 0,
       stopped: false,
     });
     expect(result.current.entries).toHaveLength(0);
@@ -1342,6 +1358,286 @@ describe("useRapidIntake and a file with no usable metadata", () => {
     },
   };
 
+  /** Every copy of the book a duplicate 409 names, read for their formats.
+   * Stubbed for GET only, so the copy press's POST is its own stub. */
+  const HOLDER = /\/api\/books\/77\/copies$/;
+
+  it("records the location on a holder of the same format", async () => {
+    api.on("/api/books/scan", DUPLICATE);
+    api.on(
+      HOLDER,
+      { body: [makeBook({ id: 77, format: BookFormat.ebook })] },
+      "GET",
+    );
+    api.on("/api/books/77/digital-references", { body: {} });
+    const file = await epubInFolder();
+    const { result } = renderRapid();
+
+    act(() => result.current.pickFiles([file]));
+    await settled(result);
+    act(() => result.current.addAll());
+    await waitFor(() => expect(result.current.result?.failed).toBe(1));
+
+    expect(
+      api.lastCall("/api/books/77/digital-references", "POST")?.body,
+    ).toMatchObject({ root_label: "Books", relative_path: "dune.epub" });
+  });
+
+  it("writes no ebook's location onto the hardcover holding its ISBN", async () => {
+    // **The defect the landing rule closes.** A Calibre EPUB often carries its
+    // print ISBN, and the 409 then names the household's hardcover: the file's
+    // location used to land on that row, whose format says it has no file.
+    api.on("/api/books/scan", DUPLICATE);
+    api.on(
+      HOLDER,
+      { body: [makeBook({ id: 77, format: BookFormat.hardcover })] },
+      "GET",
+    );
+    const file = await epubInFolder();
+    const { result } = renderRapid();
+
+    act(() => result.current.pickFiles([file]));
+    await settled(result);
+    act(() => result.current.addAll());
+    await waitFor(() => expect(result.current.result?.failed).toBe(1));
+
+    expect(
+      api.calls.some((call) => call.url.includes("digital-references")),
+    ).toBe(false);
+    expect(result.current.entries[0]).toMatchObject({
+      state: "failed",
+      reason: { kind: "held-in-another-format" },
+      copyOf: 77,
+    });
+  });
+
+  it("prefers a copy in the file's format to one nobody described", async () => {
+    // An exact format first, then an unset one: a recorded ebook beside an
+    // undescribed row is where an EPUB's location belongs.
+    api.on("/api/books/scan", DUPLICATE);
+    api.on(
+      HOLDER,
+      {
+        body: [
+          makeBook({ id: 77, format: null }),
+          makeBook({ id: 90, format: BookFormat.ebook }),
+        ],
+      },
+      "GET",
+    );
+    api.on(/\/api\/books\/(77|90)\/digital-references$/, { body: {} });
+    const file = await epubInFolder();
+    const { result } = renderRapid();
+
+    act(() => result.current.pickFiles([file]));
+    await settled(result);
+    act(() => result.current.addAll());
+    await waitFor(() => expect(result.current.result?.failed).toBe(1));
+
+    expect(
+      api.lastCall("/api/books/90/digital-references", "POST"),
+    ).toBeDefined();
+    expect(
+      api.lastCall("/api/books/77/digital-references", "POST"),
+    ).toBeUndefined();
+  });
+
+  it("holds the copy and its offer until the location is recorded too", async () => {
+    // The hold spans both requests, and the offer goes once the copy exists,
+    // so neither a batch nor a second press can act on the row in between.
+    api.on("/api/books/scan", DUPLICATE);
+    api.on(
+      HOLDER,
+      { body: [makeBook({ id: 77, format: BookFormat.hardcover })] },
+      "GET",
+    );
+    api.on("/api/books/77/copies", { body: makeBook({ id: 90 }) }, "POST");
+    let release: (() => void) | undefined;
+    api.on("/api/books/90/digital-references", () => {
+      return new Promise((resolve) => {
+        release = () => resolve({ body: {} });
+      });
+    });
+    const file = await epubInFolder();
+    const { result } = renderRapid();
+
+    act(() => result.current.pickFiles([file]));
+    await settled(result);
+    act(() => result.current.addAll());
+    await waitFor(() => expect(result.current.result?.failed).toBe(1));
+
+    const key = result.current.entries[0]!.key;
+    act(() => result.current.addAsCopy(key));
+    await waitFor(() =>
+      expect(
+        api.lastCall("/api/books/90/digital-references", "POST"),
+      ).toBeDefined(),
+    );
+    expect(result.current.isAddingCopy).toBe(true);
+    expect(result.current.entries[0]?.copyOf).toBeUndefined();
+    act(() => result.current.addAsCopy(key));
+
+    act(() => release?.());
+    await waitFor(() => expect(result.current.isAddingCopy).toBe(false));
+    expect(
+      api.calls.filter(
+        (call) => call.method === "POST" && call.url.endsWith("/77/copies"),
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("lands a re-picked file on the copy already made in its format", async () => {
+    // **The duplicate the first draft made.** The 409 names the lowest id
+    // holder, which stays the hardcover after an ebook copy exists beside it,
+    // so asking that row alone offered the copy again and the press made a
+    // second ebook.
+    api.on("/api/books/scan", DUPLICATE);
+    api.on(
+      HOLDER,
+      {
+        body: [
+          makeBook({ id: 77, format: BookFormat.hardcover }),
+          makeBook({ id: 90, format: BookFormat.ebook }),
+        ],
+      },
+      "GET",
+    );
+    api.on("/api/books/90/digital-references", { body: {} });
+    const file = await epubInFolder();
+    const { result } = renderRapid();
+
+    act(() => result.current.pickFiles([file]));
+    await settled(result);
+    act(() => result.current.addAll());
+    await waitFor(() => expect(result.current.result?.failed).toBe(1));
+
+    expect(
+      api.lastCall("/api/books/90/digital-references", "POST")?.body,
+    ).toMatchObject({ root_label: "Books", relative_path: "dune.epub" });
+    expect(result.current.entries[0]?.copyOf).toBeUndefined();
+    expect(api.lastCall("/api/books/77/copies", "POST")).toBeUndefined();
+  });
+
+  it("stops offering the copy once the row fails for another reason", async () => {
+    // The offer belongs to the reason it was made for; a later run that ends
+    // on a different failure must not leave the press under it.
+    api.on("/api/books/scan", DUPLICATE);
+    api.on(
+      HOLDER,
+      { body: [makeBook({ id: 77, format: BookFormat.hardcover })] },
+      "GET",
+    );
+    const file = await epubInFolder();
+    const { result } = renderRapid();
+
+    act(() => result.current.pickFiles([file]));
+    await settled(result);
+    act(() => result.current.addAll());
+    await waitFor(() => expect(result.current.entries[0]?.copyOf).toBe(77));
+
+    api.on(HOLDER, { status: 500, body: { detail: "Broken" } }, "GET");
+    act(() => result.current.addAll());
+    await waitFor(() =>
+      expect(result.current.entries[0]?.reason).toEqual({
+        kind: "server-said",
+        message: "Book with this ISBN already in catalog",
+      }),
+    );
+    expect(result.current.entries[0]?.copyOf).toBeUndefined();
+  });
+
+  it("writes nothing onto a holder whose format could not be read", async () => {
+    // The rule cannot be answered for a book that did not come back, so the
+    // row keeps the 409's own words and nothing is written anywhere.
+    api.on("/api/books/scan", DUPLICATE);
+    api.on(HOLDER, { status: 500, body: { detail: "Broken" } }, "GET");
+    const file = await epubInFolder();
+    const { result } = renderRapid();
+
+    act(() => result.current.pickFiles([file]));
+    await settled(result);
+    act(() => result.current.addAll());
+    await waitFor(() => expect(result.current.result?.failed).toBe(1));
+
+    expect(
+      api.calls.some((call) => call.url.includes("digital-references")),
+    ).toBe(false);
+    expect(result.current.entries[0]?.reason).toEqual({
+      kind: "server-said",
+      message: "Book with this ISBN already in catalog",
+    });
+    expect(result.current.entries[0]?.copyOf).toBeUndefined();
+  });
+
+  it("files a held row as its own ebook copy and records the location there", async () => {
+    api.on("/api/books/scan", DUPLICATE);
+    api.on(
+      HOLDER,
+      { body: [makeBook({ id: 77, format: BookFormat.hardcover })] },
+      "GET",
+    );
+    api.on("/api/books/77/copies", { body: makeBook({ id: 90 }) }, "POST");
+    api.on("/api/books/90/digital-references", { body: {} });
+    const file = await epubInFolder();
+    const { result } = renderRapid();
+
+    act(() => result.current.pickFiles([file]));
+    await settled(result);
+    act(() => result.current.addAll());
+    await waitFor(() => expect(result.current.result?.failed).toBe(1));
+
+    act(() => result.current.addAsCopy(result.current.entries[0]!.key));
+    await waitFor(() => expect(result.current.entries).toHaveLength(0));
+
+    expect(api.lastCall("/api/books/77/copies", "POST")?.body).toMatchObject({
+      format: BookFormat.ebook,
+    });
+    expect(
+      api.lastCall("/api/books/90/digital-references", "POST")?.body,
+    ).toMatchObject({ root_label: "Books", relative_path: "dune.epub" });
+    // The verdict moves by the one row, so it still describes the queue.
+    expect(result.current.result).toEqual({
+      added: 1,
+      failed: 0,
+      unreferenced: 0,
+      already: 0,
+      stopped: false,
+    });
+  });
+
+  it("keeps the offer on a row whose copy was refused", async () => {
+    api.on("/api/books/scan", DUPLICATE);
+    api.on(
+      HOLDER,
+      { body: [makeBook({ id: 77, format: BookFormat.hardcover })] },
+      "GET",
+    );
+    api.on(
+      "/api/books/77/copies",
+      { status: 403, body: { detail: "No" } },
+      "POST",
+    );
+    const file = await epubInFolder();
+    const { result } = renderRapid();
+
+    act(() => result.current.pickFiles([file]));
+    await settled(result);
+    act(() => result.current.addAll());
+    await waitFor(() => expect(result.current.result?.failed).toBe(1));
+
+    act(() => result.current.addAsCopy(result.current.entries[0]!.key));
+    await waitFor(() =>
+      expect(result.current.entries[0]?.reason).toEqual({
+        kind: "server-said",
+        message: "No",
+      }),
+    );
+    expect(result.current.entries[0]?.copyOf).toBe(77);
+    expect(
+      api.calls.some((call) => call.url.includes("digital-references")),
+    ).toBe(false);
+  });
+
   it("records the location on the book a duplicate turned out to be", async () => {
     // **The case the sighting was made idempotent for.** Re importing a folder
     // somebody imported last month answers 409 on every book in it, so a
@@ -1352,6 +1648,7 @@ describe("useRapidIntake and a file with no usable metadata", () => {
     // states its own identifier, so the book the 409 names is a book this row
     // has evidence about.
     api.on("/api/books/scan", DUPLICATE);
+    api.on(HOLDER, { body: [makeBook({ id: 77, format: null })] }, "GET");
     api.on("/api/books/77/digital-references", { body: {} });
     const file = await epubFile("dune.epub");
     Object.defineProperty(file, "webkitRelativePath", {
@@ -1446,6 +1743,7 @@ describe("useRapidIntake and a file with no usable metadata", () => {
       body: { matches: [MATCH], asked: ["open_library"], unasked: [] },
     });
     api.on("/api/books/scan", DUPLICATE);
+    api.on(HOLDER, { body: [makeBook({ id: 77, format: null })] }, "GET");
     api.on("/api/books/77/digital-references", { body: {} });
     const { result } = renderRapid();
 
@@ -2507,5 +2805,244 @@ describe("the fallback's share of the metadata budget", () => {
     const perMinute = (Number(declared![1]) * 60) / Number(declared![2]);
     expect(FALLBACK_STARTS_PER_MINUTE).toBe(perMinute / 2);
     expect(FALLBACK_INTERVAL_MS).toBe(60_000 / (perMinute / 2));
+  });
+});
+
+/** The rapid intake, for the rows a library already holds. */
+function renderTheIntake() {
+  return renderHookWithProviders(() => useRapidIntake());
+}
+
+/** A file picked out of a folder, which is the only way a path arrives. */
+function pickedInFolder(name: string, path: string): File {
+  const file = new File(["%PDF-1.4 the same bytes"], name);
+  Object.defineProperty(file, "webkitRelativePath", { value: path });
+  return file;
+}
+
+interface Holder {
+  book_id: number;
+  format: BookFormat | null;
+  same_location?: boolean;
+}
+
+/** What the route answers for every file in one request. */
+function holdersAnswering(holders: readonly Holder[], body: unknown) {
+  const asked = JSON.parse(String(body)) as { files: unknown[] };
+  return {
+    body: asked.files.map(() => ({
+      holders: holders.map((holder, index) => ({
+        same_location: true,
+        ...holder,
+        reference_id: index + 1,
+        same_partial_md5: true,
+      })),
+    })),
+  };
+}
+
+describe("useRapidIntake and a file already in the library", () => {
+  const HOLDERS = "/api/books/file-holders";
+
+  /** Answer every file asked about with these holders. */
+  function heldBy(...holders: Holder[]) {
+    api.on(
+      HOLDERS,
+      (_url, init) => holdersAnswering(holders, init?.body),
+      "POST",
+    );
+  }
+
+  it("asks about the file by where it is and by KOReader's fingerprint", async () => {
+    heldBy();
+    const file = pickedInFolder("Dune.pdf", "Books/Dune.pdf");
+    const { result } = renderTheIntake();
+
+    act(() => result.current.pickFiles([file]));
+    await waitFor(() => expect(api.lastCall(HOLDERS, "POST")).toBeDefined());
+
+    expect(api.lastCall(HOLDERS, "POST")?.body).toEqual({
+      files: [
+        {
+          root_label: "Books",
+          relative_path: "Dune.pdf",
+          partial_md5: await partialMd5(file),
+        },
+      ],
+    });
+  });
+
+  it("says a row is already in the library before anything is added", async () => {
+    heldBy({ book_id: 42, format: null });
+    const { result } = renderTheIntake();
+
+    act(() =>
+      result.current.pickFiles([pickedInFolder("Dune.pdf", "Books/Dune.pdf")]),
+    );
+
+    await waitFor(() =>
+      expect(result.current.entries[0]?.heldBy).toEqual({
+        bookId: 42,
+        lands: true,
+      }),
+    );
+    expect(api.calls.some((call) => call.url.endsWith("/api/books/scan"))).toBe(
+      false,
+    );
+  });
+
+  it("adds no second book for a re-picked file, and refreshes where it is", async () => {
+    // **The duplicate this slice exists to stop**: a file with no ISBN has no
+    // 409 to catch it, so without the lookup every re-pick made a new book.
+    heldBy({ book_id: 42, format: null });
+    api.on("/api/books/42/digital-references", { body: {} });
+    const { result } = renderTheIntake();
+
+    act(() =>
+      result.current.pickFiles([pickedInFolder("Dune.pdf", "Books/Dune.pdf")]),
+    );
+    await waitFor(() =>
+      expect(result.current.entries[0]?.heldBy).toEqual({
+        bookId: 42,
+        lands: true,
+      }),
+    );
+    act(() => result.current.addAll());
+    await waitFor(() => expect(result.current.result).not.toBeNull());
+
+    expect(api.calls.some((call) => call.url.endsWith("/api/books/scan"))).toBe(
+      false,
+    );
+    expect(
+      api.lastCall("/api/books/42/digital-references", "POST")?.body,
+    ).toMatchObject({ root_label: "Books", relative_path: "Dune.pdf" });
+    expect(result.current.result).toMatchObject({ added: 0, already: 1 });
+    expect(result.current.entries).toEqual([]);
+  });
+
+  it("takes the holder in the file's own format, as the landing rule does", async () => {
+    // The ebook may sit in a copy group the 409's holder is not in, so asking
+    // the 409's copies could not find it. Asked by the file, it is found
+    // wherever it is.
+    heldBy(
+      { book_id: 77, format: BookFormat.hardcover },
+      { book_id: 90, format: BookFormat.ebook },
+    );
+    const file = await epubInFolder();
+    const { result } = renderTheIntake();
+
+    act(() => result.current.pickFiles([file]));
+
+    await waitFor(() =>
+      expect(result.current.entries[0]?.heldBy).toEqual({
+        bookId: 90,
+        lands: true,
+      }),
+    );
+  });
+
+  it("refreshes the copy at this location before an exact copy elsewhere", async () => {
+    // The file's sighting is on a copy nobody described; an ebook carries the
+    // same bytes at another path. Refreshing the first adds no reference.
+    heldBy(
+      { book_id: 77, format: null, same_location: true },
+      { book_id: 90, format: BookFormat.ebook, same_location: false },
+    );
+    const file = await epubInFolder();
+    const { result } = renderTheIntake();
+
+    act(() => result.current.pickFiles([file]));
+
+    await waitFor(() =>
+      expect(result.current.entries[0]?.heldBy).toEqual({
+        bookId: 77,
+        lands: true,
+      }),
+    );
+  });
+
+  it("offers a copy, and writes nothing, when only another format holds the file", async () => {
+    // Owner's landing rule, for a match by fingerprint as for one by ISBN: a
+    // reference left on a hardcover is no reason to put another one there,
+    // and no reason to make a second book either.
+    heldBy({ book_id: 77, format: BookFormat.hardcover, same_location: false });
+    const file = await epubInFolder();
+    const { result } = renderTheIntake();
+
+    act(() => result.current.pickFiles([file]));
+    await waitFor(() =>
+      expect(result.current.entries[0]?.heldBy).toEqual({
+        bookId: 77,
+        lands: false,
+      }),
+    );
+    act(() => result.current.addAll());
+    await waitFor(() => expect(result.current.result).not.toBeNull());
+
+    expect(
+      api.calls.some((call) => call.url.includes("digital-references")),
+    ).toBe(false);
+    expect(api.calls.some((call) => call.url.endsWith("/api/books/scan"))).toBe(
+      false,
+    );
+    expect(result.current.entries[0]).toMatchObject({
+      state: "failed",
+      reason: { kind: "held-in-another-format" },
+      copyOf: 77,
+    });
+  });
+
+  it("asks again at the add when the pick could not, and adds nothing twice", async () => {
+    // The add time lookup is the guarantee: a pick whose lookup failed would
+    // otherwise file the same file as a second book.
+    let asked = 0;
+    api.on(
+      HOLDERS,
+      (_url, init) => {
+        asked += 1;
+        return asked === 1
+          ? { status: 500, body: {} }
+          : holdersAnswering([{ book_id: 42, format: null }], init?.body);
+      },
+      "POST",
+    );
+    api.on("/api/books/42/digital-references", { body: {} });
+    const { result } = renderTheIntake();
+
+    act(() =>
+      result.current.pickFiles([pickedInFolder("Dune.pdf", "Books/Dune.pdf")]),
+    );
+    await waitFor(() => expect(asked).toBe(1));
+    await waitFor(() => expect(result.current.isReading).toBe(false));
+    expect(result.current.entries[0]?.heldBy).toBeUndefined();
+    act(() => result.current.addAll());
+    await waitFor(() => expect(result.current.result).not.toBeNull());
+
+    expect(api.calls.some((call) => call.url.endsWith("/api/books/scan"))).toBe(
+      false,
+    );
+    expect(result.current.result).toMatchObject({ added: 0, already: 1 });
+  });
+
+  it("adds the book when nobody could say whether it is held", async () => {
+    // The lookup only stops a duplicate. A failure of it is not a refusal of
+    // the add the member pressed.
+    api.on(HOLDERS, { status: 500, body: {} }, "POST");
+    api.on("/api/books/scan", { body: makeBook({ id: 50 }) });
+    api.on("/api/books/50/digital-references", { body: {} });
+    const { result } = renderTheIntake();
+
+    act(() =>
+      result.current.pickFiles([pickedInFolder("Dune.pdf", "Books/Dune.pdf")]),
+    );
+    await waitFor(() => expect(result.current.isReading).toBe(false));
+    act(() => result.current.addAll());
+    await waitFor(() => expect(result.current.result?.added).toBe(1));
+  });
+
+  it("asks in chunks no larger than the schema takes", () => {
+    const files = propertiesOf("HoldersIn")["files"]!;
+
+    expect(FILES_PER_LOOKUP).toBe(boundOf(files, "maxItems"));
   });
 });

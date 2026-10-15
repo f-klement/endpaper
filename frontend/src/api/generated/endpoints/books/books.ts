@@ -26,6 +26,8 @@ import type {
 } from "@tanstack/react-query";
 
 import type {
+  AccessDecision,
+  AccessRequestOut,
   ApplyEnrichmentParams,
   AuthorAuthorityParams,
   AuthorBatchMergeOut,
@@ -68,6 +70,8 @@ import type {
   EnrichBookParams,
   ExportBooksParams,
   HTTPValidationError,
+  HoldersIn,
+  HoldersOut,
   IdentifierBackfillOut,
   ListAuthorSuggestionsParams,
   ListBooksParams,
@@ -3609,6 +3613,140 @@ export function useExportBooks<
   return withQueryKey(query, queryOptions.queryKey);
 }
 
+export const getFindFileHoldersUrl = () => {
+  return `/api/books/file-holders`;
+};
+
+/**
+ * Which Books the caller can see already hold each of these files.
+ *
+ * One answer per file, in the order asked. A file is named by its location,
+ * by KOReader's partial MD5, or both, and a reference matching **either** is a
+ * holder: a location is what a folder pick knows for certain, and a digest is
+ * what survives the file being moved and is all a KOReader device sends.
+ *
+ * **Scoped by the Shelf, so a Book the caller cannot see answers exactly as no
+ * Book does**: an empty list, never a refusal that would confirm it exists.
+ * Trashed Books are absent for the same reason.
+ *
+ * **A read, sent as a POST** because the question is a list of up to
+ * `MAX_FILES_PER_LOOKUP` paths, each up to a path's length, which no query
+ * string carries.
+ *
+ * One statement for the whole list, and the location is matched in Python on
+ * the rows it returns. The statement narrows on the path alone, because a
+ * path and a root can only be paired in SQL by row value comparisons whose
+ * spelling differs between the two engines; the root is then compared here.
+ * @summary Find File Holders
+ */
+export const findFileHolders = async (
+  holdersIn: HoldersIn,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<HoldersOut[]> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+  return customFetch<HoldersOut[]>(getFindFileHoldersUrl(), {
+    ...options,
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...getHeaders(options?.headers),
+    },
+    body: JSON.stringify(holdersIn),
+  });
+};
+
+export const getFindFileHoldersMutationKey = () => ["findFileHolders"] as const;
+
+export const getFindFileHoldersMutationOptions = <
+  TError = Refusal | HTTPValidationError,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof findFileHolders>>,
+    TError,
+    FindFileHoldersMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof findFileHolders>>,
+  TError,
+  FindFileHoldersMutationVariables,
+  TContext
+> => {
+  const mutationKey = getFindFileHoldersMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof findFileHolders>>,
+    FindFileHoldersMutationVariables
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return findFileHolders(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type FindFileHoldersMutationResult = NonNullable<
+  Awaited<ReturnType<typeof findFileHolders>>
+>;
+export type FindFileHoldersMutationBody = HoldersIn;
+export type FindFileHoldersMutationError = Refusal | HTTPValidationError;
+export type FindFileHoldersMutationVariables = { data: HoldersIn };
+
+/**
+ * @summary Find File Holders
+ */
+export const useFindFileHolders = <
+  TError = Refusal | HTTPValidationError,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof findFileHolders>>,
+      TError,
+      FindFileHoldersMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof findFileHolders>>,
+  TError,
+  FindFileHoldersMutationVariables,
+  TContext
+> => {
+  return useMutation(getFindFileHoldersMutationOptions(options), queryClient);
+};
 export const getBackfillFromIdentifiersUrl = (
   params?: BackfillFromIdentifiersParams,
 ) => {
@@ -5824,6 +5962,400 @@ export const useUpdateBookDetails = <
   TContext
 > => {
   return useMutation(getUpdateBookDetailsMutationOptions(options), queryClient);
+};
+export const getListAccessRequestsUrl = (bookId: number) => {
+  return `/api/books/${bookId}/access-requests`;
+};
+
+/**
+ * The requests for access to this copy that the caller is party to.
+ *
+ * Those the caller holds and those the caller made, oldest first.
+ * @summary List Access Requests
+ */
+export const listAccessRequests = async (
+  bookId: number,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<AccessRequestOut[]> => {
+  return customFetch<AccessRequestOut[]>(getListAccessRequestsUrl(bookId), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListAccessRequestsQueryKey = (bookId: number) => {
+  return [`/api/books/${bookId}/access-requests`] as const;
+};
+
+export const getListAccessRequestsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listAccessRequests>>,
+  TError = Refusal | HTTPValidationError,
+>(
+  bookId: number,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listAccessRequests>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getListAccessRequestsQueryKey(bookId);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listAccessRequests>>
+  > = ({ signal }) => listAccessRequests(bookId, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: bookId !== null && bookId !== undefined,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof listAccessRequests>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type ListAccessRequestsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listAccessRequests>>
+>;
+export type ListAccessRequestsQueryError = Refusal | HTTPValidationError;
+
+export function useListAccessRequests<
+  TData = Awaited<ReturnType<typeof listAccessRequests>>,
+  TError = Refusal | HTTPValidationError,
+>(
+  bookId: number,
+  options: {
+    query: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listAccessRequests>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listAccessRequests>>,
+          TError,
+          Awaited<ReturnType<typeof listAccessRequests>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useListAccessRequests<
+  TData = Awaited<ReturnType<typeof listAccessRequests>>,
+  TError = Refusal | HTTPValidationError,
+>(
+  bookId: number,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listAccessRequests>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listAccessRequests>>,
+          TError,
+          Awaited<ReturnType<typeof listAccessRequests>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useListAccessRequests<
+  TData = Awaited<ReturnType<typeof listAccessRequests>>,
+  TError = Refusal | HTTPValidationError,
+>(
+  bookId: number,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listAccessRequests>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/**
+ * @summary List Access Requests
+ */
+
+export function useListAccessRequests<
+  TData = Awaited<ReturnType<typeof listAccessRequests>>,
+  TError = Refusal | HTTPValidationError,
+>(
+  bookId: number,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listAccessRequests>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+} {
+  const queryOptions = getListAccessRequestsQueryOptions(bookId, options);
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+export const getRequestAccessUrl = (bookId: number) => {
+  return `/api/books/${bookId}/access-requests`;
+};
+
+/**
+ * Ask the holder of a digital copy for access to it.
+ *
+ * The holder is the member who added the book, recorded now and never
+ * changed. Refused with `no_holder` and stored nowhere when that is the
+ * caller or nobody: a request nobody can answer is not a request.
+ *
+ * A grant records that access was given and shares no file: Endpaper holds
+ * none, so the copy itself changes hands outside the app.
+ * @summary Request Access
+ */
+export const requestAccess = async (
+  bookId: number,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<AccessRequestOut> => {
+  return customFetch<AccessRequestOut>(getRequestAccessUrl(bookId), {
+    ...options,
+    method: "POST",
+  });
+};
+
+export const getRequestAccessMutationKey = () => ["requestAccess"] as const;
+
+export const getRequestAccessMutationOptions = <
+  TError = Refusal | HTTPValidationError,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof requestAccess>>,
+    TError,
+    RequestAccessMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof requestAccess>>,
+  TError,
+  RequestAccessMutationVariables,
+  TContext
+> => {
+  const mutationKey = getRequestAccessMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof requestAccess>>,
+    RequestAccessMutationVariables
+  > = (props) => {
+    const { bookId } = props ?? {};
+
+    return requestAccess(bookId, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type RequestAccessMutationResult = NonNullable<
+  Awaited<ReturnType<typeof requestAccess>>
+>;
+
+export type RequestAccessMutationError = Refusal | HTTPValidationError;
+export type RequestAccessMutationVariables = { bookId: number };
+
+/**
+ * @summary Request Access
+ */
+export const useRequestAccess = <
+  TError = Refusal | HTTPValidationError,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof requestAccess>>,
+      TError,
+      RequestAccessMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof requestAccess>>,
+  TError,
+  RequestAccessMutationVariables,
+  TContext
+> => {
+  return useMutation(getRequestAccessMutationOptions(options), queryClient);
+};
+export const getDecideAccessUrl = (bookId: number, requestId: number) => {
+  return `/api/books/${bookId}/access-requests/${requestId}`;
+};
+
+/**
+ * The holder grants or declines a waiting request. Nothing expires and
+ * nothing is returned, so a decision is final.
+ *
+ * 404 for a request the caller is not party to; 403 for its requester.
+ * @summary Decide Access
+ */
+export const decideAccess = async (
+  bookId: number,
+  requestId: number,
+  accessDecision: AccessDecision,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<AccessRequestOut> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+  return customFetch<AccessRequestOut>(getDecideAccessUrl(bookId, requestId), {
+    ...options,
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+      ...getHeaders(options?.headers),
+    },
+    body: JSON.stringify(accessDecision),
+  });
+};
+
+export const getDecideAccessMutationKey = () => ["decideAccess"] as const;
+
+export const getDecideAccessMutationOptions = <
+  TError = Refusal | HTTPValidationError,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof decideAccess>>,
+    TError,
+    DecideAccessMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof decideAccess>>,
+  TError,
+  DecideAccessMutationVariables,
+  TContext
+> => {
+  const mutationKey = getDecideAccessMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof decideAccess>>,
+    DecideAccessMutationVariables
+  > = (props) => {
+    const { bookId, requestId, data } = props ?? {};
+
+    return decideAccess(bookId, requestId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type DecideAccessMutationResult = NonNullable<
+  Awaited<ReturnType<typeof decideAccess>>
+>;
+export type DecideAccessMutationBody = AccessDecision;
+export type DecideAccessMutationError = Refusal | HTTPValidationError;
+export type DecideAccessMutationVariables = {
+  bookId: number;
+  requestId: number;
+  data: AccessDecision;
+};
+
+/**
+ * @summary Decide Access
+ */
+export const useDecideAccess = <
+  TError = Refusal | HTTPValidationError,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof decideAccess>>,
+      TError,
+      DecideAccessMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof decideAccess>>,
+  TError,
+  DecideAccessMutationVariables,
+  TContext
+> => {
+  return useMutation(getDecideAccessMutationOptions(options), queryClient);
 };
 export const getSetCollectionUrl = (bookId: number) => {
   return `/api/books/${bookId}/collection`;

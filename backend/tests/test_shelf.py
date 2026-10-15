@@ -54,7 +54,7 @@ is **not** a foreign key to `users`: `collections`, `author_aliases` and
 `author_identifiers` each carry a `created_by_user_id` that no query consults,
 so that predicate would have dropped `classifications` out of the guard the day
 somebody added `catalogued_by_user_id`. `BOOK_CHILDREN` is therefore pinned, and
-an eleventh child fails a test until a person classifies it.
+a child added later fails a test until a person classifies it.
 
 **It is wider than the old guard**, which was blind to a query reaching `books`
 through `.join(Book, ...)` while naming no `Book` inside `query()`: its own
@@ -427,6 +427,7 @@ def _child_names(metadata: MetaData) -> set[str]:
 #: derivation that could have produced it.
 BOOK_CHILDREN = frozenset(
     {
+        "access_requests",
         "book_identifiers",
         "book_tags",
         "classifications",
@@ -467,7 +468,7 @@ BOOK_CHILDREN = frozenset(
 #: table, not because its user column is inert.
 #:
 #: A table here has no user to be scoped by, so its privacy is entirely the
-#: Book's and the only correct scoping is the Shelf's. The other five have a
+#: Book's and the only correct scoping is the Shelf's. The rest have a
 #: member on every row and their own ownership rule: `reading.py` owns
 #: `user_books` and `reading_progress` the same way this module owns `books`,
 #: and the routers own the rest per row.
@@ -769,6 +770,21 @@ BOOK_OWNED_READERS = {
             "machine, and why a per reporter view would need a column the table "
             "deliberately does not have. Paginated, so it is bounded like every "
             "other many-book query here.",
+        ),
+        (
+            "held = ( Shelf.seen_by(db, current_user.id) .select( DigitalReference.id, "
+            "DigitalReference.book_id, DigitalReference.root_label, "
+            "DigitalReference.relative_path, DigitalReference.partial_md5, Book.format, ) "
+            ".join(DigitalReference, DigitalReference.book_id == Book.id) .filter( or_( "
+            "DigitalReference.relative_path.in_(asked_paths), "
+            "DigitalReference.partial_md5.in_(asked_digests), ) ) .all() )",
+            "the references matching the files a client asked about, on the "
+            "Books the caller may see, for the lookup that tells a scan queue "
+            "and a reading device which Book already holds a file. Written "
+            "through `Shelf.select()` and joined outward to `books`, so a "
+            "private Book of another member contributes no row and answers as "
+            "no Book does. The request bounds the list it matches against at "
+            "`MAX_FILES_PER_LOOKUP`.",
         ),
         (
             "reference = ( db.query(DigitalReference) .filter( DigitalReference.id == reference_id, "

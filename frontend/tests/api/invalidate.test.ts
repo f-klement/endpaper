@@ -77,6 +77,13 @@ const KEYS: Record<string, readonly unknown[]> = {
   // screen that first does has to decide whether trashing a book drops it here
   // as well; this line is where that decision belongs when it is taken.
   listMissingDigitalReferences: books.getListMissingDigitalReferencesQueryKey(),
+  // The requests for access to one digital copy that the viewer holds or made.
+  // A child of `/api/books/{id}` classified with notes and quotes: it changes
+  // only when a request is made or answered, through `useBookAccess`, which
+  // invalidates this key itself. No catalogue write moves it. A merge does,
+  // by moving requests onto the survivor, and merging duplicates calls
+  // `everything()`, which covers it.
+  listAccessRequests: books.getListAccessRequestsQueryKey(7),
   listAuthors: books.getListAuthorsQueryKey(),
   listAuthorSuggestions: books.getListAuthorSuggestionsQueryKey(),
   listSeries: books.getListSeriesQueryKey(),
@@ -240,7 +247,10 @@ describe("the inventory is complete", () => {
     //
     // 55 later the same day: the shelf wide reader over the same table, which
     // is one route and one key.
-    expect(Object.keys(KEYS).length).toBe(55);
+    //
+    // 56 on 2026-10-15: requests for access to a digital copy, three routes,
+    // one of them a read.
+    expect(Object.keys(KEYS).length).toBe(56);
   });
 });
 
@@ -343,15 +353,16 @@ describe("the catalogue is everything derived from the books table", () => {
   });
 
   it("leaves a book's children to the hooks that write them", () => {
-    // Notes, quotes, progress, enrichment candidates and the custom field
-    // values change only through their own mutations, each of which
-    // invalidates its own key.
+    // Notes, quotes, progress, enrichment candidates, the custom field values
+    // and access requests change only through their own mutations, each of
+    // which invalidates its own key.
     for (const name of [
       "getNotes",
       "getQuotes",
       "listProgress",
       "enrichmentCandidates",
       "getCustomFields",
+      "listAccessRequests",
     ]) {
       expect(isCatalogueQuery(query(KEYS[name]!)), name).toBe(false);
     }

@@ -12,9 +12,12 @@ inserts through Core and sees no model in this file at all.
 row can be re-checked only by a client and never by this server.
 """
 
+from typing import Annotated
+
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from models import DIGITAL_REFERENCE_MAX_SIZE, DIGITAL_REFERENCE_PATH_MAX
+from enums import BookFormat
+from models import DIGITAL_REFERENCE_MAX_SIZE, DIGITAL_REFERENCE_PATH_MAX, PARTIAL_MD5_HEX
 from schemas.common import UtcDateTime, UtcDateTimeIn
 
 #: The most file references one book may carry.
@@ -47,6 +50,21 @@ from schemas.common import UtcDateTime, UtcDateTimeIn
 #: `backup.restore` is uncapped here as it is everywhere, for the reason that
 #: file gives: it reinstates a database rather than adding to one.
 MAX_DIGITAL_REFERENCES_PER_BOOK = 16
+
+#: The most files one lookup of their holders may name.
+#:
+#: The scan queue's own unit: a folder pick is sent in chunks of this many, so
+#: a pick of any size is answered in a few requests and no one request makes
+#: the database match an unbounded list. Chosen, not measured: it is a large
+#: folder pick in one request.
+MAX_FILES_PER_LOOKUP = 500
+
+#: KOReader's partial MD5 as this server takes it: 32 lower case hex digits and
+#: nothing else. `ck_digital_references_partial_md5` is the same rule on the
+#: column. Lower case because that is how KOReader writes it and how a device
+#: names a document on the wire, so an upper case spelling would be a second
+#: value for one digest and match nothing.
+PartialMd5 = Annotated[str, Field(pattern=f"^[0-9a-f]{{{PARTIAL_MD5_HEX}}}$")]
 
 
 def _a_path_without_a_null(value: str) -> str:
@@ -103,6 +121,10 @@ class DigitalReferenceIn(BaseModel):
 
     #: `File.lastModified`, if the client read it.
     file_modified_at: UtcDateTimeIn | None = None
+
+    #: KOReader's partial MD5 of the file, if the client computed it.
+    #: `models.DigitalReference.partial_md5` says what it samples.
+    partial_md5: PartialMd5 | None = None
 
     @field_validator("root_label", "relative_path")
     @classmethod
@@ -164,6 +186,7 @@ class DigitalReferenceOut(BaseModel):
     root_confirmed: bool
     size_bytes: int | None
     file_modified_at: UtcDateTime | None
+    partial_md5: str | None = None
 
     # This server's own clock.
     created_at: UtcDateTime
@@ -202,3 +225,79 @@ class MissingDigitalReferenceOut(DigitalReferenceOut):
     book_title: str
     book_author: str | None = None
     book_cover_url: str | None = None
+
+
+class AskedFileIn(BaseModel):
+    """One file a client holds, named by where it is, by its digest, or both.
+
+    **Either key alone is a question worth asking.** A location is what a
+    folder pick knows for certain; a digest is what survives the file being
+    moved or renamed, and it is the only thing a KOReader device names a
+    document by. A file named by neither asks nothing, so it is refused.
+
+    The location is bounded as `DigitalReferenceIn` bounds it: each half, the
+    pair, and no NUL in either. Its two halves arrive together or not at all:
+    half a location names no file.
+    """
+
+    root_label: str | None = Field(
+        default=None, min_length=1, max_length=DIGITAL_REFERENCE_PATH_MAX
+    )
+    relative_path: str | None = Field(
+        default=None, min_length=1, max_length=DIGITAL_REFERENCE_PATH_MAX
+    )
+    partial_md5: PartialMd5 | None = None
+
+    @field_validator("root_label", "relative_path")
+    @classmethod
+    def _no_nulls(cls, value: str | None) -> str | None:
+        return None if value is None else _a_path_without_a_null(value)
+
+    @model_validator(mode="after")
+    def _names_a_file(self) -> AskedFileIn:
+        if (self.root_label is None) != (self.relative_path is None):
+            raise ValueError("A location needs both its root and the path beneath it")
+        if self.root_label is None and self.partial_md5 is None:
+            raise ValueError("A file is named by its location, its digest, or both")
+        if (
+            self.root_label is not None
+            and self.relative_path is not None
+            and len(self.root_label) + len(self.relative_path) > DIGITAL_REFERENCE_PATH_MAX
+        ):
+            raise ValueError(
+                "A root and the path beneath it may be at most "
+                f"{DIGITAL_REFERENCE_PATH_MAX} characters together"
+            )
+        return self
+
+
+class HoldersIn(BaseModel):
+    """The files whose holders a client wants to know, in the order it asks."""
+
+    files: list[AskedFileIn] = Field(min_length=1, max_length=MAX_FILES_PER_LOOKUP)
+
+
+class HolderOut(BaseModel):
+    """One visible Book holding a reference to the file, and how it matched."""
+
+    book_id: int
+    #: The reference on that Book that matched, so a client can refresh it.
+    reference_id: int
+    #: The Book's own format, so a client can choose between copies without a
+    #: request per Book.
+    format: BookFormat | None
+    #: The reference is at the location the client named.
+    same_location: bool
+    #: The reference carries the digest the client named.
+    same_partial_md5: bool
+
+
+class HoldersOut(BaseModel):
+    """The holders of one file, in Book id order, and empty where there are none.
+
+    **Empty is also the answer for a Book the caller cannot see**, by
+    construction rather than by a branch: the lookup starts from the caller's
+    shelf, so a hidden Book never reaches the rows this is built from.
+    """
+
+    holders: list[HolderOut]

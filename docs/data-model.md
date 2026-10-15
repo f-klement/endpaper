@@ -399,6 +399,14 @@ CASCADE`, like `book_tags` and unlike `notes`: a heading means nothing without i
 row is one moment somebody recorded a position, and nothing ever updates one. See
 *Progress is a log* below.
 
+**`access_requests`.** A member asking the holder of a digital copy for access, and the
+answer. `granted`, `decided_by_user_id` and `decided_at` are null while the request
+waits and all set once it is answered, which `ck_access_requests_decision` holds. The status
+the API reports is read off them rather than stored. `holder_user_id` is the
+book's adder when the request was made, kept when a merge moves the row to another entry,
+and never the requester (`ck_access_requests_two_parties`). A table of its own rather than a kind of loan:
+`models.AccessRequest` says why.
+
 **`loans`.** One row per lending event, never deleted. `returned_at IS NULL` identifies
 the single active loan; a returned loan is retained as history. Two separate foreign keys
 point at `users` (borrower and lender), which is why the relationships declare explicit
@@ -539,7 +547,7 @@ a row here has been read, opened or checked by anything.
 
 **The server cannot verify any of it, and the columns are grouped so that shows.** A
 client's claim: `root_label`, `relative_path`, `root_confirmed`, `size_bytes`,
-`file_modified_at`. The server's own clock: `created_at`, `confirmed_at`, `missing_since`.
+`file_modified_at`, `partial_md5`. The server's own clock: `created_at`, `confirmed_at`, `missing_since`.
 `confirmed_at` is **when this server was last told the file was there**,
 never when anybody looked: the server has no way to notice a file has moved, cannot re-read
 it, and cannot tell a real path from a typed one. A name promising freshness would be
@@ -589,6 +597,11 @@ believed by every reader after it.
   producer is a browser and a larger value did not survive the JSON that carried it.
 * `uq_digital_references_location` makes the location the identity, so re-importing a folder
   somebody imported last month refreshes those rows instead of doubling them.
+* `partial_md5` is KOReader's fingerprint of the file, computed in the browser at the pick,
+  and indexed because its reader is a lookup by value across the shelf
+  (`POST /api/books/file-holders`). **On the reference, not on the book**: it identifies
+  bytes, and one book's copies differ by bytes whenever a tool rewrites the file's metadata.
+  `ck_digital_references_partial_md5` holds it to 32 lower case hex digits or null.
 
 A reference carries no member of its own and is visible to exactly whoever can see the
 book, like a tag and unlike a note. It is not served on `BookOut`: like notes and quotes it
@@ -1081,7 +1094,7 @@ scanned the barcode on its back cover.
 
 ## Cascades
 
-Deleting a book removes its `user_books`, `loans`, `notes`, `book_tags`,
+Deleting a book removes its `user_books`, `loans`, `access_requests`, `notes`, `book_tags`,
 `digital_references` and `custom_field_values` rows. Deleting a custom field definition removes its values, and
 `custom_fields.remove` does that itself rather than trusting the cascade, for the reason
 `delete_tag` clears its association rows: SQLite enforces a foreign key only while
