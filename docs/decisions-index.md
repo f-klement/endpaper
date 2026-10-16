@@ -802,7 +802,7 @@ repeat the argument.
 |  | [A fixture that must be a valid phrase is derived, never written down](decisions.md#a-fixture-that-must-be-a-valid-phrase-is-derived-never-written-down) | 125 |
 |  | [An exclusion arm pins the predicate's shape and says nothing about its argument](decisions.md#an-exclusion-arm-pins-the-predicates-shape-and-says-nothing-about-its-argument) | 121 |
 |  | [An unreachable fixture pins a state the server cannot produce](decisions.md#an-unreachable-fixture-pins-a-state-the-server-cannot-produce) | 171 |
-|  | [The death signal an arm carries is the uncatchable one](decisions.md#the-death-signal-an-arm-carries-is-the-uncatchable-one) | 486 |
+|  | [The death signal an arm carries is the uncatchable one](decisions.md#the-death-signal-an-arm-carries-is-the-uncatchable-one) | 415 |
 |  | [What a killed suite run leaves is three things, and the third had no owner](decisions.md#what-a-killed-suite-run-leaves-is-three-things-and-the-third-had-no-owner) | 556 |
 |  | [A gate whose hostile input is rejected by an earlier gate has no test](decisions.md#a-gate-whose-hostile-input-is-rejected-by-an-earlier-gate-has-no-test) | 211 |
 |  | [A deadline test turns on a fact, because every clock available to it is wider than the thing it measures](decisions.md#a-deadline-test-turns-on-a-fact-because-every-clock-available-to-it-is-wider-than-the-thing-it-measures) | 545 |
@@ -907,4 +907,5 @@ repeat the argument.
 |  | [A re-picked folder: sightings at the pick, misses on a press](decisions.md#a-re-picked-folder-sightings-at-the-pick-misses-on-a-press) | 420 |
 |  | [A catalogue's 856 links are their own table, and the only thing the export writes to 856](decisions.md#a-catalogues-856-links-are-their-own-table-and-the-only-thing-the-export-writes-to-856) | 403 |
 |  | [A Calibre record's uuid is a match key, and stays inside the app](decisions.md#a-calibre-records-uuid-is-a-match-key-and-stays-inside-the-app) | 282 |
+|  | [A changelog line rides on the commit that makes the change](decisions.md#a-changelog-line-rides-on-the-commit-that-makes-the-change) | 248 |
 <!-- index: end -->

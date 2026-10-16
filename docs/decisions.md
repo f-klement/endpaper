@@ -19665,13 +19665,15 @@ this entry is about how the arms are written rather than about what the route do
 
 ## The death signal an arm carries is the uncatchable one
 
-A polite signal would let a suite run delete its own pod on the way out, which is strictly nicer,
-and it does not arrive in time to do it. The run's direct child is a shell whose final act is a
-foreground command lasting the whole suite, and a shell defers a trapped signal until that command
-returns: measured at 4.63s for a five second child under both common shells, 0.00s where the same
-child is backgrounded or replaced, and 20.04s against the real runner with the cluster stubbed and
-a twenty second suite call. A polite death signal sits pending for exactly as long as the thing it
-was meant to cut short.
+The death signal was chosen because a polite one did not arrive in time: the run's direct
+child was a shell whose final act was a foreground command lasting the whole suite, and a
+shell defers a trapped signal until that command returns, measured at 4.63s for a five
+second child under both common shells and 0.00s where the same child is backgrounded or
+replaced. **That reason no longer holds.** The runner now runs its long calls in the
+background and acts on a TERM at once, 0.92s on the builder path. Whether the sweep moves to
+a polite signal, which would buy back the whole cleanup rather than the pod delete alone, is
+an open question for the owner; until it is answered the arm still gets the uncatchable one,
+for the reasons below.
 
 **What makes the uncatchable one cheap is what that shell holds.** The worker node's lock is an
 open file descriptor, which the kernel closes whatever killed the process, so the lock goes in
@@ -19691,13 +19693,6 @@ never clears is a sweep stopped with no Python running **and** a run that has hu
 reaper cannot reach either, because it spares any pod whose registered process is alive and a hung
 run's process is alive. Against every other case the layer buys promptness, which is the smaller
 claim.
-
-**Backgrounding that final foreground command** takes the deferral to zero and would make a polite
-signal viable, which buys back the whole cleanup rather than the pod delete alone. It is not done
-here: it changes the suite runner and the test that pins its status, it leaves the run's other
-foreground calls deferring by up to three minutes at the readiness wait, and it reaches none of the
-abandoned working copies the entry below is about. It is an optimisation on top of that sweep, not
-a substitute for it.
 
 Where the kernel offers no such mechanism the sweep refuses to start rather than running a layer
 short and saying nothing.
@@ -22343,3 +22338,26 @@ identifier of any scheme, and the uuid is an internal key that means nothing
 outside the library it came from. The backup archive does carry it, as it
 carries every row, because a restore that dropped it would lose the recognition
 it exists for. `PublicBookOut` withholds it with the other identifiers.
+
+## A changelog line rides on the commit that makes the change
+
+**Every non merge commit touching shipped source carries a `Changelog:` trailer**, either the
+line a reader of the release notes needs or `none` with its reason in parentheses. A check over
+a commit range lists each commit without one and fails; the same check prints the lines the
+`## Unreleased` entries are written from.
+
+**Why a trailer rather than a draft file.** A draft beside the work is compared with nothing:
+one trio drafted one line where four behaviour changes were due, and the omission surfaced only
+when somebody read the merged branch. A trailer sits on the commit that made the change, so a
+missing line is a property of history a script can list.
+
+**Shipped is decided by path**: the application's source under `backend/` and `frontend/src/`,
+less the backend's tests. It lists too much rather than too little. A docstring only commit is
+listed and answers with `none (docstrings)`; a listed commit costs one trailer, a missed one a
+release note silent on a change. Measured over the wave that prompted it: 24 of 36 commits
+touched those paths, every one listed because the rule postdates them, and five of the 24, read by
+their subjects, would have answered `none`: three docstring commits, a refactor and a type fix.
+
+**What it cannot see**: a change shipped from outside those paths, such as the image's start
+command or a static file under `frontend/public`, and whether a line says what its commit
+changed, which the correctness reviewer judges.
