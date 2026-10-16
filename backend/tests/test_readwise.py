@@ -1,5 +1,6 @@
-"""The Readwise pull's own rules, below the routes: reading a page, the token's
-seal, and who the daily job is due for.
+"""The Readwise pull's own rules, below the routes: reading a page, a page
+written again after losing a race, the token's seal, and who the daily job is
+due for.
 
 What a pull writes is reached through the routes, in
 `tests/routers/test_readwise.py`.
@@ -8,15 +9,19 @@ What a pull writes is reached through the routes, in
 from datetime import datetime, timedelta
 
 import pytest
-from sqlalchemy import insert
+from sqlalchemy import event, insert
 from sqlalchemy.exc import IntegrityError
 
 import credentials
 import readwise
+from database import SessionLocal
+from enums import HighlightSource
 from models import (
     HIGHLIGHT_TEXT_MAX,
     MEMBER_LOGIN_ENVELOPE_MAX_BYTES,
     READWISE_TOKEN_MAX,
+    DeletedHighlight,
+    Highlight,
     MemberLogin,
 )
 
@@ -83,6 +88,141 @@ class TestReadingAPage:
         )
 
         assert page.entries[0].highlights[0].highlighted_at == datetime(2026, 3, 1, 21, 15, 9)
+
+
+class TestAPageThatLostARace:
+    """A hand delete commits while a page is being written, and the page's
+    update then matches no row."""
+
+    @staticmethod
+    def _apply(db, member_id: int, *marks: dict[str, object]) -> readwise.Counts:
+        counts = readwise.Counts()
+        page = readwise.read_page({"results": [_entry(highlights=list(marks))]})
+        index = readwise.Index.build(db, member_id)
+        readwise.apply_page(db, member_id, page, index, counts, whole=True)
+        return counts
+
+    @staticmethod
+    def _a_hand_delete_commits_first(db, member_id: int) -> None:
+        row_id = db.query(Highlight).one().id
+
+        def delete(session, *_):
+            with SessionLocal() as other:
+                other.add(
+                    DeletedHighlight(
+                        user_id=member_id, source=HighlightSource.READWISE, source_key="9"
+                    )
+                )
+                other.flush()
+                other.query(Highlight).filter(Highlight.id == row_id).delete()
+                other.commit()
+
+        event.listen(db, "before_flush", delete, once=True)
+
+    def test_a_pull_racing_a_hand_delete_leaves_the_mark_deleted(self, db, member, make_book):
+        make_book(member["headers"], title="Dune", author="Frank Herbert")
+        member_id = member["user"]["id"]
+        self._apply(db, member_id, {"id": 9, "text": "first"})
+        self._a_hand_delete_commits_first(db, member_id)
+
+        counts = self._apply(db, member_id, {"id": 9, "text": "edited at Readwise"})
+
+        assert (counts.updated, counts.skipped) == (0, 1)
+        assert db.query(Highlight).count() == 0
+
+    def test_a_retried_page_counts_each_highlight_once(self, db, member, make_book):
+        make_book(member["headers"], title="Dune", author="Frank Herbert")
+        member_id = member["user"]["id"]
+        self._apply(db, member_id, {"id": 9, "text": "first"})
+        self._a_hand_delete_commits_first(db, member_id)
+
+        counts = self._apply(
+            db, member_id, {"id": 9, "text": "edited at Readwise"}, {"id": 10, "text": "new"}
+        )
+
+        assert (counts.created, counts.updated, counts.skipped) == (1, 0, 1)
+
+
+class TestAPageListingOneHighlightUnderTwoBooks:
+    """Two answers are no answer, unless one Book already holds the highlight."""
+
+    PASSAGE = {"id": 9, "text": "Fear is the mind-killer."}
+
+    @staticmethod
+    def _apply(db, member_id: int, *entries: dict[str, object]) -> readwise.Counts:
+        counts = readwise.Counts()
+        page = readwise.read_page({"results": list(entries)})
+        index = readwise.Index.build(db, member_id)
+        readwise.apply_page(db, member_id, page, index, counts, whole=True)
+        return counts
+
+    def _both(self) -> tuple[dict[str, object], dict[str, object]]:
+        return (
+            _entry(user_book_id=7, title="Dune", highlights=[self.PASSAGE]),
+            _entry(user_book_id=8, title="Children of Dune", highlights=[self.PASSAGE]),
+        )
+
+    def test_writes_it_once_on_the_book_already_holding_it(self, db, member, make_book):
+        dune = make_book(member["headers"], title="Dune", author="Frank Herbert")["id"]
+        make_book(member["headers"], title="Children of Dune", author="Frank Herbert")
+        member_id = member["user"]["id"]
+        self._apply(db, member_id, self._both()[0])
+
+        self._apply(db, member_id, *self._both())
+
+        assert [row.book_id for row in db.query(Highlight)] == [dune]
+
+    def test_writes_it_on_neither_when_neither_holds_it(self, db, member, make_book):
+        make_book(member["headers"], title="Dune", author="Frank Herbert")
+        make_book(member["headers"], title="Children of Dune", author="Frank Herbert")
+        member_id = member["user"]["id"]
+
+        counts = self._apply(db, member_id, *self._both())
+
+        assert (counts.created, counts.skipped) == (0, 1)
+        assert db.query(Highlight).count() == 0
+
+    def test_writes_it_once_when_both_are_one_book_and_the_later_wins(
+        self, db, member, make_book
+    ):
+        make_book(member["headers"], title="Dune", author="Frank Herbert")
+        member_id = member["user"]["id"]
+        twice = (
+            _entry(user_book_id=7, highlights=[{"id": 9, "text": "earlier"}]),
+            _entry(user_book_id=8, highlights=[{"id": 9, "text": "later"}]),
+        )
+
+        counts = self._apply(db, member_id, *twice)
+
+        assert (counts.created, counts.skipped) == (1, 0)
+        assert [row.text for row in db.query(Highlight)] == ["later"]
+
+
+class TestAPageListingOneHighlightLiveAndDeleted:
+    """The page is one answer: a highlight live under one of its books is not
+    removed by a deleted book on the same page carrying it. The row is shared
+    first, so one removed and written again shows."""
+
+    @pytest.mark.parametrize(
+        ("deleted_first", "text"),
+        [(False, "first"), (False, "edited at Readwise"), (True, "first")],
+        ids=["live_first", "edited_live_first", "deleted_first"],
+    )
+    def test_the_live_listing_keeps_its_row(self, db, member, make_book, deleted_first, text):
+        make_book(member["headers"], title="Dune", author="Frank Herbert")
+        member_id = member["user"]["id"]
+        apply = TestAPageListingOneHighlightUnderTwoBooks._apply
+        apply(db, member_id, _entry(user_book_id=7, highlights=[{"id": 9, "text": "first"}]))
+        db.query(Highlight).update({"is_shared": True})
+        db.commit()
+        live = _entry(user_book_id=7, highlights=[{"id": 9, "text": text}])
+        gone = _entry(
+            user_book_id=8, title="Emma", is_deleted=True, highlights=[{"id": 9, "text": "first"}]
+        )
+
+        apply(db, member_id, *((gone, live) if deleted_first else (live, gone)))
+
+        assert db.query(Highlight.text, Highlight.is_shared).all() == [(text, True)]
 
 
 @pytest.fixture

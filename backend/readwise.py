@@ -16,18 +16,16 @@ a sync rather than an import that only ever adds.
 deleted at its source stored here and shared if they had shared it; removing it
 is what the member did.
 
-**A highlight the member deleted here stays deleted**, whatever a later page
-carries: `highlights.deleted_keys` says which, and it is counted as skipped.
-
 **Which Book a Readwise book is**: `Index` says. A book nothing matches waits,
 listed on the account page, and is never guessed onto a Book. Its highlights are
 not stored while it waits; once a Book matches it, the next pull asks Readwise
 for that book's highlights by its id, because an incremental pull would never
 send them again.
 
-**A row moved to another Book is private again**, the rule
-`highlights.import_koreader` states for the same reason: sharing was a choice
-about one Book's audience.
+**What a pull does with a highlight once it has its id is the ledger's**,
+`highlights`: it re-finds the row, leaves out one the member deleted here
+whatever a later page carries (counted as skipped), and makes a row moved to
+another Book private again.
 
 **One process, one pull per member at a time.** The Dockerfile runs a single
 uvicorn, which is `notifications.ticker`'s premise as well; `_running` holds the
@@ -68,7 +66,6 @@ from models import (
     TITLE_MAX,
     Book,
     BookIdentifier,
-    Highlight,
     MemberLogin,
     ReadwiseBook,
 )
@@ -109,9 +106,6 @@ OVERLAP: Final = timedelta(minutes=10)
 #: How often the daily job pulls for each member, and how often it looks.
 EVERY: Final = timedelta(hours=24)
 TICK_SECONDS: Final = 3600
-
-#: How many keys one highlight lookup names, `highlights._LOOKUP_CHUNK`'s bound.
-_LOOKUP_CHUNK: Final = 500
 
 _SERVICE: Final = MemberLoginService.READWISE
 
@@ -353,19 +347,18 @@ class Counts:
     deleted: int = 0
     skipped: int = 0
 
+    def add(self, other: Counts) -> None:
+        self.created += other.created
+        self.updated += other.updated
+        self.unchanged += other.unchanged
+        self.deleted += other.deleted
+        self.skipped += other.skipped
+
 
 def _delete(db: Session, member_id: int, ids: Sequence[int], counts: Counts) -> None:
-    keys = [str(ident) for ident in ids]
-    for start in range(0, len(keys), _LOOKUP_CHUNK):
-        counts.deleted += (
-            db.query(Highlight)
-            .filter(
-                Highlight.user_id == member_id,
-                Highlight.source == HighlightSource.READWISE,
-                Highlight.source_key.in_(keys[start : start + _LOOKUP_CHUNK]),
-            )
-            .delete(synchronize_session=False)
-        )
+    counts.deleted += highlights.remove(
+        db, member_id, HighlightSource.READWISE, [str(ident) for ident in ids]
+    )
 
 
 def _write(
@@ -375,51 +368,22 @@ def _write(
     marks: Sequence[ReadwiseHighlight],
     counts: Counts,
 ) -> None:
-    readable = [mark for mark in marks if mark.text is not None]
-    gone = highlights.deleted_keys(
-        db, member_id, HighlightSource.READWISE, [str(mark.id) for mark in readable]
-    )
-    usable = [mark for mark in readable if str(mark.id) not in gone]
-    counts.skipped += len(marks) - len(usable)
-    keys = [str(mark.id) for mark in usable]
-    held: dict[str, Highlight] = {}
-    for start in range(0, len(keys), _LOOKUP_CHUNK):
-        held.update(
-            (row.source_key, row)
-            for row in db.query(Highlight).filter(
-                Highlight.user_id == member_id,
-                Highlight.source == HighlightSource.READWISE,
-                Highlight.source_key.in_(keys[start : start + _LOOKUP_CHUNK]),
-            )
+    readable = {
+        str(mark.id): highlights.Mark(
+            text=mark.text,
+            note=mark.note,
+            page=mark.page,
+            highlighted_at=mark.highlighted_at,
         )
-    for mark in usable:
-        fields: dict[str, object] = {
-            "book_id": book_id,
-            "text": mark.text,
-            "note": mark.note,
-            "page": mark.page,
-            "highlighted_at": mark.highlighted_at,
-        }
-        row = held.get(str(mark.id))
-        if row is None:
-            db.add(
-                Highlight(
-                    user_id=member_id,
-                    source=HighlightSource.READWISE,
-                    source_key=str(mark.id),
-                    **fields,
-                )
-            )
-            counts.created += 1
-            continue
-        if row.book_id != book_id:
-            fields["is_shared"] = False
-        if any(getattr(row, name) != value for name, value in fields.items()):
-            for name, value in fields.items():
-                setattr(row, name, value)
-            counts.updated += 1
-        else:
-            counts.unchanged += 1
+        for mark in marks
+        if mark.text is not None
+    }
+    written = highlights.write(db, member_id, HighlightSource.READWISE, book_id, readable)
+    counts.created += written.created
+    counts.updated += written.updated
+    counts.unchanged += written.unchanged
+    # Skipped is what had no text to store and what the member deleted here.
+    counts.skipped += sum(mark.text is None for mark in marks) + written.left_deleted
 
 
 def apply_page(
@@ -430,6 +394,7 @@ def apply_page(
     counts: Counts,
     *,
     whole: bool,
+    carry: Callable[[], None] = lambda: None,
 ) -> set[int]:
     """Write one page's highlights and commit. Answers the Readwise book ids
     that this page matched to a Book for the first time.
@@ -439,47 +404,143 @@ def apply_page(
     book has only its changed highlights here**, so it is marked
     `whole_pending` and the caller asks for it again by id; that is what the
     answer is for.
+
+    **A page beaten by a hand delete is written again** (`highlights.settled`),
+    and the retry leaves the mark deleted rather than answering a 500. Each
+    attempt counts afresh, merged into `counts` only once it commits, so a
+    highlight is counted once however many attempts it took. `carry` sets what
+    the caller commits beside the page, inside each attempt, because the
+    rollback before a retry discards an assignment made before it.
     """
+
+    def attempt() -> tuple[set[int], Counts]:
+        carry()
+        fresh = Counts()
+        return _apply_once(db, member_id, page, index, fresh, whole=whole), fresh
+
+    newly, written = highlights.settled(db, attempt)
+    counts.add(written)
+    return newly
+
+
+def _apply_once(
+    db: Session, member_id: int, page: Page, index: Index, counts: Counts, *, whole: bool
+) -> set[int]:
     newly: set[int] = set()
-    for entry in page.entries:
+    placed = [
+        (entry, _placed(db, member_id, entry, index, newly, whole=whole))
+        for entry in page.entries
+    ]
+    writers = _writers(db, member_id, placed, counts)
+    # The page is one answer: a highlight live under any of its books is not
+    # removed by another listing it deleted. Removed per entry, a deleted
+    # listing would take the row a live one was keeping, or meet its update.
+    alive = {
+        mark.id
+        for entry in page.entries
+        if not entry.deleted
+        for mark in entry.highlights
+        if not mark.deleted
+    }
+    for position, (entry, book_id) in enumerate(placed):
         # Deletions first, whatever the category: a highlight deleted under a
         # book deleted whole, or under one moved out of `books`, is removed.
-        # A moved book's live highlights stay, and its mapping row goes below.
+        # A moved book's live highlights stay, and its mapping row went above.
         _delete(
             db,
             member_id,
-            [mark.id for mark in entry.highlights if entry.deleted or mark.deleted],
+            [
+                mark.id
+                for mark in entry.highlights
+                if (entry.deleted or mark.deleted) and mark.id not in alive
+            ],
             counts,
         )
-        row = (
-            db.query(ReadwiseBook)
-            .filter(
-                ReadwiseBook.user_id == member_id,
-                ReadwiseBook.user_book_id == entry.user_book_id,
-            )
-            .one_or_none()
-        )
-        if entry.deleted or not entry.is_book:
-            if row is not None:
-                db.delete(row)
-            continue
-        if row is None:
-            row = ReadwiseBook(user_id=member_id, user_book_id=entry.user_book_id)
-            db.add(row)
-        row.title, row.author, row.asin = entry.title, entry.author, entry.asin
-        if row.book_id not in index.visible:
-            row.book_id = index.match(entry.asin, entry.title, entry.author)
-            if row.book_id is not None and not whole:
-                # Kept as state rather than inferred from `book_id`, which is
-                # committed with this page: a pull stopping before the re-ask
-                # ends would otherwise leave the older highlights unasked for.
-                row.whole_pending = True
-                newly.add(entry.user_book_id)
-        if row.book_id is not None:
-            live = [mark for mark in entry.highlights if not mark.deleted]
-            _write(db, member_id, row.book_id, live, counts)
+        if book_id is not None:
+            live = [
+                mark
+                for mark in entry.highlights
+                if not mark.deleted and writers.get(mark.id) == position
+            ]
+            _write(db, member_id, book_id, live, counts)
     db.commit()
     return newly
+
+
+def _placed(
+    db: Session,
+    member_id: int,
+    entry: ReadwiseEntry,
+    index: Index,
+    newly: set[int],
+    *,
+    whole: bool,
+) -> int | None:
+    """Keep `entry`'s `ReadwiseBook` row, and answer the Book its highlights
+    go on: None for a book that waits, was deleted, or is not a book."""
+    row = (
+        db.query(ReadwiseBook)
+        .filter(
+            ReadwiseBook.user_id == member_id,
+            ReadwiseBook.user_book_id == entry.user_book_id,
+        )
+        .one_or_none()
+    )
+    if entry.deleted or not entry.is_book:
+        if row is not None:
+            db.delete(row)
+        return None
+    if row is None:
+        row = ReadwiseBook(user_id=member_id, user_book_id=entry.user_book_id)
+        db.add(row)
+    row.title, row.author, row.asin = entry.title, entry.author, entry.asin
+    if row.book_id not in index.visible:
+        row.book_id = index.match(entry.asin, entry.title, entry.author)
+        if row.book_id is not None and not whole:
+            # Kept as state rather than inferred from `book_id`, which is
+            # committed with this page: a pull stopping before the re-ask
+            # ends would otherwise leave the older highlights unasked for.
+            row.whole_pending = True
+            newly.add(entry.user_book_id)
+    return row.book_id
+
+
+def _writers(
+    db: Session,
+    member_id: int,
+    placed: Sequence[tuple[ReadwiseEntry, int | None]],
+    counts: Counts,
+) -> dict[int, int]:
+    """Which entry of the page writes each live highlight, by its position.
+
+    **One highlight listed under two Books goes on the one already holding
+    it, and on neither when neither does**, counted as skipped: two answers
+    are no answer, as for a book two Books match. Written under both, the
+    second write would insert a key the first had only added, and the page
+    would meet the unique index at commit. Listed twice on one Book, the
+    later entry writes it, as `_entry` keeps the later of an id listed twice.
+    """
+    listed: dict[int, dict[int, int]] = {}
+    for position, (entry, book_id) in enumerate(placed):
+        if book_id is None:
+            continue
+        for mark in entry.highlights:
+            if not mark.deleted:
+                listed.setdefault(mark.id, {})[book_id] = position
+    held = highlights.holders(
+        db,
+        member_id,
+        HighlightSource.READWISE,
+        [str(ident) for ident, books in listed.items() if len(books) > 1],
+    )
+    writers: dict[int, int] = {}
+    for ident, books in listed.items():
+        book_id = next(iter(books)) if len(books) == 1 else held.get(str(ident))
+        if book_id in books:
+            writers[ident] = books[book_id]
+        else:
+            counts.skipped += 1
+    return writers
 
 
 def _rematched(db: Session, member_id: int, index: Index) -> set[int]:
@@ -737,8 +798,15 @@ async def _sync(
                 pages += 1
                 cursor = page.next_cursor
                 keeping = keeping and (cursor is None or len(cursor) <= READWISE_CURSOR_MAX)
-                login.resume_cursor = cursor if keeping else None
-                asked |= await _apply(db, member_id, page, index, counts, whole=whole)
+                asked |= await _apply(
+                    db,
+                    member_id,
+                    page,
+                    index,
+                    counts,
+                    whole=whole,
+                    carry=_resuming(login, walk_started, cursor if keeping else None),
+                )
                 if cursor is None:
                     break
             wanted = sorted(asked)
@@ -771,14 +839,37 @@ async def _sync(
 
 
 async def _apply(
-    db: Session, member_id: int, page: Page, index: Index, counts: Counts, *, whole: bool
+    db: Session,
+    member_id: int,
+    page: Page,
+    index: Index,
+    counts: Counts,
+    *,
+    whole: bool,
+    carry: Callable[[], None] = lambda: None,
 ) -> set[int]:
     """`apply_page` off the event loop, `routers/opds.py::sync_server`'s
     arrangement: the session is touched by one thread at a time, since the
     next page is not fetched until this returns."""
     return await anyio.to_thread.run_sync(
-        lambda: apply_page(db, member_id, page, index, counts, whole=whole)
+        lambda: apply_page(db, member_id, page, index, counts, whole=whole, carry=carry)
     )
+
+
+def _resuming(
+    login: MemberLogin, walk_started: datetime, cursor: str | None
+) -> Callable[[], None]:
+    """What an export page commits beside its highlights: the cursor the walk
+    resumes from and when the walk began. Both, because a retried page that
+    kept only the cursor would commit it without the walk's start, and the pull
+    that resumes it would take its own start for the walk's, skipping whatever
+    changed in between."""
+
+    def carry() -> None:
+        login.walk_started_at = walk_started
+        login.resume_cursor = cursor
+
+    return carry
 
 
 def _finish(

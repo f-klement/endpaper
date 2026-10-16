@@ -33,6 +33,7 @@ import bibliographic
 import marc_fields
 import metadata
 import xml_parse
+from authors import NAME_SEPARATOR
 from catalogue import Heading, Link, Record
 from enums import ClassificationScheme, HeadingKind, LinkRelationship
 from marc_fields import Fields, Subfields
@@ -349,7 +350,7 @@ def _credited_names(author: str | None) -> list[str]:
     answer to who wrote the book. It is also what makes the repeated field
     `EXPORT_PAGE_RECORDS` is measured against reachable.
     """
-    return [name.strip() for name in (author or "").split(",") if name.strip()]
+    return [name.strip() for name in (author or "").split(NAME_SEPARATOR) if name.strip()]
 
 
 def _record_element(book: Book) -> ElementTree.Element:

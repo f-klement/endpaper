@@ -6730,6 +6730,55 @@ class TestTheDublinCoreAndModsSourcesRefuseInTheirOwnTerms:
 _BNF_PLACE: Final = re.compile(r"\s*\([^)]*\)\s*$")
 
 
+class TestACatalogueOrderNameBlankOnceFlippedIsNotCredited:
+    """`flip_catalogue_name(", 1901-1990")` is the empty string: a name that is
+    only life dates is not blank as served and is blank once flipped."""
+
+    def test_a_bnf_creator_blank_once_flipped_leaves_no_empty_name_in_the_credit_line(self):
+        assert metadata._bnf_authors([", 1901-1990", "Doe, Jane"]) == "Jane Doe"
+
+    def test_a_loc_name_blank_once_flipped_leaves_no_empty_name_in_the_credit_line(self):
+        record = ElementTree.fromstring(
+            '<mods xmlns="http://www.loc.gov/mods/v3">'
+            "<name><namePart>, 1901-1990</namePart></name>"
+            "<name><namePart>Doe, Jane</namePart></name></mods>"
+        )
+
+        assert metadata._loc_authors(record) == "Jane Doe"
+
+
+class TestAnOpenLibrarySearchRowReadsEachArrayAsStrings:
+    @pytest.mark.asyncio
+    async def test_an_open_library_author_name_sent_as_one_string_credits_nobody_rather_than_its_letters(
+        self,
+    ):
+        """A bare string iterates as its letters, so this stored `F, r, a, n, k,
+        H, e, r, b, e, r, t`. Refused whole, as `google_books.strings` refuses
+        Google's `authors` sent the same way."""
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(url__startswith="https://openlibrary.org/search.json").mock(
+                return_value=httpx.Response(
+                    200, json={"docs": [{"title": "Dune", "author_name": "Frank Herbert"}]}
+                )
+            )
+            [row] = await metadata._open_library_search("dune", 1)
+
+        assert row.author is None
+
+    @pytest.mark.asyncio
+    async def test_an_open_library_row_whose_arrays_hold_no_strings_is_still_a_row(self):
+        """Each of these raised and failed the whole search: a publisher that
+        is a number, a language list holding one, and an isbn that is one."""
+        doc = {"title": "Dune", "publisher": 7, "language": [3], "isbn": 9}
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(url__startswith="https://openlibrary.org/search.json").mock(
+                return_value=httpx.Response(200, json={"docs": [doc]})
+            )
+            [row] = await metadata._open_library_search("dune", 1)
+
+        assert (row.publisher, row.language, row.isbn) == (None, None, None)
+
+
 class TestTheBnfPublisherRuleIsLinear:
     """`metadata._without_trailing_place`, which replaced a quadratic expression.
 

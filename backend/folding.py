@@ -267,8 +267,8 @@ def _carry_highlights(fold: _Fold) -> None:
     **A highlight that changes Book is private again, on every path.** Sharing
     chose one Book's readers; the survivor's are another audience, which its
     author never chose, and folding a private Book into a public one would
-    otherwise publish every mark shared on it. `highlights.import_koreader`
-    applies the same rule to a re-import that moves a row.
+    otherwise publish every mark shared on it. `highlights.write` applies the
+    same rule to a re-import that moves a row.
     """
     for row in fold.db.query(Highlight).filter(Highlight.book_id.in_(fold.loser_ids)).all():
         row.book_id = fold.keeper.id

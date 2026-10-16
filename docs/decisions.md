@@ -2032,10 +2032,16 @@ delete to undo it, so it has to be a difference nobody would call a decision.
 
 ### The credit line is split on commas, and the importers' flip rule is not reused
 
-`books.author` is comma separated. Every writer of it says so: `marc_fields.Fields.authors`,
-`_bnf_authors` and `google_books` all join with `", "`, and every import path runs a single
-name through `flip_catalogue_name` first, so a catalogue-order name is flipped **before**
-it reaches the column.
+`books.author` is comma separated. `authors.join_authors` writes it and `authors.split_authors`
+reads it, beside `CREDIT_SEPARATOR`. **A name served in catalogue order is flipped on its own,
+before the join.** The BnF, the Library of Congress, an OPDS feed and the create body's
+`authors` hand their names to `bibliographic.credit_line`, which flips each and joins; MARC `100`
+and `700` flip in `marc_fields` and join through `join_authors` directly, for the reason in
+"The credit line has one encoder, and the catalogue order flip is an adapter in front of it".
+A source serving display order (Google Books, the Open Library search) is joined unflipped,
+because `flip_catalogue_name("John Smith, M.D.")` is `M.D. John Smith`. The CSV import flips an
+author cell whole unless its column is known to hold display order, and splits that one instead
+(same entry).
 
 This is a different decision from the one `categories` made, and the two must not be swapped.
 Categories are semicolon joined *because* Google's category names contain commas
@@ -22057,7 +22063,7 @@ documentation says nothing about expired cursors, so that case is unverified.
 
 `BookCreate.authors` carries authors sent separately. `books.author` stays one comma separated line; only the join moved to the server.
 
-- **The server reorders each name, then joins** (`bibliographic.credit_line`), the rule every server side import already follows. One author results for a name written surname first, `Tolkien, J. R. R.`, stored as `J. R. R. Tolkien`.
+- **The server reorders each name, then joins** (`bibliographic.credit_line`), the rule every server side import of catalogue order names follows (Google Books and the Open Library search do not flip, by design). One author results for a name written surname first, `Tolkien, J. R. R.`, stored as `J. R. R. Tolkien`.
 - **What is still wrong, stated exactly.** Split into two people: a name keeping two commas once dates and roles are off (`King, Martin Luther, Jr.`, `Springer, Berlin, Heidelberg`), and a display order name whose one comma precedes a listed suffix or designator (`Martin Luther King, Jr.`, `Acme, Inc.`), which `flip_catalogue_name` now leaves as written on every path that calls it, rather than writing `Jr Martin Luther King`. Reordered into a name nobody wrote: a name whose one comma precedes a suffix or designator the list does not name (`M.D.`, `2nd`, `VI`, `S.A.`, `AG`, `Co.`, `Pty Ltd`, `SRL`).
 - **The list holds only words initials cannot spell**, compared as written with one trailing full stop off: squashing punctuation read `Erickson, J.R.` as `jr`, and Kindle writes initials undotted (`Barnett, AG`), so no two letter designator is listed and `JR` in capitals is initials. Measured against the rule switched off, over 704 BnF `dc:creator` names, 1,101 DNB MARC `$a`, 70 LoC MODS and 947 distinct Kindle authors: 0 changed, so 0 made wrong and none rescued in those samples.
 - **Only a source that separated its names sends them** (`SourceRecord.authorsSeparated`, required on every reader): EPUB, FB2, MOBI, CBZ, PDF XMP creators, Calibre, Kindle, Digital Editions. Kobo, Apple Books, Moon+ Reader, the Play Books index author, a PDF's `/Author` and an audiobook's artist tag hold one line that may name several people; sent as one name, `Terry Pratchett, Neil Gaiman` would be stored as one invented person.
@@ -22066,6 +22072,64 @@ documentation says nothing about expired cursors, so that case is unverified.
 - **Bounds**: each name at the line's width (500), the count at the most one character names a 500 character line holds (167, blank entries counting), and the joined line at 500 after reordering.
 - **Kept out of the constructor's dump by `exclude=True`**, and the create partition accepts an excluded field only when `FOLDED_INTO_ANOTHER_FIELD` names it, so an excluded field the tuple does not name is refused at import (that a named field is really folded is the validator's test, not the guard's).
 - **Only the create body takes it.** `BookDetailsUpdate` carries a line a member typed, the copy route inherits the work's credit, and the bulk route carries no author.
+
+## The credit line has one encoder, and the catalogue order flip is an adapter in front of it
+
+`authors.join_authors` trims each name by `authors.credited_name`, drops a blank one and joins
+with `CREDIT_SEPARATOR`, `None` when nothing is left. The trim takes whitespace and the
+separator off both ends of a name, since `",,Jane"` beside another name was stored as
+`",,Jane, Ann Goldstein"`, and leaves a separator inside a name alone: that is the residue
+`split_authors` reads as two people and merging repairs. It lives in `authors.py` with the decoder and the separator, so
+the stored form is stated once. `bibliographic.credit_line` stays in `bibliographic.py`: the flip
+is a bibliographic rule, and `bibliographic` already imports `authors`, so the other direction
+would be a cycle.
+
+- **Before this, seven sites joined by hand**, and the four that flip first (MARC twice, BnF,
+  Library of Congress) kept a name that was blank only once flipped:
+  `flip_catalogue_name(", 1901-1990")` is the empty string, so a record could store
+  `, Jane Doe`. The OPDS reader already dropped it, by its own copy of the rule.
+- **MARC joins through `join_authors`, not through `credit_line`.** `Fields._author_entries`
+  flips each name first, so that 100 and 700 naming one person collapse onto the spelling
+  `author_identifiers` files the GND number under. Handing those names to `credit_line` would
+  flip them twice, and the flip is not idempotent outside real names:
+  `flip_catalogue_name(";,0")` is `0 ;` and flipping that gives `0`. MARC keeps its own repeat
+  dropping for the same reason, and trims each flipped name by `credited_name` and drops one
+  left blank before the repeats are dropped, so a GND number is never filed under a spelling
+  the line does not carry, `""` included.
+- **Left as they are, on purpose.** `BookCreate`'s agreement check joins the names with
+  `CREDIT_SEPARATOR` to compare them with the line as sent, which is a comparison of what the
+  client sent, not a write. `marc._credited_names` splits on `authors.NAME_SEPARATOR` and keeps
+  repeats, which its docstring argues. Single name writers write one name and join nothing. The
+  browser's `creditLine` and `boundRecord` are the client's copy and are held by the agreement
+  check.
+- **The edit body keeps `author` as one string** (owner's question, recommended): the entry
+  above already says only the create body takes `authors`, and no frontend component sends
+  `author` on the edit body at all.
+- **No guard refuses a new hand join** (owner's question, recommended). The threat is an
+  honest author adding a source and writing `", ".join` at it. A text scan for that is a list
+  of spellings, which grows by one per evasion; the type cannot stop it either, since the
+  column is a string. And what a missed site costs is bounded: a blank segment in one stored
+  line, which every reader going through `split_authors` already ignores. If the owner wants
+  one, it is a follow up.
+- **Stored lines are untouched**, with no migration, for the reasons in "Two spellings are one
+  person because somebody said so".
+- **The CSV import splits only a column known to hold a credit line in display order, and
+  flips every other author column whole, as it always did.** The known columns are read off
+  the files quoted in `tests/test_csv_import.py`: `Author` (Goodreads, Openreads, this app's
+  own export), `Authors` (StoryGraph, Open Library), `author_text` (BookWyrm), `creator`
+  (Libib) and `creators` (Libib's import template, not an export: the fixture marks it
+  unverified as an export's header). The same fixtures show LibraryThing's `Primary Author` and Goodreads'
+  `Author l-f` surname first. The import used to flip every cell whole, on its one comma, so a
+  two person cell such as this app's own export writes, `Terry Pratchett, Neil Gaiman`, came
+  back as one person called `Neil Gaiman Terry Pratchett`. The flip stays the default because a
+  column nobody has measured may be surname first, and a display order name with no comma
+  passes through the flip unchanged. What it gives up: a surname first name under a known
+  display order column, such as `Le Guin, Ursula K.` under `Author`, is stored as written and
+  splits into two people, the residue merging repairs; and a display order list under a column
+  not named is still flipped whole. Which is commoner under `Author` is not measured; the two
+  person cell is the one this app's own export produces. A display order cell is bounded again
+  after its join, because the join can lengthen it, and its names lose their life dates and
+  role words without being reordered (`bibliographic.display_name`).
 
 ## A highlight is deleted by hand only, and its key is remembered so no import brings it back
 
@@ -22090,6 +22154,94 @@ creation time can be made again on the device, where it gets a new time and so a
 imports. **A mark with no creation time (very old KOReader) is keyed on its positions**, so the
 same passage marked again in the same file has the same key and stays left out. Nothing in the
 interface undoes a deletion, which is why the control asks first.
+
+## The highlight ledger: one writer of highlight rows, and each source an adapter
+
+**`highlights.py` writes every source's marks; a source only names them.** The KOReader import
+and the Readwise pull each ran the same loop: drop the keys the member deleted, look each key up
+in chunks, create, update or leave a row, and make a row moved to another Book private again.
+Two copies of one rule drift, and one bound was already restated as a second constant.
+The ledger now holds the deletion memory, the former key a KOReader mark keeps when its pair
+goes, unsharing on a move, the counts, the one lookup chunk, removal, and the bounded retry.
+`koreader_highlights.py` derives a KOReader key; `readwise.py` hands over Readwise's id. Where
+the two sources differ on purpose they still do: only KOReader has a former key and a chapter,
+its time is the device's wall clock where Readwise's is UTC, and only Readwise reports a
+deletion, so only its adapter calls `remove`, which does not remember the key (the rulings
+above on a Readwise deletion and on a hand delete).
+
+**The ledger's writes never commit**, `write`, `remove` and `share`; `delete_own` is a whole
+request and does. What commits beside the marks is the caller's: nothing for
+KOReader, a page's book rows and resume cursor for Readwise. So the retry is a runner,
+`highlights.settled`, that rolls back and re-runs the caller's whole unit of write plus commit.
+Savepoints were not used for Readwise: `begin_nested` flushes the page's pending rows first,
+which takes SQLite's write lock before the racing writer's commit.
+
+**A retried unit sets again whatever it commits.** The rollback discards every assignment made
+since the last commit, so a Readwise page sets its resume cursor and its walk's start inside
+the unit, and counts into fresh counts merged only once the commit holds. Without the walk's
+start, a stopped walk resumes with a later pull's start and skips what changed in between.
+
+**No guard against a third writer.** Two adapters over one module is the fix; a text scan for
+`Highlight` queried by key outside the ledger would list spellings and be evaded by the next
+one, which is the shape the guard ladder refuses. The privacy guard over functions returning
+highlights already reads the ledger, and is why its lookup is inline rather than a helper
+answering rows.
+
+**The same second pairing stays in the browser.** A KOReader request carries at most the
+schema's `maxItems` marks and a byte bound, so the server never sees a whole sidecar and cannot
+tell which marks share a second across two requests. The client keeps a second's marks in one
+request, and its count bound is now read from the schema by a test rather than restated.
+
+**A Readwise pull racing a hand delete settles.** The page is written again, finds the key
+remembered, and leaves the mark out, as a KOReader import already did. Built pending the owner's confirmation.
+
+**A write reads the held rows before the deletion memory.** A hand delete commits the row's
+removal and its remembered key together, but the write's two reads are two snapshots on both
+engines: PostgreSQL's READ COMMITTED takes one per statement, and SQLite under pysqlite's legacy
+transaction control runs a SELECT before the first DML outside any transaction. Read the other
+way round, a delete landing between the reads hid both the key and the row, and the mark was
+created again with nothing for the retry to catch. Measured on both orders with the delete
+committed at each read and at the flush: only the delete landing between the reads in the old
+order wrote the mark back. **What the order does not close**: a racing import that creates the
+key, and a hand delete of that new row, both committing after this write's deletion read and
+before its commit. Closing it needs the insert to check the deletion memory at write time, which
+is not a small change.
+
+**One Readwise highlight listed under two Books on one page goes on the Book already holding
+it, and on neither when neither does**, counted as skipped. Two answers are no answer, the
+ruling a Readwise book two Books match already follows; the holder is the one answer the
+member's own data gives. Two Readwise books matched to one Book are one answer, and the later
+listing writes it, as a page reader keeps the later of an id listed twice. Before, the later
+listing moved a held row, and an unheld one met the unique index at commit.
+
+**A share is written only where the highlight still is.** The share route reads the row on its
+Book and then writes; an import moving the row in between made it private for the new Book, and
+a write by id alone would publish it to readers its author never chose. `highlights.share` is
+conditional on the Book, and a row no longer there answers 404. **The quote ceiling is judged on
+the passage the write returns**, from its own UPDATE, for the same reason: an import may have
+lengthened it since the read.
+
+**A highlight live under any book on a Readwise page is not removed by another listing of it
+deleted on that page.** Deletions ran per entry, so the outcome followed the page's order: live
+first, a held row was removed, or met a stale update and raised once edited; deleted first, it
+was removed and written again private. The page is one answer, as for one highlight under two
+Books, and a live listing is the answer it gives.
+
+**An import that carries a shared highlight past `QUOTE_TEXT_MAX` makes it private** (the Q22
+commit, droppable alone). A share is refused above the ceiling a passage shown to the shelf has;
+the source lengthening a shared passage is not its author choosing to show the longer one. An edit
+within the ceiling keeps the share. Built pending the owner's confirmation.
+
+**A write clears `is_shared` with its own UPDATE, never by setting it on the row as loaded.** The
+flush writes only what differs from the load, so a row read private and shared by its author
+before the write's flush kept the share: on the new Book after a move, or past the quote ceiling
+after Q22. The explicit statement is written whatever the read said, and it takes the row, so a
+later share waits behind it and then reads back what the write left. `flag_modified` would not
+do: the assignment has already recorded the loaded value, and the flush still compares equal.
+**Only on a row being written anyway**: a move changes the Book and a lengthening the text, so
+both still clear, while an unchanged long passage, which the share route refuses, is not written
+again on every run. Not by adding `is_shared` to the WHERE: on PostgreSQL an UPDATE matching no
+row takes no row lock, and a share landing after it would survive the lengthening.
 
 ## A Calibre library's files are recorded from the index, through both doors
 

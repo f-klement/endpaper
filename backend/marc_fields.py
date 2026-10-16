@@ -37,6 +37,7 @@ from typing import Final
 from xml.etree import ElementTree
 
 import ddc
+from authors import credited_name, join_authors
 from bibliographic import (
     LANGUAGES,
     flip_catalogue_name,
@@ -1026,6 +1027,10 @@ class Fields:
         under a spelling that is in this record's own `author` string. Two loops
         testing the same three conditions would make that alignment a comment, and a
         comment is what would drift the day a relator code is added to one of them.
+        **So each name is trimmed here by `credited_name`, the encoder's own rule,
+        and one left blank is dropped with its field**: a `$a` of `, 1901-1990` is
+        blank once flipped, and its `$0` filed under `""` named nobody the line
+        credits.
 
         **Which `700` counts is `_AUTHOR_RELATORS`, and a field stating no role at
         all does not**, which is the answer to a `700` beside a `100` losing a
@@ -1037,8 +1042,8 @@ class Fields:
         """
         entries: list[tuple[str, Subfields]] = []
         for entry in self.get("100"):
-            if entry.get("a"):
-                entries.append((flip_catalogue_name(entry["a"]), entry))
+            if entry.get("a") and (name := credited_name(flip_catalogue_name(entry["a"]))):
+                entries.append((name, entry))
         for entry in self.get("700"):
             # `t` marks an added entry for a *work*, not a person: the row exists
             # to link the original title, and its name is the original author's.
@@ -1046,16 +1051,24 @@ class Fields:
                 entry.get("a")
                 and "t" not in entry
                 and any(code in _AUTHOR_RELATORS for code in entry._relator_codes())
+                and (name := credited_name(flip_catalogue_name(entry["a"])))
             ):
-                entries.append((flip_catalogue_name(entry["a"]), entry))
+                entries.append((name, entry))
         seen: dict[str, Subfields] = {}
         for name, entry in entries:
             seen.setdefault(name, entry)
         return list(seen.items())
 
     def authors(self) -> str | None:
-        """The 100 main entry plus any 700 that actually wrote something."""
-        return ", ".join(name for name, _ in self._author_entries()) or None
+        """The 100 main entry plus any 700 that actually wrote something.
+
+        **Joined by `authors.join_authors` rather than through
+        `bibliographic.credit_line`**, because `_author_entries` has flipped each
+        name already, to drop repeats on the spelling the identifiers are filed
+        under, and a second flip is not a no op: `flip_catalogue_name(";,0")` is
+        `0 ;` and flipping that gives `0`.
+        """
+        return join_authors(name for name, _ in self._author_entries())
 
     def author_identifiers(self) -> list[AuthorityAssertion]:
         """Which GND record each credited author is, where the record says so.
@@ -1103,7 +1116,8 @@ class Fields:
                 # row links the original title and carries its author's name.
                 if entry.get("a") and "t" not in entry:
                     names.setdefault(flip_catalogue_name(entry["a"]), None)
-        return ", ".join(names) or None
+        # Flipped above, to drop repeats, so joined as `authors` is and for its reason.
+        return join_authors(names)
 
     def year(self) -> int | None:
         """The publication year, from 264 or the older 260.

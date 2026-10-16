@@ -47,7 +47,7 @@ import re
 from collections.abc import Iterable
 from typing import Final
 
-from authors import CREDIT_SEPARATOR
+from authors import join_authors
 from models import MAX_PAGE_NUMBER_IN_A_BOOK
 
 #: ISO 639-2/B, which is what every MARC derived source emits, to the 639-1
@@ -505,6 +505,28 @@ def flip_catalogue_name(raw: str) -> str:
     return f"{forenames} {surname}" if surname and forenames else name
 
 
+#: A segment that is only a life span, as a comma list leaves one behind:
+#: `J. R. R. Tolkien, 1892-1973` split on its commas. The dash is required, so
+#: a bare year, which a title or a corporate name can be, is not a life span.
+_LIFE_SPAN_ALONE: Final = re.compile(
+    r"\(?\s*\d{3,4}\s*[-\u2013]\s*\d{0,4}\s*\)?\.?"
+)
+
+
+def display_name(raw: str) -> str:
+    """One name already in display order, without the noise, and not reordered.
+
+    The life dates and role words `flip_catalogue_name` takes off, for a name
+    the flip must not touch: `Stanislaw Lem (1921-2006)` is `Stanislaw Lem`.
+    Empty for a name that was only a life span, because that is what a comma
+    list leaves when the span had a comma of its own. One name at a time:
+    over a whole list the role arm reads to the end of the cell, and takes
+    every name after the role word with it.
+    """
+    name = _strip_person_noise(" ".join(raw.split()))
+    return "" if _LIFE_SPAN_ALONE.fullmatch(name) else name
+
+
 def credit_line(names: Iterable[str]) -> str | None:
     """Names a source gave one by one, as the credit line `books.author` holds.
 
@@ -514,10 +536,10 @@ def credit_line(names: Iterable[str]) -> str | None:
     arrives as one name and is stored as `J. R. R. Tolkien`, where joined first it
     would be stored as two people.
 
-    **A name that is blank once flipped is dropped**, because `", , Jane Doe"` is
-    a credit nobody wrote and `flip_catalogue_name(",")` is the empty string.
-    `None` when nothing is left, which is what a book with nobody credited
-    stores.
+    **The flipped names are joined by `authors.join_authors`**, which drops a
+    blank one. That is tested after the flip, not before it:
+    `flip_catalogue_name(", 1901-1990")` is the empty string, so a name that is
+    not blank as served can be blank once flipped.
 
     **What still splits is every name that keeps a comma**, stored as written
     and read by `authors.split_authors` as several people, as on every other
@@ -532,5 +554,4 @@ def credit_line(names: Iterable[str]) -> str | None:
     `Co.`, `Pty Ltd`, `SRL` or `AB`. Each is a spelling initials share, which
     the list may not carry, or one it does not carry yet.
     """
-    flipped = (flip_catalogue_name(name) for name in names)
-    return CREDIT_SEPARATOR.join(name for name in flipped if name) or None
+    return join_authors(flip_catalogue_name(name) for name in names)

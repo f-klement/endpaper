@@ -42,6 +42,7 @@ import {
   useCalibreImport,
   useCustomFields,
   BYTES_PER_REQUEST,
+  HIGHLIGHTS_PER_REQUEST,
   requestChunks,
   useKoreaderHighlightImport,
   useLibraryImport,
@@ -49,6 +50,7 @@ import {
   useStoreImport,
   type UseTwoStepImportResult,
 } from "../../../../src/pages/SettingsPage/LibrarySettingsPage/hooks";
+import { boundOf, propertiesOf } from "../../../committedSchema";
 import { CALIBRE_SCHEMA, databaseOf } from "../../../lib/sqliteFixtures";
 import { mockApi, renderHookWithProviders, type MockApi } from "../../../utils";
 import { sourceText } from "../../../sourceModules";
@@ -1695,6 +1697,12 @@ describe("importing KOReader highlights", () => {
       expect(
         new TextEncoder().encode(JSON.stringify(chunk)).length,
       ).toBeLessThanOrEqual(BYTES_PER_REQUEST);
+  });
+
+  it("keeps the marks per request at the schema's bound", () => {
+    const highlights = propertiesOf("KoreaderImportIn")["highlights"]!;
+
+    expect(HIGHLIGHTS_PER_REQUEST).toBe(boundOf(highlights, "maxItems"));
   });
 
   it("keeps two marks of one second in one request across the count bound", () => {

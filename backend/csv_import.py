@@ -55,16 +55,17 @@ import io
 import logging
 import re
 from collections import Counter
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from typing import Final
 
+import authors
 import bibliographic
 from enums import BookFormat, ReadStatus
 from import_readers import Extraction, ImportReader
 from isbn import parse as parse_isbn
-from models import MAX_PAGE_NUMBER_IN_A_BOOK
+from models import AUTHOR_LINE_MAX, MAX_PAGE_NUMBER_IN_A_BOOK
 
 logger = logging.getLogger("endpaper.csv_import")
 
@@ -189,6 +190,29 @@ COLUMN_GUESSES: Final[tuple[tuple[str, tuple[str, ...]], ...]] = (
         "notes",
         ("my review", "review content", "review", "private notes", "notes", "comments"),
     ),
+)
+
+#: The author columns known to hold a credit line in display order, as
+#: normalised header names. **Only these are split into names**; every other
+#: author column is flipped whole, as one person surname first.
+#:
+#: Each is read off a file quoted in `tests/test_csv_import.py`: `Author`
+#: (Goodreads, Openreads, this app's own export), `Authors` (StoryGraph, Open
+#: Library), `author_text` (BookWyrm), `creator` (Libib) and `creators` (Libib's
+#: import template, which no export has yet confirmed). This
+#: app's own export writes the whole credit line under `Author`, so flipping
+#: that column whole turned `Terry Pratchett, Neil Gaiman` into one person
+#: called `Neil Gaiman Terry Pratchett`.
+#:
+#: **The default is the flip because it is what every column had before**, and
+#: a column nobody has measured may be surname first: LibraryThing's `Primary
+#: Author` and Goodreads' `Author l-f` are, by the same fixtures. A display
+#: order name with no comma comes through the flip unchanged, so the default
+#: costs a display order list in a column not named here, and the reordering
+#: `bibliographic.credit_line` already names for a suffix its list does not
+#: carry (`John Smith, M.D.` stored as `M.D. John Smith`).
+_DISPLAY_ORDER_AUTHOR_COLUMNS: Final = frozenset(
+    {"author", "authors", "author text", "creator", "creators"}
 )
 
 #: Their status vocabularies, mapped onto ours. Lower case, exact match after
@@ -826,8 +850,58 @@ def _cells(raw: dict[str, str], mapping: Mapping[str, str | None]) -> Callable[[
     return cell
 
 
-def _row_from(raw: dict[str, str], mapping: dict[str, str | None]) -> ImportRow | None:
-    """One row in this app's terms, or None where it has no title."""
+def _credit(value: str, display_order: bool) -> str | None:
+    """One author cell as the credit line `books.author` holds.
+
+    **Bounded twice, for two reasons.** The cell is cut before the flip or the
+    split, which is what stops a 5 MB upload paying for regex work on 20,000
+    oversized cells. And the line is bounded again after the join, because the
+    join can be longer than the cell: `A,B` is stored `A, B`, so 500 characters
+    of two letter names joined to 666, which Postgres refuses on the import's
+    one commit and SQLite stores past the column. The flip never lengthens a
+    cell, so that branch needs only the first.
+
+    **A display order name loses its life dates and role words one at a time,
+    after the split**, as the flip takes them off a surname first cell. Before
+    the split, the role arm would read on through every later name.
+    """
+    value = value[:AUTHOR_LINE_MAX]
+    if not display_order:
+        # Through `credit_line` rather than the flip alone, for the encoder's
+        # edge rule: `flip_catalogue_name(",,Jane")` keeps both commas.
+        return bibliographic.credit_line([value])
+    names = (bibliographic.display_name(name) for name in authors.split_authors(value))
+    return authors.join_authors(_within_the_column(names))
+
+
+def _within_the_column(names: Iterable[str]) -> list[str]:
+    """The leading names whose credit line fits `books.author`.
+
+    Whole names: this cut never stores half of one, though the cell cut in
+    `_credit` before the split still can. The names after the first that does
+    not fit are dropped with it.
+    """
+    kept: list[str] = []
+    width = -len(authors.CREDIT_SEPARATOR)
+    for name in names:
+        credited = authors.credited_name(name)
+        if not credited:
+            continue
+        width += len(authors.CREDIT_SEPARATOR) + len(credited)
+        if width > AUTHOR_LINE_MAX:
+            break
+        kept.append(credited)
+    return kept
+
+
+def _row_from(
+    raw: dict[str, str], mapping: dict[str, str | None], display_order: bool
+) -> ImportRow | None:
+    """One row in this app's terms, or None where it has no title.
+
+    `display_order` is whether the mapped author column is one of
+    `_DISPLAY_ORDER_AUTHOR_COLUMNS`, decided once per file by the caller.
+    """
     cell = _cells(raw, mapping)
 
     title = cell("title")
@@ -841,11 +915,7 @@ def _row_from(raw: dict[str, str], mapping: dict[str, str | None]) -> ImportRow 
 
     return ImportRow(
         title=title[:500],
-        # Bounded **before** the flip, not after: the cap is what stops a
-        # 5 MB upload paying for regex work on 20,000 oversized cells, and
-        # applied after the call it protects nothing. No name a catalogue
-        # writes reaches 500 characters, so no result changes.
-        author=bibliographic.flip_catalogue_name(cell("author")[:500]) or None,
+        author=_credit(cell("author"), display_order),
         isbn=isbn,
         status=_match_status(cell("status")),
         rating=_int(cell("rating"), minimum=1, maximum=5),
@@ -1008,6 +1078,12 @@ def _guessing_reader(column: str | None = None, unpack: UnpackCell | None = None
         mapping = _guessed_mapping(table.headers, extraction.overrides)
         compound = _by_normalised_name(table.headers).get(column or "")
         exclusions = _exclusion_columns(table.headers)
+        # Once per file, not per row: a header is as long as
+        # `csv.field_size_limit` allows, and normalising it 20,000 times would
+        # be the cost the cell bound in `_credit` exists to stop.
+        display_order = (
+            _normalise_term(mapping["author"] or "") in _DISPLAY_ORDER_AUTHOR_COLUMNS
+        )
 
         parsed = ParsedFile(
             mapping=mapping,
@@ -1031,7 +1107,7 @@ def _guessing_reader(column: str | None = None, unpack: UnpackCell | None = None
             if any(_means_deleted(raw.get(header)) for header in exclusions):
                 parsed.excluded += 1
                 continue
-            row = _row_from(raw, mapping)
+            row = _row_from(raw, mapping, display_order)
             if row is None:
                 parsed.skipped += 1
                 continue

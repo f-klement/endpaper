@@ -101,6 +101,10 @@ class TestFieldMapping:
         volume = {"volumeInfo": {"authors": ["Frank Herbert", "Brian Herbert"]}}
         assert _volume_to_fields(volume)["author"] == "Frank Herbert, Brian Herbert"
 
+    def test_a_blank_author_entry_leaves_no_empty_name_in_the_credit_line(self):
+        volume = {"volumeInfo": {"authors": ["", "Frank Herbert"]}}
+        assert _volume_to_fields(volume)["author"] == "Frank Herbert"
+
     def test_hands_on_the_categories_as_a_list(self):
         """Google's own subject list, not the curated Tag vocabulary. A list
         because the joined form belongs to `categories`, and this adapter

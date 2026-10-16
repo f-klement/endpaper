@@ -62,11 +62,10 @@ book and loses an edition.
 
 ### What is deliberately not read
 
-The passage a highlight marks is the book's text, and the note beside it is the member's own
-words with nowhere yet to go, so both are counted and neither is carried out of the parse. A
-note's timestamp is localised prose, including its timezone, and a wrong parse dates a member's
-own note wrongly. `frontend/src/lib/kobo.ts` refuses a read status on the same ground: whether
-an import writes one is a decision about the import flow rather than about reading a file.
+Highlights and notes are counted and neither is carried out of the parse: whether an import
+writes them is a decision about the import flow rather than about reading a file, the ground
+`frontend/src/lib/kobo.ts` refuses a read status on. A note's timestamp is localised prose,
+including its timezone, and a wrong parse dates a member's own note wrongly.
 
 ## What this does not settle
 

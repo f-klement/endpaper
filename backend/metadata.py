@@ -57,8 +57,10 @@ import sources
 import targets
 import xml_parse
 import z3950
+from authors import join_authors
 from bibliographic import (
     LANGUAGES,
+    credit_line,
     flip_catalogue_name,
     is_a_disc,
     is_physical_book,
@@ -2062,21 +2064,25 @@ async def _open_library_search(query: str, limit: int) -> list[Record]:
                 source="open_library",
                 title=doc.get("title"),
                 subtitle=doc.get("subtitle"),
-                # Every credited name, in order. Joined the same way the DNB
-                # and K10plus parsers join theirs, so one book looks the same
-                # whichever source found it.
-                author=", ".join(doc.get("author_name") or []) or None,
-                publisher=(doc.get("publisher") or [None])[0],
+                # Every credited name, in order. Not flipped, because the search
+                # index serves display order: see `authors.join_authors`. Read
+                # as an array of strings, since a bare string iterates as its
+                # letters and `Dune` would store `D, u, n, e`.
+                author=join_authors(google_books.strings(doc.get("author_name"))),
+                # Each array read through `google_books.strings`, as the
+                # authors are: a value of another type raised here and failed
+                # the whole search.
+                publisher=next(iter(google_books.strings(doc.get("publisher"))), None),
                 year=doc.get("first_publish_year"),
                 # The search index carries no blurb. Enrichment fills it in.
                 page_count=doc.get("number_of_pages_median"),
-                language=LANGUAGES.get((doc.get("language") or [""])[0].lower()),
+                language=LANGUAGES.get((google_books.strings(doc.get("language")) or [""])[0].lower()),
                 # By Open Library's own cover id, which the search index
                 # carries and which resolves where an ISBN lookup does not.
                 cover_url=(
                     covers.open_library_id_url(cover_id) if cover_id else None
                 ),
-                isbn=_first_isbn13(doc.get("isbn") or []),
+                isbn=_first_isbn13(google_books.strings(doc.get("isbn"))),
             )
         )
     return results
@@ -2347,13 +2353,12 @@ def _bnf_authors(creators: list[str]) -> str | None:
     marker is the main entry and is kept: dropping it would leave records with
     no author at all.
     """
-    authors = [
-        flip_catalogue_name(creator)
+    return credit_line(
+        creator
         for creator in creators
         if not _BNF_ANY_ROLE.search(creator)
         or any(role in creator.casefold() for role in _BNF_AUTHOR_ROLES)
-    ]
-    return ", ".join(authors) or None
+    )
 
 
 #: MODS `physicalDescription/form` values that say the carrier is electronic,
@@ -2521,8 +2526,8 @@ def _loc_authors(record: ElementTree.Element) -> str | None:
             continue
         part = name.find(f"{_MODS}namePart")
         if part is not None and part.text:
-            authors.append(flip_catalogue_name(part.text.strip().rstrip(",.")))
-    return ", ".join(authors) or None
+            authors.append(part.text.strip().rstrip(",."))
+    return credit_line(authors)
 
 
 def _loc_publisher(record: ElementTree.Element) -> str | None:

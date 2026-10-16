@@ -9,6 +9,8 @@ row is a decision and is the only thing here that is stored.
 import time
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 
 from authors import (
     _RULES,
@@ -22,6 +24,7 @@ from authors import (
     _Budget,
     author_key,
     build_index,
+    join_authors,
     resolve_alias_map,
     split_authors,
     squashed_key,
@@ -83,6 +86,39 @@ class TestSplittingACreditLine:
 
     def test_the_order_written_is_the_order_returned(self):
         assert split_authors("B, A")[0] == "B"
+
+
+#: One name as a source might hand it over: no comma, since a comma inside a name
+#: is the residue `split_authors` documents rather than a round trip, and a key,
+#: since a name with none is nobody to the reader.
+_NAMES = st.text(st.characters(exclude_characters=",", exclude_categories=["Cs"])).filter(
+    author_key
+)
+
+
+class TestWritingACreditLine:
+    def test_a_name_left_blank_is_not_in_the_credit_line(self):
+        assert join_authors(["", "Frank Herbert", " \t"]) == "Frank Herbert"
+
+    def test_no_names_is_no_credit_line(self):
+        assert join_authors([]) is None
+
+    def test_a_name_is_stored_without_the_whitespace_around_it(self):
+        assert join_authors([" Frank Herbert ", "Brian Herbert\t"]) == "Frank Herbert, Brian Herbert"
+
+    def test_a_separator_at_either_end_of_a_name_leaves_no_empty_name_in_the_credit_line(self):
+        """The witness the property cannot be: its names hold no comma."""
+        assert join_authors([",,Jane", ", ,", "Ann Goldstein ,"]) == "Jane, Ann Goldstein"
+
+    def test_a_separator_inside_a_name_is_left_where_it_is(self):
+        assert join_authors(["King, Jr.", "Ann Goldstein"]) == "King, Jr., Ann Goldstein"
+
+    @pytest.mark.property
+    @given(names=st.lists(_NAMES, unique_by=author_key))
+    def test_every_comma_free_list_of_names_distinct_by_author_key_survives_the_credit_line_unchanged(
+        self, names
+    ):
+        assert split_authors(join_authors(names)) == [" ".join(name.split()) for name in names]
 
 
 class TestTheKeyThatFoldsWithoutAsking:

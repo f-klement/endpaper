@@ -15,11 +15,13 @@ from itertools import count
 import httpx
 import pytest
 import respx
-from sqlalchemy import text
+from sqlalchemy import event, text
 
 import credentials
 import readwise
-from models import Highlight, MemberLogin, ReadwiseBook
+from database import SessionLocal
+from enums import HighlightSource
+from models import DeletedHighlight, Highlight, MemberLogin, ReadwiseBook
 from ratelimit import import_limiter
 
 TOKEN = "rw0123456789abcdefTOKEN"
@@ -509,6 +511,50 @@ class TestTheCursorMovesOnlyWhenEverythingArrived:
 
         assert pull(client, linked["headers"])["outcome"] == "synced"
         assert "pageCursor" not in fake.requests[asked].url.params
+
+    def test_a_retried_page_keeps_its_resume_cursor(
+        self, client, linked, make_book, fake, db, monkeypatch
+    ):
+        """A hand delete beats the first page's commit, and the page is written
+        again: the rollback took the cursor and the walk's start with it, so the
+        retry has to set both again or the next pull starts over."""
+        dune(make_book, linked["headers"])
+        fake.put(entry())
+        pull(client, linked["headers"])
+        held = db.query(Highlight).one()
+        member_id, row_id = held.user_id, held.id
+        fake.put(
+            entry(7, mark(note="edited at Readwise", updated_at=now())),
+            entry(8, mark(202, updated_at=now()), title="Emma"),
+        )
+        monkeypatch.setattr(readwise, "MAX_PAGES", 1)
+        fired: list[int] = []
+
+        def the_delete_commits_first(session, *_):
+            # Every session of the app fires this; only the page's write, the
+            # one holding a changed highlight, is the one to beat.
+            if fired or not any(isinstance(row, Highlight) for row in session.dirty):
+                return
+            fired.append(row_id)
+            with SessionLocal() as other:
+                other.add(
+                    DeletedHighlight(
+                        user_id=member_id, source=HighlightSource.READWISE, source_key="101"
+                    )
+                )
+                other.flush()
+                other.query(Highlight).filter(Highlight.id == row_id).delete()
+                other.commit()
+
+        event.listen(SessionLocal, "before_flush", the_delete_commits_first)
+        try:
+            assert pull(client, linked["headers"])["outcome"] == "incomplete"
+        finally:
+            event.remove(SessionLocal, "before_flush", the_delete_commits_first)
+
+        assert fired == [row_id]
+        resumed = login(db)
+        assert (resumed.resume_cursor, resumed.walk_started_at) == ("1", resumed.last_run_at)
 
     def test_a_book_whose_history_arrived_is_not_asked_for_again(
         self, client, linked, make_book, fake, db

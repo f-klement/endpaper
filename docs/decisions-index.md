@@ -26,7 +26,7 @@ repeat the argument.
 <!-- index: begin -->
 | Section | Entry | Words |
 |---|---|---|
-|  | [Backend](decisions.md#backend) | 33,495 |
+|  | [Backend](decisions.md#backend) | 33,585 |
 | Backend | [`bcrypt` directly, not `passlib`](decisions.md#bcrypt-directly-not-passlib) | 98 |
 | Backend | [Settings are functions, not module constants](decisions.md#settings-are-functions-not-module-constants) | 59 |
 | Backend | [`DATA_DIR` exists at all](decisions.md#data_dir-exists-at-all) | 22 |
@@ -118,7 +118,7 @@ repeat the argument.
 | Backend | [An author is a name on a book, not a row](decisions.md#an-author-is-a-name-on-a-book-not-a-row) | 381 |
 | Backend | [Two spellings are one person because somebody said so, not because the strings changed](decisions.md#two-spellings-are-one-person-because-somebody-said-so-not-because-the-strings-changed) | 295 |
 | Backend | [Three keys, and only the conservative one folds without asking](decisions.md#three-keys-and-only-the-conservative-one-folds-without-asking) | 110 |
-| Backend | [The credit line is split on commas, and the importers' flip rule is not reused](decisions.md#the-credit-line-is-split-on-commas-and-the-importers-flip-rule-is-not-reused) | 175 |
+| Backend | [The credit line is split on commas, and the importers' flip rule is not reused](decisions.md#the-credit-line-is-split-on-commas-and-the-importers-flip-rule-is-not-reused) | 265 |
 | Backend | [The author page is the library, filtered](decisions.md#the-author-page-is-the-library-filtered) | 110 |
 | Backend | [Deduplication has two entry points, and the suggestions are the smaller one](decisions.md#deduplication-has-two-entry-points-and-the-suggestions-are-the-smaller-one) | 211 |
 | Backend | [Merging is any member's, and so is undoing it](decisions.md#merging-is-any-members-and-so-is-undoing-it) | 54 |
@@ -899,8 +899,10 @@ repeat the argument.
 |  | [A Readwise book is matched by ASIN or title and first author, and only when one Book answers](decisions.md#a-readwise-book-is-matched-by-asin-or-title-and-first-author-and-only-when-one-book-answers) | 158 |
 |  | [A 429 from Readwise ends the pull rather than waiting it out](decisions.md#a-429-from-readwise-ends-the-pull-rather-than-waiting-it-out) | 113 |
 |  | [A member's Readwise token is not counted on the key screen](decisions.md#a-members-readwise-token-is-not-counted-on-the-key-screen) | 109 |
-|  | [Authors a source separated travel as a list, and the server joins them](decisions.md#authors-a-source-separated-travel-as-a-list-and-the-server-joins-them) | 530 |
+|  | [Authors a source separated travel as a list, and the server joins them](decisions.md#authors-a-source-separated-travel-as-a-list-and-the-server-joins-them) | 545 |
+|  | [The credit line has one encoder, and the catalogue order flip is an adapter in front of it](decisions.md#the-credit-line-has-one-encoder-and-the-catalogue-order-flip-is-an-adapter-in-front-of-it) | 724 |
 |  | [A highlight is deleted by hand only, and its key is remembered so no import brings it back](decisions.md#a-highlight-is-deleted-by-hand-only-and-its-key-is-remembered-so-no-import-brings-it-back) | 270 |
+|  | [The highlight ledger: one writer of highlight rows, and each source an adapter](decisions.md#the-highlight-ledger-one-writer-of-highlight-rows-and-each-source-an-adapter) | 1,146 |
 |  | [A Calibre library's files are recorded from the index, through both doors](decisions.md#a-calibre-librarys-files-are-recorded-from-the-index-through-both-doors) | 296 |
 |  | [A re-picked folder: sightings at the pick, misses on a press](decisions.md#a-re-picked-folder-sightings-at-the-pick-misses-on-a-press) | 420 |
 |  | [A catalogue's 856 links are their own table, and the only thing the export writes to 856](decisions.md#a-catalogues-856-links-are-their-own-table-and-the-only-thing-the-export-writes-to-856) | 403 |

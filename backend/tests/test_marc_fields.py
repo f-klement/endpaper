@@ -433,6 +433,23 @@ class TestTheAuthorsAuthorityIdentifier:
         for row in fields.author_identifiers():
             assert row.name in credited
 
+    def test_a_main_entry_blank_once_flipped_asserts_no_identifier(self):
+        """`flip_catalogue_name(", 1901-1990")` is the empty string, and the
+        filing property above cannot see it: `"" in credited` is always true."""
+        fields = self._fields(
+            '<datafield tag="100" ind1="1" ind2=" ">'
+            '<subfield code="0">(DE-588)9999</subfield>'
+            '<subfield code="a">, 1901-1990</subfield></datafield>',
+            '<datafield tag="700" ind1="1" ind2=" ">'
+            '<subfield code="0">(DE-588)1042243213</subfield>'
+            '<subfield code="a">Matthias, Karl</subfield>'
+            '<subfield code="4">aut</subfield></datafield>',
+        )
+
+        assert fields.author_identifiers() == [
+            AuthorityAssertion("Karl Matthias", AuthorityScheme.GND, "1042243213")
+        ]
+
     def test_one_person_named_by_both_100_and_700_is_asserted_once(self):
         fields = self._fields(
             self.MAIN,
@@ -505,6 +522,17 @@ class TestWhichAddedEntryWroteTheBook:
         )
 
         assert fields.authors() == "Elena Ferrante, Ann Goldstein"
+
+    def test_a_main_entry_blank_once_flipped_leaves_no_empty_name_in_the_credit_line(self):
+        """`flip_catalogue_name(", 1901-1990")` is the empty string, so the raw
+        `$a` is not blank and the flipped one is."""
+        fields = self._fields(
+            '<datafield tag="100" ind1="1" ind2=" ">'
+            '<subfield code="a">, 1901-1990</subfield></datafield>',
+            self._added("Goldstein, Ann", "aut"),
+        )
+
+        assert fields.authors() == "Ann Goldstein"
 
     def test_a_uri_naming_a_translator_is_still_refused(self):
         """The arm that says the URI is read for what it means rather than

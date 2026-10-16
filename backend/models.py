@@ -2171,8 +2171,8 @@ class Highlight(Base):
     **Identified at its source, never by its text.** `(user_id, source,
     source_key)` is unique, so re-running an import finds the row it wrote
     and updates it. KOReader gives an annotation no id, so its key is derived
-    from the file and the creation time: `highlights.koreader_source_key` says
-    how. A Readwise highlight carries Readwise's own id, as decimal text.
+    from the file and the creation time: `koreader_highlights.koreader_source_key`
+    says how. A Readwise highlight carries Readwise's own id, as decimal text.
 
     **Per copy**, like quotes and notes: a position is a fact about one file.
 
@@ -2264,9 +2264,10 @@ class Highlight(Base):
     #: Whether whoever can see the Book may read this highlight. False is the
     #: owner's rule for every new row. A re-import onto the same Book keeps
     #: it; one that moves the row to another Book clears it, since that Book's
-    #: readers were never chosen (`highlights.import_koreader`). Only a passage within
+    #: readers were never chosen (`highlights.write`). Only a passage within
     #: `QUOTE_TEXT_MAX` may be shared, the ceiling a passage shown to the shelf
-    #: already has: enforced at the route that shares.
+    #: already has: enforced at the route that shares, and by an import, which
+    #: makes a row it lengthens past the ceiling private (`highlights.write`).
     is_shared: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
@@ -2285,7 +2286,7 @@ class DeletedHighlight(Base):
     page**, and a sidecar or a Readwise pull still carrying the mark would
     otherwise bring it back on the next run. The row holds the identity
     `Highlight` is unique on and nothing of the passage: a KOReader key already
-    names the file by its fingerprint (`highlights.koreader_source_key`), and a
+    names the file by its fingerprint (`koreader_highlights.koreader_source_key`), and a
     Readwise key is Readwise's own id.
 
     **Not a child of `books`**: the identity does not name a Book, so a merge

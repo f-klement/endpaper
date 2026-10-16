@@ -24,6 +24,7 @@ from typing import Any, Final
 import covers
 import fetch
 import targets
+from authors import join_authors
 from categories import kept_categories
 from enums import CatalogueSource
 from isbn import parse as parse_isbn
@@ -57,7 +58,7 @@ def _mapping(value: object) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
-def _strings(value: object) -> list[str]:
+def strings(value: object) -> list[str]:
     """The strings in a JSON array, dropping everything else.
 
     **A bare string is not a list of one, and that is the arm worth having.**
@@ -66,6 +67,9 @@ def _strings(value: object) -> list[str]:
     Book with no error anywhere. Refusing the whole value is right because the
     two shapes are not a spelling apart: Google's field is documented as an
     array, so a string there is a payload this module does not understand.
+
+    Public because Open Library's search reads its arrays through it, for the
+    same reason.
     """
     if not isinstance(value, list):
         return []
@@ -92,7 +96,7 @@ def _volume_to_fields(volume: dict[str, Any]) -> dict[str, Any]:
     """
     info = _mapping(volume.get("volumeInfo"))
 
-    subjects = _strings(info.get("categories"))
+    subjects = strings(info.get("categories"))
     identifiers = info.get("industryIdentifiers")
     isbn13 = next(
         (
@@ -122,7 +126,8 @@ def _volume_to_fields(volume: dict[str, Any]) -> dict[str, Any]:
         "series_index": series_index,
         "title": info.get("title"),
         "subtitle": info.get("subtitle"),
-        "author": ", ".join(_strings(info.get("authors"))) or None,
+        # Not flipped, because Google serves display order: see `join_authors`.
+        "author": join_authors(strings(info.get("authors"))),
         "publisher": info.get("publisher"),
         "year": year,
         "description": info.get("description"),

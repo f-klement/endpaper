@@ -23,16 +23,19 @@ The separator is a comma, and that is a different decision from the one
 `categories.join_categories` made. Categories are joined with a semicolon
 *because* Google's own category names contain commas; author names contain
 commas too ("Le Guin, Ursula K."), and the field is nonetheless comma
-separated, because every writer of it says so: `marc_fields.Fields.authors`,
-`_bnf_authors` and `google_books` all join with `", "`, and every import path
-runs a name through `flip_catalogue_name` first so that a catalogue-order name
-arrives here already flipped. So a stored comma means "and", and the residue
-(a name that reached the column in catalogue order anyway, by hand or from a
-source that does not mark it) splits into two people. That residue is what
-merging exists to repair, and `flip_catalogue_name` must **not** be reused
-here: it flips on exactly one comma, which is also what "Terry Pratchett, Neil
-Gaiman" has, so applying it to a stored credit line would mangle every
-two-author book on the shelf.
+separated. Names are joined into it by `join_authors` and read out of it by
+`split_authors`. **A name served in catalogue order is flipped on its own,
+before the join**: a source hands its names to `bibliographic.credit_line`,
+which does both, or flips them itself where it has a reason to, as
+`marc_fields` does to drop a person a `100` and a `700` both name. A source
+serving display order (Google Books, the Open Library search) is joined as
+served, because the flip would turn `John Smith, M.D.` into `M.D. John Smith`.
+So a stored comma means "and", and the residue (a name that reached the
+column in catalogue order anyway, by hand or from a source that does not mark
+it) splits into two people. That residue is what merging exists to repair,
+and `flip_catalogue_name` must **not** be reused here: it flips on exactly one
+comma, which is also what "Terry Pratchett, Neil Gaiman" has, so applying it to
+a stored credit line would mangle every two-author book on the shelf.
 """
 
 from __future__ import annotations
@@ -175,15 +178,15 @@ class _Budget:
 #: Schuster" is a name, and there is no way to tell it from a join without
 #: guessing, which is the class of guess that produces two authors nobody can
 #: find. A library that writes "A & B" gets one author and can merge it.
-_SEPARATOR = ","
+NAME_SEPARATOR = ","
 
-#: What every writer of `books.author` puts between two names.
+#: What `join_authors` puts between two names.
 #:
 #: The comma `split_authors` splits on, and the space a reader expects after it.
 #: `lib/bookBounds.AUTHOR_SEPARATOR` is the browser's copy, and
 #: `schemas.book.BookCreate` refuses a body whose `author` is not its `authors`
 #: joined with this, so the two have to agree.
-CREDIT_SEPARATOR = _SEPARATOR + " "
+CREDIT_SEPARATOR = NAME_SEPARATOR + " "
 
 _PUNCTUATION = re.compile(r"[^\w\s]", flags=re.UNICODE)
 _WHITESPACE = re.compile(r"\s+")
@@ -204,7 +207,7 @@ def split_authors(credit: str | None) -> list[str]:
         return []
     names: list[str] = []
     seen: set[str] = set()
-    for part in credit.split(_SEPARATOR):
+    for part in credit.split(NAME_SEPARATOR):
         name = _WHITESPACE.sub(" ", part).strip()
         if not name:
             continue
@@ -214,6 +217,49 @@ def split_authors(credit: str | None) -> list[str]:
         seen.add(key)
         names.append(name)
     return names
+
+
+def _at_an_edge(character: str) -> bool:
+    return character.isspace() or character == NAME_SEPARATOR
+
+
+def credited_name(name: str) -> str:
+    """One name as the credit line stores it, empty where nothing is left.
+
+    **Whitespace and `NAME_SEPARATOR` come off both ends**, because a separator
+    at a name's end is an empty segment once joined: `",,Jane"` beside `"Ann
+    Goldstein"` stored `",,Jane, Ann Goldstein"`. A separator inside a name is
+    left where it is: that is the residue `split_authors` reads as two people
+    and merging repairs, and removing it here would write a name nobody wrote.
+
+    A loop over the two ends rather than a pattern, so the cost is the length
+    of what comes off: a pattern anchored at the end is tried from every
+    position of a run of spaces inside a name, and is quadratic in that run.
+    """
+    start, end = 0, len(name)
+    while start < end and _at_an_edge(name[start]):
+        start += 1
+    while end > start and _at_an_edge(name[end - 1]):
+        end -= 1
+    return name[start:end]
+
+
+def join_authors(names: Iterable[str]) -> str | None:
+    """Names already in display order, as the credit line `books.author` holds.
+
+    Each name is trimmed by `credited_name` and a blank one dropped, because
+    `", Jane Doe"` is a credit nobody wrote. `None` when nothing is left, which
+    is what a book with nobody credited stores.
+
+    **Nothing is flipped here.** A name in catalogue order arrives flipped
+    already, one name at a time, by `bibliographic.credit_line` or by
+    `marc_fields`; flipping a display order name is wrong where it has a suffix
+    the flip does not know.
+
+    Repeats are kept, because dropping them is `split_authors`' rule on the way
+    out rather than a rule of the stored form.
+    """
+    return CREDIT_SEPARATOR.join(kept for name in names if (kept := credited_name(name))) or None
 
 
 def author_key(name: str) -> str:

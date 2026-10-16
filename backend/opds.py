@@ -123,7 +123,7 @@ import fetch
 import isbn as isbn_module
 import metadata
 import xml_parse
-from bibliographic import flip_catalogue_name
+from bibliographic import credit_line
 from catalogue import Record
 from credentials import Credential, origin_of
 from deadline import in_, left
@@ -310,28 +310,14 @@ def _text(node: ElementTree.Element | None) -> str | None:
 
 
 def _authors(entry: ElementTree.Element) -> str | None:
-    """Every credited author, joined the way this application stores a credit list.
+    """Every credited author, as the credit line `books.author` holds.
 
-    **Joined with a comma because that is what `books.author` is**, which
-    `authors.py` states in full and is the rule every writer of that column
-    follows. Atom gives each author its own `<author><name>` element, so the
-    join happens here or it happens at three call sites.
-
-    **Each name is flipped before the join, never after.** A feed is free to
-    serve `Herbert, Frank` in catalogue order, and `flip_catalogue_name` turns
-    exactly one comma around, so a single `<name>` is the only place it is
-    legal to apply: over a joined credit line it would mangle every two author
-    book, which is why `authors.py` forbids that. Without the flip this was the
-    one import path leaving a catalogue order name in the column, and a bare
-    surname is what the credit then folds to, so `Herbert, Frank` and
-    `Herbert, James` became one author.
-
-    An `<author>` with no usable `<name>` is dropped rather than contributing an
-    empty segment, because `", , Jane Doe"` is a credit list nobody wrote.
-    **The flipped value is what gets tested for emptiness, not the raw one**:
-    `flip_catalogue_name(",")` is the empty string, so a `<name>` of `","` is
-    blank only after the flip, and filtering before it would let that segment
-    through.
+    **Through `bibliographic.credit_line`, which flips each name before the
+    join.** A feed is free to serve `Herbert, Frank` in catalogue order. Without
+    the flip this was the one import path leaving a catalogue order name in the
+    column, and a bare surname is what the credit then folds to, so `Herbert,
+    Frank` and `Herbert, James` became one author. An `<author>` with no usable
+    `<name>` contributes nothing, by that function's blank rule.
 
     **Each name is capped before the flip, not only after.** `_text` reads a
     feed and caps nothing, so one `<name>` can carry a whole page: measured, a
@@ -340,13 +326,11 @@ def _authors(entry: ElementTree.Element) -> str | None:
     `AUTHOR_LINE_MAX` anyway, so slicing here changes no value a credit line
     under that ceiling would have had, and removes the term entirely.
     """
-    names = [
-        flipped
+    return credit_line(
+        raw[:AUTHOR_LINE_MAX]
         for author in entry.findall(f"{ATOM}author")
         if (raw := _text(author.find(f"{ATOM}name")))
-        if (flipped := flip_catalogue_name(raw[:AUTHOR_LINE_MAX]))
-    ]
-    return ", ".join(names) or None
+    )
 
 
 def _is_held(entry: ElementTree.Element) -> bool:

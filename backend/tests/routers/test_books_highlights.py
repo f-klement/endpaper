@@ -300,6 +300,80 @@ class TestOnlyTheAuthorShares:
         assert res.status_code == 409
         assert res.json()["detail"]["code"] == "too_long_to_share"
 
+    def test_a_share_racing_an_import_that_moved_it_leaves_it_private(
+        self, client, member, make_book, db
+    ):
+        """The share reads the row on this book, and an import moving it to
+        another commits before the share writes: the share answers as though
+        the row were not here, and the new book's readers never see it."""
+        from sqlalchemy import event
+
+        from database import SessionLocal
+
+        book = make_book(member["headers"])
+        elsewhere = make_book(member["headers"], title="Emma")["id"]
+        holding(client, member["headers"], book["id"])
+        send(client, member["headers"], book["id"])
+        [highlight] = listed(client, member["headers"], book["id"])
+        moved: list[int] = []
+
+        def the_import_moves_it_first(session, instance):
+            if moved or not isinstance(instance, Highlight):
+                return
+            moved.append(instance.id)
+            with SessionLocal() as other:
+                other.query(Highlight).filter(Highlight.id == instance.id).update(
+                    {"book_id": elsewhere, "is_shared": False}
+                )
+                other.commit()
+
+        event.listen(SessionLocal, "loaded_as_persistent", the_import_moves_it_first)
+        try:
+            res = share(client, member["headers"], book["id"], highlight["id"])
+        finally:
+            event.remove(SessionLocal, "loaded_as_persistent", the_import_moves_it_first)
+
+        assert moved == [highlight["id"]]
+        assert res.status_code == 404
+        assert db.query(Highlight.book_id, Highlight.is_shared).one() == (elsewhere, False)
+
+    def test_a_share_racing_an_import_that_lengthened_it_past_a_quote_stays_private(
+        self, client, member, make_book, db
+    ):
+        """The share reads a short passage, and an import lengthening it past
+        the quote ceiling commits before the share writes: the ceiling is
+        judged on the passage written, not the one read."""
+        from sqlalchemy import event
+
+        from database import SessionLocal
+
+        book = make_book(member["headers"])
+        holding(client, member["headers"], book["id"])
+        send(client, member["headers"], book["id"])
+        [highlight] = listed(client, member["headers"], book["id"])
+        longer = "x" * (QUOTE_TEXT_MAX + 1)
+        lengthened: list[int] = []
+
+        def the_import_lengthens_it_first(session, instance):
+            if lengthened or not isinstance(instance, Highlight):
+                return
+            lengthened.append(instance.id)
+            with SessionLocal() as other:
+                other.query(Highlight).filter(Highlight.id == instance.id).update(
+                    {"text": longer}
+                )
+                other.commit()
+
+        event.listen(SessionLocal, "loaded_as_persistent", the_import_lengthens_it_first)
+        try:
+            res = share(client, member["headers"], book["id"], highlight["id"])
+        finally:
+            event.remove(SessionLocal, "loaded_as_persistent", the_import_lengthens_it_first)
+
+        assert lengthened == [highlight["id"]]
+        assert res.status_code == 409
+        assert db.query(Highlight.is_shared).scalar() is False
+
 
 class TestNoAdminArm:
     def test_an_admin_does_not_read_a_private_highlight(

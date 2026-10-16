@@ -79,6 +79,7 @@ import {
 } from "./types";
 import {
   askWhoHolds,
+  FILES_PER_LOOKUP,
   locate,
   reportEach,
   reportHeld,
@@ -1281,21 +1282,19 @@ export interface UseKoreaderHighlightImportResult {
   choose: (files: readonly File[]) => void;
 }
 
-/** `MAX_FILES_PER_LOOKUP` on the server: how many digests one lookup names. */
-const DIGESTS_PER_LOOKUP = 500;
 /** `MAX_HIGHLIGHTS_PER_IMPORT` on the server: how many marks one request carries. */
-const HIGHLIGHTS_PER_REQUEST = 5000;
+export const HIGHLIGHTS_PER_REQUEST = 5000;
 
 /**
  * Which visible Books hold each digest, or undefined for a digest whose
- * lookup failed. One lookup per `DIGESTS_PER_LOOKUP`, never one per file.
+ * lookup failed. One lookup per `FILES_PER_LOOKUP`, never one per file.
  */
 async function holdersOf(
   digests: readonly string[],
 ): Promise<Map<string, ReadonlySet<number> | undefined>> {
   const chunks: string[][] = [];
-  for (let start = 0; start < digests.length; start += DIGESTS_PER_LOOKUP)
-    chunks.push(digests.slice(start, start + DIGESTS_PER_LOOKUP));
+  for (let start = 0; start < digests.length; start += FILES_PER_LOOKUP)
+    chunks.push(digests.slice(start, start + FILES_PER_LOOKUP));
   const answered = await Promise.all(
     chunks.map((chunk) =>
       findFileHolders({
@@ -1345,7 +1344,7 @@ function asRequested(mark: SidecarHighlight): KoreaderHighlightIn {
  * the byte bound, since every field of it is bounded.
  *
  * **Marks made in the same second travel together.** The server tells a pair
- * apart only when both are in one request (`highlights.keyed`); split, each
+ * apart only when both are in one request (`koreader_highlights.keyed`); split, each
  * would be keyed on the time alone and one would overwrite the other. A
  * second's marks are a handful, far under either bound, so a group is only
  * ever moved whole to the next request, never split.

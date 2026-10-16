@@ -89,11 +89,10 @@
  *   clock time, and a timezone spelled out as a name. Localised prose, and a
  *   timezone written as a name in the account's language is not a timestamp. A
  *   wrong parse dates a member's own note wrongly, so nothing here parses it.
- * - **The words of an annotation.** The passage a highlight marks is the book's
- *   text, which this app takes no custody of, and the member's note beside it
- *   is their own words with nowhere yet to go: `kobo.ts` refuses a read status
- *   for the same reason, that whether an import writes one is a decision about
- *   the import flow. Both are counted and neither is carried out of the parse.
+ * - **The words of an annotation.** Whether a Takeout import writes a member's
+ *   highlights and notes is a decision about the import flow, the reason
+ *   `kobo.ts` refuses a read status. Both are counted and neither is carried
+ *   out of the parse.
  *   Measured: 15 annotations over 8 books, every one of them a highlight with
  *   an empty note.
  */

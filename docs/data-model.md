@@ -962,11 +962,11 @@ no author row to point at.
 
 **Splitting is on the comma, and that is not the rule `categories` uses.** Categories are
 semicolon joined because Google's category names contain commas; author names contain commas
-too, and this field is comma separated anyway, because every writer of it joins with `", "`
-and every importer runs a single name through `flip_catalogue_name` first. The residue is a
-name that reached the column in catalogue order regardless ("Le Guin, Ursula K."), which
-splits into two people; repairing that is what merging is for, and the `fragment` suggestion
-rule is aimed at it.
+too, and this field is comma separated anyway. `authors.join_authors` joins names with `", "`,
+and a source serving them in catalogue order has each one flipped by `flip_catalogue_name`
+before the join. The residue is a name that reached the column in catalogue order regardless
+("Le Guin, Ursula K."), which splits into two people; repairing that is what merging is for,
+and the `fragment` suggestion rule is aimed at it.
 
 **The privacy rule reaches all of it, and it is on the shelf rather than on the mapping.**
 The index is built from one query that applies `visible_to`, so a private book cannot put a

@@ -40,6 +40,7 @@ from csv_import import (
 )
 from enums import BookFormat, ReadStatus
 from import_readers import ImportReader
+from models import AUTHOR_LINE_MAX
 
 GOODREADS = b'''Book Id,Title,Author,Author l-f,ISBN,ISBN13,My Rating,Publisher,Binding,\
 Number of Pages,Year Published,Date Read,Bookshelves,Exclusive Shelf,My Review
@@ -681,6 +682,48 @@ class TestEndpapersOwnExportRoundTrips:
         whatever `Collection` would have done.
         """
         assert _build_mapping(["Title", "Collection"])["status"] is None
+
+
+class TestAnAuthorCellIsSplitOnlyWhereItsColumnIsKnownDisplayOrder:
+    def test_a_csv_authors_cell_naming_two_people_stores_two_people(self):
+        """Flipped whole on its one comma, this stored `Neil Gaiman Terry
+        Pratchett`, which is one person nobody is."""
+        [row] = parse(b'Title,Author\nGood Omens,"Terry Pratchett, Neil Gaiman"\n').rows
+        assert row.author == "Terry Pratchett, Neil Gaiman"
+
+    def test_a_display_order_cell_credits_no_life_span_or_role_word(self):
+        """The whole cell flip took these off; split on its commas, the cell
+        credited `1892-1973` as a person."""
+        cell = b'"Stanislaw Lem (1921-2006). Auteur du texte, J. R. R. Tolkien, 1892-1973"'
+        [row] = parse(b"Title,Author\nT," + cell + b"\n").rows
+        assert row.author == "Stanislaw Lem, J. R. R. Tolkien"
+
+    def test_an_author_cell_that_joins_wider_than_the_column_is_stored_within_it(self):
+        """At the edge: a 500 character cell whose one bare comma becomes the
+        separator's comma and space, so the two names join to one character
+        past the column, and the second does not fit."""
+        first = "a" * (AUTHOR_LINE_MAX // 2)
+        cell = first + "," + "b" * (AUTHOR_LINE_MAX - len(first) - 1)
+        [row] = parse(b'Title,Author\nT,"' + cell.encode() + b'"\n').rows
+        assert row.author == first
+
+    def test_an_author_column_no_export_has_shown_is_flipped_whole_as_before(self):
+        """A column not known to be display order may be surname first, and
+        split on its comma `Herbert, Frank` was two people."""
+        [row] = parse(
+            b'Title,Second Author\nDune,"Herbert, Frank"\n', {"author": "Second Author"}
+        ).rows
+        assert row.author == "Frank Herbert"
+
+    def test_a_surname_first_cell_with_a_separator_at_its_edge_leaves_no_empty_name(self):
+        [row] = parse(b'Title,Primary Author\nT,",,Jane"\n').rows
+        assert row.author == "Jane"
+
+    def test_a_surname_first_column_chosen_by_hand_is_still_flipped(self):
+        """Goodreads' `Author l-f` is guessed by nothing, so it is only ever
+        read because a member picked it."""
+        [row] = parse(GOODREADS, {"author": "Author l-f"}).rows
+        assert row.author == "Frank Herbert"
 
 
 class TestOpenLibraryReadingLog:

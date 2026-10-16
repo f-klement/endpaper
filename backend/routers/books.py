@@ -41,6 +41,7 @@ import google_books
 import highlights
 import identity
 import isbn as isbn_utils
+import koreader_highlights
 import lending
 import marc
 import metadata
@@ -5669,7 +5670,7 @@ def import_koreader_highlights(
         raise _conflict(
             NOT_HELD, "This book holds no file with that KOReader fingerprint."
         )
-    counts = highlights.import_koreader(
+    counts = koreader_highlights.import_koreader(
         db, book, current_user.id, payload.partial_md5, payload.highlights
     )
     return HighlightImportOut(
@@ -5746,12 +5747,17 @@ def set_highlight_sharing(
     Withdrawing is never refused.
     """
     highlight = _highlight_for_sharing(highlight_id, book, current_user, db)
-    if payload.is_shared and len(highlight.text) > QUOTE_TEXT_MAX:
+    shared = highlights.share(db, current_user.id, highlight.id, book.id, payload.is_shared)
+    if shared is None:
+        raise HTTPException(status_code=404, detail="Highlight not found")
+    # Judged on the passage the write shared, not the one read above, which
+    # an import may have lengthened since.
+    if payload.is_shared and len(shared) > QUOTE_TEXT_MAX:
+        db.rollback()
         raise _conflict(
             TOO_LONG_TO_SHARE,
             f"A highlight longer than {QUOTE_TEXT_MAX} characters stays private.",
         )
-    highlight.is_shared = payload.is_shared
     db.commit()
     db.refresh(highlight)
     return highlight

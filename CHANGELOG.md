@@ -2,6 +2,38 @@
 
 ## Unreleased
 
+- **A Readwise pull that races a highlight being deleted by hand now finishes and leaves the highlight deleted,** rather than failing.
+
+- **A Readwise page listing one highlight under two books no longer fails the pull.** The
+  highlight goes to the book that already holds it; where neither does, it is skipped and
+  counted.
+
+- **A highlight an import moves to another book stays private,** even when somebody shares it
+  at that moment. A share that raced the move used to publish it on the new book.
+
+- **An import that lengthens a shared highlight past the quote limit makes it private,** as a
+  share of a passage that long is already refused.
+
+- **A looked up book no longer stores an author line starting with a stray comma.** A MARC,
+  BnF or Library of Congress record whose name field held only life dates, such as
+  `, 1901-1990`, beside a real author stored `, Jane Doe`; it now stores `Jane Doe`. A Google
+  Books or Open Library result with an empty or blank author entry is read the same way, and
+  each name from those two is trimmed. A name a source sends with a comma at either end loses
+  it, so it no longer leaves an empty name beside the next one. Lines already stored are
+  unchanged.
+
+- **A CSV import keeps a book's several authors apart.** An author cell naming two people,
+  such as `Terry Pratchett, Neil Gaiman` in this app's own export, was read as one person
+  called `Neil Gaiman Terry Pratchett`. The author columns of the exports known to write names
+  in display order (Goodreads, StoryGraph, Open Library, BookWyrm, Libib, Openreads and this
+  app's own) are now split into names, each losing its life dates and role words; any other
+  author column is turned around as before.
+
+- **An Open Library search result whose author arrives as one string rather than a list** no
+  longer stores the name letter by letter (`F, r, a, n, k`); it credits nobody, as a Google
+  Books result sent the same way already did. A publisher, language or ISBN of the wrong type
+  no longer fails the whole search.
+
 - **A Calibre record with no file and no ISBN is recognised when the library is imported again.**
   Both Calibre doors, the Settings import and a library folder picked on the scan page, now read
   each record's `books.uuid` and send it as a `calibre_uuid` identifier. An add carrying one answers
