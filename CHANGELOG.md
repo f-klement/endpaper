@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+## v0.19.0
+
+_2026-10-17_
+
+Imports, the Scan page and the Calibre stack, with the rest of the refactor epic. What a
+member sees: a Calibre library brings where its files are and is recognised when imported again,
+KOReader and Readwise highlights come in, a book's page shows where its files are, and an import
+no longer deletes for good a book another member put in the trash. A book is refused as a
+duplicate by its Google Books volume id or its ASIN, and an import that races a merge or
+deadlocks asks to be sent again rather than failing with a server error. What an operator sees:
+the upgrade's migrations store blank text fields as no value and, on SQLite, rebuild the books
+table so a deleted book's id is never reused. For an API client, `POST /api/books/bulk` answers
+400 rather than 404 for a bad tag id in the body, and `POST /api/books/{id}/enrich` no longer
+sets categories, series or the Google Books reference.
+
 - **Importing or scanning a book that another member added and that is now in the trash no
   longer deletes it for good**; the add is refused instead. The Settings imports list the book
   as in the trash, and the Scan page says it is in the trash and how to add it again, with a link
