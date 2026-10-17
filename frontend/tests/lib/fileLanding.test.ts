@@ -160,6 +160,18 @@ describe("landing one book", () => {
     expect(stubs.report).not.toHaveBeenCalled();
   });
 
+  it("answers in the trash rather than a tie for the add door's trash refusal", async () => {
+    // It names no Book either, and a tie's sentence would tell the member it
+    // is already in the catalogue when it is in their trash view.
+    const inTrash = new ApiError("in the trash", 409, undefined, "in_trash");
+    const stubs = ports(() => Promise.reject(inTrash));
+
+    const landing = await land(request(null), stubs);
+
+    expect(landing).toEqual({ kind: "in-trash", thrown: inTrash });
+    expect(stubs.report).not.toHaveBeenCalled();
+  });
+
   it("leaves a file whose location only a print copy holds there, and records the book's other files", async () => {
     // A reference left on a print row before the landing rule: sent to the
     // ebook holding the same bytes, the server refuses it on every add, and it

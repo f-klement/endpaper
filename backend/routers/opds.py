@@ -27,7 +27,7 @@ import opds
 import settings_store
 from auth import require_admin
 from dependencies import CurrentUser, DbSession, RowId
-from errors import a_deadlock_answers_409
+from errors import a_lost_race_answers_409
 from importing import OpdsImport
 from models import OpdsServer, User
 from ratelimit import import_limiter
@@ -363,7 +363,7 @@ async def sync_server(
 
     # The same one transaction as a file import, and the same deadlock with a
     # merge through its gap fills: `routers/imports.py::import_marc` says why 409.
-    with a_deadlock_answers_409(db, _MET_ANOTHER_CHANGE):
+    with a_lost_race_answers_409(db, _MET_ANOTHER_CHANGE):
         applied = await anyio.to_thread.run_sync(
             lambda: OpdsImport.for_member(db, current_user.id).apply(
                 found.records, create_missing=create_missing

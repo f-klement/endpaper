@@ -1055,8 +1055,9 @@ class TestWhatIsOnDisk:
         assert len(seen) == 1
 
     def test_forgetting_removes_every_format(self, covers_dir):
-        """SQLite reuses an id once the highest row goes, so a leftover file is
-        the next book's cover."""
+        """Where SQLite can still issue an id again (one freed before revision
+        0850786d1753, or on a downgraded database), a leftover file is the next
+        book's cover."""
         (covers_dir / "7.jpg").write_bytes(JPEG_BYTES)
         (covers_dir / "7.png").write_bytes(PNG_BYTES)
 

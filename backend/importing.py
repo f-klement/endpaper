@@ -47,12 +47,14 @@ route.
 """
 
 import logging
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, time
 from typing import Any, Final, NewType
 
 import annotated_types
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 import book_columns
@@ -64,10 +66,12 @@ import tags
 from catalogue import Link, Record
 from database import hold_book_ceilings
 from enums import OwnershipStatus, ReadStatus
+from errors import MetAnotherChange
 from models import MAX_ONLINE_LINKS_PER_BOOK, Book, Note, OnlineLink
 from reading import Reading, Records
 from schemas import ImportResultOut
 from schemas.book import BookCreate, admits_a_container
+from shelf import Shelf
 
 logger = logging.getLogger("endpaper.importing")
 
@@ -159,6 +163,10 @@ def _settle_one(
     | `InTrash` | listed in the trash, nothing written | the same |
     | `Hidden` | counted, never named | listed unmatched |
 
+    A `Seen` Book's id is recorded before it is loaded, so that a Book deleted
+    since the index was read is found by `_a_vanished_match_met_another_change`
+    wherever the import then fails on it, this load included.
+
     **`Hidden` is listed without `create_missing`, and that is not a leak.**
     The refusal is about the create: with nothing to create, the title came off
     the caller's own file and is listed exactly as an `Unknown` row is, so the
@@ -170,8 +178,9 @@ def _settle_one(
     public Books too, and a bulk import that purged would destroy one. It holds
     for the CSV, OPDS and MARC importers only. The Calibre library and store
     imports run in the browser and post each Book to the add door, which
-    purges every holder in the trash view and creates. Its title is listed
-    because the Member can already see that Book in their trash.
+    purges the trashed holders and creates only when the caller added every
+    one, and otherwise answers 409 `in_trash`, as this listing does. Its title
+    is listed because the Member can already see that Book in their trash.
 
     What stays with each importer, because each difference has a reason:
 
@@ -186,6 +195,12 @@ def _settle_one(
     """
     match answer:
         case recognition.Seen(book_id=book_id):
+            # Before the load, because the load is the first place a Book
+            # deleted since the index was read can fail. Not re-resolved under
+            # a lock here: that is a statement and a lock on every matched row
+            # of every import (`docs/decisions.md`, the deadlock 409).
+            if book_id not in tally.created_ids:
+                tally.loaded.add(book_id)
             book = load(book_id)
             tally.matched += 1
             fill_gaps(book)
@@ -206,6 +221,7 @@ def _settle_one(
         case recognition.Unknown() if create_missing:
             created = create()
             tally.created += 1
+            tally.created_ids.add(created.id)
             return created
 
     if len(tally.unmatched) < MAX_UNMATCHED_REPORTED:
@@ -264,10 +280,10 @@ class Import:
             self._db, self._member_id, budget=tags.MAX_NEW_TAGS_PER_IMPORT
         )
 
-        for row in parsed.rows:
-            self._apply_one(row, index, tally, naming, create_missing, apply_tags)
-
-        self._db.commit()
+        with _a_vanished_match_met_another_change(self._db, self._member_id, tally):
+            for row in parsed.rows:
+                self._apply_one(row, index, tally, naming, create_missing, apply_tags)
+            self._db.commit()
 
         return ImportResultOut(
             rows_read=len(parsed.rows),
@@ -544,6 +560,67 @@ class _Tally:
     in_trash_titles: list[str] = field(default_factory=list)
     #: Capped the same way, at the same ceiling.
     ambiguous_titles: list[str] = field(default_factory=list)
+    #: Every `Seen` Book a row loaded. **Only those**: the index also holds
+    #: Books this Member cannot see, and checking whether one of them still
+    #: exists would answer, as 409 against 500, whether it was deleted.
+    loaded: set[int] = field(default_factory=set)
+    #: Every Book this run created. A later row naming one matches it, and it
+    #: is kept out of `loaded`: a failure's rollback deletes it, so the check
+    #: would find it gone and answer 409 to a failure every resend meets again.
+    created_ids: set[int] = field(default_factory=set)
+
+
+#: What an import raises on a matched Book that another transaction deleted
+#: after the index was read, by where it meets the gone row: the load, or the
+#: refresh after `hold_book_ceilings` in the MARC tail, raises
+#: `InvalidRequestError`; a gap fill's UPDATE at the flush raises
+#: `StaleDataError`; a child row's INSERT raises a foreign key violation.
+#: **Every `SQLAlchemyError` rather than those three**, because the last one's
+#: type is the driver's choice: pg8000 raises `IntegrityError` for 23505 alone
+#: and `ProgrammingError` for 23503, so a list naming `IntegrityError` let the
+#: violation through as a 500. **Never `Exception`**: a privacy refusal in
+#: `shelf.py` is a `ValueError` or a `TypeError`, which a resend raises again.
+_MEETING_A_GONE_ROW: Final = SQLAlchemyError
+
+
+@contextmanager
+def _a_vanished_match_met_another_change(
+    db: Session, member_id: int, tally: _Tally
+) -> Iterator[None]:
+    """Raise `errors.MetAnotherChange` where the import failed on a matched
+    Book that is gone, and anything else unchanged.
+
+    **Around the row loop and the commit together.** The session does not
+    autoflush, so a default CSV import writes nothing until its commit, and a
+    Book deleted after its row was loaded fails there rather than in the loop.
+
+    **Decided by whether a loaded Book is gone, not by the exception**: an
+    unrelated failure raises the same types, a deadlock among them, and is
+    raised unchanged unless a loaded Book is gone. The check is one SELECT,
+    after the rollback, and only on the failure path: an import that meets no
+    race issues nothing more. A loaded Book that has since become invisible
+    reads as gone, and the resend then sees it as `Hidden`.
+
+    An unrelated failure in the same import as a vanished match answers 409,
+    and the resend, whose index no longer names the gone Book, meets it as a
+    500 unless a Book it loaded vanishes too. A Book the import created is
+    never checked (`_Tally.created_ids`), so it cannot make that 500 a 409.
+    """
+    try:
+        yield
+    except _MEETING_A_GONE_ROW as error:
+        # First: on Postgres the failure aborted the transaction, so nothing
+        # can be read in it, and the import commits nowhere else.
+        db.rollback()
+        if tally.loaded and _any_gone(db, member_id, tally.loaded):
+            raise MetAnotherChange from error
+        raise
+
+
+def _any_gone(db: Session, member_id: int, book_ids: set[int]) -> bool:
+    """Whether any of these Books is no longer on this Member's shelf."""
+    present = Shelf.seen_by(db, member_id).where(Book.id.in_(book_ids)).count()
+    return present < len(book_ids)
 
 
 def _fill_gaps(book: Book, row: csv_import.ImportRow) -> None:
@@ -903,10 +980,10 @@ class MarcImport:
         )
         tally = _Tally()
 
-        for record, links in parsed.entries():
-            self._apply_one(record, index, tally, create_missing, links)
-
-        self._db.commit()
+        with _a_vanished_match_met_another_change(self._db, self._member_id, tally):
+            for record, links in parsed.entries():
+                self._apply_one(record, index, tally, create_missing, links)
+            self._db.commit()
 
         return ImportResultOut(
             rows_read=len(parsed.records),
@@ -1160,10 +1237,10 @@ class OpdsImport:
         )
         tally = _Tally()
 
-        for record in records:
-            self._apply_one(record, index, tally, create_missing)
-
-        self._db.commit()
+        with _a_vanished_match_met_another_change(self._db, self._member_id, tally):
+            for record in records:
+                self._apply_one(record, index, tally, create_missing)
+            self._db.commit()
 
         return ImportResultOut(
             rows_read=len(records),

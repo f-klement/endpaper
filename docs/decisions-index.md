@@ -26,7 +26,7 @@ repeat the argument.
 <!-- index: begin -->
 | Section | Entry | Words |
 |---|---|---|
-|  | [Backend](decisions.md#backend) | 33,585 |
+|  | [Backend](decisions.md#backend) | 34,246 |
 | Backend | [`bcrypt` directly, not `passlib`](decisions.md#bcrypt-directly-not-passlib) | 98 |
 | Backend | [Settings are functions, not module constants](decisions.md#settings-are-functions-not-module-constants) | 59 |
 | Backend | [`DATA_DIR` exists at all](decisions.md#data_dir-exists-at-all) | 22 |
@@ -43,7 +43,7 @@ repeat the argument.
 | Backend | [The health probe touches the database, and that was not enough](decisions.md#the-health-probe-touches-the-database-and-that-was-not-enough) | 590 |
 | Backend | [The covers that "stopped appearing" were a service worker cache, not the server](decisions.md#the-covers-that-stopped-appearing-were-a-service-worker-cache-not-the-server) | 548 |
 | Backend | [A cover is stored here, not hotlinked](decisions.md#a-cover-is-stored-here-not-hotlinked) | 317 |
-| Backend | [The cover bytes are files on the volume, not a column](decisions.md#the-cover-bytes-are-files-on-the-volume-not-a-column) | 401 |
+| Backend | [The cover bytes are files on the volume, not a column](decisions.md#the-cover-bytes-are-files-on-the-volume-not-a-column) | 420 |
 | Backend | [The cover backfill is every member's own, not the admin's](decisions.md#the-cover-backfill-is-every-members-own-not-the-admins) | 682 |
 | Backend | [The CSV import does not fetch covers inline](decisions.md#the-csv-import-does-not-fetch-covers-inline) | 75 |
 | Backend | [The server checks which host it may fetch a cover from](decisions.md#the-server-checks-which-host-it-may-fetch-a-cover-from) | 218 |
@@ -56,6 +56,7 @@ repeat the argument.
 | Backend | [A unique *index*, not a unique constraint, on `user_books`](decisions.md#a-unique-index-not-a-unique-constraint-on-user_books) | 35 |
 | Backend | [`generate_unique_id_function`](decisions.md#generate_unique_id_function) | 80 |
 | Backend | [Alembic, adopted rather than more hand-written ALTERs](decisions.md#alembic-adopted-rather-than-more-hand-written-alters) | 46 |
+| Backend | [`books.id` is `AUTOINCREMENT` on SQLite, because a deleted Book's id was reachable mid import](decisions.md#booksid-is-autoincrement-on-sqlite-because-a-deleted-books-id-was-reachable-mid-import) | 609 |
 | Backend | [Ownership is a separate axis from read status](decisions.md#ownership-is-a-separate-axis-from-read-status) | 66 |
 | Backend | [Lending willingness is a third axis, and it is on the book](decisions.md#lending-willingness-is-a-third-axis-and-it-is-on-the-book) | 178 |
 | Backend | [A book marked never lent is refused once, not forbidden](decisions.md#a-book-marked-never-lent-is-refused-once-not-forbidden) | 249 |
@@ -142,7 +143,7 @@ repeat the argument.
 | Backend | [`unrated` names its correlation explicitly](decisions.md#unrated-names-its-correlation-explicitly) | 43 |
 | Backend | [Python 3.14 is a hard requirement, and PEP 649 is why](decisions.md#python-314-is-a-hard-requirement-and-pep-649-is-why) | 34 |
 | Backend | [The test suites were slow for reasons nobody had measured](decisions.md#the-test-suites-were-slow-for-reasons-nobody-had-measured) | 451 |
-| Backend | [The per-test reset deletes rows, and two faster designs were refused](decisions.md#the-per-test-reset-deletes-rows-and-two-faster-designs-were-refused) | 450 |
+| Backend | [The per-test reset deletes rows, and two faster designs were refused](decisions.md#the-per-test-reset-deletes-rows-and-two-faster-designs-were-refused) | 468 |
 | Backend | [The per test ceiling is derived from the tree, not chosen from a distribution](decisions.md#the-per-test-ceiling-is-derived-from-the-tree-not-chosen-from-a-distribution) | 274 |
 | Backend | [A verdict is a claim about a denominator, and the layer everyone reads had none](decisions.md#a-verdict-is-a-claim-about-a-denominator-and-the-layer-everyone-reads-had-none) | 502 |
 | Backend | [The remote test runner was reporting on a tree nobody had](decisions.md#the-remote-test-runner-was-reporting-on-a-tree-nobody-had) | 167 |
@@ -913,17 +914,20 @@ repeat the argument.
 |  | [A look at a file fills what is missing and never replaces a different fingerprint](decisions.md#a-look-at-a-file-fills-what-is-missing-and-never-replaces-a-different-fingerprint) | 199 |
 |  | [A location belongs to one Book among those a member can see](decisions.md#a-location-belongs-to-one-book-among-those-a-member-can-see) | 258 |
 |  | [The ceiling's 409 carries a code too](decisions.md#the-ceilings-409-carries-a-code-too) | 291 |
-|  | [A merge holds the keeper's ceilings](decisions.md#a-merge-holds-the-keepers-ceilings) | 1,033 |
+|  | [A merge holds the keeper's ceilings](decisions.md#a-merge-holds-the-keepers-ceilings) | 1,584 |
 |  | [Which existing Book a record is has one module](decisions.md#which-existing-book-a-record-is-has-one-module) | 236 |
 |  | [A tie inside one copy group takes the lowest id; any other tie is no answer](decisions.md#a-tie-inside-one-copy-group-takes-the-lowest-id-any-other-tie-is-no-answer) | 188 |
 |  | [A tie at the add door refuses without naming a Book](decisions.md#a-tie-at-the-add-door-refuses-without-naming-a-book) | 180 |
-|  | [An import row whose ISBN only the trash view holds is listed "in the trash"](decisions.md#an-import-row-whose-isbn-only-the-trash-view-holds-is-listed-in-the-trash) | 216 |
-|  | [Hidden outranks the trash, and the disclosure that costs is accepted](decisions.md#hidden-outranks-the-trash-and-the-disclosure-that-costs-is-accepted) | 235 |
+|  | [An import row whose ISBN only the trash view holds is listed "in the trash"](decisions.md#an-import-row-whose-isbn-only-the-trash-view-holds-is-listed-in-the-trash) | 219 |
+|  | [The add door refuses another member's trashed holder, and purges only the caller's own](decisions.md#the-add-door-refuses-another-members-trashed-holder-and-purges-only-the-callers-own) | 573 |
+|  | [Hidden outranks the trash, and the disclosure that costs is accepted](decisions.md#hidden-outranks-the-trash-and-the-disclosure-that-costs-is-accepted) | 290 |
 |  | [ISBNs compare by `isbn.parse`](decisions.md#isbns-compare-by-isbnparse) | 89 |
 |  | [The add door finds an ISBN stored with hyphens or a lower case x](decisions.md#the-add-door-finds-an-isbn-stored-with-hyphens-or-a-lower-case-x) | 239 |
-|  | [An ASIN refuses an add with 409, through the shelf](decisions.md#an-asin-refuses-an-add-with-409-through-the-shelf) | 481 |
+|  | [An ASIN refuses an add with 409, through the shelf](decisions.md#an-asin-refuses-an-add-with-409-through-the-shelf) | 503 |
 |  | [An unreachable catalogue on a barcode is its own queue state](decisions.md#an-unreachable-catalogue-on-a-barcode-is-its-own-queue-state) | 222 |
-|  | [The scan queue's rules live in a pure module, whose interface is an event](decisions.md#the-scan-queues-rules-live-in-a-pure-module-whose-interface-is-an-event) | 323 |
+|  | [The scan queue's rules live in a pure module, whose interface is an event](decisions.md#the-scan-queues-rules-live-in-a-pure-module-whose-interface-is-an-event) | 320 |
+|  | [A queue row's state fields are declared absent on every arm that cannot carry them](decisions.md#a-queue-rows-state-fields-are-declared-absent-on-every-arm-that-cannot-carry-them) | 577 |
+| A queue row's state fields are declared absent on every arm that cannot carry them | [The `batch-ran` event carries row facts, by design](decisions.md#the-batch-ran-event-carries-row-facts-by-design) | 77 |
 |  | [The register writer accepts a log from another path when both trees are clean at one commit](decisions.md#the-register-writer-accepts-a-log-from-another-path-when-both-trees-are-clean-at-one-commit) | 524 |
 |  | [Landing a picked file on a Book has one home, `lib/fileLanding.ts`](decisions.md#landing-a-picked-file-on-a-book-has-one-home-libfilelandingts) | 261 |
 |  | [A file another Book holds stays there, and the book's other files are still sent](decisions.md#a-file-another-book-holds-stays-there-and-the-books-other-files-are-still-sent) | 184 |

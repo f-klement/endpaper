@@ -87,7 +87,7 @@ from enums import (
     ReadStatus,
     TagCategory,
 )
-from errors import a_deadlock_answers_409
+from errors import a_lost_race_answers_409
 from fields import Fields
 from identifiers import add_identifiers
 from lending import Loans
@@ -1741,15 +1741,20 @@ def _create_book(payload: BookCreate, current_user: User, db: Session, conflict:
             _refuse(conflict, None)
         case recognition.InTrash(book_ids=book_ids):
             # **Mis-scan, delete, re-scan is the most common delete in this
-            # app**, so a trashed holder is cleared out of the way rather than
-            # reported as "already exists" for a Book the member cannot see
-            # anywhere. Purged rather than restored: restoring would hand back
-            # the record somebody had just rejected.
+            # app**, so the caller's own trashed holder is cleared out of the
+            # way rather than reported as "already exists" for a Book they
+            # cannot see on the shelf. Purged rather than restored: restoring
+            # would hand back the record somebody had just rejected.
             #
-            # **Every holder is one this member could have purged from their
-            # own trash**, because `InTrash` is only answered when no holder is
-            # hidden: somebody else's trashed private Book answers `Hidden`
-            # and keeps its 409.
+            # **Another member's holder refuses the add instead**: the
+            # owner's ruling of 2026-10-17. The trash view holds every
+            # member's trashed public Books, so purging here let one member's
+            # import destroy a Book somebody else had trashed and could still
+            # restore. It is refused whichever client
+            # called, because the harm does not depend on which one did. "Own"
+            # is `added_by_user_id`, since nothing records who trashed a row.
+            # Somebody else's trashed private Book never reaches this arm: it
+            # answers `Hidden` and keeps its 409.
             #
             # **Every holder, not the first one.** Copies made it possible for
             # several rows to hold one ISBN, and freeing only the first was
@@ -1761,6 +1766,8 @@ def _create_book(payload: BookCreate, current_user: User, db: Session, conflict:
             # Decided in full before anything is destroyed, which the answer
             # being one value makes structural.
             holders = Shelf.trashed_by(db, current_user.id).where(Book.id.in_(book_ids)).all()
+            if any(holder.added_by_user_id != current_user.id for holder in holders):
+                _refuse_in_trash()
             freed = [_purge(holder, db) for holder in holders]
             # Flushed, not committed: this function owns the transaction and
             # commits once. Without this the DELETEs are still pending when the
@@ -1800,10 +1807,12 @@ def _create_book(payload: BookCreate, current_user: User, db: Session, conflict:
     db.commit()
     db.refresh(book)
 
-    # After the commit, and before the new book's own cover is stored. SQLite
-    # reuses the id of a deleted row, so the book just inserted may well have
-    # taken one of these: forgetting here is what stops it inheriting somebody
-    # else's cover, and doing it after `_store_cover` would delete its own.
+    # After the commit, and before the new book's own cover is stored. At head
+    # neither engine gives a deleted Book's id to a new one, so none of these is
+    # the book just inserted. The order is the backstop should `books` ever lose
+    # `AUTOINCREMENT`, when the new book can have taken one of them: forgetting
+    # here is what stops it inheriting somebody else's cover, and doing it after
+    # `_store_cover` would delete its own.
     for book_id in freed:
         cover_store.remove(book_id)
 
@@ -1845,7 +1854,10 @@ def _refuse(message: str, book_id: int | None) -> NoReturn:
     **What is withheld is the id, and nothing else is.** The two bodies are
     different shapes, a string against an object, so a string body tells the
     caller the holder is hidden from them or the record is a tie, and an object
-    body that it is one Book they can see. That is not a leak to close: the 409
+    body that it is one Book they can see. The door has a third shape, which
+    `_refuse_in_trash` raises: an object with a `code` and no `book_id`, for
+    holders the caller sees only in the trash, one of them another member's.
+    That is not a leak to close: the 409
     itself already says this
     ISBN is held by some row, whatever the body carries, and the only way to
     stop it saying so is to create the book and break the unique index. So the
@@ -1859,6 +1871,38 @@ def _refuse(message: str, book_id: int | None) -> NoReturn:
     raise HTTPException(
         status_code=status.HTTP_409_CONFLICT,
         detail=message if book_id is None else {"message": message, "book_id": book_id},
+    )
+
+
+#: The `detail.code` on the add door's 409 when only the trash view holds the
+#: ISBN and a holder is another member's. The other refusals of the door carry
+#: no code. The client's `frontend/src/lib/fileLanding.ts`, which every add door
+#: reads the refusal through, compares against this literal, and
+#: `tests/routers/test_books_trash.py` holds the two spellings equal across the
+#: trees.
+IN_TRASH: Final = "in_trash"
+
+
+def _refuse_in_trash() -> NoReturn:
+    """The 409 for an ISBN only Books in the caller's trash view hold, one of
+    them another member's.
+
+    **No `book_id`, although naming it would disclose nothing**: every holder
+    is in `Shelf.trashed_by`, which the caller already lists with its title.
+    On this door `book_id` means a Book on the caller's shelf that this record
+    already is, and both clients act on it: they land the record's files on
+    it and offer a copy of it. A trashed Book is neither, and a copy group may
+    put several in the trash at once.
+    """
+    raise HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail={
+            "code": IN_TRASH,
+            "message": (
+                "Book with this ISBN is in the trash. "
+                "Restore it, or delete it for good, and add it again."
+            ),
+        },
     )
 
 
@@ -3079,7 +3123,7 @@ def merge_books(
     # keeper and then deletes the loser, and Postgres then aborts one of the
     # two. Aborted, the merge has written nothing: every write is before this
     # commit, and the cover files move only after it.
-    with a_deadlock_answers_409(db, _MET_ANOTHER_CHANGE):
+    with a_lost_race_answers_409(db, _MET_ANOTHER_CHANGE):
         folding.fold(db, keeper, losers)
 
         # Read before the loop: `db.expire(loser)` below would make each of
@@ -4148,9 +4192,13 @@ def _purge(book: Book, db: Session) -> int:
 
     The cover is the part a soft delete leaves behind, and it is the standing
     cost of holding covers on disk rather than in the row. Files are named by
-    book id, so the next book to take that id inherits somebody else's cover,
-    and since ids are reused by SQLite after the highest row goes, that is not a
-    remote possibility. `_trash` deliberately does **not** do this: a trashed
+    book id, so the next book to take that id inherits somebody else's cover.
+    An id deleted at head is never issued again. The one id SQLite can still
+    issue once is one purged or merged away before revision 0850786d1753 that
+    was above every surviving id, trashed rows included. A database downgraded
+    below it gives an insert `max(rowid) + 1` again, which hands out a freed id
+    whenever it was above every survivor. A file left behind is dead bytes
+    either way. `_trash` deliberately does **not** do this: a trashed
     book can be restored, and restoring one to a placeholder would be a delete
     that half happened.
 

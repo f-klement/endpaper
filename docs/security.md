@@ -1298,7 +1298,10 @@ The bytes are untrusted input from a third party, and are treated as such:
 - Served by the authenticated cover route, which applies `visible_to()`. Storing covers does
   not widen who can see one.
 - Deleted when a book is purged and when a merge discards the loser's, because a cover file
-  outliving its row is not only clutter: SQLite reuses an id, so the next book to take it
+  outliving its row is not only clutter. On SQLite a deleted book's id is never issued again
+  since revision 0850786d1753. One freed before it and above every surviving id, trashed rows
+  included, can still go to the next book once, and a database downgraded below it gives an
+  insert `max(rowid) + 1` again, which reissues a freed id above every survivor. That book
   would inherit somebody else's cover.
 
 `COVER_HOSTS` and the CSP's `img-src` are unchanged: a failed download keeps the remote URL,

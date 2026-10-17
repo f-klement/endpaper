@@ -9,6 +9,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { BookLookup } from "../../../src/api/generated/model";
+import type { CalibreBook } from "../../../src/lib/calibre";
 import {
   canBeAskedAgain,
   figuresOf,
@@ -17,6 +18,7 @@ import {
   isReady,
   needsALookup,
   queueAfter,
+  type EntryIn,
   type QueueEvent,
   type ScannedEntry,
 } from "../../../src/pages/ScanPage/queue";
@@ -29,19 +31,47 @@ const DUNE: BookLookup = {
   suggested_tag_ids: [],
 };
 
-/** A row in `state`, carrying nothing it was not given. */
-function row(
-  state: ScannedEntry["state"],
-  more: Partial<ScannedEntry> = {},
-): ScannedEntry {
+/** A library's book `id`, with a title and nothing else. */
+function calibreBook(id: number): CalibreBook {
+  return {
+    id,
+    path: `Herbert/Dune (${id})`,
+    uuid: null,
+    title: "Dune",
+    authors: [],
+    authorsSeparated: true,
+    identifiers: [],
+    isbn: null,
+    publisher: null,
+    year: null,
+    language: null,
+    description: null,
+    seriesName: null,
+    seriesIndex: null,
+    files: [],
+  };
+}
+
+/** The facts `row` fills in where a test does not name them. */
+type Defaulted = "key" | "label" | "isbn" | "format" | "draft";
+
+/**
+ * One arm of `ScannedEntry` at a time with the defaulted facts optional, so a
+ * row is checked against the arm its state names.
+ */
+type Given<E = ScannedEntry> = E extends ScannedEntry
+  ? Omit<E, Defaulted> & Partial<Pick<E, Defaulted>>
+  : never;
+
+/** A row carrying nothing it was not given. */
+function row(given: Given): ScannedEntry {
   return {
     key: "k",
     label: "k",
     isbn: "",
     format: "",
-    state,
     draft: null,
-    ...more,
+    ...given,
   };
 }
 
@@ -54,7 +84,8 @@ function rowAfter(start: ScannedEntry, event: QueueEvent): ScannedEntry {
 describe("a barcode", () => {
   it("is queued as a row being looked up", () => {
     expect(queueAfter([], { kind: "captured", isbn: DUNE.isbn })).toEqual([
-      row("looking-up", {
+      row({
+        state: "looking-up",
         key: `isbn:${DUNE.isbn}`,
         label: DUNE.isbn,
         isbn: DUNE.isbn,
@@ -70,7 +101,7 @@ describe("a barcode", () => {
   });
 
   it("is found with the record a catalogue had", () => {
-    const answered = rowAfter(row("looking-up", { isbn: DUNE.isbn }), {
+    const answered = rowAfter(row({ state: "looking-up", isbn: DUNE.isbn }), {
       kind: "isbn-answered",
       key: "k",
       lookup: DUNE,
@@ -79,7 +110,7 @@ describe("a barcode", () => {
   });
 
   it("nobody knows keeps a titleless draft the batch does not take", () => {
-    const missed = rowAfter(row("looking-up", { isbn: DUNE.isbn }), {
+    const missed = rowAfter(row({ state: "looking-up", isbn: DUNE.isbn }), {
       kind: "not-answered",
       key: "k",
       asked: "looking-up",
@@ -93,7 +124,7 @@ describe("a barcode", () => {
   });
 
   it("whose catalogues were not reached is offered to the lookup", () => {
-    const missed = rowAfter(row("looking-up", { isbn: DUNE.isbn }), {
+    const missed = rowAfter(row({ state: "looking-up", isbn: DUNE.isbn }), {
       kind: "not-answered",
       key: "k",
       asked: "looking-up",
@@ -103,7 +134,7 @@ describe("a barcode", () => {
   });
 
   it("asked again during an outage stays not reached, not a kept name", () => {
-    const asked = rowAfter(row("not-reached", { isbn: DUNE.isbn }), {
+    const asked = rowAfter(row({ state: "not-reached", isbn: DUNE.isbn }), {
       kind: "asked",
       key: "k",
     });
@@ -119,7 +150,8 @@ describe("a barcode", () => {
 
 describe("an ISBN a file or a name carried", () => {
   it("from a name takes the record whole", () => {
-    const named = row("searching", {
+    const named = row({
+      state: "searching",
       isbn: DUNE.isbn,
       isbnFromTheName: true,
       draft: { ...DUNE, title: "dune", year: 1999 },
@@ -130,7 +162,8 @@ describe("an ISBN a file or a name carried", () => {
   });
 
   it("from a file keeps the file's fields where the record has none", () => {
-    const stated = row("searching", {
+    const stated = row({
+      state: "searching",
       isbn: DUNE.isbn,
       draft: { ...DUNE, publisher: "Ace" },
     });
@@ -143,7 +176,8 @@ describe("an ISBN a file or a name carried", () => {
   });
 
   it("from a file is held, not taken, when the titles cannot be one book", () => {
-    const stated = row("searching", {
+    const stated = row({
+      state: "searching",
       isbn: DUNE.isbn,
       draft: { ...DUNE, title: "Hyperion" },
     });
@@ -161,7 +195,7 @@ describe("an ISBN a file or a name carried", () => {
   });
 
   it("from a file goes back to the file's draft when no catalogue was reached", () => {
-    const stated = row("searching", { isbn: DUNE.isbn, draft: DUNE });
+    const stated = row({ state: "searching", isbn: DUNE.isbn, draft: DUNE });
     const back = rowAfter(stated, {
       kind: "not-answered",
       key: "k",
@@ -176,7 +210,8 @@ describe("an ISBN a file or a name carried", () => {
   });
 
   it("the member takes once held is filed over the draft as it stands", () => {
-    const held = row("stated", {
+    const held = row({
+      state: "stated",
       draft: { ...DUNE, title: "Hyperion", categories: ["Kept"] },
       differentRecord: DUNE,
       reason: { kind: "record-differs" },
@@ -190,7 +225,12 @@ describe("an ISBN a file or a name carried", () => {
   });
 
   it("the member refuses once held leaves the file's draft and says so", () => {
-    const held = row("stated", { draft: DUNE, differentRecord: DUNE });
+    const held = row({
+      state: "stated",
+      draft: DUNE,
+      reason: { kind: "record-differs" },
+      differentRecord: DUNE,
+    });
     const kept = rowAfter(held, { kind: "kept-the-file", key: "k" });
     expect([kept.state, kept.differentRecord, kept.reason]).toEqual([
       "stated",
@@ -201,14 +241,16 @@ describe("an ISBN a file or a name carried", () => {
 });
 
 describe("a name", () => {
-  const derived = row("derived", { query: "dune herbert", draft: DUNE });
+  const derived = row({ state: "derived", query: "dune herbert", draft: DUNE });
 
   it("being asked about drops the answer and the note it carried", () => {
-    const kept = {
-      ...derived,
-      answered: "records-for-now" as const,
-      reason: { kind: "kept-for-now" as const },
-    };
+    const kept = row({
+      state: "derived",
+      query: "dune herbert",
+      draft: DUNE,
+      answered: "records-for-now",
+      reason: { kind: "kept-for-now" },
+    });
     const asked = rowAfter(kept, { kind: "asked", key: "k" });
     expect([asked.state, asked.answered, asked.reason]).toEqual([
       "searching",
@@ -245,7 +287,8 @@ describe("a name", () => {
   });
 
   it("takes a chosen record and forgets the name gave its ISBN", () => {
-    const choosing = row("choosing", {
+    const choosing = row({
+      state: "choosing",
       draft: DUNE,
       isbnFromTheName: true,
       matches: [],
@@ -264,17 +307,23 @@ describe("a name", () => {
   });
 
   it("kept one row at a time is not offered again", () => {
-    const kept = rowAfter(row("choosing", { query: "q", draft: DUNE }), {
-      kind: "kept-the-name",
-      key: "k",
-    });
+    const kept = rowAfter(
+      row({ state: "choosing", query: "q", draft: DUNE, matches: [] }),
+      {
+        kind: "kept-the-name",
+        key: "k",
+      },
+    );
     expect([needsALookup(kept), canBeAskedAgain(kept)]).toEqual([false, false]);
   });
 
   it("kept in bulk is offered again, and only by its own press", () => {
-    const [kept] = queueAfter([row("choosing", { query: "q", draft: DUNE })], {
-      kind: "kept-every-name-for-now",
-    });
+    const [kept] = queueAfter(
+      [row({ state: "choosing", query: "q", draft: DUNE, matches: [] })],
+      {
+        kind: "kept-every-name-for-now",
+      },
+    );
     expect([
       kept!.answered,
       needsALookup(kept!),
@@ -293,7 +342,7 @@ describe("a name", () => {
 });
 
 describe("a picked file", () => {
-  const reading = row("reading", { key: "file:dune.epub" });
+  const reading = row({ state: "reading", key: "file:dune.epub" });
   const naming = { name: "Dune.epub", folders: [] };
 
   it("stands as reading until it has been read", () => {
@@ -305,7 +354,8 @@ describe("a picked file", () => {
   });
 
   it("the queue already claims is not queued again beside a new one", () => {
-    const audio = row("reading", {
+    const audio = row({
+      state: "reading",
       key: "audio:file:a.mp3:1",
       claims: ["file:a.mp3"],
     });
@@ -323,7 +373,7 @@ describe("a picked file", () => {
   });
 
   it("an audio row whose claims overlap a queued file does not claim it again", () => {
-    const queued = row("reading", { key: "file:a.mp3" });
+    const queued = row({ state: "reading", key: "file:a.mp3" });
     const queue = queueAfter([queued], {
       kind: "picked",
       rows: [
@@ -338,8 +388,22 @@ describe("a picked file", () => {
     expect(queue.map((one) => one.key)).toEqual(["file:a.mp3"]);
   });
 
+  it("carries onto its reading row only the fields a reading row is made from", () => {
+    // Held in a variable, so no excess check refuses the extra fields: the
+    // shape a row built in a `map` callback or spread from another arrives in.
+    const carrying = {
+      key: "file:dune.epub",
+      label: "dune",
+      format: "" as const,
+      copyOf: 42,
+      heldBy: { bookId: 42, lands: true },
+    };
+    const [queued] = queueAfter([], { kind: "picked", rows: [carrying] });
+    expect([queued!.copyOf, queued!.heldBy]).toEqual([undefined, undefined]);
+  });
+
   it("picked again while queued leaves the same queue, so nothing is read twice", () => {
-    const queue = [row("reading", { key: "calibre:L" })];
+    const queue = [row({ state: "reading", key: "calibre:L" })];
     expect(
       queueAfter(queue, {
         kind: "picked",
@@ -392,7 +456,8 @@ describe("a picked file", () => {
   });
 
   it("loses one subject by its value, before anything is written", () => {
-    const tagged = row("found", {
+    const tagged = row({
+      state: "found",
       draft: { ...DUNE, categories: ["Fiction", "Spam"] },
     });
     expect(
@@ -402,13 +467,83 @@ describe("a picked file", () => {
   });
 
   it("from a library gives way to its books, queueing none twice", () => {
-    const book = row("found", { key: "calibre:L:1", draft: DUNE });
-    const queue = queueAfter([book, row("reading", { key: "calibre:L" })], {
-      kind: "library-read",
-      pendingKey: "calibre:L",
-      rows: [book, { ...book, key: "calibre:L:2" }],
-    });
+    const book = row({ state: "found", key: "calibre:L:1", draft: DUNE });
+    const queue = queueAfter(
+      [book, row({ state: "reading", key: "calibre:L" })],
+      {
+        kind: "library-read",
+        pendingKey: "calibre:L",
+        books: [
+          { book: calibreBook(1), files: [] },
+          { book: calibreBook(2), files: [] },
+        ],
+      },
+    );
     expect(queue.map((one) => one.key)).toEqual(["calibre:L:1", "calibre:L:2"]);
+  });
+});
+
+describe("a row's state", () => {
+  it("cannot carry the records of the state it left", () => {
+    const choosing: EntryIn<"choosing"> = {
+      key: "k",
+      label: "k",
+      isbn: "",
+      format: "",
+      state: "choosing",
+      draft: DUNE,
+      matches: [],
+    };
+    // @ts-expect-error: `matches` belongs to `choosing`, so a spread carrying
+    // it into another state is refused.
+    const found: ScannedEntry = { ...choosing, state: "found" };
+    expect(found.state).toBe("found");
+  });
+
+  it("holds a record only under the reason that names it", () => {
+    // @ts-expect-error: a held record beside any other reason is refused.
+    const kept: EntryIn<"stated"> = {
+      key: "k",
+      label: "k",
+      isbn: "",
+      format: "",
+      state: "stated",
+      draft: DUNE,
+      reason: { kind: "kept-the-file" },
+      differentRecord: DUNE,
+    };
+    expect(kept.state).toBe("stated");
+  });
+
+  it("names a differing record only while it holds one", () => {
+    // @ts-expect-error: the reason naming a held record, with none held, is refused.
+    const naming: EntryIn<"stated"> = {
+      key: "k",
+      label: "k",
+      isbn: "",
+      format: "",
+      state: "stated",
+      draft: DUNE,
+      reason: { kind: "record-differs" },
+    };
+    expect(naming.state).toBe("stated");
+  });
+
+  it("holds a differing record under the reason that names it", () => {
+    // The two refusals above share this literal less one field or one reason.
+    // Without it a new required field on the arm would satisfy both
+    // directives and refuse nothing they were written for.
+    const holding: EntryIn<"stated"> = {
+      key: "k",
+      label: "k",
+      isbn: "",
+      format: "",
+      state: "stated",
+      draft: DUNE,
+      reason: { kind: "record-differs" },
+      differentRecord: DUNE,
+    };
+    expect(holding.state).toBe("stated");
   });
 });
 
@@ -419,7 +554,7 @@ describe("an audiobook", () => {
 });
 
 describe("the batch", () => {
-  const found = (key: string) => row("found", { key, draft: DUNE });
+  const found = (key: string) => row({ state: "found", key, draft: DUNE });
 
   it("leaves the rows it landed and keeps every other, failures with their reason", () => {
     const queue = queueAfter([found("a"), found("b"), found("c")], {
@@ -430,6 +565,27 @@ describe("the batch", () => {
     expect(queue.map((one) => [one.key, one.state, one.reason])).toEqual([
       ["b", "failed", { kind: "unreachable" }],
       ["c", "found", undefined],
+    ]);
+  });
+
+  it("stops offering a record held for a row it fails", () => {
+    const held = row({
+      state: "stated",
+      key: "a",
+      draft: { ...DUNE, title: "Hyperion" },
+      answered: "records",
+      reason: { kind: "record-differs" },
+      differentRecord: DUNE,
+    });
+    const [failed] = queueAfter([held], {
+      kind: "batch-ran",
+      walked: ["a"],
+      failures: [{ row: held, reason: { kind: "unreachable" } }],
+    });
+    expect([failed!.state, failed!.differentRecord, failed!.answered]).toEqual([
+      "failed",
+      undefined,
+      "records",
     ]);
   });
 
@@ -455,19 +611,21 @@ describe("the batch", () => {
 describe("the queue's figures", () => {
   it("count a queue with one addable row as ready to add one", () => {
     // The count Add all is held on: zero here is a button nobody can press.
-    const notFound = row("not-found", {
+    const notFound = row({
+      state: "not-found",
       key: "isbn:2",
       draft: blankDraft("2"),
     });
     expect(
-      figuresOf([row("found", { key: "isbn:1", draft: DUNE }), notFound]).ready,
+      figuresOf([row({ state: "found", key: "isbn:1", draft: DUNE }), notFound])
+        .ready,
     ).toBe(1);
   });
 
   it("quote a run's pace in minutes, at least one", () => {
     const waiting = (count: number) =>
       Array.from({ length: count }, (_, index) =>
-        row("derived", { key: `${index}`, query: "q", draft: DUNE }),
+        row({ state: "derived", key: `${index}`, query: "q", draft: DUNE }),
       );
     expect(figuresOf([]).paceMinutes).toBe(1);
     expect(figuresOf(waiting(31)).paceMinutes).toBe(2);

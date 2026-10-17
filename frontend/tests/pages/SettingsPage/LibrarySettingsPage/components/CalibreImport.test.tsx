@@ -325,6 +325,19 @@ describe("CalibreImport", () => {
     ).toBeInTheDocument();
   });
 
+  it("lists a book refused as in the trash in its own words", () => {
+    renderCard({
+      result: outcome({
+        added: 0,
+        failures: [{ title: "Dune", status: 409, inTrash: true }],
+      }),
+    });
+
+    expect(
+      screen.getByText(/^Dune · in the trash as another member's book/),
+    ).toBeInTheDocument();
+  });
+
   it("lists a duplicate naming no book in German in its own words", () => {
     renderCard(
       {

@@ -22,7 +22,7 @@ from xml.sax.saxutils import escape
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
-from sqlalchemy import Text
+from sqlalchemy import Text, text
 
 import marc
 import sru
@@ -1107,6 +1107,11 @@ class TestTheCostOfTheWidestLegalResponseIsBounded:
         db.query(Classification).delete()
         db.query(OnlineLink).delete()
         db.query(Book).delete()
+        # `books` is AUTOINCREMENT, so emptying it no longer restarts its ids, and
+        # `IDENTIFIER_DIGITS` was measured with a page numbered from 1. The
+        # identifiers are not this class's subject, so the shelf starts there again.
+        if db.get_bind().dialect.name == "sqlite":
+            db.execute(text("DELETE FROM sqlite_sequence WHERE name = 'books'"))
         db.commit()
 
     def page_bytes(

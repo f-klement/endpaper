@@ -1097,6 +1097,13 @@ class Book(Base):
             _enum_check("ownership", OwnershipStatus),
             name="ck_books_ownership",
         ),
+        # **A deleted Book's id is never given to another Book.** Without it
+        # SQLite gives an insert `max(rowid) + 1`, so a merge deleting the
+        # highest id Book handed its id to the next Book created, and an import
+        # that had matched the deleted one wrote its status there and answered
+        # 200. Postgres ignores the keyword: its sequence never moves back.
+        # Revision 0850786d1753 rebuilt deployed databases with it.
+        {"sqlite_autoincrement": True},
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)

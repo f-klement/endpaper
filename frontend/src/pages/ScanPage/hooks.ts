@@ -72,6 +72,7 @@ import {
   HeldUnnamed,
   land,
   recordOnCopy,
+  refusedForTheTrash,
   type HolderQuestion,
   type Landing,
 } from "../../lib/fileLanding";
@@ -91,6 +92,7 @@ import {
   type Picked,
   type QueueEvent,
   type QueueFigures,
+  type ReadyEntry,
   type ScanReason,
   type ScannedEntry,
 } from "./queue";
@@ -683,6 +685,16 @@ function reasonForError(error: unknown): ScanReason | undefined {
   const failure = classifyError(error);
   if (failure === undefined) return undefined;
   return reasonFor(failure.kind, failure);
+}
+
+/**
+ * Why the batch could not write a row: the two refusals naming no Book that
+ * have a sentence of their own, before what the request itself said.
+ */
+function reasonForRefusedRow(thrown: unknown): ScanReason | undefined {
+  if (thrown instanceof HeldUnnamed) return { kind: "held-unnamed" };
+  if (refusedForTheTrash(thrown)) return { kind: "in-trash" };
+  return reasonForError(thrown);
 }
 
 /**
@@ -1389,17 +1401,17 @@ export function useRapidIntake(): UseRapidIntakeResult {
       ),
     );
 
-    const rows = libraryRows(
-      pendingKey,
-      checked.map((book) => ({ book, files: located.get(book.id) ?? [] })),
-    );
+    const books = checked.map((book) => ({
+      book,
+      files: located.get(book.id) ?? [],
+    }));
     // Every file of each row that has one, as `readFiles` asks for its own.
-    const questions = rows.flatMap((row) =>
+    const questions = libraryRows(pendingKey, books).flatMap((row) =>
       row.reference === undefined
         ? []
         : [{ key: row.key, references: filesOf(row), format: row.format }],
     );
-    apply({ kind: "library-read", pendingKey, rows });
+    apply({ kind: "library-read", pendingKey, books });
     await recordHolders(questions);
   }
 
@@ -1513,7 +1525,7 @@ export function useRapidIntake(): UseRapidIntakeResult {
 
     const read: AudioFileNaming[] = [];
     // **Beside the namings rather than in them**, because what a member is told
-    // is not a fact about the grouping: see `ScannedEntry.fileReasons`, which is
+    // is not a fact about the grouping: see `queue.Grouping`, which is
     // where these end up so a split can still say what each file said.
     const reasons = new Map<string, ScanReason>();
     for (const { file, extension } of picked) {
@@ -1744,9 +1756,9 @@ export function useRapidIntake(): UseRapidIntakeResult {
      * on its holder already, returns; at the ceiling it returns too, which
      * takes it out of the queue as a counted row. A book of another format
      * throws `HeldInAnotherFormat`, which is the copy offer, and a tie throws
-     * `HeldUnnamed`, which is its own reason.
+     * `HeldUnnamed`, which is its own reason, as the trash refusal is.
      */
-    async function addOne(entry: ScannedEntry) {
+    async function addOne(entry: ReadyEntry) {
       const landing = await land(
         {
           // The same request builder as the one-book flow, so a field added
@@ -1758,7 +1770,7 @@ export function useRapidIntake(): UseRapidIntakeResult {
           body: toScanRequest({
             ...blankPending(shelf),
             format: entry.format,
-            draft: entry.draft!,
+            draft: entry.draft,
           }),
           references: filesOf(entry),
           format: entry.format,
@@ -1783,10 +1795,11 @@ export function useRapidIntake(): UseRapidIntakeResult {
           throw new HeldInAnotherFormat(landing.holderId);
         case "tie":
           throw new HeldUnnamed();
+        case "in-trash":
         case "failed":
           // Rethrown rather than reported here: the row is the loop's to
           // record, and swallowing it would count a book that is not in the
-          // catalogue.
+          // catalogue. The failure mapping names the trash refusal.
           throw landing.thrown;
         default:
           landing satisfies never;
@@ -1814,13 +1827,7 @@ export function useRapidIntake(): UseRapidIntakeResult {
       failures: outcome.failures.map(({ item, thrown }) =>
         thrown instanceof HeldInAnotherFormat
           ? { row: item, heldInAnotherFormat: thrown.holderId }
-          : {
-              row: item,
-              reason:
-                thrown instanceof HeldUnnamed
-                  ? { kind: "held-unnamed" }
-                  : reasonForError(thrown),
-            },
+          : { row: item, reason: reasonForRefusedRow(thrown) },
       ),
     });
     setIsAdding(false);

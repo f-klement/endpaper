@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+- **Importing or scanning a book that another member added and that is now in the trash no
+  longer deletes it for good**; the add is refused instead. The Settings imports list the book
+  as in the trash, and the Scan page says it is in the trash and how to add it again, with a link
+  to the trash, rather than calling it already in the catalogue. A book you added yourself and
+  put in the trash is still replaced, as before.
+
+- **An import or an OPDS sync that meets a merge deleting a book it matched now says nothing was
+  imported and asks to send it again**, instead of failing with a server error.
+
+- **On SQLite a deleted book's id is never given to another book**, so a link or a cover that
+  named a deleted book can no longer turn up on a new one, and an import racing a merge asks for
+  the file again instead of writing the merged away book's reading status onto another book.
+
+- **On the Scan page, a rapid queue row that could not be added, or that was kept as its file
+  describes it or under its file name, now says why on a line of its own**, so a long reason is
+  no longer cut off after the title. The Calibre and store import cards wrap a long reason the
+  same way.
+
+- **Rapid intake no longer offers to take a catalogue record for a file the batch could not
+  add**, when that record was held for it before the batch ran.
+
 - **A book added again with a Google Books volume id that a book you can see already carries is
   refused as a duplicate**, instead of being added a second time, whether it comes from a second
   Google Play Books import, a Calibre record or an EPUB carrying the id.

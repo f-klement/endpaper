@@ -293,6 +293,8 @@ export const de: Messages = {
   "scan.authorPlaceholder": "Name des Autors",
   "scan.couldNotAdd": "Das Buch konnte nicht hinzugefügt werden.",
   "scan.openTheOneWeHave": "Vorhandenes Exemplar öffnen",
+  "scan.inTrash":
+    "Als Buch eines anderen Mitglieds im Papierkorb und deshalb nicht hinzugefügt. Wird es zurückgelegt oder endgültig gelöscht, lässt es sich erneut hinzufügen.",
   "scan.authorField": "Autor",
   "scan.addCover": "Coverfoto hinzufügen (optional)",
   "scan.replaceCover": "Coverfoto ersetzen (optional)",
@@ -1512,6 +1514,8 @@ export const de: Messages = {
   "calibre.resultFailures": "{count} konnten nicht hinzugefügt werden:",
   "calibre.duplicate": "bereits im Katalog",
   "calibre.notAdded": "nicht hinzugefügt",
+  "calibre.inTrash":
+    "als Buch eines anderen Mitglieds im Papierkorb; wird es zurückgelegt oder endgültig gelöscht, lässt es sich erneut importieren",
   "calibre.located":
     "Bei {count} liegen die Dateien im gewählten Ordner, und beim Buch wird gespeichert, wo jede Datei liegt.",
   "calibre.already":
@@ -1601,6 +1605,8 @@ export const de: Messages = {
   "stores.resultFailures": "{count} konnten nicht hinzugefügt werden:",
   "stores.duplicate": "bereits im Katalog",
   "stores.notAdded": "nicht hinzugefügt",
+  "stores.inTrash":
+    "als Buch eines anderen Mitglieds im Papierkorb; wird es zurückgelegt oder endgültig gelöscht, lässt es sich erneut importieren",
   "stores.failureNotADatabase": "Diese Datei ist keine SQLite-Datenbank.",
   "stores.failureNotAKobo": "Diese Datenbank ist keine Kobo-Bibliothek.",
   "stores.failureNotAnArchive": "Diese Datei ist kein Zip-Archiv.",

@@ -83,7 +83,7 @@ is discarded, and only a token naming a test account does. See [security.md](sec
 | Method | Path | Access | Notes |
 |---|---|---|---|
 | GET | `/api/books` | user | Paginated. Filter with `q`, `status`, `ownership`, `format`, `lending`, `discuss`, `series`, `author`, `location`, `collection_id`, `unfiled`, `unrated`, `tags`, `sort` |
-| POST | `/api/books` | user | **409** on an ISBN already in the catalogue, or on a Calibre record (`calibre_uuid` identifier) or a store record (`asin` or `google_books` identifier) a Book the caller can see already carries |
+| POST | `/api/books` | user | **409** on an ISBN already in the catalogue, or on a Calibre record (`calibre_uuid` identifier) or a store record (`asin` or `google_books` identifier) a Book the caller can see already carries. **409** with `code: in_trash` where only Books in the caller's trash view hold the ISBN and one of them another member added |
 | POST | `/api/books/scan` | user | Same, named for the scan flow |
 | GET | `/api/books/tags` | user | The seeded vocabulary plus the invented tags the caller can already see |
 | POST | `/api/books/tags` | user | Invent a tag. Returns the existing one on a name clash |
@@ -870,9 +870,11 @@ Two consequences worth knowing:
 * **A trashed row still holds its ISBN**, and still holds its claim on it. Deleting a book and
   re-scanning it would otherwise report "already exists" for a book nobody can
   see, and mis-scan, delete, re-scan is the most common delete in this app. So
-  creating a book whose ISBN is held by a **trashed row the caller could see**
-  purges that row first. Somebody else's trashed private book still 409s:
-  purging it would destroy data they never offered up.
+  creating a book whose ISBN only the caller's trash view holds purges those rows
+  first when the caller added every one of them. Otherwise the add answers 409
+  `{"code": "in_trash", "message": ...}` with no `book_id` and purges nothing:
+  that member could still restore it. Somebody else's trashed private book still
+  409s without a code, because purging it would destroy data they never offered up.
 * **The trash does not empty itself.** This app has no scheduler, and a sweep
   at startup would delete on restart timing rather than on any schedule anybody
   chose. `DELETE /api/books/trash` is the manual version, and it is scoped by

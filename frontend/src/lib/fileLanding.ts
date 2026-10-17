@@ -32,9 +32,30 @@ import { writeOneAtATime } from "./bulkWrite";
 const REFERENCE_CEILING = "reference_ceiling";
 /** The `code` on its 409 for a file another Book the member can see holds. */
 const FILE_HELD_ELSEWHERE = "file_held_elsewhere";
+/**
+ * The add door's `code` on a 409 for an ISBN only Books in the member's trash
+ * view hold, one of them another member's. The door purges the member's own
+ * trashed Book and adds afresh, so only somebody else's answers this.
+ * `IN_TRASH` in `backend/routers/books.py` is the other spelling, and the
+ * backend suite holds the value declared here equal to it.
+ */
+const IN_TRASH = "in_trash";
 
 /** The status every refusal this module reads answers with. */
 const CONFLICT = 409;
+
+/**
+ * Whether a refused add is the add door's in the trash refusal.
+ *
+ * **The one reading of it**, for every door that adds a Book: `land` asks it
+ * before calling a 409 naming no Book a tie, and the Settings cards and the
+ * single scan ask it of what they were refused, so no page reads that 409 as
+ * a duplicate while another reads it as the trash.
+ */
+export function refusedForTheTrash(thrown: unknown): boolean {
+  const { status, code } = refusalOf(thrown);
+  return status === CONFLICT && code === IN_TRASH;
+}
 
 /**
  * Which copy of the title a file's ISBN already belongs to takes the file's
@@ -357,6 +378,10 @@ export async function reportEach<T = DigitalReferenceIn>(
  * - `tie`: the server refused the add as a duplicate and named no Book, which
  *   is a tie between Books outside one copy group and also how a holder the
  *   member cannot see answers. No file lands.
+ * - `in-trash`: refused because only the member's trash view holds the ISBN,
+ *   one holder being another member's (`refusedForTheTrash`). It names no
+ *   Book either, and is not a tie: the member can put that Book back, or
+ *   delete it for good, and add again. No file lands.
  * - `failed`: refused for any other reason, `thrown` saying why. A duplicate
  *   naming a Book is one of these even where its files were put on the copy
  *   of their kind, because no Book was made.
@@ -368,6 +393,7 @@ export type Landing =
   | { readonly kind: "other-format"; readonly holderId: number }
   | { readonly kind: "at-ceiling" }
   | { readonly kind: "tie"; readonly thrown: unknown }
+  | { readonly kind: "in-trash"; readonly thrown: unknown }
   | { readonly kind: "failed"; readonly thrown: unknown };
 
 /** The requests `land` makes, each the caller's own mutation or read. */
@@ -539,7 +565,8 @@ export async function recordOnCopy(
 
 /**
  * A refused create: a duplicate naming a Book takes the files on the copy of
- * their kind, one naming none is a tie, and anything else failed.
+ * their kind, the trash refusal is its own outcome, one naming no Book
+ * otherwise is a tie, and anything else failed.
  *
  * **The Book a duplicate names is where its files are.** Re importing a
  * folder imported last month is the case a sighting is idempotent for, and
@@ -558,6 +585,8 @@ async function asDuplicate<Body>(
 ): Promise<Landing> {
   const { status, bookId } = refusalOf(thrown);
   if (status !== CONFLICT) return { kind: "failed", thrown };
+  // Before the tie, because the trash refusal names no Book either.
+  if (refusedForTheTrash(thrown)) return { kind: "in-trash", thrown };
   if (typeof bookId !== "number") return { kind: "tie", thrown };
   if (request.references.length === 0 || !request.identifierWasRead) {
     return { kind: "failed", thrown };
@@ -623,6 +652,7 @@ export function countLandings(landings: readonly Landing[]): LandingCounts {
         counts.atCeiling += 1;
         break;
       case "tie":
+      case "in-trash":
       case "failed":
         // Each caller lists these as failed rows, so no count holds them.
         break;

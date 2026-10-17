@@ -31,7 +31,8 @@ from typing import Any, Final, cast, get_args
 
 import annotated_types
 import pytest
-from sqlalchemy import event
+from sqlalchemy import delete, event
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm.attributes import set_committed_value
 
 import book_columns
@@ -43,7 +44,9 @@ import marc
 import recognition
 import tags
 from catalogue import Record
+from database import SessionLocal
 from enums import ClassificationScheme, OwnershipStatus, ReadStatus, TagCategory
+from errors import MetAnotherChange
 from importing import (
     _MARC_RECORD_FIELDS,
     Import,
@@ -1639,6 +1642,117 @@ class TestTheSpine:
         assert book is matched
         assert filled == [matched]
         assert (tally.matched, tally.unmatched_private) == (1, 0)
+
+
+#: Each importer applying one record that names Small Gods, as a session and a
+#: member id.
+_EACH_IMPORTER: Final = {
+    "csv": lambda session, member_id: Import.for_member(session, member_id).apply(
+        parse(row("Small Gods", isbn="9780552152976"))
+    ),
+    "marc": lambda session, member_id: MarcImport.for_member(session, member_id).apply(
+        one_marc_file(catalogued("Small Gods", isbn="9780552152976"))
+    ),
+    "opds": lambda session, member_id: OpdsImport.for_member(session, member_id).apply(
+        [held("Small Gods", isbn="9780552152976")]
+    ),
+}
+
+
+class TestAMatchedBookDeletedAfterTheIndexWasRead:
+    """Each importer reads its index once, before its first row, so a merge
+    committing during the import can delete a Book the index matched. The
+    importer raises `MetAnotherChange` there, which its door answers 409. The
+    interleavings with a real merge on another connection, after the load
+    included, are driven in `test_database_ceilings_on_a_real_server.py`."""
+
+    @pytest.mark.parametrize("apply", list(_EACH_IMPORTER.values()), ids=list(_EACH_IMPORTER))
+    def test_the_importer_raises_met_another_change(self, db, member, monkeypatch, apply):
+        book = Book(title="Small Gods", isbn="9780552152976", added_by_user_id=member.id)
+        db.add(book)
+        db.commit()
+        book_id = book.id
+        build = recognition.Index.build
+
+        def build_then_delete(session, *args):
+            index = build(session, *args)
+            session.execute(delete(Book).where(Book.id == book_id))
+            session.commit()
+            return index
+
+        monkeypatch.setattr(recognition.Index, "build", build_then_delete)
+
+        with SessionLocal() as session, pytest.raises(MetAnotherChange):
+            apply(session, member.id)
+
+
+class TestTheVanishedMatchCheckReadsOnlyBooksTheImportLoaded:
+    """An import that fails checks whether a Book it loaded is gone. The index
+    also holds Books this Member cannot see, and checking one of those would
+    answer, as 409 against 500, whether another Member's Private Book was
+    deleted mid import."""
+
+    @pytest.mark.parametrize("deleted", [True, False], ids=["deleted", "kept"])
+    def test_an_unrelated_failure_is_raised_whether_or_not_a_hidden_book_was_deleted(
+        self, db, member, other, monkeypatch, deleted
+    ):
+        theirs = Book(
+            title="Theirs", isbn="9780441013593", added_by_user_id=other.id, is_private=True
+        )
+        db.add_all([theirs, Book(title="Small Gods", isbn="9780552152976", added_by_user_id=member.id)])
+        db.commit()
+        theirs_id = theirs.id
+        build = recognition.Index.build
+
+        def build_then_delete(session, *args):
+            index = build(session, *args)
+            if deleted:
+                session.execute(delete(Book).where(Book.id == theirs_id))
+                session.commit()
+            return index
+
+        def unrelated(*args):
+            raise IntegrityError("planted", {}, Exception("planted"))
+
+        monkeypatch.setattr(recognition.Index, "build", build_then_delete)
+        monkeypatch.setattr(importing, "_fill_gaps", unrelated)
+
+        with SessionLocal() as session, pytest.raises(IntegrityError):
+            Import.for_member(session, member.id).apply(
+                parse(row("Elsewhere", isbn="9780441013593"), row("Small Gods", isbn="9780552152976"))
+            )
+
+
+class TestOnlyAFailureOnAGoneRowIsCheckedForAVanishedMatch:
+    """A privacy refusal in `shelf.py` raises `ValueError` or `TypeError`. A
+    second send would raise it again, so it is never answered as a race, even
+    beside a loaded Book that is gone."""
+
+    @pytest.mark.parametrize("refusal", [ValueError, TypeError])
+    def test_a_refusal_is_raised_unchanged_beside_a_book_that_is_gone(self, db, member, refusal):
+        # An id no Book has, so the check would find it gone.
+        tally = importing._Tally(loaded={10_000})
+
+        with (
+            pytest.raises(refusal),
+            importing._a_vanished_match_met_another_change(db, member.id, tally),
+        ):
+            raise refusal("refused")
+
+
+class TestAnImportMeetingNoRaceChecksNothing:
+    """The check for a vanished match is a statement, so it runs only after a
+    failure. An import that meets no race costs what it did before."""
+
+    def test_a_clean_import_never_checks_for_a_vanished_match(self, db, member, monkeypatch):
+        db.add(Book(title="Small Gods", isbn="9780552152976", added_by_user_id=member.id))
+        db.commit()
+        checked: list[object] = []
+        monkeypatch.setattr(importing, "_any_gone", lambda *args: checked.append(args))
+
+        Import.for_member(db, member.id).apply(parse(row("Small Gods", isbn="9780552152976")))
+
+        assert checked == []
 
 
 SPINE = "_settle_one"

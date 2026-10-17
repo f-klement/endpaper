@@ -6217,3 +6217,117 @@ class TestABlankTextColumnIsNull:
 
         assert self.columns_of("Empty") == (None,) * len(self.COLUMNS)
         assert self.columns_of("Text") == ("Dune",) * len(self.COLUMNS)
+
+
+class TestADeletedBooksIdIsNeverReused:
+    """Revision 0850786d1753, which rebuilds `books` with `AUTOINCREMENT`.
+
+    The suite's schema runs this revision over an empty `books`, so the counter
+    the rebuild seeds from the ids it copies, and the rows it copies, are
+    exercised here alone.
+    """
+
+    PREVIOUS = "e6c2a9d41f73"
+
+    def build_database_with_three_books(self) -> None:
+        """Three Books, a reading status on the first, and the highest id free
+        of children so that deleting it needs no cascade."""
+        drop_everything()
+        schema.upgrade_to(self.PREVIOUS)
+        with engine.connect() as connection:
+            connection.execute(
+                text("INSERT INTO users (username, password_hash, is_admin) VALUES ('kim','x',1)")
+            )
+            for title in ("Mort", "Small Gods", "Pyramids"):
+                connection.execute(
+                    text("INSERT INTO books (title, added_by_user_id) VALUES (:title, 1)"),
+                    {"title": title},
+                )
+            connection.execute(
+                text("INSERT INTO user_books (user_id, book_id, status) VALUES (1, 1, 'read')")
+            )
+            connection.commit()
+
+    @staticmethod
+    def books_shape() -> dict[str, Any]:
+        """Every CHECK, index and foreign key on `books`, each keyed by what
+        names it, so a difference reads as the one entry that moved.
+
+        The batch rebuild learns the table by reflection, so reflection alone
+        would agree with it about a constraint neither can see. The count of
+        CHECK keywords and each index's statement are read off `sqlite_master`
+        instead, which holds what SQLite enforces."""
+        inspector = inspect(engine)
+        shape: dict[str, Any] = {}
+        for check in inspector.get_check_constraints("books"):
+            shape[f"check {check['name']}"] = check["sqltext"]
+        for key in inspector.get_foreign_keys("books"):
+            shape[f"foreign key {key['constrained_columns']}"] = key
+        with engine.connect() as connection:
+            table = connection.execute(
+                text("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'books'")
+            ).scalar_one()
+            indexes = connection.execute(
+                text(
+                    "SELECT name, sql FROM sqlite_master "
+                    "WHERE type = 'index' AND tbl_name = 'books' AND sql IS NOT NULL"
+                )
+            ).all()
+        shape["CHECK keywords in the table"] = table.upper().count("CHECK")
+        for name, statement in indexes:
+            shape[f"index {name}"] = statement
+        return shape
+
+    @staticmethod
+    def books_statement(bind: Any) -> str:
+        with bind.connect() as connection:
+            return str(
+                connection.execute(
+                    text("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'books'")
+                ).scalar_one()
+            )
+
+    def test_the_model_and_the_migrations_both_declare_autoincrement(self):
+        """The suite's schema is the migrations', so the model's keyword is
+        read only by `create_all` and `--autogenerate`, and neither compares
+        it: without this, dropping it from `Book` leaves every test green while
+        a schema built from the model reuses ids again."""
+        fresh = create_engine("sqlite://")
+        Base.metadata.create_all(fresh)
+        drop_everything()
+        schema.upgrade_to_head()
+
+        assert "AUTOINCREMENT" in self.books_statement(fresh).upper()
+        assert "AUTOINCREMENT" in self.books_statement(engine).upper()
+
+    def test_the_highest_id_deleted_after_the_upgrade_goes_to_no_later_book(self):
+        self.build_database_with_three_books()
+        schema.upgrade_to_head()
+
+        with engine.connect() as connection:
+            connection.execute(text("DELETE FROM books WHERE id = 3"))
+            eric = connection.execute(
+                text("INSERT INTO books (title, added_by_user_id) VALUES ('Eric', 1) RETURNING id")
+            ).scalar()
+            connection.commit()
+
+        assert eric == 4
+
+    def test_the_books_and_their_reading_status_survive_the_rebuild(self):
+        self.build_database_with_three_books()
+
+        schema.upgrade_to_head()
+
+        with engine.connect() as connection:
+            books = connection.execute(text("SELECT id, title FROM books ORDER BY id")).all()
+            statuses = connection.execute(text("SELECT book_id FROM user_books")).all()
+        assert [tuple(book) for book in books] == [(1, "Mort"), (2, "Small Gods"), (3, "Pyramids")]
+        assert [tuple(status) for status in statuses] == [(1,)]
+
+    def test_the_rebuild_keeps_every_check_index_and_foreign_key(self):
+        self.build_database_with_three_books()
+        before = self.books_shape()
+
+        schema.upgrade_to_head()
+
+        assert self.books_shape() == before

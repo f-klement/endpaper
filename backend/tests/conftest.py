@@ -298,6 +298,7 @@ os.environ["PYTHON_KEYRING_BACKEND"] = "keyring.backends.fail.Keyring"
 # is unaffected by this.
 
 from fastapi.testclient import TestClient  # noqa: E402
+from sqlalchemy import text  # noqa: E402
 
 import accounts  # noqa: E402
 import covers  # noqa: E402
@@ -894,14 +895,21 @@ def clean_database(_schema_once: None) -> None:
     reversing it deletes children first.
 
     Ids still restart at 1 **on SQLite**, which the `covers_dir` fixture depends
-    on, because nothing here uses `AUTOINCREMENT`: SQLite reuses the highest free
-    rowid, and an empty table has none taken. **Postgres does not**, measured:
+    on: SQLite gives an insert `max(rowid) + 1`, and an empty table has none.
+    `books` is the exception, declared `AUTOINCREMENT` so that a deleted Book's
+    id is never reused, and its counter in `sqlite_sequence` is emptied with the
+    rows. **Postgres does not restart**, measured:
     eighteen columns there default to `nextval(...)` and a DELETE does not touch
     a sequence. So every case that reads a literal id is a case that runs on one
     engine, which is why the pipeline's Postgres job selects rather than running
     the suite.
     """
     _empty_and_reseed()
+
+
+_HAS_A_SEQUENCE = text(
+    "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'sqlite_sequence'"
+)
 
 
 def _empty_and_reseed() -> None:
@@ -915,6 +923,12 @@ def _empty_and_reseed() -> None:
     with engine.begin() as connection:
         for table in reversed(Base.metadata.sorted_tables):
             connection.execute(table.delete())
+        # Without this a test's first Book takes the id after the previous
+        # test's last one, and every literal id and cover file name moves. The
+        # table exists only once some table declares `AUTOINCREMENT`, so not on
+        # a database a schema test built at an older revision.
+        if connection.dialect.name == "sqlite" and connection.execute(_HAS_A_SEQUENCE).first():
+            connection.execute(text("DELETE FROM sqlite_sequence"))
         # From the metadata, not `Tag.__table__`. A declarative class types that
         # attribute as the wider `FromClause`, which has no `insert`, which is
         # the same trap `backup.py` documents for `delete()`.

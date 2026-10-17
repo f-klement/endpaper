@@ -298,17 +298,34 @@ def is_a_deadlock(error: DBAPIError) -> bool:
     return fields is not None and fields.get("C") == _DEADLOCK_DETECTED
 
 
-@contextmanager
-def a_deadlock_answers_409(db: Session, detail: str) -> Iterator[None]:
-    """Answer 409 with `detail` where Postgres aborts the block for a deadlock.
+class MetAnotherChange(Exception):
+    """A row the block read earlier is gone: another transaction deleted it and committed.
 
-    **Only around a block that commits once, at its end, or not at all**: the
-    abort then discarded everything the block wrote, so `detail` can tell the
-    caller to send the same request again. Every other database error is
-    raised unchanged, because a second send would fail the same way.
+    Raised by an import that failed on a Book it had matched and loaded, once
+    that Book is found deleted, a merge's loser for instance
+    (`importing._a_vanished_match_met_another_change`). Like a deadlock it is a
+    race the other side won, and a second send meets the catalogue that side
+    left.
+    """
+
+
+@contextmanager
+def a_lost_race_answers_409(db: Session, detail: str) -> Iterator[None]:
+    """Answer 409 with `detail` where the block loses a race to another writer.
+
+    Two races: Postgres aborts the block for a deadlock, or the block raises
+    `MetAnotherChange`. **Only around a block that commits once, at its end,
+    or not at all**: the rollback then discards everything the block wrote, so
+    `detail` can tell the caller to send the same request again. Every other
+    error is raised unchanged. Telling a race from a failure among those is the
+    block's to do, which then raises `MetAnotherChange`, as an import does for
+    a matched Book that is gone.
     """
     try:
         yield
+    except MetAnotherChange as error:
+        db.rollback()
+        raise HTTPException(status_code=409, detail=detail) from error
     except DBAPIError as error:
         if not is_a_deadlock(error):
             raise

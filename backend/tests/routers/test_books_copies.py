@@ -6,6 +6,8 @@ two rows that merely name the same book are the second, and every test here is
 about keeping the app able to tell them apart.
 """
 
+from sqlalchemy import text
+
 import cover_store
 import covers
 from models import Book
@@ -409,10 +411,13 @@ class TestTheIsbnRule:
     ):
         """The success path, which the refusal test above cannot reach.
 
-        SQLite reuses the id of the highest deleted row, so re-scanning a book
-        that was just purged out of the way hands the new row the old row's id.
-        The unlink has to happen after the commit and **before** the new book
-        stores its own cover: later, and it deletes the cover it just fetched.
+        At head the counter in `sqlite_sequence` stops a purged Book's id going
+        to the next Book, so this ordering is never met there. Emptying the
+        counter stands in for a `books` that has lost `AUTOINCREMENT`, where
+        SQLite gives an insert `max(rowid) + 1`: re-scanning the one book, purged
+        out of the way, gives the new row the old row's id. The unlink has to
+        happen after the commit and **before** the new book stores its own
+        cover: later, and it deletes the cover it just fetched.
 
         Pinned rather than commented, because this is the second round in which
         the ordering of a cover unlink produced an unrecoverable file loss. A
@@ -422,6 +427,10 @@ class TestTheIsbnRule:
         stale = covers_dir / f"{book['id']}.jpg"
         stale.write_bytes(b"the purged book's cover")
         client.delete(f"/api/books/{book['id']}", headers=admin["headers"])
+        # After the trash and before the scan, because the scan's own request
+        # purges the trashed row and inserts the new one.
+        db.execute(text("DELETE FROM sqlite_sequence"))
+        db.commit()
 
         def store_a_cover(book_id, isbn, supplied, budget=None):
             (covers_dir / f"{book_id}.png").write_bytes(b"the new book's own cover")

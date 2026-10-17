@@ -512,8 +512,9 @@ What it costs, which is real and is handled rather than waved at:
   otherwise. `_trash` deliberately does not: a trashed book can be restored, and restoring
   one to a placeholder is a delete that half happened. All four paths have a test in
   `tests/routers/test_books_covers.py::TestTheDirectoryDoesNotDriftFromTheDatabase`.
-  Getting this wrong is not only clutter: SQLite reuses an id once the highest row goes, so a
-  leftover file becomes the next book's cover.
+  Getting this wrong is not only clutter: an id SQLite can still issue again (one freed before
+  revision 0850786d1753 and above every surviving id, or one above every survivor on a database
+  downgraded below it) would make a leftover file the next book's cover.
 * **The column and the directory can drift.** So nothing trusts `cover_url` to decide whether
   a cover exists. `_store_cover` and the backfill ask the filesystem, via `covers.stored_ids`
   (one directory read for the whole library, not a `stat` per book), and a `/covers/<id>.<ext>`
@@ -727,6 +728,56 @@ Schema changes used to be hand-written steps in `migrate_schema()`. That is exac
 failure mode migration tools exist to prevent, so Alembic runs at startup instead. The
 adoption path for an existing database (stamp the baseline, then upgrade) is in
 [architecture.md](architecture.md). `render_as_batch=True` is mandatory for SQLite.
+
+### `books.id` is `AUTOINCREMENT` on SQLite, because a deleted Book's id was reachable mid import
+
+**Reachable, measured** on a suite pod (SQLite 3.53.4, the app's own engine and pragmas, two
+real connections). A CSV import read its index; a second session ran the real `merge_books`,
+deleting the highest id Book the index had matched, and committed without waiting; the import
+then created Mort, which took the deleted id, and wrote the matched row's status onto it. The
+import answered 200.
+
+**Why the merge did not wait.** The driver runs in legacy transaction control
+(`autocommit == -1`, `isolation_level == ""`), which opens a transaction at the first INSERT,
+UPDATE or DELETE and never for a SELECT. The import's connection reported `in_transaction`
+false after its whole index read, so it held no snapshot for a writer to conflict with, and WAL
+let the merge commit. `busy_timeout` and `SQLITE_BUSY_SNAPSHOT` never came into it.
+
+**`AUTOINCREMENT` rather than a re-check in the importer.** The reused id reached the import
+through `_Tally.created_ids`, which keeps it out of `_Tally.loaded`, so the vanished match check
+never looked at it. A re-check would have to tell an id the index matched before the import
+created anything from the same id the import then created, in all three importers, for both the
+status and the gap fill. `AUTOINCREMENT` removes the reuse for every path that holds a Book id
+across a delete, the importers included. Cost, measured on the same pod with WAL and
+`synchronous=FULL`, median of five: 5,000 inserts in one transaction went from 34.2 ms to
+44.4 ms, and 200 single row commits from 498 ms to 528 ms.
+
+**Postgres is unaffected** and the revision does nothing there: a sequence never moves back.
+
+**What the revision leaves open, as reasons rather than fixes.**
+
+- *On an upgraded database, an id freed before the upgrade can be issued once, and an orphaned
+  cover under it would be served for the new Book.* The rebuild seeds the counter from the ids
+  it copies, trashed rows included, so an id deleted before the revision's last run and above
+  every surviving id goes to the next Book (measured: id 4, deleted before the upgrade, went to
+  the next insert). A downgrade and re upgrade reseeds the counter from the survivors, so an id
+  freed at head above every survivor can then be issued once too. Its cover was unlinked after the
+  purge's or the merge's commit, so a file is still there only when that unlink did not run: a
+  crash between the commit and the unlink, or an unlink that raised. The cover route then
+  checks only the new Book's visibility, so that Book, possibly another member's, shows the
+  deleted one's cover. Not fixed: it needs that lost unlink, before the revision's last run, on
+  a highest id, and the revision could only close it by raising the counter to the highest id
+  in `cover_store.book_ids()`, a read of the covers directory inside a migration.
+- *An interrupted rebuild leaves `_alembic_tmp_books`, and the next upgrade fails on "table
+  already exists" until somebody drops it.* Alembic runs SQLite DDL outside a transaction, so
+  the CREATE of the temporary table commits on its own, while the copy, the DROP, the RENAME,
+  the indexes and the version stamp share one transaction. Nothing is lost, and every batch
+  rebuild in the chain has the same shape (`c2f95a80d417` included), so this revision does not
+  get a fix the others lack.
+- *A later batch rebuild of `books` drops the keyword without a word.* SQLite reflection cannot
+  see `AUTOINCREMENT`, so a batch operation on `books` has to pass
+  `table_kwargs={"sqlite_autoincrement": True}`. The import route test, the schema test of the
+  counter and the MARC vanished match test go red when it does not.
 
 ### Ownership is a separate axis from read status
 
@@ -2593,8 +2644,9 @@ test would inherit it.
 
 The reset calls no `seed_tags()`. That helper opens its own session, which is a
 second connection, and the point of this shape is that a reset never needs one.
-Ids still restart at 1, which `covers_dir` depends on, because nothing here uses
-`AUTOINCREMENT` and SQLite reuses the highest free rowid.
+Ids still restart at 1, which `covers_dir` depends on, because SQLite gives an insert into a table
+without `AUTOINCREMENT` `max(rowid) + 1`, and the reset empties `sqlite_sequence`, which holds
+the counter of `books`, the one table that has it.
 
 **One number in this file was wrong for a whole day and is worth naming.** The
 rebuild cost was derived as 40.6s over 3236 rebuilds, giving 12ms. 40.6s was a
@@ -22575,13 +22627,13 @@ the keeper carries, then expires the keeper so every count is read under it.
   and `::TestAMergeDeadlockingWithAnotherWriterAnswers409`): the side waiting first is aborted
   with 40P01, and before this answered 500. The three import doors (CSV, MARC, the OPDS sync)
   and `POST /api/books/merge` now answer 409 saying nothing was imported or merged and to send
-  it again, through one helper, `errors.a_deadlock_answers_409`. Nothing is half written: the
+  it again, through one helper, `errors.a_lost_race_answers_409`. Nothing is half written: the
   helper wraps only a block that ends in that door's first commit, so the abort rolls the
   aborted side back whole, and the other side commits. Each import commits once, at its end.
   The merge commits a second time when it corrects the keeper's cover, outside the helper and
   after the books are merged, so the 409's "nothing was merged" stays true. **Only a
-  deadlock**: every other database error is raised unchanged, because a second send would fail
-  the same way (`tests/routers/test_imports_marc.py::TestOnlyADeadlockAsksForTheFileAgain`).
+  lost race**: a deadlock, or a matched Book found gone (the vanished match below); every
+  other database error is raised unchanged, because a second send would fail the same way (`tests/routers/test_imports_marc.py::TestOnlyALostRaceAsksForTheFileAgain`).
   - **Why not a retry of the import.** Measured with a retry once on 40P01 in `MarcImport.apply`:
     six runs of the race, six retries, six 500s, each `NoResultFound`. The retry starts while
     the merge is still finishing its delete, so its index can name the loser and the load
@@ -22596,6 +22648,54 @@ the keeper carries, then expires the keeper so every count is read under it.
   - **The 409 costs an ordinary import nothing**: no statement and no lock is added to the
     path that meets no deadlock, so the 19 `pg_locks` entries at 20,000 Books measured above
     are unchanged by construction (not re-measured).
+  - **A matched Book deleted before the import commits answers the same 409.** An import
+    reads its index before its first row, so a merge on another connection can delete a
+    Book the index matched and commit with no lock cycle between them. The session does
+    not autoflush, so where the import then fails depends on what it writes on the gone
+    row: the load or the MARC tail's refresh after `hold_book_ceilings` raises
+    `InvalidRequestError`, a gap fill's UPDATE raises `StaleDataError` at the flush (for a
+    default CSV import, the commit), a child row's INSERT raises a foreign key violation.
+    A second row naming the same Book is served from the identity map and never reloads
+    it. So each importer wraps its row loop **and** its commit in
+    `importing._a_vanished_match_met_another_change`: on a `SQLAlchemyError` it rolls
+    back, checks through `Shelf.seen_by` whether a Book it loaded is gone, and raises
+    `errors.MetAnotherChange` only then; `errors.a_lost_race_answers_409` answers that as it
+    answers 40P01. Each import commits once, inside the wrapper, so "nothing was imported"
+    stays true. Driven on Postgres for every shape but two
+    (`tests/test_database_ceilings_on_a_real_server.py`), each case asserting the error it
+    met. Not driven, both inside the same wrapper in `MarcImport._apply_one`: the heading
+    tail (`classifications.add_headings`, the same lock, flush and refresh as
+    `_keep_links`), and a lock that waits on the merge's delete rather than finding the
+    row already gone. **Only a vanished matched Book**: any other error, a missing row
+    included, is raised unchanged
+    (`tests/routers/test_imports_marc.py::TestAMatchedBookDeletedMidImportAsksForTheFileAgain::test_an_unrelated_missing_row_in_the_gap_fill_answers_500`).
+    - **Keyed on the fact, not the exception**, and over every `SQLAlchemyError`: the
+      types are what unrelated failures raise too, and the foreign key violation's type is
+      the driver's. Measured: pg8000 raises 23503 as `ProgrammingError` (only 23505 is
+      `IntegrityError`), so a catch naming `InvalidRequestError`, `StaleDataError` and
+      `IntegrityError` answered that shape 500 on Postgres. A deadlock is caught too and
+      raised unchanged unless a loaded Book is gone; the door answers 409 either way.
+      **Never `Exception`**: a privacy refusal in `shelf.py` is a `ValueError` or a
+      `TypeError`, which a resend raises again
+      (`tests/test_importing.py::TestOnlyAFailureOnAGoneRowIsCheckedForAVanishedMatch`).
+    - **Only the Books the import loaded are checked**, never the index's ids: the index
+      also holds Books the caller cannot see, and checking one would answer, as 409 against
+      500, whether another Member's Private Book was deleted
+      (`tests/test_importing.py::TestTheVanishedMatchCheckReadsOnlyBooksTheImportLoaded`).
+    - **A Book the import created is never checked**, though a later row naming it matches
+      it: the rollback deletes it, so it would read as gone and turn any failure into a 409
+      that every resend meets again. `_Tally.created_ids` keeps it out of the check
+      (`tests/test_database_ceilings_on_a_real_server.py::TestABookTheImportCreatedIsNotAVanishedMatch`
+      for each importer on Postgres, and a 500 at each door on SQLite).
+    - **The check runs on the failure path only**, so an import that meets no race gains
+      no statement and no lock
+      (`tests/test_importing.py::TestAnImportMeetingNoRaceChecksNothing`).
+    - **Residue**: an unrelated failure in the same import as a vanished match answers 409,
+      and the resend, whose index no longer names the gone Book, meets it as a 500 unless a
+      Book it loaded vanishes too. A loaded Book that became invisible mid import reads as
+      gone, and the resend sees it as hidden.
+    - **Why not re-resolve the Book under its row lock**: that is a statement and a lock on
+      every matched row of every import, which the bullet above rules out.
 
 ## Which existing Book a record is has one module
 
@@ -22665,15 +22765,63 @@ members' public Books too, and a bulk import that purged would destroy one.
 
 **Scope, narrower than the ruling reads**: the CSV, OPDS and MARC importers. The Calibre library
 import and the store imports (Kindle, Play Books, Moon+ Reader) run in the browser and post each
-Book to `POST /api/books/scan`, the add door, where `InTrash` purges every holder in the trash
-view, another member's trashed public Book included, and creates, as the door always has. Giving
-the client importers "in the trash" too changes the add door's contract (a refusal `writeBooks`
-counts, rather than a purge), so it is the owner's call.
+Book to `POST /api/books/scan`, the add door, where `InTrash` purges the holders and creates only
+when every one is the caller's own, and otherwise refuses with 409 and the code `in_trash`
+("The add door refuses another member's trashed holder, and purges only the caller's own",
+below). The client importers count that refusal as "in the trash" too, through `writeBooks`.
 
 **`MarcPreviewOut` gains `in_trash` and `ambiguous`**, so `readable` less the four counts is the
 most the import creates (an upper bound: two identical records preview as two additions and the
 import creates one and matches the other). Without them a tie or a trash holder would be
 promised as an addition.
+
+## The add door refuses another member's trashed holder, and purges only the caller's own
+
+Owner's ruling, 2026-10-17. Where only Books in the caller's trash view hold the ISBN, `POST
+/api/books` and `POST /api/books/scan` purge them and add afresh only when every holder is the
+caller's own (`added_by_user_id`, since nothing records who trashed a row). One holder that is
+not refuses the add with 409 and `detail.code` `in_trash`, and nothing is purged, the caller's
+own copies in the same group included: purging only those would leave the ISBN held.
+
+**Every caller of the door is refused, not only the imports.** The ruling is about whose Book it
+is, and the server has no honest signal of which client called: the single scan, the rapid
+queue, the Calibre card and the store card all post one Book a request to `/scan`. A header
+naming the client would be the client's claim. The harm, destroying a Book somebody else
+trashed and could restore, is the same from a single scan. The caller still has a way through:
+that Book is in their trash view, where they may restore it or delete it for good.
+
+**The 409 carries a code, and no `book_id`.** Naming the id would disclose nothing: every holder
+is in `Shelf.trashed_by`, which the caller already lists with titles (`disclosure.py`, arm 2).
+It is withheld because on this door `book_id` means a Book on the caller's shelf this record
+already is, and both clients act on it: `lib/fileLanding.ts` lands the record's files on it and
+the Scan page offers a copy of it. A trashed Book is neither, and a copy group can put several
+in the trash at once. The door's other 409s keep their shapes and carry no code.
+
+**Every door reads the refusal through one predicate.** `lib/fileLanding.refusedForTheTrash`
+reads the status and the code. `land` asks it before calling a 409 naming no Book a tie and
+answers the landing kind `in-trash`; `importing.writeBooks` asks it for the Settings cards'
+`inTrash` row; the rapid queue gives the row the `in-trash` reason; the single scan shows
+`scan.inTrash` with a link to the trash in place of the server's sentence. The code moved
+from the Settings card's `importing.ts` into `lib/fileLanding.ts`, beside the reference
+route's two codes. `IN_TRASH` in `backend/routers/books.py` names that file as the other
+spelling, and `tests/routers/test_books_trash.py` holds the value `lib/fileLanding.ts`
+declares its `IN_TRASH` with (typed or not) equal to the route's: the client's vitest stubs
+spell the code by hand, so a respelling on the route alone is what that guard is for
+(`tests/routers/test_books_trash.py::TestAnotherMembersTrashedHolderRefusesTheAdd::test_the_client_reads_the_code_as_the_route_spells_it`).
+
+**The rapid queue and the single scan say one sentence**, `scan.inTrash`, and both link to
+the trash: the refusal and the way through it are the same on both. A rapid row says
+its reason on a line of its own beneath the title rather than in the row's one truncated
+line, which cut the sentence off before its next step.
+
+It amends two paragraphs elsewhere in this register:
+
+- **"The add door asks `recognition` three times"**, the sentence "`InTrash` is the purge set".
+  The purge set is now an `InTrash` answer whose holders are all the caller's own; an `InTrash`
+  answer with another member's holder among them is the `in_trash` refusal, and purges nothing.
+- **"Hidden outranks the trash"**, its **Accepted** paragraph, which cites a create and a purge
+  per ISBN as the price at the add door. Where the trashed holder is another member's, the door
+  now answers that bit with no write; that is the price the bulk channel already had.
 
 ## Hidden outranks the trash, and the disclosure that costs is accepted
 
@@ -22691,8 +22839,11 @@ whether somebody else holds a private Book on I, through a channel that writes n
 answers up to `marc.MAX_RECORDS` ISBNs per rate limited preview.
 
 **Accepted.** The add door already gave the same bit (a hidden live holder kept its bare 409 and
-no purge; without it, purge and 201), at the price of a create and a purge per ISBN. The
-alternative the review offered, `InTrash` carrying a flag only the door reads, closes the bulk
+no purge; without it, purge and 201), at the price of a create and a purge per ISBN where the
+trashed holders are the caller's own. Where one is another member's, the door answers that bit
+with no write: a hidden co holder gives the bare string 409, and without one the object 409
+`in_trash`. That is the price the bulk channel already had, and it was accepted there, so the
+acceptance stands. The alternative the review offered, `InTrash` carrying a flag only the door reads, closes the bulk
 channel and leaves the door's; recorded so it is not rediscovered as new, and open to the owner
 if the channel's price matters.
 
@@ -22745,9 +22896,11 @@ ahead. Refusing on a hidden holder would only tell a member somebody else holds 
 **The add door asks `recognition` three times**: the Calibre uuid, the store identifier, then
 the ISBN across the whole table. Each read is narrowed to the record's own keys, and a record
 carrying no key for a ladder reads nothing for it. `_refuse(message, book_id)` raises the 409,
-and only a `Seen` answer passes an id. `InTrash` is the purge set: every holder is in the
-member's trash view, and a hidden holder outranks it, so somebody else's trashed private Book
-keeps its 409 and the member's own trashed row is not purged beside it. A visible live holder is
+and only a `Seen` answer passes an id. `InTrash` is the purge set only when every holder is the
+caller's own; with another member's holder among them it is the `in_trash` refusal and purges
+nothing ("The add door refuses another member's trashed holder", above). A hidden holder
+outranks it, so somebody else's trashed private Book keeps its 409 and the member's own trashed
+row is not purged beside it. A visible live holder is
 named before a hidden one.
 
 **The narrowed identifier read compares exact spellings** (as sent, upper cased, lower cased), so
@@ -22817,8 +22970,65 @@ figures that quote them in minutes, and the hook imports the interval it waits b
 `File`. Where an event needs the state a row was asked from (`not-answered`),
 the hook passes it, since the row is `searching` by the time the answer lands.
 
-**Left open**: `ScannedEntry` is still one shape, and which optional field exists in which state
-is said only in prose. The union of state shaped variants is its own ticket.
+**Closed since**: `ScannedEntry` is a union with one arm per state ("A queue row's state
+fields are declared absent on every arm that cannot carry them", below).
+
+## A queue row's state fields are declared absent on every arm that cannot carry them
+
+`ScannedEntry` in `frontend/src/pages/ScanPage/queue.ts` is one arm per state. Each arm names
+the state fields it may carry (`InState`'s second argument) and must carry (third), and every
+other member of `StateFields` is declared `?: undefined` rather than left out.
+
+**Why declared, not omitted.** TypeScript does not check a spread's properties against the
+target, so `{ ...choosingRow, state: "found" }` compiles with `matches` still on it when the
+found arm merely omits `matches`. Declared `undefined`, it is a compile error.
+
+**A change of state starts from `leaving(row)`**, which clears every state field, and names
+what it keeps. The alternative, clearing at each site, is what let a `stated` row the batch
+failed keep its `differentRecord`, so the failed row still offered "take the record".
+
+**Two couplings that were prose are types too.** `stated` is two arms: one holds a
+record (`differentRecord` required, reason `record-differs`), and the other holds none and may
+carry any reason but `record-differs`. `QUEUE_STATES` types `deciding` as `true` on an arm that
+carries `matches` and `false` on every other, so `isBeingDecided` narrows exactly in both
+branches.
+
+**One coupling stays prose, on purpose.** `copyOf` lives only on `failed`, but not only beside
+the `held-in-another-format` reason: a refused copy keeps the offer under the refusal's reason,
+so the press can be made again.
+
+What changed at runtime, all of it on purpose:
+
+- A failed row no longer carries `differentRecord` (the defect above; pinned by a test).
+- A row taken from a held record (`record-taken`) no longer carries `answered: "records"`.
+  Nothing reads `answered` on a `found` row: the two lookup predicates require an askable
+  state and `emptyAnswers` counts only `"nothing"`.
+- `copy-made` and `copy-refused` act only on a row that carries a copy offer. The hook sends
+  them only for such a row, so this changes nothing reachable.
+- A lookup answer landing on a row whose state changed while the lookup was in flight now
+  clears that row's state fields instead of carrying them into the new state. The union
+  forces it, since the arm a lookup lands in cannot carry the old arm's fields. The page
+  cannot reach it today: Add all is disabled while a lookup run is going, and both run
+  buttons are disabled while the batch adds.
+
+`fileReasons` exists only beside `group` (`Grouping`). That is a property of an audiobook row
+in any state, not of a state, so it is a second union rather than a state field.
+
+**`library-read` carries the library's books, not rows.** Every other event carries what
+happened, and this one carried finished rows, so only convention kept the hook from writing a
+state into one. `queueAfter` now calls `libraryRows` itself. The hook still calls it for the
+holder lookup's questions, so a library's rows are built twice per read; both builds are pure.
+A brand on the rows was tried first and refused: a spread over a branded row keeps the brand,
+so a state written in the hook still compiled.
+
+### The `batch-ran` event carries row facts, by design
+
+`afterTheBatch` spreads `leaving(failure.row)`, a row the hook hands over. `leaving` strips every
+state field, so no state and no `copyOf` crosses, but the `RowFacts` fields do, `heldBy` among
+them. Left open deliberately: the hook already supplies `heldBy` through `holders-answered`, so a
+hook writing it is the hook's own job, not a write the queue must refuse. Closing it would mean
+`BatchFailure` carrying the key alone and the queue looking the row up. A security review found
+it.
 
 ## The register writer accepts a log from another path when both trees are clean at one commit
 

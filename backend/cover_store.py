@@ -351,9 +351,10 @@ def remove(book_id: int) -> None:
 
     A file is not deleted by deleting a row, so this is the cost of holding
     covers on disk rather than in the database. A cover whose book no longer
-    exists is dead bytes no query will ever find, and worse than that: SQLite
-    reuses an id once the highest row goes, so the next book to take it would
-    inherit somebody else's cover.
+    exists is dead bytes no query will ever find, and worse than that wherever
+    an id can be issued again: an id freed before revision 0850786d1753, or on
+    a database downgraded below it, can go to the next Book on SQLite, which
+    would inherit somebody else's cover.
     """
     for extension in ALLOWED_IMAGE_EXTENSIONS:
         (COVERS_DIR / f"{book_id}.{extension}").unlink(missing_ok=True)

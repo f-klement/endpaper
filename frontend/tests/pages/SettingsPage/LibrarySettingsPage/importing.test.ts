@@ -81,6 +81,20 @@ describe("writing a shelf somebody already had", () => {
     expect(outcome.failures).toEqual([{ title: "Book 2", status: 409 }]);
   });
 
+  it("marks a book the server refused as in the trash", async () => {
+    const outcome = await writeBooks(bodies(1), {
+      post: async () => {
+        throw { status: 409, code: "in_trash" };
+      },
+      onProgress: () => {},
+      stopped: () => false,
+    });
+
+    expect(outcome.failures).toEqual([
+      { title: "Book 1", status: 409, inTrash: true },
+    ]);
+  });
+
   it("records a request that never got a status at all", async () => {
     // A connection that never answered is not a 500, and reporting it as one
     // would tell a member the server refused a book it never saw.

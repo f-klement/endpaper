@@ -21,12 +21,20 @@ a worse bug than the one this fixes.
 
 **Privacy.** The trash is not a hole in it. Somebody else's private book is as
 invisible in the trash as it is on the shelf, and their trashed book is not
-purgeable by scanning its ISBN.
+purgeable by scanning its ISBN, private or public.
 """
+
+import re
 
 import pytest
 
 from models import Book
+from routers.books import IN_TRASH
+from tests.corpus import REPO
+
+#: The client module that reads the add door's code, for the Settings cards and
+#: the Scan page alike.
+IMPORTER = REPO / "frontend/src/lib/fileLanding.ts"
 
 
 @pytest.fixture
@@ -262,10 +270,9 @@ class TestPurge:
         assert res.json()["purged"] == 0
 
     def test_the_cover_file_goes_too(self, client, admin, make_book, covers_dir):
-        """Covers are named by book id, and SQLite reuses ids.
-
-        Leaving the file behind gives the next book to take that id somebody
-        else's cover.
+        """Covers are named by book id, and an id SQLite can still issue
+        again (one freed before revision 0850786d1753, or on a downgraded
+        database) would hand a file left behind to the next book.
         """
         from tests.helpers import JPEG_BYTES
 
@@ -321,11 +328,11 @@ class TestTheIsbnIsFreedAgain:
     ):
         """Restoring instead would hand back the record just rejected.
 
-        Asserted on the title and on the trash rather than on the id. SQLite
-        makes `INTEGER PRIMARY KEY` an alias for the rowid, so purging the
-        highest row frees its id and the replacement takes it: checking that
-        the id is gone would fail against a database that did exactly the right
-        thing.
+        Asserted on the title and on the trash rather than on the id. Whether
+        the replacement takes the purged row's id is the id counter's business,
+        not this decision's: at head it never does on SQLite, and on a database
+        downgraded below revision 0850786d1753 it does, so checking that the id
+        is gone would test the counter.
         """
         book = make_book(admin["headers"], isbn=self.ISBN, title="Mis-scanned")
         client.delete(f"/api/books/{book['id']}", headers=admin["headers"])
@@ -456,6 +463,73 @@ class TestPrivacy:
             ).status_code
             == 200
         )
+
+
+class TestAnotherMembersTrashedHolderRefusesTheAdd:
+    """The owner's ruling of 2026-10-17: the add door purges only the caller's
+    own trashed Book. The trash view holds every member's trashed public Books,
+    and an import posting each book here used to destroy them."""
+
+    ISBN = "9780743273565"
+
+    def test_another_members_trashed_book_answers_in_trash_and_is_kept(
+        self, client, admin, member, make_book, db
+    ):
+        book = make_book(admin["headers"], isbn=self.ISBN, title="Theirs")
+        client.delete(f"/api/books/{book['id']}", headers=admin["headers"])
+
+        res = client.post(
+            "/api/books/scan",
+            json={"isbn": self.ISBN, "title": "Mine"},
+            headers=member["headers"],
+        )
+
+        assert (res.status_code, res.json()["detail"]["code"]) == (409, IN_TRASH)
+        assert "book_id" not in res.json()["detail"]
+        assert db.get(Book, book["id"]) is not None
+
+    def test_a_trashed_group_holding_one_of_each_is_refused_whole(
+        self, client, admin, member, make_book, db
+    ):
+        """Purging only the caller's copy would leave the ISBN held, so one
+        holder that is not theirs refuses the add and their own is kept too."""
+        theirs = make_book(admin["headers"], isbn=self.ISBN, title="Theirs")
+        mine = client.post(
+            f"/api/books/{theirs['id']}/copies", json={}, headers=member["headers"]
+        ).json()
+        deletes = [
+            client.delete(f"/api/books/{row['id']}", headers=member["headers"]).status_code
+            for row in (theirs, mine)
+        ]
+
+        res = client.post(
+            "/api/books/scan",
+            json={"isbn": self.ISBN, "title": "Mine again"},
+            headers=member["headers"],
+        )
+
+        # A delete that failed would leave a live holder, whose own 409 would
+        # pass every assertion below but the code.
+        assert deletes == [204, 204]
+        assert (res.status_code, res.json()["detail"]["code"]) == (409, IN_TRASH)
+        assert db.get(Book, theirs["id"]) is not None
+        assert db.get(Book, mine["id"]) is not None
+
+    def test_the_client_reads_the_code_as_the_route_spells_it(self):
+        """The client's vitest stubs spell the code by hand, so a code respelt
+        on the route alone stays green there while every door reads the refusal
+        as a tie or a failure. This compares the value the client declares its
+        `IN_TRASH` with, not a quoted literal anywhere in the file, because the
+        file also spells the landing kind `"in-trash"`. It holds the
+        declaration, not the comparison that reads it."""
+        declared = re.findall(
+            # The optional annotation is the typed constant this tree writes at
+            # six sites; without it an unchanged value would read as a respelling.
+            r'\bconst IN_TRASH\b(?:\s*:[^=]*)?\s*=\s*"([^"]*)"',
+            IMPORTER.read_text(encoding="utf-8"),
+        )
+
+        assert declared == [IN_TRASH]
 
 
 class TestALentBookGoingToTheTrash:

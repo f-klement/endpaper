@@ -7,6 +7,7 @@ import type {
   TagOut,
 } from "../../../api/generated/model";
 import { ErrorState } from "../../../components";
+import { refusedForTheTrash } from "../../../lib/fileLanding";
 import { useTranslation, type MessageKey } from "../../../i18n";
 import { CoverImage, LocationField, TagPicker } from "../../components";
 import { FORMAT_LABELS, FORMAT_ORDER } from "../../types";
@@ -255,7 +256,24 @@ export default function LookupResult({
 
         {error != null && (
           <div className="mt-3 space-y-2">
-            <ErrorState error={error} fallback={t("scan.couldNotAdd")} />
+            {/* The trash refusal names no Book, so without its own sentence
+                the server's English is all the member reads, and nothing
+                says where the Book they could put back is. */}
+            {refusedForTheTrash(error) ? (
+              <>
+                <ErrorState error={t("scan.inTrash")} />
+                <div>
+                  <Link
+                    to="/trash"
+                    className="text-sm font-medium text-accent-600 hover:text-accent-700 dark:text-accent-400 dark:hover:text-accent-300"
+                  >
+                    {t("trash.open")}
+                  </Link>
+                </div>
+              </>
+            ) : (
+              <ErrorState error={error} fallback={t("scan.couldNotAdd")} />
+            )}
             {/* The second pass through a bookcase is mostly books already on
                 the shelf, so this is a common outcome rather than an edge one.
                 Without the link the reader is holding the book with nothing to

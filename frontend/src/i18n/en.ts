@@ -314,6 +314,10 @@ export const en = {
   "scan.authorPlaceholder": "Author name",
   "scan.couldNotAdd": "Could not add the book.",
   "scan.openTheOneWeHave": "Open the copy already in the library",
+  // The add door's refusal for an ISBN only the trash holds, one holder being
+  // another member's. Said on the single scan and on a rapid queue row.
+  "scan.inTrash":
+    "In the trash as another member's book, so it was not added. Put it back, or delete it for good, and add it again.",
   "scan.addCover": "Add cover photo (optional)",
   "scan.replaceCover": "Replace cover photo (optional)",
   "scan.privateBook": "Private (only visible to me)",
@@ -1757,6 +1761,8 @@ export const en = {
   "calibre.resultFailures": "{count} could not be added:",
   "calibre.duplicate": "already in the catalogue",
   "calibre.notAdded": "not added",
+  "calibre.inTrash":
+    "in the trash as another member's book; put it back, or delete it for good, and import again",
   "calibre.located":
     "{count} have their files in the folder you picked, and where each file is will be saved on its book.",
   // Names the exception for `rapid.alreadyHeld`'s reason.
@@ -1855,6 +1861,8 @@ export const en = {
   "stores.resultFailures": "{count} could not be added:",
   "stores.duplicate": "already in the catalogue",
   "stores.notAdded": "not added",
+  "stores.inTrash":
+    "in the trash as another member's book; put it back, or delete it for good, and import again",
   "stores.failureNotADatabase": "That file is not a SQLite database.",
   "stores.failureNotAKobo": "That database is not a Kobo library.",
   "stores.failureNotAnArchive": "That file is not a zip archive.",

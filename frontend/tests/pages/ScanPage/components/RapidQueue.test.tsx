@@ -5,11 +5,17 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import RapidQueue from "../../../../src/pages/ScanPage/components/RapidQueue";
-import { BookFormat, Locale } from "../../../../src/api/generated/model";
+import {
+  BookFormat,
+  Locale,
+  type BookMatch,
+} from "../../../../src/api/generated/model";
 import type {
+  EntryIn,
   QueueFigures,
   ScannedEntry,
 } from "../../../../src/pages/ScanPage/queue";
+import { en } from "../../../../src/i18n/en";
 import { renderLocalised } from "../../../utils";
 
 /** The component's props, which it does not export. */
@@ -115,6 +121,18 @@ function renderQueue(
 }
 
 /**
+ * The arms of `ScannedEntry` in state `S`, without the fields a fixture helper
+ * fills in.
+ *
+ * **Typed by the state and not by the fixture**: a helper generic over the
+ * whole fixture infers its type from the literal, which turns off the excess
+ * property check, so a misspelt field compiled. Inferred from `state` alone,
+ * the literal is checked against the arm it names.
+ */
+type Without<K extends keyof ScannedEntry, S extends ScannedEntry["state"]> =
+  EntryIn<S> extends infer E ? (E extends unknown ? Omit<E, K> : never) : never;
+
+/**
  * A scanned entry, keyed and labelled the way `capture` keys and labels one.
  *
  * The queue identifies an entry by `key` rather than by ISBN, because a picked
@@ -122,9 +140,13 @@ function renderQueue(
  * format is blank because a barcode answers nothing about one, so writing all
  * three out at every fixture would say the same thing four times.
  */
-function scanned(
-  entry: Omit<ScannedEntry, "key" | "label" | "format">,
-): ScannedEntry {
+function scanned<S extends ScannedEntry["state"]>(
+  entry: Without<"key" | "label" | "format", S> & { state: S; isbn: string },
+): Without<"key" | "label" | "format", S> & {
+  key: string;
+  label: string;
+  format: "";
+} {
   return {
     ...entry,
     key: `isbn:${entry.isbn}`,
@@ -164,10 +186,15 @@ function grouped(names: readonly string[], title: string): ScannedEntry {
 }
 
 /** A picked file's entry, keyed and labelled the way `pickFiles` does. */
-function picked(
-  entry: Omit<ScannedEntry, "key" | "label" | "format" | "isbn">,
+function picked<S extends ScannedEntry["state"]>(
+  entry: Without<"key" | "label" | "format" | "isbn", S> & { state: S },
   name: string,
-): ScannedEntry {
+): Without<"key" | "label" | "format" | "isbn", S> & {
+  key: string;
+  label: string;
+  isbn: "";
+  format: BookFormat;
+} {
   return {
     ...entry,
     key: `file:${name}:10:0`,
@@ -256,6 +283,37 @@ describe("RapidQueue", () => {
       screen.getByText("Not in the catalogues, kept as the file describes it."),
     ).toBeInTheDocument();
     expect(screen.queryByText(/From the file name/)).toBeNull();
+  });
+
+  it("says why a stated row keeps the file's description on a line nothing cuts off", () => {
+    // The sentence runs well past one line of the page, and sharing the row's
+    // one truncated line with the title cut it off.
+    renderQueue({
+      entries: [
+        picked(
+          {
+            state: "stated",
+            draft: {
+              isbn: "9780441013593",
+              title: "Dune",
+              suggested_tag_ids: [],
+            },
+            answered: "records",
+            reason: { kind: "record-differs" },
+            differentRecord: {
+              isbn: "9780441013593",
+              title: "The Left Hand of Darkness",
+              author: "Ursula K. Le Guin",
+            },
+          },
+          "dune.epub",
+        ),
+      ],
+    });
+
+    expect(
+      screen.getByText(en["rapid.recordDiffers"]).closest(".truncate"),
+    ).toBe(null);
   });
 
   it("shows a record under another title, and offers to use it or keep the file", async () => {
@@ -760,6 +818,31 @@ describe("RapidQueue", () => {
     ).toBeInTheDocument();
   });
 
+  /** A picked row the add door refused because only the trash holds its ISBN. */
+  const inTrash = {
+    ...heldUnnamed,
+    reason: { kind: "in-trash" as const },
+  };
+
+  it("says a row in the trash in the single scan's sentence, on a line nothing cuts off", () => {
+    // The sentence ends on what to do, and sharing the row's one truncated
+    // line with the title cut it off before that.
+    renderQueue({ entries: [inTrash] });
+
+    expect(screen.getByText(en["scan.inTrash"]).closest(".truncate")).toBe(
+      null,
+    );
+  });
+
+  it("links a row in the trash to the trash", () => {
+    renderQueue({ entries: [inTrash] });
+
+    expect(screen.getByRole("link", { name: "Open trash" })).toHaveAttribute(
+      "href",
+      "/trash",
+    );
+  });
+
   it("says how many held books were at their ceiling, so their files went unrecorded", () => {
     renderQueue({
       result: {
@@ -1152,7 +1235,7 @@ describe("RapidQueue and a book taken from its file name", () => {
     suggested_tag_ids: [],
   };
 
-  const derived: ScannedEntry = picked(
+  const derived = picked(
     {
       state: "derived",
       draft: {
@@ -1166,6 +1249,18 @@ describe("RapidQueue and a book taken from its file name", () => {
     "The Dispossessed.pdf",
   );
 
+  /** The same file with records on screen, which a change of state clears. */
+  const offering = (...matches: BookMatch[]) =>
+    picked(
+      {
+        state: "choosing",
+        draft: derived.draft,
+        query: derived.query,
+        matches,
+      },
+      "The Dispossessed.pdf",
+    );
+
   it("shows the title the name gave and says where it came from", () => {
     renderQueue({ entries: [derived] });
 
@@ -1173,14 +1268,16 @@ describe("RapidQueue and a book taken from its file name", () => {
     expect(screen.getByText(/From the file name/)).toBeInTheDocument();
   });
 
-  it("says what the file itself could not say, beside it", () => {
+  it("says what the file itself could not say, on a line nothing cuts off", () => {
     renderQueue({
       entries: [
         { ...derived, reason: { kind: "file", failure: "not-an-epub" } },
       ],
     });
 
-    expect(screen.getByText(/Not an EPUB file/)).toBeInTheDocument();
+    expect(screen.getByText(/Not an EPUB file/).closest(".truncate")).toBe(
+      null,
+    );
   });
 
   it("offers the lookup rather than running it, and says what it costs", () => {
@@ -1222,7 +1319,14 @@ describe("RapidQueue and a book taken from its file name", () => {
   });
 
   it("says it is asking, per file", () => {
-    renderQueue({ entries: [{ ...derived, state: "searching" }] });
+    renderQueue({
+      entries: [
+        picked(
+          { state: "searching", draft: derived.draft, query: derived.query },
+          "The Dispossessed.pdf",
+        ),
+      ],
+    });
 
     expect(screen.getByText("Asking the catalogues...")).toBeInTheDocument();
   });
@@ -1231,7 +1335,7 @@ describe("RapidQueue and a book taken from its file name", () => {
     const onChoose = vi.fn<RapidQueueProps["onChoose"]>();
     const onKeepName = vi.fn<RapidQueueProps["onKeepName"]>();
     renderQueue({
-      entries: [{ ...derived, state: "choosing", matches: [MATCH] }],
+      entries: [offering(MATCH)],
       onChoose,
       onKeepName,
     });
@@ -1255,7 +1359,7 @@ describe("RapidQueue and a book taken from its file name", () => {
   it("names the record a member takes", async () => {
     const user = userEvent.setup();
     const onChoose = vi.fn<RapidQueueProps["onChoose"]>();
-    const entry = { ...derived, state: "choosing" as const, matches: [MATCH] };
+    const entry = offering(MATCH);
     renderQueue({ entries: [entry], onChoose });
 
     await user.click(
@@ -1270,7 +1374,7 @@ describe("RapidQueue and a book taken from its file name", () => {
   it("names the file whose records a member rejects", async () => {
     const user = userEvent.setup();
     const onKeepName = vi.fn<RapidQueueProps["onKeepName"]>();
-    const entry = { ...derived, state: "choosing" as const, matches: [MATCH] };
+    const entry = offering(MATCH);
     renderQueue({ entries: [entry], onKeepName });
 
     await user.click(
@@ -1291,14 +1395,12 @@ describe("RapidQueue and a book taken from its file name", () => {
     const user = userEvent.setup();
     const onKeepName = vi.fn<RapidQueueProps["onKeepName"]>();
     const second: ScannedEntry = {
-      ...derived,
+      ...offering(MATCH),
       key: "file:The Left Hand of Darkness.epub:10:0",
       label: "The Left Hand of Darkness.epub",
-      state: "choosing",
-      matches: [MATCH],
     };
     renderQueue({
-      entries: [{ ...derived, state: "choosing", matches: [MATCH] }, second],
+      entries: [offering(MATCH), second],
       onKeepName,
     });
 
@@ -1339,7 +1441,7 @@ describe("RapidQueue and a book taken from its file name", () => {
     // the accessible name as well as onto the screen.
     const untitled = { ...MATCH, title: null, year: 1965 };
     renderQueue({
-      entries: [{ ...derived, state: "choosing", matches: [untitled] }],
+      entries: [offering(untitled)],
     });
 
     expect(
@@ -1357,7 +1459,7 @@ describe("RapidQueue and a book taken from its file name", () => {
     // author and the year; the accessible name did not.
     const other = { ...MATCH, author: "U. K. Le Guin", year: 1975 };
     renderQueue({
-      entries: [{ ...derived, state: "choosing", matches: [MATCH, other] }],
+      entries: [offering(MATCH, other)],
     });
 
     // Two lookups, so `getByRole` throwing on either is the assertion.
@@ -1428,7 +1530,7 @@ describe("RapidQueue and a book taken from its file name", () => {
     // The cost of not filing an undecided row under its file name, named on
     // screen rather than left for somebody to notice afterwards.
     renderQueue({
-      entries: [{ ...derived, state: "choosing", matches: [MATCH] }],
+      entries: [offering(MATCH)],
       deciding: 1,
     });
 
@@ -1443,7 +1545,7 @@ describe("RapidQueue and a book taken from its file name", () => {
     const user = userEvent.setup();
     const onKeepAllForNow = vi.fn<RapidQueueProps["onKeepAllForNow"]>();
     renderQueue({
-      entries: [{ ...derived, state: "choosing", matches: [MATCH] }],
+      entries: [offering(MATCH)],
       deciding: 1,
       onKeepAllForNow,
     });
@@ -1460,7 +1562,7 @@ describe("RapidQueue and a book taken from its file name", () => {
     // that says nothing is discarded, and the one that says a second pass may
     // be paid for, sit on the control rather than after the press.
     renderQueue({
-      entries: [{ ...derived, state: "choosing", matches: [MATCH] }],
+      entries: [offering(MATCH)],
       deciding: 1,
     });
 
@@ -1604,7 +1706,7 @@ describe("RapidQueue and a book taken from its file name", () => {
 
   it("offers no press while the queue is being added", () => {
     renderQueue({
-      entries: [{ ...derived, state: "choosing", matches: [MATCH] }],
+      entries: [offering(MATCH)],
       deciding: 1,
       isAdding: true,
     });
@@ -1618,7 +1720,7 @@ describe("RapidQueue and a book taken from its file name", () => {
     // The other three controls here dim while a run is going, and a member
     // cannot tell which press the page will honour if a fourth stays live.
     renderQueue({
-      entries: [{ ...derived, state: "choosing", matches: [MATCH] }],
+      entries: [offering(MATCH)],
       deciding: 1,
       isLookingUp: true,
     });
@@ -1634,7 +1736,7 @@ describe("RapidQueue and a book taken from its file name", () => {
     // would offer to keep three names and clear one.
     renderQueue({
       entries: [
-        { ...derived, state: "choosing", matches: [MATCH] },
+        offering(MATCH),
         { ...derived, key: "file:b.pdf:10:0" },
         { ...derived, key: "file:c.pdf:10:0" },
       ],

@@ -11,11 +11,17 @@ import dataclasses
 import io
 from datetime import UTC, datetime
 
+import pytest
+from sqlalchemy.exc import IntegrityError
+
 import csv_import
 import importing
 import tags
+from database import SessionLocal
 from enums import BookFormat, ReadStatus
-from models import Book, UserBook
+from models import Book, User, UserBook
+from routers.books import merge_books
+from schemas.book import MergeRequest
 from tests.helpers import items
 from tests.test_errors import postgres_deadlock
 
@@ -1078,3 +1084,69 @@ class TestADeadlockedImportAsksForTheFileAgain:
         res = upload(client, admin["headers"], csv_bytes(goodreads_row("Stoner", "read")))
 
         assert res.status_code == 409
+
+
+class TestAMergeBetweenTheIndexAndTheFirstWriteIsAVanishedMatch:
+    """On SQLite the import reads its index outside any transaction, because
+    the driver opens one at the first write, so a merge on another connection
+    commits in between without waiting. The Book it deletes must not lend its
+    id to the Book the import creates next."""
+
+    def test_the_import_answers_409_and_writes_no_status(self, client, admin, db, monkeypatch):
+        """The matched Book is the highest id, which is the one SQLite would
+        hand out again without `AUTOINCREMENT`; the import then wrote its row's
+        status onto the created Mort and answered 200."""
+        owner = admin["user"]["id"]
+        keeper = Book(title="Guards! Guards!", added_by_user_id=owner)
+        db.add(keeper)
+        db.flush()
+        matched = Book(title="Small Gods", isbn="9780552152976", added_by_user_id=owner)
+        db.add(matched)
+        db.commit()
+        merge = MergeRequest(book_ids=[keeper.id, matched.id], keep_id=keeper.id)
+        build = importing._CatalogueIndex.build
+
+        def build_then_merge(session, user_id):
+            index = build(session, user_id)
+            other = SessionLocal()
+            try:
+                merge_books(merge, other, other.get_one(User, owner))
+            finally:
+                other.close()
+            return index
+
+        monkeypatch.setattr(importing._CatalogueIndex, "build", build_then_merge)
+
+        res = upload(
+            client,
+            admin["headers"],
+            csv_bytes(
+                goodreads_row("Mort", "to-read"),
+                goodreads_row("Small Gods", "read", '="9780552152976"'),
+            ),
+            create_missing=True,
+        )
+
+        assert res.status_code == 409
+        assert db.query(UserBook).count() == 0
+
+
+class TestAFailureAfterARowMatchedABookThisImportCreatedAnswers500:
+    """A later row naming a Book this import created matches it, and the
+    rollback after a failure takes that Book back. It was not on the shelf when
+    the import began, so it is no vanished match, and a resend fails the same
+    way: a 409 would ask for the file again on every send."""
+
+    @pytest.mark.answers_500(raises=(IntegrityError,))
+    def test_an_unrelated_failure_on_the_matching_row_answers_500(
+        self, client, admin, monkeypatch
+    ):
+        def unrelated(*args):
+            raise IntegrityError("planted", {}, Exception("planted"))
+
+        monkeypatch.setattr(importing, "_fill_gaps", unrelated)
+        mort = goodreads_row("Mort", "read", '="9780552131063"')
+
+        res = upload(client, admin["headers"], csv_bytes(mort, mort), create_missing=True)
+
+        assert res.status_code == 500

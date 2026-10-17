@@ -452,6 +452,23 @@ describe("writing the library", () => {
     });
   });
 
+  it("lists a book refused as in the trash as that, not as a tie", async () => {
+    // Its 409 names no Book, as a tie's does, so read as one this row would
+    // claim a duplicate the server never said it had.
+    const { result } = importHook();
+    await act(async () => result.current.choose(await libraryFile(3)));
+    await waitFor(() => expect(result.current.preview).not.toBeNull());
+    answers = [null, 409, null];
+    refusalCode = "in_trash";
+
+    await act(async () => result.current.confirm());
+    await waitFor(() => expect(result.current.result).not.toBeNull());
+
+    expect(result.current.result?.failures).toEqual([
+      { title: "Book 2", status: 409, inTrash: true },
+    ]);
+  });
+
   it("stops when it is told to, and says it was stopped", async () => {
     const { result } = importHook();
     await act(async () => result.current.choose(await libraryFile(5)));

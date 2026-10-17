@@ -229,6 +229,7 @@ const OUTCOME_MESSAGES: OutcomeMessages = {
   resultFailures: "stores.resultFailures",
   duplicate: "stores.duplicate",
   notAdded: "stores.notAdded",
+  inTrash: "stores.inTrash",
 };
 
 /**

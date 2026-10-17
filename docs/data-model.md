@@ -1211,8 +1211,11 @@ Three details worth keeping:
 - The ISBN uniqueness check in `_create_book` deliberately does **not** apply it. The
   constraint is table-wide, so a clash with somebody else's private book is still a clash.
   That also makes it the one query that sees trashed rows, which is why re-adding a book
-  the caller trashed purges that row rather than reporting a conflict about a book nobody
-  can see.
+  the caller added, once it is in the trash, purges that row rather than reporting a
+  conflict about a book nobody can see. A trashed book another member added holding the
+  same ISBN stops the purge, the caller's own rows included: a public one answers 409
+  `in_trash`, and a private one, which is not in the caller's trash view, answers the 409
+  with no code.
 
 **A custom field value obeys this rule without carrying a copy of it.** Every reader and
 writer in `custom_fields.py` takes `Book` objects rather than book ids, and a `Book` can only

@@ -847,9 +847,10 @@ export function useCalibreImport(): UseCalibreImportResult {
 
     /**
      * One book, landed by `lib/fileLanding.land`, and what that makes of it
-     * on this card: a count for each outcome but two. A tie and a failure are
-     * thrown, so the loop lists the book: a failure with the status the server
-     * answered, a tie as `HeldUnnamed`, which has its own sentence.
+     * on this card: a count for each outcome but three. A tie, the trash
+     * refusal and a failure are thrown, so the loop lists the book: a failure
+     * with the status the server answered, a tie as `HeldUnnamed`, and the
+     * trash refusal as itself, each of the last two with its own sentence.
      *
      * **A book of another format is counted, not offered**: this card has no
      * press for the copy the scan page offers.
@@ -883,7 +884,10 @@ export function useCalibreImport(): UseCalibreImportResult {
           return;
         case "tie":
           throw new HeldUnnamed();
+        case "in-trash":
         case "failed":
+          // Rethrown as the server answered, so `writeBooks` lists the row
+          // with its status, and the trash refusal as in the trash.
           throw landing.thrown;
         default:
           landing satisfies never;

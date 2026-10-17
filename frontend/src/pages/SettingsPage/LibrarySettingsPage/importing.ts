@@ -17,7 +17,7 @@ import {
   type BulkProgress,
 } from "../../../lib/bulkWrite";
 import type { BookCreate } from "../../../api/generated/model";
-import { HeldUnnamed } from "../../../lib/fileLanding";
+import { HeldUnnamed, refusedForTheTrash } from "../../../lib/fileLanding";
 
 /** How far through a step that walks nine hundred things this one is. */
 export type ImportProgress = BulkProgress;
@@ -29,6 +29,8 @@ export interface ImportFailureRow {
   readonly status: number | null;
   /** Thrown as `HeldUnnamed`: a duplicate the server named no Book for. */
   readonly unnamed?: true;
+  /** `lib/fileLanding.refusedForTheTrash`: only the trash holds the ISBN, not as theirs. */
+  readonly inTrash?: true;
 }
 
 export interface ImportOutcome {
@@ -65,6 +67,7 @@ export async function writeBooks(
       title: item.title,
       status: statusOf(thrown),
       ...(thrown instanceof HeldUnnamed ? { unnamed: true as const } : {}),
+      ...(refusedForTheTrash(thrown) ? { inTrash: true as const } : {}),
     })),
     stopped: outcome.stopped,
   };

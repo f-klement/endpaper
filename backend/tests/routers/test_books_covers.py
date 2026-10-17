@@ -267,7 +267,9 @@ class TestTheDirectoryDoesNotDriftFromTheDatabase:
         self, client, admin, make_book, covers_dir, monkeypatch
     ):
         """A cover whose book is gone is dead bytes no query will ever find, and
-        SQLite reuses an id, so the next book to take it would inherit this."""
+        where SQLite can still issue the id again (one freed before revision
+        0850786d1753, or on a downgraded database), the next book would
+        inherit this."""
         store_locally(monkeypatch)
         book = make_book(admin["headers"], title="A")
         client.post("/api/books/covers/backfill", headers=admin["headers"])

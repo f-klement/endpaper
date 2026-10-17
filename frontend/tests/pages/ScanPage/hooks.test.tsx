@@ -732,6 +732,25 @@ describe("useRapidIntake", () => {
     );
   });
 
+  it("says a row refused as in the trash is in the trash, not held unnamed", async () => {
+    // Its 409 names no Book, as a tie's does, and only the code tells them
+    // apart.
+    api.on("/api/books/lookup", { body: LOOKUP });
+    api.on("/api/books/scan", {
+      status: 409,
+      body: { detail: { message: "in the trash", code: "in_trash" } },
+    });
+    const { result } = renderRapid();
+    act(() => result.current.capture("9780441013593"));
+    await waitFor(() => expect(result.current.entries[0]?.state).toBe("found"));
+
+    act(() => result.current.addAll());
+
+    await waitFor(() =>
+      expect(result.current.entries[0]?.reason).toEqual({ kind: "in-trash" }),
+    );
+  });
+
   it("empties the queue once added", async () => {
     api.on("/api/books/lookup", { body: LOOKUP });
     api.on("/api/books/scan", { body: makeBook() });

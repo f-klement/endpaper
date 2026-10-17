@@ -9,6 +9,7 @@ and that deleting or moving a server takes its login with it.
 
 import pytest
 import respx
+from sqlalchemy.exc import IntegrityError
 
 import credentials
 import fetch
@@ -578,6 +579,35 @@ class TestASync:
         )
 
         assert response.status_code == 409
+
+    @respx.mock
+    @pytest.mark.answers_500(raises=(IntegrityError,))
+    def test_an_unrelated_failure_after_an_entry_matched_a_book_the_sync_created_answers_500(
+        self, client, admin, monkeypatch
+    ):
+        """The last entry matches the Book the one before it created, and the
+        rollback takes that Book back. It was not on the shelf when the sync
+        began, so it is no vanished match, and a resend fails the same way: a
+        409 would ask for the sync again on every send."""
+        entry = (
+            "<entry><title>Mort</title><author><name>Terry Pratchett</name></author>"
+            '<link rel="http://opds-spec.org/acquisition" href="/d/{}"/></entry>'
+        )
+        respx.get(BASE).respond(
+            text=FEED.replace("</feed>", entry.format(2) + entry.format(3) + "</feed>")
+        )
+        server = make_server(client, admin)
+
+        def unrelated(*args):
+            raise IntegrityError("planted", {}, Exception("planted"))
+
+        monkeypatch.setattr(importing, "_fill_opds_gaps", unrelated)
+
+        response = client.post(
+            f"/api/opds/servers/{server['id']}/sync", headers=admin["headers"]
+        )
+
+        assert response.status_code == 500
 
     @respx.mock
     def test_nothing_is_created_when_the_caller_asked_for_none(self, client, admin):

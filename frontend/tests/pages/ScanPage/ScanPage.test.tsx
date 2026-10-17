@@ -25,6 +25,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { installCamera } from "../../doubles/camera";
 import { decodeFromStream, emitBarcode } from "../../doubles/zxing";
 
+import { en } from "../../../src/i18n/en";
 import ScanPage from "../../../src/pages/ScanPage";
 import { makeBook, makeTagSet, resetIds } from "../../factories";
 import { answersOf, DISTINCT } from "../../lib/schemaArbitrary";
@@ -674,6 +675,31 @@ describe("ScanPage", () => {
           name: "Open the copy already in the library",
         }),
       ).not.toBeInTheDocument();
+    });
+
+    it("says a book refused as in the trash is there, and links to the trash", async () => {
+      // The refusal names no Book, so the server's own English was all the
+      // member read, with nothing to press.
+      api.on("/api/books/scan", {
+        status: 409,
+        body: {
+          detail: { message: "The server's sentence", code: "in_trash" },
+        },
+      });
+      renderWithProviders(<ScanPage />);
+
+      const user = await scan();
+      await user.click(
+        await screen.findByRole("button", { name: "Add to Library" }),
+      );
+
+      expect(
+        await screen.findByRole("link", { name: "Open trash" }),
+      ).toHaveAttribute("href", "/trash");
+      expect(screen.getByRole("alert")).toHaveTextContent(en["scan.inTrash"]);
+      expect(screen.getByRole("alert")).not.toHaveTextContent(
+        "The server's sentence",
+      );
     });
 
     it("refuses to add an untitled manual entry", async () => {

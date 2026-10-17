@@ -261,4 +261,5 @@ const OUTCOME_MESSAGES: OutcomeMessages = {
   duplicate: "calibre.duplicate",
   notAdded: "calibre.notAdded",
   unnamed: "calibre.heldUnnamed",
+  inTrash: "calibre.inTrash",
 };

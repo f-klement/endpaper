@@ -228,6 +228,8 @@ export interface OutcomeMessages {
   readonly notAdded: MessageKey;
   /** A row thrown as `HeldUnnamed`; a card without it shows `duplicate`. */
   readonly unnamed?: MessageKey;
+  /** A row the server refused as in the trash. */
+  readonly inTrash: MessageKey;
 }
 
 /**
@@ -258,15 +260,20 @@ export function OutcomePanel({
             {outcome.failures.slice(0, FAILURES_SHOWN).map((row, index) => (
               // The index keys these: a title is not a key, and two copies of
               // one book, in one library or on two devices, are ordinary.
-              <li key={index} className="truncate">
+              // The row wraps rather than truncating: the reason is the part
+              // after the title, and the in trash one says what to do next,
+              // which a cut at phone width would drop.
+              <li key={index} className="break-words">
                 {row.title}
                 {" · "}
                 {t(
-                  row.unnamed && messages.unnamed !== undefined
-                    ? messages.unnamed
-                    : row.status === DUPLICATE_STATUS
-                      ? messages.duplicate
-                      : messages.notAdded,
+                  row.inTrash
+                    ? messages.inTrash
+                    : row.unnamed && messages.unnamed !== undefined
+                      ? messages.unnamed
+                      : row.status === DUPLICATE_STATUS
+                        ? messages.duplicate
+                        : messages.notAdded,
                 )}
               </li>
             ))}

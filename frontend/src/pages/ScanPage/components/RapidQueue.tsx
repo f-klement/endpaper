@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { Link } from "react-router-dom";
 
 import { useTranslation, type MessageKey, type Translate } from "../../../i18n";
 import type { BookMatch } from "../../../api/generated/model";
@@ -71,6 +72,8 @@ const REASONS: Record<NamedScanReason, MessageKey> = {
   unreachable: "common.cannotReachServer",
   "held-in-another-format": "rapid.heldInAnotherFormat",
   "held-unnamed": "rapid.heldUnnamed",
+  // The single scan's sentence: the same refusal, and the same way through.
+  "in-trash": "scan.inTrash",
   "not-in-catalogues-as-stated": "fallback.notInCataloguesAsStated",
   "lookup-failed-as-stated": "fallback.lookupFailedAsStated",
   "record-differs": "rapid.recordDiffers",
@@ -105,7 +108,7 @@ function reasonText(reason: ScanReason, t: Translate): string {
  * exactly the states that existed and had no last arm, so a state added later
  * rendered a row on screen with nothing in it. Nothing was red, because a row
  * with no line is a row, and no test asked about a state nobody had added yet.
- * A new state is now a compile error here and at `QUEUE_STATES` in the hook,
+ * A new state is now a compile error here and at `QUEUE_STATES` in `queue.ts`,
  * which are the two places its author has to say what it means.
  *
  * **`derived` and `choosing` share one arm**, and that is the rule rather than
@@ -153,38 +156,55 @@ const ROW_LINE: Record<
     </span>
   ),
   // A book, not a failure: it carries what its name said and the batch adds it
-  // like any other. The note beside it says where the title came from and what
-  // the file itself could not say.
+  // like any other. The note beside it says where the title came from, and
+  // `RowReason` what the file itself could not say.
   derived: (entry, t) => namedDraftLine(entry, t),
   choosing: (entry, t) => namedDraftLine(entry, t),
-  // What the file said, under its own title rather than "from the file name",
-  // and why it is still that after a lookup that did not settle it.
-  stated: (entry, t) => (
+  // What the file said, under its own title rather than "from the file name".
+  // Why it is still that after a lookup that did not settle it is `RowReason`.
+  stated: (entry) => (
     <span className="text-paper-800 dark:text-paper-100">
       {entry.draft?.title}
-      {entry.reason && (
-        <span className="text-paper-600 dark:text-paper-400">
-          {" "}
-          {reasonText(entry.reason, t)}
-        </span>
-      )}
     </span>
   ),
   // Named, not counted. After a shelf of thirty, "six could not be added" is
-  // unrecoverable: this says which six and why, and they stay in the queue so
-  // they can be retried or dropped.
-  failed: (entry, t) => (
+  // unrecoverable: this says which six, and `RowReason` says why. They stay in
+  // the queue so they can be retried or dropped.
+  failed: (entry) => (
     <span className="text-danger-600 dark:text-danger-300">
       {entry.draft?.title || entry.label}
-      {entry.reason && (
-        <span className="text-paper-600 dark:text-paper-400">
-          {" "}
-          {reasonText(entry.reason, t)}
-        </span>
-      )}
     </span>
   ),
 };
+
+/**
+ * Why a row was not added, or is not what a catalogue said, on a line of its
+ * own beneath it.
+ *
+ * **Not in the row's line**, which is one truncated line beside the remove
+ * button: a reason sharing it with the title was cut off, the in the trash
+ * sentence before its next step. That sentence ends on what to do, and it
+ * carries the single scan's link to the trash for the same reason.
+ */
+function RowReason({ reason }: { reason: ScanReason }) {
+  const { t } = useTranslation();
+  return (
+    <p className="mt-1 text-xs text-paper-600 dark:text-paper-400">
+      {reasonText(reason, t)}
+      {reason.kind === "in-trash" && (
+        <>
+          {" "}
+          <Link
+            to="/trash"
+            className="font-medium text-accent-600 underline hover:text-accent-700 dark:text-accent-400 dark:hover:text-accent-300"
+          >
+            {t("trash.open")}
+          </Link>
+        </>
+      )}
+    </p>
+  );
+}
 
 /** The line a row standing under its file's own name reads. */
 function namedDraftLine(entry: ScannedEntry, t: Translate): ReactNode {
@@ -194,7 +214,6 @@ function namedDraftLine(entry: ScannedEntry, t: Translate): ReactNode {
       <span className="text-paper-600 dark:text-paper-400">
         {" "}
         {t("fallback.fromTheName")}
-        {entry.reason ? ` ${reasonText(entry.reason, t)}` : ""}
       </span>
     </span>
   );
@@ -496,6 +515,8 @@ export default function RapidQueue({
               </button>
             </div>
 
+            {entry.reason && <RowReason reason={entry.reason} />}
+
             {/* **Said before the press**, so a member re-picking a folder sees
                 which rows the batch will not add again. */}
             {entry.heldBy?.lands === true && (
@@ -667,7 +688,7 @@ export default function RapidQueue({
                 being decided is counted for the figure above by that predicate,
                 so a second spelling is a screen able to offer records the page
                 does not count as offered. */}
-            {isBeingDecided(entry) && entry.matches && (
+            {isBeingDecided(entry) && (
               <div className="mt-2 space-y-1">
                 <p className="text-xs text-paper-600 dark:text-paper-400">
                   {t("fallback.matches", { count: entry.matches.length })}

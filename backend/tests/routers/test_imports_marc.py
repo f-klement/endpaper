@@ -18,11 +18,13 @@ from xml.sax.saxutils import escape
 import pytest
 from fastapi.responses import StreamingResponse
 from fastapi.testclient import TestClient
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy import delete
+from sqlalchemy.exc import IntegrityError, NoResultFound
 
 import importing
 import main
 import marc
+import recognition
 import settings_store
 from enums import LinkRelationship, SettingKey
 from models import (
@@ -1563,7 +1565,7 @@ class TestThePreviewCountsBothRefusals:
         assert res.json()["unmatched_titles"] == []
 
 
-class TestOnlyADeadlockAsksForTheFileAgain:
+class TestOnlyALostRaceAsksForTheFileAgain:
     """A deadlock answers 409 "import the file again", because Postgres rolled
     the whole import back and a second send meets the catalogue the other side
     left. Another database error is not one a second send fixes. The deadlock
@@ -1581,5 +1583,87 @@ class TestOnlyADeadlockAsksForTheFileAgain:
         monkeypatch.setattr(importing.MarcImport, "apply", violates)
 
         res = upload(client, admin["headers"], collection(a_marc_book("Stoner")))
+
+        assert res.status_code == 500
+
+
+class TestAMatchedBookDeletedMidImportAsksForTheFileAgain:
+    """A merge can delete a Book the import's index matched, with no lock cycle
+    between them, and the import then answers the deadlock's 409. Only a
+    matched Book that is gone is answered so; any other error, a missing row
+    included, is raised unchanged. The interleavings with a real merge are
+    driven in `test_database_ceilings_on_a_real_server.py`."""
+
+    def test_the_import_answers_409_and_keeps_nothing(self, client, admin, db, monkeypatch):
+        """The import commits once, at its end, so the Book it created for the
+        record before the vanished one is rolled back with the rest. The
+        matched Book is the highest id, and the created one does not take it."""
+        library_mode(db)
+        owner = admin["user"]["id"]
+        matched = Book(title="Small Gods", isbn="9780552152976", added_by_user_id=owner)
+        db.add(matched)
+        db.commit()
+        matched_id = matched.id
+        build = recognition.Index.build
+
+        def build_then_delete(session, *args):
+            index = build(session, *args)
+            session.execute(delete(Book).where(Book.id == matched_id))
+            session.commit()
+            return index
+
+        monkeypatch.setattr(recognition.Index, "build", build_then_delete)
+
+        res = upload(
+            client,
+            admin["headers"],
+            collection(a_marc_book("Mort"), a_marc_book("Small Gods", isbn="9780552152976")),
+        )
+
+        db.expire_all()
+        assert res.status_code == 409
+        assert db.query(Book).filter(Book.title == "Mort").count() == 0
+
+    @pytest.mark.answers_500(raises=(NoResultFound,))
+    def test_an_unrelated_missing_row_in_the_gap_fill_answers_500(
+        self, client, admin, db, monkeypatch
+    ):
+        """The matched Book is still present, so the missing row is not a race
+        a second send would win."""
+        library_mode(db)
+        db.add(Book(title="Small Gods", isbn="9780552152976", added_by_user_id=admin["user"]["id"]))
+        db.commit()
+
+        def missing(*args):
+            raise NoResultFound
+
+        monkeypatch.setattr(importing, "_fill_marc_gaps", missing)
+
+        res = upload(
+            client, admin["headers"], collection(a_marc_book("Small Gods", isbn="9780552152976"))
+        )
+
+        assert res.status_code == 500
+
+
+class TestAFailureAfterARecordMatchedABookThisImportCreatedAnswers500:
+    """A later record naming a Book this import created matches it, and the
+    rollback after a failure takes that Book back. It was not on the shelf when
+    the import began, so it is no vanished match, and a resend fails the same
+    way: a 409 would ask for the file again on every send."""
+
+    @pytest.mark.answers_500(raises=(IntegrityError,))
+    def test_an_unrelated_failure_on_the_matching_record_answers_500(
+        self, client, admin, db, monkeypatch
+    ):
+        library_mode(db)
+
+        def unrelated(*args):
+            raise IntegrityError("planted", {}, Exception("planted"))
+
+        monkeypatch.setattr(importing, "_fill_marc_gaps", unrelated)
+        mort = a_marc_book("Mort", isbn="9780552131063")
+
+        res = upload(client, admin["headers"], collection(mort, mort))
 
         assert res.status_code == 500
