@@ -11,7 +11,7 @@
  *
  * **Identified by the file and `highlighted_at`**, KOReader's creation time,
  * which adjusting a mark does not change; by the positions too where that
- * time is missing or shared (`highlights.koreader_source_key`). A reflowable
+ * time is missing or shared (`koreader_highlights.koreader_source_key`). A reflowable
  * book's positions are XPointers; a fixed layout one's are coordinate
  * tables, which the browser writes as one canonical string. They are hashed,
  * never stored.

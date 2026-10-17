@@ -5655,8 +5655,8 @@ def import_koreader_highlights(
     Repeatable: a highlight already imported is updated rather than doubled,
     and one the caller deleted here stays deleted. Its sharing is left as the
     member set it while it stays on this book; one the import moves here from
-    another book is private again. `highlights` says how a KOReader highlight
-    is identified and what an import never does.
+    another book is private again. `koreader_highlights` says how a KOReader
+    highlight is identified and what an import never does.
 
     **409 `not_held` unless this book holds a file carrying the sidecar's
     fingerprint**, so a sidecar lands only on a Book its fingerprint matched

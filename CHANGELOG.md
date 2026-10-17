@@ -200,6 +200,10 @@
   value. Text with something in it keeps its spaces. Blank ones already stored are converted on
   upgrade, and clearing the manual author box on the scan page sends no value.
 
+- **The Z39.50 client library is YAZ 5.38.1**, from 5.38.0. Upstream's changes are to its
+  documentation, its build, and its own SRU server, which Endpaper does not use; the client
+  Endpaper calls behaves as before.
+
 ## v0.18.0
 
 _2026-10-10_

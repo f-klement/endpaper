@@ -802,7 +802,8 @@ repeat the argument.
 |  | [A fixture that must be a valid phrase is derived, never written down](decisions.md#a-fixture-that-must-be-a-valid-phrase-is-derived-never-written-down) | 125 |
 |  | [An exclusion arm pins the predicate's shape and says nothing about its argument](decisions.md#an-exclusion-arm-pins-the-predicates-shape-and-says-nothing-about-its-argument) | 121 |
 |  | [An unreachable fixture pins a state the server cannot produce](decisions.md#an-unreachable-fixture-pins-a-state-the-server-cannot-produce) | 171 |
-|  | [The death signal an arm carries is the uncatchable one](decisions.md#the-death-signal-an-arm-carries-is-the-uncatchable-one) | 415 |
+|  | [The death signal an arm carries is the uncatchable one](decisions.md#the-death-signal-an-arm-carries-is-the-uncatchable-one) | 459 |
+|  | [The death signal an arm carries is the polite one](decisions.md#the-death-signal-an-arm-carries-is-the-polite-one) | 589 |
 |  | [What a killed suite run leaves is three things, and the third had no owner](decisions.md#what-a-killed-suite-run-leaves-is-three-things-and-the-third-had-no-owner) | 556 |
 |  | [A gate whose hostile input is rejected by an earlier gate has no test](decisions.md#a-gate-whose-hostile-input-is-rejected-by-an-earlier-gate-has-no-test) | 211 |
 |  | [A deadline test turns on a fact, because every clock available to it is wider than the thing it measures](decisions.md#a-deadline-test-turns-on-a-fact-because-every-clock-available-to-it-is-wider-than-the-thing-it-measures) | 545 |
@@ -900,9 +901,9 @@ repeat the argument.
 |  | [A 429 from Readwise ends the pull rather than waiting it out](decisions.md#a-429-from-readwise-ends-the-pull-rather-than-waiting-it-out) | 113 |
 |  | [A member's Readwise token is not counted on the key screen](decisions.md#a-members-readwise-token-is-not-counted-on-the-key-screen) | 109 |
 |  | [Authors a source separated travel as a list, and the server joins them](decisions.md#authors-a-source-separated-travel-as-a-list-and-the-server-joins-them) | 545 |
-|  | [The credit line has one encoder, and the catalogue order flip is an adapter in front of it](decisions.md#the-credit-line-has-one-encoder-and-the-catalogue-order-flip-is-an-adapter-in-front-of-it) | 724 |
+|  | [The credit line has one encoder, and the catalogue order flip is an adapter in front of it](decisions.md#the-credit-line-has-one-encoder-and-the-catalogue-order-flip-is-an-adapter-in-front-of-it) | 716 |
 |  | [A highlight is deleted by hand only, and its key is remembered so no import brings it back](decisions.md#a-highlight-is-deleted-by-hand-only-and-its-key-is-remembered-so-no-import-brings-it-back) | 270 |
-|  | [The highlight ledger: one writer of highlight rows, and each source an adapter](decisions.md#the-highlight-ledger-one-writer-of-highlight-rows-and-each-source-an-adapter) | 1,146 |
+|  | [The highlight ledger: one writer of highlight rows, and each source an adapter](decisions.md#the-highlight-ledger-one-writer-of-highlight-rows-and-each-source-an-adapter) | 1,142 |
 |  | [A Calibre library's files are recorded from the index, through both doors](decisions.md#a-calibre-librarys-files-are-recorded-from-the-index-through-both-doors) | 296 |
 |  | [A re-picked folder: sightings at the pick, misses on a press](decisions.md#a-re-picked-folder-sightings-at-the-pick-misses-on-a-press) | 420 |
 |  | [A catalogue's 856 links are their own table, and the only thing the export writes to 856](decisions.md#a-catalogues-856-links-are-their-own-table-and-the-only-thing-the-export-writes-to-856) | 403 |

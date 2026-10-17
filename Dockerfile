@@ -19,7 +19,7 @@ ARG BASE=python:3.14.8-alpine@sha256:f6a589d43c42b9e7f7dc67a12d37132491f362859a5
 # **The hash is trust on first use.** IndexData publish no signature and no checksum file
 # alongside the release, so nothing corroborates it. See docker/build-yaz.sh.
 ARG YAZ_VERSION=5.38.1
-ARG YAZ_SHA256=c35f3994d382b42c43954253c1f24d1c0f93f0cb960532b69efa399b31b39b10
+ARG YAZ_SHA256=755835efe8385d88725cc46a3b34dae2f5e784950832cbbe7f09ca0398de344c
 
 # ── Stage 1: YAZ, the Z39.50 client library ────────────────────────────────
 #

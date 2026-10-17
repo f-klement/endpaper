@@ -19697,6 +19697,56 @@ claim.
 Where the kernel offers no such mechanism the sweep refuses to start rather than running a layer
 short and saying nothing.
 
+**Superseded 2026-10-17**, by "The death signal an arm carries is the polite one" below. What
+survives is the layer itself: the arming at the spawn, the refusal where the kernel has none,
+and its place beside the group kill rather than instead of it.
+
+## The death signal an arm carries is the polite one
+
+**An arm whose sweep dies is sent a TERM, and its own cleanup runs**: the pod is deleted, the
+run's line leaves the register the reaper reads, and the run's working copy leaves the node. The
+uncatchable signal ran none of the three and left them to the next run. The owner chose the
+change on 2026-10-17.
+
+**It is safe because the runner never waits on a long call in the foreground**, where a shell
+holds a trapped signal until the call returns. Measured on 2026-10-17, the sweep's own spawn
+killed outright two seconds into a targeted suite, four runs on each of the two paths the
+wrapper takes: the arm was gone 0.52s to 0.84s later, its pod deleted and its line dropped every
+time. The uncatchable signal on `builder` left the pod Running and the line in place for the
+next run's reaper.
+
+**The cleanup kills what the run left running in the pod before removing the working copy.**
+Ending the call into the pod does not stop the suite inside it, which went on writing into the
+copy, and the removal then failed on a directory filling up behind it: twice in the eight runs
+above. Measured with the stop one second into the suite, where that race is widest, 4 of 8
+copies were left without the kill and 0 of 8 with it. A copy left all the same is cleared by the
+next run's sweep on that node, as it clears a killed run's.
+
+**What a polite signal can lose is the escalation.** The kernel sends one signal and nothing
+follows it once the sweep is gone, so each state in which the arm does not act at once needs a
+bound of its own.
+
+- **The spawn.** Between the arming and the exec the child still carries the sweep's own handler
+  for the signal, which only sets a flag that the exec then discards, so the arm ran on with its
+  sweep dead: measured 18 and 23 of 751 arms against a timer swept across the spawn. The arming
+  hands the child the default disposition first, and the same probe then found 0 of 751, under a
+  test.
+- **A call in the foreground** holds the signal until it returns. A request to the API server
+  carries a request timeout. A test drives the wrapper, the runner and the reaper through one run
+  that reaches every call they make today and refuses any call it saw in the foreground without
+  one; a call on a path that run does not take is not judged. A call that streams into the pod,
+  the ship and the sweep of stale working copies, runs past the point that timeout reaches, so
+  only the pod's own hour bounds it. A wait for a node's lock holds nothing, neither pod nor lock,
+  and exits on the grant; the lock promises no order, so nothing short of the queue draining
+  bounds the wait. It granted in arrival order 5 of 5 rounds here.
+- **The cleanup** ignores a stop so no stop cuts it in half, and its own timeouts bound it.
+- **A blocked stop** would never arrive, because a blocked mask survives fork and exec, and the
+  sweep unblocks it at startup under a test.
+
+**A hung run with its sweep gone is still cleared**, which is the case the layer exists for: the
+reaper spares a pod whose registered process is alive, and a hang inside the suite ends with the
+wait the signal interrupts.
+
 ## What a killed suite run leaves is three things, and the third had no owner
 
 The cleanup a killed run skips does three things: it deletes the pod, it drops the run's line from
@@ -22097,15 +22147,14 @@ would be a cycle.
   repeats, which its docstring argues. Single name writers write one name and join nothing. The
   browser's `creditLine` and `boundRecord` are the client's copy and are held by the agreement
   check.
-- **The edit body keeps `author` as one string** (owner's question, recommended): the entry
+- **The edit body keeps `author` as one string**, which the owner confirmed: the entry
   above already says only the create body takes `authors`, and no frontend component sends
   `author` on the edit body at all.
-- **No guard refuses a new hand join** (owner's question, recommended). The threat is an
+- **No guard refuses a new hand join**, which the owner confirmed. The threat is an
   honest author adding a source and writing `", ".join` at it. A text scan for that is a list
   of spellings, which grows by one per evasion; the type cannot stop it either, since the
   column is a string. And what a missed site costs is bounded: a blank segment in one stored
-  line, which every reader going through `split_authors` already ignores. If the owner wants
-  one, it is a follow up.
+  line, which every reader going through `split_authors` already ignores.
 - **Stored lines are untouched**, with no migration, for the reasons in "Two spellings are one
   person because somebody said so".
 - **The CSV import splits only a column known to hold a credit line in display order, and
@@ -22188,7 +22237,7 @@ tell which marks share a second across two requests. The client keeps a second's
 request, and its count bound is now read from the schema by a test rather than restated.
 
 **A Readwise pull racing a hand delete settles.** The page is written again, finds the key
-remembered, and leaves the mark out, as a KOReader import already did. Built pending the owner's confirmation.
+remembered, and leaves the mark out, as a KOReader import already did. The owner confirmed it.
 
 **A write reads the held rows before the deletion memory.** A hand delete commits the row's
 removal and its remembered key together, but the write's two reads are two snapshots on both
@@ -22222,15 +22271,15 @@ first, a held row was removed, or met a stale update and raised once edited; del
 was removed and written again private. The page is one answer, as for one highlight under two
 Books, and a live listing is the answer it gives.
 
-**An import that carries a shared highlight past `QUOTE_TEXT_MAX` makes it private** (the Q22
-commit, droppable alone). A share is refused above the ceiling a passage shown to the shelf has;
+**An import that carries a shared highlight past `QUOTE_TEXT_MAX` makes it private**, which the
+owner confirmed. A share is refused above the ceiling a passage shown to the shelf has;
 the source lengthening a shared passage is not its author choosing to show the longer one. An edit
-within the ceiling keeps the share. Built pending the owner's confirmation.
+within the ceiling keeps the share.
 
 **A write clears `is_shared` with its own UPDATE, never by setting it on the row as loaded.** The
 flush writes only what differs from the load, so a row read private and shared by its author
 before the write's flush kept the share: on the new Book after a move, or past the quote ceiling
-after Q22. The explicit statement is written whatever the read said, and it takes the row, so a
+after an import lengthened it. The explicit statement is written whatever the read said, and it takes the row, so a
 later share waits behind it and then reads back what the write left. `flag_modified` would not
 do: the assignment has already recorded the loaded value, and the flush still compares equal.
 **Only on a row being written anyway**: a move changes the Book and a lengthening the text, so

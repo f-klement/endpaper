@@ -4295,7 +4295,7 @@
         "type": "object"
       },
       "KoreaderHighlightIn": {
-        "description": "One highlight out of a KOReader sidecar, as the browser read it.\n\n**Identified by the file and `highlighted_at`**, KOReader's creation time,\nwhich adjusting a mark does not change; by the positions too where that\ntime is missing or shared (`highlights.koreader_source_key`). A reflowable\nbook's positions are XPointers; a fixed layout one's are coordinate\ntables, which the browser writes as one canonical string. They are hashed,\nnever stored.",
+        "description": "One highlight out of a KOReader sidecar, as the browser read it.\n\n**Identified by the file and `highlighted_at`**, KOReader's creation time,\nwhich adjusting a mark does not change; by the positions too where that\ntime is missing or shared (`koreader_highlights.koreader_source_key`). A reflowable\nbook's positions are XPointers; a fixed layout one's are coordinate\ntables, which the browser writes as one canonical string. They are hashed,\nnever stored.",
         "properties": {
           "chapter": {
             "anyOf": [
@@ -12676,7 +12676,7 @@
     },
     "/api/books/{book_id}/highlights/koreader": {
       "post": {
-        "description": "Write one KOReader sidecar's highlights onto this book, as the caller's.\n\nRepeatable: a highlight already imported is updated rather than doubled,\nand one the caller deleted here stays deleted. Its sharing is left as the\nmember set it while it stays on this book; one the import moves here from\nanother book is private again. `highlights` says how a KOReader highlight\nis identified and what an import never does.\n\n**409 `not_held` unless this book holds a file carrying the sidecar's\nfingerprint**, so a sidecar lands only on a Book its fingerprint matched\nand never on one a client guessed. Read off the Book's own references,\nwhich `BookForRead` has already scoped.",
+        "description": "Write one KOReader sidecar's highlights onto this book, as the caller's.\n\nRepeatable: a highlight already imported is updated rather than doubled,\nand one the caller deleted here stays deleted. Its sharing is left as the\nmember set it while it stays on this book; one the import moves here from\nanother book is private again. `koreader_highlights` says how a KOReader\nhighlight is identified and what an import never does.\n\n**409 `not_held` unless this book holds a file carrying the sidecar's\nfingerprint**, so a sidecar lands only on a Book its fingerprint matched\nand never on one a client guessed. Read off the Book's own references,\nwhich `BookForRead` has already scoped.",
         "operationId": "import_koreader_highlights",
         "parameters": [
           {
