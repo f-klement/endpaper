@@ -1419,8 +1419,8 @@ class TestAMatchedBookNeverGainsAnIsbn:
 
     Found by the security seat while narrowing the `blocked` count: a record
     whose ISBN belongs to a Book this member cannot see, whose title and author
-    match one they can, is **matched** rather than blocked. `MarcIndex.find`
-    resolves it on the identity key, so `isbn_is_taken` is never consulted.
+    match one they can, is **matched** rather than blocked: `recognition` asks
+    the shelf on the identity key before it asks the whole table.
 
     If `isbn` were in `_MARC_GAP_FIELDS` the filler would then write the
     invisible Book's ISBN onto the visible one and trip `books.isbn`'s unique

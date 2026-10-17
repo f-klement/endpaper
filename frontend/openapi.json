@@ -4231,6 +4231,21 @@
       "ImportResultOut": {
         "description": "What an import actually did.\n\nReported field by field rather than as a single count, because the useful\nquestion afterwards is \"why did it not pick up book X?\" and the answer is\nalmost always one of: the book is not in the catalogue, the status was\nalready correct, or the row could not be acted on at all.",
         "properties": {
+          "ambiguous": {
+            "default": 0,
+            "description": "Rows two or more books on the caller's shelf answer, which are not copies of one book. Nothing is written for them rather than guessing between the books",
+            "minimum": 0.0,
+            "title": "Ambiguous",
+            "type": "integer"
+          },
+          "ambiguous_titles": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Ambiguous Titles",
+            "type": "array"
+          },
           "created": {
             "description": "Books added from the file",
             "minimum": 0.0,
@@ -4243,6 +4258,21 @@
             "minimum": 0.0,
             "title": "Excluded",
             "type": "integer"
+          },
+          "in_trash": {
+            "default": 0,
+            "description": "Rows whose ISBN only books in the caller's trash hold. Nothing is written for them: restore the book, or empty it from the trash, and import again",
+            "minimum": 0.0,
+            "title": "In Trash",
+            "type": "integer"
+          },
+          "in_trash_titles": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "In Trash Titles",
+            "type": "array"
           },
           "matched": {
             "description": "Rows matched to a book already here",
@@ -4794,7 +4824,7 @@
         "type": "object"
       },
       "MarcPreviewOut": {
-        "description": "What a MARC upload turned out to hold, before anything is written.\n\n**A different model from `ImportPreviewOut` rather than a superset**, and\nthe difference is what the reader is being asked. A CSV preview exists to\nlet somebody correct a **column guess**, so it carries the headers, the\nmapping and the delimiter. MARC has no columns to guess: `245 $a` is the\ntitle because the standard says so. What a cataloguer checks instead is\nwhether the records came through, which of them this app could not read,\nand how many are already held.\n\n`already_held` is why the model exists at all. Importing the same file\ntwice is the ordinary accident here, and the answer to \"will this double my\ncatalogue\" has to be visible before the write rather than in the result\nafterwards.\n\n**`blocked` is what makes `readable - already_held` the truth rather than an\noverstatement.** The import has a second refusal: a record whose ISBN\nbelongs to a Book the member cannot see is neither matched nor created,\nbecause the unique index is on the whole table while the shelf is not. A\npreview that modelled only `already_held` would promise records the import\nthen refuses. It is a count and never a title, for `importing.py`'s reason:\nnaming them would be an oracle for \"does a private book with this ISBN exist\nin this house\".\n\n**A count is still an oracle, and this one is cheaper than the import's.**\nThe same fact has been readable off `ImportResultOut.skipped` since the CSV\nimporter, and `importing.py` argues why: the alternative is letting the\ninsert reach the unique index, which raises and writes nothing for the whole\nfile. What is new is the **price**. The import pays for each probe by\nwriting a Book for every ISBN that does not collide; a preview writes\nnothing. Measured: 20,000 records, 3,860,064 bytes, answered 200 in 1.08\nseconds with zero books written, against a rate limit of three a minute.\n\nAccepted rather than closed, and the reasoning is in `docs/decisions.md`\nrather than here, because no arithmetic hides it: `readable`,\n`already_held` and `blocked` are the three numbers the screen exists for,\nand publishing any two publishes the third.\n\n**It under-counts in one shape, which narrows the oracle rather than\nwidening it.** A record whose ISBN belongs to an invisible Book but whose\ntitle and author match a visible one is matched, not blocked:\n`MarcIndex.find` resolves it on the identity key and `isbn_is_taken` is\nnever consulted. So a hit here means the ISBN is held **and** nothing on\nthis shelf matches the record, which is less than \"this ISBN exists\". The\nimport agrees, and drops the incoming ISBN rather than writing it: see\n`importing._MARC_GAP_FIELDS` for why that is what stops a 500.",
+        "description": "What a MARC upload turned out to hold, before anything is written.\n\n**A different model from `ImportPreviewOut` rather than a superset**, and\nthe difference is what the reader is being asked. A CSV preview exists to\nlet somebody correct a **column guess**, so it carries the headers, the\nmapping and the delimiter. MARC has no columns to guess: `245 $a` is the\ntitle because the standard says so. What a cataloguer checks instead is\nwhether the records came through, which of them this app could not read,\nand how many are already held.\n\n`already_held` is why the model exists at all. Importing the same file\ntwice is the ordinary accident here, and the answer to \"will this double my\ncatalogue\" has to be visible before the write rather than in the result\nafterwards.\n\n**`blocked` is what makes `readable - already_held` the truth rather than an\noverstatement.** The import has a second refusal: a record whose ISBN\nbelongs to a Book the member cannot see is neither matched nor created,\nbecause the unique index is on the whole table while the shelf is not. A\npreview that modelled only `already_held` would promise records the import\nthen refuses. It is a count and never a title, for `importing.py`'s reason:\nnaming them would be an oracle for \"does a private book with this ISBN exist\nin this house\".\n\n**A count is still an oracle, and this one is cheaper than the import's.**\nThe same fact has been readable off `ImportResultOut.skipped` since the CSV\nimporter, and `importing.py` argues why: the alternative is letting the\ninsert reach the unique index, which raises and writes nothing for the whole\nfile. What is new is the **price**. The import pays for each probe by\nwriting a Book for every ISBN that does not collide; a preview writes\nnothing. Measured: 20,000 records, 3,860,064 bytes, answered 200 in 1.08\nseconds with zero books written, against a rate limit of three a minute.\n\nAccepted rather than closed, and the reasoning is in `docs/decisions.md`\nrather than here, because no arithmetic hides it: `readable`,\n`already_held` and `blocked` are the three numbers the screen exists for,\nand publishing any two publishes the third.\n\n**It under-counts in one shape, which narrows the oracle rather than\nwidening it.** A record whose ISBN belongs to an invisible Book but whose\ntitle and author match a visible one is matched, not blocked: `recognition`\nasks the shelf on both keys before it asks the whole table. So a hit here\nmeans the ISBN is held **and** nothing on this shelf matches the record,\nwhich is less than \"this ISBN exists\". The import agrees, and drops the\nincoming ISBN rather than writing it: see `importing._MARC_GAP_FIELDS` for\nwhy that is what stops a 500.\n\n**`in_trash` and `ambiguous` are the import's two other ways to write\nnothing**, so `readable` less the four counts is the most the import\ncreates.",
         "properties": {
           "already_held": {
             "description": "Records matching a book this member can already see",
@@ -4802,11 +4832,25 @@
             "title": "Already Held",
             "type": "integer"
           },
+          "ambiguous": {
+            "default": 0,
+            "description": "Records two or more books on this shelf answer, which the import leaves alone rather than guessing between",
+            "minimum": 0.0,
+            "title": "Ambiguous",
+            "type": "integer"
+          },
           "blocked": {
             "default": 0,
             "description": "Records the import will refuse: their ISBN belongs to a book this member cannot see",
             "minimum": 0.0,
             "title": "Blocked",
+            "type": "integer"
+          },
+          "in_trash": {
+            "default": 0,
+            "description": "Records whose ISBN only books in this member's trash hold",
+            "minimum": 0.0,
+            "title": "In Trash",
             "type": "integer"
           },
           "readable": {
@@ -5462,6 +5506,21 @@
       "OpdsSyncOut": {
         "description": "What one sync did, over the shared import result.\n\n**The extra fields are what only this route can answer**, and each exists\nbecause of a question a person actually asks when nothing arrives.\n\n`entries_not_held` answers \"why did my library not come in\": an entry counts\nonly when it says the member holds the book, so a large number here means\nthe address given is a shelf index, or a feed offering titles for sale or\nloan rather than listing what is on the shelf. See `opds.HOLDING_RELS`.\n\n`truncated` answers \"is that all of it\": true when a cap or the sync\ndeadline stopped the walk before the feed ran out. A sync that stopped early\nhas still written what it read, so this is the difference between a complete\npicture and a partial one.",
         "properties": {
+          "ambiguous": {
+            "default": 0,
+            "description": "Rows two or more books on the caller's shelf answer, which are not copies of one book. Nothing is written for them rather than guessing between the books",
+            "minimum": 0.0,
+            "title": "Ambiguous",
+            "type": "integer"
+          },
+          "ambiguous_titles": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Ambiguous Titles",
+            "type": "array"
+          },
           "created": {
             "description": "Books added from the file",
             "minimum": 0.0,
@@ -5480,6 +5539,21 @@
             "minimum": 0.0,
             "title": "Excluded",
             "type": "integer"
+          },
+          "in_trash": {
+            "default": 0,
+            "description": "Rows whose ISBN only books in the caller's trash hold. Nothing is written for them: restore the book, or empty it from the trash, and import again",
+            "minimum": 0.0,
+            "title": "In Trash",
+            "type": "integer"
+          },
+          "in_trash_titles": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "In Trash Titles",
+            "type": "array"
           },
           "matched": {
             "description": "Rows matched to a book already here",
@@ -10007,7 +10081,7 @@
     },
     "/api/books/digital-references/sweep": {
       "post": {
-        "description": "Record what a re-picked folder found: each sighting, and each miss.\n\nThe two per reference routes in one request. A miss is the per reference\nflag's rule unchanged: `missing_since` set once, the row never deleted. A\nsighting clears `missing_since` and confirms the row, and writes its\nfingerprint only where `_fingerprint_agrees`. A sweep of a few hundred\nfiles is then a request or two rather than a request a file.\n\n**The client sends sightings at the pick and misses only on a press**,\nbecause a root is only a folder name: one member's pick of their own\n\"Calibre Library\" would otherwise flag every file another member saved\nfrom theirs.\n\n**Who may flag a reference is who may write its Book**, the rule\n`dependencies.book_for_write` states for the per reference routes. That\nrule is every Book on the caller's shelf, so the rows are resolved through\n`Shelf.seen_by`: a reference on another member's private Book is not\nreached, and answers exactly as an id that does not exist.\n\n**Only references under `root_label` are written.** A sweep is one\nfolder's account of itself, and a file under another root is not one it\nlooked for.",
+        "description": "Record what a re-picked folder found: each sighting, and each miss.\n\nThe two per reference routes in one request. A miss is the per reference\nflag's rule unchanged: `missing_since` set once, the row never deleted. A\nsighting is the per reference report's rule: it clears `missing_since`,\nconfirms the row, and fills in a fingerprint the row is missing without\never replacing a different one. A sweep of a few hundred files is then a\nrequest or two rather than a request a file.\n\n**The client sends sightings at the pick and misses only on a press**,\nbecause a root is only a folder name: one member's pick of their own\n\"Calibre Library\" would otherwise flag every file another member saved\nfrom theirs.\n\n**Who may flag a reference is who may write its Book**, the rule\n`dependencies.book_for_write` states for the per reference routes. That\nrule is every Book on the caller's shelf, so the rows are resolved through\n`Shelf.seen_by`: a reference on another member's private Book is not\nreached, and answers exactly as an id that does not exist.\n\n**Only references under `root_label` are written.** A sweep is one\nfolder's account of itself, and a file under another root is not one it\nlooked for.",
         "operationId": "sweep_digital_references",
         "requestBody": {
           "content": {
@@ -12039,7 +12113,7 @@
         ]
       },
       "post": {
-        "description": "A client reporting that it found this book's file at this location.\n\n**Idempotent on the location, and that is the design rather than a\nconvenience.** A reference is identified by where the file is, so the same\nreport twice is one reference: re-importing a folder somebody imported last\nmonth refreshes those rows instead of doubling them, which at the scale this\nruns at (a directory pick is hundreds of files in one gesture) is the\ndifference between a feature and a mess.\n\n**200 rather than 201** for the same reason: the route is not a create. What\nhappened to a given location is answerable by reading the list back, and a\nstatus that varied would be one more thing for a client committing 300\nfiles to branch on.\n\n**The report replaces the fingerprint whole rather than filling in the gaps\nin it.** A row says what one client saw in one look. Merging a new size with\nan old modification time would produce a fingerprint that no client ever\nreported and that no re-check could ever match.\n\n**A sighting clears `missing_since`.** Something has now looked and found\nit, which is the only evidence that ever contradicts a miss.\n\nThe per book ceiling is counted here rather than trusted to the payload,\nwhich bounds one request and not the total: see\n`MAX_DIGITAL_REFERENCES_PER_BOOK`, and `_add_within_the_ceiling` for why the\ncount follows the insert. It binds a **new** location only, so a book\nalready at the ceiling can still re-confirm what it holds.",
+        "description": "A client reporting that it found this book's file at this location.\n\n**Idempotent on the location, and that is the design rather than a\nconvenience.** A reference is identified by where the file is, so the same\nreport twice is one reference: re-importing a folder somebody imported last\nmonth refreshes those rows instead of doubling them, which at the scale this\nruns at (a directory pick is hundreds of files in one gesture) is the\ndifference between a feature and a mess.\n\n**200 rather than 201** for the same reason: the route is not a create. What\nhappened to a given location is answerable by reading the list back, and a\nstatus that varied would be one more thing for a client committing 300\nfiles to branch on.\n\n**A report fills in what the row is missing and never replaces a different\nfingerprint**, the rule a folder sweep and a merge keep too. Size,\nmodification time and digest are written together, and only where every\nhalf already stored is the same as the one sent: a root is only a folder\nname, so two members' folders can share it and a path beneath it, and a\nreplacing report would put one member's file's fingerprint on the other's.\n**`root_confirmed` only rises**: a bare filename report does not undo a\ndirectory pick's corroboration.\n\n**A sighting clears `missing_since`.** Something has now looked and found\nit, which is the only evidence that ever contradicts a miss.\n\n**A new location another Book the caller can see already holds is refused\nwith 409 `file_held_elsewhere`**, naming that Book in `book_id`, so a\nlocation belongs to one Book among those a member can see. A Book the\ncaller cannot see answers as no Book, since a refusal would confirm\nsomebody privately holds that exact file. A location two Books held before\nthis rule is left as it is, and either may still re-confirm it.\n\nThe per book ceiling is counted here rather than trusted to the payload,\nwhich bounds one request and not the total: past\n`MAX_DIGITAL_REFERENCES_PER_BOOK` a new location is refused with 409\n`reference_ceiling`. The count follows the insert, under a lock a merge onto\nthe Book takes too. It binds a **new** location only, so a book already at\nthe ceiling can still re-confirm what it holds.",
         "operationId": "report_digital_reference",
         "parameters": [
           {
@@ -15210,7 +15284,7 @@
     },
     "/api/imports/marc/preview": {
       "post": {
-        "description": "Read a MARC file and report what it holds, writing nothing.\n\n**`already_held` is the number this exists for.** Importing the same file\ntwice is the ordinary accident in a catalogue transfer, and \"will this\ndouble my catalogue\" has to be answerable before the write.\n\n**Both of the import's refusals are modelled, not one.** `already_held`\ncounts what it will match and `blocked` counts what it will refuse for an\nISBN this member cannot see, through `MarcIndex.holds` and\n`MarcIndex.would_refuse`, which are the same index and the same predicates\n`MarcImport` applies, over the same stored records. Counting only the\nfirst overstated what an import would add by exactly the number of records\nanother member holds privately.\n\n**What is left is an upper bound rather than an equality, and it errs\ntowards promising less.** The index is read once here and mutated during an\nimport: `MarcIndex.remember` makes a freshly created Book findable, so a\nwork listed twice in one file is created once and matched once, while this\ncounts both as additions. Measured, two identical records: the preview would\nadd 2 and the import created 1 and matched 1.\n\n**`blocked` describes the default.** `would_refuse` is the refusal\n`create_missing` reaches, and this endpoint takes no `create_missing`\nbecause the import defaults it true. With it off nothing is created, so\nnothing can be refused for a collision.\n\n**And it under-counts** where a record's ISBN is held invisibly but its\ntitle and author match a visible Book: that is a match, not a refusal. See\n`MarcPreviewOut`.\n\nRate limited together with the import, so a preview and the import that\nfollows it spend two of the three a minute allows. Parsing is the expensive\nhalf and `_read_upload` caps the body without capping the rate.",
+        "description": "Read a MARC file and report what it holds, writing nothing.\n\n**`already_held` is the number this exists for.** Importing the same file\ntwice is the ordinary accident in a catalogue transfer, and \"will this\ndouble my catalogue\" has to be answerable before the write.\n\n**Every answer the import acts on is counted, not only the match.**\n`already_held` counts what it will match, `blocked` what it will refuse for\nan ISBN this member cannot see, `in_trash` what only their trash holds and\n`ambiguous` what two Books answer, through `importing.recognise_stored`,\nthe same index and the same question `MarcImport` asks, over the same\nstored records. Counting only the first overstated what an import would add\nby exactly the number of records another member holds privately.\n\n**What is left is an upper bound rather than an equality, and it errs\ntowards promising less.** The index is read once here and grows during an\nimport: `recognition.Index.remember` makes a freshly created Book findable,\nso a work listed twice in one file is created once and matched once, while\nthis counts both as additions. Measured, two identical records: the preview\nwould add 2 and the import created 1 and matched 1.\n\n**`blocked` describes the default.** It is the refusal `create_missing`\nreaches, and this endpoint takes no `create_missing` because the import\ndefaults it true. With it off nothing is created, so nothing can be refused\nfor a collision.\n\n**And it under-counts** where a record's ISBN is held invisibly but its\ntitle and author match a visible Book: that is a match, not a refusal. See\n`MarcPreviewOut`.\n\nRate limited together with the import, so a preview and the import that\nfollows it spend two of the three a minute allows. Parsing is the expensive\nhalf and `_read_upload` caps the body without capping the rate.",
         "operationId": "preview_marc",
         "requestBody": {
           "content": {

@@ -32,9 +32,11 @@ from collections.abc import Iterable, Sequence
 from typing import Final
 
 from pydantic import ValidationError
+from sqlalchemy import inspect
 from sqlalchemy.orm import Session
 
 from catalogue import Heading
+from database import hold_book_ceilings
 from enums import ClassificationScheme, HeadingKind
 from logvalues import clipped
 from models import Book, Classification
@@ -182,6 +184,41 @@ def bounded_headings(entries: Iterable[Heading]) -> list[ClassificationIn]:
     return headings[:MAX_CLASSIFICATIONS_PER_BOOK]
 
 
+def _key(scheme: str, number: str) -> tuple[ClassificationScheme, str]:
+    """The pair the unique index is on, with the scheme coerced through the enum.
+
+    A stored row's `scheme` comes back from a plain VARCHAR as a `str` and the
+    payload's is a `ClassificationScheme`, so comparing them raw works only for
+    as long as that is a `StrEnum`; coercing removes the dependency instead of
+    commenting on it.
+    """
+    return ClassificationScheme(scheme), number
+
+
+def _headings_to_add(
+    stored: Sequence[Classification], headings: Sequence[ClassificationIn]
+) -> dict[tuple[ClassificationScheme, str], ClassificationIn]:
+    """The headings `add_headings` inserts into `stored` as loaded, by `_key`.
+
+    **The one place that says whether a row is added**: the check before the
+    lock reads whether this is empty, and the insert loop writes only what it
+    returns. Two statements of the rule would let an edit give the loop a new
+    insert case that the check does not know, and every insert follows the lock
+    only while the two agree. A heading already stored, a repeat within
+    `headings` and one past the ceiling are not in it.
+    """
+    held = {_key(entry.scheme, entry.number) for entry in stored}
+    room = MAX_CLASSIFICATIONS_PER_BOOK - len(stored)
+    adds: dict[tuple[ClassificationScheme, str], ClassificationIn] = {}
+    for heading in headings:
+        if len(adds) >= room:
+            break
+        key = _key(heading.scheme, heading.number)
+        if key not in held and key not in adds:
+            adds[key] = heading
+    return adds
+
+
 def add_headings(
     book: Book, headings: Sequence[ClassificationIn], db: Session
 ) -> list[str]:
@@ -234,19 +271,33 @@ def add_headings(
     is a stored denial of service that every listing pays for, since
     `books_to_out` selectin-loads this relationship onto every row of every
     page.
+
+    **The count is read under `database.hold_book_ceilings`**, the lock a merge
+    takes for its keeper: without it a merge carrying headings onto this Book
+    between the read and the commit lands it past the ceiling. So the stored
+    headings are re-read after the lock, flushed first so the ones an earlier
+    call in this transaction added are among them. A Book not yet in the
+    database has no other writer and takes neither.
+
+    **Only when the loaded headings show a row this call would add.** The lock
+    holds the Book against every edit until the transaction ends, which for a
+    MARC import is the end of the file, so a re-import adding nothing must not
+    take it. The check reads without the lock and may be stale, but stale it
+    errs one way: a heading it thinks stored, or a ceiling it thinks reached,
+    makes this call add less, and every insert below follows the lock and the
+    re-read. Filling in a caption or a kind adds no row.
     """
-    # Keyed on the pair the unique index is on, with the scheme coerced through
-    # the enum on both sides. A stored row's `scheme` comes back from a plain
-    # VARCHAR as a `str` and the payload's is a `ClassificationScheme`, so
-    # comparing them raw works only for as long as that is a `StrEnum`;
-    # coercing removes the dependency instead of commenting on it.
-    existing = {
-        (ClassificationScheme(entry.scheme), entry.number): entry
-        for entry in book.classifications
-    }
+    if not headings:
+        return []
+    if inspect(book).persistent and _headings_to_add(book.classifications, headings):
+        hold_book_ceilings(db, book.id)
+        db.flush()
+        db.refresh(book, ["classifications"])
+    adds = _headings_to_add(book.classifications, headings)
+    existing = {_key(entry.scheme, entry.number): entry for entry in book.classifications}
     changed: list[str] = []
     for heading in headings:
-        key = (ClassificationScheme(heading.scheme), heading.number)
+        key = _key(heading.scheme, heading.number)
         stored = existing.get(key)
         if stored is not None:
             filled = False
@@ -259,7 +310,8 @@ def add_headings(
             if filled:
                 changed.append(heading.number)
             continue
-        if len(existing) >= MAX_CLASSIFICATIONS_PER_BOOK:
+        new = adds.get(key)
+        if new is None:
             logger.info(
                 "Book %s already carries %d classifications; dropping %r",
                 book.id,
@@ -269,10 +321,10 @@ def add_headings(
             continue
         row = Classification(
             book=book,
-            scheme=heading.scheme,
-            number=heading.number,
-            label=heading.label,
-            kind=heading.kind,
+            scheme=new.scheme,
+            number=new.number,
+            label=new.label,
+            kind=new.kind,
         )
         db.add(row)
         existing[key] = row

@@ -288,6 +288,45 @@ describe("LibraryImport", () => {
       expect(screen.getByText("Solaris")).toBeInTheDocument();
     });
 
+    it("names the rows whose book is in the trash, under how to import them", () => {
+      renderImport({
+        result: outcome({ in_trash: 1, in_trash_titles: ["Solaris"] }),
+      });
+      expect(
+        screen.getByText(/1 rows name a book in the trash/),
+      ).toBeInTheDocument();
+      expect(screen.getByText("Solaris")).toBeInTheDocument();
+    });
+
+    it("names the rows two books answered apart from the ones it could not find", () => {
+      renderImport({
+        result: outcome({ ambiguous: 1, ambiguous_titles: ["Dune"] }),
+      });
+      expect(
+        screen.getByText(/1 rows match two or more books/),
+      ).toBeInTheDocument();
+      expect(screen.getByText("Dune")).toBeInTheDocument();
+      expect(
+        screen.queryByText(/Not found in the catalogue/),
+      ).not.toBeInTheDocument();
+    });
+
+    it("lists a title the file names twice once for each row", () => {
+      const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+      try {
+        renderImport({
+          result: outcome({
+            in_trash: 2,
+            in_trash_titles: ["Solaris", "Solaris"],
+          }),
+        });
+        expect(screen.getAllByText("Solaris")).toHaveLength(2);
+        expect(errors).not.toHaveBeenCalled();
+      } finally {
+        errors.mockRestore();
+      }
+    });
+
     it("surfaces a refused file", () => {
       renderImport({ error: new Error("No title column was found.") });
       expect(screen.getByRole("alert")).toHaveTextContent("No title column");

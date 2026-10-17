@@ -5470,7 +5470,7 @@ describe("every wallpaper export is imported by name somewhere", () => {
  * rendered later, which is what makes a payload on one of them reachable by
  * nothing.
  */
-const SCAN_REASONS = "pages/ScanPage/hooks.ts";
+const SCAN_REASONS = "pages/ScanPage/queue.ts";
 
 /**
  * What `name` is declared as in `source`, or null.
@@ -5577,7 +5577,7 @@ function kindOf(arm: Node): string {
  * A scan reason is a name, and three arms carry anything else.
  *
  * **What the type system was measured not to say.** A reason with no sentence
- * is a compile error, which is the whole of why `ScanPage/hooks.ts` stores
+ * is a compile error, which is the whole of why `ScanPage/queue.ts` stores
  * names instead of prose. Two things it does not refuse:
  *
  * - **A payload on an arm that is already a name reaches nothing.**
@@ -5716,7 +5716,7 @@ describe("a scan reason is a name, and three arms carry anything else", () => {
  * What a catalogue answered about a queued row is read in one file.
  *
  * **The rule the queue's own figures rest on.** Every count the scan page puts
- * on a control is derived in `pages/ScanPage/hooks.ts` by a predicate that file
+ * on a control is derived in `pages/ScanPage/queue.ts` by a predicate that file
  * owns, and the component that draws them renders them and may not recompute
  * them: a predicate written twice is a button offering to look up twelve beside
  * a run that looks up nine. The queue component held the last exception, one
@@ -5750,7 +5750,7 @@ describe("a scan reason is a name, and three arms carry anything else", () => {
  */
 describe("what a catalogue answered is read in one file", () => {
   /** The file that owns the queue's rows, and every rule over them. */
-  const QUEUE = "pages/ScanPage/hooks.ts";
+  const QUEUE = "pages/ScanPage/queue.ts";
 
   /**
    * A comparison between a row's stored answer and one of the answers there

@@ -21,7 +21,7 @@ import credentials
 import readwise
 from database import SessionLocal
 from enums import HighlightSource
-from models import DeletedHighlight, Highlight, MemberLogin, ReadwiseBook
+from models import BookIdentifier, DeletedHighlight, Highlight, MemberLogin, ReadwiseBook
 from ratelimit import import_limiter
 
 TOKEN = "rw0123456789abcdefTOKEN"
@@ -370,7 +370,11 @@ class TestAPull:
     ):
         asin = [{"scheme": "asin", "value": "B00B7NPRY8"}]
         dune(make_book, linked["headers"], identifiers=asin)
-        make_book(linked["headers"], title="Dune Messiah", author="Frank Herbert", identifiers=asin)
+        # Written directly, because an add refuses a second Book carrying an
+        # ASIN; two still arise from rows made before it did.
+        messiah = make_book(linked["headers"], title="Dune Messiah", author="Frank Herbert")
+        db.add(BookIdentifier(book_id=messiah["id"], scheme="asin", value="B00B7NPRY8"))
+        db.commit()
         fake.put(entry(asin="B00B7NPRY8"))
 
         assert pull(client, linked["headers"])["waiting_count"] == 1

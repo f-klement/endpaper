@@ -161,6 +161,19 @@ export default function ScanPage() {
         </>
       )}
 
+      {/* **No catalogue answered, which is not "nobody knows it"**, so this
+          offers the retry a 503 is for, and the hand entry the server's own
+          sentence names. Above the entry panel, which is back on screen so a
+          different book can be scanned instead. */}
+      {scan.lookupError != null && (
+        <div className="mb-4 space-y-2">
+          <ErrorState error={scan.lookupError} onRetry={scan.retryLookup} />
+          <Button variant="secondary" size="sm" onClick={scan.enterByHand}>
+            {t("scan.addByHand")}
+          </Button>
+        </div>
+      )}
+
       {showEntry && (
         <>
           {isCameraOn ? (
@@ -309,6 +322,7 @@ export default function ScanPage() {
           onCancel={handleCancel}
           onAddCopy={scan.addCopy}
           isAddingCopy={scan.isAddingCopy}
+          enteredByHand={scan.enteredByHand}
         />
       )}
     </div>

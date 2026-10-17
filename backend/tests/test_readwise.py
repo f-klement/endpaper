@@ -98,7 +98,7 @@ class TestAPageThatLostARace:
     def _apply(db, member_id: int, *marks: dict[str, object]) -> readwise.Counts:
         counts = readwise.Counts()
         page = readwise.read_page({"results": [_entry(highlights=list(marks))]})
-        index = readwise.Index.build(db, member_id)
+        index = readwise.build_index(db, member_id)
         readwise.apply_page(db, member_id, page, index, counts, whole=True)
         return counts
 
@@ -152,7 +152,7 @@ class TestAPageListingOneHighlightUnderTwoBooks:
     def _apply(db, member_id: int, *entries: dict[str, object]) -> readwise.Counts:
         counts = readwise.Counts()
         page = readwise.read_page({"results": list(entries)})
-        index = readwise.Index.build(db, member_id)
+        index = readwise.build_index(db, member_id)
         readwise.apply_page(db, member_id, page, index, counts, whole=True)
         return counts
 

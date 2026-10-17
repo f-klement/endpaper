@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final
 
-from sqlalchemy import String, create_engine, event, exc
+from sqlalchemy import String, create_engine, event, exc, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
@@ -517,6 +517,48 @@ def _month_bucket_unsupported(element: MonthBucket, compiler: Any, **kw: Any) ->
         "SQLite and Postgres are the two spelled here; add an arm in "
         "database.py rather than a dialect specific function at a call site."
     )
+
+
+# ── One Book's capped child tables, one writer at a time ─────────────────────
+
+
+def hold_book_ceilings(db: Session, book_id: int) -> None:
+    """Hold one Book's capped child tables until this transaction ends.
+
+    Taken before the count by the file reference report, the heading writer
+    and a MARC import's link writer, and by the merge for its keeper before it
+    carries rows. The identifier writer takes none: its one caller writes onto
+    a Book its own transaction created, which no other transaction can see.
+    **One lock per Book for every capped table rather than one per table**,
+    because a merge carries several of them in one transaction: a lock for one
+    table alone leaves the merge racing the writers of every other.
+
+    * **Postgres** at READ COMMITTED: the Book's row, `FOR NO KEY UPDATE`,
+      released by the commit or the rollback that ends the transaction. **A row
+      lock rather than an advisory lock**, because an advisory lock takes an
+      entry in the shared lock table and a MARC import holds one Book's lock
+      for every Book it touches until its one commit: that exhausted the table
+      partway through an import at the record cap. A row lock is kept on the
+      row. It does not conflict with the key share lock a child row's insert
+      takes, so a writer holding it still inserts under it. **It does conflict
+      with the lock every `UPDATE books` takes**, so an edit to a held Book
+      waits for the holder's commit. The file reference report, the heading
+      writer and the link writer therefore take it only when they would add a
+      row (the last two judged from the rows they loaded); the merge takes it
+      always, for its keeper, before it reads anything.
+    * **SQLite** takes nothing here. It serialises writers from a transaction's
+      first write to its commit, which covers a writer whose count follows its
+      own insert and not one that counts before it writes.
+
+    **Whatever is counted has to be read after this call.** A collection loaded
+    before it is a count the lock did not cover, so a caller expires or
+    refreshes one it may already hold.
+    """
+    if db.get_bind().dialect.name == "postgresql":
+        db.execute(
+            text("SELECT id FROM books WHERE id = :book FOR NO KEY UPDATE"),
+            {"book": book_id},
+        )
 
 
 class Base(DeclarativeBase):

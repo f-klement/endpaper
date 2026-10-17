@@ -34,7 +34,6 @@ import {
 import { BookFormat } from "../../api/generated/model";
 import { useGoogleBooksReady } from "../../app/hooks";
 import type {
-  BookLookup,
   BookMatch,
   BookSearchOut,
   CatalogueSource,
@@ -46,25 +45,17 @@ import { QUERY_FLOOR } from "../../lib/bookBounds";
 import { writeOneAtATime, type BulkProgress } from "../../lib/bulkWrite";
 import { referenceFor } from "../../lib/digitalReference";
 import {
-  formatOf,
   libraryIndexIn,
   readCalibreLibrary,
   type CalibreBook,
 } from "../../lib/calibre";
 import { useTranslation } from "../../i18n";
-import type { FileFailure } from "../../lib/fileReaders";
-import type { AudioFailure, AudioTags } from "../../lib/audiobook";
-import type {
-  AudiobookGroup,
-  AudioFileNaming,
-} from "../../lib/audiobookGroups";
+import type { AudioTags } from "../../lib/audiobook";
+import type { AudioFileNaming } from "../../lib/audiobookGroups";
 import {
   FORMAT_FOR_EXTENSION,
   plainName,
-  queryFor,
-  readName,
   supportedExtension,
-  type FileNaming,
   type SupportedExtension,
 } from "../../lib/fileName";
 import {
@@ -78,20 +69,32 @@ import {
   reportEach,
   reportHeld,
   whereItLands,
-  type Held,
   type HolderQuestion,
 } from "../hooks";
 import {
+  FALLBACK_INTERVAL_MS,
+  canBeAskedAgain,
+  figuresOf,
+  groupKey,
+  isReading,
+  isReady,
+  libraryRows,
+  needsALookup,
+  notYetQueued,
+  queueAfter,
+  scannedKey,
+  type Picked,
+  type QueueEvent,
+  type QueueFigures,
+  type ScanReason,
+  type ScannedEntry,
+} from "./queue";
+import {
   blankDraft,
   blankPending,
-  draftFromAudiobook,
-  draftFromCalibre,
   draftFromFile,
-  draftFromName,
   draftFromMatch,
   draftFromLookup,
-  enrichedDraft,
-  titlesCouldAgree,
   toCopyRequest,
   toScanRequest,
   type BookDraft,
@@ -100,35 +103,6 @@ import {
 
 /** Below this, a search is noise rather than a query. Matches the API bound. */
 const MIN_QUERY_LENGTH = QUERY_FLOOR;
-
-/**
- * How many catalogue calls a minute the filename fallback may start.
- *
- * **Priced against the limiter the same member is already spending, not against
- * the deadline.** `backend/ratelimit.py`'s `METADATA_LIMIT` allows 60 metadata
- * calls a minute per member, and it is the limiter on the ISBN lookup behind
- * every scanned barcode and on the title search box as well as on this. So the
- * fallback takes half of it and leaves the other half to the page it runs on:
- * a folder of three hundred files must not be able to answer 429 to the barcode
- * somebody scans in the middle of it.
- *
- * **Half is chosen rather than measured**, and what it is chosen against is
- * stated so the next reader can move it: the other paths on this page.
- *
- * The wall clock it buys, for 300 files: 10.0 minutes here, against 6.0 to 9.0
- * serialised at the 1.2s to 1.8s a healthy search measures by
- * `metadata.SEARCH_DEADLINE_SECONDS`' own figure, which is 33 to 50 starts a
- * minute and over this share. So the pace costs at most four minutes and the
- * interval is above the slowest healthy search, which is why one call in flight
- * is never what binds.
- *
- * `tests/pages/ScanPage/hooks.test.tsx` recomputes the interval from the
- * backend's own constant rather than restating it.
- */
-export const FALLBACK_STARTS_PER_MINUTE = 30;
-
-/** One start per this long, which is the whole of the pace. */
-export const FALLBACK_INTERVAL_MS = 60_000 / FALLBACK_STARTS_PER_MINUTE;
 
 /**
  * How many candidates one file is offered.
@@ -163,6 +137,19 @@ function delay(
 }
 
 /**
+ * Whether an ISBN lookup's throw is an answer: nobody knowing the ISBN.
+ *
+ * **A 404 is an answer and everything else is a failure to ask**, which
+ * `_lookup_failure` in the books router separates deliberately: 404 is no
+ * catalogue having a record, 503 is no source having been reachable. Every
+ * ISBN lookup on this page reads its throw through this, because collapsing
+ * the two offers the retry that buys nothing and withholds the one that does.
+ */
+function nobodyKnows(error: unknown): boolean {
+  return error instanceof ApiError && error.status === 404;
+}
+
+/**
  * The shelves already in use, for the location suggestions.
  *
  * Cached for five minutes: the set of shelves in a library changes about
@@ -190,6 +177,21 @@ export interface UseScanFlowResult {
 
   lookup: (isbn: string) => void;
   isLookingUp: boolean;
+  /**
+   * Why the lookup could not be answered, where no catalogue was reached; null
+   * otherwise. A 404 is not this: it is an answer, and becomes a blank draft.
+   */
+  lookupError: unknown;
+  /** Ask the catalogues about the same ISBN again. */
+  retryLookup: () => void;
+  /** Give up on the catalogues for this ISBN and fill the book in by hand. */
+  enterByHand: () => void;
+  /**
+   * The blank draft on screen came from `enterByHand`, so no catalogue
+   * answered for it. The confirm card reads this to keep from saying that
+   * none of them knew the ISBN, which is what a 404's blank draft says.
+   */
+  enteredByHand: boolean;
 
   /** Prefill the confirm step from a chosen search result. */
   chooseMatch: (match: BookMatch) => void;
@@ -240,6 +242,10 @@ export function useScanFlow(
     blankPending(readLastLocation()),
   );
   const [addError, setAddError] = useState<unknown>(null);
+  // Beside the draft rather than on it: a `BookDraft` field is a `WHO_WINS`
+  // row and a field `toScanRequest` has to strip, for a fact only the confirm
+  // card's sentence reads. Cleared by every door that replaces the draft.
+  const [enteredByHand, setEnteredByHand] = useState(false);
 
   const update = useCallback(
     (patch: Partial<PendingBook>) =>
@@ -269,11 +275,24 @@ export function useScanFlow(
     if (lookupQuery.data) {
       const next = draftFromLookup(lookupQuery.data);
       update({ draft: next, tagIds: next.suggested_tag_ids ?? [] });
-    } else if (lookupQuery.error) {
+    } else if (lookupQuery.error && nobodyKnows(lookupQuery.error)) {
       // Neither source knew it: offer manual entry rather than a dead end.
       update({ draft: blankDraft(isbn), tagIds: [] });
     }
   }
+
+  // **Every other throw is no catalogue having answered**, so no draft: a
+  // blank form would say nobody knows the book when nobody was asked. Null
+  // while a retry is in flight, which keeps the old error and must not keep
+  // the offer to retry beside the spinner.
+  const unanswered =
+    isbn !== null &&
+    pending.draft === null &&
+    !lookupQuery.isFetching &&
+    lookupQuery.error != null &&
+    !nobodyKnows(lookupQuery.error)
+      ? lookupQuery.error
+      : null;
 
   const scanAdd = useScanAdd();
   const addAnotherCopy = useAddCopy();
@@ -284,6 +303,7 @@ export function useScanFlow(
   function reset() {
     setIsbn(null);
     setAddError(null);
+    setEnteredByHand(false);
     // Everything except the shelf. It is the one field that is the same for
     // the next book far more often than not, and clearing it here would undo
     // the carry-over on every cancel.
@@ -408,6 +428,7 @@ export function useScanFlow(
     // with whatever Open Library says. The record is already chosen, so the
     // scan flow stays parked at null and the draft carries the ISBN instead.
     setIsbn(null);
+    setEnteredByHand(false);
     update({ draft: next, tagIds: next.suggested_tag_ids ?? [] });
   }
 
@@ -422,9 +443,20 @@ export function useScanFlow(
     lookup: (nextIsbn) => {
       update({ draft: null });
       setAddError(null);
+      setEnteredByHand(false);
       setIsbn(nextIsbn);
     },
-    isLookingUp: isbn !== null && pending.draft === null,
+    isLookingUp: isbn !== null && pending.draft === null && unanswered === null,
+    lookupError: unanswered,
+    // A refetch rather than `lookup` again: the ISBN is the same, so the key
+    // does not change and the failed answer would simply be read back.
+    retryLookup: () => void lookupQuery.refetch(),
+    enterByHand: () => {
+      if (isbn === null) return;
+      setEnteredByHand(true);
+      update({ draft: blankDraft(isbn), tagIds: [] });
+    },
+    enteredByHand,
 
     createTag: (name) =>
       setPending((current) =>
@@ -625,90 +657,6 @@ export function useBookSearch(): UseBookSearchResult {
 }
 
 /**
- * How a row came to be standing under its own file name.
- *
- * A closed set, and it is a named type rather than an inline union so that
- * `OFFERED_AGAIN` can be keyed on it: a fourth answer is then a compile error
- * until somebody has decided whether it may be looked up again.
- */
-export type CatalogueAnswer = "nothing" | "records" | "records-for-now";
-
-/**
- * The reasons a row can carry that are a name and nothing else.
- *
- * **Declared rather than derived from `ScanReason["kind"]`**, and not because
- * one spelling catches more. Measured against a widened `kind`, the two produce
- * the same six errors in the same six places and differ in the last one's code
- * alone: `TS7053` on the `REASONS[reason.kind]` lookup, against `TS2345` in
- * that same expression.
- *
- * **It is the unwidened case that decides it.**
- * `Record<ScanReason["kind"], MessageKey>` demands a sentence for `file`,
- * `audio` and `server-said`, three keys nothing ever looks up because those
- * arms are answered before `REASONS` is reached. Measured: `TS2739` naming the
- * three, plus the import that spelling leaves unused.
- *
- * **What a type cannot say about this union is said in
- * `frontend/tests/houseRules.test.ts`**: three arms carry a payload and every
- * other is a name, which is a rule about arity rather than about any type, so
- * no spelling of a payload evades it.
- */
-export type NamedScanReason =
-  | "no-title"
-  | "unreadable"
-  | "not-in-catalogues"
-  | "lookup-failed"
-  | "kept-the-name"
-  | "kept-for-now"
-  | "unreachable"
-  | "held-in-another-format"
-  | "not-in-catalogues-as-stated"
-  | "lookup-failed-as-stated"
-  | "record-differs"
-  | "kept-the-file";
-
-/**
- * Why a row is where it is, as a name rather than as a sentence.
- *
- * **The words are chosen where the row is drawn**, which is `REASONS` in
- * `RapidQueue.tsx` and the two tables beside it. It is the discipline
- * `lib/fileReaders.ts` and `lib/stores.ts` state for their own readers, and the
- * one `OFFERED_AGAIN` keeps for `CatalogueAnswer` above: a reason with no
- * sentence for a member is a compile error rather than a row that says nothing.
- * Stored as a sentence it was also fixed in the locale in force at the moment
- * the file failed, where a name re-renders in the language being read.
- *
- * **No arm interpolates, and that is the cost of the change rather than a
- * property of it.** `string` took an interpolated sentence for free. The first
- * reason to want one, "could not read chapter 12 of 40", takes a `kind` of its
- * own outside `NamedScanReason`, carries the numbers, and is answered by its
- * own branch in `reasonText`. **Never a field hung on a name that is already
- * there**: `REASONS` is reached by the name alone, so the numbers would compile
- * and reach nothing.
- *
- * **Exactly one arm carries free text, and it is named for what it carries.**
- * That is `server-said`, and no type states it: a second free text arm compiles
- * clean once it has a branch, the first having made free text ordinary. So
- * `frontend/tests/houseRules.test.ts` states it, off this declaration, as the
- * three arms that may carry anything besides a `kind`. It cannot resolve an arm
- * spelled as a type from another module, and refuses that by a blunter rule.
- */
-export type ScanReason =
-  /** What a reader said about a picked file, over `fileReaders.FileFailure`. */
-  | { kind: "file"; failure: FileFailure }
-  /** What the audio reader said about one audio file. */
-  | { kind: "audio"; failure: AudioFailure }
-  /**
-   * The server's own message, in whatever language it answered in.
-   *
-   * **The one free text arm.** `addAll` is its only site: a refused request
-   * carries a `detail` written for the reader, and nothing on this side can
-   * translate it.
-   */
-  | { kind: "server-said"; message: string }
-  | { kind: NamedScanReason };
-
-/**
  * The reason a refused request leaves on the row it was refused for.
  *
  * **A mapping and not a second classification**, which is the whole of why
@@ -773,242 +721,6 @@ function reasonFor<Kind extends RequestFailure["kind"]>(
   return REASON_FOR_FAILURE[kind](failure);
 }
 
-/** One book caught by the rapid scanner or picked as a file, and how it has gone so far. */
-export interface ScannedEntry {
-  /**
-   * Identity in the queue, and what a removal names.
-   *
-   * **Not the ISBN, and that is the whole reason this field exists.** A file is
-   * the second way into this queue and most files carry no ISBN at all:
-   * measured over 79 real EPUBs, 4 did. Keying on one would collapse every
-   * ISBN-less pick into a single entry.
-   */
-  key: string;
-  /** What the queue shows and what a removal is announced by. */
-  label: string;
-  /** Empty when the entry came from a file that named none. */
-  isbn: string;
-  /**
-   * What kind of object this copy is, where the way it arrived answers that.
-   *
-   * **A picked EPUB is an ebook and the container says so**, which is not the
-   * guess `docs/decisions.md` refuses when it leaves `format` nullable: that
-   * refuses a value written across every imported row on no evidence, and
-   * `csv_import` already reads the literal string `epub` as this answer. A
-   * barcode carries no such evidence and stays blank.
-   */
-  format: BookFormat | "";
-  /**
-   * Where this entry has got to.
-   *
-   * **`derived` is a book, not a failure, and that is the decision behind the
-   * whole fallback path.** A file whose own metadata said nothing still has a
-   * name, and a row carrying what the name said is added by `addAll` rather
-   * than skipped. It is the same call the OPDS sync makes for a holding with no
-   * description: reported as created, because it is.
-   *
-   * **`stated` is a file that named its own title and ISBN**, and is `found`
-   * in every way but one: no catalogue has been asked about that ISBN. It is
-   * added as the file describes it unless the paced lookup is pressed, which
-   * asks what a scanned barcode is asked and keeps the file's own fields only
-   * where the record has none (`types.enrichedDraft`).
-   */
-  state:
-    | "looking-up"
-    | "reading"
-    | "derived"
-    | "stated"
-    | "searching"
-    | "choosing"
-    | "found"
-    | "not-found"
-    | "failed";
-  draft: BookDraft | null;
-  /**
-   * Why it could not be read, or could not be added once the batch has run.
-   *
-   * **A name, never a sentence**: see `ScanReason`. Absent is the absence, and
-   * it is what a row going back to `searching` is set to; a `"none"` arm would
-   * be a second spelling of the same thing.
-   */
-  reason?: ScanReason;
-  /**
-   * What to ask the catalogue about this file, derived from its name.
-   *
-   * Absent for a barcode, which needs no such thing, and for a file whose name
-   * reduced to nothing a catalogue could be asked about.
-   */
-  query?: string;
-  /** What the catalogue offered for it, for the member to accept or reject. */
-  matches?: BookMatch[];
-  /**
-   * What the catalogue answered, where the answer left the row under its own
-   * name or, for a `stated` row, as its file describes it.
-   *
-   * **Values rather than one flag**, because the ways a row keeps its file name
-   * are different sentences to the member. `"nothing"` is a catalogue with no
-   * record, which for a title that exists only as a file is the ordinary
-   * outcome and is what `fallback.aboutEbooks` explains. `"records"` is a
-   * catalogue that had some and a member who preferred the name (or, on a
-   * `stated` row, a record for its ISBN whose title shares no significant
-   * word with the file's), and saying
-   * anything about ebooks to them would describe something that did not happen.
-   * `"records-for-now"` is the same records and a member who was clearing the
-   * queue rather than answering about this book, so the row can be asked
-   * again; `OFFERED_AGAIN` is where that difference is spent.
-   *
-   * **Absent means nothing has been asked**, which is what the run and the count
-   * both read, and it is what a call that could not be made leaves behind: a
-   * catalogue nobody reached has answered nothing and is worth asking again.
-   */
-  answered?: CatalogueAnswer;
-  /**
-   * The audio files this one candidate was made of, and the rule that said so.
-   *
-   * **Present only for an audiobook**, and it is the whole of the inversion
-   * this format brings: every other row here is one file, and one audiobook is
-   * usually a folder of chapter files. `lib/audiobookGroups.ts` holds the rule.
-   *
-   * Carried rather than counted, for two reasons that are the same reason: the
-   * queue shows the member which files a candidate claims before anything is
-   * added, and `splitApart` needs them back to undo a grouping the member
-   * disagrees with. It is also what dedup is decided on, so picking the same
-   * folder twice queues nothing twice.
-   */
-  group?: AudiobookGroup;
-  /**
-   * Why each of this row's own files said nothing, keyed by the file key.
-   *
-   * **Present only while the row can still be split**, which is
-   * `splitTheGroup`'s own condition rather than a second rule: more than one
-   * file. A row of one file already states what its file said in `reason` and
-   * nothing can split it further, so a map there would be the same value twice,
-   * and the two would part company at the first patch of `reason`.
-   *
-   * A note from one file of forty describes that file rather than the book, so
-   * a grouped row shows none of them; the split is where each file becomes a
-   * row that has to state its own.
-   *
-   * **Not on the group's files**, which are `lib/audiobookGroups.ts`'s type:
-   * what a member is told is not a fact about a grouping, and a page's union
-   * has no business in `lib/`.
-   *
-   * Narrowed to the files this row claims rather than the whole pick, so one
-   * row does not hold the reasons belonging to every other row in the queue.
-   */
-  fileReasons?: ReadonlyMap<string, ScanReason>;
-  /**
-   * The picked files this row claims, where it came from files.
-   *
-   * **Set before the grouping is known and kept afterwards**, which is the one
-   * job it has: an audiobook's rows cannot be made until every file in the pick
-   * has been read, and in that window the queue still has to be able to say
-   * that those files are spoken for. Picking the same folder twice queues
-   * nothing twice because of this.
-   *
-   * **Only the reading row carries it.** Once the files are grouped, `group`
-   * holds them and is where the claim is read from: setting both would be one
-   * fact in two fields that agree by construction and by nothing else.
-   */
-  claims?: readonly string[];
-  /**
-   * Where the file this row was drafted from is, as the server takes it.
-   *
-   * **Derived at the pick and carried, because the `File` does not survive the
-   * read.** Only the key and the label go into the queue, so by the time the
-   * batch runs there is nothing left to ask. `lib/digitalReference.ts` decides
-   * what this browser may honestly claim, and answers nothing for a file picked
-   * one at a time.
-   *
-   * **Absent for an audiobook row**, and that is the format's own inversion
-   * again rather than an omission: a row standing for forty chapter files has
-   * no one file to point at, and a book holds sixteen references at the most.
-   */
-  reference?: DigitalReferenceIn;
-  /**
-   * Where this row's other files are, for a book that is several files.
-   *
-   * **Only a Calibre library's row has one**: Calibre keeps one book as one
-   * record with a file per format, so the row is one book and each of its
-   * files is a reference on it. Reported wherever `reference` is, after it;
-   * the holder lookup asks by `reference` alone, because Calibre keeps every
-   * format of a book in one directory and they move together.
-   */
-  moreReferences?: readonly DigitalReferenceIn[];
-  /**
-   * The Book that already holds this row's file, `null` where none the member
-   * can see does, and absent until somebody has asked.
-   *
-   * **Asked by the file and not by its ISBN**: a location or KOReader's
-   * fingerprint, through `POST /api/books/file-holders`. So a re-picked folder
-   * is recognised whatever its files say, including the ones with no ISBN,
-   * which a create would otherwise file a second time. A held row is never
-   * added: where `lands`, `addAll` refreshes its sighting on that Book, and
-   * otherwise the row is offered as its own copy, by the landing rule.
-   */
-  heldBy?: Held | null;
-  /**
-   * Whether this row's ISBN was read out of the file's **name**.
-   *
-   * **Carried rather than read off the state, because the state deliberately
-   * stops saying it.** `lookUpTheName` promotes a row to `found` whenever the
-   * ISBN lookup answers, for a row standing under its name and for a `stated`
-   * file alike, so after a successful lookup `found` covers a file that
-   * stated its identifier and a name that happened to contain one. The comment
-   * there says as much: a name carrying an ISBN takes the route a barcode
-   * takes. That collapse is right for the lookup and wrong for anything asking
-   * where the identifier came from.
-   *
-   * Set by `fromTheName` and cleared by `chooseFor`, which are the only two
-   * places that know. Read by `theIsbnWasRead`, and by `lookUpTheName`, which
-   * takes the record for such an ISBN whole rather than filling it from the
-   * name's guesses.
-   */
-  isbnFromTheName?: true;
-  /**
-   * The catalogue's record for a `stated` row's ISBN, where its title shares
-   * no significant word with the title the file stated.
-   *
-   * **Held, not taken.** A file's ISBN can be a stranger's or a publisher
-   * template's, and taking a record that names a different work would file
-   * the wrong book with this file's identifiers, subjects and location on it,
-   * with nothing on screen saying so. `titlesCouldAgree` says which records
-   * are held and which it lets through, a same series volume among them. So the row stays as the file describes it,
-   * which is what `addAll` adds, and the member takes the record
-   * (`takeTheRecord`) or refuses it (`keepTheFile`). The raw record rather
-   * than a merged draft, so a subject dropped meanwhile stays dropped when it
-   * is taken. Set only beside the `record-differs` reason.
-   */
-  differentRecord?: BookLookup;
-  /**
-   * The book this row's ISBN already belongs to, where that book is a
-   * different kind of object from the file.
-   *
-   * **Set only beside the `held-in-another-format` reason, by the one site
-   * that sets that reason**, which is the failure mapping in `addAll`. It is
-   * what `addAsCopy` copies, and it is cleared there for every other outcome,
-   * so a row that later fails for another reason stops offering the copy.
-   */
-  copyOf?: number;
-}
-
-/**
- * Every picked file an entry claims.
- *
- * One entry is one file everywhere except an audiobook, where it is many. Read
- * off the entries rather than kept beside them, because a second record of what
- * has been queued is a second record to keep in step.
- */
-function claimedKeys(entries: readonly ScannedEntry[]): Set<string> {
-  const keys = new Set<string>();
-  for (const entry of entries) {
-    const claimed = entry.group?.files.map((file) => file.key) ??
-      entry.claims ?? [entry.key];
-    for (const key of claimed) keys.add(key);
-  }
-  return keys;
-}
-
 /**
  * Whether a file of this extension is one part of an audiobook.
  *
@@ -1047,11 +759,6 @@ function filesOf(entry: ScannedEntry): DigitalReferenceIn[] {
     : [entry.reference, ...(entry.moreReferences ?? [])];
 }
 
-/** The queue key for a scanned barcode. One book, one ISBN, one entry. */
-function scannedKey(isbn: string): string {
-  return `isbn:${isbn}`;
-}
-
 /**
  * The queue key for a picked file.
  *
@@ -1081,86 +788,6 @@ function foldersOf(file: File): string[] {
   return file.webkitRelativePath
     ? file.webkitRelativePath.split("/").slice(0, -1).filter(Boolean)
     : [];
-}
-
-/**
- * What every rule in this file makes of a row's state.
- *
- * **A total `Record` keyed on the union rather than a comparison at each site**,
- * which is `OFFERED_AGAIN`'s rule one field over, and the field it is one over
- * is the one that was open: a ninth `ScannedEntry["state"]` used to compile
- * clean and be silently wrong in five places at once. Three predicates below
- * answered `false` for it, the run's own reading answered `false`, and the
- * queue's rows are drawn by a table in `RapidQueue.tsx` that had a line for
- * each of the eight states and no line for anything else, so the row appeared
- * on screen with nothing at all in it. Nothing was red anywhere. A ninth state
- * now fails to compile here and at that table, which are the two places its
- * author has to answer for it.
- *
- * **Three facts and not one flag per predicate.** Each is something a state
- * either is or is not, and the predicates below are conjunctions over them and
- * the fields beside them. `derived` is `askable` without `deciding`,
- * which is a reading of the two rather than a third entry (`stated` reads the
- * same, and `ROW_LINE` is what tells the two apart): two fields that
- * agree by construction and by nothing else are what `ScannedEntry.claims`
- * refuses one level down.
- */
-interface QueueStateRules {
-  /**
-   * The file behind this row is still being read.
-   *
-   * What a stop has to be able to interrupt, and what the page reads to know a
-   * pick is still going.
-   */
-  readonly stillReading: boolean;
-  /**
-   * A catalogue has something to be asked about this row, and its answer
-   * would replace or fill the draft the row carries.
-   *
-   * True of a row standing under its file's name, whether nothing has been
-   * offered for it or records are on screen, and of a `stated` row, whose
-   * file named an ISBN that no catalogue has been asked about.
-   */
-  readonly askable: boolean;
-  /** Records are offered on this row and the member has neither taken nor refused them. */
-  readonly deciding: boolean;
-}
-
-const QUEUE_STATES: Record<ScannedEntry["state"], QueueStateRules> = {
-  "looking-up": {
-    stillReading: false,
-    askable: false,
-    deciding: false,
-  },
-  reading: { stillReading: true, askable: false, deciding: false },
-  derived: { stillReading: false, askable: true, deciding: false },
-  stated: { stillReading: false, askable: true, deciding: false },
-  searching: {
-    stillReading: false,
-    askable: false,
-    deciding: false,
-  },
-  choosing: { stillReading: false, askable: true, deciding: true },
-  found: { stillReading: false, askable: false, deciding: false },
-  "not-found": {
-    stillReading: false,
-    askable: false,
-    deciding: false,
-  },
-  failed: { stillReading: false, askable: false, deciding: false },
-};
-
-/**
- * An entry with records offered and neither taken nor refused.
- *
- * **Exported for `RapidQueue.tsx`**, which used to spell this state out by hand
- * beside the records it draws. One rule with one home, and the component asks
- * the question rather than knowing the answer: a predicate written twice is a
- * screen able to report something the page did not do, which is the reason
- * `QueueFigures` exists at all.
- */
-export function isBeingDecided(entry: ScannedEntry): boolean {
-  return QUEUE_STATES[entry.state].deciding;
 }
 
 /**
@@ -1262,186 +889,6 @@ function theIsbnWasRead(entry: ScannedEntry): boolean {
   return entry.isbnFromTheName !== true;
 }
 
-/**
- * Whether an answer leaves the row worth offering a second pass.
- *
- * **A map keyed on the union rather than a disjunction**, which is what makes
- * this self enforcing: a fourth answer does not compile until it appears here,
- * so nobody can add one and inherit an offer, or the absence of one, by
- * omission. The default is exactly what the author of a new answer would not
- * think to state.
- *
- * A member who refused the records answered about that book and is not asked
- * again. A member who kept the names in bulk was clearing a queue rather than
- * answering, and the whole of the owner's decision on 2026-09-10 is that those
- * can come back.
- */
-const OFFERED_AGAIN: Record<CatalogueAnswer, boolean> = {
-  nothing: false,
-  records: false,
-  "records-for-now": true,
-};
-
-/**
- * What a row the catalogue did not settle says, by which draft it went back to.
- *
- * **Two sentences per outcome and not one**, because "kept under its file
- * name" is false of a `stated` row, which keeps what the file described.
- * `unknown` is a 404, nobody knowing the ISBN; `unreachable` is every other
- * failure to ask, which `lookUpTheName` reads apart.
- */
-const UNSETTLED = {
-  derived: { unknown: "not-in-catalogues", unreachable: "lookup-failed" },
-  stated: {
-    unknown: "not-in-catalogues-as-stated",
-    unreachable: "lookup-failed-as-stated",
-  },
-} as const satisfies Record<
-  "derived" | "stated",
-  Record<"unknown" | "unreachable", NamedScanReason>
->;
-
-/**
- * What one row becomes once the catalogue has a record for its ISBN.
- *
- * **A name's ISBN takes the record whole**: `theIsbnWasRead` distrusts that
- * provenance, so a stranger's record is not mixed with the name's guessed
- * author and year. **A file's stated ISBN keeps the file's fields where the
- * record has none**, `types.enrichedDraft`, unless the two titles cannot be
- * one book, when the record is held for the member
- * (`ScannedEntry.differentRecord`) and the row stays as the file describes
- * it.
- */
-function answeredByIsbn(one: ScannedEntry, lookup: BookLookup): ScannedEntry {
-  if (one.isbnFromTheName) {
-    return { ...one, state: "found", draft: draftFromLookup(lookup) };
-  }
-  const own = one.draft?.title ?? "";
-  if (one.draft !== null && !titlesCouldAgree(lookup.title, own)) {
-    return {
-      ...one,
-      state: "stated",
-      answered: "records",
-      reason: { kind: "record-differs" },
-      differentRecord: lookup,
-    };
-  }
-  return { ...one, state: "found", draft: enrichedDraft(lookup, one.draft) };
-}
-
-/**
- * An entry the catalogue has not been asked about and could be.
- *
- * One predicate rather than a filter written twice, because the count on the
- * button and the list the run walks have to be the same set: a button offering
- * to look up twelve and a run that looks up nine is a screen reporting
- * something the page did not do.
- *
- * **An answered row is never in here, whatever the answer**, which is the
- * invariant the bulk keep was not allowed to cost: a member who picks ten more
- * files and presses this must look up ten, not the two hundred and fifty they
- * had just cleared off the screen. Those are `canBeAskedAgain`, which is a
- * second control saying so in its own words.
- */
-function needsALookup(entry: ScannedEntry): boolean {
-  const state = QUEUE_STATES[entry.state];
-  return (
-    state.askable &&
-    !state.deciding &&
-    entry.answered === undefined &&
-    // A file already in the library has nothing to ask a catalogue, `stated`
-    // rows included. Known only once the file holders answer has arrived: a
-    // press before it, or after that call failed, looks the row up anyway.
-    !entry.heldBy &&
-    (entry.isbn !== "" || entry.query !== undefined)
-  );
-}
-
-/**
- * An entry the catalogue answered, whose answer the member left open.
- *
- * **Disjoint from `needsALookup` by construction**, on `answered` being set
- * against unset rather than on two lists that happen not to overlap: a row in
- * both would be looked up twice by two presses that each said it was the whole
- * of the work.
- */
-function canBeAskedAgain(entry: ScannedEntry): boolean {
-  const state = QUEUE_STATES[entry.state];
-  return (
-    state.askable &&
-    !state.deciding &&
-    entry.answered !== undefined &&
-    OFFERED_AGAIN[entry.answered] &&
-    (entry.isbn !== "" || entry.query !== undefined)
-  );
-}
-
-/**
- * What the queue adds up to, counted once and read everywhere.
- *
- * **One value rather than a member each, because they are one reading of one
- * array.** Every figure here is derived from `entries` by a predicate this
- * module owns, and the screen's rule is that it may render them and may not
- * recompute them: a predicate written twice is a button offering to look up
- * twelve beside a run that looks up nine. Passed as a group so that another
- * figure reaches the component without another prop, and so the docstring
- * saying what each one counts has one home. There is deliberately no count of
- * them written here: the version of this sentence that said five was stale on
- * the day the sixth arrived, and it had anticipated that arrival in its own
- * next clause.
- *
- * **The two pace members are minutes and not counts**, which is why this is not
- * named for counting. They are derived from the counts beside them by one
- * arithmetic, so carrying them apart is how a figure on a button comes to quote
- * a pace the run it starts does not keep.
- */
-export interface QueueFigures {
-  /**
-   * Files a catalogue has not been asked about yet: a name with nothing else
-   * behind it, or an ISBN the file stated.
-   */
-  readonly waiting: number;
-  /**
-   * Files with records offered and neither taken nor refused.
-   *
-   * **Derived from the predicate `addAll` excludes, not from a second one
-   * spelled the same.** The screen says how many rows the batch is going to
-   * leave where they are, so a predicate written twice is a screen that can
-   * report something the page did not do. Same reason `needsALookup` is one
-   * function rather than a filter at each site.
-   */
-  readonly deciding: number;
-  /**
-   * Files kept under their names in bulk, which the catalogues may be asked
-   * about again.
-   *
-   * **Not part of `waiting`, and that is the point of counting it separately.**
-   * A member who clears a queue of two hundred and fifty and then picks ten more
-   * files presses a button that says ten. These come back through a press of
-   * their own, which names them.
-   */
-  readonly keptForNow: number;
-  /**
-   * Files a catalogue was asked about and had no record of.
-   *
-   * **Here rather than read off the rows by whoever draws them**, which is the
-   * rule this interface states and the one place the queue component was still
-   * breaking it: it held the only `entries.some` on the page, spelling an
-   * answer out by hand to decide whether to say that catalogues list few
-   * ebooks. A second reading of `answered` is a second place for that sentence
-   * to appear beside a queue it is not true of.
-   *
-   * A count and not a flag, for the reason the figures beside it are counts:
-   * what the screen does with it is the screen's, and a member who was offered
-   * records and preferred the name is not counted here at all.
-   */
-  readonly emptyAnswers: number;
-  /** Roughly how long looking all of them up would take, in minutes. */
-  readonly paceMinutes: number;
-  /** The same figure for a second pass over the names kept in bulk. */
-  readonly keptPaceMinutes: number;
-}
-
 export interface UseRapidIntakeResult {
   isActive: boolean;
   start: () => void;
@@ -1486,8 +933,8 @@ export interface UseRapidIntakeResult {
   /** What the queue adds up to, for every control that quotes a figure. */
   figures: QueueFigures;
   /**
-   * Ask the catalogue about every file that has only its name, and about every
-   * ISBN a file stated.
+   * Ask the catalogue about every file that has only its name, about every
+   * ISBN a file stated, and about every barcode no catalogue answered.
    *
    * **Offered, never automatic**, and it is one press for the queue as it stood
    * when it was pressed. Two reasons, and the second is the one that decides it:
@@ -1522,12 +969,12 @@ export interface UseRapidIntakeResult {
   /**
    * Take one subject off one queued book before anything is written.
    *
-   * **The only route that ever removes a subject, and this is the last moment
-   * it exists.** `BookDetailsUpdate` has no `categories`, so once `addAll`
-   * has run the column can be replaced by enriching and cleared by nothing:
-   * the remedy afterwards is deleting the book. A file states a subject a
+   * **The only control in this app that removes a subject, and this is the
+   * last moment it is offered.** `BookDetailsUpdate` takes `categories`, and an
+   * empty list clears them, but no page sends that field: once `addAll` has
+   * run, the remedy is a request to the API by hand. A file states a subject a
    * stranger wrote, a folder pick is several hundred files behind one press,
-   * and this is the row where that is still reversible.
+   * and this is the row where that is still one press to undo.
    *
    * **Here rather than on the confirm card, which was where the design round
    * put it and is a surface a file never reaches**: measured while building
@@ -1699,13 +1146,13 @@ export function useRapidIntake(): UseRapidIntakeResult {
   // as the search box does.
   const { locale } = useTranslation();
 
-  /** Rewrite the one entry with this key, leaving every other alone. */
-  function settle(key: string, patch: Partial<ScannedEntry>) {
-    setEntries((current) =>
-      current.map((entry) =>
-        entry.key === key ? { ...entry, ...patch } : entry,
-      ),
-    );
+  /**
+   * What happened, applied to the queue as it stands when React gets to it
+   * rather than as this render saw it: a subject dropped while a lookup was in
+   * flight stays dropped.
+   */
+  function apply(event: QueueEvent) {
+    setEntries((current) => queueAfter(current, event));
   }
 
   /**
@@ -1720,24 +1167,11 @@ export function useRapidIntake(): UseRapidIntakeResult {
   }
 
   function capture(isbn: string) {
-    const key = scannedKey(isbn);
     setEntries((current) => {
-      // The camera fires continuously while a barcode is in frame, so the same
-      // book arrives many times a second. Without this the queue fills with
-      // one book.
-      if (current.some((entry) => entry.key === key)) return current;
-      void lookUp(isbn);
-      return [
-        ...current,
-        {
-          key,
-          label: isbn,
-          isbn,
-          format: "",
-          state: "looking-up",
-          draft: null,
-        },
-      ];
+      const queued = queueAfter(current, { kind: "captured", isbn });
+      // A repeat comes back as the same queue, and is not looked up again.
+      if (queued !== current) void lookUp(isbn);
+      return queued;
     });
   }
 
@@ -1749,12 +1183,16 @@ export function useRapidIntake(): UseRapidIntakeResult {
         queryFn: () => lookupIsbn({ isbn }),
         staleTime: 60_000,
       });
-      settle(key, { state: "found", draft: draftFromLookup(lookup) });
-    } catch {
-      // Neither source knew it. Kept in the queue as a blank draft rather than
-      // dropped, so it can still be added by hand instead of silently vanishing
-      // between the shelf and the catalogue.
-      settle(key, { state: "not-found", draft: blankDraft(isbn) });
+      apply({ kind: "isbn-answered", key, lookup });
+    } catch (error) {
+      // Kept in the queue either way rather than dropped, so a book on the
+      // shelf does not silently vanish between the shelf and the catalogue.
+      apply({
+        kind: "not-answered",
+        key,
+        asked: "looking-up",
+        unknown: nobodyKnows(error),
+      });
     }
   }
 
@@ -1782,8 +1220,9 @@ export function useRapidIntake(): UseRapidIntakeResult {
    * usually a folder of chapter files, so its rows cannot be made until every
    * file in the pick has been read and grouped. `readAudio` is that route.
    *
-   * The already-queued check happens inside the updater and starts the reads
-   * from there, which is the shape `capture` uses and for the same reason: the
+   * The queue is asked what it already holds (`notYetQueued`) inside the
+   * updater, and the reads start from there, which is the shape `capture` uses
+   * and for the same reason: the
    * queue is the only record of what has been picked, so asking anything else
    * would be a second one to keep in step. The skipped count is taken **before**
    * it, because an updater that counts is an updater run twice under a strict
@@ -1816,9 +1255,8 @@ export function useRapidIntake(): UseRapidIntakeResult {
     );
 
     setEntries((current) => {
-      const queued = claimedKeys(current);
-      const unqueued = supported.filter(
-        (walk) => !queued.has(pickedKey(walk.file)),
+      const unqueued = notYetQueued(current, supported, (walk) =>
+        pickedKey(walk.file),
       );
       // **The audio half gets one row for the whole pick, not one each.** Which
       // files are one book is decided by what they say, so nothing can be
@@ -1829,30 +1267,28 @@ export function useRapidIntake(): UseRapidIntakeResult {
       const fresh = unqueued.filter((walk) => !isAudio(walk.extension));
       const pending = audio.length > 0 ? pendingAudio(audio) : null;
       if (pending) void readAudio(audio, pending.key);
-      if (fresh.length === 0) {
-        return pending ? [...current, pending] : current;
-      }
-      void readFiles(fresh.map((walk) => walk.file));
-      return [
-        ...current,
-        ...(pending ? [pending] : []),
-        ...fresh.map((walk) => ({
-          key: pickedKey(walk.file),
-          // Taken while the `File` is still in hand. After the read the queue
-          // holds a key and a label and could not derive this if it wanted to.
-          reference: referenceFor(walk.file) ?? undefined,
-          // Cleaned for the reason every derived value is: a name is somebody
-          // else's text, and this one is printed beside a title that was.
-          label: plainName(walk.file.name),
-          isbn: "",
-          // The extension answers this, and it is the same kind of evidence a
-          // zip container is rather than the guess `format` is nullable to
-          // refuse.
-          format: FORMAT_FOR_EXTENSION[walk.extension],
-          state: "reading" as const,
-          draft: null,
-        })),
-      ];
+      if (fresh.length > 0) void readFiles(fresh.map((walk) => walk.file));
+      return queueAfter(current, {
+        kind: "picked",
+        rows: [
+          ...(pending ? [pending] : []),
+          ...fresh.map((walk) => ({
+            key: pickedKey(walk.file),
+            // Taken while the `File` is still in hand. After the read the
+            // queue holds a key and a label and could not derive this if it
+            // wanted to.
+            reference: referenceFor(walk.file) ?? undefined,
+            // Cleaned for the reason every derived value is: a name is
+            // somebody else's text, and this one is printed beside a title
+            // that was.
+            label: plainName(walk.file.name),
+            // The extension answers this, and it is the same kind of evidence
+            // a zip container is rather than the guess `format` is nullable to
+            // refuse.
+            format: FORMAT_FOR_EXTENSION[walk.extension],
+          })),
+        ],
+      });
     });
   }
 
@@ -1870,19 +1306,14 @@ export function useRapidIntake(): UseRapidIntakeResult {
     const root = index.webkitRelativePath.split("/")[0]!;
     const key = `calibre:${root}`;
     setEntries((current) => {
-      if (current.some((entry) => entry.key === key)) return current;
-      void readLibrary(files, index, key);
-      return [
-        ...current,
-        {
-          key,
-          label: plainName(root),
-          isbn: "",
-          format: "",
-          state: "reading",
-          draft: null,
-        },
-      ];
+      const queued = queueAfter(current, {
+        kind: "picked",
+        rows: [{ key, label: plainName(root), format: "" }],
+      });
+      // A library still being read comes back as the same queue, and is not
+      // read again.
+      if (queued !== current) void readLibrary(files, index, key);
+      return queued;
     });
   }
 
@@ -1912,9 +1343,7 @@ export function useRapidIntake(): UseRapidIntakeResult {
   ) {
     const read = await readIndexed(index, files);
     if (read === null) {
-      setEntries((current) =>
-        current.filter((entry) => entry.key !== pendingKey),
-      );
+      apply({ kind: "removed", key: pendingKey });
       walkFiles(files.filter((file) => file !== index));
       setLibraryNotice({ kind: "index-unread" });
       return;
@@ -1948,50 +1377,17 @@ export function useRapidIntake(): UseRapidIntakeResult {
       ),
     );
 
-    const rows: ScannedEntry[] = [];
-    const questions: HolderQuestion[] = [];
-    for (const book of checked) {
-      const key = `${pendingKey}:${book.id}`;
-      const format = formatOf(book) ?? "";
-      const draft = draftFromCalibre(book);
-      if (draft.title === "") {
-        // The one field the API requires, which `Unknown` in the index is
-        // not. Said on the row, as for a file that named no title.
-        rows.push({
-          key,
-          label: plainName(book.path.split("/").at(-1) || pendingKey),
-          isbn: "",
-          format,
-          state: "failed",
-          reason: { kind: "no-title" },
-          draft: null,
-        });
-        continue;
-      }
-      const [reference, ...more] = located.get(book.id) ?? [];
-      rows.push({
-        key,
-        label: plainName(draft.title),
-        isbn: draft.isbn,
-        format,
-        // `readFiles`' rule: a stated ISBN is offered the catalogue lookup,
-        // never sent to it at the pick.
-        state: draft.isbn === "" ? "found" : "stated",
-        draft,
-        reference,
-        moreReferences: more.length > 0 ? more : undefined,
-      });
-      if (reference) {
-        questions.push({ key, references: [reference, ...more], format });
-      }
-    }
-    setEntries((current) => {
-      const queued = new Set(current.map((entry) => entry.key));
-      return [
-        ...current.filter((entry) => entry.key !== pendingKey),
-        ...rows.filter((row) => !queued.has(row.key)),
-      ];
-    });
+    const rows = libraryRows(
+      pendingKey,
+      checked.map((book) => ({ book, files: located.get(book.id) ?? [] })),
+    );
+    // Every file of each row that has one, as `readFiles` asks for its own.
+    const questions = rows.flatMap((row) =>
+      row.reference === undefined
+        ? []
+        : [{ key: row.key, references: filesOf(row), format: row.format }],
+    );
+    apply({ kind: "library-read", pendingKey, rows });
     await recordHolders(questions);
   }
 
@@ -2008,63 +1404,22 @@ export function useRapidIntake(): UseRapidIntakeResult {
    */
   function pendingAudio(
     picked: readonly { file: File; extension: SupportedExtension }[],
-  ): ScannedEntry {
+  ): Picked {
     const first = picked[0]!.file;
     const folders = foldersOf(first);
     const keys = picked.map((walk) => pickedKey(walk.file));
     return {
-      key: `audio:${[...keys].sort()[0]}:${keys.length}`,
+      key: groupKey(keys),
       label: plainName(folders.at(-1) ?? first.name),
-      isbn: "",
       format: BookFormat.audiobook,
-      state: "reading",
-      draft: null,
       claims: keys,
-    };
-  }
-
-  /**
-   * The entry a file's own name makes, and the note saying why it came to that.
-   *
-   * A name reducing to nothing is the one way a picked file still fails: the API
-   * requires a title, and saying so here is better than a 422 halfway through
-   * somebody's batch.
-   */
-  function fromTheName(
-    naming: FileNaming,
-    note: ScanReason | undefined,
-    // **The state is in the return type rather than merely in both arms.** A
-    // caller spreading this over a row has to end with one, and a `Partial`
-    // says it might not, which is a row with no state and no compiler to say so.
-  ): Partial<ScannedEntry> & Pick<ScannedEntry, "state"> {
-    const clues = readName(naming);
-    const draft = draftFromName(clues);
-    if (draft.title === "") {
-      return { state: "failed", reason: note ?? { kind: "no-title" } };
-    }
-    return {
-      state: "derived",
-      isbn: draft.isbn,
-      draft,
-      query: clues.query ?? undefined,
-      reason: note,
-      // The one site that knows, and it stays true through the lookup that
-      // promotes this row to `found`: what the catalogue answered about an ISBN
-      // does not change where the ISBN came from.
-      isbnFromTheName: draft.isbn === "" ? undefined : true,
     };
   }
 
   /** Mark each asked row with the Book holding its file, or with none. */
   async function recordHolders(questions: readonly HolderQuestion[]) {
     if (questions.length === 0) return;
-    const held = await askWhoHolds(questions);
-    if (held.size === 0) return;
-    setEntries((current) =>
-      current.map((entry) =>
-        held.has(entry.key) ? { ...entry, heldBy: held.get(entry.key) } : entry,
-      ),
-    );
+    apply({ kind: "holders-answered", held: await askWhoHolds(questions) });
   }
 
   async function readFiles(files: readonly File[]) {
@@ -2085,6 +1440,7 @@ export function useRapidIntake(): UseRapidIntakeResult {
           format: extension ? FORMAT_FOR_EXTENSION[extension] : "",
         });
       }
+      let said: BookDraft | undefined;
       let note: ScanReason | undefined;
       try {
         // **Which reader opens this is `lib/fileReaders.ts`'s question, not
@@ -2096,31 +1452,20 @@ export function useRapidIntake(): UseRapidIntakeResult {
         if (reading && !reading.ok) {
           note = { kind: "file", failure: reading.failure };
         } else if (reading) {
-          const draft = draftFromFile(reading.metadata);
-          if (draft.title !== "") {
-            // **A stated ISBN is offered the catalogue, never sent to it
-            // here.** The paced run is what asks, one press for the queue, so
-            // a folder of five hundred is not five hundred metered lookups at
-            // the moment it is picked.
-            settle(key, {
-              state: draft.isbn === "" ? "found" : "stated",
-              isbn: draft.isbn,
-              draft,
-              reference,
-            });
-            continue;
-          }
-          // The file opened and named no title, so what is left is its name.
-          note = { kind: "no-title" };
+          said = draftFromFile(reading.metadata);
         }
       } catch {
         // A bug in the reader rather than anything the file did. Still one
         // entry, and the name is still a signal.
         note = { kind: "unreadable" };
       }
-      settle(key, {
-        ...fromTheName({ name: file.name, folders: foldersOf(file) }, note),
+      apply({
+        kind: "file-read",
+        key,
+        naming: { name: file.name, folders: foldersOf(file) },
         reference,
+        said,
+        note,
       });
     }
     // **Once for the pick, after every file is read**, so a re-picked folder
@@ -2198,86 +1543,12 @@ export function useRapidIntake(): UseRapidIntakeResult {
       });
     }
 
-    const candidates = groups
-      .groupAudiobooks(read)
-      .map((group) => entryForGroup(group, reasons));
-    // **In the pending row's place, and only if it is still there.** A member
-    // who discarded the queue while this was reading gets an empty queue rather
-    // than rows arriving into the one they just emptied, and nothing else has
-    // to know that a discard happened.
-    setEntries((current) =>
-      current.flatMap((entry) =>
-        entry.key === pendingKey ? candidates : [entry],
-      ),
-    );
-  }
-
-  /**
-   * One candidate book, from the files the grouping rule put together.
-   *
-   * **The queue key is the group's smallest member key and its size**, not a
-   * digest of them: the smallest key is claimed by exactly one entry, and the
-   * size is what makes a split's rows different keys from the group they came
-   * from.
-   *
-   * **What the files said is preferred to what they are called**, and only
-   * where they said nothing does this fall to the folder name through the same
-   * `fromTheName` every other picked file uses.
-   */
-  function entryForGroup(
-    group: AudiobookGroup,
-    reasons: ReadonlyMap<string, ScanReason>,
-  ): ScannedEntry {
-    const keys = group.files.map((file) => file.key);
-    // This row's own files, never the whole pick: see `ScannedEntry.fileReasons`.
-    const own = new Map(
-      keys.flatMap((key) => {
-        const reason = reasons.get(key);
-        return reason === undefined ? [] : [[key, reason] as const];
-      }),
-    );
-    const base = {
-      key: `audio:${[...keys].sort()[0]}:${keys.length}`,
-      isbn: "",
-      // Not read off an extension, because a group has several. `isAudio` is
-      // the test every member file passed to get here, and it is exactly this
-      // answer from `FORMAT_FOR_EXTENSION`.
-      format: BookFormat.audiobook,
-      group,
-      draft: null,
-      // Only while this row can still be split: `ScannedEntry.fileReasons`.
-      fileReasons: group.files.length > 1 && own.size > 0 ? own : undefined,
-    };
-    // Only from a group of one. A note from one file of forty describes that
-    // file and would read as though the whole book had failed.
-    const note = group.files.length === 1 ? own.get(keys[0]!) : undefined;
-
-    const draft = draftFromAudiobook(group);
-    if (draft !== null) {
-      return {
-        ...base,
-        label: draft.title,
-        state: "derived",
-        draft,
-        // **Through `queryFor`, not through a second bounding written here.**
-        // What the catalogue is asked is a title and an author, which is what
-        // `q` takes, and the cleaning, the floor and the cut in code points all
-        // live in one place already. Not through `readName`, which is a rule
-        // about a **file name**: it would strip a trailing `.mp3` off an album
-        // and hunt an ISBN through the author line.
-        query:
-          queryFor([draft.title, draft.author].filter(Boolean).join(" ")) ??
-          undefined,
-        reason: note,
-      };
-    }
-
-    const naming = groupNaming(group);
-    return {
-      ...base,
-      label: plainName(naming.name),
-      ...fromTheName(naming, note),
-    };
+    apply({
+      kind: "audio-grouped",
+      pendingKey,
+      groups: groups.groupAudiobooks(read),
+      reasons,
+    });
   }
 
   /**
@@ -2292,36 +1563,7 @@ export function useRapidIntake(): UseRapidIntakeResult {
    */
   async function splitTheGroup(key: string) {
     const groups = await import("../../lib/audiobookGroups");
-    setEntries((current) =>
-      current.flatMap((entry) => {
-        if (entry.key !== key || !entry.group) return [entry];
-        if (entry.group.files.length < 2) return [entry];
-        // The reasons the pick read are the row's, so each part gets back what
-        // its own file said: there is nothing left to read them from by now.
-        const reasons = entry.fileReasons ?? new Map<string, ScanReason>();
-        return groups
-          .splitApart(entry.group)
-          .map((group) => entryForGroup(group, reasons));
-      }),
-    );
-  }
-
-  /**
-   * The name a group with no usable tags derives its book from.
-   *
-   * The folder for several files and the file itself for one, which is what a
-   * person named after the book in each case: a chapter file is named after its
-   * chapter, and the folder over it after the work.
-   */
-  function groupNaming(group: AudiobookGroup): FileNaming {
-    const first = group.files[0]!;
-    if (group.files.length === 1) {
-      return { name: first.name, folders: first.folders };
-    }
-    const own = first.folders.at(-1);
-    return own === undefined
-      ? { name: first.name, folders: [] }
-      : { name: own, folders: first.folders.slice(0, -1) };
+    apply({ kind: "split", key, apart: groups.splitApart });
   }
 
   /**
@@ -2348,14 +1590,7 @@ export function useRapidIntake(): UseRapidIntakeResult {
           queryFn: () => lookupIsbn({ isbn: entry.isbn }),
           staleTime: 60_000,
         });
-        // **Over the row as it stands now, not as the run found it**, which is
-        // why this is not `settle`: a subject dropped while the lookup was in
-        // flight would otherwise come back from the run's own copy.
-        setEntries((current) =>
-          current.map((one) =>
-            one.key === entry.key ? answeredByIsbn(one, lookup) : one,
-          ),
-        );
+        apply({ kind: "isbn-answered", key: entry.key, lookup });
         return;
       }
       if (!entry.query) return;
@@ -2372,30 +1607,19 @@ export function useRapidIntake(): UseRapidIntakeResult {
         // quota to be told what it was just told.
         staleTime: 5 * 60_000,
       });
-      if (answer.matches.length === 0) {
-        settle(entry.key, {
-          state: "derived",
-          answered: "nothing",
-          reason: { kind: "not-in-catalogues" },
-        });
-        return;
-      }
-      settle(entry.key, { state: "choosing", matches: answer.matches });
+      apply({
+        kind: "search-answered",
+        key: entry.key,
+        matches: answer.matches,
+      });
     } catch (error) {
-      // **A 404 is an answer and everything else is a failure to ask**, which
-      // `_lookup_failure` in the books router separates deliberately: 404 is
-      // nobody knowing the ISBN, 503 is no source having been reachable. The
-      // barcode path in this file reads the same throw the same way. Collapsing
-      // the two offered the retry that buys nothing and withheld the one that
-      // does.
-      const unknown = error instanceof ApiError && error.status === 404;
-      // A `stated` row goes back to its file's draft and says so; only a row
-      // standing under its name is said to be kept under it.
-      const back = entry.state === "stated" ? "stated" : "derived";
-      settle(entry.key, {
-        state: back,
-        answered: unknown ? "nothing" : undefined,
-        reason: { kind: UNSETTLED[back][unknown ? "unknown" : "unreachable"] },
+      // `entry` is the row as the run found it, before it was asked, which
+      // is the state where it goes back to.
+      apply({
+        kind: "not-answered",
+        key: entry.key,
+        asked: entry.state,
+        unknown: nobodyKnows(error),
       });
     }
   }
@@ -2450,16 +1674,7 @@ export function useRapidIntake(): UseRapidIntakeResult {
         // the queue as it stood, so without this a removed row, or a whole
         // discarded queue, still spends one metered lookup each.
         if (!liveEntries.current.some((one) => one.key === entry.key)) continue;
-        // **The note and the answer go with the state.** A row being asked
-        // about has no answer and is not standing under its name for a reason
-        // it can still state: leaving either behind renders a list of catalogue
-        // records under the sentence saying the name was kept, and leaves the
-        // row counted as kept while it is being decided again.
-        settle(entry.key, {
-          state: "searching",
-          answered: undefined,
-          reason: undefined,
-        });
+        apply({ kind: "asked", key: entry.key });
         const startedAt = Date.now();
         await lookUpTheName(entry);
         if (index === walking.length - 1) break;
@@ -2481,13 +1696,7 @@ export function useRapidIntake(): UseRapidIntakeResult {
    * and possibly a sighting.
    */
   async function addAll() {
-    // **A row still being decided is not offered**, for the reason a row with no
-    // draft is not: it is exactly what somebody still has to decide about, and
-    // filing it under its file name would throw away every record the catalogue
-    // found for it with nothing said on screen.
-    const ready = entries.filter(
-      (entry) => entry.draft !== null && !isBeingDecided(entry),
-    );
+    const ready = entries.filter(isReady);
     if (ready.length === 0) return;
 
     stopAddingRequested.current = false;
@@ -2619,46 +1828,15 @@ export function useRapidIntake(): UseRapidIntakeResult {
     // than everything: a rapid run leaves the scanner open, so a keyless
     // invalidate re-spent the search quota in the middle of a shelf.
     invalidate.catalogue();
-    // Kept, with their reason, rather than counted. "6 could not be added"
-    // after scanning a shelf of thirty is unrecoverable: nothing says which
-    // six, and the queue that knew has just been cleared.
-    const failed = new Map(
-      outcome.failures.map(({ item, thrown }) => [
-        item.key,
+    apply({
+      kind: "batch-ran",
+      walked: outcome.attempted.map((entry) => entry.key),
+      failures: outcome.failures.map(({ item, thrown }) =>
         thrown instanceof HeldInAnotherFormat
-          ? {
-              ...item,
-              state: "failed" as const,
-              reason: { kind: "held-in-another-format" as const },
-              copyOf: thrown.holderId,
-            }
-          : {
-              ...item,
-              state: "failed" as const,
-              reason: reasonForError(thrown),
-              // Cleared, because the spread carries it from a previous run and
-              // the offer would outlive the reason it was made for.
-              copyOf: undefined,
-            },
-      ]),
-    );
-    // **Only the ones that landed leave the queue, and that means the ones that
-    // were never offered stay too.** This used to keep the failures alone,
-    // which silently dropped every entry with no draft: a barcode whose lookup
-    // was still in flight when the button was pressed vanished between the
-    // shelf and the catalogue, and a file that could not be read would vanish
-    // the same way. Both are exactly what somebody still has to decide about.
-    //
-    // **Walked rather than offered, and that is what a stop costs.** The two
-    // sets are equal for a run that finished, so the distinction was invisible
-    // until there was a stop; pruning by what was offered clears the rows a
-    // member pressed stop in order to keep.
-    const walked = new Set(outcome.attempted.map((entry) => entry.key));
-    setEntries((current) =>
-      current
-        .filter((entry) => !walked.has(entry.key) || failed.has(entry.key))
-        .map((entry) => failed.get(entry.key) ?? entry),
-    );
+          ? { row: item, heldInAnotherFormat: thrown.holderId }
+          : { row: item, reason: reasonForError(thrown) },
+      ),
+    });
     setIsAdding(false);
     setAddProgress(null);
     setResult({
@@ -2717,11 +1895,11 @@ export function useRapidIntake(): UseRapidIntakeResult {
       copyId = copy.id;
       // The offer goes the moment the copy exists, so a second press while
       // the reference is in flight cannot post a second copy.
-      settle(key, { copyOf: undefined });
+      apply({ kind: "copy-made", key });
     } catch (error) {
       // The offer stays, so the press can be made again; the reason says why
       // this one did not take.
-      settle(key, { reason: reasonForError(error) });
+      apply({ kind: "copy-refused", key, reason: reasonForError(error) });
       return;
     }
     const referenced = await reportFiles(copyId, entry).then(
@@ -2730,7 +1908,7 @@ export function useRapidIntake(): UseRapidIntakeResult {
     );
     // A copy is a new book, the reason `useScanFlow.addCopy` gives.
     invalidate.catalogue();
-    setEntries((current) => current.filter((one) => one.key !== key));
+    apply({ kind: "removed", key });
     setResult((last) => ({
       added: (last?.added ?? 0) + 1,
       failed: Math.max(0, (last?.failed ?? 0) - 1),
@@ -2740,41 +1918,8 @@ export function useRapidIntake(): UseRapidIntakeResult {
     }));
   }
 
-  // One filter, read twice. Two would let the count on the button and the
-  // figure beside it disagree the first time either is edited.
-  const waiting = entries.filter(needsALookup).length;
-  const deciding = entries.filter(isBeingDecided).length;
-  const keptForNow = entries.filter(canBeAskedAgain).length;
-  // Counted here rather than on the screen that says so, which is the rule
-  // every figure beside it follows: the queue component held the only reading
-  // of `answered` outside this file.
-  const emptyAnswers = entries.filter(
-    (entry) => entry.answered === "nothing",
-  ).length;
-
-  /**
-   * Roughly how long a paced run over this many files takes, in minutes.
-   *
-   * One arithmetic for both presses. Two counts is two numbers and it is the
-   * same pace: writing it twice is how the second control comes to quote a
-   * figure the run it starts does not keep. A floor of one minute, because
-   * "about 0 minutes" is not a wait anybody recognises.
-   */
-  function paceFor(count: number): number {
-    return Math.max(1, Math.ceil((count * FALLBACK_INTERVAL_MS) / 60_000));
-  }
-
-  // Assembled once, here, rather than as a member each of the return: the pace
-  // figures are derived from the counts beside them, so a screen cannot be
-  // handed one without the other.
-  const figures: QueueFigures = {
-    waiting,
-    deciding,
-    keptForNow,
-    emptyAnswers,
-    paceMinutes: paceFor(waiting),
-    keptPaceMinutes: paceFor(keptForNow),
-  };
+  // One reading of the queue for every control that quotes a figure.
+  const figures = figuresOf(entries);
 
   return {
     isActive,
@@ -2789,10 +1934,7 @@ export function useRapidIntake(): UseRapidIntakeResult {
     locations,
     capture,
     pickFiles,
-    // Derived rather than counted. A count is a second record of the same fact
-    // and drifts the first time a read ends on a path that forgets to decrement
-    // it; the queue already says which entries are still being read.
-    isReading: entries.some((entry) => QUEUE_STATES[entry.state].stillReading),
+    isReading: isReading(entries),
     skipped,
     figures,
     lookUpTheNames: () => void runTheLookups(needsALookup),
@@ -2805,95 +1947,17 @@ export function useRapidIntake(): UseRapidIntakeResult {
       endTheWait.current?.();
     },
     isLookingUp,
-    chooseFor: (key, match) =>
-      settle(key, {
-        state: "found",
-        isbn: match.isbn13 ?? "",
-        draft: draftFromMatch(match),
-        matches: undefined,
-        // A member looked at this record and took it, so the identifier is the
-        // catalogue's rather than the name's. `settle` spreads, so the explicit
-        // `undefined` clears what `fromTheName` set.
-        //
-        // **It clears nothing today, and that is stated rather than left to be
-        // reasoned from.** A flagged row has a non empty `isbn`, so
-        // `lookUpTheName` returns from the ISBN branch and never produces the
-        // `choosing` state this control is rendered under, so no flagged row
-        // reaches here. Kept because it is correct and free, and because the
-        // path that would produce one is exactly the remedy this refusal is
-        // missing. Deleting it fails no test, which is the honest rung.
-        isbnFromTheName: undefined,
-      }),
-    takeTheRecord: (key) =>
-      setEntries((current) =>
-        current.map((one) =>
-          one.key === key && one.differentRecord !== undefined
-            ? {
-                ...one,
-                state: "found",
-                // Merged now, over the draft as it stands, for the reason
-                // `answeredByIsbn` holds the raw record.
-                draft: enrichedDraft(one.differentRecord, one.draft),
-                differentRecord: undefined,
-                reason: undefined,
-              }
-            : one,
-        ),
-      ),
-    keepTheFile: (key) =>
-      setEntries((current) =>
-        current.map((one) =>
-          one.key === key && one.differentRecord !== undefined
-            ? {
-                ...one,
-                differentRecord: undefined,
-                reason: { kind: "kept-the-file" },
-              }
-            : one,
-        ),
-      ),
-    keepTheName: (key) =>
-      settle(key, {
-        state: "derived",
-        answered: "records",
-        matches: undefined,
-        reason: { kind: "kept-the-name" },
-      }),
-    keepEveryNameForNow: () =>
-      setEntries((current) =>
-        current.map((entry) =>
-          isBeingDecided(entry)
-            ? {
-                ...entry,
-                state: "derived",
-                answered: "records-for-now",
-                // Dropped from the row rather than held for an undo: they are
-                // what the catalogue answers again, and holding them would be a
-                // second store of a record with no rule for how long it lives.
-                matches: undefined,
-                reason: { kind: "kept-for-now" },
-              }
-            : entry,
-        ),
-      ),
-    remove: (key) =>
-      setEntries((current) => current.filter((entry) => entry.key !== key)),
+    chooseFor: (key, match) => apply({ kind: "chosen", key, match }),
+    takeTheRecord: (key) => apply({ kind: "record-taken", key }),
+    keepTheFile: (key) => apply({ kind: "kept-the-file", key }),
+    keepTheName: (key) => apply({ kind: "kept-the-name", key }),
+    keepEveryNameForNow: () => apply({ kind: "kept-every-name-for-now" }),
+    remove: (key) => apply({ kind: "removed", key }),
     splitApart: (key) => void splitTheGroup(key),
     dropSubject: (key, subject) =>
-      setEntries((current) =>
-        current.map((entry) => {
-          if (entry.key !== key || entry.draft === null) return entry;
-          // **Filtered by value and not by index**, because the row is
-          // rendered from this same list: an index would be the renderer's
-          // and would remove the wrong subject the moment anything reordered.
-          // `boundCategories` folded the exact repeats out, so one value names
-          // one chip.
-          const kept = entry.draft.categories?.filter((one) => one !== subject);
-          return { ...entry, draft: { ...entry.draft, categories: kept } };
-        }),
-      ),
+      apply({ kind: "subject-dropped", key, subject }),
     clear: () => {
-      setEntries([]);
+      apply({ kind: "cleared" });
       // The count goes with the queue it described. Leaving it would tell
       // somebody starting again what happened to a pick they discarded.
       setSkipped(0);

@@ -46,9 +46,10 @@ export type WriteHooks = BulkHooks<BookCreate>;
  * which sixty.
  *
  * **The items it reached are dropped here rather than carried on.** A stopped
- * import sends every book again on the next press and the ones already there
- * answer 409, which `hooks.ts` records as the decision it is; the queue that
- * has to prune by what was walked is the scanner's.
+ * import sends every book again on the next press, and the ones the server
+ * recognises answer 409 (`DUPLICATE_STATUS` says by what), which `hooks.ts`
+ * records as the decision it is; the queue that has to prune by what was
+ * walked is the scanner's.
  */
 export async function writeBooks(
   bodies: readonly BookCreate[],
@@ -80,7 +81,7 @@ export function statusOf(thrown: unknown): number | null {
 
 /**
  * What the server answers for a book whose ISBN is already on the shelf, or
- * whose Calibre record a Book the member can see already carries.
+ * whose Calibre record or ASIN a Book the member can see already carries.
  *
  * Named because it is the ordinary outcome rather than an error: importing the
  * same library twice is what a second run is, and a member who reads "could not

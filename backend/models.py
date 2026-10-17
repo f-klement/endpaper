@@ -2602,12 +2602,13 @@ class DigitalReference(Base):
         Boolean, nullable=False, default=False, server_default="0"
     )
 
-    #: `File.size` as last reported, or null while nobody has said.
-    #: Half of the fingerprint a re-check compares against.
+    #: `File.size` as the first look to record a fingerprint saw it, or null
+    #: while nobody has said: a later look fills a gap and never replaces it
+    #: (`file_references`). Half of the fingerprint a re-check compares against.
     size_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
-    #: `File.lastModified` as last reported. The other half, and the half that
-    #: moves when somebody edits the file's metadata in place.
+    #: `File.lastModified`, on the size's rule. The other half, and the half
+    #: that moves when somebody edits the file's metadata in place.
     file_modified_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     #: KOReader's partial MD5 of the file, as this browser computed it at the
@@ -2978,21 +2979,22 @@ class BookIdentifier(Base):
     updates a Book it already added, is named in `identifiers.py` and is not
     written.
 
-    **Two readers match on it.** The Readwise pull links a Readwise book
-    carrying an ASIN to the one Book the member can see with that ASIN
-    (`readwise.Index`), and writes nothing to a Book, only which Book a
-    member's highlights land on. And an add carrying a `calibre_uuid` row answers
-    409 where a Book the member can see already carries it
-    (`routers/books._calibre_holder`), which is how a Calibre record with no
-    file and no ISBN is recognised on a second import. Otherwise what reads it
-    is `BookOut`, which
-    carries it on every Book a member fetches, the book detail page, which
-    renders it as text beside the ISBN, the archive, which holds it, and the
-    merge, which moves it. What deliberately does not: no store's identifier is
-    a match key on an add, `/duplicates` still groups on a normalised title
+    **Two readers match on it, both through `recognition`.** The Readwise pull
+    links a Readwise book carrying an ASIN to the one Book the member can see
+    with that ASIN (`recognition.Source.HIGHLIGHTS`), and writes nothing to a
+    Book, only which Book a member's highlights land on. And an add carrying a
+    `calibre_uuid` or an ASIN answers 409 where a Book the member can see
+    already carries it (`recognition.Source.CALIBRE` and `STORE`), which is
+    how a Calibre record with no file and no ISBN, or a Kindle book, is
+    recognised on a second import. A Google volume id matches nothing yet.
+
+    Otherwise what reads it is `BookOut`, which carries it on every Book a
+    member fetches, the book detail page, which renders it as text beside the
+    ISBN, the archive, which holds it, and the merge, which moves it. What
+    deliberately does not: `/duplicates` still groups on a normalised title
     and author, and `PublicBookOut` withholds it, so a public shelf does not
-    announce which stores the house buys from. See `docs/decisions.md` for what
-    each of those would have cost.
+    announce which stores the house buys from. See `docs/decisions.md` for
+    what each of those would have cost.
 
     **Rendered as text and never as a link**, which is a decision about this
     column rather than about that page: an ASIN names an edition on the
@@ -3020,9 +3022,9 @@ class BookIdentifier(Base):
             unique=True,
         ),
         # **The lookup by value**, which the unique index above cannot serve
-        # because it leads with `book_id`: `routers/books._calibre_holder` asks
-        # it once per add, so an import of nine hundred books asks it nine
-        # hundred times.
+        # because it leads with `book_id`: an add carrying a Calibre uuid or an
+        # ASIN asks it for each (`recognition.recognise_one`), so an import
+        # of nine hundred books asks it up to eighteen hundred times.
         Index("ix_book_identifiers_scheme_value", "scheme", "value"),
         # Built from the enum rather than written out, `ck_author_identifiers_
         # scheme`'s rule: the literal list left a value the application accepts
@@ -4500,7 +4502,7 @@ class MemberLogin(Base):
 class ReadwiseBook(Base):
     """One book in a member's Readwise account, and which Book it is here.
 
-    **Readwise carries no ISBN**, so the link is made by `readwise.Index`: an
+    **Readwise carries no ISBN**, so the link is made by `recognition`: an
     ASIN on exactly one Book the member can see, else exactly one Book with the
     same title and first author. Anything else leaves `book_id` null, and the
     row is what the account page lists as waiting. A row is kept for exactly

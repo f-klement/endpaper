@@ -148,6 +148,30 @@ describe("MarcImport", () => {
     ).toBeInTheDocument();
   });
 
+  it("subtracts the records the trash holds and the ones two books answer", () => {
+    renderMarc({
+      preview: preview({
+        readable: 10,
+        already_held: 4,
+        in_trash: 1,
+        ambiguous: 2,
+      }),
+    });
+    expect(
+      screen.getByLabelText(/Add the 3 records this catalogue does not hold/),
+    ).toBeInTheDocument();
+  });
+
+  it("says why a record waits on the trash, and why one is left between two books", () => {
+    renderMarc({ preview: preview({ in_trash: 1, ambiguous: 2 }) });
+    expect(
+      screen.getByText(/1 carry an ISBN that only a book in the trash holds/),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/2 match two or more books on this shelf/),
+    ).toBeInTheDocument();
+  });
+
   it("does not mention blocked records when there are none", () => {
     renderMarc({ preview: preview({ blocked: 0 }) });
     expect(screen.queryByText(/cannot see/)).not.toBeInTheDocument();
@@ -226,6 +250,26 @@ describe("MarcImport", () => {
     expect(
       screen.getByText(/10 records read, 4 matched, 6 added/),
     ).toBeInTheDocument();
+  });
+
+  it("names the records it left because their book is in the trash", () => {
+    renderMarc({
+      result: outcome({ in_trash: 1, in_trash_titles: ["Stoner"] }),
+    });
+    expect(
+      screen.getByText(/1 records carry an ISBN that only a book in the trash/),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Stoner")).toBeInTheDocument();
+  });
+
+  it("names the records it left because two books on the shelf match them", () => {
+    renderMarc({
+      result: outcome({ ambiguous: 1, ambiguous_titles: ["Dune"] }),
+    });
+    expect(
+      screen.getByText(/1 records match two or more books/),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Dune")).toBeInTheDocument();
   });
 
   it("offers to review the records it added", async () => {

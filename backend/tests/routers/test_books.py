@@ -3234,7 +3234,7 @@ class TestTheDuplicateConflictPointsAtTheBook:
     def test_only_the_id_is_withheld_and_the_two_bodies_stay_tellable_apart(
         self, client, admin, member, make_book
     ):
-        """What `_conflict_detail` promises, and the thing it does not promise.
+        """What `_refuse` promises, and the thing it does not promise.
 
         A caller can see which case it got: one body is a string and the other
         an object. Concealing that is not available anyway, because the 409
@@ -3256,6 +3256,27 @@ class TestTheDuplicateConflictPointsAtTheBook:
 
         assert hidden.json()["detail"] == shown.json()["detail"]["message"]
         assert shown.json()["detail"]["book_id"] == mine["id"]
+
+    def test_two_books_holding_the_isbn_outside_a_copy_group_answer_naming_neither(
+        self, client, admin, db
+    ):
+        """An ISBN-10 row written before canonicalisation beside its ISBN-13 is
+        two Books the tie rule does not settle. The client acts on the id a 409
+        names, so naming the lower one would pick between them."""
+        db.add_all(
+            Book(title="Dune", isbn=isbn, added_by_user_id=admin["user"]["id"])
+            for isbn in (self.ISBN, "0441013597")
+        )
+        db.commit()
+
+        res = client.post(
+            "/api/books",
+            json={"title": "Dune", "isbn": self.ISBN},
+            headers=admin["headers"],
+        )
+
+        assert res.status_code == 409
+        assert isinstance(res.json()["detail"], str)
 
     def test_your_own_private_book_is_still_pointed_at(
         self, client, admin, make_book

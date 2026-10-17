@@ -353,7 +353,7 @@ repeat the argument.
 | Open, and not resolved in this ticket | [A source that cannot answer says which of two things is wrong](decisions.md#a-source-that-cannot-answer-says-which-of-two-things-is-wrong) | 63 |
 | Open, and not resolved in this ticket | [An evasion attempt is bounded by the shapes its author imagines](decisions.md#an-evasion-attempt-is-bounded-by-the-shapes-its-author-imagines) | 180 |
 | Open, and not resolved in this ticket | [A paragraph describing behaviour is not re-read when the behaviour changes](decisions.md#a-paragraph-describing-behaviour-is-not-re-read-when-the-behaviour-changes) | 181 |
-|  | [MARC21 import and export](decisions.md#marc21-import-and-export) | 10,303 |
+|  | [MARC21 import and export](decisions.md#marc21-import-and-export) | 10,317 |
 | MARC21 import and export | [MARC is read through `metadata.py`'s parser, not a second one](decisions.md#marc-is-read-through-metadatapys-parser-not-a-second-one) | 209 |
 | MARC21 import and export | [What `marc.py` refuses is deliberately narrower than what a lookup refuses](decisions.md#what-marcpy-refuses-is-deliberately-narrower-than-what-a-lookup-refuses) | 110 |
 | MARC21 import and export | [An oversized MARC file is refused, where an oversized CSV is truncated](decisions.md#an-oversized-marc-file-is-refused-where-an-oversized-csv-is-truncated) | 62 |
@@ -367,7 +367,7 @@ repeat the argument.
 | MARC21 import and export | [The MARC importer applies the API's own bounds, read off the declarations](decisions.md#the-marc-importer-applies-the-apis-own-bounds-read-off-the-declarations) | 1,166 |
 | MARC21 import and export | [A guard's fixture has to reference the thing the guard stops](decisions.md#a-guards-fixture-has-to-reference-the-thing-the-guard-stops) | 115 |
 | MARC21 import and export | [No module reads another module's private names](decisions.md#no-module-reads-another-modules-private-names) | 458 |
-| MARC21 import and export | [`isbn` is never gap-filled onto a matched Book, and that is what stops a 500](decisions.md#isbn-is-never-gap-filled-onto-a-matched-book-and-that-is-what-stops-a-500) | 408 |
+| MARC21 import and export | [`isbn` is never gap-filled onto a matched Book, and that is what stops a 500](decisions.md#isbn-is-never-gap-filled-onto-a-matched-book-and-that-is-what-stops-a-500) | 422 |
 | MARC21 import and export | [The MARC preview publishes an ISBN existence oracle, and it is accepted](decisions.md#the-marc-preview-publishes-an-isbn-existence-oracle-and-it-is-accepted) | 254 |
 | MARC21 import and export | [The shelf loads what the row needs, not what the serialiser will load anyway](decisions.md#the-shelf-loads-what-the-row-needs-not-what-the-serialiser-will-load-anyway) | 393 |
 | MARC21 import and export | [Three national catalogues speak SRU over HTTP, so they need no Z39.50 client](decisions.md#three-national-catalogues-speak-sru-over-http-so-they-need-no-z3950-client) | 444 |
@@ -491,7 +491,7 @@ repeat the argument.
 |  | [The one catalogue record scalar that is deliberately unbounded](decisions.md#the-one-catalogue-record-scalar-that-is-deliberately-unbounded) | 176 |
 |  | [A catalogue record's ISBN is bounded, and what makes that safe](decisions.md#a-catalogue-records-isbn-is-bounded-and-what-makes-that-safe) | 403 |
 |  | [A request body bounds the cover URL it stores, not the one it receives](decisions.md#a-request-body-bounds-the-cover-url-it-stores-not-the-one-it-receives) | 289 |
-|  | [Which columns an import may fill, column by column](decisions.md#which-columns-an-import-may-fill-column-by-column) | 652 |
+|  | [Which columns an import may fill, column by column](decisions.md#which-columns-an-import-may-fill-column-by-column) | 667 |
 |  | [Which authority schemes exist, and why the list is code rather than rows](decisions.md#which-authority-schemes-exist-and-why-the-list-is-code-rather-than-rows) | 401 |
 |  | [Storing an identifier and resolving one are different acts](decisions.md#storing-an-identifier-and-resolving-one-are-different-acts-1) | 246 |
 |  | [The Z39.50 door's bounds, and which of fetch.py's four have no counterpart](decisions.md#the-z3950-doors-bounds-and-which-of-fetchpys-four-have-no-counterpart) | 658 |
@@ -516,7 +516,7 @@ repeat the argument.
 |  | [The ASCII guard in `isbn.normalise` widens the backend rather than narrowing it](decisions.md#the-ascii-guard-in-isbnnormalise-widens-the-backend-rather-than-narrowing-it) | 73 |
 |  | [The candidate list sets column priority, and the pool is kept though it is inert](decisions.md#the-candidate-list-sets-column-priority-and-the-pool-is-kept-though-it-is-inert) | 219 |
 |  | [Encoding is decided per byte where the file is UTF-8, and per file where it is not](decisions.md#encoding-is-decided-per-byte-where-the-file-is-utf-8-and-per-file-where-it-is-not) | 594 |
-|  | [The duplicate 409 withholds the id, and does not hide which case it was](decisions.md#the-duplicate-409-withholds-the-id-and-does-not-hide-which-case-it-was) | 134 |
+|  | [The duplicate 409 withholds the id, and does not hide which case it was](decisions.md#the-duplicate-409-withholds-the-id-and-does-not-hide-which-case-it-was) | 156 |
 |  | [A guard's file set is derived from the publish gate, never listed beside it](decisions.md#a-guards-file-set-is-derived-from-the-publish-gate-never-listed-beside-it) | 686 |
 |  | [The ignore file rule had three homes with three refusal shapes, and one module replaced them](decisions.md#the-ignore-file-rule-had-three-homes-with-three-refusal-shapes-and-one-module-replaced-them) | 1,621 |
 |  | [The ASCII narrowing rule is about alphanumeric predicates, not digits](decisions.md#the-ascii-narrowing-rule-is-about-alphanumeric-predicates-not-digits) | 222 |
@@ -642,7 +642,7 @@ repeat the argument.
 |  | [A container of books is a library source, not a file reader](decisions.md#a-container-of-books-is-a-library-source-not-a-file-reader) | 229 |
 |  | [Two store reader fields nothing read, and why the one word they shared could not be given a sentence](decisions.md#two-store-reader-fields-nothing-read-and-why-the-one-word-they-shared-could-not-be-given-a-sentence) | 427 |
 |  | [A store's own identifier is read and not kept, and the ASIN is where that first bit](decisions.md#a-stores-own-identifier-is-read-and-not-kept-and-the-asin-is-where-that-first-bit) | 262 |
-|  | [A store's identifier is a table of its own, not a second guess at `isbn`](decisions.md#a-stores-identifier-is-a-table-of-its-own-not-a-second-guess-at-isbn) | 925 |
+|  | [A store's identifier is a table of its own, not a second guess at `isbn`](decisions.md#a-stores-identifier-is-a-table-of-its-own-not-a-second-guess-at-isbn) | 980 |
 |  | [A store that cannot say who owns a book says so, and the default meant it never could](decisions.md#a-store-that-cannot-say-who-owns-a-book-says-so-and-the-default-meant-it-never-could) | 500 |
 |  | [Prevalence is a rate, and a lifetime count is a measure of age](decisions.md#prevalence-is-a-rate-and-a-lifetime-count-is-a-measure-of-age) | 170 |
 |  | [A Calibre type string is a name and a marketplace, and the value is what decides](decisions.md#a-calibre-type-string-is-a-name-and-a-marketplace-and-the-value-is-what-decides) | 765 |
@@ -783,7 +783,7 @@ repeat the argument.
 |  | [A shared helper takes the wider type, and a caller that has narrowed one keeps its own](decisions.md#a-shared-helper-takes-the-wider-type-and-a-caller-that-has-narrowed-one-keeps-its-own) | 211 |
 |  | [A `*_ORDER` list is exhaustive by type, and the tests keep only what the type cannot hold](decisions.md#a-_order-list-is-exhaustive-by-type-and-the-tests-keep-only-what-the-type-cannot-hold) | 258 |
 |  | [A decision record's own figures are deleted rather than corrected](decisions.md#a-decision-records-own-figures-are-deleted-rather-than-corrected) | 333 |
-|  | [The scan queue keeps no module, and the reason is a measurement](decisions.md#the-scan-queue-keeps-no-module-and-the-reason-is-a-measurement) | 191 |
+|  | [The scan queue keeps no module, and the reason is a measurement](decisions.md#the-scan-queue-keeps-no-module-and-the-reason-is-a-measurement) | 228 |
 |  | [A row names whose secret its door takes, not whether it is metered](decisions.md#a-row-names-whose-secret-its-door-takes-not-whether-it-is-metered) | 499 |
 |  | [A weakened population and a decorative tuple member are different failures, and only one is a cross check](decisions.md#a-weakened-population-and-a-decorative-tuple-member-are-different-failures-and-only-one-is-a-cross-check) | 385 |
 |  | [An index of this file is generated, not written](decisions.md#an-index-of-this-file-is-generated-not-written) | 280 |
@@ -891,7 +891,7 @@ repeat the argument.
 |  | [No ratchet on import node handling](decisions.md#no-ratchet-on-import-node-handling) | 82 |
 |  | [The scanner has no flipped decode for a mirrored camera](decisions.md#the-scanner-has-no-flipped-decode-for-a-mirrored-camera) | 157 |
 |  | [A file's location lands on an existing book only when the formats agree](decisions.md#a-files-location-lands-on-an-existing-book-only-when-the-formats-agree) | 240 |
-|  | [A file is recognised by its location or by KOReader's fingerprint, asked before the add](decisions.md#a-file-is-recognised-by-its-location-or-by-koreaders-fingerprint-asked-before-the-add) | 746 |
+|  | [A file is recognised by its location or by KOReader's fingerprint, asked before the add](decisions.md#a-file-is-recognised-by-its-location-or-by-koreaders-fingerprint-asked-before-the-add) | 809 |
 |  | [A highlight is its own table, private by default, and identified at its source](decisions.md#a-highlight-is-its-own-table-private-by-default-and-identified-at-its-source) | 656 |
 |  | [KOReader progress sync is served here, under `/kosync`](decisions.md#koreader-progress-sync-is-served-here-under-kosync) | 725 |
 |  | [A digital copy is requested and granted, not lent](decisions.md#a-digital-copy-is-requested-and-granted-not-lent) | 459 |
@@ -904,9 +904,24 @@ repeat the argument.
 |  | [The credit line has one encoder, and the catalogue order flip is an adapter in front of it](decisions.md#the-credit-line-has-one-encoder-and-the-catalogue-order-flip-is-an-adapter-in-front-of-it) | 716 |
 |  | [A highlight is deleted by hand only, and its key is remembered so no import brings it back](decisions.md#a-highlight-is-deleted-by-hand-only-and-its-key-is-remembered-so-no-import-brings-it-back) | 270 |
 |  | [The highlight ledger: one writer of highlight rows, and each source an adapter](decisions.md#the-highlight-ledger-one-writer-of-highlight-rows-and-each-source-an-adapter) | 1,142 |
-|  | [A Calibre library's files are recorded from the index, through both doors](decisions.md#a-calibre-librarys-files-are-recorded-from-the-index-through-both-doors) | 296 |
+|  | [A Calibre library's files are recorded from the index, through both doors](decisions.md#a-calibre-librarys-files-are-recorded-from-the-index-through-both-doors) | 298 |
 |  | [A re-picked folder: sightings at the pick, misses on a press](decisions.md#a-re-picked-folder-sightings-at-the-pick-misses-on-a-press) | 420 |
 |  | [A catalogue's 856 links are their own table, and the only thing the export writes to 856](decisions.md#a-catalogues-856-links-are-their-own-table-and-the-only-thing-the-export-writes-to-856) | 403 |
-|  | [A Calibre record's uuid is a match key, and stays inside the app](decisions.md#a-calibre-records-uuid-is-a-match-key-and-stays-inside-the-app) | 282 |
+|  | [A Calibre record's uuid is a match key, and stays inside the app](decisions.md#a-calibre-records-uuid-is-a-match-key-and-stays-inside-the-app) | 349 |
 |  | [A changelog line rides on the commit that makes the change](decisions.md#a-changelog-line-rides-on-the-commit-that-makes-the-change) | 248 |
+|  | [What one look at a file may write lives in one module](decisions.md#what-one-look-at-a-file-may-write-lives-in-one-module) | 222 |
+|  | [A look at a file fills what is missing and never replaces a different fingerprint](decisions.md#a-look-at-a-file-fills-what-is-missing-and-never-replaces-a-different-fingerprint) | 199 |
+|  | [A location belongs to one Book among those a member can see](decisions.md#a-location-belongs-to-one-book-among-those-a-member-can-see) | 258 |
+|  | [The ceiling's 409 carries a code too](decisions.md#the-ceilings-409-carries-a-code-too) | 192 |
+|  | [A merge holds the keeper's ceilings](decisions.md#a-merge-holds-the-keepers-ceilings) | 782 |
+|  | [Which existing Book a record is has one module](decisions.md#which-existing-book-a-record-is-has-one-module) | 236 |
+|  | [A tie inside one copy group takes the lowest id; any other tie is no answer](decisions.md#a-tie-inside-one-copy-group-takes-the-lowest-id-any-other-tie-is-no-answer) | 188 |
+|  | [A tie at the add door refuses without naming a Book](decisions.md#a-tie-at-the-add-door-refuses-without-naming-a-book) | 180 |
+|  | [An import row whose ISBN only the trash view holds is listed "in the trash"](decisions.md#an-import-row-whose-isbn-only-the-trash-view-holds-is-listed-in-the-trash) | 216 |
+|  | [Hidden outranks the trash, and the disclosure that costs is accepted](decisions.md#hidden-outranks-the-trash-and-the-disclosure-that-costs-is-accepted) | 235 |
+|  | [ISBNs compare by `isbn.parse`](decisions.md#isbns-compare-by-isbnparse) | 89 |
+|  | [The add door finds an ISBN stored with hyphens or a lower case x](decisions.md#the-add-door-finds-an-isbn-stored-with-hyphens-or-a-lower-case-x) | 239 |
+|  | [An ASIN refuses an add with 409, through the shelf](decisions.md#an-asin-refuses-an-add-with-409-through-the-shelf) | 446 |
+|  | [An unreachable catalogue on a barcode is its own queue state](decisions.md#an-unreachable-catalogue-on-a-barcode-is-its-own-queue-state) | 222 |
+|  | [The scan queue's rules live in a pure module, whose interface is an event](decisions.md#the-scan-queues-rules-live-in-a-pure-module-whose-interface-is-an-event) | 311 |
 <!-- index: end -->

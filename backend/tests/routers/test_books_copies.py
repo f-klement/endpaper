@@ -266,7 +266,8 @@ class TestTheIsbnRule:
         self, client, admin, make_book
     ):
         """A group suspends the index, not the check. Two copies must not become
-        three because somebody walked past the shelf again."""
+        three because somebody walked past the shelf again. The 409 names the
+        group's lowest id, the original, so the client offers one Book to open."""
         book = make_book(admin["headers"], title="Dune", isbn="9780441013593")
         add_copy(client, admin["headers"], book["id"])
 
@@ -277,6 +278,7 @@ class TestTheIsbnRule:
         )
 
         assert res.status_code == 409
+        assert res.json()["detail"]["book_id"] == book["id"]
 
     def test_a_copy_of_a_book_with_no_isbn_is_allowed(self, client, admin, make_book):
         """Nothing about this hangs off the ISBN. A hand-typed book has copies too."""

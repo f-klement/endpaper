@@ -41,14 +41,15 @@ class TestTheDigestIsStoredOnTheReference:
         res = report(client, admin["headers"], book["id"], partial_md5=DIGEST.upper())
         assert res.status_code == 422
 
-    def test_a_report_without_a_digest_clears_the_one_stored(
+    def test_a_report_without_a_digest_keeps_the_one_stored(
         self, client, admin, make_book
     ):
-        """The report replaces what one client saw in one look, digest included,
-        for the reason it replaces the size and the modification time."""
+        """A look that could not read the file has nothing to say about its
+        bytes, and clearing the digest would leave the file unrecognised by
+        them until somebody picked it again."""
         book = make_book(admin["headers"])
         report(client, admin["headers"], book["id"], partial_md5=DIGEST)
-        assert report(client, admin["headers"], book["id"]).json()["partial_md5"] is None
+        assert report(client, admin["headers"], book["id"]).json()["partial_md5"] == DIGEST
 
 
 class TestWhichBooksHoldAFile:

@@ -59,8 +59,8 @@ export interface BookDraft extends BookLookup {
    * with a control that removes it.** Publisher, year, description, subtitle,
    * series and the identifiers all reach the wire from a file without being
    * shown, and every one of them can be edited on the book's own page
-   * afterwards. This one cannot: `BookDetailsUpdate` has no `categories`, so
-   * the remedy after "Add all" is deleting the book.
+   * afterwards. This one cannot: `BookDetailsUpdate` takes `categories`, but
+   * no page sends it, so the remedy after "Add all" is the API by hand.
    * `ScanPage/components/RapidQueue.tsx` draws it and `useRapidIntake`'s
    * `dropSubject` takes one off.
    *

@@ -165,6 +165,39 @@ export function ResultPanel({ children }: { children: ReactNode }) {
   );
 }
 
+/**
+ * A heading and the titles under it, for the rows an import names rather than
+ * counts. Nothing when the list is empty.
+ */
+export function TitleList({
+  heading,
+  titles,
+}: {
+  heading: string;
+  titles: readonly string[] | undefined;
+}) {
+  if (!titles || titles.length === 0) return null;
+  // A file may name one book twice, so the title alone collides. The key is
+  // the title and how often it has already appeared, which stays unique and
+  // is not the array index: oxlint's no-array-index-key backlog count holds.
+  const seen = new Map<string, number>();
+  const keyed = titles.map((title) => {
+    const occurrence = seen.get(title) ?? 0;
+    seen.set(title, occurrence + 1);
+    return { title, key: `${title}\u0000${occurrence}` };
+  });
+  return (
+    <div className="text-xs text-paper-600 dark:text-paper-400">
+      <p className="font-medium">{heading}</p>
+      <ul className="list-disc list-inside mt-1 space-y-0.5">
+        {keyed.map(({ title, key }) => (
+          <li key={key}>{title}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 /** Offered after an import that added books, which arrive unconfirmed. */
 export function ReviewAdded({
   added,

@@ -16,6 +16,12 @@
  */
 export interface ImportResultOut {
   /**
+   * Rows two or more books on the caller's shelf answer, which are not copies of one book. Nothing is written for them rather than guessing between the books
+   * @minimum 0
+   */
+  ambiguous?: number;
+  ambiguous_titles?: string[];
+  /**
    * Books added from the file
    * @minimum 0
    */
@@ -25,6 +31,12 @@ export interface ImportResultOut {
    * @minimum 0
    */
   excluded?: number;
+  /**
+   * Rows whose ISBN only books in the caller's trash hold. Nothing is written for them: restore the book, or empty it from the trash, and import again
+   * @minimum 0
+   */
+  in_trash?: number;
+  in_trash_titles?: string[];
   /**
    * Rows matched to a book already here
    * @minimum 0

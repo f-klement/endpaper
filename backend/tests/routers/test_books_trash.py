@@ -414,6 +414,34 @@ class TestPrivacy:
         assert res.status_code == 409
         assert db.get(Book, book["id"]) is not None
 
+    def test_your_own_trashed_book_is_kept_while_a_hidden_book_holds_the_isbn(
+        self, client, admin, member, make_book, db
+    ):
+        """The add purges only when every holder is one the caller could purge
+        from their own trash. The hidden row holds the ISBN-10, as a row written
+        before canonicalisation does, so the purge would have freed nothing and
+        the insert would still collide."""
+        mine = make_book(member["headers"], isbn="9780743273565", title="Mine")
+        client.delete(f"/api/books/{mine['id']}", headers=member["headers"])
+        db.add(
+            Book(
+                title="A diary",
+                isbn="0743273567",
+                is_private=True,
+                added_by_user_id=admin["user"]["id"],
+            )
+        )
+        db.commit()
+
+        res = client.post(
+            "/api/books",
+            json={"isbn": "9780743273565", "title": "Mine again"},
+            headers=member["headers"],
+        )
+
+        assert res.status_code == 409
+        assert db.get(Book, mine["id"]) is not None
+
     def test_a_public_trashed_book_is_shared_like_any_other(
         self, client, admin, member, make_book
     ):

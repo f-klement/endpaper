@@ -18,18 +18,22 @@ the ticket was not a column.
 import contextlib
 import threading
 from concurrent.futures import ThreadPoolExecutor
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from database import engine
 from main import app, iter_api_routes
-from models import DIGITAL_REFERENCE_PATH_MAX, Book, DigitalReference
-from routers.books import report_digital_reference
+from models import DIGITAL_REFERENCE_PATH_MAX, Book, DigitalReference, User
+from routers.books import FILE_HELD_ELSEWHERE, REFERENCE_CEILING, report_digital_reference
 from schemas.digital import MAX_DIGITAL_REFERENCES_PER_BOOK, DigitalReferenceIn
+from tests.corpus import REPO
 
 URL = "/api/books/{}/digital-references"
+
+#: The Settings card that reads the two 409 codes.
+CARD = REPO / "frontend/src/pages/SettingsPage/LibrarySettingsPage/hooks.ts"
 
 
 def report(client, headers, book_id, **fields):
@@ -39,6 +43,17 @@ def report(client, headers, book_id, **fields):
 
 def listing(client, headers, book_id):
     return client.get(URL.format(book_id), headers=headers)
+
+
+def seed(db, book_id, **fields):
+    """A row the report route would now refuse: a location a second Book held
+    before the refusal existed, which a merge still meets."""
+    db.add(
+        DigitalReference(
+            book_id=book_id, root_label="/books", relative_path="a/b.epub", **fields
+        )
+    )
+    db.commit()
 
 
 class TestReportingWhereAFileIs:
@@ -86,10 +101,12 @@ class TestReportingWhereAFileIs:
         report(client, admin["headers"], book["id"], root_label="/laptop")
         assert len(listing(client, admin["headers"], book["id"]).json()) == 2
 
-    def test_a_report_replaces_the_fingerprint_whole(self, client, admin, make_book):
-        """A row is one client's one look. Merging a new size with an old
-        modification time would produce a fingerprint nobody ever reported and
-        that no re-check could match."""
+    def test_a_report_never_replaces_a_different_fingerprint(
+        self, client, admin, make_book
+    ):
+        """A root is only a folder name, so a second report of the location can
+        be another member's different file. Replacing would put that file's
+        fingerprint on the first one's row."""
         book = make_book(admin["headers"])
         report(
             client,
@@ -99,8 +116,36 @@ class TestReportingWhereAFileIs:
             file_modified_at="2020-01-01T00:00:00",
         )
         body = report(client, admin["headers"], book["id"], size_bytes=200).json()
-        assert body["size_bytes"] == 200
-        assert body["file_modified_at"] is None
+        assert body["size_bytes"] == 100
+        assert body["file_modified_at"].startswith("2020")
+
+    def test_a_report_fills_a_fingerprint_the_row_is_missing(
+        self, client, admin, make_book
+    ):
+        """A first report that could not read the file left the row empty, and a
+        later look that could is the only way it ever gets one."""
+        book = make_book(admin["headers"])
+        report(client, admin["headers"], book["id"])
+        body = report(
+            client,
+            admin["headers"],
+            book["id"],
+            size_bytes=200,
+            file_modified_at="2021-01-01T00:00:00",
+            partial_md5="0123456789abcdef0123456789abcdef",
+        ).json()
+        assert (body["size_bytes"], body["partial_md5"]) == (
+            200,
+            "0123456789abcdef0123456789abcdef",
+        )
+
+    def test_a_corroborated_root_stays_corroborated(self, client, admin, make_book):
+        """`root_confirmed` only rises: a bare filename report of the same
+        location is a weaker look, not evidence the path stopped being one."""
+        book = make_book(admin["headers"])
+        report(client, admin["headers"], book["id"], root_confirmed=True)
+        body = report(client, admin["headers"], book["id"], root_confirmed=False).json()
+        assert body["root_confirmed"] is True
 
     def test_a_book_that_the_caller_cannot_see_takes_no_report(
         self, client, member, other_user, make_book
@@ -309,7 +354,7 @@ class TestTheCeilingIsCountedPerBookAndNotPerRequest:
         book = make_book(admin["headers"])
         self._fill(client, admin["headers"], book["id"])
         res = report(client, admin["headers"], book["id"], root_label="/one-too-many")
-        assert res.status_code == 409
+        assert (res.status_code, res.json()["detail"]["code"]) == (409, "reference_ceiling")
 
     def test_a_book_at_the_ceiling_can_still_re_confirm_what_it_holds(
         self, client, admin, make_book
@@ -362,13 +407,15 @@ class TestTwoReportsAtOnceStayWithinTheCeiling:
 
         def one(label):
             with Racing(bind=engine, autoflush=False) as db:
-                held = db.get(Book, book["id"])
+                held, user = db.get(Book, book["id"]), db.get(User, admin["user"]["id"])
                 assert held is not None
+                assert user is not None
                 try:
                     report_digital_reference(
                         DigitalReferenceIn(root_label=label, relative_path="x.epub"),
                         held,
                         db,
+                        user,
                     )
                 except HTTPException as refused:
                     return refused.status_code
@@ -400,14 +447,16 @@ class TestTwoReportsAtOnceStayWithinTheCeiling:
 
         def one(size):
             with Racing(bind=engine, autoflush=False) as db:
-                held = db.get(Book, book["id"])
+                held, user = db.get(Book, book["id"]), db.get(User, admin["user"]["id"])
                 assert held is not None
+                assert user is not None
                 report_digital_reference(
                     DigitalReferenceIn(
                         root_label="/books", relative_path="x.epub", size_bytes=size
                     ),
                     held,
                     db,
+                    user,
                 )
 
         with ThreadPoolExecutor(2) as pool:
@@ -415,6 +464,56 @@ class TestTwoReportsAtOnceStayWithinTheCeiling:
 
         rows = listing(client, admin["headers"], book["id"]).json()
         assert [row["relative_path"] for row in rows] == ["x.epub"]
+
+
+class TestALocationBelongsToOneBookAMemberCanSee:
+    def test_a_location_another_visible_book_holds_is_refused_naming_it(
+        self, client, admin, make_book
+    ):
+        """The class a client wrote twice: the same file reported onto a second
+        Book. The body names the holder so the client can put it there."""
+        holder, other = make_book(admin["headers"]), make_book(admin["headers"])
+        report(client, admin["headers"], holder["id"])
+        res = report(client, admin["headers"], other["id"])
+        detail = res.json()["detail"]
+        assert (res.status_code, detail["code"], detail["book_id"]) == (
+            409,
+            "file_held_elsewhere",
+            holder["id"],
+        )
+
+    def test_a_location_held_only_by_a_hidden_book_is_accepted(
+        self, client, member, other_user, make_book
+    ):
+        """A refusal here would confirm that another member privately holds
+        that exact file, so a hidden holder answers as no Book does."""
+        hidden = make_book(member["headers"], is_private=True)
+        mine = make_book(other_user["headers"])
+        report(client, member["headers"], hidden["id"])
+        assert report(client, other_user["headers"], mine["id"]).status_code == 200
+
+    def test_a_location_two_books_already_hold_can_still_be_re_confirmed(
+        self, client, admin, make_book, db
+    ):
+        """Rows from before the refusal existed stay where they are, so a Book
+        holding one must still be able to say the file is there."""
+        first, second = make_book(admin["headers"]), make_book(admin["headers"])
+        seed(db, first["id"])
+        seed(db, second["id"])
+        assert report(client, admin["headers"], first["id"]).status_code == 200
+
+
+class TestTheSettingsCardReadsTheCodesTheRouteSends:
+    def test_the_card_compares_against_each_409_code_as_the_route_spells_it(self):
+        """The Settings card tells the two 409s apart by `detail.code`, and its
+        own vitest stubs the server in the card's spelling, so a code respelt on
+        one side only is green in both trees while every refusal is listed as a
+        failure. This reads the card's source for each code as a quoted literal;
+        a code moved out of that file is red here too, which is the safe way."""
+        source = CARD.read_text(encoding="utf-8")
+        assert [
+            code for code in (REFERENCE_CEILING, FILE_HELD_ELSEWHERE) if f'"{code}"' not in source
+        ] == []
 
 
 class TestTheShelfReachesAReference:
@@ -500,7 +599,7 @@ class TestMergingTwoBooksKeepsTheirReferences:
         assert "/overflow" in [entry["root_label"] for entry in held]
 
     def test_the_same_file_on_both_does_not_break_the_merge(
-        self, client, admin, make_book
+        self, client, admin, make_book, db
     ):
         """`uq_digital_references_location` would refuse the flush, and two rows
         for one book catalogued from one library is the likely case rather than
@@ -508,7 +607,7 @@ class TestMergingTwoBooksKeepsTheirReferences:
         keeper = make_book(admin["headers"], title="One")
         loser = make_book(admin["headers"], title="Two")
         report(client, admin["headers"], keeper["id"])
-        report(client, admin["headers"], loser["id"])
+        seed(db, loser["id"])
         res = client.post(
             "/api/books/merge",
             json={"book_ids": [keeper["id"], loser["id"]], "keep_id": keeper["id"]},
@@ -517,35 +616,42 @@ class TestMergingTwoBooksKeepsTheirReferences:
         assert res.status_code == 200
         assert len(listing(client, admin["headers"], keeper["id"]).json()) == 1
 
-    def test_the_same_file_keeps_the_fingerprint_only_the_loser_had(
-        self, client, admin, make_book
+    def test_a_survivor_with_no_fingerprint_takes_the_losers_whole_one(
+        self, client, admin, make_book, db
     ):
-        """Nothing on the server can compute it again, so dropping the loser's
-        row whole would lose it."""
+        """Nothing on the server can compute a fingerprint again, so dropping
+        the loser's row whole would lose it. Size, time and digest arrive
+        together, as one look saw them."""
         digest = "0123456789abcdef0123456789abcdef"
         keeper = make_book(admin["headers"], title="One")
         loser = make_book(admin["headers"], title="Two")
         report(client, admin["headers"], keeper["id"])
-        report(client, admin["headers"], loser["id"], partial_md5=digest)
+        seed(
+            db,
+            loser["id"],
+            size_bytes=300,
+            file_modified_at=datetime(2022, 2, 2),
+            partial_md5=digest,
+        )
         client.post(
             "/api/books/merge",
             json={"book_ids": [keeper["id"], loser["id"]], "keep_id": keeper["id"]},
             headers=admin["headers"],
         )
         [kept] = listing(client, admin["headers"], keeper["id"]).json()
-        assert kept["partial_md5"] == digest
+        assert (kept["size_bytes"], kept["partial_md5"]) == (300, digest)
+        assert kept["file_modified_at"].startswith("2022")
 
     def test_a_fingerprint_from_a_different_look_is_not_kept(
-        self, client, admin, make_book
+        self, client, admin, make_book, db
     ):
         """A loser that saw another size saw another file, so its digest does
         not join the survivor's sighting."""
         keeper = make_book(admin["headers"], title="One")
         loser = make_book(admin["headers"], title="Two")
         report(client, admin["headers"], keeper["id"], size_bytes=100)
-        report(
-            client,
-            admin["headers"],
+        seed(
+            db,
             loser["id"],
             size_bytes=200,
             partial_md5="0123456789abcdef0123456789abcdef",

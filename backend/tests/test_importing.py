@@ -26,6 +26,7 @@ import ast
 import inspect
 from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
+from datetime import datetime
 from typing import Any, Final, cast, get_args
 
 import annotated_types
@@ -39,6 +40,7 @@ import csv_import
 import evidence
 import importing
 import marc
+import recognition
 import tags
 from catalogue import Record
 from enums import ClassificationScheme, OwnershipStatus, ReadStatus, TagCategory
@@ -46,13 +48,22 @@ from importing import (
     _MARC_RECORD_FIELDS,
     Import,
     MarcImport,
-    MarcIndex,
     OpdsImport,
-    _CatalogueIndex,
     _settle_one,
+    recognise_stored,
     stored_record,
 )
-from models import BLANK_IS_NULL, TITLE_MAX, Book, Note, Tag, User, UserBook
+from models import (
+    BLANK_IS_NULL,
+    MAX_ONLINE_LINKS_PER_BOOK,
+    TITLE_MAX,
+    Book,
+    Note,
+    OnlineLink,
+    Tag,
+    User,
+    UserBook,
+)
 from schemas.book import BookCreate, admits_a_container
 from schemas.tag import MAX_TAG_NAME
 
@@ -200,11 +211,94 @@ class TestThePrivateBookOracle:
         assert result.skipped == 0
 
 
+class TestWhichBookARowIs:
+    """`recognition`'s answers, as the reading history import tallies them.
+
+    The answers themselves are pinned in `tests/test_recognition.py`; these pin
+    the owner's rulings of 2026-10-17 at the importer, where a wrong answer
+    becomes a status on the wrong Book.
+    """
+
+    def test_importing_again_after_trashing_your_own_book_lists_it_in_the_trash(
+        self, db, member
+    ):
+        db.add(
+            Book(
+                title="Dune",
+                isbn="9780441013593",
+                added_by_user_id=member.id,
+                deleted_at=datetime(2026, 1, 1),
+            )
+        )
+        db.commit()
+
+        result = Import.for_member(db, member.id).apply(
+            parse(row("Dune", isbn="9780441013593")), create_missing=True
+        )
+
+        assert (result.in_trash, result.in_trash_titles) == (1, ["Dune"])
+        assert (result.skipped, result.created, result.unmatched_titles) == (0, 0, [])
+
+    def test_a_title_two_books_share_takes_no_row_and_creates_nothing(self, db, member):
+        db.add_all(
+            [Book(title="Dune", added_by_user_id=member.id) for _ in range(2)]
+        )
+        db.commit()
+
+        result = Import.for_member(db, member.id).apply(
+            parse(row("Dune")), create_missing=True
+        )
+
+        assert (result.matched, result.created, result.unmatched_titles) == (0, 0, [])
+        assert (result.ambiguous, result.ambiguous_titles) == (1, ["Dune"])
+        assert db.query(UserBook).count() == 0
+
+    def test_a_copy_group_takes_the_row_on_its_lowest_id(self, db, member):
+        copies = [
+            Book(title="Dune", isbn="9780441013593", copy_group="g", added_by_user_id=member.id)
+            for _ in range(2)
+        ]
+        db.add_all(copies)
+        db.commit()
+
+        Import.for_member(db, member.id).apply(parse(row("Dune", isbn="9780441013593")))
+
+        assert [record.book_id for record in db.query(UserBook)] == [
+            min(copy.id for copy in copies)
+        ]
+
+    def test_a_stored_isbn_ten_is_matched_by_the_isbn_thirteen_in_a_file(self, db, member):
+        db.add(Book(title="Dune", isbn="0441013597", added_by_user_id=member.id))
+        db.commit()
+
+        result = Import.for_member(db, member.id).apply(
+            parse(row("Another Spelling", isbn="9780441013593")), create_missing=True
+        )
+
+        assert (result.matched, result.created) == (1, 0)
+
+    def test_a_catalogue_record_two_editions_answer_creates_nothing(self, db, member):
+        db.add_all(
+            [
+                Book(title="Dune", author="Frank Herbert", isbn=isbn, added_by_user_id=member.id)
+                for isbn in ("9780441013593", "9780340960196")
+            ]
+        )
+        db.commit()
+
+        result = MarcImport.for_member(db, member.id).apply(
+            one_marc_file(catalogued("Dune", author="Frank Herbert"))
+        )
+
+        assert (result.matched, result.created, result.unmatched_titles) == (0, 0, [])
+        assert (result.ambiguous, result.ambiguous_titles) == (1, ["Dune"])
+
+
 class TestATitleCollisionNeverReachesAnotherMembersPrivateBook:
     """The title side of the oracle, which nothing pinned.
 
-    `TestThePrivateBookOracle` above pins the **ISBN** side, and both index
-    builders read `Shelf.seen_by`, so the property holds by construction today:
+    `TestThePrivateBookOracle` above pins the **ISBN** side, and
+    `recognition.Index` reads `Shelf.seen_by`, so the property holds by construction today:
     an invisible row is not in the dictionary, so no key can name it. That is
     exactly why it is written down. The natural way to make matching "more
     complete" is to widen the index past the viewer, and this is what refuses
@@ -222,9 +316,9 @@ class TestATitleCollisionNeverReachesAnotherMembersPrivateBook:
         )
         db.commit()
 
-        index = _CatalogueIndex.build(db, member.id)
+        index = recognition.Index.build(db, member.id, recognition.Source.READING_HISTORY)
 
-        assert index.find_by(db, None, "Shared Title") is None
+        assert index.recognise(title="Shared Title") == recognition.Unknown()
 
     def test_the_catalogue_transfer_index_does_not_hold_one(self, db, member, other):
         db.add(
@@ -237,21 +331,20 @@ class TestATitleCollisionNeverReachesAnotherMembersPrivateBook:
         )
         db.commit()
 
-        index = MarcIndex.build(db, member.id)
+        index = recognition.Index.build(db, member.id, recognition.Source.CATALOGUE)
         stored = stored_record(Record(title="Shared Title", author="Ann Author"))
 
-        assert index.holds(stored) is False
+        assert recognise_stored(index, stored) == recognition.Unknown()
 
     def test_a_work_key_hit_keeps_an_invisibly_taken_isbn_out_of_the_refusals(
         self, db, member, other
     ):
         """The conjunction that decides how much the upload preview discloses.
 
-        `would_refuse` is `not holds(...) and isbn_is_taken(...)`, and the two
-        halves read different populations: the identity index is the Shelf, the
-        ISBN set is the whole table. So a record whose ISBN an invisible Book
-        holds is reported as refused only when the work key misses too, and every
-        such report is one bit about a Book the member cannot see.
+        `recognition` asks the Shelf on both keys before it asks the whole table
+        for the ISBN. So a record whose ISBN an invisible Book holds is answered
+        `Hidden` only when the work key misses too, and every such answer is one
+        bit about a Book the member cannot see.
 
         **That makes the count a function of the key**, which is why it is pinned
         here: a future tightening of the fold moves records into this arm, and
@@ -260,9 +353,8 @@ class TestATitleCollisionNeverReachesAnotherMembersPrivateBook:
         **Its diagonal lives in another file**, which is worth saying because a
         reader will not look for it there: the True branch is
         `tests/routers/test_imports_marc.py::TestThePreviewCountsBothRefusals`,
-        over the complementary shape. Alone, this arm would pass for a
-        `would_refuse` that returned False unconditionally; the pair pins the
-        conjunction.
+        over the complementary shape. Alone, this arm would pass for an index
+        that never answered `Hidden`; the pair pins the conjunction.
         """
         db.add(
             Book(
@@ -282,14 +374,14 @@ class TestATitleCollisionNeverReachesAnotherMembersPrivateBook:
         )
         db.commit()
 
-        index = MarcIndex.build(db, member.id)
+        index = recognition.Index.build(db, member.id, recognition.Source.CATALOGUE)
         stored = stored_record(
             Record(
                 title="The Shared Title", author="Ann Author", isbn="9780441013593"
             )
         )
 
-        assert index.would_refuse(stored) is False
+        assert isinstance(recognise_stored(index, stored), recognition.Seen)
 
     def test_a_visible_book_with_the_same_title_is_still_matched(
         self, db, member, other
@@ -307,10 +399,11 @@ class TestATitleCollisionNeverReachesAnotherMembersPrivateBook:
 
         stored = stored_record(Record(title="Shared Title", author="Ann Author"))
 
-        assert _CatalogueIndex.build(db, member.id).find_by(
-            db, None, "Shared Title"
-        ) is not None
-        assert MarcIndex.build(db, member.id).holds(stored) is True
+        reading = recognition.Index.build(db, member.id, recognition.Source.READING_HISTORY)
+        catalogue_index = recognition.Index.build(db, member.id, recognition.Source.CATALOGUE)
+
+        assert isinstance(reading.recognise(title="Shared Title"), recognition.Seen)
+        assert isinstance(recognise_stored(catalogue_index, stored), recognition.Seen)
 
 
 class TestReadingRecordsArePersonal:
@@ -688,14 +781,13 @@ class TestTheCatalogueIsReadOnce:
         # and the status query, which were per row and are now per import.
         assert for_ten - for_one == 9, (for_one, for_ten)
 
-    def test_the_match_index_is_scoped_and_the_isbn_set_is_not(self, db, member, other):
+    def test_the_match_is_scoped_and_the_isbn_refusal_is_not(self, db, member, other):
         """The module's most load-bearing property, and the two halves pull in
         opposite directions on purpose.
 
-        **Both Books need an ISBN or this test proves nothing.** The first
-        version gave them none, so `taken_isbns` was empty and the assertion
-        reduced to `{"mine"} != set()`: true, and true for a reason unrelated
-        to what it claimed.
+        **Both Books need an ISBN or this test proves nothing.** Without one on
+        theirs, `Unknown` for their title is true for a reason unrelated to
+        what it claims.
         """
         theirs = "9780441013593"
         mine = "9780140449136"
@@ -703,19 +795,18 @@ class TestTheCatalogueIsReadOnce:
         db.add(Book(title="Mine", isbn=mine, added_by_user_id=member.id))
         db.commit()
 
-        index = _CatalogueIndex.build(db, member.id)
+        index = recognition.Index.build(db, member.id, recognition.Source.READING_HISTORY)
 
-        # The match halves are scoped: another Member's Private Book is not
-        # something this import may match against or fill gaps on.
-        assert set(index.by_title) == {"mine"}
-        assert set(index.by_isbn) == {mine}
+        # The match is scoped: another Member's Private Book is not something
+        # this import may match against or fill gaps on.
+        assert index.recognise(title="Theirs") == recognition.Unknown()
+        assert isinstance(index.recognise(title="Elsewhere", isbn=mine), recognition.Seen)
 
-        # `taken_isbns` is deliberately wider, because it answers the
-        # uniqueness question rather than the visibility one. Without their
-        # ISBN in here, creating a row for it raises on the unique index and
-        # takes the whole import down.
-        assert theirs in index.taken_isbns
-        assert mine in index.taken_isbns
+        # The refusal is deliberately wider, because it answers the uniqueness
+        # question rather than the visibility one. Without it, creating a row
+        # for their ISBN raises on the unique index and takes the whole import
+        # down.
+        assert index.recognise(title="Elsewhere", isbn=theirs) == recognition.Hidden()
 
 
 # ── OPDS ──────────────────────────────────────────────────────────────────────
@@ -772,7 +863,7 @@ class TestAnOpdsSyncAssertsOwnership:
 
 
 class TestTheOpdsMatchingRuleIsTheOneImportUses:
-    """ISBN where one exists, then the normalised title. Not `MarcIndex`'s rule."""
+    """ISBN where one exists, then the normalised title. Not the MARC import's rule."""
 
     def test_an_isbn_matches_before_a_title(self, db, member):
         db.add(Book(title="A different spelling", isbn="9780552152976",
@@ -788,7 +879,7 @@ class TestTheOpdsMatchingRuleIsTheOneImportUses:
     def test_a_title_matches_case_insensitively_with_no_author_in_the_key(
         self, db, member
     ):
-        """The difference from `MarcIndex`, which folds the author into the key.
+        """The difference from the MARC import, which folds the author into the key.
         A record crediting nobody still matches a Book credited to someone."""
         db.add(Book(title="Small Gods", author="Terry Pratchett",
                     added_by_user_id=member.id))
@@ -1435,14 +1526,8 @@ class TestAFilesHeadingsCrossOnlyThroughEvidence:
         assert book.classifications == []
 
 
-class _TakenIsbns:
-    """An index that answers the one question the spine asks it."""
-
-    def __init__(self, *taken: str) -> None:
-        self._taken = set(taken)
-
-    def isbn_is_taken(self, isbn: str | None) -> bool:
-        return bool(isbn) and isbn in self._taken
+def _refuse_to_load(book_id: int) -> Book:
+    raise AssertionError("the spine loaded a Book for a row it did not match")
 
 
 def _refuse_to_create() -> Book:
@@ -1453,6 +1538,21 @@ def _refuse_to_fill(book: Book) -> None:
     raise AssertionError("the spine filled gaps on a row it did not match")
 
 
+def _settle(
+    answer: recognition.Answer, tally: importing._Tally, *, create_missing: bool = True
+) -> Book | None:
+    """One row through the spine with every side effect refused."""
+    return _settle_one(
+        answer,
+        tally,
+        load=_refuse_to_load,
+        unmatched_title="Small Gods",
+        create=_refuse_to_create,
+        fill_gaps=_refuse_to_fill,
+        create_missing=create_missing,
+    )
+
+
 class TestTheSpine:
     """`_settle_one` driven directly, with no database and no importer.
 
@@ -1460,42 +1560,22 @@ class TestTheSpine:
     say what the rule is, in the one place it is now written.
     """
 
-    def test_a_taken_isbn_is_counted_and_never_created(self):
+    def test_a_hidden_holder_is_counted_and_never_created(self):
         tally = importing._Tally()
 
-        book = _settle_one(
-            _TakenIsbns("9780552152976"),
-            tally,
-            None,
-            isbn="9780552152976",
-            unmatched_title="Small Gods",
-            create=_refuse_to_create,
-            fill_gaps=_refuse_to_fill,
-            create_missing=True,
-        )
-
-        assert book is None
+        assert _settle(recognition.Hidden(), tally) is None
         assert (tally.unmatched_private, tally.created) == (1, 0)
 
-    def test_a_taken_isbn_is_never_named(self):
+    def test_a_hidden_holder_is_never_named(self):
         """The whole of the privacy rule: naming it answers "does a Book with
         this ISBN exist in this house"."""
         tally = importing._Tally()
 
-        _settle_one(
-            _TakenIsbns("9780552152976"),
-            tally,
-            None,
-            isbn="9780552152976",
-            unmatched_title="Small Gods",
-            create=_refuse_to_create,
-            fill_gaps=_refuse_to_fill,
-            create_missing=True,
-        )
+        _settle(recognition.Hidden(), tally)
 
-        assert tally.unmatched == []
+        assert (tally.unmatched, tally.in_trash_titles) == ([], [])
 
-    def test_a_caller_that_asked_for_no_creations_still_reports_a_taken_isbn(self):
+    def test_a_caller_that_asked_for_no_creations_still_reports_a_hidden_holder(self):
         """**The refusal is about the create, not about the ISBN.** With
         nothing to create, the title came off the caller's own file and telling
         them about it discloses nothing they did not upload. Pinned because a
@@ -1503,34 +1583,43 @@ class TestTheSpine:
         this row into a refusal and cost the CSV path its unmatched report."""
         tally = importing._Tally()
 
-        _settle_one(
-            _TakenIsbns("9780552152976"),
-            tally,
-            None,
-            isbn="9780552152976",
-            unmatched_title="Small Gods",
-            create=_refuse_to_create,
-            fill_gaps=_refuse_to_fill,
-            create_missing=False,
-        )
+        _settle(recognition.Hidden(), tally, create_missing=False)
 
         assert (tally.unmatched, tally.unmatched_private) == (["Small Gods"], 0)
 
+    def test_a_tie_is_listed_as_ambiguous_and_nothing_is_created(self):
+        """The owner's ruling of 2026-10-17: a tie the copy group rule does not
+        settle is no answer, even where the caller asked for creations. Listed
+        apart from the unmatched rows, which the catalogue does not hold."""
+        tally = importing._Tally()
+
+        _settle(recognition.Tied(frozenset({1, 2})), tally)
+
+        assert (tally.ambiguous, tally.ambiguous_titles) == (1, ["Small Gods"])
+        assert (tally.unmatched, tally.created, tally.matched) == ([], 0, 0)
+
+    def test_a_holder_in_the_trash_is_listed_as_in_the_trash_and_nothing_is_written(self):
+        tally = importing._Tally()
+
+        _settle(recognition.InTrash(frozenset({1})), tally)
+
+        assert (tally.in_trash, tally.in_trash_titles) == (1, ["Small Gods"])
+        assert (tally.unmatched, tally.unmatched_private, tally.created) == ([], 0, 0)
+
     def test_the_unmatched_report_stops_at_the_cap(self):
         tally = importing._Tally()
-        for n in range(importing.MAX_UNMATCHED_REPORTED + 5):
-            _settle_one(
-                _TakenIsbns(),
-                tally,
-                None,
-                isbn=None,
-                unmatched_title=f"Title {n}",
-                create=_refuse_to_create,
-                fill_gaps=_refuse_to_fill,
-                create_missing=False,
-            )
+        for _ in range(importing.MAX_UNMATCHED_REPORTED + 5):
+            _settle(recognition.Unknown(), tally, create_missing=False)
 
         assert len(tally.unmatched) == importing.MAX_UNMATCHED_REPORTED
+
+    def test_the_trash_report_stops_at_the_cap_and_the_count_does_not(self):
+        tally = importing._Tally()
+        for _ in range(importing.MAX_UNMATCHED_REPORTED + 5):
+            _settle(recognition.InTrash(frozenset({1})), tally)
+
+        assert len(tally.in_trash_titles) == importing.MAX_UNMATCHED_REPORTED
+        assert tally.in_trash == importing.MAX_UNMATCHED_REPORTED + 5
 
     def test_a_matched_row_fills_its_gaps_and_comes_back_for_the_tail(self):
         tally = importing._Tally()
@@ -1538,10 +1627,9 @@ class TestTheSpine:
         filled: list[Book] = []
 
         book = _settle_one(
-            _TakenIsbns("9780552152976"),
+            recognition.Seen(7),
             tally,
-            matched,
-            isbn="9780552152976",
+            load={7: matched}.__getitem__,
             unmatched_title="Small Gods",
             create=_refuse_to_create,
             fill_gaps=filled.append,
@@ -2044,8 +2132,8 @@ class TestEveryImporterCreatesThroughTheSpine:
     this class. A construction here that is not an importer's is still a Book
     on a path the spine does not hold.
 
-    Deleting `_settle_one`'s `isbn_is_taken` call does not redden these: they
-    are about the route, and `TestTheSpine` is about the rule. Both are needed
+    Deleting `_settle_one`'s `Hidden` arm does not redden these: they are
+    about the route, and `TestTheSpine` is about the rule. Both are needed
     and neither covers the other.
     """
 
@@ -3329,3 +3417,21 @@ class TestACreatedBookStoresABlankAsNull:
         OpdsImport.for_member(db, member.id).apply([held("Small Gods", author="   ")])
 
         assert db.query(Book).one().author is None
+
+
+class TestTheLinkCapCountsWhatThisImportAlreadyAdded:
+    def test_two_records_matching_one_book_stay_within_the_cap_between_them(self, db):
+        """Two records of one MARC file can match one Book, and the second
+        re-reads the Book's links under the merge's lock. Re-read without what
+        the first one added, it counts nothing and the Book takes ten."""
+        book = Book(title="Small Gods")
+        db.add(book)
+        db.flush()
+
+        importing._keep_links(book, [catalogue.Link(url=f"https://a.example/{n}") for n in range(5)], db)
+        importing._keep_links(book, [catalogue.Link(url=f"https://b.example/{n}") for n in range(5)], db)
+        db.flush()
+
+        assert db.query(OnlineLink).filter(OnlineLink.book_id == book.id).count() == (
+            MAX_ONLINE_LINKS_PER_BOOK
+        )

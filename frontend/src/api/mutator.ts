@@ -20,11 +20,19 @@ export class ApiError extends Error {
     /**
      * The book an error is about, when the server named one.
      *
-     * Only the duplicate-ISBN 409 sets this, and only when the book is one the
-     * caller may see. It is what lets "already in the library" offer to open
-     * the book rather than being a sentence the reader can do nothing with.
+     * Set by a 409 naming a Book the caller may see: a duplicate ISBN, or a
+     * file another Book already holds. It is what lets "already in the
+     * library" offer to open the book rather than being a sentence the reader
+     * can do nothing with.
      */
     readonly bookId?: number,
+    /**
+     * Which refusal this is, when the server said: the `code` beside the
+     * `message` in an object `detail`. Read rather than the status where one
+     * route answers 409 for more than one reason, such as a file reference's
+     * ceiling and a file another Book holds.
+     */
+    readonly code?: string,
   ) {
     super(message);
     this.name = "ApiError";
@@ -133,7 +141,7 @@ function readable(text: unknown): text is string {
  */
 async function errorDetail(
   response: Response,
-): Promise<{ message: string; bookId?: number }> {
+): Promise<{ message: string; bookId?: number; code?: string }> {
   try {
     const body: unknown = await response.json();
     const detail = (body as { detail?: unknown }).detail;
@@ -147,19 +155,25 @@ async function errorDetail(
       if (messages.length > 0) return { message: messages.join(", ") };
     }
 
-    // An object detail: a message plus whatever the route could say about it.
-    // Only the duplicate-ISBN 409 sends one today. Not a list, which is an
-    // object too and is read above.
+    // An object detail: a message plus whatever the route could say about it,
+    // a Book it names and a code saying which refusal it is. Not a list, which
+    // is an object too and is read above.
     if (detail && typeof detail === "object" && !Array.isArray(detail)) {
-      const { message, book_id: bookId } = detail as {
+      const {
+        message,
+        book_id: bookId,
+        code,
+      } = detail as {
         message?: unknown;
         book_id?: unknown;
+        code?: unknown;
       };
       // The book is kept when the sentence is blank: it is what lets the
       // reader open the copy already on the shelf.
       return {
         message: readable(message) ? message : response.statusText,
         bookId: typeof bookId === "number" ? bookId : undefined,
+        code: typeof code === "string" ? code : undefined,
       };
     }
   } catch {
@@ -445,7 +459,12 @@ export const customFetch = async <T>(
 
   if (!response.ok) {
     const detail = await errorDetail(response);
-    throw new ApiError(detail.message, response.status, detail.bookId);
+    throw new ApiError(
+      detail.message,
+      response.status,
+      detail.bookId,
+      detail.code,
+    );
   }
 
   if (response.status === 204) return null as T;

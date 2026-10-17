@@ -16,11 +16,11 @@ a sync rather than an import that only ever adds.
 deleted at its source stored here and shared if they had shared it; removing it
 is what the member did.
 
-**Which Book a Readwise book is**: `Index` says. A book nothing matches waits,
-listed on the account page, and is never guessed onto a Book. Its highlights are
-not stored while it waits; once a Book matches it, the next pull asks Readwise
-for that book's highlights by its id, because an incremental pull would never
-send them again.
+**Which Book a Readwise book is**: `_matched` says, through `recognition`. A
+book nothing matches waits, listed on the account page, and is never guessed
+onto a Book. Its highlights are not stored while it waits; once a Book matches
+it, the next pull asks Readwise for that book's highlights by its id, because
+an incremental pull would never send them again.
 
 **What a pull does with a highlight once it has its id is the ledger's**,
 `highlights`: it re-finds the row, leaves out one the member deleted here
@@ -39,10 +39,10 @@ deployment that filters egress has to allow it, or every pull ends
 
 import asyncio
 import logging
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from typing import Final, Self
+from typing import Final
 
 import anyio
 import httpx
@@ -52,7 +52,7 @@ import credentials
 import errors
 import fetch
 import highlights
-import identity
+import recognition
 from database import SessionLocal
 from deadline import in_, left
 from enums import BookIdentifierScheme, HighlightSource, MemberLoginService, ReadwiseOutcome
@@ -64,12 +64,9 @@ from models import (
     MAX_PAGE_NUMBER_IN_A_BOOK,
     READWISE_CURSOR_MAX,
     TITLE_MAX,
-    Book,
-    BookIdentifier,
     MemberLogin,
     ReadwiseBook,
 )
-from shelf import Shelf
 
 logger = logging.getLogger("endpaper.readwise")
 
@@ -281,59 +278,26 @@ def read_page(body: object) -> Page:
 # ── Which Book a Readwise book is ─────────────────────────────────────────────
 
 
-@dataclass(frozen=True)
-class Index:
-    """The Books one member can see, keyed the two ways a Readwise book is matched.
+def _matched(
+    index: recognition.Index, asin: str | None, title: str, author: str | None
+) -> int | None:
+    """The Book a Readwise book goes on, or None while it waits.
 
-    **An ASIN on exactly one Book first**, since an ASIN names an edition.
-    **Then exactly one Book with the same `identity.work_key`**, title and first
-    credit folded: the predicate the catalogue transfer uses, because a wrong
-    answer here puts a member's highlights on somebody else's Book. Two Books
-    answering either key is no answer, so a copy and its original wait for the
-    member rather than being picked between.
-
-    Built from `Shelf.seen_by`, so a Book the member cannot see is never a
-    candidate, and from one query each, like `importing.MarcIndex`.
+    `recognition.Source.HIGHLIGHTS` is the ladder: an ASIN on one Book the
+    member can see, then one Book with the same `identity.work_key`. **Two
+    Books answering is no answer**, a copy and its original included, so the
+    book waits for the member rather than its highlights going on a guess.
     """
-
-    visible: frozenset[int]
-    by_asin: Mapping[str, frozenset[int]]
-    by_work: Mapping[str, frozenset[int]]
-
-    @classmethod
-    def build(cls, db: Session, member_id: int) -> Self:
-        shelf = Shelf.seen_by(db, member_id)
-        books = shelf.select(Book.id, Book.title, Book.author).all()
-        asins = (
-            shelf.select(BookIdentifier.value, Book.id)
-            .join(BookIdentifier, BookIdentifier.book_id == Book.id)
-            .filter(BookIdentifier.scheme == BookIdentifierScheme.ASIN)
-            .all()
-        )
-        return cls(
-            visible=frozenset(book_id for book_id, _title, _author in books),
-            by_asin=_grouped((value.upper(), book_id) for value, book_id in asins),
-            by_work=_grouped(
-                (identity.work_key(title, author), book_id) for book_id, title, author in books
-            ),
-        )
-
-    def match(self, asin: str | None, title: str, author: str | None) -> int | None:
-        if asin:
-            held = self.by_asin.get(asin.upper(), frozenset())
-            if held:
-                # Two Books carrying the ASIN is no answer, rather than a
-                # reason to ask the title instead.
-                return next(iter(held)) if len(held) == 1 else None
-        held = self.by_work.get(identity.work_key(title, author), frozenset())
-        return next(iter(held)) if len(held) == 1 else None
+    answer = index.recognise(
+        title=title,
+        author=author,
+        identifiers=((BookIdentifierScheme.ASIN, asin),) if asin else (),
+    )
+    return answer.book_id if isinstance(answer, recognition.Seen) else None
 
 
-def _grouped(pairs: Iterable[tuple[str, int]]) -> dict[str, frozenset[int]]:
-    grouped: dict[str, set[int]] = {}
-    for key, book_id in pairs:
-        grouped.setdefault(key, set()).add(book_id)
-    return {key: frozenset(ids) for key, ids in grouped.items()}
+def build_index(db: Session, member_id: int) -> recognition.Index:
+    return recognition.Index.build(db, member_id, recognition.Source.HIGHLIGHTS)
 
 
 # ── Writing a page ────────────────────────────────────────────────────────────
@@ -390,7 +354,7 @@ def apply_page(
     db: Session,
     member_id: int,
     page: Page,
-    index: Index,
+    index: recognition.Index,
     counts: Counts,
     *,
     whole: bool,
@@ -424,7 +388,7 @@ def apply_page(
 
 
 def _apply_once(
-    db: Session, member_id: int, page: Page, index: Index, counts: Counts, *, whole: bool
+    db: Session, member_id: int, page: Page, index: recognition.Index, counts: Counts, *, whole: bool
 ) -> set[int]:
     newly: set[int] = set()
     placed = [
@@ -471,7 +435,7 @@ def _placed(
     db: Session,
     member_id: int,
     entry: ReadwiseEntry,
-    index: Index,
+    index: recognition.Index,
     newly: set[int],
     *,
     whole: bool,
@@ -494,8 +458,8 @@ def _placed(
         row = ReadwiseBook(user_id=member_id, user_book_id=entry.user_book_id)
         db.add(row)
     row.title, row.author, row.asin = entry.title, entry.author, entry.asin
-    if row.book_id not in index.visible:
-        row.book_id = index.match(entry.asin, entry.title, entry.author)
+    if not index.sees(row.book_id):
+        row.book_id = _matched(index, entry.asin, entry.title, entry.author)
         if row.book_id is not None and not whole:
             # Kept as state rather than inferred from `book_id`, which is
             # committed with this page: a pull stopping before the re-ask
@@ -543,17 +507,17 @@ def _writers(
     return writers
 
 
-def _rematched(db: Session, member_id: int, index: Index) -> set[int]:
+def _rematched(db: Session, member_id: int, index: recognition.Index) -> set[int]:
     """Readwise books to ask for by id: those whose Book is gone or unseen and
     which a Book matches now, and those whose whole history was never read
     (`ReadwiseBook.whole_pending`)."""
     return {
         row.user_book_id
         for row in db.query(ReadwiseBook).filter(ReadwiseBook.user_id == member_id)
-        if (row.whole_pending and row.book_id in index.visible)
+        if (row.whole_pending and index.sees(row.book_id))
         or (
-            row.book_id not in index.visible
-            and index.match(row.asin, row.title, row.author) is not None
+            not index.sees(row.book_id)
+            and _matched(index, row.asin, row.title, row.author) is not None
         )
     }
 
@@ -764,7 +728,7 @@ async def _sync(
     except credentials.CredentialError:
         return _finish(db, login, member_id, ReadwiseOutcome.UNREADABLE, counts, started)
 
-    index = await anyio.to_thread.run_sync(Index.build, db, member_id)
+    index = await anyio.to_thread.run_sync(build_index, db, member_id)
     asked = await anyio.to_thread.run_sync(_rematched, db, member_id, index)
     ends = in_(SYNC_SECONDS)
     pages = 0
@@ -842,7 +806,7 @@ async def _apply(
     db: Session,
     member_id: int,
     page: Page,
-    index: Index,
+    index: recognition.Index,
     counts: Counts,
     *,
     whole: bool,

@@ -39,6 +39,11 @@ interface LookupResultProps {
   /** Record it as another copy of the book the 409 named. */
   onAddCopy: () => void;
   isAddingCopy: boolean;
+  /**
+   * The blank form is hand entry chosen after no catalogue answered, so its
+   * sentence may not say that none of them knew the ISBN.
+   */
+  enteredByHand: boolean;
 }
 
 /**
@@ -68,6 +73,7 @@ export default function LookupResult({
   onCancel,
   onAddCopy,
   isAddingCopy,
+  enteredByHand,
 }: LookupResultProps) {
   const { t } = useTranslation();
   const { draft, coverFile, isPrivate, location, format, tagIds, tagNames } =
@@ -89,7 +95,12 @@ export default function LookupResult({
         {draft.notFound ? (
           <>
             <p className="text-paper-600 text-sm mb-3 dark:text-paper-400">
-              {t("scan.notFoundManual", { isbn: draft.isbn })}
+              {t(
+                enteredByHand ? "scan.unansweredManual" : "scan.notFoundManual",
+                {
+                  isbn: draft.isbn,
+                },
+              )}
             </p>
             <label
               htmlFor="manual-title"

@@ -47,10 +47,10 @@ def pull(client, device, document=DIGEST):
     return client.get(f"/kosync/syncs/progress/{document}", headers=device)
 
 
-def file_on(client, account, book_id, digest=DIGEST):
+def file_on(client, account, book_id, digest=DIGEST, root="Books"):
     res = client.post(
         f"/api/books/{book_id}/digital-references",
-        json={"root_label": "Books", "relative_path": f"{digest}.epub", "partial_md5": digest},
+        json={"root_label": root, "relative_path": f"{digest}.epub", "partial_md5": digest},
         headers=account["headers"],
     )
     assert res.status_code in (200, 201), res.text
@@ -332,8 +332,10 @@ class TestWhichBookADocumentIs:
     def test_two_books_holding_the_fingerprint_leave_it_in_the_inbox(
         self, client, admin, member, make_book
     ):
+        # The same bytes in two folders: one location is one Book's, so the
+        # second copy is at a location of its own.
         for title in ("One", "Two"):
-            file_on(client, admin, make_book(admin["headers"], title=title)["id"])
+            file_on(client, admin, make_book(admin["headers"], title=title)["id"], root=title)
         push(client, sign_in(client, member))
         inbox = client.get("/api/kosync/inbox", headers=member["headers"]).json()
         assert [row["document"] for row in inbox] == [DIGEST]

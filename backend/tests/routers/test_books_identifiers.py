@@ -187,32 +187,49 @@ class TestAnIsbnLookupCannotBeGivenAnAsin:
         assert res.json()["isbn"] is None
         assert db.get(Book, res.json()["id"]).isbn is None
 
-    def test_two_books_may_share_an_identifier_where_they_could_not_share_an_isbn(
-        self, client, admin
-    ):
-        """`uq_books_isbn_single_copy` answers 409 for a repeated ISBN, and this
-        store deliberately does not: a second import of one library is the
-        ordinary case, and the row that would collide is the one a member wants
-        offered to `/duplicates` rather than refused."""
-        first = client.post(
-            "/api/books",
-            json={
-                "title": "Docker",
-                "identifiers": [{"scheme": "asin", "value": ASIN}],
-            },
-            headers=admin["headers"],
-        )
-        second = client.post(
-            "/api/books",
-            json={
-                "title": "Docker",
-                "identifiers": [{"scheme": "asin", "value": ASIN}],
-            },
-            headers=admin["headers"],
-        )
 
-        assert first.status_code == 201
-        assert second.status_code == 201
+class TestAnAsinRecognisesTheBook:
+    """A second Kindle import, whose entries carry an ASIN and no ISBN, used to
+    add every book again."""
+
+    def test_a_second_add_carrying_the_asin_answers_409_naming_the_book(self, client, admin):
+        body = {"title": "Docker", "identifiers": [{"scheme": "asin", "value": ASIN}]}
+        first = client.post("/api/books/scan", json=body, headers=admin["headers"])
+
+        again = client.post("/api/books/scan", json=body, headers=admin["headers"])
+
+        assert again.status_code == 409
+        assert again.json()["detail"]["book_id"] == first.json()["id"]
+
+    def test_two_books_carrying_it_outside_a_copy_group_answer_409_naming_neither(
+        self, client, admin, db
+    ):
+        """The pair an earlier defect left, two imports of one Kindle library.
+        A client lands files on the Book a 409 names and offers a copy of it,
+        so naming the lower id would pick between two Books. The second row is
+        written directly because an add now refuses it."""
+        body = {"title": "Docker", "identifiers": [{"scheme": "asin", "value": ASIN}]}
+        client.post("/api/books", json=body, headers=admin["headers"])
+        twin = client.post("/api/books", json={"title": "Docker"}, headers=admin["headers"])
+        db.add(BookIdentifier(book_id=twin.json()["id"], scheme="asin", value=ASIN))
+        db.commit()
+
+        res = client.post("/api/books/scan", json=body, headers=admin["headers"])
+
+        assert res.status_code == 409
+        assert isinstance(res.json()["detail"], str)
+
+    def test_another_members_private_book_carrying_it_answers_as_no_book(
+        self, client, admin, member
+    ):
+        """Refusing would confirm somebody holds that edition, and nothing makes
+        an identifier unique the way an ISBN is."""
+        body = {"title": "Docker", "identifiers": [{"scheme": "asin", "value": ASIN}]}
+        client.post("/api/books", json=body | {"is_private": True}, headers=admin["headers"])
+
+        res = client.post("/api/books", json=body, headers=member["headers"])
+
+        assert res.status_code == 201
 
 
 class TestAMergeMovesThem:
@@ -278,9 +295,11 @@ class TestAMergeMovesThem:
     def test_an_exact_repeat_is_dropped_rather_than_flushed_twice(
         self, client, admin, db
     ):
-        """Two rows for one book are commonly two imports of one library, so
-        this is the likely case rather than an edge: without the drop the flush
-        trips `uq_book_identifiers_book_scheme_value` and the merge 500s."""
+        """Two Books carrying one identifier are two imports of one library made
+        before an add refused the second, or a private Book made public: without
+        the drop the flush trips `uq_book_identifiers_book_scheme_value` and the
+        merge 500s. The second row is written directly because an add now
+        refuses it."""
         keeper = client.post(
             "/api/books",
             json={
@@ -290,13 +309,10 @@ class TestAMergeMovesThem:
             headers=admin["headers"],
         ).json()
         loser = client.post(
-            "/api/books",
-            json={
-                "title": "Docker",
-                "identifiers": [{"scheme": "asin", "value": ASIN}],
-            },
-            headers=admin["headers"],
+            "/api/books", json={"title": "Docker"}, headers=admin["headers"]
         ).json()
+        db.add(BookIdentifier(book_id=loser["id"], scheme="asin", value=ASIN))
+        db.commit()
 
         res = client.post(
             "/api/books/merge",

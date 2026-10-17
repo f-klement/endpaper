@@ -11,6 +11,7 @@ import {
   ImportError,
   ResultPanel,
   ReviewAdded,
+  TitleList,
 } from "./ImportChrome";
 import ImportPreview from "./ImportPreview";
 
@@ -151,16 +152,20 @@ export default function LibraryImport({
               {t("import.excludedResult", { count: result.excluded ?? 0 })}
             </p>
           )}
-          {result.unmatched_titles && result.unmatched_titles.length > 0 && (
-            <div className="text-xs text-paper-600 dark:text-paper-400">
-              <p className="font-medium">{t("import.unmatched")}</p>
-              <ul className="list-disc list-inside mt-1 space-y-0.5">
-                {result.unmatched_titles.map((title) => (
-                  <li key={title}>{title}</li>
-                ))}
-              </ul>
-            </div>
-          )}
+          <TitleList
+            heading={t("import.unmatched")}
+            titles={result.unmatched_titles}
+          />
+          {/* Named as well as counted: the member can already see each of
+              these in their trash, and restoring one is what imports it. */}
+          <TitleList
+            heading={t("import.inTrash", { count: result.in_trash ?? 0 })}
+            titles={result.in_trash_titles}
+          />
+          <TitleList
+            heading={t("import.ambiguous", { count: result.ambiguous ?? 0 })}
+            titles={result.ambiguous_titles}
+          />
           <ReviewAdded added={result.created} onReview={onReviewUnconfirmed} />
         </ResultPanel>
       )}

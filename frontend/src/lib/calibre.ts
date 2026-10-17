@@ -529,7 +529,7 @@ const SCHEME_OF_TYPE = new Map<string, StoreIdentifierScheme>(
  * different kind of value; it is the same kind, issued by a different store.
  * **Which store issued it is what is lost**, and `models.BookIdentifier`
  * refuses to record that on purpose: two marketplaces disagreeing leave two
- * rows, and nothing matches on either.
+ * rows, and an add carrying either is refused where a Book already does.
  *
  * **What the open family costs is a plugin's invented key**, `amazon_zz` and
  * whatever else somebody writes; `stores.producedValue` is the bound on that,

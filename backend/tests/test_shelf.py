@@ -733,30 +733,95 @@ BOOK_OWNED_READERS = {
             "its own targets rather than a query with an audience.",
         ),
     ],
-    "kosync.py": [
+    "file_references.py": [
         (
-            "holders = { book_id for (book_id,) in Shelf.seen_by(db, member_id) "
+            "at_this_location = db.query(DigitalReference).filter( DigitalReference.book_id == "
+            "book_id, DigitalReference.root_label == payload.root_label, "
+            "DigitalReference.relative_path == payload.relative_path, )",
+            "looks up the reference at the location a client has just reported, "
+            "to decide whether that is a refresh or a new row, and again after a "
+            "concurrent report of the same location won the insert. Narrowed to "
+            "the Book id its one caller, the report route, resolved through "
+            "`dependencies`; the two payload values narrow it further and neither "
+            "of them can widen it.",
+        ),
+        (
+            "holder: int | None = ( Shelf.seen_by(db, member_id) .select(DigitalReference.book_id) "
+            ".join(DigitalReference, DigitalReference.book_id == Book.id) .filter( "
+            "DigitalReference.book_id != book_id, DigitalReference.root_label == "
+            "payload.root_label, DigitalReference.relative_path == payload.relative_path, ) "
+            ".order_by(DigitalReference.book_id) .limit(1) .scalar() )",
+            "which other Book already holds the location a client is reporting, "
+            "so the report can be refused naming it. Written through "
+            "`Shelf.select()` and joined outward to `books`, so a private Book of "
+            "another member contributes no row and the report goes ahead as if "
+            "no Book held it. Returns one id, the lowest.",
+        ),
+        (
+            "held = ( db.query(func.count(DigitalReference.id)) .filter(DigitalReference.book_id == "
+            "reference.book_id) .scalar() )",
+            "counts one Book's references against the per book ceiling, after "
+            "the new one is inserted. Publishes no rows and no values, only how "
+            "many that Book holds, and `reference` is built on the Book id the "
+            "report route resolved through `dependencies`.",
+        ),
+        (
+            "rows = ( Shelf.seen_by(db, member_id) .select(DigitalReference) "
+            ".join(DigitalReference, DigitalReference.book_id == Book.id) .filter( "
+            "DigitalReference.id.in_(asked), DigitalReference.root_label == payload.root_label, "
+            ") .all() )",
+            "resolves the references a sweep names, so the sweep can flag or "
+            "refresh them. Written through `Shelf.select()` and joined outward to "
+            "`books`, so an id on a Book the member may not see, and therefore "
+            "may not write, resolves to no row. The request bounds the id list "
+            "at `MAX_FILES_PER_LOOKUP`; the rows are written and only their ids "
+            "are returned.",
+        ),
+        (
+            "held = ( Shelf.seen_by(db, member_id) .select( DigitalReference.id, "
+            "DigitalReference.book_id, DigitalReference.root_label, "
+            "DigitalReference.relative_path, DigitalReference.partial_md5, Book.format, ) "
+            ".join(DigitalReference, DigitalReference.book_id == Book.id) .filter( or_( "
+            "DigitalReference.relative_path.in_(asked_paths), "
+            "DigitalReference.partial_md5.in_(asked_digests), ) ) .all() )",
+            "the references matching the files a client asked about, on the "
+            "Books the member may see, for the lookup that tells a scan queue "
+            "and a reading device which Book already holds a file. Written "
+            "through `Shelf.select()` and joined outward to `books`, so a "
+            "private Book of another member contributes no row and answers as "
+            "no Book does. The request bounds the list it matches against at "
+            "`MAX_FILES_PER_LOOKUP`.",
+        ),
+        (
+            "return { book_id for (book_id,) in Shelf.seen_by(db, member_id) "
             ".select(DigitalReference.book_id) .join(DigitalReference, "
             "DigitalReference.book_id == Book.id) .filter(DigitalReference.partial_md5 "
-            "== document) .distinct() .limit(2) .all() }",
-            "which Book a KOReader document is, by the fingerprint on a file "
-            "reference, for the device's own member. Written through "
-            "`Shelf.select()` and joined outward to `books`, so a private Book of "
-            "another member contributes no row and the document stays in the "
-            "inbox as it would for no Book. It returns ids, at most two, and "
-            "only to decide whether exactly one Book holds the file.",
+            "== digest) .distinct() .limit(limit) .all() }",
+            "which Books carry one digest on a file reference, for one member. "
+            "Written through `Shelf.select()` and joined outward to `books`, so "
+            "a private Book of another member contributes no row. It returns "
+            "ids, at most `limit` of them; KOReader sync asks for two, only to "
+            "decide whether exactly one Book holds the file.",
         ),
     ],
-    "readwise.py": [
+    "recognition.py": [
         (
-            "asins = ( shelf.select(BookIdentifier.value, Book.id) "
+            "carrying = ( shelf.select(BookIdentifier.value, BookIdentifier.scheme, Book.id) "
             ".join(BookIdentifier, BookIdentifier.book_id == Book.id) "
-            ".filter(BookIdentifier.scheme == BookIdentifierScheme.ASIN) .all() )",
-            "which Book a member's Readwise book is, by an ASIN, for that member "
-            "alone. `shelf` is `Shelf.seen_by` the member and the join runs outward "
-            "to `books`, so a private Book of another member contributes no row. "
-            "The pairs never leave the process: they decide only whether exactly "
-            "one Book carries the ASIN, and nothing is published from them.",
+            ".filter(BookIdentifier.scheme.in_(ladder.schemes)) )",
+            "which Book a record carrying a store identifier or a Calibre uuid is, "
+            "for one member alone. `shelf` is `Shelf.seen_by` the member and the "
+            "join runs outward to `books`, so a private Book of another member "
+            "contributes no row. The pairs never leave the process: they decide "
+            "only which visible Books carry the identifier, and an add names at "
+            "most one of them, as the 409's `book_id` on a Book the caller can "
+            "already open.",
+        ),
+        (
+            "carrying = carrying.filter(BookIdentifier.value.in_(narrow.values))",
+            "narrows the statement above to one record's own identifiers, for an "
+            "add. A clause on the same Shelf scoped join, so it can only remove "
+            "rows the reason above already covers.",
         ),
     ],
     "routers/books.py": [
@@ -764,18 +829,6 @@ BOOK_OWNED_READERS = {
             "db.execute(book_tags.delete().where(book_tags.c.tag_id == tag_id))",
             "deletes the association rows for a Tag being removed. A write, and "
             "reported for the `where` clause on it rather than for being one.",
-        ),
-        (
-            "holder_id = ( shelf.select(Book.id) .join(BookIdentifier, "
-            "BookIdentifier.book_id == Book.id) .filter( BookIdentifier.scheme == "
-            "BookIdentifierScheme.CALIBRE_UUID, BookIdentifier.value.in_(uuids), ) "
-            ".order_by(Book.id) .limit(1) .scalar() )",
-            "which Book an add's Calibre uuid already names, for the caller "
-            "alone. `shelf` is `Shelf.seen_by` the caller and the join runs "
-            "outward to `books`, so a private Book of another member "
-            "contributes no row and the add goes ahead as for no Book. It "
-            "returns one id, which reaches the caller only as the 409's "
-            "`book_id` on a Book the caller can already open.",
         ),
         (
             "shelf = Shelf.seen_by(db, current_user.id).where( Book.id > after_id, "
@@ -834,33 +887,6 @@ BOOK_OWNED_READERS = {
             "missing listing's rule for the same table, and paginated.",
         ),
         (
-            "rows = ( Shelf.seen_by(db, current_user.id) .select(DigitalReference) "
-            ".join(DigitalReference, DigitalReference.book_id == Book.id) .filter( "
-            "DigitalReference.id.in_(asked), DigitalReference.root_label == payload.root_label, "
-            ") .all() )",
-            "resolves the references a sweep names, so the route can flag or "
-            "refresh them. Written through `Shelf.select()` and joined outward to "
-            "`books`, so an id on a Book the caller may not see, and therefore "
-            "may not write, resolves to no row. The request bounds the id list "
-            "at `MAX_FILES_PER_LOOKUP`; the rows are written and only their ids "
-            "are returned.",
-        ),
-        (
-            "held = ( Shelf.seen_by(db, current_user.id) .select( DigitalReference.id, "
-            "DigitalReference.book_id, DigitalReference.root_label, "
-            "DigitalReference.relative_path, DigitalReference.partial_md5, Book.format, ) "
-            ".join(DigitalReference, DigitalReference.book_id == Book.id) .filter( or_( "
-            "DigitalReference.relative_path.in_(asked_paths), "
-            "DigitalReference.partial_md5.in_(asked_digests), ) ) .all() )",
-            "the references matching the files a client asked about, on the "
-            "Books the caller may see, for the lookup that tells a scan queue "
-            "and a reading device which Book already holds a file. Written "
-            "through `Shelf.select()` and joined outward to `books`, so a "
-            "private Book of another member contributes no row and answers as "
-            "no Book does. The request bounds the list it matches against at "
-            "`MAX_FILES_PER_LOOKUP`.",
-        ),
-        (
             "reference = ( db.query(DigitalReference) .filter( DigitalReference.id == reference_id, "
             "DigitalReference.book_id == book.id, ) .first() )",
             "reads one reference so the route can flag or forget it. Narrowed "
@@ -876,24 +902,6 @@ BOOK_OWNED_READERS = {
             "a `Book` object and never an id, so `dependencies.book_for_read` "
             "has already applied the privacy rule; the same argument "
             "`custom_fields.py` makes twice above.",
-        ),
-        (
-            "held = ( db.query(func.count(DigitalReference.id)) .filter(DigitalReference.book_id == "
-            "reference.book_id) .scalar() )",
-            "counts one Book's references against the per book ceiling, after "
-            "the new one is inserted. Publishes no rows and no values, only how "
-            "many that Book holds, and its only caller builds `reference` on the "
-            "`Book` the dependency resolved.",
-        ),
-        (
-            "at_this_location = db.query(DigitalReference).filter( DigitalReference.book_id == "
-            "book.id, DigitalReference.root_label == payload.root_label, "
-            "DigitalReference.relative_path == payload.relative_path, )",
-            "looks up the reference at the location a client has just reported, "
-            "to decide whether that is a refresh or a new row, and again after a "
-            "concurrent report of the same location won the insert. Narrowed to a "
-            "`Book` the dependency resolved; the two payload values narrow it "
-            "further and neither of them can widen it.",
         ),
         (
             "identifier = ( db.query(BookIdentifier) .filter( BookIdentifier.id == identifier_id, "
@@ -3260,18 +3268,15 @@ class TestTheShelfIsTheOnlyWayIn:
                     calls[node.func.id].append(f"{name}:{node.lineno}")
 
         # **Call sites, not modules.** A set of module names does not count
-        # anything: three of the four uniqueness calls are already in
-        # `routers/books.py`, so a fifth added there would leave the set
+        # anything: two of the three uniqueness calls are already in
+        # `routers/books.py`, so a fourth added there would leave the set
         # unchanged and pass green, which is exactly the quiet growth the
         # deleted exemption counter existed to prevent.
         #
-        # **Four, and it went 4 to 5 to 4 rather than staying put.** MARC import
-        # added a second index builder in `importing.py` that needs the same
-        # whole table read, which would have been a fifth. It is a third way
-        # past the viewer only if it is written a second time, so the read moved
-        # into `importing._taken_isbns` and both builders call that. The number
-        # here is the same as before and the module count fell.
-        assert len(calls["whole_table_for_uniqueness"]) == 4, calls
+        # **Three, and every recognition holds one of them between them.**
+        # The importers and the add door reach the whole table through
+        # `recognition.Index`, so a new importer or door is not a fourth.
+        assert len(calls["whole_table_for_uniqueness"]) == 3, calls
         assert len(calls["rereading_filtered_rows"]) == 1, calls
         # **One, and it is the arm that keeps the third way past a viewer
         # narrow.** It answers whether a vocabulary entry has anything to

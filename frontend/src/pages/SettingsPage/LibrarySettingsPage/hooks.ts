@@ -563,6 +563,15 @@ export type CalibreIntakeFailure = CalibreFailure | SqliteFailure;
 const PREVIEW_ROWS = 5;
 
 /**
+ * The `code` on the reference route's 409 for a Book at its file ceiling. The
+ * backend suite reads this file for both codes as quoted literals, so a
+ * respelling on one side only is red there.
+ */
+const REFERENCE_CEILING = "reference_ceiling";
+/** The `code` on its 409 for a file another Book the member can see holds. */
+const FILE_HELD_ELSEWHERE = "file_held_elsewhere";
+
+/**
  * The Calibre card.
  *
  * Two picks and the second is optional, which is the shape the extra members
@@ -869,13 +878,20 @@ export function useCalibreImport(): UseCalibreImportResult {
             reportReference.mutateAsync({ bookId, data }),
           );
         } catch (refused) {
-          // The book is in the library, and the one 409 a reference route
-          // answers is its ceiling, not a duplicate: thrown on, the card
-          // listed it as "already in the catalogue" and said nothing of its
-          // files.
-          if (statusOf(refused) !== 409) throw refused;
-          atCeiling += 1;
-          return;
+          // The book is in the library either way. The reference route
+          // answers 409 for two reasons and the body's `code` says which:
+          // the ceiling, or a file another Book the member can see holds,
+          // which is this card's "already" (a Book the member can see holds
+          // the file). Anything else is thrown on, to be listed with its
+          // reason, rather than counted as either.
+          const code = refused instanceof ApiError ? refused.code : undefined;
+          if (statusOf(refused) === 409 && code === REFERENCE_CEILING) {
+            atCeiling += 1;
+            return;
+          }
+          if (statusOf(refused) !== 409 || code !== FILE_HELD_ELSEWHERE) {
+            throw refused;
+          }
         }
         already += 1;
         return;
@@ -890,13 +906,16 @@ export function useCalibreImport(): UseCalibreImportResult {
           });
         }
       } catch (refused) {
-        // **A duplicate names the book the ISBN, or the Calibre record's
-        // uuid, belongs to**, and the files land on the copy of it the
-        // landing rule admits. Where no copy is
-        // the files' kind, an EPUB carrying the household's hardcover ISBN,
-        // the book is the other format case the lookup path counts, and says
-        // so in the same words rather than "already in the catalogue". Copies
-        // that cannot be read leave the 409 as it was.
+        // **A duplicate names the book its ISBN, its ASIN or the Calibre
+        // record's uuid belongs to**, and the files land on the copy of it
+        // the landing rule admits. Where no copy is the files' kind, an EPUB
+        // carrying the household's hardcover ISBN, the book is the other
+        // format case the lookup path counts, and says so in the same words
+        // rather than "already in the catalogue". Copies that cannot be read
+        // leave the 409 as it was. A 409 naming no book, a tie between two
+        // Books that are not copies of one another, is thrown on too: the
+        // row is listed as a failure, "already in the catalogue", and no
+        // file lands.
         const holder = refused instanceof ApiError ? refused.bookId : undefined;
         if (holder !== undefined && files !== undefined) {
           const copies = await listCopies(holder).catch(() => undefined);
@@ -1207,9 +1226,11 @@ export function useStoreImport(): UseStoreImportResult {
     setIsImporting(false);
     setResult(outcome);
     // **The sources are kept when the member stopped, and pressing Import again
-    // starts over rather than carrying on.** Every book is sent a second time
-    // and the ones already in answer 409, which the result names as duplicates;
-    // resuming where it stopped is a different ticket. They are kept so that
+    // starts over rather than carrying on.** Every book is sent a second time.
+    // One the server recognises, by its ISBN or its ASIN, answers 409 and the
+    // result names it as a duplicate; one carrying neither, a Play Books or a
+    // Moon+ Reader entry, is added again. Resuming where it stopped is a
+    // different ticket. They are kept so that
     // pressing again does not mean picking the file a second time.
     if (!outcome.stopped) {
       abandonReads();

@@ -322,25 +322,25 @@ export const getPreviewMarcUrl = () => {
  * twice is the ordinary accident in a catalogue transfer, and "will this
  * double my catalogue" has to be answerable before the write.
  *
- * **Both of the import's refusals are modelled, not one.** `already_held`
- * counts what it will match and `blocked` counts what it will refuse for an
- * ISBN this member cannot see, through `MarcIndex.holds` and
- * `MarcIndex.would_refuse`, which are the same index and the same predicates
- * `MarcImport` applies, over the same stored records. Counting only the
- * first overstated what an import would add by exactly the number of records
- * another member holds privately.
+ * **Every answer the import acts on is counted, not only the match.**
+ * `already_held` counts what it will match, `blocked` what it will refuse for
+ * an ISBN this member cannot see, `in_trash` what only their trash holds and
+ * `ambiguous` what two Books answer, through `importing.recognise_stored`,
+ * the same index and the same question `MarcImport` asks, over the same
+ * stored records. Counting only the first overstated what an import would add
+ * by exactly the number of records another member holds privately.
  *
  * **What is left is an upper bound rather than an equality, and it errs
- * towards promising less.** The index is read once here and mutated during an
- * import: `MarcIndex.remember` makes a freshly created Book findable, so a
- * work listed twice in one file is created once and matched once, while this
- * counts both as additions. Measured, two identical records: the preview would
- * add 2 and the import created 1 and matched 1.
+ * towards promising less.** The index is read once here and grows during an
+ * import: `recognition.Index.remember` makes a freshly created Book findable,
+ * so a work listed twice in one file is created once and matched once, while
+ * this counts both as additions. Measured, two identical records: the preview
+ * would add 2 and the import created 1 and matched 1.
  *
- * **`blocked` describes the default.** `would_refuse` is the refusal
- * `create_missing` reaches, and this endpoint takes no `create_missing`
- * because the import defaults it true. With it off nothing is created, so
- * nothing can be refused for a collision.
+ * **`blocked` describes the default.** It is the refusal `create_missing`
+ * reaches, and this endpoint takes no `create_missing` because the import
+ * defaults it true. With it off nothing is created, so nothing can be refused
+ * for a collision.
  *
  * **And it under-counts** where a record's ISBN is held invisibly but its
  * title and author match a visible Book: that is a match, not a refusal. See

@@ -1,9 +1,10 @@
 /**
- * Tests for src/pages/ScanPage/hooks.ts: the Google Books search path.
+ * Tests for src/pages/ScanPage/hooks.ts: the title search, the one book flow
+ * and rapid intake, each through the requests it makes.
  *
- * The scan-and-lookup path is covered through the page in `ScanPage.test.tsx`.
- * These are the parts that are easier to pin at the hook: when a request is
- * made at all, and what a chosen result does to the draft.
+ * What a rapid intake event makes of a row is pinned without React in
+ * `queue.test.ts`; these pin that the hook asks, when, and that it feeds the
+ * answer in. The page's own wiring is `ScanPage.test.tsx`'s.
  */
 
 import { act, waitFor } from "@testing-library/react";
@@ -13,12 +14,14 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { BookFormat, type BookMatch } from "../../../src/api/generated/model";
 import {
-  FALLBACK_INTERVAL_MS,
-  FALLBACK_STARTS_PER_MINUTE,
   useBookSearch,
   useRapidIntake,
   useScanFlow,
 } from "../../../src/pages/ScanPage/hooks";
+import {
+  FALLBACK_INTERVAL_MS,
+  FALLBACK_STARTS_PER_MINUTE,
+} from "../../../src/pages/ScanPage/queue";
 import * as calibreFolder from "../../../src/lib/calibreFolder";
 import { partialMd5 } from "../../../src/lib/fileDigest";
 import { makeBook, resetIds } from "../../factories";
@@ -551,6 +554,27 @@ describe("useRapidIntake", () => {
     await waitFor(() => expect(result.current.entries).toHaveLength(1));
   });
 
+  it("does not look a barcode up again when it arrives after its lookup failed", async () => {
+    // A failed lookup is not cached, so every frame the camera sends while
+    // the barcode stays in view would be another metered request. The other
+    // barcode is what the wait stands on: its request is sent after any the
+    // repeat would have sent.
+    api.on("/api/books/lookup", { status: 503, body: { detail: "down" } });
+    const { result } = renderRapid();
+    act(() => result.current.capture("9780441013593"));
+    await waitFor(() => expect(result.current.figures.waiting).toBe(1));
+
+    act(() => result.current.capture("9780441013593"));
+    act(() => result.current.capture("9780262033848"));
+    await waitFor(() => expect(result.current.figures.waiting).toBe(2));
+
+    expect(
+      api.calls
+        .filter((call) => call.url.includes("/api/books/lookup"))
+        .map((call) => new URL(call.url, "http://x").searchParams.get("isbn")),
+    ).toEqual(["9780441013593", "9780262033848"]);
+  });
+
   it("keeps a book neither source knew, rather than dropping it", async () => {
     // It is still a book on the shelf. Silently discarding it is how a
     // catalogue ends up quietly incomplete.
@@ -566,6 +590,77 @@ describe("useRapidIntake", () => {
       expect(result.current.entries[0]?.state).toBe("not-found"),
     );
     expect(result.current.entries[0]?.draft).not.toBeNull();
+  });
+
+  it("leaves a barcode no catalogue knows out of the batch", async () => {
+    // Its draft has no title, which `BookCreate` refuses, so offering it only
+    // ever came back refused. The known barcode beside it is what makes the
+    // batch run at all: alone, it would return before writing anything.
+    api.on("/api/books/lookup", (url) =>
+      url.includes("9780441013593")
+        ? { body: LOOKUP }
+        : { status: 404, body: { detail: "unknown" } },
+    );
+    api.on("/api/books/scan", { body: makeBook() });
+    const { result } = renderRapid();
+    act(() => result.current.capture("9780441013593"));
+    act(() => result.current.capture("9780262033848"));
+    await waitFor(() =>
+      expect(result.current.entries.map((entry) => entry.state)).toEqual([
+        "found",
+        "not-found",
+      ]),
+    );
+    expect(result.current.figures.ready).toBe(1);
+
+    act(() => result.current.addAll());
+
+    await waitFor(() => expect(result.current.result).not.toBeNull());
+    expect(
+      api.calls
+        .filter((call) => call.url.includes("/api/books/scan"))
+        .map((call) => (call.body as { title: string }).title),
+    ).toEqual(["Dune"]);
+    expect(result.current.entries.map((entry) => entry.key)).toEqual([
+      "isbn:9780262033848",
+    ]);
+    expect(result.current.figures.ready).toBe(0);
+  });
+
+  it("offers a barcode again when the catalogues could not be reached", async () => {
+    // A 503 is no catalogue having been reachable, not a record nobody has.
+    // Read as not found, the row was a dead end nothing would ask about again.
+    api.on("/api/books/lookup", { status: 503, body: { detail: "down" } });
+    const { result } = renderRapid();
+    act(() => result.current.capture("9780441013593"));
+    await waitFor(() => expect(result.current.figures.waiting).toBe(1));
+
+    api.on("/api/books/lookup", { body: LOOKUP });
+    act(() => result.current.lookUpTheNames());
+
+    await waitFor(() => expect(result.current.entries[0]?.state).toBe("found"));
+    expect(result.current.entries[0]?.draft?.title).toBe("Dune");
+  });
+
+  it("keeps a barcode offered when asking again reaches no catalogue either", async () => {
+    // The name path's own reading of that throw files the row under a file
+    // name a barcode does not have, so the paced retry has to hand it back to
+    // the scan's reading instead.
+    api.on("/api/books/lookup", { status: 503, body: { detail: "down" } });
+    const { result } = renderRapid();
+    act(() => result.current.capture("9780441013593"));
+    await waitFor(() => expect(result.current.figures.waiting).toBe(1));
+
+    act(() => result.current.lookUpTheNames());
+
+    await waitFor(() =>
+      expect(
+        api.calls.filter((call) => call.url.includes("/api/books/lookup")),
+      ).toHaveLength(2),
+    );
+    await waitFor(() => expect(result.current.isLookingUp).toBe(false));
+    expect(result.current.entries[0]?.state).toBe("not-reached");
+    expect(result.current.figures.waiting).toBe(1);
   });
 
   it("writes nothing until the batch is confirmed", async () => {

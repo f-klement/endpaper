@@ -141,8 +141,8 @@ describe("ScanPage", () => {
       // design round put the control on a surface a file never reaches.** A
       // picked file settles into this queue and never into the confirm card,
       // so this is the one screen where a subject is visible while it is
-      // still reversible: `BookDetailsUpdate` has no `categories`, and the
-      // remedy after "Add all" is deleting the book.
+      // still one press to undo: no page sends `BookDetailsUpdate`'s
+      // `categories`, so the remedy after "Add all" is the API by hand.
       const user = userEvent.setup();
       const file = await epubFile("dune.epub", {
         opf: packageDocument(
@@ -379,6 +379,42 @@ describe("ScanPage", () => {
 
       expect(await screen.findByLabelText("Title *")).toBeInTheDocument();
       expect(screen.getByLabelText("Author")).toBeInTheDocument();
+      expect(screen.getByText(/No details found for ISBN/)).toBeInTheDocument();
+    });
+
+    it("offers to ask again when the catalogues could not be reached", async () => {
+      // A 503 is no catalogue having answered. A blank form here reported a
+      // fact about the book that nobody established, and offered no retry.
+      api.on("/api/books/lookup", {
+        status: 503,
+        body: { detail: "Could not reach the book catalogues." },
+      });
+      renderWithProviders(<ScanPage />);
+
+      const user = await scan();
+      const retry = await screen.findByRole("button", { name: "Try again" });
+      api.on("/api/books/lookup", { body: LOOKUP });
+      await user.click(retry);
+
+      expect(await screen.findByText("Dune")).toBeInTheDocument();
+    });
+
+    it("still lets that book be added by hand, as the server's words offer", async () => {
+      api.on("/api/books/lookup", {
+        status: 503,
+        body: { detail: "Could not reach the book catalogues." },
+      });
+      renderWithProviders(<ScanPage />);
+
+      const user = await scan();
+      await user.click(
+        await screen.findByRole("button", { name: "Add it by hand" }),
+      );
+
+      expect(await screen.findByLabelText("Title *")).toBeInTheDocument();
+      // No catalogue answered, so the card may not say none of them knew it.
+      expect(screen.queryByText(/No details found/)).not.toBeInTheDocument();
+      expect(screen.getByText(/No catalogue answered/)).toBeInTheDocument();
     });
 
     it("preselects the tags the backend suggested", async () => {

@@ -11,6 +11,7 @@ import {
   ImportError,
   ResultPanel,
   ReviewAdded,
+  TitleList,
 } from "./ImportChrome";
 
 interface MarcImportProps {
@@ -58,12 +59,18 @@ export default function MarcImport({
   // records has transferred nothing.
   const [createMissing, setCreateMissing] = useState(true);
 
-  // **Both refusals, not one.** A record already held is filled in rather than
-  // added; a record whose ISBN belongs to a book this account cannot see is
-  // refused outright. Counting only the first promised records the import then
-  // refused, by exactly the number another member holds privately.
+  // **Every record the import does not add, not one kind of it.** A record
+  // already held is filled in rather than added; one whose ISBN belongs to a
+  // book this account cannot see is refused, one whose ISBN only the trash
+  // holds waits for it, and one two books answer is left alone. Counting only
+  // the first promised records the import then refused, by exactly the number
+  // another member holds privately.
   const wouldBeAdded = preview
-    ? preview.readable - preview.already_held - (preview.blocked ?? 0)
+    ? preview.readable -
+      preview.already_held -
+      (preview.blocked ?? 0) -
+      (preview.in_trash ?? 0) -
+      (preview.ambiguous ?? 0)
     : 0;
 
   return (
@@ -98,6 +105,16 @@ export default function MarcImport({
             {(preview.blocked ?? 0) > 0 && (
               <p className="text-xs text-paper-600 dark:text-paper-400">
                 {t("marc.blocked", { count: preview.blocked ?? 0 })}
+              </p>
+            )}
+            {(preview.in_trash ?? 0) > 0 && (
+              <p className="text-xs text-paper-600 dark:text-paper-400">
+                {t("marc.inTrash", { count: preview.in_trash ?? 0 })}
+              </p>
+            )}
+            {(preview.ambiguous ?? 0) > 0 && (
+              <p className="text-xs text-paper-600 dark:text-paper-400">
+                {t("marc.ambiguous", { count: preview.ambiguous ?? 0 })}
               </p>
             )}
             {preview.skipped > 0 && (
@@ -179,6 +196,16 @@ export default function MarcImport({
               {t("marc.resultSkipped", { count: result.skipped })}
             </p>
           )}
+          <TitleList
+            heading={t("marc.resultInTrash", { count: result.in_trash ?? 0 })}
+            titles={result.in_trash_titles}
+          />
+          <TitleList
+            heading={t("marc.resultAmbiguous", {
+              count: result.ambiguous ?? 0,
+            })}
+            titles={result.ambiguous_titles}
+          />
           <ReviewAdded added={result.created} onReview={onReviewUnconfirmed} />
         </ResultPanel>
       )}

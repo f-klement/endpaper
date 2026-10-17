@@ -305,6 +305,9 @@ export const en = {
     "That does not look like a valid ISBN. Check the digits and try again.",
   "scan.notFoundManual":
     "No details found for ISBN {isbn}. You can still add it by hand.",
+  "scan.unansweredManual":
+    "No catalogue answered for ISBN {isbn}. You can still add it by hand.",
+  "scan.addByHand": "Add it by hand",
   "scan.titleRequired": "Title *",
   "scan.titlePlaceholder": "Book title",
   "scan.authorField": "Author",
@@ -1299,6 +1302,7 @@ export const en = {
   "rapid.lookingUp": "Looking up...",
   "rapid.reading": "{name} is being read...",
   "rapid.notFound": "Not found: {isbn}",
+  "rapid.notReached": "Catalogues not reached: {isbn}",
   "rapid.duplicate": "Already scanned",
   "rapid.alreadyInLibrary": "Already in the library",
   "rapid.reviewTitle": "Review {count} books",
@@ -1394,10 +1398,12 @@ export const en = {
   // **The disclosure lives on the control that does it.** The panel above says
   // the files are never uploaded, which is true and, read next to a button
   // offering a lookup, invites the reading that the lookup is local too. It is
-  // not: the names, and any ISBN a file states, go to the same public
-  // catalogues a title search and a scanned barcode reach.
+  // not: the names, any ISBN a file states, an audiobook's tagged title and
+  // author, and a scanned barcode the first lookup could not get answered, go
+  // to the same public catalogues a title search and a scanned barcode reach.
+  // The tags are file content rather than a name, which is why they are named.
   "fallback.pace":
-    "The file names, and any ISBN a file states, are sent to the catalogues Endpaper searches; the files are not. Paced, so that one folder cannot spend a whole library's budget at once. Roughly {minutes} min.",
+    "The file names, any ISBN a file states, the title and author an audiobook's tags name (or its folder name, where it has none), and the ISBN of any scanned barcode that reached no catalogue are sent to the catalogues Endpaper searches; the files are not. Paced, so that one folder cannot spend a whole library's budget at once. Roughly {minutes} min.",
   // **Written to stand alone, because that is how it usually renders.** The bulk
   // keep clears the queue, so nothing is waiting and the paragraph above is off
   // the screen: every fact this press discloses is in this string on its own,
@@ -1406,7 +1412,7 @@ export const en = {
   // screen together after a run is stopped partway, and a paragraph printed
   // twice is read once.
   "fallback.paceAgain":
-    "The same file names go to the same catalogues a second time, and the files themselves still do not. Paced the same way. Roughly {minutes} min.",
+    "The same file names, audiobook tags and audiobook folder names go to the same catalogues a second time, and the files themselves still do not. Paced the same way. Roughly {minutes} min.",
   "fallback.stop": "Stop looking up",
   "fallback.searching": "Asking the catalogues...",
   "fallback.fromTheName": "From the file name",
@@ -1673,6 +1679,10 @@ export const en = {
   "import.readAs": "Read as a {service} export.",
   "import.readAsGeneric": "Read as a plain table, with the columns guessed.",
   "import.unmatched": "Not found in the catalogue:",
+  "import.inTrash":
+    "{count} rows name a book in the trash, and nothing was written for them. Put it back, or delete it for good, and import again:",
+  "import.ambiguous":
+    "{count} rows match two or more books on this shelf, and nothing was written for them rather than guessing between them:",
 
   // ── MARC (library mode) ─────────────────────────────────────────────────
   "marc.title": "Take a catalogue across",
@@ -1687,6 +1697,10 @@ export const en = {
     "{count} are already on this shelf and will be filled in rather than added.",
   "marc.blocked":
     "{count} carry an ISBN that belongs to a book this account cannot see, and will be left alone.",
+  "marc.inTrash":
+    "{count} carry an ISBN that only a book in the trash holds, and will be left alone until it is put back or deleted for good.",
+  "marc.ambiguous":
+    "{count} match two or more books on this shelf, and will be left alone rather than guessed between.",
   "marc.skipped": "{count} records have no title and will be left out.",
   "marc.createMissing": "Add the {count} records this catalogue does not hold",
   "marc.createMissingHint":
@@ -1696,6 +1710,10 @@ export const en = {
   "marc.result": "{rowsRead} records read, {matched} matched, {created} added.",
   "marc.resultSkipped":
     "{count} records were left out: no title, or an ISBN that belongs to a book this account cannot see.",
+  "marc.resultInTrash":
+    "{count} records carry an ISBN that only a book in the trash holds, and nothing was written for them. Put it back, or delete it for good, and import again:",
+  "marc.resultAmbiguous":
+    "{count} records match two or more books on this shelf, and nothing was written for them rather than guessing between them:",
 
   // ── Calibre library import ─────────────────────────────────────────
   "calibre.title": "Bring a Calibre library across",

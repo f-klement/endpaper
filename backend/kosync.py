@@ -32,6 +32,7 @@ from typing import Final
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+import file_references
 from models import (
     AUTHOR_LINE_MAX,
     KOSYNC_DEVICE_MAX,
@@ -40,7 +41,6 @@ from models import (
     KOSYNC_PROGRESS_MAX,
     TITLE_MAX,
     Book,
-    DigitalReference,
     KosyncDocument,
     ReadingProgress,
     User,
@@ -340,20 +340,12 @@ def _the_one_holder(db: Session, member_id: int, document: str) -> int | None:
     """The Book whose file this is, when exactly one Book the member can see
     carries this fingerprint on a reference.
 
-    The batched file holders lookup's question, asked for one digest. **Two or
-    more Books leave it in the inbox**: guessing between copies would write a
-    reading record to a Book the member did not pick.
+    `file_references.books_carrying` answers which Books; the tie rule is
+    this module's. **Two or more Books leave it in the inbox**: guessing
+    between copies would write a reading record to a Book the member did not
+    pick.
     """
-    holders = {
-        book_id
-        for (book_id,) in Shelf.seen_by(db, member_id)
-        .select(DigitalReference.book_id)
-        .join(DigitalReference, DigitalReference.book_id == Book.id)
-        .filter(DigitalReference.partial_md5 == document)
-        .distinct()
-        .limit(2)
-        .all()
-    }
+    holders = file_references.books_carrying(db, member_id, document, limit=2)
     return holders.pop() if len(holders) == 1 else None
 
 

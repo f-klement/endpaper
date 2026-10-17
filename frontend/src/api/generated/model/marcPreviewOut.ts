@@ -48,12 +48,16 @@ import type { MarcPreviewRow } from "./marcPreviewRow.ts";
  *
  * **It under-counts in one shape, which narrows the oracle rather than
  * widening it.** A record whose ISBN belongs to an invisible Book but whose
- * title and author match a visible one is matched, not blocked:
- * `MarcIndex.find` resolves it on the identity key and `isbn_is_taken` is
- * never consulted. So a hit here means the ISBN is held **and** nothing on
- * this shelf matches the record, which is less than "this ISBN exists". The
- * import agrees, and drops the incoming ISBN rather than writing it: see
- * `importing._MARC_GAP_FIELDS` for why that is what stops a 500.
+ * title and author match a visible one is matched, not blocked: `recognition`
+ * asks the shelf on both keys before it asks the whole table. So a hit here
+ * means the ISBN is held **and** nothing on this shelf matches the record,
+ * which is less than "this ISBN exists". The import agrees, and drops the
+ * incoming ISBN rather than writing it: see `importing._MARC_GAP_FIELDS` for
+ * why that is what stops a 500.
+ *
+ * **`in_trash` and `ambiguous` are the import's two other ways to write
+ * nothing**, so `readable` less the four counts is the most the import
+ * creates.
  */
 export interface MarcPreviewOut {
   /**
@@ -62,10 +66,20 @@ export interface MarcPreviewOut {
    */
   already_held: number;
   /**
+   * Records two or more books on this shelf answer, which the import leaves alone rather than guessing between
+   * @minimum 0
+   */
+  ambiguous?: number;
+  /**
    * Records the import will refuse: their ISBN belongs to a book this member cannot see
    * @minimum 0
    */
   blocked?: number;
+  /**
+   * Records whose ISBN only books in this member's trash hold
+   * @minimum 0
+   */
+  in_trash?: number;
   /**
    * Records with a title this app can store
    * @minimum 0

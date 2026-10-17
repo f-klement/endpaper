@@ -1549,8 +1549,14 @@ and a client that strips it write two rows for one file.
 by `(root_label, relative_path)`, so reporting the same file twice refreshes one row rather
 than making two: re-importing a folder somebody imported last month is the case that makes
 this matter, and a directory pick is hundreds of files in one gesture. It answers **200 and
-not 201** for the same reason: the route is not a create. A report replaces the fingerprint
-whole rather than filling gaps in it, because a row is what one client saw in one look.
+not 201** for the same reason: the route is not a create.
+
+**A report fills in a fingerprint the row is missing and never replaces a different one**,
+the rule a folder sweep and a merge keep too. Size, modification time and digest are written
+together, and only where every half already stored is the same as the one sent. A root is
+only a folder name, so two members' folders can share it and a path beneath it, and a
+replacing report would put one member's file's fingerprint on the other's. **`root_confirmed`
+only rises**: a bare filename report does not undo a directory pick's corroboration.
 
 **What the server knows, and what it only stores.** `root_label`, `relative_path`,
 `root_confirmed`, `size_bytes`, `file_modified_at` and `partial_md5` are a client's claim and are accepted
@@ -1560,8 +1566,8 @@ this server was last **told** the file was there, not when anybody looked; the s
 cannot see the file, so it can never say more than that.
 
 **Staleness is reported, never detected here.** A client that goes looking either reports a
-sighting, which refreshes the fingerprint and clears `missing_since`, or reports it missing,
-which sets `missing_since` once and does not move it on a repeat. **A missing report never
+sighting, which fills in a fingerprint the row is missing and clears `missing_since`, or
+reports it missing, which sets `missing_since` once and does not move it on a repeat. **A missing report never
 deletes the row**: a phone that cannot reach the NAS reports every file on the NAS missing
 and is telling the truth about what it can see, so acting on it would let one browser with
 a drive unplugged erase where the library is. Only the DELETE removes a reference, and only
@@ -1603,8 +1609,19 @@ refuses nothing **NUL free** that the character arm admits, and refusing the res
 is for: UTF-8 is at most four bytes per character, so the widest legitimate pair lands
 exactly on the byte bound.
 
-One book holds at most 16 references, counted **per book rather than per request**, and the
-ceiling is a 409. It binds a new location only, so a book already at the ceiling can still
+**A new location is refused with a 409 for one of two reasons**, and the body's `detail` is
+an object, `{message, code}`, whose `code` says which:
+
+| `code` | when | also carries |
+|---|---|---|
+| `file_held_elsewhere` | another book the caller can see already holds the location | `book_id`, the lowest id holder, so the client can put the file there |
+| `reference_ceiling` | the book already holds 16 references | nothing more |
+
+**A location belongs to one book among those a member can see.** A book the caller cannot see
+answers as no book does, and the report goes ahead: a refusal would confirm that somebody
+privately holds that exact file. A location two books held before this refusal existed is
+left as it is, and either may re-confirm it. The ceiling is counted **per book rather than
+per request** and binds a new location only, so a book already at the ceiling can still
 re-confirm what it holds.
 
 **`partial_md5` is KOReader's fingerprint of the file**, nullable, and exactly 32 lower case

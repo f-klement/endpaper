@@ -7870,10 +7870,11 @@ file; a published document may not, which is how this paragraph first failed the
 `importing._MARC_GAP_FIELDS` excludes it, and the exclusion was load bearing and
 unstated until the security seat's last round. A record whose ISBN belongs to a
 Book the member cannot see, but whose title and author match one they can, is
-**matched**: `MarcIndex.find` resolves it on the identity key and
-`isbn_is_taken` is never consulted. If the gap filler wrote `isbn`, it would put
-the invisible Book's ISBN onto the visible one and trip `books.isbn`'s unique
-index. That is the failure `_taken_isbns` exists to prevent, arriving by a door
+**matched**: `recognition` asks the shelf on both keys before the whole table, so
+the identity key answers and the hidden ISBN is never reached. If the gap filler wrote
+`isbn`, it would put the invisible Book's ISBN onto the visible one and trip
+`books.isbn`'s unique index. That is the failure the hidden ISBN refusal exists to
+prevent, arriving by a door
 nothing guarded, and it is one transaction, so the transfer writes nothing and
 answers 500. The incoming ISBN is dropped instead, which is the cheaper loss,
 and `TestAMatchedBookNeverGainsAnIsbn` pins it.
@@ -11176,8 +11177,9 @@ one of the two.
 economy.** It is written once, on the create path, and never filled in on a
 matched Book. Adding it here would reach this shape: a record whose ISBN
 belongs to a Book this Member cannot see, whose title and author match one
-they can. `MarcIndex.find` matches on the identity key, so `isbn_is_taken` is
-never consulted, and the gap filler would then write the invisible Book's
+they can. `recognition` asks the shelf on both keys before the whole table, so the
+identity key answers and the hidden ISBN is never reached, and the gap filler would
+then write the invisible Book's
 ISBN onto the visible one, tripping `books.isbn`'s unique index.
 
 **The assignment is silent, and no lazy load can surface it**, which is the
@@ -11214,7 +11216,7 @@ commit.
 
 The conclusion never depended on which: it is one transaction, so the whole
 transfer writes nothing and answers 500, which is the exact failure
-`_taken_isbns` exists to prevent by another route. The incoming ISBN is
+the hidden ISBN refusal exists to prevent by another route. The incoming ISBN is
 dropped instead, silently, and that is the cheaper loss.
 
 **Written down anyway, because five statements of this mechanism were made
@@ -11955,9 +11957,10 @@ in `TestOneStrayByteDoesNotDecideTheEncodingOfTheWholeFile`.
 
 ## The duplicate 409 withholds the id, and does not hide which case it was
 
-`_conflict_detail` returns a bare string when the holder is another member's private book and
-an object carrying `book_id` otherwise, so a caller can tell the two apart by the shape of
-the body. The docstring claimed the opposite and the code was never trying to do it: the 409
+`_refuse` raises a bare string when the holder is another member's private book, or when two
+Books tie, and an object carrying `book_id` when one Book the caller can see holds it (only a
+`Seen` answer from `recognition` names a Book), so a caller can tell the cases apart by the
+shape of the body. The docstring claimed the opposite and the code was never trying to do it: the 409
 itself says the ISBN is held by some row whatever the body carries, and the only way to stop
 it saying so is to create the book and break the unique index. So the promise is the narrow
 one, the id, and `docs/api.md` has stated it correctly all along.
@@ -14961,6 +14964,11 @@ only match key: making an identifier answer 409 would need a partial unique inde
 whole table and would turn a second import of one library into a refusal, where today it is
 a row `/duplicates` offers. Showing one is a page folder this work does not own and a
 product decision about what a member does with an ASIN; it is a ticket.
+
+**Superseded 2026-10-17 for the ASIN**, by "An ASIN refuses an add with 409, through the
+shelf" below. No unique index is needed, because the refusal is the shelf's rather than the
+table's, and a second import of one library adding every book again is the defect it stops. A
+Google volume id still matches nothing.
 
 **Withheld from `PublicBookOut`.** An ASIN and a volume id name a vendor's edition record,
 not an access point another institution resolves, so a published catalogue gains nothing by
@@ -18491,7 +18499,7 @@ harmful column unchanged.
 supersedes the earlier decision that the whole fold was the right widening.
 
 **Refused: stripping a leading article.** `The Hobbit` and `Hobbit` stay two keys here, which
-is the difference `MarcIndex` relies on: the stricter index has a credit to tell them apart
+is the difference `recognition.Source.CATALOGUE` relies on: the stricter ladder has a credit to tell them apart
 and this one does not.
 
 **Unchanged: author blindness**, by the owner's instruction of 2026-09-05. That instruction is
@@ -19190,6 +19198,10 @@ was what it **excluded**, the transitions, and nothing mechanical would have hel
 what the type level route took is the closed state union: a total table keyed on it in the hook
 and another in the component, in place of comparisons at each site. That closes a live defect a
 module would not have, and it costs no new file, no move and no import.
+
+**Superseded 2026-10-17**, by "The scan queue's rules live in a pure module, whose interface
+is an event" below. What survives is the closed state union and the total tables keyed on it,
+which the module carries unchanged.
 
 ## A row names whose secret its door takes, not whether it is metered
 
@@ -21893,7 +21905,9 @@ or fingerprint runs before the queue adds anything.
   tool rewrites the file's metadata, which is the cardinality `digital_references` already has.
 - **A report replaces it with the rest of the sighting**, so a report without one clears it. A
   row is one client's one look; keeping an old digest beside a new size would describe a file no
-  client saw.
+  client saw. **Superseded 2026-10-17**, by "A look at a file fills what is missing and never
+  replaces a different fingerprint" below: a root is only a folder name, so a replacing report
+  could put one member's file's fingerprint on another member's row.
 - **Either key matches.** A location is what a folder pick knows for certain; a digest survives a
   move or a rename and is all a device sends. A match on either is a holder, and the answer says
   which matched.
@@ -21911,7 +21925,8 @@ or fingerprint runs before the queue adds anything.
   before the landing rule, is offered as its own copy and is neither written onto that book nor
   made a second book by itself. Owner's ruling, 2026-10-15.
 - **A merge keeps a repeat's fingerprint** when the surviving reference has none, because no
-  server can compute one again.
+  server can compute one again. **Superseded 2026-10-17**, by the same entry: a merge's repeat
+  is one more look, and a survivor with none takes the loser's whole fingerprint.
 - **A digest is a client claim**, like every column on the reference: any member may put any
   digest on a public book's reference, which would make other members' later picks of that file
   a sighting there. That is within the shared shelf, where any member may edit a public book.
@@ -22302,8 +22317,8 @@ requests: Calibre rewrites one format when it embeds metadata, so the first file
 held book new. A holder the file may land on wins over one it may not.
 
 A book's references are sent one after another, and the server counts after inserting under one
-guard (SQLite's single writer; a transaction scoped advisory lock on Postgres), because a count
-taken before the insert let two concurrent reports both take a book's last place.
+guard (SQLite's single writer; a lock on the Book's row on Postgres, `database.hold_book_ceilings`),
+because a count taken before the insert let two concurrent reports both take a book's last place.
 
 An index the add page cannot read leaves an ordinary folder, read file by file, with a notice:
 the member is likely to pick the live library, and a structurally torn index is refused rather
@@ -22371,6 +22386,12 @@ an edition, and two Books may honestly carry one, a copy and its original. A
 Calibre uuid names one record in one library for that record's life, so a
 second add carrying it is the same record arriving again.
 
+**Amended 2026-10-17** by "An ASIN refuses an add with 409, through the shelf" below: an
+ASIN is now a match key at the add as well. The copy and its original this paragraph
+protects are answered by the tie rule: copies in one group answer with the lowest id, any
+other pair answers 409 naming neither, and a copy made by `POST /api/books/{id}/copies`
+carries no identifier anyway.
+
 **Matched through the Shelf, not across the table**, which is the opposite of
 the ISBN walk. The ISBN is unique across `books`, so a hidden holder is a clash
 the insert hits anyway. Nothing makes a uuid unique, so refusing on a hidden
@@ -22410,3 +22431,358 @@ their subjects, would have answered `none`: three docstring commits, a refactor 
 **What it cannot see**: a change shipped from outside those paths, such as the image's start
 command or a static file under `frontend/public`, and whether a line says what its commit
 changed, which the correctness reviewer judges.
+
+## What one look at a file may write lives in one module
+
+`backend/file_references.py` owns every write to a file reference's fingerprint, its
+confirmation and its miss flag: the per reference report, a re-picked folder's sweep, the
+merge's absorb of a repeat, the miss, the forget, the per Book ceiling, the held elsewhere
+refusal, and the three holder questions (batched by location or digest, the Books carrying one
+digest, whether one Book carries a digest). `routers/books.py` keeps the routes, their
+docstrings, the commit, the two 409s and the reference listings. KOReader sync asks the module
+which Books carry a digest and keeps its own tie rule: two or more leave the document in the
+inbox.
+
+**A concept rather than the split by resource ADR 0008 refuses**: three writers decided what a
+look may write under three rules, and they now ask one (`file_references._settle`). A caller
+stops knowing the ceiling, the lock, and which columns a look touches.
+
+**No guard.** The risk is an honest author writing a fourth fingerprint writer outside the
+module. A check would be an ast scan for assignments to six columns, a text guard over an open
+set of spellings (`setattr`, a Core update, a bulk `update()`), which this repository moves away
+from. The module boundary and its docstring are the answer. `backup.restore` stays outside on
+purpose, since a restore inserts an archive verbatim and is not a look at anything.
+
+## A look at a file fills what is missing and never replaces a different fingerprint
+
+Owner's ruling, 2026-10-17, reversing the replace rule in "A file is recognised by its location
+or by KOReader's fingerprint, asked before the add".
+
+- **On every path**: the per reference report, a re-picked folder's sweep and a merge's repeat.
+  Size, modification time and digest are written together, and only where every half already
+  stored is the same as the one sent, so a row with no fingerprint takes a look's whole one and
+  a report without a digest keeps the stored one. A root is only a folder name, two members'
+  folders can share it and a path beneath it, and a replacing report put one member's file's
+  fingerprint on the other's row, where the sweep had already refused to.
+- **A merge's repeat is one more look at the location.** A survivor with no fingerprint takes
+  the loser's whole one, size, time and digest together, where it used to take the digest only
+  when size and time matched; a survivor whose fingerprint differs keeps its own.
+- **`root_confirmed` only rises.** A bare filename report of a location a directory pick
+  corroborated is a weaker look, not evidence that the path stopped being one, so no write
+  lowers it.
+
+## A location belongs to one Book among those a member can see
+
+Owner's ruling, 2026-10-17. The report route refuses a **new** location that another Book the
+caller can see already holds: 409, `code` `file_held_elsewhere`, `book_id` the lowest id holder.
+
+- **A hidden holder answers as no Book**, and the report goes ahead. A refusal would confirm that
+  another member privately holds that exact file, which the holder lookup already refuses to say.
+  The Calibre uuid check makes the same choice for the same reason. Trashed Books are off the
+  shelf and hold nothing.
+- **By location, not by digest.** The same bytes at another path are a second copy a member may
+  keep; KOReader sync's tie rule already handles two Books carrying one digest.
+- **Existing rows are left alone**, as the ceiling binds a new location only, and there is no
+  migration. A location two Books held before the refusal is still re-confirmed on either:
+  `TestALocationBelongsToOneBookAMemberCanSee::test_a_location_two_books_already_hold_can_still_be_re_confirmed`.
+- **Not "one location is one file"**, which is false beside the root rule: two members' folders
+  can share a root name and a path beneath it while naming different files.
+- **Two concurrent reports of one new location onto two different Books both pass.** The ceiling
+  lock is per Book, so nothing serialises them. Not closed: the client asks the holder lookup
+  first and writes one at a time, and closing it needs a lock keyed on the location.
+- **No server format landing check** (owner, 2026-10-17): the server cannot know a file's kind
+  without a second copy of the client's extension table, and a merge carries references whatever
+  the keeper's format.
+
+## The ceiling's 409 carries a code too
+
+`reference_ceiling`, beside `file_held_elsewhere`, so a client reads which refusal it met rather
+than the status. The owner's ruling settled the behaviour and happened to spell one code with
+hyphens; the lead ruled on 2026-10-17 to spell both with underscores, as `not_lendable` and
+`digital_copy` are on the loan routes and every other `code` in the API is. The Settings card
+counts `atCeiling` on the first and `already` on the second; any other 409 is listed as a
+failure with its reason.
+
+**Held across the trees by a backend test, not by the schema.**
+`tests/routers/test_books_digital_references.py::TestTheSettingsCardReadsTheCodesTheRouteSends`
+reads the card's source for each code the route sends, as a quoted literal. Declaring the 409
+with a `Literal` code would have made a respelling a `typecheck` failure, one rung higher, and
+was refused: *The schema declares the 401, 403 and 404 a route's code builds, and no other
+refusal* keeps 400, 409 and 429 undeclared everywhere for uniformity, and no operation in the
+schema declares a 409 today. Declaring one here is a decision about the whole error surface.
+It is the owner's to reverse, and the test is replaced by a type the day it is.
+
+## A merge holds the keeper's ceilings
+
+`database.hold_book_ceilings` locks one Book's row, `FOR NO KEY UPDATE`, for every table with a
+per Book ceiling. The file reference report, the heading writer and a MARC import's link writer
+take it before they count, and `folding.fold` takes it for the keeper before anything reads what
+the keeper carries, then expires the keeper so every count is read under it.
+
+- **A row lock, not an advisory lock.** An advisory lock takes an entry in Postgres's shared lock
+  table, and a MARC import holds one Book's lock for every Book it touches until its single
+  commit. Measured on Postgres 18.6 at the defaults (`max_locks_per_transaction` 64,
+  `max_connections` 100), one transaction: advisory locks failed with "out of shared memory" at
+  14,912; row locks on 20,000 Books (`marc.MAX_RECORDS`) all held, with 19 entries in `pg_locks`
+  for the session, in 17.97s. The failure lies above 64 times 100 because Postgres sizes the
+  table over every backend slot, not client connections alone, and lets it grow into spare
+  shared memory. The arm that holds this checks that holding fifty Books takes no more
+  `pg_locks` entries than holding one. `FOR NO KEY UPDATE` is the weakest row mode that
+  conflicts with itself, and it does not conflict with the key share lock a child row's insert
+  takes, so a holder still inserts under it.
+- **One lock for every capped table, not one per table**, because a merge carries several in one
+  transaction.
+- **Each writer re-reads after the lock**: the heading writer and the link writer flush, so rows
+  an earlier call in the transaction added are counted, then refresh the Book's collection.
+- **The heading writer and the link writer take the lock only when they would insert a row.**
+  `FOR NO KEY UPDATE` conflicts with the lock every `UPDATE books` takes, so a held Book's edits,
+  trash, ownership changes and cover writes wait for the holder's commit, which for a MARC import
+  is the end of the file. Taken whenever the input was non empty, a re-import adding nothing held
+  every matched Book carrying a heading or a link: measured against Postgres 18.6 with a 500ms
+  lock timeout, an edit of a Book whose link writer added nothing timed out (55P03), and an
+  import (links on X, then Y) against a bulk edit (Y, then X) deadlocked (40P01). Each writer
+  now judges from the Book's loaded rows whether a key is missing and there is room, and returns
+  before the lock otherwise.
+- **Why that check before the lock is safe.** It reads without the lock and may be stale, and
+  stale it errs one way. A row it believes stored that another transaction deleted, or a ceiling
+  it believes reached that a delete freed, makes the writer add less, the same outcome as running
+  just before that delete. A row committed since the load makes it believe a key is missing when
+  it is not; it then takes the lock, re-reads and adds nothing. No insert happens on the unlocked
+  path, and every insert on the locked path follows the lock and the re-read. A caption or kind
+  fill adds no row and takes no lock.
+- **The identifier writer takes none**: its one caller, `_create_book`, writes onto a Book its
+  own transaction created, which no other transaction can see.
+- **Postgres only.** SQLite serialises from a transaction's first write, which covers a writer
+  whose count follows its own insert (the report) and not one that counts first (the merge, the
+  heading and link writers). The gap is open on SQLite. Those race tests are one module that
+  skips itself there, `tests/test_database_ceilings_on_a_real_server.py`, as the TLS and error
+  detail files do, because the coverage register refuses a marked skip on the default run; the
+  report's race runs on both engines from `test_folding.py`.
+- **An import and a merge over the same Books can deadlock, and Postgres fails one of them.** The
+  import holds Book X once it has added a row to it; a merge keeping K with loser X holds K and
+  waits on X to delete it; the import then reaches a record matching K. A consistent lock order
+  is the usual answer and is not available here: the import takes its Books in record order, one
+  at a time, and cannot know them in advance without reading the whole file's matches first. The
+  same cycle existed before this lock wherever both wrote the keeper's own row. Not measured.
+  Nothing is half written: the failed side rolls back whole. Left open; a retry of the merge on a
+  deadlock error is the cheap close. The same holds for an import against a bulk edit, for the
+  Books the import adds a row to.
+
+## Which existing Book a record is has one module
+
+Owner's ruling, 2026-10-17. `backend/recognition.py` answers which Book on one member's shelf a
+record is, over `identity.py`, which stays pure. It owns, per source kind, the key ladder, the
+tie rule, which rows count (the Shelf, the trash view, the whole table) and the ISBN forms. One
+answer shape: `Seen` (one visible Book), `Unknown`, `Tied` (two or more visible Books the tie
+rule does not settle), `InTrash` (only Books in the member's trash view hold the ISBN), `Hidden`
+(a Book the member cannot see holds the ISBN; it carries nothing). The CSV, OPDS and MARC
+importers, the Readwise pull and the add door ask it; each maps the answer to its own tally.
+Same split as `authors.py` under `authorship.py`.
+
+**Why a module rather than a fix per site.** The importers held two index classes with a first
+wins rule and a raw string ISBN compare, Readwise a third with a no answer rule, and the two
+disagreed about copies with no decision saying they should. Each new key (the Calibre uuid was
+the last) cost a census of the sites.
+
+**Sites that stay outside it**: `routers/books.py::_duplicate_key`, the duplicates page's
+grouping key, which answers no record; KOReader sync's one holder rule and `find_file_holders`,
+which key on a file rather than a record; and the docstring of migration `e6c2a9d41f73`, which
+names the function the add door used to call, because a migration records the code it was
+written against.
+
+## A tie inside one copy group takes the lowest id; any other tie is no answer
+
+Owner's ruling, 2026-10-17, for the CSV, OPDS and MARC imports. Rows sharing one non null
+`copy_group` token are deliberate copies (minted only by `POST /api/books/{id}/copies`), so a
+status landing on the lowest id is right. Any other tie, two Books sharing a title in a reading
+history or two editions sharing a work key in a catalogue, is listed as ambiguous
+(`ImportResultOut.ambiguous` and `ambiguous_titles`, shown on the CSV and MARC result panels)
+and nothing is created, `create_missing` or not. This replaces the first wins rule the importers
+carried, under which a status, tags and a review landed on whichever of two different Books had
+the lower id.
+
+**A tie on the identifier is final**: the title is not asked. Two holders of one ISBN are copies
+or rows left alone from before canonicalisation, and either way a stronger claim than any title.
+
+**Readwise is not changed.** "A Readwise book is matched by ASIN or title and first author, and
+only when one Book answers" stands: the ruling named the three imports, and a highlight belongs
+to the copy somebody read, so a copy and its original still wait.
+
+## A tie at the add door refuses without naming a Book
+
+A `Tied` answer at the add door (two or more visible Books outside one copy group carrying the
+uuid, the ASIN or the ISBN) answers 409 with the bare message, the same body shape as a hidden
+holder. **The id is acted on, not only shown**: the Calibre import lands a record's files on a
+copy of the Book the 409 names, and the scan page offers to open it and to add a copy of it, so
+naming the lowest id would pick between two different Books. Reachable live: the Kindle defect
+left ASIN pairs that are left alone, and an ISBN-10 row beside its ISBN-13 is the ISBN rung's
+pair. A tie inside one copy group still names the lowest id, because `recognition` answers it
+`Seen`.
+
+What a client does with the bare 409: the Calibre import and the scan page's rapid queue record
+the row as a failure with status 409, which the import card words as "already in the
+catalogue", and land no file; the single scan shows the message without the open and copy
+presses.
+
+## An import row whose ISBN only the trash view holds is listed "in the trash"
+
+Owner's ruling, 2026-10-17. Nothing is written and the row is counted in
+`ImportResultOut.in_trash` and named in `in_trash_titles` (capped at `MAX_UNMATCHED_REPORTED`),
+where it used to be counted in `skipped` as though a stranger held the ISBN. The title is named
+because the member can already see that Book in their trash.
+
+**Not purging is the build's reason, not the owner's ruling**: the trash view holds other
+members' public Books too, and a bulk import that purged would destroy one.
+
+**Scope, narrower than the ruling reads**: the CSV, OPDS and MARC importers. The Calibre library
+import and the store imports (Kindle, Play Books, Moon+ Reader) run in the browser and post each
+Book to `POST /api/books/scan`, the add door, where `InTrash` purges every holder in the trash
+view, another member's trashed public Book included, and creates, as the door always has. Giving
+the client importers "in the trash" too changes the add door's contract (a refusal `writeBooks`
+counts, rather than a purge), so it is the owner's call.
+
+**`MarcPreviewOut` gains `in_trash` and `ambiguous`**, so `readable` less the four counts is the
+most the import creates (an upper bound: two identical records preview as two additions and the
+import creates one and matches the other). Without them a tie or a trash holder would be
+promised as an addition.
+
+## Hidden outranks the trash, and the disclosure that costs is accepted
+
+Where a Book the member cannot see also holds the ISBN, the answer is `Hidden` and an import row
+is counted in `skipped`. `InTrash` promises every holder is one the member could restore or
+purge, which is what lets the add door decide a purge safely: with a hidden co-holder a purge
+would not free the number, and the insert would raise.
+
+**The price, measured by the security review.** An ISBN held both by a Book in the caller's
+trash view and by a Book they cannot see answers `Hidden`; without the hidden row it answers
+`InTrash`. The CSV and OPDS imports report the two differently (`skipped` against `in_trash`
+with `create_missing`, `unmatched_titles` against `in_trash_titles` without), and so does the
+MARC preview (`blocked` against `in_trash`). So a member who sees ISBN I in their trash learns
+whether somebody else holds a private Book on I, through a channel that writes nothing and
+answers up to `marc.MAX_RECORDS` ISBNs per rate limited preview.
+
+**Accepted.** The add door already gave the same bit (a hidden live holder kept its bare 409 and
+no purge; without it, purge and 201), at the price of a create and a purge per ISBN. The
+alternative the review offered, `InTrash` carrying a flag only the door reads, closes the bulk
+channel and leaves the door's; recorded so it is not rediscovered as new, and open to the owner
+if the channel's price matters.
+
+## ISBNs compare by `isbn.parse`
+
+Every reader produces a canonical ISBN-13. A row stored before canonicalisation, or restored
+from an archive that held one, keeps its ISBN-10, and the importers compared raw strings, so such
+a row was never matched and was created again beside itself. `recognition` keys both sides
+through `isbn.parse`, falling back to the stored string where `parse` refuses it. The same
+applies off the shelf: a hidden ISBN-10 now refuses a row carrying its ISBN-13, where it used to
+let the import mint a second spelling of somebody's private Book's number.
+
+## The add door finds an ISBN stored with hyphens or a lower case x
+
+The add door's read for one record compared exact spellings (the canonical 13 and an upper case
+X 10), so a stored `978-0-441-01359-3` or `080442957x` was matched by an import and missed by
+the door, which then created a second Book. Now the narrowed ISBN read is one scan of
+`books.isbn` with a superset ILIKE (each form's characters in order, `%` between), keyed in
+Python through the same `isbn.parse` the full index uses; the shelf and trash reads then ask
+those ids by primary key, and are skipped when nothing holds the ISBN.
+
+**The cost, measured once** (SQLite in memory, `books` with a unique index on `isbn`, a fifth of
+rows null, best of 20, one read):
+
+| rows | exact IN on the index | the superset ILIKE scan |
+|---|---|---|
+| 2,000 | 0.011 ms | 1.26 ms |
+| 10,000 | 0.012 ms | 5.38 ms |
+| 50,000 | 0.007 ms | 25.98 ms |
+
+One scan per add carrying an ISBN, where three exact reads were. Accepted against the
+alternatives: an expression index cannot express `isbn.normalise` (it drops every non ASCII
+alphanumeric character) on SQLite, and a length guard that keeps the index for plain rows misses
+a hyphenated ISBN-10, which is thirteen characters. A Library of a few thousand Books pays about
+a millisecond or two per add; a nine hundred book Calibre import at ten thousand Books, about
+five seconds in all.
+
+## An ASIN refuses an add with 409, through the shelf
+
+Owner's ruling, 2026-10-17. An add (`POST /api/books`, `POST /api/books/scan`) carrying an ASIN
+that a Book the member can see already carries answers 409 naming that Book, with the message
+"Book from this store record already in catalog". Two Books outside one copy group carrying it
+answer 409 naming neither. A second Kindle import used to add every book again: its entries
+carry an ASIN and never an ISBN, and the add refused only on an ISBN or a Calibre uuid.
+
+**Through the shelf, as the Calibre uuid is.** Nothing makes an identifier unique across the
+table, so a Book the member cannot see, or one in the trash, answers as no Book and the add goes
+ahead. Refusing on a hidden holder would only tell a member somebody else holds that edition.
+
+**The add door asks `recognition` three times**: the Calibre uuid, the store identifier, then
+the ISBN across the whole table. Each read is narrowed to the record's own keys, and a record
+carrying no key for a ladder reads nothing for it. `_refuse(message, book_id)` raises the 409,
+and only a `Seen` answer passes an id. `InTrash` is the purge set: every holder is in the
+member's trash view, and a hidden holder outranks it, so somebody else's trashed private Book
+keeps its 409 and the member's own trashed row is not purged beside it. A visible live holder is
+named before a hidden one.
+
+**The narrowed identifier read compares exact spellings** (as sent, upper cased, lower cased), so
+`ix_book_identifiers_scheme_value` serves it; an ASIN stored in mixed case is the one it misses.
+A case folding filter would have scanned the table on every add of a nine hundred book import.
+
+**A Google volume id is not asked.** The ruling named the ASIN. A Play Books Takeout has the same
+defect (its entries carry a volume id and no ISBN, so a second import adds every book again);
+extending `recognition.Source.STORE` to `google_books` is one tuple member, and most of
+`tests/routers/test_books_identifier_backfill.py` posts several Books sharing one volume id, so
+those fixtures would move with it. Open for the owner.
+
+**A Calibre record carrying an ASIN lands its files on the Kindle imported Book.** The Calibre
+import's records carry every identifier Calibre holds, an Amazon one included, so a record whose
+ASIN a Kindle import already brought in answers 409 naming that Book (when no uuid or ISBN
+holder answers first), and the import then lands the record's files on the copy of it the
+landing rule admits. Before, the record made a second Book. Judged right: the ASIN names the
+edition, and a Kindle book and the Calibre copy of the same purchase are one Book.
+
+## An unreachable catalogue on a barcode is its own queue state
+
+A rapid intake barcode whose ISBN lookup throws anything but a 404 becomes `not-reached`: no
+draft, askable, so `needsALookup` counts it and the paced lookup asks again; a retry that 404s
+lands on `not-found`, one that answers lands on `found`. A tenth state rather than a reuse:
+`derived` would say "from the file name" and `stated` "as the file describes it", both false of
+a barcode, and `ROW_LINE` and `QUEUE_STATES` are total, so the new state is a compile error until
+both say what it means.
+
+The empty title rule sits on the batch's `ready` filter (a draft with title "" is not offered),
+not on the not found row, so every source of a titleless draft is covered by one predicate. The
+not found row keeps its blank draft and carries no `no-title` reason: that reason's only
+sentence is `file.noTitle`, "This file carries no title", which is false of a barcode, and the
+row already reads "Not found: {isbn}".
+
+Single book flow: a non 404 throw leaves no draft and exposes `lookupError`, `retryLookup` (a
+refetch, since the key does not change) and `enterByHand`, the last because the server's 503
+sentence offers hand entry. The `NO_SOURCES` 409 now shows its own sentence there too, where it
+used to be hidden behind "No details found", which reported a fact nobody had asked about.
+
+## The scan queue's rules live in a pure module, whose interface is an event
+
+`ScanPage/queue.ts` holds what a rapid intake row is and every rule over it; `useRapidIntake`
+keeps the reads, the paced lookup, the holder lookup and the batch's landing, and hands each
+outcome to `queueAfter(entries, event)`. The owner chose it on 2026-10-17, over the refusal it
+replaces ("The scan queue keeps no module, and the reason is a measurement").
+
+**What changed is what the module was defined by.** The refused proposal was a vocabulary module
+that excluded the transitions, so the hook kept every one and nothing mechanical held the
+exclusion. This one holds the transitions themselves: the hook assigns no state at all (state
+assignment sites in the hook, 26 before the move, 0 after, by grep), and a transition is tested
+by naming its event, with no React and no request. Before it, every rule was reachable only
+through a rendered hook, a stubbed API and real file bytes.
+
+**A throw is read where it is thrown.** The event carries `unknown` for a 404 and a reason for a
+refusal, because what a throw means belongs beside the request (`nobodyKnows`,
+`reasonForError`), and the module stays free of the error classes.
+
+**The pace is the module's too.** The fallback pace constants sit in `queue.ts` beside the
+figures that quote them in minutes, and the hook imports the interval it waits between asks.
+
+**What the module does not own, on purpose.** The landing orchestration in `addAll` and
+`addOne`, `theIsbnWasRead` with it, which the frontend file landing replaces next, and the row
+keys taken from a `File`. Where an event needs the state a row was asked from (`not-answered`),
+the hook passes it, since the row is `searching` by the time the answer lands.
+
+**Left open**: `ScannedEntry` is still one shape, and which optional field exists in which state
+is said only in prose. The union of state shaped variants is its own ticket.

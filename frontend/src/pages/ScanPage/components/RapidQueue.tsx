@@ -4,13 +4,13 @@ import { useTranslation, type MessageKey, type Translate } from "../../../i18n";
 import type { BookMatch } from "../../../api/generated/model";
 import type { AudioFailure } from "../../../lib/audiobook";
 import type { FileFailure } from "../../../lib/fileReaders";
-import { isBeingDecided } from "../hooks";
+import { isBeingDecided } from "../queue";
 import type {
   NamedScanReason,
   QueueFigures,
   ScanReason,
   ScannedEntry,
-} from "../hooks";
+} from "../queue";
 import type { BulkProgress } from "../../../lib/bulkWrite";
 
 /**
@@ -101,10 +101,10 @@ function reasonText(reason: ScanReason, t: Translate): string {
  * **A total `Record` keyed on `ScannedEntry["state"]` rather than a run of
  * comparisons**, which is `FILE_FAILURES`' rule and `OFFERED_AGAIN`'s, and the
  * defect it closes was live: the run of comparisons this replaced covered
- * exactly the states that existed and had no last arm, so a ninth state
+ * exactly the states that existed and had no last arm, so a state added later
  * rendered a row on screen with nothing in it. Nothing was red, because a row
  * with no line is a row, and no test asked about a state nobody had added yet.
- * A ninth state is now a compile error here and at `QUEUE_STATES` in the hook,
+ * A new state is now a compile error here and at `QUEUE_STATES` in the hook,
  * which are the two places its author has to say what it means.
  *
  * **`derived` and `choosing` share one arm**, and that is the rule rather than
@@ -143,6 +143,12 @@ const ROW_LINE: Record<
   "not-found": (entry, t) => (
     <span className="text-amber-700 dark:text-amber-300">
       {t("rapid.notFound", { isbn: entry.isbn })}
+    </span>
+  ),
+  // Not "not found": nobody was asked, and the lookup button offers it again.
+  "not-reached": (entry, t) => (
+    <span className="text-amber-700 dark:text-amber-300">
+      {t("rapid.notReached", { isbn: entry.isbn })}
     </span>
   ),
   // A book, not a failure: it carries what its name said and the batch adds it
@@ -329,6 +335,7 @@ export default function RapidQueue({
     deciding,
     keptForNow,
     emptyAnswers,
+    ready,
     paceMinutes,
     keptPaceMinutes,
   } = figures;
@@ -534,13 +541,13 @@ export default function RapidQueue({
               </div>
             )}
 
-            {/* **The subjects the file stated, and the only place they can be
-                taken off.** Nothing here is written until "Add all", and no
-                route clears `books.categories` afterwards: enrichment can
-                replace the list and never empty it, and `BookDetailsUpdate`
-                has no such field, so the remedy after the batch is deleting
-                the book. That is the same argument the grouped audio block
-                above makes for the same moment, one field over.
+            {/* **The subjects the file stated, and the only place on any page
+                they can be taken off.** Nothing here is written until "Add
+                all", and no page clears `books.categories` afterwards:
+                `BookDetailsUpdate` takes the field but nothing here sends it,
+                so the remedy after the batch is the API by hand. That is the
+                same argument the grouped audio block above makes for the same
+                moment, one field over.
 
                 **Folded away behind a summary rather than always open**, the
                 grouping block's shape, because a folder pick is several
@@ -820,10 +827,13 @@ export default function RapidQueue({
         >
           {t("rapid.discard")}
         </button>
+        {/* Held while nothing in the queue is one the batch would take, as it
+            is while a run is busy: a live button over only not found rows
+            did nothing on a press and said nothing about why. */}
         <button
           type="button"
           onClick={onAddAll}
-          disabled={busy}
+          disabled={busy || ready === 0}
           className="flex-1 py-2.5 rounded-xl bg-accent-fill text-on-accent text-sm font-semibold hover:bg-accent-fill-hover disabled:opacity-50"
         >
           {isAdding ? t("rapid.adding") : t("rapid.addAll")}

@@ -32,10 +32,11 @@ from sqlalchemy import Table
 from sqlalchemy.orm import Session
 
 import custom_fields
+import file_references
 import lending
 import reading
 from book_columns import FILLABLE_FROM_ANOTHER_ROW
-from database import Base
+from database import Base, hold_book_ceilings
 from enums import BookIdentifierScheme, ClassificationScheme
 from logvalues import clipped
 from models import (
@@ -240,27 +241,6 @@ def _absorb_heading(survivor: Classification, losing: Classification) -> None:
         survivor.kind = losing.kind
 
 
-def _absorb_digest(survivor: DigitalReference, losing: DigitalReference) -> None:
-    """A repeat of the same file keeps its fingerprint if the survivor has none.
-
-    Nothing regenerates one on the server: it is computed in a browser holding
-    the file, so dropping the loser's would leave the file unrecognised by its
-    bytes until somebody picks it again.
-
-    **Only where the two looks saw the same size and modification time.** A
-    row is one client's one look, the rule a report keeps by replacing it
-    whole, so a digest from a look at a file that has since changed beside the
-    survivor's size would describe a file nobody saw.
-    """
-    if (
-        survivor.partial_md5 is None
-        and losing.partial_md5 is not None
-        and survivor.size_bytes == losing.size_bytes
-        and survivor.file_modified_at == losing.file_modified_at
-    ):
-        survivor.partial_md5 = losing.partial_md5
-
-
 def _carry_highlights(fold: _Fold) -> None:
     """Every highlight travels, and arrives private.
 
@@ -373,8 +353,8 @@ TRANSFERS: Final[tuple[_Transfer, ...]] = (
     # `uq_digital_references_location` would refuse the flush where the keeper
     # and a loser were catalogued from the same file, which is the **likely**
     # case rather than an edge: two rows for one Book are commonly two imports
-    # of one library. A repeat is dropped, keeping only a fingerprint the
-    # survivor lacks: see `_absorb_digest`.
+    # of one library. A repeat is dropped after it gives the survivor what one
+    # more look at that location may write: see `file_references.absorb`.
     _Transfer(
         _table(DigitalReference.__tablename__),
         _deduplicated(
@@ -382,7 +362,7 @@ TRANSFERS: Final[tuple[_Transfer, ...]] = (
             held=lambda book: book.digital_references,
             key=lambda row: (row.root_label, row.relative_path),
             ceiling=MAX_DIGITAL_REFERENCES_PER_BOOK,
-            absorb=_absorb_digest,
+            absorb=file_references.absorb,
         ),
     ),
     # **Only an exact repeat is a duplicate here**, which is the difference from
@@ -524,7 +504,19 @@ def fold(db: Session, keeper: Book, losers: Sequence[Book]) -> None:
     Flushed between the absorb and the transfers, and again at the end, because
     every transfer is written to read the database as it stands rather than what
     a caller has already repointed.
+
+    **The keeper's ceilings are held first, before anything reads what it
+    already carries.** A capped transfer counts the keeper's rows and then
+    moves the losers' in, so a writer adding to the keeper between the two
+    lands it past the ceiling: a file reference report, an enrichment's
+    headings or an import's links, each of which takes the same lock. The keeper is expired after
+    it, so every count is read under the lock rather than from a collection a
+    caller loaded before. That discards nothing only while this is the
+    transaction's first write to the keeper, which the one caller keeps.
     """
+    hold_book_ceilings(db, keeper.id)
+    db.expire(keeper)
+
     absorbed_isbn = next((loser.isbn for loser in losers if loser.isbn), None)
     if keeper.isbn is None and absorbed_isbn is not None:
         for loser in losers:

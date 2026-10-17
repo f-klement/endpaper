@@ -47,6 +47,30 @@ class ImportResultOut(BaseModel):
     # Capped by the router: a large export with nothing matching would
     # otherwise return more than it was given.
     unmatched_titles: list[str] = []
+    in_trash: int = Field(
+        default=0,
+        ge=0,
+        description=(
+            "Rows whose ISBN only books in the caller's trash hold. Nothing is "
+            "written for them: restore the book, or empty it from the trash, "
+            "and import again"
+        ),
+    )
+    # Capped like `unmatched_titles`. Named because the caller can already see
+    # these books in their own trash.
+    in_trash_titles: list[str] = []
+    ambiguous: int = Field(
+        default=0,
+        ge=0,
+        description=(
+            "Rows two or more books on the caller's shelf answer, which are not "
+            "copies of one book. Nothing is written for them rather than "
+            "guessing between the books"
+        ),
+    )
+    # Capped like `unmatched_titles`. Every book that answered one is on the
+    # caller's shelf, and the title is the row's own.
+    ambiguous_titles: list[str] = []
 
 
 class ImportPreviewRow(BaseModel):
@@ -169,12 +193,16 @@ class MarcPreviewOut(BaseModel):
 
     **It under-counts in one shape, which narrows the oracle rather than
     widening it.** A record whose ISBN belongs to an invisible Book but whose
-    title and author match a visible one is matched, not blocked:
-    `MarcIndex.find` resolves it on the identity key and `isbn_is_taken` is
-    never consulted. So a hit here means the ISBN is held **and** nothing on
-    this shelf matches the record, which is less than "this ISBN exists". The
-    import agrees, and drops the incoming ISBN rather than writing it: see
-    `importing._MARC_GAP_FIELDS` for why that is what stops a 500.
+    title and author match a visible one is matched, not blocked: `recognition`
+    asks the shelf on both keys before it asks the whole table. So a hit here
+    means the ISBN is held **and** nothing on this shelf matches the record,
+    which is less than "this ISBN exists". The import agrees, and drops the
+    incoming ISBN rather than writing it: see `importing._MARC_GAP_FIELDS` for
+    why that is what stops a 500.
+
+    **`in_trash` and `ambiguous` are the import's two other ways to write
+    nothing**, so `readable` less the four counts is the most the import
+    creates.
     """
 
     total_records: int = Field(ge=0, description="Records in the file")
@@ -189,6 +217,19 @@ class MarcPreviewOut(BaseModel):
         description=(
             "Records the import will refuse: their ISBN belongs to a book this "
             "member cannot see"
+        ),
+    )
+    in_trash: int = Field(
+        default=0,
+        ge=0,
+        description="Records whose ISBN only books in this member's trash hold",
+    )
+    ambiguous: int = Field(
+        default=0,
+        ge=0,
+        description=(
+            "Records two or more books on this shelf answer, which the import "
+            "leaves alone rather than guessing between"
         ),
     )
     rows: list[MarcPreviewRow] = []

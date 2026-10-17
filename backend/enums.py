@@ -543,8 +543,9 @@ class BookIdentifierScheme(StrEnum):
     #: `metadata.db`, read by `frontend/src/lib/calibre.ts`. **Not a store's
     #: name for an edition but the one key a Calibre record keeps for life**,
     #: so it is what recognises a record with no file and no ISBN when the
-    #: library is imported again: `routers/books._calibre_holder` matches on
-    #: it. An internal key, so no export carries it.
+    #: library is imported again: an add carrying one is refused where a
+    #: visible Book carries it (`recognition.Source.CALIBRE`). An internal
+    #: key, so no export carries it.
     #:
     #: **Named for the value and not `calibre`**, because the file readers say
     #: Calibre in their own code, `opf.ts` reading `calibre:series`, and

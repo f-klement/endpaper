@@ -414,7 +414,7 @@ is stored nowhere; its digest travels in an admin's backup archive with the rest
 `user_book_id`, the `title`, `author` and `asin` Readwise gave it, and `book_id`, null while
 no Book matches and the book waits on the member's account page. Keyed on `(user_id,
 user_book_id)`, private to that member by construction, and `SET NULL` when the Book is
-purged, as `kosync_documents` is. How a Book is chosen is `readwise.Index`.
+purged, as `kosync_documents` is. How a Book is chosen is `recognition.Source.HIGHLIGHTS`.
 
 **`access_requests`.** A member asking the holder of a digital copy for access, and the
 answer. `granted`, `decided_by_user_id` and `decided_at` are null while the request
@@ -566,12 +566,15 @@ overwrite on when the book's own volume id found the record. A row here
 records which volume a member's own export says they own, which is a claim rather than a
 preference.
 
-**Nothing matches on one and nothing shows one yet, which is stated rather than implied.**
-`BookOut` carries them, the archive holds them and a merge moves them; `books.isbn` stays
-the only match key, `/duplicates` still groups on a normalised title and author, and the
-published catalogue withholds them, because where a household shops is not a fact about the
-work. A row carries no member: its visibility is the book's entirely, which is what puts it
-in `BOOK_OWNED_TABLES`.
+**An add matches on an ASIN or a Calibre uuid.** An add carrying one that a Book the member
+can see already carries answers 409 rather than making a second Book, so a Kindle or Calibre
+library imported twice does not double. Only through the shelf: nothing makes an identifier
+unique, so a Book the member cannot see answers as no Book. A Google volume id matches
+nothing yet. `BookOut` carries them, the archive holds them and a merge moves them;
+`/duplicates` still groups on a normalised title and author, and the published catalogue
+withholds them, because where a household shops is not a fact about the work. A row carries
+no member: its visibility is the book's entirely, which is what puts it in
+`BOOK_OWNED_TABLES`.
 
 **`online_links`.** What a catalogue record says is online about a book: MARC `856`, a
 `url`, the record's link text in `label`, and `relation` from the second indicator
@@ -605,10 +608,13 @@ believed by every reader after it.
   browser gave the path under a directory the member picked, so going and looking is
   something somebody can do. False means the browser gave a bare filename and the root is
   the member's own guess, so the two together may name nothing. Without it the two records
-  are identical on disk.
+  are identical on disk. **It only rises**: a bare filename report of a location a pick
+  corroborated is a weaker look, not evidence the path stopped being one.
 * **Staleness is detected by a client and reported, never determined here.** A client that
-  looks and finds the file reports it, which refreshes the fingerprint and clears
-  `missing_since`; a client that looks and does not find it sets `missing_since`, once. The
+  looks and finds the file reports it, which fills in a fingerprint the row is missing and
+  clears `missing_since`. **A look never replaces a different fingerprint**, whether it
+  arrives as a report, a sweep or a merge's repeat, because two members' folders can share a
+  root name and a path beneath it; a client that looks and does not find it sets `missing_since`, once. The
   row is then **flagged and never deleted**, because a phone that cannot reach the NAS
   reports every file on the NAS missing and is telling the truth about what it can see.
   Only a member deleting the reference removes it. Koha reaches the same answer from the
@@ -638,7 +644,13 @@ believed by every reader after it.
   the widest legitimate pair lands exactly on the byte bound rather than under it. `size_bytes` is bounded at `Number.MAX_SAFE_INTEGER`, because the
   producer is a browser and a larger value did not survive the JSON that carried it.
 * `uq_digital_references_location` makes the location the identity, so re-importing a folder
-  somebody imported last month refreshes those rows instead of doubling them.
+  somebody imported last month refreshes those rows instead of doubling them. Across Books
+  the report route keeps it, so a location belongs to one Book among those a member can see:
+  a new location another Book the member can see holds is refused, and one held only by a
+  Book the member cannot see is accepted, so the refusal discloses nothing. A member whose
+  own, different file sits at a location a Book they can see already holds can only report it
+  onto that Book's row, which is why a look never replaces a fingerprint. Locations two Books
+  held before that rule stay as they are, and either Book may re-confirm its own.
 * `partial_md5` is KOReader's fingerprint of the file, computed in the browser at the pick,
   and indexed because its reader is a lookup by value across the shelf
   (`POST /api/books/file-holders`). **On the reference, not on the book**: it identifies

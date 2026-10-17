@@ -2,6 +2,52 @@
 
 ## Unreleased
 
+- **A scanned barcode no catalogue knows is no longer added with an empty title.** It stays in
+  the scan queue, marked not found, and Add all is held while nothing in the queue can be added,
+  rather than doing nothing when pressed.
+
+- **When the catalogues cannot be reached, a scanned or typed ISBN offers to try again** (and,
+  for one book, to add it by hand) instead of reporting the book as not found. The note beside
+  "Look up" on the scan queue says that such a barcode is sent to the catalogues again too.
+
+- **The Scan page's lookup notice names everything it sends to the catalogues**: an audiobook's
+  tagged title and author, and the folder name of an untagged audiobook of several files, as
+  well as file names and ISBNs.
+
+- **An import no longer counts a book you trashed as skipped.** It lists the row as in the
+  trash, so you can restore the book or empty it and import again; the CSV and MARC import
+  results name those rows, and the MARC preview no longer counts them as additions.
+
+- **An import that matches two different books no longer updates the one with the lower id.**
+  Two books sharing a title, or two editions sharing a title and author, leave the row alone,
+  and the CSV and MARC import results list such rows under their own heading; the MARC preview
+  no longer counts them as additions. Copies of one book still take the first copy.
+
+- **A book stored with an old ten digit ISBN is matched by an import carrying its thirteen digit
+  form**, instead of being added a second time. Adding a book also finds one stored with its
+  ISBN written with hyphens or a lower case x, rather than adding it twice.
+
+- **A book added again with an ASIN a Book you can see already carries is refused as a
+  duplicate**, so importing a Kindle library twice no longer doubles it. A book added again that
+  matches two different books you can see is refused without pointing at either, so the scan
+  page and the Calibre import no longer pick one of them.
+
+- **A file reference report fills in what is missing and never replaces a different
+  fingerprint** or clears a stored digest, on the report, the folder sweep and a merge alike; a
+  merged file keeps the other row's whole fingerprint when its own has none. A report no longer
+  lowers `root_confirmed`: once a folder pick corroborated a location, a later bare filename
+  report of it leaves the flag true.
+
+- **Reporting a file at a location another book you can see already holds is refused** with
+  409 and the code `file_held_elsewhere`, naming that book. The file reference ceiling's 409
+  carries the code `reference_ceiling` and now answers with `detail` as an object,
+  `{message, code}`, where it was a string, so a client reading `detail` as text has to read
+  `detail.message`.
+
+- **Merging books no longer races a file reference report, an enrichment or a MARC import on
+  Postgres**, so the kept book cannot end up past its file reference, classification or online
+  link ceiling.
+
 - **A Readwise pull that races a highlight being deleted by hand now finishes and leaves the highlight deleted,** rather than failing.
 
 - **A Readwise page listing one highlight under two books no longer fails the pull.** The

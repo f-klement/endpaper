@@ -19,6 +19,7 @@ from xml.etree import ElementTree
 import pytest
 from sqlalchemy import insert
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
 
 import decoders
 import marc_fields
@@ -26,6 +27,7 @@ import metadata
 import targets
 from catalogue import Heading
 from classifications import KIND_ORDER, add_headings, bounded_headings, kind_of
+from database import engine
 from enums import ClassificationScheme, HeadingKind
 from models import Book, Classification
 from schemas import MAX_CLASSIFICATIONS_PER_BOOK
@@ -850,6 +852,55 @@ _CLASSIFIED = (
 
 def _parsed(source: str) -> ast.Module:
     return ast.parse(textwrap.dedent(source))
+
+
+class TestTheCeilingIsCountedAsTheBookStands:
+    def test_a_heading_committed_after_the_book_was_loaded_is_counted(self, db):
+        """The Book's headings were loaded before the writer took the Book's
+        lock, and another session committed one more in between. Counted from
+        the loaded list the Book holds 7, takes one more, and lands at 9."""
+        book = Book(title="Praxiswissen Docker")
+        db.add(book)
+        db.flush()
+        for index in range(MAX_CLASSIFICATIONS_PER_BOOK - 1):
+            db.add(Classification(book=book, scheme=ClassificationScheme.DDC, number=f"{index}00"))
+        db.commit()
+
+        with Session(bind=engine, autoflush=False) as writing:
+            held = writing.get(Book, book.id)
+            assert held is not None
+            assert len(held.classifications) == MAX_CLASSIFICATIONS_PER_BOOK - 1
+            db.add(Classification(book_id=book.id, scheme=ClassificationScheme.DDC, number="990"))
+            db.commit()
+            add_headings(
+                held, [ClassificationIn(scheme=ClassificationScheme.DDC, number="991")], writing
+            )
+            writing.commit()
+
+        stored = db.query(Classification).filter(Classification.book_id == book.id).count()
+        assert stored == MAX_CLASSIFICATIONS_PER_BOOK
+
+    def test_two_calls_in_one_transaction_stay_within_the_ceiling_between_them(self, db):
+        """A MARC import adds headings to one Book once per record matching it,
+        and commits once. Re-read without what the first call added, the second
+        counts nothing and the Book takes ten."""
+        book = Book(title="Praxiswissen Docker")
+        db.add(book)
+        db.flush()
+
+        for hundreds in ("0", "5"):
+            add_headings(
+                book,
+                [
+                    ClassificationIn(scheme=ClassificationScheme.DDC, number=f"{n}{hundreds}0")
+                    for n in range(5)
+                ],
+                db,
+            )
+        db.flush()
+
+        stored = db.query(Classification).filter(Classification.book_id == book.id).count()
+        assert stored == MAX_CLASSIFICATIONS_PER_BOOK
 
 
 class TestTheCallGraphResolvesACallTheWayPythonDoes:

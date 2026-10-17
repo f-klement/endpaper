@@ -36,20 +36,21 @@ the handler.
 ## The rule that is not about performance
 
 **A row whose ISBN belongs to a Book this Member cannot see is counted as
-unmatched, and its title is never reported.** Creating it would raise on the
-unique index, and that raise is two problems at once: it aborts the whole
-transaction, so a 5000 row import silently writes nothing, and the 500 against
-200 difference is a clean oracle for "does a Book with this ISBN exist in this
-house", which is exactly what the 404-not-403 rule withholds. `skipped` counts
-it together with the rows that had no title, because separating them out would
-be the oracle again by another route.
+unmatched, and its title is never reported.** `recognition` answers it
+`Hidden`. Creating it would raise on the unique index, and that raise is two
+problems at once: it aborts the whole transaction, so a 5000 row import
+silently writes nothing, and the 500 against 200 difference is a clean oracle
+for "does a Book with this ISBN exist in this house", which is exactly what the
+404-not-403 rule withholds. `skipped` counts it together with the rows that had
+no title, because separating them out would be the oracle again by another
+route.
 """
 
 import logging
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, time
-from typing import Any, Final, NewType, Protocol
+from typing import Any, Final, NewType
 
 import annotated_types
 from sqlalchemy.orm import Session
@@ -57,68 +58,41 @@ from sqlalchemy.orm import Session
 import book_columns
 import csv_import
 import evidence
-import identity
 import marc
+import recognition
 import tags
 from catalogue import Link, Record
+from database import hold_book_ceilings
 from enums import OwnershipStatus, ReadStatus
 from models import MAX_ONLINE_LINKS_PER_BOOK, Book, Note, OnlineLink
 from reading import Reading, Records
 from schemas import ImportResultOut
 from schemas.book import BookCreate, admits_a_container
-from shelf import Shelf, whole_table_for_uniqueness
 
 logger = logging.getLogger("endpaper.importing")
 
-#: How many unmatched titles come back in the response.
+#: How many unmatched titles come back in the response, and separately how
+#: many titles found in the trash and how many two Books answered.
 #:
 #: A 5000 book export with nothing matching would otherwise return a response
 #: larger than the file that produced it.
 MAX_UNMATCHED_REPORTED = 50
 
 
-def _taken_isbns(db: Session) -> set[str]:
-    """Every ISBN in the Library, whoever can see the Book carrying it.
-
-    **One of the two named ways past a viewer, and the only one this module
-    uses.** The ISBN is unique across the whole table, so an incoming row that
-    collides with a Book this Member cannot see still collides. Filtering to the
-    visible rows would let the import write a row the database then refuses, and
-    that refusal aborts the transaction: a five thousand row file would write
-    nothing at all, with a 500, because of one Private Book somebody else owns.
-
-    **One call site, shared by both index builders.** It was two, one per
-    importer, which is two ways past the viewer where the rule is one. Counted
-    by `tests/test_shelf.py::test_the_named_ways_past_a_viewer_have_the_callers_they_claim`,
-    so adding a third is allowed and doing it quietly is not.
-
-    What the caller must not do with the answer is report a title from it: see
-    this module's docstring. Knowing an ISBN is taken is what stops the 500;
-    saying whose Book it is would be the oracle the 404-not-403 rule withholds.
-    """
-    return {
-        isbn
-        for (isbn,) in whole_table_for_uniqueness(db, Book.isbn).filter(
-            Book.isbn.isnot(None)
-        )
-    }
-
-
 @dataclass
 class _CatalogueIndex:
-    """The catalogue in memory, for the duration of one import.
+    """What a reading history import reads once rather than per row.
 
-    Three lookups happen per row and each was its own query: the Book by ISBN,
-    the Book by title, and this Member's reading status. That is fine for one
-    row and is 25,000 statements for a Goodreads export. Measured before this
-    existed: a 5000 row file cost **25,001 statements and 61 seconds**, and
-    profiling put only about 15% of that in SQLite. The rest was SQLAlchemy
-    compiling the same three queries five thousand times each. The catalogue is
-    a Library's, so holding two dicts of it is a few hundred kilobytes.
+    Three lookups happen per row and each was its own query: the Book, this
+    Member's reading status, and whether they already have a note on it. That
+    is fine for one row and is 25,000 statements for a Goodreads export.
+    Measured before this existed: a 5000 row file cost **25,001 statements and
+    61 seconds**, and profiling put only about 15% of that in SQLite. The rest
+    was SQLAlchemy compiling the same three queries five thousand times each.
 
-    **It does not make the per row cost zero, and does not claim to.** `find`
-    still issues one `db.get` for a row it matched, because that is the lookup
-    that has to return a live object rather than an id.
+    **It does not make the per row cost zero, and does not claim to.** A matched
+    row still issues one `db.get`, because that is the lookup that has to return
+    a live object rather than an id.
 
     What is measured here rather than inherited: `tests/test_importing.py`
     counts **SELECTs** and finds **one per extra matched row**. The 25,001
@@ -126,47 +100,17 @@ class _CatalogueIndex:
     included, so the two are not the same unit and no total is derived from
     them here. The claim this module makes is the slope, and the slope is one.
 
-    `taken_isbns` covers **every** Book, invisible ones included, because
-    `books.isbn` is unique across the whole table for any row nobody has
-    declared a copy. That is the check that keeps a row whose ISBN belongs to
-    somebody else's Private Book from raising on the index and taking the whole
-    import with it.
-
-    It stays that broad now that deliberate copies suspend the unique index for
-    their ISBN, and the reason has changed rather than gone away: an export
-    listing a Book twice must not silently mint a second copy. A copy is
-    something a person adds on purpose, one press at a time, never something a
-    CSV file decides a Library holds.
+    Which Book a row is belongs to `books`, which `recognition` builds.
     """
 
-    by_isbn: dict[str, int]
-    by_title: dict[str, int]
-    taken_isbns: set[str]
+    books: recognition.Index
     statuses: Records
     notes: set[int]
 
     @classmethod
     def build(cls, db: Session, user_id: int) -> _CatalogueIndex:
-        visible = (
-            Shelf.seen_by(db, user_id)
-            .select(Book.id, Book.isbn, Book.title)
-            .order_by(Book.id)
-            .all()
-        )
         return cls(
-            # First wins, and ordered so "first" means something. Copies made
-            # two visible rows able to share an ISBN, and an import row that
-            # matches one must attach its status and its notes to the same copy
-            # on every run, not to whichever the query happened to return.
-            by_isbn=_first_wins((isbn, book_id) for book_id, isbn, _title in visible if isbn),
-            # First wins, matching the old `.first()`. What the collision
-            # costs is `identity.reading_history_title`'s subject, not this
-            # comment's: here the rule is only which row wins one.
-            by_title=_first_wins(
-                (identity.reading_history_title(title), book_id)
-                for book_id, _isbn, title in visible
-            ),
-            taken_isbns=_taken_isbns(db),
+            books=recognition.Index.build(db, user_id, recognition.Source.READING_HISTORY),
             # The Member's whole reading record rather than the matched Books':
             # which Books a 5,000 row file will match is not known until it has
             # been walked, and per row would be one SELECT per line.
@@ -177,87 +121,23 @@ class _CatalogueIndex:
             },
         )
 
-    def find(self, db: Session, row: csv_import.ImportRow) -> Book | None:
-        """Match an exported row to a Book already in the catalogue."""
-        return self.find_by(db, row.isbn, row.title)
-
-    def find_by(self, db: Session, isbn: str | None, title: str) -> Book | None:
-        """Match an ISBN and a title to a Book already in the catalogue.
-
-        ISBN first, since it is unambiguous. The title fallback is deliberate
-        and imperfect for the reason above.
-
-        **The two arguments rather than a row, so that this rule has one
-        implementation and not one per importer.** `OpdsImport` matches on
-        exactly this rule by the owner's instruction of 2026-09-05, and a second
-        index keyed the same way would be a second place for it to drift. It is
-        deliberately **not** `MarcIndex`'s rule, which folds the author in
-        **and folds the title all the way**: see that class for why a catalogue
-        transfer needs the stricter one and a reading history does not.
-
-        **The title is matched as a catalogue spelled it**, through
-        `identity.reading_history_title`, which is the one predicate in that
-        module that takes only half the fold. Which half, and why it refuses
-        the rest, is there.
-        """
-        book_id = None
-        if isbn:
-            book_id = self.by_isbn.get(isbn)
-        if book_id is None:
-            book_id = self.by_title.get(identity.reading_history_title(title))
-        return db.get(Book, book_id) if book_id is not None else None
-
-    def isbn_is_taken(self, isbn: str | None) -> bool:
-        return bool(isbn) and isbn in self.taken_isbns
-
-    def remember(self, book: Book) -> None:
-        """Keep a freshly created Book findable by later rows of the same file.
-
-        An export listing one Book twice would otherwise create it twice, or
-        raise on the ISBN index the second time.
-        """
-        if book.isbn:
-            self.by_isbn[book.isbn] = book.id
-            self.taken_isbns.add(book.isbn)
-        self.by_title.setdefault(identity.reading_history_title(book.title), book.id)
-
-
-def _first_wins(pairs: Iterable[tuple[str, int]]) -> dict[str, int]:
-    result: dict[str, int] = {}
-    for key, value in pairs:
-        result.setdefault(key, value)
-    return result
-
-
-class _KnowsTakenIsbns(Protocol):
-    """The one question the spine asks an index.
-
-    Both index classes answer more than this, and only this is named: a
-    protocol wider than the call is a claim about the two indexes that nothing
-    checks, and the two `find` methods do not agree on a signature anyway.
-    """
-
-    def isbn_is_taken(self, isbn: str | None) -> bool: ...
-
 
 def _settle_one(
-    index: _KnowsTakenIsbns,
+    answer: recognition.Answer,
     tally: _Tally,
-    book: Book | None,
     *,
-    isbn: str | None,
+    load: Callable[[int], Book],
     unmatched_title: str,
     create: Callable[[], Book],
     fill_gaps: Callable[[Book], None],
     create_missing: bool,
 ) -> Book | None:
-    """One row, once the catalogue has been asked about it.
+    """One row, once `recognition` has answered which Book it is.
 
     **The branch that is about privacy rather than correctness is here and
-    nowhere else.** A row whose ISBN belongs to a Book this Member cannot see
-    is counted and its title is never reported. This module's docstring holds
-    what creating it would cost and why `skipped` counts it together with the
-    rows that had no title; it is not restated here.
+    nowhere else.** A `Hidden` row is counted and its title is never reported.
+    This module's docstring holds what creating it would cost and why `skipped`
+    counts it together with the rows that had no title; it is not restated here.
 
     **Every importer creates through this function and has no other path to the
     database**, which is what the three hand written copies could not give: a
@@ -271,11 +151,30 @@ def _settle_one(
     unmatched row both end here, and a caller that carried on would run its
     tail on a row this function declined to act on.
 
+    | answer | with `create_missing` | without |
+    |---|---|---|
+    | `Seen` | matched, gaps filled | the same |
+    | `Unknown` | created | listed unmatched |
+    | `Tied` | listed as ambiguous, nothing created | the same |
+    | `InTrash` | listed in the trash, nothing written | the same |
+    | `Hidden` | counted, never named | listed unmatched |
+
+    **`Hidden` is listed without `create_missing`, and that is not a leak.**
+    The refusal is about the create: with nothing to create, the title came off
+    the caller's own file and is listed exactly as an `Unknown` row is, so the
+    two cannot be told apart.
+
+    **`InTrash` writes nothing rather than purging and creating** as the add
+    door does. Listing the row is the owner's ruling of 2026-10-17; not
+    purging is this module's own reason: the trash view holds other Members'
+    public Books too, and a bulk import that purged would destroy one. It holds
+    for the CSV, OPDS and MARC importers only. The Calibre library and store
+    imports run in the browser and post each Book to the add door, which
+    purges every holder in the trash view and creates. Its title is listed
+    because the Member can already see that Book in their trash.
+
     What stays with each importer, because each difference has a reason:
 
-    * **how the catalogue was asked.** Three signatures over two matching
-      rules, which is why the match happens at the call site and the result is
-      passed in. `_CatalogueIndex.find_by` and `MarcIndex` hold the two rules.
     * **what `unmatched_title` is spelled from.** Three spellings over three
       sources, and only one of them is behavioural: `OpdsImport` refuses a
       missing title before the match because its own constructor path nulls an
@@ -285,18 +184,29 @@ def _settle_one(
     * **which columns the gap fill writes**, and every `_create` body.
     * **the tail**, and where it sits relative to the gap fill.
     """
-    if book is not None:
-        tally.matched += 1
-        fill_gaps(book)
-        return book
-
-    if create_missing:
-        if index.isbn_is_taken(isbn):
+    match answer:
+        case recognition.Seen(book_id=book_id):
+            book = load(book_id)
+            tally.matched += 1
+            fill_gaps(book)
+            return book
+        case recognition.Hidden() if create_missing:
             tally.unmatched_private += 1
             return None
-        created = create()
-        tally.created += 1
-        return created
+        case recognition.InTrash():
+            tally.in_trash += 1
+            if len(tally.in_trash_titles) < MAX_UNMATCHED_REPORTED:
+                tally.in_trash_titles.append(unmatched_title)
+            return None
+        case recognition.Tied():
+            tally.ambiguous += 1
+            if len(tally.ambiguous_titles) < MAX_UNMATCHED_REPORTED:
+                tally.ambiguous_titles.append(unmatched_title)
+            return None
+        case recognition.Unknown() if create_missing:
+            created = create()
+            tally.created += 1
+            return created
 
     if len(tally.unmatched) < MAX_UNMATCHED_REPORTED:
         tally.unmatched.append(unmatched_title)
@@ -377,6 +287,10 @@ class Import:
             excluded=parsed.excluded,
             tags_dropped=tally.tags_dropped,
             unmatched_titles=tally.unmatched,
+            in_trash=tally.in_trash,
+            in_trash_titles=tally.in_trash_titles,
+            ambiguous=tally.ambiguous,
+            ambiguous_titles=tally.ambiguous_titles,
         )
 
     def _apply_one(
@@ -390,10 +304,9 @@ class Import:
     ) -> None:
         """One row: match it, maybe create it, then write what is personal."""
         book = _settle_one(
-            index,
+            index.books.recognise(title=row.title, author=row.author, isbn=row.isbn),
             tally,
-            index.find(self._db, row),
-            isbn=row.isbn,
+            load=lambda book_id: self._db.get_one(Book, book_id),
             unmatched_title=row.title,
             create=lambda: self._create(row, index),
             fill_gaps=lambda matched: _fill_gaps(matched, row),
@@ -439,7 +352,7 @@ class Import:
         )
         self._db.add(book)
         self._db.flush()
-        index.remember(book)
+        index.books.remember(book)
         return book
 
     def _apply_tags(self, book: Book, names: list[str], naming: tags.Naming) -> int:
@@ -612,6 +525,8 @@ class _Tally:
     created: int = 0
     updated: int = 0
     unmatched_private: int = 0
+    in_trash: int = 0
+    ambiguous: int = 0
     #: Records with nothing left to file them under. Only `OpdsImport` counts
     #: these: the other two importers get the number from their parser, which
     #: has already dropped a titleless row before this class is built.
@@ -625,6 +540,10 @@ class _Tally:
     #: Capped at `MAX_UNMATCHED_REPORTED` by the caller, not here: this is a
     #: tally, and where the ceiling comes from is the report's business.
     unmatched: list[str] = field(default_factory=list)
+    #: Capped the same way, at the same ceiling.
+    in_trash_titles: list[str] = field(default_factory=list)
+    #: Capped the same way, at the same ceiling.
+    ambiguous_titles: list[str] = field(default_factory=list)
 
 
 def _fill_gaps(book: Book, row: csv_import.ImportRow) -> None:
@@ -663,7 +582,7 @@ def _fill_gaps(book: Book, row: csv_import.ImportRow) -> None:
 # cataloguer least wants to retype and the one this whole ticket turns on.
 #
 # **It matches on author and title together, never on title alone.** See
-# `identity.work_key`.
+# `identity.work_key`, and `recognition.Source.CATALOGUE` for the ladder.
 
 
 #: A `Record` this Library has already held to its own bounds: what every
@@ -676,7 +595,7 @@ def _fill_gaps(book: Book, row: csv_import.ImportRow) -> None:
 #:
 #: **What it buys is a signature that cannot take an unbounded record.** Without
 #: it, "matching reads the bounded view, never the raw record" is a docstring
-#: sentence with nothing behind it: handing the raw record to `MarcIndex`
+#: sentence with nothing behind it: handing the raw record to `recognise_stored`
 #: behaves identically on every reachable path, because `within_bounds` is the
 #: identity there, so no behavioural test could ever observe the mistake.
 #:
@@ -789,114 +708,15 @@ def stored_record(record: Record) -> Stored:
     return Stored(record.with_scalars(**rebound) if rebound else record)
 
 
-@dataclass
-class MarcIndex:
-    """The catalogue keyed the two ways a MARC record is matched.
+def recognise_stored(index: recognition.Index, stored: Stored) -> recognition.Answer:
+    """Which Book a bounded record is.
 
-    **A separate index from `_CatalogueIndex` rather than two more fields on it**,
-    which is the one thing only this class knows. The two importers ask different
-    questions: this one matches on ISBN then `identity.work_key`, that one on
-    ISBN then `identity.reading_history_title`. What each wrong answer costs is
-    stated once, in `identity.py`, rather than twice here.
-
-    **Two differences rather than one, and naming only the credit understates
-    it.** The looser rule does not fold its title all the way either: it
-    normalises case, composition and spacing and stops there, keeping a leading
-    article and any punctuation inside the title. So a feed spelling
-    `The Hobbit` against a stored `Hobbit` creates a second Book where this
-    index matches one.
-
-    Built from one query over what the Member can see, like `_CatalogueIndex`,
-    for the same reason: the per row lookup was one statement per row and a
-    catalogue transfer is thousands of rows.
+    Takes a `Stored`, never a plain `Record`: see `stored_record` for what
+    matching on the unbounded values cost. The MARC import and its preview
+    both ask through here, so the two screens cannot disagree about a record.
+    `or ""` is `MarcImport._apply_one`'s belt, said there.
     """
-
-    by_isbn: dict[str, int]
-    by_identity: dict[str, int]
-    taken_isbns: set[str]
-
-    @classmethod
-    def build(cls, db: Session, user_id: int) -> MarcIndex:
-        visible = (
-            Shelf.seen_by(db, user_id)
-            .select(Book.id, Book.isbn, Book.title, Book.author)
-            .order_by(Book.id)
-            .all()
-        )
-        return cls(
-            by_isbn=_first_wins(
-                (isbn, book_id) for book_id, isbn, _title, _author in visible if isbn
-            ),
-            by_identity=_first_wins(
-                (identity.work_key(title, author), book_id)
-                for book_id, _isbn, title, author in visible
-            ),
-            taken_isbns=_taken_isbns(db),
-        )
-
-    def _matched_id(self, stored: Stored) -> int | None:
-        """The id of the Book this record is about, without loading it.
-
-        Takes a `Stored`, never a plain `Record`: see `stored_record` for what
-        matching on the unbounded values cost. The annotation is the whole of
-        that rule now, where it used to be this sentence.
-        """
-        isbn = stored.isbn
-        if isbn:
-            book_id = self.by_isbn.get(isbn)
-            if book_id is not None:
-                return book_id
-        return self.by_identity.get(identity.work_key(stored.title, stored.author))
-
-    def holds(self, stored: Stored) -> bool:
-        """Whether this Library already has the Book this record describes.
-
-        **A boolean, and it costs no statement**, which is why it is not
-        `find(...) is not None`. `build` selects columns rather than entities, so
-        nothing is in the identity map and every `db.get` below is a real query.
-        The preview asks this once per record and writes nothing: measured, 50
-        held records cost 50 statements through `find` and 0 through this, and
-        `marc.MAX_RECORDS` puts the ceiling at 20,000 on a route that writes
-        nothing.
-        """
-        return self._matched_id(stored) is not None
-
-    def would_refuse(self, stored: Stored) -> bool:
-        """Whether the import will skip this record without touching a Book.
-
-        **The preview's headline number is wrong without this.** A record whose
-        ISBN belongs to a Book this Member cannot see is neither held (it is not
-        in `by_isbn`, which is built from the Shelf) nor creatable (the unique
-        index would refuse it), so `_apply_one` counts it and returns. A preview
-        that modelled only `holds` would promise a record the import then
-        refuses, and the screen's whole job is answering what the import will do.
-        """
-        return not self.holds(stored) and self.isbn_is_taken(stored.isbn)
-
-    def find(self, db: Session, stored: Stored) -> Book | None:
-        """The Book this record is about, loaded, or None.
-
-        `holds` is the question the preview asks and this is the one the applier
-        asks: it needs the object to write to. Keep them apart, or the preview
-        pays for a load it throws away.
-        """
-        book_id = self._matched_id(stored)
-        return db.get(Book, book_id) if book_id is not None else None
-
-    def isbn_is_taken(self, isbn: str | None) -> bool:
-        return bool(isbn) and isbn in self.taken_isbns
-
-    def remember(self, book: Book) -> None:
-        """Keep a freshly created Book findable by later records of the same file.
-
-        A catalogue export listing one work twice would otherwise create it
-        twice, or raise on the ISBN index the second time and take the whole
-        transfer with it.
-        """
-        if book.isbn:
-            self.by_isbn[book.isbn] = book.id
-            self.taken_isbns.add(book.isbn)
-        self.by_identity.setdefault(identity.work_key(book.title, book.author), book.id)
+    return index.recognise(title=stored.title or "", author=stored.author, isbn=stored.isbn)
 
 
 def within_bounds(attribute: str, value: Any) -> Any:
@@ -1078,7 +898,9 @@ class MarcImport:
         uniformly clean, and failing the transfer on record 412 of 5,000 gives
         the cataloguer nothing to act on.
         """
-        index = MarcIndex.build(self._db, self._member_id)
+        index = recognition.Index.build(
+            self._db, self._member_id, recognition.Source.CATALOGUE
+        )
         tally = _Tally()
 
         for record, links in parsed.entries():
@@ -1102,12 +924,16 @@ class MarcImport:
             # withholds.
             skipped=parsed.skipped + tally.unmatched_private,
             unmatched_titles=tally.unmatched,
+            in_trash=tally.in_trash,
+            in_trash_titles=tally.in_trash_titles,
+            ambiguous=tally.ambiguous,
+            ambiguous_titles=tally.ambiguous_titles,
         )
 
     def _apply_one(
         self,
         record: Record,
-        index: MarcIndex,
+        index: recognition.Index,
         tally: _Tally,
         create_missing: bool,
         links: Sequence[Link],
@@ -1117,10 +943,9 @@ class MarcImport:
         # `stored_record`.
         stored = stored_record(record)
         book = _settle_one(
-            index,
+            recognise_stored(index, stored),
             tally,
-            index.find(self._db, stored),
-            isbn=stored.isbn,
+            load=lambda book_id: self._db.get_one(Book, book_id),
             # A title the caller supplied in their own file, so reporting it
             # discloses nothing they did not already have.
             #
@@ -1157,9 +982,9 @@ class MarcImport:
         # After the create and after the gap fill, so a matched Book gains the
         # headings it lacked as well as a new one getting all of them.
         evidence.confirm_file_headings(book, record.headings, self._db)
-        _keep_links(book, links)
+        _keep_links(book, links, self._db)
 
-    def _create(self, stored: Stored, index: MarcIndex) -> Book:
+    def _create(self, stored: Stored, index: recognition.Index) -> Book:
         """Add a Book the file catalogues and this Library does not hold.
 
         **`ownership=UNKNOWN`, exactly as the CSV path does it**, and the reason
@@ -1194,23 +1019,52 @@ class MarcImport:
         return book
 
 
-def _keep_links(book: Book, links: Sequence[Link]) -> None:
+def _links_to_add(stored: Sequence[OnlineLink], links: Sequence[Link]) -> list[Link]:
+    """The links `_keep_links` appends to `stored` as loaded, one per new URL.
+
+    **The one place that says whether a row is added**: the check before the lock
+    reads whether this is empty, and the append loop writes only what it
+    returns, so the two cannot disagree about a row. A URL already stored, a
+    repeat within `links` and one past the per Book cap are not in it.
+    """
+    held = {row.url for row in stored}
+    room = MAX_ONLINE_LINKS_PER_BOOK - len(stored)
+    adds: list[Link] = []
+    for link in links:
+        if len(adds) >= room:
+            break
+        if link.url not in held:
+            held.add(link.url)
+            adds.append(link)
+    return adds
+
+
+def _keep_links(book: Book, links: Sequence[Link], db: Session) -> None:
     """Add the record's online links the Book lacks, up to the per Book cap.
 
     A matched Book gains them as a new one does, as with the headings: a link
     is catalogue evidence, not a value a member typed over. Never fetched.
+
+    **Counted under `database.hold_book_ceilings`**, the lock a merge takes for
+    its keeper: a matched Book is one a merge can be carrying links onto, and
+    counted beside it the Book lands past the cap. So its links are re-read
+    after the lock, flushed first so the ones an earlier record in this import
+    added are among them.
+
+    **Only when the loaded links show one this call would add**, for the
+    heading writer's reason (`classifications.add_headings`): the lock holds the
+    Book against every edit until this import's one commit. Stale, the check
+    only makes this call add less, and every append below follows the lock.
     """
-    if not links:
+    if not _links_to_add(book.online_links, links):
         return
-    held = {row.url for row in book.online_links}
-    for link in links:
-        if len(book.online_links) >= MAX_ONLINE_LINKS_PER_BOOK:
-            return
-        if link.url not in held:
-            held.add(link.url)
-            book.online_links.append(
-                OnlineLink(url=link.url, label=link.label, relation=link.relation)
-            )
+    hold_book_ceilings(db, book.id)
+    db.flush()
+    db.refresh(book, ["online_links"])
+    for link in _links_to_add(book.online_links, links):
+        book.online_links.append(
+            OnlineLink(url=link.url, label=link.label, relation=link.relation)
+        )
 
 
 def _fill_marc_gaps(book: Book, stored: Stored) -> None:
@@ -1240,9 +1094,9 @@ def _fill_marc_gaps(book: Book, stored: Stored) -> None:
 # value of the route, and it is why `_create` below arrives at OWNED where
 # `MarcImport._create` arrives at UNKNOWN.
 #
-# **The matching rule is `_CatalogueIndex`'s and not `MarcIndex`'s**, by the
-# owner's instruction of 2026-09-05: ISBN where one exists, then lowercased
-# title. Do not invent a third.
+# **The matching rule is the CSV importer's and not the MARC one's**, by the
+# owner's instruction of 2026-09-05: `recognition.Source.READING_HISTORY`, ISBN
+# where one exists, then the title. Do not invent a third.
 
 
 #: The columns an OPDS record can fill on a Book it matched.
@@ -1296,18 +1150,14 @@ class OpdsImport:
         server lists what they have, and a sync that adds none of it has synced
         nothing.
 
-        **`_CatalogueIndex` is built here although two of its four lookups go
-        unread.** It loads this Member's whole reading record and their note ids
-        for `Import`'s benefit, which this class never touches. That is two
-        statements per sync rather than per record, and the alternative is a
-        third index class keyed the same way as the first, which is the second
-        matching rule the owner refused.
-
         Commits once at the end. One entry that cannot be acted on is counted
         and skipped: a library of thousands is not uniformly clean, and failing
         the sync on entry 412 gives nobody anything to act on.
         """
-        index = _CatalogueIndex.build(self._db, self._member_id)
+        # The CSV importer's ladder, by the owner's instruction of 2026-09-05.
+        index = recognition.Index.build(
+            self._db, self._member_id, recognition.Source.READING_HISTORY
+        )
         tally = _Tally()
 
         for record in records:
@@ -1330,12 +1180,16 @@ class OpdsImport:
             # withholds.
             skipped=tally.unmatched_private + tally.skipped_untitled,
             unmatched_titles=tally.unmatched,
+            in_trash=tally.in_trash,
+            in_trash_titles=tally.in_trash_titles,
+            ambiguous=tally.ambiguous,
+            ambiguous_titles=tally.ambiguous_titles,
         )
 
     def _apply_one(
         self,
         record: Record,
-        index: _CatalogueIndex,
+        index: recognition.Index,
         tally: _Tally,
         create_missing: bool,
     ) -> None:
@@ -1352,12 +1206,12 @@ class OpdsImport:
             # nobody made. `opds.entry_record` refuses an entry whose `<title>`
             # is missing or blank, so that is not this arm either.
             #
-            # Without it an empty title reaches `find_by` and keys as the
+            # Without it an empty title reaches `recognise` and keys as the
             # empty string, which is what every other untitled row keys as, so
-            # the feed's status lands on whichever of them `_first_wins` kept.
+            # the entry would be matched against every untitled Book here.
             # The stated reason here was `within_bounds` truncating to `""`,
             # which it cannot do: a critic read the mechanism rather than the
-            # comment. It then said `find_by` would raise `AttributeError`,
+            # comment. It then said the matcher would raise `AttributeError`,
             # which stopped being true when the title predicate stopped
             # reaching for a method on its argument. **A guard justified by a
             # crash outlives the crash**, and what it is really worth is above:
@@ -1371,10 +1225,9 @@ class OpdsImport:
         # one of the three with nothing to run after the branch, and that is
         # the whole of the difference.
         _settle_one(
-            index,
+            index.recognise(title=title, author=stored.author, isbn=stored.isbn),
             tally,
-            index.find_by(self._db, stored.isbn, title),
-            isbn=stored.isbn,
+            load=lambda book_id: self._db.get_one(Book, book_id),
             # A title from the member's own server, so reporting it back to
             # that member discloses nothing they did not already have. Known
             # non-empty: the arm above returned on anything else.
@@ -1384,7 +1237,7 @@ class OpdsImport:
             create_missing=create_missing,
         )
 
-    def _create(self, stored: Stored, index: _CatalogueIndex) -> Book:
+    def _create(self, stored: Stored, index: recognition.Index) -> Book:
         """Add a Book the member's server lists and this Library does not hold.
 
         **`ownership=OWNED`, where both other importers arrive at UNKNOWN**, and

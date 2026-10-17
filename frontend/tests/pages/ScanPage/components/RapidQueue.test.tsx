@@ -9,7 +9,7 @@ import { BookFormat, Locale } from "../../../../src/api/generated/model";
 import type {
   QueueFigures,
   ScannedEntry,
-} from "../../../../src/pages/ScanPage/hooks";
+} from "../../../../src/pages/ScanPage/queue";
 import { renderLocalised } from "../../../utils";
 
 /** The component's props, which it does not export. */
@@ -28,6 +28,8 @@ const FIGURES: QueueFigures = {
   deciding: 0,
   keptForNow: 0,
   emptyAnswers: 0,
+  // One, so `Add all` is live unless a test says the batch would take nothing.
+  ready: 1,
   paceMinutes: 1,
   keptPaceMinutes: 1,
 };
@@ -49,6 +51,7 @@ function splitFigures(overrides: QueueOverrides, base: QueueFigures) {
     deciding,
     keptForNow,
     emptyAnswers,
+    ready,
     paceMinutes,
     keptPaceMinutes,
     ...rest
@@ -58,6 +61,7 @@ function splitFigures(overrides: QueueOverrides, base: QueueFigures) {
     deciding: deciding ?? base.deciding,
     keptForNow: keptForNow ?? base.keptForNow,
     emptyAnswers: emptyAnswers ?? base.emptyAnswers,
+    ready: ready ?? base.ready,
     paceMinutes: paceMinutes ?? base.paceMinutes,
     keptPaceMinutes: keptPaceMinutes ?? base.keptPaceMinutes,
   };
@@ -298,10 +302,10 @@ describe("RapidQueue", () => {
   });
 
   it("shows the subjects a picked file stated, and how many", () => {
-    // **The last moment a subject is reversible.** No route clears
-    // `books.categories` once the batch has written it: enrichment replaces
-    // the list and never empties it, and `BookDetailsUpdate` has no such
-    // field, so the remedy afterwards is deleting the book.
+    // **The last moment a subject is one press to undo.** No page clears
+    // `books.categories` once the batch has written it: `BookDetailsUpdate`
+    // takes the field but nothing here sends it, so the remedy afterwards is
+    // the API by hand.
     renderQueue({
       entries: [
         picked(
@@ -522,6 +526,24 @@ describe("RapidQueue", () => {
     expect(offer).toHaveTextContent("Add as its own copy (Ebook)");
     await userEvent.click(offer);
     expect(queue.onAddAsCopy).toHaveBeenCalledWith("file:dune.epub:10:0");
+  });
+
+  it("holds Add all when nothing in the queue can be added", () => {
+    // A barcode nobody knows has no title, so the batch leaves it, and a
+    // button that stays live over a queue of only those does nothing on a
+    // press and says nothing about why.
+    renderQueue({
+      entries: [
+        scanned({
+          isbn: "9780262033848",
+          state: "not-found",
+          draft: { isbn: "9780262033848", title: "", suggested_tag_ids: [] },
+        }),
+      ],
+      ready: 0,
+    });
+
+    expect(screen.getByRole("button", { name: "Add all" })).toBeDisabled();
   });
 
   it("holds Add all while a row is being added as its own copy", () => {
@@ -1386,7 +1408,9 @@ describe("RapidQueue and a book taken from its file name", () => {
     });
 
     expect(
-      screen.getByText(/The same file names go to the same catalogues/),
+      screen.getByText(
+        /The same file names, audiobook tags and audiobook folder names go to the same catalogues/,
+      ),
     ).toBeInTheDocument();
     expect(screen.getByText(/Roughly 4 min/)).toBeInTheDocument();
   });
@@ -1410,11 +1434,13 @@ describe("RapidQueue and a book taken from its file name", () => {
 
     expect(
       screen.getAllByText(
-        /The file names, and any ISBN a file states, are sent/,
+        /The file names, any ISBN a file states, the title and author an audiobook's tags name/,
       ),
     ).toHaveLength(1);
     expect(
-      screen.getAllByText(/The same file names go to the same catalogues/),
+      screen.getAllByText(
+        /The same file names, audiobook tags and audiobook folder names go to the same catalogues/,
+      ),
     ).toHaveLength(1);
   });
 

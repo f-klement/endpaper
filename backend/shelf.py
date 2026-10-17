@@ -1179,11 +1179,11 @@ def whole_table_for_uniqueness(db: Session, *columns: Any) -> Query[Any]:
     It sees **trashed** rows too, which is the trap soft deletion introduces:
     a number is held by a Book in the bin until that Book is purged.
 
-    Four callers, all of them writes deciding whether a value is already taken:
-    the ISBN walk in `_create_book`, the two halves of the copy group check in
-    `_normalise_copy_group`, and the import's `taken_isbns`. A fifth would be
-    worth a hard look, because "I need to see everything" is what somebody
-    writes just before disclosing everything, and
+    Three callers, all of them deciding whether a value is already taken: the
+    two halves of the copy group check in `_normalise_copy_group`, and
+    `recognition.Index`, which the importers and the add door both ask. A
+    fourth would be worth a hard look, because "I need to see everything" is
+    what somebody writes just before disclosing everything, and
     `tests/test_shelf.py::test_the_named_ways_past_a_viewer_have_the_callers_they_claim`
     is what makes adding one a decision rather than an edit.
 

@@ -46,7 +46,7 @@ from schemas.common import RowIdField, UtcDateTime, UtcDateTimeIn
 #: **The bound is per book and not per request**, which is the distinction
 #: `MAX_CLASSIFICATIONS_PER_BOOK` records paying for: a route that bounds one
 #: payload while the writer is additive across requests bounds nothing.
-#: `routers/books.report_digital_reference` counts the rows already on the book.
+#: `file_references.report` counts the rows already on the book.
 #: `backup.restore` is uncapped here as it is everywhere, for the reason that
 #: file gives: it reinstates a database rather than adding to one.
 MAX_DIGITAL_REFERENCES_PER_BOOK = 16

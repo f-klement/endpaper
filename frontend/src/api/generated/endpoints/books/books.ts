@@ -3480,9 +3480,10 @@ export const getSweepDigitalReferencesUrl = () => {
  *
  * The two per reference routes in one request. A miss is the per reference
  * flag's rule unchanged: `missing_since` set once, the row never deleted. A
- * sighting clears `missing_since` and confirms the row, and writes its
- * fingerprint only where `_fingerprint_agrees`. A sweep of a few hundred
- * files is then a request or two rather than a request a file.
+ * sighting is the per reference report's rule: it clears `missing_since`,
+ * confirms the row, and fills in a fingerprint the row is missing without
+ * ever replacing a different one. A sweep of a few hundred files is then a
+ * request or two rather than a request a file.
  *
  * **The client sends sightings at the pick and misses only on a press**,
  * because a root is only a folder name: one member's pick of their own
@@ -7738,19 +7739,31 @@ export const getReportDigitalReferenceUrl = (bookId: number) => {
  * status that varied would be one more thing for a client committing 300
  * files to branch on.
  *
- * **The report replaces the fingerprint whole rather than filling in the gaps
- * in it.** A row says what one client saw in one look. Merging a new size with
- * an old modification time would produce a fingerprint that no client ever
- * reported and that no re-check could ever match.
+ * **A report fills in what the row is missing and never replaces a different
+ * fingerprint**, the rule a folder sweep and a merge keep too. Size,
+ * modification time and digest are written together, and only where every
+ * half already stored is the same as the one sent: a root is only a folder
+ * name, so two members' folders can share it and a path beneath it, and a
+ * replacing report would put one member's file's fingerprint on the other's.
+ * **`root_confirmed` only rises**: a bare filename report does not undo a
+ * directory pick's corroboration.
  *
  * **A sighting clears `missing_since`.** Something has now looked and found
  * it, which is the only evidence that ever contradicts a miss.
  *
+ * **A new location another Book the caller can see already holds is refused
+ * with 409 `file_held_elsewhere`**, naming that Book in `book_id`, so a
+ * location belongs to one Book among those a member can see. A Book the
+ * caller cannot see answers as no Book, since a refusal would confirm
+ * somebody privately holds that exact file. A location two Books held before
+ * this rule is left as it is, and either may still re-confirm it.
+ *
  * The per book ceiling is counted here rather than trusted to the payload,
- * which bounds one request and not the total: see
- * `MAX_DIGITAL_REFERENCES_PER_BOOK`, and `_add_within_the_ceiling` for why the
- * count follows the insert. It binds a **new** location only, so a book
- * already at the ceiling can still re-confirm what it holds.
+ * which bounds one request and not the total: past
+ * `MAX_DIGITAL_REFERENCES_PER_BOOK` a new location is refused with 409
+ * `reference_ceiling`. The count follows the insert, under a lock a merge onto
+ * the Book takes too. It binds a **new** location only, so a book already at
+ * the ceiling can still re-confirm what it holds.
  * @summary Report Digital Reference
  */
 export const reportDigitalReference = async (

@@ -75,6 +75,8 @@ let answers: (number | null)[] = [];
 let holdersAnswer: { book_id: number; format: string | null }[] = [];
 /** The Books it names for one file, by its path; `holdersAnswer` by default. */
 let holdersFor: (path: string) => typeof holdersAnswer = () => holdersAnswer;
+/** The `code` a 409 carries, for the reference route's two refusals. */
+let refusalCode: string | null = null;
 /** The Book a 409 names, and that Book's copies, for the duplicate arm. */
 let conflict: {
   holder: number;
@@ -123,6 +125,7 @@ beforeEach(() => {
   holdersAnswer = [];
   holdersFor = () => holdersAnswer;
   conflict = null;
+  refusalCode = null;
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {
@@ -176,7 +179,9 @@ beforeEach(() => {
       const detail =
         status === 409 && conflict !== null
           ? { message: "no", book_id: conflict.holder }
-          : "no";
+          : status === 409 && refusalCode !== null
+            ? { message: "no", code: refusalCode }
+            : "no";
       return {
         ok: status === null,
         status: status ?? 201,
@@ -545,12 +550,29 @@ describe("recording where the library's files are", () => {
   it("says a book already in the library whose files met the ceiling is that, not already in the catalogue", async () => {
     holdersAnswer = [{ book_id: 7, format: "ebook" }];
     answers = [409];
+    refusalCode = "reference_ceiling";
 
     const { result } = await importWithItsFile();
 
     expect(result.current.result).toMatchObject({
       already: 0,
       atCeiling: 1,
+      failures: [],
+    });
+  });
+
+  it("counts a file another Book holds as already in the library, not as the ceiling", async () => {
+    // The route's second 409. Read by its code: counted by its status, the
+    // card said the book was full when its file was simply on another Book.
+    holdersAnswer = [{ book_id: 7, format: "ebook" }];
+    answers = [409];
+    refusalCode = "file_held_elsewhere";
+
+    const { result } = await importWithItsFile();
+
+    expect(result.current.result).toMatchObject({
+      already: 1,
+      atCeiling: 0,
       failures: [],
     });
   });

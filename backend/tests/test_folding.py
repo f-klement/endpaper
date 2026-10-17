@@ -13,16 +13,23 @@ files each independently warning about the same thing.
 import ast
 import importlib.util
 import logging
+import threading
+from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
+from fastapi import HTTPException
 from sqlalchemy import Column, ForeignKey, Integer, MetaData, Table
+from sqlalchemy.orm import Session
 
 import folding
 import models
-from database import Base
-from models import children_of_books
-from schemas import MAX_CLASSIFICATIONS_PER_BOOK
+from database import Base, engine
+from models import Book, DigitalReference, User, children_of_books
+from routers.books import report_digital_reference
+from schemas import MAX_CLASSIFICATIONS_PER_BOOK, MAX_DIGITAL_REFERENCES_PER_BOOK
+from schemas.digital import DigitalReferenceIn
 from tests.test_shelf import _READING_METHODS
 
 FOLDING = Path(__file__).resolve().parent.parent / "folding.py"
@@ -157,19 +164,19 @@ def _reads_nothing(root: ast.Call) -> bool:
     method names, so a fourth no argument session call is covered the day it
     appears.
 
-    **`delete` with one positional argument**: `Session.delete(obj)` takes a row
-    already in hand. It is here because `Query.delete()` shares the name and
-    `_READING_METHODS` is derived, and it is keyed on the method because
-    `execute(stmt)` has the same shape and does read. `db.query(...).delete()`
-    is not this: that chain is rooted at the `query`, which has to be bounded
-    like any other.
+    **`delete` or `expire` with one positional argument**: each takes a row
+    already in hand, and `expire` only marks its attributes stale. They are
+    roots because every call on the session is one, and `Query.delete()` shares
+    the first name besides. Keyed on the method because `execute(stmt)` has the
+    same shape and does read. `db.query(...).delete()` is not this: that chain
+    is rooted at the `query`, which has to be bounded like any other.
     """
     if not _on_the_session(root):
         return False
     if not root.args and not root.keywords:
         return True
     assert isinstance(root.func, ast.Attribute)
-    return root.func.attr == "delete" and len(root.args) == 1 and not root.keywords
+    return root.func.attr in {"delete", "expire"} and len(root.args) == 1 and not root.keywords
 
 
 def _subjects(root: ast.Call) -> set[str]:
@@ -342,10 +349,11 @@ def _unbounded_reads(source: str) -> list[int]:
 #: spelling, failed that pass until a person described it. `_unbounded_reads`
 #: refuses a shape and asks nobody to look, so the looking is this number's job.
 #:
-#: Twelve: five queries, two `Session.delete`s of a row in hand, three
-#: `flush`es and the two plain Python calls in `NOT_A_DATABASE_READ`. The fifth
-#: query is `_carry_highlights`, bounded to the losers' ids.
-READ_ROOTS = 12
+#: Thirteen: five queries, two `Session.delete`s of a row in hand, the
+#: `Session.expire` of the keeper after its lock, three `flush`es and the two
+#: plain Python calls in `NOT_A_DATABASE_READ`. The fifth query is
+#: `_carry_highlights`, bounded to the losers' ids.
+READ_ROOTS = 13
 
 #: Calls the derived reading set matches that touch no table, and why.
 #:
@@ -641,3 +649,102 @@ class TestEveryReadIsBoundedToTheBooksBeingFolded:
             if not _on_the_session(root)
         ]
         assert off_session == [call for call, _ in NOT_A_DATABASE_READ]
+
+
+class TestAMergeHoldsTheKeepersCeilings:
+    """A merge counts the keeper's capped rows and then carries the losers' in,
+    so a writer adding to the keeper between the two lands it past the ceiling.
+    The report's race runs on both engines; the races of the writers that count
+    before they write are in `test_database_ceilings_on_a_real_server.py`. The
+    class is in the pipeline's Postgres selection."""
+
+    @staticmethod
+    def _merge_racing(keeper_id: int, loser_id: int, write: Callable[[Session], object]) -> object:
+        """Fold in one session and, before it commits, run `write` in another.
+
+        The merge waits up to two seconds for the write to finish. Held back by
+        the keeper's lock, the write cannot, so it runs after the commit and
+        counts what the merge carried; not held back, it commits first and the
+        merge carries past it.
+        """
+        folded = threading.Event()
+        written = threading.Event()
+
+        def merge() -> None:
+            with Session(bind=engine, autoflush=False) as db:
+                keeper, loser = db.get(Book, keeper_id), db.get(Book, loser_id)
+                assert keeper is not None
+                assert loser is not None
+                folding.fold(db, keeper, [loser])
+                folded.set()
+                written.wait(timeout=2)
+                db.commit()
+
+        def other() -> object:
+            assert folded.wait(timeout=10)
+            try:
+                with Session(bind=engine, autoflush=False) as db:
+                    return write(db)
+            finally:
+                written.set()
+
+        with ThreadPoolExecutor(2) as pool:
+            merging, writing = pool.submit(merge), pool.submit(other)
+            merging.result()
+            return writing.result()
+
+    def test_a_reference_reported_onto_the_keeper_mid_merge_stays_within_the_ceiling(
+        self, admin, make_book, db
+    ):
+        """The keeper is one short and the loser carries one more. Without the
+        merge's lock the report counts 16 beside the merge's uncommitted move,
+        commits, and the merge's commit makes it 17."""
+        keeper, loser = make_book(admin["headers"]), make_book(admin["headers"])
+        for index in range(MAX_DIGITAL_REFERENCES_PER_BOOK - 1):
+            db.add(DigitalReference(book_id=keeper["id"], root_label=f"/r{index}", relative_path="x"))
+        db.add(DigitalReference(book_id=loser["id"], root_label="/loser", relative_path="x"))
+        db.commit()
+
+        def report(session: Session) -> int:
+            book, user = session.get(Book, keeper["id"]), session.get(User, admin["user"]["id"])
+            assert book is not None
+            assert user is not None
+            try:
+                report_digital_reference(
+                    DigitalReferenceIn(root_label="/late", relative_path="x"), book, session, user
+                )
+            except HTTPException as refused:
+                return refused.status_code
+            return 200
+
+        answer = self._merge_racing(keeper["id"], loser["id"], report)
+
+        held = db.query(DigitalReference).filter(DigitalReference.book_id == keeper["id"]).count()
+        assert (answer, held) == (409, MAX_DIGITAL_REFERENCES_PER_BOOK)
+
+
+class TestAMergeCountsTheKeeperAsItStands:
+    def test_a_reference_committed_after_the_keeper_was_loaded_is_counted(
+        self, admin, make_book, db
+    ):
+        """The keeper's references were loaded before the merge took its lock,
+        and another session committed one more in between. Counted from the
+        loaded list the keeper holds 15, takes the loser's, and lands at 17."""
+        keeper, loser = make_book(admin["headers"]), make_book(admin["headers"])
+        for index in range(MAX_DIGITAL_REFERENCES_PER_BOOK - 1):
+            db.add(DigitalReference(book_id=keeper["id"], root_label=f"/r{index}", relative_path="x"))
+        db.add(DigitalReference(book_id=loser["id"], root_label="/loser", relative_path="x"))
+        db.commit()
+
+        with Session(bind=engine, autoflush=False) as merging:
+            kept, lost = merging.get(Book, keeper["id"]), merging.get(Book, loser["id"])
+            assert kept is not None
+            assert lost is not None
+            assert len(kept.digital_references) == MAX_DIGITAL_REFERENCES_PER_BOOK - 1
+            db.add(DigitalReference(book_id=keeper["id"], root_label="/late", relative_path="x"))
+            db.commit()
+            folding.fold(merging, kept, [lost])
+            merging.commit()
+
+        held = db.query(DigitalReference).filter(DigitalReference.book_id == keeper["id"]).count()
+        assert held == MAX_DIGITAL_REFERENCES_PER_BOOK

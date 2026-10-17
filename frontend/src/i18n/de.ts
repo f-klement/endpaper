@@ -285,6 +285,9 @@ export const de: Messages = {
     "Das sieht nicht nach einer gültigen ISBN aus. Bitte die Ziffern prüfen und es erneut versuchen.",
   "scan.notFoundManual":
     "Keine Angaben zur ISBN {isbn} gefunden. Das Buch lässt sich trotzdem von Hand anlegen.",
+  "scan.unansweredManual":
+    "Kein Katalog hat zur ISBN {isbn} geantwortet. Das Buch lässt sich trotzdem von Hand anlegen.",
+  "scan.addByHand": "Von Hand anlegen",
   "scan.titleRequired": "Titel *",
   "scan.titlePlaceholder": "Buchtitel",
   "scan.authorPlaceholder": "Name des Autors",
@@ -1146,6 +1149,7 @@ export const de: Messages = {
   "rapid.lookingUp": "Wird nachgeschlagen...",
   "rapid.reading": "{name} wird gelesen...",
   "rapid.notFound": "Nicht gefunden: {isbn}",
+  "rapid.notReached": "Kataloge nicht erreicht: {isbn}",
   "rapid.duplicate": "Schon gescannt",
   "rapid.alreadyInLibrary": "Schon in der Bibliothek",
   "rapid.reviewTitle": "{count} Bücher prüfen",
@@ -1199,9 +1203,9 @@ export const de: Messages = {
     "{count} übersprungen, weil Endpaper kein Format davon liest.",
   "fallback.lookUp": "{count} in den Katalogen nachschlagen",
   "fallback.pace":
-    "Die Dateinamen und jede ISBN, die eine Datei nennt, gehen an die Kataloge, in denen Endpaper sucht, die Dateien selbst nicht. Zeitlich gestreckt, damit ein einzelner Ordner nicht das ganze Budget einer Bibliothek auf einmal verbraucht. Ungefähr {minutes} min.",
+    "Die Dateinamen, jede ISBN, die eine Datei nennt, Titel und Autor aus den Tags eines Hörbuchs (ohne Tags der Name seines Ordners) und die ISBN jedes gescannten Barcodes, der keinen Katalog erreicht hat, gehen an die Kataloge, in denen Endpaper sucht, die Dateien selbst nicht. Zeitlich gestreckt, damit ein einzelner Ordner nicht das ganze Budget einer Bibliothek auf einmal verbraucht. Ungefähr {minutes} min.",
   "fallback.paceAgain":
-    "Dieselben Dateinamen gehen ein zweites Mal an dieselben Kataloge, die Dateien selbst weiterhin nicht. Genauso zeitlich gestreckt. Ungefähr {minutes} min.",
+    "Dieselben Dateinamen, Hörbuchtags und Hörbuchordnernamen gehen ein zweites Mal an dieselben Kataloge, die Dateien selbst weiterhin nicht. Genauso zeitlich gestreckt. Ungefähr {minutes} min.",
   "fallback.stop": "Suche beenden",
   "fallback.searching": "Die Kataloge werden gefragt...",
   "fallback.fromTheName": "Aus dem Dateinamen",
@@ -1435,6 +1439,10 @@ export const de: Messages = {
   "import.readAs": "Als Export von {service} gelesen.",
   "import.readAsGeneric": "Als einfache Tabelle gelesen, die Spalten geraten.",
   "import.unmatched": "Nicht im Katalog gefunden:",
+  "import.inTrash":
+    "{count} Zeilen nennen ein Buch im Papierkorb, und für sie wurde nichts geschrieben. Wird es zurückgelegt oder endgültig gelöscht, lassen sie sich erneut importieren:",
+  "import.ambiguous":
+    "{count} Zeilen passen zu zwei oder mehr Büchern in diesem Regal, und für sie wurde nichts geschrieben, statt zwischen ihnen zu raten:",
 
   // ── MARC (Bibliotheksmodus) ─────────────────────────────────────────────
   "marc.title": "Einen Katalog übernehmen",
@@ -1449,6 +1457,10 @@ export const de: Messages = {
     "{count} davon stehen bereits in diesem Regal und werden ergänzt statt neu angelegt.",
   "marc.blocked":
     "{count} tragen eine ISBN, die zu einem für dieses Konto nicht sichtbaren Buch gehört, und bleiben unangetastet.",
+  "marc.inTrash":
+    "{count} tragen eine ISBN, die nur ein Buch im Papierkorb hat, und bleiben unangetastet, bis es zurückgelegt oder endgültig gelöscht ist.",
+  "marc.ambiguous":
+    "{count} passen zu zwei oder mehr Büchern in diesem Regal und bleiben unangetastet, statt zwischen ihnen zu raten.",
   "marc.skipped":
     "{count} Datensätze haben keinen Titel und bleiben unberücksichtigt.",
   "marc.createMissing":
@@ -1461,6 +1473,10 @@ export const de: Messages = {
     "{rowsRead} Datensätze gelesen, {matched} zugeordnet, {created} angelegt.",
   "marc.resultSkipped":
     "{count} Datensätze blieben unberücksichtigt: kein Titel, oder eine ISBN, die zu einem für dieses Konto nicht sichtbaren Buch gehört.",
+  "marc.resultInTrash":
+    "{count} Datensätze tragen eine ISBN, die nur ein Buch im Papierkorb hat, und für sie wurde nichts geschrieben. Wird es zurückgelegt oder endgültig gelöscht, lassen sie sich erneut importieren:",
+  "marc.resultAmbiguous":
+    "{count} Datensätze passen zu zwei oder mehr Büchern in diesem Regal, und für sie wurde nichts geschrieben, statt zwischen ihnen zu raten:",
 
   // ── Calibre library import ─────────────────────────────────────────
   "calibre.title": "Eine Calibre-Bibliothek übernehmen",

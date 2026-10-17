@@ -2,11 +2,10 @@ import asyncio
 import csv
 import io
 import logging
-from collections import defaultdict
 from collections.abc import Callable, Iterator
 from concurrent.futures import Future, wait
 from datetime import UTC, datetime
-from typing import Annotated, Any, Final, Literal, NamedTuple, cast
+from typing import Annotated, Any, Final, Literal, NamedTuple, NoReturn, cast
 
 from fastapi import (
     APIRouter,
@@ -20,8 +19,7 @@ from fastapi import (
 )
 from fastapi.responses import StreamingResponse
 from pydantic import ValidationError
-from sqlalchemy import func, nullslast, or_, text
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy import func, nullslast, or_
 from sqlalchemy.orm import Query as RowQuery
 from sqlalchemy.orm import Session, joinedload
 
@@ -36,6 +34,7 @@ import ddc
 import deadline
 import downloads
 import evidence
+import file_references
 import folding
 import google_books
 import highlights
@@ -45,6 +44,7 @@ import koreader_highlights
 import lending
 import marc
 import metadata
+import recognition
 import settings_store
 from auth import require_admin
 from authors import AUTHOR_NAME_MAX, MATCHERS, MatcherName
@@ -174,7 +174,6 @@ from schemas import (
     HighlightImportOut,
     HighlightOut,
     HighlightSharingIn,
-    HolderOut,
     HoldersIn,
     HoldersOut,
     IdentifierBackfillOut,
@@ -195,7 +194,6 @@ from schemas import (
     QuoteWithBookOut,
     RefusedAssertionOut,
     SeriesOut,
-    SightingIn,
     SweepIn,
     SweepOut,
     TagCreate,
@@ -1701,80 +1699,72 @@ def _checked_collection(db: Session, collection_id: int | None, viewer_id: int) 
 
 
 def _create_book(payload: BookCreate, current_user: User, db: Session, conflict: str) -> BookOut:
-    # payload.isbn is already canonical ISBN-13 (see BookCreate's validator),
-    # but rows written before canonicalisation may hold the ISBN-10, so both
-    # spellings are checked or the same book gets added twice.
-    #
-    # The ISBN walk below reads through `whole_table_for_uniqueness` rather
-    # than a shelf: the ISBN is unique across the whole table, so a clash with
-    # somebody else's private book is still a clash. That also means it sees
-    # **trashed** rows, which is the trap soft deletion introduces and
-    # `_freeable` exists to resolve.
-    # Before the ISBN walk below, which purges trashed rows to free the number,
-    # so a bad collection id is refused before any purge is flushed. The other
-    # order would lose nothing: the purge is flushed and not committed, so a
-    # refusal rolls it back with the request.
+    # Before the ISBN question below, which purges trashed rows to free the
+    # number, so a bad collection id is refused before any purge is flushed. The
+    # other order would lose nothing: the purge is flushed and not committed, so
+    # a refusal rolls it back with the request.
     _checked_collection(db, payload.collection_id, current_user.id)
 
-    # Before the ISBN walk too, so a 409 names the Book this record already is
-    # rather than one that only shares its ISBN.
+    # Which Book this record already is, asked by `recognition`, one key at a
+    # time and narrowed to this record's keys. The Calibre uuid and the ASIN
+    # before the ISBN, so a 409 names the Book this record already is rather
+    # than one that only shares its ISBN:
     # `test_the_uuid_holder_answers_where_the_isbn_names_another_book` pins it.
-    calibre_holder = _calibre_holder(payload, current_user, db)
-    if calibre_holder is not None:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=_conflict_detail(_CALIBRE_CONFLICT, calibre_holder, current_user),
-        )
+    # Neither asks past the Shelf: nothing makes an identifier unique, so a
+    # hidden or trashed holder answers as no Book rather than disclosing it.
+    carried = [(entry.scheme, entry.value) for entry in payload.identifiers]
+    for source, message in (
+        (recognition.Source.CALIBRE, _CALIBRE_CONFLICT),
+        (recognition.Source.STORE, _STORE_CONFLICT),
+    ):
+        match recognition.recognise_one(db, current_user.id, source, identifiers=carried):
+            case recognition.Seen(book_id=book_id):
+                _refuse(message, book_id)
+            case recognition.Tied():
+                # Two Books outside one copy group: the client acts on the id
+                # a 409 names, so naming either would pick between them.
+                _refuse(message, None)
 
+    # The ISBN is asked across the whole table: it is unique there, invisible
+    # rows included, so a filtered check would miss the row that is actually
+    # going to collide and turn a 409 into a 500. `recognition` compares every
+    # stored spelling, so a row written before canonicalisation as an ISBN-10
+    # is found too.
     freed: list[int] = []
-    if payload.isbn:
-        forms = isbn_utils.equivalent_forms(payload.isbn)
-        if forms:
-            # `whole_table_for_uniqueness`, not a shelf: the ISBN is unique
-            # across the whole table, invisible rows included, so a filtered
-            # check would miss the row that is actually going to collide and
-            # turn a 409 into a 500.
+    match recognition.recognise_one(
+        db, current_user.id, recognition.Source.ADD, isbn=payload.isbn
+    ):
+        case recognition.Seen(book_id=book_id):
+            _refuse(conflict, book_id)
+        case recognition.Tied() | recognition.Hidden():
+            _refuse(conflict, None)
+        case recognition.InTrash(book_ids=book_ids):
+            # **Mis-scan, delete, re-scan is the most common delete in this
+            # app**, so a trashed holder is cleared out of the way rather than
+            # reported as "already exists" for a Book the member cannot see
+            # anywhere. Purged rather than restored: restoring would hand back
+            # the record somebody had just rejected.
+            #
+            # **Every holder is one this member could have purged from their
+            # own trash**, because `InTrash` is only answered when no holder is
+            # hidden: somebody else's trashed private Book answers `Hidden`
+            # and keeps its 409.
             #
             # **Every holder, not the first one.** Copies made it possible for
             # several rows to hold one ISBN, and freeing only the first was
             # wrong in two different ways, both measured through the API: a
-            # trashed group of two answered **500** (`IntegrityError: UNIQUE
-            # constraint failed: books.isbn`, because the survivor's token was
+            # trashed group of two answered **500** (the survivor's token was
             # cleared as the group shrank and it re-entered the partial index
             # just as the insert reclaimed the ISBN), and a trashed group of
-            # three answered **201**, purging one row and adding a stray fourth
-            # beside the two that still held the ISBN.
-            #
-            # Ordered live-first so the row named in a 409 is the one on the
-            # shelf rather than one in the trash.
-            holders = (
-                whole_table_for_uniqueness(db)
-                .filter(Book.isbn.in_(forms))
-                .order_by(Book.deleted_at.isnot(None), Book.id)
-                .all()
-            )
-            # Decided in full before anything is destroyed. `_purge` is not
-            # undoable by the request failing: it used to unlink the cover file
-            # itself, so a 409 raised half way through a group left a member
-            # holding a book whose cover was gone. That unlink now happens
-            # after the commit, and this loop is what makes sure there is
-            # nothing to undo in the first place.
-            blocker = next(
-                (holder for holder in holders if not _freeable(holder, current_user)),
-                None,
-            )
-            if blocker is not None:
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail=_conflict_detail(conflict, blocker, current_user),
-                )
+            # three answered **201** beside the two that still held the ISBN.
+            # Decided in full before anything is destroyed, which the answer
+            # being one value makes structural.
+            holders = Shelf.trashed_by(db, current_user.id).where(Book.id.in_(book_ids)).all()
             freed = [_purge(holder, db) for holder in holders]
-            if freed:
-                # Flushed, not committed: this function owns the transaction
-                # and commits once. Without this the DELETEs are still pending
-                # when the INSERT runs and the unique ISBN index rejects it,
-                # which is the whole thing this avoids.
-                db.flush()
+            # Flushed, not committed: this function owns the transaction and
+            # commits once. Without this the DELETEs are still pending when the
+            # INSERT runs and the unique ISBN index rejects it.
+            db.flush()
 
     fields = payload.model_dump()
     # The loop rather than one `pop` per name, so this list and the import time
@@ -1828,53 +1818,12 @@ def _create_book(payload: BookCreate, current_user: User, db: Session, conflict:
 #: The 409 message for a Calibre record a visible Book already carries.
 _CALIBRE_CONFLICT = "Book from this Calibre record already in catalog"
 
-
-def _calibre_holder(payload: BookCreate, current_user: User, db: Session) -> Book | None:
-    """The lowest id Book the caller can see that carries one of this add's
-    `calibre_uuid` identifiers, or None.
-
-    **What recognises a Calibre record with no file and no ISBN on a second
-    import.** The file lookup has no file to ask by and the ISBN walk has no
-    ISBN, so without this the record became a second Book every time the
-    library was imported. `books.uuid` is the one key Calibre keeps for a
-    record for life, which is what makes it a match key where a store's
-    identifier is not: `enums.BookIdentifierScheme.CALIBRE_UUID`.
-
-    **Through the Shelf, so a Book the caller cannot see answers as no Book**,
-    and the add goes ahead. That is the opposite of the ISBN walk's choice, and
-    the reason is the index: the ISBN is unique across the table, so a hidden
-    holder is a clash the insert would hit anyway, while nothing makes a uuid
-    unique, so refusing on a hidden holder would only confirm that somebody
-    else holds that record. Trashed Books are off the Shelf too, the caller's
-    own included, so a re-import beside one makes a new Book rather than
-    reviving it, where the ISBN walk purges the trashed row instead.
-    """
-    uuids = [
-        entry.value
-        for entry in payload.identifiers
-        if entry.scheme == BookIdentifierScheme.CALIBRE_UUID
-    ]
-    if not uuids:
-        return None
-    shelf = Shelf.seen_by(db, current_user.id)
-    holder_id = (
-        shelf.select(Book.id)
-        .join(BookIdentifier, BookIdentifier.book_id == Book.id)
-        .filter(
-            BookIdentifier.scheme == BookIdentifierScheme.CALIBRE_UUID,
-            BookIdentifier.value.in_(uuids),
-        )
-        .order_by(Book.id)
-        .limit(1)
-        .scalar()
-    )
-    if holder_id is None:
-        return None
-    return shelf.where(Book.id == holder_id).first()
+#: The 409 message for a store's edition a visible Book already carries.
+_STORE_CONFLICT = "Book from this store record already in catalog"
 
 
-def _conflict_detail(message: str, holder: Book, current_user: User) -> str | dict[str, object]:
-    """The 409 body for a book whose ISBN is already taken.
+def _refuse(message: str, book_id: int | None) -> NoReturn:
+    """The 409 for a record a Book already is.
 
     Re-scanning a book already on the shelf is not a rare mistake, it is what
     happens on the second pass through a bookcase. Answering it with a bare
@@ -1882,60 +1831,34 @@ def _conflict_detail(message: str, holder: Book, current_user: User) -> str | di
     have to go and find it themselves to check it really is the same edition.
     So the id travels with the message and the UI offers to open it.
 
-    **Only when the holder is visible to the caller.** The uniqueness check
-    deliberately sees every row, private ones included, so returning the id
-    unconditionally would turn a 409 into a way to confirm that a particular
-    member owns a particular book, which is exactly what `is_private` promises
-    it will not do. In that case the message goes back on its own.
+    **Only for the one Book the caller can see that this record is**: the
+    callers pass an id for a `Seen` answer and `None` for the others. That is
+    this router's match, not a property of `recognition`: `Tied` still carries
+    the ids of two Books outside one copy group, and naming the lower one would
+    have the client land files on, or copy, whichever was added first. `Hidden`
+    carries no id to pass. The ISBN question deliberately sees every row, private ones
+    included, so naming the holder unconditionally would turn a 409 into a way
+    to confirm that a particular member owns a particular book, which is
+    exactly what `is_private` promises it will not do.
 
     **What is withheld is the id, and nothing else is.** The two bodies are
-    different shapes, a string against an object, so a caller can tell which
-    case it got. That is not a leak to close: the 409 itself already says this
+    different shapes, a string against an object, so a string body tells the
+    caller the holder is hidden from them or the record is a tie, and an object
+    body that it is one Book they can see. That is not a leak to close: the 409
+    itself already says this
     ISBN is held by some row, whatever the body carries, and the only way to
     stop it saying so is to create the book and break the unique index. So the
     promise here is the narrow one, and `tests/routers/test_books.py::
     TestTheDuplicateConflictPointsAtTheBook` reads the body rather than the
     message, because a test on the message passes under either rule.
     """
-    if holder.is_private and holder.added_by_user_id != current_user.id:
-        return message
     # `book_id` is what the client offers two actions on: opening the book it
     # already has (a mis-scan, the common case) and adding another copy of it
-    # (`POST /api/books/{book_id}/copies`). Both need the id and neither may
-    # have it when the holder is somebody else's private book.
-    return {"message": message, "book_id": holder.id}
-
-
-def _freeable(holder: Book, current_user: User) -> bool:
-    """Whether a trashed row may be cleared out of the way of a book being
-    added again.
-
-    Without this, deleting a book and re-scanning it reports "already exists"
-    for a book the member cannot see anywhere, which is a worse bug than the
-    one soft deletion fixes. `implementation.md` names mis-scan, delete,
-    re-scan as the most common delete in this app, so it is also the common
-    path rather than a corner.
-
-    Purged rather than restored, so the outcome matches what deleting and
-    re-adding has always done here: a fresh record. Restoring instead would
-    silently hand back the record somebody had just rejected, which is exactly
-    what a person who deleted it because its metadata was wrong does not want.
-    Losing the undo window costs nothing: they are holding the book and adding
-    it right now.
-
-    **Only a row this member could have seen in their own trash.** Purging
-    somebody else's trashed private book because their ISBN happened to match
-    would destroy data they never offered up, and would confirm the book
-    existed. That case keeps the 409.
-
-    **A predicate and nothing else**, deliberately. It used to purge as well,
-    which meant the caller could only ask about one row at a time without
-    destroying it: see the note at the call site for what that cost once one
-    ISBN could be held by several rows.
-    """
-    if holder.deleted_at is None:
-        return False
-    return not holder.is_private or holder.added_by_user_id == current_user.id
+    # (`POST /api/books/{book_id}/copies`).
+    raise HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail=message if book_id is None else {"message": message, "book_id": book_id},
+    )
 
 
 @router.post("", response_model=BookOut, status_code=status.HTTP_201_CREATED)
@@ -2997,8 +2920,8 @@ def list_duplicates(db: DbSession, current_user: CurrentUser) -> DuplicateReport
     # `Shelf.select` rather than a bare query, and not as a formality: it
     # rebuilds from `seen_by`'s own criteria tuple, so this projection and the
     # entity read it replaced are narrowed by the same object and cannot
-    # diverge. `importing.MarcIndex.build` scans on the same predicate the
-    # same way.
+    # diverge. `recognition.Index.build` scans on the same predicate the same
+    # way.
     rows = [
         _DuplicateRow(*row)
         for row in cast(
@@ -4532,24 +4455,6 @@ def list_digital_references_under_root(
     )
 
 
-def _fingerprint_agrees(reference: DigitalReference, sighting: SightingIn) -> bool:
-    """Whether a sweep's sighting may write its fingerprint onto this row.
-
-    **Only where every stored half is unset or the same as the one sent**, so a
-    write adds what was missing and never changes what another look recorded.
-    A root is only a folder name, and two members' folders can share it and a
-    path beneath it: without this, one member's pick replaces the other's
-    size, time and digest with those of a different file, and the holder
-    lookup stops finding the first file by its own digest.
-    """
-    pairs = (
-        (reference.size_bytes, sighting.size_bytes),
-        (reference.file_modified_at, sighting.file_modified_at),
-        (reference.partial_md5, sighting.partial_md5),
-    )
-    return all(stored is None or stored == sent for stored, sent in pairs)
-
-
 @router.post("/digital-references/sweep", response_model=SweepOut)
 def sweep_digital_references(
     payload: SweepIn,
@@ -4560,9 +4465,10 @@ def sweep_digital_references(
 
     The two per reference routes in one request. A miss is the per reference
     flag's rule unchanged: `missing_since` set once, the row never deleted. A
-    sighting clears `missing_since` and confirms the row, and writes its
-    fingerprint only where `_fingerprint_agrees`. A sweep of a few hundred
-    files is then a request or two rather than a request a file.
+    sighting is the per reference report's rule: it clears `missing_since`,
+    confirms the row, and fills in a fingerprint the row is missing without
+    ever replacing a different one. A sweep of a few hundred files is then a
+    request or two rather than a request a file.
 
     **The client sends sightings at the pick and misses only on a press**,
     because a root is only a folder name: one member's pick of their own
@@ -4579,40 +4485,9 @@ def sweep_digital_references(
     folder's account of itself, and a file under another root is not one it
     looked for.
     """
-    sightings = {sighting.reference_id: sighting for sighting in payload.seen}
-    asked = set(sightings) | set(payload.missing)
-    rows = (
-        Shelf.seen_by(db, current_user.id)
-        .select(DigitalReference)
-        .join(DigitalReference, DigitalReference.book_id == Book.id)
-        .filter(
-            DigitalReference.id.in_(asked),
-            DigitalReference.root_label == payload.root_label,
-        )
-        .all()
-    )
-
-    seen: list[int] = []
-    missing: list[int] = []
-    for reference in sorted(rows, key=lambda row: row.id):
-        sighting = sightings.get(reference.id)
-        if sighting is not None:
-            # A sighting wins over a miss naming the same id: something looked
-            # and found it, which is the only evidence against a miss.
-            reference.root_confirmed = True
-            if _fingerprint_agrees(reference, sighting):
-                reference.size_bytes = sighting.size_bytes
-                reference.file_modified_at = sighting.file_modified_at
-                reference.partial_md5 = sighting.partial_md5
-            reference.confirmed_at = func.now()
-            reference.missing_since = None
-            seen.append(reference.id)
-        else:
-            if reference.missing_since is None:
-                reference.missing_since = func.now()
-            missing.append(reference.id)
+    swept = file_references.sweep(db, current_user.id, payload)
     db.commit()
-    return SweepOut(seen=seen, missing=missing)
+    return swept
 
 
 # ── Which Books already hold these files ──────────────────────────────────────
@@ -4646,69 +4521,7 @@ def find_file_holders(
     path and a root can only be paired in SQL by row value comparisons whose
     spelling differs between the two engines; the root is then compared here.
     """
-    asked_paths = {
-        file.relative_path for file in payload.files if file.relative_path is not None
-    }
-    asked_digests = {
-        file.partial_md5 for file in payload.files if file.partial_md5 is not None
-    }
-    held = (
-        Shelf.seen_by(db, current_user.id)
-        .select(
-            DigitalReference.id,
-            DigitalReference.book_id,
-            DigitalReference.root_label,
-            DigitalReference.relative_path,
-            DigitalReference.partial_md5,
-            Book.format,
-        )
-        .join(DigitalReference, DigitalReference.book_id == Book.id)
-        .filter(
-            or_(
-                DigitalReference.relative_path.in_(asked_paths),
-                DigitalReference.partial_md5.in_(asked_digests),
-            )
-        )
-        .all()
-    )
-
-    by_location: dict[tuple[str, str], list[Any]] = defaultdict(list)
-    by_digest: dict[str, list[Any]] = defaultdict(list)
-    for row in held:
-        by_location[(row.root_label, row.relative_path)].append(row)
-        if row.partial_md5 is not None:
-            by_digest[row.partial_md5].append(row)
-
-    answers: list[HoldersOut] = []
-    for file in payload.files:
-        located = (
-            by_location.get((file.root_label, file.relative_path), [])
-            if file.root_label is not None and file.relative_path is not None
-            else []
-        )
-        digested = by_digest.get(file.partial_md5, []) if file.partial_md5 else []
-        at = {row.id for row in located}
-        carrying = {row.id for row in digested}
-        # A reference matching on both keys is one holder, not two.
-        rows = sorted(
-            {row.id: row for row in [*located, *digested]}.values(),
-            key=lambda row: (row.book_id, row.id),
-        )
-        answers.append(
-            HoldersOut(
-                holders=[
-                    HolderOut(
-                        book_id=row.book_id,
-                        reference_id=row.id,
-                        format=row.format,
-                        same_location=row.id in at,
-                        same_partial_md5=row.id in carrying,
-                    )
-                    for row in rows
-                ]
-            )
-        )
-    return answers
+    return file_references.holders(db, current_user.id, payload.files)
 
 
 # ── Single book ───────────────────────────────────────────────────────────────
@@ -5663,10 +5476,7 @@ def import_koreader_highlights(
     and never on one a client guessed. Read off the Book's own references,
     which `BookForRead` has already scoped.
     """
-    if not any(
-        reference.partial_md5 == payload.partial_md5
-        for reference in book.digital_references
-    ):
+    if not file_references.carries(book, payload.partial_md5):
         raise _conflict(
             NOT_HELD, "This book holds no file with that KOReader fingerprint."
         )
@@ -5962,53 +5772,15 @@ def list_digital_references(book: BookForRead, db: DbSession) -> list[DigitalRef
     )
 
 
-#: Postgres advisory lock class for one book's file references, so the key
-#: space shares nothing with any other advisory lock this database is given.
-_REFERENCE_CEILING_LOCK = 0x45_4E_44_50
-
-
-def _add_within_the_ceiling(db: Session, reference: DigitalReference) -> None:
-    """Add a new reference to its book, or refuse it with 409 past the ceiling.
-
-    **The count is taken after the insert, inside the same transaction, and
-    that order is the guard.** A count taken first and an insert after it is a
-    gap two concurrent reports both pass, each reading the same count and each
-    inserting, so a book lands past the ceiling and a later merge of it is
-    refused (`folding.py`). Counted after the insert, the row is already in the
-    count, so the second of two racing reports sees the first:
-
-    * **SQLite** serialises writers. The insert takes the write lock and holds
-      it to the commit, so the other report's insert waits on `busy_timeout`
-      and its count then includes this row.
-    * **Postgres** at READ COMMITTED does not: two uncommitted inserts never see
-      each other. A transaction scoped advisory lock on the book serialises the
-      two, released by the commit or the rollback that ends the request.
-
-    Narrowed to this book, and that narrowing **is** the ceiling: without it the
-    count is the whole library's and one member filling their own shelf refuses
-    everybody else's next reference.
-    """
-    if db.get_bind().dialect.name == "postgresql":
-        db.execute(
-            text("SELECT pg_advisory_xact_lock(:space, :book)"),
-            {"space": _REFERENCE_CEILING_LOCK, "book": reference.book_id},
-        )
-    db.add(reference)
-    db.flush()
-    held = (
-        db.query(func.count(DigitalReference.id))
-        .filter(DigitalReference.book_id == reference.book_id)
-        .scalar()
-    )
-    if held > MAX_DIGITAL_REFERENCES_PER_BOOK:
-        db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=(
-                "This book already holds "
-                f"{MAX_DIGITAL_REFERENCES_PER_BOOK} file references"
-            ),
-        )
+#: The `detail.code` on the 409 when a new location would put the Book past
+#: `MAX_DIGITAL_REFERENCES_PER_BOOK`. Spelt as `routers/loans.py` spells its
+#: codes. The Settings card compares against both literals, and
+#: `tests/routers/test_books_digital_references.py` holds the two spellings
+#: equal across the trees.
+REFERENCE_CEILING: Final = "reference_ceiling"
+#: The `detail.code` on the 409 when another Book the caller can see already
+#: holds the location. `detail.book_id` names it.
+FILE_HELD_ELSEWHERE: Final = "file_held_elsewhere"
 
 
 @router.post("/{book_id}/digital-references", response_model=DigitalReferenceOut)
@@ -6016,6 +5788,7 @@ def report_digital_reference(
     payload: DigitalReferenceIn,
     book: BookForWrite,
     db: DbSession,
+    current_user: CurrentUser,
 ) -> DigitalReference:
     """A client reporting that it found this book's file at this location.
 
@@ -6031,56 +5804,57 @@ def report_digital_reference(
     status that varied would be one more thing for a client committing 300
     files to branch on.
 
-    **The report replaces the fingerprint whole rather than filling in the gaps
-    in it.** A row says what one client saw in one look. Merging a new size with
-    an old modification time would produce a fingerprint that no client ever
-    reported and that no re-check could ever match.
+    **A report fills in what the row is missing and never replaces a different
+    fingerprint**, the rule a folder sweep and a merge keep too. Size,
+    modification time and digest are written together, and only where every
+    half already stored is the same as the one sent: a root is only a folder
+    name, so two members' folders can share it and a path beneath it, and a
+    replacing report would put one member's file's fingerprint on the other's.
+    **`root_confirmed` only rises**: a bare filename report does not undo a
+    directory pick's corroboration.
 
     **A sighting clears `missing_since`.** Something has now looked and found
     it, which is the only evidence that ever contradicts a miss.
 
+    **A new location another Book the caller can see already holds is refused
+    with 409 `file_held_elsewhere`**, naming that Book in `book_id`, so a
+    location belongs to one Book among those a member can see. A Book the
+    caller cannot see answers as no Book, since a refusal would confirm
+    somebody privately holds that exact file. A location two Books held before
+    this rule is left as it is, and either may still re-confirm it.
+
     The per book ceiling is counted here rather than trusted to the payload,
-    which bounds one request and not the total: see
-    `MAX_DIGITAL_REFERENCES_PER_BOOK`, and `_add_within_the_ceiling` for why the
-    count follows the insert. It binds a **new** location only, so a book
-    already at the ceiling can still re-confirm what it holds.
+    which bounds one request and not the total: past
+    `MAX_DIGITAL_REFERENCES_PER_BOOK` a new location is refused with 409
+    `reference_ceiling`. The count follows the insert, under a lock a merge onto
+    the Book takes too. It binds a **new** location only, so a book already at
+    the ceiling can still re-confirm what it holds.
     """
-    at_this_location = db.query(DigitalReference).filter(
-        DigitalReference.book_id == book.id,
-        DigitalReference.root_label == payload.root_label,
-        DigitalReference.relative_path == payload.relative_path,
-    )
-    existing = at_this_location.first()
-    if existing is None:
-        try:
-            existing = DigitalReference(
-                book_id=book.id,
-                root_label=payload.root_label,
-                relative_path=payload.relative_path,
-            )
-            _add_within_the_ceiling(db, existing)
-        except IntegrityError:
-            # Another report of this location inserted it between the lookup
-            # and this insert, and `uq_digital_references_location` refused
-            # the second row. It is the same sighting, so it refreshes that
-            # row; uncaught, the loser of the race answered 500.
-            db.rollback()
-            existing = at_this_location.first()
-            if existing is None:
-                raise
-
-    existing.root_confirmed = payload.root_confirmed
-    existing.size_bytes = payload.size_bytes
-    existing.file_modified_at = payload.file_modified_at
-    existing.partial_md5 = payload.partial_md5
-    # The database's clock, not the client's, and not the client's word for when
-    # it looked. This column records when this server was told.
-    existing.confirmed_at = func.now()
-    existing.missing_since = None
-
+    try:
+        reported = file_references.report(db, current_user.id, book.id, payload)
+    except file_references.HeldElsewhere as held:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "message": "Another book already holds the file at this location",
+                "code": FILE_HELD_ELSEWHERE,
+                "book_id": held.book_id,
+            },
+        ) from None
+    except file_references.CeilingReached:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "message": (
+                    "This book already holds "
+                    f"{MAX_DIGITAL_REFERENCES_PER_BOOK} file references"
+                ),
+                "code": REFERENCE_CEILING,
+            },
+        ) from None
     db.commit()
-    db.refresh(existing)
-    return existing
+    db.refresh(reported)
+    return reported
 
 
 @router.post(
@@ -6108,8 +5882,7 @@ def report_digital_reference_missing(
     Reversed by an ordinary sighting: something looked and found it.
     """
     reference = _digital_reference_for(book, reference_id, db)
-    if reference.missing_since is None:
-        reference.missing_since = func.now()
+    if file_references.miss(reference):
         db.commit()
         db.refresh(reference)
     return reference
@@ -6132,7 +5905,7 @@ def forget_digital_reference(
     gone and a browser that could not see it are different statements, and only
     the first is evidence.
     """
-    db.delete(_digital_reference_for(book, reference_id, db))
+    file_references.forget(db, _digital_reference_for(book, reference_id, db))
     db.commit()
 
 

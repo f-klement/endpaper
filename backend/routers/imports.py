@@ -25,6 +25,7 @@ them, so that is not what choosing a reader decides.
 """
 
 import logging
+from collections import Counter
 from typing import Annotated
 
 from fastapi import APIRouter, File, HTTPException, Query, UploadFile
@@ -32,12 +33,13 @@ from sqlalchemy.orm import Session
 
 import csv_import
 import marc
+import recognition
 import settings_store
 from classifications import bounded_headings
 from config import MAX_UPLOAD_BYTES
 from dependencies import CurrentUser, DbSession
 from import_readers import ImportReader
-from importing import Import, MarcImport, MarcIndex, stored_record
+from importing import Import, MarcImport, recognise_stored, stored_record
 from ratelimit import import_limiter
 from refusals import refuses
 from schemas import (
@@ -298,25 +300,25 @@ def preview_marc(
     twice is the ordinary accident in a catalogue transfer, and "will this
     double my catalogue" has to be answerable before the write.
 
-    **Both of the import's refusals are modelled, not one.** `already_held`
-    counts what it will match and `blocked` counts what it will refuse for an
-    ISBN this member cannot see, through `MarcIndex.holds` and
-    `MarcIndex.would_refuse`, which are the same index and the same predicates
-    `MarcImport` applies, over the same stored records. Counting only the
-    first overstated what an import would add by exactly the number of records
-    another member holds privately.
+    **Every answer the import acts on is counted, not only the match.**
+    `already_held` counts what it will match, `blocked` what it will refuse for
+    an ISBN this member cannot see, `in_trash` what only their trash holds and
+    `ambiguous` what two Books answer, through `importing.recognise_stored`,
+    the same index and the same question `MarcImport` asks, over the same
+    stored records. Counting only the first overstated what an import would add
+    by exactly the number of records another member holds privately.
 
     **What is left is an upper bound rather than an equality, and it errs
-    towards promising less.** The index is read once here and mutated during an
-    import: `MarcIndex.remember` makes a freshly created Book findable, so a
-    work listed twice in one file is created once and matched once, while this
-    counts both as additions. Measured, two identical records: the preview would
-    add 2 and the import created 1 and matched 1.
+    towards promising less.** The index is read once here and grows during an
+    import: `recognition.Index.remember` makes a freshly created Book findable,
+    so a work listed twice in one file is created once and matched once, while
+    this counts both as additions. Measured, two identical records: the preview
+    would add 2 and the import created 1 and matched 1.
 
-    **`blocked` describes the default.** `would_refuse` is the refusal
-    `create_missing` reaches, and this endpoint takes no `create_missing`
-    because the import defaults it true. With it off nothing is created, so
-    nothing can be refused for a collision.
+    **`blocked` describes the default.** It is the refusal `create_missing`
+    reaches, and this endpoint takes no `create_missing` because the import
+    defaults it true. With it off nothing is created, so nothing can be refused
+    for a collision.
 
     **And it under-counts** where a record's ISBN is held invisibly but its
     title and author match a visible Book: that is a match, not a refusal. See
@@ -330,7 +332,7 @@ def preview_marc(
     import_limiter.check(current_user.username)
 
     parsed = _read_marc(_read_upload(file))
-    index = MarcIndex.build(db, current_user.id)
+    index = recognition.Index.build(db, current_user.id, recognition.Source.CATALOGUE)
     # The same stored view the import matches on. Matching the raw record here
     # and the truncated one there would make the two screens disagree about the
     # records the bound acts on, which is exactly what the counts are for.
@@ -340,15 +342,18 @@ def preview_marc(
     # views of one value the comment above says must not happen; it was invisible
     # only because the projection is the identity on every reachable path.
     stored = [stored_record(record) for record in parsed.records]
+    # Asked once per record and kept, so the four counts read one answer each.
+    # No statement per record: the index answers ids and nothing is loaded.
+    answers = Counter(type(recognise_stored(index, record)) for record in stored)
 
     return MarcPreviewOut(
         total_records=parsed.total,
         readable=len(parsed.records),
         skipped=parsed.skipped,
-        # `holds`, never `find`: this is a count, and `find` loads a Book that
-        # would be thrown away. See `MarcIndex.holds` for the measurement.
-        already_held=sum(1 for record in stored if index.holds(record)),
-        blocked=sum(1 for record in stored if index.would_refuse(record)),
+        already_held=answers[recognition.Seen],
+        blocked=answers[recognition.Hidden],
+        in_trash=answers[recognition.InTrash],
+        ambiguous=answers[recognition.Tied],
         rows=[
             MarcPreviewRow(
                 title=record.title or "",
