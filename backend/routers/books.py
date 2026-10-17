@@ -87,6 +87,7 @@ from enums import (
     ReadStatus,
     TagCategory,
 )
+from errors import a_deadlock_answers_409
 from fields import Fields
 from identifiers import add_identifiers
 from lending import Loans
@@ -1706,9 +1707,9 @@ def _create_book(payload: BookCreate, current_user: User, db: Session, conflict:
     _checked_collection(db, payload.collection_id, current_user.id)
 
     # Which Book this record already is, asked by `recognition`, one key at a
-    # time and narrowed to this record's keys. The Calibre uuid and the ASIN
-    # before the ISBN, so a 409 names the Book this record already is rather
-    # than one that only shares its ISBN:
+    # time and narrowed to this record's keys. The Calibre uuid and the store
+    # identifiers before the ISBN, so a 409 names the Book this record already
+    # is rather than one that only shares its ISBN:
     # `test_the_uuid_holder_answers_where_the_isbn_names_another_book` pins it.
     # Neither asks past the Shelf: nothing makes an identifier unique, so a
     # hidden or trashed holder answers as no Book rather than disclosing it.
@@ -3073,40 +3074,55 @@ def merge_books(
     # is also where the flushes and the ISBN release ordering live. What stays
     # here is this transaction's own business: the covers on disk, the copy
     # group tokens, and when the commit happens.
-    folding.fold(db, keeper, losers)
+    #
+    # **A writer holding a loser can deadlock with the merge**, which holds its
+    # keeper and then deletes the loser, and Postgres then aborts one of the
+    # two. Aborted, the merge has written nothing: every write is before this
+    # commit, and the cover files move only after it.
+    with a_deadlock_answers_409(db, _MET_ANOTHER_CHANGE):
+        folding.fold(db, keeper, losers)
 
-    # Read before the loop: `db.expire(loser)` below would make each of these
-    # a fresh SELECT, and after the delete there is nothing left to read them
-    # from at all.
-    shrinking_groups = {loser.copy_group for loser in losers} - {None}
+        # Read before the loop: `db.expire(loser)` below would make each of
+        # these a fresh SELECT, and after the delete there is nothing left to
+        # read them from at all.
+        shrinking_groups = {loser.copy_group for loser in losers} - {None}
 
-    cover_files = _MergeCovers(keeper)
-    for loser in losers:
-        cover_files.plan(loser)
+        cover_files = _MergeCovers(keeper)
+        for loser in losers:
+            cover_files.plan(loser)
 
-        # Expire before deleting. The repointing above moved rows out from
-        # under the loser, but its loaded relationship collections still list
-        # them, and the delete cascade walks those collections rather than the
-        # database. Without this, every note, quote, loan and status just
-        # moved to the keeper is deleted along with the row they came from.
-        db.expire(loser)
-        db.delete(loser)
+            # Expire before deleting. The repointing above moved rows out from
+            # under the loser, but its loaded relationship collections still
+            # list them, and the delete cascade walks those collections rather
+            # than the database. Without this, every note, quote, loan and
+            # status just moved to the keeper is deleted along with the row
+            # they came from.
+            db.expire(loser)
+            db.delete(loser)
 
-    # Merging two rows that were copies of each other is a member saying they
-    # were never two objects. That can leave one row wearing a group token,
-    # which would keep its ISBN out of the unique index for no reason. Flushed
-    # first, or the rows being counted still include the ones just deleted.
-    if shrinking_groups:
-        db.flush()
-        for token in shrinking_groups:
-            _normalise_copy_group(token, db)
+        # Merging two rows that were copies of each other is a member saying
+        # they were never two objects. That can leave one row wearing a group
+        # token, which would keep its ISBN out of the unique index for no
+        # reason. Flushed first, or the rows being counted still include the
+        # ones just deleted.
+        if shrinking_groups:
+            db.flush()
+            for token in shrinking_groups:
+                _normalise_copy_group(token, db)
 
-    db.commit()
+        db.commit()
     if cover_files.settle():
         db.commit()
 
     db.refresh(keeper)
     return book_to_out(keeper, current_user, db)
+
+
+#: The 409 for a merge Postgres aborted to break a deadlock.
+_MET_ANOTHER_CHANGE = (
+    "Another change to the same books met this merge, and nothing was merged. "
+    "Merge them again."
+)
 
 
 class _MergeCovers:
@@ -5774,9 +5790,10 @@ def list_digital_references(book: BookForRead, db: DbSession) -> list[DigitalRef
 
 #: The `detail.code` on the 409 when a new location would put the Book past
 #: `MAX_DIGITAL_REFERENCES_PER_BOOK`. Spelt as `routers/loans.py` spells its
-#: codes. The Settings card compares against both literals, and
-#: `tests/routers/test_books_digital_references.py` holds the two spellings
-#: equal across the trees.
+#: codes. The client's landing module, `frontend/src/lib/fileLanding.ts`, which
+#: the Scan page and the Settings card both land a picked file through, compares
+#: against both literals, and `tests/routers/test_books_digital_references.py`
+#: holds the two spellings equal across the trees.
 REFERENCE_CEILING: Final = "reference_ceiling"
 #: The `detail.code` on the 409 when another Book the caller can see already
 #: holds the location. `detail.book_id` names it.

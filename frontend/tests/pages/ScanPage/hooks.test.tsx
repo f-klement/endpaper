@@ -704,7 +704,30 @@ describe("useRapidIntake", () => {
         failed: 1,
         unreferenced: 0,
         already: 0,
+        atCeiling: 0,
+        filesLeft: 0,
         stopped: false,
+      }),
+    );
+  });
+
+  it("says a duplicate naming no Book is held unnamed, not the server's sentence", async () => {
+    // A tie and a holder hidden from this member answer alike, so the row
+    // gets the one sentence true of both.
+    api.on("/api/books/lookup", { body: LOOKUP });
+    api.on("/api/books/scan", {
+      status: 409,
+      body: { detail: "Book with this ISBN already exists" },
+    });
+    const { result } = renderRapid();
+    act(() => result.current.capture("9780441013593"));
+    await waitFor(() => expect(result.current.entries[0]?.state).toBe("found"));
+
+    act(() => result.current.addAll());
+
+    await waitFor(() =>
+      expect(result.current.entries[0]?.reason).toEqual({
+        kind: "held-unnamed",
       }),
     );
   });
@@ -851,6 +874,8 @@ describe("stopping a rapid add", () => {
       failed: 0,
       unreferenced: 0,
       already: 0,
+      atCeiling: 0,
+      filesLeft: 0,
       stopped: true,
     });
   });
@@ -940,6 +965,8 @@ describe("stopping a rapid add", () => {
       failed: 0,
       unreferenced: 0,
       already: 0,
+      atCeiling: 0,
+      filesLeft: 0,
       stopped: false,
     });
     expect(result.current.entries).toEqual([]);
@@ -1459,6 +1486,8 @@ describe("useRapidIntake and a file with no usable metadata", () => {
       failed: 0,
       unreferenced: 1,
       already: 0,
+      atCeiling: 0,
+      filesLeft: 0,
       stopped: false,
     });
     expect(result.current.entries).toHaveLength(0);
@@ -1739,7 +1768,44 @@ describe("useRapidIntake and a file with no usable metadata", () => {
       failed: 0,
       unreferenced: 0,
       already: 0,
+      atCeiling: 0,
+      filesLeft: 0,
       stopped: false,
+    });
+  });
+
+  it("leaves a file another Book holds on it when filing the row as a copy, and counts it", async () => {
+    // A location only a print copy holds is refused on the new copy too, on
+    // every press. Counted unrecorded, the row promised that picking the folder
+    // again would record it, which it never would.
+    api.on("/api/books/scan", DUPLICATE);
+    api.on(
+      HOLDER,
+      { body: [makeBook({ id: 77, format: BookFormat.hardcover })] },
+      "GET",
+    );
+    api.on("/api/books/77/copies", { body: makeBook({ id: 90 }) }, "POST");
+    api.on("/api/books/90/digital-references", {
+      status: 409,
+      body: {
+        detail: { message: "held", code: "file_held_elsewhere", book_id: 3 },
+      },
+    });
+    const file = await epubInFolder();
+    const { result } = renderRapid();
+
+    act(() => result.current.pickFiles([file]));
+    await settled(result);
+    act(() => result.current.addAll());
+    await waitFor(() => expect(result.current.result?.failed).toBe(1));
+
+    act(() => result.current.addAsCopy(result.current.entries[0]!.key));
+    await waitFor(() => expect(result.current.entries).toHaveLength(0));
+
+    expect(result.current.result).toMatchObject({
+      added: 1,
+      unreferenced: 0,
+      filesLeft: 1,
     });
   });
 
@@ -1816,6 +1882,10 @@ describe("useRapidIntake and a file with no usable metadata", () => {
     // else's book and spend one of its sixteen references, on a row the screen
     // calls failed.
     api.on("/api/books/scan", DUPLICATE);
+    // Both answered, so a gate switched off writes and this goes red, rather
+    // than the copies read failing first and the add stopping either way.
+    api.on(HOLDER, { body: [makeBook({ id: 77, format: null })] }, "GET");
+    api.on("/api/books/77/digital-references", { body: {} });
     const { result } = renderRapid();
 
     act(() =>
@@ -1855,6 +1925,9 @@ describe("useRapidIntake and a file with no usable metadata", () => {
       },
     });
     api.on("/api/books/scan", DUPLICATE);
+    // Answered for the reason the test above gives.
+    api.on(HOLDER, { body: [makeBook({ id: 77, format: null })] }, "GET");
+    api.on("/api/books/77/digital-references", { body: {} });
     const { result } = renderRapid();
 
     act(() =>
@@ -3055,6 +3128,34 @@ describe("useRapidIntake and a file already in the library", () => {
       api.lastCall("/api/books/42/digital-references", "POST")?.body,
     ).toMatchObject({ root_label: "Books", relative_path: "Dune.pdf" });
     expect(result.current.result).toMatchObject({ added: 0, already: 1 });
+    expect(result.current.entries).toEqual([]);
+  });
+
+  it("takes a row whose holder is at its file ceiling out of the queue, and counts it", async () => {
+    // Owner's ruling, 2026-10-17: the book is in the library, and adding the
+    // row again is refused the same way, so a failed row would be a retry
+    // that cannot succeed.
+    heldBy({ book_id: 42, format: null });
+    api.on("/api/books/42/digital-references", {
+      status: 409,
+      body: { detail: { message: "full", code: "reference_ceiling" } },
+    });
+    const { result } = renderTheIntake();
+
+    act(() =>
+      result.current.pickFiles([pickedInFolder("Dune.pdf", "Books/Dune.pdf")]),
+    );
+    await waitFor(() => expect(result.current.entries[0]?.heldBy).toBeTruthy());
+    act(() => result.current.addAll());
+    await waitFor(() => expect(result.current.result).not.toBeNull());
+
+    expect(result.current.result).toMatchObject({
+      added: 0,
+      failed: 0,
+      already: 0,
+      atCeiling: 1,
+      filesLeft: 0,
+    });
     expect(result.current.entries).toEqual([]);
   });
 

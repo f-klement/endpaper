@@ -2983,10 +2983,10 @@ class BookIdentifier(Base):
     links a Readwise book carrying an ASIN to the one Book the member can see
     with that ASIN (`recognition.Source.HIGHLIGHTS`), and writes nothing to a
     Book, only which Book a member's highlights land on. And an add carrying a
-    `calibre_uuid` or an ASIN answers 409 where a Book the member can see
-    already carries it (`recognition.Source.CALIBRE` and `STORE`), which is
-    how a Calibre record with no file and no ISBN, or a Kindle book, is
-    recognised on a second import. A Google volume id matches nothing yet.
+    `calibre_uuid`, an ASIN or a Google volume id answers 409 where a Book the
+    member can see already carries it (`recognition.Source.CALIBRE` and
+    `STORE`), which is how a Calibre record with no file and no ISBN, a Kindle
+    book or a Play Books one is recognised on a second import.
 
     Otherwise what reads it is `BookOut`, which carries it on every Book a
     member fetches, the book detail page, which renders it as text beside the
@@ -3022,9 +3022,9 @@ class BookIdentifier(Base):
             unique=True,
         ),
         # **The lookup by value**, which the unique index above cannot serve
-        # because it leads with `book_id`: an add carrying a Calibre uuid or an
-        # ASIN asks it for each (`recognition.recognise_one`), so an import
-        # of nine hundred books asks it up to eighteen hundred times.
+        # because it leads with `book_id`: an add carrying a Calibre uuid or a
+        # store identifier asks it for each (`recognition.recognise_one`), so
+        # an import of nine hundred books asks it up to eighteen hundred times.
         Index("ix_book_identifiers_scheme_value", "scheme", "value"),
         # Built from the enum rather than written out, `ck_author_identifiers_
         # scheme`'s rule: the literal list left a value the application accepts

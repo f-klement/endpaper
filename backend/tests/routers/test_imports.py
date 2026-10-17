@@ -12,10 +12,12 @@ import io
 from datetime import UTC, datetime
 
 import csv_import
+import importing
 import tags
 from enums import BookFormat, ReadStatus
 from models import Book, UserBook
 from tests.helpers import items
+from tests.test_errors import postgres_deadlock
 
 HEADER = (
     "Book Id,Title,Author,ISBN,ISBN13,My Rating,Publisher,"
@@ -1060,3 +1062,19 @@ class TestATitleTheMemberDeletedAtTheSourceDoesNotComeBack:
         body = res.json()
         assert (body["reader"], body["excluded"]) == ("generic", 0)
         assert body["exclusion_column"] is None
+
+
+class TestADeadlockedImportAsksForTheFileAgain:
+    def test_an_import_postgres_aborted_for_a_deadlock_answers_409(
+        self, client, admin, monkeypatch
+    ):
+        """The import commits once, so the abort left nothing of it behind."""
+
+        def deadlocked(*args, **kwargs):
+            raise postgres_deadlock()
+
+        monkeypatch.setattr(importing.Import, "apply", deadlocked)
+
+        res = upload(client, admin["headers"], csv_bytes(goodreads_row("Stoner", "read")))
+
+        assert res.status_code == 409

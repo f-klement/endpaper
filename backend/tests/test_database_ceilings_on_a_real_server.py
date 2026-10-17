@@ -13,11 +13,16 @@ pipeline's `test:postgres` job names this file.
 
 from __future__ import annotations
 
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
+
 import pytest
 from sqlalchemy import text, update
 from sqlalchemy.orm import Session
 
 import database
+import folding
 import importing
 import marc
 from catalogue import Heading, Link, Record
@@ -29,6 +34,7 @@ from models import MAX_ONLINE_LINKS_PER_BOOK, Book, Classification, OnlineLink
 from schemas import MAX_CLASSIFICATIONS_PER_BOOK
 from schemas.classification import ClassificationIn
 from tests import test_folding
+from tests.routers.test_imports_marc import collection, field, library_mode, link_field, record, upload
 
 if engine.dialect.name != "postgresql":
     pytest.skip(
@@ -173,3 +179,143 @@ class TestAMarcImportAddingNothingToABookLeavesItEditable:
         edited = db.get(Book, book_id)
         assert edited is not None
         assert edited.title == "Edited"
+
+
+#: How long either side of a race below waits for the other before it fails,
+#: so a harness that stops meeting its cycle fails rather than hanging the run.
+_RACE_BOUND_SECONDS = 15
+
+
+def _until_another_session_waits_on_this_one(session: Session) -> None:
+    """Return once some backend is blocked on a lock `session` holds.
+
+    `pg_locks` rather than `pg_stat_activity`, which a transaction reads from a
+    snapshot taken on its first look and so never sees the wait begin.
+    """
+    deadline = time.monotonic() + _RACE_BOUND_SECONDS
+    while time.monotonic() < deadline:
+        blocked = session.execute(
+            text(
+                "SELECT count(*) FROM pg_locks"
+                " WHERE NOT granted AND pg_backend_pid() = ANY(pg_blocking_pids(pid))"
+            )
+        ).scalar_one()
+        if blocked:
+            return
+        time.sleep(0.02)
+    raise AssertionError("no session came to wait on a lock this one holds")
+
+
+class TestAMarcImportDeadlockingWithAMergeAnswers409:
+    """A MARC import locks each Book it adds a link to, in record order, until
+    its one commit; a merge locks its keeper and then deletes its loser. An
+    import holding the loser that reaches the keeper closes a cycle, and
+    Postgres aborts whichever side started waiting first."""
+
+    def test_an_import_aborted_for_a_deadlock_with_a_merge_answers_409_and_writes_nothing(
+        self, client, admin, db, monkeypatch
+    ):
+        """The import waits first, so Postgres aborts the import and the merge
+        commits. The import holds the loser before the merge starts and waits
+        on the keeper before the merge reaches the loser, and Postgres runs its
+        deadlock check one `deadlock_timeout` after a wait begins."""
+        library_mode(db)
+        owner = admin["user"]["id"]
+        keeper = Book(title="Small Gods", isbn="9780552152976", added_by_user_id=owner)
+        loser = Book(title="Pyramids", isbn="9780552134613", added_by_user_id=owner)
+        db.add_all([keeper, loser])
+        db.commit()
+        keeper_id, loser_id = keeper.id, loser.id
+
+        loser_held, keeper_held = threading.Event(), threading.Event()
+        keep_links = importing._keep_links
+
+        def keep_links_then_let_the_merge_in(book: Book, links, session: Session) -> None:
+            keep_links(book, links, session)
+            if book.id == loser_id and not loser_held.is_set():
+                loser_held.set()
+                assert keeper_held.wait(timeout=_RACE_BOUND_SECONDS)
+
+        monkeypatch.setattr(importing, "_keep_links", keep_links_then_let_the_merge_in)
+
+        def merge() -> None:
+            assert loser_held.wait(timeout=_RACE_BOUND_SECONDS)
+            with Session(bind=engine, autoflush=False) as session:
+                kept, lost = session.get(Book, keeper_id), session.get(Book, loser_id)
+                assert kept is not None
+                assert lost is not None
+                database.hold_book_ceilings(session, keeper_id)
+                keeper_held.set()
+                _until_another_session_waits_on_this_one(session)
+                folding.fold(session, kept, [lost])
+                session.expire(lost)
+                session.delete(lost)
+                session.commit()
+
+        with ThreadPoolExecutor(1) as pool:
+            merging = pool.submit(merge)
+            res = upload(
+                client,
+                admin["headers"],
+                collection(
+                    record(
+                        field("245", ("a", "Pyramids")),
+                        field("020", ("a", "9780552134613")),
+                        link_field("https://a.example/pyramids"),
+                    ),
+                    record(
+                        field("245", ("a", "Small Gods")),
+                        field("020", ("a", "9780552152976")),
+                        link_field("https://a.example/small-gods"),
+                    ),
+                ),
+            )
+            merging.result(timeout=_RACE_BOUND_SECONDS)
+
+        db.expire_all()
+        assert res.status_code == 409
+        assert db.get(Book, loser_id) is None
+        assert db.query(OnlineLink).filter(OnlineLink.book_id == keeper_id).count() == 0
+
+
+class TestAMergeDeadlockingWithAnotherWriterAnswers409:
+    """A merge holds its keeper and then deletes its loser. A writer holding
+    the loser that reaches for the keeper closes a cycle, and Postgres aborts
+    whichever side started waiting first."""
+
+    def test_a_merge_aborted_for_a_deadlock_answers_409_and_merges_nothing(
+        self, client, admin, db
+    ):
+        """The merge waits first, on the loser the writer holds, so Postgres
+        aborts the merge and the writer commits. The writer reaches for the
+        keeper once the merge is waiting, inside the one `deadlock_timeout`
+        after which Postgres checks the merge's wait for a cycle."""
+        owner = admin["user"]["id"]
+        keeper = Book(title="Small Gods", isbn="9780552152976", added_by_user_id=owner)
+        loser = Book(title="Pyramids", added_by_user_id=owner)
+        db.add_all([keeper, loser])
+        db.commit()
+        keeper_id, loser_id = keeper.id, loser.id
+        loser_held = threading.Event()
+
+        def hold_the_loser_then_reach_for_the_keeper() -> None:
+            with Session(bind=engine) as session:
+                database.hold_book_ceilings(session, loser_id)
+                loser_held.set()
+                _until_another_session_waits_on_this_one(session)
+                database.hold_book_ceilings(session, keeper_id)
+                session.commit()
+
+        with ThreadPoolExecutor(1) as pool:
+            writing = pool.submit(hold_the_loser_then_reach_for_the_keeper)
+            assert loser_held.wait(timeout=_RACE_BOUND_SECONDS)
+            res = client.post(
+                "/api/books/merge",
+                json={"book_ids": [keeper_id, loser_id], "keep_id": keeper_id},
+                headers=admin["headers"],
+            )
+            writing.result(timeout=_RACE_BOUND_SECONDS)
+
+        db.expire_all()
+        assert res.status_code == 409
+        assert db.get(Book, loser_id) is not None

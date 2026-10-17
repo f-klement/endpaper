@@ -70,6 +70,7 @@ const REASONS: Record<NamedScanReason, MessageKey> = {
   "kept-for-now": "fallback.keptForNow",
   unreachable: "common.cannotReachServer",
   "held-in-another-format": "rapid.heldInAnotherFormat",
+  "held-unnamed": "rapid.heldUnnamed",
   "not-in-catalogues-as-stated": "fallback.notInCataloguesAsStated",
   "lookup-failed-as-stated": "fallback.lookupFailedAsStated",
   "record-differs": "rapid.recordDiffers",
@@ -232,6 +233,8 @@ interface RapidQueueProps {
     failed: number;
     unreferenced: number;
     already: number;
+    atCeiling: number;
+    filesLeft: number;
     stopped: boolean;
   } | null;
   onRemove: (key: string) => void;
@@ -404,6 +407,19 @@ export default function RapidQueue({
         {result.already > 0 && (
           <span className="block mt-1">
             {t("rapid.alreadyHeld", { count: result.already })}
+          </span>
+        )}
+        {result.atCeiling > 0 && (
+          <span className="block mt-1">
+            {t("rapid.atCeiling", { count: result.atCeiling })}
+          </span>
+        )}
+        {/* The files "except where another book already held the location"
+          above names, and those of a book added or a copy press: they stay
+          with the Book holding them. */}
+        {result.filesLeft > 0 && (
+          <span className="block mt-1">
+            {t("rapid.filesLeft", { count: result.filesLeft })}
           </span>
         )}
       </p>

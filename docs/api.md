@@ -83,7 +83,7 @@ is discarded, and only a token naming a test account does. See [security.md](sec
 | Method | Path | Access | Notes |
 |---|---|---|---|
 | GET | `/api/books` | user | Paginated. Filter with `q`, `status`, `ownership`, `format`, `lending`, `discuss`, `series`, `author`, `location`, `collection_id`, `unfiled`, `unrated`, `tags`, `sort` |
-| POST | `/api/books` | user | **409** on an ISBN already in the catalogue, or on a Calibre record (`calibre_uuid` identifier) a Book the caller can see already carries |
+| POST | `/api/books` | user | **409** on an ISBN already in the catalogue, or on a Calibre record (`calibre_uuid` identifier) or a store record (`asin` or `google_books` identifier) a Book the caller can see already carries |
 | POST | `/api/books/scan` | user | Same, named for the scan flow |
 | GET | `/api/books/tags` | user | The seeded vocabulary plus the invented tags the caller can already see |
 | POST | `/api/books/tags` | user | Invent a tag. Returns the existing one on a name clash |
@@ -105,7 +105,7 @@ is discarded, and only a token naming a test account does. See [security.md](sec
 | GET | `/api/books/duplicates` | user | Books that look like the same work |
 | GET | `/api/books/trash` | user | What the caller has deleted and could put back |
 | DELETE | `/api/books/trash` | user | Empties it for good. Returns `{purged}` |
-| POST | `/api/books/merge` | user | Fold several entries into one |
+| POST | `/api/books/merge` | user | Fold several entries into one. **409** when Postgres aborted the merge to break a deadlock with another change to the same Books: nothing is merged, and the same request can be sent again |
 | POST | `/api/books/bulk` | user | One verb applied to a selection of books |
 | POST | `/api/books/covers/backfill?after_id=` | user | Fetch and store the covers of books that have none. Bounded per run: send the reply's `next_after_id` back to carry on, and it returns 0 at the end. `after_id` is 0 to 2^63-1; outside that is a **422** |
 | GET | `/api/books/{id}` | read | **404** if absent *or* invisible |
@@ -1000,9 +1000,9 @@ fixed statement budget that a test reads out of its own docstring.
 | Method | Path | Access | Notes |
 |---|---|---|---|
 | POST | `/api/imports/preview` | user | Reads the file and reports what it is. Writes nothing |
-| POST | `/api/imports/csv` | user | Applies it. `create_missing`, `apply_tags`, `overrides`, `reader` |
+| POST | `/api/imports/csv` | user | Applies it. `create_missing`, `apply_tags`, `overrides`, `reader`. **409** when Postgres aborted the import to break a deadlock with another change to the same Books, such as a merge: nothing is written, and the same file can be sent again |
 | POST | `/api/imports/marc/preview` | user | Reads a MARCXML file and reports what it holds. Writes nothing. **403** without library mode |
-| POST | `/api/imports/marc` | user | Applies it. `create_missing`, default **true**. **403** without library mode |
+| POST | `/api/imports/marc` | user | Applies it. `create_missing`, default **true**. **403** without library mode. **409** on a deadlock, as for the CSV import |
 
 Goodreads, LibraryThing, StoryGraph, Libib, Openreads, or anything else with a
 title column. The approach is taken from **BookWyrm's** `bookwyrm/importers/`,

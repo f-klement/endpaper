@@ -15,6 +15,7 @@ import { useInvalidate } from "../../api/invalidate";
 import { ApiError } from "../../api/mutator";
 
 import {
+  findFileHolders,
   getLookupIsbnQueryKey,
   getSearchBooksQueryKey,
   listCopies,
@@ -34,10 +35,12 @@ import {
 import { BookFormat } from "../../api/generated/model";
 import { useGoogleBooksReady } from "../../app/hooks";
 import type {
+  AskedFileIn,
   BookMatch,
   BookSearchOut,
   CatalogueSource,
   DigitalReferenceIn,
+  HoldersOut,
   LocationOut,
   TagOut,
 } from "../../api/generated/model";
@@ -65,12 +68,14 @@ import {
 } from "../../lib/lastLocation";
 import {
   askWhoHolds,
-  locate,
-  reportEach,
-  reportHeld,
-  whereItLands,
+  countLandings,
+  HeldUnnamed,
+  land,
+  recordOnCopy,
   type HolderQuestion,
-} from "../hooks";
+  type Landing,
+} from "../../lib/fileLanding";
+import { locate } from "../hooks";
 import {
   FALLBACK_INTERVAL_MS,
   canBeAskedAgain,
@@ -752,6 +757,11 @@ export type LibraryNotice =
   | { readonly kind: "index-unread" }
   | { readonly kind: "unindexed"; readonly count: number };
 
+/** The holder lookup, in the shape `lib/fileLanding.askWhoHolds` takes. */
+function whoHolds(files: AskedFileIn[]): Promise<HoldersOut[]> {
+  return findFileHolders({ files });
+}
+
 /** Every file a row says where it is, its own reference first. */
 function filesOf(entry: ScannedEntry): DigitalReferenceIn[] {
   return entry.reference === undefined
@@ -833,8 +843,8 @@ async function readIndexed(index: File, files: readonly File[]) {
 }
 
 /**
- * Thrown by one row of `addAll` when its ISBN belongs to a book of another
- * format, so the failure mapping can offer the copy rather than state the 409.
+ * Thrown by one row of `addAll` when `land` answers `other-format`, so the
+ * failure mapping can offer the copy rather than state the 409.
  *
  * **A thrown value rather than a flag beside the row**, because the shared
  * loop in `lib/bulkWrite.ts` records a row as failed by its throw and by
@@ -1062,6 +1072,15 @@ export interface UseRapidIntakeResult {
    * nothing was added for them and their sighting was refreshed there. Not in
    * `added`, which would otherwise claim books the batch did not make.
    *
+   * `atCeiling` is such rows where that Book refused a file for holding as
+   * many as a Book may. They leave the queue too (owner's ruling, 2026-10-17):
+   * the book is in the library, and a retry is refused the same way.
+   *
+   * `filesLeft` is files of the rows added or already held, or of a copy
+   * press, that another Book
+   * the member can see already holds the location of, so they were left
+   * there and not recorded on the row's Book.
+   *
    * `stopped` says the run ended because the member ended it, so a count far
    * short of the queue is not read as damage. The rows it never reached are
    * still in the queue, which is the other half of the same sentence.
@@ -1071,6 +1090,8 @@ export interface UseRapidIntakeResult {
     failed: number;
     unreferenced: number;
     already: number;
+    atCeiling: number;
+    filesLeft: number;
     stopped: boolean;
   } | null;
 }
@@ -1127,6 +1148,8 @@ export function useRapidIntake(): UseRapidIntakeResult {
     failed: number;
     unreferenced: number;
     already: number;
+    atCeiling: number;
+    filesLeft: number;
     stopped: boolean;
   } | null>(null);
 
@@ -1153,17 +1176,6 @@ export function useRapidIntake(): UseRapidIntakeResult {
    */
   function apply(event: QueueEvent) {
     setEntries((current) => queueAfter(current, event));
-  }
-
-  /**
-   * Every file of a row onto one Book: its `reference`, then each of its
-   * `moreReferences`, one after another and stopping at the first the server
-   * refuses (`pages/hooks.reportEach`).
-   */
-  async function reportFiles(bookId: number, entry: ScannedEntry) {
-    await reportEach(filesOf(entry), (data) =>
-      reportReference.mutateAsync({ bookId, data }),
-    );
   }
 
   function capture(isbn: string) {
@@ -1419,7 +1431,10 @@ export function useRapidIntake(): UseRapidIntakeResult {
   /** Mark each asked row with the Book holding its file, or with none. */
   async function recordHolders(questions: readonly HolderQuestion[]) {
     if (questions.length === 0) return;
-    apply({ kind: "holders-answered", held: await askWhoHolds(questions) });
+    apply({
+      kind: "holders-answered",
+      held: await askWhoHolds(questions, whoHolds),
+    });
   }
 
   async function readFiles(files: readonly File[]) {
@@ -1707,8 +1722,6 @@ export function useRapidIntake(): UseRapidIntakeResult {
     // reach would stand over those rows while they are being written.
     setResult(null);
     const shelf = normaliseLocation(location);
-    let unreferenced = 0;
-    let already = 0;
 
     // **Asked again for every row nobody has asked about yet**, which is a
     // row whose pick lookup failed or had not answered when this was pressed.
@@ -1719,97 +1732,64 @@ export function useRapidIntake(): UseRapidIntakeResult {
         ? [{ key: entry.key, references: filesOf(entry), format: entry.format }]
         : [],
     );
-    const heldNow = await askWhoHolds(unasked);
+    const heldNow = await askWhoHolds(unasked, whoHolds);
+    const landings: Landing[] = [];
 
     /**
-     * One row: the book, and then where its file is.
+     * One row, landed by `lib/fileLanding.land`, and what that makes of it
+     * here.
      *
-     * **One item of the shared loop's work and up to three requests**, which is
-     * why the loop takes an item rather than a body: only the outermost throw
-     * makes this row a failure.
+     * **Only a throw makes the row a failure**, because the shared loop
+     * records one by nothing else. So a row whose book was made, or which is
+     * on its holder already, returns; at the ceiling it returns too, which
+     * takes it out of the queue as a counted row. A book of another format
+     * throws `HeldInAnotherFormat`, which is the copy offer, and a tie throws
+     * `HeldUnnamed`, which is its own reason.
      */
     async function addOne(entry: ScannedEntry) {
-      const draft = entry.draft!;
-      const known = heldNow.get(entry.key) ?? entry.heldBy;
-      if (known && entry.reference) {
-        // Held only by a Book of another format: the copy offer, never a
-        // reference on that Book and never a second Book of its own.
-        if (!known.lands) throw new HeldInAnotherFormat(known.bookId);
-        // **Already in the library, so this is a sighting and not a book.**
-        // Thrown on a refusal like any row, because nothing was added and the
-        // row should stay where a member can see it did not take.
-        await reportHeld(known, filesOf(entry), (bookId, data) =>
-          reportReference.mutateAsync({ bookId, data }),
-        );
-        already += 1;
-        return;
-      }
-      try {
-        // The same request builder as the one-book flow, so a field added
-        // there cannot quietly go missing from a rapid run. Everything a rapid
-        // run does not offer takes its blank value: no cover, no tags, not
-        // private. `format` is the exception and is carried off the entry,
-        // because a picked file answers it and a barcode does not.
-        const book = await scanAdd.mutateAsync({
-          data: toScanRequest({
+      const landing = await land(
+        {
+          // The same request builder as the one-book flow, so a field added
+          // there cannot quietly go missing from a rapid run. Everything a
+          // rapid run does not offer takes its blank value: no cover, no
+          // tags, not private. `format` is the exception and is carried off
+          // the entry, because a picked file answers it and a barcode does
+          // not.
+          body: toScanRequest({
             ...blankPending(shelf),
             format: entry.format,
-            draft,
+            draft: entry.draft!,
           }),
-        });
-        if (entry.reference) {
-          // **Its own `try`, inside this function and outside the book's, and
-          // that placement is the whole of it.** The book exists by the time
-          // this runs, so a throw caught by the arm below would report a
-          // created book as failed and a member would add it again into a
-          // duplicate. Same shape as the cover and the tags in
-          // `useScanFlow.confirm`, for the same reason.
-          //
-          // **A second request per book, sequential with the first.** There is
-          // no batched route: the contract is one sighting per location, and a
-          // sighting is idempotent on the pair, so a folder imported twice
-          // refreshes rows rather than doubling them. A three hundred book
-          // pick is six hundred requests against one SQLite writer, which is
-          // the reason the loop this runs in is sequential.
-          try {
-            await reportFiles(book.id, entry);
-          } catch {
-            // Counted rather than swallowed. A member who pointed at a folder
-            // so the library would know where their files are should not be
-            // told three hundred were added and left to discover that none of
-            // them says where it came from.
-            //
-            // **Not counted as refused**, which this arm also catches: a
-            // dropped connection, a timeout and a browser that went offline all
-            // land here and none of them is the server saying no.
-            unreferenced += 1;
-          }
-        }
-      } catch (error) {
-        // **The book this row is a duplicate of is where its file is.** Re
-        // importing a folder somebody imported last month is the case the
-        // sighting was made idempotent for, and every book in it answers 409,
-        // so a reference posted only after a successful create would be posted
-        // on exactly the pick that needs it least. `bookId` is present only
-        // where the holder is visible to this member, which is the same test
-        // `addCopy` applies before offering to copy it.
-        const holder = error instanceof ApiError ? error.bookId : undefined;
-        if (holder !== undefined && entry.reference && theIsbnWasRead(entry)) {
-          // **Asked rather than assumed**: the 409 names one book and not its
-          // format, nor its other copies. Copies that cannot be read are not
-          // written to, because the rule below cannot be answered for them,
-          // and the row keeps the 409's own reason.
-          const copies = await listCopies(holder).catch(() => undefined);
-          if (copies === undefined) throw error;
-          const target = whereItLands(copies, entry.format);
-          if (target === undefined) throw new HeldInAnotherFormat(holder);
-          // The row is a failure whichever way this goes, and it carries its
-          // reason on screen, so a refusal here is not counted a second time.
-          await reportFiles(target, entry).catch(() => undefined);
-        }
-        // Rethrown rather than reported here: the row is the loop's to record,
-        // and swallowing it would count a book that is not in the catalogue.
-        throw error;
+          references: filesOf(entry),
+          format: entry.format,
+          held: heldNow.get(entry.key) ?? entry.heldBy,
+          identifierWasRead: theIsbnWasRead(entry),
+        },
+        {
+          create: (data) => scanAdd.mutateAsync({ data }),
+          report: (bookId, data) =>
+            reportReference.mutateAsync({ bookId, data }),
+          copiesOf: listCopies,
+        },
+      );
+      landings.push(landing);
+      switch (landing.kind) {
+        case "added":
+        case "added-unreferenced":
+        case "on-holder":
+        case "at-ceiling":
+          return;
+        case "other-format":
+          throw new HeldInAnotherFormat(landing.holderId);
+        case "tie":
+          throw new HeldUnnamed();
+        case "failed":
+          // Rethrown rather than reported here: the row is the loop's to
+          // record, and swallowing it would count a book that is not in the
+          // catalogue.
+          throw landing.thrown;
+        default:
+          landing satisfies never;
       }
     }
 
@@ -1834,18 +1814,27 @@ export function useRapidIntake(): UseRapidIntakeResult {
       failures: outcome.failures.map(({ item, thrown }) =>
         thrown instanceof HeldInAnotherFormat
           ? { row: item, heldInAnotherFormat: thrown.holderId }
-          : { row: item, reason: reasonForError(thrown) },
+          : {
+              row: item,
+              reason:
+                thrown instanceof HeldUnnamed
+                  ? { kind: "held-unnamed" }
+                  : reasonForError(thrown),
+            },
       ),
     });
     setIsAdding(false);
     setAddProgress(null);
+    const counts = countLandings(landings);
     setResult({
-      // The shared loop counts every row that did not throw, and a row already
-      // in the library returns without a book being made.
-      added: outcome.added - already,
+      // From the landings rather than the shared loop, which counts every
+      // row that did not throw, a row already in the library among them.
+      added: counts.added,
       failed: outcome.failures.length,
-      unreferenced,
-      already,
+      unreferenced: counts.unreferenced,
+      already: counts.already,
+      atCeiling: counts.atCeiling,
+      filesLeft: counts.filesLeft,
       stopped: outcome.stopped,
     });
   }
@@ -1854,7 +1843,7 @@ export function useRapidIntake(): UseRapidIntakeResult {
    * File one row as its own copy of the book its ISBN belongs to, and say
    * where the file is on that copy.
    *
-   * **The press `whereItLands` refuses to make for the member.** The copy
+   * **The press `lib/fileLanding.whereItLands` refuses to make for the member.** The copy
    * route is the one the single book flow's "add as another copy" uses, with
    * the same body builder, so a copy made here inherits the work, the tags and
    * the privacy of the holder exactly as one made there does. The format is
@@ -1863,7 +1852,9 @@ export function useRapidIntake(): UseRapidIntakeResult {
    * The row leaves the queue once the copy exists, whatever the reference
    * does, for the reason `addOne` gives: a created book put back as a failure
    * is added again into a duplicate. The verdict above the queue moves by one
-   * row, so it keeps describing what is left beneath it.
+   * row, so it keeps describing what is left beneath it. The files go through
+   * `lib/fileLanding.recordOnCopy`, so a location another Book holds is left
+   * there as it is on the holder path.
    */
   async function addAsCopy(key: string) {
     const entry = entries.find((one) => one.key === key);
@@ -1902,9 +1893,10 @@ export function useRapidIntake(): UseRapidIntakeResult {
       apply({ kind: "copy-refused", key, reason: reasonForError(error) });
       return;
     }
-    const referenced = await reportFiles(copyId, entry).then(
-      () => true,
-      () => false,
+    const { left, recorded } = await recordOnCopy(
+      copyId,
+      filesOf(entry),
+      (bookId, data) => reportReference.mutateAsync({ bookId, data }),
     );
     // A copy is a new book, the reason `useScanFlow.addCopy` gives.
     invalidate.catalogue();
@@ -1912,8 +1904,10 @@ export function useRapidIntake(): UseRapidIntakeResult {
     setResult((last) => ({
       added: (last?.added ?? 0) + 1,
       failed: Math.max(0, (last?.failed ?? 0) - 1),
-      unreferenced: (last?.unreferenced ?? 0) + (referenced ? 0 : 1),
+      unreferenced: (last?.unreferenced ?? 0) + (recorded ? 0 : 1),
       already: last?.already ?? 0,
+      atCeiling: last?.atCeiling ?? 0,
+      filesLeft: (last?.filesLeft ?? 0) + left,
       stopped: last?.stopped ?? false,
     }));
   }

@@ -12,6 +12,7 @@ import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
+import { Locale } from "../../../../../src/api/generated/model";
 import CalibreImport from "../../../../../src/pages/SettingsPage/LibrarySettingsPage/components/CalibreImport";
 import type {
   CalibrePreview,
@@ -44,13 +45,17 @@ function outcome(overrides: Partial<CalibreResult> = {}): CalibreResult {
     otherFormat: 0,
     unreferenced: 0,
     atCeiling: 0,
+    filesLeft: 0,
     ...overrides,
   };
 }
 
 type Props = React.ComponentProps<typeof CalibreImport>;
 
-function renderCard(overrides: Partial<Props> = {}) {
+function renderCard(
+  overrides: Partial<Props> = {},
+  { locale = Locale.en }: { locale?: Locale } = {},
+) {
   const props = {
     isReading: false,
     isImporting: false,
@@ -66,7 +71,7 @@ function renderCard(overrides: Partial<Props> = {}) {
     onCancel: vi.fn<Props["onCancel"]>(),
     ...overrides,
   };
-  renderLocalised(<CalibreImport {...props} />);
+  renderLocalised(<CalibreImport {...props} />, { locale });
   return props;
 }
 
@@ -253,6 +258,87 @@ describe("CalibreImport", () => {
       screen.getByText(/3 are already in your library as another kind of copy/),
     ).toBeInTheDocument();
     expect(screen.queryByText(/without where all/)).not.toBeInTheDocument();
+  });
+
+  it("says how many files were left with another book holding their location", () => {
+    renderCard({ result: outcome({ added: 0, already: 1, filesLeft: 2 }) });
+
+    expect(
+      screen.getByText(
+        "Files whose location another book in your library already holds, so they were left there: 2.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("says in German how many files were left with another book", () => {
+    renderCard(
+      { result: outcome({ added: 0, already: 1, filesLeft: 2 }) },
+      { locale: Locale.de },
+    );
+
+    expect(
+      screen.getByText(
+        "Dateien, deren Ort schon bei einem anderen Buch der Bibliothek gespeichert ist und die deshalb dort blieben: 2.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("says the books already held had their files recorded except where another book held the location", () => {
+    // A file left with another book is counted beside this sentence, so the
+    // sentence cannot claim every file was recorded.
+    renderCard({ result: outcome({ added: 0, already: 1, filesLeft: 2 }) });
+
+    expect(
+      screen.getByText(
+        "1 were already in your library, so they were not added again. Where their files are was recorded, except where another book already held the location.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("says in German that the books already held had their files recorded except where another book held the location", () => {
+    renderCard(
+      { result: outcome({ added: 0, already: 1, filesLeft: 2 }) },
+      { locale: Locale.de },
+    );
+
+    expect(
+      screen.getByText(
+        /außer wo der Ort schon bei einem anderen Buch gespeichert war/,
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("lists a duplicate naming no book in its own words, not as any duplicate", () => {
+    // A tie and a holder hidden from this member answer alike, so the row
+    // claims neither.
+    renderCard({
+      result: outcome({
+        added: 0,
+        failures: [{ title: "Dune", status: 409, unnamed: true }],
+      }),
+    });
+
+    expect(
+      screen.getByText(
+        "Dune · already in the catalogue as more than one book, or as one you cannot see",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("lists a duplicate naming no book in German in its own words", () => {
+    renderCard(
+      {
+        result: outcome({
+          added: 0,
+          failures: [{ title: "Dune", status: 409, unnamed: true }],
+        }),
+      },
+      { locale: Locale.de },
+    );
+
+    expect(
+      screen.getByText(/Dune · bereits im Katalog, als mehr als ein Buch/),
+    ).toBeInTheDocument();
   });
 
   it("says it was stopped rather than reporting a short count as the whole", () => {

@@ -14,16 +14,19 @@ calling it is code.
 import logging
 import string
 import traceback
+from collections.abc import Iterator
+from contextlib import contextmanager
 from http import HTTPStatus
 from pathlib import Path
 from typing import Final
 
-from fastapi import FastAPI, Request, status
+from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError, ResponseValidationError
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from pydantic import ValidationError
 from sqlalchemy.exc import DBAPIError, PendingRollbackError
+from sqlalchemy.orm import Session
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.requests import ClientDisconnect
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
@@ -260,11 +263,57 @@ def database_error_summary(error: DBAPIError | PendingRollbackError) -> str:
     """
     if not isinstance(error, DBAPIError):
         return type(error).__name__
+    fields = server_fields(error)
+    constraint = fields.get("n") if fields is not None else None
+    summary = f"{type(error).__name__}({type(error.orig).__name__})"
+    return f"{summary} on {constraint}" if isinstance(constraint, str) else summary
+
+
+def server_fields(error: DBAPIError) -> dict[str, object] | None:
+    """The server's fields of a driver error, or None where it carries none.
+
+    pg8000 hands them over as a dict in the exception's first argument, keyed
+    by Postgres's one letter field codes: `C` the SQLSTATE, `n` a constraint.
+    SQLite errors carry none.
+    """
     original = error.orig
     fields = original.args[0] if original is not None and original.args else None
-    constraint = fields.get("n") if isinstance(fields, dict) else None
-    summary = f"{type(error).__name__}({type(original).__name__})"
-    return f"{summary} on {constraint}" if isinstance(constraint, str) else summary
+    return fields if isinstance(fields, dict) else None
+
+
+#: The SQLSTATE Postgres aborts a transaction with to break a deadlock.
+_DEADLOCK_DETECTED: Final = "40P01"
+
+
+def is_a_deadlock(error: DBAPIError) -> bool:
+    """Whether Postgres aborted this transaction to break a deadlock.
+
+    Two transactions each waiting on a row lock the other holds, as a writer
+    holding `database.hold_book_ceilings` on one Book can with a merge holding
+    another, and Postgres aborts one of them: nothing the aborted side wrote
+    survives, and the other side goes on to commit. SQLite raises no such
+    error, because it serialises writers rather than locking rows.
+    """
+    fields = server_fields(error)
+    return fields is not None and fields.get("C") == _DEADLOCK_DETECTED
+
+
+@contextmanager
+def a_deadlock_answers_409(db: Session, detail: str) -> Iterator[None]:
+    """Answer 409 with `detail` where Postgres aborts the block for a deadlock.
+
+    **Only around a block that commits once, at its end, or not at all**: the
+    abort then discarded everything the block wrote, so `detail` can tell the
+    caller to send the same request again. Every other database error is
+    raised unchanged, because a second send would fail the same way.
+    """
+    try:
+        yield
+    except DBAPIError as error:
+        if not is_a_deadlock(error):
+            raise
+        db.rollback()
+        raise HTTPException(status_code=409, detail=detail) from error
 
 
 def _without_values(errors: object) -> list[dict[str, object]]:

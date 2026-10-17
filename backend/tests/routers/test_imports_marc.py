@@ -18,7 +18,9 @@ from xml.sax.saxutils import escape
 import pytest
 from fastapi.responses import StreamingResponse
 from fastapi.testclient import TestClient
+from sqlalchemy.exc import IntegrityError
 
+import importing
 import main
 import marc
 import settings_store
@@ -43,6 +45,7 @@ from models import (
 from routers import books as books_router
 from schemas.classification import MAX_CLASSIFICATIONS_PER_BOOK
 from tests.corpus import application_modules
+from tests.test_errors import postgres_shaped_error
 
 MARCXML = "http://www.loc.gov/MARC21/slim"
 
@@ -1558,3 +1561,25 @@ class TestThePreviewCountsBothRefusals:
 
         assert "Secret" not in res.text
         assert res.json()["unmatched_titles"] == []
+
+
+class TestOnlyADeadlockAsksForTheFileAgain:
+    """A deadlock answers 409 "import the file again", because Postgres rolled
+    the whole import back and a second send meets the catalogue the other side
+    left. Another database error is not one a second send fixes. The deadlock
+    itself is driven in `test_database_ceilings_on_a_real_server.py`."""
+
+    @pytest.mark.answers_500(raises=(IntegrityError,))
+    def test_a_unique_violation_is_not_answered_as_a_deadlock(
+        self, client, admin, db, monkeypatch
+    ):
+        library_mode(db)
+
+        def violates(*args, **kwargs):
+            raise postgres_shaped_error("NOT-A-DEADLOCK")
+
+        monkeypatch.setattr(importing.MarcImport, "apply", violates)
+
+        res = upload(client, admin["headers"], collection(a_marc_book("Stoner")))
+
+        assert res.status_code == 500

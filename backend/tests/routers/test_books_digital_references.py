@@ -32,8 +32,9 @@ from tests.corpus import REPO
 
 URL = "/api/books/{}/digital-references"
 
-#: The Settings card that reads the two 409 codes.
-CARD = REPO / "frontend/src/pages/SettingsPage/LibrarySettingsPage/hooks.ts"
+#: The client module that reads the two 409 codes, for the Settings card and the
+#: Scan page alike.
+CARD = REPO / "frontend/src/lib/fileLanding.ts"
 
 
 def report(client, headers, book_id, **fields):
@@ -505,11 +506,12 @@ class TestALocationBelongsToOneBookAMemberCanSee:
 
 class TestTheSettingsCardReadsTheCodesTheRouteSends:
     def test_the_card_compares_against_each_409_code_as_the_route_spells_it(self):
-        """The Settings card tells the two 409s apart by `detail.code`, and its
-        own vitest stubs the server in the card's spelling, so a code respelt on
-        one side only is green in both trees while every refusal is listed as a
-        failure. This reads the card's source for each code as a quoted literal;
-        a code moved out of that file is red here too, which is the safe way."""
+        """The client's landing module tells the two 409s apart by
+        `detail.code`, and the vitest stubs the server in the module's spelling,
+        so a code respelt on one side only is green in both trees while every
+        refusal is a failure. This reads the module's source for each code as a
+        quoted literal; a code moved out of that file is red here too, which is
+        the safe way."""
         source = CARD.read_text(encoding="utf-8")
         assert [
             code for code in (REFERENCE_CEILING, FILE_HELD_ELSEWHERE) if f'"{code}"' not in source

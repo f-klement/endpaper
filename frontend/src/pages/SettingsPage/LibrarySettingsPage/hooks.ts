@@ -49,7 +49,6 @@ import type {
   MarcPreviewOut,
 } from "../../../api/generated/model";
 import { useInvalidate } from "../../../api/invalidate";
-import { ApiError } from "../../../api/mutator";
 import type { CalibreBook, CalibreFailure } from "../../../lib/calibre";
 import {
   readSidecar,
@@ -66,7 +65,6 @@ import {
   type StoreLibrary,
 } from "../../../lib/stores";
 import {
-  statusOf,
   writeBooks,
   type ImportFailureRow,
   type ImportOutcome,
@@ -79,14 +77,15 @@ import {
 } from "./types";
 import {
   askWhoHolds,
-  FILES_PER_LOOKUP,
-  locate,
-  reportEach,
-  reportHeld,
-  whereItLands,
+  countLandings,
+  HeldUnnamed,
+  land,
+  lookUpHolders,
   type Held,
   type HolderQuestion,
-} from "../../hooks";
+  type Landing,
+} from "../../../lib/fileLanding";
+import { locate } from "../../hooks";
 
 /**
  * What a two step import offers its card, over the two things that differ.
@@ -514,13 +513,16 @@ export type CalibreFailureRow = ImportFailureRow;
  * it adds neither. `unreferenced` is books
  * added whose files were not all recorded. `atCeiling` is books already held
  * whose files the server refused past its per book ceiling: not added, and
- * not every file recorded.
+ * not every file recorded. `filesLeft` is files of the books added or
+ * already held that another Book holds the location of, so they were left
+ * there.
  */
 export interface CalibreResult extends ImportOutcome {
   readonly already: number;
   readonly otherFormat: number;
   readonly unreferenced: number;
   readonly atCeiling: number;
+  readonly filesLeft: number;
 }
 
 /** One row of the sample the preview shows, so a wrong reading is visible. */
@@ -561,15 +563,6 @@ export type CalibreIntakeFailure = CalibreFailure | SqliteFailure;
 
 /** How many rows the preview samples. The same five the CSV preview shows. */
 const PREVIEW_ROWS = 5;
-
-/**
- * The `code` on the reference route's 409 for a Book at its file ceiling. The
- * backend suite reads this file for both codes as quoted literals, so a
- * respelling on one side only is red there.
- */
-const REFERENCE_CEILING = "reference_ceiling";
-/** The `code` on its 409 for a file another Book the member can see holds. */
-const FILE_HELD_ELSEWHERE = "file_held_elsewhere";
 
 /**
  * The Calibre card.
@@ -658,7 +651,7 @@ export interface UseCalibreImportResult {
  * holding `metadata.db` at its root is read as a library in one pick.
  *
  * **A file already in the library is recognised before anything is added**,
- * by the lookup the scan page asks (`pages/hooks.askWhoHolds`): a book whose
+ * by the lookup the scan page asks (`lib/fileLanding.askWhoHolds`): a book whose
  * file a Book the member can see holds is a sighting there, not a second Book,
  * and the landing rule decides whether the file may land on it.
  *
@@ -846,89 +839,54 @@ export function useCalibreImport(): UseCalibreImportResult {
         format: body.format ?? "",
       }),
     );
-    const held: ReadonlyMap<string, Held | null> = await askWhoHolds(questions);
+    const held: ReadonlyMap<string, Held | null> = await askWhoHolds(
+      questions,
+      (files) => findFileHolders({ files }),
+    );
+    const landings: Landing[] = [];
 
-    let already = 0;
-    let otherFormat = 0;
-    let unreferenced = 0;
-    let atCeiling = 0;
-
-    /** Every reference onto one Book: `pages/hooks.reportEach`. */
-    async function report(
-      bookId: number,
-      references: readonly DigitalReferenceIn[],
-    ) {
-      await reportEach(references, (data) =>
-        reportReference.mutateAsync({ bookId, data }),
-      );
-    }
-
+    /**
+     * One book, landed by `lib/fileLanding.land`, and what that makes of it
+     * on this card: a count for each outcome but two. A tie and a failure are
+     * thrown, so the loop lists the book: a failure with the status the server
+     * answered, a tie as `HeldUnnamed`, which has its own sentence.
+     *
+     * **A book of another format is counted, not offered**: this card has no
+     * press for the copy the scan page offers.
+     */
     async function addOne(body: BookCreate) {
       const files = filesOf.get(body);
-      const known = files === undefined ? undefined : held.get(files.key);
-      if (files !== undefined && known) {
-        // The landing rule: a Book of another kind takes no file of this
-        // one, and this card has no press for the copy the scan page offers.
-        if (!known.lands) {
-          otherFormat += 1;
-          return;
-        }
-        try {
-          await reportHeld(known, files.references, (bookId, data) =>
+      const landing = await land(
+        {
+          body,
+          references: files?.references ?? [],
+          format: body.format ?? "",
+          held: files === undefined ? undefined : held.get(files.key),
+          // A Calibre record's identifiers are the library's own fields,
+          // never read out of a file's name.
+          identifierWasRead: true,
+        },
+        {
+          create: (data) => scanAdd.mutateAsync({ data }),
+          report: (bookId, data) =>
             reportReference.mutateAsync({ bookId, data }),
-          );
-        } catch (refused) {
-          // The book is in the library either way. The reference route
-          // answers 409 for two reasons and the body's `code` says which:
-          // the ceiling, or a file another Book the member can see holds,
-          // which is this card's "already" (a Book the member can see holds
-          // the file). Anything else is thrown on, to be listed with its
-          // reason, rather than counted as either.
-          const code = refused instanceof ApiError ? refused.code : undefined;
-          if (statusOf(refused) === 409 && code === REFERENCE_CEILING) {
-            atCeiling += 1;
-            return;
-          }
-          if (statusOf(refused) !== 409 || code !== FILE_HELD_ELSEWHERE) {
-            throw refused;
-          }
-        }
-        already += 1;
-        return;
-      }
-      try {
-        const book = await scanAdd.mutateAsync({ data: body });
-        if (files !== undefined) {
-          // Its own `catch`: the book exists by now, and a throw reaching
-          // the loop would record a created book as failed.
-          await report(book.id, files.references).catch(() => {
-            unreferenced += 1;
-          });
-        }
-      } catch (refused) {
-        // **A duplicate names the book its ISBN, its ASIN or the Calibre
-        // record's uuid belongs to**, and the files land on the copy of it
-        // the landing rule admits. Where no copy is the files' kind, an EPUB
-        // carrying the household's hardcover ISBN, the book is the other
-        // format case the lookup path counts, and says so in the same words
-        // rather than "already in the catalogue". Copies that cannot be read
-        // leave the 409 as it was. A 409 naming no book, a tie between two
-        // Books that are not copies of one another, is thrown on too: the
-        // row is listed as a failure, "already in the catalogue", and no
-        // file lands.
-        const holder = refused instanceof ApiError ? refused.bookId : undefined;
-        if (holder !== undefined && files !== undefined) {
-          const copies = await listCopies(holder).catch(() => undefined);
-          if (copies !== undefined) {
-            const target = whereItLands(copies, body.format ?? "");
-            if (target === undefined) {
-              otherFormat += 1;
-              return;
-            }
-            await report(target, files.references).catch(() => undefined);
-          }
-        }
-        throw refused;
+          copiesOf: listCopies,
+        },
+      );
+      landings.push(landing);
+      switch (landing.kind) {
+        case "added":
+        case "added-unreferenced":
+        case "on-holder":
+        case "other-format":
+        case "at-ceiling":
+          return;
+        case "tie":
+          throw new HeldUnnamed();
+        case "failed":
+          throw landing.thrown;
+        default:
+          landing satisfies never;
       }
     }
 
@@ -943,15 +901,18 @@ export function useCalibreImport(): UseCalibreImportResult {
     invalidate.catalogue();
     setProgress(null);
     setIsImporting(false);
+    const { added, already, otherFormat, unreferenced, atCeiling, filesLeft } =
+      countLandings(landings);
     setResult({
       ...outcome,
-      // The shared loop counts every book that did not throw, and a book
-      // already in the library returns without one being made.
-      added: outcome.added - already - otherFormat - atCeiling,
+      // From the landings rather than the shared loop, which counts every
+      // book that did not throw, a book already in the library among them.
+      added,
       already,
       otherFormat,
       unreferenced,
       atCeiling,
+      filesLeft,
     });
     if (!outcome.stopped) {
       setBooks(null);
@@ -1227,9 +1188,9 @@ export function useStoreImport(): UseStoreImportResult {
     setResult(outcome);
     // **The sources are kept when the member stopped, and pressing Import again
     // starts over rather than carrying on.** Every book is sent a second time.
-    // One the server recognises, by its ISBN or its ASIN, answers 409 and the
-    // result names it as a duplicate; one carrying neither, a Play Books or a
-    // Moon+ Reader entry, is added again. Resuming where it stopped is a
+    // One the server recognises, by its ISBN, its ASIN or its Google volume id,
+    // answers 409 and the result names it as a duplicate; one carrying none of
+    // them, a Moon+ Reader entry, is added again. Resuming where it stopped is a
     // different ticket. They are kept so that
     // pressing again does not mean picking the file a second time.
     if (!outcome.stopped) {
@@ -1308,34 +1269,28 @@ export const HIGHLIGHTS_PER_REQUEST = 5000;
 
 /**
  * Which visible Books hold each digest, or undefined for a digest whose
- * lookup failed. One lookup per `FILES_PER_LOOKUP`, never one per file.
+ * lookup failed. Chunked by `lib/fileLanding.lookUpHolders`, as every holder
+ * lookup is, never one request per file.
  */
 async function holdersOf(
   digests: readonly string[],
 ): Promise<Map<string, ReadonlySet<number> | undefined>> {
-  const chunks: string[][] = [];
-  for (let start = 0; start < digests.length; start += FILES_PER_LOOKUP)
-    chunks.push(digests.slice(start, start + FILES_PER_LOOKUP));
-  const answered = await Promise.all(
-    chunks.map((chunk) =>
-      findFileHolders({
-        files: chunk.map((digest) => ({ partial_md5: digest })),
-      }).catch(() => undefined),
-    ),
+  const answers = await lookUpHolders(
+    digests,
+    (digest) => ({ partial_md5: digest }),
+    (files) => findFileHolders({ files }),
   );
-  const found = new Map<string, ReadonlySet<number> | undefined>();
-  chunks.forEach((chunk, which) =>
-    chunk.forEach((digest, index) => {
-      const answer = answered[which]?.[index];
-      found.set(
+  return new Map(
+    digests.map((digest, at) => {
+      const answer = answers[at];
+      return [
         digest,
         answer === undefined
           ? undefined
           : new Set(answer.holders.map((holder) => holder.book_id)),
-      );
+      ];
     }),
   );
-  return found;
 }
 
 /**

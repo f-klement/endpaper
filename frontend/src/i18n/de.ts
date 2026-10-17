@@ -1164,7 +1164,11 @@ export const de: Messages = {
   "rapid.unreferenced":
     "Bei {count} davon wurde nicht gespeichert, wo die Datei liegt. Den Ordner noch einmal auswählen speichert es.",
   "rapid.alreadyHeld":
-    "{count} waren schon in der Bibliothek und wurden nicht noch einmal hinzugefügt. Wo die Dateien liegen, wurde gespeichert.",
+    "{count} waren schon in der Bibliothek und wurden nicht noch einmal hinzugefügt. Wo die Dateien liegen, wurde gespeichert, außer wo der Ort schon bei einem anderen Buch gespeichert war.",
+  "rapid.atCeiling":
+    "{count} waren schon in der Bibliothek und haben bereits so viele Dateiorte, wie ein Buch haben kann. Wo einige der Dateien liegen, wurde deshalb nicht gespeichert.",
+  "rapid.filesLeft":
+    "Dateien, deren Ort schon bei einem anderen Buch der Bibliothek gespeichert ist und die deshalb dort blieben: {count}.",
   "rapid.inYourLibrary":
     "Schon in der Bibliothek. Hinzufügen speichert nur, wo die Datei liegt, und legt kein Buch an.",
   "rapid.removeFromQueue": "{label} aus der Liste entfernen",
@@ -1356,6 +1360,8 @@ export const de: Messages = {
     "Die aus diesem Ordner gespeicherten Dateien konnten nicht alle geprüft oder markiert werden. Was bereits geschehen ist, bleibt.",
   "rapid.heldInAnotherFormat":
     "Schon in einer anderen Ausgabe in der Bibliothek, die Datei wurde deshalb nicht dort eingetragen.",
+  "rapid.heldUnnamed":
+    "Schon im Katalog, als mehr als ein Buch oder als eines, das hier nicht sichtbar ist, und deshalb nicht hinzugefügt.",
   "rapid.recordDiffers":
     "Der Katalog führt diese ISBN unter einem anderen Titel, möglicherweise ein anderes Buch, es bleibt deshalb so, wie die Datei es beschreibt.",
   "rapid.keptTheFile": "Bleibt so, wie die Datei es beschreibt.",
@@ -1509,13 +1515,17 @@ export const de: Messages = {
   "calibre.located":
     "Bei {count} liegen die Dateien im gewählten Ordner, und beim Buch wird gespeichert, wo jede Datei liegt.",
   "calibre.already":
-    "{count} waren schon in der Bibliothek und wurden nicht noch einmal hinzugefügt. Wo die Dateien liegen, wurde gespeichert.",
+    "{count} waren schon in der Bibliothek und wurden nicht noch einmal hinzugefügt. Wo die Dateien liegen, wurde gespeichert, außer wo der Ort schon bei einem anderen Buch gespeichert war.",
   "calibre.otherFormat":
     "{count} sind schon als ein anderes Exemplar in der Bibliothek, etwa als gedrucktes Buch, deshalb wurden weder das Buch noch der Ort seiner Dateien hinzugefügt. Den Bibliotheksordner auf der Seite Scannen wählen, um jedes als eigenes Exemplar hinzuzufügen.",
   "calibre.unreferenced":
     "{count} davon wurden hinzugefügt, ohne dass gespeichert wurde, wo alle Dateien liegen. Ein erneuter Import mit gewähltem Bibliotheksordner holt das nach.",
   "calibre.atCeiling":
     "{count} waren schon in der Bibliothek und haben bereits so viele Dateiorte, wie ein Buch haben kann. Wo einige der Dateien liegen, wurde deshalb nicht gespeichert.",
+  "calibre.filesLeft":
+    "Dateien, deren Ort schon bei einem anderen Buch der Bibliothek gespeichert ist und die deshalb dort blieben: {count}.",
+  "calibre.heldUnnamed":
+    "bereits im Katalog, als mehr als ein Buch oder als eines, das hier nicht sichtbar ist",
   "calibre.failureNotADatabase": "Diese Datei ist keine SQLite-Datenbank.",
   "calibre.failureDamaged":
     "Diese Kopie ist beschädigt. So sieht eine Kopie aus, die entstand, während in die Bibliothek geschrieben wurde: bitte eine neue anlegen.",

@@ -642,7 +642,7 @@ repeat the argument.
 |  | [A container of books is a library source, not a file reader](decisions.md#a-container-of-books-is-a-library-source-not-a-file-reader) | 229 |
 |  | [Two store reader fields nothing read, and why the one word they shared could not be given a sentence](decisions.md#two-store-reader-fields-nothing-read-and-why-the-one-word-they-shared-could-not-be-given-a-sentence) | 427 |
 |  | [A store's own identifier is read and not kept, and the ASIN is where that first bit](decisions.md#a-stores-own-identifier-is-read-and-not-kept-and-the-asin-is-where-that-first-bit) | 262 |
-|  | [A store's identifier is a table of its own, not a second guess at `isbn`](decisions.md#a-stores-identifier-is-a-table-of-its-own-not-a-second-guess-at-isbn) | 980 |
+|  | [A store's identifier is a table of its own, not a second guess at `isbn`](decisions.md#a-stores-identifier-is-a-table-of-its-own-not-a-second-guess-at-isbn) | 978 |
 |  | [A store that cannot say who owns a book says so, and the default meant it never could](decisions.md#a-store-that-cannot-say-who-owns-a-book-says-so-and-the-default-meant-it-never-could) | 500 |
 |  | [Prevalence is a rate, and a lifetime count is a measure of age](decisions.md#prevalence-is-a-rate-and-a-lifetime-count-is-a-measure-of-age) | 170 |
 |  | [A Calibre type string is a name and a marketplace, and the value is what decides](decisions.md#a-calibre-type-string-is-a-name-and-a-marketplace-and-the-value-is-what-decides) | 765 |
@@ -907,13 +907,13 @@ repeat the argument.
 |  | [A Calibre library's files are recorded from the index, through both doors](decisions.md#a-calibre-librarys-files-are-recorded-from-the-index-through-both-doors) | 298 |
 |  | [A re-picked folder: sightings at the pick, misses on a press](decisions.md#a-re-picked-folder-sightings-at-the-pick-misses-on-a-press) | 420 |
 |  | [A catalogue's 856 links are their own table, and the only thing the export writes to 856](decisions.md#a-catalogues-856-links-are-their-own-table-and-the-only-thing-the-export-writes-to-856) | 403 |
-|  | [A Calibre record's uuid is a match key, and stays inside the app](decisions.md#a-calibre-records-uuid-is-a-match-key-and-stays-inside-the-app) | 349 |
+|  | [A Calibre record's uuid is a match key, and stays inside the app](decisions.md#a-calibre-records-uuid-is-a-match-key-and-stays-inside-the-app) | 353 |
 |  | [A changelog line rides on the commit that makes the change](decisions.md#a-changelog-line-rides-on-the-commit-that-makes-the-change) | 248 |
 |  | [What one look at a file may write lives in one module](decisions.md#what-one-look-at-a-file-may-write-lives-in-one-module) | 222 |
 |  | [A look at a file fills what is missing and never replaces a different fingerprint](decisions.md#a-look-at-a-file-fills-what-is-missing-and-never-replaces-a-different-fingerprint) | 199 |
 |  | [A location belongs to one Book among those a member can see](decisions.md#a-location-belongs-to-one-book-among-those-a-member-can-see) | 258 |
-|  | [The ceiling's 409 carries a code too](decisions.md#the-ceilings-409-carries-a-code-too) | 192 |
-|  | [A merge holds the keeper's ceilings](decisions.md#a-merge-holds-the-keepers-ceilings) | 782 |
+|  | [The ceiling's 409 carries a code too](decisions.md#the-ceilings-409-carries-a-code-too) | 291 |
+|  | [A merge holds the keeper's ceilings](decisions.md#a-merge-holds-the-keepers-ceilings) | 1,033 |
 |  | [Which existing Book a record is has one module](decisions.md#which-existing-book-a-record-is-has-one-module) | 236 |
 |  | [A tie inside one copy group takes the lowest id; any other tie is no answer](decisions.md#a-tie-inside-one-copy-group-takes-the-lowest-id-any-other-tie-is-no-answer) | 188 |
 |  | [A tie at the add door refuses without naming a Book](decisions.md#a-tie-at-the-add-door-refuses-without-naming-a-book) | 180 |
@@ -921,7 +921,13 @@ repeat the argument.
 |  | [Hidden outranks the trash, and the disclosure that costs is accepted](decisions.md#hidden-outranks-the-trash-and-the-disclosure-that-costs-is-accepted) | 235 |
 |  | [ISBNs compare by `isbn.parse`](decisions.md#isbns-compare-by-isbnparse) | 89 |
 |  | [The add door finds an ISBN stored with hyphens or a lower case x](decisions.md#the-add-door-finds-an-isbn-stored-with-hyphens-or-a-lower-case-x) | 239 |
-|  | [An ASIN refuses an add with 409, through the shelf](decisions.md#an-asin-refuses-an-add-with-409-through-the-shelf) | 446 |
+|  | [An ASIN refuses an add with 409, through the shelf](decisions.md#an-asin-refuses-an-add-with-409-through-the-shelf) | 481 |
 |  | [An unreachable catalogue on a barcode is its own queue state](decisions.md#an-unreachable-catalogue-on-a-barcode-is-its-own-queue-state) | 222 |
-|  | [The scan queue's rules live in a pure module, whose interface is an event](decisions.md#the-scan-queues-rules-live-in-a-pure-module-whose-interface-is-an-event) | 311 |
+|  | [The scan queue's rules live in a pure module, whose interface is an event](decisions.md#the-scan-queues-rules-live-in-a-pure-module-whose-interface-is-an-event) | 323 |
+|  | [The register writer accepts a log from another path when both trees are clean at one commit](decisions.md#the-register-writer-accepts-a-log-from-another-path-when-both-trees-are-clean-at-one-commit) | 524 |
+|  | [Landing a picked file on a Book has one home, `lib/fileLanding.ts`](decisions.md#landing-a-picked-file-on-a-book-has-one-home-libfilelandingts) | 261 |
+|  | [A file another Book holds stays there, and the book's other files are still sent](decisions.md#a-file-another-book-holds-stays-there-and-the-books-other-files-are-still-sent) | 184 |
+|  | [A location held only by a Book the file may not land on is not sent](decisions.md#a-location-held-only-by-a-book-the-file-may-not-land-on-is-not-sent) | 106 |
+|  | [A tie has its own outcome and its own sentence, true of both cases it covers](decisions.md#a-tie-has-its-own-outcome-and-its-own-sentence-true-of-both-cases-it-covers) | 149 |
+|  | [Each caller maps a landing in an exhaustive switch](decisions.md#each-caller-maps-a-landing-in-an-exhaustive-switch) | 60 |
 <!-- index: end -->

@@ -12,7 +12,9 @@ import respx
 
 import credentials
 import fetch
+import importing
 from models import CatalogueCredential, OpdsServer
+from tests.test_errors import postgres_deadlock
 
 BASE = "http://10.0.9.9:8083/opds/books"
 
@@ -557,6 +559,25 @@ class TestASync:
         response = client.post("/api/opds/servers/999/sync", headers=admin["headers"])
 
         assert response.status_code == 404
+
+    @respx.mock
+    def test_a_sync_postgres_aborted_for_a_deadlock_answers_409(
+        self, client, admin, monkeypatch
+    ):
+        """The sync's import commits once, so the abort left nothing of it behind."""
+        respx.get(BASE).respond(text=FEED)
+        server = make_server(client, admin)
+
+        def deadlocked(*args, **kwargs):
+            raise postgres_deadlock()
+
+        monkeypatch.setattr(importing.OpdsImport, "apply", deadlocked)
+
+        response = client.post(
+            f"/api/opds/servers/{server['id']}/sync", headers=admin["headers"]
+        )
+
+        assert response.status_code == 409
 
     @respx.mock
     def test_nothing_is_created_when_the_caller_asked_for_none(self, client, admin):

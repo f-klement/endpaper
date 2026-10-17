@@ -14965,10 +14965,10 @@ whole table and would turn a second import of one library into a refusal, where 
 a row `/duplicates` offers. Showing one is a page folder this work does not own and a
 product decision about what a member does with an ASIN; it is a ticket.
 
-**Superseded 2026-10-17 for the ASIN**, by "An ASIN refuses an add with 409, through the
-shelf" below. No unique index is needed, because the refusal is the shelf's rather than the
-table's, and a second import of one library adding every book again is the defect it stops. A
-Google volume id still matches nothing.
+**Superseded 2026-10-17 for the ASIN and the Google volume id**, by "An ASIN refuses an add
+with 409, through the shelf" below. No unique index is needed, because the refusal is the
+shelf's rather than the table's, and a second import of one library adding every book again is
+the defect it stops.
 
 **Withheld from `PublicBookOut`.** An ASIN and a volume id name a vendor's edition record,
 not an access point another institution resolves, so a published catalogue gains nothing by
@@ -22387,7 +22387,7 @@ Calibre uuid names one record in one library for that record's life, so a
 second add carrying it is the same record arriving again.
 
 **Amended 2026-10-17** by "An ASIN refuses an add with 409, through the shelf" below: an
-ASIN is now a match key at the add as well. The copy and its original this paragraph
+ASIN and a Google volume id are now match keys at the add as well. The copy and its original this paragraph
 protects are answered by the tie rule: copies in one group answer with the lowest id, any
 other pair answers 409 naming neither, and a copy made by `POST /api/books/{id}/copies`
 carries no identifier anyway.
@@ -22503,9 +22503,17 @@ hyphens; the lead ruled on 2026-10-17 to spell both with underscores, as `not_le
 counts `atCeiling` on the first and `already` on the second; any other 409 is listed as a
 failure with its reason.
 
+**Amended 2026-10-17** by "Landing a picked file on a Book has one home, `lib/fileLanding.ts`"
+and "A file another Book holds stays there, and the book's other files are still sent" below.
+Both pages read the codes through that module. The Scan page now counts the first too and
+takes the row out of the queue. On the second, both pages leave that one file where it is,
+count it among the files left, and still send the book's other files; the card no longer
+counts it `already`.
+
 **Held across the trees by a backend test, not by the schema.**
 `tests/routers/test_books_digital_references.py::TestTheSettingsCardReadsTheCodesTheRouteSends`
-reads the card's source for each code the route sends, as a quoted literal. Declaring the 409
+reads the landing module's source, `frontend/src/lib/fileLanding.ts`, for each code the route
+sends, as a quoted literal. The class keeps its name because this entry cites it. Declaring the 409
 with a `Literal` code would have made a respelling a `typecheck` failure, one rung higher, and
 was refused: *The schema declares the 401, 403 and 404 a route's code builds, and no other
 refusal* keeps 400, 409 and 429 undeclared everywhere for uniformity, and no operation in the
@@ -22558,15 +22566,36 @@ the keeper carries, then expires the keeper so every count is read under it.
   skips itself there, `tests/test_database_ceilings_on_a_real_server.py`, as the TLS and error
   detail files do, because the coverage register refuses a marked skip on the default run; the
   report's race runs on both engines from `test_folding.py`.
-- **An import and a merge over the same Books can deadlock, and Postgres fails one of them.** The
-  import holds Book X once it has added a row to it; a merge keeping K with loser X holds K and
-  waits on X to delete it; the import then reaches a record matching K. A consistent lock order
-  is the usual answer and is not available here: the import takes its Books in record order, one
-  at a time, and cannot know them in advance without reading the whole file's matches first. The
-  same cycle existed before this lock wherever both wrote the keeper's own row. Not measured.
-  Nothing is half written: the failed side rolls back whole. Left open; a retry of the merge on a
-  deadlock error is the cheap close. The same holds for an import against a bulk edit, for the
-  Books the import adds a row to.
+- **An import or a merge that Postgres aborts for a deadlock answers 409.** The import holds
+  Book X once it adds a link or a heading to it, or updates its row in a gap fill; a merge
+  keeping K with loser X holds K and waits on X to delete it; the import then reaches a record
+  matching K. Postgres aborts whichever side started waiting first. Measured on Postgres 18.6
+  through the routes, both ways round
+  (`tests/test_database_ceilings_on_a_real_server.py::TestAMarcImportDeadlockingWithAMergeAnswers409`
+  and `::TestAMergeDeadlockingWithAnotherWriterAnswers409`): the side waiting first is aborted
+  with 40P01, and before this answered 500. The three import doors (CSV, MARC, the OPDS sync)
+  and `POST /api/books/merge` now answer 409 saying nothing was imported or merged and to send
+  it again, through one helper, `errors.a_deadlock_answers_409`. Nothing is half written: the
+  helper wraps only a block that ends in that door's first commit, so the abort rolls the
+  aborted side back whole, and the other side commits. Each import commits once, at its end.
+  The merge commits a second time when it corrects the keeper's cover, outside the helper and
+  after the books are merged, so the 409's "nothing was merged" stays true. **Only a
+  deadlock**: every other database error is raised unchanged, because a second send would fail
+  the same way (`tests/routers/test_imports_marc.py::TestOnlyADeadlockAsksForTheFileAgain`).
+  - **Why not a retry of the import.** Measured with a retry once on 40P01 in `MarcImport.apply`:
+    six runs of the race, six retries, six 500s, each `NoResultFound`. The retry starts while
+    the merge is still finishing its delete, so its index can name the loser and the load
+    after it finds the row gone. A safe retry would first have to wait out the merge, which
+    means locking every Book the file matches before reading, and would still need an answer
+    for a second collision.
+  - **Why not locking the import's Books in id order.** One side ordering its locks prevents
+    no cycle while the other does not: the merge takes its keeper and then its loser, whatever
+    their ids. And locking every matched Book up front holds each against every edit until
+    the import's one commit, which is the cost the writers' "only when they would add a row"
+    check exists to avoid.
+  - **The 409 costs an ordinary import nothing**: no statement and no lock is added to the
+    path that meets no deadlock, so the 19 `pg_locks` entries at 20,000 Books measured above
+    are unchanged by construction (not re-measured).
 
 ## Which existing Book a record is has one module
 
@@ -22725,11 +22754,14 @@ named before a hidden one.
 `ix_book_identifiers_scheme_value` serves it; an ASIN stored in mixed case is the one it misses.
 A case folding filter would have scanned the table on every add of a nine hundred book import.
 
-**A Google volume id is not asked.** The ruling named the ASIN. A Play Books Takeout has the same
-defect (its entries carry a volume id and no ISBN, so a second import adds every book again);
-extending `recognition.Source.STORE` to `google_books` is one tuple member, and most of
-`tests/routers/test_books_identifier_backfill.py` posts several Books sharing one volume id, so
-those fixtures would move with it. Open for the owner.
+**A Google volume id refuses an add too**, under the owner's answer to Q16 that a store
+identifier refuses an add with 409. `recognition.Source.STORE` asks both schemes in one read,
+with the same message and the same tie rule, so a second Play Books import answers 409 per
+book as a second Kindle import does. **Compared as sent**: Google's volume ids are case
+sensitive, so the upper casing an ASIN takes would refuse an add of a different volume
+(`test_recognition.py::TestOneRecord::test_a_volume_id_differing_only_in_case_is_another_volume`).
+The backfill tests that posted several Books under one volume id now give each Book its own
+(`LIBRARY_VOLUME_IDS`), with every assertion unchanged.
 
 **A Calibre record carrying an ASIN lands its files on the Kindle imported Book.** The Calibre
 import's records carry every identifier Calibre holds, an Amazon one included, so a record whose
@@ -22779,10 +22811,123 @@ refusal, because what a throw means belongs beside the request (`nobodyKnows`,
 **The pace is the module's too.** The fallback pace constants sit in `queue.ts` beside the
 figures that quote them in minutes, and the hook imports the interval it waits between asks.
 
-**What the module does not own, on purpose.** The landing orchestration in `addAll` and
-`addOne`, `theIsbnWasRead` with it, which the frontend file landing replaces next, and the row
-keys taken from a `File`. Where an event needs the state a row was asked from (`not-answered`),
+**What the module does not own, on purpose.** The landing orchestration, which is
+`lib/fileLanding.ts`'s ("Landing a picked file on a Book has one home" below), with
+`theIsbnWasRead` kept in the hook to hand that module its answer, and the row keys taken from a
+`File`. Where an event needs the state a row was asked from (`not-answered`),
 the hook passes it, since the row is `searching` by the time the answer lands.
 
 **Left open**: `ScannedEntry` is still one shape, and which optional field exists in which state
 is said only in prose. The union of state shaped variants is its own ticket.
+
+## The register writer accepts a log from another path when both trees are clean at one commit
+
+The coverage register writer refused every log whose ship line named another path, so a gate's
+logs, shipped from the gate's own detached worktree, could not be applied, and the register cost
+a second full run of both suites on the commit the gate had just measured.
+
+The suite runner now prints `==> the tree shipped is commit <sha>, clean`, or `..., with
+uncommitted changes`, right after the ship line, taken at the tar. The writer accepts a foreign
+path only when that record equals the applier's own `<sha>, clean`. Everything else is refused
+as before.
+
+- **One writer and one place that decides**, and it works for any run from any clean worktree
+  at the applier's commit, not only the gate's.
+- **Recorded at the tar, not when the run is asked for**: a worktree can move while its run
+  waits for a node. The record is taken on both sides of the tar and printed only when the two
+  agree, so a commit or an edit landing during the tar ships with no record rather than under
+  the earlier one. Measured cost: about 20 ms per record on the development host, in a worktree
+  and the main checkout alike, against a tar the runner's comment puts at 2.3 s.
+- **Untracked files are changes on both sides**, because the ship carries them, and both status
+  calls pass `--untracked-files=normal` so `status.showUntrackedFiles=no` cannot hide them. The
+  test stub answers a status without the flag as clean, which is what real git does under that
+  setting, so dropping the flag reds a named arm on each side. Ignored files are in neither
+  answer; they ship and are not compared, so the claim is "the same versioned files".
+- **A root that is not the top of its own repository records no commit**, so a copy inside a
+  checkout cannot borrow that checkout's commit.
+- **A record belongs to the ship line before it**, so in concatenated logs one run's record
+  cannot vouch for another's path.
+- **`subprocess` joins the writer's permitted imports for one `git` call**; an arm holds that
+  `git` is the only command it runs. S603 and S607 are a named refusal for that file, in the
+  linter's configuration and in `BANDIT_REFUSALS`, as for the other scripts that ask git.
+- **A refusal names its case and the way out**: no record (an older log, a tree git could not
+  answer for, or one that moved during the tar), two records for one ship, a dirty tree on
+  either side, or another commit.
+
+**False refusals considered and accepted.** A second write after the first, because the first
+write dirties the applier: both logs go in one call. An applier with any unrelated uncommitted
+edit, tracked skill files included, which are versioned but not shipped: strict on purpose,
+commit or set the edit aside first. An applier at a descendant of the gated commit, such as a
+merge made after gating: the same files are not provable, so it is refused.
+`assume-unchanged` and `skip-worktree` hide an edit from both sides; accepted, since either takes
+a deliberate `update-index`, or a sparse checkout nobody here uses.
+
+## Landing a picked file on a Book has one home, `lib/fileLanding.ts`
+
+The Scan page's rapid queue and the Calibre card on the library settings page both land a
+book through `land(request, ports)`, which returns one `Landing` per book: `added`,
+`added-unreferenced`, `on-holder`, `other-format`, `at-ceiling`, `tie`, `failed`. Each caller
+maps it to its own row or count. The holder lookup (`askWhoHolds`), the landing rule
+(`whereItLands`), the chunked lookup every holder question uses (`lookUpHolders`, which
+`holdersOf` for KOReader highlights now uses too) and the sequential reference loop
+(`reportEach`) live beside it.
+
+**In `lib/` with every request handed in**, because only a `hooks.ts` reaches the generated
+client: each caller passes its own mutations and `findFileHolders`. **`locate` stays in
+`pages/hooks.ts`**: it reads a `File`, and a `lib/` module that names `File` in code joins the
+file reader population `houseRules.test.ts` holds, which is the set that may never carry
+anything out. A module whose purpose is sending references does not belong in that set.
+
+The three ways the two pages disagreed end as one behaviour each, pinned in
+`tests/lib/fileLanding.test.ts`:
+
+| Case | Behaviour now |
+|---|---|
+| Held only in another format | `other-format` with the holder; the Scan page offers the copy, the card counts `otherFormat` (it has no copy press) |
+| Ceiling 409 on the holder | `at-ceiling`; the card counts `atCeiling`, the Scan page takes the row out of the queue and counts it (owner's Q12) |
+| A duplicate's holder and an ISBN read out of a name | `identifierWasRead` on the request; the module refuses the landing when false. The card passes true: a Calibre record's identifiers are never a name's |
+
+## A file another Book holds stays there, and the book's other files are still sent
+
+A `file_held_elsewhere` refusal is about one file, so it leaves that file where it is, counted,
+and the next file is sent; only another refusal (the ceiling among them) stops the rest. This
+holds at all three sites that send a book's files: the holder path, which answers `on-holder`;
+the create path, which answers `added` with the count rather than `added-unreferenced`, because
+both pages promise a second pick records an unreferenced book and the server refuses that pick
+the same way; and the Scan page's copy press (`recordOnCopy`), where the print row case was
+refused on every press and the row was counted unrecorded with a hint that picking again would
+record it. The Calibre card counted the refusal `already` before; the Scan page failed the row.
+The count of files left is each landing's `left`, shown on both pages ("Files whose location
+another book in your library already holds, so they were left there: N."). The books already
+held say "Where their files are was recorded, except where another book already held the
+location", because the plain sentence was false for those files.
+
+## A location held only by a Book the file may not land on is not sent
+
+Lead's decision for wave GG, consistent with Q10 (no server format check). Where the holder
+lookup says a file's location is held, and only by Books the file may not land on (a print row
+left from before the landing rule), `askWhoHolds` records it in `Held.inAnotherFormat` and
+`land` sends nothing for it, then carries on with the book's other files. Sent to the digest
+holder, the server refuses it with `file_held_elsewhere` on every add, and before this the
+refusal stopped the book's later files too. They are counted in `on-holder.left` with the
+files the server refused for the same reason, and both pages show that count.
+
+## A tie has its own outcome and its own sentence, true of both cases it covers
+
+A 409 naming no Book answers `tie`, and no file lands. The server answers a tie outside one copy
+group and a holder hidden from this member alike (`_refuse` in `routers/books.py`), so the
+client cannot tell them apart, and the wording first proposed ("two Books in your library
+match; open them to choose") would be false for a hidden holder and has nothing to open. Both
+pages say "already in the catalogue as more than one book, or as one you cannot see", which
+discloses nothing the string body of the 409 does not already say. The Scan page throws
+`HeldUnnamed` for the `held-unnamed` reason; the Calibre card throws the same class, which lives
+in `lib/fileLanding.ts` beside `Landing` because it is a fact about the outcome, and is
+listed through an optional `unnamed` sentence in `OutcomeMessages` that the store card does not
+set, so the store card is unchanged.
+
+## Each caller maps a landing in an exhaustive switch
+
+Both callers end their `switch (landing.kind)` with `landing satisfies never`, and so does
+`countLandings`, which both pages' counts come from, so a new kind is a type error at each
+rather than a row or a count either page drops. Measured: one planted kind gives `TS1360` at
+both callers; the same kind answered in both callers gives it in `countLandings`.

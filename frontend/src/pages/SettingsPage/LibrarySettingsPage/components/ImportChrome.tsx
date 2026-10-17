@@ -226,6 +226,8 @@ export interface OutcomeMessages {
   readonly resultFailures: MessageKey;
   readonly duplicate: MessageKey;
   readonly notAdded: MessageKey;
+  /** A row thrown as `HeldUnnamed`; a card without it shows `duplicate`. */
+  readonly unnamed?: MessageKey;
 }
 
 /**
@@ -260,9 +262,11 @@ export function OutcomePanel({
                 {row.title}
                 {" · "}
                 {t(
-                  row.status === DUPLICATE_STATUS
-                    ? messages.duplicate
-                    : messages.notAdded,
+                  row.unnamed && messages.unnamed !== undefined
+                    ? messages.unnamed
+                    : row.status === DUPLICATE_STATUS
+                      ? messages.duplicate
+                      : messages.notAdded,
                 )}
               </li>
             ))}

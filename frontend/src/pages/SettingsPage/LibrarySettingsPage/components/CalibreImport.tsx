@@ -219,6 +219,7 @@ export default function CalibreImport({
               ["otherFormat", "calibre.otherFormat"],
               ["unreferenced", "calibre.unreferenced"],
               ["atCeiling", "calibre.atCeiling"],
+              ["filesLeft", "calibre.filesLeft"],
             ] as const
           ).map(
             ([count, message]) =>
@@ -259,4 +260,5 @@ const OUTCOME_MESSAGES: OutcomeMessages = {
   resultFailures: "calibre.resultFailures",
   duplicate: "calibre.duplicate",
   notAdded: "calibre.notAdded",
+  unnamed: "calibre.heldUnnamed",
 };

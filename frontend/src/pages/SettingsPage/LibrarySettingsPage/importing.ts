@@ -17,6 +17,7 @@ import {
   type BulkProgress,
 } from "../../../lib/bulkWrite";
 import type { BookCreate } from "../../../api/generated/model";
+import { HeldUnnamed } from "../../../lib/fileLanding";
 
 /** How far through a step that walks nine hundred things this one is. */
 export type ImportProgress = BulkProgress;
@@ -26,6 +27,8 @@ export interface ImportFailureRow {
   readonly title: string;
   /** The HTTP status, or `null` when the request never got one. */
   readonly status: number | null;
+  /** Thrown as `HeldUnnamed`: a duplicate the server named no Book for. */
+  readonly unnamed?: true;
 }
 
 export interface ImportOutcome {
@@ -61,6 +64,7 @@ export async function writeBooks(
     failures: outcome.failures.map(({ item, thrown }) => ({
       title: item.title,
       status: statusOf(thrown),
+      ...(thrown instanceof HeldUnnamed ? { unnamed: true as const } : {}),
     })),
     stopped: outcome.stopped,
   };
@@ -81,7 +85,8 @@ export function statusOf(thrown: unknown): number | null {
 
 /**
  * What the server answers for a book whose ISBN is already on the shelf, or
- * whose Calibre record or ASIN a Book the member can see already carries.
+ * whose Calibre record, ASIN or Google volume id a Book the member can see
+ * already carries.
  *
  * Named because it is the ordinary outcome rather than an error: importing the
  * same library twice is what a second run is, and a member who reads "could not

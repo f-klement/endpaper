@@ -25,7 +25,7 @@ import {
   readName,
   type FileNaming,
 } from "../../lib/fileName";
-import type { Held } from "../hooks";
+import type { Held } from "../../lib/fileLanding";
 import {
   blankDraft,
   draftFromAudiobook,
@@ -105,6 +105,7 @@ export type NamedScanReason =
   | "kept-for-now"
   | "unreachable"
   | "held-in-another-format"
+  | "held-unnamed"
   | "not-in-catalogues-as-stated"
   | "lookup-failed-as-stated"
   | "record-differs"

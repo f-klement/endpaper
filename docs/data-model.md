@@ -566,11 +566,12 @@ overwrite on when the book's own volume id found the record. A row here
 records which volume a member's own export says they own, which is a claim rather than a
 preference.
 
-**An add matches on an ASIN or a Calibre uuid.** An add carrying one that a Book the member
-can see already carries answers 409 rather than making a second Book, so a Kindle or Calibre
-library imported twice does not double. Only through the shelf: nothing makes an identifier
-unique, so a Book the member cannot see answers as no Book. A Google volume id matches
-nothing yet. `BookOut` carries them, the archive holds them and a merge moves them;
+**An add matches on an ASIN, a Google volume id or a Calibre uuid.** An add carrying one that
+a Book the member can see already carries answers 409 rather than making a second Book, so a
+Kindle, Play Books or Calibre library imported twice does not double. Only through the shelf:
+nothing makes an identifier unique, so a Book the member cannot see answers as no Book. A volume
+id is compared as sent, because Google's are case sensitive; an ASIN is upper cased. `BookOut`
+carries them, the archive holds them and a merge moves them;
 `/duplicates` still groups on a normalised title and author, and the published catalogue
 withholds them, because where a household shops is not a fact about the work. A row carries
 no member: its visibility is the book's entirely, which is what puts it in

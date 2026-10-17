@@ -214,6 +214,26 @@ class TestOneRecord:
 
         assert answer == Seen(book.id)
 
+    def test_a_volume_id_differing_only_in_case_is_another_volume(self, db, member):
+        """Google's volume ids are case sensitive, so the case folding an ASIN
+        takes would refuse an add of a different volume."""
+        book = _book(db, member, "Dune")
+        db.add(
+            BookIdentifier(
+                book_id=book.id, scheme=BookIdentifierScheme.GOOGLE_BOOKS, value="zytcalfpjgyc"
+            )
+        )
+        db.commit()
+
+        answer = recognise_one(
+            db,
+            member.id,
+            Source.STORE,
+            identifiers=[(BookIdentifierScheme.GOOGLE_BOOKS, "zyTCAlFPjgYC")],
+        )
+
+        assert answer == Unknown()
+
     def test_an_isbn_stored_with_hyphens_answers_the_canonical_one(self, db, member):
         """The full index keys every stored ISBN through `isbn.parse`, so the
         door has to find the spelling an exact comparison would miss."""

@@ -47,7 +47,7 @@ identifier are a stronger claim than any title.
 | `CATALOGUE` (MARC) | ISBN | `identity.work_key` | the lowest id |
 | `HIGHLIGHTS` (Readwise) | ASIN | `identity.work_key` | no answer |
 | `CALIBRE` (an add) | Calibre uuid | none | the lowest id |
-| `STORE` (an add) | ASIN | none | the lowest id |
+| `STORE` (an add) | ASIN, Google volume id | none | the lowest id |
 | `ADD` (an add) | ISBN | none | the lowest id |
 
 Any other tie is no answer. **An add asks no title**: two Books may share one,
@@ -162,10 +162,13 @@ _LADDERS: Final[Mapping[Source, _Ladder]] = {
     Source.CALIBRE: _Ladder(
         schemes=(BookIdentifierScheme.CALIBRE_UUID,), title=None, copies_take_the_lowest=True
     ),
-    # The ASIN alone, as the owner's ruling of 2026-10-17 names it. A Google
-    # volume id is the same kind of claim and is not asked yet.
+    # Both store identifiers, under the owner's ruling that a store identifier
+    # refuses an add: a Google volume id is the Play Books import's only key,
+    # as the ASIN is the Kindle import's.
     Source.STORE: _Ladder(
-        schemes=(BookIdentifierScheme.ASIN,), title=None, copies_take_the_lowest=True
+        schemes=(BookIdentifierScheme.ASIN, BookIdentifierScheme.GOOGLE_BOOKS),
+        title=None,
+        copies_take_the_lowest=True,
     ),
     Source.ADD: _Ladder(schemes=None, title=None, copies_take_the_lowest=True),
 }

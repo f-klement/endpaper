@@ -27,6 +27,7 @@ import opds
 import settings_store
 from auth import require_admin
 from dependencies import CurrentUser, DbSession, RowId
+from errors import a_deadlock_answers_409
 from importing import OpdsImport
 from models import OpdsServer, User
 from ratelimit import import_limiter
@@ -42,6 +43,13 @@ from schemas import (
 logger = logging.getLogger("endpaper.opds")
 
 router = APIRouter(prefix="/api/opds", tags=["opds"])
+
+
+#: The 409 for a sync Postgres aborted to break a deadlock.
+_MET_ANOTHER_CHANGE = (
+    "Another change to the same books met this sync, and nothing was imported. "
+    "Sync the server again."
+)
 
 
 def _server(db: Session, server_id: int) -> OpdsServer:
@@ -353,11 +361,14 @@ async def sync_server(
         logger.warning("OPDS sync of server %d failed: %s", row.id, failure)
         raise HTTPException(status_code=502, detail=str(failure)) from None
 
-    applied = await anyio.to_thread.run_sync(
-        lambda: OpdsImport.for_member(db, current_user.id).apply(
-            found.records, create_missing=create_missing
+    # The same one transaction as a file import, and the same deadlock with a
+    # merge through its gap fills: `routers/imports.py::import_marc` says why 409.
+    with a_deadlock_answers_409(db, _MET_ANOTHER_CHANGE):
+        applied = await anyio.to_thread.run_sync(
+            lambda: OpdsImport.for_member(db, current_user.id).apply(
+                found.records, create_missing=create_missing
+            )
         )
-    )
 
     return OpdsSyncOut(
         **applied.model_dump(),

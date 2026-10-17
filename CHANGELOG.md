@@ -2,6 +2,38 @@
 
 ## Unreleased
 
+- **A book added again with a Google Books volume id that a book you can see already carries is
+  refused as a duplicate**, instead of being added a second time, whether it comes from a second
+  Google Play Books import, a Calibre record or an EPUB carrying the id.
+
+- **A CSV import, a catalogue (MARC) import, an OPDS sync or a merge that deadlocks with another
+  change to the same books now says nothing was written and asks to send it again**, instead of
+  failing with a server error.
+
+- **A file whose location another book already holds no longer stops a book's other files from
+  being recorded**, on the Scan page and in the Calibre import, whether the book was already in
+  your library or has just been added. That file is left with the other book and a new sentence
+  counts such files. A book just added no longer says that picking the folder again would record
+  the rest, and books already in your library say their file locations were recorded except
+  where another book held one, rather than claiming every one was.
+
+- **A picked file whose location only a printed copy holds is no longer sent on every add to be
+  refused**, and the book's other files are recorded rather than skipped after it, on the Scan
+  page and in the Calibre import.
+
+- **On the Scan page, a book already in your library whose files are at the most a book can hold
+  now leaves the queue and is counted** in its own sentence, which says some of its file
+  locations were not recorded, rather than staying as a failed row that adding again could not
+  fix.
+
+- **On the Scan page, adding a file as its own copy no longer calls the copy's location
+  unrecorded when another book already holds that location**; the file is counted as left with
+  that book.
+
+- **A book refused because it is already in the catalogue as more than one book, or as one you
+  cannot see, now says so** on the Scan page and in the Calibre import, instead of the generic
+  duplicate message.
+
 - **A scanned barcode no catalogue knows is no longer added with an empty title.** It stays in
   the scan queue, marked not found, and Add all is held while nothing in the queue can be added,
   rather than doing nothing when pressed.

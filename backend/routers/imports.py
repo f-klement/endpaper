@@ -38,6 +38,7 @@ import settings_store
 from classifications import bounded_headings
 from config import MAX_UPLOAD_BYTES
 from dependencies import CurrentUser, DbSession
+from errors import a_deadlock_answers_409
 from import_readers import ImportReader
 from importing import Import, MarcImport, recognise_stored, stored_record
 from ratelimit import import_limiter
@@ -226,9 +227,12 @@ def import_csv(
 
     parsed = _parse(_read_upload(file), _parse_overrides(overrides), reader)
 
-    return Import.for_member(db, current_user.id).apply(
-        parsed, create_missing=create_missing, apply_tags=apply_tags
-    )
+    # A merge over the same Books can deadlock with the import through its gap
+    # fills, which update a matched Book's row: `import_marc` says why 409.
+    with a_deadlock_answers_409(db, _MET_ANOTHER_CHANGE):
+        return Import.for_member(db, current_user.id).apply(
+            parsed, create_missing=create_missing, apply_tags=apply_tags
+        )
 
 
 def _parse_overrides(raw: str | None) -> dict[str, str]:
@@ -409,6 +413,22 @@ def import_marc(
 
     parsed = _read_marc(_read_upload(file))
 
-    return MarcImport.for_member(db, current_user.id).apply(
-        parsed, create_missing=create_missing
-    )
+    # **A merge over the same Books can deadlock with the import**, and Postgres
+    # then aborts one of the two. The import locks each Book it adds a link or a
+    # heading to, in record order, until its one commit, so no lock order can be
+    # imposed against a merge, which takes its keeper and then its loser.
+    # Aborted, the import has written nothing, and the same file sent again
+    # meets the catalogue the merge left. **Not retried here**: a retry starts
+    # while the merge is still finishing, so it can match the loser and then
+    # find it deleted (`docs/decisions.md`).
+    with a_deadlock_answers_409(db, _MET_ANOTHER_CHANGE):
+        return MarcImport.for_member(db, current_user.id).apply(
+            parsed, create_missing=create_missing
+        )
+
+
+#: The 409 for an import Postgres aborted to break a deadlock.
+_MET_ANOTHER_CHANGE = (
+    "Another change to the same books met this import, and nothing was imported. "
+    "Import the file again."
+)

@@ -25,7 +25,7 @@ import respx
 from fastapi.exceptions import ResponseValidationError
 from pydantic import BaseModel, ValidationError
 from sqlalchemy import text
-from sqlalchemy.exc import IntegrityError, PendingRollbackError
+from sqlalchemy.exc import IntegrityError, PendingRollbackError, ProgrammingError
 from starlette.exceptions import HTTPException
 from starlette.requests import ClientDisconnect
 
@@ -270,6 +270,17 @@ def postgres_shaped_error(marker: str) -> IntegrityError:
     return IntegrityError(
         "INSERT INTO users (email) VALUES (%s)", (marker,), original, hide_parameters=True
     )
+
+
+def postgres_deadlock() -> ProgrammingError:
+    """A deadlock abort as pg8000 hands one over, for a suite on SQLite.
+
+    `pg8000.ProgrammingError`, the class its cursor raises for any SQLSTATE but
+    23505 and 28000, with the server's fields as a dict and `C` the SQLSTATE.
+    `test_database_ceilings_on_a_real_server.py` drives a real one.
+    """
+    original = pg8000.ProgrammingError({"S": "ERROR", "C": "40P01", "M": "deadlock detected"})
+    return ProgrammingError("DELETE FROM books WHERE books.id = %s", (1,), original)
 
 
 @pytest.mark.answers_500(raises=(IntegrityError, PendingRollbackError))

@@ -403,6 +403,7 @@ describe("writing the library", () => {
       otherFormat: 0,
       unreferenced: 0,
       atCeiling: 0,
+      filesLeft: 0,
     });
   });
 
@@ -437,14 +438,17 @@ describe("writing the library", () => {
     await waitFor(() => expect(result.current.result).not.toBeNull());
 
     expect(posted).toHaveLength(3);
+    // Its 409 names no Book, so it is listed as held unnamed: a tie and a
+    // holder hidden from this member answer alike.
     expect(result.current.result).toEqual({
       added: 2,
-      failures: [{ title: "Book 2", status: 409 }],
+      failures: [{ title: "Book 2", status: 409, unnamed: true }],
       stopped: false,
       already: 0,
       otherFormat: 0,
       unreferenced: 0,
       atCeiling: 0,
+      filesLeft: 0,
     });
   });
 
@@ -557,6 +561,7 @@ describe("recording where the library's files are", () => {
     expect(result.current.result).toMatchObject({
       already: 0,
       atCeiling: 1,
+      filesLeft: 0,
       failures: [],
     });
   });
@@ -573,6 +578,7 @@ describe("recording where the library's files are", () => {
     expect(result.current.result).toMatchObject({
       already: 1,
       atCeiling: 0,
+      filesLeft: 1,
       failures: [],
     });
   });

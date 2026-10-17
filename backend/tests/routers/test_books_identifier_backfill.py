@@ -16,6 +16,7 @@ than asserted in prose.
 
 import asyncio
 import logging
+import re
 from collections.abc import Awaitable
 
 import httpx
@@ -28,6 +29,10 @@ from tests.routers.test_concurrency_bounds import _built_to, _the_bound
 
 VOLUME_ID = "s7NIrgEACAAJ"
 OTHER_VOLUME_ID = "abcdefghijkl"
+#: One volume id per Book where an arm imports several. The add door refuses a
+#: second Book carrying a volume id a Book the member can see already carries,
+#: so a library of imported Books is one of distinct volumes, as a Takeout is.
+LIBRARY_VOLUME_IDS = tuple(f"s7NIrgEACA{serial:02d}" for serial in range(4))
 
 
 #: How long a parked acquire waits here before it accuses the handler.
@@ -195,10 +200,19 @@ def catalogues():
         yield mock
 
 
-def volume_route(mock, volume_id: str = VOLUME_ID, response=None):
-    """Google answering for one volume id, with everything else silenced."""
-    route = mock.get(f"{GOOGLE_BOOKS}/{volume_id}").mock(
-        return_value=response or httpx.Response(200, json=volume_body(volume_id))
+def volume_route(mock, response=None):
+    """Google answering for `VOLUME_ID` and every `LIBRARY_VOLUME_IDS` member,
+    each with its own volume unless `response` is given, and everything else
+    silenced. One route, so its call count is every volume asked."""
+    answered = "|".join(re.escape(volume_id) for volume_id in (VOLUME_ID, *LIBRARY_VOLUME_IDS))
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        return response or httpx.Response(
+            200, json=volume_body(request.url.path.rsplit("/", 1)[-1])
+        )
+
+    route = mock.get(url__regex=rf"{re.escape(GOOGLE_BOOKS)}/(?:{answered})(?:\?.*)?$").mock(
+        side_effect=answer
     )
     silence_catalogues(mock)
     return route
@@ -212,6 +226,14 @@ def imported_book(client, headers, make_book, volume_id: str = VOLUME_ID) -> dic
         author="Frank Herbert",
         identifiers=[{"scheme": "google_books", "value": volume_id}],
     )
+
+
+def imported_library(client, headers, make_book, books: int) -> list[dict]:
+    """`books` imported Books, each carrying its own volume id."""
+    return [
+        imported_book(client, headers, make_book, volume_id)
+        for volume_id in LIBRARY_VOLUME_IDS[:books]
+    ]
 
 
 class TestWhatOneImportedBookCosts:
@@ -313,9 +335,9 @@ class TestWhatABatchCostsTheDatabase:
     on a listing, which is what `_books_to_out` batches for.
     """
 
-    def _measure(self, client, headers, make_book, books: int) -> int:
-        for _ in range(books):
-            imported_book(client, headers, make_book)
+    def _measure(self, client, headers, make_book, volume_ids: tuple[str, ...]) -> int:
+        for volume_id in volume_ids:
+            imported_book(client, headers, make_book, volume_id)
         return statements_for(client, "/api/books/identifiers/backfill", headers)
 
     def test_one_statement_per_book_and_no_more(
@@ -323,10 +345,10 @@ class TestWhatABatchCostsTheDatabase:
     ):
         volume_route(catalogues)
 
-        two = self._measure(client, admin["headers"], make_book, 2)
+        two = self._measure(client, admin["headers"], make_book, LIBRARY_VOLUME_IDS[:2])
         # The first run recorded a volume on both books, so they stop being
         # candidates and the next measurement is over the two new ones only.
-        four = self._measure(client, admin["headers"], make_book, 2)
+        four = self._measure(client, admin["headers"], make_book, LIBRARY_VOLUME_IDS[2:4])
 
         assert (two, four) == (12, 12), (
             f"a batch of two costs {two} SELECTs and the next two cost {four}. "
@@ -344,8 +366,8 @@ class TestWhatABatchCostsTheDatabase:
     ):
         volume_route(catalogues)
 
-        one = self._measure(client, admin["headers"], make_book, 1)
-        three = self._measure(client, admin["headers"], make_book, 3)
+        one = self._measure(client, admin["headers"], make_book, LIBRARY_VOLUME_IDS[:1])
+        three = self._measure(client, admin["headers"], make_book, LIBRARY_VOLUME_IDS[1:4])
 
         assert three - one == 2, (
             f"one book costs {one} SELECTs and three cost {three}, a slope of "
@@ -529,8 +551,7 @@ class TestTheBackfill:
     def test_resolves_a_library_of_imported_books(
         self, client, admin, make_book, google_enabled, catalogues
     ):
-        for _ in range(3):
-            imported_book(client, admin["headers"], make_book)
+        imported_library(client, admin["headers"], make_book, 3)
         volume_route(catalogues)
 
         res = client.post(
@@ -553,8 +574,7 @@ class TestTheBackfill:
         search roster, which `test_without_the_identifier_it_is_a_fan_out_and_a_title_match`
         measures.
         """
-        for _ in range(3):
-            imported_book(client, admin["headers"], make_book)
+        imported_library(client, admin["headers"], make_book, 3)
         volume_route(catalogues)
 
         client.post("/api/books/identifiers/backfill", headers=admin["headers"])
@@ -693,8 +713,7 @@ class TestTheBackfill:
         import routers.books as books_router
 
         monkeypatch.setattr(books_router, "MAX_IDENTIFIER_BACKFILL", 2)
-        for _ in range(3):
-            imported_book(client, admin["headers"], make_book)
+        imported_library(client, admin["headers"], make_book, 3)
         volume_route(catalogues)
 
         first = client.post(
@@ -934,8 +953,7 @@ class TestTheBatchIsBoundedInWallClockAndNotOnlyInBooks:
         """
         self._deadline(monkeypatch, 0.1)
         self._starved(monkeypatch)
-        for _ in range(3):
-            imported_book(client, admin["headers"], make_book)
+        imported_library(client, admin["headers"], make_book, 3)
         volume_route(catalogues)
 
         res = client.post(
@@ -954,8 +972,7 @@ class TestTheBatchIsBoundedInWallClockAndNotOnlyInBooks:
         """The check at the top of each wave, which the starved arms above
         never reach: they spend their deadline parked inside a wave."""
         self._deadline(monkeypatch, 0.0)
-        for _ in range(3):
-            imported_book(client, admin["headers"], make_book)
+        imported_library(client, admin["headers"], make_book, 3)
         volume_route(catalogues)
 
         body = client.post(
@@ -976,8 +993,7 @@ class TestTheBatchIsBoundedInWallClockAndNotOnlyInBooks:
         """
         self._deadline(monkeypatch, 0.1)
         self._starved(monkeypatch)
-        for _ in range(3):
-            imported_book(client, admin["headers"], make_book)
+        imported_library(client, admin["headers"], make_book, 3)
         volume_route(catalogues)
 
         body = client.post(
@@ -1001,9 +1017,7 @@ class TestTheBatchIsBoundedInWallClockAndNotOnlyInBooks:
         monkeypatch.setattr(books_router, "IDENTIFIER_BACKFILL_CONCURRENCY", 2)
         self._deadline(monkeypatch, 0.5)
         self._starved(monkeypatch, at_most=2)
-        books = [
-            imported_book(client, admin["headers"], make_book) for _ in range(4)
-        ]
+        books = imported_library(client, admin["headers"], make_book, 4)
         volume_route(catalogues)
 
         body = client.post(
@@ -1029,8 +1043,7 @@ class TestTheBatchIsBoundedInWallClockAndNotOnlyInBooks:
         monkeypatch.setattr(books_router, "IDENTIFIER_BACKFILL_CONCURRENCY", 2)
         self._deadline(monkeypatch, 0.5)
         self._starved(monkeypatch, at_most=2)
-        for _ in range(4):
-            imported_book(client, admin["headers"], make_book)
+        imported_library(client, admin["headers"], make_book, 4)
         volume_route(catalogues)
 
         body = client.post(
@@ -1050,8 +1063,7 @@ class TestTheBatchIsBoundedInWallClockAndNotOnlyInBooks:
         monkeypatch.setattr(books_router, "IDENTIFIER_BACKFILL_CONCURRENCY", 2)
         self._deadline(monkeypatch, 0.5)
         self._starved(monkeypatch, at_most=2)
-        for _ in range(4):
-            imported_book(client, admin["headers"], make_book)
+        imported_library(client, admin["headers"], make_book, 4)
         volume_route(catalogues)
 
         first = client.post(
@@ -1097,12 +1109,12 @@ class TestTheBatchIsBoundedInWallClockAndNotOnlyInBooks:
         slots = _SlotsThatCount(2)
         monkeypatch.setattr(books_router, "_BACKFILL_LOOKUPS_AT_ONCE", slots)
 
-        # The same volume id for both, as `test_resolves_a_library_of_imported_books`
-        # does: what is under test is how the walk groups them, not what they are.
-        imported_book(client, admin["headers"], make_book)
-        for _ in range(5):
-            imported_book(client, admin["headers"], make_book, "not-an-id")
-        imported_book(client, admin["headers"], make_book)
+        first, last = LIBRARY_VOLUME_IDS[:2]
+        imported_book(client, admin["headers"], make_book, first)
+        for serial in range(5):
+            # Eleven characters, so `google_books.is_a_volume_id` refuses each.
+            imported_book(client, admin["headers"], make_book, f"not-an-id-{serial}")
+        imported_book(client, admin["headers"], make_book, last)
         volume_route(catalogues)
 
         body = client.post(

@@ -592,6 +592,8 @@ describe("RapidQueue", () => {
         failed: 2,
         unreferenced: 0,
         already: 0,
+        atCeiling: 0,
+        filesLeft: 0,
         stopped: false,
       },
     });
@@ -608,6 +610,8 @@ describe("RapidQueue", () => {
         failed: 0,
         unreferenced: 2,
         already: 0,
+        atCeiling: 0,
+        filesLeft: 0,
         stopped: false,
       },
     });
@@ -628,6 +632,8 @@ describe("RapidQueue", () => {
         failed: 0,
         unreferenced: 0,
         already: 0,
+        atCeiling: 0,
+        filesLeft: 0,
         stopped: false,
       },
     });
@@ -642,13 +648,134 @@ describe("RapidQueue", () => {
         failed: 0,
         unreferenced: 0,
         already: 2,
+        atCeiling: 0,
+        filesLeft: 0,
         stopped: false,
       },
     });
 
     expect(
       screen.getByText(
-        "2 were already in your library, so they were not added again. Where their files are was recorded.",
+        "2 were already in your library, so they were not added again. Where their files are was recorded, except where another book already held the location.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("says in German that a location another book held was not recorded on the books already there", () => {
+    renderQueue(
+      {
+        result: {
+          added: 0,
+          failed: 0,
+          unreferenced: 0,
+          already: 1,
+          atCeiling: 0,
+          filesLeft: 2,
+          stopped: false,
+        },
+      },
+      { locale: Locale.de },
+    );
+
+    expect(
+      screen.getByText(
+        /außer wo der Ort schon bei einem anderen Buch gespeichert war/,
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("says how many files were left with another book holding their location", () => {
+    // The exception to "where their files are was recorded": without it a file
+    // left on a printed copy was covered by that sentence.
+    renderQueue({
+      result: {
+        added: 0,
+        failed: 0,
+        unreferenced: 0,
+        already: 1,
+        atCeiling: 0,
+        filesLeft: 2,
+        stopped: false,
+      },
+    });
+
+    expect(
+      screen.getByText(
+        "Files whose location another book in your library already holds, so they were left there: 2.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("says in German how many files were left with another book", () => {
+    renderQueue(
+      {
+        result: {
+          added: 0,
+          failed: 0,
+          unreferenced: 0,
+          already: 1,
+          atCeiling: 0,
+          filesLeft: 2,
+          stopped: false,
+        },
+      },
+      { locale: Locale.de },
+    );
+
+    expect(
+      screen.getByText(/bei einem anderen Buch der Bibliothek gespeichert/),
+    ).toBeInTheDocument();
+  });
+
+  /** A picked row the batch refused as a duplicate naming no Book. */
+  const heldUnnamed = {
+    ...picked(
+      {
+        state: "failed" as const,
+        draft: { isbn: "9780441013593", title: "Dune", suggested_tag_ids: [] },
+        reason: { kind: "held-unnamed" as const },
+      },
+      "dune.epub",
+    ),
+    isbn: "9780441013593",
+  };
+
+  it("says a duplicate naming no book is more than one book or one not visible", () => {
+    // The server answers a tie and a hidden holder alike, so the row may claim
+    // neither.
+    renderQueue({ entries: [heldUnnamed] });
+
+    expect(
+      screen.getByText(
+        "Already in the catalogue as more than one book, or as one you cannot see, so it was not added.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("says in German that a duplicate naming no book was not added", () => {
+    renderQueue({ entries: [heldUnnamed] }, { locale: Locale.de });
+
+    expect(
+      screen.getByText(/als mehr als ein Buch oder als eines/),
+    ).toBeInTheDocument();
+  });
+
+  it("says how many held books were at their ceiling, so their files went unrecorded", () => {
+    renderQueue({
+      result: {
+        added: 0,
+        failed: 0,
+        unreferenced: 0,
+        already: 0,
+        atCeiling: 2,
+        filesLeft: 0,
+        stopped: false,
+      },
+    });
+
+    expect(
+      screen.getByText(
+        "2 were already in your library and already hold as many file locations as a book can, so where some of their files are was not recorded.",
       ),
     ).toBeInTheDocument();
   });
@@ -660,6 +787,8 @@ describe("RapidQueue", () => {
         failed: 0,
         unreferenced: 0,
         already: 0,
+        atCeiling: 0,
+        filesLeft: 0,
         stopped: false,
       },
     });
@@ -733,6 +862,8 @@ describe("RapidQueue", () => {
         failed: 1,
         unreferenced: 0,
         already: 0,
+        atCeiling: 0,
+        filesLeft: 0,
         stopped: false,
       },
     });
@@ -784,6 +915,8 @@ describe("RapidQueue", () => {
         failed: 0,
         unreferenced: 0,
         already: 0,
+        atCeiling: 0,
+        filesLeft: 0,
         stopped: true,
       },
     });
@@ -828,6 +961,8 @@ describe("RapidQueue", () => {
         failed: 2,
         unreferenced: 1,
         already: 0,
+        atCeiling: 0,
+        filesLeft: 0,
         stopped: true,
       },
     });
@@ -917,6 +1052,8 @@ describe("RapidQueue", () => {
         failed: 0,
         unreferenced: 0,
         already: 0,
+        atCeiling: 0,
+        filesLeft: 0,
         stopped: true,
       },
     });
@@ -941,6 +1078,8 @@ describe("RapidQueue", () => {
         failed: 0,
         unreferenced: 0,
         already: 0,
+        atCeiling: 0,
+        filesLeft: 0,
         stopped: false,
       },
     });
@@ -959,6 +1098,8 @@ describe("RapidQueue", () => {
         failed: 0,
         unreferenced: 0,
         already: 0,
+        atCeiling: 0,
+        filesLeft: 0,
         stopped: true,
       },
     });
@@ -983,6 +1124,8 @@ describe("RapidQueue", () => {
         failed: 1,
         unreferenced: 0,
         already: 0,
+        atCeiling: 0,
+        filesLeft: 0,
         stopped: false,
       },
     });

@@ -1325,9 +1325,19 @@ export const en = {
   "rapid.unreferenced":
     "{count} of those were added without where their file is. Picking the folder again records it.",
   // **Says what the batch did instead**, because a member who picked the same
-  // folder twice is checking that nothing was doubled.
+  // folder twice is checking that nothing was doubled. Names the exception
+  // `rapid.filesLeft` counts, without which the sentence is false for them.
   "rapid.alreadyHeld":
-    "{count} were already in your library, so they were not added again. Where their files are was recorded.",
+    "{count} were already in your library, so they were not added again. Where their files are was recorded, except where another book already held the location.",
+  // **Says why a row left the queue unrecorded**, because adding it again is
+  // refused the same way: the book is full, not failed.
+  "rapid.atCeiling":
+    "{count} were already in your library and already hold as many file locations as a book can, so where some of their files are was not recorded.",
+  // **Counts the files the sentences above leave out**: another Book holds
+  // each one's location, often a printed copy that carried it before the
+  // landing rule, and the server keeps a location on one Book.
+  "rapid.filesLeft":
+    "Files whose location another book in your library already holds, so they were left there: {count}.",
   "rapid.inYourLibrary":
     "Already in your library. Adding only records where its file is and adds no book.",
   "rapid.removeFromQueue": "Remove {label} from the queue",
@@ -1600,6 +1610,11 @@ export const en = {
     "The files saved from this folder could not all be checked or marked. What was already done is kept.",
   "rapid.heldInAnotherFormat":
     "Already in the library in another format, so the file was not attached to it.",
+  // **True of both cases the server answers alike**: a tie between Books
+  // outside one copy group, and a holder hidden from this member. It names
+  // neither, so this sentence cannot either.
+  "rapid.heldUnnamed":
+    "Already in the catalogue as more than one book, or as one you cannot see, so it was not added.",
   "rapid.recordDiffers":
     "The catalogue lists this ISBN under another title, which may be a different book, so it is kept as the file describes it.",
   "rapid.keptTheFile": "Kept as the file describes it.",
@@ -1744,14 +1759,20 @@ export const en = {
   "calibre.notAdded": "not added",
   "calibre.located":
     "{count} have their files in the folder you picked, and where each file is will be saved on its book.",
+  // Names the exception for `rapid.alreadyHeld`'s reason.
   "calibre.already":
-    "{count} were already in your library, so they were not added again. Where their files are was recorded.",
+    "{count} were already in your library, so they were not added again. Where their files are was recorded, except where another book already held the location.",
   "calibre.otherFormat":
     "{count} are already in your library as another kind of copy, such as a printed book, so neither the book nor where its files are was added. Pick the library folder on the Scan page to add each as its own copy.",
   "calibre.unreferenced":
     "{count} of those were added without where all of their files are. Importing again with the library folder picked records it.",
   "calibre.atCeiling":
     "{count} were already in your library and already hold as many file locations as a book can, so where some of their files are was not recorded.",
+  "calibre.filesLeft":
+    "Files whose location another book in your library already holds, so they were left there: {count}.",
+  // `rapid.heldUnnamed` says why it names neither case.
+  "calibre.heldUnnamed":
+    "already in the catalogue as more than one book, or as one you cannot see",
   "calibre.failureNotADatabase": "That file is not a SQLite database.",
   "calibre.failureDamaged":
     "That copy is damaged. A copy taken while the library was being written to looks like this: take another one.",

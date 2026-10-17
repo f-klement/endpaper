@@ -232,6 +232,22 @@ class TestAnAsinRecognisesTheBook:
         assert res.status_code == 201
 
 
+class TestAGoogleVolumeIdRecognisesTheBook:
+    """A second Play Books import, whose entries carry a volume id and no ISBN,
+    added every book again, as a second Kindle import did before the ASIN."""
+
+    def test_a_second_add_carrying_the_volume_id_answers_409_naming_the_book(
+        self, client, admin
+    ):
+        body = {"title": "Dune", "identifiers": [{"scheme": "google_books", "value": VOLUME_ID}]}
+        first = client.post("/api/books/scan", json=body, headers=admin["headers"])
+
+        again = client.post("/api/books/scan", json=body, headers=admin["headers"])
+
+        assert again.status_code == 409
+        assert again.json()["detail"]["book_id"] == first.json()["id"]
+
+
 class TestAMergeMovesThem:
     def test_the_survivor_takes_the_losers_identifier(self, client, admin, db):
         keeper = client.post(
