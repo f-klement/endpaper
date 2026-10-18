@@ -40,6 +40,7 @@ class TestTheDegradeCannotFillADisk:
     characters as it is given in a `VARCHAR(20)`.
     """
 
+    @pytest.mark.sqlite_only(reason="stores past a VARCHAR's declared length, which only SQLite allows")
     def test_a_long_stray_value_logs_a_bounded_line(self, db, caplog) -> None:
         book = Book(title="Poisoned")
         db.add(book)
@@ -78,6 +79,7 @@ class TestTheDegradeCannotFillADisk:
             db.execute(insert(Book), {"title": "Shaped", "format": {"a": 1}})
         db.rollback()
 
+    @pytest.mark.sqlite_only(reason="reads SQLite's storage class with typeof()")
     def test_a_member_still_binds_as_its_value(self, db) -> None:
         """What dropping the coercion could have broken, pinned rather than
         assumed."""

@@ -128,7 +128,7 @@ def rows_at_the_engine() -> Iterator[list[Statement]]:
     driver the same attribute means something else, and a silent zero would
     make every reading over this pass. The suite runs on SQLite unless
     `ENDPAPER_TEST_DATABASE_URL` asks otherwise, and the one job that asks
-    selects three files, none of them a caller of this.
+    runs a selection holding no caller of this.
     """
     from sqlalchemy import event
     from sqlalchemy.orm import Session

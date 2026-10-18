@@ -6,6 +6,7 @@ two rows that merely name the same book are the second, and every test here is
 about keeping the app able to tell them apart.
 """
 
+import pytest
 from sqlalchemy import text
 
 import cover_store
@@ -406,6 +407,7 @@ class TestTheIsbnRule:
 
         assert cover.exists()
 
+    @pytest.mark.sqlite_only(reason="empties sqlite_sequence so that SQLite reuses a deleted rowid")
     def test_a_reused_id_keeps_the_new_book_s_own_cover(
         self, client, admin, make_book, db, covers_dir, monkeypatch
     ):

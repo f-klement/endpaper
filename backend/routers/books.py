@@ -5,6 +5,7 @@ import logging
 from collections.abc import Callable, Iterator
 from concurrent.futures import Future, wait
 from datetime import UTC, datetime
+from functools import partial
 from typing import Annotated, Any, Final, Literal, NamedTuple, NoReturn, cast
 
 from fastapi import (
@@ -57,6 +58,7 @@ from authorship import (
 )
 from categories import join_categories
 from classifications import add_headings, bounded_headings
+from database import on_commit
 from dependencies import (
     BookForOwner,
     BookForRead,
@@ -1731,7 +1733,6 @@ def _create_book(payload: BookCreate, current_user: User, db: Session, conflict:
     # going to collide and turn a 409 into a 500. `recognition` compares every
     # stored spelling, so a row written before canonicalisation as an ISBN-10
     # is found too.
-    freed: list[int] = []
     match recognition.recognise_one(
         db, current_user.id, recognition.Source.ADD, isbn=payload.isbn
     ):
@@ -1768,7 +1769,8 @@ def _create_book(payload: BookCreate, current_user: User, db: Session, conflict:
             holders = Shelf.trashed_by(db, current_user.id).where(Book.id.in_(book_ids)).all()
             if any(holder.added_by_user_id != current_user.id for holder in holders):
                 _refuse_in_trash()
-            freed = [_purge(holder, db) for holder in holders]
+            for holder in holders:
+                _purge(holder, db)
             # Flushed, not committed: this function owns the transaction and
             # commits once. Without this the DELETEs are still pending when the
             # INSERT runs and the unique ISBN index rejects it.
@@ -1804,17 +1806,13 @@ def _create_book(payload: BookCreate, current_user: User, db: Session, conflict:
     # arrived without the identifier its import read cannot be told apart
     # afterwards from one whose store carried none.
     add_identifiers(book, payload.identifiers, db)
+    # This commit runs the purged holders' cover removals, which is why it
+    # comes before `_store_cover`. At head neither engine gives a deleted Book's
+    # id to a new one. Should `books` ever lose `AUTOINCREMENT`, the new book
+    # can take a purged id, and storing its cover before this commit would have
+    # the removal delete it.
     db.commit()
     db.refresh(book)
-
-    # After the commit, and before the new book's own cover is stored. At head
-    # neither engine gives a deleted Book's id to a new one, so none of these is
-    # the book just inserted. The order is the backstop should `books` ever lose
-    # `AUTOINCREMENT`, when the new book can have taken one of them: forgetting
-    # here is what stops it inheriting somebody else's cover, and doing it after
-    # `_store_cover` would delete its own.
-    for book_id in freed:
-        cover_store.remove(book_id)
 
     # After the commit, because the cover is stored under the book's id and the
     # id does not exist until the row does. A failed fetch is not a failed add:
@@ -4186,9 +4184,9 @@ def _trash(book: Book, db: Session) -> None:
         lending.close(loan, now)
 
 
-def _purge(book: Book, db: Session) -> int:
-    """Delete a trashed book for good. Returns the id whose cover files the
-    caller must forget **after the commit**.
+def _purge(book: Book, db: Session) -> None:
+    """Delete a trashed book for good, and its cover files once the caller's
+    transaction commits.
 
     The cover is the part a soft delete leaves behind, and it is the standing
     cost of holding covers on disk rather than in the row. Files are named by
@@ -4202,8 +4200,8 @@ def _purge(book: Book, db: Session) -> int:
     book can be restored, and restoring one to a placeholder would be a delete
     that half happened.
 
-    **The unlink is the caller's, and it belongs after the commit.** This
-    function used to do it itself, first thing, which made a file loss
+    **The unlink waits for the commit, through `on_commit`.** This function
+    used to do it itself, first thing, which made a file loss
     unrecoverable by any failure after it: the transaction rolls the DELETE
     back, so the member still has the book, and its `cover_url` now points at
     a file that no longer exists. Nothing logged it. Adding copies made that
@@ -4220,6 +4218,8 @@ def _purge(book: Book, db: Session) -> int:
     book_id = book.id
     token = book.copy_group
     db.delete(book)
+    # A partial rather than a lambda, so a failure's log line names the id.
+    on_commit(db, partial(cover_store.remove, book_id))
 
     # Only when this row was one of several copies, which almost none are. The
     # flush is what makes the count in `_normalise_copy_group` see the delete,
@@ -4227,7 +4227,6 @@ def _purge(book: Book, db: Session) -> int:
     if token is not None:
         db.flush()
         _normalise_copy_group(token, db)
-    return book_id
 
 
 @router.get("/trash", response_model=Page[BookOut])
@@ -4344,13 +4343,10 @@ def empty_trash(db: DbSession, current_user: CurrentUser) -> PurgeResult:
     than on any schedule anybody chose.
     """
     books = Shelf.trashed_by(db, current_user.id).all()
-    purged = [_purge(book, db) for book in books]
+    for book in books:
+        _purge(book, db)
     db.commit()
-    # After the commit. See `_purge`: an unlink before it is a file loss no
-    # rollback undoes.
-    for book_id in purged:
-        cover_store.remove(book_id)
-    return PurgeResult(purged=len(purged))
+    return PurgeResult(purged=len(books))
 
 
 # ── Files reported missing, across the shelf ──────────────────────────────────
@@ -4836,10 +4832,8 @@ def restore_book(book: BookInTrash, db: DbSession, current_user: CurrentUser) ->
 @router.delete("/{book_id}/permanent", status_code=status.HTTP_204_NO_CONTENT)
 def purge_book(book: BookInTrash, db: DbSession) -> None:
     """Delete one trashed book for good."""
-    purged = _purge(book, db)
+    _purge(book, db)
     db.commit()
-    # After the commit. See `_purge`.
-    cover_store.remove(purged)
 
 
 @router.put("/{book_id}/status", response_model=BookOut)
@@ -5192,8 +5186,12 @@ async def upload_cover(
     # refusal. What the file is called, and that the other formats of this book
     # go with it, are `cover_store`'s.
     data = await read_image_upload(file)
-    destination = cover_store.save(book.id, data)
+    destination = cover_store.write(book.id, data)
     book.cover_url = covers.local_url(book.id, destination.suffix.lstrip("."))
+    # The other formats go once the row names the new file. Swept before the
+    # commit, a PNG replacing a JPEG deletes the JPEG, and a commit that fails
+    # leaves the row naming it.
+    on_commit(db, partial(cover_store.sweep, book.id, destination))
     db.commit()
     db.refresh(book)
     return book_to_out(book, current_user, db)
@@ -5326,14 +5324,8 @@ def _note_for_reading_back(note_id: int, current_user: User, db: Session) -> Not
 def _note_for_edit(note_id: int, book: Book, current_user: User, db: Session) -> Note:
     """A note belonging to this book, which the caller may change.
 
-    The book/note pairing is enforced so a note id from another book cannot be
-    edited through a book the caller happens to have access to.
-
-    **404 for a note the caller cannot read, 403 for one they can.** A 403 on a
-    private note would confirm that another member's private note exists, which
-    is what the privacy withholds; `dependencies._not_found` states the same
-    rule for a book. A shared note somebody else wrote is a 403 because its
-    existence is not a secret, only its authorship is.
+    The pairing with the Book and the 404 and 403 follow the rule for a row
+    under a Book, in `docs/data-model.md` under the privacy rule.
 
     **The admin arm stops at the visibility.** An admin may edit or delete any
     note they can read, which is the moderation power `docs/data-model.md`
@@ -5445,9 +5437,10 @@ def add_quote(
 def _quote_for_edit(quote_id: int, book: Book, current_user: User, db: Session) -> Quote:
     """A quote belonging to this book, which the caller may change.
 
-    The book/quote pairing is enforced so a quote id from another book cannot
-    be edited through a book the caller happens to have access to. Same rule,
-    same reason, as `_note_for_edit`.
+    The rule for a row under a Book is in `docs/data-model.md`, under the
+    privacy rule. An admin may change any quote on a Book they can read.
+    **No visibility predicate**: `Quote` has no `is_private`, so whoever can
+    read the Book reads the quote, and somebody else's is a 403.
     """
     quote = db.query(Quote).filter(Quote.id == quote_id, Quote.book_id == book.id).first()
     if quote is None:
@@ -5581,10 +5574,9 @@ def _highlight_for_sharing(
 ) -> Highlight:
     """A highlight on this book that the caller wrote.
 
-    **404 for one the caller cannot read, 403 for one they can**, the rule
-    `_note_for_edit` states: a shared highlight's existence is no secret, a
-    private one's is. **No admin arm**: sharing speaks for the author, and
-    nobody else may publish or withdraw their marks.
+    The rule for a row under a Book is in `docs/data-model.md`, under the
+    privacy rule. **No admin arm**: sharing speaks for the author, and nobody
+    else may publish or withdraw their marks.
     """
     highlight = (
         db.query(Highlight)
@@ -5782,38 +5774,16 @@ def decide_access(
 # **Every route in this section is per book and goes through `dependencies`**,
 # so the privacy rule reaches a reference exactly as it reaches any other field
 # on a book: a reference on a book the caller cannot see is a 404 on the book,
-# never a row. The reads below are reported by `tests/test_shelf.py`'s fourth
-# pass, because `digital_references` is book owned, and each carries its reason
-# in `BOOK_OWNED_READERS`.
+# never a row. Every read and write of one Book's references is in
+# `file_references`, which `tests/test_shelf.py`'s fourth pass reports because
+# `digital_references` is book owned; each read carries its reason in
+# `BOOK_OWNED_READERS`. This section keeps the 404 and the 409s.
 #
 # **The fifth route is not here and not per book**: `GET /digital-references/
 # missing` reads the flag across the shelf and is declared before `/{book_id}`,
 # which is why it sits with `/quotes` rather than with its own family. It is
 # scoped by the Shelf and by nothing else, which is this table's rule and not a
 # looser reading of it: a reference has no Member of its own.
-
-
-def _digital_reference_for(book: Book, reference_id: int, db: Session) -> DigitalReference:
-    """One reference belonging to **this** book, or 404.
-
-    The book/reference pairing is enforced rather than assumed, for the reason
-    `_note_for_edit` enforces it: an id from another book must not be reachable
-    through a book the caller does happen to hold. There is no second
-    permission question after that, because a reference carries no Member of
-    its own: whoever may write the book may write its references, which is the
-    same rule `BookForWrite` states for tags and covers.
-    """
-    reference = (
-        db.query(DigitalReference)
-        .filter(
-            DigitalReference.id == reference_id,
-            DigitalReference.book_id == book.id,
-        )
-        .first()
-    )
-    if reference is None:
-        raise HTTPException(status_code=404, detail="Digital reference not found")
-    return reference
 
 
 @router.get("/{book_id}/digital-references", response_model=list[DigitalReferenceOut])
@@ -5828,12 +5798,7 @@ def list_digital_references(book: BookForRead, db: DbSession) -> list[DigitalRef
     Nothing in the response has been verified by this server. `confirmed_at` is
     when it was last **told** the file was there.
     """
-    return (
-        db.query(DigitalReference)
-        .filter(DigitalReference.book_id == book.id)
-        .order_by(DigitalReference.id)
-        .all()
-    )
+    return file_references.references_on(db, book)
 
 
 #: The `detail.code` on the 409 when a new location would put the Book past
@@ -5946,7 +5911,9 @@ def report_digital_reference_missing(
 
     Reversed by an ordinary sighting: something looked and found it.
     """
-    reference = _digital_reference_for(book, reference_id, db)
+    reference = file_references.reference_on(db, book, reference_id)
+    if reference is None:
+        raise HTTPException(status_code=404, detail="Digital reference not found")
     if file_references.miss(reference):
         db.commit()
         db.refresh(reference)
@@ -5970,7 +5937,10 @@ def forget_digital_reference(
     gone and a browser that could not see it are different statements, and only
     the first is evidence.
     """
-    file_references.forget(db, _digital_reference_for(book, reference_id, db))
+    reference = file_references.reference_on(db, book, reference_id)
+    if reference is None:
+        raise HTTPException(status_code=404, detail="Digital reference not found")
+    file_references.forget(db, reference)
     db.commit()
 
 
@@ -5980,11 +5950,8 @@ def forget_digital_reference(
 def _book_identifier_for(book: Book, identifier_id: int, db: Session) -> BookIdentifier:
     """One identifier belonging to **this** book, or 404.
 
-    `_digital_reference_for`'s rule, for the table that shares its ownership
-    model: the book/row pairing is enforced in the query rather than taken from
-    the path, so an id from another book is not reachable through a book the
-    caller does happen to hold. There is no second permission question after
-    that, because an identifier carries no Member of its own.
+    The rule for a row under a Book is in `docs/data-model.md`, under the
+    privacy rule.
     """
     identifier = (
         db.query(BookIdentifier)

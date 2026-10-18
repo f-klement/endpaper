@@ -21,7 +21,7 @@ from cryptography import x509
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519
 from cryptography.x509.oid import NameOID
-from sqlalchemy import event, exc, text
+from sqlalchemy import event, exc, inspect, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import QueuePool
@@ -69,6 +69,7 @@ def _a_certificate_authority(into: Path) -> Path:
     return path
 
 
+@pytest.mark.sqlite_only(reason="asserts the suite's engine is SQLite")
 class TestEngine:
     def test_is_pointed_at_the_test_database(self):
         assert "sqlite" in str(engine.url)
@@ -168,7 +169,9 @@ class TestEveryEngineHidesItsParameters:
 
 
 class TestSqlitePragmas:
-    """Every one of these is off or too short by default in SQLite."""
+    """Every one of these is off or too short by default in SQLite. Marked one
+    by one rather than as a class, because the dangling reference arm reads no
+    pragma and ports: a class mark would skip it on Postgres too."""
 
     @pytest.fixture
     def pragma(self):
@@ -178,6 +181,7 @@ class TestSqlitePragmas:
 
         return _read
 
+    @pytest.mark.sqlite_only(reason="reads SQLite's pragmas")
     def test_foreign_keys_are_enforced(self, pragma):
         """Off by default, which makes every ForeignKey in models.py and the
         ON DELETE CASCADE on book_tags decorative."""
@@ -185,16 +189,20 @@ class TestSqlitePragmas:
 
     def test_a_dangling_reference_is_refused(self, pragma):
         """The pragma reading 1 only proves it is set. This proves it bites."""
-        with engine.connect() as connection, pytest.raises(Exception, match="FOREIGN KEY"):
+        # Case blind, because SQLite says `FOREIGN KEY constraint failed` and
+        # Postgres `violates foreign key constraint`.
+        with engine.connect() as connection, pytest.raises(Exception, match=r"(?i)foreign key"):
             connection.execute(
                 text("INSERT INTO notes (book_id, user_id, content) VALUES (9999, 9999, 'x')")
             )
 
+    @pytest.mark.sqlite_only(reason="reads SQLite's pragmas")
     def test_the_journal_is_write_ahead(self, pragma):
         """Without WAL a long write, an import or a restore, blocks every read
         for its duration."""
         assert pragma("journal_mode").lower() == "wal"
 
+    @pytest.mark.sqlite_only(reason="reads SQLite's pragmas")
     def test_a_busy_database_waits_rather_than_erroring(self, pragma):
         assert pragma("busy_timeout") == 5000
 
@@ -215,12 +223,16 @@ class TestForeignKeyIndexes:
         ],
     )
     def test_the_column_leads_an_index(self, table, column):
-        with engine.connect() as connection:
-            indexes = connection.execute(text(f"PRAGMA index_list('{table}')")).fetchall()
-            leading = {
-                connection.execute(text(f"PRAGMA index_info('{row[1]}')")).fetchall()[0][2]
-                for row in indexes
-            }
+        """Read by reflection, so it asks whichever engine the suite is on.
+
+        A unique or primary key constraint counts, because both engines back one
+        with an index: `PRAGMA index_list`, which this read before, lists those as
+        SQLite's automatic indexes, and reflection reports them separately.
+        """
+        reflected = inspect(engine)
+        leading = {index["column_names"][0] for index in reflected.get_indexes(table)}
+        leading |= {unique["column_names"][0] for unique in reflected.get_unique_constraints(table)}
+        leading |= set(reflected.get_pk_constraint(table)["constrained_columns"][:1])
         assert column in leading
 
 
@@ -1044,7 +1056,7 @@ class TestThePostgresSessionZoneIsSetUnderAutocommit:
         assert (connection.autocommit, connection.cursors_closed) == (False, 1)
 
     def test_a_connection_is_not_touched_when_the_gate_says_this_is_not_postgres(
-        self,
+        self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """SQLite compiles the same default to `CURRENT_TIMESTAMP`, which is
         UTC by definition, so there is nothing to set and no cursor to open.
@@ -1054,6 +1066,8 @@ class TestThePostgresSessionZoneIsSetUnderAutocommit:
         class; what makes the listener leave it alone is the module flag, not
         anything about the connection, and the old name said otherwise.
         """
+        # Set rather than inherited, so the arm reads the gate on a Postgres run too.
+        monkeypatch.setattr(database, "_SPEAKS_POSTGRES", False)
         connection = _ARecordedConnection()
 
         database._pin_the_postgres_session_zone(connection, None)
@@ -1070,6 +1084,7 @@ class TestThePostgresSessionZoneIsSetUnderAutocommit:
         """
         assert event.contains(engine, "connect", database._pin_the_postgres_session_zone)
 
+    @pytest.mark.sqlite_only(reason="asserts the suite's engine is SQLite")
     def test_the_suite_s_own_engine_reaches_none_of_it(self) -> None:
         """The suite is SQLite, so no arm in it can observe this listener run.
 
@@ -1405,3 +1420,87 @@ class TestTheSessionZoneIsALiteralAndNotAnEnvironmentRead:
         assert isinstance(argument, ast.JoinedStr), ast.unparse(argument)
         assert interpolated == ["_SESSION_TIME_ZONE"]
         assert shadows == [], "the listener rebinds the name it interpolates"
+
+
+class TestOnCommit:
+    """What a session runs after its commit, and what it never runs.
+
+    Against the suite's own session, because the behaviour is SQLAlchemy's
+    event order and a stand in for the session would test the stand in.
+    """
+
+    @pytest.fixture
+    def ran(self) -> list[str]:
+        return []
+
+    def test_an_entry_runs_once_the_transaction_commits_and_only_once(self, db, ran):
+        database.on_commit(db, lambda: ran.append("unlink"))
+        assert ran == []
+
+        db.commit()
+        db.commit()
+
+        assert ran == ["unlink"]
+
+    def test_a_rollback_forgets_what_was_enqueued(self, db, ran):
+        database.on_commit(db, lambda: ran.append("unlink"))
+
+        db.rollback()
+        db.commit()
+
+        assert ran == []
+
+    def test_a_close_forgets_what_was_enqueued(self, db, ran):
+        database.on_commit(db, lambda: ran.append("unlink"))
+
+        db.close()
+        db.commit()
+
+        assert ran == []
+
+    def test_releasing_a_savepoint_is_not_the_commit(self, db, ran):
+        database.on_commit(db, lambda: ran.append("unlink"))
+
+        with db.begin_nested():
+            pass
+        assert ran == []
+
+        db.commit()
+        assert ran == ["unlink"]
+
+    def test_an_entry_runs_on_its_own_session_s_commit_and_no_other(self, db, ran):
+        """Each request has its own session, so a queue shared between them
+        would run one member's unlink on another's commit, before the first
+        member's own commit has settled whether the row is gone."""
+        other = database.SessionLocal()
+        try:
+            database.on_commit(db, lambda: ran.append("mine"))
+            database.on_commit(other, lambda: ran.append("theirs"))
+
+            other.commit()
+            assert ran == ["theirs"]
+
+            db.rollback()
+            db.commit()
+            assert ran == ["theirs"]
+        finally:
+            other.close()
+
+    def test_a_failing_entry_does_not_skip_the_ones_after_it(self, db, ran, caplog):
+        """Emptying the trash enqueues one removal per book, so failing fast at
+        the first would leave every later file behind for good. The log line
+        names the entry, which for a removal carries the book's id."""
+
+        def remove_the_cover():
+            raise OSError("the mount went away")
+
+        database.on_commit(db, remove_the_cover)
+        database.on_commit(db, lambda: ran.append("the next one"))
+
+        with caplog.at_level(logging.ERROR, logger="endpaper.database"):
+            db.commit()
+
+        assert ran == ["the next one"]
+        failures = [r for r in caplog.records if r.exc_info]
+        assert [r.exc_info[0] for r in failures] == [OSError]
+        assert "remove_the_cover" in failures[0].getMessage()

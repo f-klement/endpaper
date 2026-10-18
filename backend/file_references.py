@@ -2,10 +2,11 @@
 
 A `DigitalReference` row is one client's account of one file at one location.
 **Every write to a row's fingerprint, its confirmation and its miss flag is
-here**, and so are the per Book ceiling on new locations, the refusal of a
-location another Book holds, and the three ways a caller asks which Books hold
-a file. `routers/books.py` declares the routes, resolves the Book, commits, and
-turns `CeilingReached` and `HeldElsewhere` into a 409.
+here**, and so are the reads of one Book's references, the per Book ceiling on
+new locations, the refusal of a location another Book holds, and the three ways
+a caller asks which Books hold a file. `routers/books.py` declares the routes,
+resolves the Book, commits, turns `CeilingReached` and `HeldElsewhere` into a
+409, and turns a `None` from `reference_on` into a 404.
 
 **One rule for every look at a known location, whichever path it arrives
 on**: the per reference report, a re-picked folder's sweep, and a merge's
@@ -59,6 +60,40 @@ class HeldElsewhere(Exception):
     def __init__(self, book_id: int) -> None:
         super().__init__(book_id)
         self.book_id = book_id
+
+
+# ── One Book's references ─────────────────────────────────────────────────────
+#
+# Both take a `Book`, never an id, as `custom_fields.py` does: a `Book` in hand
+# has been through `dependencies` or the Shelf, so the Book's own rule is
+# already applied and the query adds no second one. The rule for a row under a
+# Book is in `docs/data-model.md`, under the privacy rule.
+
+
+def reference_on(db: Session, book: Book, reference_id: int) -> DigitalReference | None:
+    """This Book's reference with this id, or `None` when no reference of this Book has it.
+
+    The Book is in the query beside the id, so the id of another Book's
+    reference finds nothing here.
+    """
+    return (
+        db.query(DigitalReference)
+        .filter(
+            DigitalReference.id == reference_id,
+            DigitalReference.book_id == book.id,
+        )
+        .first()
+    )
+
+
+def references_on(db: Session, book: Book) -> list[DigitalReference]:
+    """Every reference on this Book, oldest first."""
+    return (
+        db.query(DigitalReference)
+        .filter(DigitalReference.book_id == book.id)
+        .order_by(DigitalReference.id)
+        .all()
+    )
 
 
 # ── Writes ────────────────────────────────────────────────────────────────────

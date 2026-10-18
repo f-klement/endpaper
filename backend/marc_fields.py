@@ -592,7 +592,7 @@ def is_component_part(record: ElementTree.Element) -> bool:
 #: `Schallplatte`, `Tonie-Figur` and `E-BOOK`, none of which is a language this
 #: rule was missing: `CD-ROM` is absent from `bibliographic._DISC_FORMS` in English too.
 #:
-#: Each code is one of the two halves rather than a widening:
+#: Each code but `k` is one of the two halves rather than a widening:
 #:
 #: | set | codes | what it is the code for |
 #: |---|---|---|
@@ -600,6 +600,7 @@ def is_component_part(record: ElementTree.Element) -> bool:
 #: | 007/00 | `s`, `v` | a sound recording and a videorecording, `bibliographic._DISC_FORMS` |
 #: | leader/06 | `m` | a computer file, `bibliographic._ONLINE_FORMS` |
 #: | leader/06 | `i`, `j`, `g` | sound recordings and projected media, `bibliographic._DISC_FORMS` |
+#: | leader/06 | `k` | a two dimensional nonprojectable graphic: a photograph, a print, a poster |
 #: | 008/23 | `o`, `q`, `s` | online, direct electronic and electronic |
 #:
 #: **The 008/23 row is not load bearing today and is kept anyway**, which is the
@@ -611,17 +612,26 @@ def is_component_part(record: ElementTree.Element) -> bool:
 #: hold. `s` has never been observed here at all and is in the set on MARC's
 #: definition, like `b` at `_COMPONENT_PART_LEVELS`.
 #:
-#: **What is deliberately not here**: every other leader/06. Refusing them would
-#: catch 35 more of those 2,605, of which 20 are graphics, **12 are notated
-#: music**, 2 are maps and 1 is a three dimensional object. The music is why it
-#: is not one decision: `Gabriel Fauré, Catalogue des œuvres`, `LII, 496 Seiten`,
-#: is a book K10plus files as music, and `1 Partitur (101 Seiten)` is a printed
-#: score somebody may well shelve. Whether this app takes printed scores, maps or
-#: photographs is a decision about what it catalogues rather than a correction to
-#: this rule, which is the reason `_COMPONENT_PART_LEVELS` gives for not refusing
-#: serials, and widening a frozenset is the quietest possible place to take one.
+#: **`k` is the one row that is not a half of the prose rule.** It is the
+#: owner's ruling that a photograph is not a book (#593), taken because the ÖNB
+#: answers a title search with Erich Lessing's film set photographs: 29 records
+#: for "zorba the greek" on 2026-10-17, leader/06 `k` and `007 kv`, which merged
+#: into 14 result rows. No prose rule names a photograph, so before this row
+#: nothing refused them.
+#:
+#: **What is deliberately not here**: every other leader/06. Of those 2,605, 35
+#: carried a leader/06 outside `g`, `i`, `j` and `m`: 20 graphics, which `k` now
+#: refuses, **12 notated music**, 2 maps and 1 three dimensional object. The
+#: music is why the rest is not one decision: `Gabriel Fauré, Catalogue des
+#: œuvres`, `LII, 496 Seiten`, is a book K10plus files as music, and `1 Partitur
+#: (101 Seiten)` is a printed score somebody may well shelve. Whether this app
+#: takes printed scores, maps or objects is a decision about what it catalogues
+#: rather than a correction to this rule, which is the reason
+#: `_COMPONENT_PART_LEVELS` gives for not refusing serials, and widening a
+#: frozenset is the quietest possible place to take one. The owner took it for
+#: `k` and has not taken it for `c`, `d`, `e`, `f` or `r`.
 _NOT_A_BOOK_CARRIERS: Final = frozenset({"c", "s", "v"})
-_NOT_A_BOOK_RECORD_TYPES: Final = frozenset({"g", "i", "j", "m"})
+_NOT_A_BOOK_RECORD_TYPES: Final = frozenset({"g", "i", "j", "k", "m"})
 _NOT_A_BOOK_FORMS_OF_ITEM: Final = frozenset({"o", "q", "s"})
 
 

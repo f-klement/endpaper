@@ -277,6 +277,50 @@ class TestTheServerClockIsNotReachableFromThePayload:
         assert not body["confirmed_at"].startswith("1999")
 
 
+class TestTheBrowsersSpellingIsStoredAsNaiveUtc:
+    """`file_modified_at` arrives as `toISOString()`, aware, and the column is naive UTC.
+
+    `schemas/common.py::_as_stored` converts it on the way in. Every other arm
+    in this file sends a naive value, which never reaches the conversion.
+    """
+
+    #: The instant both arms send, as the column holds it.
+    INSTANT = datetime(2026, 3, 1, 12, 34, 56, 789_000)
+
+    def test_the_millisecond_z_spelling_is_one_file_when_reported_twice(
+        self, client, admin, make_book, db
+    ):
+        """**The second report is the arm.** SQLite drops a zero offset on
+        write, so the stored value alone is right with the conversion deleted.
+        What breaks is `file_references._settle`, which compares the stored
+        half with the one sent: aware against naive is unequal, so the same
+        file reads as a different one and its missing size is never filled."""
+        book = make_book(admin["headers"])
+        sent = "2026-03-01T12:34:56.789Z"
+        report(client, admin["headers"], book["id"], file_modified_at=sent)
+        body = report(
+            client, admin["headers"], book["id"], file_modified_at=sent, size_bytes=200
+        ).json()
+
+        row = db.get(DigitalReference, body["id"])
+        assert (row.file_modified_at, row.size_bytes) == (self.INSTANT, 200)
+
+    def test_a_non_zero_offset_is_stored_at_its_utc_instant(
+        self, client, admin, make_book, db
+    ):
+        """Without the conversion the column holds the sender's wall clock,
+        two hours off, and reads back as UTC."""
+        book = make_book(admin["headers"])
+        body = report(
+            client,
+            admin["headers"],
+            book["id"],
+            file_modified_at="2026-03-01T14:34:56.789+02:00",
+        ).json()
+
+        assert db.get(DigitalReference, body["id"]).file_modified_at == self.INSTANT
+
+
 class TestAnOverWidePairIs422AndNot500:
     """The schema and the CHECK bound the same inequality, and only one of them
     answers a member.
@@ -326,6 +370,20 @@ class TestForgettingAReference:
         )
         assert res.status_code == 204
         assert listing(client, admin["headers"], book["id"]).json() == []
+
+    def test_a_reference_on_another_book_cannot_be_deleted_through_this_one(
+        self, client, admin, make_book
+    ):
+        """The pairing on the forget route. The Shelf guard counts the route's
+        read but does not run it, so without this arm a lookup by id alone
+        would delete another Book's reference with a 204."""
+        mine, theirs = make_book(admin["headers"]), make_book(admin["headers"])
+        one = report(client, admin["headers"], theirs["id"]).json()["id"]
+        res = client.delete(
+            f"{URL.format(mine['id'])}/{one}", headers=admin["headers"]
+        )
+        assert res.status_code == 404
+        assert [r["id"] for r in listing(client, admin["headers"], theirs["id"]).json()] == [one]
 
     def test_purging_the_book_takes_its_references(self, client, admin, make_book, db):
         """Cascaded like the notes and the quotes: a purged book's references
@@ -534,6 +592,16 @@ class TestTheShelfReachesAReference:
         whoever may write the book may write its references."""
         book = make_book(member["headers"])
         assert report(client, other_user["headers"], book["id"]).status_code == 200
+
+    def test_a_listing_holds_only_this_books_references(self, client, admin, make_book):
+        """The narrowing in `references_on`. The Shelf guard counts the
+        statement but does not run it, so without this arm a listing of every
+        reference on the shelf passes."""
+        mine, theirs = make_book(admin["headers"]), make_book(admin["headers"])
+        one = report(client, admin["headers"], mine["id"]).json()["id"]
+        elsewhere = report(client, admin["headers"], theirs["id"], relative_path="c/d.epub")
+        assert elsewhere.status_code == 200
+        assert [r["id"] for r in listing(client, admin["headers"], mine["id"]).json()] == [one]
 
 
 class TestMergingTwoBooksKeepsTheirReferences:

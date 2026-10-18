@@ -2057,10 +2057,11 @@ Worth knowing before exposing this beyond a private network:
   chooses the address and any member can make the request**, so an admin gains a capability
   no other setting on their list gives them. No bytes of the response are echoed, though
   its status code is, and so are the titles and authors parsed out of it, which makes the
-  door a small oracle rather than a blind one. **http is admitted and https is not
-  required**, because these servers rarely carry a certificate, so a login stored for an
-  `http` feed travels as `Authorization: Basic` in the clear on the household's own
-  network.
+  door a small oracle rather than a blind one.
+- **A login stored for a household OPDS server can travel in the clear.** http is admitted
+  and https is not required, because these servers rarely carry a certificate, so a login
+  stored for an `http` feed travels as `Authorization: Basic` in the clear on the
+  household's own network.
 - **No account lockout.** The login limiter bounds guessing; nothing disables an account
   after a run of failures, deliberately, because a limiter keyed on a caller supplied
   username is a lockout somebody else can trigger.

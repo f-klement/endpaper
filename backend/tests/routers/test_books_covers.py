@@ -15,14 +15,20 @@ where they need one. The fetch itself is exercised for real, against a mocked
 transport, in tests/test_covers.py.
 """
 
+from collections.abc import Callable
+from typing import Literal
+
 import httpx
 import pytest
 import respx
+from sqlalchemy import event
+from sqlalchemy.orm import Session
 
 import cover_store
 import covers
 from config import COVERS_DIR
-from tests.helpers import AT_DNB_COVERS, AT_OPEN_LIBRARY_COVERS, JPEG_BYTES
+from models import Book
+from tests.helpers import AT_DNB_COVERS, AT_OPEN_LIBRARY_COVERS, JPEG_BYTES, PNG_BYTES
 
 
 def store_locally(monkeypatch) -> list[int]:
@@ -249,8 +255,6 @@ class TestBackfill:
 
 def _give_a_cover(db, covers_dir, book_id: int) -> None:
     """Put a cover file behind a book and point its column at it."""
-    from models import Book
-
     (covers_dir / f"{book_id}.jpg").write_bytes(JPEG_BYTES)
     db.query(Book).filter(Book.id == book_id).update(
         {"cover_url": f"/covers/{book_id}.jpg"}
@@ -394,6 +398,162 @@ class TestTheDirectoryDoesNotDriftFromTheDatabase:
         assert cover_store.book_ids() == {book["id"]}
 
 
+class CommitRefused(Exception):
+    """The failure a test injects between a removal being enqueued and the
+    commit that would settle it."""
+
+
+#: Where a session records that a flush carried the change a test refuses.
+_FLUSHED_THE_CHANGE = "refuse_commits_flushed_the_change"
+
+
+@pytest.fixture
+def refuse_commits():
+    """Arm, after the arrangement has committed, a refusal of the commit that
+    carries a change to a Book: its deletion by default, or `kind="dirty"` for
+    an update to its row.
+
+    A `before_commit` listener raising stands for any raise between a removal
+    being enqueued and its commit: a deadlock, a constraint the flush trips, a
+    409 a later step decides on. **Every other commit goes through.** Refusing
+    all of them would let a commit landing before the removal, in the route
+    body or the identity path, take the refusal with nothing changed, and each
+    arm would pass without reaching the removal. A route that never reaches
+    the change answers 2xx instead, which reddens the arm's 500.
+
+    `after_flush` records the change, because a merge and a copy group purge
+    flush before they commit, which empties `session.deleted` by then. Removed
+    at teardown so no other test inherits the listeners.
+    """
+    armed: list[tuple[str, Callable[..., None]]] = []
+
+    def arm(kind: Literal["deleted", "dirty"] = "deleted") -> None:
+        def carries_it(session):
+            return any(isinstance(row, Book) for row in getattr(session, kind))
+
+        def record(session, _flush_context):
+            if carries_it(session):
+                session.info[_FLUSHED_THE_CHANGE] = True
+
+        def forget(session, transaction):
+            if transaction.parent is None:
+                session.info.pop(_FLUSHED_THE_CHANGE, None)
+
+        def refuse(session):
+            if session.info.get(_FLUSHED_THE_CHANGE) or carries_it(session):
+                raise CommitRefused
+
+        for name, listener in (
+            ("after_flush", record),
+            ("after_transaction_end", forget),
+            ("before_commit", refuse),
+        ):
+            event.listen(Session, name, listener)
+            armed.append((name, listener))
+
+    yield arm
+    for name, listener in armed:
+        event.remove(Session, name, listener)
+
+
+@pytest.mark.answers_500(raises=(CommitRefused,))
+class TestARaiseInTheBodyRunsNoTail:
+    """A cover removal waits for the commit, so a request that fails before it
+    leaves the file behind the row the rollback kept.
+
+    The defect `_purge`'s docstring records: run before the commit, the unlink
+    survives the rollback, and the member keeps a book whose `cover_url` names
+    a file that is gone. One test per route that removes a cover, because each
+    reaches the removal by its own path.
+    """
+
+    def test_purging_one_book(
+        self, client, admin, make_book, covers_dir, db, refuse_commits
+    ):
+        book = make_book(admin["headers"], title="A")
+        _give_a_cover(db, covers_dir, book["id"])
+        client.delete(f"/api/books/{book['id']}", headers=admin["headers"])
+        refuse_commits()
+
+        res = client.delete(
+            f"/api/books/{book['id']}/permanent", headers=admin["headers"]
+        )
+
+        assert res.status_code == 500
+        assert db.get(Book, book["id"]) is not None
+        assert cover_store.book_ids() == {book["id"]}
+
+    def test_emptying_the_trash(
+        self, client, admin, make_book, covers_dir, db, refuse_commits
+    ):
+        books = [make_book(admin["headers"], title=title) for title in ("A", "B")]
+        for book in books:
+            _give_a_cover(db, covers_dir, book["id"])
+            client.delete(f"/api/books/{book['id']}", headers=admin["headers"])
+        refuse_commits()
+
+        res = client.delete("/api/books/trash", headers=admin["headers"])
+
+        assert res.status_code == 500
+        assert all(db.get(Book, book["id"]) is not None for book in books)
+        assert cover_store.book_ids() == {book["id"] for book in books}
+
+    def test_re_adding_a_trashed_isbn(
+        self, client, admin, make_book, covers_dir, db, refuse_commits
+    ):
+        """The add purges the caller's own trashed holder of the ISBN first."""
+        book = make_book(admin["headers"], title="Dune", isbn="9780441013593")
+        _give_a_cover(db, covers_dir, book["id"])
+        client.delete(f"/api/books/{book['id']}", headers=admin["headers"])
+        refuse_commits()
+
+        res = client.post(
+            "/api/books/scan",
+            json={"title": "Dune", "isbn": "9780441013593"},
+            headers=admin["headers"],
+        )
+
+        assert res.status_code == 500
+        assert db.get(Book, book["id"]) is not None
+        assert cover_store.book_ids() == {book["id"]}
+
+    def test_merging(self, client, admin, make_book, covers_dir, db, refuse_commits):
+        """The adoption is a move, which destroys the source the same way."""
+        keeper = make_book(admin["headers"], title="Dune")
+        loser = make_book(admin["headers"], title="Dune")
+        _give_a_cover(db, covers_dir, loser["id"])
+        refuse_commits()
+
+        res = client.post(
+            "/api/books/merge",
+            json={"book_ids": [keeper["id"], loser["id"]], "keep_id": keeper["id"]},
+            headers=admin["headers"],
+        )
+
+        assert res.status_code == 500
+        assert db.get(Book, loser["id"]) is not None
+        assert cover_store.book_ids() == {loser["id"]}
+
+    def test_replacing_a_cover_in_another_format(
+        self, client, admin, make_book, covers_dir, db, refuse_commits
+    ):
+        """The upload's sweep of the old format is a removal like the others."""
+        book = make_book(admin["headers"], title="Dune")
+        _give_a_cover(db, covers_dir, book["id"])
+        refuse_commits(kind="dirty")
+
+        res = client.post(
+            f"/api/books/{book['id']}/cover",
+            files={"file": ("cover.png", PNG_BYTES, "image/png")},
+            headers=admin["headers"],
+        )
+
+        assert res.status_code == 500
+        db.expire_all()
+        assert db.get(Book, book["id"]).cover_url == f"/covers/{book['id']}.jpg"
+        assert (covers_dir / f"{book['id']}.jpg").is_file()
+
+
 class TestAMemberCannotChooseWhereTheServerConnects:
     """`cover_url` is member input on `BookCreate`, and adding a book makes the
     server fetch it. Without a host check that is an authenticated caller
@@ -501,8 +661,6 @@ class TestACoverFailureNeverFailsTheRequest:
     ):
         """A member could store `https://books.google.com:99999/x.jpg`, which
         `storable` admits because it only tests the scheme."""
-        from models import Book
-
         make_book(admin["headers"], title="Poison")
         db.query(Book).update({"cover_url": "https://books.google.com:99999/x.jpg"})
         db.commit()

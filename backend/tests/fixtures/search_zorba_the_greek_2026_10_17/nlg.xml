@@ -1,0 +1,456 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<zs:searchRetrieveResponse xmlns:zs="http://www.loc.gov/zing/srw/"><zs:version>1.1</zs:version><zs:numberOfRecords>5</zs:numberOfRecords><zs:records><zs:record><zs:recordSchema>marcxml</zs:recordSchema><zs:recordPacking>xml</zs:recordPacking><zs:recordData><record xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns="http://www.loc.gov/MARC21/slim" xsi:schemaLocation="http://www.loc.gov/MARC21/slim http://www.loc.gov/standards/marcxml/schema/MARC21slim.xsd">
+
+  <leader>00858nam a2200193Ia 4500</leader>
+  <controlfield tag="001">561985</controlfield>
+  <controlfield tag="003">GRAtEVE</controlfield>
+  <controlfield tag="005">20260916045044.0</controlfield>
+  <controlfield tag="008">171123n|\\\|\\\xxk |||   ||| 000       #</controlfield>
+  <datafield tag="020" ind1=" " ind2=" ">
+    <subfield code="a">9780571323272</subfield>
+  </datafield>
+  <datafield tag="040" ind1=" " ind2=" ">
+    <subfield code="a">GRAtEVE</subfield>
+    <subfield code="b">gre</subfield>
+    <subfield code="c">GRAtEVE</subfield>
+  </datafield>
+  <datafield tag="082" ind1="7" ind2="4">
+    <subfield code="a">889.33</subfield>
+    <subfield code="2">19, ελληνική έκδ.</subfield>
+  </datafield>
+  <datafield tag="100" ind1="1" ind2=" ">
+    <subfield code="a">Καζαντζάκης, Νίκος,</subfield>
+    <subfield code="d">1883-1957</subfield>
+    <subfield code="0">urn:nbn:gr:nlg:01-A000002</subfield>
+    <subfield code="4">aut</subfield>
+    <subfield code="9">19445</subfield>
+  </datafield>
+  <datafield tag="245" ind1="1" ind2="0">
+    <subfield code="a">Zorba the Greek /</subfield>
+    <subfield code="c">Nikos Kazantzakis ; translated by Carl Wildman</subfield>
+  </datafield>
+  <datafield tag="260" ind1=" " ind2=" ">
+    <subfield code="a">[Χ.τ.] :</subfield>
+    <subfield code="b">Faber&amp;Faber,</subfield>
+    <subfield code="c">2016</subfield>
+  </datafield>
+  <datafield tag="942" ind1=" " ind2=" ">
+    <subfield code="c">BK</subfield>
+    <subfield code="n">0</subfield>
+  </datafield>
+  <datafield tag="952" ind1=" " ind2=" ">
+    <subfield code="0">0</subfield>
+    <subfield code="1">0</subfield>
+    <subfield code="2">ddc</subfield>
+    <subfield code="4">0</subfield>
+    <subfield code="6">889_330000000000000_ΚΑΖ</subfield>
+    <subfield code="7">1</subfield>
+    <subfield code="8">22</subfield>
+    <subfield code="9">672937</subfield>
+    <subfield code="a">EBEL</subfield>
+    <subfield code="b">EBEL</subfield>
+    <subfield code="c">EBE19</subfield>
+    <subfield code="d">2018-01-18</subfield>
+    <subfield code="e">02</subfield>
+    <subfield code="h">1</subfield>
+    <subfield code="i">19, ελληνική έκδ.</subfield>
+    <subfield code="o">889.33 ΚΑΖ</subfield>
+    <subfield code="p">00881127</subfield>
+    <subfield code="r">2025-09-22 17:48:13</subfield>
+    <subfield code="s">2025-09-02</subfield>
+    <subfield code="t">17451/2017-1</subfield>
+    <subfield code="x">ΒΡΕΓΜΕΝΟ. ΑΠΟΣΥΡΣΗ 10/2025</subfield>
+    <subfield code="y">BK</subfield>
+    <subfield code="z">16ο</subfield>
+    <subfield code="g"/>
+    <subfield code="l"/>
+    <subfield code="m"/>
+    <subfield code="n"/>
+    <subfield code="v">dmg</subfield>
+    <subfield code="w">01</subfield>
+  </datafield>
+  <datafield tag="998" ind1=" " ind2=" ">
+    <subfield code="a">681247</subfield>
+  </datafield>
+  <datafield tag="999" ind1=" " ind2=" ">
+    <subfield code="c">561985</subfield>
+    <subfield code="d">561985</subfield>
+  </datafield>
+</record></zs:recordData><zs:recordPosition>1</zs:recordPosition></zs:record><zs:record><zs:recordSchema>marcxml</zs:recordSchema><zs:recordPacking>xml</zs:recordPacking><zs:recordData><record xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns="http://www.loc.gov/MARC21/slim" xsi:schemaLocation="http://www.loc.gov/MARC21/slim http://www.loc.gov/standards/marcxml/schema/MARC21slim.xsd">
+
+  <leader>00957cam a2200265 a 4500</leader>
+  <controlfield tag="001">166321</controlfield>
+  <controlfield tag="003">GRAtEVE</controlfield>
+  <controlfield tag="005">20260916044946.0</controlfield>
+  <controlfield tag="008">020821s1952||||    |||g      000 1 eng #</controlfield>
+  <datafield tag="015" ind1=" " ind2=" ">
+    <subfield code="a">GR1197/61</subfield>
+    <subfield code="2">eev</subfield>
+  </datafield>
+  <datafield tag="040" ind1=" " ind2=" ">
+    <subfield code="a">GRAtEVE</subfield>
+    <subfield code="b">gre</subfield>
+    <subfield code="c">GRAtEVE</subfield>
+  </datafield>
+  <datafield tag="041" ind1="1" ind2=" ">
+    <subfield code="a">eng</subfield>
+    <subfield code="h">gre</subfield>
+  </datafield>
+  <datafield tag="082" ind1="0" ind2="4">
+    <subfield code="a">889.3</subfield>
+    <subfield code="2">21η έκδ.</subfield>
+  </datafield>
+  <datafield tag="100" ind1="1" ind2=" ">
+    <subfield code="a">Καζαντζάκης, Νίκος,</subfield>
+    <subfield code="d">1883-1957</subfield>
+    <subfield code="0">urn:nbn:gr:nlg:01-A000002</subfield>
+    <subfield code="4">aut</subfield>
+    <subfield code="9">19445</subfield>
+  </datafield>
+  <datafield tag="245" ind1="1" ind2="0">
+    <subfield code="a">Zorba the Greek /</subfield>
+    <subfield code="c">Nikos Kazantzaki ; translated by Carl Wildman, with an introduction by Ian Scott - Kilvert</subfield>
+  </datafield>
+  <datafield tag="260" ind1=" " ind2=" ">
+    <subfield code="a">London :</subfield>
+    <subfield code="b">Lehmann,</subfield>
+    <subfield code="c">1952</subfield>
+  </datafield>
+  <datafield tag="901" ind1=" " ind2=" ">
+    <subfield code="a">ELIDOC-03</subfield>
+  </datafield>
+  <datafield tag="920" ind1=" " ind2=" ">
+    <subfield code="a">Ν.Φ.</subfield>
+    <subfield code="b">660</subfield>
+    <subfield code="c">WYI</subfield>
+  </datafield>
+  <datafield tag="930" ind1=" " ind2=" ">
+    <subfield code="a">1</subfield>
+    <subfield code="d">8o</subfield>
+  </datafield>
+  <datafield tag="940" ind1=" " ind2=" ">
+    <subfield code="a">Δωρεά</subfield>
+    <subfield code="b">1197</subfield>
+    <subfield code="c">1961</subfield>
+  </datafield>
+  <datafield tag="942" ind1=" " ind2=" ">
+    <subfield code="c">BK</subfield>
+  </datafield>
+  <datafield tag="952" ind1=" " ind2=" ">
+    <subfield code="0">0</subfield>
+    <subfield code="1">0</subfield>
+    <subfield code="2">loc</subfield>
+    <subfield code="4">0</subfield>
+    <subfield code="6">ΝΦ_660WYI</subfield>
+    <subfield code="7">0</subfield>
+    <subfield code="8">21</subfield>
+    <subfield code="9">182105</subfield>
+    <subfield code="a">EBE</subfield>
+    <subfield code="b">EBE</subfield>
+    <subfield code="c">A2.02.040-D-S0.005</subfield>
+    <subfield code="d">2004-07-23</subfield>
+    <subfield code="e">03</subfield>
+    <subfield code="h">1</subfield>
+    <subfield code="o">ΝΦ-660-WYI</subfield>
+    <subfield code="p">00612086</subfield>
+    <subfield code="r">2025-02-10 09:02:24</subfield>
+    <subfield code="t">01197/1961-3</subfield>
+    <subfield code="y">BK</subfield>
+    <subfield code="z">8ο</subfield>
+  </datafield>
+  <datafield tag="970" ind1=" " ind2=" ">
+    <subfield code="a">0</subfield>
+  </datafield>
+  <datafield tag="998" ind1=" " ind2=" ">
+    <subfield code="a">266945</subfield>
+  </datafield>
+  <datafield tag="999" ind1=" " ind2=" ">
+    <subfield code="f">GR-AtEVE-B172841</subfield>
+    <subfield code="e">266945</subfield>
+    <subfield code="c">166321</subfield>
+    <subfield code="d">166321</subfield>
+  </datafield>
+</record></zs:recordData><zs:recordPosition>2</zs:recordPosition></zs:record><zs:record><zs:recordSchema>marcxml</zs:recordSchema><zs:recordPacking>xml</zs:recordPacking><zs:recordData><record xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns="http://www.loc.gov/MARC21/slim" xsi:schemaLocation="http://www.loc.gov/MARC21/slim http://www.loc.gov/standards/marcxml/schema/MARC21slim.xsd">
+
+  <leader>01089nam a2200277 a 4500</leader>
+  <controlfield tag="001">407815</controlfield>
+  <controlfield tag="003">GRAtEVE</controlfield>
+  <controlfield tag="005">20260916044947.0</controlfield>
+  <controlfield tag="008">090306s2007||||gr  |||g  ||| 000 d eng #</controlfield>
+  <datafield tag="015" ind1=" " ind2=" ">
+    <subfield code="a">urn:nbn:gr:nlg:01-B200707191</subfield>
+    <subfield code="2">gnb</subfield>
+  </datafield>
+  <datafield tag="015" ind1=" " ind2=" ">
+    <subfield code="a">GR10150/07</subfield>
+    <subfield code="2">eev</subfield>
+  </datafield>
+  <datafield tag="020" ind1=" " ind2=" ">
+    <subfield code="a">9789608971639</subfield>
+  </datafield>
+  <datafield tag="040" ind1=" " ind2=" ">
+    <subfield code="a">GRAtEVE</subfield>
+    <subfield code="b">gre</subfield>
+    <subfield code="c">GRAtEVE</subfield>
+  </datafield>
+  <datafield tag="041" ind1="1" ind2=" ">
+    <subfield code="a">eng</subfield>
+    <subfield code="h">gre</subfield>
+  </datafield>
+  <datafield tag="082" ind1="0" ind2="4">
+    <subfield code="a">880</subfield>
+    <subfield code="2">21</subfield>
+  </datafield>
+  <datafield tag="084" ind1=" " ind2=" ">
+    <subfield code="a">2007/010150</subfield>
+  </datafield>
+  <datafield tag="100" ind1="1" ind2=" ">
+    <subfield code="9">27423</subfield>
+    <subfield code="a">Πατρικαρέας, Θόδωρος,</subfield>
+    <subfield code="d">1930-</subfield>
+    <subfield code="4">aut</subfield>
+  </datafield>
+  <datafield tag="245" ind1="1" ind2="0">
+    <subfield code="a">Zorba, teach me to dance :</subfield>
+    <subfield code="b">Nikos Kazantzakis, a play adapted from the novel "Zorba the Greek" /</subfield>
+    <subfield code="c">Theodore Patrikareas</subfield>
+  </datafield>
+  <datafield tag="260" ind1=" " ind2=" ">
+    <subfield code="a">Athens :</subfield>
+    <subfield code="b">Whatever Productions,</subfield>
+    <subfield code="c">2007</subfield>
+  </datafield>
+  <datafield tag="300" ind1=" " ind2=" ">
+    <subfield code="a">IV,67,[5]σ. ;</subfield>
+    <subfield code="c">21εκ.</subfield>
+  </datafield>
+  <datafield tag="700" ind1="1" ind2=" ">
+    <subfield code="a">Καζαντζάκης, Νίκος,</subfield>
+    <subfield code="d">1883-1957</subfield>
+    <subfield code="0">urn:nbn:gr:nlg:01-A000002</subfield>
+    <subfield code="4">ant</subfield>
+    <subfield code="9">19445</subfield>
+  </datafield>
+  <datafield tag="942" ind1=" " ind2=" ">
+    <subfield code="c">BK</subfield>
+  </datafield>
+  <datafield tag="952" ind1=" " ind2=" ">
+    <subfield code="0">0</subfield>
+    <subfield code="1">0</subfield>
+    <subfield code="2">loc</subfield>
+    <subfield code="4">0</subfield>
+    <subfield code="6">10150_000000000000000_20071</subfield>
+    <subfield code="7">0</subfield>
+    <subfield code="8">21</subfield>
+    <subfield code="9">481489</subfield>
+    <subfield code="a">EBE</subfield>
+    <subfield code="b">EBE</subfield>
+    <subfield code="c">A2.02.040-I-504</subfield>
+    <subfield code="d">2008-02-01</subfield>
+    <subfield code="e">01</subfield>
+    <subfield code="h">1</subfield>
+    <subfield code="o">10150/2007-1</subfield>
+    <subfield code="p">00135657</subfield>
+    <subfield code="r">2022-08-01 00:00:00</subfield>
+    <subfield code="t">10150/2007-1</subfield>
+    <subfield code="y">BK</subfield>
+    <subfield code="z">8o</subfield>
+  </datafield>
+  <datafield tag="970" ind1=" " ind2=" ">
+    <subfield code="a">1</subfield>
+    <subfield code="c">2007</subfield>
+  </datafield>
+  <datafield tag="998" ind1=" " ind2=" ">
+    <subfield code="a">509464</subfield>
+  </datafield>
+  <datafield tag="999" ind1=" " ind2=" ">
+    <subfield code="f">GR-AtEVE-B428070</subfield>
+    <subfield code="e">509464</subfield>
+    <subfield code="c">407815</subfield>
+    <subfield code="d">407815</subfield>
+  </datafield>
+</record></zs:recordData><zs:recordPosition>3</zs:recordPosition></zs:record><zs:record><zs:recordSchema>marcxml</zs:recordSchema><zs:recordPacking>xml</zs:recordPacking><zs:recordData><record xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns="http://www.loc.gov/MARC21/slim" xsi:schemaLocation="http://www.loc.gov/MARC21/slim http://www.loc.gov/standards/marcxml/schema/MARC21slim.xsd">
+
+  <leader>00650nam a22001811a 4500</leader>
+  <controlfield tag="001">563564</controlfield>
+  <controlfield tag="003">GR-AtEVE</controlfield>
+  <controlfield tag="005">20220801163126.0</controlfield>
+  <controlfield tag="008">160804n||||||||gr     g  |||       eng #</controlfield>
+  <datafield tag="020" ind1=" " ind2=" ">
+    <subfield code="a">9786188229358</subfield>
+  </datafield>
+  <datafield tag="040" ind1=" " ind2=" ">
+    <subfield code="b">gre</subfield>
+  </datafield>
+  <datafield tag="042" ind1=" " ind2=" ">
+    <subfield code="a">nlgacq</subfield>
+  </datafield>
+  <datafield tag="245" ind1="0" ind2="0">
+    <subfield code="a">Mistress Troika, Zorba the Greek and a Molotov Cocktail /</subfield>
+    <subfield code="c">V. Ludens</subfield>
+  </datafield>
+  <datafield tag="260" ind1=" " ind2=" ">
+    <subfield code="a">[Κόρινθος] :</subfield>
+    <subfield code="b">Phonographic Society Books,</subfield>
+    <subfield code="c">2016</subfield>
+  </datafield>
+  <datafield tag="300" ind1=" " ind2=" ">
+    <subfield code="a">450 σ. ;</subfield>
+    <subfield code="c">12.7Χ20.32</subfield>
+  </datafield>
+  <datafield tag="952" ind1=" " ind2=" ">
+    <subfield code="0">0</subfield>
+    <subfield code="1">0</subfield>
+    <subfield code="2">loc</subfield>
+    <subfield code="4">0</subfield>
+    <subfield code="6">07676_000000000000000_20171</subfield>
+    <subfield code="7">0</subfield>
+    <subfield code="8">21</subfield>
+    <subfield code="9">674536</subfield>
+    <subfield code="a">EBE</subfield>
+    <subfield code="b">EBE</subfield>
+    <subfield code="c">A2.02.040-N-366</subfield>
+    <subfield code="d">2017-09-07</subfield>
+    <subfield code="e">01</subfield>
+    <subfield code="o">07676/2017-1</subfield>
+    <subfield code="p">00840958</subfield>
+    <subfield code="r">2022-08-01 00:00:00</subfield>
+    <subfield code="t">07676/2017-1</subfield>
+    <subfield code="y">BK</subfield>
+  </datafield>
+  <datafield tag="998" ind1=" " ind2=" ">
+    <subfield code="a">683336</subfield>
+  </datafield>
+  <datafield tag="999" ind1=" " ind2=" ">
+    <subfield code="c">563564</subfield>
+    <subfield code="d">563564</subfield>
+  </datafield>
+</record></zs:recordData><zs:recordPosition>4</zs:recordPosition></zs:record><zs:record><zs:recordSchema>marcxml</zs:recordSchema><zs:recordPacking>xml</zs:recordPacking><zs:recordData><record xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns="http://www.loc.gov/MARC21/slim" xsi:schemaLocation="http://www.loc.gov/MARC21/slim http://www.loc.gov/standards/marcxml/schema/MARC21slim.xsd">
+
+  <leader>01782nam a2200337 a 4500</leader>
+  <controlfield tag="001">322837</controlfield>
+  <controlfield tag="003">GRAtEVE</controlfield>
+  <controlfield tag="005">20251223042136.0</controlfield>
+  <controlfield tag="008">071023s2007||||gr a|||g b||| 001   gre #</controlfield>
+  <datafield tag="015" ind1=" " ind2=" ">
+    <subfield code="a">urn:nbn:gr:nlg:01-B200704379</subfield>
+    <subfield code="2">gnb</subfield>
+  </datafield>
+  <datafield tag="015" ind1=" " ind2=" ">
+    <subfield code="a">GR6507/07</subfield>
+    <subfield code="2">eev</subfield>
+  </datafield>
+  <datafield tag="020" ind1=" " ind2=" ">
+    <subfield code="a">9789603223078</subfield>
+  </datafield>
+  <datafield tag="040" ind1=" " ind2=" ">
+    <subfield code="a">GRAtEVE</subfield>
+    <subfield code="b">gre</subfield>
+    <subfield code="c">GRAtEVE</subfield>
+  </datafield>
+  <datafield tag="082" ind1="0" ind2="4">
+    <subfield code="a">880</subfield>
+    <subfield code="2">21</subfield>
+  </datafield>
+  <datafield tag="084" ind1=" " ind2=" ">
+    <subfield code="a">2007/006507</subfield>
+  </datafield>
+  <datafield tag="100" ind1="1" ind2=" ">
+    <subfield code="a">Αγάθος, Θανάσης,</subfield>
+    <subfield code="d">1967-</subfield>
+    <subfield code="0">urn:nbn:gr:nlg:01-A031129</subfield>
+    <subfield code="4">aut</subfield>
+    <subfield code="9">53193</subfield>
+  </datafield>
+  <datafield tag="245" ind1="1" ind2="0">
+    <subfield code="a">Από το "Βίος και πολιτεία του Αλέξη Ζορμπά" στο 'Zorba the Greek": Κριτικοί βίοι παράλληλοι /</subfield>
+    <subfield code="c">Θανάσης Αγάθος</subfield>
+  </datafield>
+  <datafield tag="260" ind1=" " ind2=" ">
+    <subfield code="a">Αθήνα :</subfield>
+    <subfield code="b">Αιγόκερως,</subfield>
+    <subfield code="c">c2007</subfield>
+  </datafield>
+  <datafield tag="300" ind1=" " ind2=" ">
+    <subfield code="a">207σ. :</subfield>
+    <subfield code="b">εικ. ;</subfield>
+    <subfield code="c">22εκ.</subfield>
+  </datafield>
+  <datafield tag="490" ind1="1" ind2=" ">
+    <subfield code="a">Κινηματογράφος - Λογοτεχνία</subfield>
+  </datafield>
+  <datafield tag="500" ind1=" " ind2=" ">
+    <subfield code="a">Ευρετήριο: σ. 185-192</subfield>
+  </datafield>
+  <datafield tag="504" ind1=" " ind2=" ">
+    <subfield code="a">Βιβλιογραφία: σ. 172-184</subfield>
+  </datafield>
+  <datafield tag="600" ind1="1" ind2="7">
+    <subfield code="a">Καζαντζάκης, Νίκος,</subfield>
+    <subfield code="d">1883-1957.</subfield>
+    <subfield code="t">Βίος και πολιτεία του Αλέξη Ζορμπά</subfield>
+    <subfield code="0">urn:nbn:gr:nlg:01-A172482</subfield>
+    <subfield code="2">nlgaf</subfield>
+    <subfield code="9">267464</subfield>
+  </datafield>
+  <datafield tag="600" ind1="1" ind2="7">
+    <subfield code="a">Καζαντζάκης, Νίκος,</subfield>
+    <subfield code="d">1883-1957</subfield>
+    <subfield code="x">Κριτική και ερμηνεία</subfield>
+    <subfield code="0">urn:nbn:gr:nlg:01-A027763</subfield>
+    <subfield code="2">nlgaf</subfield>
+    <subfield code="9">46006</subfield>
+  </datafield>
+  <datafield tag="650" ind1="0" ind2="7">
+    <subfield code="a">Κινηματογραφικές ταινίες και λογοτεχνία</subfield>
+    <subfield code="0">urn:nbn:gr:nlg:01-A244987</subfield>
+    <subfield code="2">nlgaf</subfield>
+    <subfield code="9">209535</subfield>
+  </datafield>
+  <datafield tag="830" ind1=" " ind2="0">
+    <subfield code="a">Κινηματογράφος - Λογοτεχνία</subfield>
+    <subfield code="9">267461</subfield>
+  </datafield>
+  <datafield tag="942" ind1=" " ind2=" ">
+    <subfield code="c">BK</subfield>
+    <subfield code="n">0</subfield>
+  </datafield>
+  <datafield tag="952" ind1=" " ind2=" ">
+    <subfield code="0">0</subfield>
+    <subfield code="1">0</subfield>
+    <subfield code="2">loc</subfield>
+    <subfield code="4">0</subfield>
+    <subfield code="6">06507_000000000000000_20071</subfield>
+    <subfield code="7">0</subfield>
+    <subfield code="8">21</subfield>
+    <subfield code="9">375884</subfield>
+    <subfield code="a">EBE</subfield>
+    <subfield code="b">EBE</subfield>
+    <subfield code="c">A2.02.040-I-456</subfield>
+    <subfield code="d">2007-10-24</subfield>
+    <subfield code="e">01</subfield>
+    <subfield code="h">1</subfield>
+    <subfield code="o">06507/2007-1</subfield>
+    <subfield code="p">00139668</subfield>
+    <subfield code="r">2022-08-01 00:00:00</subfield>
+    <subfield code="s">2021-08-02</subfield>
+    <subfield code="t">06507/2007-1</subfield>
+    <subfield code="y">BK</subfield>
+    <subfield code="z">8ο</subfield>
+  </datafield>
+  <datafield tag="970" ind1=" " ind2=" ">
+    <subfield code="a">1</subfield>
+    <subfield code="c">2007</subfield>
+  </datafield>
+  <datafield tag="998" ind1=" " ind2=" ">
+    <subfield code="a">424183</subfield>
+  </datafield>
+  <datafield tag="999" ind1=" " ind2=" ">
+    <subfield code="a">335338</subfield>
+    <subfield code="b">Horizon bib#</subfield>
+    <subfield code="f">GR-AtEVE-B335338</subfield>
+    <subfield code="e">424183</subfield>
+    <subfield code="c">322837</subfield>
+    <subfield code="d">322837</subfield>
+  </datafield>
+</record></zs:recordData><zs:recordPosition>5</zs:recordPosition></zs:record></zs:records><zs:echoedSearchRetrieveRequest><zs:version>1.1</zs:version><zs:query>dc.title=zorba and dc.title=the and dc.title=greek</zs:query><zs:maximumRecords>30</zs:maximumRecords><zs:recordPacking>xml</zs:recordPacking><zs:recordSchema>marcxml</zs:recordSchema></zs:echoedSearchRetrieveRequest></zs:searchRetrieveResponse>

@@ -770,7 +770,9 @@ class TestCollectionsAndTheIsbnIndexThatSurvivesThem:
         schema.upgrade_to_head()
 
         with engine.connect() as connection:
-            connection.execute(text("PRAGMA foreign_keys=ON"))
+            # Every connection already enforces foreign keys on any other engine.
+            if connection.dialect.name == "sqlite":
+                connection.execute(text("PRAGMA foreign_keys=ON"))
             # `name_folded` by hand: e7b3d02a5c94 made it NOT NULL, and the
             # `@validates` hook that fills it in only fires through the ORM.
             connection.execute(
@@ -1164,7 +1166,9 @@ class TestFoldingCollectionNamesOutsideAscii:
         schema.upgrade_to_head()
 
         with engine.connect() as connection:
-            connection.execute(text("PRAGMA foreign_keys=ON"))
+            # Every connection already enforces foreign keys on any other engine.
+            if connection.dialect.name == "sqlite":
+                connection.execute(text("PRAGMA foreign_keys=ON"))
             connection.execute(text("DELETE FROM collections WHERE id = 2"))
             connection.commit()
 
@@ -1180,6 +1184,7 @@ class TestFoldingCollectionNamesOutsideAscii:
         assert "ix_collections_id" in names
         assert "uq_collections_name_folded" in names
 
+    @pytest.mark.sqlite_only(reason="builds a dangling reference by switching SQLite's foreign keys off")
     def test_a_book_already_pointing_nowhere_stops_the_upgrade(self):
         """A dangling id cannot be written by the app: the delete route, the
         ORM and `ON DELETE SET NULL` under `PRAGMA foreign_keys=ON` each
@@ -1198,6 +1203,7 @@ class TestFoldingCollectionNamesOutsideAscii:
         with pytest.raises(RuntimeError, match="does not exist"):
             schema.upgrade_to_head()
 
+    @pytest.mark.sqlite_only(reason="builds a dangling reference by switching SQLite's foreign keys off")
     def test_a_refused_upgrade_changes_nothing(self):
         """It has to leave the database exactly as it was found, because a
         failed revision here does not roll back on its own: Alembic's SQLite
@@ -1226,6 +1232,7 @@ class TestFoldingCollectionNamesOutsideAscii:
             self.LOWER,
         ]
 
+    @pytest.mark.sqlite_only(reason="reads the DDL SQLite keeps in sqlite_master")
     def test_the_downgrade_restores_the_old_index_and_cannot_un_merge(self):
         """Schema, not data. The losing rows and the names on them are gone, so
         a downgrade gives back the shape and not the shelves."""
@@ -1536,6 +1543,7 @@ class TestKeyingTheSeededTags:
             connection.execute(text("ALTER TABLE loose RENAME TO tags"))
             connection.commit()
 
+    @pytest.mark.sqlite_only(reason="reads the DDL SQLite keeps in sqlite_master")
     def test_two_rows_claiming_one_seeded_key_stop_it_before_anything_changes(self):
         """The check the module docstring expects to be dead, made reachable.
 
@@ -1596,6 +1604,7 @@ class TestKeyingTheSeededTags:
         assert self.keys()["Beach"] is None
         assert self.keys()["Loft"] is None
 
+    @pytest.mark.sqlite_only(reason="reads the columns with SQLite's PRAGMA table_info")
     def test_the_downgrade_drops_the_column(self):
         from alembic import command
 
@@ -2562,7 +2571,15 @@ class TestTheSeededCatalogueTargetsMatchTheCode:
             # `test_targets.py` covers this value, but only through
             # `__post_init__`, which is the arm a Core insert skips. Deleting the
             # constraint failed nothing.
-            ("isbn_attribute", "7 @and @attr 1=4 anything"),
+            # On another engine the integer column refuses the text itself, so
+            # the constraint this case drives exists for SQLite's typing alone.
+            pytest.param(
+                "isbn_attribute",
+                "7 @and @attr 1=4 anything",
+                marks=pytest.mark.sqlite_only(
+                    reason="stores text in an INTEGER column, which only SQLite allows"
+                ),
+            ),
         ],
     )
     def test_a_restore_cannot_write_a_row_the_dataclass_would_refuse(
@@ -3088,6 +3105,7 @@ class TestTheMigratedDatabaseCarriesTheBoundsItPromises:
                 text("SELECT count(*) FROM digital_references")
             ).scalar() == 1
 
+    @pytest.mark.sqlite_only(reason="reads the DDL SQLite keeps in sqlite_master")
     def test_the_model_still_describes_the_constraint_the_revision_installs(self):
         """The two copies of the CHECK, compared as text.
 
@@ -3499,6 +3517,7 @@ class TestEveryTextCeilingIsInstalledWithItsByteArm:
             ).scalar() == 1
 
     @pytest.mark.parametrize("name", sorted(_byte_armed_constraints()))
+    @pytest.mark.sqlite_only(reason="reads the DDL SQLite keeps in sqlite_master")
     def test_the_model_is_the_constraint_the_revision_installs(self, name: str) -> None:
         """The two copies, compared against the DDL a migrated database holds.
 
@@ -3630,6 +3649,7 @@ class TestEveryTextCeilingIsInstalledWithItsByteArm:
     @pytest.mark.parametrize(
         "rule", bind_every_text_ceiling._CEILINGS, ids=lambda rule: rule.constraint
     )
+    @pytest.mark.sqlite_only(reason="reads the DDL SQLite keeps in sqlite_master")
     def test_the_downgrade_puts_each_ceiling_back(
         self, rule: SwappedRule
     ) -> None:
@@ -4037,6 +4057,7 @@ class TestTheGlobRulesThatLearnedAboutNul:
         a_nul_clause_on_two_glob_rules._GLOB_RULES,
         ids=lambda rule: rule.constraint,
     )
+    @pytest.mark.sqlite_only(reason="reads the DDL SQLite keeps in sqlite_master")
     def test_the_revisions_text_is_the_schema_it_installs(
         self, rule: SwappedRule
     ) -> None:
@@ -4069,6 +4090,7 @@ class TestTheGlobRulesThatLearnedAboutNul:
         a_nul_clause_on_two_glob_rules._GLOB_RULES,
         ids=lambda rule: rule.constraint,
     )
+    @pytest.mark.sqlite_only(reason="reads the DDL SQLite keeps in sqlite_master")
     def test_the_model_is_the_rule_a_migrated_database_carries(
         self, rule: SwappedRule
     ) -> None:
@@ -4101,6 +4123,7 @@ class TestTheGlobRulesThatLearnedAboutNul:
         a_nul_clause_on_two_glob_rules._GLOB_RULES,
         ids=lambda rule: rule.constraint,
     )
+    @pytest.mark.sqlite_only(reason="reads the DDL SQLite keeps in sqlite_master")
     def test_the_downgrade_puts_each_rule_back(
         self, rule: SwappedRule
     ) -> None:
@@ -4145,6 +4168,7 @@ class TestTheGlobRulesThatLearnedAboutNul:
 
     @pytest.mark.parametrize("column", ["isbn_index", "title_index"])
     @pytest.mark.parametrize(("where", "value", "bytes_stored"), SMUGGLED)
+    @pytest.mark.sqlite_only(reason="builds a NUL with SQLite's char(0), and Postgres text cannot hold one")
     def test_the_previous_schema_stored_a_smuggled_index_and_this_one_refuses_it(
         self, column: str, where: str, value: str, bytes_stored: int
     ) -> None:
@@ -4205,6 +4229,7 @@ class TestTheGlobRulesThatLearnedAboutNul:
                 text("SELECT title_index FROM catalogue_targets WHERE source = 'oenb'")
             ).scalar() == ""
 
+    @pytest.mark.sqlite_only(reason="builds a NUL with SQLite's char(0), and Postgres text cannot hold one")
     def test_the_upgrade_refuses_a_row_carrying_a_smuggled_index(self) -> None:
         """The revision's "nothing, or it refuses to run" claim, run.
 
@@ -4281,6 +4306,7 @@ class TestTheGlobRulesThatLearnedAboutNul:
 
         assert "ck_opds_servers_base_url" in str(refusal.value)
 
+    @pytest.mark.sqlite_only(reason="measures stored bytes with SQLite's CAST(... AS BLOB)")
     def test_the_widest_address_the_route_can_send_is_stored(self) -> None:
         """The other side of the byte arm, without which a constraint refusing
         everything would pass every case above.
@@ -4915,6 +4941,7 @@ class TestTheBoundsThisRevisionPutOnBytes:
         + [(added.table, added.constraint) for added in bound_the_bytes._ADDED],
         ids=lambda value: value,
     )
+    @pytest.mark.sqlite_only(reason="reads the DDL SQLite keeps in sqlite_master")
     def test_the_model_is_the_rule_a_migrated_database_carries(
         self, table_name: str, constraint: str
     ) -> None:
@@ -4936,6 +4963,7 @@ class TestTheBoundsThisRevisionPutOnBytes:
     @pytest.mark.parametrize(
         "rule", bound_the_bytes._SWAPPED, ids=lambda rule: rule.constraint
     )
+    @pytest.mark.sqlite_only(reason="reads the DDL SQLite keeps in sqlite_master")
     def test_the_downgrade_puts_each_rule_back(self, rule: SwappedRule) -> None:
         """`downgrade()` run rather than read, with `before` checked against a
         schema this revision did not write.
@@ -4962,6 +4990,7 @@ class TestTheBoundsThisRevisionPutOnBytes:
     @pytest.mark.parametrize(
         "added", bound_the_bytes._ADDED, ids=lambda added: added.constraint
     )
+    @pytest.mark.sqlite_only(reason="reads the DDL SQLite keeps in sqlite_master")
     def test_the_downgrade_takes_the_added_rule_away(self, added: AddedRule) -> None:
         """The other direction of an addition, which is a removal rather than a
         narrower rule. A downgrade leaving it behind would hand a rolled back
@@ -5052,6 +5081,7 @@ class TestTheBoundsThisRevisionPutOnBytes:
         assert "ck_catalogue_targets_indexes" in str(refusal.value)
 
     @pytest.mark.parametrize("column", ["isbn_index", "title_index"])
+    @pytest.mark.sqlite_only(reason="measures stored bytes with SQLite's CAST(... AS BLOB)")
     def test_an_index_name_exactly_on_the_bound_is_stored(self, column: str) -> None:
         """The other side, and the measurement that says the two units are one
         number on this column: the charset rule admits only characters SQLite
@@ -5165,6 +5195,7 @@ class TestTheBoundsThisRevisionPutOnBytes:
                      "FROM catalogue_targets WHERE source = 'oenb'")
             ).one() == (9, budget)
 
+    @pytest.mark.sqlite_only(reason="measures stored bytes with SQLite's CAST(... AS BLOB)")
     def test_the_widest_address_the_roster_can_hold_is_stored(self) -> None:
         """The acceptance side in characters, which the lead byte cases are not.
 
@@ -5404,6 +5435,7 @@ class TestTheBoundsThisRevisionPutOnBytes:
 
         assert declared.length == models.TARGET_INDEX_MAX
 
+    @pytest.mark.sqlite_only(reason="measures stored bytes with SQLite's CAST(... AS BLOB)")
     def test_the_widest_envelope_the_routes_can_write_is_stored(self) -> None:
         """The acceptance side, at exactly the ceiling rather than under it.
 
@@ -5736,6 +5768,7 @@ class TestEveryConfinementArmedConstraintIsProbedToo:
         [(row[0], row[1]) for row in _CONFINEMENT_PROBES],
         ids=lambda value: value,
     )
+    @pytest.mark.sqlite_only(reason="reads the DDL SQLite keeps in sqlite_master")
     def test_the_model_is_the_constraint_the_revision_installs(
         self, constraint: str, table_name: str
     ) -> None:
@@ -6287,6 +6320,7 @@ class TestADeletedBooksIdIsNeverReused:
                 ).scalar_one()
             )
 
+    @pytest.mark.sqlite_only(reason="reads the DDL SQLite keeps in sqlite_master")
     def test_the_model_and_the_migrations_both_declare_autoincrement(self):
         """The suite's schema is the migrations', so the model's keyword is
         read only by `create_all` and `--autogenerate`, and neither compares
@@ -6324,6 +6358,7 @@ class TestADeletedBooksIdIsNeverReused:
         assert [tuple(book) for book in books] == [(1, "Mort"), (2, "Small Gods"), (3, "Pyramids")]
         assert [tuple(status) for status in statuses] == [(1,)]
 
+    @pytest.mark.sqlite_only(reason="reads the DDL SQLite keeps in sqlite_master")
     def test_the_rebuild_keeps_every_check_index_and_foreign_key(self):
         self.build_database_with_three_books()
         before = self.books_shape()

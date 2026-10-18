@@ -1043,6 +1043,7 @@ class TestTheBorrowerRuleHasOneSpelling:
         ]
         assert [str(check.sqltext) for check in checks] == [ONE_BORROWER_SQL]
 
+    @pytest.mark.sqlite_only(reason="reads the DDL SQLite keeps in sqlite_master")
     def test_the_migrated_database_carries_the_constant(self, db):
         """The fourth statement, which cannot call the constant.
 
@@ -1414,6 +1415,7 @@ class TestAnOpdsServerNeverBorrowsACatalogueLogin:
             {"key": new_opds_credential_key()},
         )
 
+    @pytest.mark.sqlite_only(reason="builds a NUL with SQLite's char(0), and Postgres text cannot hold one")
     def test_the_credential_key_column_refuses_a_path_hidden_behind_a_nul(self, db):
         """SQLite's `length` and `GLOB` stop at the first NUL, so the clause
         that catches this is `instr(credential_key, char(0)) = 0` and nothing

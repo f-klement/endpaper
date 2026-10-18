@@ -1,0 +1,3309 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?><searchRetrieveResponse xmlns="http://www.loc.gov/zing/srw/">
+  <version>1.2</version>
+  <numberOfRecords>34</numberOfRecords>
+  <records>
+    <record>
+      <recordSchema>marcxml</recordSchema>
+      <recordPacking>xml</recordPacking>
+      <recordData>
+        <record xmlns="http://www.loc.gov/MARC21/slim">
+          <leader>01624nkm a2200325zc 4500</leader>
+          <controlfield tag="001">9958701649203338</controlfield>
+          <controlfield tag="005">20261005091658.0</controlfield>
+          <controlfield tag="007">kv#|||||||||||</controlfield>
+          <controlfield tag="008">200101|1964#######|||############i|####u</controlfield>
+          <controlfield tag="009">GZ00657963</controlfield>
+          <datafield ind1=" " ind2=" " tag="035">
+            <subfield code="a">(Gideon)baa18433068</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="035">
+            <subfield code="a">(DBN)LE_64040426</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="040">
+            <subfield code="a">ONB</subfield>
+            <subfield code="b">ger</subfield>
+            <subfield code="c">ONB-FOTO</subfield>
+            <subfield code="d">AT-OeNB</subfield>
+          </datafield>
+          <datafield ind1="1" ind2=" " tag="100">
+            <subfield code="a">Lessing, Erich</subfield>
+            <subfield code="d">1923-2018</subfield>
+            <subfield code="0">(DE-588)119157004</subfield>
+            <subfield code="4">pht</subfield>
+          </datafield>
+          <datafield ind1="1" ind2="0" tag="245">
+            <subfield code="a">Anthony Quinn als "Zorba the Greek" ("Alexis Sorbas"), Kreta, 1964</subfield>
+          </datafield>
+          <datafield ind1=" " ind2="0" tag="264">
+            <subfield code="c">1964</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="505">
+            <subfield code="g">"Zorba the Greek", the film after the famous novel by Nikos Kazantzakis, was written, directed and produced by Michael Cacoyannis. Anthony Quinn portrayed Zorba. Crete, Greece, 1964</subfield>
+          </datafield>
+          <datafield ind1=" " ind2="7" tag="655">
+            <subfield code="a">Fotografie</subfield>
+            <subfield code="0">(DE-588)4045895-7</subfield>
+            <subfield code="2">gnd-content</subfield>
+          </datafield>
+          <datafield ind1="1" ind2=" " tag="700">
+            <subfield code="a">Quinn, Anthony</subfield>
+            <subfield code="d">1916-</subfield>
+            <subfield code="4">oth</subfield>
+            <subfield code="e">Abgebildet</subfield>
+          </datafield>
+          <datafield ind1="4" ind2=" " tag="856">
+            <subfield code="u">https://data.onb.ac.at/rep/BAG_18433068</subfield>
+            <subfield code="3">Digitales Objekt</subfield>
+          </datafield>
+          <datafield ind1="2" ind2=" " tag="970">
+            <subfield code="a">ONB</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="980">
+            <subfield code="a">gideon foto</subfield>
+            <subfield code="9">LOCAL</subfield>
+            <subfield code="9">local</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="980">
+            <subfield code="a">Webshop</subfield>
+            <subfield code="9">LOCAL</subfield>
+            <subfield code="9">local</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="980">
+            <subfield code="a">Webverkauf</subfield>
+            <subfield code="9">local</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="982">
+            <subfield code="a">Kultur / Wissenschaft</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1="1" ind2=" " tag="983">
+            <subfield code="a">NATURE | CINEMA | MOVIE: ZORBAS THE GREEK | QUINN, ANTHONY, ACTOR | REPORTAGE | 20TH CENTURY | AUSTRIAN | BIRDCAGE | BIRD | ZORBAS THE GREEK, MOVIE | ANIMAL:BIRD | PHOTOGRAPHY | 20TH | LESSING, ERICH, PHOTOGRAPHER | ANIMAL | EUROPE: POST WORLD WAR II | ANIMALS | AUSTRIA | MOVIES | ANIMAL: BIRD</subfield>
+            <subfield code="2">iconclass</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="994">
+            <subfield code="a">Lessing, Erich</subfield>
+            <subfield code="b">Österreichischer Fotograf. Mitglied bei Magnum Photos.</subfield>
+            <subfield code="d">13.07.1923</subfield>
+            <subfield code="f">29.08.2018</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="994">
+            <subfield code="a">Quinn, Anthony</subfield>
+            <subfield code="d">??.??.1916</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="995">
+            <subfield code="e">Lessing Archiv</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="998">
+            <subfield code="a">LE 64040426</subfield>
+            <subfield code="x">ZPOR</subfield>
+            <subfield code="y">MAG</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="AVA">
+            <subfield code="0">9958701649203338</subfield>
+            <subfield code="8">22444935420003338</subfield>
+            <subfield code="a">43ACC_ONB</subfield>
+            <subfield code="b">ZPOR</subfield>
+            <subfield code="c">Picture Archives and Graphics Department (POR-MAG)</subfield>
+            <subfield code="d">LE 64040426</subfield>
+            <subfield code="e">available</subfield>
+            <subfield code="f">1</subfield>
+            <subfield code="g">0</subfield>
+            <subfield code="j">MAG</subfield>
+            <subfield code="p">1</subfield>
+            <subfield code="q">Picture Archives and Graphics Department (POR)</subfield>
+          </datafield>
+        </record>
+      </recordData>
+      <recordIdentifier>9958701649203338</recordIdentifier>
+      <recordPosition>1</recordPosition>
+    </record><record>
+      <recordSchema>marcxml</recordSchema>
+      <recordPacking>xml</recordPacking>
+      <recordData>
+        <record xmlns="http://www.loc.gov/MARC21/slim">
+          <leader>01667nkm a2200325zc 4500</leader>
+          <controlfield tag="001">9958701649303338</controlfield>
+          <controlfield tag="005">20261005091657.0</controlfield>
+          <controlfield tag="007">kv#|||||||||||</controlfield>
+          <controlfield tag="008">200101|1964#######|||############i|####u</controlfield>
+          <controlfield tag="009">GZ00657962</controlfield>
+          <datafield ind1=" " ind2=" " tag="035">
+            <subfield code="a">(Gideon)baa18433061</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="035">
+            <subfield code="a">(DBN)LE_64040423</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="040">
+            <subfield code="a">ONB</subfield>
+            <subfield code="b">ger</subfield>
+            <subfield code="c">ONB-FOTO</subfield>
+            <subfield code="d">AT-OeNB</subfield>
+          </datafield>
+          <datafield ind1="1" ind2=" " tag="100">
+            <subfield code="a">Lessing, Erich</subfield>
+            <subfield code="d">1923-2018</subfield>
+            <subfield code="0">(DE-588)119157004</subfield>
+            <subfield code="4">pht</subfield>
+          </datafield>
+          <datafield ind1="1" ind2="0" tag="245">
+            <subfield code="a">Anthony Quinn als "Zorba the Greek" ("Alexis Sorbas"), Kreta, 1964</subfield>
+          </datafield>
+          <datafield ind1=" " ind2="0" tag="264">
+            <subfield code="c">1964</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="505">
+            <subfield code="g">"Zorbas the Greek",the film after the famous novel by Nikos Kazantzakis,was written,directed and produced by Michael Cacoyannis.Anthony Quinn played Zorbas, Eleni Anousaki the temptress Lola. Zorbas with bird-cage.Crete,1961</subfield>
+          </datafield>
+          <datafield ind1=" " ind2="7" tag="655">
+            <subfield code="a">Fotografie</subfield>
+            <subfield code="0">(DE-588)4045895-7</subfield>
+            <subfield code="2">gnd-content</subfield>
+          </datafield>
+          <datafield ind1="1" ind2=" " tag="700">
+            <subfield code="a">Quinn, Anthony</subfield>
+            <subfield code="d">1916-</subfield>
+            <subfield code="4">oth</subfield>
+            <subfield code="e">Abgebildet</subfield>
+          </datafield>
+          <datafield ind1="4" ind2=" " tag="856">
+            <subfield code="u">https://data.onb.ac.at/rep/BAG_18433061</subfield>
+            <subfield code="3">Digitales Objekt</subfield>
+          </datafield>
+          <datafield ind1="2" ind2=" " tag="970">
+            <subfield code="a">ONB</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="980">
+            <subfield code="a">gideon foto</subfield>
+            <subfield code="9">LOCAL</subfield>
+            <subfield code="9">local</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="980">
+            <subfield code="a">Webshop</subfield>
+            <subfield code="9">LOCAL</subfield>
+            <subfield code="9">local</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="980">
+            <subfield code="a">Webverkauf</subfield>
+            <subfield code="9">local</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="982">
+            <subfield code="a">Kultur / Wissenschaft</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1="1" ind2=" " tag="983">
+            <subfield code="a">NATURE | CINEMA | MOVIE: ZORBAS THE GREEK | QUINN, ANTHONY, ACTOR | REPORTAGE | 20TH CENTURY | AUSTRIAN | BIRDCAGE | BIRD | ZORBAS THE GREEK, MOVIE | ANIMAL:BIRD | PHOTOGRAPHY | 20TH | LESSING, ERICH, PHOTOGRAPHER | ANIMAL | EUROPE: POST WORLD WAR II | ANIMALS | AUSTRIA | MOVIES | ANIMAL: BIRD</subfield>
+            <subfield code="2">iconclass</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="994">
+            <subfield code="a">Lessing, Erich</subfield>
+            <subfield code="b">Österreichischer Fotograf. Mitglied bei Magnum Photos.</subfield>
+            <subfield code="d">13.07.1923</subfield>
+            <subfield code="f">29.08.2018</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="994">
+            <subfield code="a">Quinn, Anthony</subfield>
+            <subfield code="d">??.??.1916</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="995">
+            <subfield code="e">Lessing Archiv</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="998">
+            <subfield code="a">LE 64040423</subfield>
+            <subfield code="x">ZPOR</subfield>
+            <subfield code="y">MAG</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="AVA">
+            <subfield code="0">9958701649303338</subfield>
+            <subfield code="8">22444935570003338</subfield>
+            <subfield code="a">43ACC_ONB</subfield>
+            <subfield code="b">ZPOR</subfield>
+            <subfield code="c">Picture Archives and Graphics Department (POR-MAG)</subfield>
+            <subfield code="d">LE 64040423</subfield>
+            <subfield code="e">available</subfield>
+            <subfield code="f">1</subfield>
+            <subfield code="g">0</subfield>
+            <subfield code="j">MAG</subfield>
+            <subfield code="p">1</subfield>
+            <subfield code="q">Picture Archives and Graphics Department (POR)</subfield>
+          </datafield>
+        </record>
+      </recordData>
+      <recordIdentifier>9958701649303338</recordIdentifier>
+      <recordPosition>2</recordPosition>
+    </record><record>
+      <recordSchema>marcxml</recordSchema>
+      <recordPacking>xml</recordPacking>
+      <recordData>
+        <record xmlns="http://www.loc.gov/MARC21/slim">
+          <leader>01675nkm a2200325zc 4500</leader>
+          <controlfield tag="001">9958701649603338</controlfield>
+          <controlfield tag="005">20261005091654.0</controlfield>
+          <controlfield tag="007">kv#|||||||||||</controlfield>
+          <controlfield tag="008">200101|1964#######|||############i|####u</controlfield>
+          <controlfield tag="009">GZ00657959</controlfield>
+          <datafield ind1=" " ind2=" " tag="035">
+            <subfield code="a">(Gideon)baa18433040</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="035">
+            <subfield code="a">(DBN)LE_64040419</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="040">
+            <subfield code="a">ONB</subfield>
+            <subfield code="b">ger</subfield>
+            <subfield code="c">ONB-FOTO</subfield>
+            <subfield code="d">AT-OeNB</subfield>
+          </datafield>
+          <datafield ind1="1" ind2=" " tag="100">
+            <subfield code="a">Lessing, Erich</subfield>
+            <subfield code="d">1923-2018</subfield>
+            <subfield code="0">(DE-588)119157004</subfield>
+            <subfield code="4">pht</subfield>
+          </datafield>
+          <datafield ind1="1" ind2="0" tag="245">
+            <subfield code="a">Anthony Quinn als "Zorba the Greek" ("Alexis Sorbas"), Kreta, 1964</subfield>
+          </datafield>
+          <datafield ind1=" " ind2="0" tag="264">
+            <subfield code="c">1964</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="505">
+            <subfield code="g">"Zorbas the Greek",the film after the famous novel by Nikos Kazantzakis,was written,directed and produced by Michael Cacoyannis.Anthony Quinn played Zorbas, Eleni Anousaki the temptress Lola. Portrait Anthony Quinn.</subfield>
+          </datafield>
+          <datafield ind1=" " ind2="7" tag="655">
+            <subfield code="a">Fotografie</subfield>
+            <subfield code="0">(DE-588)4045895-7</subfield>
+            <subfield code="2">gnd-content</subfield>
+          </datafield>
+          <datafield ind1="1" ind2=" " tag="700">
+            <subfield code="a">Quinn, Anthony</subfield>
+            <subfield code="d">1916-</subfield>
+            <subfield code="4">oth</subfield>
+            <subfield code="e">Abgebildet</subfield>
+          </datafield>
+          <datafield ind1="4" ind2=" " tag="856">
+            <subfield code="u">https://data.onb.ac.at/rep/BAG_18433040</subfield>
+            <subfield code="3">Digitales Objekt</subfield>
+          </datafield>
+          <datafield ind1="2" ind2=" " tag="970">
+            <subfield code="a">ONB</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="980">
+            <subfield code="a">gideon foto</subfield>
+            <subfield code="9">LOCAL</subfield>
+            <subfield code="9">local</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="980">
+            <subfield code="a">Webshop</subfield>
+            <subfield code="9">LOCAL</subfield>
+            <subfield code="9">local</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="980">
+            <subfield code="a">Webverkauf</subfield>
+            <subfield code="9">local</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="982">
+            <subfield code="a">Kultur / Wissenschaft</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1="1" ind2=" " tag="983">
+            <subfield code="a">CINEMA | PORTRAIT | HEAD, MALE | MOVIE: ZORBAS THE GREEK | CLOSE UP | QUINN, ANTHONY, ACTOR | REPORTAGE | 20TH CENTURY | AUSTRIAN | ZORBAS THE GREEK, MOVIE | PORTRAIT, MALE | MAN | PHOTOGRAPHY | MEN | 20TH | LESSING, ERICH, PHOTOGRAPHER | EUROPE: POST WORLD WAR II | AUSTRIA | MOVIES | MALE PORTRAIT | PORTRAITS</subfield>
+            <subfield code="2">iconclass</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="994">
+            <subfield code="a">Lessing, Erich</subfield>
+            <subfield code="b">Österreichischer Fotograf. Mitglied bei Magnum Photos.</subfield>
+            <subfield code="d">13.07.1923</subfield>
+            <subfield code="f">29.08.2018</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="994">
+            <subfield code="a">Quinn, Anthony</subfield>
+            <subfield code="d">??.??.1916</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="995">
+            <subfield code="e">Lessing Archiv</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="998">
+            <subfield code="a">LE 64040419</subfield>
+            <subfield code="x">ZPOR</subfield>
+            <subfield code="y">MAG</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="AVA">
+            <subfield code="0">9958701649603338</subfield>
+            <subfield code="8">22444935980003338</subfield>
+            <subfield code="a">43ACC_ONB</subfield>
+            <subfield code="b">ZPOR</subfield>
+            <subfield code="c">Picture Archives and Graphics Department (POR-MAG)</subfield>
+            <subfield code="d">LE 64040419</subfield>
+            <subfield code="e">available</subfield>
+            <subfield code="f">1</subfield>
+            <subfield code="g">0</subfield>
+            <subfield code="j">MAG</subfield>
+            <subfield code="p">1</subfield>
+            <subfield code="q">Picture Archives and Graphics Department (POR)</subfield>
+          </datafield>
+        </record>
+      </recordData>
+      <recordIdentifier>9958701649603338</recordIdentifier>
+      <recordPosition>3</recordPosition>
+    </record><record>
+      <recordSchema>marcxml</recordSchema>
+      <recordPacking>xml</recordPacking>
+      <recordData>
+        <record xmlns="http://www.loc.gov/MARC21/slim">
+          <leader>01546nkm a2200325zc 4500</leader>
+          <controlfield tag="001">9958701305203338</controlfield>
+          <controlfield tag="005">20261005091523.0</controlfield>
+          <controlfield tag="007">kv#|||||||||||</controlfield>
+          <controlfield tag="008">200101|1964#######|||############i|####u</controlfield>
+          <controlfield tag="009">GZ00656590</controlfield>
+          <datafield ind1=" " ind2=" " tag="035">
+            <subfield code="a">(Gideon)baa18433250</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="035">
+            <subfield code="a">(DBN)LE_64042837</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="040">
+            <subfield code="a">ONB</subfield>
+            <subfield code="b">ger</subfield>
+            <subfield code="c">ONB-FOTO</subfield>
+            <subfield code="d">AT-OeNB</subfield>
+          </datafield>
+          <datafield ind1="1" ind2=" " tag="100">
+            <subfield code="a">Lessing, Erich</subfield>
+            <subfield code="d">1923-2018</subfield>
+            <subfield code="0">(DE-588)119157004</subfield>
+            <subfield code="4">pht</subfield>
+          </datafield>
+          <datafield ind1="1" ind2="0" tag="245">
+            <subfield code="a">Anthony Quinn und Eleni Anousaki in "Zorba the Greek", Kreta, 1964</subfield>
+          </datafield>
+          <datafield ind1=" " ind2="0" tag="264">
+            <subfield code="c">1964</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="505">
+            <subfield code="g">"Zorbas the Greek",the film after the famous novel by Nikos Kazantzakis,was written,directed and produced by Michael Cacoyannis.Anthony Quinn played Zorbas, Eleni Anousaki the temptress Lola. Crete,1964</subfield>
+          </datafield>
+          <datafield ind1=" " ind2="7" tag="655">
+            <subfield code="a">Fotografie</subfield>
+            <subfield code="0">(DE-588)4045895-7</subfield>
+            <subfield code="2">gnd-content</subfield>
+          </datafield>
+          <datafield ind1="1" ind2=" " tag="700">
+            <subfield code="a">Quinn, Anthony</subfield>
+            <subfield code="d">1916-</subfield>
+            <subfield code="4">oth</subfield>
+            <subfield code="e">Abgebildet</subfield>
+          </datafield>
+          <datafield ind1="4" ind2=" " tag="856">
+            <subfield code="u">https://data.onb.ac.at/rep/BAG_18433250</subfield>
+            <subfield code="3">Digitales Objekt</subfield>
+          </datafield>
+          <datafield ind1="2" ind2=" " tag="970">
+            <subfield code="a">ONB</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="980">
+            <subfield code="a">gideon foto</subfield>
+            <subfield code="9">LOCAL</subfield>
+            <subfield code="9">local</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="980">
+            <subfield code="a">Webshop</subfield>
+            <subfield code="9">LOCAL</subfield>
+            <subfield code="9">local</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="980">
+            <subfield code="a">Webverkauf</subfield>
+            <subfield code="9">local</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="982">
+            <subfield code="a">Kultur / Wissenschaft</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1="1" ind2=" " tag="983">
+            <subfield code="a">CINEMA | 20TH | MOVIE: ZORBAS THE GREEK | LESSING, ERICH, PHOTOGRAPHER | REPORTAGE | EUROPE: POST WORLD WAR II | AUSTRIAN | 20TH CENTURY | ZORBAS THE GREEK, MOVIE | AUSTRIA | MOVIES | PHOTOGRAPHY</subfield>
+            <subfield code="2">iconclass</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="994">
+            <subfield code="a">Lessing, Erich</subfield>
+            <subfield code="b">Österreichischer Fotograf. Mitglied bei Magnum Photos.</subfield>
+            <subfield code="d">13.07.1923</subfield>
+            <subfield code="f">29.08.2018</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="994">
+            <subfield code="a">Quinn, Anthony</subfield>
+            <subfield code="d">??.??.1916</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="995">
+            <subfield code="e">Lessing Archiv</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="998">
+            <subfield code="a">LE 64042837</subfield>
+            <subfield code="x">ZPOR</subfield>
+            <subfield code="y">MAG</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="AVA">
+            <subfield code="0">9958701305203338</subfield>
+            <subfield code="8">22444877900003338</subfield>
+            <subfield code="a">43ACC_ONB</subfield>
+            <subfield code="b">ZPOR</subfield>
+            <subfield code="c">Picture Archives and Graphics Department (POR-MAG)</subfield>
+            <subfield code="d">LE 64042837</subfield>
+            <subfield code="e">available</subfield>
+            <subfield code="f">1</subfield>
+            <subfield code="g">0</subfield>
+            <subfield code="j">MAG</subfield>
+            <subfield code="p">1</subfield>
+            <subfield code="q">Picture Archives and Graphics Department (POR)</subfield>
+          </datafield>
+        </record>
+      </recordData>
+      <recordIdentifier>9958701305203338</recordIdentifier>
+      <recordPosition>4</recordPosition>
+    </record><record>
+      <recordSchema>marcxml</recordSchema>
+      <recordPacking>xml</recordPacking>
+      <recordData>
+        <record xmlns="http://www.loc.gov/MARC21/slim">
+          <leader>01546nkm a2200325zc 4500</leader>
+          <controlfield tag="001">9958701305503338</controlfield>
+          <controlfield tag="005">20261005091524.0</controlfield>
+          <controlfield tag="007">kv#|||||||||||</controlfield>
+          <controlfield tag="008">200101|1964#######|||############i|####u</controlfield>
+          <controlfield tag="009">GZ00656587</controlfield>
+          <datafield ind1=" " ind2=" " tag="035">
+            <subfield code="a">(Gideon)baa18433229</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="035">
+            <subfield code="a">(DBN)LE_64042724</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="040">
+            <subfield code="a">ONB</subfield>
+            <subfield code="b">ger</subfield>
+            <subfield code="c">ONB-FOTO</subfield>
+            <subfield code="d">AT-OeNB</subfield>
+          </datafield>
+          <datafield ind1="1" ind2=" " tag="100">
+            <subfield code="a">Lessing, Erich</subfield>
+            <subfield code="d">1923-2018</subfield>
+            <subfield code="0">(DE-588)119157004</subfield>
+            <subfield code="4">pht</subfield>
+          </datafield>
+          <datafield ind1="1" ind2="0" tag="245">
+            <subfield code="a">Anthony Quinn und Eleni Anousaki in "Zorba the Greek", Kreta, 1964</subfield>
+          </datafield>
+          <datafield ind1=" " ind2="0" tag="264">
+            <subfield code="c">1964</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="505">
+            <subfield code="g">"Zorbas the Greek",the film after the famous novel by Nikos Kazantzakis,was written,directed and produced by Michael Cacoyannis.Anthony Quinn played Zorbas, Eleni Anousaki the temptress Lola. Crete,1964</subfield>
+          </datafield>
+          <datafield ind1=" " ind2="7" tag="655">
+            <subfield code="a">Fotografie</subfield>
+            <subfield code="0">(DE-588)4045895-7</subfield>
+            <subfield code="2">gnd-content</subfield>
+          </datafield>
+          <datafield ind1="1" ind2=" " tag="700">
+            <subfield code="a">Quinn, Anthony</subfield>
+            <subfield code="d">1916-</subfield>
+            <subfield code="4">oth</subfield>
+            <subfield code="e">Abgebildet</subfield>
+          </datafield>
+          <datafield ind1="4" ind2=" " tag="856">
+            <subfield code="u">https://data.onb.ac.at/rep/BAG_18433229</subfield>
+            <subfield code="3">Digitales Objekt</subfield>
+          </datafield>
+          <datafield ind1="2" ind2=" " tag="970">
+            <subfield code="a">ONB</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="980">
+            <subfield code="a">gideon foto</subfield>
+            <subfield code="9">LOCAL</subfield>
+            <subfield code="9">local</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="980">
+            <subfield code="a">Webshop</subfield>
+            <subfield code="9">LOCAL</subfield>
+            <subfield code="9">local</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="980">
+            <subfield code="a">Webverkauf</subfield>
+            <subfield code="9">local</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="982">
+            <subfield code="a">Kultur / Wissenschaft</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1="1" ind2=" " tag="983">
+            <subfield code="a">CINEMA | 20TH | MOVIE: ZORBAS THE GREEK | LESSING, ERICH, PHOTOGRAPHER | REPORTAGE | EUROPE: POST WORLD WAR II | AUSTRIAN | 20TH CENTURY | ZORBAS THE GREEK, MOVIE | AUSTRIA | MOVIES | PHOTOGRAPHY</subfield>
+            <subfield code="2">iconclass</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="994">
+            <subfield code="a">Lessing, Erich</subfield>
+            <subfield code="b">Österreichischer Fotograf. Mitglied bei Magnum Photos.</subfield>
+            <subfield code="d">13.07.1923</subfield>
+            <subfield code="f">29.08.2018</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="994">
+            <subfield code="a">Quinn, Anthony</subfield>
+            <subfield code="d">??.??.1916</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="995">
+            <subfield code="e">Lessing Archiv</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="998">
+            <subfield code="a">LE 64042724</subfield>
+            <subfield code="x">ZPOR</subfield>
+            <subfield code="y">MAG</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="AVA">
+            <subfield code="0">9958701305503338</subfield>
+            <subfield code="8">22444878180003338</subfield>
+            <subfield code="a">43ACC_ONB</subfield>
+            <subfield code="b">ZPOR</subfield>
+            <subfield code="c">Picture Archives and Graphics Department (POR-MAG)</subfield>
+            <subfield code="d">LE 64042724</subfield>
+            <subfield code="e">available</subfield>
+            <subfield code="f">1</subfield>
+            <subfield code="g">0</subfield>
+            <subfield code="j">MAG</subfield>
+            <subfield code="p">1</subfield>
+            <subfield code="q">Picture Archives and Graphics Department (POR)</subfield>
+          </datafield>
+        </record>
+      </recordData>
+      <recordIdentifier>9958701305503338</recordIdentifier>
+      <recordPosition>5</recordPosition>
+    </record><record>
+      <recordSchema>marcxml</recordSchema>
+      <recordPacking>xml</recordPacking>
+      <recordData>
+        <record xmlns="http://www.loc.gov/MARC21/slim">
+          <leader>01599nkm a2200325zc 4500</leader>
+          <controlfield tag="001">9958701315603338</controlfield>
+          <controlfield tag="005">20261005091525.0</controlfield>
+          <controlfield tag="007">kv#|||||||||||</controlfield>
+          <controlfield tag="008">200101|1964#######|||############i|####u</controlfield>
+          <controlfield tag="009">GZ00656136</controlfield>
+          <datafield ind1=" " ind2=" " tag="035">
+            <subfield code="a">(Gideon)baa18433208</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="035">
+            <subfield code="a">(DBN)LE_64042436</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="040">
+            <subfield code="a">ONB</subfield>
+            <subfield code="b">ger</subfield>
+            <subfield code="c">ONB-FOTO</subfield>
+            <subfield code="d">AT-OeNB</subfield>
+          </datafield>
+          <datafield ind1="1" ind2=" " tag="100">
+            <subfield code="a">Lessing, Erich</subfield>
+            <subfield code="d">1923-2018</subfield>
+            <subfield code="0">(DE-588)119157004</subfield>
+            <subfield code="4">pht</subfield>
+          </datafield>
+          <datafield ind1="1" ind2="0" tag="245">
+            <subfield code="a">Anthony Quinn und Eleni Anousaki in "Zorba the Greek", Kreta, 1964</subfield>
+          </datafield>
+          <datafield ind1=" " ind2="0" tag="264">
+            <subfield code="c">1964</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="505">
+            <subfield code="g">Lola (Eleni Anousaki) notices with satisfaction that Zorba (Anthony Quinn) is well supplied with money and persuades him to go on a drunken spending spree of caviar and champagne. The making of Zorba the Greek. Crete, Greece, 1964.</subfield>
+          </datafield>
+          <datafield ind1=" " ind2="7" tag="655">
+            <subfield code="a">Fotografie</subfield>
+            <subfield code="0">(DE-588)4045895-7</subfield>
+            <subfield code="2">gnd-content</subfield>
+          </datafield>
+          <datafield ind1="1" ind2=" " tag="700">
+            <subfield code="a">Quinn, Anthony</subfield>
+            <subfield code="d">1916-</subfield>
+            <subfield code="4">oth</subfield>
+            <subfield code="e">Abgebildet</subfield>
+          </datafield>
+          <datafield ind1="4" ind2=" " tag="856">
+            <subfield code="u">https://data.onb.ac.at/rep/BAG_18433208</subfield>
+            <subfield code="3">Digitales Objekt</subfield>
+          </datafield>
+          <datafield ind1="2" ind2=" " tag="970">
+            <subfield code="a">ONB</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="980">
+            <subfield code="a">gideon foto</subfield>
+            <subfield code="9">LOCAL</subfield>
+            <subfield code="9">local</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="980">
+            <subfield code="a">Webshop</subfield>
+            <subfield code="9">LOCAL</subfield>
+            <subfield code="9">local</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="980">
+            <subfield code="a">Webverkauf</subfield>
+            <subfield code="9">local</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="982">
+            <subfield code="a">Kultur / Wissenschaft</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1="1" ind2=" " tag="983">
+            <subfield code="a">CINEMA | 20TH | MOVIE: ZORBAS THE GREEK | LESSING, ERICH, PHOTOGRAPHER | QUINN, ANTHONY, ACTOR | REPORTAGE | EUROPE: POST WORLD WAR II | AUSTRIAN | 20TH CENTURY | ZORBAS THE GREEK, MOVIE | AUSTRIA | MOVIES | PHOTOGRAPHY</subfield>
+            <subfield code="2">iconclass</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="994">
+            <subfield code="a">Lessing, Erich</subfield>
+            <subfield code="b">Österreichischer Fotograf. Mitglied bei Magnum Photos.</subfield>
+            <subfield code="d">13.07.1923</subfield>
+            <subfield code="f">29.08.2018</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="994">
+            <subfield code="a">Quinn, Anthony</subfield>
+            <subfield code="d">??.??.1916</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="995">
+            <subfield code="e">Lessing Archiv</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="998">
+            <subfield code="a">LE 64042436</subfield>
+            <subfield code="x">ZPOR</subfield>
+            <subfield code="y">MAG</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="AVA">
+            <subfield code="0">9958701315603338</subfield>
+            <subfield code="8">22444858240003338</subfield>
+            <subfield code="a">43ACC_ONB</subfield>
+            <subfield code="b">ZPOR</subfield>
+            <subfield code="c">Picture Archives and Graphics Department (POR-MAG)</subfield>
+            <subfield code="d">LE 64042436</subfield>
+            <subfield code="e">available</subfield>
+            <subfield code="f">1</subfield>
+            <subfield code="g">0</subfield>
+            <subfield code="j">MAG</subfield>
+            <subfield code="p">1</subfield>
+            <subfield code="q">Picture Archives and Graphics Department (POR)</subfield>
+          </datafield>
+        </record>
+      </recordData>
+      <recordIdentifier>9958701315603338</recordIdentifier>
+      <recordPosition>6</recordPosition>
+    </record><record>
+      <recordSchema>marcxml</recordSchema>
+      <recordPacking>xml</recordPacking>
+      <recordData>
+        <record xmlns="http://www.loc.gov/MARC21/slim">
+          <leader>01570nkm a2200325zc 4500</leader>
+          <controlfield tag="001">9958701315703338</controlfield>
+          <controlfield tag="005">20261005091525.0</controlfield>
+          <controlfield tag="007">kv#|||||||||||</controlfield>
+          <controlfield tag="008">200101|1964#######|||############i|####u</controlfield>
+          <controlfield tag="009">GZ00656135</controlfield>
+          <datafield ind1=" " ind2=" " tag="035">
+            <subfield code="a">(Gideon)baa18433201</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="035">
+            <subfield code="a">(DBN)LE_64042432</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="040">
+            <subfield code="a">ONB</subfield>
+            <subfield code="b">ger</subfield>
+            <subfield code="c">ONB-FOTO</subfield>
+            <subfield code="d">AT-OeNB</subfield>
+          </datafield>
+          <datafield ind1="1" ind2=" " tag="100">
+            <subfield code="a">Lessing, Erich</subfield>
+            <subfield code="d">1923-2018</subfield>
+            <subfield code="0">(DE-588)119157004</subfield>
+            <subfield code="4">pht</subfield>
+          </datafield>
+          <datafield ind1="1" ind2="0" tag="245">
+            <subfield code="a">Anthony Quinn und Eleni Anousaki in "Zorba the Greek", Kreta, 1964</subfield>
+          </datafield>
+          <datafield ind1=" " ind2="0" tag="264">
+            <subfield code="c">1964</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="505">
+            <subfield code="g">"Zorbas the Greek",the film after the famous novel by Nikos Kazantzakis,was written,directed and produced by Michael Cacoyannis.Anthony Quinn played Zorbas, Eleni Anousaki the temptress Lola.Lola sees Quinn's money. Crete,1964</subfield>
+          </datafield>
+          <datafield ind1=" " ind2="7" tag="655">
+            <subfield code="a">Fotografie</subfield>
+            <subfield code="0">(DE-588)4045895-7</subfield>
+            <subfield code="2">gnd-content</subfield>
+          </datafield>
+          <datafield ind1="1" ind2=" " tag="700">
+            <subfield code="a">Quinn, Anthony</subfield>
+            <subfield code="d">1916-</subfield>
+            <subfield code="4">oth</subfield>
+            <subfield code="e">Abgebildet</subfield>
+          </datafield>
+          <datafield ind1="4" ind2=" " tag="856">
+            <subfield code="u">https://data.onb.ac.at/rep/BAG_18433201</subfield>
+            <subfield code="3">Digitales Objekt</subfield>
+          </datafield>
+          <datafield ind1="2" ind2=" " tag="970">
+            <subfield code="a">ONB</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="980">
+            <subfield code="a">gideon foto</subfield>
+            <subfield code="9">LOCAL</subfield>
+            <subfield code="9">local</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="980">
+            <subfield code="a">Webshop</subfield>
+            <subfield code="9">LOCAL</subfield>
+            <subfield code="9">local</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="980">
+            <subfield code="a">Webverkauf</subfield>
+            <subfield code="9">local</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="982">
+            <subfield code="a">Kultur / Wissenschaft</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1="1" ind2=" " tag="983">
+            <subfield code="a">CINEMA | 20TH | MOVIE: ZORBAS THE GREEK | LESSING, ERICH, PHOTOGRAPHER | REPORTAGE | EUROPE: POST WORLD WAR II | AUSTRIAN | 20TH CENTURY | ZORBAS THE GREEK, MOVIE | AUSTRIA | MOVIES | PHOTOGRAPHY</subfield>
+            <subfield code="2">iconclass</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="994">
+            <subfield code="a">Lessing, Erich</subfield>
+            <subfield code="b">Österreichischer Fotograf. Mitglied bei Magnum Photos.</subfield>
+            <subfield code="d">13.07.1923</subfield>
+            <subfield code="f">29.08.2018</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="994">
+            <subfield code="a">Quinn, Anthony</subfield>
+            <subfield code="d">??.??.1916</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="995">
+            <subfield code="e">Lessing Archiv</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="998">
+            <subfield code="a">LE 64042432</subfield>
+            <subfield code="x">ZPOR</subfield>
+            <subfield code="y">MAG</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="AVA">
+            <subfield code="0">9958701315703338</subfield>
+            <subfield code="8">22444858370003338</subfield>
+            <subfield code="a">43ACC_ONB</subfield>
+            <subfield code="b">ZPOR</subfield>
+            <subfield code="c">Picture Archives and Graphics Department (POR-MAG)</subfield>
+            <subfield code="d">LE 64042432</subfield>
+            <subfield code="e">available</subfield>
+            <subfield code="f">1</subfield>
+            <subfield code="g">0</subfield>
+            <subfield code="j">MAG</subfield>
+            <subfield code="p">1</subfield>
+            <subfield code="q">Picture Archives and Graphics Department (POR)</subfield>
+          </datafield>
+        </record>
+      </recordData>
+      <recordIdentifier>9958701315703338</recordIdentifier>
+      <recordPosition>7</recordPosition>
+    </record><record>
+      <recordSchema>marcxml</recordSchema>
+      <recordPacking>xml</recordPacking>
+      <recordData>
+        <record xmlns="http://www.loc.gov/MARC21/slim">
+          <leader>01574nkm a2200325zc 4500</leader>
+          <controlfield tag="001">9958701316003338</controlfield>
+          <controlfield tag="005">20261005091525.0</controlfield>
+          <controlfield tag="007">kv#|||||||||||</controlfield>
+          <controlfield tag="008">200101|1964#######|||############i|####u</controlfield>
+          <controlfield tag="009">GZ00656132</controlfield>
+          <datafield ind1=" " ind2=" " tag="035">
+            <subfield code="a">(Gideon)baa18433180</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="035">
+            <subfield code="a">(DBN)LE_64042031</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="040">
+            <subfield code="a">ONB</subfield>
+            <subfield code="b">ger</subfield>
+            <subfield code="c">ONB-FOTO</subfield>
+            <subfield code="d">AT-OeNB</subfield>
+          </datafield>
+          <datafield ind1="1" ind2=" " tag="100">
+            <subfield code="a">Lessing, Erich</subfield>
+            <subfield code="d">1923-2018</subfield>
+            <subfield code="0">(DE-588)119157004</subfield>
+            <subfield code="4">pht</subfield>
+          </datafield>
+          <datafield ind1="1" ind2="0" tag="245">
+            <subfield code="a">Anthony Quinn und Eleni Anousaki in "Zorba the Greek", Kreta, 1964</subfield>
+          </datafield>
+          <datafield ind1=" " ind2="0" tag="264">
+            <subfield code="c">1964</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="505">
+            <subfield code="g">In a bar Alexis Zorba (Anthony Quinn) meets young, voluptuous Lola (Eleni Anousaki) and he plunges into an orgy of champagne, caviar and carnival spirits. The making of Zorba the Greek. Crete, Greece, 1964.</subfield>
+          </datafield>
+          <datafield ind1=" " ind2="7" tag="655">
+            <subfield code="a">Fotografie</subfield>
+            <subfield code="0">(DE-588)4045895-7</subfield>
+            <subfield code="2">gnd-content</subfield>
+          </datafield>
+          <datafield ind1="1" ind2=" " tag="700">
+            <subfield code="a">Quinn, Anthony</subfield>
+            <subfield code="d">1916-</subfield>
+            <subfield code="4">oth</subfield>
+            <subfield code="e">Abgebildet</subfield>
+          </datafield>
+          <datafield ind1="4" ind2=" " tag="856">
+            <subfield code="u">https://data.onb.ac.at/rep/BAG_18433180</subfield>
+            <subfield code="3">Digitales Objekt</subfield>
+          </datafield>
+          <datafield ind1="2" ind2=" " tag="970">
+            <subfield code="a">ONB</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="980">
+            <subfield code="a">gideon foto</subfield>
+            <subfield code="9">LOCAL</subfield>
+            <subfield code="9">local</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="980">
+            <subfield code="a">Webshop</subfield>
+            <subfield code="9">LOCAL</subfield>
+            <subfield code="9">local</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="980">
+            <subfield code="a">Webverkauf</subfield>
+            <subfield code="9">local</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="982">
+            <subfield code="a">Kultur / Wissenschaft</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1="1" ind2=" " tag="983">
+            <subfield code="a">CINEMA | 20TH | MOVIE: ZORBAS THE GREEK | LESSING, ERICH, PHOTOGRAPHER | QUINN, ANTHONY, ACTOR | REPORTAGE | EUROPE: POST WORLD WAR II | AUSTRIAN | 20TH CENTURY | ZORBAS THE GREEK, MOVIE | AUSTRIA | MOVIES | PHOTOGRAPHY</subfield>
+            <subfield code="2">iconclass</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="994">
+            <subfield code="a">Lessing, Erich</subfield>
+            <subfield code="b">Österreichischer Fotograf. Mitglied bei Magnum Photos.</subfield>
+            <subfield code="d">13.07.1923</subfield>
+            <subfield code="f">29.08.2018</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="994">
+            <subfield code="a">Quinn, Anthony</subfield>
+            <subfield code="d">??.??.1916</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="995">
+            <subfield code="e">Lessing Archiv</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="998">
+            <subfield code="a">LE 64042031</subfield>
+            <subfield code="x">ZPOR</subfield>
+            <subfield code="y">MAG</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="AVA">
+            <subfield code="0">9958701316003338</subfield>
+            <subfield code="8">22444858720003338</subfield>
+            <subfield code="a">43ACC_ONB</subfield>
+            <subfield code="b">ZPOR</subfield>
+            <subfield code="c">Picture Archives and Graphics Department (POR-MAG)</subfield>
+            <subfield code="d">LE 64042031</subfield>
+            <subfield code="e">available</subfield>
+            <subfield code="f">1</subfield>
+            <subfield code="g">0</subfield>
+            <subfield code="j">MAG</subfield>
+            <subfield code="p">1</subfield>
+            <subfield code="q">Picture Archives and Graphics Department (POR)</subfield>
+          </datafield>
+        </record>
+      </recordData>
+      <recordIdentifier>9958701316003338</recordIdentifier>
+      <recordPosition>8</recordPosition>
+    </record><record>
+      <recordSchema>marcxml</recordSchema>
+      <recordPacking>xml</recordPacking>
+      <recordData>
+        <record xmlns="http://www.loc.gov/MARC21/slim">
+          <leader>01560nkm a2200325zc 4500</leader>
+          <controlfield tag="001">9958701649703338</controlfield>
+          <controlfield tag="005">20261005091656.0</controlfield>
+          <controlfield tag="007">kv#|||||||||||</controlfield>
+          <controlfield tag="008">200101|1964#######|||############i|####u</controlfield>
+          <controlfield tag="009">GZ00657958</controlfield>
+          <datafield ind1=" " ind2=" " tag="035">
+            <subfield code="a">(Gideon)baa18433033</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="035">
+            <subfield code="a">(DBN)LE_64040415</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="040">
+            <subfield code="a">ONB</subfield>
+            <subfield code="b">ger</subfield>
+            <subfield code="c">ONB-FOTO</subfield>
+            <subfield code="d">AT-OeNB</subfield>
+          </datafield>
+          <datafield ind1="1" ind2=" " tag="100">
+            <subfield code="a">Lessing, Erich</subfield>
+            <subfield code="d">1923-2018</subfield>
+            <subfield code="0">(DE-588)119157004</subfield>
+            <subfield code="4">pht</subfield>
+          </datafield>
+          <datafield ind1="1" ind2="0" tag="245">
+            <subfield code="a">Anthony Quinn und Eleni Anousaki in "Zorba the Greek", Kreta, 1964</subfield>
+          </datafield>
+          <datafield ind1=" " ind2="0" tag="264">
+            <subfield code="c">1964</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="505">
+            <subfield code="g">"Zorba the Greek", the film after the famous novel by Nikos Kazantzakis, was written, directed and produced by Michael Cacoyannis. Anthony Quinn portrayed Zorba, Eleni Anousaki the temptress Lola. Crete, Greece, 1964</subfield>
+          </datafield>
+          <datafield ind1=" " ind2="7" tag="655">
+            <subfield code="a">Fotografie</subfield>
+            <subfield code="0">(DE-588)4045895-7</subfield>
+            <subfield code="2">gnd-content</subfield>
+          </datafield>
+          <datafield ind1="1" ind2=" " tag="700">
+            <subfield code="a">Quinn, Anthony</subfield>
+            <subfield code="d">1916-</subfield>
+            <subfield code="4">oth</subfield>
+            <subfield code="e">Abgebildet</subfield>
+          </datafield>
+          <datafield ind1="4" ind2=" " tag="856">
+            <subfield code="u">https://data.onb.ac.at/rep/BAG_18433033</subfield>
+            <subfield code="3">Digitales Objekt</subfield>
+          </datafield>
+          <datafield ind1="2" ind2=" " tag="970">
+            <subfield code="a">ONB</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="980">
+            <subfield code="a">gideon foto</subfield>
+            <subfield code="9">LOCAL</subfield>
+            <subfield code="9">local</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="980">
+            <subfield code="a">Webshop</subfield>
+            <subfield code="9">LOCAL</subfield>
+            <subfield code="9">local</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="980">
+            <subfield code="a">Webverkauf</subfield>
+            <subfield code="9">local</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="982">
+            <subfield code="a">Kultur / Wissenschaft</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1="1" ind2=" " tag="983">
+            <subfield code="a">CINEMA | 20TH | MOVIE: ZORBAS THE GREEK | LESSING, ERICH, PHOTOGRAPHER | REPORTAGE | EUROPE: POST WORLD WAR II | AUSTRIAN | 20TH CENTURY | ZORBAS THE GREEK, MOVIE | AUSTRIA | MOVIES | PHOTOGRAPHY</subfield>
+            <subfield code="2">iconclass</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="994">
+            <subfield code="a">Lessing, Erich</subfield>
+            <subfield code="b">Österreichischer Fotograf. Mitglied bei Magnum Photos.</subfield>
+            <subfield code="d">13.07.1923</subfield>
+            <subfield code="f">29.08.2018</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="994">
+            <subfield code="a">Quinn, Anthony</subfield>
+            <subfield code="d">??.??.1916</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="995">
+            <subfield code="e">Lessing Archiv</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="998">
+            <subfield code="a">LE 64040415</subfield>
+            <subfield code="x">ZPOR</subfield>
+            <subfield code="y">MAG</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="AVA">
+            <subfield code="0">9958701649703338</subfield>
+            <subfield code="8">22444936070003338</subfield>
+            <subfield code="a">43ACC_ONB</subfield>
+            <subfield code="b">ZPOR</subfield>
+            <subfield code="c">Picture Archives and Graphics Department (POR-MAG)</subfield>
+            <subfield code="d">LE 64040415</subfield>
+            <subfield code="e">available</subfield>
+            <subfield code="f">1</subfield>
+            <subfield code="g">0</subfield>
+            <subfield code="j">MAG</subfield>
+            <subfield code="p">1</subfield>
+            <subfield code="q">Picture Archives and Graphics Department (POR)</subfield>
+          </datafield>
+        </record>
+      </recordData>
+      <recordIdentifier>9958701649703338</recordIdentifier>
+      <recordPosition>9</recordPosition>
+    </record><record>
+      <recordSchema>marcxml</recordSchema>
+      <recordPacking>xml</recordPacking>
+      <recordData>
+        <record xmlns="http://www.loc.gov/MARC21/slim">
+          <leader>01638nkm a2200325zc 4500</leader>
+          <controlfield tag="001">9958701648203338</controlfield>
+          <controlfield tag="005">20261005091654.0</controlfield>
+          <controlfield tag="007">kv#|||||||||||</controlfield>
+          <controlfield tag="008">200101|1964#######|||############i|####u</controlfield>
+          <controlfield tag="009">GZ00657973</controlfield>
+          <datafield ind1=" " ind2=" " tag="035">
+            <subfield code="a">(Gideon)baa18433166</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="035">
+            <subfield code="a">(DBN)LE_64041816</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="040">
+            <subfield code="a">ONB</subfield>
+            <subfield code="b">ger</subfield>
+            <subfield code="c">ONB-FOTO</subfield>
+            <subfield code="d">AT-OeNB</subfield>
+          </datafield>
+          <datafield ind1="1" ind2=" " tag="100">
+            <subfield code="a">Lessing, Erich</subfield>
+            <subfield code="d">1923-2018</subfield>
+            <subfield code="0">(DE-588)119157004</subfield>
+            <subfield code="4">pht</subfield>
+          </datafield>
+          <datafield ind1="1" ind2="0" tag="245">
+            <subfield code="a">Anthony Quinn und Lila Kedrova in "Zorba the Greek", Kreta, 1964</subfield>
+          </datafield>
+          <datafield ind1=" " ind2="0" tag="264">
+            <subfield code="c">1964</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="505">
+            <subfield code="g">"Zorbas the Greek",the film after the famous novel by Nikos Kazantzakis,was written,directed and produced by Michael Cacoyannis.Anthony Quinn played Zorbas. Quinn and Lila Kedrova.</subfield>
+          </datafield>
+          <datafield ind1=" " ind2="7" tag="655">
+            <subfield code="a">Fotografie</subfield>
+            <subfield code="0">(DE-588)4045895-7</subfield>
+            <subfield code="2">gnd-content</subfield>
+          </datafield>
+          <datafield ind1="1" ind2=" " tag="700">
+            <subfield code="a">Quinn, Anthony</subfield>
+            <subfield code="d">1916-</subfield>
+            <subfield code="4">oth</subfield>
+            <subfield code="e">Abgebildet</subfield>
+          </datafield>
+          <datafield ind1="4" ind2=" " tag="856">
+            <subfield code="u">https://data.onb.ac.at/rep/BAG_18433166</subfield>
+            <subfield code="3">Digitales Objekt</subfield>
+          </datafield>
+          <datafield ind1="2" ind2=" " tag="970">
+            <subfield code="a">ONB</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="980">
+            <subfield code="a">gideon foto</subfield>
+            <subfield code="9">LOCAL</subfield>
+            <subfield code="9">local</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="980">
+            <subfield code="a">Webshop</subfield>
+            <subfield code="9">LOCAL</subfield>
+            <subfield code="9">local</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="980">
+            <subfield code="a">Webverkauf</subfield>
+            <subfield code="9">local</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="982">
+            <subfield code="a">Kultur / Wissenschaft</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1="1" ind2=" " tag="983">
+            <subfield code="a">CINEMA | PORTRAIT | HEAD, MALE | MOVIE: ZORBAS THE GREEK | CLOSE UP | QUINN, ANTHONY, ACTOR | REPORTAGE | 20TH CENTURY | AUSTRIAN | ZORBAS THE GREEK, MOVIE | PORTRAIT, MALE | MAN | PHOTOGRAPHY | MEN | 20TH | LESSING, ERICH, PHOTOGRAPHER | EUROPE: POST WORLD WAR II | AUSTRIA | MOVIES | MALE PORTRAIT | PORTRAITS</subfield>
+            <subfield code="2">iconclass</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="994">
+            <subfield code="a">Lessing, Erich</subfield>
+            <subfield code="b">Österreichischer Fotograf. Mitglied bei Magnum Photos.</subfield>
+            <subfield code="d">13.07.1923</subfield>
+            <subfield code="f">29.08.2018</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="994">
+            <subfield code="a">Quinn, Anthony</subfield>
+            <subfield code="d">??.??.1916</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="995">
+            <subfield code="e">Lessing Archiv</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="998">
+            <subfield code="a">LE 64041816</subfield>
+            <subfield code="x">ZPOR</subfield>
+            <subfield code="y">MAG</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="AVA">
+            <subfield code="0">9958701648203338</subfield>
+            <subfield code="8">22444934200003338</subfield>
+            <subfield code="a">43ACC_ONB</subfield>
+            <subfield code="b">ZPOR</subfield>
+            <subfield code="c">Picture Archives and Graphics Department (POR-MAG)</subfield>
+            <subfield code="d">LE 64041816</subfield>
+            <subfield code="e">available</subfield>
+            <subfield code="f">1</subfield>
+            <subfield code="g">0</subfield>
+            <subfield code="j">MAG</subfield>
+            <subfield code="p">1</subfield>
+            <subfield code="q">Picture Archives and Graphics Department (POR)</subfield>
+          </datafield>
+        </record>
+      </recordData>
+      <recordIdentifier>9958701648203338</recordIdentifier>
+      <recordPosition>10</recordPosition>
+    </record><record>
+      <recordSchema>marcxml</recordSchema>
+      <recordPacking>xml</recordPacking>
+      <recordData>
+        <record xmlns="http://www.loc.gov/MARC21/slim">
+          <leader>01557nkm a2200325zc 4500</leader>
+          <controlfield tag="001">9958701649403338</controlfield>
+          <controlfield tag="005">20261005091655.0</controlfield>
+          <controlfield tag="007">kv#|||||||||||</controlfield>
+          <controlfield tag="008">200101|1964#######|||############i|####u</controlfield>
+          <controlfield tag="009">GZ00657961</controlfield>
+          <datafield ind1=" " ind2=" " tag="035">
+            <subfield code="a">(Gideon)baa18433054</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="035">
+            <subfield code="a">(DBN)LE_64040421</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="040">
+            <subfield code="a">ONB</subfield>
+            <subfield code="b">ger</subfield>
+            <subfield code="c">ONB-FOTO</subfield>
+            <subfield code="d">AT-OeNB</subfield>
+          </datafield>
+          <datafield ind1="1" ind2=" " tag="100">
+            <subfield code="a">Lessing, Erich</subfield>
+            <subfield code="d">1923-2018</subfield>
+            <subfield code="0">(DE-588)119157004</subfield>
+            <subfield code="4">pht</subfield>
+          </datafield>
+          <datafield ind1="1" ind2="0" tag="245">
+            <subfield code="a">Anthony Quinn und Lila Kedrova in "Zorba the Greek", Kreta, 1964</subfield>
+          </datafield>
+          <datafield ind1=" " ind2="0" tag="264">
+            <subfield code="c">1964</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="505">
+            <subfield code="g">"Zorbas the Greek",the film after the famous novel by Nikos Kazantzakis,was written,directed and produced by Michael Cacoyannis. Crete,1964</subfield>
+          </datafield>
+          <datafield ind1=" " ind2="7" tag="655">
+            <subfield code="a">Fotografie</subfield>
+            <subfield code="0">(DE-588)4045895-7</subfield>
+            <subfield code="2">gnd-content</subfield>
+          </datafield>
+          <datafield ind1="1" ind2=" " tag="700">
+            <subfield code="a">Quinn, Anthony</subfield>
+            <subfield code="d">1916-</subfield>
+            <subfield code="4">oth</subfield>
+            <subfield code="e">Abgebildet</subfield>
+          </datafield>
+          <datafield ind1="4" ind2=" " tag="856">
+            <subfield code="u">https://data.onb.ac.at/rep/BAG_18433054</subfield>
+            <subfield code="3">Digitales Objekt</subfield>
+          </datafield>
+          <datafield ind1="2" ind2=" " tag="970">
+            <subfield code="a">ONB</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="980">
+            <subfield code="a">gideon foto</subfield>
+            <subfield code="9">LOCAL</subfield>
+            <subfield code="9">local</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="980">
+            <subfield code="a">Webshop</subfield>
+            <subfield code="9">LOCAL</subfield>
+            <subfield code="9">local</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="980">
+            <subfield code="a">Webverkauf</subfield>
+            <subfield code="9">local</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="982">
+            <subfield code="a">Kultur / Wissenschaft</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1="1" ind2=" " tag="983">
+            <subfield code="a">CINEMA | FASHION, CLOTHING | MOVIE: ZORBAS THE GREEK | QUINN, ANTHONY, ACTOR | REPORTAGE | 20TH CENTURY | ZORBAS THE GREEK, MOVIE | COSTUME, CLOTHING | PHOTOGRAPHY | 20TH | CLOTHING | LESSING, ERICH, PHOTOGRAPHER | DAILY LIFE | DRESS, CLOTHING | EUROPE: POST WORLD WAR II</subfield>
+            <subfield code="2">iconclass</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="994">
+            <subfield code="a">Lessing, Erich</subfield>
+            <subfield code="b">Österreichischer Fotograf. Mitglied bei Magnum Photos.</subfield>
+            <subfield code="d">13.07.1923</subfield>
+            <subfield code="f">29.08.2018</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="994">
+            <subfield code="a">Quinn, Anthony</subfield>
+            <subfield code="d">??.??.1916</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="995">
+            <subfield code="e">Lessing Archiv</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="998">
+            <subfield code="a">LE 64040421</subfield>
+            <subfield code="x">ZPOR</subfield>
+            <subfield code="y">MAG</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="AVA">
+            <subfield code="0">9958701649403338</subfield>
+            <subfield code="8">22444935700003338</subfield>
+            <subfield code="a">43ACC_ONB</subfield>
+            <subfield code="b">ZPOR</subfield>
+            <subfield code="c">Picture Archives and Graphics Department (POR-MAG)</subfield>
+            <subfield code="d">LE 64040421</subfield>
+            <subfield code="e">available</subfield>
+            <subfield code="f">1</subfield>
+            <subfield code="g">0</subfield>
+            <subfield code="j">MAG</subfield>
+            <subfield code="p">1</subfield>
+            <subfield code="q">Picture Archives and Graphics Department (POR)</subfield>
+          </datafield>
+        </record>
+      </recordData>
+      <recordIdentifier>9958701649403338</recordIdentifier>
+      <recordPosition>11</recordPosition>
+    </record><record>
+      <recordSchema>marcxml</recordSchema>
+      <recordPacking>xml</recordPacking>
+      <recordData>
+        <record xmlns="http://www.loc.gov/MARC21/slim">
+          <leader>01486nkm a2200325zc 4500</leader>
+          <controlfield tag="001">9958701650103338</controlfield>
+          <controlfield tag="005">20261005091655.0</controlfield>
+          <controlfield tag="007">kv#|||||||||||</controlfield>
+          <controlfield tag="008">200101|1964#######|||############i|####u</controlfield>
+          <controlfield tag="009">GZ00657954</controlfield>
+          <datafield ind1=" " ind2=" " tag="035">
+            <subfield code="a">(Gideon)baa18433005</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="035">
+            <subfield code="a">(DBN)LE_64040315</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="040">
+            <subfield code="a">ONB</subfield>
+            <subfield code="b">ger</subfield>
+            <subfield code="c">ONB-FOTO</subfield>
+            <subfield code="d">AT-OeNB</subfield>
+          </datafield>
+          <datafield ind1="1" ind2=" " tag="100">
+            <subfield code="a">Lessing, Erich</subfield>
+            <subfield code="d">1923-2018</subfield>
+            <subfield code="0">(DE-588)119157004</subfield>
+            <subfield code="4">pht</subfield>
+          </datafield>
+          <datafield ind1="1" ind2="0" tag="245">
+            <subfield code="a">Anthony Quinn und Lila Kedrova während der Dreharbeiten zu "Zorba the Greek", Kreta, 1964</subfield>
+          </datafield>
+          <datafield ind1=" " ind2="0" tag="264">
+            <subfield code="c">1964</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="505">
+            <subfield code="g">Anthony Quinn (Alexis Zorba) and Lila Kedrova (Madame Hortense). The making of Zorba the Greek. Crete, Greece, 1964</subfield>
+          </datafield>
+          <datafield ind1=" " ind2="7" tag="655">
+            <subfield code="a">Fotografie</subfield>
+            <subfield code="0">(DE-588)4045895-7</subfield>
+            <subfield code="2">gnd-content</subfield>
+          </datafield>
+          <datafield ind1="1" ind2=" " tag="700">
+            <subfield code="a">Quinn, Anthony</subfield>
+            <subfield code="d">1916-</subfield>
+            <subfield code="4">oth</subfield>
+            <subfield code="e">Abgebildet</subfield>
+          </datafield>
+          <datafield ind1="4" ind2=" " tag="856">
+            <subfield code="u">https://data.onb.ac.at/rep/BAG_18433005</subfield>
+            <subfield code="3">Digitales Objekt</subfield>
+          </datafield>
+          <datafield ind1="2" ind2=" " tag="970">
+            <subfield code="a">ONB</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="980">
+            <subfield code="a">gideon foto</subfield>
+            <subfield code="9">LOCAL</subfield>
+            <subfield code="9">local</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="980">
+            <subfield code="a">Webshop</subfield>
+            <subfield code="9">LOCAL</subfield>
+            <subfield code="9">local</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="980">
+            <subfield code="a">Webverkauf</subfield>
+            <subfield code="9">local</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="982">
+            <subfield code="a">Kultur / Wissenschaft</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1="1" ind2=" " tag="983">
+            <subfield code="a">CINEMA | 20TH | MOVIE: ZORBAS THE GREEK | LESSING, ERICH, PHOTOGRAPHER | QUINN, ANTHONY, ACTOR | REPORTAGE | EUROPE: POST WORLD WAR II | 20TH CENTURY | ZORBAS THE GREEK, MOVIE | MOVIES | PHOTOGRAPHY</subfield>
+            <subfield code="2">iconclass</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="994">
+            <subfield code="a">Lessing, Erich</subfield>
+            <subfield code="b">Österreichischer Fotograf. Mitglied bei Magnum Photos.</subfield>
+            <subfield code="d">13.07.1923</subfield>
+            <subfield code="f">29.08.2018</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="994">
+            <subfield code="a">Quinn, Anthony</subfield>
+            <subfield code="d">??.??.1916</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="995">
+            <subfield code="e">Lessing Archiv</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="998">
+            <subfield code="a">LE 64040315</subfield>
+            <subfield code="x">ZPOR</subfield>
+            <subfield code="y">MAG</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="AVA">
+            <subfield code="0">9958701650103338</subfield>
+            <subfield code="8">22444936650003338</subfield>
+            <subfield code="a">43ACC_ONB</subfield>
+            <subfield code="b">ZPOR</subfield>
+            <subfield code="c">Picture Archives and Graphics Department (POR-MAG)</subfield>
+            <subfield code="d">LE 64040315</subfield>
+            <subfield code="e">available</subfield>
+            <subfield code="f">1</subfield>
+            <subfield code="g">0</subfield>
+            <subfield code="j">MAG</subfield>
+            <subfield code="p">1</subfield>
+            <subfield code="q">Picture Archives and Graphics Department (POR)</subfield>
+          </datafield>
+        </record>
+      </recordData>
+      <recordIdentifier>9958701650103338</recordIdentifier>
+      <recordPosition>12</recordPosition>
+    </record><record>
+      <recordSchema>marcxml</recordSchema>
+      <recordPacking>xml</recordPacking>
+      <recordData>
+        <record xmlns="http://www.loc.gov/MARC21/slim">
+          <leader>01620nkm a2200325zc 4500</leader>
+          <controlfield tag="001">9958701649003338</controlfield>
+          <controlfield tag="005">20261005091658.0</controlfield>
+          <controlfield tag="007">kv#|||||||||||</controlfield>
+          <controlfield tag="008">200101|1964#######|||############i|####u</controlfield>
+          <controlfield tag="009">GZ00657965</controlfield>
+          <datafield ind1=" " ind2=" " tag="035">
+            <subfield code="a">(Gideon)baa18433089</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="035">
+            <subfield code="a">(DBN)LE_64040813</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="040">
+            <subfield code="a">ONB</subfield>
+            <subfield code="b">ger</subfield>
+            <subfield code="c">ONB-FOTO</subfield>
+            <subfield code="d">AT-OeNB</subfield>
+          </datafield>
+          <datafield ind1="1" ind2=" " tag="100">
+            <subfield code="a">Lessing, Erich</subfield>
+            <subfield code="d">1923-2018</subfield>
+            <subfield code="0">(DE-588)119157004</subfield>
+            <subfield code="4">pht</subfield>
+          </datafield>
+          <datafield ind1="1" ind2="0" tag="245">
+            <subfield code="a">Anthony Quinn und Michael Cacoyannis während der Dreharbeiten zu "Zorba the Greek",</subfield>
+          </datafield>
+          <datafield ind1=" " ind2="0" tag="264">
+            <subfield code="c">1964</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="505">
+            <subfield code="g">"Zorbas the Greek",the film after the famous novel by Nikos Kazantzakis,was written,directed and produced by Michael Cacoyannis.Anthony Quinn played Zorbas, Eleni Anousaki the temptress Lola.Quinn and Cacoyannis.</subfield>
+          </datafield>
+          <datafield ind1=" " ind2="7" tag="655">
+            <subfield code="a">Fotografie</subfield>
+            <subfield code="0">(DE-588)4045895-7</subfield>
+            <subfield code="2">gnd-content</subfield>
+          </datafield>
+          <datafield ind1="1" ind2=" " tag="700">
+            <subfield code="a">Quinn, Anthony</subfield>
+            <subfield code="d">1916-</subfield>
+            <subfield code="4">oth</subfield>
+            <subfield code="e">Abgebildet</subfield>
+          </datafield>
+          <datafield ind1="4" ind2=" " tag="856">
+            <subfield code="u">https://data.onb.ac.at/rep/BAG_18433089</subfield>
+            <subfield code="3">Digitales Objekt</subfield>
+          </datafield>
+          <datafield ind1="2" ind2=" " tag="970">
+            <subfield code="a">ONB</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="980">
+            <subfield code="a">gideon foto</subfield>
+            <subfield code="9">LOCAL</subfield>
+            <subfield code="9">local</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="980">
+            <subfield code="a">Webshop</subfield>
+            <subfield code="9">LOCAL</subfield>
+            <subfield code="9">local</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="980">
+            <subfield code="a">Webverkauf</subfield>
+            <subfield code="9">local</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="982">
+            <subfield code="a">Kultur / Wissenschaft</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1="1" ind2=" " tag="983">
+            <subfield code="a">CINEMA | MOVIE: ZORBAS THE GREEK | QUINN, ANTHONY, ACTOR | REPORTAGE | 20TH CENTURY | AUSTRIAN | ZORBAS THE GREEK, MOVIE | PHOTOGRAPHY | 20TH | LESSING, ERICH, PHOTOGRAPHER | EUROPE: POST WORLD WAR II | AUSTRIA | CACOYANNIS, MICHAEL | MOVIES</subfield>
+            <subfield code="2">iconclass</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="994">
+            <subfield code="a">Lessing, Erich</subfield>
+            <subfield code="b">Österreichischer Fotograf. Mitglied bei Magnum Photos.</subfield>
+            <subfield code="d">13.07.1923</subfield>
+            <subfield code="f">29.08.2018</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="994">
+            <subfield code="a">Quinn, Anthony</subfield>
+            <subfield code="d">??.??.1916</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="995">
+            <subfield code="e">Lessing Archiv</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="998">
+            <subfield code="a">LE 64040813</subfield>
+            <subfield code="x">ZPOR</subfield>
+            <subfield code="y">MAG</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="AVA">
+            <subfield code="0">9958701649003338</subfield>
+            <subfield code="8">22444935180003338</subfield>
+            <subfield code="a">43ACC_ONB</subfield>
+            <subfield code="b">ZPOR</subfield>
+            <subfield code="c">Picture Archives and Graphics Department (POR-MAG)</subfield>
+            <subfield code="d">LE 64040813</subfield>
+            <subfield code="e">available</subfield>
+            <subfield code="f">1</subfield>
+            <subfield code="g">0</subfield>
+            <subfield code="j">MAG</subfield>
+            <subfield code="p">1</subfield>
+            <subfield code="q">Picture Archives and Graphics Department (POR)</subfield>
+          </datafield>
+        </record>
+      </recordData>
+      <recordIdentifier>9958701649003338</recordIdentifier>
+      <recordPosition>13</recordPosition>
+    </record><record>
+      <recordSchema>marcxml</recordSchema>
+      <recordPacking>xml</recordPacking>
+      <recordData>
+        <record xmlns="http://www.loc.gov/MARC21/slim">
+          <leader>01411nkm a2200325zc 4500</leader>
+          <controlfield tag="001">9958701650203338</controlfield>
+          <controlfield tag="005">20261005091658.0</controlfield>
+          <controlfield tag="007">kv#|||||||||||</controlfield>
+          <controlfield tag="008">200101|1964#######|||############i|####u</controlfield>
+          <controlfield tag="009">GZ00657953</controlfield>
+          <datafield ind1=" " ind2=" " tag="035">
+            <subfield code="a">(Gideon)baa18432998</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="035">
+            <subfield code="a">(DBN)LE_64040310</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="040">
+            <subfield code="a">ONB</subfield>
+            <subfield code="b">ger</subfield>
+            <subfield code="c">ONB-FOTO</subfield>
+            <subfield code="d">AT-OeNB</subfield>
+          </datafield>
+          <datafield ind1="1" ind2=" " tag="100">
+            <subfield code="a">Lessing, Erich</subfield>
+            <subfield code="d">1923-2018</subfield>
+            <subfield code="0">(DE-588)119157004</subfield>
+            <subfield code="4">pht</subfield>
+          </datafield>
+          <datafield ind1="1" ind2="0" tag="245">
+            <subfield code="a">Anthony Quinn und Regisseur Michael Cacoyannis während der Dreharbeiten zu "Zorba the Greek" (dt. "Alexis Sorbas") in Kreta, 1964</subfield>
+          </datafield>
+          <datafield ind1=" " ind2="0" tag="264">
+            <subfield code="c">1964</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="505">
+            <subfield code="g">"Zorbas the Greek",the film after the famous novel by Nikos Kazantzakis,was written,directed and produced by Michael Cacoyannis.</subfield>
+          </datafield>
+          <datafield ind1=" " ind2="7" tag="655">
+            <subfield code="a">Fotografie</subfield>
+            <subfield code="0">(DE-588)4045895-7</subfield>
+            <subfield code="2">gnd-content</subfield>
+          </datafield>
+          <datafield ind1="1" ind2=" " tag="700">
+            <subfield code="a">Quinn, Anthony</subfield>
+            <subfield code="d">1916-</subfield>
+            <subfield code="4">oth</subfield>
+            <subfield code="e">Abgebildet</subfield>
+          </datafield>
+          <datafield ind1="4" ind2=" " tag="856">
+            <subfield code="u">https://data.onb.ac.at/rep/BAG_18432998</subfield>
+            <subfield code="3">Digitales Objekt</subfield>
+          </datafield>
+          <datafield ind1="2" ind2=" " tag="970">
+            <subfield code="a">ONB</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="980">
+            <subfield code="a">gideon foto</subfield>
+            <subfield code="9">LOCAL</subfield>
+            <subfield code="9">local</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="980">
+            <subfield code="a">Webshop</subfield>
+            <subfield code="9">LOCAL</subfield>
+            <subfield code="9">local</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="980">
+            <subfield code="a">Webverkauf</subfield>
+            <subfield code="9">local</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="982">
+            <subfield code="a">Kultur / Wissenschaft</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1="1" ind2=" " tag="983">
+            <subfield code="a">CINEMA | MOVIE: ZORBAS THE GREEK | REPORTAGE | ZORBAS THE GREEK, MOVIE</subfield>
+            <subfield code="2">iconclass</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="994">
+            <subfield code="a">Lessing, Erich</subfield>
+            <subfield code="b">Österreichischer Fotograf. Mitglied bei Magnum Photos.</subfield>
+            <subfield code="d">13.07.1923</subfield>
+            <subfield code="f">29.08.2018</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="994">
+            <subfield code="a">Quinn, Anthony</subfield>
+            <subfield code="d">??.??.1916</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="995">
+            <subfield code="e">Lessing Archiv</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="998">
+            <subfield code="a">LE 64040310</subfield>
+            <subfield code="x">ZPOR</subfield>
+            <subfield code="y">MAG</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="AVA">
+            <subfield code="0">9958701650203338</subfield>
+            <subfield code="8">22444936800003338</subfield>
+            <subfield code="a">43ACC_ONB</subfield>
+            <subfield code="b">ZPOR</subfield>
+            <subfield code="c">Picture Archives and Graphics Department (POR-MAG)</subfield>
+            <subfield code="d">LE 64040310</subfield>
+            <subfield code="e">available</subfield>
+            <subfield code="f">1</subfield>
+            <subfield code="g">0</subfield>
+            <subfield code="j">MAG</subfield>
+            <subfield code="p">1</subfield>
+            <subfield code="q">Picture Archives and Graphics Department (POR)</subfield>
+          </datafield>
+        </record>
+      </recordData>
+      <recordIdentifier>9958701650203338</recordIdentifier>
+      <recordPosition>14</recordPosition>
+    </record><record>
+      <recordSchema>marcxml</recordSchema>
+      <recordPacking>xml</recordPacking>
+      <recordData>
+        <record xmlns="http://www.loc.gov/MARC21/slim">
+          <leader>01243nkm a2200301zc 4500</leader>
+          <controlfield tag="001">9958701305103338</controlfield>
+          <controlfield tag="005">20261005091527.0</controlfield>
+          <controlfield tag="007">kv#|||||||||||</controlfield>
+          <controlfield tag="008">200101|1964#######|||############i|####u</controlfield>
+          <controlfield tag="009">GZ00656591</controlfield>
+          <datafield ind1=" " ind2=" " tag="035">
+            <subfield code="a">(Gideon)baa18433257</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="035">
+            <subfield code="a">(DBN)LE_64042921</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="040">
+            <subfield code="a">ONB</subfield>
+            <subfield code="b">ger</subfield>
+            <subfield code="c">ONB-FOTO</subfield>
+            <subfield code="d">AT-OeNB</subfield>
+          </datafield>
+          <datafield ind1="1" ind2=" " tag="100">
+            <subfield code="a">Lessing, Erich</subfield>
+            <subfield code="d">1923-2018</subfield>
+            <subfield code="0">(DE-588)119157004</subfield>
+            <subfield code="4">pht</subfield>
+          </datafield>
+          <datafield ind1="1" ind2="0" tag="245">
+            <subfield code="a">Bei den Dreharbeiten zu "Zorba the Greek" (dt. "Alexis Sorbas"), Kreta, 1964</subfield>
+          </datafield>
+          <datafield ind1=" " ind2="0" tag="264">
+            <subfield code="c">1964</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="505">
+            <subfield code="g">"Zorbas the Greek",the film after the famous novel by Nikos Kazantzakis,was written,directed and produced by Michael Cacoyannis.</subfield>
+          </datafield>
+          <datafield ind1=" " ind2="7" tag="655">
+            <subfield code="a">Fotografie</subfield>
+            <subfield code="0">(DE-588)4045895-7</subfield>
+            <subfield code="2">gnd-content</subfield>
+          </datafield>
+          <datafield ind1="4" ind2=" " tag="856">
+            <subfield code="u">https://data.onb.ac.at/rep/BAG_18433257</subfield>
+            <subfield code="3">Digitales Objekt</subfield>
+          </datafield>
+          <datafield ind1="2" ind2=" " tag="970">
+            <subfield code="a">ONB</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="980">
+            <subfield code="a">gideon foto</subfield>
+            <subfield code="9">LOCAL</subfield>
+            <subfield code="9">local</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="980">
+            <subfield code="a">Webshop</subfield>
+            <subfield code="9">LOCAL</subfield>
+            <subfield code="9">local</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="980">
+            <subfield code="a">Webverkauf</subfield>
+            <subfield code="9">local</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="982">
+            <subfield code="a">Kultur / Wissenschaft</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1="1" ind2=" " tag="983">
+            <subfield code="a">MOVIE: ZORBAS THE GREEK | REPORTAGE | ZORBAS THE GREEK, MOVIE</subfield>
+            <subfield code="2">iconclass</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="994">
+            <subfield code="a">Lessing, Erich</subfield>
+            <subfield code="b">Österreichischer Fotograf. Mitglied bei Magnum Photos.</subfield>
+            <subfield code="d">13.07.1923</subfield>
+            <subfield code="f">29.08.2018</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="995">
+            <subfield code="e">Lessing Archiv</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="998">
+            <subfield code="a">LE 64042921</subfield>
+            <subfield code="x">ZPOR</subfield>
+            <subfield code="y">MAG</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="AVA">
+            <subfield code="0">9958701305103338</subfield>
+            <subfield code="8">22444877830003338</subfield>
+            <subfield code="a">43ACC_ONB</subfield>
+            <subfield code="b">ZPOR</subfield>
+            <subfield code="c">Picture Archives and Graphics Department (POR-MAG)</subfield>
+            <subfield code="d">LE 64042921</subfield>
+            <subfield code="e">available</subfield>
+            <subfield code="f">1</subfield>
+            <subfield code="g">0</subfield>
+            <subfield code="j">MAG</subfield>
+            <subfield code="p">1</subfield>
+            <subfield code="q">Picture Archives and Graphics Department (POR)</subfield>
+          </datafield>
+        </record>
+      </recordData>
+      <recordIdentifier>9958701305103338</recordIdentifier>
+      <recordPosition>15</recordPosition>
+    </record><record>
+      <recordSchema>marcxml</recordSchema>
+      <recordPacking>xml</recordPacking>
+      <recordData>
+        <record xmlns="http://www.loc.gov/MARC21/slim">
+          <leader>01357nkm a2200325zc 4500</leader>
+          <controlfield tag="001">9958701315803338</controlfield>
+          <controlfield tag="005">20261005091528.0</controlfield>
+          <controlfield tag="007">kv#|||||||||||</controlfield>
+          <controlfield tag="008">200101|1964#######|||############i|####u</controlfield>
+          <controlfield tag="009">GZ00656134</controlfield>
+          <datafield ind1=" " ind2=" " tag="035">
+            <subfield code="a">(Gideon)baa18433194</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="035">
+            <subfield code="a">(DBN)LE_64042310</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="040">
+            <subfield code="a">ONB</subfield>
+            <subfield code="b">ger</subfield>
+            <subfield code="c">ONB-FOTO</subfield>
+            <subfield code="d">AT-OeNB</subfield>
+          </datafield>
+          <datafield ind1="1" ind2=" " tag="100">
+            <subfield code="a">Lessing, Erich</subfield>
+            <subfield code="d">1923-2018</subfield>
+            <subfield code="0">(DE-588)119157004</subfield>
+            <subfield code="4">pht</subfield>
+          </datafield>
+          <datafield ind1="1" ind2="0" tag="245">
+            <subfield code="a">Bei den Dreharbeiten zu "Zorba the Greek" (dt. "Alexis Sorbas"), Kreta, 1964</subfield>
+          </datafield>
+          <datafield ind1=" " ind2="0" tag="264">
+            <subfield code="c">1964</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="505">
+            <subfield code="g">"Zorbas the Greek",the film after the famous novel by Nikos Kazantzakis,was written,directed and produced by Michael Cacoyannis.</subfield>
+          </datafield>
+          <datafield ind1=" " ind2="7" tag="655">
+            <subfield code="a">Fotografie</subfield>
+            <subfield code="0">(DE-588)4045895-7</subfield>
+            <subfield code="2">gnd-content</subfield>
+          </datafield>
+          <datafield ind1="1" ind2=" " tag="700">
+            <subfield code="a">Quinn, Anthony</subfield>
+            <subfield code="d">1916-</subfield>
+            <subfield code="4">oth</subfield>
+            <subfield code="e">Abgebildet</subfield>
+          </datafield>
+          <datafield ind1="4" ind2=" " tag="856">
+            <subfield code="u">https://data.onb.ac.at/rep/BAG_18433194</subfield>
+            <subfield code="3">Digitales Objekt</subfield>
+          </datafield>
+          <datafield ind1="2" ind2=" " tag="970">
+            <subfield code="a">ONB</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="980">
+            <subfield code="a">gideon foto</subfield>
+            <subfield code="9">LOCAL</subfield>
+            <subfield code="9">local</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="980">
+            <subfield code="a">Webshop</subfield>
+            <subfield code="9">LOCAL</subfield>
+            <subfield code="9">local</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="980">
+            <subfield code="a">Webverkauf</subfield>
+            <subfield code="9">local</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="982">
+            <subfield code="a">Kultur / Wissenschaft</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1="1" ind2=" " tag="983">
+            <subfield code="a">CINEMA | MOVIE: ZORBAS THE GREEK | REPORTAGE | ZORBAS THE GREEK, MOVIE</subfield>
+            <subfield code="2">iconclass</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="994">
+            <subfield code="a">Lessing, Erich</subfield>
+            <subfield code="b">Österreichischer Fotograf. Mitglied bei Magnum Photos.</subfield>
+            <subfield code="d">13.07.1923</subfield>
+            <subfield code="f">29.08.2018</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="994">
+            <subfield code="a">Quinn, Anthony</subfield>
+            <subfield code="d">??.??.1916</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="995">
+            <subfield code="e">Lessing Archiv</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="998">
+            <subfield code="a">LE 64042310</subfield>
+            <subfield code="x">ZPOR</subfield>
+            <subfield code="y">MAG</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="AVA">
+            <subfield code="0">9958701315803338</subfield>
+            <subfield code="8">22444858460003338</subfield>
+            <subfield code="a">43ACC_ONB</subfield>
+            <subfield code="b">ZPOR</subfield>
+            <subfield code="c">Picture Archives and Graphics Department (POR-MAG)</subfield>
+            <subfield code="d">LE 64042310</subfield>
+            <subfield code="e">available</subfield>
+            <subfield code="f">1</subfield>
+            <subfield code="g">0</subfield>
+            <subfield code="j">MAG</subfield>
+            <subfield code="p">1</subfield>
+            <subfield code="q">Picture Archives and Graphics Department (POR)</subfield>
+          </datafield>
+        </record>
+      </recordData>
+      <recordIdentifier>9958701315803338</recordIdentifier>
+      <recordPosition>16</recordPosition>
+    </record><record>
+      <recordSchema>marcxml</recordSchema>
+      <recordPacking>xml</recordPacking>
+      <recordData>
+        <record xmlns="http://www.loc.gov/MARC21/slim">
+          <leader>01537nkm a2200301zc 4500</leader>
+          <controlfield tag="001">9958701650403338</controlfield>
+          <controlfield tag="005">20261005091653.0</controlfield>
+          <controlfield tag="007">kv#|||||||||||</controlfield>
+          <controlfield tag="008">200101|1964#######|||############i|####u</controlfield>
+          <controlfield tag="009">GZ00657951</controlfield>
+          <datafield ind1=" " ind2=" " tag="035">
+            <subfield code="a">(Gideon)baa18432984</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="035">
+            <subfield code="a">(DBN)LE_64040128</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="040">
+            <subfield code="a">ONB</subfield>
+            <subfield code="b">ger</subfield>
+            <subfield code="c">ONB-FOTO</subfield>
+            <subfield code="d">AT-OeNB</subfield>
+          </datafield>
+          <datafield ind1="1" ind2=" " tag="100">
+            <subfield code="a">Lessing, Erich</subfield>
+            <subfield code="d">1923-2018</subfield>
+            <subfield code="0">(DE-588)119157004</subfield>
+            <subfield code="4">pht</subfield>
+          </datafield>
+          <datafield ind1="1" ind2="0" tag="245">
+            <subfield code="a">Der Regisseur Michael Cacoyannis am Set seines Films "Zorba the Greek" (dt. Titel "Alexis Sorbas"), Kreta, 1964</subfield>
+          </datafield>
+          <datafield ind1=" " ind2="0" tag="264">
+            <subfield code="c">1964</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="505">
+            <subfield code="g">"Zorbas the Greek",the film after the famous novel by Nikos Kazantzakis,was written,directed and produced by Michael Cacoyannis.Anthony Quinn played Zorbas, Eleni Anousaki the temptress Lola. Director Michael Cacoyannis, Crete,1964</subfield>
+          </datafield>
+          <datafield ind1=" " ind2="7" tag="655">
+            <subfield code="a">Fotografie</subfield>
+            <subfield code="0">(DE-588)4045895-7</subfield>
+            <subfield code="2">gnd-content</subfield>
+          </datafield>
+          <datafield ind1="4" ind2=" " tag="856">
+            <subfield code="u">https://data.onb.ac.at/rep/BAG_18432984</subfield>
+            <subfield code="3">Digitales Objekt</subfield>
+          </datafield>
+          <datafield ind1="2" ind2=" " tag="970">
+            <subfield code="a">ONB</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="980">
+            <subfield code="a">gideon foto</subfield>
+            <subfield code="9">LOCAL</subfield>
+            <subfield code="9">local</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="980">
+            <subfield code="a">Webshop</subfield>
+            <subfield code="9">LOCAL</subfield>
+            <subfield code="9">local</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="980">
+            <subfield code="a">Webverkauf</subfield>
+            <subfield code="9">local</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="982">
+            <subfield code="a">Kultur / Wissenschaft</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1="1" ind2=" " tag="983">
+            <subfield code="a">CINEMA | 20TH | MOVIE: ZORBAS THE GREEK | LESSING, ERICH, PHOTOGRAPHER | REPORTAGE | EUROPE: POST WORLD WAR II | AUSTRIAN | 20TH CENTURY | ZORBAS THE GREEK, MOVIE | AUSTRIA | MOVIES | CACOYANNIS, MICHAEL | PHOTOGRAPHY</subfield>
+            <subfield code="2">iconclass</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="994">
+            <subfield code="a">Lessing, Erich</subfield>
+            <subfield code="b">Österreichischer Fotograf. Mitglied bei Magnum Photos.</subfield>
+            <subfield code="d">13.07.1923</subfield>
+            <subfield code="f">29.08.2018</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="995">
+            <subfield code="e">Lessing Archiv</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="998">
+            <subfield code="a">LE 64040128</subfield>
+            <subfield code="x">ZPOR</subfield>
+            <subfield code="y">MAG</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="AVA">
+            <subfield code="0">9958701650403338</subfield>
+            <subfield code="8">22444937080003338</subfield>
+            <subfield code="a">43ACC_ONB</subfield>
+            <subfield code="b">ZPOR</subfield>
+            <subfield code="c">Picture Archives and Graphics Department (POR-MAG)</subfield>
+            <subfield code="d">LE 64040128</subfield>
+            <subfield code="e">available</subfield>
+            <subfield code="f">1</subfield>
+            <subfield code="g">0</subfield>
+            <subfield code="j">MAG</subfield>
+            <subfield code="p">1</subfield>
+            <subfield code="q">Picture Archives and Graphics Department (POR)</subfield>
+          </datafield>
+        </record>
+      </recordData>
+      <recordIdentifier>9958701650403338</recordIdentifier>
+      <recordPosition>17</recordPosition>
+    </record><record>
+      <recordSchema>marcxml</recordSchema>
+      <recordPacking>xml</recordPacking>
+      <recordData>
+        <record xmlns="http://www.loc.gov/MARC21/slim">
+          <leader>01292nkm a2200301zc 4500</leader>
+          <controlfield tag="001">9958701648903338</controlfield>
+          <controlfield tag="005">20261005091659.0</controlfield>
+          <controlfield tag="007">kv#|||||||||||</controlfield>
+          <controlfield tag="008">200101|1964#######|||############i|####u</controlfield>
+          <controlfield tag="009">GZ00657966</controlfield>
+          <datafield ind1=" " ind2=" " tag="035">
+            <subfield code="a">(Gideon)baa18433103</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="035">
+            <subfield code="a">(DBN)LE_64041013</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="040">
+            <subfield code="a">ONB</subfield>
+            <subfield code="b">ger</subfield>
+            <subfield code="c">ONB-FOTO</subfield>
+            <subfield code="d">AT-OeNB</subfield>
+          </datafield>
+          <datafield ind1="1" ind2=" " tag="100">
+            <subfield code="a">Lessing, Erich</subfield>
+            <subfield code="d">1923-2018</subfield>
+            <subfield code="0">(DE-588)119157004</subfield>
+            <subfield code="4">pht</subfield>
+          </datafield>
+          <datafield ind1="1" ind2="0" tag="245">
+            <subfield code="a">Der Regisseur Michael Cacoyannis während der Dreharbeiten zu "Zorba the Greek" (dt. "Alexis Sorbas") in Kreta, 1964</subfield>
+          </datafield>
+          <datafield ind1=" " ind2="0" tag="264">
+            <subfield code="c">1964</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="505">
+            <subfield code="g">"Zorbas the Greek",the film after the famous novel by Nikos Kazantzakis,was written,directed and produced by Michael Cacoyannis.</subfield>
+          </datafield>
+          <datafield ind1=" " ind2="7" tag="655">
+            <subfield code="a">Fotografie</subfield>
+            <subfield code="0">(DE-588)4045895-7</subfield>
+            <subfield code="2">gnd-content</subfield>
+          </datafield>
+          <datafield ind1="4" ind2=" " tag="856">
+            <subfield code="u">https://data.onb.ac.at/rep/BAG_18433103</subfield>
+            <subfield code="3">Digitales Objekt</subfield>
+          </datafield>
+          <datafield ind1="2" ind2=" " tag="970">
+            <subfield code="a">ONB</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="980">
+            <subfield code="a">gideon foto</subfield>
+            <subfield code="9">LOCAL</subfield>
+            <subfield code="9">local</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="980">
+            <subfield code="a">Webshop</subfield>
+            <subfield code="9">LOCAL</subfield>
+            <subfield code="9">local</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="980">
+            <subfield code="a">Webverkauf</subfield>
+            <subfield code="9">local</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="982">
+            <subfield code="a">Kultur / Wissenschaft</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1="1" ind2=" " tag="983">
+            <subfield code="a">CINEMA | MOVIE: ZORBAS THE GREEK | REPORTAGE | ZORBAS THE GREEK, MOVIE</subfield>
+            <subfield code="2">iconclass</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="994">
+            <subfield code="a">Lessing, Erich</subfield>
+            <subfield code="b">Österreichischer Fotograf. Mitglied bei Magnum Photos.</subfield>
+            <subfield code="d">13.07.1923</subfield>
+            <subfield code="f">29.08.2018</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="995">
+            <subfield code="e">Lessing Archiv</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="998">
+            <subfield code="a">LE 64041013</subfield>
+            <subfield code="x">ZPOR</subfield>
+            <subfield code="y">MAG</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="AVA">
+            <subfield code="0">9958701648903338</subfield>
+            <subfield code="8">22444935040003338</subfield>
+            <subfield code="a">43ACC_ONB</subfield>
+            <subfield code="b">ZPOR</subfield>
+            <subfield code="c">Picture Archives and Graphics Department (POR-MAG)</subfield>
+            <subfield code="d">LE 64041013</subfield>
+            <subfield code="e">available</subfield>
+            <subfield code="f">1</subfield>
+            <subfield code="g">0</subfield>
+            <subfield code="j">MAG</subfield>
+            <subfield code="p">1</subfield>
+            <subfield code="q">Picture Archives and Graphics Department (POR)</subfield>
+          </datafield>
+        </record>
+      </recordData>
+      <recordIdentifier>9958701648903338</recordIdentifier>
+      <recordPosition>18</recordPosition>
+    </record><record>
+      <recordSchema>marcxml</recordSchema>
+      <recordPacking>xml</recordPacking>
+      <recordData>
+        <record xmlns="http://www.loc.gov/MARC21/slim">
+          <leader>01419nkm a2200301zc 4500</leader>
+          <controlfield tag="001">9958701648403338</controlfield>
+          <controlfield tag="005">20261005091658.0</controlfield>
+          <controlfield tag="007">kv#|||||||||||</controlfield>
+          <controlfield tag="008">200101|1964#######|||############i|####u</controlfield>
+          <controlfield tag="009">GZ00657971</controlfield>
+          <datafield ind1=" " ind2=" " tag="035">
+            <subfield code="a">(Gideon)baa18433145</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="035">
+            <subfield code="a">(DBN)LE_64041613</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="040">
+            <subfield code="a">ONB</subfield>
+            <subfield code="b">ger</subfield>
+            <subfield code="c">ONB-FOTO</subfield>
+            <subfield code="d">AT-OeNB</subfield>
+          </datafield>
+          <datafield ind1="1" ind2=" " tag="100">
+            <subfield code="a">Lessing, Erich</subfield>
+            <subfield code="d">1923-2018</subfield>
+            <subfield code="0">(DE-588)119157004</subfield>
+            <subfield code="4">pht</subfield>
+          </datafield>
+          <datafield ind1="1" ind2="0" tag="245">
+            <subfield code="a">Der Regisseur Michael Cacoyannis während der Dreharbeiten zu "Zorba the Greek", Kreta, 1964</subfield>
+          </datafield>
+          <datafield ind1=" " ind2="0" tag="264">
+            <subfield code="c">1964</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="505">
+            <subfield code="g">Director Michael Cacoyannis shows the "evil eye" with a gesture of his fingers. The making of Zorba the Greek. Crete, Greece, 1964.</subfield>
+          </datafield>
+          <datafield ind1=" " ind2="7" tag="655">
+            <subfield code="a">Fotografie</subfield>
+            <subfield code="0">(DE-588)4045895-7</subfield>
+            <subfield code="2">gnd-content</subfield>
+          </datafield>
+          <datafield ind1="4" ind2=" " tag="856">
+            <subfield code="u">https://data.onb.ac.at/rep/BAG_18433145</subfield>
+            <subfield code="3">Digitales Objekt</subfield>
+          </datafield>
+          <datafield ind1="2" ind2=" " tag="970">
+            <subfield code="a">ONB</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="980">
+            <subfield code="a">gideon foto</subfield>
+            <subfield code="9">LOCAL</subfield>
+            <subfield code="9">local</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="980">
+            <subfield code="a">Webshop</subfield>
+            <subfield code="9">LOCAL</subfield>
+            <subfield code="9">local</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="980">
+            <subfield code="a">Webverkauf</subfield>
+            <subfield code="9">local</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="982">
+            <subfield code="a">Kultur / Wissenschaft</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1="1" ind2=" " tag="983">
+            <subfield code="a">CINEMA | MOVIE: ZORBAS THE GREEK | 20TH CENTURY | REPORTAGE | ZORBAS THE GREEK, MOVIE | PHOTOGRAPHY | 20TH | LESSING, ERICH, PHOTOGRAPHER | EUROPE: POST WORLD WAR II | CURSE | MALEDICTION | CACOYANNIS, MICHAEL | MOVIES</subfield>
+            <subfield code="2">iconclass</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="994">
+            <subfield code="a">Lessing, Erich</subfield>
+            <subfield code="b">Österreichischer Fotograf. Mitglied bei Magnum Photos.</subfield>
+            <subfield code="d">13.07.1923</subfield>
+            <subfield code="f">29.08.2018</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="995">
+            <subfield code="e">Lessing Archiv</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="998">
+            <subfield code="a">LE 64041613</subfield>
+            <subfield code="x">ZPOR</subfield>
+            <subfield code="y">MAG</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="AVA">
+            <subfield code="0">9958701648403338</subfield>
+            <subfield code="8">22444934420003338</subfield>
+            <subfield code="a">43ACC_ONB</subfield>
+            <subfield code="b">ZPOR</subfield>
+            <subfield code="c">Picture Archives and Graphics Department (POR-MAG)</subfield>
+            <subfield code="d">LE 64041613</subfield>
+            <subfield code="e">available</subfield>
+            <subfield code="f">1</subfield>
+            <subfield code="g">0</subfield>
+            <subfield code="j">MAG</subfield>
+            <subfield code="p">1</subfield>
+            <subfield code="q">Picture Archives and Graphics Department (POR)</subfield>
+          </datafield>
+        </record>
+      </recordData>
+      <recordIdentifier>9958701648403338</recordIdentifier>
+      <recordPosition>19</recordPosition>
+    </record><record>
+      <recordSchema>marcxml</recordSchema>
+      <recordPacking>xml</recordPacking>
+      <recordData>
+        <record xmlns="http://www.loc.gov/MARC21/slim">
+          <leader>01458nkm a2200301zc 4500</leader>
+          <controlfield tag="001">9958701648603338</controlfield>
+          <controlfield tag="005">20261005091655.0</controlfield>
+          <controlfield tag="007">kv#|||||||||||</controlfield>
+          <controlfield tag="008">200101|1964#######|||############i|####u</controlfield>
+          <controlfield tag="009">GZ00657969</controlfield>
+          <datafield ind1=" " ind2=" " tag="035">
+            <subfield code="a">(Gideon)baa18433131</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="035">
+            <subfield code="a">(DBN)LE_64041329</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="040">
+            <subfield code="a">ONB</subfield>
+            <subfield code="b">ger</subfield>
+            <subfield code="c">ONB-FOTO</subfield>
+            <subfield code="d">AT-OeNB</subfield>
+          </datafield>
+          <datafield ind1="1" ind2=" " tag="100">
+            <subfield code="a">Lessing, Erich</subfield>
+            <subfield code="d">1923-2018</subfield>
+            <subfield code="0">(DE-588)119157004</subfield>
+            <subfield code="4">pht</subfield>
+          </datafield>
+          <datafield ind1="1" ind2="0" tag="245">
+            <subfield code="a">Der Regisseur Michael Cacoyannis während der Dreharbeiten zu "Zorba the Greek", Kreta, 1964</subfield>
+          </datafield>
+          <datafield ind1=" " ind2="0" tag="264">
+            <subfield code="c">1964</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="505">
+            <subfield code="g">The explosive temperament of director Michael Cacoyannis is captured in this phot taken in the countryside near Chania. The making of Zorba the Greek. Crete, Greece, 1964.</subfield>
+          </datafield>
+          <datafield ind1=" " ind2="7" tag="655">
+            <subfield code="a">Fotografie</subfield>
+            <subfield code="0">(DE-588)4045895-7</subfield>
+            <subfield code="2">gnd-content</subfield>
+          </datafield>
+          <datafield ind1="4" ind2=" " tag="856">
+            <subfield code="u">https://data.onb.ac.at/rep/BAG_18433131</subfield>
+            <subfield code="3">Digitales Objekt</subfield>
+          </datafield>
+          <datafield ind1="2" ind2=" " tag="970">
+            <subfield code="a">ONB</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="980">
+            <subfield code="a">gideon foto</subfield>
+            <subfield code="9">LOCAL</subfield>
+            <subfield code="9">local</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="980">
+            <subfield code="a">Webshop</subfield>
+            <subfield code="9">LOCAL</subfield>
+            <subfield code="9">local</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="980">
+            <subfield code="a">Webverkauf</subfield>
+            <subfield code="9">local</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="982">
+            <subfield code="a">Kultur / Wissenschaft</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1="1" ind2=" " tag="983">
+            <subfield code="a">CINEMA | 20TH | MOVIE: ZORBAS THE GREEK | LESSING, ERICH, PHOTOGRAPHER | REPORTAGE | EUROPE: POST WORLD WAR II | AUSTRIAN | 20TH CENTURY | ZORBAS THE GREEK, MOVIE | AUSTRIA | MOVIES | CACOYANNIS, MICHAEL | PHOTOGRAPHY</subfield>
+            <subfield code="2">iconclass</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="994">
+            <subfield code="a">Lessing, Erich</subfield>
+            <subfield code="b">Österreichischer Fotograf. Mitglied bei Magnum Photos.</subfield>
+            <subfield code="d">13.07.1923</subfield>
+            <subfield code="f">29.08.2018</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="995">
+            <subfield code="e">Lessing Archiv</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="998">
+            <subfield code="a">LE 64041329</subfield>
+            <subfield code="x">ZPOR</subfield>
+            <subfield code="y">MAG</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="AVA">
+            <subfield code="0">9958701648603338</subfield>
+            <subfield code="8">22444934650003338</subfield>
+            <subfield code="a">43ACC_ONB</subfield>
+            <subfield code="b">ZPOR</subfield>
+            <subfield code="c">Picture Archives and Graphics Department (POR-MAG)</subfield>
+            <subfield code="d">LE 64041329</subfield>
+            <subfield code="e">available</subfield>
+            <subfield code="f">1</subfield>
+            <subfield code="g">0</subfield>
+            <subfield code="j">MAG</subfield>
+            <subfield code="p">1</subfield>
+            <subfield code="q">Picture Archives and Graphics Department (POR)</subfield>
+          </datafield>
+        </record>
+      </recordData>
+      <recordIdentifier>9958701648603338</recordIdentifier>
+      <recordPosition>20</recordPosition>
+    </record><record>
+      <recordSchema>marcxml</recordSchema>
+      <recordPacking>xml</recordPacking>
+      <recordData>
+        <record xmlns="http://www.loc.gov/MARC21/slim">
+          <leader>01422nkm a2200301zc 4500</leader>
+          <controlfield tag="001">9958701648703338</controlfield>
+          <controlfield tag="005">20261005091657.0</controlfield>
+          <controlfield tag="007">kv#|||||||||||</controlfield>
+          <controlfield tag="008">200101|1964#######|||############i|####u</controlfield>
+          <controlfield tag="009">GZ00657968</controlfield>
+          <datafield ind1=" " ind2=" " tag="035">
+            <subfield code="a">(Gideon)baa18433117</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="035">
+            <subfield code="a">(DBN)LE_64041120</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="040">
+            <subfield code="a">ONB</subfield>
+            <subfield code="b">ger</subfield>
+            <subfield code="c">ONB-FOTO</subfield>
+            <subfield code="d">AT-OeNB</subfield>
+          </datafield>
+          <datafield ind1="1" ind2=" " tag="100">
+            <subfield code="a">Lessing, Erich</subfield>
+            <subfield code="d">1923-2018</subfield>
+            <subfield code="0">(DE-588)119157004</subfield>
+            <subfield code="4">pht</subfield>
+          </datafield>
+          <datafield ind1="1" ind2="0" tag="245">
+            <subfield code="a">Der Regisseur Michael Cacoyannis während der Dreharbeiten zu "Zorba the Greek", Kreta, 1964</subfield>
+          </datafield>
+          <datafield ind1=" " ind2="0" tag="264">
+            <subfield code="c">1964</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="505">
+            <subfield code="g">Director Michael Cacoyannis during the filming on location. The making of Zorba the Greek. Crete, Greece, 1964.</subfield>
+          </datafield>
+          <datafield ind1=" " ind2="7" tag="655">
+            <subfield code="a">Fotografie</subfield>
+            <subfield code="0">(DE-588)4045895-7</subfield>
+            <subfield code="2">gnd-content</subfield>
+          </datafield>
+          <datafield ind1="4" ind2=" " tag="856">
+            <subfield code="u">https://data.onb.ac.at/rep/BAG_18433117</subfield>
+            <subfield code="3">Digitales Objekt</subfield>
+          </datafield>
+          <datafield ind1="2" ind2=" " tag="970">
+            <subfield code="a">ONB</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="980">
+            <subfield code="a">gideon foto</subfield>
+            <subfield code="9">LOCAL</subfield>
+            <subfield code="9">local</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="980">
+            <subfield code="a">Webshop</subfield>
+            <subfield code="9">LOCAL</subfield>
+            <subfield code="9">local</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="980">
+            <subfield code="a">Webverkauf</subfield>
+            <subfield code="9">local</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="982">
+            <subfield code="a">Kultur / Wissenschaft</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1="1" ind2=" " tag="983">
+            <subfield code="a">CINEMA | MOVIE: ZORBAS THE GREEK | QUINN, ANTHONY, ACTOR | REPORTAGE | 20TH CENTURY | AUSTRIAN | ZORBAS THE GREEK, MOVIE | PHOTOGRAPHY | 20TH | LESSING, ERICH, PHOTOGRAPHER | EUROPE: POST WORLD WAR II | AUSTRIA | CACOYANNIS, MICHAEL | MOVIES</subfield>
+            <subfield code="2">iconclass</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="994">
+            <subfield code="a">Lessing, Erich</subfield>
+            <subfield code="b">Österreichischer Fotograf. Mitglied bei Magnum Photos.</subfield>
+            <subfield code="d">13.07.1923</subfield>
+            <subfield code="f">29.08.2018</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="995">
+            <subfield code="e">Lessing Archiv</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="998">
+            <subfield code="a">LE 64041120</subfield>
+            <subfield code="x">ZPOR</subfield>
+            <subfield code="y">MAG</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="AVA">
+            <subfield code="0">9958701648703338</subfield>
+            <subfield code="8">22444934790003338</subfield>
+            <subfield code="a">43ACC_ONB</subfield>
+            <subfield code="b">ZPOR</subfield>
+            <subfield code="c">Picture Archives and Graphics Department (POR-MAG)</subfield>
+            <subfield code="d">LE 64041120</subfield>
+            <subfield code="e">available</subfield>
+            <subfield code="f">1</subfield>
+            <subfield code="g">0</subfield>
+            <subfield code="j">MAG</subfield>
+            <subfield code="p">1</subfield>
+            <subfield code="q">Picture Archives and Graphics Department (POR)</subfield>
+          </datafield>
+        </record>
+      </recordData>
+      <recordIdentifier>9958701648703338</recordIdentifier>
+      <recordPosition>21</recordPosition>
+    </record><record>
+      <recordSchema>marcxml</recordSchema>
+      <recordPacking>xml</recordPacking>
+      <recordData>
+        <record xmlns="http://www.loc.gov/MARC21/slim">
+          <leader>01554nkm a2200301zc 4500</leader>
+          <controlfield tag="001">9958701650303338</controlfield>
+          <controlfield tag="005">20261005091656.0</controlfield>
+          <controlfield tag="007">kv#|||||||||||</controlfield>
+          <controlfield tag="008">200101|1964#######|||############i|####u</controlfield>
+          <controlfield tag="009">GZ00657952</controlfield>
+          <datafield ind1=" " ind2=" " tag="035">
+            <subfield code="a">(Gideon)baa18432991</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="035">
+            <subfield code="a">(DBN)LE_64040130</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="040">
+            <subfield code="a">ONB</subfield>
+            <subfield code="b">ger</subfield>
+            <subfield code="c">ONB-FOTO</subfield>
+            <subfield code="d">AT-OeNB</subfield>
+          </datafield>
+          <datafield ind1="1" ind2=" " tag="100">
+            <subfield code="a">Lessing, Erich</subfield>
+            <subfield code="d">1923-2018</subfield>
+            <subfield code="0">(DE-588)119157004</subfield>
+            <subfield code="4">pht</subfield>
+          </datafield>
+          <datafield ind1="1" ind2="0" tag="245">
+            <subfield code="a">Der Regisseur Michael Cacoyannis während der Dreharbeiten zu seinem Film "Zorba the Greek" (dt. "Alexis Sorbas") in Kreta, 1964</subfield>
+          </datafield>
+          <datafield ind1=" " ind2="0" tag="264">
+            <subfield code="c">1964</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="505">
+            <subfield code="g">"Zorbas the Greek",the film after the famous novel by Nikos Kazantzakis,was written,directed and produced by Michael Cacoyannis.Anthony Quinn played Zorbas, Eleni Anousaki the temptress Lola. Director Michael Cacoyannis, Crete,1964</subfield>
+          </datafield>
+          <datafield ind1=" " ind2="7" tag="655">
+            <subfield code="a">Fotografie</subfield>
+            <subfield code="0">(DE-588)4045895-7</subfield>
+            <subfield code="2">gnd-content</subfield>
+          </datafield>
+          <datafield ind1="4" ind2=" " tag="856">
+            <subfield code="u">https://data.onb.ac.at/rep/BAG_18432991</subfield>
+            <subfield code="3">Digitales Objekt</subfield>
+          </datafield>
+          <datafield ind1="2" ind2=" " tag="970">
+            <subfield code="a">ONB</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="980">
+            <subfield code="a">gideon foto</subfield>
+            <subfield code="9">LOCAL</subfield>
+            <subfield code="9">local</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="980">
+            <subfield code="a">Webshop</subfield>
+            <subfield code="9">LOCAL</subfield>
+            <subfield code="9">local</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="980">
+            <subfield code="a">Webverkauf</subfield>
+            <subfield code="9">local</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="982">
+            <subfield code="a">Kultur / Wissenschaft</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1="1" ind2=" " tag="983">
+            <subfield code="a">CINEMA | 20TH | MOVIE: ZORBAS THE GREEK | LESSING, ERICH, PHOTOGRAPHER | REPORTAGE | EUROPE: POST WORLD WAR II | AUSTRIAN | 20TH CENTURY | ZORBAS THE GREEK, MOVIE | AUSTRIA | MOVIES | CACOYANNIS, MICHAEL | PHOTOGRAPHY</subfield>
+            <subfield code="2">iconclass</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="994">
+            <subfield code="a">Lessing, Erich</subfield>
+            <subfield code="b">Österreichischer Fotograf. Mitglied bei Magnum Photos.</subfield>
+            <subfield code="d">13.07.1923</subfield>
+            <subfield code="f">29.08.2018</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="995">
+            <subfield code="e">Lessing Archiv</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="998">
+            <subfield code="a">LE 64040130</subfield>
+            <subfield code="x">ZPOR</subfield>
+            <subfield code="y">MAG</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="AVA">
+            <subfield code="0">9958701650303338</subfield>
+            <subfield code="8">22444936920003338</subfield>
+            <subfield code="a">43ACC_ONB</subfield>
+            <subfield code="b">ZPOR</subfield>
+            <subfield code="c">Picture Archives and Graphics Department (POR-MAG)</subfield>
+            <subfield code="d">LE 64040130</subfield>
+            <subfield code="e">available</subfield>
+            <subfield code="f">1</subfield>
+            <subfield code="g">0</subfield>
+            <subfield code="j">MAG</subfield>
+            <subfield code="p">1</subfield>
+            <subfield code="q">Picture Archives and Graphics Department (POR)</subfield>
+          </datafield>
+        </record>
+      </recordData>
+      <recordIdentifier>9958701650303338</recordIdentifier>
+      <recordPosition>22</recordPosition>
+    </record><record>
+      <recordSchema>marcxml</recordSchema>
+      <recordPacking>xml</recordPacking>
+      <recordData>
+        <record xmlns="http://www.loc.gov/MARC21/slim">
+          <leader>01501nkm a2200301zc 4500</leader>
+          <controlfield tag="001">9958701305303338</controlfield>
+          <controlfield tag="005">20261005091528.0</controlfield>
+          <controlfield tag="007">kv#|||||||||||</controlfield>
+          <controlfield tag="008">200101|1964#######|||############i|####u</controlfield>
+          <controlfield tag="009">GZ00656589</controlfield>
+          <datafield ind1=" " ind2=" " tag="035">
+            <subfield code="a">(Gideon)baa18433243</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="035">
+            <subfield code="a">(DBN)LE_64042833</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="040">
+            <subfield code="a">ONB</subfield>
+            <subfield code="b">ger</subfield>
+            <subfield code="c">ONB-FOTO</subfield>
+            <subfield code="d">AT-OeNB</subfield>
+          </datafield>
+          <datafield ind1="1" ind2=" " tag="100">
+            <subfield code="a">Lessing, Erich</subfield>
+            <subfield code="d">1923-2018</subfield>
+            <subfield code="0">(DE-588)119157004</subfield>
+            <subfield code="4">pht</subfield>
+          </datafield>
+          <datafield ind1="1" ind2="0" tag="245">
+            <subfield code="a">Die Schauspielerin Eleni Anousaki in "Zorba the Greek", Kreta, 1964</subfield>
+          </datafield>
+          <datafield ind1=" " ind2="0" tag="264">
+            <subfield code="c">1964</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="505">
+            <subfield code="g">"Zorbas the Greek",the film after the famous novel by Nikos Kazantzakis,was written,directed and produced by Michael Cacoyannis.Anthony Quinn played Zorbas, Eleni Anousaki the temptress Lola.Lola (Anousaki) sees Quinn's money. Crete,1964</subfield>
+          </datafield>
+          <datafield ind1=" " ind2="7" tag="655">
+            <subfield code="a">Fotografie</subfield>
+            <subfield code="0">(DE-588)4045895-7</subfield>
+            <subfield code="2">gnd-content</subfield>
+          </datafield>
+          <datafield ind1="4" ind2=" " tag="856">
+            <subfield code="u">https://data.onb.ac.at/rep/BAG_18433243</subfield>
+            <subfield code="3">Digitales Objekt</subfield>
+          </datafield>
+          <datafield ind1="2" ind2=" " tag="970">
+            <subfield code="a">ONB</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="980">
+            <subfield code="a">gideon foto</subfield>
+            <subfield code="9">LOCAL</subfield>
+            <subfield code="9">local</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="980">
+            <subfield code="a">Webshop</subfield>
+            <subfield code="9">LOCAL</subfield>
+            <subfield code="9">local</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="980">
+            <subfield code="a">Webverkauf</subfield>
+            <subfield code="9">local</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="982">
+            <subfield code="a">Kultur / Wissenschaft</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1="1" ind2=" " tag="983">
+            <subfield code="a">CINEMA | 20TH | MOVIE: ZORBAS THE GREEK | LESSING, ERICH, PHOTOGRAPHER | QUINN, ANTHONY, ACTOR | REPORTAGE | EUROPE: POST WORLD WAR II | AUSTRIAN | 20TH CENTURY | ZORBAS THE GREEK, MOVIE | AUSTRIA | MOVIES | PHOTOGRAPHY</subfield>
+            <subfield code="2">iconclass</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="994">
+            <subfield code="a">Lessing, Erich</subfield>
+            <subfield code="b">Österreichischer Fotograf. Mitglied bei Magnum Photos.</subfield>
+            <subfield code="d">13.07.1923</subfield>
+            <subfield code="f">29.08.2018</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="995">
+            <subfield code="e">Lessing Archiv</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="998">
+            <subfield code="a">LE 64042833</subfield>
+            <subfield code="x">ZPOR</subfield>
+            <subfield code="y">MAG</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="AVA">
+            <subfield code="0">9958701305303338</subfield>
+            <subfield code="8">22444878000003338</subfield>
+            <subfield code="a">43ACC_ONB</subfield>
+            <subfield code="b">ZPOR</subfield>
+            <subfield code="c">Picture Archives and Graphics Department (POR-MAG)</subfield>
+            <subfield code="d">LE 64042833</subfield>
+            <subfield code="e">available</subfield>
+            <subfield code="f">1</subfield>
+            <subfield code="g">0</subfield>
+            <subfield code="j">MAG</subfield>
+            <subfield code="p">1</subfield>
+            <subfield code="q">Picture Archives and Graphics Department (POR)</subfield>
+          </datafield>
+        </record>
+      </recordData>
+      <recordIdentifier>9958701305303338</recordIdentifier>
+      <recordPosition>23</recordPosition>
+    </record><record>
+      <recordSchema>marcxml</recordSchema>
+      <recordPacking>xml</recordPacking>
+      <recordData>
+        <record xmlns="http://www.loc.gov/MARC21/slim">
+          <leader>01552nkm a2200301zc 4500</leader>
+          <controlfield tag="001">9958701305403338</controlfield>
+          <controlfield tag="005">20261005091524.0</controlfield>
+          <controlfield tag="007">kv#|||||||||||</controlfield>
+          <controlfield tag="008">200101|1964#######|||############i|####u</controlfield>
+          <controlfield tag="009">GZ00656588</controlfield>
+          <datafield ind1=" " ind2=" " tag="035">
+            <subfield code="a">(Gideon)baa18433236</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="035">
+            <subfield code="a">(DBN)LE_64042731</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="040">
+            <subfield code="a">ONB</subfield>
+            <subfield code="b">ger</subfield>
+            <subfield code="c">ONB-FOTO</subfield>
+            <subfield code="d">AT-OeNB</subfield>
+          </datafield>
+          <datafield ind1="1" ind2=" " tag="100">
+            <subfield code="a">Lessing, Erich</subfield>
+            <subfield code="d">1923-2018</subfield>
+            <subfield code="0">(DE-588)119157004</subfield>
+            <subfield code="4">pht</subfield>
+          </datafield>
+          <datafield ind1="1" ind2="0" tag="245">
+            <subfield code="a">Die Schauspielerin Eleni Anousaki in "Zorba the Greek", Kreta, 1964</subfield>
+          </datafield>
+          <datafield ind1=" " ind2="0" tag="264">
+            <subfield code="c">1964</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="505">
+            <subfield code="g">"Zorbas the Greek",the film after the world-famous novel by Nikos Kazantzakis,was written,directed and produced by Michael Cacoyannis.Anthony Quinn played Zorbas,Eleni Anousaki the temptress Lola.</subfield>
+          </datafield>
+          <datafield ind1=" " ind2="7" tag="655">
+            <subfield code="a">Fotografie</subfield>
+            <subfield code="0">(DE-588)4045895-7</subfield>
+            <subfield code="2">gnd-content</subfield>
+          </datafield>
+          <datafield ind1="4" ind2=" " tag="856">
+            <subfield code="u">https://data.onb.ac.at/rep/BAG_18433236</subfield>
+            <subfield code="3">Digitales Objekt</subfield>
+          </datafield>
+          <datafield ind1="2" ind2=" " tag="970">
+            <subfield code="a">ONB</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="980">
+            <subfield code="a">gideon foto</subfield>
+            <subfield code="9">LOCAL</subfield>
+            <subfield code="9">local</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="980">
+            <subfield code="a">Webshop</subfield>
+            <subfield code="9">LOCAL</subfield>
+            <subfield code="9">local</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="980">
+            <subfield code="a">Webverkauf</subfield>
+            <subfield code="9">local</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="982">
+            <subfield code="a">Kultur / Wissenschaft</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1="1" ind2=" " tag="983">
+            <subfield code="a">CINEMA | PORTRAIT | HEAD, MALE | MOVIE: ZORBAS THE GREEK | CLOSE UP | QUINN, ANTHONY, ACTOR | REPORTAGE | 20TH CENTURY | AUSTRIAN | ZORBAS THE GREEK, MOVIE | PORTRAIT, MALE | MAN | PHOTOGRAPHY | MEN | 20TH | LESSING, ERICH, PHOTOGRAPHER | EUROPE: POST WORLD WAR II | AUSTRIA | MOVIES | MALE PORTRAIT | PORTRAITS</subfield>
+            <subfield code="2">iconclass</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="994">
+            <subfield code="a">Lessing, Erich</subfield>
+            <subfield code="b">Österreichischer Fotograf. Mitglied bei Magnum Photos.</subfield>
+            <subfield code="d">13.07.1923</subfield>
+            <subfield code="f">29.08.2018</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="995">
+            <subfield code="e">Lessing Archiv</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="998">
+            <subfield code="a">LE 64042731</subfield>
+            <subfield code="x">ZPOR</subfield>
+            <subfield code="y">MAG</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="AVA">
+            <subfield code="0">9958701305403338</subfield>
+            <subfield code="8">22444878070003338</subfield>
+            <subfield code="a">43ACC_ONB</subfield>
+            <subfield code="b">ZPOR</subfield>
+            <subfield code="c">Picture Archives and Graphics Department (POR-MAG)</subfield>
+            <subfield code="d">LE 64042731</subfield>
+            <subfield code="e">available</subfield>
+            <subfield code="f">1</subfield>
+            <subfield code="g">0</subfield>
+            <subfield code="j">MAG</subfield>
+            <subfield code="p">1</subfield>
+            <subfield code="q">Picture Archives and Graphics Department (POR)</subfield>
+          </datafield>
+        </record>
+      </recordData>
+      <recordIdentifier>9958701305403338</recordIdentifier>
+      <recordPosition>24</recordPosition>
+    </record><record>
+      <recordSchema>marcxml</recordSchema>
+      <recordPacking>xml</recordPacking>
+      <recordData>
+        <record xmlns="http://www.loc.gov/MARC21/slim">
+          <leader>01459nkm a2200301zc 4500</leader>
+          <controlfield tag="001">9958701315903338</controlfield>
+          <controlfield tag="005">20261005091529.0</controlfield>
+          <controlfield tag="007">kv#|||||||||||</controlfield>
+          <controlfield tag="008">200101|1964#######|||############i|####u</controlfield>
+          <controlfield tag="009">GZ00656133</controlfield>
+          <datafield ind1=" " ind2=" " tag="035">
+            <subfield code="a">(Gideon)baa18433187</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="035">
+            <subfield code="a">(DBN)LE_64042034</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="040">
+            <subfield code="a">ONB</subfield>
+            <subfield code="b">ger</subfield>
+            <subfield code="c">ONB-FOTO</subfield>
+            <subfield code="d">AT-OeNB</subfield>
+          </datafield>
+          <datafield ind1="1" ind2=" " tag="100">
+            <subfield code="a">Lessing, Erich</subfield>
+            <subfield code="d">1923-2018</subfield>
+            <subfield code="0">(DE-588)119157004</subfield>
+            <subfield code="4">pht</subfield>
+          </datafield>
+          <datafield ind1="1" ind2="0" tag="245">
+            <subfield code="a">Die Schauspielerin Eleni Anousaki in "Zorba the Greek", Kreta, 1964</subfield>
+          </datafield>
+          <datafield ind1=" " ind2="0" tag="264">
+            <subfield code="c">1964</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="505">
+            <subfield code="g">"Zorbas the Greek",the film after the famous novel by Nikos Kazantzakis,was written,directed and produced by Michael Cacoyannis.Anthony Quinn played Zorbas, Eleni Anousaki the temptress Lola.Anousaki as Lola. Crete,1964</subfield>
+          </datafield>
+          <datafield ind1=" " ind2="7" tag="655">
+            <subfield code="a">Fotografie</subfield>
+            <subfield code="0">(DE-588)4045895-7</subfield>
+            <subfield code="2">gnd-content</subfield>
+          </datafield>
+          <datafield ind1="4" ind2=" " tag="856">
+            <subfield code="u">https://data.onb.ac.at/rep/BAG_18433187</subfield>
+            <subfield code="3">Digitales Objekt</subfield>
+          </datafield>
+          <datafield ind1="2" ind2=" " tag="970">
+            <subfield code="a">ONB</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="980">
+            <subfield code="a">gideon foto</subfield>
+            <subfield code="9">LOCAL</subfield>
+            <subfield code="9">local</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="980">
+            <subfield code="a">Webshop</subfield>
+            <subfield code="9">LOCAL</subfield>
+            <subfield code="9">local</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="980">
+            <subfield code="a">Webverkauf</subfield>
+            <subfield code="9">local</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="982">
+            <subfield code="a">Kultur / Wissenschaft</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1="1" ind2=" " tag="983">
+            <subfield code="a">CINEMA | 20TH | MOVIE: ZORBAS THE GREEK | LESSING, ERICH, PHOTOGRAPHER | REPORTAGE | EUROPE: POST WORLD WAR II | AUSTRIAN | 20TH CENTURY | ZORBAS THE GREEK, MOVIE | AUSTRIA | MOVIES | PHOTOGRAPHY</subfield>
+            <subfield code="2">iconclass</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="994">
+            <subfield code="a">Lessing, Erich</subfield>
+            <subfield code="b">Österreichischer Fotograf. Mitglied bei Magnum Photos.</subfield>
+            <subfield code="d">13.07.1923</subfield>
+            <subfield code="f">29.08.2018</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="995">
+            <subfield code="e">Lessing Archiv</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="998">
+            <subfield code="a">LE 64042034</subfield>
+            <subfield code="x">ZPOR</subfield>
+            <subfield code="y">MAG</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="AVA">
+            <subfield code="0">9958701315903338</subfield>
+            <subfield code="8">22444858620003338</subfield>
+            <subfield code="a">43ACC_ONB</subfield>
+            <subfield code="b">ZPOR</subfield>
+            <subfield code="c">Picture Archives and Graphics Department (POR-MAG)</subfield>
+            <subfield code="d">LE 64042034</subfield>
+            <subfield code="e">available</subfield>
+            <subfield code="f">1</subfield>
+            <subfield code="g">0</subfield>
+            <subfield code="j">MAG</subfield>
+            <subfield code="p">1</subfield>
+            <subfield code="q">Picture Archives and Graphics Department (POR)</subfield>
+          </datafield>
+        </record>
+      </recordData>
+      <recordIdentifier>9958701315903338</recordIdentifier>
+      <recordPosition>25</recordPosition>
+    </record><record>
+      <recordSchema>marcxml</recordSchema>
+      <recordPacking>xml</recordPacking>
+      <recordData>
+        <record xmlns="http://www.loc.gov/MARC21/slim">
+          <leader>01442nkm a2200301zc 4500</leader>
+          <controlfield tag="001">9958701648303338</controlfield>
+          <controlfield tag="005">20261005091656.0</controlfield>
+          <controlfield tag="007">kv#|||||||||||</controlfield>
+          <controlfield tag="008">200101|1964#######|||############i|####u</controlfield>
+          <controlfield tag="009">GZ00657972</controlfield>
+          <datafield ind1=" " ind2=" " tag="035">
+            <subfield code="a">(Gideon)baa18433152</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="035">
+            <subfield code="a">(DBN)LE_64041710</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="040">
+            <subfield code="a">ONB</subfield>
+            <subfield code="b">ger</subfield>
+            <subfield code="c">ONB-FOTO</subfield>
+            <subfield code="d">AT-OeNB</subfield>
+          </datafield>
+          <datafield ind1="1" ind2=" " tag="100">
+            <subfield code="a">Lessing, Erich</subfield>
+            <subfield code="d">1923-2018</subfield>
+            <subfield code="0">(DE-588)119157004</subfield>
+            <subfield code="4">pht</subfield>
+          </datafield>
+          <datafield ind1="1" ind2="0" tag="245">
+            <subfield code="a">Die Schauspielerin Eleni Anousaki in "Zorba the Greek", Kreta, 1964</subfield>
+          </datafield>
+          <datafield ind1=" " ind2="0" tag="264">
+            <subfield code="c">1964</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="505">
+            <subfield code="g">"Zorbas the Greek",the film after the famous novel by Nikos Kazantzakis,was written,directed and produced by Michael Cacoyannis.Anthony Quinn played Zorbas, Eleni Anousaki the temptress Lola. Crete,1964</subfield>
+          </datafield>
+          <datafield ind1=" " ind2="7" tag="655">
+            <subfield code="a">Fotografie</subfield>
+            <subfield code="0">(DE-588)4045895-7</subfield>
+            <subfield code="2">gnd-content</subfield>
+          </datafield>
+          <datafield ind1="4" ind2=" " tag="856">
+            <subfield code="u">https://data.onb.ac.at/rep/BAG_18433152</subfield>
+            <subfield code="3">Digitales Objekt</subfield>
+          </datafield>
+          <datafield ind1="2" ind2=" " tag="970">
+            <subfield code="a">ONB</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="980">
+            <subfield code="a">gideon foto</subfield>
+            <subfield code="9">LOCAL</subfield>
+            <subfield code="9">local</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="980">
+            <subfield code="a">Webshop</subfield>
+            <subfield code="9">LOCAL</subfield>
+            <subfield code="9">local</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="980">
+            <subfield code="a">Webverkauf</subfield>
+            <subfield code="9">local</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="982">
+            <subfield code="a">Kultur / Wissenschaft</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1="1" ind2=" " tag="983">
+            <subfield code="a">CINEMA | 20TH | MOVIE: ZORBAS THE GREEK | LESSING, ERICH, PHOTOGRAPHER | REPORTAGE | EUROPE: POST WORLD WAR II | AUSTRIAN | 20TH CENTURY | ZORBAS THE GREEK, MOVIE | AUSTRIA | MOVIES | PHOTOGRAPHY</subfield>
+            <subfield code="2">iconclass</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="994">
+            <subfield code="a">Lessing, Erich</subfield>
+            <subfield code="b">Österreichischer Fotograf. Mitglied bei Magnum Photos.</subfield>
+            <subfield code="d">13.07.1923</subfield>
+            <subfield code="f">29.08.2018</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="995">
+            <subfield code="e">Lessing Archiv</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="998">
+            <subfield code="a">LE 64041710</subfield>
+            <subfield code="x">ZPOR</subfield>
+            <subfield code="y">MAG</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="AVA">
+            <subfield code="0">9958701648303338</subfield>
+            <subfield code="8">22444934320003338</subfield>
+            <subfield code="a">43ACC_ONB</subfield>
+            <subfield code="b">ZPOR</subfield>
+            <subfield code="c">Picture Archives and Graphics Department (POR-MAG)</subfield>
+            <subfield code="d">LE 64041710</subfield>
+            <subfield code="e">available</subfield>
+            <subfield code="f">1</subfield>
+            <subfield code="g">0</subfield>
+            <subfield code="j">MAG</subfield>
+            <subfield code="p">1</subfield>
+            <subfield code="q">Picture Archives and Graphics Department (POR)</subfield>
+          </datafield>
+        </record>
+      </recordData>
+      <recordIdentifier>9958701648303338</recordIdentifier>
+      <recordPosition>26</recordPosition>
+    </record><record>
+      <recordSchema>marcxml</recordSchema>
+      <recordPacking>xml</recordPacking>
+      <recordData>
+        <record xmlns="http://www.loc.gov/MARC21/slim">
+          <leader>01629nkm a2200301zc 4500</leader>
+          <controlfield tag="001">9958701649503338</controlfield>
+          <controlfield tag="005">20261005091653.0</controlfield>
+          <controlfield tag="007">kv#|||||||||||</controlfield>
+          <controlfield tag="008">200101|1964#######|||############i|####u</controlfield>
+          <controlfield tag="009">GZ00657960</controlfield>
+          <datafield ind1=" " ind2=" " tag="035">
+            <subfield code="a">(Gideon)baa18433047</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="035">
+            <subfield code="a">(DBN)LE_64040420</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="040">
+            <subfield code="a">ONB</subfield>
+            <subfield code="b">ger</subfield>
+            <subfield code="c">ONB-FOTO</subfield>
+            <subfield code="d">AT-OeNB</subfield>
+          </datafield>
+          <datafield ind1="1" ind2=" " tag="100">
+            <subfield code="a">Lessing, Erich</subfield>
+            <subfield code="d">1923-2018</subfield>
+            <subfield code="0">(DE-588)119157004</subfield>
+            <subfield code="4">pht</subfield>
+          </datafield>
+          <datafield ind1="1" ind2="0" tag="245">
+            <subfield code="a">Regisseur Michael Cacoyannis mit der Schauspielerin Lila Kedrova während der Dreharbeiten zu "Zorba the Greek", Kreta, 1964</subfield>
+          </datafield>
+          <datafield ind1=" " ind2="0" tag="264">
+            <subfield code="c">1964</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="505">
+            <subfield code="g">"Zorbas the Greek",the film after the famous novel by Nikos Kazantzakis,was written,directed and produced by Michael Cacoyannis.Anthony Quinn played Zorbas. Director Cacoyannis and Lila Kedrova.</subfield>
+          </datafield>
+          <datafield ind1=" " ind2="7" tag="655">
+            <subfield code="a">Fotografie</subfield>
+            <subfield code="0">(DE-588)4045895-7</subfield>
+            <subfield code="2">gnd-content</subfield>
+          </datafield>
+          <datafield ind1="4" ind2=" " tag="856">
+            <subfield code="u">https://data.onb.ac.at/rep/BAG_18433047</subfield>
+            <subfield code="3">Digitales Objekt</subfield>
+          </datafield>
+          <datafield ind1="2" ind2=" " tag="970">
+            <subfield code="a">ONB</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="980">
+            <subfield code="a">gideon foto</subfield>
+            <subfield code="9">LOCAL</subfield>
+            <subfield code="9">local</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="980">
+            <subfield code="a">Webshop</subfield>
+            <subfield code="9">LOCAL</subfield>
+            <subfield code="9">local</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="980">
+            <subfield code="a">Webverkauf</subfield>
+            <subfield code="9">local</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="982">
+            <subfield code="a">Kultur / Wissenschaft</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1="1" ind2=" " tag="983">
+            <subfield code="a">CINEMA | PORTRAIT | HEAD, MALE | MOVIE: ZORBAS THE GREEK | CLOSE UP | QUINN, ANTHONY, ACTOR | REPORTAGE | 20TH CENTURY | AUSTRIAN | ZORBAS THE GREEK, MOVIE | PORTRAIT, MALE | MAN | PHOTOGRAPHY | MEN | 20TH | LESSING, ERICH, PHOTOGRAPHER | EUROPE: POST WORLD WAR II | AUSTRIA | MOVIES | CACOYANNIS, MICHAEL | MALE PORTRAIT | PORTRAITS</subfield>
+            <subfield code="2">iconclass</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="994">
+            <subfield code="a">Lessing, Erich</subfield>
+            <subfield code="b">Österreichischer Fotograf. Mitglied bei Magnum Photos.</subfield>
+            <subfield code="d">13.07.1923</subfield>
+            <subfield code="f">29.08.2018</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="995">
+            <subfield code="e">Lessing Archiv</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="998">
+            <subfield code="a">LE 64040420</subfield>
+            <subfield code="x">ZPOR</subfield>
+            <subfield code="y">MAG</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="AVA">
+            <subfield code="0">9958701649503338</subfield>
+            <subfield code="8">22444935820003338</subfield>
+            <subfield code="a">43ACC_ONB</subfield>
+            <subfield code="b">ZPOR</subfield>
+            <subfield code="c">Picture Archives and Graphics Department (POR-MAG)</subfield>
+            <subfield code="d">LE 64040420</subfield>
+            <subfield code="e">available</subfield>
+            <subfield code="f">1</subfield>
+            <subfield code="g">0</subfield>
+            <subfield code="j">MAG</subfield>
+            <subfield code="p">1</subfield>
+            <subfield code="q">Picture Archives and Graphics Department (POR)</subfield>
+          </datafield>
+        </record>
+      </recordData>
+      <recordIdentifier>9958701649503338</recordIdentifier>
+      <recordPosition>28</recordPosition>
+    </record><record>
+      <recordSchema>marcxml</recordSchema>
+      <recordPacking>xml</recordPacking>
+      <recordData>
+        <record xmlns="http://www.loc.gov/MARC21/slim">
+          <leader>01538nkm a2200301zc 4500</leader>
+          <controlfield tag="001">9958701649803338</controlfield>
+          <controlfield tag="005">20261005091653.0</controlfield>
+          <controlfield tag="007">kv#|||||||||||</controlfield>
+          <controlfield tag="008">200101|1964#######|||############i|####u</controlfield>
+          <controlfield tag="009">GZ00657957</controlfield>
+          <datafield ind1=" " ind2=" " tag="035">
+            <subfield code="a">(Gideon)baa18433026</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="035">
+            <subfield code="a">(DBN)LE_64040412</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="040">
+            <subfield code="a">ONB</subfield>
+            <subfield code="b">ger</subfield>
+            <subfield code="c">ONB-FOTO</subfield>
+            <subfield code="d">AT-OeNB</subfield>
+          </datafield>
+          <datafield ind1="1" ind2=" " tag="100">
+            <subfield code="a">Lessing, Erich</subfield>
+            <subfield code="d">1923-2018</subfield>
+            <subfield code="0">(DE-588)119157004</subfield>
+            <subfield code="4">pht</subfield>
+          </datafield>
+          <datafield ind1="1" ind2="0" tag="245">
+            <subfield code="a">Regisseur Michael Cacoyannis und ein Assistent während der Dreharbeiten zu "Zorba the Greek", Kreta, 1964</subfield>
+          </datafield>
+          <datafield ind1=" " ind2="0" tag="264">
+            <subfield code="c">1964</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="505">
+            <subfield code="g">"Zorbas the Greek",the film after the famous novel by Nikos Kazantzakis,was written,directed and produced by Michael Cacoyannis.Anthony Quinn played Zorbas, Eleni Anousaki the temptress Lola. Director Cacoyannis and assistant. Crete,1964</subfield>
+          </datafield>
+          <datafield ind1=" " ind2="7" tag="655">
+            <subfield code="a">Fotografie</subfield>
+            <subfield code="0">(DE-588)4045895-7</subfield>
+            <subfield code="2">gnd-content</subfield>
+          </datafield>
+          <datafield ind1="4" ind2=" " tag="856">
+            <subfield code="u">https://data.onb.ac.at/rep/BAG_18433026</subfield>
+            <subfield code="3">Digitales Objekt</subfield>
+          </datafield>
+          <datafield ind1="2" ind2=" " tag="970">
+            <subfield code="a">ONB</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="980">
+            <subfield code="a">gideon foto</subfield>
+            <subfield code="9">LOCAL</subfield>
+            <subfield code="9">local</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="980">
+            <subfield code="a">Webshop</subfield>
+            <subfield code="9">LOCAL</subfield>
+            <subfield code="9">local</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="980">
+            <subfield code="a">Webverkauf</subfield>
+            <subfield code="9">local</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="982">
+            <subfield code="a">Kultur / Wissenschaft</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1="1" ind2=" " tag="983">
+            <subfield code="a">CINEMA | 20TH | MOVIE: ZORBAS THE GREEK | LESSING, ERICH, PHOTOGRAPHER | REPORTAGE | EUROPE: POST WORLD WAR II | AUSTRIAN | 20TH CENTURY | ZORBAS THE GREEK, MOVIE | AUSTRIA | MOVIES | CACOYANNIS, MICHAEL | PHOTOGRAPHY</subfield>
+            <subfield code="2">iconclass</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="994">
+            <subfield code="a">Lessing, Erich</subfield>
+            <subfield code="b">Österreichischer Fotograf. Mitglied bei Magnum Photos.</subfield>
+            <subfield code="d">13.07.1923</subfield>
+            <subfield code="f">29.08.2018</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="995">
+            <subfield code="e">Lessing Archiv</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="998">
+            <subfield code="a">LE 64040412</subfield>
+            <subfield code="x">ZPOR</subfield>
+            <subfield code="y">MAG</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="AVA">
+            <subfield code="0">9958701649803338</subfield>
+            <subfield code="8">22444936260003338</subfield>
+            <subfield code="a">43ACC_ONB</subfield>
+            <subfield code="b">ZPOR</subfield>
+            <subfield code="c">Picture Archives and Graphics Department (POR-MAG)</subfield>
+            <subfield code="d">LE 64040412</subfield>
+            <subfield code="e">available</subfield>
+            <subfield code="f">1</subfield>
+            <subfield code="g">0</subfield>
+            <subfield code="j">MAG</subfield>
+            <subfield code="p">1</subfield>
+            <subfield code="q">Picture Archives and Graphics Department (POR)</subfield>
+          </datafield>
+        </record>
+      </recordData>
+      <recordIdentifier>9958701649803338</recordIdentifier>
+      <recordPosition>29</recordPosition>
+    </record><record>
+      <recordSchema>marcxml</recordSchema>
+      <recordPacking>xml</recordPacking>
+      <recordData>
+        <record xmlns="http://www.loc.gov/MARC21/slim">
+          <leader>01520nkm a2200301zc 4500</leader>
+          <controlfield tag="001">9958701648103338</controlfield>
+          <controlfield tag="005">20261005091654.0</controlfield>
+          <controlfield tag="007">kv#|||||||||||</controlfield>
+          <controlfield tag="008">200101|1964#######|||############i|####u</controlfield>
+          <controlfield tag="009">GZ00657974</controlfield>
+          <datafield ind1=" " ind2=" " tag="035">
+            <subfield code="a">(Gideon)baa18433173</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="035">
+            <subfield code="a">(DBN)LE_64041930</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="040">
+            <subfield code="a">ONB</subfield>
+            <subfield code="b">ger</subfield>
+            <subfield code="c">ONB-FOTO</subfield>
+            <subfield code="d">AT-OeNB</subfield>
+          </datafield>
+          <datafield ind1="1" ind2=" " tag="100">
+            <subfield code="a">Lessing, Erich</subfield>
+            <subfield code="d">1923-2018</subfield>
+            <subfield code="0">(DE-588)119157004</subfield>
+            <subfield code="4">pht</subfield>
+          </datafield>
+          <datafield ind1="1" ind2="0" tag="245">
+            <subfield code="a">Regisseur Michael Cacoyannis während der Dreharbeiten zu "Zorba the Greek", Kreta, 1964</subfield>
+          </datafield>
+          <datafield ind1=" " ind2="0" tag="264">
+            <subfield code="c">1964</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="505">
+            <subfield code="g">"Zorbas the Greek",the film after the famous novel by Nikos Kazantzakis,was written,directed and produced by Michael Cacoyannis.Anthony Quinn played Zorbas,Eleni Anousaki the temptress Lola.Cacoyannis in a rare moment of rest. Crete,1964</subfield>
+          </datafield>
+          <datafield ind1=" " ind2="7" tag="655">
+            <subfield code="a">Fotografie</subfield>
+            <subfield code="0">(DE-588)4045895-7</subfield>
+            <subfield code="2">gnd-content</subfield>
+          </datafield>
+          <datafield ind1="4" ind2=" " tag="856">
+            <subfield code="u">https://data.onb.ac.at/rep/BAG_18433173</subfield>
+            <subfield code="3">Digitales Objekt</subfield>
+          </datafield>
+          <datafield ind1="2" ind2=" " tag="970">
+            <subfield code="a">ONB</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="980">
+            <subfield code="a">gideon foto</subfield>
+            <subfield code="9">LOCAL</subfield>
+            <subfield code="9">local</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="980">
+            <subfield code="a">Webshop</subfield>
+            <subfield code="9">LOCAL</subfield>
+            <subfield code="9">local</subfield>
+          </datafield>
+          <datafield ind1="0" ind2=" " tag="980">
+            <subfield code="a">Webverkauf</subfield>
+            <subfield code="9">local</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="982">
+            <subfield code="a">Kultur / Wissenschaft</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1="1" ind2=" " tag="983">
+            <subfield code="a">CINEMA | 20TH | MOVIE: ZORBAS THE GREEK | LESSING, ERICH, PHOTOGRAPHER | REPORTAGE | EUROPE: POST WORLD WAR II | AUSTRIAN | 20TH CENTURY | ZORBAS THE GREEK, MOVIE | AUSTRIA | MOVIES | CACOYANNIS, MICHAEL | PHOTOGRAPHY</subfield>
+            <subfield code="2">iconclass</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="994">
+            <subfield code="a">Lessing, Erich</subfield>
+            <subfield code="b">Österreichischer Fotograf. Mitglied bei Magnum Photos.</subfield>
+            <subfield code="d">13.07.1923</subfield>
+            <subfield code="f">29.08.2018</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="995">
+            <subfield code="e">Lessing Archiv</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="998">
+            <subfield code="a">LE 64041930</subfield>
+            <subfield code="x">ZPOR</subfield>
+            <subfield code="y">MAG</subfield>
+            <subfield code="9">LOCAL</subfield>
+          </datafield>
+          <datafield ind1=" " ind2=" " tag="AVA">
+            <subfield code="0">9958701648103338</subfield>
+            <subfield code="8">22444934120003338</subfield>
+            <subfield code="a">43ACC_ONB</subfield>
+            <subfield code="b">ZPOR</subfield>
+            <subfield code="c">Picture Archives and Graphics Department (POR-MAG)</subfield>
+            <subfield code="d">LE 64041930</subfield>
+            <subfield code="e">available</subfield>
+            <subfield code="f">1</subfield>
+            <subfield code="g">0</subfield>
+            <subfield code="j">MAG</subfield>
+            <subfield code="p">1</subfield>
+            <subfield code="q">Picture Archives and Graphics Department (POR)</subfield>
+          </datafield>
+        </record>
+      </recordData>
+      <recordIdentifier>9958701648103338</recordIdentifier>
+      <recordPosition>30</recordPosition>
+    </record>
+  </records>
+  <nextRecordPosition>31</nextRecordPosition>
+  <extraResponseData xmlns:xb="http://www.exlibris.com/repository/search/xmlbeans/">
+    <xb:exact>true</xb:exact>
+    <xb:responseDate>2026-10-17T23:53:55+0200</xb:responseDate>
+  </extraResponseData>
+</searchRetrieveResponse>

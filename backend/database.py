@@ -1,7 +1,7 @@
 import logging
 import os
 import ssl
-from collections.abc import Generator, Mapping
+from collections.abc import Callable, Generator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final
@@ -9,7 +9,7 @@ from typing import Any, Final
 from sqlalchemy import String, create_engine, event, exc, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.compiler import compiles
-from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
+from sqlalchemy.orm import DeclarativeBase, Session, SessionTransaction, sessionmaker
 from sqlalchemy.sql.functions import FunctionElement
 
 from config import database_ssl_mode, database_ssl_root_cert, database_url
@@ -559,6 +559,84 @@ def hold_book_ceilings(db: Session, book_id: int) -> None:
             text("SELECT id FROM books WHERE id = :book FOR NO KEY UPDATE"),
             {"book": book_id},
         )
+
+
+# ── What a transaction runs once it commits ──────────────────────────────────
+#
+# A filesystem action that destroys something, such as unlinking a cover file,
+# is one no rollback restores. Run before the commit, any raise between it and
+# the commit leaves a row that survived naming a file that did not. So such an
+# action is handed to `on_commit`, which runs it from SQLAlchemy's own
+# `after_commit` session event, and the transaction ending any other way
+# forgets it.
+#
+# **A write is the other way round and does not belong here.** `_store_cover`
+# writes `book.cover_url` onto the pending row, so it runs inside the
+# transaction. An entry cannot write a row either: it runs after the COMMIT and
+# before the session expires every object, so an attribute set from it is
+# discarded unflushed. That is why a merge's cover move stays explicit after its
+# commit: a failed move ends in a row write.
+#
+# **Every entry runs, and a failing one is logged rather than raised.**
+# Emptying a trash of five hundred books commits once and enqueues five hundred
+# unlinks. Failing fast at the third would leave 497 files nothing will ever
+# remove, and the request has already committed, so raising would answer 500
+# for a change that happened. The residue of a logged failure is dead bytes.
+#
+# What it lets through: an entry enqueued inside a SAVEPOINT that is rolled
+# back is kept for the outer commit. No caller enqueues inside one.
+
+#: The key in `Session.info` holding one session's queue. Its presence also
+#: records that the two listeners are registered, so they are added once.
+_AFTER_COMMIT: Final = "after_commit_queue"
+
+
+def on_commit(db: Session, fn: Callable[[], None]) -> None:
+    """Run `fn` once the session's current transaction commits.
+
+    Entries run in the order they were enqueued, and only on the commit of the
+    outermost transaction: releasing a SAVEPOINT also fires `after_commit`, and
+    running there would unlink a file before the commit that settles whether
+    its row is gone. A rollback, or a close without a commit, forgets them.
+    """
+    # Begun here when nothing is in progress yet, because a rollback of a
+    # transaction that never began ends nothing, so the entry would survive it
+    # and run on whatever commit came next.
+    if not db.in_transaction():
+        db.begin()
+    queue: list[Callable[[], None]] | None = db.info.get(_AFTER_COMMIT)
+    if queue is None:
+        queue = db.info[_AFTER_COMMIT] = []
+        event.listen(db, "after_commit", _run_after_commit)
+        event.listen(db, "after_transaction_end", _forget_after_commit)
+    queue.append(fn)
+
+
+def _run_after_commit(db: Session) -> None:
+    if db.in_nested_transaction():
+        return
+    queue: list[Callable[[], None]] = db.info[_AFTER_COMMIT]
+    # A copy, so the loop never walks a list it is clearing. An entry that
+    # enqueues another from here is forgotten as this transaction ends.
+    pending = queue[:]
+    queue.clear()
+    for fn in pending:
+        try:
+            fn()
+        except Exception:
+            # `Exception` and not `BaseException`, so an interrupt still stops
+            # the process. Removing the `try` makes the first failure skip
+            # every entry after it.
+            logger.exception("An after commit action failed: %r", fn)
+
+
+def _forget_after_commit(db: Session, transaction: SessionTransaction) -> None:
+    # Only the outermost transaction: a SAVEPOINT ending says nothing about
+    # whether the work enqueued before it will commit. On a commit
+    # `_run_after_commit` has already emptied the queue, so this clears only
+    # what a rollback left.
+    if transaction.parent is None:
+        db.info[_AFTER_COMMIT].clear()
 
 
 class Base(DeclarativeBase):

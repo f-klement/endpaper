@@ -596,7 +596,7 @@ class TestTheCarrierDecides:
     """The MARC codes, alone, so their edges are visible.
 
     **A diagonal, verified by deleting each code rather than by claiming it.**
-    Every one of the ten codes in the three frozensets is pinned: drop any one
+    Every one of the eleven codes in the three frozensets is pinned: drop any one
     and a row goes red. That is the whole point of the block and the first
     version of it did not have the property, while saying it did. A critic
     measured it: **7 of the 10 survived deletion with all 14 rows green**, since
@@ -604,27 +604,29 @@ class TestTheCarrierDecides:
     leader and `vd` on a `ngm` leader, so each covered for the other and neither
     name was load bearing.
 
-    **So the rows are of three kinds, and 9 plus 7 plus 5 is 21.** Both critics
+    **So the rows are of three kinds, and 10 plus 7 plus 5 is 22.** Both critics
     found the previous sentence separately: it said two kinds and accounted for
     16 of the rows, which is the shape CLAUDE.md predicts for a fix round, a
     corrected partition that does not sum. It replaced a claim that every row was
     live, which was false but at least total, so the correction was weaker in the
     dimension nobody re-checked.
 
-    **9 live**, shapes seen in a catalogue during the September 2026 roster
-    measurement. **7 constructed**, one per code that no live record refuses on
-    its own, and they have to exist: over 2,605 records only two of the ten codes
-    ever refuse a record by themselves, `007 c` on exactly one and leader/06 `m`
-    on exactly one, so a table drawn only from live shapes cannot pin this rule.
+    **10 live**: nine shapes seen in a catalogue during the September 2026
+    roster measurement, and the ÖNB photograph of October 2026, which refuses
+    on leader/06 `k` alone. **7 constructed**, one per code that no live record
+    refuses on its own, and they have to exist: over those 2,605 records only
+    two of the ten codes measured there ever refuse a record by themselves,
+    `007 c` on exactly one and leader/06 `m` on exactly one, so a table drawn
+    only from live shapes cannot pin this rule.
     **5 edge**, none of them a live shape, which was checked rather than assumed:
     of those 2,605, none carries a leader under 8 characters, an 008 under 24, an
     empty `007`, or no control field at all.
 
     The 5 are not decoration, and they do **three** jobs rather than one. Strip
-    the two length tests and **3 of them raise `IndexError`** where the other 18
+    the two length tests and **3 of them raise `IndexError`** where the other 19
     rows do not: the truncated leader, the empty leader and the 11 character 008.
     Change `value[:1]` to `value[0]` and leave both length tests alone and the
-    empty `007` row is the **only** one of the 21 that goes red, so it is the
+    empty `007` row is the **only** one of the 22 that goes red, so it is the
     sole pin for reading the carrier by prefix. The fifth, a record declaring
     nothing at all, pins that silence decides nothing. No row is idle, which is a
     better argument against trimming the table than a count of edges.
@@ -655,6 +657,14 @@ class TestTheCarrierDecides:
             ("01533ngm a2200505 c 4500", {"007": "vd |||||||||||"}, False),
             # A computer file, the NLG's `E-BOOK`, which carries no 007 at all.
             ("01533nmm a2200505 c 4500", {}, False),
+            # A photograph: one of the ÖNB's film set stills, as recorded. Its
+            # `007 kv` and its 008/23 `#` refuse nothing, so leader/06 `k` is
+            # the only code that keeps it out of a title search.
+            (
+                "01546nkm a2200325zc 4500",
+                {"007": "kv#|||||||||||", "008": "200101|1964#######|||############i|####u"},
+                False,
+            ),
             # ── Constructed, one per code no live record refuses alone ───────
             # The two live disc rows above carry a refusing carrier **and** a
             # refusing leader, so without these seven, seven of the ten codes

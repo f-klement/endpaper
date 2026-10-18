@@ -1904,6 +1904,7 @@ class TestNoExportArmResolvesMoreBooksThanAPage:
             "twice, and both answer 200."
         )
 
+    @pytest.mark.sqlite_only(reason="counts rows through sqlite3's row_factory, which no other driver has")
     def test_no_arm_loads_more_rows_of_a_paged_entity_at_once_than_a_page(
         self, client, admin, db, small_pages
     ):
@@ -1990,6 +1991,7 @@ class TestNoExportArmResolvesMoreBooksThanAPage:
         return peak_rows(seen)
 
     @pytest.mark.parametrize("format", list(ExportFormat))
+    @pytest.mark.sqlite_only(reason="counts rows through sqlite3's row_factory, which no other driver has")
     def test_the_rows_behind_an_arm_do_not_grow_with_the_shelf(
         self, client, admin, db, small_pages, format
     ):
@@ -2230,6 +2232,7 @@ class TestNoExportArmResolvesMoreBooksThanAPage:
 
         assert resolved.queries == ["select"]
 
+    @pytest.mark.sqlite_only(reason="counts rows through sqlite3's row_factory, which no other driver has")
     def test_the_row_counter_tells_a_whole_shelf_from_a_page(self, admin, db, small_pages):
         """The fourth reading's diagonal: the two shapes, past the same counter.
 
@@ -2259,6 +2262,7 @@ class TestNoExportArmResolvesMoreBooksThanAPage:
         assert paged == paged_again == small_pages
         assert (whole, whole_again) == (self.BOOKS, self.BOOKS * 2)
 
+    @pytest.mark.sqlite_only(reason="counts rows through sqlite3's row_factory, which no other driver has")
     def test_the_row_counter_sees_a_reading_load_hoisted_off_the_page(
         self, admin, db, small_pages
     ):
@@ -2971,7 +2975,22 @@ class TestTheTextExportCannotBeMadeToForgeALine:
 
         assert "Description: First. Second." in exported
 
-    @pytest.mark.parametrize("label", sorted(_PLANTERS))
+    @pytest.mark.parametrize(
+        "label",
+        [
+            # `year` is an INTEGER column, so on another engine the type refuses
+            # the payload before the writer ever sees it.
+            pytest.param(
+                label,
+                marks=pytest.mark.sqlite_only(
+                    reason="stores text in an INTEGER column, which only SQLite allows"
+                ),
+            )
+            if label == "Year"
+            else label
+            for label in sorted(_PLANTERS)
+        ],
+    )
     def test_no_value_on_the_record_can_open_a_line(
         self, client, admin, db, make_book, label
     ):

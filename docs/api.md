@@ -656,9 +656,8 @@ whoever is on call looking at the wrong service.
 
 ### Importing from Goodreads
 
-| Method | Path | Access | Notes |
-|---|---|---|---|
-| POST | `/api/imports/goodreads?create_missing=` | user | multipart CSV; **400** if it is not an export |
+A Goodreads export is read by the library import, `POST /api/imports/csv` with a preview
+first, under *Importing a library* below; there is no route of its own.
 
 There is no Goodreads API to connect to: they stopped issuing developer keys in December
 2020. A CSV export is the only route in, and linking out to their search is the only other

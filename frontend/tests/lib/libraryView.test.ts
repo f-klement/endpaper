@@ -88,9 +88,9 @@ describe("writing one", () => {
   });
 
   it("keeps a choice that happens to be the default", () => {
-    // `writeColumns` clears its key here and this deliberately does not: there
-    // is no reset control whose visibility turns on the answer, and a
-    // cataloguer who picks the dense view has picked it.
+    // `libraryColumnsPreference` clears its key here and this deliberately
+    // does not: there is no reset control whose visibility turns on the
+    // answer, and a cataloguer who picks the dense view has picked it.
     libraryViewPreference.write("cataloguer", "list");
     expect(localStorage.getItem("libraryView.cataloguer")).toBe("list");
   });

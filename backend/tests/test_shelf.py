@@ -735,6 +735,25 @@ BOOK_OWNED_READERS = {
     ],
     "file_references.py": [
         (
+            "return ( db.query(DigitalReference) .filter( DigitalReference.id == reference_id, "
+            "DigitalReference.book_id == book.id, ) .first() )",
+            "reads one reference so a route can flag or forget it. Narrowed to "
+            "the `Book` its caller passed **as well as** to the id, and the "
+            "pairing is the point: without it a reference id belonging to "
+            "another Book would be reachable through a Book the caller can "
+            "see. Takes a `Book` object, never an id, so the Book has been "
+            "through `dependencies.py`, and a caller turns `None` into the "
+            "404.",
+        ),
+        (
+            "return ( db.query(DigitalReference) .filter(DigitalReference.book_id == book.id) "
+            ".order_by(DigitalReference.id) .all() )",
+            "reads one Book's references for the route that lists them. Takes "
+            "a `Book` object and never an id, so the caller's "
+            "`dependencies.book_for_read` has already applied the privacy rule; "
+            "the argument `custom_fields.py` makes twice above.",
+        ),
+        (
             "at_this_location = db.query(DigitalReference).filter( DigitalReference.book_id == "
             "book_id, DigitalReference.root_label == payload.root_label, "
             "DigitalReference.relative_path == payload.relative_path, )",
@@ -885,23 +904,6 @@ BOOK_OWNED_READERS = {
             "the rows of that listing: every reference under one root on a Book "
             "the caller may see. Scoped by the Shelf and by nothing else, the "
             "missing listing's rule for the same table, and paginated.",
-        ),
-        (
-            "reference = ( db.query(DigitalReference) .filter( DigitalReference.id == reference_id, "
-            "DigitalReference.book_id == book.id, ) .first() )",
-            "reads one reference so the route can flag or forget it. Narrowed "
-            "to a `Book` the dependency resolved **as well as** to the id, and "
-            "the pairing is the point: without it a reference id belonging to "
-            "another Book would be reachable through a Book the caller does "
-            "hold.",
-        ),
-        (
-            "return ( db.query(DigitalReference) .filter(DigitalReference.book_id == book.id) "
-            ".order_by(DigitalReference.id) .all() )",
-            "reads one Book's references for the route that lists them. Takes "
-            "a `Book` object and never an id, so `dependencies.book_for_read` "
-            "has already applied the privacy rule; the same argument "
-            "`custom_fields.py` makes twice above.",
         ),
         (
             "identifier = ( db.query(BookIdentifier) .filter( BookIdentifier.id == identifier_id, "
@@ -3922,6 +3924,7 @@ class TestAPageIsWholeHoweverTheLoadingJoins:
         db.commit()
 
     @pytest.mark.parametrize("load", list(Loading))
+    @pytest.mark.sqlite_only(reason="counts rows through sqlite3's row_factory, which no other driver has")
     def test_a_page_is_whole_however_this_member_loads(self, db, user, load):
         """One book more than a page, and the page still holds a page.
 
@@ -3961,6 +3964,7 @@ class TestAPageIsWholeHoweverTheLoadingJoins:
         )
 
     @pytest.mark.parametrize("load", list(Loading))
+    @pytest.mark.sqlite_only(reason="counts rows through sqlite3's row_factory, which no other driver has")
     def test_the_rows_behind_a_page_do_not_grow_with_the_shelf(self, db, user, load):
         """What a page's eager loads pull behind it, pinned as a relative number.
 
@@ -3997,6 +4001,7 @@ class TestAPageIsWholeHoweverTheLoadingJoins:
             "than the page."
         )
 
+    @pytest.mark.sqlite_only(reason="counts rows through sqlite3's row_factory, which no other driver has")
     def test_the_rows_cannot_see_a_short_page_and_the_books_can(self, db, user):
         """The counter example that keeps these two instruments apart.
 

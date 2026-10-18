@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **A title search no longer returns photographs, such as film stills, as books.**
+
+- **A cover upload in a different image format whose save then fails keeps the book's previous
+  cover**, where it used to delete it.
+
+- **Permanently deleting a book, emptying the trash or re-adding a trashed ISBN no longer answers
+  an error when a cover file cannot be removed after the book is gone**; the failure is logged
+  and the leftover file is dead bytes.
+
 ## v0.19.0
 
 _2026-10-17_

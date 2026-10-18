@@ -120,12 +120,21 @@ def replace_image(directory: Path, base: str, extension: str, data: bytes) -> Pa
     so this is not a choice a new call site makes.
     """
     destination = write_image(directory, base, extension, data)
+    sweep_other_formats(directory, base, destination)
+    return destination
 
+
+def sweep_other_formats(directory: Path, base: str, kept: Path) -> None:
+    """Remove every format of `base` but `kept`: `replace_image`'s second half.
+
+    Its own function for a caller whose row naming `kept` has not committed
+    yet. The sweep is a removal no rollback restores, so that caller runs it
+    once the commit has settled which file the row names.
+    """
     for other in ALLOWED_IMAGE_EXTENSIONS:
         stale = directory / f"{base}.{other}"
-        if stale != destination:
+        if stale != kept:
             stale.unlink(missing_ok=True)
-    return destination
 
 
 def write_image(directory: Path, base: str, extension: str, data: bytes) -> Path:

@@ -422,9 +422,10 @@ describe("storage never holds a copy of the default", () => {
     // `isDefaultColumns` compares joined strings, so an unordered set equal to
     // the default would have slipped past the guard and been stored raw: a
     // frozen copy of the default, with the reset control hidden because the
-    // normalised set on screen reports itself as the default. `writeColumns`
-    // normalises its input first, so the guard holds for any caller rather
-    // than only for the one that happens to pass a canonical set.
+    // normalised set on screen reports itself as the default. The
+    // preference's `encode` normalises its input first, so the guard holds for
+    // any caller rather than only for the one that happens to pass a canonical
+    // set.
     libraryColumnsPreference.write(
       "household",
       [...DEFAULT_COLUMNS.household].reverse(),

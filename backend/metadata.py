@@ -3603,8 +3603,8 @@ _SECONDARY_PENALTY: Final = 1
 #: of its own, folded with an SRU row that carries the identifier, scores both
 #: fields off two different doors and counts nothing twice. Measured in
 #: process, both input orders. **How much of a live ranking the double count
-#: reaches is therefore not claimed here**, and nothing in this tree observes
-#: the ordering that would answer it.
+#: reaches is therefore not claimed here**; the order of one recorded search is
+#: pinned by `tests/test_metadata.py::TestARecordedSearchComesBackInItsPinnedOrder`.
 #:
 #: **Said by the door rather than by a list of source names**, which is what
 #: goes stale the day a fifth MARC catalogue is added, and held by

@@ -506,8 +506,9 @@ What decided it:
 
 What it costs, which is real and is handled rather than waved at:
 
-* **Orphan files.** A row delete does not delete a file. `_purge` calls `covers.forget`, so
-  purging a book and emptying the trash both take the cover with them, and a merge moves the
+* **Orphan files.** A row delete does not delete a file. `_purge` hands `cover_store.remove` to
+  `database.on_commit`, so purging a book and emptying the trash both take the cover with them
+  once their commit lands, and a merge moves the
   loser's file to the keeper when the keeper absorbed its `cover_url` and deletes it
   otherwise. `_trash` deliberately does not: a trashed book can be restored, and restoring
   one to a placeholder is a delete that half happened. All four paths have a test in
@@ -1953,7 +1954,7 @@ do with copies.
 
 ### The copy's cover file is copied, not shared
 
-Covers are files named by book id, and `covers.forget` deletes by id. Two rows pointing at
+Covers are files named by book id, and `cover_store.remove` deletes by id. Two rows pointing at
 one file would mean purging either copy blanks the other's cover while leaving a `cover_url`
 pointing at nothing. `covers.duplicate` is `adopt` without the delete, used only for a cover
 this app already holds; a remote URL is inherited by assignment, and a book with neither is
@@ -1977,26 +1978,54 @@ the same live-first order, refuse on the first one that cannot be freed, and fre
 only if none refused.
 
 Live-first is what decides which row a 409 names: the one on the shelf, not one in the
-trash. Deciding in full before destroying anything is the other half, and it is not
-tidiness. `_purge` is not undone by the request failing, so a 409 raised part way through a
-group used to leave a member holding a book whose cover file had been unlinked.
+trash. Deciding in full before destroying anything is the other half: the refusal comes before
+any holder is purged, so a 409 flushes nothing it then has to discard. A refusal after a
+purge would still unlink nothing, because the unlink waits on the commit (*A cover file is
+unlinked after the commit, never before it*).
 
 ### A cover file is unlinked after the commit, never before it
 
-`_purge` used to call `covers.forget` first. A rollback after that point undoes the DELETE and
+`_purge` used to unlink the cover first. A rollback after that point undoes the DELETE and
 not the unlink, so the member still has the book and its `cover_url` names a file that does not
 exist, with nothing logged. Copies made it reachable through the ordinary scan flow.
 
-`_purge` returns the id and the caller unlinks after its commit. **Reordering inside `_purge`
-buys nothing**, because `db.delete` only marks the row in the session, and flushing per book to
-get closer would put back the 3,801 statements the "does not commit" note exists to avoid.
+`_purge` hands the unlink to `database.on_commit`, which runs it from SQLAlchemy's own
+`after_commit` session event on the outermost commit and forgets it when the transaction ends
+any other way. A raise anywhere between the purge and the commit therefore unlinks nothing,
+and none of its three callers orders the unlink by hand. **Reordering inside `_purge` buys
+nothing**, because `db.delete` only marks the row in the session, and flushing per book to get
+closer would put back the 3,801 statements the "does not commit" note exists to avoid.
 
-**In `_create_book` the unlink sits after the commit and before `_store_cover`.** SQLite reuses
-the id of a deleted row, so the new book may hold a purged id: unlinking later deletes its own
-cover, and not unlinking hands it somebody else's. That window is three lines wide and pinned
-by `test_a_reused_id_keeps_the_new_book_s_own_cover`, because moving the loop below
-`_store_cover` passes every other test in the file: only a test that forces the id reuse and
-stores a real cover can tell the two orders apart.
+**The tail runs every entry and raises nothing.** Emptying a trash commits once and enqueues
+one unlink per book, so failing fast at one would leave every later file behind, and the
+request has already committed. A failure is logged with the entry, which names the book id;
+its residue is dead bytes.
+
+**An upload replacing a cover in another format sweeps the old file the same way.**
+`upload_cover` writes through `cover_store.write` and hands `cover_store.sweep` to
+`on_commit`. Swept before the commit, a PNG replacing a JPEG deleted the JPEG, and a commit
+that then failed left the row naming it. `covers.store`, the download path, still sweeps at
+once: it holds no session, and the backfill reaches it from a thread pool where the session
+may not be touched. That half is a ticket.
+
+**A merge's cover move stays explicit after its commit.** Its sweep depends on the move's
+outcome, and a failed move ends in a write to the keeper's `cover_url`, which a tail cannot
+make: it runs before the session expires every object, so the attribute is discarded
+unflushed.
+
+**In `_create_book` the first commit runs the unlinks, and `_store_cover` follows it.** At
+head `books.id` is `AUTOINCREMENT` on both engines, so the order is a backstop: should that
+ever be lost, the new book may hold a purged id, and storing its cover before that commit
+would have the unlink delete it. Pinned by `test_a_reused_id_keeps_the_new_book_s_own_cover`;
+a raise before the commit is pinned by `TestARaiseInTheBodyRunsNoTail` in
+`tests/routers/test_books_covers.py`, whose refusal fires only on the commit carrying the
+change, so a commit earlier in the request cannot take it.
+
+Refused in the same ticket, with reasons on it: a `settled(db)` context manager whose exit
+commits (it cannot express `_create_book`'s two commits and hides the commit a reviewer should
+see), and a `blocking(fn)` that picks `to_thread` from the calling frame (silently wrong the
+day a sync helper gains an async caller; `await` already answers it statically).
+
 ### Duplicate detection matches on title and author, not ISBN
 
 An accidental exact repeat is already refused by `uq_books_isbn_single_copy`. The case left
@@ -3318,6 +3347,14 @@ every per mode write until the feature flags resolved by closing over the hook's
 `modeIsKnown`, which no call site could supply. Modelling that as `{ value, settled }` would
 have made "this scope, and it is settled" constructible anywhere, so the scope is
 `CatalogueMode | undefined` instead and `useCatalogueScope` is the only thing that produces it.
+
+Pinned by mutation over the whole frontend suite, measured 2026-10-18. Sending a write made in the window
+to the reading scope, `scope ?? preference.whenUnknown`, rather than refusing it type checks and
+fails five tests, each on an assertion: two of its tests and the three in the Home
+page's hooks that refuse a column, a view and a reset made before the flags settle. Deleting the
+refusal alone is no mutant, because the type check refuses it. Defining settled in
+`useCatalogueScope` as `flags !== undefined` fails six, among them the test that opens the gate
+when the flags fetch fails.
 
 **A write whose value depends on the scope asks for the scope.** That is the one property the
 wrapper had and a plain setter does not: `writeForMode` handed the mode to its caller, so a value
@@ -8511,23 +8548,13 @@ two; a `useState` initialiser would capture the household set and a cataloguer
 would keep it for the rest of the session. Reading storage when the mode changes
 costs one `getItem`.
 
-**Storage never holds a copy of the default, and `writeColumns` enforces it on
-a normalised set.** A stored copy stops following the default the moment a later
-version changes it, which is the one thing "back to the usual columns" must not
-do. Two shapes reach that state and only the first is obvious: reset, and
-turning one column off and straight back on, which also hides the reset control
-because there is then nothing to reset *from* while the key still holds a copy.
-The guard compares joined strings, so it normalises its input first: without
-that it holds only for a canonical caller, and the docstring claiming the
-invariant needs nobody to remember it would have been true only because the one
-call site remembered.
+**Storage never holds a copy of the default.** The rule and its reasons,
+including why the set is normalised before it is compared, are in the docstring
+of `libraryColumnsPreference` in `lib/libraryColumns.ts`, whose `encode`
+enforces it.
 
-**`readColumns` decides on the stored tokens, never on its own result.** The
-result always carries the forced title, so a length test on it cannot tell a
-reader who turned every other column off from a value naming nothing this
-version knows, and a title-only table silently reverted on reload. The docstring
-claimed the forced title was what stopped those two being confused, and the code
-confused exactly them.
+**A stored set is judged on its tokens, never on the decoded result.** The
+same docstring holds the rule and its reason, at `decode`.
 
 One consequence, stated rather than fixed: the stored value is an unversioned
 comma list, so a deliberate title-only choice and the survivor of a mass column
@@ -10831,29 +10858,25 @@ and had nothing to preserve; this one is in every browser that has ever chosen a
 renaming it would reset every household to the grid, which is the clobber the split exists to
 prevent arriving from the other side.
 
-**`writeLibraryView` stores a choice equal to the default where `writeColumns` clears it.** The
-half of that rule about a stored default going stale does reach the view and is accepted; the
-half about a reader stuck with a frozen copy does not, because there is no reset control here.
+**The view stores a choice equal to the default, where the column set clears its key.** The
+docstring of `libraryViewPreference` in `lib/libraryView.ts` holds which half of the column rule
+reaches the view, and why that half is accepted.
 
 **The view is derived from the mode rather than seeded into state**, and that is what makes the
 per mode default correct on a cold load: the mode is fetched, so a state initialiser would read
 storage while the mode still answered household.
 
-**`catalogueMode(undefined)` is a fallback for reading and not for writing.** A wrong read costs
-one render; a wrong write is permanent and silent, and the control paints before the flags land.
-So `useLibrary` refuses every per mode write until the flags resolve, through one door rather
-than a guard at each writer, and disables the controls meanwhile so a refused click is visible
-rather than inert.
+**The write gate's reasons are in the docstring of `useCatalogueScope` in `app/hooks.ts`**:
+why the fallback that is right for reading is no answer for writing, and why a failed fetch
+counts as settled. The entry "A stored preference has one owner" holds the gate's shape and its
+mutation pin, under "The write gate is the scope being absent", and why the controls are
+disabled meanwhile, under "`canSet` still reaches the controls". `useScopedPreference` refuses
+every per mode write through `useCatalogueScope` until the flags are settled.
 
-**Resolved means settled either way, not `flags !== undefined`.** A failed fetch is an answer:
-defining it the other way locks the controls for the session.
+**What the gate refuses that would have been correct**: a household's pick made before the flags
+settle, which the gate cannot tell from a cataloguer's because the fallback is the same value.
+Accepted deliberately.
 
-**What the gate refuses that nothing refused before**: a household's pick during that window,
-which would have been correct and is indistinguishable from a cataloguer's, because the
-fallback is the same value. Accepted deliberately.
-
-Pinned by mutation rather than by reading: over the whole suite, deleting the gate fails three
-named tests and defining resolved as `data !== undefined` fails five.
 ## The SRU server borrows the public catalogue's gate rather than growing one
 
 The ticket asked only that library mode off make the endpoint disappear.
@@ -18703,8 +18726,9 @@ bespoke search doors carry a cover of their own, so there the pair is two facts.
 before `_ranked` and Open Library leads `_MATCH_PRECEDENCE`, so a book it holds with a cover id
 of its own, folded with an SRU row that carries the identifier, scores both fields off two
 different doors and counts nothing twice. **So the double count is the SRU row's and not the
-scored row's**, and how much of a live ranking it reaches is not claimed: nothing in this tree
-observes the ordering that would answer it.
+scored row's**, and how much of a live ranking it reaches is not claimed. The order of one
+recorded search is pinned by `tests/test_metadata.py::TestARecordedSearchComesBackInItsPinnedOrder`,
+and a change that moves it is red there with the new order as its message.
 `tests/test_metadata.py::TestASearchRowsCoverIsDerivedFromItsOwnIsbn` holds the derivation at
 the reader, which is the half that can be tested. The sentence says what the reader does and
 refuses to say what the ranking does, because the first replacement for this paragraph
@@ -23141,3 +23165,44 @@ Both callers end their `switch (landing.kind)` with `landing satisfies never`, a
 `countLandings`, which both pages' counts come from, so a new kind is a type error at each
 rather than a row or a count either page drops. Measured: one planted kind gives `TS1360` at
 both callers; the same kind answered in both callers gives it in `countLandings`.
+
+## An audiobook records no file location
+
+**The Scan page records a file location for a book that is one file, and none for an
+audiobook.** A row standing for forty chapter files has no one file to point at, and a Book
+holds sixteen references at the most (`ScannedEntry.reference` in
+`frontend/src/pages/ScanPage/queue.ts`), so the picker's promise is scoped to a book that is
+one file rather than broken on the books it cannot keep.
+
+Recording the folder as the one location was considered and not taken: a reference is a file
+with a fingerprint, and a folder has neither, so that is a change to what a reference is and
+belongs to its own design. Owner's ruling, 2026-10-17.
+
+## A test asserting SQLite's behaviour says so, and an unmarked one fails
+
+**`@pytest.mark.sqlite_only(reason=...)` marks a test that asserts SQLite's own behaviour on
+purpose** (a pragma, the `sqlite_master` catalogue, dynamic typing, the `sqlite3` driver). On
+any other engine `tests/conftest.py` skips it with `SQLite only: <reason>`, and a mark without
+exactly one keyword `reason` is a usage error on every engine, so the skip line always says why.
+The Postgres job therefore reports such a test as not applicable instead of failing it, and
+what still fails there is an application defect or a test assuming SQLite without the mark.
+
+**There is no Postgres counterpart mark**, because the coverage register refuses any collected
+test carrying a skip, skipif or xfail on the default run. A mark that skipped on SQLite would be
+exactly that, which is also why the modules that need a real server skip themselves at module
+level (the *Postgres only* item of *A merge holds the keeper's ceilings*).
+
+**An unmarked test that executes a statement spelling `PRAGMA` or the `sqlite_` namespace fails
+at teardown**, through one `before_cursor_execute` listener on the suite's engine. Attribution is
+by the first frame outside SQLAlchemy: a statement the dialect or Alembic wrote while reflecting
+is portable and is not the test's. A statement under `if ... dialect.name == "sqlite"`, or reached
+from a call under one, is allowed; one in its `else` is not. The table valued form
+(`pragma_table_info`) is matched too. What the guard cannot see is stated in the docstring of
+`tests/sqlite_only.py`: `typeof`, `CAST(... AS BLOB)`, an assertion on the dialect name, a
+statement on an engine the test built, and anything sent through the raw DBAPI cursor.
+
+**The whole suite on Postgres is refused as the guard for now.** Measured at the base of the
+wave, a full run on Postgres left several hundred failures, most of them application defects not
+yet separated from the SQLite assumptions, so the job would have turned red on every tag. The
+mark and the side guard come first, and a whole suite job is the natural next guard once that
+list is fixed or carried.

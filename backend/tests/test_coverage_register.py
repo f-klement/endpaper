@@ -1686,6 +1686,7 @@ class TestEveryNumberInTheRegisterIsThisRunsOwn:
             "a run cannot write."
         )
 
+    @pytest.mark.sqlite_only(reason="the register describes the default run, which is on SQLite")
     def test_a_row_of_zero_names_a_file_this_run_did_not_collect(
         self, census: Census, register: str
     ) -> None:
@@ -1760,6 +1761,7 @@ class TestEveryNumberInTheRegisterIsThisRunsOwn:
             "it is the gate that needs widening and not this arm."
         )
 
+    @pytest.mark.sqlite_only(reason="the register describes the default run, which is on SQLite")
     def test_nothing_collected_is_skipped_or_left_expected_to_fail(
         self, request: pytest.FixtureRequest
     ) -> None:

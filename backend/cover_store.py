@@ -12,12 +12,14 @@ extension set, or which writer applies. `uploads.py` keeps the sniffing and the
 atomic write and stops being a door a caller configures.
 
 **Which writer sweeps is decided by the argument, not by the caller.** `save`
-takes a book id and sweeps the other formats of that book; `restore` takes a
-filename out of an archive and must not sweep, because a library that holds both
-`1.jpg` and `1.png` is a library whose rows name both (`restore` carries that
-reasoning). An upload cannot reach `restore` without inventing a filename, and a
-restore cannot reach `save` without discarding the name the archive gave it. The
-one word edit is now a different argument.
+takes a book id and sweeps the other formats of that book, and `write` with
+`sweep` is the same split at the one thing a caller decides, which is when its
+row commits; `restore` takes a filename out of an archive and must not sweep,
+because a library that holds both `1.jpg` and `1.png` is a library whose rows
+name both (`restore` carries that reasoning). An upload cannot reach `restore`
+without inventing a filename, and a restore cannot reach `save` without
+discarding the name the archive gave it. The one word edit is now a different
+argument.
 
 **Every write of bytes from outside this directory sniffs them**, including the
 three whose caller already did. `copy` and `move` are the exception and the only
@@ -39,7 +41,7 @@ from pathlib import Path
 from typing import Final
 
 from config import ALLOWED_IMAGE_EXTENSIONS, COVERS_DIR
-from uploads import replace_image, sniff_image_extension, write_image
+from uploads import replace_image, sniff_image_extension, sweep_other_formats, write_image
 
 # No logger. Every failure here is raised, and the caller that can say what the
 # failure cost is the one that logs it: `covers.adopt` names the book a move came
@@ -232,6 +234,21 @@ def save(book_id: int, data: bytes) -> Path:
     counted failure and which is a 500.
     """
     return replace_image(COVERS_DIR, str(book_id), _identify(data), data)
+
+
+def write(book_id: int, data: bytes) -> Path:
+    """`save` without its sweep, for a caller whose row naming the new file has
+    not committed yet. That caller hands `sweep` to `database.on_commit`.
+
+    Swept before the commit, a replace in another format deletes the old file,
+    and a commit that then fails leaves the row naming it. Raises as `save` does.
+    """
+    return write_image(COVERS_DIR, str(book_id), _identify(data), data)
+
+
+def sweep(book_id: int, kept: Path) -> None:
+    """Remove this book's cover in every format but the file `write` returned."""
+    sweep_other_formats(COVERS_DIR, str(book_id), kept)
 
 
 def save_login_background(data: bytes) -> Path:

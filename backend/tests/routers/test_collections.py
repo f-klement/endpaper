@@ -437,6 +437,7 @@ class TestWhoMayBeToldACollectionExists:
 
         assert [(row["name"], row["book_count"]) for row in rows] == [("Empty", 0)]
 
+    @pytest.mark.sqlite_only(reason="counts rows through sqlite3's row_factory, which no other driver has")
     def test_the_list_costs_three_statements_whatever_it_holds(
         self, client, admin, member, make_book
     ):

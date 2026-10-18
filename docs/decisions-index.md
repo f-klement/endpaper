@@ -26,7 +26,7 @@ repeat the argument.
 <!-- index: begin -->
 | Section | Entry | Words |
 |---|---|---|
-|  | [Backend](decisions.md#backend) | 34,246 |
+|  | [Backend](decisions.md#backend) | 34,542 |
 | Backend | [`bcrypt` directly, not `passlib`](decisions.md#bcrypt-directly-not-passlib) | 98 |
 | Backend | [Settings are functions, not module constants](decisions.md#settings-are-functions-not-module-constants) | 59 |
 | Backend | [`DATA_DIR` exists at all](decisions.md#data_dir-exists-at-all) | 22 |
@@ -43,7 +43,7 @@ repeat the argument.
 | Backend | [The health probe touches the database, and that was not enough](decisions.md#the-health-probe-touches-the-database-and-that-was-not-enough) | 590 |
 | Backend | [The covers that "stopped appearing" were a service worker cache, not the server](decisions.md#the-covers-that-stopped-appearing-were-a-service-worker-cache-not-the-server) | 548 |
 | Backend | [A cover is stored here, not hotlinked](decisions.md#a-cover-is-stored-here-not-hotlinked) | 317 |
-| Backend | [The cover bytes are files on the volume, not a column](decisions.md#the-cover-bytes-are-files-on-the-volume-not-a-column) | 420 |
+| Backend | [The cover bytes are files on the volume, not a column](decisions.md#the-cover-bytes-are-files-on-the-volume-not-a-column) | 426 |
 | Backend | [The cover backfill is every member's own, not the admin's](decisions.md#the-cover-backfill-is-every-members-own-not-the-admins) | 682 |
 | Backend | [The CSV import does not fetch covers inline](decisions.md#the-csv-import-does-not-fetch-covers-inline) | 75 |
 | Backend | [The server checks which host it may fetch a cover from](decisions.md#the-server-checks-which-host-it-may-fetch-a-cover-from) | 218 |
@@ -113,8 +113,8 @@ repeat the argument.
 | Backend | [Deliberate copies and accidental duplicates are told apart by a token](decisions.md#deliberate-copies-and-accidental-duplicates-are-told-apart-by-a-token) | 172 |
 | Backend | [The copy group is a shared label, not a self-referencing foreign key](decisions.md#the-copy-group-is-a-shared-label-not-a-self-referencing-foreign-key) | 223 |
 | Backend | [The copy's cover file is copied, not shared](decisions.md#the-copys-cover-file-is-copied-not-shared) | 71 |
-| Backend | [`_create_book` frees every holder of the ISBN, not the first one](decisions.md#_create_book-frees-every-holder-of-the-isbn-not-the-first-one) | 260 |
-| Backend | [A cover file is unlinked after the commit, never before it](decisions.md#a-cover-file-is-unlinked-after-the-commit-never-before-it) | 176 |
+| Backend | [`_create_book` frees every holder of the ISBN, not the first one](decisions.md#_create_book-frees-every-holder-of-the-isbn-not-the-first-one) | 269 |
+| Backend | [A cover file is unlinked after the commit, never before it](decisions.md#a-cover-file-is-unlinked-after-the-commit-never-before-it) | 457 |
 | Backend | [Duplicate detection matches on title and author, not ISBN](decisions.md#duplicate-detection-matches-on-title-and-author-not-isbn) | 59 |
 | Backend | [An author is a name on a book, not a row](decisions.md#an-author-is-a-name-on-a-book-not-a-row) | 381 |
 | Backend | [Two spellings are one person because somebody said so, not because the strings changed](decisions.md#two-spellings-are-one-person-because-somebody-said-so-not-because-the-strings-changed) | 295 |
@@ -166,10 +166,10 @@ repeat the argument.
 | Backend | [A payload's per viewer half is a type, and it carries no defaults](decisions.md#a-payloads-per-viewer-half-is-a-type-and-it-carries-no-defaults) | 275 |
 | Backend | [`LoanOut.book` is `BookColumns`, and it stops there rather than at four fields](decisions.md#loanoutbook-is-bookcolumns-and-it-stops-there-rather-than-at-four-fields) | 245 |
 | Backend | [A measured number lives where the column is declared](decisions.md#a-measured-number-lives-where-the-column-is-declared) | 231 |
-|  | [Frontend](decisions.md#frontend) | 14,679 |
+|  | [Frontend](decisions.md#frontend) | 14,779 |
 | Frontend | [Page-centric colocation](decisions.md#page-centric-colocation) | 18 |
 | Frontend | [`useLibrary` has one door for filters, not a setter per field](decisions.md#uselibrary-has-one-door-for-filters-not-a-setter-per-field) | 559 |
-| Frontend | [A stored preference has one owner, and the subscription is what retired the counter](decisions.md#a-stored-preference-has-one-owner-and-the-subscription-is-what-retired-the-counter) | 1,169 |
+| Frontend | [A stored preference has one owner, and the subscription is what retired the counter](decisions.md#a-stored-preference-has-one-owner-and-the-subscription-is-what-retired-the-counter) | 1,269 |
 | Frontend | [The filter set is checked against the API's own schema](decisions.md#the-filter-set-is-checked-against-the-apis-own-schema) | 370 |
 | Frontend | [Types are generated, not hand-written](decisions.md#types-are-generated-not-hand-written) | 48 |
 | Frontend | [No top-level `query` block in `orval.config.ts`](decisions.md#no-top-level-query-block-in-orvalconfigts) | 49 |
@@ -383,12 +383,12 @@ repeat the argument.
 | MARC21 import and export | [A finding that rests on a mechanism should say what guards that mechanism](decisions.md#a-finding-that-rests-on-a-mechanism-should-say-what-guards-that-mechanism) | 316 |
 | MARC21 import and export | [An SRU source built on PQF may not build its own query string](decisions.md#an-sru-source-built-on-pqf-may-not-build-its-own-query-string) | 417 |
 | MARC21 import and export | [A source that is not UTF-8 corrupts a shelf rather than failing a search](decisions.md#a-source-that-is-not-utf-8-corrupts-a-shelf-rather-than-failing-a-search) | 418 |
-|  | [The cataloguer's column set](decisions.md#the-cataloguers-column-set) | 1,687 |
+|  | [The cataloguer's column set](decisions.md#the-cataloguers-column-set) | 1,550 |
 | The cataloguer's column set | [The call number is Dewey and Library of Congress, the subjects are GND and LCSH](decisions.md#the-call-number-is-dewey-and-library-of-congress-the-subjects-are-gnd-and-lcsh) | 198 |
 | The cataloguer's column set | [Sorting the call number sorts the classification, never the cell](decisions.md#sorting-the-call-number-sorts-the-classification-never-the-cell) | 106 |
 | The cataloguer's column set | [There is no record status column, and the promise of one is withdrawn](decisions.md#there-is-no-record-status-column-and-the-promise-of-one-is-withdrawn) | 268 |
 | The cataloguer's column set | [One spec table per column, not a label map beside two lists of keys](decisions.md#one-spec-table-per-column-not-a-label-map-beside-two-lists-of-keys) | 223 |
-| The cataloguer's column set | [The column set is per mode, in two localStorage keys](decisions.md#the-column-set-is-per-mode-in-two-localstorage-keys) | 393 |
+| The cataloguer's column set | [The column set is per mode, in two localStorage keys](decisions.md#the-column-set-is-per-mode-in-two-localstorage-keys) | 256 |
 | The cataloguer's column set | [One table of scheme labels, because there were about to be three](decisions.md#one-table-of-scheme-labels-because-there-were-about-to-be-three) | 53 |
 | The cataloguer's column set | [A count is not a fact about a file until it says which tree it describes](decisions.md#a-count-is-not-a-fact-about-a-file-until-it-says-which-tree-it-describes) | 126 |
 | The cataloguer's column set | [A refusal belongs where somebody would go to propose it again](decisions.md#a-refusal-belongs-where-somebody-would-go-to-propose-it-again) | 75 |
@@ -478,7 +478,7 @@ repeat the argument.
 | The refused long search names our own limit, not the catalogues' | [The backend suite is twice as slow in CI as in an identical pod, and three obvious reasons are not it](decisions.md#the-backend-suite-is-twice-as-slow-in-ci-as-in-an-identical-pod-and-three-obvious-reasons-are-not-it) | 424 |
 | The refused long search names our own limit, not the catalogues' | [The runner checks its image against the pipeline for both toolchains, not one](decisions.md#the-runner-checks-its-image-against-the-pipeline-for-both-toolchains-not-one) | 451 |
 | The refused long search names our own limit, not the catalogues' | [What the pipeline now reports about its own CPU](decisions.md#what-the-pipeline-now-reports-about-its-own-cpu) | 622 |
-|  | [The library view is remembered per mode, and the household's key kept its name](decisions.md#the-library-view-is-remembered-per-mode-and-the-households-key-kept-its-name) | 395 |
+|  | [The library view is remembered per mode, and the household's key kept its name](decisions.md#the-library-view-is-remembered-per-mode-and-the-households-key-kept-its-name) | 349 |
 |  | [The SRU server borrows the public catalogue's gate rather than growing one](decisions.md#the-sru-server-borrows-the-public-catalogues-gate-rather-than-growing-one) | 149 |
 |  | [The column boundary for a MARC record is `marc.py`'s field mapping, and it is now pinned](decisions.md#the-column-boundary-for-a-marc-record-is-marcpys-field-mapping-and-it-is-now-pinned) | 173 |
 |  | [Masking is supported because SQLite's LIKE does not backtrack](decisions.md#masking-is-supported-because-sqlites-like-does-not-backtrack) | 304 |
@@ -765,7 +765,7 @@ repeat the argument.
 | The reading history title takes half the fold and refuses the other half | [A provenance claim is the most quotable sentence in a module and the least checked](decisions.md#a-provenance-claim-is-the-most-quotable-sentence-in-a-module-and-the-least-checked) | 1,368 |
 |  | [A leading article is a title's, never a credit's](decisions.md#a-leading-article-is-a-titles-never-a-credits) | 84 |
 |  | [`identity.py` is kept although the depth instrument argues against it](decisions.md#identitypy-is-kept-although-the-depth-instrument-argues-against-it) | 361 |
-|  | [The two completeness scores are two questions, not one list](decisions.md#the-two-completeness-scores-are-two-questions-not-one-list) | 671 |
+|  | [The two completeness scores are two questions, not one list](decisions.md#the-two-completeness-scores-are-two-questions-not-one-list) | 686 |
 |  | [An arm compared against itself survives every mutant, and the sweep cannot see it](decisions.md#an-arm-compared-against-itself-survives-every-mutant-and-the-sweep-cannot-see-it) | 257 |
 |  | [An arm that pins the wrong thing, and the seat that withdrew its own finding](decisions.md#an-arm-that-pins-the-wrong-thing-and-the-seat-that-withdrew-its-own-finding) | 314 |
 |  | [A guard for the general components folder names no domain word](decisions.md#a-guard-for-the-general-components-folder-names-no-domain-word) | 125 |
@@ -934,4 +934,6 @@ repeat the argument.
 |  | [A location held only by a Book the file may not land on is not sent](decisions.md#a-location-held-only-by-a-book-the-file-may-not-land-on-is-not-sent) | 106 |
 |  | [A tie has its own outcome and its own sentence, true of both cases it covers](decisions.md#a-tie-has-its-own-outcome-and-its-own-sentence-true-of-both-cases-it-covers) | 149 |
 |  | [Each caller maps a landing in an exhaustive switch](decisions.md#each-caller-maps-a-landing-in-an-exhaustive-switch) | 60 |
+|  | [An audiobook records no file location](decisions.md#an-audiobook-records-no-file-location) | 111 |
+|  | [A test asserting SQLite's behaviour says so, and an unmarked one fails](decisions.md#a-test-asserting-sqlites-behaviour-says-so-and-an-unmarked-one-fails) | 339 |
 <!-- index: end -->

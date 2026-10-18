@@ -3040,7 +3040,8 @@ class TestASearchRowsCoverIsDerivedFromItsOwnIsbn:
     `_MATCH_PRECEDENCE`, so a merged row can carry its identifier from one door
     and its cover from another and score both on two facts. The derivation here
     is the reader's. Whether the scored row double counts is a question about
-    the merge, and nothing in this tree observes the ordering.
+    the merge, and the ordering it produces is observed by
+    `TestARecordedSearchComesBackInItsPinnedOrder`, over one recorded search.
     """
 
     #: Fields every body above is read for, beside the identifier and the
@@ -3188,6 +3189,363 @@ class TestASearchRowsCoverIsDerivedFromItsOwnIsbn:
         assert not carried.cover_url
         assert covered.cover_url
         assert not covered.isbn
+
+
+#: One title search recorded live on 2026-10-17 from every catalogue a keyless
+#: install asks, at the route's default page size.
+#:
+#: **Each SRU envelope is cut to the records its reader turns into a row**, and
+#: every kept record is the catalogue's bytes. The cut envelope was checked to
+#: decode to the same rows, in the same order, as the whole one, so the cut
+#: removed only records the search door refuses. Open Library's answer is whole.
+SEARCH_RECORDING: Final = BACKEND / "tests" / "fixtures" / "search_zorba_the_greek_2026_10_17"
+
+
+@dataclass(frozen=True)
+class RecordedSearch:
+    """What one `metadata.search` over `SEARCH_RECORDING` did."""
+
+    #: What `search` returned.
+    returned: list[Record]
+    #: Every row `_ranked` ranked, past the cut included.
+    ranked: list[Record]
+    #: The merged rows `_ranked` was handed, in arrival order.
+    merged: list[Record]
+    #: Every source the fan out asked `_search_one` for, in call order.
+    asked: tuple[CatalogueSource, ...]
+
+
+class TestARecordedSearchComesBackInItsPinnedOrder:
+    """The order of a whole result set, over rows the readers really produce.
+
+    `TestRanking` compares constructed rows two at a time, and says nothing
+    about what a list of real rows comes back as. The score decides membership
+    as well as order: `title_search` truncates to `limit` after ranking, so a
+    row demoted past the cut is absent with a 200 and no log line.
+
+    **`ORDER` is a competition ranking, and a shared rank is a tie.** The arms
+    derive each rank from `_relevance` over the rows as `_ranked` returned them
+    (`_ranks`), so on a green run a rank holds exactly the rows whose
+    `_relevance` is equal, and a literal declaring a tie too wide or too narrow
+    is red. Inside a rank `ORDER` is in `_canonical` order, not arrival order:
+    a reorder the ranking does not decide stays green, and one it does decide
+    goes red.
+
+    **Written from the implementation, so it pins what the ranking does and not
+    what it should do.** A deliberate change to the ranking reddens the order
+    arms, and the two that compare the whole of `ORDER` print its replacement
+    body as their failure message, ready to paste. The diff of `ORDER` in that
+    commit is then the measurement of what the change moved.
+
+    **What goes past it**: a change that only reorders rows inside one rank; a
+    change visible only on rows this one query does not produce; a reader that
+    starts keeping records it refused, because the recording kept only the
+    records that became rows that day, the ÖNB's aside (`REFUSED_WHOLE`); a
+    source only the `harder` search asks, because `ORDER` is the default search
+    and that search does not ask it; and Google Books, which has no recording.
+    See `UNRECORDED`.
+    """
+
+    QUERY = "zorba the greek"
+    #: The reader's language. The route passes the interface locale.
+    LANGUAGE = "de"
+    #: The route's default page size, and the one the recording asked for.
+    LIMIT = 10
+    #: How much of a title `ORDER` carries. Enough to tell every row in one
+    #: rank from every row in another, which `test_each_label_belongs_to_one_rank`
+    #: holds, because a label shared across two ranks would hide a swap of them.
+    TITLE_WIDTH = 44
+
+    #: Sources the fan out asks that have no recording, each with why.
+    #:
+    #: **An entry is asked and never called through**: `_search` answers it with
+    #: no rows in place of `metadata._search_one`, so it sends nothing over any
+    #: transport. That same answer would hide a source's rows from `ORDER`
+    #: without a word, so the roster arm admits an entry only for a source a
+    #: keyless install has no credential for, whatever its reason says.
+    UNRECORDED: Final = {
+        CatalogueSource.GOOGLE_BOOKS: (
+            "needs a key and sends no request without one, so a keyless search "
+            "gets no rows from it; a keyless request was refused with a 429 on "
+            "the day of recording"
+        ),
+    }
+
+    #: Recordings that answer no row, each with the leader/06 code a refusal
+    #: of its records reads.
+    #:
+    #: **An entry is a refusal pinned, not a catalogue that answered nothing.**
+    #: All 29 ÖNB records are film set photographs, which `marc_fields` refuses
+    #: on `k` because a photograph is not a book (#593). The lift arm shows only
+    #: that the recording answers rows again once these codes are allowed, not
+    #: how many, so the recording is what keeps that refusal from
+    #: being dropped quietly; deleting it would lose that, and the roster arm
+    #: refuses to let a free source go unrecorded anyway.
+    REFUSED_WHOLE: Final = {CatalogueSource.OENB: "k"}
+
+    #: The transports whose requests go through httpx, which is all `respx`
+    #: serves. A recorded source on any other would open a real socket from the
+    #: runner before anything here could go red. BESPOKE is here only because
+    #: both bespoke doors use httpx today; a bespoke door on another client
+    #: takes it out.
+    MOCKED_TRANSPORTS: Final = frozenset({targets.Transport.SRU, targets.Transport.BESPOKE})
+
+    #: `(rank, source, year, the first TITLE_WIDTH characters of the title)`,
+    #: best first, as `title_search` ranked the recording. Inside a rank, in
+    #: `_canonical` order.
+    ORDER: Final[tuple[tuple[int, str, int | None, str], ...]] = (
+        (1, "k10plus", 2023, "Zorba the Greek"),
+        (2, "open_library", 1965, "Zorba the Greek"),
+        (3, "open_library", 1964, "Zorba the Greek"),
+        (4, "k10plus", 2019, "Zorba the Greek"),
+        (5, "open_library", 1993, "Zorba the Greek"),
+        (6, "open_library", 1969, "Zorba the Greek"),
+        (7, "loc+open_library", 1952, "Zorba the Greek"),
+        (8, "loc", 2014, "Zorba the Greek"),
+        (9, "open_library", 2003, "Zorba the Greek / Grek Zorba"),
+        (10, "loc", 1996, "Zorba the Greek"),
+        (11, "nlg", 2016, "Zorba the Greek"),
+        (12, "loc", 1953, "Zorba the Greek"),
+        (13, "nlg", 1952, "Zorba the Greek"),
+        (14, "k10plus", 2023, "Relay Effects"),
+        (15, "k10plus", 2020, "Zorba Yunani"),
+        (16, "k10plus", 2019, "Kazantzakis's Zorba the Greek"),
+        (17, "open_library", 1953, "ZORBA THE GREEK. Translated by Carl Wildman."),
+        (18, "dnb", 1996, "Zorbas"),
+        (19, "open_library", 2015, "Zorba the Greek / Βίος Και Πολιτεία Του Αλέξ"),
+        (20, "dnb", 2006, "Zorbas"),
+        (21, "k10plus", 2019, "Xīlàrén zuǒ bā"),
+        (22, "k10plus", 2017, "Zhorba da Greek"),
+        (23, "loc+nlg", 2007, 'Apo to "Vios kai politeia tou Alexē Zormpa"'),
+        (24, "nlg", 2007, "Zorba, teach me to dance"),
+        (25, "nlg", 2016, "Mistress Troika, Zorba the Greek and a Molot"),
+        (26, "loc", None, "Theme from Zorba the Greek and more Greek da"),
+        (26, "loc", None, "Zorba the Greek and other Broadway and motio"),
+        (28, "dnb", 1966, "Zorbas Tanz"),
+        (29, "bnf", 1965, "Zorba le Grec [- Zorba the Greek]... . Parol"),
+        (30, "k10plus", 2021, "Zorba"),
+        (31, "open_library", 1964, "Zorba"),
+        (32, "k10plus", 2019, "Zorba's dance"),
+        (33, "dnb", 2009, "Zorba's dance"),
+        (34, "loc", 1969, "Zorbá"),
+        (35, "k10plus", 2022, "Zorba der Grieche"),
+        (36, "k10plus", 2021, "Zūrbā-yi Yūnānī"),
+        (37, "open_library", 1952, "Vios ke Politia tou Alexi Zorba"),
+        (38, "k10plus", 2019, "Alexis Sorbas"),
+        (39, "k10plus", 2019, "Pop for Violin - Best of"),
+        (40, "dnb", 1966, "Die Strasse der hunderttausend Lichter ..."),
+        (41, "dnb", 1965, "Das Leben geht weiter"),
+        (41, "dnb", 1965, "Thema"),
+        (43, "dnb", 1969, "Zorbaʹs Dance"),
+        (44, "dnb", 1965, "(I canʹt get no) satisfaction [Satisfaction]"),
+        (45, "bnf", 1965, "[Zorba le grec"),
+        (46, "bnf", 1964, "Zorba le grec"),
+        (47, "bnf", None, "[Zorba le Grec (Mikis Theodorakis)"),
+        (48, "k10plus", 2022, "Cōrpā en̲r̲a Kirēkkan̲"),
+        (49, "k10plus", 2016, "Hal Leonard mandolin fake book"),
+    )
+
+    def _recordings(self) -> dict[CatalogueSource, Path]:
+        return {CatalogueSource(path.stem): path for path in SEARCH_RECORDING.iterdir()}
+
+    def _label(self, row: Record) -> tuple[str, int | None, str]:
+        return (row.source, row.year, (row.title or "")[: self.TITLE_WIDTH])
+
+    @staticmethod
+    def _canonical(entry: tuple[int, str, int | None, str]) -> tuple[int, str, int, str]:
+        """The order of `ORDER` inside a rank. `-1` for a missing year because
+        `None` does not compare with an int."""
+        rank, source, year, title = entry
+        return (rank, source, -1 if year is None else year, title)
+
+    def _ranks(self, rows: list[Record]) -> tuple[tuple[int, str, int | None, str], ...]:
+        """`rows`, in the order given, written as `ORDER` spells them.
+
+        **Each rank is derived from `_relevance`, not read from `ORDER`**: a row
+        takes the position of the first row in its run of equal `_relevance`.
+        That is what holds the tie claim in the class docstring, and what makes
+        the failure message a replacement literal rather than a list of
+        positions to rebuild by hand.
+        """
+        terms = metadata._search_terms(self.QUERY)
+        scores = [metadata._relevance(row, terms, self.LANGUAGE) for row in rows]
+        entries = []
+        rank = 0
+        for position, (score, row) in enumerate(zip(scores, rows, strict=True)):
+            if position == 0 or score != scores[position - 1]:
+                rank = position + 1
+            entries.append((rank, *self._label(row)))
+        return tuple(sorted(entries, key=self._canonical))
+
+    @staticmethod
+    def _as_literal(entries: tuple[tuple[int, str, int | None, str], ...]) -> str:
+        """The failure message: `entries` as the body of `ORDER`, to paste."""
+        return "\n".join(["the ranking now gives ORDER as:", *(f"        {e!r}," for e in entries)])
+
+    async def _search(self, monkeypatch: pytest.MonkeyPatch) -> RecordedSearch:
+        """`metadata.search` over the recording.
+
+        **Through `search` and not `_ranked` alone**, so the readers, the merge
+        and the truncation that ship are the ones under test. `_ranked` is
+        wrapped rather than replaced, which is how the rows past the cut are
+        seen at all. `assert_all_called` because a recording nobody asks for
+        would leave its rows out of the order without a word.
+
+        **`_search_one` is wrapped too, and calls through only for a source
+        with a recording.** That is the seam the fan out asks every source
+        through, so an `UNRECORDED` source sends nothing, over any transport,
+        and a recorded one whose door `respx` cannot serve fails before its
+        door is called rather than after it has reached the network.
+        """
+        recordings = self._recordings()
+        seen: dict[str, list[Record]] = {}
+        asked: list[CatalogueSource] = []
+        real_ranked = metadata._ranked
+        real_search_one = metadata._search_one
+
+        def ranked(
+            matches: list[Record], terms: list[str], prefer_language: str | None
+        ) -> list[Record]:
+            seen["merged"] = list(matches)
+            seen["ranked"] = real_ranked(matches, terms, prefer_language)
+            return seen["ranked"]
+
+        async def search_one(
+            target: targets.Target,
+            query: str,
+            limit: int,
+            api_key: str,
+            *,
+            credential: fetch.Credential | None,
+        ) -> list[Record]:
+            asked.append(target.source)
+            if target.source not in recordings:
+                return []
+            if target.transport not in self.MOCKED_TRANSPORTS:
+                pytest.fail(
+                    f"{target.source} is recorded, and its {target.transport} door "
+                    "would reach the network: respx serves httpx only"
+                )
+            return await real_search_one(
+                target, query, limit, api_key, credential=credential
+            )
+
+        monkeypatch.setattr(metadata, "_ranked", ranked)
+        monkeypatch.setattr(metadata, "_search_one", search_one)
+        with respx.mock(assert_all_called=True) as mock:
+            for source, path in recordings.items():
+                body = path.read_text(encoding="utf-8")
+                kind = "text/xml" if path.suffix == ".xml" else "application/json"
+                mock.get(url__startswith=targets.SEEDED[source].base_url).mock(
+                    return_value=httpx.Response(
+                        200, text=body, headers={"content-type": kind}
+                    )
+                )
+            returned = await search(
+                self.QUERY, limit=self.LIMIT, prefer_language=self.LANGUAGE
+            )
+        return RecordedSearch(returned, seen["ranked"], seen["merged"], tuple(asked))
+
+    def test_every_search_source_is_recorded_or_says_why_not(self):
+        """Derived from `ALL_SOURCES.searched`, the roster the fan out iterates,
+        so a source added to the search is red here until somebody records it
+        or says why not.
+
+        **The one reason an entry may give is that a keyless install has no
+        credential to ask with**, which is `NEEDS_A_KEY - SHIPS_A_CREDENTIAL` on
+        the rows. An entry is never called through, so without this a free
+        source written into `UNRECORDED` with any reason has no rows in `ORDER`
+        and every arm green, while a real search returns its rows.
+        """
+        recorded = set(self._recordings())
+        searched = set(ALL_SOURCES.searched)
+        keyless_cannot_ask = sources.NEEDS_A_KEY - sources.SHIPS_A_CREDENTIAL
+
+        assert not recorded & set(self.UNRECORDED)
+        assert recorded | set(self.UNRECORDED) == searched, sorted(
+            (recorded | set(self.UNRECORDED)) ^ searched
+        )
+        assert sorted(set(self.UNRECORDED) - keyless_cannot_ask) == []
+
+    async def test_only_a_recorded_source_is_called_through(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        """The fan out asks the whole roster once each, and the sources whose
+        door really ran are exactly the recorded ones."""
+        searched = await self._search(monkeypatch)
+        recorded = set(self._recordings())
+
+        assert sorted(searched.asked) == sorted(ALL_SOURCES.searched)
+        assert {source for source in searched.asked if source in recorded} == recorded
+
+    def test_every_recording_has_a_row_in_the_order(self):
+        """A recording whose catalogue answers nothing pins nothing about it,
+        unless `REFUSED_WHOLE` names it, and then it must answer nothing."""
+        answering = {part for entry in self.ORDER for part in entry[1].split("+")}
+
+        assert {
+            source for source in self._recordings() if source.value not in answering
+        } == set(self.REFUSED_WHOLE)
+
+    async def test_a_recording_refused_whole_answers_once_its_code_is_lifted(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        """The entry's code is the reason it answers nothing. Without this a
+        reader that stopped parsing the ÖNB would answer nothing too, and the
+        entry would hide it."""
+        lifted = set(self.REFUSED_WHOLE.values())
+        monkeypatch.setattr(
+            marc_fields,
+            "_NOT_A_BOOK_RECORD_TYPES",
+            marc_fields._NOT_A_BOOK_RECORD_TYPES - lifted,
+        )
+        merged = (await self._search(monkeypatch)).merged
+        answering = {part for row in merged for part in row.source.split("+")}
+
+        assert {source.value for source in self.REFUSED_WHOLE} - answering == set()
+
+    def test_each_label_belongs_to_one_rank(self):
+        ranks: dict[tuple[str, int | None, str], set[int]] = {}
+        for rank, source, year, title in self.ORDER:
+            ranks.setdefault((source, year, title), set()).add(rank)
+
+        assert {label: found for label, found in ranks.items() if len(found) > 1} == {}
+
+    async def test_a_recorded_search_ranks_every_row_into_its_pinned_rank(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        ranked = self._ranks((await self._search(monkeypatch)).ranked)
+
+        assert ranked == self.ORDER, self._as_literal(ranked)
+
+    async def test_the_order_is_the_rankings_and_not_the_order_rows_arrived_in(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        """The same rows handed over reversed land in the same ranks.
+
+        **This is the arm that sees arrival order decide a rank.** A sort that
+        stops honouring part of `_relevance` settles what it ignores by arrival
+        order, which can happen to match `ORDER` in one direction and cannot in
+        both.
+        """
+        merged = (await self._search(monkeypatch)).merged
+        reversed_rows = self._ranks(
+            metadata._ranked(
+                merged[::-1], metadata._search_terms(self.QUERY), self.LANGUAGE
+            )
+        )
+
+        assert reversed_rows == self.ORDER, self._as_literal(reversed_rows)
+
+    async def test_a_search_returns_the_head_of_the_order(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        """The cut falls between two ranks, so which rows are returned is the
+        ranking's decision and not the catalogues' order."""
+        returned = (await self._search(monkeypatch)).returned
+
+        assert self.ORDER[self.LIMIT][0] == self.LIMIT + 1
+        assert self._ranks(returned) == self.ORDER[: self.LIMIT]
 
 
 class TestAHostileSourceCostsItsOwnRows:

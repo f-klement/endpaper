@@ -298,7 +298,7 @@ os.environ["PYTHON_KEYRING_BACKEND"] = "keyring.backends.fail.Keyring"
 # is unaffected by this.
 
 from fastapi.testclient import TestClient  # noqa: E402
-from sqlalchemy import text  # noqa: E402
+from sqlalchemy import event, text  # noqa: E402
 
 import accounts  # noqa: E402
 import covers  # noqa: E402
@@ -307,6 +307,7 @@ import metadata  # noqa: E402
 import ratelimit  # noqa: E402
 from database import Base, SessionLocal, engine  # noqa: E402
 from models import User  # noqa: E402
+from tests import sqlite_only  # noqa: E402
 from tests.helpers import cover_resolver  # noqa: E402
 
 # ── Moving the process off UTC, for anything that writes or reads a day ──────
@@ -1122,6 +1123,75 @@ def a_crashing_route_fails_its_test(request: pytest.FixtureRequest) -> Iterator[
         if isinstance(crash, BaseException):
             raise crash
         pytest.fail(f"a route crashed during this test: {record.getMessage()}")
+
+
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    """Skip a `sqlite_only` test on any other engine, with the reason it gives.
+
+    `tests/sqlite_only.py` says what the mark means and why there is no Postgres
+    counterpart. On SQLite this adds nothing, so the default run collects and
+    runs every marked test, which is what the coverage register's refusal of a
+    marked skip needs.
+
+    **A mark without a reason is refused on every engine**, so the refusal reaches
+    the author on the run they make rather than on a Postgres run they do not.
+    """
+    for item in items:
+        for mark in item.iter_markers(sqlite_only.MARK):
+            try:
+                reason = sqlite_only.reason_of(mark.args, mark.kwargs)
+            except ValueError as refusal:
+                raise pytest.UsageError(f"{item.nodeid}: {refusal}") from None
+            if engine.dialect.name != "sqlite":
+                item.add_marker(pytest.mark.skip(reason=f"SQLite only: {reason}"))
+
+
+@event.listens_for(engine, "before_cursor_execute")
+def _record_sqlites_own_sql(
+    _connection: Any, _cursor: Any, statement: str, *_rest: Any
+) -> None:
+    """Note a statement SQLite alone understands that the test tree spelled.
+
+    Registered once rather than per test, so twelve thousand tests do not each
+    add and remove a listener. The regular expression is the cheap half and runs
+    on every statement; the frame walk runs only on a match.
+    """
+    judging = sqlite_only.JUDGING
+    if not judging or judging["marked"] or not sqlite_only.spells_sqlites_own_sql(statement):
+        return
+    authors = sqlite_only.authors_of(sys._getframe(1))
+    if sqlite_only.needs_the_mark(authors):
+        path, line = authors[0]
+        judging["seen"].append(f"{path.relative_to(sqlite_only.TESTS.parent)}:{line}: {statement[:100]!r}")
+
+
+@pytest.fixture(autouse=True)
+def sqlite_only_sql_is_marked(request: pytest.FixtureRequest) -> Iterator[None]:
+    """A test that runs SQLite's own SQL says so, or it fails.
+
+    Without this a test reading `sqlite_master` passes on every default run and
+    fails on Postgres, where it should have been skipped, and the Postgres
+    failures stop being a count of what does not port. Judged at teardown, the
+    way the crash net above is, so a test that catches the error a statement
+    raises is still judged on the statement.
+    """
+    sqlite_only.JUDGING.update(
+        marked=request.node.get_closest_marker(sqlite_only.MARK) is not None, seen=[]
+    )
+    try:
+        yield
+    finally:
+        seen = sqlite_only.JUDGING["seen"]
+        sqlite_only.JUDGING.clear()
+    if seen:
+        pytest.fail(
+            "this test runs SQL only SQLite understands, so on another engine it "
+            "fails rather than skipping. Mark it "
+            f"`@pytest.mark.{sqlite_only.MARK}(reason=...)` if SQLite's behaviour is "
+            'its subject, or put the statement under `if ... dialect.name == "sqlite"` '
+            "if it is a step of a portable test:\n  " + "\n  ".join(seen),
+            pytrace=False,
+        )
 
 
 @pytest.fixture(autouse=True)

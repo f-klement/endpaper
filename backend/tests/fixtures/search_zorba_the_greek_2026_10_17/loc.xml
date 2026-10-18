@@ -1,0 +1,500 @@
+<?xml version="1.0"?>
+<zs:searchRetrieveResponse xmlns:zs="http://www.loc.gov/zing/srw/"><zs:version>1.1</zs:version><zs:numberOfRecords>21</zs:numberOfRecords><zs:records><zs:record><zs:recordSchema>mods</zs:recordSchema><zs:recordPacking>xml</zs:recordPacking><zs:recordData><mods xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns="http://www.loc.gov/mods/v3" version="3.8" xsi:schemaLocation="http://www.loc.gov/mods/v3 http://www.loc.gov/standards/mods/v3/mods-3-8.xsd">
+  <titleInfo>
+    <title>Zorba the Greek</title>
+  </titleInfo>
+  <titleInfo type="uniform" nameTitleGroup="1">
+    <title>Vios kai politeia tou Alexe&#x304; Zormpa. English</title>
+  </titleInfo>
+  <name type="personal" usage="primary" nameTitleGroup="1">
+    <namePart>Kazantzakis, Nikos,</namePart>
+    <namePart type="date">1883-1957</namePart>
+  </name>
+  <typeOfResource>text</typeOfResource>
+  <genre authority="rdacontent">text</genre>
+  <genre authority="gsafd">Picaresque literature.</genre>
+  <originInfo>
+    <place>
+      <placeTerm type="code" authority="marccountry">nyu</placeTerm>
+    </place>
+    <dateIssued encoding="marc">1953</dateIssued>
+    <copyrightDate encoding="marc">1952</copyrightDate>
+    <issuance>monographic</issuance>
+    <place>
+      <placeTerm type="text">New York</placeTerm>
+    </place>
+    <agent>
+      <namePart>Simon and Schuster</namePart>
+    </agent>
+    <dateIssued>1953 [c1952]</dateIssued>
+  </originInfo>
+  <language>
+    <languageTerm authority="iso639-2b" type="code">eng</languageTerm>
+  </language>
+  <language objectPart="translation">
+    <languageTerm authority="iso639-2b" type="code">gre</languageTerm>
+  </language>
+  <physicalDescription>
+    <form authority="marcform">print</form>
+    <form type="media" authority="rdamedia">unmediated</form>
+    <form type="carrier" authority="rdacarrier">volume</form>
+    <extent>311 p. 22 cm.</extent>
+  </physicalDescription>
+  <note type="statement of responsibility">translated by Carl Wildman.</note>
+  <classification authority="lcc">PZ3.K1884 Zo3</classification>
+  <classification authority="ddc">889.3</classification>
+  <identifier type="lccn">53007756</identifier>
+  <recordInfo>
+    <recordContentSource authority="marcorg">DLC</recordContentSource>
+    <recordCreationDate encoding="marc">730522</recordCreationDate>
+    <recordChangeDate encoding="iso8601">20250607144619.9</recordChangeDate>
+    <recordIdentifier>3110360</recordIdentifier>
+    <recordOrigin>Converted from MARCXML to MODS version 3.8 using MARC21slim2MODS3-8_XSLT1-0.xsl
+				(Revision 1.172 20230208)</recordOrigin>
+  </recordInfo>
+</mods></zs:recordData><zs:recordPosition>3</zs:recordPosition></zs:record><zs:record><zs:recordSchema>mods</zs:recordSchema><zs:recordPacking>xml</zs:recordPacking><zs:recordData><mods xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns="http://www.loc.gov/mods/v3" version="3.8" xsi:schemaLocation="http://www.loc.gov/mods/v3 http://www.loc.gov/standards/mods/v3/mods-3-8.xsd">
+  <titleInfo>
+    <title>Zorba the Greek</title>
+  </titleInfo>
+  <titleInfo type="uniform" nameTitleGroup="1">
+    <title>Vios kai politeia tou Alexe&#x304; Zormpa. English</title>
+  </titleInfo>
+  <name type="personal" usage="primary" nameTitleGroup="1">
+    <namePart>Kazantzakis, Nikos,</namePart>
+    <namePart type="date">1883-1957</namePart>
+  </name>
+  <name type="personal">
+    <namePart>Wildman, Carl.</namePart>
+  </name>
+  <typeOfResource>text</typeOfResource>
+  <genre authority="rdacontent">text</genre>
+  <originInfo>
+    <place>
+      <placeTerm type="code" authority="marccountry">nyu</placeTerm>
+    </place>
+    <issuance>monographic</issuance>
+    <place>
+      <placeTerm type="text">New York</placeTerm>
+    </place>
+    <agent>
+      <namePart>Scribner Paperback Fiction</namePart>
+    </agent>
+    <dateIssued>1996</dateIssued>
+    <edition>1st Scribner Paperback Fiction ed.</edition>
+  </originInfo>
+  <language>
+    <languageTerm authority="iso639-2b" type="code">eng</languageTerm>
+  </language>
+  <language objectPart="translation">
+    <languageTerm authority="iso639-2b" type="code">gre</languageTerm>
+  </language>
+  <physicalDescription>
+    <form authority="marcform">print</form>
+    <form type="media" authority="rdamedia">unmediated</form>
+    <form type="carrier" authority="rdacarrier">volume</form>
+    <extent>311 p. ; 21 cm.</extent>
+  </physicalDescription>
+  <note type="statement of responsibility">by Nikos Kazantzakis ; translated by Carl Wildman.</note>
+  <note>Originally published: New York : Simon and Schuster, 1953.</note>
+  <classification authority="lcc">PA5610.K39 V5613 1996</classification>
+  <classification authority="ddc" edition="20">889/.332</classification>
+  <identifier type="isbn">0684825546</identifier>
+  <identifier type="isbn">9780684825540</identifier>
+  <identifier type="lccn">96032106</identifier>
+  <relatedItem>
+    <location>
+      <url displayLabel="Publisher description">http://www.loc.gov/catdir/enhancements/fy1408/96032106-d.html</url>
+    </location>
+  </relatedItem>
+  <relatedItem>
+    <location>
+      <url displayLabel="Contributor biographical information">http://www.loc.gov/catdir/enhancements/fy1408/96032106-b.html</url>
+    </location>
+  </relatedItem>
+  <recordInfo>
+    <descriptionStandard>aacr</descriptionStandard>
+    <recordContentSource authority="marcorg">DLC</recordContentSource>
+    <recordCreationDate encoding="marc">960729</recordCreationDate>
+    <recordChangeDate encoding="iso8601">20250607152629.4</recordChangeDate>
+    <recordIdentifier>3525623</recordIdentifier>
+    <recordOrigin>Converted from MARCXML to MODS version 3.8 using MARC21slim2MODS3-8_XSLT1-0.xsl
+				(Revision 1.172 20230208)</recordOrigin>
+  </recordInfo>
+</mods></zs:recordData><zs:recordPosition>4</zs:recordPosition></zs:record><zs:record><zs:recordSchema>mods</zs:recordSchema><zs:recordPacking>xml</zs:recordPacking><zs:recordData><mods xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns="http://www.loc.gov/mods/v3" version="3.8" xsi:schemaLocation="http://www.loc.gov/mods/v3 http://www.loc.gov/standards/mods/v3/mods-3-8.xsd">
+  <titleInfo>
+    <title>Zorba the Greek</title>
+  </titleInfo>
+  <titleInfo type="uniform" nameTitleGroup="1">
+    <title>Vios kai politeia tou Alexe&#x304; Zormpa. English</title>
+  </titleInfo>
+  <name type="personal" usage="primary" nameTitleGroup="1">
+    <namePart>Kazantzakis, Nikos,</namePart>
+    <namePart type="date">1883-1957</namePart>
+  </name>
+  <name type="personal">
+    <namePart>Wildman, Carl,</namePart>
+    <role>
+      <roleTerm type="text">tr</roleTerm>
+    </role>
+  </name>
+  <typeOfResource>text</typeOfResource>
+  <genre authority="rdacontent">text</genre>
+  <originInfo>
+    <place>
+      <placeTerm type="code" authority="marccountry">enk</placeTerm>
+    </place>
+    <dateIssued encoding="marc">1952</dateIssued>
+    <issuance>monographic</issuance>
+    <place>
+      <placeTerm type="text">London</placeTerm>
+    </place>
+    <agent>
+      <namePart>J. Lehmann</namePart>
+    </agent>
+    <dateIssued>[1952]</dateIssued>
+  </originInfo>
+  <language>
+    <languageTerm authority="iso639-2b" type="code">eng</languageTerm>
+  </language>
+  <language objectPart="translation">
+    <languageTerm authority="iso639-2b" type="code">gre</languageTerm>
+  </language>
+  <physicalDescription>
+    <form authority="marcform">print</form>
+    <form type="media" authority="rdamedia">unmediated</form>
+    <form type="carrier" authority="rdacarrier">volume</form>
+    <extent>319 p. 21 cm.</extent>
+  </physicalDescription>
+  <note type="statement of responsibility">translated by Carl Wildman.  With an introd. by Ian Scott-Kilvert.</note>
+  <classification authority="lcc">PZ3.K1884 Zo4</classification>
+  <classification authority="ddc">889.3</classification>
+  <relatedItem type="series">
+    <titleInfo>
+      <title>The Modern European Library</title>
+    </titleInfo>
+  </relatedItem>
+  <identifier type="lccn">53023233</identifier>
+  <identifier type="oclc">8985093</identifier>
+  <recordInfo>
+    <recordContentSource authority="marcorg">DLC</recordContentSource>
+    <recordCreationDate encoding="marc">821123</recordCreationDate>
+    <recordChangeDate encoding="iso8601">20250608050026.3</recordChangeDate>
+    <recordIdentifier>9787619</recordIdentifier>
+    <recordOrigin>Converted from MARCXML to MODS version 3.8 using MARC21slim2MODS3-8_XSLT1-0.xsl
+				(Revision 1.172 20230208)</recordOrigin>
+  </recordInfo>
+</mods></zs:recordData><zs:recordPosition>6</zs:recordPosition></zs:record><zs:record><zs:recordSchema>mods</zs:recordSchema><zs:recordPacking>xml</zs:recordPacking><zs:recordData><mods xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns="http://www.loc.gov/mods/v3" version="3.8" xsi:schemaLocation="http://www.loc.gov/mods/v3 http://www.loc.gov/standards/mods/v3/mods-3-8.xsd">
+  <titleInfo>
+    <title>Zorba the Greek</title>
+    <subTitle>the saint's life of Zorba</subTitle>
+  </titleInfo>
+  <titleInfo type="uniform" nameTitleGroup="1">
+    <title>Vios kai politeia tou Alexe&#x304; Zormpa. English</title>
+  </titleInfo>
+  <name type="personal" usage="primary" nameTitleGroup="1">
+    <namePart>Kazantzakis, Nikos,</namePart>
+    <namePart type="date">1883-1957</namePart>
+    <role>
+      <roleTerm type="text">author</roleTerm>
+    </role>
+  </name>
+  <name type="personal">
+    <namePart>Bien, Peter,</namePart>
+    <role>
+      <roleTerm type="text">translator</roleTerm>
+    </role>
+  </name>
+  <typeOfResource>text</typeOfResource>
+  <genre authority="rdacontent">text</genre>
+  <originInfo>
+    <place>
+      <placeTerm type="code" authority="marccountry">nyu</placeTerm>
+    </place>
+    <dateIssued encoding="marc">2014</dateIssued>
+    <issuance>monographic</issuance>
+  </originInfo>
+  <originInfo eventType="publication">
+    <place>
+      <placeTerm type="text">New York :</placeTerm>
+    </place>
+    <agent>
+      <namePart>Simon &amp; Schuster Paperbacks,</namePart>
+      <role>
+        <roleTerm>publisher</roleTerm>
+      </role>
+    </agent>
+    <dateIssued>2014.</dateIssued>
+  </originInfo>
+  <language>
+    <languageTerm authority="iso639-2b" type="code">eng</languageTerm>
+  </language>
+  <language objectPart="translation">
+    <languageTerm authority="iso639-2b" type="code">gre</languageTerm>
+  </language>
+  <physicalDescription>
+    <form authority="marcform">print</form>
+    <form type="media" authority="rdamedia">unmediated</form>
+    <form type="carrier" authority="rdacarrier">volume</form>
+    <extent>x, 349 pages ; 22 cm</extent>
+  </physicalDescription>
+  <note type="statement of responsibility">by Nikos Kazantzakis ; newly translated by Peter Bien.</note>
+  <classification authority="lcc">PA5610.K39 V5613 2014</classification>
+  <classification authority="ddc" edition="23">889.3/32</classification>
+  <identifier type="isbn">9781476782812</identifier>
+  <identifier type="isbn" invalid="yes">9781439144664 (ebook)</identifier>
+  <identifier type="lccn">2014037760</identifier>
+  <recordInfo>
+    <descriptionStandard>rda</descriptionStandard>
+    <recordContentSource authority="marcorg">ICU/DLC</recordContentSource>
+    <recordCreationDate encoding="marc">140926</recordCreationDate>
+    <recordChangeDate encoding="iso8601">20250607061943.2</recordChangeDate>
+    <recordIdentifier>18318699</recordIdentifier>
+    <recordOrigin>Converted from MARCXML to MODS version 3.8 using MARC21slim2MODS3-8_XSLT1-0.xsl
+				(Revision 1.172 20230208)</recordOrigin>
+    <languageOfCataloging>
+      <languageTerm authority="iso639-2b" type="code">eng</languageTerm>
+    </languageOfCataloging>
+  </recordInfo>
+</mods></zs:recordData><zs:recordPosition>8</zs:recordPosition></zs:record><zs:record><zs:recordSchema>mods</zs:recordSchema><zs:recordPacking>xml</zs:recordPacking><zs:recordData><mods xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns="http://www.loc.gov/mods/v3" version="3.8" xsi:schemaLocation="http://www.loc.gov/mods/v3 http://www.loc.gov/standards/mods/v3/mods-3-8.xsd">
+  <titleInfo>
+    <title>Zorba&#x301;</title>
+  </titleInfo>
+  <titleInfo type="uniform" nameTitleGroup="1">
+    <title>Zorba</title>
+  </titleInfo>
+  <name type="personal" usage="primary" nameTitleGroup="1">
+    <namePart>Stein, Joseph.</namePart>
+  </name>
+  <name type="personal">
+    <namePart>Kander, John.</namePart>
+  </name>
+  <name type="personal">
+    <namePart>Ebb, Fred.</namePart>
+  </name>
+  <typeOfResource>text</typeOfResource>
+  <genre authority="rdacontent">text</genre>
+  <originInfo>
+    <place>
+      <placeTerm type="code" authority="marccountry">nyu</placeTerm>
+    </place>
+    <dateIssued encoding="marc">1969</dateIssued>
+    <issuance>monographic</issuance>
+    <place>
+      <placeTerm type="text">New York</placeTerm>
+    </place>
+    <agent>
+      <namePart>Random House</namePart>
+    </agent>
+    <dateIssued>[1969]</dateIssued>
+  </originInfo>
+  <language>
+    <languageTerm authority="iso639-2b" type="code">eng</languageTerm>
+  </language>
+  <physicalDescription>
+    <form authority="marcform">print</form>
+    <form type="media" authority="rdamedia">unmediated</form>
+    <form type="carrier" authority="rdacarrier">volume</form>
+    <extent>114 p. illus. 21 cm.</extent>
+  </physicalDescription>
+  <note type="statement of responsibility">Book by Joseph Stein. Music by John Kander. Lyrics by Fred Ebb. Adapted from Zorba&#x301; the Greek by Nikos Kazantzakis.</note>
+  <subject authority="lcsh">
+    <topic>Musicals</topic>
+    <genre>Librettos</genre>
+  </subject>
+  <classification authority="lcc">ML50.K173 Z72 1969</classification>
+  <classification authority="ddc">782.8/1/2</classification>
+  <relatedItem>
+    <titleInfo>
+      <title>Vios kai politeia tou Alexe&#x304; Zormpa</title>
+    </titleInfo>
+    <name type="personal">
+      <namePart>Kazantzakis, Nikos,</namePart>
+      <namePart type="date">1883-1957</namePart>
+    </name>
+  </relatedItem>
+  <identifier type="lccn">74081733</identifier>
+  <recordInfo>
+    <recordContentSource authority="marcorg">DLC</recordContentSource>
+    <recordCreationDate encoding="marc">691105</recordCreationDate>
+    <recordChangeDate encoding="iso8601">20250607162158.7</recordChangeDate>
+    <recordIdentifier>4098390</recordIdentifier>
+    <recordOrigin>Converted from MARCXML to MODS version 3.8 using MARC21slim2MODS3-8_XSLT1-0.xsl
+				(Revision 1.172 20230208)</recordOrigin>
+  </recordInfo>
+</mods></zs:recordData><zs:recordPosition>9</zs:recordPosition></zs:record><zs:record><zs:recordSchema>mods</zs:recordSchema><zs:recordPacking>xml</zs:recordPacking><zs:recordData><mods xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns="http://www.loc.gov/mods/v3" version="3.8" xsi:schemaLocation="http://www.loc.gov/mods/v3 http://www.loc.gov/standards/mods/v3/mods-3-8.xsd">
+  <titleInfo>
+    <title>Theme from Zorba the Greek and more Greek dance music</title>
+    <subTitle>[Sound recording]</subTitle>
+  </titleInfo>
+  <titleInfo type="alternative">
+    <title>Zorba the Greek</title>
+  </titleInfo>
+  <name type="personal">
+    <namePart>Spanos, Yani.</namePart>
+  </name>
+  <name type="corporate">
+    <namePart>Kyriakos.</namePart>
+  </name>
+  <typeOfResource>text</typeOfResource>
+  <genre authority="rdacontent">text</genre>
+  <originInfo>
+    <place>
+      <placeTerm type="code" authority="marccountry">xx</placeTerm>
+    </place>
+    <issuance>monographic</issuance>
+    <place>
+      <placeTerm type="text">n.p.]</placeTerm>
+    </place>
+    <agent>
+      <namePart>Four Corners Records FCL 4222. [1965]</namePart>
+    </agent>
+  </originInfo>
+  <language>
+    <languageTerm authority="iso639-2b" type="code">eng</languageTerm>
+  </language>
+  <physicalDescription>
+    <form authority="marcform">print</form>
+    <form type="media" authority="rdamedia">unmediated</form>
+    <form type="carrier" authority="rdacarrier">volume</form>
+    <extent>p. 2 s. 12 in. 33 1/3 rpm. microgroove.</extent>
+  </physicalDescription>
+  <note>The Greek dance music principally composed by Yani Spanos.</note>
+  <note>Kyriakos, and his orchestra.</note>
+  <note>Program notes on slipcase.</note>
+  <subject>
+    <geographicCode authority="marcgac">e-gr---</geographicCode>
+  </subject>
+  <subject authority="lcsh">
+    <topic>Motion picture music</topic>
+    <topic>Excerpts, Arranged</topic>
+  </subject>
+  <subject authority="lcsh">
+    <topic>Dance music, Greek. [from old catalog]</topic>
+  </subject>
+  <identifier type="lccn">r 65003786</identifier>
+  <recordInfo>
+    <recordContentSource authority="marcorg">DLC</recordContentSource>
+    <recordCreationDate encoding="marc">860530</recordCreationDate>
+    <recordChangeDate encoding="iso8601">20250608034010.8</recordChangeDate>
+    <recordIdentifier>8927641</recordIdentifier>
+    <recordOrigin>Converted from MARCXML to MODS version 3.8 using MARC21slim2MODS3-8_XSLT1-0.xsl
+				(Revision 1.172 20230208)</recordOrigin>
+  </recordInfo>
+</mods></zs:recordData><zs:recordPosition>14</zs:recordPosition></zs:record><zs:record><zs:recordSchema>mods</zs:recordSchema><zs:recordPacking>xml</zs:recordPacking><zs:recordData><mods xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns="http://www.loc.gov/mods/v3" version="3.8" xsi:schemaLocation="http://www.loc.gov/mods/v3 http://www.loc.gov/standards/mods/v3/mods-3-8.xsd">
+  <titleInfo>
+    <title>Zorba the Greek and other Broadway and motion picture favorites</title>
+    <subTitle>[Sound recording]</subTitle>
+  </titleInfo>
+  <name type="personal">
+    <namePart>Addeo, Leo.</namePart>
+  </name>
+  <name type="corporate">
+    <namePart>Living Marimbas.</namePart>
+  </name>
+  <typeOfResource>text</typeOfResource>
+  <genre authority="rdacontent">text</genre>
+  <originInfo>
+    <place>
+      <placeTerm type="code" authority="marccountry">xx</placeTerm>
+    </place>
+    <issuance>monographic</issuance>
+    <place>
+      <placeTerm type="text">n.p.]</placeTerm>
+    </place>
+    <agent>
+      <namePart>RCA Camden CAS 2308. [1969]</namePart>
+    </agent>
+  </originInfo>
+  <language>
+    <languageTerm authority="iso639-2b" type="code">eng</languageTerm>
+  </language>
+  <physicalDescription>
+    <form authority="marcform">print</form>
+    <form type="media" authority="rdamedia">unmediated</form>
+    <form type="carrier" authority="rdacarrier">volume</form>
+    <extent>p. 2 s. 12 in. 33 1/3 rpm. microgroove. stereophonic.</extent>
+  </physicalDescription>
+  <note>Living Marimbas; Leo Addeo, arranger-conductor.</note>
+  <note>Playable also on monaural equipment.</note>
+  <note>Program notes by Alvin H. Marill on slipcase.</note>
+  <subject authority="lcsh">
+    <topic>Musicals</topic>
+    <genre>Excerpts, Arranged</genre>
+  </subject>
+  <subject authority="lcsh">
+    <topic>Motion picture music</topic>
+    <genre>Excerpts, Arranged</genre>
+  </subject>
+  <identifier type="lccn">73760609</identifier>
+  <recordInfo>
+    <recordContentSource authority="marcorg">DLC</recordContentSource>
+    <recordCreationDate encoding="marc">860714</recordCreationDate>
+    <recordChangeDate encoding="iso8601">20250608013600.8</recordChangeDate>
+    <recordIdentifier>7598432</recordIdentifier>
+    <recordOrigin>Converted from MARCXML to MODS version 3.8 using MARC21slim2MODS3-8_XSLT1-0.xsl
+				(Revision 1.172 20230208)</recordOrigin>
+  </recordInfo>
+</mods></zs:recordData><zs:recordPosition>18</zs:recordPosition></zs:record><zs:record><zs:recordSchema>mods</zs:recordSchema><zs:recordPacking>xml</zs:recordPacking><zs:recordData><mods xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns="http://www.loc.gov/mods/v3" version="3.8" xsi:schemaLocation="http://www.loc.gov/mods/v3 http://www.loc.gov/standards/mods/v3/mods-3-8.xsd">
+  <titleInfo>
+    <title>Apo to "Vios kai politeia tou Alexe&#x304; Zormpa" sto "Zorba the Greek"</title>
+    <subTitle>kritikoi vioi paralle&#x304;loi</subTitle>
+  </titleInfo>
+  <name type="personal" usage="primary">
+    <namePart>Agathos, Thanase&#x304;s,</namePart>
+    <namePart type="date">1967-</namePart>
+  </name>
+  <typeOfResource>text</typeOfResource>
+  <genre authority="marcgt">bibliography</genre>
+  <genre authority="rdacontent">text</genre>
+  <originInfo>
+    <place>
+      <placeTerm type="code" authority="marccountry">gr</placeTerm>
+    </place>
+    <dateIssued encoding="marc">2007</dateIssued>
+    <issuance>monographic</issuance>
+    <place>
+      <placeTerm type="text">Athe&#x304;na</placeTerm>
+    </place>
+    <agent>
+      <namePart>Aigokero&#x304;s</namePart>
+    </agent>
+    <dateIssued>c2007</dateIssued>
+  </originInfo>
+  <language>
+    <languageTerm authority="iso639-2b" type="code">gre</languageTerm>
+  </language>
+  <physicalDescription>
+    <form authority="marcform">print</form>
+    <form type="media" authority="rdamedia">unmediated</form>
+    <form type="carrier" authority="rdacarrier">volume</form>
+    <extent>207 p. : ill. ; 21 cm.</extent>
+  </physicalDescription>
+  <note type="statement of responsibility">Thanase&#x304;s Agathos.</note>
+  <note type="bibliography">Includes bibliographical references (p. 172-184) and index.</note>
+  <subject authority="lcsh">
+    <name type="personal">
+      <namePart>Kazantzakis, Nikos,</namePart>
+      <namePart type="date">1883-1957</namePart>
+    </name>
+    <titleInfo>
+      <title>Vios kai politeia tou Alexe&#x304; Zormpa</title>
+    </titleInfo>
+  </subject>
+  <subject authority="lcsh">
+    <titleInfo>
+      <title>Alexe&#x304;s Zormpas (Motion picture)</title>
+    </titleInfo>
+  </subject>
+  <classification authority="lcc">PA5610.K39 V562 2007</classification>
+  <identifier type="isbn">9789603223078</identifier>
+  <identifier type="lccn">2008446874</identifier>
+  <recordInfo>
+    <descriptionStandard>aacr</descriptionStandard>
+    <recordContentSource authority="marcorg">DLC</recordContentSource>
+    <recordCreationDate encoding="marc">080311</recordCreationDate>
+    <recordChangeDate encoding="iso8601">20250607024958.0</recordChangeDate>
+    <recordIdentifier>15405796</recordIdentifier>
+    <recordOrigin>Converted from MARCXML to MODS version 3.8 using MARC21slim2MODS3-8_XSLT1-0.xsl
+				(Revision 1.172 20230208)</recordOrigin>
+  </recordInfo>
+</mods></zs:recordData><zs:recordPosition>19</zs:recordPosition></zs:record></zs:records><zs:nextRecordPosition>21</zs:nextRecordPosition><zs:echoedSearchRetrieveRequest><zs:version>1.1</zs:version><zs:query>dc.title="zorba the greek"</zs:query><zs:maximumRecords>20</zs:maximumRecords><zs:recordPacking>xml</zs:recordPacking><zs:recordSchema>mods</zs:recordSchema></zs:echoedSearchRetrieveRequest></zs:searchRetrieveResponse>

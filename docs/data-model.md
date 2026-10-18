@@ -1225,8 +1225,20 @@ that reaches for a value with an id off a URL gets a type error at the call site
 `CustomField` deliberately carries no `values` relationship, so a definition cannot be walked
 to every book's value for it.
 
+**A row under a Book is reached through the Book.** The lookup pairs the row's own id with
+that Book rather than trusting the path to name the right one, so a row of another Book is
+404 through any Book the caller can see. A row with no Member of its own has no second
+question: whoever may write the Book may change it. When a row carries its author, a change
+by anyone else is 404 if they cannot read the row and 403 if they can, because its existence
+is no secret and only its authorship is; where an admin may change it too, its lookup says so.
+Two routes answer otherwise, and each states it at its own site: `delete_highlight` answers
+404 to everyone but the author, a shared highlight included, and `decide_access` answers 403
+to the requester, who wrote the request and does not decide it. `delete_progress` answering
+404 to everyone but the author is the rule itself, since a reading log is listed to its
+author alone.
+
 Privacy can be changed by the book's owner or by an admin. Admins can also edit or delete
-anyone's note **that they can read**. There is no other privilege difference, and admin does
+anyone's note or quote **that they can read**. There is no other privilege difference, and admin does
 not bypass a visibility predicate: not the book's in listings, and not the note's, which is
 why somebody else's private note answers 404 to an admin as well.
 
