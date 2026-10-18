@@ -7234,6 +7234,26 @@ either way and reported nightly. **Acting on apk is what turned it fail open**,
 which is the general shape worth keeping: widening what a gate acts on can
 convert a harmless merge into a silent drop. Identity is now `(ecosystem, id)`.
 
+### Docker digest updates wait for one merge request a week, except the release pin
+
+Every Docker digest update, whether a base image in the `Dockerfile`, a CI job image or a suite runner pin, rides one grouped merge request opened before 5am on Tuesdays. Owner's ruling. Over 2026-10-04 to 2026-10-18, 19 digest merge requests caused 25 merge request pipelines and 19 main pipelines, 17.0 of the 48.8 slot hours that merge request and main pipelines spent on the shared runner.
+
+**For these images what waits is a digest, never a version or a fix.** A digest moves when upstream republishes the same tag. For the base image that brings Alpine package updates, which the entry above says a digest bump does not deliver: `RUN apk upgrade --no-cache` in every build does, under a six hour cache TTL, so a week old base digest ships the same packages as a current one. Version updates (patch, minor, major) keep their own rules and their own timing, and the Python minor hold is untouched.
+
+**The one image left out is Endpaper's own**, pinned by digest in `docker-compose.deploy.yml`, the file the README tells users to install from. Its digest moves only when a release is published, so for this pin the digest update is how a release, the rebuild that entry cuts included, reaches users. It keeps its own merge request, automerged once its pipeline passes. Grouped, it would trail every release by up to a week with nothing red. A guard refuses a package rule that groups, schedules or delays it or turns its automerge off, and a Renovate preset it has not read, since a preset's rules merge before the repository's own.
+
+**Tuesday, not Monday**, because the lock file maintenance merge request opens in the Monday window, and two automerging merge requests in one window means the second is rebased and retested after the first merges.
+
+**What it costs:**
+
+- A CI tool image republished for its own fix (a trivy or kaniko digest) reaches the pipeline up to a week later. A tag move for such a fix is a version update and is not held.
+- **The schedule bounds when the group's merge request opens, not when it changes.** Renovate's `updateNotScheduled` defaults to true, so once the merge request is open every later run keeps rebasing it and adding newly moved digests, each push with a pipeline of its own, outside the window as well as in it.
+- **One red digest holds every other digest in the group.** The merge request cannot automerge until the red one is fixed or dropped, and it keeps taking pushes meanwhile, so a digest that breaks the build holds the rest for as long as nobody looks, a week or more.
+
+**Not taken: `rebaseWhen`.** Renovate rebases every automerging merge request that falls behind `main`, because `rebaseWhen` defaults to `auto`, which means behind base branch under automerge, and the Renovate runs triggered after every main push make that frequent. That includes the group's merge request once it is open. The project merges with a merge commit and does not require a rebase, so `conflicted` would stop it; the cost is that a merge request merges a tree its own pipeline did not test, and only the main pipeline tests the merge. That is a change to what "main is gated" means and is for the owner. The triggered runs themselves are configured in the separate repository that deploys this image, not here. `updateNotScheduled: false` on the group would make the window bind updates too; not taken either, for the same reason: it is the owner's trade.
+
+**No guard on the grouping itself.** Losing it costs slot time and breaks nothing; the guards on the Renovate configuration pin the rules whose loss does, and the release pin's exclusion is one of them.
+
 ### The ledger reads one line, not the whole tag message
 
 `cmd_base` built the released-advisory ledger by grepping ids out of every tag's
@@ -10694,6 +10714,10 @@ was blamed once and the pair failed identically with the fix in and out.
 **The honest cost.** Order dependence is what this setting buys back. The suite is nine times
 faster and a leak is now a suite level fault rather than a file level one, which is a trade
 made deliberately rather than a property to be surprised by.
+### Clearing vitest's mocks after each test does not lower the peak of the schema property files
+
+`@vitest/spy` 5.0.0 keeps every called mock in a module level set until it is cleared, and `restoreAllMocks` does not clear it, so under `isolate: false` it was suspected of holding every schema draw's fetch stub for the life of a worker. A/B on the files that draw over any answer the schema permits, one run each, on builder with four workers, `memory.peak` read from the pod's cgroup each second: 2132 MiB without `vi.clearAllMocks()` and 2134 MiB with it in `forget()` and in the setup's `afterEach`. Both climbed over the run in the same shape. So the clear was not shipped and no guard for it was written.
+
 ### The backend suite is twice as slow in CI as in an identical pod, and three obvious reasons are not it
 
 Measured on one node, with the suite pod shaped to match the CI job pod exactly: two CPUs,
@@ -21913,6 +21937,28 @@ The pipeline file had several readers in the internal tooling, each answering a 
 **A scanner report the nightly plan is handed and cannot read is a refusal, never "no findings".** A scan job allowed to fail after another scan in the same job left the image report absent and the night planned with no OS package findings, paging nothing. The plan now exits 1 when one of its five scanner reports is absent or empty, and the existing failure path pages. The cache, ledger, ignore file and base pipeline stay optional because they are absent on ordinary nights.
 
 **The publish gate keeps refusing the reader's old path after the move.** It names a file that no longer exists, and it is load bearing: without it a published test loading the reader by its old path passes the gate and fails in every mirror clone, and the guard that derives stripped test names from that list loses the reader's.
+
+**The reader reads the file once per call and caches what it derives on the text, never on a path.** Every public reader resolves its `source` once and hands the text down, and the split lines and the image walk are cached keyed on the text itself. A path key was refused: a fixture string has no path, and the file can change between two calls in one process, so a path key would answer for text that is no longer there. The cache lives inside the one reader, so no caller holds a second copy of the file's shape. A refusal is an exception and is not cached. `TestTheReaderReadsTheFileOncePerCall` in the autopatch suite counts the reads of each public reader.
+
+## A cache's one writer is stated at its job, not held by a guard
+
+The uv, bun, trivy and mypy caches each have one job that pushes and every other job pulls. Nothing asserts that across the file. A second writer costs upload time and is visible in a job log; it never changes what a job checks, and a pull only job that finds no cache runs cold rather than failing. A guard would need its own model of how GitLab merges `cache:` through `extends`, a map merged key by key and a list replacing it. GitLab's lint, asked for the merged YAML, shows that model holding on this file, and a live merge request trace shows a policy set by a rule taking effect; a second model of the same rule inside a guard would be one more thing to drift from GitLab. So each writer carries the reason in a comment, and each pull only cache says `policy: pull` beside a pointer to its writer.
+
+**A merge request pulls the trivy cache rather than writing its own copy, because the owner's merge request pipelines share main's.** With the project's separate caches for protected branches on, a pipeline a Maintainer or Owner starts uses the `-protected` copy of every key, even on a merge request ref. A merge request writer would therefore put the database of an unmerged Trivy bump into the copy `main` and the release read. Of the last 30 merge request pipelines, measured 2026-10-18, 22 restored the protected copy, 1 the unprotected one and 7 skipped the job. On a merge request, a pipeline started by an account below Maintainer uses the unprotected copy and downloads the database cold, which costs one ghcr.io pull and changes no verdict.
+
+## What "main is gated" means once the image builds beside the suites
+
+**`:latest` moves to a `main` commit only after its image booted in `build:smoke` and both suites passed on its exact git tree, in this pipeline or in the merge request pipeline that made it, and only while that commit is still the head of `main`.** `build` does not wait for the suites: it pushes `:<sha>`, which nothing deploys, and writes the digest it pushed. `promote:latest` copies that digest to `:latest` with `--preserve-digests` once `build:smoke`, `test:backend` and `test:frontend` have passed. An answer about `main`'s head that names no `main` reds the job rather than reading as superseded.
+
+**The suites run once per git tree; only `main` skips them.** `suites:proof` looks for the merge request pipeline of the merge that made this commit. It accepts one only when the pipeline is this project's, of source `merge_request_event`, started by a Maintainer or above, has a tree GitLab's straight compare finds identical, and ran each suite once, green, with a JUnit report holding tests and no failures or errors. A suite it let skip writes no report, so a proof never vouches for a proof.
+
+**A tag always runs both suites in full.** A release commit is pushed straight to `main` and has no merge request, so the one pipeline that could prove its tag is `main`'s own push pipeline. A push option there narrowing the suites (`-o ci.variable=...`) would go unseen, because the proof cannot read pipeline variables. A merge request pipeline could prove a tag in general, so the rule is that tags always run the suites, not that a proof is impossible.
+
+**What it gives up, and why that is accepted.** A flake or a clock dependent failure that only a second run on `main` would have caught goes unseen on a proven commit; the tree already passed once, unretried, and nothing on `main` was asked to differ from it. pip-audit runs ahead of ruff, mypy and pytest so a proven tree is audited too, and that reaches every pipeline: on the day an advisory is published, every merge request's backend job reds before any check has run, and its author gets no ruff, mypy or pytest result until the advisory is handled. The graph refuses `:latest` on an image that failed its smoke test, and a proof from a pipeline whose suite passed only on a retry. `main`'s own suite, green on a retry, still promotes.
+
+**It fails closed.** No `SUITES_PROOF_TOKEN`, any API failure, refusal or timeout, or a crash writes no proof, and both suites run. The skip is a file artifact the test jobs compare with the checkout's own `HEAD`, never a dotenv and never `CI_COMMIT_SHA`, because a pipeline variable outranks both. pip-audit runs on a proven tree; `test:postgres` runs only on tags and patch branches, where nothing is proven.
+
+**The token is a Reporter `read_api` project token, scoped by environment.** Its variable carries the environment scope `suites-proof`, which only `suites:proof` in this file declares. GitLab hands the variable to any job on a protected ref that declares the environment, so a job in a `v*` tag's own yml, or in a merge request pipeline the owner starts, would receive it too; that is why the role is Reporter. Measured on this project: a Maintainer read returns the runner registration token, which is set, and a variable at the default scope reaches every job on `main` and on tags and every merge request pipeline the owner starts. A Reporter cannot read pipeline variables, so the proof does not check them: GitLab passes a `ci.variable` push option to branch pipelines only, and a merge request pipeline, the only candidate, takes none. In `suites:proof`, `CI_JOB_TOKEN` is used only for `GET /job`.
 
 ## The one writer rule is held by a ratchet on references, not by the MARC arm alone
 

@@ -10703,8 +10703,7 @@ class TestNothingStripsAnAssertOutOfTheImage:
         assert not offenders, (
             f"a container surface carries a bare -O token: {offenders}. If it is Python's "
             "optimise flag, every `assert` in application code disappears and the "
-            "narrowings go with them; `RUN PYTHONOPTIMIZE=1 uv sync` bakes the same thing "
-            "into the compiled bytecode. If it is a fetch tool's output flag, move it into "
+            "narrowings go with them. If it is a fetch tool's output flag, move it into "
             "a script under the build directory, which this rule does not read, and say so "
             "here."
         )

@@ -2,9 +2,9 @@
 
 <!-- measured: begin -->
 
-**11783 tests, in 177 files**, counted by the run that reads this line.
-**The 149 rows below sum to 10239.**
-The other 1544 tests are in 31 files this register may not name.
+**11811 tests, in 179 files**, counted by the run that reads this line.
+**The 150 rows below sum to 10248.**
+The other 1563 tests are in 32 files this register may not name.
 The table also carries 3 files this engine does not run, stated as 0.
 <!-- measured: end -->
 
@@ -138,6 +138,7 @@ why the helper uses regexes.
 | `test_uploads.py` | 33 | Content-sniffed image validation and the size cap |
 | `test_middleware.py` | 27 | Security headers, CSP contents, HSTS conditions |
 | `test_main.py` | 65 | App wiring, tag seeding, the operationId guard, the overdue ticker's lifespan, what the built files say about being reused, the shell that has to answer a client route. The operationId guard is held on its extent as well as its refusal: its population against the operations the document publishes, its call position against every `include_router` in the module, and the acceptance of a name two unpublished routes share, which is what a published pair being refused cannot say |
+| `test_image_layers.py` | 9 | **What the image build keeps out of its layers, and what the app's user may touch.** That the frontend stage installs, builds and deletes both `node_modules` and bun's install cache in one `RUN`; that no chown, chmod or `COPY` flag reaching the runtime gives the app's user write past `DATA_DIR`; that a directory from the build context reaches the runtime only through a stage that opens its modes to reading, so a checkout made under a restrictive umask still builds an image that starts; that `.dockerignore` leaves a secret file out of the build context at any depth; and that a comment line inside a continued `RUN` does not end it |
 | `test_house_rules.py`                      |   448 | **Defects a person found four times.** Every caller-supplied row id bounded at both ends, whether it arrives as a query parameter. Also that the route handler population is derived twice, once from the decorators and once from the routes the app registers, with the decorator tuple itself held against the names the corpus carries; and that no docstring anywhere under `backend/` holds the control character its own sentence names, over the one walk that sees the generated revisions as well. The ignore file rule has one home now, so each form that home refuses is asserted on its own arm, the parse is held against an expected value rather than fed back into the matcher, and both parameters of that seam are keyword only, and each marker character is refused by the position or the equality git defines it at rather than by containment, with an arm on each side of that: the forms refused, and the literals a containment test used to refuse by accident |
 | `test_corpus.py` | 53 | **What this project wrote, decided once.** The vendored rule as a shape, every population in `tests/corpus.py` against a tree planted with each kind of vendored directory, this checkout's backend populations against globs that do not route through them, and the ratchet that keeps every other module from walking a tree itself or reaching into the corpus's own walk |
 | `test_bindings.py` | 29 | **What a name means, answered once.** What the resolver answers for each spelling of an import, an alias, a relative import, a star and a rebinding, refined through itself or not; where the source adapter and the module adapter agree and where they part; and the ratchet that holds every other test function to the import alias reads it still makes, a stripped module stating its own |

@@ -77,16 +77,22 @@ committed, so neither the build nor the test suite needs a Python toolchain.
 ```
 Stage 1  python:3.14-alpine  compile YAZ                    →  /opt/yaz-runtime
 Stage 2  oven/bun:alpine     bun install --frozen-lockfile  →  bun run build  →  dist/
-Stage 3  python:3.14-alpine  uv sync --frozen --no-dev  +  COPY --from=stage2 dist ./static
-                                                       +  COPY --from=stage1 /opt/yaz-runtime
+Stage 3  python:3.14-alpine  uv sync --frozen --no-dev      →  /app/.venv
+Stage 4  python:3.14-alpine  the backend sources, compiled  →  /app
+Stage 5  python:3.14-alpine  COPY --from=stage3 /app/.venv  +  COPY --from=stage4 /app
+                          +  COPY --from=stage2 dist ./static
+                          +  COPY --from=stage1 /opt/yaz-runtime
 ```
 
 Only the compiled assets cross from stage 2, so Bun, `node_modules` and the TypeScript
-sources are absent from the shipped image.
+sources are absent from the shipped image. Only the virtualenv crosses from stage 3, so uv
+is absent too.
 
-Both stages install from a lockfile (`bun.lock`, `uv.lock`) and both base images are pinned
-by digest, so rebuilding a commit produces the same dependency set. `--no-dev` keeps pytest,
-ruff and mypy out of the runtime image, which runs as **uid 1000, non-root**.
+Both install stages read a lockfile (`bun.lock`, `uv.lock`) and every base image the
+Dockerfile names is pinned by digest, so rebuilding a commit produces the same dependency
+set. `--no-dev` keeps pytest, ruff and mypy out of the runtime image, which runs as **uid
+1000, non-root**. The data directory is that user's. The code and the virtualenv are
+root's, compiled at build time, readable by everyone and writable only by root.
 
 Every stage is Alpine, which sets a bar for new Python dependencies. A C-extension package
 with no musllinux wheel does not fail politely: uv tries to build it from source and dies

@@ -490,6 +490,16 @@ const LINE = 1 << 20;
 const BOUNDED = "timeout -s KILL 25";
 
 /**
+ * **vitest's budget for an arm that spawns through `BOUNDED`, kept above it.**
+ * `spawnSync` blocks the worker, so vitest's own five second default cannot
+ * interrupt the child; it only reds the arm afterwards when the child was slow
+ * to start. Measured 2026-10-18 on a busy builder: the stall arm took 5,227 ms
+ * against a design cost of its 200 ms deadline plus one second, and failed on
+ * the default. The same pair as `SPAWNED` below, for the same reason.
+ */
+const PRINTED = 30_000;
+
+/**
  * A bun child that prints through the real printer, on a pipe it has first
  * confirmed is non blocking, then runs `body`, with the child's `line` set to
  * the expression given.
@@ -542,25 +552,29 @@ describe("the printer a write travels through", () => {
    * line of `x` and delivered a third of this one. A register's cells are
    * prose a person wrote, so the first one past ASCII would be that cut.
    */
-  it("is whole in the pipe when the printer returns", () => {
-    const expected = Buffer.from(`${"\u2026".repeat(LINE / 2)}\n`);
-    const run = spawnSync(
-      process.execPath,
-      [
-        "-e",
-        printerChild(
-          [`printWhole(line);`, `process.kill(process.pid, "SIGKILL");`],
-          `"\\u2026".repeat(${String(LINE / 2)})`,
-        ),
-      ],
-      { maxBuffer: 1 << 24, timeout: 25_000, killSignal: "SIGKILL" },
-    );
+  it(
+    "is whole in the pipe when the printer returns",
+    () => {
+      const expected = Buffer.from(`${"\u2026".repeat(LINE / 2)}\n`);
+      const run = spawnSync(
+        process.execPath,
+        [
+          "-e",
+          printerChild(
+            [`printWhole(line);`, `process.kill(process.pid, "SIGKILL");`],
+            `"\\u2026".repeat(${String(LINE / 2)})`,
+          ),
+        ],
+        { maxBuffer: 1 << 24, timeout: 25_000, killSignal: "SIGKILL" },
+      );
 
-    expect(run.stderr.toString()).toBe("");
-    expect(run.signal).toBe("SIGKILL");
-    expect(run.stdout.length).toBe(expected.length);
-    expect(run.stdout.equals(expected)).toBe(true);
-  });
+      expect(run.stderr.toString()).toBe("");
+      expect(run.signal).toBe("SIGKILL");
+      expect(run.stdout.length).toBe(expected.length);
+      expect(run.stdout.equals(expected)).toBe(true);
+    },
+    PRINTED,
+  );
 
   /**
    * **A reader that closed is a write that can never arrive**, and only
@@ -571,27 +585,31 @@ describe("the printer a write travels through", () => {
    * `true` closes the pipe's read end by exiting, so the child's write meets
    * `EPIPE` whether it starts before or after that.
    */
-  it("throws on a reader that has closed rather than retrying", () => {
-    const run = spawnSync(
-      "sh",
-      [
-        "-c",
-        `${BOUNDED} "$0" -e "$1" | true`,
-        process.execPath,
-        printerChild([
-          `try {`,
-          `  printWhole(line, 1, 2000);`,
-          `  process.stderr.write("returned");`,
-          `} catch (error) {`,
-          `  process.stderr.write("threw " + String(error.code));`,
-          `}`,
-        ]),
-      ],
-      { encoding: "utf8" },
-    );
+  it(
+    "throws on a reader that has closed rather than retrying",
+    () => {
+      const run = spawnSync(
+        "sh",
+        [
+          "-c",
+          `${BOUNDED} "$0" -e "$1" | true`,
+          process.execPath,
+          printerChild([
+            `try {`,
+            `  printWhole(line, 1, 2000);`,
+            `  process.stderr.write("returned");`,
+            `} catch (error) {`,
+            `  process.stderr.write("threw " + String(error.code));`,
+            `}`,
+          ]),
+        ],
+        { encoding: "utf8" },
+      );
 
-    expect(run.stderr).toBe("threw EPIPE");
-  });
+      expect(run.stderr).toBe("threw EPIPE");
+    },
+    PRINTED,
+  );
 
   /**
    * **A reader that stays open and never reads is the silent loss this
@@ -604,37 +622,41 @@ describe("the printer a write travels through", () => {
    * deadline then meets `EPIPE` when the reader goes, and the arm reds on
    * the reason.
    */
-  it("fails the run when no byte moves for the deadline", () => {
-    const dir = mkdtempSync(join(tmpdir(), "register-stall-"));
-    const done = join(dir, "done");
-    const run = spawnSync(
-      "sh",
-      [
-        "-c",
-        `${BOUNDED} "$0" -e "$1" | (i=0; until [ -e "$2" ] || [ $i -ge 20 ]; do sleep 1; i=$((i + 1)); done)`,
-        process.execPath,
-        printerChild([
-          `try {`,
-          `  printWhole(line, 1, 200);`,
-          `  process.stderr.write("returned");`,
-          `} catch (error) {`,
-          `  process.stderr.write(String(error.message));`,
-          `} finally {`,
-          `  writeFileSync(${JSON.stringify(done)}, "");`,
-          `}`,
-        ]),
-        done,
-      ],
-      { encoding: "utf8" },
-    );
-    rmSync(dir, { recursive: true });
+  it(
+    "fails the run when no byte moves for the deadline",
+    () => {
+      const dir = mkdtempSync(join(tmpdir(), "register-stall-"));
+      const done = join(dir, "done");
+      const run = spawnSync(
+        "sh",
+        [
+          "-c",
+          `${BOUNDED} "$0" -e "$1" | (i=0; until [ -e "$2" ] || [ $i -ge 20 ]; do sleep 1; i=$((i + 1)); done)`,
+          process.execPath,
+          printerChild([
+            `try {`,
+            `  printWhole(line, 1, 200);`,
+            `  process.stderr.write("returned");`,
+            `} catch (error) {`,
+            `  process.stderr.write(String(error.message));`,
+            `} finally {`,
+            `  writeFileSync(${JSON.stringify(done)}, "");`,
+            `}`,
+          ]),
+          done,
+        ],
+        { encoding: "utf8" },
+      );
+      rmSync(dir, { recursive: true });
 
-    expect(run.stderr).toMatch(
-      new RegExp(
-        `stalled: \\d+ of ${String(LINE + 1)} bytes .* none moved for 200 ms`,
-      ),
-    );
-  });
+      expect(run.stderr).toMatch(
+        new RegExp(
+          `stalled: \\d+ of ${String(LINE + 1)} bytes .* none moved for 200 ms`,
+        ),
+      );
+    },
+    PRINTED,
+  );
 
   /**
    * **The deadline is a gap with nothing moving, not a limit on the whole
@@ -647,42 +669,46 @@ describe("the printer a write travels through", () => {
    * The reader stops at the line's length or at the end of its input, and
    * both children are bounded as the arms above bound them.
    */
-  it("waits on a reader that is slow and never stops", () => {
-    const reader = [
-      `import { readSync } from "node:fs";`,
-      `const pause = new Int32Array(new SharedArrayBuffer(4));`,
-      `const chunk = Buffer.alloc(32768);`,
-      `let total = 0;`,
-      `while (total < ${String(LINE + 1)}) {`,
-      `  Atomics.wait(pause, 0, 0, 100);`,
-      `  const took = readSync(0, chunk, 0, chunk.length, null);`,
-      `  if (took === 0) break;`,
-      `  total += took;`,
-      `}`,
-      `process.stdout.write(String(total));`,
-    ].join("\n");
-    const run = spawnSync(
-      "sh",
-      [
-        "-c",
-        `${BOUNDED} "$0" -e "$1" | ${BOUNDED} "$0" -e "$2"`,
-        process.execPath,
-        printerChild([
-          `try {`,
-          `  printWhole(line, 1, 1000);`,
-          `  process.stderr.write("returned");`,
-          `} catch (error) {`,
-          `  process.stderr.write(String(error.message));`,
-          `}`,
-        ]),
-        reader,
-      ],
-      { encoding: "utf8" },
-    );
+  it(
+    "waits on a reader that is slow and never stops",
+    () => {
+      const reader = [
+        `import { readSync } from "node:fs";`,
+        `const pause = new Int32Array(new SharedArrayBuffer(4));`,
+        `const chunk = Buffer.alloc(32768);`,
+        `let total = 0;`,
+        `while (total < ${String(LINE + 1)}) {`,
+        `  Atomics.wait(pause, 0, 0, 100);`,
+        `  const took = readSync(0, chunk, 0, chunk.length, null);`,
+        `  if (took === 0) break;`,
+        `  total += took;`,
+        `}`,
+        `process.stdout.write(String(total));`,
+      ].join("\n");
+      const run = spawnSync(
+        "sh",
+        [
+          "-c",
+          `${BOUNDED} "$0" -e "$1" | ${BOUNDED} "$0" -e "$2"`,
+          process.execPath,
+          printerChild([
+            `try {`,
+            `  printWhole(line, 1, 1000);`,
+            `  process.stderr.write("returned");`,
+            `} catch (error) {`,
+            `  process.stderr.write(String(error.message));`,
+            `}`,
+          ]),
+          reader,
+        ],
+        { encoding: "utf8" },
+      );
 
-    expect(run.stderr).toBe("returned");
-    expect(run.stdout).toBe(String(LINE + 1));
-  });
+      expect(run.stderr).toBe("returned");
+      expect(run.stdout).toBe(String(LINE + 1));
+    },
+    PRINTED,
+  );
 });
 
 describe("what counts as a line carrying something", () => {

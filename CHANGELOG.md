@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## v0.20.0
+
+_2026-10-18_
+
+A smaller image whose process cannot rewrite its own code, and three fixes. A title search no
+longer returns photographs as books; a failed cover upload in another format keeps the old
+cover; deleting a book, emptying the trash or re-adding a trashed ISBN no longer answers an
+error when a cover file cannot be removed. The image ships no uv, its process can write only the
+data directory, and a local build no longer copies key or environment files from inside
+`backend/` or `frontend/`.
+
 - **A title search no longer returns photographs, such as film stills, as books.**
 
 - **A cover upload in a different image format whose save then fails keeps the book's previous
@@ -10,6 +21,12 @@
 - **Permanently deleting a book, emptying the trash or re-adding a trashed ISBN no longer answers
   an error when a cover file cannot be removed after the book is gone**; the failure is logged
   and the leftover file is dead bytes.
+
+- **The image no longer ships uv, and the app's user can write nowhere under `/app` but the data
+  directory**, so the image is smaller and the running process cannot rewrite its own code.
+
+- **A local image build no longer copies a `.env`, `.pem` or `.key` file from inside `backend/` or
+  `frontend/` into the image.**
 
 ## v0.19.0
 

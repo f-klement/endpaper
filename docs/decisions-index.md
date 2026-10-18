@@ -271,7 +271,7 @@ repeat the argument.
 | Product | [No bookshop or retailer is a catalogue source](decisions.md#no-bookshop-or-retailer-is-a-catalogue-source) | 252 |
 |  | [Multi workstation is joined terminals, and the container stays the documented alternative](decisions.md#multi-workstation-is-joined-terminals-and-the-container-stays-the-documented-alternative) | 496 |
 |  | [VIAF is the wrong supplier for resolution and the right one for discovery](decisions.md#viaf-is-the-wrong-supplier-for-resolution-and-the-right-one-for-discovery) | 447 |
-|  | [An identifier two files disagree about is shown and never stored](decisions.md#an-identifier-two-files-disagree-about-is-shown-and-never-stored) | 16,793 |
+|  | [An identifier two files disagree about is shown and never stored](decisions.md#an-identifier-two-files-disagree-about-is-shown-and-never-stored) | 17,431 |
 | An identifier two files disagree about is shown and never stored | [VIAF was refused as a supplier and is used as an enrichment, and both are right](decisions.md#viaf-was-refused-as-a-supplier-and-is-used-as-an-enrichment-and-both-are-right) | 251 |
 | An identifier two files disagree about is shown and never stored | [A VIAF cluster is verified against the confirmed record, never trusted](decisions.md#a-viaf-cluster-is-verified-against-the-confirmed-record-never-trusted) | 300 |
 | An identifier two files disagree about is shown and never stored | [Storing an identifier and resolving one are different acts](decisions.md#storing-an-identifier-and-resolving-one-are-different-acts) | 173 |
@@ -338,6 +338,7 @@ repeat the argument.
 | An identifier two files disagree about is shown and never stored | [Settled by the owner, and not a seat's to reopen](decisions.md#settled-by-the-owner-and-not-a-seats-to-reopen) | 195 |
 | An identifier two files disagree about is shown and never stored | [An apk finding is acted on, because the rebuild is the fix and a digest bump is not](decisions.md#an-apk-finding-is-acted-on-because-the-rebuild-is-the-fix-and-a-digest-bump-is-not) | 385 |
 | An identifier two files disagree about is shown and never stored | [One CVE against two ecosystems is two findings](decisions.md#one-cve-against-two-ecosystems-is-two-findings) | 161 |
+| An identifier two files disagree about is shown and never stored | [Docker digest updates wait for one merge request a week, except the release pin](decisions.md#docker-digest-updates-wait-for-one-merge-request-a-week-except-the-release-pin) | 623 |
 | An identifier two files disagree about is shown and never stored | [The ledger reads one line, not the whole tag message](decisions.md#the-ledger-reads-one-line-not-the-whole-tag-message) | 135 |
 | An identifier two files disagree about is shown and never stored | [A `$` anchored pattern is not a `fullmatch`](decisions.md#a--anchored-pattern-is-not-a-fullmatch) | 43 |
 | An identifier two files disagree about is shown and never stored | [A rebuild finding is not ledgered, so a failed rebuild is retried](decisions.md#a-rebuild-finding-is-not-ledgered-so-a-failed-rebuild-is-retried) | 150 |
@@ -467,7 +468,7 @@ repeat the argument.
 |  | [The longer fan out is bounded by concurrency, and the bound never waits](decisions.md#the-longer-fan-out-is-bounded-by-concurrency-and-the-bound-never-waits) | 902 |
 | The longer fan out is bounded by concurrency, and the bound never waits | [The backfill waits where the search refuses, and a deadline is what buys the wait](decisions.md#the-backfill-waits-where-the-search-refuses-and-a-deadline-is-what-buys-the-wait) | 701 |
 |  | [Asking nothing has two causes, and the answer has to tell them apart](decisions.md#asking-nothing-has-two-causes-and-the-answer-has-to-tell-them-apart) | 253 |
-|  | [The refused long search names our own limit, not the catalogues'](decisions.md#the-refused-long-search-names-our-own-limit-not-the-catalogues) | 4,048 |
+|  | [The refused long search names our own limit, not the catalogues'](decisions.md#the-refused-long-search-names-our-own-limit-not-the-catalogues) | 4,172 |
 | The refused long search names our own limit, not the catalogues' | [A scheme says how its own call numbers sort, and a scheme with no rule sorts as text](decisions.md#a-scheme-says-how-its-own-call-numbers-sort-and-a-scheme-with-no-rule-sorts-as-text) | 846 |
 | The refused long search names our own limit, not the catalogues' | [A catalogue source is a row, and its parser is not](decisions.md#a-catalogue-source-is-a-row-and-its-parser-is-not) | 201 |
 | The refused long search names our own limit, not the catalogues' | [The runtime asks the constant, and the table waits for the ticket that edits it](decisions.md#the-runtime-asks-the-constant-and-the-table-waits-for-the-ticket-that-edits-it) | 157 |
@@ -475,6 +476,7 @@ repeat the argument.
 | The refused long search names our own limit, not the catalogues' | [The roster guard changed shape because the question did](decisions.md#the-roster-guard-changed-shape-because-the-question-did) | 120 |
 | The refused long search names our own limit, not the catalogues' | [What the guard learned from being attacked](decisions.md#what-the-guard-learned-from-being-attacked) | 189 |
 | The refused long search names our own limit, not the catalogues' | [The frontend suite shares one environment, and `tests/doubles/` is what pays for it](decisions.md#the-frontend-suite-shares-one-environment-and-testsdoubles-is-what-pays-for-it) | 521 |
+| The refused long search names our own limit, not the catalogues' | [Clearing vitest's mocks after each test does not lower the peak of the schema property files](decisions.md#clearing-vitests-mocks-after-each-test-does-not-lower-the-peak-of-the-schema-property-files) | 107 |
 | The refused long search names our own limit, not the catalogues' | [The backend suite is twice as slow in CI as in an identical pod, and three obvious reasons are not it](decisions.md#the-backend-suite-is-twice-as-slow-in-ci-as-in-an-identical-pod-and-three-obvious-reasons-are-not-it) | 424 |
 | The refused long search names our own limit, not the catalogues' | [The runner checks its image against the pipeline for both toolchains, not one](decisions.md#the-runner-checks-its-image-against-the-pipeline-for-both-toolchains-not-one) | 451 |
 | The refused long search names our own limit, not the catalogues' | [What the pipeline now reports about its own CPU](decisions.md#what-the-pipeline-now-reports-about-its-own-cpu) | 622 |
@@ -884,7 +886,9 @@ repeat the argument.
 |  | [Refresh rewrites nine columns and leaves four](decisions.md#refresh-rewrites-nine-columns-and-leaves-four) | 495 |
 |  | [A blank text column is null](decisions.md#a-blank-text-column-is-null) | 312 |
 |  | [One rule decides who may be told a vocabulary entry exists](decisions.md#one-rule-decides-who-may-be-told-a-vocabulary-entry-exists) | 455 |
-|  | [One reader for the pipeline file, and the shell runners keep theirs, held equal](decisions.md#one-reader-for-the-pipeline-file-and-the-shell-runners-keep-theirs-held-equal) | 386 |
+|  | [One reader for the pipeline file, and the shell runners keep theirs, held equal](decisions.md#one-reader-for-the-pipeline-file-and-the-shell-runners-keep-theirs-held-equal) | 507 |
+|  | [A cache's one writer is stated at its job, not held by a guard](decisions.md#a-caches-one-writer-is-stated-at-its-job-not-held-by-a-guard) | 279 |
+|  | [What "main is gated" means once the image builds beside the suites](decisions.md#what-main-is-gated-means-once-the-image-builds-beside-the-suites) | 611 |
 |  | [The one writer rule is held by a ratchet on references, not by the MARC arm alone](decisions.md#the-one-writer-rule-is-held-by-a-ratchet-on-references-not-by-the-marc-arm-alone) | 211 |
 |  | [The internal declaration rule stays in three copies, held equal by a pin](decisions.md#the-internal-declaration-rule-stays-in-three-copies-held-equal-by-a-pin) | 181 |
 |  | [A name's meaning is answered by one resolver, and a test that reads an import alias itself is counted per function](decisions.md#a-names-meaning-is-answered-by-one-resolver-and-a-test-that-reads-an-import-alias-itself-is-counted-per-function) | 90 |

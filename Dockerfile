@@ -1,14 +1,16 @@
 # ── The pins every stage shares ────────────────────────────────────────────
 #
-# BASE IS WRITTEN ONCE AND USED BY TWO STAGES. YAZ is compiled in the first and loaded in
+# BASE IS WRITTEN ONCE AND USED BY FOUR STAGES. YAZ is compiled in the first and loaded in
 # the last, so they have to be the same image: a library built against one musl and linked
-# into another is the failure this whole arrangement exists to prevent. It used to be
-# written out twice with a pipeline check comparing them, which is a fact stored twice
-# with a guard bolted on. Verified under kaniko v1.28.3 that this shape works and that
-# `--build-arg YAZ_BUILDER=...` still overrides only the builder half.
+# into another is the failure this whole arrangement exists to prevent. The venv and app
+# stages build on it for the same reason one level up: the virtualenv's interpreter link,
+# its compiled extensions and every bytecode file are made for this Python and no other.
+# Writing the image out twice with a pipeline check comparing the copies would store one
+# fact twice with a guard bolted on. Verified under kaniko v1.28.3 that this shape works
+# and that `--build-arg YAZ_BUILDER=...` still overrides only the builder half.
 #
 # Renovate bumps this line: the dockerfile manager reads an `ARG` default that a `FROM`
-# consumes, and the runtime stage consumes it directly.
+# consumes, and the venv, app and runtime stages consume it directly.
 ARG BASE=python:3.14.8-alpine@sha256:f6a589d43c42b9e7f7dc67a12d37132491f362859a5d750607710cc56da3bc72
 
 # Bumped by hand, and BOTH LINES TOGETHER. A version moved without its hash fails the
@@ -60,16 +62,7 @@ RUN sh /tmp/build-yaz.sh build && rm -f /tmp/build-yaz.sh
 FROM oven/bun:1.4.3-alpine@sha256:629e17411f1f129dbec3af78d5af9c9f2a937435c80349437206c6b0b7422373 AS frontend
 WORKDIR /app/frontend
 
-# Manifest, lockfile and bunfig first, so the install layer is cached until a
-# dependency actually changes. bunfig.toml belongs here: it configures the
-# security scanner that screens packages during this very install.
-COPY frontend/package.json frontend/bun.lock frontend/bunfig.toml ./
-# --frozen-lockfile fails the build if the lockfile and manifest disagree,
-# rather than silently resolving something the lockfile never pinned.
-RUN bun install --frozen-lockfile
-
 COPY frontend/ .
-# `build` runs `tsc --noEmit` first, so a type error fails the image build.
 # The version the About card shows. The frontend is built here, in a stage with no
 # .git and no CI variables, so the tag cannot be discovered and has to be handed in.
 # Empty on a local build, which is correct: vite.config falls back to git describe,
@@ -77,16 +70,35 @@ COPY frontend/ .
 ARG APP_VERSION=""
 ENV CI_COMMIT_TAG=$APP_VERSION
 
-RUN bun run build
-
-# ── Stage 3: FastAPI server with uv ────────────────────────────────────────
+# **ONE RUN, SO NO LAYER EVER HOLDS node_modules.** Only `dist` leaves this stage,
+# but the pipeline's kaniko caches every RUN layer in a registry. A separate
+# `bun install` layer would be the whole of node_modules, which a cold build pushes and
+# a warm one spends longer unpacking than the install itself takes. Installing again on
+# every build costs seconds. Splitting the install back out above `COPY frontend/ .` is
+# the usual Docker idiom and brings that layer back.
 #
-# Alpine, matching stage 1. Moved off python:3.14.7-slim (Debian 13) on 2026-08-18,
-# alongside the same move in the webpage project, where the first gating image scan
-# blocked on CVE-2026-53615 in util-linux: nine binary packages from one source, none
-# of which a uvicorn process ever invokes, and with no fixed base image to bump to.
-# Debian's userland is apt, dpkg and their dependencies: findings waiting to happen
-# against software that is never executed. Alpine's is busybox and musl.
+# --frozen-lockfile fails the build if the lockfile and manifest disagree, rather
+# than silently resolving something the lockfile never pinned. bunfig.toml arrives
+# with the sources and configures the security scanner that screens packages during
+# this install. `build` runs `tsc --noEmit` first, so a type error fails the image
+# build. The install cache is pointed at a path this line deletes: left at its default,
+# under root's home, it would put about as much again as node_modules into the layer.
+#
+# `chmod -R a+rX,go-w dist` for the reasons the app stage gives: Vite copies `public/`
+# with the modes the checkout gave it, so the app's user may be unable to read a file, or
+# able to write one.
+RUN BUN_INSTALL_CACHE_DIR=/tmp/bun-install-cache bun install --frozen-lockfile \
+    && bun run build \
+    && chmod -R a+rX,go-w dist \
+    && rm -rf node_modules /tmp/bun-install-cache
+
+# ── Stage 3: The Python virtualenv, built where uv is ──────────────────────
+#
+# uv builds the virtualenv and nothing in the running image invokes it, so the binary
+# stays in this stage and only /app/.venv crosses to the runtime. Shipped, it would be
+# a layer of its own on every pull and one more binary for a scanner to find an
+# advisory in. The base is the runtime's own, because the venv's interpreter link and
+# every compiled extension in it point at that base's Python, at the same path.
 #
 # HIGHER RISK HERE THAN IN WEBPAGE, AND VERIFIED RATHER THAN ASSUMED. musl breaks
 # manylinux wheels, and unlike webpage this backend leans on compiled packages:
@@ -101,6 +113,67 @@ RUN bun run build
 # Keep that bar for new dependencies. A package with a C extension and no musllinux
 # wheel will not fail politely: uv will try to build it from source and die for want
 # of a compiler, in CI, at image-build time.
+FROM ${BASE} AS venv
+WORKDIR /app
+
+# NOTE THE SOURCE PATH. The Debian uv image ships the binary at /uv; the -alpine
+# variant ships it at /usr/local/bin/uv. Copying /uv from the alpine image fails with
+# "failed to get fileinfo for /kaniko/deps/.../uv: no such file or directory", which
+# reads like a kaniko cross-stage bug and is really just a missing file.
+COPY --from=ghcr.io/astral-sh/uv:0.13.1-alpine@sha256:ffc7a8b9b0bbf136676da234e29915f66480322b68111b31115c5bbcf6b2cab0 /usr/local/bin/uv /bin/uv
+
+ENV UV_LINK_MODE=copy \
+    UV_PYTHON_DOWNLOADS=never
+
+COPY backend/pyproject.toml backend/uv.lock ./
+# --no-dev omits pytest, ruff and mypy: the test tooling has no place in a
+# runtime image. --frozen refuses to silently re-resolve the lockfile.
+#
+# **The bytecode is compiled here as unchecked hash, not by uv.** uv's own option
+# writes timestamp bytecode, which is valid only while each source keeps the mtime it
+# had when compiled, and nothing promises that across the COPY into the runtime stage.
+# There the venv is owned by root, so a stale file could not be rewritten and every
+# start would compile the dependencies again in memory. Unchecked hash bytecode is
+# never compared with its source, which is right for an image nobody edits in place.
+#
+# **`go-w` because uv creates `.venv/.lock` writable by everybody**, under the build's
+# umask of 022 too, and the COPY into the runtime keeps that mode. Without it the process
+# can write one file under /app outside DATA_DIR.
+RUN uv sync --frozen --no-cache --no-dev --no-install-project \
+    && python -m compileall -q -j 0 --invalidation-mode unchecked-hash .venv \
+    && chmod -R go-w .venv
+
+# ── Stage 4: The application's sources, compiled and readable ──────────────
+#
+# **The runtime's /app is root's, so the modes decide what the app can do with it.** A
+# COPY from the build context keeps the modes the checkout gave each file. A checkout
+# made under umask 077 leaves files at 0600 and directories at 0700: root reads them,
+# uid 1000 cannot import a module or open a template. One made under umask 000 leaves
+# every file writable by everybody. The pipeline's checkout is neither, so its green
+# build shows neither failure. `a+rX` makes every file readable and every directory
+# traversable; `go-w` takes write from everybody but root. It runs here, in a stage of
+# its own, because a chmod in the runtime stage would copy every file it touches into
+# one more layer.
+#
+# **Precompiled because the process cannot write under /app.** Python writes a
+# `__pycache__` beside each module it imports, silently skips it when the directory
+# is not writable, and then compiles every module in memory again on every start.
+# Unchecked hash for the reason given in the venv stage. The chmod comes after the
+# compile so it also covers the `__pycache__` directories and files the compile creates.
+FROM ${BASE} AS app
+WORKDIR /app
+COPY backend/ .
+RUN python -m compileall -q -j 0 --invalidation-mode unchecked-hash . \
+    && chmod -R a+rX,go-w .
+
+# ── Stage 5: The FastAPI server ────────────────────────────────────────────
+#
+# Alpine, matching stage 1. Moved off python:3.14.7-slim (Debian 13) on 2026-08-18,
+# alongside the same move in the webpage project, where the first gating image scan
+# blocked on CVE-2026-53615 in util-linux: nine binary packages from one source, none
+# of which a uvicorn process ever invokes, and with no fixed base image to bump to.
+# Debian's userland is apt, dpkg and their dependencies: findings waiting to happen
+# against software that is never executed. Alpine's is busybox and musl.
 FROM ${BASE}
 
 # ── The YAZ tree ───────────────────────────────────────────────────────────
@@ -111,7 +184,7 @@ FROM ${BASE}
 # further down once its libraries are installed, by running it.
 #
 # **BE CLEAR ABOUT WHAT THIS ONE CAN AND CANNOT CATCH.** In an ordinary build it cannot
-# fire: the stage above runs from the same pins and the same recipe file, so the stamp
+# fire: the yaz stage runs from the same pins and the same recipe file, so the stamp
 # matches by construction. It is a check on the COPY source, and the thing it would catch
 # is somebody pointing `--from` at a tree this Dockerfile did not describe. **It does not
 # catch a different subset of the SAME build**, because the recipe writes the same id into
@@ -202,37 +275,37 @@ RUN LD_BIND_NOW=1 /opt/yaz/bin/yaz-client -V | grep -q "^YAZ version: ${YAZ_VERS
 
 WORKDIR /app
 
-# NOTE THE SOURCE PATH. The Debian uv image ships the binary at /uv; the -alpine
-# variant ships it at /usr/local/bin/uv. Copying /uv from the alpine image fails with
-# "failed to get fileinfo for /kaniko/deps/.../uv: no such file or directory", which
-# reads like a kaniko cross-stage bug and is really just a missing file.
-COPY --from=ghcr.io/astral-sh/uv:0.13.1-alpine@sha256:ffc7a8b9b0bbf136676da234e29915f66480322b68111b31115c5bbcf6b2cab0 /usr/local/bin/uv /bin/uv
+ENV PATH="/app/.venv/bin:$PATH"
 
-ENV UV_COMPILE_BYTECODE=1 \
-    UV_LINK_MODE=copy \
-    UV_PYTHON_DOWNLOADS=never \
-    PATH="/app/.venv/bin:$PATH"
+# ── Everything under /app is root's, except DATA_DIR ───────────────────────
+#
+# Every COPY here leaves its files owned by root, and nothing chowns them afterwards.
+# A `chown -R` of /app below these lines would be a second full copy of every file it
+# touches, because a chown in a later layer rewrites them all: the venv and the
+# sources twice over in every image, under a new digest on every build because the
+# sources change on every build. It would also let the process rewrite its own code
+# and dependencies, which it never needs to do. A chmod here costs the same, which is
+# why the app and frontend stages open the modes before their files cross.
+COPY --from=venv /app/.venv /app/.venv
+COPY --from=app /app /app
 
-COPY backend/pyproject.toml backend/uv.lock ./
-# --no-dev omits pytest, ruff and mypy: the test tooling has no place in a
-# runtime image. --frozen refuses to silently re-resolve the lockfile.
-RUN uv sync --frozen --no-cache --no-dev --no-install-project
-
-COPY backend/ .
-# Only the compiled assets cross from stage 1: no Bun, no node_modules,
+# Only the compiled assets cross from the frontend stage: no Bun, no node_modules,
 # no TypeScript sources in the shipped image.
 COPY --from=frontend /app/frontend/dist ./static
 
 # The licence travels with the copy, because MIT conditions the grant on the
 # notice being included in every copy of the software and an image is a copy.
 # Apache-2.0 clause 4(a) asked for the same and this line was missing under it.
-# `frontend/tests/licence.test.ts` fails if it goes.
+# `frontend/tests/licence.test.ts` fails if it goes, and reads only this stage, so the
+# file is copied here rather than through the app stage. The process never opens it,
+# so its read bits do not matter; the user RUN below takes its write bits from
+# everybody but root, which costs one layer holding this one file.
 COPY LICENSE ./LICENSE
 
 # DATA_DIR holds the SQLite database and uploaded covers, and is the path to
-# mount a volume at. Created here so a first run works with no volume.
+# mount a volume at. Created below, owned by the app's user, so a first run works
+# with no volume, and so an empty named volume mounted here starts with that owner.
 ENV DATA_DIR=/app/data
-RUN mkdir -p "$DATA_DIR/covers"
 
 # ── Run as a non-root user ─────────────────────────────────────────────────
 #
@@ -249,9 +322,14 @@ RUN mkdir -p "$DATA_DIR/covers"
 # busybox adduser/addgroup, not shadow's useradd/groupadd: Alpine does not install
 # shadow, and the build would fail with "command not found". -D creates the account
 # with no password and -H skips the home directory, which a service account wants.
+#
+# The chown names DATA_DIR and nothing else. Widening it to /app copies the whole
+# application into one more layer; the section above says what that cost.
 RUN addgroup -g 1000 app \
     && adduser -D -H -h /app -u 1000 -G app app \
-    && chown -R 1000:1000 /app
+    && mkdir -p "$DATA_DIR/covers" \
+    && chown -R 1000:1000 "$DATA_DIR" \
+    && chmod go-w LICENSE
 
 # ── Drop pip and setuptools ────────────────────────────────────────────────
 #
@@ -280,8 +358,10 @@ USER 1000:1000
 # an emptyDir there). FastAPI spools an uploaded cover into a
 # SpooledTemporaryFile that rolls over to a real file in TMPDIR once it
 # outgrows its buffer, so cover uploads fail without it. Nothing else needs a
-# writable path outside DATA_DIR. UV_COMPILE_BYTECODE precompiles the .pyc
-# files at build time, so the venv is never written to at runtime.
+# writable path outside DATA_DIR. Everything else under /app is root's, and each
+# stage that ships files there takes write from group and other, as the LICENSE
+# line does for the one file copied straight in. The venv and the sources are both
+# precompiled at build time, so the process never needs to write beside them.
 
 EXPOSE 8000
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
