@@ -1,6 +1,6 @@
 services:
   endpaper:
-    image: fklement/endpaper:latest@sha256:f91e3609edccd4556bbaba576c0b9b06b4b21e96b8980600de56cdf5009a9533
+    image: fklement/endpaper:latest@sha256:97d33a42eec666f93f07d8bdb4ec8c73f67f2ac312340737ed1d8c875a61d9ce
     container_name: endpaper
     ports:
       - "8000:8000"     # change left side to any free host port e.g. 8123:8000
