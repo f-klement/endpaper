@@ -11,7 +11,7 @@
 #
 # Renovate bumps this line: the dockerfile manager reads an `ARG` default that a `FROM`
 # consumes, and the venv, app and runtime stages consume it directly.
-ARG BASE=python:3.14.8-alpine@sha256:f6a589d43c42b9e7f7dc67a12d37132491f362859a5d750607710cc56da3bc72
+ARG BASE=python:3.14.9-alpine@sha256:d55673c233e28839c1c0c69766428cb6d50174a2ecfdcf915b6f58a0b0991562
 
 # Bumped by hand, and BOTH LINES TOGETHER. A version moved without its hash fails the
 # build at `sha256sum -c`, which is the failure you want. Renovate raises the version half
@@ -59,7 +59,7 @@ COPY docker/build-yaz.sh /tmp/build-yaz.sh
 RUN sh /tmp/build-yaz.sh build && rm -f /tmp/build-yaz.sh
 
 # ── Stage 2: Build the React PWA with Bun ──────────────────────────────────
-FROM oven/bun:1.4.3-alpine@sha256:629e17411f1f129dbec3af78d5af9c9f2a937435c80349437206c6b0b7422373 AS frontend
+FROM oven/bun:1.4.4-alpine@sha256:4cf82f5686b196504fe119db3fcd9185b191f82ece82c40680e597228ec6070a AS frontend
 WORKDIR /app/frontend
 
 COPY frontend/ .
