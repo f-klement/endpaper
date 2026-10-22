@@ -27,7 +27,7 @@
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-router-dom": "^7.18.2",
-    "sql.js": "1.15.0"
+    "sql.js": "1.15.1"
   },
   "devDependencies": {
     "@socketsecurity/bun-security-scanner": "^1.1.2",

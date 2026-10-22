@@ -42,7 +42,7 @@
  *
  * The engine is
  * `assets/sql-wasm-browser-*.wasm` at 684.89 kB raw and **338.96 kB gzipped**,
- * and this module's own chunk is 41.00 kB raw and 14.75 gzipped: 353.71 kB
+ * and this module's own chunk is 41.09 kB raw and 14.84 gzipped: 353.80 kB
  * gzipped for the route, against a main chunk of 388.09 kB gzipped that carries
  * none of it. `calibre.ts` has no chunk of its own: the scan page imports it
  * statically, so it ships in the main chunk.
@@ -55,14 +55,14 @@
  * **The split is not clean, and the part that is not is the small part.** The
  * service worker precaches by the extensions `globPatterns` lists in
  * `vite.config.ts`, which has no `wasm` among them, so the 338.96 kB is
- * downloaded only by a session that opens this card. The 14.75 kB wrapper
+ * downloaded only by a session that opens this card. The 14.84 kB wrapper
  * chunk is a `.js` and is precached like every other lazy chunk in this app, so
  * every session pays that much.
  *
  * **`script-src` had to be relaxed for this and the relaxation is one token.**
  * `backend/middleware.py` grants `'wasm-unsafe-eval'`, which permits compiling
  * WebAssembly and nothing else; `'unsafe-eval'` is still refused, and so is
- * `'unsafe-inline'`. **sql.js 1.15.0 contains no `eval(` and no `new Function`,
+ * `'unsafe-inline'`. **sql.js 1.15.1 contains no `eval(` and no `new Function`,
  * measured over `dist/sql-wasm-browser.js`**, so the wider grant would have
  * bought nothing.
  *
