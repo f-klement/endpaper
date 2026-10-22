@@ -2,9 +2,9 @@
 
 <!-- measured: begin -->
 
-**11813 tests, in 179 files**, counted by the run that reads this line.
+**11822 tests, in 179 files**, counted by the run that reads this line.
 **The 150 rows below sum to 10249.**
-The other 1564 tests are in 32 files this register may not name.
+The other 1573 tests are in 32 files this register may not name.
 The table also carries 3 files this engine does not run, stated as 0.
 <!-- measured: end -->
 
