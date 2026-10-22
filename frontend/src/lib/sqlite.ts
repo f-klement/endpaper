@@ -41,10 +41,11 @@
  * is named: the figures are the build's, not a machine's.
  *
  * The engine is
- * `assets/sql-wasm-browser-*.wasm` at 658.41 kB raw and **326.00 kB gzipped**,
- * this module's own chunk is 41.10 kB raw and 14.67 gzipped, and `calibre.ts`
- * is 5.68 kB raw and 2.20 gzipped: 342.87 kB gzipped for the route, against a
- * main chunk of 340.08 kB gzipped that carries none of it.
+ * `assets/sql-wasm-browser-*.wasm` at 684.89 kB raw and **338.96 kB gzipped**,
+ * and this module's own chunk is 41.00 kB raw and 14.75 gzipped: 353.71 kB
+ * gzipped for the route, against a main chunk of 388.09 kB gzipped that carries
+ * none of it. `calibre.ts` has no chunk of its own: the scan page imports it
+ * statically, so it ships in the main chunk.
  *
  * **Every figure here is from one build and the two small ones move with any
  * code edit**, by hundredths of a kilobyte. Requote them from a build rather
@@ -53,14 +54,15 @@
  *
  * **The split is not clean, and the part that is not is the small part.** The
  * service worker precaches by the extensions `globPatterns` lists in
- * `vite.config.ts`, which has no `wasm` among them, so the 326.00 kB is
- * downloaded only by a session that opens this card. The 14.66 kB wrapper chunk is a `.js` and is precached like
- * every other lazy chunk in this app, so every session pays that much.
+ * `vite.config.ts`, which has no `wasm` among them, so the 338.96 kB is
+ * downloaded only by a session that opens this card. The 14.75 kB wrapper
+ * chunk is a `.js` and is precached like every other lazy chunk in this app, so
+ * every session pays that much.
  *
  * **`script-src` had to be relaxed for this and the relaxation is one token.**
  * `backend/middleware.py` grants `'wasm-unsafe-eval'`, which permits compiling
  * WebAssembly and nothing else; `'unsafe-eval'` is still refused, and so is
- * `'unsafe-inline'`. **sql.js 1.14.2 contains no `eval(` and no `new Function`,
+ * `'unsafe-inline'`. **sql.js 1.15.0 contains no `eval(` and no `new Function`,
  * measured over `dist/sql-wasm-browser.js`**, so the wider grant would have
  * bought nothing.
  *
