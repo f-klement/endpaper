@@ -7,5 +7,5 @@
  */
 
 export interface BodySetLoginImage {
-  file: Blob;
+  file: Blob | File;
 }

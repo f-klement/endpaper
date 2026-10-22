@@ -283,7 +283,7 @@ def _accepts(annotation: Any, metadata: list[Any], value: Any) -> bool:
     `Annotated` of one.
     """
     subject = Annotated[(annotation, *metadata)] if metadata else annotation
-    adapter: TypeAdapter[Any] = TypeAdapter(subject)
+    adapter: TypeAdapter[Any] = TypeAdapter(typing.cast(Any, subject))
     try:
         adapter.validate_python(value)
     except ValidationError:

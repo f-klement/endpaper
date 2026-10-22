@@ -11,7 +11,11 @@ requires-python = ">=3.14"
 dependencies = [
     "fastapi>=0.115.8",
     "uvicorn[standard]>=0.34.0",
-    "sqlalchemy>=2.0.38",
+    # Held below 2.1 because 2.1 drops `select` from the reading methods the
+    # shelf guard derives from Query and Select, so a bare shelf select evades
+    # the book-owned rule (tests/test_shelf.py). Lift it once the guard has
+    # learnt 2.1's spelling.
+    "sqlalchemy>=2.0.38,<2.1",
     "pyjwt>=2.10.1",
     "bcrypt>=4.2.1",
     "python-multipart>=0.0.20",

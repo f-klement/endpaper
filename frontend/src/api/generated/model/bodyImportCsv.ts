@@ -7,5 +7,5 @@
  */
 
 export interface BodyImportCsv {
-  file: Blob;
+  file: Blob | File;
 }

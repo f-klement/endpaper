@@ -1551,6 +1551,7 @@ def _every_subclass(root: type) -> set[type]:
     """
     seen: set[type] = set()
     stack = [root]
+    sub: type
     while stack:
         for sub in stack.pop().__subclasses__():
             if sub not in seen:

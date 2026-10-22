@@ -7,5 +7,5 @@
  */
 
 export interface BodyUploadCover {
-  file: Blob;
+  file: Blob | File;
 }

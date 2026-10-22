@@ -9,7 +9,7 @@ import in the test suite.
 
 import atexit
 import contextlib
-import datetime
+import datetime as dt
 import hashlib
 import logging
 import os
@@ -337,11 +337,11 @@ NINE_HOURS_EAST = "JST-9"
 
 #: The offset `NINE_HOURS_EAST` must produce, asserted rather than assumed by
 #: anything that wants to know the zone really moved.
-NINE_HOURS = datetime.timedelta(hours=9)
+NINE_HOURS = dt.timedelta(hours=9)
 
 #: A fixed instant to read an offset at, so the reading never depends on when
 #: the suite ran or on a daylight saving boundary.
-_A_FIXED_INSTANT = datetime.datetime(2026, 3, 13, 15, 30, tzinfo=datetime.UTC)
+_A_FIXED_INSTANT = dt.datetime(2026, 3, 13, 15, 30, tzinfo=dt.UTC)
 
 
 @contextlib.contextmanager

@@ -7,5 +7,5 @@
  */
 
 export interface BodyImportMarc {
-  file: Blob;
+  file: Blob | File;
 }

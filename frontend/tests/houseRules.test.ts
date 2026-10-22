@@ -8341,18 +8341,18 @@ describe("a dated field named in a JSX child is handed to a door call", () => {
     expect([...kinds]).not.toContain("ParenthesizedExpression");
   });
 
-  it("refuses a comma at the top of a child and not below it", () => {
-    // **Where the parser's refusal holds, which is narrower than it looked.**
-    // JSX refuses the comma operator as the whole of a container, and that is
-    // all it refuses: inside a conditional branch it parses, which is why
-    // `SequenceExpression` has a forwarding row at all. The earlier version
-    // read the top level refusal as covering the kind.
-    expect(() =>
+  it("reports a dated field behind a comma, at the top of a child and below it", () => {
+    // **A comma parses in either position, so the forwarding row carries both.**
+    // A parenthesized comma is a valid expression as the whole of a JSX
+    // container, and vite's parser accepts it there as it does inside a
+    // conditional branch. The walk reaches the field through
+    // `SequenceExpression`'s forwarding row in both, which is what this pins.
+    expect(
       datesRenderedRawIn(
         "x.tsx",
         "const C = () => <p>{(ok, book.due_at)}</p>;",
       ),
-    ).toThrow("may not use the comma operator");
+    ).toEqual(["x.tsx renders due_at unformatted"]);
     expect(
       datesRenderedRawIn(
         "x.tsx",

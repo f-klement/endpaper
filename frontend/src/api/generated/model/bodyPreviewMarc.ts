@@ -7,5 +7,5 @@
  */
 
 export interface BodyPreviewMarc {
-  file: Blob;
+  file: Blob | File;
 }

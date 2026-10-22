@@ -21,7 +21,7 @@ import importlib
 import inspect
 import pkgutil
 from datetime import UTC, datetime
-from typing import Annotated, Any
+from typing import Annotated, Any, cast
 
 from pydantic import BaseModel, PlainSerializer, TypeAdapter
 
@@ -144,7 +144,7 @@ def _emitted(model: type[BaseModel], field: str) -> object:
     )
     # Spelled out, because the annotation is only known at runtime and the type
     # checker otherwise infers `TypeAdapter[Never]` and refuses the argument.
-    adapter: TypeAdapter[Any] = TypeAdapter(annotation)
+    adapter: TypeAdapter[Any] = TypeAdapter(cast(Any, annotation))
     return adapter.dump_python(A_NAIVE_INSTANT, mode="json")
 
 

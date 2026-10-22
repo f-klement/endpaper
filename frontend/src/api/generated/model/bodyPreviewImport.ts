@@ -7,5 +7,5 @@
  */
 
 export interface BodyPreviewImport {
-  file: Blob;
+  file: Blob | File;
 }

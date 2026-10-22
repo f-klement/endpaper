@@ -7,5 +7,5 @@
  */
 
 export interface BodyRestoreBackup {
-  file: Blob;
+  file: Blob | File;
 }

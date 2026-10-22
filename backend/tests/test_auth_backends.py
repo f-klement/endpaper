@@ -941,7 +941,9 @@ class TestADirectoryNameWiderThanTheColumnIsRefused:
             "comparison below proved nothing"
         )
 
-        shared = os.path.commonprefix([header_refusal, funnel_refusal])
+        # Two log messages, not paths: the shared characters are what a grep rule
+        # matches, so commonpath, which RUF071 offers, would compare the wrong thing.
+        shared = os.path.commonprefix([header_refusal, funnel_refusal])  # noqa: RUF071
         assert len(shared) <= len(self.LONGEST_SHARED_OPENING), (
             "the two refusals now share a grep prefix, so one alert rule "
             "matches an unauthenticated header event and a directory "
