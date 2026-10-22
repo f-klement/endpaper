@@ -13,6 +13,9 @@ import re
 import sys
 import textwrap
 from collections.abc import Iterable, Iterator, Mapping
+from collections.abc import Set as AbstractSet
+from functools import cache
+from types import MappingProxyType
 from typing import Any
 from xml.etree import ElementTree
 
@@ -727,14 +730,25 @@ def _graph_of(trees: Mapping[str, ast.Module]) -> tuple[dict[str, set[str]], set
     return calls, builds
 
 
-def _call_graph() -> tuple[dict[str, set[str]], set[str]]:
-    """`_graph_of` this application."""
-    return _graph_of(
+@cache
+def _call_graph() -> tuple[Mapping[str, frozenset[str]], frozenset[str]]:
+    """`_graph_of` this application, built once per process.
+
+    **Built from the source files alone**, so a test that patches a loaded
+    module, as the dispatch table test does, changes what `_registered_entries`
+    reads and leaves the graph as it was. Frozen because it is shared: a caller
+    adding an edge would hand every later test a graph the source does not hold.
+    """
+    calls, builds = _graph_of(
         {_module_name(path): ast.parse(path.read_text()) for path in application_modules()}
+    )
+    return (
+        MappingProxyType({function: frozenset(callees) for function, callees in calls.items()}),
+        frozenset(builds),
     )
 
 
-def _reaching(calls: dict[str, set[str]], builds: set[str]) -> set[str]:
+def _reaching(calls: Mapping[str, AbstractSet[str]], builds: AbstractSet[str]) -> set[str]:
     """The functions that build a Heading, plus everything that can call one."""
     reaching = set(builds)
     moved = True
@@ -1353,11 +1367,8 @@ class TestHowManyCataloguescanFeedOneBooksHeadings:
         literal, because a docstring is dedented and its literal is not, so a
         guard comparing one against the other reports a mismatch that is not
         there."""
-        derived = {
-            source
-            for source, target in targets.SEEDED.items()
-            if target.reader in self._derived()
-        }
+        readers = self._derived()
+        derived = {source for source, target in targets.SEEDED.items() if target.reader in readers}
         stated = _catalogues_stated_in(bounded_headings.__doc__ or "")
 
         assert stated is not None, (
@@ -1377,9 +1388,8 @@ class TestHowManyCataloguescanFeedOneBooksHeadings:
         """The same sentence lives in a published document, and a figure written
         twice is a figure that stops being re-derived. Both are checked against
         the derivation rather than against each other."""
-        derived = sum(
-            target.reader in self._derived() for target in targets.SEEDED.values()
-        )
+        readers = self._derived()
+        derived = sum(target.reader in readers for target in targets.SEEDED.values())
         stated = _catalogues_stated_in(
             (BACKEND.parent / "docs" / "data-model.md").read_text()
         )

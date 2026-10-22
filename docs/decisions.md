@@ -23252,3 +23252,122 @@ wave, a full run on Postgres left several hundred failures, most of them applica
 yet separated from the SQLite assumptions, so the job would have turned red on every tag. The
 mark and the side guard come first, and a whole suite job is the natural next guard once that
 list is fixed or carried.
+
+## A call inside a comprehension's condition is not refused by a guard
+
+Two tests rebuilt a set from a tree walk once per element: `set(scope())` in
+`test_roster_counts.py`, and a walk of every Markdown file in the guard over the published
+documents. Each was hoisted out of its comprehension, and no arm refuses the shape.
+
+**A static arm cannot tell the expensive call from the cheap one.** An `ast` scan of `backend/`
+for a call in a comprehension's `if` that names none of the comprehension's targets found the
+two walks among dozens of other calls, most of them cheap or already cached: `set()`,
+`Path('.')`, `len(MARKER)`, and helpers under `functools.cache` such as `_linters()`,
+`_backend_module_names()` and `pipeline_keys()`. Refusing all of them refuses ordinary code.
+Admitting the cheap ones takes a list of spellings, which grows by one name each time a helper
+is added or cached.
+
+**The cost is time, not a wrong answer**, and time already has an instrument: the per test
+durations in the pipeline's test report.
+
+**And the arm sees only half of the same shape elsewhere.** `test_classifications.py` called
+`self._derived()`, which rebuilt the call graph, once per seeded target in two tests: in a set
+comprehension's condition in one, and in a generator's element in the other. An arm keyed on
+the condition sees the first and not the second.
+
+## build:smoke and scan:image take the digest build pushed
+
+`build` writes `BUILD_DIGEST=<digest>` to a dotenv report and build:smoke runs
+`${CI_REGISTRY_IMAGE}@${BUILD_DIGEST}`, so the smoke test runs the digest promote:latest
+copies even when `:<short sha>` is rewritten between the push and the pull (a second
+pipeline on the commit, or a retried build: kaniko builds without `--reproducible`).
+scan:image scans the same digest, read from the `image.digest` file.
+
+A project, group or pipeline variable named `BUILD_DIGEST` outranks a dotenv one, and
+would boot an image other than the one promote:latest copies. The old tag had the same
+exposure. No variable outranks a file, so build:smoke compares the variable against the
+`image.digest` file `build` wrote before anything else runs, and fails by name when they
+differ.
+
+What this does not cover: a `build` retried once build:smoke has started writes a new
+digest, and promote:latest copies one nobody smoked. That predates this change.
+
+Whether GitLab expands a dotenv variable in `image: name:` was read from GitLab's own
+documentation on 2026-10-22:
+
+- docs.gitlab.com/ci/variables/dotenv_variables: "You can use dotenv variables in job
+  script sections or with keywords that support variable expansion on the runner", and
+  "You cannot use dotenv variables in rules sections". `image` is not named either way.
+- docs.gitlab.com/ci/variables/where_variables_can_be_used: `image`, expansion place
+  Runner, supported, "The variable expansion is made by GitLab Runner's internal variable
+  expansion mechanism".
+- gitlab-org/gitlab issue 562249 reports dotenv variables expanding empty in
+  `services:variables`; its reproduction names the service image by a dotenv variable
+  and the service ran. Not the same keyword, and no staff answer.
+
+So the documentation says it expands, and the change was made. **Only a main pipeline
+proves it**: the first one after merge should show build:smoke pulling `@sha256:...`.
+If the variable arrives empty, the image is `<image>@`, which is not a valid image
+reference, so the pod never starts and the job is red. That blocks promote:latest rather
+than promoting an untested digest.
+
+## The smoke test refuses a world writable entry
+
+The image smoke test walks the built image's root filesystem and fails on any world
+writable file or directory it can stat, outside `/tmp` and `/var/tmp`. The layer test reads
+chown, chmod and COPY flags and cannot see a mode a tool sets (uv's 0666 `.venv/.lock`); this
+reads the modes the build produced, at the level above the write arms.
+
+Choices, each measured or read:
+
+- Python, not `find`: as uid 1000, `find` exits 1 on `/root` (0700 in the pinned base,
+  read from its tar headers), so a status read past that also passes a `find` that
+  never ran. The walk names, and passes, a directory it cannot list and an entry it
+  cannot stat, because failing on them would fail on `/root`. An entry inside such a
+  directory goes unchecked, though a directory with search and no read still lets its
+  writer reach a file by name. The walk fails if it never reached `APP_DIR`.
+- Exempt `/tmp` and `/var/tmp` only: the published image's tar headers list them as its
+  only world writable entries. DATA_DIR is the app user's by owner, and its mode gives
+  other users no write.
+- The root device only, as `find -xdev`: /proc, /sys, /dev and the runner's mounts are
+  not the image; the working directory (the runner's checkout) is skipped by path too.
+  The device skip's test fakes a second device, because a mount cannot be built without
+  privileges; that a real mount reports one is the kernel's, and only a pipeline shows it.
+- World writable only. Write by the app's user through ownership outside DATA_DIR stays
+  with the layer test's chown arms.
+
+Not checked on a real image: no image was built here. The first main pipeline's
+build:smoke log should end the walk with "nothing in the image is world writable".
+
+## The release pin guard reads globs with PurePosixPath.full_match
+
+The release pin guard reads a non regex pattern in `matchPackageNames`,
+`excludePackageNames`, `matchDepNames` and `matchFileNames` with
+`PurePosixPath(value).full_match(pattern)`, not with `fnmatch.fnmatchcase`. fnmatch's `*`
+crosses `/` and its `**/` needs a literal `/`; Renovate's minimatch does neither.
+
+Renovate's main branch reads both package names and file names through one matcher,
+`minimatch(pattern, { dot: true, nocase: true })` from minimatch 10.2.6 (its
+`string-match.ts` and `package.json`, read on 2026-10-22). Measured on 2026-10-22 with the
+old and the new `_matches` side by side, on Python 3.13.5 and 3.14.0 with identical output,
+and against minimatch 10.2.6 under those options:
+
+- Over the seven patterns Renovate's configuration holds today, all literal package
+  names, against the pin, the deploy file and the six other names they select: no
+  disagreement between the two Python matchers.
+- What the new matcher refuses that the old allowed: a rule holding the pin through
+  `matchFileNames: ["**/docker-compose*.yml"]` (or `**/*.yml`), which fnmatch read as
+  missing the root file, and a rule whose only exclusion of the pin is a glob whose `*` or `?`
+  must cross the slash (`!fklement*`, `!*`, `!fklement?endpaper`). minimatch agrees with
+  the new matcher on `**/docker-compose*.yml`, `fklement*` and `fklement?endpaper`.
+- What it allows that the old refused: a positive glob of that second shape on a holding
+  rule, which Renovate does not apply to the pin either.
+- Where it is wrong the other way: it normalises the pattern as a path, so
+  `fklement/endpaper/` and `./fklement/endpaper` match the pin, and under minimatch
+  neither does. Such a spelling in an exclusion would let the guard pass a rule Renovate
+  applies, and in a positive pattern on a holding rule it would refuse a rule Renovate
+  does not apply. `fklement//endpaper` matches under both, since minimatch collapses repeated
+  slashes. A brace list is read literally, and case is compared where Renovate ignores
+  it, as the guard's docstring says.
+
+The guard's glob arm reds on the fnmatch matcher; that was planted and measured.

@@ -940,4 +940,8 @@ repeat the argument.
 |  | [Each caller maps a landing in an exhaustive switch](decisions.md#each-caller-maps-a-landing-in-an-exhaustive-switch) | 60 |
 |  | [An audiobook records no file location](decisions.md#an-audiobook-records-no-file-location) | 111 |
 |  | [A test asserting SQLite's behaviour says so, and an unmarked one fails](decisions.md#a-test-asserting-sqlites-behaviour-says-so-and-an-unmarked-one-fails) | 339 |
+|  | [A call inside a comprehension's condition is not refused by a guard](decisions.md#a-call-inside-a-comprehensions-condition-is-not-refused-by-a-guard) | 208 |
+|  | [build:smoke and scan:image take the digest build pushed](decisions.md#buildsmoke-and-scanimage-take-the-digest-build-pushed) | 306 |
+|  | [The smoke test refuses a world writable entry](decisions.md#the-smoke-test-refuses-a-world-writable-entry) | 301 |
+|  | [The release pin guard reads globs with PurePosixPath.full_match](decisions.md#the-release-pin-guard-reads-globs-with-pureposixpathfull_match) | 318 |
 <!-- index: end -->

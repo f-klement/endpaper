@@ -2,9 +2,9 @@
 
 <!-- measured: begin -->
 
-**11811 tests, in 179 files**, counted by the run that reads this line.
-**The 150 rows below sum to 10248.**
-The other 1563 tests are in 32 files this register may not name.
+**11813 tests, in 179 files**, counted by the run that reads this line.
+**The 150 rows below sum to 10249.**
+The other 1564 tests are in 32 files this register may not name.
 The table also carries 3 files this engine does not run, stated as 0.
 <!-- measured: end -->
 
@@ -154,7 +154,7 @@ why the helper uses regexes.
 | `schemas/test_book.py` | 164 | **Two request bodies writing one column must agree about it.** `BookMatch` bounded four of its seventeen fields while the merge wrote them all. Also the doors over `books.categories`, by the input that drives each: a separator bearing candidate among clean ones for the refusal, the count and the entry width read off their own named factors, a payload of exactly the stated width carrying bare separators for the rejoin, one subject as wide as the whole bound for the diagonal, and a field partition driven by synthetic sides including this tree's own annotated spelling and an abstract sequence; and the field partition is read against both write bodies, since the update route assigns onto a row rather than calling a constructor and needs its own refusal, its own derived pop list and its own reader over the route's source, and that the authors list folds into the line |
 | `schemas/test_settings.py` | 2 | **A row the router builds must carry every field the source describes.** The settings row is built by splatting the description into the response model |
 | `test_serialisation.py` | 47 | Assembling `BookOut`: the per-request fields, the tag suggestion by caption and by DDC number, that a tag name inside a longer word is not a caption match |
-| `test_schema.py`                           |   334 | Alembic: create, adopt a pre-Alembic database, upgrade, that two table rewrites left their partial unique indexes partial, and the bounds three text columns and one address column gained, and that the revision nulling blank text columns agrees with the rule on every whitespace character and keeps four lookalikes |
+| `test_schema.py`                           |   335 | Alembic: create, adopt a pre-Alembic database, upgrade, that two table rewrites left their partial unique indexes partial, and the bounds three text columns and one address column gained, and that the revision nulling blank text columns agrees with the rule on every whitespace character and keeps four lookalikes |
 | `schemas/test_wire_datetimes.py` | 7 | **Every dated field this API publishes carries an offset**, asked of what each field emits rather than of which policy object it names, so a second correct spelling passes and a field that lost one is reported by name. With the arms that keep it from passing vacuously: a population floor, a planted bare field, a planted container, and the published components reconciled against the walk |
 | `schemas/test_digital.py` | 31 | What a client may say about a file it holds, bounded at the schema: the root, the path beneath it and the fingerprint, each refused at its ceiling rather than trusted for its width |
 | `test_env_example.py` | 4 | **Operator documentation that goes stale silently.** That every environment name `config.py` reads appears in `.env.example` and nothing appears there that the code ignores |

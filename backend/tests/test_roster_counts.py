@@ -2512,7 +2512,8 @@ def test_a_file_that_declares_itself_internal_is_out_of_scope():
         "nothing in the candidate set declares itself internal any more, so this "
         "rule now guards nothing and the census note on the declaration is stale"
     )
-    assert not [p for p in declared if p in set(scope())]
+    scoped = set(scope())
+    assert not [p for p in declared if p in scoped]
 
 
 def _fixture_tree(root, files: dict[str, str]):

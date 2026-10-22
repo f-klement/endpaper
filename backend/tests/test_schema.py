@@ -9,8 +9,10 @@ import json
 import os
 import random
 import re
+import sqlite3
 import subprocess
 import sys
+from collections import Counter
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -104,12 +106,86 @@ def build_pre_alembic_database() -> None:
         connection.commit()
 
 
+#: The database the chain builds at head, copied by `_head_built_once`. None on
+#: Postgres, where `at_head` runs the chain instead.
+_head: sqlite3.Connection | None = None
+
+
+@pytest.fixture(autouse=True, scope="module")
+def _head_built_once() -> Iterator[None]:
+    """Run the whole chain once in this process and keep a copy of what it built.
+
+    **The copy is the migrations' output, not a second description of it**, so
+    `at_head` keeps "The suite's database is the migrations'" in
+    `docs/decisions.md` true: what `at_head` restores is what the revisions
+    built in this same process.
+    `test_a_restored_head_is_the_database_the_chain_builds` checks that the copy
+    matches a fresh build, order of statements and of constraint clauses aside,
+    and that a restore dumps exactly as the copy does.
+
+    Module scoped, so it runs before any test's `monkeypatch` and a patched
+    revision or runner can never be what gets copied. Each xdist worker is its
+    own process, so each builds its own.
+    """
+    global _head
+    drop_everything()
+    schema.upgrade_to_head()
+    if engine.dialect.name != "sqlite":
+        yield
+        return
+    copy = sqlite3.connect(":memory:")
+    with _live_file() as live:
+        live.backup(copy)
+    _head = copy
+    try:
+        yield
+    finally:
+        _head = None
+        copy.close()
+
+
+def at_head() -> None:
+    """The database the chain builds at head, without running the chain again.
+
+    Replaying the chain on every test's teardown was the largest single cost in
+    this file. SQLite's backup API copies the pages over the live file through one of the
+    engine's own connections, so the pool keeps its connections and every other
+    one rereads the schema, because the backup bumps the destination's schema
+    cookie. Swapping the file under the pool instead would leave those
+    connections on the old inode.
+
+    **For a test whose subject is not the chain.** A test of an upgrade from
+    nothing, of a boot, or of one step between two revisions still runs the
+    chain, since the replay is what it is checking. So does a test that patches
+    a revision or the runner: on SQLite `at_head` restores the unpatched copy
+    and would leave the patch unexercised, so such a test calls
+    `drop_everything()` and `schema.upgrade_to_head()` itself.
+    """
+    if _head is None:
+        drop_everything()
+        schema.upgrade_to_head()
+        return
+    with _live_file() as live:
+        _head.backup(live)
+
+
+@contextmanager
+def _live_file() -> Iterator[sqlite3.Connection]:
+    """One of the engine's own pooled connections, as the driver's object."""
+    raw = engine.raw_connection()
+    try:
+        live = raw.driver_connection
+        assert isinstance(live, sqlite3.Connection), type(live)
+        yield live
+    finally:
+        raw.close()
+
+
 @pytest.fixture(autouse=True)
 def restore_schema():
     """Leave the database as the rest of the suite expects to find it."""
     yield
-    drop_everything()
-    schema.upgrade_to_head()
+    at_head()
 
 
 def current_revision() -> str | None:
@@ -143,8 +219,7 @@ class TestTheChainRunsBothWays:
         # downgrades are reached by this one alone.
         from alembic import command
 
-        drop_everything()
-        schema.upgrade_to_head()
+        at_head()
 
         command.downgrade(schema._alembic_config(), "base")
 
@@ -153,8 +228,7 @@ class TestTheChainRunsBothWays:
     def test_a_database_downgraded_to_nothing_upgrades_again(self):
         from alembic import command
 
-        drop_everything()
-        schema.upgrade_to_head()
+        at_head()
         head = current_revision()
         command.downgrade(schema._alembic_config(), "base")
 
@@ -178,6 +252,77 @@ class TestTheChainRunsBothWays:
             command.upgrade(config, "head", sql=True)
 
         assert config.output_buffer.getvalue() == ""
+
+
+def _dump(live: sqlite3.Connection) -> list[str]:
+    """Every statement that would rebuild the file, schema and rows both."""
+    return list(live.iterdump())
+
+
+def _driver(connection: Connection) -> sqlite3.Connection:
+    live = connection.connection.driver_connection
+    assert isinstance(live, sqlite3.Connection), type(live)
+    return live
+
+
+#: How a table clause that is not a column begins, in SQLAlchemy's DDL.
+_CONSTRAINT_CLAUSES: Final = ("CONSTRAINT", "PRIMARY KEY", "UNIQUE", "CHECK", "FOREIGN KEY")
+
+
+def _unordered(statements: list[str]) -> Counter[tuple[str, ...]]:
+    """A dump with the order of its statements, and of each table's clauses, dropped.
+
+    **Two runs of the chain do not write the same text.** A batch rebuild lists a
+    table's constraints and indexes in an order that moves between runs in one
+    process, so a byte comparison of two honest builds fails. Columns did not
+    move, and their position matters to `SELECT *` and a positional `INSERT`, so
+    they stay in order and only the constraint clauses are sorted. The clause
+    split follows SQLAlchemy's own layout. A table whose text is not in that
+    layout, written by a literal statement or extended by `ADD COLUMN`, splits
+    into fewer clauses or none, and the text left unsplit keeps its order.
+    """
+    shapes: Counter[tuple[str, ...]] = Counter()
+    for statement in statements:
+        opening, bracket, body = statement.partition(" (\n\t")
+        if statement.startswith("CREATE TABLE") and bracket and body.endswith("\n);"):
+            clauses = body.removesuffix("\n);").split(", \n\t")
+            columns = [c for c in clauses if not c.startswith(_CONSTRAINT_CLAUSES)]
+            constraints = sorted(c for c in clauses if c.startswith(_CONSTRAINT_CLAUSES))
+            shapes[(opening, *columns, *constraints)] += 1
+        else:
+            shapes[(statement,)] += 1
+    return shapes
+
+
+class TestTheHeadThisFileRestores:
+    @pytest.mark.sqlite_only(reason="compares SQLite's own dump of the file")
+    def test_a_restored_head_is_the_database_the_chain_builds(self):
+        """What makes `at_head` safe to put where the chain used to run.
+
+        The copy against a build of the chain, for what it holds; then the
+        restore against the copy, dumped exactly, read through a connection held
+        open across it, so one the backup did not write through has to see the
+        new schema as well. Restored twice: from a schema a test edited at head,
+        with the stamp still at head, and from a database downgraded to nothing.
+        """
+        from alembic import command
+
+        assert _head is not None, "the module fixture took no copy on SQLite"
+        drop_everything()
+        schema.upgrade_to_head()
+        with engine.connect() as other:
+            assert _unordered(_dump(_head)) == _unordered(_dump(_driver(other)))
+            other.exec_driver_sql("DROP INDEX ix_books_format")
+            other.commit()
+
+            at_head()
+
+            assert _dump(_driver(other)) == _dump(_head)
+            command.downgrade(schema._alembic_config(), "base")
+
+            at_head()
+
+            assert _dump(_driver(other)) == _dump(_head)
 
 
 class TestAdoptingAPreAlembicDatabase:
@@ -1271,8 +1416,7 @@ class TestCustomFieldsOnABook:
     PREVIOUS = "e7b3d02a5c94"
 
     def _at_head(self) -> None:
-        drop_everything()
-        schema.upgrade_to_head()
+        at_head()
 
     def test_both_tables_arrive(self):
         self._at_head()
@@ -1687,8 +1831,7 @@ class TestTheMigrationsAndTheModelsAgree:
     @staticmethod
     def _reflected() -> dict[str, dict[str, tuple[bool, str]]]:
         """Every table the migrations build, as `{table: {column: (nullable, type)}}`."""
-        drop_everything()
-        schema.upgrade_to_head()
+        at_head()
         inspector = inspect(engine)
         return {
             table: {
@@ -1788,8 +1931,7 @@ class TestTheMigrationsAndTheModelsAgree:
         `test_house_rules.py` refuses both for an **enum** column; this refuses
         them for every column there is.
         """
-        drop_everything()
-        schema.upgrade_to_head()
+        at_head()
         declared = _declared_checks()
         installed = _installed_checks()
 
@@ -1823,8 +1965,7 @@ class TestTheMigrationsAndTheModelsAgree:
         whitespace, which is the caveat `_declared_constraint` states at its own
         site and this inherits.
         """
-        drop_everything()
-        schema.upgrade_to_head()
+        at_head()
         declared = _declared_checks()
         installed = _installed_checks()
 
@@ -1854,8 +1995,7 @@ class TestTheMigrationsAndTheModelsAgree:
         legitimately dropped, which is the instrument this tree has already
         recorded going stale in the direction that still passes.
         """
-        drop_everything()
-        schema.upgrade_to_head()
+        at_head()
 
         assert _declared_checks(), "no model in this schema declares a CHECK"
         assert _installed_checks(), "the migrated schema carries no CHECK at all"
@@ -2049,8 +2189,7 @@ class TestTheEnvelopeConstraintOnAMigratedDatabase:
 
     @staticmethod
     def _migrated() -> None:
-        drop_everything()
-        schema.upgrade_to_head()
+        at_head()
 
     @staticmethod
     def _insert(source: str, envelope: str) -> str:
@@ -2183,8 +2322,7 @@ class TestTheAuthorityIdentifierConstraintsOnAMigratedDatabase:
 
     @staticmethod
     def _migrated() -> None:
-        drop_everything()
-        schema.upgrade_to_head()
+        at_head()
 
     @staticmethod
     def _insert(**overrides: object) -> str:
@@ -2482,8 +2620,7 @@ class TestTheSeededCatalogueTargetsMatchTheCode:
 
     @staticmethod
     def _rows() -> dict[str, dict[str, object]]:
-        drop_everything()
-        schema.upgrade_to_head()
+        at_head()
         with engine.connect() as connection:
             result = connection.execute(text("SELECT * FROM catalogue_targets"))
             return {row.source: dict(row._mapping) for row in result}
@@ -2796,8 +2933,7 @@ class TestTheBookFormatColumnOnAMigratedDatabase:
 
     @staticmethod
     def _migrated() -> None:
-        drop_everything()
-        schema.upgrade_to_head()
+        at_head()
 
     @staticmethod
     def _format_column():
@@ -2865,8 +3001,7 @@ class TestANoteCarriesItsOwnVisibility:
     PREVIOUS = "d9c1f47b2a06"
 
     def _a_database_with_a_note(self) -> None:
-        drop_everything()
-        schema.upgrade_to_head()
+        at_head()
         from alembic import command
 
         command.downgrade(schema._alembic_config(), self.PREVIOUS)
@@ -2908,8 +3043,7 @@ class TestANoteCarriesItsOwnVisibility:
         makes every private note readable again."""
         from alembic import command
 
-        drop_everything()
-        schema.upgrade_to_head()
+        at_head()
         with engine.connect() as connection:
             connection.execute(
                 text(
@@ -2972,8 +3106,7 @@ class TestTheMigratedDatabaseCarriesTheBoundsItPromises:
 
     @staticmethod
     def _migrated() -> int:
-        drop_everything()
-        schema.upgrade_to_head()
+        at_head()
         with engine.connect() as connection:
             connection.execute(
                 text("INSERT INTO books (title, ownership) VALUES ('A book', 'owned')")
@@ -3533,8 +3666,7 @@ class TestEveryTextCeilingIsInstalledWithItsByteArm:
         none of these constraints holds a string literal with internal
         whitespace.
         """
-        drop_everything()
-        schema.upgrade_to_head()
+        at_head()
         declared = _byte_armed_constraints()[name]
 
         installed = self._installed()
@@ -3793,8 +3925,7 @@ class TestTheIdentifierBoundsSurvivedIntoTheMigration:
 
     @staticmethod
     def _migrated() -> int:
-        drop_everything()
-        schema.upgrade_to_head()
+        at_head()
         with engine.connect() as connection:
             connection.execute(
                 text("INSERT INTO books (title, ownership) VALUES ('A book', 'owned')")
@@ -4109,8 +4240,7 @@ class TestTheGlobRulesThatLearnedAboutNul:
         newest revision installed, so a revision that rewrites one of these
         constraints keeps this green and moves that one.
         """
-        drop_everything()
-        schema.upgrade_to_head()
+        at_head()
 
         installed = TestEveryTextCeilingIsInstalledWithItsByteArm._installed_check(
             rule.constraint
@@ -4850,8 +4980,7 @@ class TestTheBoundsThisRevisionPutOnBytes:
 
     @staticmethod
     def _migrated() -> None:
-        drop_everything()
-        schema.upgrade_to_head()
+        at_head()
 
     @staticmethod
     def _at_previous() -> None:
@@ -5781,8 +5910,7 @@ class TestEveryConfinementArmedConstraintIsProbedToo:
         Two of the six fixture columns rather than all six, because the other
         four are the probe's and this case inserts nothing.
         """
-        drop_everything()
-        schema.upgrade_to_head()
+        at_head()
 
         installed = TestEveryTextCeilingIsInstalledWithItsByteArm._installed_check(
             constraint
@@ -5929,8 +6057,7 @@ class TestTheApiBoundIsTheCeilingAMigratedDatabaseInstalls:
 
     @staticmethod
     def _migrated() -> None:
-        drop_everything()
-        schema.upgrade_to_head()
+        at_head()
 
     @classmethod
     def _row(cls, field: str, length: int) -> tuple[str, dict[str, str]]:
@@ -6328,8 +6455,7 @@ class TestADeletedBooksIdIsNeverReused:
         a schema built from the model reuses ids again."""
         fresh = create_engine("sqlite://")
         Base.metadata.create_all(fresh)
-        drop_everything()
-        schema.upgrade_to_head()
+        at_head()
 
         assert "AUTOINCREMENT" in self.books_statement(fresh).upper()
         assert "AUTOINCREMENT" in self.books_statement(engine).upper()
