@@ -888,7 +888,7 @@ repeat the argument.
 |  | [One rule decides who may be told a vocabulary entry exists](decisions.md#one-rule-decides-who-may-be-told-a-vocabulary-entry-exists) | 455 |
 |  | [One reader for the pipeline file, and the shell runners keep theirs, held equal](decisions.md#one-reader-for-the-pipeline-file-and-the-shell-runners-keep-theirs-held-equal) | 507 |
 |  | [A cache's one writer is stated at its job, not held by a guard](decisions.md#a-caches-one-writer-is-stated-at-its-job-not-held-by-a-guard) | 279 |
-|  | [What "main is gated" means once the image builds beside the suites](decisions.md#what-main-is-gated-means-once-the-image-builds-beside-the-suites) | 611 |
+|  | [What "main is gated" means once the image builds beside the suites](decisions.md#what-main-is-gated-means-once-the-image-builds-beside-the-suites) | 613 |
 |  | [The one writer rule is held by a ratchet on references, not by the MARC arm alone](decisions.md#the-one-writer-rule-is-held-by-a-ratchet-on-references-not-by-the-marc-arm-alone) | 211 |
 |  | [The internal declaration rule stays in three copies, held equal by a pin](decisions.md#the-internal-declaration-rule-stays-in-three-copies-held-equal-by-a-pin) | 181 |
 |  | [A name's meaning is answered by one resolver, and a test that reads an import alias itself is counted per function](decisions.md#a-names-meaning-is-answered-by-one-resolver-and-a-test-that-reads-an-import-alias-itself-is-counted-per-function) | 90 |
