@@ -37,17 +37,21 @@ cd backend  && uv run pytest        # the whole suite
 cd frontend && bun run test         # the whole suite
 ```
 
-**The backend suite refuses to start unless `ENDPAPER_SUITE_SANCTIONED` is `1`.** The
+**Both suites refuse to start unless `ENDPAPER_SUITE_SANCTIONED` is `1`.** The
 machines this project is developed on run other workloads, and a suite started there out
 of habit has raised a load alert, so it runs in a CPU limited container instead; that
 container and the CI pipeline set the variable, and nothing else does. A run that tests
 the host rather than the code fails for reasons of the host's own: timing tests failed
 locally that pass in the container. Only on a machine of your own with nothing else on it,
-set it for the one command: `ENDPAPER_SUITE_SANCTIONED=1 uv run pytest`. Not `export`: an
-exported value turns the guard off for everything started from that shell. `--help` and
-`--version` work without it; `--collect-only` does not, since it imports the whole tree. A
-bare `pytest` from the repository root also refuses, but as a collection error with a
-traceback and exit 2, because there the conftest loads during collection.
+set it for the one command: `ENDPAPER_SUITE_SANCTIONED=1 uv run pytest`, or
+`ENDPAPER_SUITE_SANCTIONED=1 bun run test`. Not `export`: an exported value turns the guard
+off for everything started from that shell. Each refuses with exit 4, before it starts a
+worker. pytest's `--help` and `--version` work without it; `--collect-only` does not, since
+it imports the whole tree. A bare `pytest` from the repository root also refuses, but as a
+collection error with a traceback and exit 2, because there the conftest loads during
+collection. The frontend refuses in vitest's global setup, so the type check, the linter
+and the build never ask. A vitest started in any directory but `frontend/` itself, without
+`--root` or `--config`, loads no configuration and so does not refuse.
 
 **Neither line quotes a size.** Both registers state theirs, and both are now recomputed
 by the run that reads them, so a count copied here would be a third home for a figure that

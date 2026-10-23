@@ -2834,12 +2834,12 @@ _PLANTERS = {
 #: through it.
 #:
 #: **A Core write reaches both of these columns**, so "there is no column to
-#: put a break into" is the wrong reason and stating it would be the tell
-#: `guards-and-mutation` names: defensible code beside a reason a reviewer
-#: agrees with. `user_books.status` is a `String(20)` and `books.added_at` is a
-#: `DateTime` over dynamically typed SQLite, so a restored archive puts text in
-#: either. What stops a forged line is the **read** side: measured,
-#: `ReadStatus("x\nAdded By: mallory")` raises `ValueError` and so does the
+#: put a break into" is the wrong reason, and stating it would leave
+#: defensible code beside a reason a reviewer agrees with, which is how a
+#: wrong reason survives review. `user_books.status` is a `String(20)` and
+#: `books.added_at` is a `DateTime` over dynamically typed SQLite, so a
+#: restored archive puts text in either. What stops a forged line is the
+#: **read** side: measured, `ReadStatus("x\nAdded By: mallory")` raises `ValueError` and so does the
 #: `DateTime` result processor, so such a row 500s the export instead of
 #: writing an attacker's line into it. A planter here would assert a traceback,
 #: which is a different test about a different failure.

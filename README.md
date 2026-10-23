@@ -224,11 +224,11 @@ cd backend   && uv run pytest              # pytest, no network access
 cd frontend  && bun run test               # vitest + Testing Library
 ```
 
-The backend suite refuses to start unless `ENDPAPER_SUITE_SANCTIONED` is `1`. On a machine of
+Both suites refuse to start unless `ENDPAPER_SUITE_SANCTIONED` is `1`. On a machine of
 your own with nothing else on it, set it for the one command,
-`ENDPAPER_SUITE_SANCTIONED=1 uv run pytest`, rather than exporting it, which would turn the
-guard off for everything started from that shell. [`docs/testing.md`](docs/testing.md#running)
-says why.
+`ENDPAPER_SUITE_SANCTIONED=1 uv run pytest` or `ENDPAPER_SUITE_SANCTIONED=1 bun run test`,
+rather than exporting it, which would turn the guard off for everything started from that
+shell. [`docs/testing.md`](docs/testing.md#running) says why.
 
 Useful variants:
 

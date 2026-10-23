@@ -7103,9 +7103,8 @@ describe("a date reaches a reader through one module", () => {
 
   it("leaves no export of the door unreached", () => {
     // **Derived rather than a threshold**, which is the wallpaper rule's shape
-    // and is stronger than a written bound in the direction
-    // `guards-and-mutation` records: a stated `6` against a constant that had
-    // moved to seven passes, because a smaller count is a weaker claim. This
+    // and is stronger than a written bound: a stated `6` against a constant that
+    // had moved to seven passes, because a smaller count is a weaker claim. This
     // writes no number. It fails if the door is renamed and if a format is added
     // with no caller.
     //

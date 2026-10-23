@@ -365,8 +365,10 @@ export default defineConfig({
     reporters: ["default", "./tests/coverageRegister.reporter.ts", ...junit()],
     // The other half of that, and the half a command line cannot take away.
     // The second hands the seed guard the configuration this process loaded,
-    // which a worker resolving it again cannot see.
+    // which a worker resolving it again cannot see. The refusal of an
+    // unsanctioned run comes first, so nothing else sets up for it.
     globalSetup: [
+      "./tests/sanctionedRun.globalSetup.ts",
       "./tests/coverageRegister.globalSetup.ts",
       "./tests/runConfiguration.globalSetup.ts",
     ],
