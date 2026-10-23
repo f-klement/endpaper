@@ -843,6 +843,8 @@ repeat the argument.
 |  | [An unfixable Python advisory is recorded against its release and package, or it blocks](decisions.md#an-unfixable-python-advisory-is-recorded-against-its-release-and-package-or-it-blocks) | 338 |
 |  | [The carve out asks OSV again, and reads it more strictly than the trigger does](decisions.md#the-carve-out-asks-osv-again-and-reads-it-more-strictly-than-the-trigger-does) | 420 |
 |  | [A blocked night is exit 3, armed it pages its own summary, and unarmed it is a report](decisions.md#a-blocked-night-is-exit-3-armed-it-pages-its-own-summary-and-unarmed-it-is-a-report) | 144 |
+|  | [A ledgered npm advisory bun can fix rides as content, never as a trigger](decisions.md#a-ledgered-npm-advisory-bun-can-fix-rides-as-content-never-as-a-trigger) | 114 |
+|  | [An npm advisory the nightly bump cannot fix opens an issue, and the night stays green](decisions.md#an-npm-advisory-the-nightly-bump-cannot-fix-opens-an-issue-and-the-night-stays-green) | 410 |
 |  | [The release acts only on what its own run made](decisions.md#the-release-acts-only-on-what-its-own-run-made) | 257 |
 |  | [Every call carrying a release credential leaves through one pinned opener](decisions.md#every-call-carrying-a-release-credential-leaves-through-one-pinned-opener) | 346 |
 |  | [The HTTP library's request lines are switched off by level, not redacted](decisions.md#the-http-librarys-request-lines-are-switched-off-by-level-not-redacted) | 173 |

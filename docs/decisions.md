@@ -21156,6 +21156,49 @@ the resolve never runs on a failed pipeline, so nothing pages again, that stop o
 night completes. Whether a standing block should re-page nightly is the owner's question and is not
 answered here.
 
+## A ledgered npm advisory bun can fix rides as content, never as a trigger
+
+Owner's decision, 2026-10-23. The ledger exists to stop a release loop, a bump that shipped
+being released again every night, not to block a lockfile fix. A ledgered id that bun's dry run
+still lists in `fixes[]` means the bump that shipped did not clear it: a widened range, or a
+second installed copy. So `decide.py plan` leaves it off the bump's ignore list and puts it in
+the content, and never in the triggers, so it cannot start a release or loop one; `finalise`
+also leaves it out when it asks again whether a trigger cleared. It rides the next release
+something else triggers. npm only: the rebuild path's ledger handling is unchanged.
+
+## An npm advisory the nightly bump cannot fix opens an issue, and the night stays green
+
+Owner's decision, 2026-10-23. The frontend bump failed every night on `@vitest/mocker`, whose
+fix vitest's exact range excluded, and a red pipeline told nobody what to move. Now `decide.py
+plan` writes `npm_unfixable`, one entry per package that bun's dry run lists as blocked or
+unfixable, with what blocks the fix and those of its advisories the bump is told to leave alone.
+If bun ever lists one package as both fixable and blocked, which is not measured, the package is
+not filed on a night that bumps it, and the bump stays red. On an armed night `gitlab.py unfixable-issues` opens one issue per package,
+labelled `needs-triage`, or rewrites the description of the open one this token created with the
+same title. It looks the issue up by exact title among its own issues rather than through
+GitLab's search, whose handling of `@scope/name` nothing here can test. An API refusal fails the
+job, so an issue that did not open still pages. An advisory accepted in `.trivyignore` opens
+nothing, and nothing closes an issue.
+
+A later ruling the same day: **a closed issue is respected.** The description ends in a hidden
+comment listing its advisory ids. The ids of all closed issues with that title are combined, and
+while every advisory a night would file is among them, nothing is reopened or filed. An advisory
+none of them named opens a new issue, and so does an entry with no id to compare or a closed
+issue with no marker. Any project Developer can suppress a refile by adding ids to a closed
+issue's marker, and that has no expiry.
+
+**The red night was a spelling defect, not bun refusing.** bun matches `--ignore` case
+sensitively and skips an id it does not know without a word, and the plan upper cased every
+id, so the bump's ignore list had never narrowed anything. Measured on bun 1.4.3 against the
+v0.20.0 frontend, the upper cased list reproduced the night exactly: `2 vulnerabilities
+remaining` and exit 1. In bun's spelling, a lower case body, the same run exited 0. So the bump
+still fails on any non zero exit from bun, and a crash, a network failure or a refused install
+keeps failing the night.
+
+The backend bump does not share the shape. `uv lock --upgrade-package` leaves a lock it cannot
+move unchanged and exits 0, and a PyPI fix that a floor excludes is the release audit's refusal,
+which the owner ruled on separately.
+
 ## The release acts only on what its own run made
 
 Owner's ruling, 2026-10-03: the job that refuses a release deletes the branch it cut, so a refused
