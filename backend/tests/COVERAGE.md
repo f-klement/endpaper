@@ -2,9 +2,9 @@
 
 <!-- measured: begin -->
 
-**11822 tests, in 179 files**, counted by the run that reads this line.
-**The 150 rows below sum to 10249.**
-The other 1573 tests are in 32 files this register may not name.
+**11825 tests, in 180 files**, counted by the run that reads this line.
+**The 151 rows below sum to 10251.**
+The other 1574 tests are in 32 files this register may not name.
 The table also carries 3 files this engine does not run, stated as 0.
 <!-- measured: end -->
 
@@ -229,6 +229,7 @@ why the helper uses regexes.
 | `routers/test_sru.py` | 35 | **The gate in front of the protocol.** That the endpoint does not exist until both switches are on, that turning library mode back off closes it |
 | `routers/test_stats.py` | 39 | Every aggregation, and that each respects privacy |
 | `routers/test_users.py` | 72 | The member list, test accounts and the address an admin may set while creating one, appearance (the caller's own only, never on `UserOut`) |
+| `test_a_bare_run_is_refused.py` | 2 | **A suite nobody sanctioned does not start.** Without `ENDPAPER_SUITE_SANCTIONED` a run exits before collecting, naming the suite runner first and the variable only for a machine of your own; with it the run proceeds, and `--help` passes either way |
 
 ## The parts that matter most
 

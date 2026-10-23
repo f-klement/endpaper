@@ -69,6 +69,46 @@ def _register_reading(path: Path | None = None) -> str:
 #: reason to pass.
 _REGISTER_WAS: str | None = _register_reading()
 
+# ── Who may start this suite ──────────────────────────────────────────────────
+
+#: Set to `1` by whatever is meant to run this suite. docs/testing.md, under
+#: "Running", is the one home of what it means and who sets it.
+SANCTIONED = "ENDPAPER_SUITE_SANCTIONED"
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_configure(config: pytest.Config) -> None:
+    """Refuse a run nobody sanctioned, before a worker starts or a test runs.
+
+    **`pytest_configure` and not this module's scope**, because an exit raised
+    while pytest imports a conftest is reported as a failed import with a
+    traceback, which reads as a broken tree rather than a refusal. By this hook
+    the module above has already run, which costs one import of the app, its
+    migrations included, in one process; no worker starts, since xdist starts
+    its workers at session start, after this.
+
+    **The controller decides.** A worker inherits the controller's environment,
+    so asking again there could only disagree if something rewrote it in
+    between, and the refusal would then arrive as a crashed worker.
+
+    `--help` is let through, since it runs nothing, and `--version` never reaches
+    this hook. `--collect-only` is refused like any other run: it imports the
+    whole tree in every worker. `--noconftest`, and a `--confcutdir` below this
+    directory, skip this file and so this check; they are deliberate bypasses,
+    and this does not try to stop them.
+    """
+    if hasattr(config, "workerinput") or config.option.help:
+        return
+    if os.environ.get(SANCTIONED) == "1":
+        return
+    pytest.exit(
+        f"refusing to run: {SANCTIONED} is not 1. Run this suite through the "
+        "project's CPU limited suite runner, which sets it, or in CI. Only on a "
+        "machine of your own with nothing else on it, set "
+        f"{SANCTIONED}=1 for the one command; docs/testing.md, Running, says why.",
+        returncode=pytest.ExitCode.USAGE_ERROR,
+    )
+
 # ── What the property based tests are allowed to spend ────────────────────────
 #
 # **The budget is the constraint the property tests were designed around, not a
