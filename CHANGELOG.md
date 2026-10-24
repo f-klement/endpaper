@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+## v0.21.0
+
+_2026-10-24_
+
+A security fix in the certificate bundle, an updated SQLite engine for the Calibre library
+import, and routine dependency updates. For contributors, both test suites refuse a run nobody
+sanctioned, and the frontend is formatted with oxfmt instead of prettier.
+
+- **A known security problem in certifi, the certificate bundle the app trusts, is fixed.**
+
+- **The SQLite engine behind the Calibre library import is updated to sql.js 1.15.1.**
+
+- **Routine dependency updates**, among them FastAPI, Pydantic, SQLAlchemy and cryptography.
+
+- **For contributors: both test suites refuse to start unless `ENDPAPER_SUITE_SANCTIONED` is
+  1.** `docs/testing.md` says when and how to set it.
+
+- **For contributors: the frontend is formatted with oxfmt instead of prettier**, behind the
+  same `format` and `format:check` scripts.
+
 ## v0.20.0
 
 _2026-10-18_
