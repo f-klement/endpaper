@@ -12,6 +12,15 @@
 - **An admin's "Empty the trash" confirmation now says that it also deletes for good the books in
   the trash nobody is recorded as adding.**
 
+- **A merge of duplicates no longer folds away a book another member added; only they or an admin
+  can, and the duplicates page says which entries stay out.**
+
+- **The duplicates page no longer lists, or counts, groups made only of another member's books,
+  which you cannot merge, so they can no longer push your own duplicates off the page.**
+
+- **The duplicates page no longer hides a large group whose first twenty entries belong to other
+  members when some of its later entries are yours to merge.**
+
 ## v0.21.0
 
 _2026-10-24_

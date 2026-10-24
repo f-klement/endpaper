@@ -927,6 +927,7 @@ repeat the argument.
 |  | [An import row whose ISBN only the trash view holds is listed "in the trash"](decisions.md#an-import-row-whose-isbn-only-the-trash-view-holds-is-listed-in-the-trash) | 219 |
 |  | [The add door refuses another member's trashed holder, and purges only the caller's own](decisions.md#the-add-door-refuses-another-members-trashed-holder-and-purges-only-the-callers-own) | 587 |
 |  | [Deleting for good reaches only the trashed Books the caller added](decisions.md#deleting-for-good-reaches-only-the-trashed-books-the-caller-added) | 743 |
+|  | [A merge folds away only the Books the caller added, unless the caller is an admin](decisions.md#a-merge-folds-away-only-the-books-the-caller-added-unless-the-caller-is-an-admin) | 652 |
 |  | [Hidden outranks the trash, and the disclosure that costs is accepted](decisions.md#hidden-outranks-the-trash-and-the-disclosure-that-costs-is-accepted) | 290 |
 |  | [ISBNs compare by `isbn.parse`](decisions.md#isbns-compare-by-isbnparse) | 89 |
 |  | [The add door finds an ISBN stored with hyphens or a lower case x](decisions.md#the-add-door-finds-an-isbn-stored-with-hyphens-or-a-lower-case-x) | 239 |

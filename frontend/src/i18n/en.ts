@@ -1280,6 +1280,8 @@ export const en = {
   // group one over the member cap withholds exactly one entry.
   "duplicates.moreInGroup":
     "More entries in this group, left for a second pass ({count})",
+  "duplicates.notYours":
+    "Not added by you. It can be the one kept, but only the member who added it or an admin can fold it into another.",
   "duplicates.couldNotLoad": "Could not check for duplicates.",
 
   // ── Bulk actions ────────────────────────────────────────────────────────

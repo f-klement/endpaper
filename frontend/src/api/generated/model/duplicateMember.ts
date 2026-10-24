@@ -29,6 +29,7 @@ export interface DuplicateMember {
   format?: BookFormat | null;
   id: number;
   isbn?: string | null;
+  may_merge_away: boolean;
   publisher?: string | null;
   title: string;
   year?: number | null;

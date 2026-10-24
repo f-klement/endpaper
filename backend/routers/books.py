@@ -71,6 +71,7 @@ from dependencies import (
     Paging,
     RowId,
     TagIdList,
+    owns_or_administers,
     row_ids,
 )
 from dependencies import divisions as parse_divisions
@@ -2861,8 +2862,9 @@ def list_classifications(db: DbSession, current_user: CurrentUser) -> Classifica
 class _DuplicateRow(NamedTuple):
     """One catalogue row as this route reads it, and the whole of what it reads.
 
-    Four columns for the grouping (`id`, `title`, `author`, `copy_group`) and
-    five more for the card. Nothing here is an ORM `Book`, and that is the
+    Four columns for the grouping (`id`, `title`, `author`, `copy_group`),
+    five more for the card, and the adder, for whether the card may offer the
+    row as a merge's loser. Nothing here is an ORM `Book`, and that is the
     point rather than tidiness: once no entity survives the scan, no attribute
     read downstream can lazily load a relationship and quietly re-widen the
     query into the per book N+1 this route has already paid for once.
@@ -2877,6 +2879,7 @@ class _DuplicateRow(NamedTuple):
     year: int | None
     isbn: str | None
     cover_url: str | None
+    added_by_user_id: int | None
 
 
 @router.get("/duplicates", response_model=DuplicateReport)
@@ -2928,7 +2931,7 @@ def list_duplicates(db: DbSession, current_user: CurrentUser) -> DuplicateReport
         _DuplicateRow(*row)
         for row in cast(
             "list[tuple[int, str, str | None, str | None, BookFormat | None, "
-            "str | None, int | None, str | None, str | None]]",
+            "str | None, int | None, str | None, str | None, int | None]]",
             Shelf.seen_by(db, current_user.id)
             .select(
                 Book.id,
@@ -2940,6 +2943,7 @@ def list_duplicates(db: DbSession, current_user: CurrentUser) -> DuplicateReport
                 Book.year,
                 Book.isbn,
                 Book.cover_url,
+                Book.added_by_user_id,
             )
             .tuples()
             .all(),
@@ -2956,36 +2960,67 @@ def list_duplicates(db: DbSession, current_user: CurrentUser) -> DuplicateReport
     # see would publish that sibling's title. Nothing the viewer cannot see is
     # in `rows` at all, so such a group cannot arise here; `DuplicateGroup`
     # refuses to be constructed with one if it ever does.
-    duplicated = sorted((key, members) for key, members in groups.items() if len(members) > 1)
+    #
+    # **A group the viewer cannot merge is left out, and out of the total.**
+    # Its card would offer no keep that folds anything, because `merge_books`
+    # refuses every row in it as a loser; yet it would spend the budget, so
+    # another member's duplicates sorting first could fill the page and hide
+    # every group the viewer can work on, and the capped line would promise
+    # groups that merging never brings. Whether a group can be merged is read
+    # off the rows the card renders, since those are the only ones a keep can
+    # send.
+    #
+    # **So the cap keeps the viewer's own rows first.** Cut in id order, a
+    # group over the cap whose first rows were all other members' would be
+    # left out although the viewer could merge it. The kept rows go back into
+    # id order so the card's order does not depend on whose rows they are.
+    # An admin may merge away every row, so an admin's cut is plain id order.
+    duplicated = [
+        (
+            key,
+            [_duplicate_member(row, current_user) for row in _rendered(members, current_user)],
+            len(members),
+        )
+        for key, members in sorted(groups.items())
+        if len(members) > 1
+    ]
+    workable = [group for group in duplicated if any(member.may_merge_away for member in group[1])]
 
     shown: list[DuplicateGroup] = []
     remaining = DUPLICATE_BOOKS_SHOWN
-    for key, members in duplicated:
-        # Whole groups only. The merge action sends every id the card renders,
-        # so a group cut by the budget would be a merge offered over a subset
-        # nobody chose. A group contributes at most `MERGE_BOOKS_MAX`, which is
-        # below the budget, so the first group always fits and the answer can
-        # stop below the budget but never above it.
-        members_shown = members[:MERGE_BOOKS_MAX]
+    for key, members_shown, size in workable:
+        # Whole groups only. The merge action sends no id the card does not
+        # render, so a group cut by the budget would be a merge offered over a
+        # subset nobody chose. A group contributes at most `MERGE_BOOKS_MAX`,
+        # which is below the budget, so the first group always fits and the
+        # answer can stop below the budget but never above it.
         if len(members_shown) > remaining:
             break
         remaining -= len(members_shown)
-        shown.append(
-            DuplicateGroup(
-                key=key,
-                size=len(members),
-                books=[_duplicate_member(row) for row in members_shown],
-            )
-        )
+        shown.append(DuplicateGroup(key=key, size=size, books=members_shown))
 
-    return DuplicateReport(groups=shown, total_groups=len(duplicated))
+    return DuplicateReport(groups=shown, total_groups=len(workable))
 
 
-def _duplicate_member(row: _DuplicateRow) -> DuplicateMember:
-    """The card's view of one row. `author` and `copy_group` stay behind.
+def _rendered(members: list[_DuplicateRow], viewer: User) -> list[_DuplicateRow]:
+    """The rows of one group the card renders, in id order: at most
+    `MERGE_BOOKS_MAX`, chosen from the rows the viewer may merge away first.
+
+    `sorted` is stable, so between two reads of the same shelf the cut falls
+    on the same rows.
+    """
+    own_first = sorted(members, key=lambda row: not owns_or_administers(row.added_by_user_id, viewer))
+    return sorted(own_first[:MERGE_BOOKS_MAX], key=lambda row: row.id)
+
+
+def _duplicate_member(row: _DuplicateRow, viewer: User) -> DuplicateMember:
+    """The card's view of one row. `author`, `copy_group` and the adder stay
+    behind.
 
     The author is the half of the key the group already carries, and the copy
-    group token is a fact about another member's copies.
+    group token is a fact about another member's copies. The adder is answered
+    as the one thing the card needs of it, whether `merge_books` would take the
+    row as a loser, so the rule is not spelled a second time in the client.
     """
     return DuplicateMember(
         id=row.id,
@@ -2995,6 +3030,7 @@ def _duplicate_member(row: _DuplicateRow) -> DuplicateMember:
         year=row.year,
         isbn=row.isbn,
         cover_url=row.cover_url,
+        may_merge_away=owns_or_administers(row.added_by_user_id, viewer),
     )
 
 
@@ -3007,8 +3043,9 @@ def _one_per_copy_group(rows: list[_DuplicateRow]) -> list[_DuplicateRow]:
     group that lands beside a genuine duplicate is being offered as a book, not
     as a copy.
 
-    The id order it leaves behind is also the order the member cap cuts at, so
-    which members a group over the cap shows is stable between two reads.
+    The id order it leaves behind is the order the member cap cuts at, first
+    among the rows the viewer may merge away and then among the rest, so which
+    members a group over the cap shows is stable between two reads.
     """
     seen: set[str] = set()
     kept: list[_DuplicateRow] = []
@@ -3050,6 +3087,11 @@ def merge_books(
     dropped. A status collision (both rows read by the same person) keeps the
     one on the survivor, because deleting somebody's reading history to
     satisfy a unique index is not an acceptable way to resolve it.
+
+    A merge deletes its losers, so each one must be a Book the caller added,
+    unless the caller is an admin; one that is not refuses the whole merge
+    with 409, before anything moves. The survivor may be anybody's: it loses
+    nothing, since it never overwrites a value it holds.
     """
     if payload.keep_id not in payload.book_ids:
         raise HTTPException(status_code=400, detail="keep_id must be one of book_ids")
@@ -3064,10 +3106,20 @@ def merge_books(
     keeper = found[payload.keep_id]
     losers = [book for book in books if book.id != keeper.id]
 
-    # No further permission check: `visible_to` already yields exactly the set
-    # this caller may write. Public books are a shared shelf, and a private
-    # book is only visible to the member who added it, so anything that came
-    # back from that filter is theirs to merge. See dependencies.book_for_write.
+    # Seeing a public Book is not enough to delete it. Without this a member
+    # could restore another member's trashed Book, fold it into one of their
+    # own, which carries off its owner's reading status, notes and quotes, and
+    # then purge their own. The rule is `book_for_owner`'s, not
+    # `_purgeable_by`'s: an admin may fold away any loser. That is not harmless
+    # to the loser's adder. The fold carries their rows onto the survivor, whose
+    # own adder may then trash and purge it with those rows, so an admin's
+    # merge into a Book the admin added hands the admin that purge. The owner
+    # accepted this: an admin is trusted with every member's Books.
+    if not all(owns_or_administers(loser.added_by_user_id, current_user) for loser in losers):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Only the member who added a book, or an admin, may merge it into another.",
+        )
 
     # Absorbing the columns and moving every child row is `folding.fold`, which
     # is also where the flushes and the ISBN release ordering live. What stays

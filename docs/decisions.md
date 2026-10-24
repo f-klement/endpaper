@@ -22997,6 +22997,57 @@ caller restores it or asks for the delete.
 **Restoring is unchanged**: any member who sees a trashed public Book may put it back, as on
 the shelf any member may remove one. Putting back loses nothing; destroying cannot be undone.
 
+## A merge folds away only the Books the caller added, unless the caller is an admin
+
+Owner's rulings, 2026-10-24. `POST /api/books/merge` deletes every Book it names except the
+keeper, and it took those losers from `Shelf.seen_by` with nothing else asked. Seeing a public
+Book was enough to delete it: a member could restore another member's trashed public Book, fold
+it into one they added, which carries its owner's reading status, notes and quotes onto their
+Book, then trash and purge their own. A merge now refuses when any loser was added by somebody
+other than the caller, unless the caller is an admin. A Book with no recorded adder is nobody's,
+so only an admin may fold it away.
+
+**The keeper may be anybody's.** It is not deleted and never overwrites a value it holds, so a
+member folding their own duplicates into another member's Book takes nothing from that member.
+
+**The rule is `book_for_owner`'s, not `_purgeable_by`'s, and it is spelled once as
+`owns_or_administers` in `dependencies.py`.** The two rules differ where an admin meets a Book a
+member added: the purge rule refuses the admin, and the merge rule lets the admin fold it away,
+as `book_for_owner` lets an admin edit any Book. Bending `_purgeable_by` to cover both would have
+taken a second flag beside `deliberate` for one call site. The predicate takes the adder column
+rather than a `Book` because the duplicates report reads tuples.
+
+**The admin's exception is not harmless to the loser's adder, and the owner accepted it**
+(2026-10-24). The fold keeps the loser's reading status, notes and quotes, but on the keeper,
+whose adder may trash and purge it with them. So an admin who merges a member's Book into one
+the admin added can then destroy that member's rows with two more requests, which the purge
+rule alone refuses the admin. An admin is trusted with every member's Books, so no code stops
+it.
+
+**One refused loser refuses the whole merge, with 409 and nothing moved**, as the purge route
+answers for another member's Book. Not 404: every loser is on the caller's shelf. The purge
+entry turns 403 down because `book_for_owner`'s 403 lets an admin through and the purge rule
+does not; that reason does not carry over, since this rule is `book_for_owner`'s, admin
+included. 409 anyway, because both refusals say the same thing: the Book named is on the caller's
+shelf and is not theirs to destroy. 403 stays `book_for_owner`'s answer for one Book named in a path, which the merge does
+not take. The check runs before `folding.fold`, so no child row moves.
+
+**The duplicates page does not offer a merge it would be refused.** The report carries
+`may_merge_away` per row, answered by the same predicate, so the client does not spell the rule
+again. A keep sends the survivor and only the rows the caller may fold away; a row another
+member added stays on the card as a choice of survivor and says why it stays out; a keep with
+nothing left to fold in is disabled. Narrowing rather than refusing the card lets a member fold
+their own duplicates together while another member's sits in the same group.
+
+**A group with no row the caller may fold away is not reported, and is not counted.** Its card
+could fold nothing, yet it took its share of the 200 book budget, so another member's duplicates
+sorting first could fill the page, hide every group the caller can work on, and make "merge
+these and the next ones appear" false. The judgement is over the rows the card renders, since
+a keep sends no other, and of a group over 20 those are chosen from the rows the caller may fold
+away first, then put back in id order. Cut in id order alone, a group whose first 20 rows were
+other members' dropped out although the caller's rows past them could be merged. An admin may
+fold away every row, so an admin's cut is still id order.
+
 ## Hidden outranks the trash, and the disclosure that costs is accepted
 
 Where a Book the member cannot see also holds the ISBN, the answer is `Hidden` and an import row

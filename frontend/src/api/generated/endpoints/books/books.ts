@@ -4568,6 +4568,11 @@ export const getMergeBooksUrl = () => {
  * dropped. A status collision (both rows read by the same person) keeps the
  * one on the survivor, because deleting somebody's reading history to
  * satisfy a unique index is not an acceptable way to resolve it.
+ *
+ * A merge deletes its losers, so each one must be a Book the caller added,
+ * unless the caller is an admin; one that is not refuses the whole merge
+ * with 409, before anything moves. The survivor may be anybody's: it loses
+ * nothing, since it never overwrites a value it holds.
  * @summary Merge Books
  */
 export const mergeBooks = async (

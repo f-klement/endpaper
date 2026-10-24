@@ -1124,6 +1124,8 @@ export const de: Messages = {
   // falsch, und der kleinste Wert hier ist eins.
   "duplicates.moreInGroup":
     "Weitere Einträge in dieser Gruppe, für einen zweiten Durchgang ({count})",
+  "duplicates.notYours":
+    "Nicht selbst hinzugefügt. Dieser Eintrag kann behalten werden, aber mit einem anderen zusammenführen kann ihn nur das Mitglied, das ihn hinzugefügt hat, oder ein Admin.",
   "duplicates.couldNotLoad": "Die Prüfung auf Doppelte ist fehlgeschlagen.",
 
   // ── Sammelaktionen ──────────────────────────────────────────────────────
