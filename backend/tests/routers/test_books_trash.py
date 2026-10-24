@@ -21,7 +21,8 @@ a worse bug than the one this fixes.
 
 **Privacy.** The trash is not a hole in it. Somebody else's private book is as
 invisible in the trash as it is on the shelf, and their trashed book is not
-purgeable by scanning its ISBN, private or public.
+purgeable by anyone else, by scanning its ISBN or from the trash, private or
+public.
 """
 
 import re
@@ -416,6 +417,107 @@ class TestPrivacy:
 
         assert client.get("/api/books/trash", headers=member["headers"]).json()["total"] == 1
         assert client.post(f"/api/books/{book['id']}/restore", headers=member["headers"]).status_code == 200
+
+
+class TestOnlyTheMemberWhoAddedABookPurgesIt:
+    """The owner's rulings of 2026-10-22 and 2026-10-24: a trashed Book is
+    destroyed only by the member who added it, or, through the two purge
+    routes, by an admin when nobody is recorded as adding it. The admin is the
+    caller wherever the Book is somebody else's, because the exception
+    `book_for_owner` makes for an admin is the one a copy of it would bring
+    here, and a member caller cannot see it. Where nobody added the Book, a
+    member caller is pinned on every path too, because there the member is the
+    one refused."""
+
+    ISBN = "9780743273565"
+
+    @pytest.fixture
+    def members_trashed(self, client, member, make_book):
+        """A public Book the member added and trashed."""
+        book = make_book(member["headers"], isbn=self.ISBN, title="Theirs")
+        client.delete(f"/api/books/{book['id']}", headers=member["headers"])
+        return book
+
+    @pytest.fixture
+    def adderless(self, members_trashed, db):
+        """A trashed public Book with no adder, as a row written outside the
+        application leaves it."""
+        db.get(Book, members_trashed["id"]).added_by_user_id = None
+        db.commit()
+        return members_trashed
+
+    def test_an_admin_purging_a_book_a_member_added_is_refused_and_keeps_it(
+        self, client, admin, members_trashed, db
+    ):
+        res = client.delete(f"/api/books/{members_trashed['id']}/permanent", headers=admin["headers"])
+
+        assert res.status_code == 409
+        assert db.get(Book, members_trashed["id"]) is not None
+
+    def test_an_admin_emptying_the_trash_skips_a_book_a_member_added_and_counts_only_its_own(
+        self, client, admin, members_trashed, trashed, db
+    ):
+        res = client.delete("/api/books/trash", headers=admin["headers"])
+
+        assert res.json()["purged"] == 1
+        assert db.get(Book, trashed["id"]) is None
+        assert db.get(Book, members_trashed["id"]) is not None
+
+    def test_an_admin_adding_the_isbn_of_a_book_a_member_added_is_refused_and_keeps_it(
+        self, client, admin, members_trashed, db
+    ):
+        res = client.post(
+            "/api/books/scan", json={"isbn": self.ISBN, "title": "Mine"}, headers=admin["headers"]
+        )
+
+        assert (res.status_code, res.json()["detail"]["code"]) == (409, IN_TRASH)
+        assert db.get(Book, members_trashed["id"]) is not None
+
+    def test_an_admin_purges_a_book_with_no_adder(self, client, admin, adderless, db):
+        res = client.delete(f"/api/books/{adderless['id']}/permanent", headers=admin["headers"])
+
+        assert res.status_code == 204
+        assert db.get(Book, adderless["id"]) is None
+
+    def test_a_member_purging_a_book_with_no_adder_is_refused(self, client, member, adderless, db):
+        res = client.delete(f"/api/books/{adderless['id']}/permanent", headers=member["headers"])
+
+        assert res.status_code == 409
+        assert db.get(Book, adderless["id"]) is not None
+
+    def test_an_admin_emptying_the_trash_purges_a_book_with_no_adder(self, client, admin, adderless, db):
+        res = client.delete("/api/books/trash", headers=admin["headers"])
+
+        assert res.json()["purged"] == 1
+        assert db.get(Book, adderless["id"]) is None
+
+    def test_a_member_emptying_the_trash_keeps_a_book_with_no_adder(self, client, member, adderless, db):
+        res = client.delete("/api/books/trash", headers=member["headers"])
+
+        assert res.json()["purged"] == 0
+        assert db.get(Book, adderless["id"]) is not None
+
+    def test_an_admin_adding_the_isbn_of_a_book_with_no_adder_is_refused_and_keeps_it(
+        self, client, admin, adderless, db
+    ):
+        """The admin's exception is for deleting such a Book on purpose. The
+        add door purges only the caller's own, admin or not."""
+        res = client.post(
+            "/api/books/scan", json={"isbn": self.ISBN, "title": "Mine"}, headers=admin["headers"]
+        )
+
+        assert (res.status_code, res.json()["detail"]["code"]) == (409, IN_TRASH)
+        assert db.get(Book, adderless["id"]) is not None
+
+    def test_a_member_adding_the_isbn_of_a_book_with_no_adder_is_refused_and_keeps_it(
+        self, client, member, adderless, db
+    ):
+        res = client.post(
+            "/api/books/scan", json={"isbn": self.ISBN, "title": "Mine"}, headers=member["headers"]
+        )
+
+        assert (res.status_code, res.json()["detail"]["code"]) == (409, IN_TRASH)
+        assert db.get(Book, adderless["id"]) is not None
 
 
 class TestAnotherMembersTrashedHolderRefusesTheAdd:

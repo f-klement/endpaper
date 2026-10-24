@@ -1736,11 +1736,14 @@ def _create_book(payload: BookCreate, current_user: User, db: Session, conflict:
             # owner's ruling of 2026-10-17. The trash view holds every
             # member's trashed public Books, so purging here let one member's
             # import destroy a Book somebody else had trashed and could still
-            # restore. It is refused whichever client
-            # called, because the harm does not depend on which one did. "Own"
-            # is `added_by_user_id`, since nothing records who trashed a row.
-            # Somebody else's trashed private Book never reaches this arm: it
-            # answers `Hidden` and keeps its 409.
+            # restore. It is refused whichever client called, because the
+            # harm does not depend on which one did. Who may purge a holder is
+            # `_purgeable_by`, the rule both purge routes ask too, here without
+            # the admin's exception for a Book nobody added: that exception is
+            # for deleting such a Book on purpose, and an add is not a request
+            # to delete anything. Somebody
+            # else's trashed private Book never reaches this arm: it answers
+            # `Hidden` and keeps its 409.
             #
             # **Every holder, not the first one.** Copies made it possible for
             # several rows to hold one ISBN, and freeing only the first was
@@ -1752,7 +1755,7 @@ def _create_book(payload: BookCreate, current_user: User, db: Session, conflict:
             # Decided in full before anything is destroyed, which the answer
             # being one value makes structural.
             holders = Shelf.trashed_by(db, current_user.id).where(Book.id.in_(book_ids)).all()
-            if any(holder.added_by_user_id != current_user.id for holder in holders):
+            if not all(_purgeable_by(holder, current_user, deliberate=False) for holder in holders):
                 _refuse_in_trash()
             for holder in holders:
                 _purge(holder, db)
@@ -1839,7 +1842,7 @@ def _refuse(message: str, book_id: int | None) -> NoReturn:
     caller the holder is hidden from them or the record is a tie, and an object
     body that it is one Book they can see. The door has a third shape, which
     `_refuse_in_trash` raises: an object with a `code` and no `book_id`, for
-    holders the caller sees only in the trash, one of them another member's.
+    holders the caller sees only in the trash, one of them not the caller's own.
     That is not a leak to close: the 409
     itself already says this
     ISBN is held by some row, whatever the body carries, and the only way to
@@ -1858,7 +1861,7 @@ def _refuse(message: str, book_id: int | None) -> NoReturn:
 
 
 #: The `detail.code` on the add door's 409 when only the trash view holds the
-#: ISBN and a holder is another member's. The other refusals of the door carry
+#: ISBN and a holder is not the caller's own. The other refusals of the door carry
 #: no code. The client's `frontend/src/lib/fileLanding.ts`, which every add door
 #: reads the refusal through, compares against this literal, and
 #: `tests/routers/test_books_trash.py` holds the two spellings equal across the
@@ -1868,7 +1871,7 @@ IN_TRASH: Final = "in_trash"
 
 def _refuse_in_trash() -> NoReturn:
     """The 409 for an ISBN only Books in the caller's trash view hold, one of
-    them another member's.
+    them not the caller's own.
 
     **No `book_id`, although naming it would disclose nothing**: every holder
     is in `Shelf.trashed_by`, which the caller already lists with its title.
@@ -1882,7 +1885,9 @@ def _refuse_in_trash() -> NoReturn:
         detail={
             "code": IN_TRASH,
             "message": (
-                "Book with this ISBN is in the trash. Restore it, or delete it for good, and add it again."
+                "Book with this ISBN is in the trash, and you did not add it. Restore it,"
+                " or ask the member who added it, or an admin if nobody did, to delete it"
+                " for good, and add it again."
             ),
         },
     )
@@ -4114,6 +4119,31 @@ def _trash(book: Book, db: Session) -> None:
         lending.close(loan, now)
 
 
+def _purgeable_by(book: Book, user: User, *, deliberate: bool) -> bool:
+    """Whether `user` may delete the trashed `book` for good: they added it,
+    or nobody is recorded as adding it, they are an admin, and the purge is
+    `deliberate`.
+
+    `deliberate` is whether the caller asked for this Book to go: true on the
+    two purge routes, false on the add door, which purges a holder only to
+    make room. The owner gave an admin the Books nobody added to delete on
+    purpose; the add door still purges only the caller's own, so an admin's
+    scan does not silently destroy a Book some member trashed and could still
+    restore.
+
+    The trash view, `Shelf.trashed_by`, is wider than this: it lists every
+    member's trashed public Books, which any of them may put back but only the
+    one who added it may destroy. "Added" is `added_by_user_id`, since nothing
+    records who trashed a row. An admin gets no exception for a Book another
+    member added, unlike `book_for_owner`; only a row with no adder, which no
+    member could otherwise ever purge, is theirs. Both purge routes and the
+    add door ask this, so the rule has one spelling.
+    """
+    if book.added_by_user_id is None:
+        return deliberate and user.is_admin
+    return book.added_by_user_id == user.id
+
+
 def _purge(book: Book, db: Session) -> None:
     """Delete a trashed book for good, and its cover files once the caller's
     transaction commits.
@@ -4263,14 +4293,20 @@ def list_quotes(
 
 @router.delete("/trash", response_model=PurgeResult)
 def empty_trash(db: DbSession, current_user: CurrentUser) -> PurgeResult:
-    """Delete everything in the caller's trash for good.
+    """Delete for good every Book in the caller's trash that `_purgeable_by`
+    lets them destroy.
 
-    Scoped by `in_trash_for`, so emptying the trash never reaches a book the
-    caller could not see in it. There is no automatic expiry: this app has no
-    scheduler, and a sweep at startup would delete on restart timing rather
-    than on any schedule anybody chose.
+    The rest of the listing is left where it is and not counted. Filtered in
+    Python rather than SQL so the rule has one spelling: the trash is small,
+    and `_purge` loads every row it deletes anyway. There is no automatic
+    expiry: this app has no scheduler, and a sweep at startup would delete on
+    restart timing rather than on any schedule anybody chose.
     """
-    books = Shelf.trashed_by(db, current_user.id).all()
+    books = [
+        book
+        for book in Shelf.trashed_by(db, current_user.id).all()
+        if _purgeable_by(book, current_user, deliberate=True)
+    ]
     for book in books:
         _purge(book, db)
     db.commit()
@@ -4754,8 +4790,19 @@ def restore_book(book: BookInTrash, db: DbSession, current_user: CurrentUser) ->
 
 
 @router.delete("/{book_id}/permanent", status_code=status.HTTP_204_NO_CONTENT)
-def purge_book(book: BookInTrash, db: DbSession) -> None:
-    """Delete one trashed book for good."""
+def purge_book(book: BookInTrash, db: DbSession, current_user: CurrentUser) -> None:
+    """Delete one trashed book for good, if `_purgeable_by` lets the caller.
+
+    A Book it refuses is in the caller's trash view, so it answers 409 rather
+    than 404, as the add door answers the same Book, and stays in the trash,
+    where it can still be put back. Not `book_for_owner`'s 403, whose admin
+    exception this rule does not have.
+    """
+    if not _purgeable_by(book, current_user, deliberate=True):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Only the member who added this book, or an admin if nobody did, may delete it for good.",
+        )
     _purge(book, db)
     db.commit()
 

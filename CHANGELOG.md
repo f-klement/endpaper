@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **Deleting for good, one book or the whole trash, now reaches only books you added.** Another
+  member's deleted book stays in the trash for them, and the trash page no longer offers to
+  delete it.
+
+- **An admin can delete for good a book in the trash that no member is recorded as adding**, and
+  "Empty the trash" stays on the trash page when more books are in it than the page lists.
+
+- **An admin's "Empty the trash" confirmation now says that it also deletes for good the books in
+  the trash nobody is recorded as adding.**
+
 ## v0.21.0
 
 _2026-10-24_

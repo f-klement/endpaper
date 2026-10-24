@@ -2,8 +2,8 @@
 
 <!-- measured: begin -->
 
-**12072 tests, in 183 files**, counted by the run that reads this line.
-**The 151 rows below sum to 10266.**
+**12081 tests, in 183 files**, counted by the run that reads this line.
+**The 151 rows below sum to 10275.**
 The other 1806 tests are in 35 files this register may not name.
 The table also carries 3 files this engine does not run, stated as 0.
 <!-- measured: end -->
@@ -217,7 +217,7 @@ why the helper uses regexes.
 | `test_identifiers.py`                      |    10 | Writing identifiers onto a book: duplicates within one payload dropped rather than refused, because a client reading two of its own files may find one book in both, and the repoint a merge performs |
 | `routers/test_books_google.py` | 34 | Enrichment, the chosen-edition apply and that its body cannot overflow the database |
 | `routers/test_books_search.py` | 56 | **Free-text search.** That it works with no API key, that the six catalogues a reader would doubt answer do, how they merge, that a record describing itself with more subjects than a book may hold still comes back as a row where the cap now trims them |
-| `routers/test_books_trash.py` | 47 | **Undoing a delete.** That a trashed book leaves every view, comes back whole, and frees its ISBN again, and that a member's own trashed Book is kept while a Book they cannot see holds the ISBN |
+| `routers/test_books_trash.py` | 56 | **Undoing a delete.** That a trashed book leaves every view, comes back whole, and frees its ISBN again, and that a member's own trashed Book is kept while a Book they cannot see holds the ISBN, and that deleting for good, one Book or the whole trash, reaches only the Books the caller added, and for an admin also those with no recorded adder, while the add door purges only the caller's own |
 | `routers/test_settings.py` | 184 | Feature flags, the masked API key, the overdue webhook settings, admin-only writes |
 | `routers/test_imports.py` | 64 | The import, the private-ISBN branch, the tag caps, the rate limit, and the round trip: that every column of the live export is read back or named as unread, that each one lands in the field named for it, and that every importer field is filled or named as absent, and that an import Postgres aborts for a deadlock answers 409 |
 | `routers/test_books_tags.py` | 67 | **Two vocabularies in one table.** Who may create, who may delete, and the counts |

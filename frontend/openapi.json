@@ -6375,7 +6375,7 @@
         "type": "object"
       },
       "PurgeResult": {
-        "description": "How many books emptying the trash destroyed.",
+        "description": "How many Books emptying the trash destroyed: those in it the caller\nadded. Another member's trashed Book is left in place and not counted.",
         "properties": {
           "purged": {
             "minimum": 0.0,
@@ -10998,7 +10998,7 @@
     },
     "/api/books/trash": {
       "delete": {
-        "description": "Delete everything in the caller's trash for good.\n\nScoped by `in_trash_for`, so emptying the trash never reaches a book the\ncaller could not see in it. There is no automatic expiry: this app has no\nscheduler, and a sweep at startup would delete on restart timing rather\nthan on any schedule anybody chose.",
+        "description": "Delete for good every Book in the caller's trash that `_purgeable_by`\nlets them destroy.\n\nThe rest of the listing is left where it is and not counted. Filtered in\nPython rather than SQL so the rule has one spelling: the trash is small,\nand `_purge` loads every row it deletes anyway. There is no automatic\nexpiry: this app has no scheduler, and a sweep at startup would delete on\nrestart timing rather than on any schedule anybody chose.",
         "operationId": "empty_trash",
         "responses": {
           "200": {
@@ -13564,7 +13564,7 @@
     },
     "/api/books/{book_id}/permanent": {
       "delete": {
-        "description": "Delete one trashed book for good.",
+        "description": "Delete one trashed book for good, if `_purgeable_by` lets the caller.\n\nA Book it refuses is in the caller's trash view, so it answers 409 rather\nthan 404, as the add door answers the same Book, and stays in the trash,\nwhere it can still be put back. Not `book_for_owner`'s 403, whose admin\nexception this rule does not have.",
         "operationId": "purge_book",
         "parameters": [
           {

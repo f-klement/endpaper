@@ -104,14 +104,14 @@ is discarded, and only a token naming a test account does. See [security.md](sec
 | GET | `/api/books/locations` | user | Distinct shelf locations, most-populated first |
 | GET | `/api/books/duplicates` | user | Books that look like the same work |
 | GET | `/api/books/trash` | user | What the caller has deleted and could put back |
-| DELETE | `/api/books/trash` | user | Empties it for good. Returns `{purged}` |
+| DELETE | `/api/books/trash` | user | Deletes for good every book in the trash the caller added, and an admin also every one with no recorded adder; leaves the rest. Returns `{purged}`, counting only those destroyed |
 | POST | `/api/books/merge` | user | Fold several entries into one. **409** when Postgres aborted the merge to break a deadlock with another change to the same Books: nothing is merged, and the same request can be sent again |
 | POST | `/api/books/bulk` | user | One verb applied to a selection of books |
 | POST | `/api/books/covers/backfill?after_id=` | user | Fetch and store the covers of books that have none. Bounded per run: send the reply's `next_after_id` back to carry on, and it returns 0 at the end. `after_id` is 0 to 2^63-1; outside that is a **422** |
 | GET | `/api/books/{id}` | read | **404** if absent *or* invisible |
 | DELETE | `/api/books/{id}` | write | 204. Moves it to the trash, reversibly |
 | POST | `/api/books/{id}/restore` | trashed | Puts it back, with everything on it |
-| DELETE | `/api/books/{id}/permanent` | trashed | 204. Destroys it and its cover file |
+| DELETE | `/api/books/{id}/permanent` | trashed | 204. Destroys it and its cover file. **409** for a book another member added, or for one with no recorded adder unless the caller is an admin; it stays in the trash |
 | PATCH | `/api/books/{id}/privacy` | **owner** | **403** for another member |
 | PUT | `/api/books/{id}/status` | read | Sets *your* status only |
 | PUT | `/api/books/{id}/refresh` | write | **400** without an ISBN |

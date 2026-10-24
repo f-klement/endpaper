@@ -15,7 +15,7 @@ import { getUpdateStatusMutationKey } from "../../../src/api/generated/endpoints
 import { Locale } from "../../../src/api/generated/model";
 import { ToastProvider } from "../../../src/app/toast";
 import TrashPage from "../../../src/pages/TrashPage";
-import { makeBook, resetIds } from "../../factories";
+import { makeBook, makeUser, resetIds } from "../../factories";
 import {
   createTestQueryClient,
   heldOpen,
@@ -28,6 +28,10 @@ import { holds, PROFILE, PROPERTY, witness } from "../../property";
 import { forget, overSchema } from "../../schemaPage";
 
 let api: MockApi;
+
+/** The signed in member, and another one. Fixed ids, clear of the books'. */
+const ME = makeUser({ id: 9001, username: "me" });
+const SOMEBODY_ELSE = makeUser({ id: 9002, username: "somebody" });
 
 beforeEach(() => {
   resetIds();
@@ -53,9 +57,32 @@ function twoBooks() {
   ]);
 }
 
-function stubTrash(items: ReturnType<typeof makeBook>[]) {
+/**
+ * A book the factory leaves with no adder is stubbed as the caller's own, so
+ * a test that names no adder is about a book the caller may delete for good.
+ */
+function stubTrash(items: ReturnType<typeof makeBook>[], total = items.length) {
+  const owned = items.map((book) => ({
+    ...book,
+    added_by: book.added_by ?? ME,
+  }));
   api.on("/api/books/trash", {
-    body: { items, total: items.length, page: 1, page_size: 50 },
+    body: { items: owned, total, page: 1, page_size: 50 },
+  });
+}
+
+/**
+ * A trash holding one Book nobody is recorded as adding. Not `stubTrash`,
+ * which fills a missing adder in with the caller.
+ */
+function stubAdderless() {
+  api.on("/api/books/trash", {
+    body: {
+      items: [makeBook({ id: 7, title: "Dune", added_by: null })],
+      total: 1,
+      page: 1,
+      page_size: 50,
+    },
   });
 }
 
@@ -68,7 +95,7 @@ describe("TrashPage", () => {
         deleted_at: "2026-08-19T10:00:00Z",
       }),
     ]);
-    renderWithProviders(<TrashPage />);
+    renderWithProviders(<TrashPage currentUser={ME} />);
 
     expect(await screen.findByText("Deleted Book")).toBeInTheDocument();
   });
@@ -80,7 +107,7 @@ describe("TrashPage", () => {
     stubTrash([
       makeBook({ id: 7, title: "Dune", deleted_at: "2026-08-19T10:00:00Z" }),
     ]);
-    renderWithProviders(<TrashPage />);
+    renderWithProviders(<TrashPage currentUser={ME} />);
 
     expect(await screen.findByText(/^Deleted \d/)).toBeInTheDocument();
   });
@@ -95,7 +122,7 @@ describe("TrashPage", () => {
     stubTrash([
       makeBook({ id: 7, title: "Dune", deleted_at: "2026-08-19T10:00:00Z" }),
     ]);
-    renderWithProviders(<TrashPage />, { locale: Locale.de });
+    renderWithProviders(<TrashPage currentUser={ME} />, { locale: Locale.de });
 
     expect(await screen.findByText(/19\.8\.2026/)).toBeInTheDocument();
     expect(screen.queryByText(/8\/19\/2026/)).not.toBeInTheDocument();
@@ -103,26 +130,139 @@ describe("TrashPage", () => {
 
   it("says the trash does not empty itself", async () => {
     stubTrash([makeBook({ id: 7, deleted_at: "2026-08-19T10:00:00Z" })]);
-    renderWithProviders(<TrashPage />);
+    renderWithProviders(<TrashPage currentUser={ME} />);
 
     expect(await screen.findByText(/until you empty it/)).toBeInTheDocument();
   });
 
   it("shows an empty state when nothing has been deleted", async () => {
     stubTrash([]);
-    renderWithProviders(<TrashPage />);
+    renderWithProviders(<TrashPage currentUser={ME} />);
 
     expect(await screen.findByText("The trash is empty")).toBeInTheDocument();
   });
 
   it("offers no empty-the-trash button when there is nothing in it", async () => {
     stubTrash([]);
-    renderWithProviders(<TrashPage />);
+    renderWithProviders(<TrashPage currentUser={ME} />);
 
     await screen.findByText("The trash is empty");
     expect(
       screen.queryByRole("button", { name: "Empty the trash" }),
     ).not.toBeInTheDocument();
+  });
+
+  describe("a book another member added", () => {
+    it("offers no delete for good on it", async () => {
+      stubTrash([
+        makeBook({ id: 7, title: "Dune", added_by: SOMEBODY_ELSE }),
+        makeBook({ id: 8, title: "Emma" }),
+      ]);
+      renderWithProviders(<TrashPage currentUser={ME} />);
+
+      await screen.findByText("Dune");
+      expect(
+        within(rowOf("Dune")).queryByRole("button", {
+          name: "Delete for good",
+        }),
+      ).not.toBeInTheDocument();
+      expect(
+        within(rowOf("Dune")).getByText(/^Added by another member/),
+      ).toBeInTheDocument();
+      expect(
+        within(rowOf("Emma")).getByRole("button", { name: "Delete for good" }),
+      ).toBeInTheDocument();
+    });
+
+    it("offers an admin no delete for good on it either", async () => {
+      // The server gives an admin no exception for a book a member added,
+      // unlike `book_for_owner`, so the page must not offer one.
+      stubTrash([makeBook({ id: 7, title: "Dune", added_by: SOMEBODY_ELSE })]);
+      renderWithProviders(
+        <TrashPage currentUser={{ ...ME, is_admin: true }} />,
+      );
+
+      await screen.findByText("Dune");
+      expect(
+        within(rowOf("Dune")).queryByRole("button", {
+          name: "Delete for good",
+        }),
+      ).not.toBeInTheDocument();
+    });
+
+    it("offers empty the trash while rows past the first page are unlisted", async () => {
+      stubTrash(
+        Array.from({ length: 50 }, (_, i) =>
+          makeBook({
+            id: i + 1,
+            title: `Theirs ${i + 1}`,
+            added_by: SOMEBODY_ELSE,
+          }),
+        ),
+        51,
+      );
+      renderWithProviders(<TrashPage currentUser={ME} />);
+
+      await screen.findByText("Theirs 1");
+      expect(
+        screen.getByRole("button", { name: "Empty the trash" }),
+      ).toBeInTheDocument();
+    });
+
+    it("offers no empty-the-trash button when every book in it is another member's", async () => {
+      stubTrash([makeBook({ id: 7, title: "Dune", added_by: SOMEBODY_ELSE })]);
+      renderWithProviders(<TrashPage currentUser={ME} />);
+
+      await screen.findByText("Dune");
+      expect(
+        screen.queryByRole("button", { name: "Empty the trash" }),
+      ).not.toBeInTheDocument();
+    });
+  });
+
+  describe("a book nobody is recorded as adding", () => {
+    it("offers an admin delete for good on it", async () => {
+      stubAdderless();
+      renderWithProviders(
+        <TrashPage currentUser={{ ...ME, is_admin: true }} />,
+      );
+
+      await screen.findByText("Dune");
+      expect(
+        within(rowOf("Dune")).getByRole("button", { name: "Delete for good" }),
+      ).toBeInTheDocument();
+    });
+
+    it("offers a member no delete for good on it", async () => {
+      stubAdderless();
+      renderWithProviders(<TrashPage currentUser={ME} />);
+
+      await screen.findByText("Dune");
+      expect(
+        within(rowOf("Dune")).queryByRole("button", {
+          name: "Delete for good",
+        }),
+      ).not.toBeInTheDocument();
+      expect(
+        within(rowOf("Dune")).getByText(/^Nobody is recorded as adding it/),
+      ).toBeInTheDocument();
+    });
+
+    it("tells an admin that emptying the trash destroys it too", async () => {
+      stubAdderless();
+      const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
+      renderWithProviders(
+        <TrashPage currentUser={{ ...ME, is_admin: true }} />,
+      );
+
+      await userEvent
+        .setup()
+        .click(await screen.findByRole("button", { name: "Empty the trash" }));
+
+      expect(confirmSpy).toHaveBeenCalledWith(
+        expect.stringMatching(/every one nobody is recorded as adding/),
+      );
+    });
   });
 
   describe("putting a book back", () => {
@@ -136,7 +276,7 @@ describe("TrashPage", () => {
       ]);
       api.on("/api/books/7/restore", { body: makeBook({ id: 7 }) });
       const confirmSpy = vi.spyOn(window, "confirm");
-      renderWithProviders(<TrashPage />);
+      renderWithProviders(<TrashPage currentUser={ME} />);
 
       await userEvent
         .setup()
@@ -158,7 +298,7 @@ describe("TrashPage", () => {
       api.on("/api/books/7/restore", reply.respond, "POST");
       renderWithProviders(
         <ToastProvider>
-          <TrashPage />
+          <TrashPage currentUser={ME} />
         </ToastProvider>,
       );
       await screen.findByText("Dune");
@@ -188,7 +328,7 @@ describe("TrashPage", () => {
       const reply = heldOpen();
       api.on("/api/books/8/permanent", reply.respond, "DELETE");
       vi.spyOn(window, "confirm").mockReturnValue(true);
-      renderWithProviders(<TrashPage />);
+      renderWithProviders(<TrashPage currentUser={ME} />);
       await screen.findByText("Emma");
 
       await userEvent.setup().click(
@@ -216,7 +356,7 @@ describe("TrashPage", () => {
       api.on("/api/books/7/restore", restoring.respond, "POST");
       api.on("/api/books/8/permanent", purging.respond, "DELETE");
       vi.spyOn(window, "confirm").mockReturnValue(true);
-      renderWithProviders(<TrashPage />);
+      renderWithProviders(<TrashPage currentUser={ME} />);
       await screen.findByText("Dune");
       const user = userEvent.setup();
 
@@ -256,7 +396,7 @@ describe("TrashPage", () => {
       const emma = heldOpen();
       api.on("/api/books/7/restore", dune.respond, "POST");
       api.on("/api/books/8/restore", emma.respond, "POST");
-      renderWithProviders(<TrashPage />);
+      renderWithProviders(<TrashPage currentUser={ME} />);
       await screen.findByText("Dune");
       const user = userEvent.setup();
 
@@ -303,7 +443,7 @@ describe("TrashPage", () => {
       api.on("/api/books/8/restore", emma.respond, "POST");
       renderWithProviders(
         <ToastProvider>
-          <TrashPage />
+          <TrashPage currentUser={ME} />
         </ToastProvider>,
       );
       await screen.findByText("Dune");
@@ -337,7 +477,7 @@ describe("TrashPage", () => {
       api.on("/api/books/7/permanent", dune.respond, "DELETE");
       api.on("/api/books/8/permanent", emma.respond, "DELETE");
       vi.spyOn(window, "confirm").mockReturnValue(true);
-      renderWithProviders(<TrashPage />);
+      renderWithProviders(<TrashPage currentUser={ME} />);
       await screen.findByText("Dune");
       const user = userEvent.setup();
 
@@ -371,7 +511,7 @@ describe("TrashPage", () => {
           mutationFn: () => new Promise(() => {}),
         })
         .execute({ bookId: 7 });
-      renderWithProviders(<TrashPage />, { queryClient });
+      renderWithProviders(<TrashPage currentUser={ME} />, { queryClient });
       await screen.findByText("Dune");
 
       expect(queryClient.isMutating()).toBe(1);
@@ -391,7 +531,7 @@ describe("TrashPage", () => {
         }),
       ]);
       const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
-      renderWithProviders(<TrashPage />);
+      renderWithProviders(<TrashPage currentUser={ME} />);
 
       await userEvent
         .setup()
@@ -411,7 +551,7 @@ describe("TrashPage", () => {
       ]);
       api.on("/api/books/7/permanent", { status: 204 }, "DELETE");
       vi.spyOn(window, "confirm").mockReturnValue(true);
-      renderWithProviders(<TrashPage />);
+      renderWithProviders(<TrashPage currentUser={ME} />);
 
       await userEvent
         .setup()
@@ -425,7 +565,7 @@ describe("TrashPage", () => {
     it("asks before emptying the whole trash", async () => {
       stubTrash([makeBook({ id: 7, deleted_at: "2026-08-19T10:00:00Z" })]);
       const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
-      renderWithProviders(<TrashPage />);
+      renderWithProviders(<TrashPage currentUser={ME} />);
 
       await userEvent
         .setup()
@@ -439,7 +579,7 @@ describe("TrashPage", () => {
       stubTrash([makeBook({ id: 7, deleted_at: "2026-08-19T10:00:00Z" })]);
       api.on("/api/books/trash", { body: { purged: 1 } }, "DELETE");
       vi.spyOn(window, "confirm").mockReturnValue(true);
-      renderWithProviders(<TrashPage />);
+      renderWithProviders(<TrashPage currentUser={ME} />);
 
       await userEvent
         .setup()
@@ -457,7 +597,7 @@ describe("TrashPage", () => {
       vi.spyOn(window, "confirm").mockReturnValue(true);
       renderWithProviders(
         <ToastProvider>
-          <TrashPage />
+          <TrashPage currentUser={ME} />
         </ToastProvider>,
       );
 
@@ -476,7 +616,7 @@ describe("TrashPage", () => {
       status: 500,
       body: { detail: "Something went wrong" },
     });
-    renderWithProviders(<TrashPage />);
+    renderWithProviders(<TrashPage currentUser={ME} />);
 
     expect(await screen.findByRole("alert")).toBeInTheDocument();
   });
@@ -503,7 +643,10 @@ describe("TrashPage over any answer the schema permits", () => {
         fc.gen(),
         async (answers) => {
           try {
-            const rendered = await overSchema(<TrashPage />, answers);
+            const rendered = await overSchema(
+              <TrashPage currentUser={ME} />,
+              answers,
+            );
             expect(rendered.problems).toEqual([]);
             return rendered;
           } finally {

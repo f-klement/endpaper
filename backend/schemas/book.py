@@ -1729,7 +1729,8 @@ class BulkResult(BaseModel):
 
 
 class PurgeResult(BaseModel):
-    """How many books emptying the trash destroyed."""
+    """How many Books emptying the trash destroyed: those in it the caller
+    added. Another member's trashed Book is left in place and not counted."""
 
     purged: int = Field(ge=0)
 

@@ -6,6 +6,8 @@ import { numericDate } from "../../../lib/date";
 interface TrashRowProps {
   book: BookOut;
   isBusy: boolean;
+  /** Whether the server lets the caller delete this book for good. */
+  canPurge: boolean;
   onRestore: () => void;
   onPurge: () => void;
 }
@@ -21,6 +23,7 @@ interface TrashRowProps {
 export default function TrashRow({
   book,
   isBusy,
+  canPurge,
   onRestore,
   onPurge,
 }: TrashRowProps) {
@@ -48,6 +51,11 @@ export default function TrashRow({
             {t("trash.deletedOn", { date: deletedOn })}
           </span>
         )}
+        {!canPurge && (
+          <span className="mt-0.5 block text-xs text-paper-600 dark:text-paper-400">
+            {t(book.added_by == null ? "trash.noAdder" : "trash.notYours")}
+          </span>
+        )}
       </span>
 
       <Button
@@ -59,17 +67,19 @@ export default function TrashRow({
       >
         {t("trash.restore")}
       </Button>
-      <button
-        type="button"
-        disabled={isBusy}
-        onClick={() => {
-          if (confirm(t("trash.deleteForeverConfirm", { title: book.title })))
-            onPurge();
-        }}
-        className="shrink-0 text-xs text-paper-600 underline hover:text-danger-600 disabled:opacity-50 dark:text-paper-400 dark:hover:text-danger-300"
-      >
-        {t("trash.deleteForever")}
-      </button>
+      {canPurge && (
+        <button
+          type="button"
+          disabled={isBusy}
+          onClick={() => {
+            if (confirm(t("trash.deleteForeverConfirm", { title: book.title })))
+              onPurge();
+          }}
+          className="shrink-0 text-xs text-paper-600 underline hover:text-danger-600 disabled:opacity-50 dark:text-paper-400 dark:hover:text-danger-300"
+        >
+          {t("trash.deleteForever")}
+        </button>
+      )}
     </li>
   );
 }

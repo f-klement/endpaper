@@ -92,7 +92,7 @@ export default function AppRoutes({ user, mode, onSignIn }: AppRoutesProps) {
         element={<DataSettingsPage mode={mode} onSignIn={onSignIn} />}
       />
       <Route path="/settings/about" element={<AboutSettingsPage />} />
-      <Route path="/trash" element={<TrashPage />} />
+      <Route path="/trash" element={<TrashPage currentUser={user} />} />
       {/* The published catalogue, mounted here **as well as** above the
           session gate in `App.tsx`. A member following a link to a public
           record would otherwise land on the 404 page, and an admin who has

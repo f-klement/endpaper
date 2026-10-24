@@ -925,7 +925,8 @@ repeat the argument.
 |  | [A tie inside one copy group takes the lowest id; any other tie is no answer](decisions.md#a-tie-inside-one-copy-group-takes-the-lowest-id-any-other-tie-is-no-answer) | 188 |
 |  | [A tie at the add door refuses without naming a Book](decisions.md#a-tie-at-the-add-door-refuses-without-naming-a-book) | 180 |
 |  | [An import row whose ISBN only the trash view holds is listed "in the trash"](decisions.md#an-import-row-whose-isbn-only-the-trash-view-holds-is-listed-in-the-trash) | 219 |
-|  | [The add door refuses another member's trashed holder, and purges only the caller's own](decisions.md#the-add-door-refuses-another-members-trashed-holder-and-purges-only-the-callers-own) | 573 |
+|  | [The add door refuses another member's trashed holder, and purges only the caller's own](decisions.md#the-add-door-refuses-another-members-trashed-holder-and-purges-only-the-callers-own) | 587 |
+|  | [Deleting for good reaches only the trashed Books the caller added](decisions.md#deleting-for-good-reaches-only-the-trashed-books-the-caller-added) | 743 |
 |  | [Hidden outranks the trash, and the disclosure that costs is accepted](decisions.md#hidden-outranks-the-trash-and-the-disclosure-that-costs-is-accepted) | 290 |
 |  | [ISBNs compare by `isbn.parse`](decisions.md#isbns-compare-by-isbnparse) | 89 |
 |  | [The add door finds an ISBN stored with hyphens or a lower case x](decisions.md#the-add-door-finds-an-isbn-stored-with-hyphens-or-a-lower-case-x) | 239 |
