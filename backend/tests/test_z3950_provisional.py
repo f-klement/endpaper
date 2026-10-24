@@ -400,14 +400,10 @@ class TestTheCtypesDeclarationsAreComplete:
         assert declared["ZOOM_record_get"] is ctypes.c_void_p
 
     def test_every_call_the_binding_makes_is_declared(self):
-        source = (
-            __import__("pathlib").Path(provisional.__file__).read_text()
-        )
+        source = __import__("pathlib").Path(provisional.__file__).read_text()
         declared = {name for name, _, _ in provisional.SIGNATURES}
         used = {
-            line.split("self._lib.")[1].split("(")[0]
-            for line in source.splitlines()
-            if "self._lib." in line
+            line.split("self._lib.")[1].split("(")[0] for line in source.splitlines() if "self._lib." in line
         }
         assert used - declared == set()
         # And nothing is declared that is never called, so the table cannot rot into a

@@ -33,6 +33,10 @@ from schemas.common import (
 )
 from tests.corpus import BACKEND, application_modules
 
+TREE_GUARDS = {
+    "TestTheApiLayerAsksRatherThanSpelling": ("application_modules",),
+}
+
 #: The module the API layer is required to ask, found through the function
 #: rather than by path, so moving the home moves the exemption with it.
 _HOME = Path(inspect.getsourcefile(one_line) or "").resolve()
@@ -142,12 +146,8 @@ class TestRemovingWhatHasNoWidth:
         the fields that take this rule are names, labels and identifiers. Only
         a value that may be followed as a link wants the weld.
         """
-        assert one_line_without_invisible_characters("Holiday\treads") == (
-            "Holiday reads"
-        )
-        assert one_line_without_invisible_characters("Ursula K.\nLe Guin") == (
-            "Ursula K. Le Guin"
-        )
+        assert one_line_without_invisible_characters("Holiday\treads") == ("Holiday reads")
+        assert one_line_without_invisible_characters("Ursula K.\nLe Guin") == ("Ursula K. Le Guin")
 
     def test_the_two_sets_partition_the_control_characters(self):
         """What keeps the middle rule from drifting into the bottom one.
@@ -173,9 +173,7 @@ class TestRemovingWhatHasNoWidth:
         and reads exactly like one that does not.
         """
         assert set(_CONTROL_CHARACTERS) == {
-            point
-            for point in range(sys.maxunicode + 1)
-            if unicodedata.category(chr(point)) == "Cc"
+            point for point in range(sys.maxunicode + 1) if unicodedata.category(chr(point)) == "Cc"
         }
 
     def test_a_byte_order_mark_is_kept_and_is_not_whitespace_here(self):
@@ -221,9 +219,7 @@ class TestTheUrlRuleDeletesEvenATab:
     URL = "https://a.example\t/x"
 
     def test_a_tab_inside_a_url_leaves_no_space_behind(self):
-        assert one_line_without_any_control_character(self.URL) == (
-            "https://a.example/x"
-        )
+        assert one_line_without_any_control_character(self.URL) == ("https://a.example/x")
 
     def test_the_other_order_is_the_bug_this_replaced(self):
         """The arm that goes red on a rewrite to `one_line(value).translate(...)`,
@@ -233,16 +229,12 @@ class TestTheUrlRuleDeletesEvenATab:
 
         assert collapsed_first == "https://a.example /x"
         assert urlsplit(collapsed_first).hostname == "a.example "
-        assert urlsplit(one_line_without_any_control_character(self.URL)).hostname == (
-            "a.example"
-        )
+        assert urlsplit(one_line_without_any_control_character(self.URL)).hostname == ("a.example")
 
     def test_the_name_rule_is_not_this_one(self):
         """The two differ on exactly the character that made this field's case,
         so a caller that reached for the wrong one is visible here."""
-        assert one_line_without_invisible_characters(self.URL) == (
-            "https://a.example /x"
-        )
+        assert one_line_without_invisible_characters(self.URL) == ("https://a.example /x")
 
 
 class TestTheApiLayerAsksRatherThanSpelling:

@@ -107,9 +107,7 @@ def _declared(table_name: str, constraint: str, dialect) -> str:
     """One CHECK as `models.py` declares it for one dialect, whitespace
     normalised. Safe to normalise here: no constraint in this schema holds a
     string literal with internal whitespace."""
-    check = next(
-        one for one in _checks(Base.metadata.tables[table_name]) if one.name == constraint
-    )
+    check = next(one for one in _checks(Base.metadata.tables[table_name]) if one.name == constraint)
     return " ".join(str(check.sqltext.compile(dialect=dialect)).split())
 
 
@@ -237,9 +235,7 @@ def _revision_modules() -> dict[str, ModuleType]:
     return found
 
 
-def _rules_in[RuleT: tuple](
-    namespace: Mapping[str, object], shape: type[RuleT]
-) -> list[RuleT]:
+def _rules_in[RuleT: tuple](namespace: Mapping[str, object], shape: type[RuleT]) -> list[RuleT]:
     """Every rule of `shape` one module's namespace declares.
 
     **A namespace rather than a module, so this can be driven.** What it does
@@ -279,9 +275,7 @@ def _rules_in[RuleT: tuple](
         if isinstance(value, str | bytes) or not isinstance(value, Collection):
             continue
         members = [
-            one
-            for one in (value.values() if isinstance(value, Mapping) else value)
-            if isinstance(one, shape)
+            one for one in (value.values() if isinstance(value, Mapping) else value) if isinstance(one, shape)
         ]
         if len(members) == len(value):
             rules.extend(members)
@@ -349,11 +343,7 @@ def _alembics_chain() -> list[str]:
 
     return [
         revision.revision
-        for revision in reversed(
-            list(
-                ScriptDirectory.from_config(schema._alembic_config()).walk_revisions()
-            )
-        )
+        for revision in reversed(list(ScriptDirectory.from_config(schema._alembic_config()).walk_revisions()))
     ]
 
 
@@ -401,9 +391,7 @@ def _added_rules() -> list[tuple[str, AddedRule]]:
     return [
         (revision, rule)
         for revision in _in_chain_order(list(carrying))
-        for rule in sorted(
-            carrying[revision], key=lambda one: (one.table, one.constraint)
-        )
+        for rule in sorted(carrying[revision], key=lambda one: (one.table, one.constraint))
     ]
 
 
@@ -623,8 +611,7 @@ class TestTheRevisionsPostgresArmIsTheModelsPostgresArm:
             (constraint, earlier_name, later_name)
             for constraint, swaps in SWAP_CHAIN.items()
             for (earlier_name, earlier), (later_name, later) in pairwise(swaps)
-            if " ".join(earlier.after_pg.split())
-            != " ".join(later.before_pg.split())
+            if " ".join(earlier.after_pg.split()) != " ".join(later.before_pg.split())
         ]
 
         assert not broken, (
@@ -646,9 +633,7 @@ class TestTheRevisionsPostgresArmIsTheModelsPostgresArm:
             "no revision was found to carry a table of swapped rules, so every "
             "comparison in this class is over an empty chain"
         )
-        assert [
-            constraint for constraint, swaps in SWAP_CHAIN.items() if len(swaps) > 1
-        ]
+        assert [constraint for constraint, swaps in SWAP_CHAIN.items() if len(swaps) > 1]
 
     def test_these_are_the_swaps_the_revisions_make(self):
         """The exact list for the swapped side, which is where the room to
@@ -672,15 +657,11 @@ class TestTheRevisionsPostgresArmIsTheModelsPostgresArm:
         """
         assert _swap_rows() == THE_SWAPS
 
-    @pytest.mark.parametrize(
-        "constraint", sorted(SWAP_CHAIN), ids=lambda constraint: constraint
-    )
+    @pytest.mark.parametrize("constraint", sorted(SWAP_CHAIN), ids=lambda constraint: constraint)
     def test_the_last_revision_to_touch_a_rule_is_the_model(self, constraint: str):
         _, rule = SWAP_CHAIN[constraint][-1]
 
-        assert " ".join(rule.after_pg.split()) == _declared(
-            rule.table, rule.constraint, POSTGRESQL
-        )
+        assert " ".join(rule.after_pg.split()) == _declared(rule.table, rule.constraint, POSTGRESQL)
 
     @pytest.mark.parametrize(
         "added",
@@ -697,9 +678,7 @@ class TestTheRevisionsPostgresArmIsTheModelsPostgresArm:
         compared against nothing: the rule nobody adds a line for is always the
         new one.
         """
-        assert " ".join(added.postgresql.split()) == _declared(
-            added.table, added.constraint, POSTGRESQL
-        )
+        assert " ".join(added.postgresql.split()) == _declared(added.table, added.constraint, POSTGRESQL)
 
     def test_these_are_the_rules_the_revisions_add(self):
         """Anti vacuity for that walk, and **non emptiness would not be it.**
@@ -723,9 +702,9 @@ class TestTheRevisionsPostgresArmIsTheModelsPostgresArm:
         it against the model, which is the shape
         `TestTheseAreTheConstraintsWithTwoSpellings` already has in this file.
         """
-        assert [
-            (revision, rule.table, rule.constraint) for revision, rule in ADDED_RULES
-        ] == [("b8f4c1a7e309", "catalogue_targets", "ck_catalogue_targets_base_url")]
+        assert [(revision, rule.table, rule.constraint) for revision, rule in ADDED_RULES] == [
+            ("b8f4c1a7e309", "catalogue_targets", "ck_catalogue_targets_base_url")
+        ]
 
     def test_every_addition_is_still_the_last_text_of_its_chain(self):
         """The condition under which comparing an addition with the model is
@@ -766,8 +745,7 @@ class TestTheRevisionsPostgresArmIsTheModelsPostgresArm:
         """
         added = {(rule.table, rule.constraint): rule for _, rule in ADDED_RULES}
         last_swap = {
-            (swaps[-1][1].table, constraint): swaps[-1][1]
-            for constraint, swaps in SWAP_CHAIN.items()
+            (swaps[-1][1].table, constraint): swaps[-1][1] for constraint, swaps in SWAP_CHAIN.items()
         }
         # **Both engines, and the engine is in the message.** A first version
         # compared the Postgres sides alone, so an addition overtaken on the
@@ -799,9 +777,7 @@ class TestTheRevisionsPostgresArmIsTheModelsPostgresArm:
         )
 
 
-@pytest.mark.parametrize(
-    "table_name", sorted(Base.metadata.tables), ids=lambda name: name
-)
+@pytest.mark.parametrize("table_name", sorted(Base.metadata.tables), ids=lambda name: name)
 class TestEveryCheckRendersWithoutASqliteOnlyIdiom:
     """Every table in the schema, rendered against the other dialect.
 
@@ -818,9 +794,7 @@ class TestEveryCheckRendersWithoutASqliteOnlyIdiom:
     def test_the_sqlite_ddl_still_compiles(self, table_name: str):
         """The other direction, so a `DialectSQL` with a broken SQLite arm is a
         failure here rather than at a deployment's next fresh install."""
-        assert "CREATE TABLE" in str(
-            CreateTable(Base.metadata.tables[table_name]).compile(dialect=SQLITE)
-        )
+        assert "CREATE TABLE" in str(CreateTable(Base.metadata.tables[table_name]).compile(dialect=SQLITE))
 
 
 class TestEveryNulArmDroppedOnACharacterColumn:
@@ -929,9 +903,7 @@ class TestEveryNulArmDroppedOnACharacterColumn:
         repository names, so the exception is asserted rather than left to be
         tidied away."""
         element = next(
-            one
-            for _, name, one in _dialect_checks()
-            if name == "ck_catalogue_credentials_envelope"
+            one for _, name, one in _dialect_checks() if name == "ck_catalogue_credentials_envelope"
         )
 
         assert "char(0)" not in element.sqlite
@@ -990,8 +962,7 @@ class TestNoSqliteArmLostAClause:
         each name is what makes this bite.
         """
         extra = {
-            constraint: self._conjuncts(element.sqlite)
-            - self._conjuncts(element.postgresql)
+            constraint: self._conjuncts(element.sqlite) - self._conjuncts(element.postgresql)
             for _, constraint, element in _dialect_checks()
             if self._conjuncts(element.sqlite) != self._conjuncts(element.postgresql)
         }
@@ -1018,9 +989,7 @@ class TestNoSqliteArmLostAClause:
         enforces the type" is the honest sounding reason for deleting it from
         both."""
         element = next(
-            one
-            for _, name, one in _dialect_checks()
-            if name == "ck_catalogue_targets_use_attribute"
+            one for _, name, one in _dialect_checks() if name == "ck_catalogue_targets_use_attribute"
         )
 
         assert "typeof(isbn_attribute) = 'integer'" in element.sqlite
@@ -1035,11 +1004,7 @@ class TestTheCatalogueTargetsBooleanIsSpelledPerEngine:
     """
 
     def test_both_arms(self):
-        element = next(
-            one
-            for _, name, one in _dialect_checks()
-            if name == "ck_catalogue_targets_isbn_claim"
-        )
+        element = next(one for _, name, one in _dialect_checks() if name == "ck_catalogue_targets_isbn_claim")
 
         assert element.sqlite == "requires_isbn_claim = 1 OR source = 'dnb'"
         assert element.postgresql == "requires_isbn_claim OR source = 'dnb'"

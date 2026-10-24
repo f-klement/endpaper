@@ -236,6 +236,7 @@ Useful variants:
 |---|---|
 | `uv run pytest --cov` | Backend coverage report |
 | `uv run ruff check .` | Backend lint |
+| `uv run ruff format --check --config pyproject.toml .` | Backend formatting; drop `--check` to apply it |
 | `uv run mypy .` | Backend type check (strict) |
 | `bun run api:generate` | Regenerate the API client from the backend schema |
 | `bun run test:watch` | Re-run frontend tests on change |

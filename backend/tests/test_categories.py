@@ -79,21 +79,15 @@ class TestTheJoinCapsTheCountForAProducer:
     def test_the_cap_is_the_default(self) -> None:
         """The arm that removes the duty: a producer that passes nothing is
         capped, so the next caller of the join cannot forget the count."""
-        assert join_categories(["a"] * 40) == CATEGORY_SEPARATOR.join(
-            ["a"] * MAX_CATEGORIES_PER_BOOK
-        )
+        assert join_categories(["a"] * 40) == CATEGORY_SEPARATOR.join(["a"] * MAX_CATEGORIES_PER_BOOK)
 
     def test_without_a_limit_nothing_is_truncated(self) -> None:
         """The opt out the Google adapter takes, because `as_match` caps after it."""
-        assert join_categories(["a"] * 40, limit=None) == CATEGORY_SEPARATOR.join(
-            ["a"] * 40
-        )
+        assert join_categories(["a"] * 40, limit=None) == CATEGORY_SEPARATOR.join(["a"] * 40)
 
     def test_a_list_inside_the_limit_is_untouched(self) -> None:
         """The false refusal the cap could have bought."""
-        assert join_categories(["a"] * 32, limit=32) == CATEGORY_SEPARATOR.join(
-            ["a"] * 32
-        )
+        assert join_categories(["a"] * 32, limit=32) == CATEGORY_SEPARATOR.join(["a"] * 32)
 
     def test_the_drop_runs_before_the_truncation(self) -> None:
         """`bounded_headings`' rule, and the arm that separates the two orders.
@@ -133,16 +127,12 @@ class TestTheListFormIsWhatAReaderGetsBack:
 
     @pytest.mark.property
     @given(subjects=_SUBJECTS, limit=st.sampled_from([None, 0, 1, 3, 32]))
-    def test_the_list_equals_the_split_of_the_join(
-        self, subjects: list[str], limit: int | None
-    ) -> None:
+    def test_the_list_equals_the_split_of_the_join(self, subjects: list[str], limit: int | None) -> None:
         bare = CATEGORY_SEPARATOR.strip()
         storable = [subject for subject in subjects if bare not in subject]
         capped = storable if limit is None else storable[:limit]
 
-        assert kept_categories(subjects, limit=limit) == split_categories(
-            CATEGORY_SEPARATOR.join(capped)
-        )
+        assert kept_categories(subjects, limit=limit) == split_categories(CATEGORY_SEPARATOR.join(capped))
 
 
 class TestARequestEntryCarryingTheSeparatorIsRefused:
@@ -168,13 +158,7 @@ def test_the_module_imports_nothing_from_the_application() -> None:
         for node in ast.walk(tree)
         if isinstance(node, ast.Import)
         for alias in node.names
-    } | {
-        (node.module or "").split(".")[0]
-        for node in ast.walk(tree)
-        if isinstance(node, ast.ImportFrom)
-    }
+    } | {(node.module or "").split(".")[0] for node in ast.walk(tree) if isinstance(node, ast.ImportFrom)}
 
     assert imported, "the walk found no import at all, so it is looking at nothing"
-    assert imported <= set(sys.stdlib_module_names), sorted(
-        imported - set(sys.stdlib_module_names)
-    )
+    assert imported <= set(sys.stdlib_module_names), sorted(imported - set(sys.stdlib_module_names))

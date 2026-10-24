@@ -31,6 +31,13 @@ import sources
 from tests.bindings import SourceNames
 from tests.corpus import application_sources
 
+TREE_GUARDS = {
+    "TestAnUnauthenticatedCallerIsNeverToldAboutTheSettings": ("application_sources",),
+    "TestOnlyTheAccessDoorAsksACatalogue": ("application_sources",),
+    "TestOnlyTheAccessDoorBuildsAnAccess": ("application_sources",),
+    "TestTheDoorCannotReachABook": ("application_sources",),
+}
+
 #: A value shaped like a secret, for asserting that something does not print.
 #:
 #: Not a real key and not a real login: this file publishes to the mirror.
@@ -475,9 +482,7 @@ class TestTheDoorSaysNothingItWasNotGiven:
         secret = _A_KEY_SHAPED_VALUE
         plan = sources.Plan(preferences=())
         built = [
-            catalogue_access.Enquiry(
-                _access=metadata.Access(plan=plan, api_key=secret, logins={})
-            ),
+            catalogue_access.Enquiry(_access=metadata.Access(plan=plan, api_key=secret, logins={})),
             catalogue_access.GoogleVolumes(_plan=plan, _api_key=secret),
         ]
         public = {
@@ -489,8 +494,7 @@ class TestTheDoorSaysNothingItWasNotGiven:
         }
 
         assert public == {type(one).__name__ for one in built}, (
-            f"{public} is not the set this sweep builds, so a public type here is "
-            "printing unchecked"
+            f"{public} is not the set this sweep builds, so a public type here is printing unchecked"
         )
         for one in built:
             assert secret not in render(one), f"{type(one).__name__} leaked its key"
@@ -532,8 +536,7 @@ class TestTheDoorCannotReachABook:
                     continue
                 checked += 1
                 annotations = {
-                    str(parameter.annotation)
-                    for parameter in inspect.signature(function).parameters.values()
+                    str(parameter.annotation) for parameter in inspect.signature(function).parameters.values()
                 }
                 assert not any("User" in one for one in annotations), (
                     f"{owner.__name__}.{name} takes a User, so this module can "
@@ -542,9 +545,7 @@ class TestTheDoorCannotReachABook:
 
         # Both constructors plus every instance method, or the loop above skipped the
         # members it exists to read.
-        assert checked == sum(
-            len(names) for names in TestNeitherAskingTypeWidens.SURFACE.values()
-        )
+        assert checked == sum(len(names) for names in TestNeitherAskingTypeWidens.SURFACE.values())
 
     def test_the_module_imports_no_model(self):
         """The refusal in this module's docstring, given an enforcement.
@@ -557,15 +558,8 @@ class TestTheDoorCannotReachABook:
         """
         tree = ast.parse(application_sources()[DOOR])
         imported = {
-            node.module
-            for node in ast.walk(tree)
-            if isinstance(node, ast.ImportFrom) and node.module
-        } | {
-            entry.name
-            for node in ast.walk(tree)
-            if isinstance(node, ast.Import)
-            for entry in node.names
-        }
+            node.module for node in ast.walk(tree) if isinstance(node, ast.ImportFrom) and node.module
+        } | {entry.name for node in ast.walk(tree) if isinstance(node, ast.Import) for entry in node.names}
 
         assert "models" not in imported, (
             f"{DOOR} imports from models. Which book to ask about is the handler's "
@@ -648,10 +642,7 @@ class TestABareCatalogueIsAudible:
         access = metadata.Access(
             plan=plan,
             api_key="",
-            logins={
-                source: _StubLogin()
-                for source in settings_store.sources_whose_door_carries_a_login()
-            },
+            logins={source: _StubLogin() for source in settings_store.sources_whose_door_carries_a_login()},
         )
 
         with caplog.at_level(logging.WARNING, logger=catalogue_access.logger.name):
@@ -708,10 +699,7 @@ class TestEachDoorChargesItsOwnLimiter:
         Sharing would let one backfill exhaust a Member's scanning budget, which is
         the reason `identifier_backfill_limiter` exists at all.
         """
-        assert (
-            ratelimit.metadata_limiter
-            is not ratelimit.identifier_backfill_limiter
-        )
+        assert ratelimit.metadata_limiter is not ratelimit.identifier_backfill_limiter
 
 
 class TestALocallyRefusedRequestSpendsNoBudget:
@@ -744,9 +732,7 @@ class TestALocallyRefusedRequestSpendsNoBudget:
         assert res.status_code == 400
         assert self._charged(member) == 0
 
-    def test_a_book_with_no_isbn_is_refused_before_the_charge(
-        self, client, member, make_book
-    ):
+    def test_a_book_with_no_isbn_is_refused_before_the_charge(self, client, member, make_book):
         book = make_book(member["headers"], title="No barcode here")
 
         res = client.put(f"/api/books/{book['id']}/refresh", headers=member["headers"])
@@ -780,9 +766,7 @@ class TestAnUnauthenticatedCallerIsNeverToldAboutTheSettings:
             ("get", "/api/books/1/enrich/candidates"),
         ],
     )
-    def test_no_route_answers_a_refusal_to_a_caller_with_no_session(
-        self, client, method, path
-    ):
+    def test_no_route_answers_a_refusal_to_a_caller_with_no_session(self, client, method, path):
         res = getattr(client, method)(path)
 
         assert res.status_code == 401, (

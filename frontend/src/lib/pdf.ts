@@ -362,7 +362,14 @@ interface PdfArray {
 }
 
 type PdfValue =
-  number | boolean | null | PdfName | PdfString | PdfRef | PdfDict | PdfArray;
+  | number
+  | boolean
+  | null
+  | PdfName
+  | PdfString
+  | PdfRef
+  | PdfDict
+  | PdfArray;
 
 function isDict(value: PdfValue): value is PdfDict {
   return typeof value === "object" && value !== null && value.kind === "dict";

@@ -31,6 +31,10 @@ from config import ALLOWED_IMAGE_EXTENSIONS, COVERS_DIR
 from tests.corpus import application_sources
 from tests.helpers import JPEG_BYTES, NOT_AN_IMAGE, PNG_BYTES, WEBP_BYTES
 
+TREE_GUARDS = {
+    "TestTheDirectoryHasOneOwner": ("application_sources",),
+}
+
 #: The module that defines where the directory is, and the module that owns it.
 #:
 #: Stated as the exclusion rather than as a list of the modules that are allowed
@@ -266,9 +270,7 @@ class TestRestoringFromAnArchive:
 
         assert list(covers_dir.iterdir()) == []
 
-    def test_it_refuses_a_destination_that_is_a_link_out_of_the_directory(
-        self, covers_dir, tmp_path
-    ):
+    def test_it_refuses_a_destination_that_is_a_link_out_of_the_directory(self, covers_dir, tmp_path):
         """The containment arm, which no name above reaches.
 
         Every refusal above is the name check one line earlier, so the
@@ -300,9 +302,7 @@ class TestFindingWhatIsStored:
 
         assert cover_store.path_of(7) == covers_dir / "7.webp"
 
-    def test_two_formats_of_one_book_resolve_the_same_way_every_time(
-        self, covers_dir, monkeypatch
-    ):
+    def test_two_formats_of_one_book_resolve_the_same_way_every_time(self, covers_dir, monkeypatch):
         """A restore can leave two, and `ALLOWED_IMAGE_EXTENSIONS` is a frozenset.
 
         Re-presenting the allowlist in a different order is what a second process
@@ -415,9 +415,7 @@ class TestServingOne:
             (covers_dir / "sub" / "1.jpg").unlink()
             (covers_dir / "sub").rmdir()
 
-    def test_a_cover_that_is_a_link_out_of_the_directory_is_not_served(
-        self, covers_dir, tmp_path
-    ):
+    def test_a_cover_that_is_a_link_out_of_the_directory_is_not_served(self, covers_dir, tmp_path):
         """Nothing this app writes creates one, so this is about what a cover
         file is allowed to be rather than about a caller."""
         outside = tmp_path / "elsewhere.jpg"

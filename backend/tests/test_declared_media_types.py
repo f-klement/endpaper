@@ -85,9 +85,7 @@ def _routes_answering_with_a_body_of_their_own() -> list[Any]:
     appends a wrapper rather than splicing the child's routes in.
     """
     return [
-        route
-        for route in main.iter_api_routes(main.app.routes)
-        if _answers_with_a_body_of_its_own(route)
+        route for route in main.iter_api_routes(main.app.routes) if _answers_with_a_body_of_its_own(route)
     ]
 
 
@@ -198,9 +196,7 @@ def _answers_without_a_body(key: str) -> bool:
     exactly one key.
     """
     return not (
-        _written_by_the_framework(key)
-        or _the_refusal_rules_business(key)
-        or _carries_a_representation(key)
+        _written_by_the_framework(key) or _the_refusal_rules_business(key) or _carries_a_representation(key)
     )
 
 
@@ -216,9 +212,7 @@ def _documented_answers(route: Any, schema: dict[str, Any]) -> list[tuple[str, s
     for that route.
     """
     operations = schema["paths"][route.path]
-    documented = sorted(
-        method for method in (name.lower() for name in route.methods) if method in operations
-    )
+    documented = sorted(method for method in (name.lower() for name in route.methods) if method in operations)
 
     assert documented, (
         f"{_label(route)} is documented and this schema files no operation "
@@ -263,8 +257,7 @@ def _bodies_declaring_json_they_do_not_send(route: Any, schema: dict[str, Any]) 
     if getattr(_answer_class(route), "media_type", None) == JSON:
         return []
     return [
-        f"{_answer_label(route, method, key)} declares "
-        f"{sorted(_content(route, schema, method, key))}"
+        f"{_answer_label(route, method, key)} declares {sorted(_content(route, schema, method, key))}"
         for method, key in _documented_answers(route, schema)
         if _carries_a_representation(key) and JSON in _content(route, schema, method, key)
     ]
@@ -280,8 +273,7 @@ def _non_bodies_declaring_content(route: Any, schema: dict[str, Any]) -> list[st
     above, so `TestTheCellsNoLiveRouteReaches` is what holds it.
     """
     return [
-        f"{_answer_label(route, method, key)} declares "
-        f"{sorted(_content(route, schema, method, key))}"
+        f"{_answer_label(route, method, key)} declares {sorted(_content(route, schema, method, key))}"
         for method, key in _documented_answers(route, schema)
         if _answers_without_a_body(key) and _content(route, schema, method, key)
     ]
@@ -386,8 +378,7 @@ class TestARouteThatSendsBytesDeclaresThem:
         unannotated = [
             _label(route)
             for route in main.iter_api_routes(main.app.routes)
-            if route.include_in_schema
-            and "return" not in typing.get_type_hints(route.endpoint)
+            if route.include_in_schema and "return" not in typing.get_type_hints(route.endpoint)
         ]
 
         assert unannotated == [], (
@@ -417,8 +408,7 @@ class TestARouteThatSendsBytesDeclaresThem:
 
         assert silent == [], (
             "These routes send a body and the schema declares no content type "
-            "for it, so a reader of the document learns less than before:\n  "
-            + "\n  ".join(silent)
+            "for it, so a reader of the document learns less than before:\n  " + "\n  ".join(silent)
         )
 
     def test_none_of_them_declares_json(self) -> None:
@@ -570,9 +560,7 @@ class TestTheCellsNoLiveRouteReaches:
         return next(
             route
             for route in app.routes
-            if isinstance(route, APIRoute)
-            and route.path == path
-            and _answers_with_a_body_of_its_own(route)
+            if isinstance(route, APIRoute) and route.path == path and _answers_with_a_body_of_its_own(route)
         )
 
     @classmethod
@@ -699,15 +687,11 @@ class TestTheDeclarationIsTheOneHomeRead:
     def test_the_backup_declares_the_type_it_sends(self) -> None:
         assert self._declared("/api/backup", "200") == {ARCHIVE_MEDIA_TYPE}
 
-    @pytest.mark.parametrize(
-        "path", ["/covers/{book_id}.{extension}", "/covers/login_bg.{extension}"]
-    )
+    @pytest.mark.parametrize("path", ["/covers/{book_id}.{extension}", "/covers/login_bg.{extension}"])
     def test_a_cover_declares_every_type_the_store_serves(self, path: str) -> None:
         assert self._declared(path, "200") == set(covers_router._MEDIA_TYPES.values())
 
-    @pytest.mark.parametrize(
-        "path", ["/covers/{book_id}.{extension}", "/covers/login_bg.{extension}"]
-    )
+    @pytest.mark.parametrize("path", ["/covers/{book_id}.{extension}", "/covers/login_bg.{extension}"])
     def test_a_cover_declares_the_envelope_two_ranges_arrive_in(self, path: str) -> None:
         """**A separate arm rather than a second parameter on the one above,
         because the two sets differ.** A single range sends the file's own
@@ -739,16 +723,12 @@ class TestTheWireIsWhatTheDocumentSays:
         rather than a general answer: these arms drive named paths and check
         the status first."""
         sent = response.headers["content-type"].split(";")[0].strip()
-        declared = set(
-            main.app.openapi()["paths"][path]["get"]["responses"][key]["content"]
-        )
+        declared = set(main.app.openapi()["paths"][path]["get"]["responses"][key]["content"])
         assert sent in declared, f"{path} [{key}] sent {sent!r}, declares {sorted(declared)}"
 
     @staticmethod
     def _a_stored_cover(client, admin) -> str:
-        book_id = client.post(
-            "/api/books", json={"title": "Dune"}, headers=admin["headers"]
-        ).json()["id"]
+        book_id = client.post("/api/books", json={"title": "Dune"}, headers=admin["headers"]).json()["id"]
         return client.post(
             f"/api/books/{book_id}/cover",
             files={"file": ("cover.png", PNG_BYTES, "image/png")},
@@ -756,15 +736,11 @@ class TestTheWireIsWhatTheDocumentSays:
         ).json()["cover_url"]
 
     @pytest.mark.parametrize("fmt", sorted(EXPORT_MEDIA_TYPES))
-    def test_every_export_arm_sends_a_declared_type(
-        self, client, admin, db, make_book, fmt
-    ) -> None:
+    def test_every_export_arm_sends_a_declared_type(self, client, admin, db, make_book, fmt) -> None:
         settings_store.set_value(db, SettingKey.LIBRARY_MODE, "true")
         make_book(admin["headers"], title="Stoner")
 
-        response = client.get(
-            "/api/books/export", params={"format": fmt}, headers=admin["headers"]
-        )
+        response = client.get("/api/books/export", params={"format": fmt}, headers=admin["headers"])
 
         assert response.status_code == 200, response.text
         self._assert_declared(response, "/api/books/export", "200")
@@ -783,9 +759,7 @@ class TestTheWireIsWhatTheDocumentSays:
         assert response.status_code == 200
         self._assert_declared(response, "/covers/{book_id}.{extension}", "200")
 
-    def test_one_range_sends_a_type_declared_under_the_partial(
-        self, client, admin, covers_dir
-    ) -> None:
+    def test_one_range_sends_a_type_declared_under_the_partial(self, client, admin, covers_dir) -> None:
         """`FileResponse` handles `Range` after this module's route has
         returned, so the 206 is the framework's answer and not one any code
         here writes. The status is asserted first: an arm reading the type off
@@ -797,9 +771,7 @@ class TestTheWireIsWhatTheDocumentSays:
         assert response.status_code == 206, response.status_code
         self._assert_declared(response, "/covers/{book_id}.{extension}", "206")
 
-    def test_two_ranges_send_a_type_the_two_hundred_does_not_declare(
-        self, client, admin, covers_dir
-    ) -> None:
+    def test_two_ranges_send_a_type_the_two_hundred_does_not_declare(self, client, admin, covers_dir) -> None:
         """**The arm the 206 declaration exists for.** A single range answers
         the file's own image type, so declaring the 200's content set under the
         206 would be right for the request somebody checking this would type
@@ -829,9 +801,7 @@ class TestTheWireIsWhatTheDocumentSays:
 
         sent = response.headers["content-type"].split(";")[0].strip()
         assert sent not in set(
-            main.app.openapi()["paths"]["/covers/{book_id}.{extension}"]["get"]["responses"][
-                "200"
-            ]["content"]
+            main.app.openapi()["paths"]["/covers/{book_id}.{extension}"]["get"]["responses"]["200"]["content"]
         ), (
             f"a two range request sent {sent!r}, which the 200 declares too, so the "
             "two keys no longer differ and this arm has stopped being about "

@@ -205,9 +205,7 @@ def _normalise_would_drop_an_alphanumeric(text: str) -> bool:
     before this and after, because the deletion shortens the candidate past
     every length test.
     """
-    return any(
-        character.isalnum() and not character.isascii() for character in text
-    )
+    return any(character.isalnum() and not character.isascii() for character in text)
 
 
 def _isbn_parts(text: str) -> tuple[str, bool]:
@@ -376,11 +374,7 @@ class Subfields(dict[str, str]):
         and the reason a list of brackets is the wrong shape of fix.
         """
         whole = self.get("a", "")
-        return (
-            "q" in self
-            or _isbn_parts(whole)[1]
-            or _normalise_would_drop_an_alphanumeric(whole)
-        )
+        return "q" in self or _isbn_parts(whole)[1] or _normalise_would_drop_an_alphanumeric(whole)
 
     def gnd_identifier(self) -> str | None:
         """The GND number a field's `$0` carries, or None if it carries none.
@@ -693,10 +687,7 @@ def _marc_carrier_is_book(record: ElementTree.Element) -> bool:
     `Zsfassung + 1 CD-ROM`) carry `007 tu` and nothing else.
     """
     leader = record.findtext(f"{_MARC}leader") or ""
-    if (
-        len(leader) > _RECORD_TYPE_POSITION
-        and leader[_RECORD_TYPE_POSITION] in _NOT_A_BOOK_RECORD_TYPES
-    ):
+    if len(leader) > _RECORD_TYPE_POSITION and leader[_RECORD_TYPE_POSITION] in _NOT_A_BOOK_RECORD_TYPES:
         return False
 
     carriers: list[str] = []
@@ -729,9 +720,7 @@ def _marc_carrier_is_book(record: ElementTree.Element) -> bool:
     # measurement that it costs nothing, 0 of the 1,484 records carrying a text
     # 007 also carry a refusing leader/06 or 008/23. Without this clause the 48
     # Austrian Books Online records are refused, and they are real prints.
-    return _TEXT_CARRIER in carriers or not any(
-        carrier in _NOT_A_BOOK_CARRIERS for carrier in carriers
-    )
+    return _TEXT_CARRIER in carriers or not any(carrier in _NOT_A_BOOK_CARRIERS for carrier in carriers)
 
 
 #: `856`'s second indicator, where it states a relation. Blank and `8` do not.
@@ -877,9 +866,7 @@ class Fields:
         coded it wrongly, which the DNB does, writing `338 $a Band` on three
         records whose 007, 008 and extent all say online.
         """
-        return _marc_carrier_is_book(self._record) and is_physical_book(
-            self.extent(), title
-        )
+        return _marc_carrier_is_book(self._record) and is_physical_book(self.extent(), title)
 
     def controlled_subjects(self) -> tuple[list[Subject], list[Heading]]:
         """The controlled subject headings, as plain subjects and as GND rows.
@@ -952,9 +939,7 @@ class Fields:
                 if not heading:
                     continue
                 vocabulary = entry.subject_vocabulary(tag)
-                subjects.append(
-                    Subject(heading, vocabulary, entry.subject_identifier())
-                )
+                subjects.append(Subject(heading, vocabulary, entry.subject_identifier()))
                 number = entry.gnd_identifier()
                 if number is not None:
                     headings.append(
@@ -1011,9 +996,7 @@ class Fields:
         """
         entries = [entry for entry in self.get("020") if "a" in entry]
         unqualified = [
-            entry
-            for entry in entries
-            if entry.stated_isbn() is not None and not entry.isbn_is_qualified()
+            entry for entry in entries if entry.stated_isbn() is not None and not entry.isbn_is_qualified()
         ]
         return unqualified or entries
 
@@ -1145,12 +1128,7 @@ class Fields:
     def publisher(self) -> str | None:
         """The publisher, from the RDA 264 or the older 260."""
         return next(
-            (
-                entry["b"].rstrip(",")
-                for tag in ("264", "260")
-                for entry in self.get(tag)
-                if entry.get("b")
-            ),
+            (entry["b"].rstrip(",") for tag in ("264", "260") for entry in self.get(tag) if entry.get("b")),
             None,
         )
 

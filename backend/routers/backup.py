@@ -104,9 +104,7 @@ async def restore_backup(
     db: DbSession,
     current_user: Annotated[User, Depends(require_admin)],
     file: Annotated[UploadFile, File()],
-    confirm: Annotated[
-        bool, Query(description="Must be true. Restoring replaces everything.")
-    ] = False,
+    confirm: Annotated[bool, Query(description="Must be true. Restoring replaces everything.")] = False,
 ) -> RestoreResult:
     """Replace the catalogue with the contents of a backup.
 
@@ -150,6 +148,4 @@ async def restore_backup(
     # exists to prevent. `restore()` keys its counts by table name and the
     # fields are named after those tables; a field with no matching key reads 0,
     # which is what the enumeration did anyway.
-    return RestoreResult(
-        **{name: restored.get(name, 0) for name in RestoreResult.model_fields}
-    )
+    return RestoreResult(**{name: restored.get(name, 0) for name in RestoreResult.model_fields})

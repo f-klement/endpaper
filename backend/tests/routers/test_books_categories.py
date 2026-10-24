@@ -49,15 +49,11 @@ class TestAddingABookWithSubjects:
         assert res.status_code == 201
         assert stored(res.json()["id"], db) == "Science Fiction; Dystopia"
 
-    def test_a_book_added_without_any_stores_a_null_rather_than_an_empty_string(
-        self, client, admin, db
-    ):
+    def test_a_book_added_without_any_stores_a_null_rather_than_an_empty_string(self, client, admin, db):
         """A stored empty string reads back as no subjects and sorts differently
         from a row that never had any, so the default has to reach the column as
         a null."""
-        res = client.post(
-            "/api/books", json={"title": "Untagged"}, headers=admin["headers"]
-        )
+        res = client.post("/api/books", json={"title": "Untagged"}, headers=admin["headers"])
 
         assert res.status_code == 201
         assert stored(res.json()["id"], db) is None
@@ -105,9 +101,7 @@ class TestAddingABookWithSubjects:
 
         assert res.status_code == 422
 
-    def test_a_subject_is_normalised_rather_than_refused_for_its_spacing(
-        self, client, admin, db
-    ):
+    def test_a_subject_is_normalised_rather_than_refused_for_its_spacing(self, client, admin, db):
         """A run of spaces and a control character are a producer's noise rather
         than an assertion, so they are removed. Only the separator is refused."""
         res = client.post(
@@ -119,9 +113,7 @@ class TestAddingABookWithSubjects:
         assert res.status_code == 201
         assert res.json()["categories"] == ["Science Fiction"]
 
-    def test_a_blank_entry_between_two_subjects_drops_and_the_rest_survive(
-        self, client, admin, db
-    ):
+    def test_a_blank_entry_between_two_subjects_drops_and_the_rest_survive(self, client, admin, db):
         """An entry with nothing left after normalising is dropped, not
         refused and not kept as an empty member.
 
@@ -150,9 +142,7 @@ class TestAddingABookWithSubjects:
         assert res.status_code == 201, res.text
         assert stored(res.json()["id"], db) == "Science Fiction; Dystopia"
 
-    def test_the_subjects_a_member_sent_read_back_unchanged(
-        self, client, admin, make_book
-    ):
+    def test_the_subjects_a_member_sent_read_back_unchanged(self, client, admin, make_book):
         """The round trip through the column, over the route rather than over the
         helpers.
 
@@ -170,9 +160,7 @@ class TestAddingABookWithSubjects:
 
         assert res.json()["categories"] == ["Fiction, general"]
 
-    def test_a_subject_spelled_like_a_curated_tag_still_mints_nothing(
-        self, client, admin, db
-    ):
+    def test_a_subject_spelled_like_a_curated_tag_still_mints_nothing(self, client, admin, db):
         """The ruling: stored, never interpreted, and this is its sharpest case.
 
         "Science Fiction" is a **seeded** tag name, so a subject spelled exactly
@@ -245,25 +233,19 @@ class TestEditingTheSubjectsOfABookThatExists:
     def test_an_empty_list_clears_them(self, client, admin, db):
         book_id = self._a_book_with_subjects(client, admin)
 
-        res = client.patch(
-            f"/api/books/{book_id}", json={"categories": []}, headers=admin["headers"]
-        )
+        res = client.patch(f"/api/books/{book_id}", json={"categories": []}, headers=admin["headers"])
 
         assert res.status_code == 200, res.text
         assert res.json()["categories"] == []
 
-    def test_a_cleared_column_holds_a_null_rather_than_an_empty_string(
-        self, client, admin, db
-    ):
+    def test_a_cleared_column_holds_a_null_rather_than_an_empty_string(self, client, admin, db):
         """The half the response cannot show. A hand rolled join at the route
         would store `""`, which reads back as no subjects and sorts apart from
         a row that never had any; `categories.join_categories` answers `None`
         for an empty list, which is what the create door already stores."""
         book_id = self._a_book_with_subjects(client, admin)
 
-        client.patch(
-            f"/api/books/{book_id}", json={"categories": []}, headers=admin["headers"]
-        )
+        client.patch(f"/api/books/{book_id}", json={"categories": []}, headers=admin["headers"])
 
         assert stored(book_id, db) is None
 
@@ -272,16 +254,12 @@ class TestEditingTheSubjectsOfABookThatExists:
         A body that edits the title must not clear the subjects."""
         book_id = self._a_book_with_subjects(client, admin)
 
-        res = client.patch(
-            f"/api/books/{book_id}", json={"title": "Island"}, headers=admin["headers"]
-        )
+        res = client.patch(f"/api/books/{book_id}", json={"title": "Island"}, headers=admin["headers"])
 
         assert res.status_code == 200, res.text
         assert stored(book_id, db) == "Science Fiction; Dystopia"
 
-    def test_a_null_is_refused_rather_than_taken_as_a_second_clear(
-        self, client, admin
-    ):
+    def test_a_null_is_refused_rather_than_taken_as_a_second_clear(self, client, admin):
         """One act, one spelling. Every other field here clears on a null, so
         a caller will try it: a 422 says which spelling this column takes
         instead of accepting both and letting the two diverge."""
@@ -295,9 +273,7 @@ class TestEditingTheSubjectsOfABookThatExists:
 
         assert res.status_code == 422, res.text
 
-    def test_a_subject_carrying_the_separator_is_refused_at_this_door_too(
-        self, client, admin, db
-    ):
+    def test_a_subject_carrying_the_separator_is_refused_at_this_door_too(self, client, admin, db):
         """The second door onto one column applies the same rule, because both
         validators call `schemas.book.normalised_subjects`. Stored unsplit it
         would read back as two subjects nobody asserted."""
@@ -323,9 +299,7 @@ class TestEditingTheSubjectsOfABookThatExists:
 
         assert res.status_code == 422, res.text
 
-    def test_one_subject_past_the_entry_width_is_refused_at_this_door_too(
-        self, client, admin
-    ):
+    def test_one_subject_past_the_entry_width_is_refused_at_this_door_too(self, client, admin):
         book_id = self._a_book_with_subjects(client, admin)
 
         res = client.patch(
@@ -336,9 +310,7 @@ class TestEditingTheSubjectsOfABookThatExists:
 
         assert res.status_code == 422, res.text
 
-    def test_a_blank_entry_between_two_subjects_drops_at_this_door_too(
-        self, client, admin, db
-    ):
+    def test_a_blank_entry_between_two_subjects_drops_at_this_door_too(self, client, admin, db):
         """The same rule at the second door, and the same two halves.
 
         Both validators call one function, so this is the arm that says the

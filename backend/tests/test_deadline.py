@@ -23,6 +23,11 @@ import deadline
 from deadline import in_, left
 from tests.corpus import BACKEND, application_modules
 
+TREE_GUARDS = {
+    "TestNoModuleWorksOutWhatIsLeftForItself": ("application_modules",),
+    "TestTheTwoWordsDoNotMix": ("application_modules",),
+}
+
 
 class TestADeadlineIsAnAbsoluteMonotonicTimestamp:
     def test_it_names_a_moment_that_many_seconds_ahead(self):
@@ -96,8 +101,7 @@ class TestTheDoorIsTwoFunctionsWide:
         }
 
         assert public == {"in_", "left"}, (
-            "a name was added to the deadline door; read this class's "
-            "docstring before keeping it"
+            "a name was added to the deadline door; read this class's docstring before keeping it"
         )
 
     def test_neither_of_them_takes_a_second_argument(self):
@@ -110,8 +114,7 @@ class TestTheDoorIsTwoFunctionsWide:
         accident of typing rather than a rule, so both are asserted here.
         """
         taken = {
-            name: list(inspect.signature(getattr(deadline, name)).parameters)
-            for name in ("in_", "left")
+            name: list(inspect.signature(getattr(deadline, name)).parameters) for name in ("in_", "left")
         }
 
         assert taken == {"in_": ["seconds"], "left": ["deadline"]}
@@ -143,11 +146,7 @@ def _modules_that_could_read_a_clock() -> list[Path]:
     over it rather than a reason to copy it. The exclusion here is a path and
     not a basename for the reason `test_covers._our_modules` states.
     """
-    return [
-        path
-        for path in application_modules()
-        if path.relative_to(BACKEND).as_posix() != "deadline.py"
-    ]
+    return [path for path in application_modules() if path.relative_to(BACKEND).as_posix() != "deadline.py"]
 
 
 def _works_out_what_is_left(tree: ast.AST) -> list[int]:
@@ -209,8 +208,7 @@ class TestNoModuleWorksOutWhatIsLeftForItself:
         ]
 
         assert offenders == [], (
-            "this works out what is left of a deadline by hand; ask "
-            f"deadline.left: {offenders}"
+            f"this works out what is left of a deadline by hand; ask deadline.left: {offenders}"
         )
 
     @pytest.mark.parametrize(
@@ -245,8 +243,6 @@ class TestNoModuleWorksOutWhatIsLeftForItself:
 
         assert {"authority.py", "covers.py", "fetch.py", "opds.py", "z3950.py"} <= walked
         assert "deadline.py" not in walked
-
-
 
 
 #: Words that make a name a length of time rather than a moment.
@@ -367,14 +363,10 @@ def _what_this_module_imported(
     assigned: set[str] = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
-            modules |= {
-                alias.asname or alias.name: alias.name for alias in node.names if alias.name in ours
-            }
+            modules |= {alias.asname or alias.name: alias.name for alias in node.names if alias.name in ours}
         elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
             if node.module in ours:
-                functions |= {
-                    alias.asname or alias.name: (node.module, alias.name) for alias in node.names
-                }
+                functions |= {alias.asname or alias.name: (node.module, alias.name) for alias in node.names}
             modules |= {
                 alias.asname or alias.name: f"{node.module}.{alias.name}"
                 for alias in node.names
@@ -386,9 +378,7 @@ def _what_this_module_imported(
             assigned.add(node.arg)
         elif not isinstance(node, ast.alias):
             assigned |= {
-                bound
-                for field in ("name", "rest")
-                if isinstance(bound := getattr(node, field, None), str)
+                bound for field in ("name", "rest") if isinstance(bound := getattr(node, field, None), str)
             }
     return (
         {alias: name for alias, name in modules.items() if alias not in assigned},
@@ -396,9 +386,7 @@ def _what_this_module_imported(
     )
 
 
-def _words_crossed(
-    tree: ast.AST, ours: dict[str, dict[str, list[str] | None]]
-) -> list[tuple[int, str]]:
+def _words_crossed(tree: ast.AST, ours: dict[str, dict[str, list[str] | None]]) -> list[tuple[int, str]]:
     """Every argument bound to a slot that means the other thing.
 
     **The keyword arm needs no resolution at all** and is the one with teeth
@@ -417,9 +405,7 @@ def _words_crossed(
     for call in ast.walk(tree):
         if not isinstance(call, ast.Call):
             continue
-        bound: list[tuple[str, ast.expr]] = [
-            (kw.arg, kw.value) for kw in call.keywords if kw.arg is not None
-        ]
+        bound: list[tuple[str, ast.expr]] = [(kw.arg, kw.value) for kw in call.keywords if kw.arg is not None]
         func = call.func
         taken: list[str] | None = None
         if isinstance(func, ast.Name):

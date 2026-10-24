@@ -75,7 +75,7 @@ function insideALiteral(source: string, lang: "ts" | "tsx"): Uint8Array {
  * `keeps every reader out of reach of the network` green at 97 of 97 passing,
  * and the same line written with `\n` failed it.
  *
- * `prettier --check` rewrites all three to `\n` and CI runs it, which is a
+ * `oxfmt --check` rewrites all three to `\n` and CI runs it, which is a
  * mitigation and not the guard: it fails the format job, not the rule.
  *
  * **All four are in a fixture row beside, and the fourth is why that is said

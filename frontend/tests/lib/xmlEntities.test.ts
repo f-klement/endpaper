@@ -182,7 +182,7 @@ function withoutProse(source: string): string {
  * `DOMParser` treats identically, left this file green; probed across 13
  * spellings of the same call, 11 evaded, including
  * `application/xhtml+xml`, a media type held in a constant, and **the line
- * break prettier inserts when the call exceeds the print width**, which is the
+ * break oxfmt inserts when the call exceeds the print width**, which is the
  * one nobody chooses. `new DOMParser(` is one spelling, it is short enough that
  * no formatter breaks it, and every caller has to write it.
  *
@@ -293,7 +293,7 @@ describe("a reader that parses a whole document refuses a declaration first", ()
    * where the scan ran to the end of the source without closing.
    *
    * **A scanner rather than a pattern over syntax**, because three shapes
-   * defeat a pattern here: a nested call's own paren, the line break prettier
+   * defeat a pattern here: a nested call's own paren, the line break oxfmt
    * inserts when a call exceeds the print width, and a quote span that runs
    * across the code sitting between two literals rather than matching either.
    *
@@ -344,7 +344,7 @@ describe("a reader that parses a whole document refuses a declaration first", ()
   /**
    * The last element of an argument list, split at its own top level comma.
    *
-   * **A trailing comma is not an empty last argument.** Prettier writes one
+   * **A trailing comma is not an empty last argument.** oxfmt writes one
    * whenever it breaks a call across lines, and splitting naively answered the
    * empty string for a perfectly good html parse.
    */

@@ -56,9 +56,7 @@ def list_users(db: DbSession, current_user: CurrentUser) -> list[User]:
 
 
 @router.get("/test-accounts", response_model=list[UserOut])
-def list_test_accounts(
-    db: DbSession, current_user: Annotated[User, Depends(require_admin)]
-) -> list[User]:
+def list_test_accounts(db: DbSession, current_user: Annotated[User, Depends(require_admin)]) -> list[User]:
     """The accounts an admin may switch into, and no others.
 
     `switch_targets()`, not the flag alone, so that sentence is true of every
@@ -116,9 +114,7 @@ def create_test_account(
     # a new account with a password on it is the most consequential thing this
     # app writes, and this one is reachable in a mode where no other route can
     # create an account at all.
-    logger.warning(
-        "Admin %r created the test account %r", current_user.username, user.username
-    )
+    logger.warning("Admin %r created the test account %r", current_user.username, user.username)
     return user
 
 
@@ -150,9 +146,7 @@ def get_my_appearance(current_user: CurrentUser) -> AppearanceOut:
 
 
 @router.put("/me/appearance", response_model=AppearanceOut)
-def set_my_appearance(
-    payload: AppearanceUpdate, current_user: CurrentUser, db: DbSession
-) -> AppearanceOut:
+def set_my_appearance(payload: AppearanceUpdate, current_user: CurrentUser, db: DbSession) -> AppearanceOut:
     """Replace the caller's own appearance.
 
     No admin check and no member check, deliberately: a preference about what
@@ -217,11 +211,7 @@ def _refuse_if_the_directory_owns_it(user: User) -> None:
     """
     if not directory_owns_email(user.auth_source):
         return
-    setting = (
-        "PROXY_EMAIL_HEADER"
-        if user.auth_source == AuthMode.PROXY.value
-        else "LDAP_EMAIL_ATTRIBUTE"
-    )
+    setting = "PROXY_EMAIL_HEADER" if user.auth_source == AuthMode.PROXY.value else "LDAP_EMAIL_ATTRIBUTE"
     raise HTTPException(
         status_code=status.HTTP_409_CONFLICT,
         detail=(
@@ -243,9 +233,7 @@ def get_my_email(current_user: CurrentUser) -> MemberEmailOut:
 
 
 @router.put("/me/email", response_model=MemberEmailOut)
-def set_my_email(
-    payload: EmailUpdate, current_user: CurrentUser, db: DbSession
-) -> MemberEmailOut:
+def set_my_email(payload: EmailUpdate, current_user: CurrentUser, db: DbSession) -> MemberEmailOut:
     """Set or clear the caller's own address."""
     _refuse_if_the_directory_owns_it(current_user)
     current_user.email = payload.email
@@ -255,9 +243,7 @@ def set_my_email(
 
 
 @router.get("/emails", response_model=list[MemberEmailOut])
-def list_emails(
-    db: DbSession, current_user: Annotated[User, Depends(require_admin)]
-) -> list[MemberEmailOut]:
+def list_emails(db: DbSession, current_user: Annotated[User, Depends(require_admin)]) -> list[MemberEmailOut]:
     """Every member's address. Admin only.
 
     **Reading was the half of this that was argued about**, and the refused
@@ -270,9 +256,7 @@ def list_emails(
     is a list: a household has a handful of accounts and the admin is looking
     for the empty row.
     """
-    return [
-        _member_email(user) for user in db.query(User).order_by(User.username).all()
-    ]
+    return [_member_email(user) for user in db.query(User).order_by(User.username).all()]
 
 
 # ── Account recovery, and confirming an address ───────────────────────────────
@@ -419,9 +403,7 @@ def get_my_security(db: DbSession, current_user: CurrentUser) -> MySecurityOut:
     reset = accounts.last_completed_reset(db, current_user.id)
     return MySecurityOut(
         password_reset_at=reset.completed_at if reset is not None else None,
-        password_reset_approved_by=(
-            _username(db, reset.approved_by_user_id) if reset is not None else None
-        ),
+        password_reset_approved_by=(_username(db, reset.approved_by_user_id) if reset is not None else None),
         verified_at=current_user.email_verified_at,
         verification_source=(
             VerificationProvenance(current_user.email_verification_source)
@@ -469,10 +451,7 @@ def verify_member(
     if not app_holds_the_password(user):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=(
-                "This account is authenticated elsewhere, so there is nothing "
-                "here to confirm."
-            ),
+            detail=("This account is authenticated elsewhere, so there is nothing here to confirm."),
         )
     # **An account that is already settled is left alone**, and the row is
     # returned unchanged. Re-stamping would overwrite a member's own

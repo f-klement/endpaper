@@ -219,9 +219,7 @@ def _headings_to_add(
     return adds
 
 
-def add_headings(
-    book: Book, headings: Sequence[ClassificationIn], db: Session
-) -> list[str]:
+def add_headings(book: Book, headings: Sequence[ClassificationIn], db: Session) -> list[str]:
     """Add or complete this book's headings. Returns the numbers it **changed**.
 
     **Returning a filled in caption as a change is load bearing**, not

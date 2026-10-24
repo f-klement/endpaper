@@ -326,9 +326,7 @@ class TestResolvingAName:
         shelve(db, user, "Le Guin")
         authorship = Authorship.seen_by(db, user.id)
         authorship.merge([author_key("Le Guin")], "Ursula K. Le Guin", by_user_id=user.id)
-        authorship.merge(
-            [author_key("Ursula K. Le Guin")], "U. K. Le Guin", by_user_id=user.id
-        )
+        authorship.merge([author_key("Ursula K. Le Guin")], "U. K. Le Guin", by_user_id=user.id)
 
         assert len(authorship.book_ids_for("Ursula K. Le Guin")) == 1
 
@@ -432,9 +430,7 @@ class TestStoringWhatACatalogueAsserted:
 
         assert db.query(AuthorIdentifier).count() == 1
 
-    def test_a_catalogue_disagreeing_with_a_stored_value_changes_nothing(
-        self, db, user
-    ):
+    def test_a_catalogue_disagreeing_with_a_stored_value_changes_nothing(self, db, user):
         """The refusal, asserted rather than assumed from the absence of a verb.
 
         Skipped rather than raised here: a refresh must not answer 500 because
@@ -447,9 +443,7 @@ class TestStoringWhatACatalogueAsserted:
             [AuthorityAssertion("Sean P. Kane", AuthorityScheme.GND, "9999")], credited=KANE.name
         )
 
-        assert [row.identifier for row in db.query(AuthorIdentifier).all()] == [
-            "1042243212"
-        ]
+        assert [row.identifier for row in db.query(AuthorIdentifier).all()] == ["1042243212"]
 
     def test_a_record_may_not_deposit_more_rows_than_the_ceiling(self, db, user):
         """A catalogue response has no size cap anywhere in `metadata.py`, and
@@ -465,22 +459,16 @@ class TestStoringWhatACatalogueAsserted:
 
         assert db.query(AuthorIdentifier).count() == MAX_ASSERTIONS_PER_RECORD
 
-    def test_an_identifier_the_column_cannot_hold_is_dropped_not_raised(
-        self, db, user
-    ):
+    def test_an_identifier_the_column_cannot_hold_is_dropped_not_raised(self, db, user):
         """Nothing in a third party record is worth failing a member's refresh
         for. The same call `classifications.bounded_headings` makes for a heading."""
-        long_one = AuthorityAssertion(
-            "Long", AuthorityScheme.GND, "9" * (AUTHORITY_IDENTIFIER_MAX + 1)
-        )
+        long_one = AuthorityAssertion("Long", AuthorityScheme.GND, "9" * (AUTHORITY_IDENTIFIER_MAX + 1))
 
         Authorship.seen_by(db, user.id).record_catalogue_assertions(
             [long_one, KANE], credited=f"Long, {KANE.name}"
         )
 
-        assert [row.identifier for row in db.query(AuthorIdentifier).all()] == [
-            "1042243212"
-        ]
+        assert [row.identifier for row in db.query(AuthorIdentifier).all()] == ["1042243212"]
 
     def test_a_name_that_normalises_to_nothing_is_dropped(self, db, user):
         """An empty key matches no spelling ever, so the row would be
@@ -517,9 +505,7 @@ class TestACandidateIsNotStoredSilently:
                 "Sean P. Kane", AuthorityScheme.GND, "1", by_user_id=user.id
             )
 
-    def test_confirming_a_different_value_over_a_stored_one_is_refused(
-        self, db, user
-    ):
+    def test_confirming_a_different_value_over_a_stored_one_is_refused(self, db, user):
         """The refusal a Member meets, as opposed to the one a catalogue meets.
 
         Raised here because there is somebody to tell. Retyping is the only
@@ -531,9 +517,7 @@ class TestACandidateIsNotStoredSilently:
         authorship.record_catalogue_assertions([KANE], credited=KANE.name)
 
         with pytest.raises(IdentifierConflict):
-            authorship.confirm_identifier(
-                "Sean P. Kane", AuthorityScheme.GND, "9999", by_user_id=user.id
-            )
+            authorship.confirm_identifier("Sean P. Kane", AuthorityScheme.GND, "9999", by_user_id=user.id)
 
         assert db.query(AuthorIdentifier).one().identifier == "1042243212"
 
@@ -733,9 +717,7 @@ class TestAnIdentifierIsRemovableAndNeverEditable:
 
         assert db.query(AuthorIdentifier).one().identifier == "1042243212"
 
-    def test_removing_a_row_you_cannot_see_the_effect_of_raises(
-        self, db, user, other
-    ):
+    def test_removing_a_row_you_cannot_see_the_effect_of_raises(self, db, user, other):
         """Authority rather than secrecy, the same rule `unmerge` applies: the
         page offers this beside the spelling it names, and a row with no such
         spelling on your shelf has no meaning here."""
@@ -823,9 +805,7 @@ class TestAnIdentifierIsPerSpellingNotPerPerson:
 
 
 class TestThePrivacyLineOnTheIdentifierTable:
-    def test_a_row_for_a_spelling_only_on_a_private_book_is_not_listed(
-        self, db, user, other
-    ):
+    def test_a_row_for_a_spelling_only_on_a_private_book_is_not_listed(self, db, user, other):
         """The rows are Library wide, like the aliases, and listing one whose
         spelling survives only on somebody else's Private Book would announce
         that the Book exists."""
@@ -868,44 +848,32 @@ class TestAMergedNameIsNotEvidenceOfAnything:
         Authorship.seen_by(db, other.id).record_catalogue_assertions([KANE], credited=KANE.name)
         return db.query(AuthorIdentifier).one().id
 
-    def test_guessing_a_name_does_not_reveal_a_private_books_identifier(
-        self, db, user, other
-    ):
+    def test_guessing_a_name_does_not_reveal_a_private_books_identifier(self, db, user, other):
         self._strangers_private_identifier(db, other)
         shelve(db, user, "Terry Pratchett")
         authorship = Authorship.seen_by(db, user.id)
 
-        authorship.merge(
-            [author_key("Terry Pratchett")], "Sean P. Kane", by_user_id=user.id
-        )
+        authorship.merge([author_key("Terry Pratchett")], "Sean P. Kane", by_user_id=user.id)
 
         assert all(author.identifiers == [] for author in authorship.listing())
 
-    def test_guessing_a_name_does_not_reach_the_authority_lookups_door(
-        self, db, user, other
-    ):
+    def test_guessing_a_name_does_not_reach_the_authority_lookups_door(self, db, user, other):
         """`identifiers_for` is what `GET /authors/authority` asks, so it is a
         second door onto the same rows and needs the same rule."""
         self._strangers_private_identifier(db, other)
         shelve(db, user, "Terry Pratchett")
         authorship = Authorship.seen_by(db, user.id)
-        authorship.merge(
-            [author_key("Terry Pratchett")], "Sean P. Kane", by_user_id=user.id
-        )
+        authorship.merge([author_key("Terry Pratchett")], "Sean P. Kane", by_user_id=user.id)
 
         assert authorship.identifiers_for("Sean P. Kane") == []
 
-    def test_guessing_a_name_does_not_let_a_member_delete_the_row(
-        self, db, user, other
-    ):
+    def test_guessing_a_name_does_not_let_a_member_delete_the_row(self, db, user, other):
         """The worse half: a destructive write against data derived from a Book
         the caller cannot see."""
         row_id = self._strangers_private_identifier(db, other)
         shelve(db, user, "Terry Pratchett")
         authorship = Authorship.seen_by(db, user.id)
-        authorship.merge(
-            [author_key("Terry Pratchett")], "Sean P. Kane", by_user_id=user.id
-        )
+        authorship.merge([author_key("Terry Pratchett")], "Sean P. Kane", by_user_id=user.id)
 
         with pytest.raises(AuthorNotFound):
             authorship.forget_identifier(row_id)
@@ -951,9 +919,7 @@ class TestAConfirmationIsFiledOnASpellingTheShelfCarries:
         somebody tidied the name."""
         shelve(db, user, "R. L. Stevenson")
         authorship = Authorship.seen_by(db, user.id)
-        authorship.merge(
-            [author_key("R. L. Stevenson")], "R.L. Stevenson", by_user_id=user.id
-        )
+        authorship.merge([author_key("R. L. Stevenson")], "R.L. Stevenson", by_user_id=user.id)
         row = authorship.confirm_identifier(
             "R.L. Stevenson", AuthorityScheme.GND, "118753711", by_user_id=user.id
         )
@@ -1008,9 +974,7 @@ class TestALosingAssertionIsReportedRatherThanDiscarded:
         `kept_provenance` is what makes it actionable."""
         shelve(db, user, "Sean P. Kane")
         authorship = Authorship.seen_by(db, user.id)
-        authorship.confirm_identifier(
-            "Sean P. Kane", AuthorityScheme.GND, "1111", by_user_id=user.id
-        )
+        authorship.confirm_identifier("Sean P. Kane", AuthorityScheme.GND, "1111", by_user_id=user.id)
 
         recorded = authorship.record_catalogue_assertions([KANE], credited=KANE.name)
 
@@ -1053,9 +1017,7 @@ class TestOnlyAnAssertionTheBookCreditsIsStored:
     def test_a_spelling_the_book_does_not_carry_is_not_stored(self, db, user):
         shelve(db, user, "S. P. Kane")
 
-        recorded = Authorship.seen_by(db, user.id).record_catalogue_assertions(
-            [KANE], credited="S. P. Kane"
-        )
+        recorded = Authorship.seen_by(db, user.id).record_catalogue_assertions([KANE], credited="S. P. Kane")
 
         assert recorded.stored == []
         assert db.query(AuthorIdentifier).count() == 0
@@ -1065,9 +1027,7 @@ class TestOnlyAnAssertionTheBookCreditsIsStored:
         is nothing for a Member to act on."""
         shelve(db, user, "S. P. Kane")
 
-        recorded = Authorship.seen_by(db, user.id).record_catalogue_assertions(
-            [KANE], credited="S. P. Kane"
-        )
+        recorded = Authorship.seen_by(db, user.id).record_catalogue_assertions([KANE], credited="S. P. Kane")
 
         assert recorded.refused == []
 
@@ -1078,9 +1038,7 @@ class TestOnlyAnAssertionTheBookCreditsIsStored:
             [KANE], credited="Sean P. Kane"
         )
 
-        assert [row.author_key for row in recorded.stored] == [
-            author_key("Sean P. Kane")
-        ]
+        assert [row.author_key for row in recorded.stored] == [author_key("Sean P. Kane")]
 
     def test_one_credited_author_of_several_still_qualifies(self, db, user):
         """A credit line is a comma joined list of people, and an assertion
@@ -1094,9 +1052,7 @@ class TestOnlyAnAssertionTheBookCreditsIsStored:
         assert len(recorded.stored) == 1
 
     def test_a_book_with_no_author_stores_nothing(self, db, user):
-        recorded = Authorship.seen_by(db, user.id).record_catalogue_assertions(
-            [KANE], credited=None
-        )
+        recorded = Authorship.seen_by(db, user.id).record_catalogue_assertions([KANE], credited=None)
 
         assert recorded.stored == []
 
@@ -1106,13 +1062,9 @@ class TestOnlyAnAssertionTheBookCreditsIsStored:
         shelve(db, user, "Sean P. Kane")
         authorship = Authorship.seen_by(db, user.id)
 
-        recorded = authorship.record_catalogue_assertions(
-            [KANE], credited="Sean P. Kane"
-        )
+        recorded = authorship.record_catalogue_assertions([KANE], credited="Sean P. Kane")
 
-        listed = {
-            row.id for author in authorship.listing() for row in author.identifiers
-        }
+        listed = {row.id for author in authorship.listing() for row in author.identifiers}
         assert {row.id for row in recorded.stored} == listed
         for row in recorded.stored:
             authorship.forget_identifier(row.id)
@@ -1162,9 +1114,7 @@ class TestTheCrossReferencesStoredWithAConfirmation:
             "Jorge Luis Borges", self._references(), by_user_id=user.id
         )
 
-        assert all(
-            row.provenance == AuthorityProvenance.MEMBER for row in recorded.stored
-        )
+        assert all(row.provenance == AuthorityProvenance.MEMBER for row in recorded.stored)
         assert all(row.created_by_user_id == user.id for row in recorded.stored)
 
     def test_it_files_under_the_same_key_a_confirmation_does(self, db, user):
@@ -1191,7 +1141,9 @@ class TestTheCrossReferencesStoredWithAConfirmation:
         shelve(db, user, "Jorge Luis Borges")
         authorship = Authorship.seen_by(db, user.id)
         authorship.confirm_identifier(
-            "Jorge Luis Borges", AuthorityScheme.ISNI, "0000000000000001",
+            "Jorge Luis Borges",
+            AuthorityScheme.ISNI,
+            "0000000000000001",
             by_user_id=user.id,
         )
 
@@ -1218,9 +1170,7 @@ class TestTheCrossReferencesStoredWithAConfirmation:
         an `IntegrityError` rather than a report."""
         shelve(db, user, "Jorge Luis Borges")
         authorship = Authorship.seen_by(db, user.id)
-        authorship.record_cross_references(
-            "Jorge Luis Borges", self._references(), by_user_id=user.id
-        )
+        authorship.record_cross_references("Jorge Luis Borges", self._references(), by_user_id=user.id)
 
         again = authorship.record_cross_references(
             "Jorge Luis Borges", self._references(), by_user_id=user.id
@@ -1255,9 +1205,7 @@ class TestTheCrossReferencesStoredWithAConfirmation:
 
 def _identify(db, user, name: str, identifier: str, scheme=IDENTITY_SPINE) -> None:
     """File one authority identifier under a spelling the shelf carries."""
-    Authorship.seen_by(db, user.id).confirm_identifier(
-        name, scheme, identifier, by_user_id=user.id
-    )
+    Authorship.seen_by(db, user.id).confirm_identifier(name, scheme, identifier, by_user_id=user.id)
 
 
 class TestOnlyTheSpineSaysTwoSpellingsAreOnePerson:
@@ -1278,9 +1226,7 @@ class TestOnlyTheSpineSaysTwoSpellingsAreOnePerson:
     """
 
     @pytest.mark.parametrize("scheme", list(AuthorityScheme))
-    def test_exactly_one_scheme_groups_two_spellings_and_it_is_the_spine(
-        self, db, user, scheme
-    ):
+    def test_exactly_one_scheme_groups_two_spellings_and_it_is_the_spine(self, db, user, scheme):
         shelve(db, user, "Boz", "Charles Dickens")
         _identify(db, user, "Boz", DICKENS, scheme)
         _identify(db, user, "Charles Dickens", DICKENS, scheme)
@@ -1338,9 +1284,7 @@ class TestThePrivacyLineOnTheSpine:
         _identify(db, user, "Boz", DICKENS)
         authorship = Authorship.seen_by(db, user.id)
 
-        authorship.merge(
-            [author_key("Terry Pratchett")], "Sean P. Kane", by_user_id=user.id
-        )
+        authorship.merge([author_key("Terry Pratchett")], "Sean P. Kane", by_user_id=user.id)
 
         assert all(Reason.IDENTITY not in group.reasons for group in authorship.suggestions())
 
@@ -1361,9 +1305,7 @@ class TestThePrivacyLineOnTheSpine:
 
 
 class TestASpineDisagreementIsReportedAndSettlesNothing:
-    def test_two_folded_spellings_holding_different_isnis_are_reported(
-        self, db, user
-    ):
+    def test_two_folded_spellings_holding_different_isnis_are_reported(self, db, user):
         """Reported exactly as a GND disagreement is, which is the ticket's
         second open question answered in the tree rather than in a handoff."""
         shelve(db, user, "Boz", "Charles Dickens")
@@ -1389,9 +1331,13 @@ class TestASpineDisagreementIsReportedAndSettlesNothing:
         one of them lets a rule that keeps `min` pass without dropping anything.
         """
         shelve(
-            db, user, "Boz",
-            "Charles Dickens", "C. Dickens",
-            "Ellis Bell", "E. Bell",
+            db,
+            user,
+            "Boz",
+            "Charles Dickens",
+            "C. Dickens",
+            "Ellis Bell",
+            "E. Bell",
         )
         _identify(db, user, "Boz", DICKENS)
         _identify(db, user, "Charles Dickens", DICKENS)
@@ -1417,9 +1363,7 @@ class TestAnAuthorWithNoSpine:
     """The ticket's first open question, confirmed rather than assumed. It is the
     common case: a self published book carries no authority record at all."""
 
-    def test_the_spelling_stays_the_key_and_the_suggestions_are_unchanged(
-        self, db, user
-    ):
+    def test_the_spelling_stays_the_key_and_the_suggestions_are_unchanged(self, db, user):
         shelve(db, user, "U. K. Le Guin", "Ursula K. Le Guin")
 
         [group] = Authorship.seen_by(db, user.id).suggestions()
@@ -1501,10 +1445,7 @@ class _NoScan(dict):
 
 def _points_at(db) -> dict[str, str]:
     """Which person every alias row currently means, keyed by the spelling."""
-    return {
-        row.alias_key: author_key(row.canonical_name)
-        for row in db.query(AuthorAlias).all()
-    }
+    return {row.alias_key: author_key(row.canonical_name) for row in db.query(AuthorAlias).all()}
 
 
 class TestWhatABatchWouldFold:
@@ -1531,9 +1472,7 @@ class TestWhatABatchWouldFold:
 
         groups = Authorship.seen_by(db, user.id).suggestions()
 
-        assert _group(groups, "Le Guin", "Ursula K.", "Ursula K. Le Guin").keep_name == (
-            "Le Guin"
-        )
+        assert _group(groups, "Le Guin", "Ursula K.", "Ursula K. Le Guin").keep_name == ("Le Guin")
 
     def test_a_name_somebody_merged_into_wins_over_the_count(self, db, user):
         """The case a batch exists for: an import creates a spelling of somebody
@@ -1549,9 +1488,7 @@ class TestWhatABatchWouldFold:
 
         groups = authorship.suggestions()
 
-        assert _group(
-            groups, "Le Guin", "Ursula K.", "Ursula K. Le Guin"
-        ).keep_name == "Ursula K. Le Guin"
+        assert _group(groups, "Le Guin", "Ursula K.", "Ursula K. Le Guin").keep_name == "Ursula K. Le Guin"
 
     def test_two_decided_names_in_one_group_hold_it_back(self, db, user):
         """No rule here is entitled to pick between two people's decisions."""
@@ -1591,9 +1528,7 @@ class TestWhatABatchWouldFold:
 
         assert held.keep_name is None
 
-    def test_a_decision_only_visible_to_somebody_else_still_holds_the_name(
-        self, db, user, other
-    ):
+    def test_a_decision_only_visible_to_somebody_else_still_holds_the_name(self, db, user, other):
         """The privacy shaped half, and it runs the other way from the usual one.
 
         A decision whose folded spelling is on a Private Book is invisible to
@@ -1602,17 +1537,13 @@ class TestWhatABatchWouldFold:
         What that costs is stated in `_decided_keys`; what it buys is here.
         """
         shelve(db, other, "Boz", private=True)
-        Authorship.seen_by(db, other.id).merge(
-            [author_key("Boz")], "Charles Dickens", by_user_id=other.id
-        )
+        Authorship.seen_by(db, other.id).merge([author_key("Boz")], "Charles Dickens", by_user_id=other.id)
         shelve(db, user, "C. Dickens", "C. Dickens", "C. Dickens")
         shelve(db, user, "Charles Dickens")
 
         groups = Authorship.seen_by(db, user.id).suggestions()
 
-        assert _group(groups, "C. Dickens", "Charles Dickens").keep_name == (
-            "Charles Dickens"
-        )
+        assert _group(groups, "C. Dickens", "Charles Dickens").keep_name == ("Charles Dickens")
 
     def test_and_without_that_row_the_count_would_have_won(self, db, user):
         """The control the test above needs: `C. Dickens` is the more credited
@@ -1664,9 +1595,7 @@ class TestABatchIsOneTransactionOrNothing:
     def test_every_group_is_applied(self, db, user):
         groups = self._two_groups(db, user)
 
-        answered = Authorship.seen_by(db, user.id).merge_batch(
-            groups, by_user_id=user.id
-        )
+        answered = Authorship.seen_by(db, user.id).merge_batch(groups, by_user_id=user.id)
 
         assert [author.name for author in answered.merged] == [
             "J. R. R. Tolkien",
@@ -1697,9 +1626,7 @@ class TestABatchIsOneTransactionOrNothing:
 
         assert db.query(AuthorAlias).count() == 0
 
-    def test_a_group_that_would_repoint_a_decision_refuses_the_whole_batch(
-        self, db, user
-    ):
+    def test_a_group_that_would_repoint_a_decision_refuses_the_whole_batch(self, db, user):
         groups = self._two_groups(db, user)
         authorship = Authorship.seen_by(db, user.id)
         authorship.merge(
@@ -1772,9 +1699,7 @@ class TestABatchIsOneTransactionOrNothing:
             monkeypatch.setattr(authorship_module, "author_key", real)
         return counted
 
-    def test_the_alias_table_is_indexed_once_and_not_once_per_group(
-        self, db, user, monkeypatch
-    ):
+    def test_the_alias_table_is_indexed_once_and_not_once_per_group(self, db, user, monkeypatch):
         """Building it once is one arm of this and is **not** the property that
         matters, which is why the second arm exists below."""
         self._two_groups_and_planted_rows(db, user, 0)
@@ -1812,16 +1737,11 @@ class TestABatchIsOneTransactionOrNothing:
         )
 
         # A row already pointing at the kept person changes nothing.
-        assert (
-            authorship_module._would_repoint(index, {"boz"}, "charles dickens")
-            is False
-        )
+        assert authorship_module._would_repoint(index, {"boz"}, "charles dickens") is False
         # The same row, folded somewhere else, would be repointed.
         assert authorship_module._would_repoint(index, {"boz"}, "boz") is True
 
-    def test_adding_alias_rows_costs_one_normalisation_each_not_one_per_group(
-        self, db, user, monkeypatch
-    ):
+    def test_adding_alias_rows_costs_one_normalisation_each_not_one_per_group(self, db, user, monkeypatch):
         """What the quadratic cost, in numbers rather than in a refusal.
 
         **Measured as a difference rather than as a total**, so nothing here has
@@ -1872,9 +1792,7 @@ class TestABatchIsOneTransactionOrNothing:
         groups = self._two_groups(db, user)
         authorship = Authorship.seen_by(db, user.id)
 
-        statements = selects(
-            lambda: authorship.merge_batch(groups, by_user_id=user.id)
-        )
+        statements = selects(lambda: authorship.merge_batch(groups, by_user_id=user.id))
 
         assert sum(1 for line in statements if "FROM books" in line) == 2
 
@@ -1895,16 +1813,10 @@ class TestABatchNeverClearsADecision:
             by_user_id=user.id,
         )
         before = _points_at(db)
-        proposed = _group(
-            authorship.suggestions(), "Le Guin", "Ursula K.", "Ursula K. Le Guin"
-        )
+        proposed = _group(authorship.suggestions(), "Le Guin", "Ursula K.", "Ursula K. Le Guin")
 
         authorship.merge_batch(
-            [
-                AuthorMergeGroup(
-                    keys=list(proposed.keys), keep_name=proposed.keep_name or ""
-                )
-            ],
+            [AuthorMergeGroup(keys=list(proposed.keys), keep_name=proposed.keep_name or "")],
             by_user_id=user.id,
         )
 
@@ -1929,9 +1841,7 @@ class TestABatchNeverClearsADecision:
             by_user_id=user.id,
         )
         before = {row.alias_key: row.canonical_name for row in db.query(AuthorAlias).all()}
-        proposed = _group(
-            authorship.suggestions(), "Le Guin", "Ursula K.", "Ursula K. Le Guin"
-        )
+        proposed = _group(authorship.suggestions(), "Le Guin", "Ursula K.", "Ursula K. Le Guin")
 
         authorship.merge_batch(
             [
@@ -1959,15 +1869,9 @@ class TestABatchNeverClearsADecision:
             "Ursula K. Le Guin",
             by_user_id=user.id,
         )
-        proposed = _group(
-            authorship.suggestions(), "Le Guin", "Ursula K.", "Ursula K. Le Guin"
-        )
+        proposed = _group(authorship.suggestions(), "Le Guin", "Ursula K.", "Ursula K. Le Guin")
         authorship.merge_batch(
-            [
-                AuthorMergeGroup(
-                    keys=list(proposed.keys), keep_name=proposed.keep_name or ""
-                )
-            ],
+            [AuthorMergeGroup(keys=list(proposed.keys), keep_name=proposed.keep_name or "")],
             by_user_id=user.id,
         )
 
@@ -1998,6 +1902,4 @@ class TestABatchNeverClearsADecision:
         ]
 
         assert offered
-        assert len(authorship.merge_batch(offered, by_user_id=user.id).merged) == len(
-            offered
-        )
+        assert len(authorship.merge_batch(offered, by_user_id=user.id).merged) == len(offered)

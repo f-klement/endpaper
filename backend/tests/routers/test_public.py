@@ -25,9 +25,7 @@ from tests.helpers import items, total
 def _publish(db, *, mode: bool = True, published: bool = True, indexed: bool = False):
     """Put the two switches, and the indexing one, where a test wants them."""
     settings_store.set_value(db, SettingKey.LIBRARY_MODE, "true" if mode else "false")
-    settings_store.set_value(
-        db, SettingKey.PUBLIC_CATALOGUE_ENABLED, "true" if published else "false"
-    )
+    settings_store.set_value(db, SettingKey.PUBLIC_CATALOGUE_ENABLED, "true" if published else "false")
     settings_store.set_value(
         db,
         SettingKey.PUBLIC_CATALOGUE_INDEXING_ENABLED,
@@ -110,23 +108,17 @@ class TestTheCatalogueIsClosedUntilTwoSwitchesSayOtherwise:
 class TestOnlyPublishedRowsAreShown:
     def test_a_private_book_is_absent_from_the_listing(self, client, db, shelf):
         _publish(db)
-        assert [book["title"] for book in items(client.get(f"{PUBLIC_PREFIX}/books"))] == [
-            "Public Book"
-        ]
+        assert [book["title"] for book in items(client.get(f"{PUBLIC_PREFIX}/books"))] == ["Public Book"]
 
     def test_a_private_book_is_404_by_id(self, client, db, shelf):
         """Not 403. A 403 confirms the id exists, which is how a stranger counts
         through the catalogue to learn how many private books a library holds."""
         _publish(db)
-        assert (
-            client.get(f"{PUBLIC_PREFIX}/books/{shelf['private']}").status_code == 404
-        )
+        assert client.get(f"{PUBLIC_PREFIX}/books/{shelf['private']}").status_code == 404
 
     def test_a_trashed_book_is_404_by_id(self, client, db, shelf):
         _publish(db)
-        assert (
-            client.get(f"{PUBLIC_PREFIX}/books/{shelf['trashed']}").status_code == 404
-        )
+        assert client.get(f"{PUBLIC_PREFIX}/books/{shelf['trashed']}").status_code == 404
 
     def test_a_book_that_never_existed_is_the_same_404(self, client, db, shelf):
         """The three answers are identical, which is what makes them tell a
@@ -157,9 +149,7 @@ class TestThePublicListingAcceptsOnlyPublicQuestions:
         """`added_at` is withheld, and an ordering is a read of the column it
         orders by: one request would return the whole acquisition order."""
         _publish(db)
-        assert (
-            client.get(f"{PUBLIC_PREFIX}/books?sort=newest").status_code == 422
-        )
+        assert client.get(f"{PUBLIC_PREFIX}/books?sort=newest").status_code == 422
 
     def test_a_sort_by_a_published_column_is_accepted(self, client, db, shelf):
         """The diagonal. Without it the refusal above would be satisfied by a
@@ -209,9 +199,7 @@ class TestThePublicPayloadCarriesNoPerMemberField:
         body = client.get(f"{PUBLIC_PREFIX}/books/{shelf['public']}").json()
         assert set(body) <= set(PublicBookOut.model_fields)
 
-    def test_nothing_a_member_wrote_about_themselves_reaches_the_wire(
-        self, client, db, admin, shelf
-    ):
+    def test_nothing_a_member_wrote_about_themselves_reaches_the_wire(self, client, db, admin, shelf):
         """A sentinel sweep, and what it sweeps is stated rather than implied.
 
         **Four of the twenty seven withheld fields**, not all of them: the four
@@ -309,9 +297,7 @@ class TestCrawlersAreNotInvitedUntilSomebodySaysSo:
         _publish(db, indexed=True)
         assert client.get("/api/books").headers["X-Robots-Tag"] == "noindex, nofollow"
 
-    def test_a_path_that_merely_starts_like_the_catalogue_is_not_lifted(
-        self, client, db, shelf
-    ):
+    def test_a_path_that_merely_starts_like_the_catalogue_is_not_lifted(self, client, db, shelf):
         """`startswith("/catalogue")` also matches `/catalogue-of-members`. The
         rule matches exactly or on a slash, which is the same looseness the
         signed out route table is tested against on the frontend."""
@@ -324,9 +310,7 @@ class TestCrawlersAreNotInvitedUntilSomebodySaysSo:
         assert "Disallow: /" in body
         assert "Allow:" not in body
 
-    def test_robots_still_disallows_a_published_but_unindexed_catalogue(
-        self, client, db
-    ):
+    def test_robots_still_disallows_a_published_but_unindexed_catalogue(self, client, db):
         """Publishing and inviting a crawler are different decisions, and this
         is the state a library that has taken only the first is in."""
         _publish(db)
@@ -432,8 +416,7 @@ class TestEveryPublicRouteIsGated:
         )
         names = {route.name for route in self._module_routes()}
         assert names >= UNGATED_BY_DESIGN, (
-            f"{sorted(UNGATED_BY_DESIGN - names)} is allowlisted and is not a "
-            "route in routers.public."
+            f"{sorted(UNGATED_BY_DESIGN - names)} is allowlisted and is not a route in routers.public."
         )
 
     def test_every_route_in_the_module_carries_the_gate(self):
@@ -459,9 +442,7 @@ class TestEveryPublicRouteIsGated:
             if route.path == PUBLIC_PREFIX or route.path.startswith(f"{PUBLIC_PREFIX}/")
             if getattr(route.endpoint, "__module__", "") != "routers.public"
         )
-        assert strangers == [], (
-            f"These routes serve a public path from another module: {strangers}"
-        )
+        assert strangers == [], f"These routes serve a public path from another module: {strangers}"
 
     def test_nothing_in_the_module_writes(self):
         # `route.methods` is typed optional on the base class, so it is
@@ -503,9 +484,7 @@ class TestTheTagFilterCannotBeUsedToBreakOrStallTheApp:
         _publish(db)
         assert client.get(f"{PUBLIC_PREFIX}/books?tags={value}").status_code != 500
 
-    def test_an_id_that_is_not_a_row_id_is_dropped_rather_than_reaching_the_driver(
-        self, client, db, shelf
-    ):
+    def test_an_id_that_is_not_a_row_id_is_dropped_rather_than_reaching_the_driver(self, client, db, shelf):
         """The existing contract, extended to the case that used to 500:
         `?tags=abc` has always been ignored, and an id past the range is not a
         row id either."""
@@ -540,9 +519,7 @@ class TestTheTagFilterCannotBeUsedToBreakOrStallTheApp:
         ["18446744073709551616", "9" * 5000, ",".join(str(n) for n in range(1, 1001))],
         ids=["past SQLite's integer range", "past int_max_str_digits", "a thousand ids"],
     )
-    def test_the_signed_in_listing_is_fixed_by_the_same_parser(
-        self, client, admin, value
-    ):
+    def test_the_signed_in_listing_is_fixed_by_the_same_parser(self, client, admin, value):
         """Where the defect actually lived. It was pre-existing and member
         reachable, and copying it onto a surface with no session is what made it
         worth fixing here rather than filing."""

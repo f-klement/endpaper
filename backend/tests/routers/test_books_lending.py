@@ -181,9 +181,7 @@ class TestTheOfferIsVisibleToEverybody:
         assert body["my_status"] == "unread"
         assert [user["username"] for user in body["discuss_with"]] == ["admin"]
 
-    def test_several_members_are_listed_in_one_order(
-        self, client, admin, member, other_user, make_book
-    ):
+    def test_several_members_are_listed_in_one_order(self, client, admin, member, other_user, make_book):
         book = make_book(admin["headers"])
         for account in (other_user, admin, member):
             set_discuss(client, account["headers"], book["id"], True)
@@ -196,17 +194,12 @@ class TestTheOfferIsVisibleToEverybody:
             "other",
         ]
 
-    def test_it_is_not_carried_on_a_book_nobody_offered(
-        self, client, admin, member, make_book
-    ):
+    def test_it_is_not_carried_on_a_book_nobody_offered(self, client, admin, member, make_book):
         offered = make_book(admin["headers"], title="Talk to me")
         make_book(admin["headers"], title="Quiet")
         set_discuss(client, admin["headers"], offered["id"], True)
 
-        by_title = {
-            book["title"]: book["discuss_with"]
-            for book in items(listed(client, member["headers"]))
-        }
+        by_title = {book["title"]: book["discuss_with"] for book in items(listed(client, member["headers"]))}
 
         assert by_title["Quiet"] == []
         assert len(by_title["Talk to me"]) == 1

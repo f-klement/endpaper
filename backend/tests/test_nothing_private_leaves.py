@@ -144,17 +144,10 @@ UNAUTHENTICATED: dict[str, str] = {
     # The four recovery routes. Each is reachable without a session because a
     # member who could sign in would not need it, and each answers the same
     # whatever it found, so none is a roster. See `backend/accounts.py`.
-    "POST /auth/reset/request": (
-        "a member with no session asking an admin to approve a reset"
-    ),
-    "POST /auth/reset/redeem": (
-        "spending an approved code on a new password, which issues no session"
-    ),
+    "POST /auth/reset/request": ("a member with no session asking an admin to approve a reset"),
+    "POST /auth/reset/redeem": ("spending an approved code on a new password, which issues no session"),
     "POST /auth/verify/request": "sending a confirmation code to an address again",
-    "POST /auth/verify": (
-        "returning the confirmation code, which settles the account and issues "
-        "no session"
-    ),
+    "POST /auth/verify": ("returning the confirmation code, which settles the account and issues no session"),
     "GET /covers/login_bg.{extension}": "the sign in background's bytes",
     "GET /robots.txt": "what a crawler is told, which must answer either way",
     "GET /sru": "the SRU base URL, gated by the same publish switch",
@@ -287,20 +280,14 @@ def marked(db, admin, member):
         setattr(private, name, f"{MARKER} {SHARED_TERM} {name}"[:limit])
     private.tags = [Tag(name=f"{MARKER} tag", category=TagCategory.CUSTOM)]
     private.classifications = [
-        Classification(
-            scheme=ClassificationScheme.DDC, number="823", label=f"{MARKER} label"
-        )
+        Classification(scheme=ClassificationScheme.DDC, number="823", label=f"{MARKER} label")
     ]
     private.notes = [Note(user_id=member["user"]["id"], content=f"{MARKER} note")]
-    private.quotes = [
-        Quote(user_id=member["user"]["id"], text=f"{MARKER} quote", page=7)
-    ]
+    private.quotes = [Quote(user_id=member["user"]["id"], text=f"{MARKER} quote", page=7)]
     field = CustomField(name=f"{MARKER} field", kind=CustomFieldKind.TEXT)
     db.add(field)
     db.flush()
-    private.custom_field_values = [
-        CustomFieldValue(field_id=field.id, value=f"{MARKER} value")
-    ]
+    private.custom_field_values = [CustomFieldValue(field_id=field.id, value=f"{MARKER} value")]
 
     public = Book(
         title=f"{PUBLIC_MARKER} {SHARED_TERM} title",
@@ -440,18 +427,14 @@ class TestTheSweepWouldNotice:
         `is_private` means: visible to the account that added it, and to nobody
         else.
         """
-        response = client.get(
-            f"/api/books/{marked['private']}", headers=auth_header(member["access_token"])
-        )
+        response = client.get(f"/api/books/{marked['private']}", headers=auth_header(member["access_token"]))
         assert response.status_code == 200
         assert MARKER in response.text
 
     def test_another_member_is_refused_the_same_book(self, client, marked, admin):
         """The diagonal. Without it the control above would pass on a
         deployment where every Book is visible to everybody."""
-        response = client.get(
-            f"/api/books/{marked['private']}", headers=auth_header(admin["access_token"])
-        )
+        response = client.get(f"/api/books/{marked['private']}", headers=auth_header(admin["access_token"]))
         assert response.status_code == 404
         assert MARKER not in response.text
 

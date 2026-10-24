@@ -194,12 +194,7 @@ def _deduplicated(
 
     def carry(fold: _Fold) -> None:
         kept = {key(row): row for row in held(fold.keeper)}
-        for row in (
-            fold.db.query(model)
-            .filter(model.book_id.in_(fold.loser_ids))
-            .order_by(model.id)
-            .all()
-        ):
+        for row in fold.db.query(model).filter(model.book_id.in_(fold.loser_ids)).order_by(model.id).all():
             token = key(row)
             survivor = kept.get(token)
             if survivor is not None:

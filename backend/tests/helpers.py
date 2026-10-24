@@ -164,9 +164,7 @@ def rows_at_the_engine() -> Iterator[list[Statement]]:
             _rows_relationship=bool(state.is_relationship_load),
         )
 
-    def record(
-        conn: Any, cursor: Any, statement: str, parameters: Any, context: Any, many: Any
-    ) -> None:
+    def record(conn: Any, cursor: Any, statement: str, parameters: Any, context: Any, many: Any) -> None:
         options = context.execution_options
         entry = Statement(
             sql=statement,
@@ -340,9 +338,7 @@ def silence_covers(mock: Any) -> Any:
     # The addresses, not the names: see `AT_OPEN_LIBRARY_COVERS` for why a route
     # under a cover host's name is never matched.
     for base in (AT_OPEN_LIBRARY_COVERS, AT_DNB_COVERS):
-        mock.get(url__regex=f"{re.escape(base)}.*").mock(
-            return_value=httpx.Response(404)
-        )
+        mock.get(url__regex=f"{re.escape(base)}.*").mock(return_value=httpx.Response(404))
     return mock
 
 
@@ -430,9 +426,7 @@ def silence_sru_catalogues(mock: Any) -> Any:
     for target in targets.SEEDED.values():
         if target.transport in (targets.Transport.BESPOKE, targets.Transport.Z3950):
             continue
-        mock.get(url__regex=f"{re.escape(target.base_url)}.*").mock(
-            return_value=sru_response()
-        )
+        mock.get(url__regex=f"{re.escape(target.base_url)}.*").mock(return_value=sru_response())
     return mock
 
 
@@ -463,9 +457,7 @@ def silence_open_library(mock: Any) -> Any:
     register it for the tests that exist to watch Open Library answer, and respx
     resolves in registration order, so those would silently test nothing.
     """
-    mock.get(url__regex=f"{re.escape(OPEN_LIBRARY)}.*").mock(
-        return_value=httpx.Response(404)
-    )
+    mock.get(url__regex=f"{re.escape(OPEN_LIBRARY)}.*").mock(return_value=httpx.Response(404))
     return mock
 
 
@@ -494,9 +486,7 @@ def silence_catalogues(mock: Any) -> Any:
     # **which sources exist**.
     silence_sru_catalogues(mock)
     silence_covers(mock)
-    mock.get(url__regex=f"{re.escape(OPEN_LIBRARY)}.*").mock(
-        return_value=httpx.Response(404)
-    )
+    mock.get(url__regex=f"{re.escape(OPEN_LIBRARY)}.*").mock(return_value=httpx.Response(404))
     mock.get(url__regex=f"{re.escape(GOOGLE_BOOKS)}.*").mock(
         return_value=httpx.Response(200, json={"items": []})
     )

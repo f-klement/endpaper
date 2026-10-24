@@ -240,12 +240,8 @@ class AskedFileIn(BaseModel):
     half a location names no file.
     """
 
-    root_label: str | None = Field(
-        default=None, min_length=1, max_length=DIGITAL_REFERENCE_PATH_MAX
-    )
-    relative_path: str | None = Field(
-        default=None, min_length=1, max_length=DIGITAL_REFERENCE_PATH_MAX
-    )
+    root_label: str | None = Field(default=None, min_length=1, max_length=DIGITAL_REFERENCE_PATH_MAX)
+    relative_path: str | None = Field(default=None, min_length=1, max_length=DIGITAL_REFERENCE_PATH_MAX)
     partial_md5: PartialMd5 | None = None
 
     @field_validator("root_label", "relative_path")
@@ -346,9 +342,7 @@ class SweepIn(BaseModel):
         if asked == 0:
             raise ValueError("A sweep names at least one reference")
         if asked > MAX_FILES_PER_LOOKUP:
-            raise ValueError(
-                f"A sweep names at most {MAX_FILES_PER_LOOKUP} references at once"
-            )
+            raise ValueError(f"A sweep names at most {MAX_FILES_PER_LOOKUP} references at once")
         return self
 
 

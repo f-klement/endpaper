@@ -768,8 +768,7 @@ class Shelf:
         for scheme, number in filters.headings:
             shelf = shelf.where(
                 Book.classifications.any(
-                    (Classification.scheme == scheme)
-                    & (Classification.number == number)
+                    (Classification.scheme == scheme) & (Classification.number == number)
                 )
             )
 
@@ -795,9 +794,7 @@ class Shelf:
         )
         if status is ReadStatus.UNREAD:
             # A Book with no row has never been touched, which is unread.
-            query = query.filter(
-                or_(UserBook.status == ReadStatus.UNREAD, UserBook.id.is_(None))
-            )
+            query = query.filter(or_(UserBook.status == ReadStatus.UNREAD, UserBook.id.is_(None)))
         else:
             query = query.filter(UserBook.status == status)
         # `joined=True`, which is what makes `select()` refuse rather than
@@ -919,9 +916,7 @@ class Shelf:
                 "limited() needs an ordering: a LIMIT with no ORDER BY is an "
                 "unspecified subset of this shelf rather than an unsorted one"
             )
-        return (
-            self._query.options(*_LOADING_OPTIONS[load]).order_by(*order).limit(limit).all()
-        )
+        return self._query.options(*_LOADING_OPTIONS[load]).order_by(*order).limit(limit).all()
 
     def first(self, *, load: Loading = Loading.NOTHING) -> Book | None:
         """One Book from this shelf, or None.
@@ -949,11 +944,7 @@ class Shelf:
         """
         total = self.count()
         books = (
-            self._query.options(*_LOADING_OPTIONS[load])
-            .order_by(*order)
-            .offset(offset)
-            .limit(limit)
-            .all()
+            self._query.options(*_LOADING_OPTIONS[load]).order_by(*order).offset(offset).limit(limit).all()
         )
         return books, total
 
@@ -1117,9 +1108,7 @@ class Shelf:
             .group_by(_division_key(Classification.number))
             .all()
         )
-        return [
-            DivisionCount(division=f"{key}0", book_count=count) for key, count in rows
-        ]
+        return [DivisionCount(division=f"{key}0", book_count=count) for key, count in rows]
 
     def select(self, *columns: Any) -> Query[Any]:
         """A query over other columns, already narrowed to this shelf.

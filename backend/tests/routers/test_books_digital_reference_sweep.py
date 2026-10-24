@@ -51,9 +51,7 @@ class TestTheReferencesUnderARoot:
         assert [row["id"] for row in body["items"]] == [here["id"]]
         assert body["total"] == 1
 
-    def test_a_private_book_of_another_member_lists_nothing(
-        self, client, member, other_user, make_book
-    ):
+    def test_a_private_book_of_another_member_lists_nothing(self, client, member, other_user, make_book):
         theirs = make_book(member["headers"], is_private=True)
         report(client, member["headers"], theirs["id"])
 
@@ -87,9 +85,7 @@ class TestASweepRecordsWhatThePickFound:
         [row] = stored(client, admin["headers"], book["id"])
         assert row["missing_since"] is not None
 
-    def test_a_file_still_there_clears_the_flag_and_takes_the_fingerprint(
-        self, client, admin, make_book
-    ):
+    def test_a_file_still_there_clears_the_flag_and_takes_the_fingerprint(self, client, admin, make_book):
         book = make_book(admin["headers"])
         there = report(client, admin["headers"], book["id"])
         sweep(client, admin["headers"], missing=[there["id"]])
@@ -101,9 +97,7 @@ class TestASweepRecordsWhatThePickFound:
         assert row["missing_since"] is None
         assert (row["size_bytes"], row["partial_md5"]) == (7, DIGEST)
 
-    def test_a_reference_under_another_root_is_not_written(
-        self, client, admin, make_book
-    ):
+    def test_a_reference_under_another_root_is_not_written(self, client, admin, make_book):
         """A sweep is one folder's account of itself."""
         book = make_book(admin["headers"])
         elsewhere = report(client, admin["headers"], book["id"], root="Laptop")
@@ -113,10 +107,7 @@ class TestASweepRecordsWhatThePickFound:
         [row] = stored(client, admin["headers"], book["id"])
         assert row["missing_since"] is None
 
-
-    def test_a_sighting_beats_a_miss_naming_the_same_reference(
-        self, client, admin, make_book
-    ):
+    def test_a_sighting_beats_a_miss_naming_the_same_reference(self, client, admin, make_book):
         book = make_book(admin["headers"])
         both = report(client, admin["headers"], book["id"])
 
@@ -174,9 +165,7 @@ class TestASightingNeverRewritesAnotherLook:
 
 
 class TestOnlyAMemberWhoMayWriteTheBookFlagsIt:
-    def test_a_private_book_of_another_member_is_not_flagged(
-        self, client, member, other_user, make_book
-    ):
+    def test_a_private_book_of_another_member_is_not_flagged(self, client, member, other_user, make_book):
         """Who may flag is who may write the Book, and a private Book of another
         member is neither visible nor writable to the caller. Its id answers as
         an id that does not exist."""
@@ -189,9 +178,7 @@ class TestOnlyAMemberWhoMayWriteTheBookFlagsIt:
         [row] = stored(client, member["headers"], theirs["id"])
         assert row["missing_since"] is None
 
-    def test_a_public_book_somebody_else_added_is_flagged(
-        self, client, admin, member, make_book
-    ):
+    def test_a_public_book_somebody_else_added_is_flagged(self, client, admin, member, make_book):
         """`book_for_write`'s rule: a public Book is a shared shelf."""
         theirs = make_book(member["headers"])
         reference = report(client, member["headers"], theirs["id"])

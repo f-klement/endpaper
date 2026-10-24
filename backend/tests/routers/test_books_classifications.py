@@ -75,10 +75,7 @@ def headings(book_id, db):
     """
     db.expire_all()
     return (
-        db.query(Classification)
-        .filter(Classification.book_id == book_id)
-        .order_by(Classification.id)
-        .all()
+        db.query(Classification).filter(Classification.book_id == book_id).order_by(Classification.id).all()
     )
 
 
@@ -88,9 +85,7 @@ class TestAddingABookWithHeadings:
             "/api/books",
             json={
                 "title": "Praxiswissen Docker",
-                "classifications": [
-                    {"scheme": "ddc", "number": "004", "label": "Informatik"}
-                ],
+                "classifications": [{"scheme": "ddc", "number": "004", "label": "Informatik"}],
             },
             headers=admin["headers"],
         )
@@ -107,9 +102,7 @@ class TestAddingABookWithHeadings:
 
         assert res.json()["classifications"] == []
 
-    def test_the_same_number_twice_in_one_payload_becomes_one_row(
-        self, client, admin, db
-    ):
+    def test_the_same_number_twice_in_one_payload_becomes_one_row(self, client, admin, db):
         """Two catalogues agreeing is the ordinary case, and two identical rows
         in one flush trip the unique index rather than the check before it."""
         res = client.post(
@@ -140,9 +133,7 @@ class TestAddingABookWithHeadings:
 
         assert res.status_code == 422
 
-    def test_a_number_carrying_a_control_character_is_refused(
-        self, client, admin
-    ):
+    def test_a_number_carrying_a_control_character_is_refused(self, client, admin):
         """NUL specifically, and the reason is `filing`.
 
         `str.split()` does not treat NUL as whitespace, so the whitespace
@@ -210,27 +201,21 @@ class TestAddingABookWithHeadings:
             "/api/books",
             json={
                 "title": "Docker",
-                "classifications": [
-                    {"scheme": "lcc", "number": "BF575.S75 E64 2022"}
-                ],
+                "classifications": [{"scheme": "lcc", "number": "BF575.S75 E64 2022"}],
             },
             headers=admin["headers"],
         )
 
         assert res.status_code == 201
 
-    def test_more_headings_than_any_catalogue_returns_are_refused(
-        self, client, admin
-    ):
+    def test_more_headings_than_any_catalogue_returns_are_refused(self, client, admin):
         """Every entry becomes a row, so the list is bounded like every other
         caller-supplied one."""
         res = client.post(
             "/api/books",
             json={
                 "title": "Docker",
-                "classifications": [
-                    {"scheme": "ddc", "number": f"00{index}"} for index in range(9)
-                ],
+                "classifications": [{"scheme": "ddc", "number": f"00{index}"} for index in range(9)],
             },
             headers=admin["headers"],
         )
@@ -243,13 +228,9 @@ class TestTheLookup:
 
     def _lookup(self, client, headers):
         with respx.mock(assert_all_called=False) as mock:
-            mock.get(url__startswith=DNB).mock(
-                return_value=sru_response(DNB_RECORD)
-            )
+            mock.get(url__startswith=DNB).mock(return_value=sru_response(DNB_RECORD))
             silence_catalogues(mock)
-            return client.get(
-                f"/api/books/lookup?isbn={GERMAN_ISBN}", headers=headers
-            )
+            return client.get(f"/api/books/lookup?isbn={GERMAN_ISBN}", headers=headers)
 
     def test_the_number_survives_the_lookup(self, client, admin):
         res = self._lookup(client, admin["headers"])
@@ -265,10 +246,8 @@ class TestTheLookup:
             },
         ]
 
-    def test_a_german_caption_still_suggests_the_curated_tag(
-        self, client, admin, db
-    ):
-        """"Informatik" matches no seeded tag name. `004` maps to Computing,
+    def test_a_german_caption_still_suggests_the_curated_tag(self, client, admin, db):
+        """ "Informatik" matches no seeded tag name. `004` maps to Computing,
         and that is the whole point of storing the number.
 
         Sharper since the MARC switch: the DNB no longer captions its Dewey
@@ -312,18 +291,11 @@ class TestTheLookup:
                 )
             )
             silence_catalogues(mock)
-            res = client.get(
-                f"/api/books/lookup?isbn={GERMAN_ISBN}", headers=admin["headers"]
-            )
+            res = client.get(f"/api/books/lookup?isbn={GERMAN_ISBN}", headers=admin["headers"])
 
         assert res.status_code == 200
-        assert all(
-            len(entry["number"]) <= 120
-            for entry in res.json()["classifications"]
-        )
-        assert long_number not in [
-            entry["number"] for entry in res.json()["classifications"]
-        ]
+        assert all(len(entry["number"]) <= 120 for entry in res.json()["classifications"])
+        assert long_number not in [entry["number"] for entry in res.json()["classifications"]]
 
     def test_a_heading_the_column_could_not_hold_is_dropped(self, client, admin):
         """The lookup response is a draft the client posts straight back, so a
@@ -341,9 +313,7 @@ class TestTheLookup:
                 )
             )
             silence_catalogues(mock)
-            res = client.get(
-                f"/api/books/lookup?isbn={GERMAN_ISBN}", headers=admin["headers"]
-            )
+            res = client.get(f"/api/books/lookup?isbn={GERMAN_ISBN}", headers=admin["headers"])
 
         assert res.status_code == 200
         # The Dewey number is untouched: one unusable entry costs its own row
@@ -352,9 +322,7 @@ class TestTheLookup:
             {"scheme": "ddc", "number": "004", "label": None, "kind": None}
         ]
 
-    def test_a_second_catalogues_dewey_number_survives_the_ceiling(
-        self, client, admin
-    ):
+    def test_a_second_catalogues_dewey_number_survives_the_ceiling(self, client, admin):
         """The ordering that decides what survives cannot live in a parser.
 
         `_merge` puts the leading source's list first and extends it with each
@@ -392,13 +360,9 @@ class TestTheLookup:
         )
         with respx.mock(assert_all_called=False) as mock:
             mock.get(url__startswith=DNB).mock(return_value=sru_response(dnb))
-            mock.get(url__startswith=K10PLUS).mock(
-                return_value=sru_response(k10plus)
-            )
+            mock.get(url__startswith=K10PLUS).mock(return_value=sru_response(k10plus))
             silence_catalogues(mock)
-            res = client.get(
-                f"/api/books/lookup?isbn={GERMAN_ISBN}", headers=admin["headers"]
-            )
+            res = client.get(f"/api/books/lookup?isbn={GERMAN_ISBN}", headers=admin["headers"])
 
         headings_out = res.json()["classifications"]
         assert len(headings_out) == MAX_CLASSIFICATIONS_PER_BOOK
@@ -422,69 +386,47 @@ class TestTheLookup:
 
 
 class TestEnrichment:
-    def test_automatic_enrichment_fills_scalars_without_storing_headings(
-        self, client, admin, make_book, db
-    ):
+    def test_automatic_enrichment_fills_scalars_without_storing_headings(self, client, admin, make_book, db):
         book = make_book(admin["headers"], isbn=GERMAN_ISBN)
         with respx.mock(assert_all_called=False) as mock:
-            mock.get(url__startswith=DNB).mock(
-                return_value=sru_response(DNB_RECORD)
-            )
+            mock.get(url__startswith=DNB).mock(return_value=sru_response(DNB_RECORD))
             silence_catalogues(mock)
-            res = client.post(
-                f"/api/books/{book['id']}/enrich", headers=admin["headers"]
-            )
+            res = client.post(f"/api/books/{book['id']}/enrich", headers=admin["headers"])
 
         assert res.status_code == 200
         assert res.json()["book"]["page_count"] == 390
         assert "classifications" not in res.json()["updated_fields"]
         assert headings(book["id"], db) == []
 
-    def test_repeated_automatic_enrichment_leaves_no_headings(
-        self, client, admin, make_book, db
-    ):
+    def test_repeated_automatic_enrichment_leaves_no_headings(self, client, admin, make_book, db):
         """Automatic enrichment may run again without accepting a record."""
         book = make_book(admin["headers"], isbn=GERMAN_ISBN)
         responses = []
         for _ in range(2):
             with respx.mock(assert_all_called=False) as mock:
-                mock.get(url__startswith=DNB).mock(
-                    return_value=sru_response(DNB_RECORD)
-                )
+                mock.get(url__startswith=DNB).mock(return_value=sru_response(DNB_RECORD))
                 silence_catalogues(mock)
-                responses.append(
-                    client.post(
-                        f"/api/books/{book['id']}/enrich", headers=admin["headers"]
-                    )
-                )
+                responses.append(client.post(f"/api/books/{book['id']}/enrich", headers=admin["headers"]))
 
         assert all("classifications" not in res.json()["updated_fields"] for res in responses)
         assert headings(book["id"], db) == []
 
-    def test_automatic_enrichment_does_not_complete_a_stored_heading(
-        self, client, admin, db
-    ):
+    def test_automatic_enrichment_does_not_complete_a_stored_heading(self, client, admin, db):
         """A selected record is needed even to fill a missing caption."""
         created = client.post(
             "/api/books",
             json={
                 "title": "Docker",
                 "isbn": GERMAN_ISBN,
-                "classifications": [
-                    {"scheme": "gnd", "number": "4026894-9"}
-                ],
+                "classifications": [{"scheme": "gnd", "number": "4026894-9"}],
             },
             headers=admin["headers"],
         ).json()
 
         with respx.mock(assert_all_called=False) as mock:
-            mock.get(url__startswith=DNB).mock(
-                return_value=sru_response(DNB_RECORD)
-            )
+            mock.get(url__startswith=DNB).mock(return_value=sru_response(DNB_RECORD))
             silence_catalogues(mock)
-            client.post(
-                f"/api/books/{created['id']}/enrich", headers=admin["headers"]
-            )
+            client.post(f"/api/books/{created['id']}/enrich", headers=admin["headers"])
 
         assert headings(created["id"], db)[0].label is None
 
@@ -514,9 +456,7 @@ class TestEnrichment:
             "4026894-9",
         ]
 
-    def test_a_caption_is_the_only_change_and_still_commits(
-        self, client, admin, db
-    ):
+    def test_a_caption_is_the_only_change_and_still_commits(self, client, admin, db):
         """The isolated case, which the test above cannot reach.
 
         `enrich/apply` commits only `if updated:`, and `get_db` closes the
@@ -536,11 +476,7 @@ class TestEnrichment:
 
         res = client.post(
             f"/api/books/{created['id']}/enrich/apply",
-            json={
-                "classifications": [
-                    {"scheme": "ddc", "number": "004", "label": "Informatik"}
-                ]
-            },
+            json={"classifications": [{"scheme": "ddc", "number": "004", "label": "Informatik"}]},
             headers=admin["headers"],
         )
 
@@ -548,30 +484,22 @@ class TestEnrichment:
         assert res.json()["updated_fields"] == ["classifications"]
         assert headings(created["id"], db)[0].label == "Informatik"
 
-    def test_a_refresh_keeps_existing_headings_without_adding_new_ones(
-        self, client, admin, db
-    ):
+    def test_a_refresh_keeps_existing_headings_without_adding_new_ones(self, client, admin, db):
         """Refresh preserves classification evidence without accepting more."""
         created = client.post(
             "/api/books",
             json={
                 "title": "Docker",
                 "isbn": GERMAN_ISBN,
-                "classifications": [
-                    {"scheme": "lcc", "number": "QA76.73.P98"}
-                ],
+                "classifications": [{"scheme": "lcc", "number": "QA76.73.P98"}],
             },
             headers=admin["headers"],
         ).json()
 
         with respx.mock(assert_all_called=False) as mock:
-            mock.get(url__startswith=DNB).mock(
-                return_value=sru_response(DNB_RECORD)
-            )
+            mock.get(url__startswith=DNB).mock(return_value=sru_response(DNB_RECORD))
             silence_catalogues(mock)
-            res = client.put(
-                f"/api/books/{created['id']}/refresh", headers=admin["headers"]
-            )
+            res = client.put(f"/api/books/{created['id']}/refresh", headers=admin["headers"])
 
         assert res.status_code == 200
         assert res.json()["page_count"] == 390
@@ -592,9 +520,7 @@ class TestMerging:
             "/api/books",
             json={
                 "title": "Docker",
-                "classifications": [
-                    {"scheme": "lcc", "number": "QA76.73.P98"}
-                ],
+                "classifications": [{"scheme": "lcc", "number": "QA76.73.P98"}],
             },
             headers=admin["headers"],
         ).json()
@@ -627,9 +553,7 @@ class TestMerging:
             "/api/books",
             json={
                 "title": "Docker",
-                "classifications": [
-                    {"scheme": "ddc", "number": "004", "label": "Informatik"}
-                ],
+                "classifications": [{"scheme": "ddc", "number": "004", "label": "Informatik"}],
             },
             headers=admin["headers"],
         ).json()
@@ -643,9 +567,7 @@ class TestMerging:
         assert res.status_code == 200
         assert [entry.label for entry in headings(keeper["id"], db)] == ["Informatik"]
 
-    def test_a_merge_cannot_carry_the_survivor_past_the_ceiling(
-        self, client, admin, db
-    ):
+    def test_a_merge_cannot_carry_the_survivor_past_the_ceiling(self, client, admin, db):
         """The merge is the second writer of this table, and the larger hole if
         it is left out: `MergeRequest.book_ids` takes 20 books and carries no
         rate limiter, so one request could move 8 x 19 = 152 rows onto the
@@ -656,8 +578,7 @@ class TestMerging:
                 json={
                     "title": f"Docker {book}",
                     "classifications": [
-                        {"scheme": "ddc", "number": f"{book}{index}0"}
-                        for index in range(1, 6)
+                        {"scheme": "ddc", "number": f"{book}{index}0"} for index in range(1, 6)
                     ],
                 },
                 headers=admin["headers"],
@@ -677,9 +598,7 @@ class TestMerging:
         assert res.status_code == 200
         assert len(headings(books[0]["id"], db)) == MAX_CLASSIFICATIONS_PER_BOOK
 
-    def test_the_survivor_own_headings_are_the_ones_that_survive(
-        self, client, admin, db
-    ):
+    def test_the_survivor_own_headings_are_the_ones_that_survive(self, client, admin, db):
         """Keeper first, then losers in id order: what survives is what was
         already stored, the same tie-break `classifications.add_headings` uses. The
         overflow is deleted, which is where it was going before this round
@@ -688,9 +607,7 @@ class TestMerging:
             "/api/books",
             json={
                 "title": "Docker",
-                "classifications": [
-                    {"scheme": "ddc", "number": f"{index}00"} for index in range(1, 9)
-                ],
+                "classifications": [{"scheme": "ddc", "number": f"{index}00"} for index in range(1, 9)],
             },
             headers=admin["headers"],
         ).json()
@@ -720,9 +637,7 @@ class TestMerging:
             "/api/books",
             json={
                 "title": "Docker",
-                "classifications": [
-                    {"scheme": "ddc", "number": f"{index}00"} for index in range(1, 9)
-                ],
+                "classifications": [{"scheme": "ddc", "number": f"{index}00"} for index in range(1, 9)],
             },
             headers=admin["headers"],
         ).json()
@@ -730,9 +645,7 @@ class TestMerging:
             "/api/books",
             json={
                 "title": "Docker",
-                "classifications": [
-                    {"scheme": "ddc", "number": "100", "label": "Philosophie"}
-                ],
+                "classifications": [{"scheme": "ddc", "number": "100", "label": "Philosophie"}],
             },
             headers=admin["headers"],
         ).json()
@@ -780,10 +693,7 @@ class TestSubjectHeadingsFromTheLibraryOfCongress:
     the client posts it back to `enrich/apply`, which is the path under test.
     """
 
-    HEADING = (
-        "United States -- History -- Civil War, 1861-1865 -- "
-        "Social aspects -- Juvenile literature"
-    )
+    HEADING = "United States -- History -- Civil War, 1861-1865 -- Social aspects -- Juvenile literature"
 
     def test_a_picked_row_stores_its_subject_heading(self, client, admin, db):
         created = client.post(
@@ -802,9 +712,7 @@ class TestSubjectHeadingsFromTheLibraryOfCongress:
             (ClassificationScheme.LCSH, self.HEADING, None)
         ]
 
-    def test_the_subdivisions_are_stored_rather_than_truncated(
-        self, client, admin, db
-    ):
+    def test_the_subdivisions_are_stored_rather_than_truncated(self, client, admin, db):
         """89 characters, against the 40 the column carried before this scheme
         existed. `United States -- History` and the whole chain name different
         sets of books, so a truncation would merge two headings into one."""
@@ -849,20 +757,12 @@ class TestTheCeiling:
     def _apply(self, client, admin, book_id, numbers):
         return client.post(
             f"/api/books/{book_id}/enrich/apply",
-            json={
-                "classifications": [
-                    {"scheme": "ddc", "number": number} for number in numbers
-                ]
-            },
+            json={"classifications": [{"scheme": "ddc", "number": number} for number in numbers]},
             headers=admin["headers"],
         )
 
-    def test_repeated_calls_cannot_grow_a_book_past_the_ceiling(
-        self, client, admin, db
-    ):
-        book = client.post(
-            "/api/books", json={"title": "Docker"}, headers=admin["headers"]
-        ).json()
+    def test_repeated_calls_cannot_grow_a_book_past_the_ceiling(self, client, admin, db):
+        book = client.post("/api/books", json={"title": "Docker"}, headers=admin["headers"]).json()
 
         for batch in range(4):
             res = self._apply(
@@ -875,15 +775,11 @@ class TestTheCeiling:
 
         assert len(headings(book["id"], db)) == MAX_CLASSIFICATIONS_PER_BOOK
 
-    def test_the_ones_already_stored_are_kept_rather_than_the_newest(
-        self, client, admin, db
-    ):
+    def test_the_ones_already_stored_are_kept_rather_than_the_newest(self, client, admin, db):
         """Dropping the incoming entry rather than evicting a stored one: a
         heading already here was asserted by a catalogue too, and churn is what
         the additive rule exists to avoid."""
-        book = client.post(
-            "/api/books", json={"title": "Docker"}, headers=admin["headers"]
-        ).json()
+        book = client.post("/api/books", json={"title": "Docker"}, headers=admin["headers"]).json()
         self._apply(client, admin, book["id"], [f"{index}00" for index in range(1, 9)])
 
         self._apply(client, admin, book["id"], ["990"])
@@ -893,18 +789,12 @@ class TestTheCeiling:
     def test_a_caption_still_fills_in_on_a_full_book(self, client, admin, db):
         """The ceiling stops inserts, not completions. A book at the ceiling
         must still be able to learn the caption for a heading it already has."""
-        book = client.post(
-            "/api/books", json={"title": "Docker"}, headers=admin["headers"]
-        ).json()
+        book = client.post("/api/books", json={"title": "Docker"}, headers=admin["headers"]).json()
         self._apply(client, admin, book["id"], [f"{index}00" for index in range(1, 9)])
 
         res = client.post(
             f"/api/books/{book['id']}/enrich/apply",
-            json={
-                "classifications": [
-                    {"scheme": "ddc", "number": "100", "label": "Philosophie"}
-                ]
-            },
+            json={"classifications": [{"scheme": "ddc", "number": "100", "label": "Philosophie"}]},
             headers=admin["headers"],
         )
 
@@ -924,9 +814,7 @@ class TestDeletion:
             headers=admin["headers"],
         ).json()
         client.delete(f"/api/books/{book['id']}", headers=admin["headers"])
-        client.delete(
-            f"/api/books/{book['id']}/permanent", headers=admin["headers"]
-        )
+        client.delete(f"/api/books/{book['id']}/permanent", headers=admin["headers"])
 
         assert headings(book["id"], db) == []
 
@@ -953,9 +841,7 @@ def test_google_is_not_a_source_of_classifications(client, admin, db):
             )
         )
         silence_catalogues(mock)
-        res = client.get(
-            f"/api/books/lookup?isbn={GERMAN_ISBN}", headers=admin["headers"]
-        )
+        res = client.get(f"/api/books/lookup?isbn={GERMAN_ISBN}", headers=admin["headers"])
 
     assert res.status_code == 200
     assert res.json()["classifications"] == []

@@ -199,9 +199,7 @@ class Disclosure:
                     if entry_id is not None
                 }
             else:
-                self._visible = frozenset(
-                    row[0] for row in query.distinct().all() if row[0] is not None
-                )
+                self._visible = frozenset(row[0] for row in query.distinct().all() if row[0] is not None)
         return self._visible
 
     @property

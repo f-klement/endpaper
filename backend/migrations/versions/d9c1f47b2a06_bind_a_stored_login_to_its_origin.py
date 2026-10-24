@@ -73,16 +73,13 @@ _MIN_ENVELOPE = 40
 #: parts of a version it can open.
 _ENVELOPE_BEFORE = f"envelope GLOB 'v1.*.*.*' AND length(envelope) >= {_MIN_ENVELOPE}"
 _ENVELOPE_AFTER = (
-    "(envelope GLOB 'v1.*.*.*' OR envelope GLOB 'v2.*.*.*') "
-    f"AND length(envelope) >= {_MIN_ENVELOPE}"
+    f"(envelope GLOB 'v1.*.*.*' OR envelope GLOB 'v2.*.*.*') AND length(envelope) >= {_MIN_ENVELOPE}"
 )
 
 #: The same two shapes on Postgres. Each separator is escaped, because the naive
 #: `~ '^v1.*.*.*'` admits `v1XYZ`: `f3a20d68c4b1` carries the measurement.
 _SHAPE_PG = r"envelope ~ '^v{version}\..*\..*\.'"
-_ENVELOPE_BEFORE_PG = (
-    f"{_SHAPE_PG.format(version=1)} AND length(envelope) >= {_MIN_ENVELOPE}"
-)
+_ENVELOPE_BEFORE_PG = f"{_SHAPE_PG.format(version=1)} AND length(envelope) >= {_MIN_ENVELOPE}"
 _ENVELOPE_AFTER_PG = (
     f"({_SHAPE_PG.format(version=1)} OR {_SHAPE_PG.format(version=2)}) "
     f"AND length(envelope) >= {_MIN_ENVELOPE}"
@@ -94,9 +91,7 @@ _CONSTRAINT = "ck_catalogue_credentials_envelope"
 def _swap(sqlite: str, postgresql: str) -> None:
     with op.batch_alter_table("catalogue_credentials") as batch:
         batch.drop_constraint(_CONSTRAINT, type_="check")
-        batch.create_check_constraint(
-            _CONSTRAINT, DialectSQL(sqlite=sqlite, postgresql=postgresql)
-        )
+        batch.create_check_constraint(_CONSTRAINT, DialectSQL(sqlite=sqlite, postgresql=postgresql))
 
 
 def upgrade() -> None:
@@ -137,9 +132,7 @@ def downgrade() -> None:
             for_bind(
                 op.get_bind(),
                 sqlite="DELETE FROM catalogue_credentials WHERE envelope GLOB 'v2.*'",
-                postgresql=(
-                    r"DELETE FROM catalogue_credentials WHERE envelope ~ '^v2\.'"
-                ),
+                postgresql=(r"DELETE FROM catalogue_credentials WHERE envelope ~ '^v2\.'"),
             )
         )
     )

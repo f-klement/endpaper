@@ -96,7 +96,7 @@ def _within(path: Path) -> bool:
     """
     try:
         return path.resolve().parent == COVERS_DIR.resolve()
-    except (OSError, ValueError):
+    except OSError, ValueError:
         return False
 
 
@@ -295,12 +295,7 @@ def restore(name: str, data: bytes) -> Path:
     # The NUL is refused here because no path holding one resolves: left to
     # the containment arm below, it was refused only because `_within` swallows
     # the resolve error, and under a message saying it resolved elsewhere.
-    if (
-        stored.name != name
-        or not stored.stem
-        or "\x00" in name
-        or extension not in ALLOWED_IMAGE_EXTENSIONS
-    ):
+    if stored.name != name or not stored.stem or "\x00" in name or extension not in ALLOWED_IMAGE_EXTENSIONS:
         raise ValueError(f"Not a cover filename: {name!r}")
     _identify(data)
     destination = COVERS_DIR / f"{stored.stem}.{extension}"

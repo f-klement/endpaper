@@ -28,6 +28,10 @@ import refusals
 from tests.corpus import BACKEND, application_modules
 from tests.test_errors import _constructions, _Module, _resolve, _status_of
 
+TREE_GUARDS = {
+    "TestEveryRouteDeclaresTheRefusalsItsCodeBuilds": ("application_modules",),
+}
+
 _REFUSAL_BODY = {"application/json": {"schema": {"$ref": "#/components/schemas/Refusal"}}}
 
 type _Def = ast.FunctionDef | ast.AsyncFunctionDef
@@ -304,8 +308,7 @@ class TestEveryRouteDeclaresTheRefusalsItsCodeBuilds:
 
     def test_each_route_declares_exactly_what_it_can_answer(self) -> None:
         disagreeing = [
-            f"{_label(context)}: declares {sorted(_declared(context))}, "
-            f"builds {sorted(_derived(context))}"
+            f"{_label(context)}: declares {sorted(_declared(context))}, builds {sorted(_derived(context))}"
             for context in _published()
             if _declared(context) != _derived(context)
         ]
@@ -341,9 +344,7 @@ class TestEveryRouteDeclaresTheRefusalsItsCodeBuilds:
             f"{where}:{call.lineno} builds {sorted(statuses & refusals.DECLARED)}"
             for where, call, statuses in _constructions()
             if statuses and statuses & refusals.DECLARED
-            if not any(
-                path == where and first <= call.lineno <= last for path, first, last in spans
-            )
+            if not any(path == where and first <= call.lineno <= last for path, first, last in spans)
         ]
 
         assert unread == [], (
@@ -423,8 +424,7 @@ class TestEveryDeclaredRefusalIsTheRefusalBody:
         structured = [
             f"{where}:{call.lineno}"
             for where, call, statuses in _constructions()
-            if statuses and statuses & refusals.DECLARED
-            and _is_structured(_detail_of(call))
+            if statuses and statuses & refusals.DECLARED and _is_structured(_detail_of(call))
         ]
 
         assert structured == []

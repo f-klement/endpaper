@@ -59,6 +59,21 @@ import pytest
 from tests.corpus import suite_modules
 from tests.declaration import declares_itself_internal
 
+TREE_GUARDS = {
+    "TestTheCensusMeasuresRatherThanAgrees": ("suite_modules",),
+    "TestTheDocumentIsReadRatherThanAssumed": ("suite_modules",),
+    "TestTheGateComparesTwoInstruments": ("suite_modules",),
+    "TestTheWriteCarriesTheChecksOwnFigures": ("suite_modules",),
+    "TestWhatARowOfZeroClaims": ("suite_modules",),
+}
+
+#: Walks, and stays out of the set a run choosing tests by what a branch changed
+#: adds. On a branch that adds a test or moves a count it is red until the merge
+#: writes the register, so adding it there would turn each such run red over a
+#: figure nobody may fix there.
+#: The full gate runs it, and names its failures as the register's.
+TREE_GUARDS_LEFT_OUT = ("TestEveryNumberInTheRegisterIsThisRunsOwn",)
+
 TESTS = Path(__file__).resolve().parent
 REGISTER = TESTS / "COVERAGE.md"
 
@@ -131,25 +146,13 @@ def _pytest_bindings(tree: ast.Module) -> tuple[frozenset[str], dict[str, str]]:
     functions: dict[str, str] = {}
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
-            modules |= {
-                alias.asname or alias.name
-                for alias in node.names
-                if alias.name == "pytest"
-            }
-        elif (
-            isinstance(node, ast.ImportFrom)
-            and node.module == "pytest"
-            and not node.level
-        ):
-            functions |= {
-                alias.asname or alias.name: alias.name for alias in node.names
-            }
+            modules |= {alias.asname or alias.name for alias in node.names if alias.name == "pytest"}
+        elif isinstance(node, ast.ImportFrom) and node.module == "pytest" and not node.level:
+            functions |= {alias.asname or alias.name: alias.name for alias in node.names}
     return frozenset(modules), functions
 
 
-def _skip_called(
-    node: ast.AST, modules: frozenset[str], functions: dict[str, str]
-) -> str | None:
+def _skip_called(node: ast.AST, modules: frozenset[str], functions: dict[str, str]) -> str | None:
     """Which of `_ENDS_COLLECTION` this node calls under this module's names.
 
     **`allow_module_level` is required of `skip`, and requiring it is what
@@ -166,11 +169,7 @@ def _skip_called(
     if not isinstance(node, ast.Call):
         return None
     func = node.func
-    if (
-        isinstance(func, ast.Attribute)
-        and isinstance(func.value, ast.Name)
-        and func.value.id in modules
-    ):
+    if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name) and func.value.id in modules:
         name = func.attr if func.attr in _ENDS_COLLECTION else None
     elif isinstance(func, ast.Name) and functions.get(func.id) in _ENDS_COLLECTION:
         name = functions[func.id]
@@ -211,9 +210,7 @@ def _can_end_its_own_collection(path: Path) -> bool:
     return any(
         _skip_called(node, modules, functions) is not None
         for statement in tree.body
-        if not isinstance(
-            statement, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
-        )
+        if not isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
         for node in ast.walk(statement)
     )
 
@@ -230,8 +227,7 @@ def _collector_reads(name: str, patterns: Sequence[str]) -> bool:
     which is a fix refusing something that was never broken.
     """
     return any(
-        name.startswith(pattern)
-        or (any(mark in pattern for mark in "*?[") and fnmatch(name, pattern))
+        name.startswith(pattern) or (any(mark in pattern for mark in "*?[") and fnmatch(name, pattern))
         for pattern in patterns
     )
 
@@ -365,9 +361,7 @@ def _decorated_past_recognition(
     at `_declares_a_test`.
     """
     recognised = modules | set(functions)
-    return any(
-        _rooted_at(decorator) not in recognised for decorator in node.decorator_list
-    )
+    return any(_rooted_at(decorator) not in recognised for decorator in node.decorator_list)
 
 
 def _defined_more_than_once(
@@ -399,9 +393,7 @@ def _reachable_definitions(
     """
     found: list[ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef] = []
     for statement in body:
-        if isinstance(
-            statement, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
-        ):
+        if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
             found.append(statement)
         elif isinstance(statement, ast.If):
             found += _reachable_definitions(statement.body)
@@ -448,24 +440,17 @@ def _declared_tests(
             if (
                 _collector_reads(statement.name, names)
                 and not _is_a_fixture(statement, modules, functions)
-                and not (
-                    top_level
-                    and _decorated_past_recognition(statement, modules, functions)
-                )
+                and not (top_level and _decorated_past_recognition(statement, modules, functions))
             ):
                 yield statement.name
-        elif isinstance(statement, ast.ClassDef) and _collector_reads(
-            statement.name, classes
-        ):
+        elif isinstance(statement, ast.ClassDef) and _collector_reads(statement.name, classes):
             if (
                 _switched_off(statement.body)
                 or _has_a_constructor(statement.body)
                 or _decorated_past_recognition(statement, modules, functions)
             ):
                 continue
-            for inner in _declared_tests(
-                statement.body, names, classes, modules, functions, top_level=False
-            ):
+            for inner in _declared_tests(statement.body, names, classes, modules, functions, top_level=False):
                 yield f"{statement.name}.{inner}"
 
 
@@ -494,9 +479,7 @@ def _disowned(body: list[ast.stmt], owners: set[str]) -> set[str]:
     for statement in body:
         if not isinstance(statement, (ast.Assign, ast.AnnAssign)):
             continue
-        targets = (
-            statement.targets if isinstance(statement, ast.Assign) else [statement.target]
-        )
+        targets = statement.targets if isinstance(statement, ast.Assign) else [statement.target]
         for target in targets:
             if isinstance(target, ast.Name) and target.id in owners:
                 gone.add(target.id)
@@ -507,9 +490,7 @@ def _disowned(body: list[ast.stmt], owners: set[str]) -> set[str]:
             ):
                 if target.attr != "__test__":
                     gone.add(f"{target.value.id}.{target.attr}")
-                elif not (
-                    isinstance(statement.value, ast.Constant) and statement.value.value
-                ):
+                elif not (isinstance(statement.value, ast.Constant) and statement.value.value):
                     gone.add(target.value.id)
     return gone
 
@@ -584,9 +565,7 @@ def _declares_a_test(path: Path, names: Sequence[str], classes: Sequence[str]) -
     # A module level statement reaches a module level name, so each test is
     # asked about under the name that owns it rather than its own.
     gone = _disowned(tree.body, {name.split(".")[0] for name in declared})
-    return any(
-        name not in gone and name.split(".")[0] not in gone for name in declared
-    )
+    return any(name not in gone and name.split(".")[0] not in gone for name in declared)
 
 
 #: Builtins that reach a module's own namespace, so a statement naming one of
@@ -721,18 +700,10 @@ def _written_to(tree: ast.Module, protected: set[str]) -> list[str]:
     for node in ast.walk(tree):
         at = getattr(node, "lineno", 0)
         if isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign, ast.Delete)):
-            targets = (
-                node.targets
-                if isinstance(node, (ast.Assign, ast.Delete))
-                else [node.target]
-            )
+            targets = node.targets if isinstance(node, (ast.Assign, ast.Delete)) else [node.target]
             flat: list[ast.expr] = []
             for target in targets:
-                flat += (
-                    list(target.elts)
-                    if isinstance(target, (ast.Tuple, ast.List))
-                    else [target]
-                )
+                flat += list(target.elts) if isinstance(target, (ast.Tuple, ast.List)) else [target]
             found += [
                 f"a write to {_reaches(target)} at line {at}"
                 for target in flat
@@ -761,9 +732,7 @@ def _written_to(tree: ast.Module, protected: set[str]) -> list[str]:
             found += [f"an except handler binding {node.name} at line {at}"]
         elif isinstance(node, (ast.Global, ast.Nonlocal)):
             found += [
-                f"a global declaration of {name} at line {at}"
-                for name in node.names
-                if name in protected
+                f"a global declaration of {name} at line {at}" for name in node.names if name in protected
             ]
         elif isinstance(node, ast.Call) and _rooted_at(node.func) in _REACHES_THE_NAMESPACE:
             found += [
@@ -774,9 +743,7 @@ def _written_to(tree: ast.Module, protected: set[str]) -> list[str]:
     return found
 
 
-def _members_the_collector_reads(
-    cls: ast.ClassDef, names: Sequence[str], classes: Sequence[str]
-) -> set[str]:
+def _members_the_collector_reads(cls: ast.ClassDef, names: Sequence[str], classes: Sequence[str]) -> set[str]:
     """What a protected class body must not rebind: its tests and its nested
     protected classes."""
     return {
@@ -786,10 +753,7 @@ def _members_the_collector_reads(
             isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef))
             and _collector_reads(statement.name, names)
         )
-        or (
-            isinstance(statement, ast.ClassDef)
-            and _collector_reads(statement.name, classes)
-        )
+        or (isinstance(statement, ast.ClassDef) and _collector_reads(statement.name, classes))
     }
 
 
@@ -872,24 +836,16 @@ def _unrecognised(
                 )
             continue
         if isinstance(statement, ast.Expr):
-            if isinstance(statement.value, ast.Constant) and isinstance(
-                statement.value.value, str
-            ):
+            if isinstance(statement.value, ast.Constant) and isinstance(statement.value.value, str):
                 continue
             if _skip_called(statement.value, modules, functions) is not None:
                 continue
         elif isinstance(statement, ast.If):
-            if _names_written_down(statement.test) & (
-                protected | _REACHES_THE_NAMESPACE
-            ):
+            if _names_written_down(statement.test) & (protected | _REACHES_THE_NAMESPACE):
                 found.append(statement)
                 continue
-            found += _unrecognised(
-                statement.body, modules, functions, protected, names, classes
-            )
-            found += _unrecognised(
-                statement.orelse, modules, functions, protected, names, classes
-            )
+            found += _unrecognised(statement.body, modules, functions, protected, names, classes)
+            found += _unrecognised(statement.orelse, modules, functions, protected, names, classes)
             continue
         elif isinstance(statement, ast.Try):
             for section in (
@@ -898,38 +854,20 @@ def _unrecognised(
                 statement.finalbody,
                 *(handler.body for handler in statement.handlers),
             ):
-                found += _unrecognised(
-                    section, modules, functions, protected, names, classes
-                )
+                found += _unrecognised(section, modules, functions, protected, names, classes)
             continue
         elif isinstance(statement, (ast.Assign, ast.AnnAssign)):
-            targets = (
-                statement.targets
-                if isinstance(statement, ast.Assign)
-                else [statement.target]
-            )
+            targets = statement.targets if isinstance(statement, ast.Assign) else [statement.target]
             bound: list[str] = []
             plain = True
             for target in targets:
-                for part in (
-                    target.elts
-                    if isinstance(target, (ast.Tuple, ast.List))
-                    else [target]
-                ):
+                for part in target.elts if isinstance(target, (ast.Tuple, ast.List)) else [target]:
                     if isinstance(part, ast.Name):
                         bound.append(part.id)
                     else:
                         plain = False
-            touched = (
-                _names_written_down(statement.value)
-                if statement.value is not None
-                else set()
-            )
-            if (
-                plain
-                and not set(bound) & protected
-                and not touched & (protected | _REACHES_THE_NAMESPACE)
-            ):
+            touched = _names_written_down(statement.value) if statement.value is not None else set()
+            if plain and not set(bound) & protected and not touched & (protected | _REACHES_THE_NAMESPACE):
                 continue
         found.append(statement)
     return found
@@ -956,20 +894,20 @@ def _statements_that_could_reach_a_test(
         )
         or (isinstance(statement, ast.ClassDef) and _collector_reads(statement.name, classes))
     }
-    return [
-        f"{type(statement).__name__} at line {statement.lineno}"
-        for statement in _unrecognised(
-            tree.body, modules, functions, protected, names, classes
-        )
-    ] + [
-        f"{statement.name} defined again at line {statement.lineno}"
-        for statement in _defined_more_than_once(tree.body)
-    ] + _written_to(tree, protected)
+    return (
+        [
+            f"{type(statement).__name__} at line {statement.lineno}"
+            for statement in _unrecognised(tree.body, modules, functions, protected, names, classes)
+        ]
+        + [
+            f"{statement.name} defined again at line {statement.lineno}"
+            for statement in _defined_more_than_once(tree.body)
+        ]
+        + _written_to(tree, protected)
+    )
 
 
-def _is_silenced_by_the_engine(
-    path: Path, names: Sequence[str], classes: Sequence[str]
-) -> bool:
+def _is_silenced_by_the_engine(path: Path, names: Sequence[str], classes: Sequence[str]) -> bool:
     """Whether a file collecting nothing here is this engine's doing.
 
     Both halves, because a row of 0 claims both: that the file has tests, and
@@ -1017,9 +955,7 @@ def split(text: str) -> tuple[str, str, str]:
     pass by comparing nothing with nothing.
     """
     if BEGIN not in text or END not in text:
-        raise AssertionError(
-            f"{REGISTER.name} carries no measured block. Expected {BEGIN} and {END}."
-        )
+        raise AssertionError(f"{REGISTER.name} carries no measured block. Expected {BEGIN} and {END}.")
     head, rest = text.split(BEGIN, 1)
     block, tail = rest.split(END, 1)
     return head, block, tail
@@ -1198,14 +1134,18 @@ class WriteInstruction:
 
     def payload(self) -> str:
         """The one line a run prints, which is the whole write."""
-        return WRITE_SENTINEL + " " + json.dumps(
-            {
-                "register": self.register,
-                "block": self.block,
-                "lines": [list(pair) for pair in self.lines],
-                "refused": list(self.refused),
-            },
-            sort_keys=True,
+        return (
+            WRITE_SENTINEL
+            + " "
+            + json.dumps(
+                {
+                    "register": self.register,
+                    "block": self.block,
+                    "lines": [list(pair) for pair in self.lines],
+                    "refused": list(self.refused),
+                },
+                sort_keys=True,
+            )
         )
 
 
@@ -1218,7 +1158,7 @@ def _restated(register: str, match: re.Match[str], counted: int) -> tuple[str, s
     expression every other rule in this file reads.
 
     **No padding is reproduced, deliberately.** One of the two registers is
-    formatted by prettier, which pads this column to a fixed width, so a write
+    formatted by oxfmt, which pads this column to a fixed width, so a write
     that changes a count's digit count leaves that file needing the formatter
     the gate already runs last. Reproducing the alignment here would be a
     second implementation of the formatter's rule in two languages, and its
@@ -1273,14 +1213,10 @@ def write_instruction(census: Census, register: str) -> WriteInstruction | None:
         # in whatever applies the write.** A rule the applier has to honour is
         # a rule the next applier does not; carrying no block and no line
         # makes the refusal a property of what this run offers.
-        return WriteInstruction(
-            register=REGISTER_PATH, block=None, lines=(), refused=tuple(refused)
-        )
+        return WriteInstruction(register=REGISTER_PATH, block=None, lines=(), refused=tuple(refused))
     if current == block and not lines:
         return None
-    return WriteInstruction(
-        register=REGISTER_PATH, block=block, lines=tuple(lines), refused=()
-    )
+    return WriteInstruction(register=REGISTER_PATH, block=block, lines=tuple(lines), refused=())
 
 
 def _write_line(census: Census, register: str, deselected: Sequence[str]) -> str:
@@ -1366,9 +1302,7 @@ def _excused(census: Census, register: str, root: Path = TESTS) -> frozenset[str
         path
         for path in set(census.on_disk) - set(census.counts) - named
         if declares_itself_internal(root / path)
-        and _is_silenced_by_the_engine(
-            root / path, census.test_names, census.test_classes
-        )
+        and _is_silenced_by_the_engine(root / path, census.test_names, census.test_classes)
     )
 
 
@@ -1425,9 +1359,7 @@ def _rows_of_zero_that_collected(census: Census, register: str) -> list[str]:
     ]
 
 
-def _rows_of_zero_with_no_engine_reason(
-    census: Census, register: str, root: Path = TESTS
-) -> list[str]:
+def _rows_of_zero_with_no_engine_reason(census: Census, register: str, root: Path = TESTS) -> list[str]:
     """Rows stating 0 for a file whose silence here is not the engine's doing.
 
     Asked only of the files the walk has, so a row naming a path the tree lost
@@ -1438,9 +1370,7 @@ def _rows_of_zero_with_no_engine_reason(
         path
         for path in not_collected_here(register)
         if path in census.on_disk
-        and not _is_silenced_by_the_engine(
-            root / path, census.test_names, census.test_classes
-        )
+        and not _is_silenced_by_the_engine(root / path, census.test_names, census.test_classes)
     )
 
 
@@ -1476,9 +1406,7 @@ def register() -> str:
 
 
 class TestThePlantHarnessSwitch:
-    def test_off_skips_the_arms_that_read_the_document(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_off_skips_the_arms_that_read_the_document(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # Cleared, because the pipeline running this arm sets it.
         monkeypatch.delenv("GITLAB_CI", raising=False)
         monkeypatch.setenv(SWITCH, "off")
@@ -1486,9 +1414,7 @@ class TestThePlantHarnessSwitch:
         with pytest.raises(pytest.skip.Exception, match=SWITCH):
             _the_document()
 
-    def test_off_in_a_pipeline_fails_rather_than_skips(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_off_in_a_pipeline_fails_rather_than_skips(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("GITLAB_CI", "true")
         monkeypatch.setenv(SWITCH, "off")
 
@@ -1609,19 +1535,14 @@ class TestEveryNumberInTheRegisterIsThisRunsOwn:
         collection is the whole tree, a file with no count has collected none.
         """
         wrong = [
-            f"{path}: the register says {stated}, the run collected "
-            f"{whole_tree.counts.get(path, 0)}"
+            f"{path}: the register says {stated}, the run collected {whole_tree.counts.get(path, 0)}"
             for path, stated in rows(register)
             if stated != whole_tree.counts.get(path, 0)
         ]
 
-        assert wrong == [], "\n".join(wrong) + _write_line(
-            whole_tree, register, deselected_items
-        )
+        assert wrong == [], "\n".join(wrong) + _write_line(whole_tree, register, deselected_items)
 
-    def test_every_row_names_a_file_the_tree_has(
-        self, census: Census, register: str
-    ) -> None:
+    def test_every_row_names_a_file_the_tree_has(self, census: Census, register: str) -> None:
         """The other direction, because the cheapest way to make the rule above
         go green is to delete the row it names.
 
@@ -1674,9 +1595,7 @@ class TestEveryNumberInTheRegisterIsThisRunsOwn:
         """
         named = {path for path, _ in rows(register)}
         undescribed = [
-            path
-            for path in sorted(census.on_disk - named)
-            if not declares_itself_internal(TESTS / path)
+            path for path in sorted(census.on_disk - named) if not declares_itself_internal(TESTS / path)
         ]
 
         assert undescribed == [], (
@@ -1687,9 +1606,7 @@ class TestEveryNumberInTheRegisterIsThisRunsOwn:
         )
 
     @pytest.mark.sqlite_only(reason="the register describes the default run, which is on SQLite")
-    def test_a_row_of_zero_names_a_file_this_run_did_not_collect(
-        self, census: Census, register: str
-    ) -> None:
+    def test_a_row_of_zero_names_a_file_this_run_did_not_collect(self, census: Census, register: str) -> None:
         """A row of 0 is what subtracts a file from `whole_tree`, so it is the
         one cell that can widen what a narrowed run is allowed to look like.
 
@@ -1713,9 +1630,7 @@ class TestEveryNumberInTheRegisterIsThisRunsOwn:
             "collected by the run reading it:\n" + "\n".join(live)
         )
 
-    def test_a_row_of_zero_names_a_file_this_engine_cannot_run(
-        self, census: Census, register: str
-    ) -> None:
+    def test_a_row_of_zero_names_a_file_this_engine_cannot_run(self, census: Census, register: str) -> None:
         """The second instrument under that row, so one digit cannot reopen the gate.
 
         The arm above catches a live file's count changed to 0, because such a
@@ -1741,9 +1656,7 @@ class TestEveryNumberInTheRegisterIsThisRunsOwn:
             "and a 0 excuses it for good."
         )
 
-    def test_this_run_deselected_nothing_and_the_counter_says_so(
-        self, deselected_items: list[str]
-    ) -> None:
+    def test_this_run_deselected_nothing_and_the_counter_says_so(self, deselected_items: list[str]) -> None:
         """The arming check for the thing that withholds a write.
 
         **Zero is the true value and there is no room under it**, which is
@@ -1792,18 +1705,14 @@ class TestTheCensusMeasuresRatherThanAgrees:
     `counts` and would compare them just as happily if `counts` were a constant
     or a count of function definitions."""
 
-    def test_the_census_counts_cases_rather_than_functions(
-        self, whole_tree: Census
-    ) -> None:
+    def test_the_census_counts_cases_rather_than_functions(self, whole_tree: Census) -> None:
         """`test_dialect.py` is the witness because its cases are generated per
         dialect, so its collected count has always stood well above the number
         of functions in it. This file is parametrised nowhere and could not
         serve.
         """
         witness = "test_dialect.py"
-        functions = len(
-            re.findall(r"^\s*def test_", (TESTS / witness).read_text(), re.MULTILINE)
-        )
+        functions = len(re.findall(r"^\s*def test_", (TESTS / witness).read_text(), re.MULTILINE))
 
         assert whole_tree.counts[witness] > functions, (
             f"{witness} collects {whole_tree.counts[witness]} tests from "
@@ -1840,10 +1749,7 @@ class TestTheCensusMeasuresRatherThanAgrees:
         inert today, and a divergence mostly refuses: a stricter rule reads
         fewer names as tests and reds the row of 0 it then cannot support.
         """
-        collected = {
-            Path(item.path).relative_to(TESTS).as_posix()
-            for item in request.session.items
-        }
+        collected = {Path(item.path).relative_to(TESTS).as_posix() for item in request.session.items}
 
         assert census.total == len(request.session.items), (
             "the census and this run's own item list disagree on how many "
@@ -1878,11 +1784,7 @@ class TestTheCensusMeasuresRatherThanAgrees:
         """
         patterns = request.session.config.getini("python_files")
         walked = {path.relative_to(TESTS).as_posix() for path in suite_modules()}
-        named = {
-            path
-            for path in walked
-            if any(fnmatch(Path(path).name, pattern) for pattern in patterns)
-        }
+        named = {path for path in walked if any(fnmatch(Path(path).name, pattern) for pattern in patterns)}
 
         assert set(census.on_disk) == named, (
             "the census is no longer the test tree walk under the collector's "
@@ -1898,9 +1800,7 @@ class TestTheCensusMeasuresRatherThanAgrees:
             "equality is comparing the walk with itself"
         )
 
-    def test_the_walk_reads_a_tree_rather_than_the_collection(
-        self, tmp_path: Path
-    ) -> None:
+    def test_the_walk_reads_a_tree_rather_than_the_collection(self, tmp_path: Path) -> None:
         """`on_disk` comes from the shared tree walk and `counts` from pytest's
         own collection, and every rule above rests on those being two
         instruments: the completeness gate compares them, and a gate comparing
@@ -1933,14 +1833,10 @@ class TestTheDocumentIsReadRatherThanAssumed:
             split("# Backend test coverage\n\nNo block here.\n")
 
     def test_a_padded_row_is_read(self) -> None:
-        assert rows("| `test_a.py`   |   327 | What it covers |\n") == [
-            ("test_a.py", 327)
-        ]
+        assert rows("| `test_a.py`   |   327 | What it covers |\n") == [("test_a.py", 327)]
 
     def test_a_row_in_a_nested_directory_keeps_its_path(self) -> None:
-        assert rows("| `routers/test_books.py` | 143 | Listing |\n") == [
-            ("routers/test_books.py", 143)
-        ]
+        assert rows("| `routers/test_books.py` | 143 | Listing |\n") == [("routers/test_books.py", 143)]
 
     def test_a_number_in_the_third_column_is_not_read_as_the_count(self) -> None:
         """The cell boundary, which is the mistake the roster census made
@@ -1957,24 +1853,17 @@ class TestTheDocumentIsReadRatherThanAssumed:
         with a constant."""
         census = Census(
             counts={"test_a.py": 10, "test_b.py": 5, "test_hidden.py": 2},
-            on_disk=frozenset(
-                {"test_a.py", "test_b.py", "test_hidden.py", "test_quiet.py"}
-            ),
+            on_disk=frozenset({"test_a.py", "test_b.py", "test_hidden.py", "test_quiet.py"}),
             test_names=("test",),
             test_classes=("Test",),
         )
 
-        block = render(
-            census, [("test_a.py", 10), ("test_b.py", 5), ("test_quiet.py", 0)]
-        )
+        block = render(census, [("test_a.py", 10), ("test_b.py", 5), ("test_quiet.py", 0)])
 
         assert "**17 tests, in 3 files**" in block
         assert "**The 3 rows below sum to 15.**" in block
         assert "The other 2 tests are in 1 file this register may not name." in block
-        assert (
-            "The table also carries 1 file this engine does not run, stated as 0."
-            in block
-        )
+        assert "The table also carries 1 file this engine does not run, stated as 0." in block
 
     def test_one_file_is_not_written_as_files(self) -> None:
         assert _files(1) == "1 file"
@@ -2005,9 +1894,7 @@ class TestTheWriteCarriesTheChecksOwnFigures:
     def _document(census: Census, table: list[tuple[str, int]]) -> str:
         """A register whose block is current for `census` and whose rows are
         whatever the caller asked for, so an arm moves one thing at a time."""
-        body = "".join(
-            f"| `{path}` | {stated} | What {path} covers |\n" for path, stated in table
-        )
+        body = "".join(f"| `{path}` | {stated} | What {path} covers |\n" for path, stated in table)
         return (
             "# Backend test coverage\n\n"
             f"{BEGIN}{render(census, table)}{END}\n\n"
@@ -2058,8 +1945,7 @@ class TestTheWriteCarriesTheChecksOwnFigures:
 
         assert instruction is not None
         assert instruction.lines == (
-            ("| `test_a.py` | 10 | What test_a.py covers |",
-             "| `test_a.py` | 12 | What test_a.py covers |"),
+            ("| `test_a.py` | 10 | What test_a.py covers |", "| `test_a.py` | 12 | What test_a.py covers |"),
         )
         assert instruction.refused == ()
 
@@ -2077,8 +1963,10 @@ class TestTheWriteCarriesTheChecksOwnFigures:
 
         assert instruction is not None
         assert instruction.lines == (
-            ("| `test_a.py` | 9 | **12 shapes**, and the 3 that are not |",
-             "| `test_a.py` | 4 | **12 shapes**, and the 3 that are not |"),
+            (
+                "| `test_a.py` | 9 | **12 shapes**, and the 3 that are not |",
+                "| `test_a.py` | 4 | **12 shapes**, and the 3 that are not |",
+            ),
         )
 
     def test_the_block_it_writes_is_the_block_the_arm_compares(self) -> None:
@@ -2086,9 +1974,7 @@ class TestTheWriteCarriesTheChecksOwnFigures:
         compares the document against `render`; so does the write."""
         census = _planted({"test_a.py": 10, "test_b.py": 7}, {"test_a.py", "test_b.py"})
         table = [("test_a.py", 10), ("test_b.py", 7)]
-        document = self._document(census, table).replace(
-            "**17 tests", "**1700 tests"
-        )
+        document = self._document(census, table).replace("**17 tests", "**1700 tests")
 
         instruction = write_instruction(census, document)
 
@@ -2213,35 +2099,27 @@ class TestWhatEndsAModulesOwnCollection:
         the module body can reach, not what its first statement is."""
         planted = tmp_path / "test_planted.py"
         planted.write_text(
-            "import pytest\n\nif True:\n"
-            '    pytest.skip("no engine here", allow_module_level=True)\n'
+            'import pytest\n\nif True:\n    pytest.skip("no engine here", allow_module_level=True)\n'
         )
 
         assert _can_end_its_own_collection(planted)
 
-    def test_a_module_level_import_or_skip_ends_its_own_collection(
-        self, tmp_path: Path
-    ) -> None:
+    def test_a_module_level_import_or_skip_ends_its_own_collection(self, tmp_path: Path) -> None:
         planted = tmp_path / "test_planted.py"
         planted.write_text('import pytest\n\nlxml = pytest.importorskip("lxml")\n')
 
         assert _can_end_its_own_collection(planted)
 
-    def test_a_skip_written_on_an_alias_of_the_module_ends_its_own_collection(
-        self, tmp_path: Path
-    ) -> None:
+    def test_a_skip_written_on_an_alias_of_the_module_ends_its_own_collection(self, tmp_path: Path) -> None:
         """`import pytest as pt`, which the receiver test refused."""
         planted = tmp_path / "test_planted.py"
         planted.write_text(
-            "import pytest as pt\n\nif True:\n"
-            '    pt.skip("no engine here", allow_module_level=True)\n'
+            'import pytest as pt\n\nif True:\n    pt.skip("no engine here", allow_module_level=True)\n'
         )
 
         assert _can_end_its_own_collection(planted)
 
-    def test_a_skip_imported_by_name_ends_its_own_collection(
-        self, tmp_path: Path
-    ) -> None:
+    def test_a_skip_imported_by_name_ends_its_own_collection(self, tmp_path: Path) -> None:
         """`from pytest import skip as stop`, which the receiver test refused.
 
         The alias, rather than the plain `from pytest import skip`, because the
@@ -2256,9 +2134,7 @@ class TestWhatEndsAModulesOwnCollection:
 
         assert _can_end_its_own_collection(planted)
 
-    def test_a_skip_that_is_not_allowed_at_module_level_does_not(
-        self, tmp_path: Path
-    ) -> None:
+    def test_a_skip_that_is_not_allowed_at_module_level_does_not(self, tmp_path: Path) -> None:
         """A false accept rather than a miss.
 
         pytest raises `Failed: Using pytest.skip outside of a test is not
@@ -2270,9 +2146,7 @@ class TestWhatEndsAModulesOwnCollection:
 
         assert not _can_end_its_own_collection(planted)
 
-    def test_a_name_this_module_never_bound_to_pytest_does_not(
-        self, tmp_path: Path
-    ) -> None:
+    def test_a_name_this_module_never_bound_to_pytest_does_not(self, tmp_path: Path) -> None:
         """The other direction of reading the binding.
 
         A helper called `skip` that this file defines itself is not pytest's,
@@ -2295,10 +2169,7 @@ class TestWhatEndsAModulesOwnCollection:
         writing the skip one level out.
         """
         planted = tmp_path / "test_planted.py"
-        planted.write_text(
-            "import pytest\n\n\ndef test_one() -> None:\n"
-            '    pytest.skip("not today")\n'
-        )
+        planted.write_text('import pytest\n\n\ndef test_one() -> None:\n    pytest.skip("not today")\n')
 
         assert not _can_end_its_own_collection(planted)
 
@@ -2321,15 +2192,11 @@ class TestWhatTheCollectorReadsAsATest:
     excuse with the whole suite green at exit 0.
     """
 
-    def test_a_test_inside_a_class_counts_as_one_the_file_declares(
-        self, tmp_path: Path
-    ) -> None:
+    def test_a_test_inside_a_class_counts_as_one_the_file_declares(self, tmp_path: Path) -> None:
         """Where the collector looks, so the class body is read and a function
         body is not."""
         planted = tmp_path / "test_planted.py"
-        planted.write_text(
-            "class TestThing:\n    def test_one(self) -> None: ...\n"
-        )
+        planted.write_text("class TestThing:\n    def test_one(self) -> None: ...\n")
         buried = tmp_path / "test_buried.py"
         buried.write_text("def helper() -> None:\n    def test_one() -> None: ...\n")
 
@@ -2338,34 +2205,25 @@ class TestWhatTheCollectorReadsAsATest:
         # The class name rule is the collector's too, so a test hidden in a
         # class it would not read is not one this file declares.
         assert not _declares_a_test(planted, ("test",), ("Suite",))
-    def test_a_class_with_a_constructor_declares_no_test(
-        self, tmp_path: Path
-    ) -> None:
+
+    def test_a_class_with_a_constructor_declares_no_test(self, tmp_path: Path) -> None:
         """`Class.collect` refuses such a class with a warning and no items,
         so a test written inside one runs on no engine at all."""
         for constructor in ("def __init__(self): ...", "def __new__(cls): ..."):
             planted = tmp_path / "test_planted.py"
             planted.write_text(
-                f"class TestThing:\n    {constructor}\n\n"
-                "    def test_one(self) -> None: ...\n"
+                f"class TestThing:\n    {constructor}\n\n    def test_one(self) -> None: ...\n"
             )
 
             assert not _declares_a_test(planted, ("test",), ("Test",)), constructor
 
-    def test_a_class_that_switches_itself_off_declares_no_test(
-        self, tmp_path: Path
-    ) -> None:
+    def test_a_class_that_switches_itself_off_declares_no_test(self, tmp_path: Path) -> None:
         planted = tmp_path / "test_planted.py"
-        planted.write_text(
-            "class TestThing:\n    __test__ = False\n\n"
-            "    def test_one(self) -> None: ...\n"
-        )
+        planted.write_text("class TestThing:\n    __test__ = False\n\n    def test_one(self) -> None: ...\n")
 
         assert not _declares_a_test(planted, ("test",), ("Test",))
 
-    def test_a_module_that_switches_itself_off_declares_no_test(
-        self, tmp_path: Path
-    ) -> None:
+    def test_a_module_that_switches_itself_off_declares_no_test(self, tmp_path: Path) -> None:
         """The same attribute one level out, which `PyCollector.collect` asks
         first and which empties the file rather than the class."""
         planted = tmp_path / "test_planted.py"
@@ -2373,22 +2231,16 @@ class TestWhatTheCollectorReadsAsATest:
 
         assert not _declares_a_test(planted, ("test",), ("Test",))
 
-    def test_a_test_switched_off_by_attribute_is_not_declared(
-        self, tmp_path: Path
-    ) -> None:
+    def test_a_test_switched_off_by_attribute_is_not_declared(self, tmp_path: Path) -> None:
         """The spelling that is not in the `def` at all: the collector reads
         the module's `__dict__` after it has run, so a statement below the
         definition decides."""
         planted = tmp_path / "test_planted.py"
-        planted.write_text(
-            "def test_one() -> None: ...\n\n\ntest_one.__test__ = False\n"
-        )
+        planted.write_text("def test_one() -> None: ...\n\n\ntest_one.__test__ = False\n")
 
         assert not _declares_a_test(planted, ("test",), ("Test",))
 
-    def test_a_declared_name_rebound_afterwards_is_not_declared(
-        self, tmp_path: Path
-    ) -> None:
+    def test_a_declared_name_rebound_afterwards_is_not_declared(self, tmp_path: Path) -> None:
         """Three places a name can be rebound, and the collector reads the
         module's `__dict__` after it has run, so all three decide.
 
@@ -2403,23 +2255,17 @@ class TestWhatTheCollectorReadsAsATest:
         function = tmp_path / "test_function.py"
         function.write_text("def test_one() -> None: ...\n\n\ntest_one = None\n")
         owner = tmp_path / "test_owner.py"
-        owner.write_text(
-            "class TestThing:\n    def test_one(self) -> None: ...\n\n\n"
-            "TestThing = None\n"
-        )
+        owner.write_text("class TestThing:\n    def test_one(self) -> None: ...\n\n\nTestThing = None\n")
         method = tmp_path / "test_method.py"
         method.write_text(
-            "class TestThing:\n    def test_one(self) -> None: ...\n\n\n"
-            "TestThing.test_one = None\n"
+            "class TestThing:\n    def test_one(self) -> None: ...\n\n\nTestThing.test_one = None\n"
         )
 
         assert not _declares_a_test(function, ("test",), ("Test",))
         assert not _declares_a_test(owner, ("test",), ("Test",))
         assert not _declares_a_test(method, ("test",), ("Test",))
 
-    def test_a_fixture_the_collector_would_name_is_not_a_test(
-        self, tmp_path: Path
-    ) -> None:
+    def test_a_fixture_the_collector_would_name_is_not_a_test(self, tmp_path: Path) -> None:
         """`istestfunction` requires no fixture marker, so a fixture whose
         name the pattern reads is collected as nothing. Three spellings,
         because the marker is resolved through the same bindings the skip
@@ -2446,9 +2292,7 @@ class TestWhatTheCollectorReadsAsATest:
 
             assert not _declares_a_test(planted, ("test",), ("Test",)), source
 
-    def test_a_decorated_definition_the_collector_would_read_is_not_a_test(
-        self, tmp_path: Path
-    ) -> None:
+    def test_a_decorated_definition_the_collector_would_read_is_not_a_test(self, tmp_path: Path) -> None:
         """A decorator replaces the name it decorates, and the whitelist did
         not look at one.
 
@@ -2465,8 +2309,7 @@ class TestWhatTheCollectorReadsAsATest:
         """
         wrap = "def wrap(thing):\n    return None\n\n\n"
         refused = {
-            "a top level class": wrap + "@wrap\nclass TestThing:\n"
-            "    def test_one(self) -> None: ...\n",
+            "a top level class": wrap + "@wrap\nclass TestThing:\n    def test_one(self) -> None: ...\n",
             "a top level function": wrap + "@wrap\ndef test_one() -> None: ...\n",
             "a nested class": wrap + "class TestOuter:\n    @wrap\n"
             "    class TestInner:\n        def test_one(self) -> None: ...\n",
@@ -2477,10 +2320,7 @@ class TestWhatTheCollectorReadsAsATest:
         # this file publishes.
         marked = ["class TestThing:", "    def test_one(self) -> None: ..."]
         kept = {
-            "a marker on a class": "\n".join(
-                ["import pytest", "", "", "@pytest.mark.slow", *marked]
-            )
-            + "\n",
+            "a marker on a class": "\n".join(["import pytest", "", "", "@pytest.mark.slow", *marked]) + "\n",
             "a marker on a top level function": "\n".join(
                 [
                     "import pytest",
@@ -2491,16 +2331,13 @@ class TestWhatTheCollectorReadsAsATest:
                 ]
             )
             + "\n",
-            "a marker through an alias": "\n".join(
-                ["import pytest as pt", "", "", "@pt.mark.slow", *marked]
-            )
+            "a marker through an alias": "\n".join(["import pytest as pt", "", "", "@pt.mark.slow", *marked])
             + "\n",
             "a third party decorator on a method": wrap
             + "class TestThing:\n    @wrap\n    def test_one(self) -> None: ...\n",
             "an undecorated nested class": "class TestOuter:\n"
             "    class TestInner:\n        def test_one(self) -> None: ...\n",
-            "a decorated helper beside a test": wrap
-            + "@wrap\ndef helper() -> None: ...\n\n\n"
+            "a decorated helper beside a test": wrap + "@wrap\ndef helper() -> None: ...\n\n\n"
             "class TestThing:\n    def test_one(self) -> None: ...\n",
         }
 
@@ -2516,9 +2353,7 @@ class TestWhatTheCollectorReadsAsATest:
 
             assert _declares_a_test(planted, ("test",), ("Test",)), what
 
-    def test_a_live_sibling_keeps_the_file_declaring_a_test(
-        self, tmp_path: Path
-    ) -> None:
+    def test_a_live_sibling_keeps_the_file_declaring_a_test(self, tmp_path: Path) -> None:
         """The other direction, so the refusals above are not a predicate
         that answers False on anything interesting.
 
@@ -2546,9 +2381,7 @@ class TestWhatTheCollectorReadsAsATest:
         assert _declares_a_test(planted, ("test",), ("Test",))
         assert _declares_a_test(beside, ("test",), ("Test",))
 
-    def test_the_end_state_an_evasion_reached_is_not_silenced_by_the_engine(
-        self, tmp_path: Path
-    ) -> None:
+    def test_the_end_state_an_evasion_reached_is_not_silenced_by_the_engine(self, tmp_path: Path) -> None:
         """The whole file a review seat drove to a green suite at exit 0.
 
         A module level skip and one `Test` class carrying `__test__ = False`,
@@ -2602,9 +2435,7 @@ class TestWhatARowOfZeroClaims:
 
         assert _is_silenced_by_the_engine(planted, ("test",), ("Test",))
 
-    def test_an_emptied_file_is_not_silenced_by_the_engine(
-        self, tmp_path: Path
-    ) -> None:
+    def test_an_emptied_file_is_not_silenced_by_the_engine(self, tmp_path: Path) -> None:
         """The permanent excuse, which a module level skip alone buys.
 
         Driven on the branch before this half existed: a planted `test_*.py`
@@ -2612,17 +2443,12 @@ class TestWhatARowOfZeroClaims:
         count arms running and the whole suite green at exit 0.
         """
         planted = tmp_path / "test_planted.py"
-        planted.write_text(
-            "import pytest\n\n"
-            'pytest.skip("nothing here any more", allow_module_level=True)\n'
-        )
+        planted.write_text('import pytest\n\npytest.skip("nothing here any more", allow_module_level=True)\n')
 
         assert _can_end_its_own_collection(planted)
         assert not _is_silenced_by_the_engine(planted, ("test",), ("Test",))
 
-    def test_a_module_body_that_only_declares_is_recognised(
-        self, tmp_path: Path
-    ) -> None:
+    def test_a_module_body_that_only_declares_is_recognised(self, tmp_path: Path) -> None:
         """What the whitelist costs, which is the half worth arming.
 
         A rule that refuses everything refuses every door, so the arm that
@@ -2633,18 +2459,13 @@ class TestWhatARowOfZeroClaims:
         is the property, and the files it does refuse are named by shape in
         `_unrecognised`.
         """
-        skip = (
-            "import pytest\n\nif 1 != 2:\n"
-            "    pytest.skip('no', allow_module_level=True)\n\n\n"
-        )
+        skip = "import pytest\n\nif 1 != 2:\n    pytest.skip('no', allow_module_level=True)\n\n\n"
         bodies = {
             "a module level constant": "BACKEND = 1\n",
             "an annotated constant": "ROWS: list[int] = [1, 2]\n",
             "a parametrisation table": "CASES = [(1, 2), (3, 4)]\n",
             "an export list": "__all__ = ['TestThing']\n",
-            "a conditional import": (
-                "try:\n    import lxml\nexcept ImportError:\n    lxml = None\n"
-            ),
+            "a conditional import": ("try:\n    import lxml\nexcept ImportError:\n    lxml = None\n"),
         }
         tail = "\n\nclass TestThing:\n    def test_one(self) -> None: ...\n"
 
@@ -2654,9 +2475,7 @@ class TestWhatARowOfZeroClaims:
 
             assert _is_silenced_by_the_engine(planted, ("test",), ("Test",)), what
 
-    def test_a_statement_that_could_reach_a_test_is_refused(
-        self, tmp_path: Path
-    ) -> None:
+    def test_a_statement_that_could_reach_a_test_is_refused(self, tmp_path: Path) -> None:
         """Eight spellings and one arm, which is the whole of the change.
 
         **Each is a member of a family with no last member**, and four
@@ -2670,10 +2489,7 @@ class TestWhatARowOfZeroClaims:
         The refusal names the statement and its line, because a whitelist
         that only says no is one the next reader widens blindly.
         """
-        skip = (
-            "import pytest\n\nif 1 != 2:\n"
-            "    pytest.skip('no', allow_module_level=True)\n\n\n"
-        )
+        skip = "import pytest\n\nif 1 != 2:\n    pytest.skip('no', allow_module_level=True)\n\n\n"
         owned = "class TestThing:\n    def test_one(self) -> None: ...\n\n\n"
         loose = "def test_one() -> None: ...\n\n\n"
         doors = {
@@ -2682,9 +2498,7 @@ class TestWhatARowOfZeroClaims:
             "deleting the method": owned + "del TestThing.test_one\n",
             "deleting the class": owned + "del TestThing\n",
             "a dynamic set": owned + "setattr(TestThing, 'test_one', None)\n",
-            "an alias then a rebinding": (
-                owned + "Alias = TestThing\nAlias.test_one = None\n"
-            ),
+            "an alias then a rebinding": (owned + "Alias = TestThing\nAlias.test_one = None\n"),
             "a nested class rebound": (
                 "class TestOuter:\n    class TestInner:\n"
                 "        def test_one(self) -> None: ...\n\n\n"
@@ -2697,16 +2511,10 @@ class TestWhatARowOfZeroClaims:
             planted = tmp_path / "test_planted.py"
             planted.write_text(skip + body)
 
-            assert not _is_silenced_by_the_engine(
-                planted, ("test",), ("Test",)
-            ), what
-            assert _statements_that_could_reach_a_test(
-                planted, ("test",), ("Test",)
-            ), what
+            assert not _is_silenced_by_the_engine(planted, ("test",), ("Test",)), what
+            assert _statements_that_could_reach_a_test(planted, ("test",), ("Test",)), what
 
-    def test_a_class_body_is_read_the_way_the_module_body_is(
-        self, tmp_path: Path
-    ) -> None:
+    def test_a_class_body_is_read_the_way_the_module_body_is(self, tmp_path: Path) -> None:
         """The whitelist skipped a class definition by kind, which is the
         construction that blocked the round before this one.
 
@@ -2714,10 +2522,7 @@ class TestWhatARowOfZeroClaims:
         level and none of them was read. Measured by collection, each of
         these collects nothing, raises no refusal and answered silenced.
         """
-        skip = (
-            "import pytest\n\nif 1 != 2:\n"
-            "    pytest.skip('no', allow_module_level=True)\n\n\n"
-        )
+        skip = "import pytest\n\nif 1 != 2:\n    pytest.skip('no', allow_module_level=True)\n\n\n"
         doors = {
             "the test rebound after its own def": "class TestThing:\n"
             "    def test_one(self) -> None: ...\n\n    test_one = None\n",
@@ -2730,21 +2535,14 @@ class TestWhatARowOfZeroClaims:
             "        def test_one(self) -> None: ...\n\n"
             "        test_one = None\n",
         }
-        ordinary = (
-            "class TestThing:\n    CASES = [(1, 2)]\n\n"
-            "    def test_one(self) -> None: ...\n"
-        )
+        ordinary = "class TestThing:\n    CASES = [(1, 2)]\n\n    def test_one(self) -> None: ...\n"
 
         for what, body in doors.items():
             planted = tmp_path / "test_planted.py"
             planted.write_text(skip + body)
 
-            assert not _is_silenced_by_the_engine(
-                planted, ("test",), ("Test",)
-            ), what
-            assert _statements_that_could_reach_a_test(
-                planted, ("test",), ("Test",)
-            ), what
+            assert not _is_silenced_by_the_engine(planted, ("test",), ("Test",)), what
+            assert _statements_that_could_reach_a_test(planted, ("test",), ("Test",)), what
 
         # The cost, which is what makes the rule worth having rather than
         # a refusal of every class: an ordinary class level constant stays.
@@ -2753,9 +2551,7 @@ class TestWhatARowOfZeroClaims:
 
         assert _is_silenced_by_the_engine(planted, ("test",), ("Test",))
 
-    def test_nothing_anywhere_may_bind_a_protected_name(
-        self, tmp_path: Path
-    ) -> None:
+    def test_nothing_anywhere_may_bind_a_protected_name(self, tmp_path: Path) -> None:
         """The two containers the whitelist does not read, and the binding
         forms that reach past it.
 
@@ -2776,10 +2572,7 @@ class TestWhatARowOfZeroClaims:
         still silenced. Deleting them would leave a loop of thirteen green
         assertions about nothing.
         """
-        skip = (
-            "import pytest\n\nif 1 != 2:\n"
-            "    pytest.skip('no', allow_module_level=True)\n\n\n"
-        )
+        skip = "import pytest\n\nif 1 != 2:\n    pytest.skip('no', allow_module_level=True)\n\n\n"
         owned = "class TestThing:\n    def test_one(self) -> None: ...\n\n\n"
         doors = {
             "a helper class body": owned + "class Helper:\n    TestThing.test_one = None\n",
@@ -2796,28 +2589,23 @@ class TestWhatARowOfZeroClaims:
             "class Helper:\n    TestOuter.TestInner = None\n",
             "a deletion in a helper": owned
             + "def wipe() -> None:\n    del TestThing.test_one\n\n\n_ = wipe()\n",
-            "a global declaration in a helper": owned
-            + "def wipe() -> None:\n    global TestThing\n"
+            "a global declaration in a helper": owned + "def wipe() -> None:\n    global TestThing\n"
             "    for TestThing in [None]:\n        pass\n\n\n_ = wipe()\n",
             "a namespace call in a helper": owned
             + "def wipe() -> None:\n    setattr(TestThing, 'test_one', None)\n\n\n"
             "_ = wipe()\n",
             "an import alias": owned + "import os as TestThing\n",
             "a star import": owned + "from os.path import *\n",
-            "a star import in a conditional": owned
-            + "if True:\n    from os.path import *\n",
+            "a star import in a conditional": owned + "if True:\n    from os.path import *\n",
             "a star import in a try": owned
             + "try:\n    from os.path import *\nexcept ImportError:\n    pass\n",
-            "an except handler": owned + "try:\n    import os\n"
-            "except ImportError as TestThing:\n    pass\n",
+            "an except handler": owned + "try:\n    import os\nexcept ImportError as TestThing:\n    pass\n",
         }
         kept = {
             "a helper with a local named like a test": owned
             + "def helper() -> int:\n    test_one = 1\n    return test_one\n",
-            "a helper class with an ordinary attribute": owned
-            + "class Helper:\n    CASES = [1]\n",
-            "a helper reading a protected name": owned
-            + "def helper():\n    return TestThing\n",
+            "a helper class with an ordinary attribute": owned + "class Helper:\n    CASES = [1]\n",
+            "a helper reading a protected name": owned + "def helper():\n    return TestThing\n",
             "a namespace call on something else": owned
             + "class Helper:\n    NAMES = frozenset(n for n in vars(dict) if n)\n",
             "an ordinary import and an ordinary handler": owned
@@ -2828,9 +2616,7 @@ class TestWhatARowOfZeroClaims:
             planted = tmp_path / "test_planted.py"
             planted.write_text(skip + body)
 
-            assert not _is_silenced_by_the_engine(
-                planted, ("test",), ("Test",)
-            ), what
+            assert not _is_silenced_by_the_engine(planted, ("test",), ("Test",)), what
 
         for what, body in kept.items():
             planted = tmp_path / "test_planted.py"
@@ -2848,9 +2634,7 @@ class TestWhatARowOfZeroClaims:
 
         assert _statements_that_could_reach_a_test(planted, ("test",), ("Test",)) == []
 
-    def test_a_walrus_binding_a_protected_name_is_refused(
-        self, tmp_path: Path
-    ) -> None:
+    def test_a_walrus_binding_a_protected_name_is_refused(self, tmp_path: Path) -> None:
         """The row of the table that was discharged by a sentence.
 
         The sentence said the value rule catches one, which holds only where
@@ -2860,19 +2644,14 @@ class TestWhatARowOfZeroClaims:
         module scope. Censused free: 29 walrus expressions in this corpus and
         none binds a protected name.
         """
-        skip = (
-            "import pytest\n\nif 1 != 2:\n"
-            "    pytest.skip('no', allow_module_level=True)\n\n\n"
-        )
+        skip = "import pytest\n\nif 1 != 2:\n    pytest.skip('no', allow_module_level=True)\n\n\n"
         owned = "class TestThing:\n    def test_one(self) -> None: ...\n\n\n"
         doors = {
-            "in a default argument": owned
-            + "def helper(value=(TestThing := None)) -> None: ...\n",
+            "in a default argument": owned + "def helper(value=(TestThing := None)) -> None: ...\n",
             "in a decorator argument": owned
             + "def deco(thing):\n    return lambda given: given\n\n\n"
             + "@deco((TestThing := None))\ndef helper() -> None: ...\n",
-            "in a class base": owned
-            + "class Helper((TestThing := object)):\n    pass\n",
+            "in a class base": owned + "class Helper((TestThing := object)):\n    pass\n",
             "inside a module level statement": owned + "_ = [(TestThing := None)]\n",
         }
 
@@ -2880,13 +2659,9 @@ class TestWhatARowOfZeroClaims:
             planted = tmp_path / "test_planted.py"
             planted.write_text(skip + body)
 
-            assert not _is_silenced_by_the_engine(
-                planted, ("test",), ("Test",)
-            ), what
+            assert not _is_silenced_by_the_engine(planted, ("test",), ("Test",)), what
 
-    def test_a_container_that_can_rebind_is_refused_by_kind(
-        self, tmp_path: Path
-    ) -> None:
+    def test_a_container_that_can_rebind_is_refused_by_kind(self, tmp_path: Path) -> None:
         """A witness for a row discharged rather than refused.
 
         The table discharges a loop or context manager target at module level
@@ -2904,10 +2679,7 @@ class TestWhatARowOfZeroClaims:
         and a future branch over them would make this arm prove less than it
         reads.
         """
-        skip = (
-            "import pytest\n\nif 1 != 2:\n"
-            "    pytest.skip('no', allow_module_level=True)\n\n\n"
-        )
+        skip = "import pytest\n\nif 1 != 2:\n    pytest.skip('no', allow_module_level=True)\n\n\n"
         bodies = {
             "a loop target": "class TestThing:\n"
             "    def test_one(self) -> None: ...\n\n\n"
@@ -2924,13 +2696,9 @@ class TestWhatARowOfZeroClaims:
         for what, body in bodies.items():
             planted = tmp_path / "test_planted.py"
             planted.write_text(skip + body)
-            reported = _statements_that_could_reach_a_test(
-                planted, ("test",), ("Test",)
-            )
+            reported = _statements_that_could_reach_a_test(planted, ("test",), ("Test",))
 
-            assert not _is_silenced_by_the_engine(
-                planted, ("test",), ("Test",)
-            ), what
+            assert not _is_silenced_by_the_engine(planted, ("test",), ("Test",)), what
             assert any(kinds[what] in one for one in reported), (what, reported)
 
             # The container refusal is the only thing holding this, so the
@@ -2940,9 +2708,7 @@ class TestWhatARowOfZeroClaims:
 
             assert namespace["TestThing"] is None, what
 
-    def test_a_binding_the_collector_never_reads_leaves_the_test(
-        self, tmp_path: Path
-    ) -> None:
+    def test_a_binding_the_collector_never_reads_leaves_the_test(self, tmp_path: Path) -> None:
         """The other row discharged rather than refused, with its witness,
         and the witness split the row.
 
@@ -2966,13 +2732,9 @@ class TestWhatARowOfZeroClaims:
         Both are false refusals, both censused free, and both are loud. The
         third part below is what says so.
         """
-        skip = (
-            "import pytest\n\nif 1 != 2:\n"
-            "    pytest.skip('no', allow_module_level=True)\n\n\n"
-        )
+        skip = "import pytest\n\nif 1 != 2:\n    pytest.skip('no', allow_module_level=True)\n\n\n"
         head = (
-            "def test_alone() -> None: ...\n\n\n"
-            "class TestThing:\n    def test_one(self) -> None: ...\n\n\n"
+            "def test_alone() -> None: ...\n\n\nclass TestThing:\n    def test_one(self) -> None: ...\n\n\n"
         )
         body = head + (
             "def helper(test_alone: int = 1) -> list[int]:\n"
@@ -3000,43 +2762,31 @@ class TestWhatARowOfZeroClaims:
         }.items():
             planted.write_text(skip + head + shadow)
 
-            assert not _is_silenced_by_the_engine(
-                planted, ("test",), ("Test",)
-            ), what
+            assert not _is_silenced_by_the_engine(planted, ("test",), ("Test",)), what
 
-    def test_a_top_level_name_defined_twice_is_refused(
-        self, tmp_path: Path
-    ) -> None:
+    def test_a_top_level_name_defined_twice_is_refused(self, tmp_path: Path) -> None:
         """The second definition wins and the first is gone, so a class
         redefined under a name the collector reads can lose its tests to a
         later definition carrying a falsy declaration.
 
         Censused free: no file in this corpus defines a top level name twice.
         """
-        skip = (
-            "import pytest\n\nif 1 != 2:\n"
-            "    pytest.skip('no', allow_module_level=True)\n\n\n"
-        )
+        skip = "import pytest\n\nif 1 != 2:\n    pytest.skip('no', allow_module_level=True)\n\n\n"
         again = {
             "a class": "class TestThing:\n"
             "    def test_one(self) -> None: ...\n\n\n"
             "class TestThing:\n    __test__ = False\n",
-            "a function": "def test_one() -> None: ...\n\n\n"
-            "def test_one() -> None: ...\n",
+            "a function": "def test_one() -> None: ...\n\n\ndef test_one() -> None: ...\n",
         }
 
         for what, body in again.items():
             planted = tmp_path / "test_planted.py"
             planted.write_text(skip + body)
 
-            assert not _is_silenced_by_the_engine(
-                planted, ("test",), ("Test",)
-            ), what
+            assert not _is_silenced_by_the_engine(planted, ("test",), ("Test",)), what
             assert any(
                 "defined again" in reason
-                for reason in _statements_that_could_reach_a_test(
-                    planted, ("test",), ("Test",)
-                )
+                for reason in _statements_that_could_reach_a_test(planted, ("test",), ("Test",))
             ), what
 
     def test_a_row_of_zero_on_a_collected_file_is_reported(self) -> None:
@@ -3050,14 +2800,10 @@ class TestWhatARowOfZeroClaims:
         census = _planted({"test_a.py": 10}, {"test_a.py"})
         register = "| `test_a.py` | 0 | Not on this engine |\n"
 
-        assert _rows_of_zero_that_collected(census, register) == [
-            "test_a.py: stated as 0, collected 10"
-        ]
+        assert _rows_of_zero_that_collected(census, register) == ["test_a.py: stated as 0, collected 10"]
         assert _rows_of_zero_that_collected(_planted({}, {"test_a.py"}), register) == []
 
-    def test_a_row_of_zero_on_a_file_with_nothing_in_it_is_reported(
-        self, tmp_path: Path
-    ) -> None:
+    def test_a_row_of_zero_on_a_file_with_nothing_in_it_is_reported(self, tmp_path: Path) -> None:
         """The sibling comprehension, driven the same way and for the same
         reason: replacing its membership test with `False` was also green."""
         (tmp_path / "test_quiet.py").write_text(
@@ -3071,9 +2817,7 @@ class TestWhatARowOfZeroClaims:
         census = _planted({}, {"test_quiet.py", "test_engine.py"})
         register = "| `test_quiet.py` | 0 | Gone |\n| `test_engine.py` | 0 | Elsewhere |\n"
 
-        assert _rows_of_zero_with_no_engine_reason(census, register, tmp_path) == [
-            "test_quiet.py"
-        ]
+        assert _rows_of_zero_with_no_engine_reason(census, register, tmp_path) == ["test_quiet.py"]
 
 
 class TestTheGateComparesTwoInstruments:
@@ -3113,9 +2857,7 @@ class TestTheGateComparesTwoInstruments:
 
     def test_the_gate_names_an_excused_file_that_collected(self) -> None:
         """Symmetric, so the subtraction cannot turn a live file into a hole."""
-        census = _planted(
-            {"test_a.py": 10, "test_quiet.py": 6}, {"test_a.py", "test_quiet.py"}
-        )
+        census = _planted({"test_a.py": 10, "test_quiet.py": 6}, {"test_a.py", "test_quiet.py"})
 
         refusal = _refusal(census, frozenset({"test_quiet.py"}))
 
@@ -3123,9 +2865,7 @@ class TestTheGateComparesTwoInstruments:
         assert "test_quiet.py" in refusal
 
     def test_the_gate_still_names_a_narrowed_run(self) -> None:
-        census = _planted(
-            {"test_a.py": 10}, {"test_a.py", "test_b.py", "test_quiet.py"}
-        )
+        census = _planted({"test_a.py": 10}, {"test_a.py", "test_b.py", "test_quiet.py"})
 
         refusal = _refusal(census, frozenset({"test_quiet.py"}))
 
@@ -3156,9 +2896,7 @@ class TestTheGateComparesTwoInstruments:
         assert "the remedy is a row of 0 for it" in from_the_run
         assert "the walk going wrong" not in from_the_run
 
-    def test_an_internal_module_this_engine_cannot_run_is_excused(
-        self, tmp_path: Path
-    ) -> None:
+    def test_an_internal_module_this_engine_cannot_run_is_excused(self, tmp_path: Path) -> None:
         """The fourth cell, which has no row to be excused by.
 
         A file the publish gate strips cannot be named in a published
@@ -3179,9 +2917,7 @@ class TestTheGateComparesTwoInstruments:
         assert _excused(census, "", tmp_path) == frozenset({"test_stripped.py"})
         assert _refusal(census, _excused(census, "", tmp_path)) is None
 
-    def test_an_internal_module_that_merely_collects_nothing_is_not_excused(
-        self, tmp_path: Path
-    ) -> None:
+    def test_an_internal_module_that_merely_collects_nothing_is_not_excused(self, tmp_path: Path) -> None:
         """The same half of the rule the row of 0 has.
 
         Without it the fourth cell's fix would hand an emptied stripped file
@@ -3195,9 +2931,7 @@ class TestTheGateComparesTwoInstruments:
 
         assert _excused(census, "", tmp_path) == frozenset()
 
-    def test_a_published_module_that_collects_nothing_is_not_excused(
-        self, tmp_path: Path
-    ) -> None:
+    def test_a_published_module_that_collects_nothing_is_not_excused(self, tmp_path: Path) -> None:
         """The cell that stays in the skip, and deliberately.
 
         Such a file can carry a row of 0 and is required to, so the gate asks

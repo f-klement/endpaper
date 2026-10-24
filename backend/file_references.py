@@ -138,9 +138,7 @@ def _settle(reference: DigitalReference, look: _Fingerprint, *, root_confirmed: 
     reference.root_confirmed = bool(reference.root_confirmed) or root_confirmed
 
 
-def report(
-    db: Session, member_id: int, book_id: int, payload: DigitalReferenceIn
-) -> DigitalReference:
+def report(db: Session, member_id: int, book_id: int, payload: DigitalReferenceIn) -> DigitalReference:
     """Record one client's look at one location on this Book, uncommitted.
 
     The row at the location is settled by `_settle`, or created within the
@@ -187,9 +185,7 @@ def report(
     return existing
 
 
-def _held_elsewhere(
-    db: Session, member_id: int, book_id: int, payload: DigitalReferenceIn
-) -> int | None:
+def _held_elsewhere(db: Session, member_id: int, book_id: int, payload: DigitalReferenceIn) -> int | None:
     """The lowest id Book other than this one, seen by the member, holding this location.
 
     **Through the Shelf, so a Book the member cannot see answers as no Book**

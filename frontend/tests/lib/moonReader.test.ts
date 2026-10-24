@@ -95,7 +95,9 @@ async function booksOn(...rows: string[]): Promise<readonly MoonReaderBook[]> {
  * the thing under test would make the two agree by construction.
  */
 const FORMAT_IS_NO_WIDER_THAN_A_STORE_ROW_TAKES:
-  "ebook" | "audiobook" | "comic" = "ebook" as MoonReaderFormat;
+  | "ebook"
+  | "audiobook"
+  | "comic" = "ebook" as MoonReaderFormat;
 
 const IN_BOOKS = `INSERT INTO books (filename, book, author)
   VALUES ('/storage/emulated/0/Books/dune.epub', 'Dune', 'Frank Herbert')`;

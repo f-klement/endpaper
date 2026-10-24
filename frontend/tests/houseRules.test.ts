@@ -3685,7 +3685,7 @@ describe("a module is replaced by an alias, never by a module mock", () => {
       // Not anchored to the start of a line: that was the cheaper rule and it
       // is blind to anything sharing the line with the call.
       `const a = 1; vi.mock("./thing");`,
-      // The receiver split onto its own line, which is what prettier does to a
+      // The receiver split onto its own line, which is what oxfmt does to a
       // call that heads an assignment chain, and which three real call sites in
       // this tree are already written as. A regex needed a whitespace class on
       // both sides of the dot to see this; the parser needs nothing.
@@ -3919,7 +3919,7 @@ describe("storage is refused on the instance, never by a prototype spy", () => {
 
     for (const code of [
       `vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {});`,
-      // The split prettier writes when the call heads an assignment chain,
+      // The split oxfmt writes when the call heads an assignment chain,
       // which is how one of the sites this rule was written after was spelled.
       `const s = vi\n  .spyOn(Storage.prototype, "setItem");`,
       `vi.spyOn(window.Storage.prototype, "removeItem");`,

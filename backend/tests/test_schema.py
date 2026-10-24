@@ -61,6 +61,10 @@ from tests.corpus import BACKEND, application_modules
 from tests.test_dialect import ADDED_RULES, SWAP_CHAIN, THE_SWAPS, _swap_rows
 from tests.test_filing import CORPUS
 
+TREE_GUARDS = {
+    "TestTheBoundsThisRevisionPutOnBytes": ("application_modules",),
+}
+
 
 def drop_everything() -> None:
     """A truly empty database, `alembic_version` included.
@@ -93,16 +97,10 @@ def build_pre_alembic_database() -> None:
 
     with engine.connect() as connection:
         connection.execute(text("DROP INDEX IF EXISTS uq_user_books_user_book"))
-        connection.execute(
-            text("INSERT INTO users (username, password_hash, is_admin) VALUES ('kim','x',1)")
-        )
+        connection.execute(text("INSERT INTO users (username, password_hash, is_admin) VALUES ('kim','x',1)"))
         connection.execute(text("INSERT INTO books (title) VALUES ('An Old Book')"))
-        connection.execute(
-            text("INSERT INTO user_books (user_id, book_id, status) VALUES (1,1,'unread')")
-        )
-        connection.execute(
-            text("INSERT INTO user_books (user_id, book_id, status) VALUES (1,1,'read')")
-        )
+        connection.execute(text("INSERT INTO user_books (user_id, book_id, status) VALUES (1,1,'unread')"))
+        connection.execute(text("INSERT INTO user_books (user_id, book_id, status) VALUES (1,1,'read')"))
         connection.commit()
 
 
@@ -203,9 +201,7 @@ class TestEmptyDatabase:
 
         schema.upgrade_to_head()
 
-        assert {"books", "users", "tags", "loans", "notes", "user_books", "book_tags"} <= (
-            table_names()
-        )
+        assert {"books", "users", "tags", "loans", "notes", "user_books", "book_tags"} <= (table_names())
 
     def test_records_the_revision(self):
         drop_everything()
@@ -235,9 +231,7 @@ class TestTheChainRunsBothWays:
         schema.upgrade_to_head()
 
         assert current_revision() == head
-        assert {"books", "users", "tags", "loans", "notes", "user_books", "book_tags"} <= (
-            table_names()
-        )
+        assert {"books", "users", "tags", "loans", "notes", "user_books", "book_tags"} <= (table_names())
 
     def test_rendering_the_chain_as_sql_is_refused_before_a_line_is_printed(self):
         from io import StringIO
@@ -494,10 +488,7 @@ class TestHyphenatingTheAgeTags:
     def tag_names(self) -> list[str]:
         with engine.connect() as connection:
             return [
-                row[0]
-                for row in connection.execute(
-                    text("SELECT name FROM tags WHERE category = 'age'")
-                )
+                row[0] for row in connection.execute(text("SELECT name FROM tags WHERE category = 'age'"))
             ]
 
     def test_renames_the_existing_row(self):
@@ -526,9 +517,7 @@ class TestHyphenatingTheAgeTags:
         schema.upgrade_to_head()
 
         with engine.connect() as connection:
-            links = connection.execute(
-                text("SELECT tag_id FROM book_tags")
-            ).scalars().all()
+            links = connection.execute(text("SELECT tag_id FROM book_tags")).scalars().all()
         assert links == [tag_id]
 
     def test_seeding_afterwards_does_not_duplicate_it(self):
@@ -595,9 +584,7 @@ class TestLendingToSomeoneWithoutAnAccount:
 
         with engine.connect() as connection:
             assert connection.execute(text("SELECT COUNT(*) FROM loans")).scalar() == 1
-            assert (
-                connection.execute(text("SELECT loaned_to_user_id FROM loans")).scalar() == 1
-            )
+            assert connection.execute(text("SELECT loaned_to_user_id FROM loans")).scalar() == 1
 
     def test_the_borrower_name_column_arrives(self):
         self.build_database_with_a_loan()
@@ -644,9 +631,7 @@ class TestLendingToSomeoneWithoutAnAccount:
         schema.upgrade_to_head()
 
         with engine.connect() as connection:
-            connection.execute(
-                text("UPDATE loans SET returned_at = datetime('now') WHERE id = 1")
-            )
+            connection.execute(text("UPDATE loans SET returned_at = datetime('now') WHERE id = 1"))
             connection.execute(
                 text(
                     "INSERT INTO loans (book_id, loaned_to_user_id, loaned_by_user_id, "
@@ -675,9 +660,7 @@ class TestLendingToSomeoneWithoutAnAccount:
         self.build_database_with_a_loan()
         schema.upgrade_to_head()
         with engine.connect() as connection:
-            connection.execute(
-                text("UPDATE loans SET returned_at = datetime('now') WHERE id = 1")
-            )
+            connection.execute(text("UPDATE loans SET returned_at = datetime('now') WHERE id = 1"))
             connection.execute(
                 text(
                     "INSERT INTO loans (book_id, loaned_to_name, loaned_by_user_id, "
@@ -775,9 +758,7 @@ class TestUpgradingStoredCovers:
 
         assert self.cover_of("ShoutedScheme") is not None
 
-    @pytest.mark.parametrize(
-        "title", ["Script", "Data", "SchemeRelative", "Traversal"]
-    )
+    @pytest.mark.parametrize("title", ["Script", "Data", "SchemeRelative", "Traversal"])
     def test_a_legacy_value_no_image_tag_should_load_is_nulled(self, title):
         """Nothing rewrites these rows, so nothing else would ever refuse them.
         `data:` is still listed in `img-src`, so such a row does not merely
@@ -920,9 +901,7 @@ class TestCollectionsAndTheIsbnIndexThatSurvivesThem:
                 connection.execute(text("PRAGMA foreign_keys=ON"))
             # `name_folded` by hand: e7b3d02a5c94 made it NOT NULL, and the
             # `@validates` hook that fills it in only fires through the ORM.
-            connection.execute(
-                text("INSERT INTO collections (name, name_folded) VALUES ('Ebooks','ebooks')")
-            )
+            connection.execute(text("INSERT INTO collections (name, name_folded) VALUES ('Ebooks','ebooks')"))
             connection.execute(text("UPDATE books SET collection_id = 1"))
             connection.execute(text("DELETE FROM collections WHERE id = 1"))
             connection.commit()
@@ -945,10 +924,7 @@ class TestWideningTheClassificationNumber:
     a rewrite that dropped it would be silent until two identical rows appeared.
     """
 
-    HEADING = (
-        "United States -- History -- Civil War, 1861-1865 -- "
-        "Social aspects -- Juvenile literature"
-    )
+    HEADING = "United States -- History -- Civil War, 1861-1865 -- Social aspects -- Juvenile literature"
 
     def build_database_with_a_heading(self) -> None:
         """A database one revision back, holding a book and a short heading."""
@@ -971,11 +947,7 @@ class TestWideningTheClassificationNumber:
 
     def numbers(self) -> list[str]:
         with engine.connect() as connection:
-            return list(
-                connection.execute(
-                    text("SELECT number FROM classifications ORDER BY id")
-                ).scalars()
-            )
+            return list(connection.execute(text("SELECT number FROM classifications ORDER BY id")).scalars())
 
     def test_the_column_takes_a_heading_no_call_number_would_reach(self):
         self.build_database_with_a_heading()
@@ -1122,9 +1094,7 @@ class TestFoldingCollectionNamesOutsideAscii:
                 text("INSERT INTO users (username, password_hash, is_admin) VALUES ('kim','x',1)")
             )
             for name in ("Fiction", self.UPPER, self.LOWER):
-                connection.execute(
-                    text("INSERT INTO collections (name) VALUES (:name)"), {"name": name}
-                )
+                connection.execute(text("INSERT INTO collections (name) VALUES (:name)"), {"name": name})
             for title, collection_id in (("Other", 1), ("Upper", 2), ("Lower", 3)):
                 connection.execute(
                     text(
@@ -1150,9 +1120,7 @@ class TestFoldingCollectionNamesOutsideAscii:
         with engine.connect() as connection:
             return [
                 (row[0], row[1])
-                for row in connection.execute(
-                    text("SELECT id, name FROM collections ORDER BY id")
-                )
+                for row in connection.execute(text("SELECT id, name FROM collections ORDER BY id"))
             ]
 
     def shelf_of(self, title: str) -> int | None:
@@ -1226,13 +1194,9 @@ class TestFoldingCollectionNamesOutsideAscii:
         schema.upgrade_to_head()
 
         with engine.connect() as connection:
-            connection.execute(
-                text("INSERT INTO collections (name, name_folded) VALUES ('Later','later')")
-            )
+            connection.execute(text("INSERT INTO collections (name, name_folded) VALUES ('Later','later')"))
             connection.commit()
-            later = connection.execute(
-                text("SELECT id FROM collections WHERE name = 'Later'")
-            ).scalar_one()
+            later = connection.execute(text("SELECT id FROM collections WHERE name = 'Later'")).scalar_one()
             # The point of the test: this is the id the merge freed. If it is
             # not, the count below is true for a reason unrelated to the
             # repoint and the test proves nothing.
@@ -1255,13 +1219,9 @@ class TestFoldingCollectionNamesOutsideAscii:
         schema.upgrade_to(self.PREVIOUS)
         with engine.connect() as connection:
             for index, name in enumerate(("ÄÖ", "äÖ", "Äö", "äö"), start=1):
+                connection.execute(text("INSERT INTO collections (name) VALUES (:name)"), {"name": name})
                 connection.execute(
-                    text("INSERT INTO collections (name) VALUES (:name)"), {"name": name}
-                )
-                connection.execute(
-                    text(
-                        "INSERT INTO books (title, collection_id) VALUES (:title, :collection_id)"
-                    ),
+                    text("INSERT INTO books (title, collection_id) VALUES (:title, :collection_id)"),
                     {"title": f"Book {index}", "collection_id": index},
                 )
             connection.commit()
@@ -1339,10 +1299,7 @@ class TestFoldingCollectionNamesOutsideAscii:
         self.build_database_with_a_colliding_pair()
         with self._with_foreign_keys_off() as connection:
             connection.execute(
-                text(
-                    "INSERT INTO books (title, collection_id, added_by_user_id) "
-                    "VALUES ('Nowhere', 9999, 1)"
-                )
+                text("INSERT INTO books (title, collection_id, added_by_user_id) VALUES ('Nowhere', 9999, 1)")
             )
 
         with pytest.raises(RuntimeError, match="does not exist"):
@@ -1359,10 +1316,7 @@ class TestFoldingCollectionNamesOutsideAscii:
         self.build_database_with_a_colliding_pair()
         with self._with_foreign_keys_off() as connection:
             connection.execute(
-                text(
-                    "INSERT INTO books (title, collection_id, added_by_user_id) "
-                    "VALUES ('Nowhere', 9999, 1)"
-                )
+                text("INSERT INTO books (title, collection_id, added_by_user_id) VALUES ('Nowhere', 9999, 1)")
             )
 
         with pytest.raises(RuntimeError, match="has been stopped and nothing was changed"):
@@ -1392,10 +1346,7 @@ class TestFoldingCollectionNamesOutsideAscii:
             definitions = [
                 row[0]
                 for row in connection.execute(
-                    text(
-                        "SELECT sql FROM sqlite_master WHERE tbl_name = 'collections' "
-                        "AND sql IS NOT NULL"
-                    )
+                    text("SELECT sql FROM sqlite_master WHERE tbl_name = 'collections' AND sql IS NOT NULL")
                 )
             ]
         assert any("lower(name)" in definition for definition in definitions)
@@ -1429,9 +1380,7 @@ class TestCustomFieldsOnABook:
         self._at_head()
 
         with engine.connect() as connection:
-            connection.execute(
-                text("INSERT INTO custom_fields (name, kind) VALUES ('Calibre', 'url')")
-            )
+            connection.execute(text("INSERT INTO custom_fields (name, kind) VALUES ('Calibre', 'url')"))
             connection.execute(text("INSERT INTO books (title) VALUES ('Solaris')"))
             connection.execute(
                 text(
@@ -1456,18 +1405,13 @@ class TestCustomFieldsOnABook:
         self._at_head()
 
         with engine.connect() as connection:
-            connection.execute(
-                text("INSERT INTO custom_fields (name, kind) VALUES ('Calibre', 'url')")
-            )
+            connection.execute(text("INSERT INTO custom_fields (name, kind) VALUES ('Calibre', 'url')"))
             connection.execute(text("INSERT INTO books (title) VALUES ('Solaris')"))
             connection.commit()
 
             with pytest.raises(IntegrityError):
                 connection.execute(
-                    text(
-                        "INSERT INTO custom_field_values (book_id, field_id, value) "
-                        "VALUES (1, 1, '')"
-                    )
+                    text("INSERT INTO custom_field_values (book_id, field_id, value) VALUES (1, 1, '')")
                 )
 
     def test_a_value_past_the_bound_is_refused_by_the_database(self):
@@ -1476,18 +1420,13 @@ class TestCustomFieldsOnABook:
         self._at_head()
 
         with engine.connect() as connection:
-            connection.execute(
-                text("INSERT INTO custom_fields (name, kind) VALUES ('Calibre', 'url')")
-            )
+            connection.execute(text("INSERT INTO custom_fields (name, kind) VALUES ('Calibre', 'url')"))
             connection.execute(text("INSERT INTO books (title) VALUES ('Solaris')"))
             connection.commit()
 
             with pytest.raises(IntegrityError):
                 connection.execute(
-                    text(
-                        "INSERT INTO custom_field_values (book_id, field_id, value) "
-                        "VALUES (1, 1, :value)"
-                    ),
+                    text("INSERT INTO custom_field_values (book_id, field_id, value) VALUES (1, 1, :value)"),
                     {"value": "x" * 501},
                 )
 
@@ -1503,23 +1442,17 @@ class TestCustomFieldsOnABook:
         self._at_head()
 
         with engine.connect() as connection, pytest.raises(IntegrityError):
-            connection.execute(
-                text("INSERT INTO custom_fields (name, kind) VALUES ('X', 'link')")
-            )
+            connection.execute(text("INSERT INTO custom_fields (name, kind) VALUES ('X', 'link')"))
 
     def test_two_fields_cannot_share_a_name(self):
         self._at_head()
 
         with engine.connect() as connection:
-            connection.execute(
-                text("INSERT INTO custom_fields (name, kind) VALUES ('Calibre', 'url')")
-            )
+            connection.execute(text("INSERT INTO custom_fields (name, kind) VALUES ('Calibre', 'url')"))
             connection.commit()
 
             with pytest.raises(IntegrityError):
-                connection.execute(
-                    text("INSERT INTO custom_fields (name, kind) VALUES ('Calibre', 'text')")
-                )
+                connection.execute(text("INSERT INTO custom_fields (name, kind) VALUES ('Calibre', 'text')"))
 
     def test_the_downgrade_drops_both_tables(self):
         """Honest rather than clever: the values live nowhere else, so a
@@ -1700,13 +1633,9 @@ class TestKeyingTheSeededTags:
         ids = self.build_database_with_tags()
         self.lose_the_name_constraint()
         with engine.connect() as connection:
-            connection.execute(
-                text("INSERT INTO tags (name, category) VALUES ('Computing', 'custom')")
-            )
+            connection.execute(text("INSERT INTO tags (name, category) VALUES ('Computing', 'custom')"))
             second = int(
-                connection.execute(
-                    text("SELECT MAX(id) FROM tags WHERE name = 'Computing'")
-                ).scalar_one()
+                connection.execute(text("SELECT MAX(id) FROM tags WHERE name = 'Computing'")).scalar_one()
             )
             connection.commit()
 
@@ -1725,10 +1654,7 @@ class TestKeyingTheSeededTags:
 
         with engine.connect() as connection, pytest.raises(IntegrityError):
             connection.execute(
-                text(
-                    "INSERT INTO tags (name, category, key) "
-                    "VALUES ('Second', 'custom', 'computing')"
-                )
+                text("INSERT INTO tags (name, category, key) VALUES ('Second', 'custom', 'computing')")
             )
 
     def test_many_rows_may_share_a_null_key(self):
@@ -1737,12 +1663,8 @@ class TestKeyingTheSeededTags:
         schema.upgrade_to_head()
 
         with engine.connect() as connection:
-            connection.execute(
-                text("INSERT INTO tags (name, category) VALUES ('Beach', 'custom')")
-            )
-            connection.execute(
-                text("INSERT INTO tags (name, category) VALUES ('Loft', 'custom')")
-            )
+            connection.execute(text("INSERT INTO tags (name, category) VALUES ('Beach', 'custom')"))
+            connection.execute(text("INSERT INTO tags (name, category) VALUES ('Loft', 'custom')"))
             connection.commit()
 
         assert self.keys()["Beach"] is None
@@ -1862,9 +1784,7 @@ class TestTheMigrationsAndTheModelsAgree:
         """
         migrated = self._reflected()
         wrong: list[str] = []
-        if undeclared := sorted(
-            set(migrated) - {table.name for table in Base.metadata.sorted_tables}
-        ):
+        if undeclared := sorted(set(migrated) - {table.name for table in Base.metadata.sorted_tables}):
             wrong.append(f"migrated but never declared: {undeclared}")
         for table in Base.metadata.sorted_tables:
             built = migrated.get(table.name)
@@ -1905,10 +1825,7 @@ class TestTheMigrationsAndTheModelsAgree:
                 if built is None:
                     continue
                 if built[1] != str(column.type):
-                    wrong.append(
-                        f"{table.name}.{column.name}: migration {built[1]}, "
-                        f"model {column.type}"
-                    )
+                    wrong.append(f"{table.name}.{column.name}: migration {built[1]}, model {column.type}")
 
         assert not wrong, "\n".join(wrong)
 
@@ -2120,8 +2037,7 @@ class TestTheSchemaTheApplicationBootsIsTheRevisions:
         )
 
         assert finished.returncode == 0, (
-            f"the {how} probe did not finish, so this rule measured nothing:\n"
-            f"{finished.stderr[-2000:]}"
+            f"the {how} probe did not finish, so this rule measured nothing:\n{finished.stderr[-2000:]}"
         )
         return dict(json.loads(report.read_text()))
 
@@ -2193,10 +2109,7 @@ class TestTheEnvelopeConstraintOnAMigratedDatabase:
 
     @staticmethod
     def _insert(source: str, envelope: str) -> str:
-        return (
-            "INSERT INTO catalogue_credentials (source, envelope) VALUES "
-            f"({source}, {envelope})"
-        )
+        return f"INSERT INTO catalogue_credentials (source, envelope) VALUES ({source}, {envelope})"
 
     @pytest.mark.parametrize("version", credentials.KNOWN_VERSIONS)
     def test_every_version_this_build_recognises_is_storable(self, version):
@@ -2212,9 +2125,7 @@ class TestTheEnvelopeConstraintOnAMigratedDatabase:
             connection.commit()
 
         with engine.connect() as connection:
-            assert connection.execute(
-                text("SELECT count(*) FROM catalogue_credentials")
-            ).scalar() == 1
+            assert connection.execute(text("SELECT count(*) FROM catalogue_credentials")).scalar() == 1
 
     def test_a_plaintext_password_is_still_refused(self):
         self._migrated()
@@ -2236,9 +2147,7 @@ class TestTheEnvelopeConstraintOnAMigratedDatabase:
         self._migrated()
 
         with engine.connect() as connection, pytest.raises(IntegrityError) as refusal:
-            connection.execute(
-                text(self._insert("'../../books/5?'", self._envelope(credentials.VERSION)))
-            )
+            connection.execute(text(self._insert("'../../books/5?'", self._envelope(credentials.VERSION))))
 
         assert "ck_catalogue_credentials_source" in str(refusal.value)
 
@@ -2267,9 +2176,7 @@ class TestTheEnvelopeConstraintOnAMigratedDatabase:
         command.upgrade(schema._alembic_config(), "d9c1f47b2a06")
 
         with engine.connect() as connection:
-            kept = connection.execute(
-                text("SELECT envelope FROM catalogue_credentials")
-            ).scalars().all()
+            kept = connection.execute(text("SELECT envelope FROM catalogue_credentials")).scalars().all()
         assert len(kept) == 1
         assert kept[0].split(".")[0] == older
 
@@ -2284,21 +2191,14 @@ class TestTheEnvelopeConstraintOnAMigratedDatabase:
         self._migrated()
         older = credentials._UNBOUND_VERSION
         with engine.connect() as connection:
-            connection.execute(
-                text(self._insert("'bne'", self._envelope(credentials.VERSION)))
-            )
+            connection.execute(text(self._insert("'bne'", self._envelope(credentials.VERSION))))
             connection.execute(text(self._insert("'dnb'", self._envelope(older))))
             connection.commit()
 
         command.downgrade(schema._alembic_config(), "c8b3e5017d4a")
 
         with engine.connect() as connection:
-            left = [
-                row[0]
-                for row in connection.execute(
-                    text("SELECT source FROM catalogue_credentials")
-                )
-            ]
+            left = [row[0] for row in connection.execute(text("SELECT source FROM catalogue_credentials"))]
 
         assert left == ["dnb"]
 
@@ -2385,12 +2285,7 @@ class TestTheAuthorityIdentifierConstraintsOnAMigratedDatabase:
         command.downgrade(schema._alembic_config(), "d5e1b93a7c62")
 
         with engine.connect() as connection:
-            left = [
-                row[0]
-                for row in connection.execute(
-                    text("SELECT scheme FROM author_identifiers")
-                )
-            ]
+            left = [row[0] for row in connection.execute(text("SELECT scheme FROM author_identifiers"))]
 
         assert left == ["isni"]
 
@@ -2532,11 +2427,7 @@ class TestAnAddressPerMember:
 
         schema.upgrade_to_head()
 
-        column = next(
-            item
-            for item in inspect(engine).get_columns("users")
-            if item["name"] == "email"
-        )
+        column = next(item for item in inspect(engine).get_columns("users") if item["name"] == "email")
         assert column["nullable"] is True
 
     def test_the_column_is_as_wide_as_the_rule_allows(self):
@@ -2557,11 +2448,7 @@ class TestAnAddressPerMember:
         self.build_database_with_a_member()
         schema.upgrade_to_head()
 
-        column = next(
-            item
-            for item in inspect(engine).get_columns("users")
-            if item["name"] == "email"
-        )
+        column = next(item for item in inspect(engine).get_columns("users") if item["name"] == "email")
         # `isinstance` rather than a cast: that the column is a VARCHAR at all
         # is half the claim, and a cast would assert it without checking it.
         migrated = column["type"]
@@ -2577,9 +2464,7 @@ class TestAnAddressPerMember:
         schema.upgrade_to_head()
 
         with engine.connect() as connection:
-            row = connection.execute(
-                text("SELECT username, email FROM users")
-            ).one()
+            row = connection.execute(text("SELECT username, email FROM users")).one()
         assert row.username == "kim"
         assert row.email is None
 
@@ -2646,16 +2531,12 @@ class TestTheSeededCatalogueTargetsMatchTheCode:
                 "needs_key": target.needs_key,
                 "sru_version": target.sru_version,
                 "query_parameter": target.query_parameter,
-                "query_language": (
-                    target.query_language.value if target.query_language else None
-                ),
+                "query_language": (target.query_language.value if target.query_language else None),
                 "record_schema": target.record_schema,
                 "isbn_index": target.isbn_index,
                 "isbn_attribute": target.isbn_attribute,
                 "title_index": target.title_index,
-                "title_query_shape": (
-                    target.title_query_shape.value if target.title_query_shape else None
-                ),
+                "title_query_shape": (target.title_query_shape.value if target.title_query_shape else None),
                 "lookup_records": target.lookup_records,
                 "search_multiplier": target.search_multiplier,
                 "search_cap": target.search_cap,
@@ -2678,10 +2559,7 @@ class TestTheSeededCatalogueTargetsMatchTheCode:
         default filled, which is how a row comes to disagree with the code it was
         copied from."""
         row = next(iter(self._rows().values()))
-        assert set(row) == {
-            column.name
-            for column in Base.metadata.tables["catalogue_targets"].columns
-        }
+        assert set(row) == {column.name for column in Base.metadata.tables["catalogue_targets"].columns}
 
     @pytest.mark.parametrize(
         ("column", "value"),
@@ -2719,9 +2597,7 @@ class TestTheSeededCatalogueTargetsMatchTheCode:
             ),
         ],
     )
-    def test_a_restore_cannot_write_a_row_the_dataclass_would_refuse(
-        self, column, value
-    ):
+    def test_a_restore_cannot_write_a_row_the_dataclass_would_refuse(self, column, value):
         """`backup.restore` writes through Core, where no validator and no
         `__post_init__` fires, so these are CHECK constraints or they are
         nothing. The ÖNB row is the subject because a mistyped index there
@@ -2732,8 +2608,7 @@ class TestTheSeededCatalogueTargetsMatchTheCode:
             connection.execute(
                 text(
                     # The interpolation is a column name chosen by this loop, never a request value.
-                    f"UPDATE catalogue_targets SET {column} = :value "
-                    "WHERE source = 'oenb'"
+                    f"UPDATE catalogue_targets SET {column} = :value WHERE source = 'oenb'"
                 ),
                 {"value": value},
             )
@@ -2744,10 +2619,7 @@ class TestTheSeededCatalogueTargetsMatchTheCode:
         self._rows()
         with engine.connect() as connection:
             connection.execute(
-                text(
-                    "UPDATE catalogue_targets SET requires_isbn_claim = 0 "
-                    "WHERE source = 'dnb'"
-                )
+                text("UPDATE catalogue_targets SET requires_isbn_claim = 0 WHERE source = 'dnb'")
             )
             connection.commit()
 
@@ -2820,8 +2692,7 @@ class TestTheStoredShelfKey:
         schema.upgrade_to_head()
 
         assert self.stored() == [
-            (scheme, number, filing.sort_key_for(scheme, number))
-            for scheme, number in self.FILED
+            (scheme, number, filing.sort_key_for(scheme, number)) for scheme, number in self.FILED
         ]
 
     def test_the_column_refuses_a_row_with_no_key(self):
@@ -2866,13 +2737,9 @@ class TestTheStoredShelfKey:
 
         with engine.connect() as connection:
             numbers = list(
-                connection.execute(
-                    text("SELECT number FROM classifications ORDER BY id")
-                ).scalars()
+                connection.execute(text("SELECT number FROM classifications ORDER BY id")).scalars()
             )
-            columns = {
-                column["name"] for column in inspect(engine).get_columns("classifications")
-            }
+            columns = {column["name"] for column in inspect(engine).get_columns("classifications")}
         assert numbers == [number for _scheme, number in self.FILED]
         assert "sort_key" not in columns
 
@@ -2904,14 +2771,11 @@ class TestTheStoredShelfKey:
         generator = random.Random(137)
         alphabet = "AZaz09. /"
         values = [
-            "".join(generator.choice(alphabet) for _ in range(generator.randint(0, 14)))
-            for _ in range(400)
+            "".join(generator.choice(alphabet) for _ in range(generator.randint(0, 14))) for _ in range(400)
         ]
 
         mismatches = [
-            value
-            for value in values
-            if revision._sort_key("lcc", value) != filing.sort_key_for("lcc", value)
+            value for value in values if revision._sort_key("lcc", value) != filing.sort_key_for("lcc", value)
         ]
 
         assert mismatches == []
@@ -2937,11 +2801,7 @@ class TestTheBookFormatColumnOnAMigratedDatabase:
 
     @staticmethod
     def _format_column():
-        return next(
-            column
-            for column in inspect(engine).get_columns("books")
-            if column["name"] == "format"
-        )
+        return next(column for column in inspect(engine).get_columns("books") if column["name"] == "format")
 
     def test_no_check_constraint_governs_the_column(self):
         """The whole of the claim. A migration adding one would make a new
@@ -2980,10 +2840,7 @@ class TestTheBookFormatColumnOnAMigratedDatabase:
                     {"title": f"a book on {one.value}", "format": one.value},
                 )
             connection.commit()
-            stored = {
-                row[0]
-                for row in connection.execute(text("SELECT format FROM books")).fetchall()
-            }
+            stored = {row[0] for row in connection.execute(text("SELECT format FROM books")).fetchall()}
 
         assert stored == {one.value for one in BookFormat}
 
@@ -3007,10 +2864,7 @@ class TestANoteCarriesItsOwnVisibility:
         command.downgrade(schema._alembic_config(), self.PREVIOUS)
         with engine.connect() as connection:
             connection.execute(
-                text(
-                    "INSERT INTO users (username, password_hash, is_admin) "
-                    "VALUES ('reader', 'x', 0)"
-                )
+                text("INSERT INTO users (username, password_hash, is_admin) VALUES ('reader', 'x', 0)")
             )
             connection.execute(text("INSERT INTO books (title) VALUES ('Dune')"))
             connection.execute(
@@ -3031,10 +2885,7 @@ class TestANoteCarriesItsOwnVisibility:
         schema.upgrade_to_head()
 
         with engine.connect() as connection:
-            stored = [
-                tuple(row)
-                for row in connection.execute(text("SELECT content, is_private FROM notes"))
-            ]
+            stored = [tuple(row) for row in connection.execute(text("SELECT content, is_private FROM notes"))]
         assert stored == [("written before the column existed", 0)]
 
     def test_the_downgrade_loses_the_distinction_and_not_the_notes(self):
@@ -3046,10 +2897,7 @@ class TestANoteCarriesItsOwnVisibility:
         at_head()
         with engine.connect() as connection:
             connection.execute(
-                text(
-                    "INSERT INTO users (username, password_hash, is_admin) "
-                    "VALUES ('reader', 'x', 0)"
-                )
+                text("INSERT INTO users (username, password_hash, is_admin) VALUES ('reader', 'x', 0)")
             )
             connection.execute(text("INSERT INTO books (title) VALUES ('Dune')"))
             connection.execute(
@@ -3065,9 +2913,7 @@ class TestANoteCarriesItsOwnVisibility:
         columns = {column["name"] for column in inspect(engine).get_columns("notes")}
         assert "is_private" not in columns
         with engine.connect() as connection:
-            stored = [
-                tuple(row) for row in connection.execute(text("SELECT content FROM notes"))
-            ]
+            stored = [tuple(row) for row in connection.execute(text("SELECT content FROM notes"))]
         assert stored == [("what I actually thought",)]
 
 
@@ -3108,9 +2954,7 @@ class TestTheMigratedDatabaseCarriesTheBoundsItPromises:
     def _migrated() -> int:
         at_head()
         with engine.connect() as connection:
-            connection.execute(
-                text("INSERT INTO books (title, ownership) VALUES ('A book', 'owned')")
-            )
+            connection.execute(text("INSERT INTO books (title, ownership) VALUES ('A book', 'owned')"))
             connection.commit()
             book_id = connection.execute(text("SELECT id FROM books")).scalar()
         assert isinstance(book_id, int)
@@ -3170,9 +3014,7 @@ class TestTheMigratedDatabaseCarriesTheBoundsItPromises:
         self._insert(book, "\U0001f600" * widest, "\U0001f600")
 
         with engine.connect() as connection:
-            assert connection.execute(
-                text("SELECT count(*) FROM digital_references")
-            ).scalar() == 1
+            assert connection.execute(text("SELECT count(*) FROM digital_references")).scalar() == 1
 
     def test_the_location_is_unique_in_the_migration_too(self):
         """The index that makes a re-import a refresh rather than a doubling.
@@ -3217,8 +3059,7 @@ class TestTheMigratedDatabaseCarriesTheBoundsItPromises:
         engine = create_engine("sqlite://")
         Base.metadata.tables["digital_references"].create(engine)
         insert = text(
-            "INSERT INTO digital_references (book_id, root_label, relative_path)"
-            " VALUES (1, :root, :path)"
+            "INSERT INTO digital_references (book_id, root_label, relative_path) VALUES (1, :root, :path)"
         )
         widest = models.DIGITAL_REFERENCE_PATH_MAX - 1
 
@@ -3234,9 +3075,7 @@ class TestTheMigratedDatabaseCarriesTheBoundsItPromises:
                 insert,
                 {"root": "\U0001f600" * widest, "path": "\U0001f600"},
             )
-            assert connection.execute(
-                text("SELECT count(*) FROM digital_references")
-            ).scalar() == 1
+            assert connection.execute(text("SELECT count(*) FROM digital_references")).scalar() == 1
 
     @pytest.mark.sqlite_only(reason="reads the DDL SQLite keeps in sqlite_master")
     def test_the_model_still_describes_the_constraint_the_revision_installs(self):
@@ -3311,12 +3150,8 @@ class TestTheMigratedDatabaseCarriesTheBoundsItPromises:
         cost of that rule is a fact stored twice, and this is what stands
         between the copies.
         """
-        assert where_a_book_file_is_said_to_be._PATH_MAX == (
-            models.DIGITAL_REFERENCE_PATH_MAX
-        )
-        assert where_a_book_file_is_said_to_be._MAX_SIZE == (
-            models.DIGITAL_REFERENCE_MAX_SIZE
-        )
+        assert where_a_book_file_is_said_to_be._PATH_MAX == (models.DIGITAL_REFERENCE_PATH_MAX)
+        assert where_a_book_file_is_said_to_be._MAX_SIZE == (models.DIGITAL_REFERENCE_MAX_SIZE)
 
 
 #: Every ceiling `f4a1c62d0b97` gave a byte arm, as `(table, column, others)`.
@@ -3414,9 +3249,7 @@ def _declared_checks() -> dict[str, tuple[str, str]]:
     declared: dict[str, tuple[str, str]] = {}
     for table in Base.metadata.tables.values():
         for constraint in table.constraints:
-            if isinstance(constraint, CheckConstraint) and isinstance(
-                constraint.name, str
-            ):
+            if isinstance(constraint, CheckConstraint) and isinstance(constraint.name, str):
                 declared[constraint.name] = (
                     table.name,
                     " ".join(str(constraint.sqltext).split()),
@@ -3484,11 +3317,13 @@ def _declared_constraint(table_name: str, constraint: str) -> str:
     against one caller at a time.
     """
     return " ".join(
-        str(next(
-            one
-            for one in Base.metadata.tables[table_name].constraints
-            if isinstance(one, CheckConstraint) and one.name == constraint
-        ).sqltext).split()
+        str(
+            next(
+                one
+                for one in Base.metadata.tables[table_name].constraints
+                if isinstance(one, CheckConstraint) and one.name == constraint
+            ).sqltext
+        ).split()
     )
 
 
@@ -3500,9 +3335,7 @@ def _byte_armed_constraints() -> dict[str, str]:
     that no revision installs fails rather than passing unexamined.
     """
     return {
-        name: declared
-        for name, (_, declared) in _declared_checks().items()
-        if _A_BYTE_ARM.search(declared)
+        name: declared for name, (_, declared) in _declared_checks().items() if _A_BYTE_ARM.search(declared)
     }
 
 
@@ -3559,8 +3392,7 @@ class TestEveryTextCeilingIsInstalledWithItsByteArm:
         declared = _byte_armed_constraints()[_CEILING_CONSTRAINTS[table_name, column]]
 
         assert f"length({column}) <= {self._ceiling(table_name, column)}" in declared or (
-            f"length({column}) BETWEEN 1 AND {self._ceiling(table_name, column)}"
-            in declared
+            f"length({column}) BETWEEN 1 AND {self._ceiling(table_name, column)}" in declared
         ), f"{table_name}.{column} is declared wider or narrower than it is bounded"
 
     @pytest.mark.parametrize(("table_name", "column", "others"), _TEXT_CEILINGS)
@@ -3591,9 +3423,7 @@ class TestEveryTextCeilingIsInstalledWithItsByteArm:
             self._probe(table_name) as connection,
             pytest.raises(IntegrityError) as refusal,
         ):
-            connection.execute(
-                insert.values(**others, **{column: "a\x00" + "x" * (4 * ceiling)})
-            )
+            connection.execute(insert.values(**others, **{column: "a\x00" + "x" * (4 * ceiling)}))
 
         assert _CEILING_CONSTRAINTS[table_name, column] in str(refusal.value)
 
@@ -3621,9 +3451,7 @@ class TestEveryTextCeilingIsInstalledWithItsByteArm:
         with self._probe(table_name) as connection:
             connection.execute(table.insert().values(**others, **{column: at_the_budget}))
 
-            assert connection.execute(
-                text(f"SELECT count(*) FROM {table_name}")
-            ).scalar() == 1
+            assert connection.execute(text(f"SELECT count(*) FROM {table_name}")).scalar() == 1
 
     @pytest.mark.parametrize(("table_name", "column", "others"), _TEXT_CEILINGS)
     def test_the_widest_legitimate_value_is_stored(
@@ -3641,13 +3469,9 @@ class TestEveryTextCeilingIsInstalledWithItsByteArm:
         table = Base.metadata.tables[table_name]
 
         with self._probe(table_name) as connection:
-            connection.execute(
-                table.insert().values(**others, **{column: "\U0001f600" * ceiling})
-            )
+            connection.execute(table.insert().values(**others, **{column: "\U0001f600" * ceiling}))
 
-            assert connection.execute(
-                text(f"SELECT count(*) FROM {table_name}")
-            ).scalar() == 1
+            assert connection.execute(text(f"SELECT count(*) FROM {table_name}")).scalar() == 1
 
     @pytest.mark.parametrize("name", sorted(_byte_armed_constraints()))
     @pytest.mark.sqlite_only(reason="reads the DDL SQLite keeps in sqlite_master")
@@ -3726,8 +3550,7 @@ class TestEveryTextCeilingIsInstalledWithItsByteArm:
         }
 
         assert set(_byte_armed_constraints()) == probed, (
-            "these carry a byte arm that nothing probes: "
-            f"{sorted(set(_byte_armed_constraints()) - probed)}"
+            f"these carry a byte arm that nothing probes: {sorted(set(_byte_armed_constraints()) - probed)}"
         )
 
     PREVIOUS = "b2e94f7c1a03"
@@ -3737,9 +3560,7 @@ class TestEveryTextCeilingIsInstalledWithItsByteArm:
         with engine.connect() as connection:
             return " ".join(
                 " ".join(str(row[0]).split())
-                for row in connection.execute(
-                    text("SELECT sql FROM sqlite_master WHERE sql IS NOT NULL")
-                )
+                for row in connection.execute(text("SELECT sql FROM sqlite_master WHERE sql IS NOT NULL"))
             )
 
     @staticmethod
@@ -3777,14 +3598,9 @@ class TestEveryTextCeilingIsInstalledWithItsByteArm:
                     return " ".join(sql[start:position].split())
         raise AssertionError(f"{name}'s CHECK is unbalanced in sqlite_master")
 
-
-    @pytest.mark.parametrize(
-        "rule", bind_every_text_ceiling._CEILINGS, ids=lambda rule: rule.constraint
-    )
+    @pytest.mark.parametrize("rule", bind_every_text_ceiling._CEILINGS, ids=lambda rule: rule.constraint)
     @pytest.mark.sqlite_only(reason="reads the DDL SQLite keeps in sqlite_master")
-    def test_the_downgrade_puts_each_ceiling_back(
-        self, rule: SwappedRule
-    ) -> None:
+    def test_the_downgrade_puts_each_ceiling_back(self, rule: SwappedRule) -> None:
         """`downgrade()`, run rather than read, and `before` checked against a
         schema this revision did not write.
 
@@ -3847,19 +3663,11 @@ class TestEveryTextCeilingIsInstalledWithItsByteArm:
             # value a hand written INSERT has to know, and this revision adds no
             # column, so today's metadata describes the previous schema exactly.
             book = self._only_row(
-                connection.execute(
-                    tables["books"].insert().values(title="A book", ownership="owned")
-                )
+                connection.execute(tables["books"].insert().values(title="A book", ownership="owned"))
             )
-            member = self._only_row(
-                connection.execute(
-                    tables["users"].insert().values(username="a-member")
-                )
-            )
+            member = self._only_row(connection.execute(tables["users"].insert().values(username="a-member")))
             connection.execute(
-                tables["quotes"].insert().values(
-                    book_id=book, user_id=member, text="a\x00" + "x" * 10_000
-                )
+                tables["quotes"].insert().values(book_id=book, user_id=member, text="a\x00" + "x" * 10_000)
             )
             connection.commit()
 
@@ -3878,13 +3686,8 @@ class TestEveryTextCeilingIsInstalledWithItsByteArm:
             connection.execute(text("DROP TABLE IF EXISTS _alembic_tmp_quotes"))
             connection.commit()
 
-
-    @pytest.mark.parametrize(
-        "rule", bind_every_text_ceiling._CEILINGS, ids=lambda rule: rule.constraint
-    )
-    def test_the_revisions_text_is_the_models_text(
-        self, rule: SwappedRule
-    ) -> None:
+    @pytest.mark.parametrize("rule", bind_every_text_ceiling._CEILINGS, ids=lambda rule: rule.constraint)
+    def test_the_revisions_text_is_the_models_text(self, rule: SwappedRule) -> None:
         """The revision writes its SQL out rather than importing a constant, so
         the two copies are a fact stored twice and this is what stands between
         them.
@@ -3897,11 +3700,13 @@ class TestEveryTextCeilingIsInstalledWithItsByteArm:
         not the other's fails one of the two.
         """
         declared = " ".join(
-            str(next(
-                one
-                for one in Base.metadata.tables[rule.table].constraints
-                if isinstance(one, CheckConstraint) and one.name == rule.constraint
-            ).sqltext).split()
+            str(
+                next(
+                    one
+                    for one in Base.metadata.tables[rule.table].constraints
+                    if isinstance(one, CheckConstraint) and one.name == rule.constraint
+                ).sqltext
+            ).split()
         )
 
         assert " ".join(rule.after.split()) == declared
@@ -3927,9 +3732,7 @@ class TestTheIdentifierBoundsSurvivedIntoTheMigration:
     def _migrated() -> int:
         at_head()
         with engine.connect() as connection:
-            connection.execute(
-                text("INSERT INTO books (title, ownership) VALUES ('A book', 'owned')")
-            )
+            connection.execute(text("INSERT INTO books (title, ownership) VALUES ('A book', 'owned')"))
             connection.commit()
             book_id = connection.execute(text("SELECT id FROM books")).scalar()
         assert isinstance(book_id, int)
@@ -3939,10 +3742,7 @@ class TestTheIdentifierBoundsSurvivedIntoTheMigration:
     def _insert(book_id: int, scheme: str, value: str) -> None:
         with engine.connect() as connection:
             connection.execute(
-                text(
-                    "INSERT INTO book_identifiers (book_id, scheme, value)"
-                    " VALUES (:book, :scheme, :value)"
-                ),
+                text("INSERT INTO book_identifiers (book_id, scheme, value) VALUES (:book, :scheme, :value)"),
                 {"book": book_id, "scheme": scheme, "value": value},
             )
             connection.commit()
@@ -4013,9 +3813,7 @@ class TestTheIdentifierBoundsSurvivedIntoTheMigration:
         self._insert(book, "asin", "\U0001f4d6" * models.BOOK_IDENTIFIER_MAX)
 
         with engine.connect() as connection:
-            assert connection.execute(
-                text("SELECT count(*) FROM book_identifiers")
-            ).scalar() == 1
+            assert connection.execute(text("SELECT count(*) FROM book_identifiers")).scalar() == 1
 
     def test_an_empty_value_is_refused(self):
         book = self._migrated()
@@ -4081,9 +3879,7 @@ class TestTheIdentifierBoundsSurvivedIntoTheMigration:
         self._insert(book, "asin", "B00OTHER01")
 
         with engine.connect() as connection:
-            assert connection.execute(
-                text("SELECT count(*) FROM book_identifiers")
-            ).scalar() == 2
+            assert connection.execute(text("SELECT count(*) FROM book_identifiers")).scalar() == 2
 
     def test_the_same_assertion_twice_is_refused(self):
         book = self._migrated()
@@ -4178,8 +3974,7 @@ class TestTheGlobRulesThatLearnedAboutNul:
     @staticmethod
     def _server(url: str, key: str = "opds-0123456789abcdef") -> tuple[str, dict[str, str]]:
         return (
-            "INSERT INTO opds_servers (name, base_url, credential_key) "
-            "VALUES ('a server', :url, :key)",
+            "INSERT INTO opds_servers (name, base_url, credential_key) VALUES ('a server', :url, :key)",
             {"url": url, "key": key},
         )
 
@@ -4189,9 +3984,7 @@ class TestTheGlobRulesThatLearnedAboutNul:
         ids=lambda rule: rule.constraint,
     )
     @pytest.mark.sqlite_only(reason="reads the DDL SQLite keeps in sqlite_master")
-    def test_the_revisions_text_is_the_schema_it_installs(
-        self, rule: SwappedRule
-    ) -> None:
+    def test_the_revisions_text_is_the_schema_it_installs(self, rule: SwappedRule) -> None:
         """`after` against the DDL a database **at this revision** carries.
 
         **Against a database rather than against `models.py`**, which is what
@@ -4208,9 +4001,7 @@ class TestTheGlobRulesThatLearnedAboutNul:
         """
         self._migrated()
 
-        installed = TestEveryTextCeilingIsInstalledWithItsByteArm._installed_check(
-            rule.constraint
-        )
+        installed = TestEveryTextCeilingIsInstalledWithItsByteArm._installed_check(rule.constraint)
 
         assert installed == " ".join(rule.after.split())
 
@@ -4222,9 +4013,7 @@ class TestTheGlobRulesThatLearnedAboutNul:
         ids=lambda rule: rule.constraint,
     )
     @pytest.mark.sqlite_only(reason="reads the DDL SQLite keeps in sqlite_master")
-    def test_the_model_is_the_rule_a_migrated_database_carries(
-        self, rule: SwappedRule
-    ) -> None:
+    def test_the_model_is_the_rule_a_migrated_database_carries(self, rule: SwappedRule) -> None:
         """The model's copy against the DDL, as an equality rather than a
         containment.
 
@@ -4242,9 +4031,7 @@ class TestTheGlobRulesThatLearnedAboutNul:
         """
         at_head()
 
-        installed = TestEveryTextCeilingIsInstalledWithItsByteArm._installed_check(
-            rule.constraint
-        )
+        installed = TestEveryTextCeilingIsInstalledWithItsByteArm._installed_check(rule.constraint)
 
         assert installed == self._declared(rule.table, rule.constraint)
 
@@ -4254,9 +4041,7 @@ class TestTheGlobRulesThatLearnedAboutNul:
         ids=lambda rule: rule.constraint,
     )
     @pytest.mark.sqlite_only(reason="reads the DDL SQLite keeps in sqlite_master")
-    def test_the_downgrade_puts_each_rule_back(
-        self, rule: SwappedRule
-    ) -> None:
+    def test_the_downgrade_puts_each_rule_back(self, rule: SwappedRule) -> None:
         """`downgrade()` run rather than read, with `before` checked against a
         schema this revision did not write.
 
@@ -4316,8 +4101,7 @@ class TestTheGlobRulesThatLearnedAboutNul:
         """
         smuggled = (
             # The interpolation is a column name chosen by this loop, never a request value.
-            f"UPDATE catalogue_targets SET {column} = {value} "
-            "WHERE source = 'oenb'"
+            f"UPDATE catalogue_targets SET {column} = {value} WHERE source = 'oenb'"
         )
 
         self._at_previous()
@@ -4326,8 +4110,7 @@ class TestTheGlobRulesThatLearnedAboutNul:
             connection.commit()
             stored = connection.execute(
                 # The interpolation is a column name chosen by this loop, never a request value.
-                text(f"SELECT length(CAST({column} AS BLOB)) FROM catalogue_targets "
-                     "WHERE source = 'oenb'")
+                text(f"SELECT length(CAST({column} AS BLOB)) FROM catalogue_targets WHERE source = 'oenb'")
             ).scalar()
         assert stored == bytes_stored
 
@@ -4355,9 +4138,12 @@ class TestTheGlobRulesThatLearnedAboutNul:
             )
             connection.commit()
 
-            assert connection.execute(
-                text("SELECT title_index FROM catalogue_targets WHERE source = 'oenb'")
-            ).scalar() == ""
+            assert (
+                connection.execute(
+                    text("SELECT title_index FROM catalogue_targets WHERE source = 'oenb'")
+                ).scalar()
+                == ""
+            )
 
     @pytest.mark.sqlite_only(reason="builds a NUL with SQLite's char(0), and Postgres text cannot hold one")
     def test_the_upgrade_refuses_a_row_carrying_a_smuggled_index(self) -> None:
@@ -4407,8 +4193,7 @@ class TestTheGlobRulesThatLearnedAboutNul:
             connection.execute(text(statement), parameters)
             connection.commit()
             characters, stored = connection.execute(
-                text("SELECT length(base_url), length(CAST(base_url AS BLOB)) "
-                     "FROM opds_servers")
+                text("SELECT length(base_url), length(CAST(base_url AS BLOB)) FROM opds_servers")
             ).one()
 
         assert (characters, stored) == (8, 1_000_009)
@@ -4459,8 +4244,7 @@ class TestTheGlobRulesThatLearnedAboutNul:
             connection.execute(text(statement), parameters)
             connection.commit()
             characters, stored = connection.execute(
-                text("SELECT length(base_url), length(CAST(base_url AS BLOB)) "
-                     "FROM opds_servers")
+                text("SELECT length(base_url), length(CAST(base_url AS BLOB)) FROM opds_servers")
             ).one()
 
         assert (characters, stored) == (255, 999)
@@ -4517,8 +4301,7 @@ class TestTheGlobRulesThatLearnedAboutNul:
             )
 
             assert connection.execute(
-                text("SELECT length(base_url), length(CAST(base_url AS BLOB)) "
-                     "FROM probe")
+                text("SELECT length(base_url), length(CAST(base_url AS BLOB)) FROM probe")
             ).one() == (9, 1_000_009)
 
     def test_the_shipped_rule_refuses_one_byte_past_the_budget(self) -> None:
@@ -4564,8 +4347,7 @@ class TestTheGlobRulesThatLearnedAboutNul:
             connection.commit()
 
             assert connection.execute(
-                text("SELECT length(base_url), length(CAST(base_url AS BLOB)) "
-                     "FROM opds_servers")
+                text("SELECT length(base_url), length(CAST(base_url AS BLOB)) FROM opds_servers")
             ).one() == (9, 4 * models.BASE_URL_MAX)
 
     def test_the_other_rules_on_these_tables_survived_the_rebuild(self) -> None:
@@ -4605,12 +4387,7 @@ class TestTheGlobRulesThatLearnedAboutNul:
         assert "ck_opds_servers_credential_key" in str(borrowed.value)
 
         with engine.connect() as connection, pytest.raises(IntegrityError) as transport:
-            connection.execute(
-                text(
-                    "UPDATE catalogue_targets SET transport = 'z3950' "
-                    "WHERE source = 'oenb'"
-                )
-            )
+            connection.execute(text("UPDATE catalogue_targets SET transport = 'z3950' WHERE source = 'oenb'"))
         assert "ck_catalogue_targets_transport" in str(transport.value)
 
     def test_the_envelope_rule_is_deliberately_untouched(self) -> None:
@@ -4640,16 +4417,12 @@ class TestTheGlobRulesThatLearnedAboutNul:
 
         with engine.connect() as connection:
             connection.execute(
-                text(
-                    "INSERT INTO catalogue_credentials (source, envelope) "
-                    "VALUES ('bne', :envelope)"
-                ),
+                text("INSERT INTO catalogue_credentials (source, envelope) VALUES ('bne', :envelope)"),
                 {"envelope": envelope},
             )
             connection.commit()
             characters, stored = connection.execute(
-                text("SELECT length(envelope), length(CAST(envelope AS BLOB)) "
-                     "FROM catalogue_credentials")
+                text("SELECT length(envelope), length(CAST(envelope AS BLOB)) FROM catalogue_credentials")
             ).one()
 
         assert (characters, stored) == (47, len(envelope.encode()))
@@ -4751,10 +4524,7 @@ def _widest_envelope_this_application_writes() -> int:
     `username:password` encoded, so the plaintext is bounded by the characters
     the routes accept rather than by their count.
     """
-    plaintext = max(
-        4 * username + len(":") + 4 * password
-        for username, password in _credential_api_bounds()
-    )
+    plaintext = max(4 * username + len(":") + 4 * password for username, password in _credential_api_bounds())
     ciphertext = plaintext + _GCM_TAG_BYTES
     separators = 3
     return (
@@ -4851,16 +4621,10 @@ class TestEveryRuleARevisionAddsIsTheModelsRule:
         """A constraint added rather than swapped has no `before` at all, which
         is why it is a second shape and why its only text is the one being
         installed."""
-        assert " ".join(added.sqlite.split()) == _declared_constraint(
-            added.table, added.constraint
-        )
+        assert " ".join(added.sqlite.split()) == _declared_constraint(added.table, added.constraint)
 
-    @pytest.mark.parametrize(
-        "constraint", sorted(SWAP_CHAIN), ids=lambda constraint: constraint
-    )
-    def test_the_last_revision_to_swap_a_rule_wrote_the_models_text(
-        self, constraint: str
-    ) -> None:
+    @pytest.mark.parametrize("constraint", sorted(SWAP_CHAIN), ids=lambda constraint: constraint)
+    def test_the_last_revision_to_swap_a_rule_wrote_the_models_text(self, constraint: str) -> None:
         """The swapped side of the same comparison, over every revision rather
         than one.
 
@@ -4879,9 +4643,7 @@ class TestEveryRuleARevisionAddsIsTheModelsRule:
         """
         _, rule = SWAP_CHAIN[constraint][-1]
 
-        assert " ".join(rule.after.split()) == _declared_constraint(
-            rule.table, rule.constraint
-        )
+        assert " ".join(rule.after.split()) == _declared_constraint(rule.table, rule.constraint)
 
     def test_a_revision_declares_one_to_compare(self) -> None:
         """Anti vacuity. The parametrisation above is over a derived
@@ -5025,9 +4787,7 @@ class TestTheBoundsThisRevisionPutOnBytes:
         }
         with engine.connect() as connection:
             for table_name in sorted(rebuilt):
-                connection.execute(
-                    text(f"DROP TABLE IF EXISTS _alembic_tmp_{table_name}")
-                )
+                connection.execute(text(f"DROP TABLE IF EXISTS _alembic_tmp_{table_name}"))
             connection.commit()
 
     @staticmethod
@@ -5046,9 +4806,7 @@ class TestTheBoundsThisRevisionPutOnBytes:
 
     # ── the two copies of each rule ────────────────────────────────────────
 
-    @pytest.mark.parametrize(
-        "rule", bound_the_bytes._SWAPPED, ids=lambda rule: rule.constraint
-    )
+    @pytest.mark.parametrize("rule", bound_the_bytes._SWAPPED, ids=lambda rule: rule.constraint)
     def test_the_revisions_text_is_the_models_text(self, rule: SwappedRule) -> None:
         """The revision writes its SQL out rather than importing from `models`,
         so the two copies are a fact stored twice and this is what stands
@@ -5058,9 +4816,7 @@ class TestTheBoundsThisRevisionPutOnBytes:
         found, which by definition is no longer the one `models.py` declares.
         `test_the_downgrade_puts_each_rule_back` is what holds that half.
         """
-        assert " ".join(rule.after.split()) == self._declared(
-            rule.table, rule.constraint
-        )
+        assert " ".join(rule.after.split()) == self._declared(rule.table, rule.constraint)
 
     _declared = staticmethod(_declared_constraint)
 
@@ -5083,15 +4839,11 @@ class TestTheBoundsThisRevisionPutOnBytes:
         """
         self._migrated()
 
-        installed = TestEveryTextCeilingIsInstalledWithItsByteArm._installed_check(
-            constraint
-        )
+        installed = TestEveryTextCeilingIsInstalledWithItsByteArm._installed_check(constraint)
 
         assert installed == self._declared(table_name, constraint)
 
-    @pytest.mark.parametrize(
-        "rule", bound_the_bytes._SWAPPED, ids=lambda rule: rule.constraint
-    )
+    @pytest.mark.parametrize("rule", bound_the_bytes._SWAPPED, ids=lambda rule: rule.constraint)
     @pytest.mark.sqlite_only(reason="reads the DDL SQLite keeps in sqlite_master")
     def test_the_downgrade_puts_each_rule_back(self, rule: SwappedRule) -> None:
         """`downgrade()` run rather than read, with `before` checked against a
@@ -5116,9 +4868,7 @@ class TestTheBoundsThisRevisionPutOnBytes:
 
         assert installed(rule.constraint) == " ".join(rule.before.split())
 
-    @pytest.mark.parametrize(
-        "added", bound_the_bytes._ADDED, ids=lambda added: added.constraint
-    )
+    @pytest.mark.parametrize("added", bound_the_bytes._ADDED, ids=lambda added: added.constraint)
     @pytest.mark.sqlite_only(reason="reads the DDL SQLite keeps in sqlite_master")
     def test_the_downgrade_takes_the_added_rule_away(self, added: AddedRule) -> None:
         """The other direction of an addition, which is a removal rather than a
@@ -5146,9 +4896,7 @@ class TestTheBoundsThisRevisionPutOnBytes:
     @staticmethod
     def _a_book() -> int:
         with engine.connect() as connection:
-            connection.execute(
-                text("INSERT INTO books (title, ownership) VALUES ('A book', 'owned')")
-            )
+            connection.execute(text("INSERT INTO books (title, ownership) VALUES ('A book', 'owned')"))
             connection.commit()
             book_id = connection.execute(text("SELECT id FROM books")).scalar()
         assert isinstance(book_id, int)
@@ -5170,8 +4918,7 @@ class TestTheBoundsThisRevisionPutOnBytes:
 
         with pytest.raises(IntegrityError) as refusal:
             self._raw(
-                "INSERT INTO book_identifiers (book_id, scheme, value) "
-                "VALUES (:book, 'asin', :raw)",
+                "INSERT INTO book_identifiers (book_id, scheme, value) VALUES (:book, 'asin', :raw)",
                 self._behind_a_lead_byte(b"", budget + 1),
                 book=book,
             )
@@ -5200,10 +4947,7 @@ class TestTheBoundsThisRevisionPutOnBytes:
 
         with engine.connect() as connection, pytest.raises(IntegrityError) as refusal:
             connection.execute(
-                text(
-                    f"UPDATE catalogue_targets SET {column} = :value "
-                    "WHERE source = 'oenb'"
-                ),
+                text(f"UPDATE catalogue_targets SET {column} = :value WHERE source = 'oenb'"),
                 {"value": "a" * (models.TARGET_INDEX_MAX + 1)},
             )
 
@@ -5221,10 +4965,7 @@ class TestTheBoundsThisRevisionPutOnBytes:
 
         with engine.connect() as connection:
             connection.execute(
-                text(
-                    f"UPDATE catalogue_targets SET {column} = :value "
-                    "WHERE source = 'oenb'"
-                ),
+                text(f"UPDATE catalogue_targets SET {column} = :value WHERE source = 'oenb'"),
                 {"value": widest},
             )
             connection.commit()
@@ -5253,9 +4994,7 @@ class TestTheBoundsThisRevisionPutOnBytes:
             ("https://" + "x" * 250, "past the character ceiling, scheme and all"),
         ],
     )
-    def test_an_address_this_column_never_had_a_rule_for_is_refused(
-        self, value: str, why: str
-    ) -> None:
+    def test_an_address_this_column_never_had_a_rule_for_is_refused(self, value: str, why: str) -> None:
         """The address rule, which this table carried none of.
 
         The sibling column has refused these since `b7d4e6f01a95`; this one
@@ -5320,8 +5059,10 @@ class TestTheBoundsThisRevisionPutOnBytes:
 
         with engine.connect() as connection:
             assert connection.execute(
-                text("SELECT length(base_url), length(CAST(base_url AS BLOB)) "
-                     "FROM catalogue_targets WHERE source = 'oenb'")
+                text(
+                    "SELECT length(base_url), length(CAST(base_url AS BLOB)) "
+                    "FROM catalogue_targets WHERE source = 'oenb'"
+                )
             ).one() == (9, budget)
 
     @pytest.mark.sqlite_only(reason="measures stored bytes with SQLite's CAST(... AS BLOB)")
@@ -5348,15 +5089,16 @@ class TestTheBoundsThisRevisionPutOnBytes:
 
         with engine.connect() as connection:
             connection.execute(
-                text("UPDATE catalogue_targets SET base_url = :value "
-                     "WHERE source = 'oenb'"),
+                text("UPDATE catalogue_targets SET base_url = :value WHERE source = 'oenb'"),
                 {"value": widest},
             )
             connection.commit()
 
             assert connection.execute(
-                text("SELECT length(base_url), length(CAST(base_url AS BLOB)) "
-                     "FROM catalogue_targets WHERE source = 'oenb'")
+                text(
+                    "SELECT length(base_url), length(CAST(base_url AS BLOB)) "
+                    "FROM catalogue_targets WHERE source = 'oenb'"
+                )
             ).one() == (models.TARGET_BASE_URL_MAX, 999)
 
     # ── catalogue_credentials.envelope: the ceiling, derived ───────────────
@@ -5371,9 +5113,7 @@ class TestTheBoundsThisRevisionPutOnBytes:
         derivation is read off the code that produces it: see
         `_widest_envelope_this_application_writes`.
         """
-        assert _widest_envelope_this_application_writes() == (
-            models.CATALOGUE_ENVELOPE_MAX_BYTES
-        )
+        assert _widest_envelope_this_application_writes() == (models.CATALOGUE_ENVELOPE_MAX_BYTES)
 
     def test_the_derivation_is_what_seal_actually_returns(self) -> None:
         """The arithmetic against the function, rather than against itself.
@@ -5400,9 +5140,7 @@ class TestTheBoundsThisRevisionPutOnBytes:
             key=len,
         )
 
-        envelope = credentials.seal(
-            b"\x01" * 32, "dnb", "https://services.dnb.de/sru/dnb", widest
-        )
+        envelope = credentials.seal(b"\x01" * 32, "dnb", "https://services.dnb.de/sru/dnb", widest)
 
         assert len(envelope.encode()) == models.CATALOGUE_ENVELOPE_MAX_BYTES
         assert [len(part) for part in envelope.split(".")] == [
@@ -5577,26 +5315,30 @@ class TestTheBoundsThisRevisionPutOnBytes:
         # Everything but the ciphertext, built from the same terms the
         # derivation reads rather than from its total: a literal for the header's
         # width here would be the one number in this file nobody could re-derive.
-        header = ".".join((
-            credentials.VERSION,
-            "a" * (2 * credentials._GENERATION_BYTES),
-            credentials._b64(bytes(credentials._NONCE_BYTES)),
-        ))
+        header = ".".join(
+            (
+                credentials.VERSION,
+                "a" * (2 * credentials._GENERATION_BYTES),
+                credentials._b64(bytes(credentials._NONCE_BYTES)),
+            )
+        )
         ciphertext = models.CATALOGUE_ENVELOPE_MAX_BYTES - len(header) - len(".")
         widest = f"{header}.{'c' * ciphertext}"
         assert len(widest.encode()) == models.CATALOGUE_ENVELOPE_MAX_BYTES
 
         with engine.connect() as connection:
             connection.execute(
-                text("INSERT INTO catalogue_credentials (source, envelope) "
-                     "VALUES ('bne', :envelope)"),
+                text("INSERT INTO catalogue_credentials (source, envelope) VALUES ('bne', :envelope)"),
                 {"envelope": widest},
             )
             connection.commit()
 
-            assert connection.execute(
-                text("SELECT length(CAST(envelope AS BLOB)) FROM catalogue_credentials")
-            ).scalar() == models.CATALOGUE_ENVELOPE_MAX_BYTES
+            assert (
+                connection.execute(
+                    text("SELECT length(CAST(envelope AS BLOB)) FROM catalogue_credentials")
+                ).scalar()
+                == models.CATALOGUE_ENVELOPE_MAX_BYTES
+            )
 
     def test_an_envelope_behind_a_lead_byte_is_refused_at_the_ceiling(self) -> None:
         """One byte past the ceiling, in the shape that satisfies every other
@@ -5613,11 +5355,8 @@ class TestTheBoundsThisRevisionPutOnBytes:
 
         with pytest.raises(IntegrityError) as refusal:
             self._raw(
-                "INSERT INTO catalogue_credentials (source, envelope) "
-                "VALUES ('bne', :raw)",
-                self._behind_a_lead_byte(
-                    prefix, models.CATALOGUE_ENVELOPE_MAX_BYTES + 1
-                ),
+                "INSERT INTO catalogue_credentials (source, envelope) VALUES ('bne', :raw)",
+                self._behind_a_lead_byte(prefix, models.CATALOGUE_ENVELOPE_MAX_BYTES + 1),
             )
 
         assert "ck_catalogue_credentials_envelope" in str(refusal.value)
@@ -5638,8 +5377,7 @@ class TestTheBoundsThisRevisionPutOnBytes:
 
         with engine.connect() as connection, pytest.raises(IntegrityError) as refusal:
             connection.execute(
-                text("INSERT INTO catalogue_credentials (source, envelope) "
-                     "VALUES ('bne', :envelope)"),
+                text("INSERT INTO catalogue_credentials (source, envelope) VALUES ('bne', :envelope)"),
                 {"envelope": envelope},
             )
 
@@ -5672,15 +5410,13 @@ class TestTheBoundsThisRevisionPutOnBytes:
 
         with engine.connect() as connection:
             connection.execute(
-                text("INSERT INTO catalogue_credentials (source, envelope) "
-                     "VALUES ('bne', :envelope)"),
+                text("INSERT INTO catalogue_credentials (source, envelope) VALUES ('bne', :envelope)"),
                 {"envelope": smuggled},
             )
             connection.commit()
 
             assert connection.execute(
-                text("SELECT length(envelope), length(CAST(envelope AS BLOB)) "
-                     "FROM catalogue_credentials")
+                text("SELECT length(envelope), length(CAST(envelope AS BLOB)) FROM catalogue_credentials")
             ).one() == (47, models.CATALOGUE_ENVELOPE_MAX_BYTES)
 
     def test_a_blob_walks_every_glob_rule_and_not_the_byte_arm(self) -> None:
@@ -5704,8 +5440,7 @@ class TestTheBoundsThisRevisionPutOnBytes:
 
         with engine.connect() as connection, pytest.raises(IntegrityError) as refusal:
             connection.execute(
-                text(f"UPDATE catalogue_targets SET isbn_index = x'{blob.hex()}' "
-                     "WHERE source = 'oenb'")
+                text(f"UPDATE catalogue_targets SET isbn_index = x'{blob.hex()}' WHERE source = 'oenb'")
             )
 
         assert "ck_catalogue_targets_indexes" in str(refusal.value)
@@ -5724,8 +5459,7 @@ class TestTheBoundsThisRevisionPutOnBytes:
 
         with engine.connect() as connection:
             assert connection.execute(
-                text("SELECT length(envelope), length(CAST(envelope AS BLOB)) "
-                     "FROM catalogue_credentials")
+                text("SELECT length(envelope), length(CAST(envelope AS BLOB)) FROM catalogue_credentials")
             ).one() == (48, models.CATALOGUE_ENVELOPE_MAX_BYTES)
 
     # ── what the upgrade does to a row that is already there ───────────────
@@ -5747,8 +5481,7 @@ class TestTheBoundsThisRevisionPutOnBytes:
         self._at_previous()
         with engine.connect() as connection:
             connection.execute(
-                text("UPDATE catalogue_targets SET base_url = 'file:///etc/passwd' "
-                     "WHERE source = 'oenb'")
+                text("UPDATE catalogue_targets SET base_url = 'file:///etc/passwd' WHERE source = 'oenb'")
             )
             connection.commit()
 
@@ -5759,7 +5492,6 @@ class TestTheBoundsThisRevisionPutOnBytes:
             assert "ck_catalogue_targets_base_url" in str(refusal.value)
         finally:
             self._drop_the_scratch_tables()
-
 
 
 def _confinement_armed_constraints() -> dict[str, str]:
@@ -5814,9 +5546,7 @@ def _confinement_armed_constraints() -> dict[str, str]:
 #: but the one under test. `catalogue_credentials.source` has no prefix rule and
 #: takes an empty one, which is the difference stated rather than a column left
 #: blank.
-_CONFINEMENT_PROBES: Final[
-    tuple[tuple[str, str, str, dict[str, object], bytes, str], ...]
-] = (
+_CONFINEMENT_PROBES: Final[tuple[tuple[str, str, str, dict[str, object], bytes, str], ...]] = (
     (
         "ck_catalogue_credentials_source",
         "catalogue_credentials",
@@ -5912,9 +5642,7 @@ class TestEveryConfinementArmedConstraintIsProbedToo:
         """
         at_head()
 
-        installed = TestEveryTextCeilingIsInstalledWithItsByteArm._installed_check(
-            constraint
-        )
+        installed = TestEveryTextCeilingIsInstalledWithItsByteArm._installed_check(constraint)
 
         assert installed == _declared_constraint(table_name, constraint)
 
@@ -5986,17 +5714,13 @@ class TestEveryConfinementArmedConstraintIsProbedToo:
         at_the_ceiling = widest + "a" * (declared.length - len(widest))
 
         with self._probe(table_name) as connection:
-            connection.execute(
-                table.insert().values(**others, **{column: at_the_ceiling})
-            )
+            connection.execute(table.insert().values(**others, **{column: at_the_ceiling}))
 
             counted, stored = connection.execute(
-                text(f"SELECT length({column}), length(CAST({column} AS BLOB)) "
-                     f"FROM {table_name}")
+                text(f"SELECT length({column}), length(CAST({column} AS BLOB)) FROM {table_name}")
             ).one()
 
         assert (counted, stored) == (declared.length, declared.length)
-
 
 
 def _opds_api_bounds() -> dict[str, int]:
@@ -6097,16 +5821,17 @@ class TestTheApiBoundIsTheCeilingAMigratedDatabaseInstalls:
             connection.execute(text(statement), values)
             connection.commit()
 
-            assert connection.execute(
-                # The interpolation is a column name off this table, never a
-                # request value.
-                text(f"SELECT length({field}) FROM opds_servers")
-            ).scalar() == _opds_api_bounds()[field]
+            assert (
+                connection.execute(
+                    # The interpolation is a column name off this table, never a
+                    # request value.
+                    text(f"SELECT length({field}) FROM opds_servers")
+                ).scalar()
+                == _opds_api_bounds()[field]
+            )
 
     @pytest.mark.parametrize("field", sorted(_opds_api_bounds()))
-    def test_one_character_past_it_is_refused_by_this_columns_own_rule(
-        self, field: str
-    ) -> None:
+    def test_one_character_past_it_is_refused_by_this_columns_own_rule(self, field: str) -> None:
         """The other side, and the half a bound alone is not: without it the API
         could be narrowed to anything and the case above would still pass.
 
@@ -6156,21 +5881,10 @@ class TestACustomFieldRecordsWhoDefinedIt:
             connection.execute(
                 text("INSERT INTO users (username, password_hash, is_admin) VALUES ('kim','x',1)")
             )
+            connection.execute(text("INSERT INTO books (title, added_by_user_id) VALUES ('Dune', 1)"))
+            connection.execute(text("INSERT INTO custom_fields (name, kind) VALUES ('Bought from', 'text')"))
             connection.execute(
-                text(
-                    "INSERT INTO books (title, added_by_user_id) VALUES ('Dune', 1)"
-                )
-            )
-            connection.execute(
-                text(
-                    "INSERT INTO custom_fields (name, kind) VALUES ('Bought from', 'text')"
-                )
-            )
-            connection.execute(
-                text(
-                    "INSERT INTO custom_field_values (book_id, field_id, value) "
-                    "VALUES (1, 1, 'Oxfam')"
-                )
+                text("INSERT INTO custom_field_values (book_id, field_id, value) VALUES (1, 1, 'Oxfam')")
             )
             connection.commit()
 
@@ -6194,10 +5908,7 @@ class TestACustomFieldRecordsWhoDefinedIt:
         with engine.connect() as connection:
             assert (
                 connection.execute(
-                    text(
-                        "SELECT COUNT(*) FROM custom_fields "
-                        "WHERE created_by_user_id IS NOT NULL"
-                    )
+                    text("SELECT COUNT(*) FROM custom_fields WHERE created_by_user_id IS NOT NULL")
                 ).scalar()
                 == 0
             )
@@ -6208,10 +5919,7 @@ class TestACustomFieldRecordsWhoDefinedIt:
         schema.upgrade_to_head()
 
         with engine.connect() as connection:
-            assert (
-                connection.execute(text("SELECT value FROM custom_field_values")).scalar()
-                == "Oxfam"
-            )
+            assert connection.execute(text("SELECT value FROM custom_field_values")).scalar() == "Oxfam"
 
     def test_the_downgrade_drops_the_column_and_keeps_both_tables(self):
         """The rebuild. A batch `drop_column` recreates `custom_fields`, which
@@ -6226,14 +5934,8 @@ class TestACustomFieldRecordsWhoDefinedIt:
         columns = {column["name"] for column in inspect(engine).get_columns("custom_fields")}
         assert "created_by_user_id" not in columns
         with engine.connect() as connection:
-            assert (
-                connection.execute(text("SELECT name FROM custom_fields")).scalar()
-                == "Bought from"
-            )
-            assert (
-                connection.execute(text("SELECT value FROM custom_field_values")).scalar()
-                == "Oxfam"
-            )
+            assert connection.execute(text("SELECT name FROM custom_fields")).scalar() == "Bought from"
+            assert connection.execute(text("SELECT value FROM custom_field_values")).scalar() == "Oxfam"
 
     def test_the_child_still_points_at_the_rebuilt_parent(self):
         """The failure a row count cannot see: a rebuild that leaves
@@ -6283,19 +5985,14 @@ class TestABlankTextColumnIsNull:
     #: code point. Derived as the revision derives its set, so what it measures is
     #: the engine's `trim` against Python's, not the set against a list.
     EVERY_WHITESPACE: Final = {
-        f"U+{ord(c):04X}": c * 2
-        for c in map(chr, range(sys.maxunicode + 1)) if c.isspace()
+        f"U+{ord(c):04X}": c * 2 for c in map(chr, range(sys.maxunicode + 1)) if c.isspace()
     }
     #: Characters that look blank and are not whitespace to `str.isspace`: zero
     #: width space, the Hangul filler, the byte order mark, and the Mongolian vowel
     #: separator, which left the whitespace set in Unicode 6.3.
-    LOOKALIKES: Final = {
-        f"U+{code:04X}": chr(code) for code in (0x200B, 0x3164, 0xFEFF, 0x180E)
-    }
+    LOOKALIKES: Final = {f"U+{code:04X}": chr(code) for code in (0x200B, 0x3164, 0xFEFF, 0x180E)}
 
-    def build_database_with_blanks(
-        self, rows: dict[str, str | None] | None = None
-    ) -> None:
+    def build_database_with_blanks(self, rows: dict[str, str | None] | None = None) -> None:
         drop_everything()
         schema.upgrade_to(self.PREVIOUS)
         with engine.connect() as connection:
@@ -6313,8 +6010,7 @@ class TestABlankTextColumnIsNull:
         with engine.connect() as connection:
             row = connection.execute(
                 text(
-                    "SELECT subtitle, author, publisher, description, series_name "
-                    "FROM books WHERE title = :t"
+                    "SELECT subtitle, author, publisher, description, series_name FROM books WHERE title = :t"
                 ),
                 {"t": title},
             ).one()
@@ -6349,8 +6045,7 @@ class TestABlankTextColumnIsNull:
             dict.fromkeys(self.EVERY_WHITESPACE, (None,) * len(self.COLUMNS))
         )
         assert {title: self.columns_of(title) for title in self.LOOKALIKES} == {
-            title: (value,) * len(self.COLUMNS)
-            for title, value in self.LOOKALIKES.items()
+            title: (value,) * len(self.COLUMNS) for title, value in self.LOOKALIKES.items()
         }
 
     def test_the_fixture_agrees_with_the_request_bodies_rule(self):

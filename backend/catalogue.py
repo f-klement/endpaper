@@ -171,9 +171,7 @@ class Link:
     relation: LinkRelationship | None = None
 
     @classmethod
-    def of(
-        cls, url: str, label: str | None, relation: LinkRelationship | None
-    ) -> Link | None:
+    def of(cls, url: str, label: str | None, relation: LinkRelationship | None) -> Link | None:
         """The link, or None where the URL is not one this app will render."""
         target = web_link(url)
         if target is None or len(escape(target).encode()) > ONLINE_LINK_URL_MAX_BYTES:
@@ -402,12 +400,8 @@ _UNBOUNDED: Final = frozenset({"source"})
 #: `marc_fields.Fields.isbn` returns `isbn.parse` output. All four are classified
 #: anyway, because a set that is exhaustive by assertion cannot acquire a field
 #: by default, which is the shape this repository keeps finding.
-_CUT_ON_UPLOAD: Final = frozenset(
-    {"title", "subtitle", "author", "publisher", "description", "series_name"}
-)
-_KEPT_WHOLE_ON_UPLOAD: Final = frozenset(
-    {"language", "cover_url", "google_books_id", "isbn"}
-)
+_CUT_ON_UPLOAD: Final = frozenset({"title", "subtitle", "author", "publisher", "description", "series_name"})
+_KEPT_WHOLE_ON_UPLOAD: Final = frozenset({"language", "cover_url", "google_books_id", "isbn"})
 
 
 def _drop_unstorable(record: Record) -> list[str]:
@@ -501,11 +495,7 @@ def _drop_unstorable(record: Record) -> list[str]:
         # a type error.** `isinstance(True, int)` is true and `1 <= True` holds,
         # so a JSON `true` in `pageCount` stored as a page count of 1: a number
         # this application invented from a value that was not one.
-        if (
-            not isinstance(value, int | float)
-            or isinstance(value, bool)
-            or not low <= value <= high
-        ):
+        if not isinstance(value, int | float) or isinstance(value, bool) or not low <= value <= high:
             object.__setattr__(record, name, None)
             dropped.append(name)
     return dropped
@@ -754,8 +744,7 @@ class Record:
             # deployment's own files is not a value that failed to fit, and the
             # log line is the only place it is visible at all.
             logger.warning(
-                "Dropped %s from a record from %r: an outside source cannot "
-                "claim this app's own file",
+                "Dropped %s from a record from %r: an outside source cannot claim this app's own file",
                 ", ".join(claimed),
                 self.source,
             )
@@ -764,9 +753,7 @@ class Record:
             return
         object.__setattr__(self, "subjects", _folded_subjects(self.subjects))
         object.__setattr__(self, "headings", _union(self.headings))
-        object.__setattr__(
-            self, "author_identifiers", _distinct(self.author_identifiers)
-        )
+        object.__setattr__(self, "author_identifiers", _distinct(self.author_identifiers))
         object.__setattr__(self, "_folded", True)
 
     @property
@@ -1137,9 +1124,7 @@ def _restates(bare: Subject, entries: list[Subject]) -> bool:
     declared = [entry for entry in entries if entry.vocabulary is not None]
     if not declared:
         return False
-    return bare.identifier is None or any(
-        entry.identifier == bare.identifier for entry in declared
-    )
+    return bare.identifier is None or any(entry.identifier == bare.identifier for entry in declared)
 
 
 def _folded_subjects(subjects: Iterable[Subject]) -> tuple[Subject, ...]:

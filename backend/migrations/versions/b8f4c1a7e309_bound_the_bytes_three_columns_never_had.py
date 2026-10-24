@@ -138,8 +138,7 @@ _SWAPPED: tuple[SwappedRule, ...] = (
         "length(value) > 0 AND length(value) <= 60",
         "length(value) > 0 AND length(value) <= 60 AND instr(value, char(0)) = 0"
         " AND length(CAST(value AS BLOB)) <= 240",
-        "length(value) > 0 AND length(value) <= 60"
-        " AND octet_length(value) <= 240",
+        "length(value) > 0 AND length(value) <= 60 AND octet_length(value) <= 240",
     ),
     SwappedRule(
         "catalogue_targets",
@@ -164,8 +163,7 @@ _SWAPPED: tuple[SwappedRule, ...] = (
     SwappedRule(
         "catalogue_credentials",
         "ck_catalogue_credentials_envelope",
-        "(envelope GLOB 'v1.*.*.*' OR envelope GLOB 'v2.*.*.*') "
-        "AND length(envelope) >= 40",
+        "(envelope GLOB 'v1.*.*.*' OR envelope GLOB 'v2.*.*.*') AND length(envelope) >= 40",
         r"(envelope ~ '^v1\..*\..*\.' OR envelope ~ '^v2\..*\..*\.') "
         "AND length(envelope) >= 40",
         "(envelope GLOB 'v1.*.*.*' OR envelope GLOB 'v2.*.*.*') "
@@ -211,17 +209,13 @@ def _swap(table: str, constraint: str, sqlite: str, postgresql: str) -> None:
     """
     with op.batch_alter_table(table) as batch:
         batch.drop_constraint(constraint, type_="check")
-        batch.create_check_constraint(
-            constraint, DialectSQL(sqlite=sqlite, postgresql=postgresql)
-        )
+        batch.create_check_constraint(constraint, DialectSQL(sqlite=sqlite, postgresql=postgresql))
 
 
 def _add(table: str, constraint: str, sqlite: str, postgresql: str) -> None:
     """Install one CHECK the table did not carry, through the same batch mode."""
     with op.batch_alter_table(table) as batch:
-        batch.create_check_constraint(
-            constraint, DialectSQL(sqlite=sqlite, postgresql=postgresql)
-        )
+        batch.create_check_constraint(constraint, DialectSQL(sqlite=sqlite, postgresql=postgresql))
 
 
 def _drop(table: str, constraint: str) -> None:

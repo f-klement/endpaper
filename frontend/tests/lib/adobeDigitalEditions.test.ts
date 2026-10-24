@@ -211,15 +211,15 @@ function endsLine(code: string, at: number): boolean {
  * **A body's braces both end their lines, and a return type's do not.** That is
  * the rule, and it is two ended because one end was not enough. Taking the first
  * brace that ends its line was the third draft and it reads a return type
- * prettier wrapped across lines, which is what prettier does to any object type
+ * oxfmt wrapped across lines, which is what oxfmt does to any object type
  * past the print width; the design seat shipped one of three fields with
  * `format:check`, `typecheck` and all 52 arms green. A body's closing brace is
  * alone on its line, where a wrapped return type's is followed by ` {` and a
  * union's first group by ` |`.
  *
  * **What it rests on, and the residual, stated rather than implied.** It rests
- * on prettier, which `format:check` runs over this tree and which is in the
- * gate. Its residual is any shape where prettier puts a brace that is not a
+ * on oxfmt, which `format:check` runs over this tree and which is in the
+ * gate. Its residual is any shape where oxfmt puts a brace that is not a
  * body's alone at the end of a line: neither seat could construct one and
  * neither claims there is none. **This is the fourth rule of its kind in three
  * rounds and each was defeated by the next shape of the same family**, which is

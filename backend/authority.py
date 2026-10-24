@@ -144,9 +144,7 @@ _LCNAF_URI: Final = re.compile(
 #: alone: lobid's default operator is already OR, so a name containing one
 #: broadens the search rather than changing its meaning, and no parse error is
 #: reachable through them.
-_LUCENE_ESCAPED: Final = str.maketrans(
-    {character: f"\\{character}" for character in '\\+-!(){}[]^"~*?:|&/'}
-)
+_LUCENE_ESCAPED: Final = str.maketrans({character: f"\\{character}" for character in '\\+-!(){}[]^"~*?:|&/'})
 
 #: What a GND search is narrowed to.
 #:
@@ -559,9 +557,7 @@ async def _claims(item: str, prop: str, deadline: float | None) -> tuple[str, ..
     testing for: the same call `_viaf_sources` makes with `found[code] !=
     identifier`.
     """
-    body = await _wikidata(
-        {"action": "wbgetclaims", "entity": item, "property": prop}, deadline
-    )
+    body = await _wikidata({"action": "wbgetclaims", "entity": item, "property": prop}, deadline)
     if not isinstance(body, dict):
         return ()
     found: list[str] = []
@@ -966,9 +962,7 @@ async def _viaf_json(
     confirmation standing.
     """
     try:
-        response = await fetch.get(
-            client, url, params=params, limit=_VIAF_LIMIT, deadline=deadline
-        )
+        response = await fetch.get(client, url, params=params, limit=_VIAF_LIMIT, deadline=deadline)
     except Exception:
         logger.info("VIAF did not answer", exc_info=True)
         return None, None
@@ -1032,9 +1026,7 @@ async def _viaf_cluster_by_gnd(
     plain prefix term. It is still truncated to `MAX_QUERY_NAME`, which bounds
     the request rather than the name.
     """
-    _, body = await _viaf_json(
-        client, _VIAF_AUTOSUGGEST_URL, {"query": name[:MAX_QUERY_NAME]}, deadline
-    )
+    _, body = await _viaf_json(client, _VIAF_AUTOSUGGEST_URL, {"query": name[:MAX_QUERY_NAME]}, deadline)
     if not isinstance(body, dict):
         return None, False
     matched: set[str] = set()
@@ -1115,9 +1107,7 @@ async def _viaf_cluster_sources(
     )
     if body is None and status is not None and status >= 500:
         logger.info("VIAF could not serialise a cluster; reading the bare record")
-        _, body = await _viaf_json(
-            client, _VIAF_RECORD_URL.format(cluster=cluster), None, deadline
-        )
+        _, body = await _viaf_json(client, _VIAF_RECORD_URL.format(cluster=cluster), None, deadline)
     if body is None:
         return None
     record = _viaf_cluster_record(body)
@@ -1245,9 +1235,7 @@ async def national_identifiers(
                 client, candidate.name, candidate.identifier, deadline
             )
         if cluster is not None and _VIAF_CLUSTER.match(cluster):
-            sources = await _viaf_cluster_sources(
-                client, cluster, deadline, _WANTED_SOURCES
-            )
+            sources = await _viaf_cluster_sources(client, cluster, deadline, _WANTED_SOURCES)
         elif heard:
             # VIAF answered and named nobody, or named two people, or named a
             # cluster id that is not one. That is an answer and it stands: the
@@ -1262,11 +1250,7 @@ async def national_identifiers(
     if sources.get(_GND_SOURCE) != candidate.identifier:
         logger.info("A VIAF cluster did not name the confirmed GND record back")
         return {}
-    return {
-        scheme: sources[code]
-        for code, scheme in _NATIONAL_SOURCES.items()
-        if code in sources
-    }
+    return {scheme: sources[code] for code, scheme in _NATIONAL_SOURCES.items() if code in sources}
 
 
 async def _cross_check(
@@ -1306,9 +1290,7 @@ async def _cross_check(
     )
 
 
-async def resolve(
-    identifier: str, *, deadline: float | None = None
-) -> AuthorityCandidate | None:
+async def resolve(identifier: str, *, deadline: float | None = None) -> AuthorityCandidate | None:
     """The one person a GND number names, or None if the file does not hold it.
 
     **Certain**, and the certainty comes from the argument rather than from
@@ -1337,9 +1319,7 @@ async def resolve(
     return await _cross_check(candidate, compare_references=True, deadline=deadline)
 
 
-async def search(
-    name: str, *, deadline: float | None = None
-) -> list[AuthorityCandidate]:
+async def search(name: str, *, deadline: float | None = None) -> list[AuthorityCandidate]:
     """The people an authority file holds under one name. A guess, every time.
 
     **A name is not a key**, which is the entire reason the confirmation step
@@ -1377,10 +1357,7 @@ async def search(
     kept = [row for row in found if row is not None][:MAX_CANDIDATES]
     return list(
         await asyncio.gather(
-            *(
-                _cross_check(row, compare_references=False, deadline=deadline)
-                for row in kept
-            )
+            *(_cross_check(row, compare_references=False, deadline=deadline) for row in kept)
         )
     )
 
@@ -1407,9 +1384,7 @@ async def search(
 #:
 #: Nothing here fetches it. **Wikipedia is not an outbound host of this app**;
 #: it is a link a reader may follow, and that is the whole of #89's decision.
-_WIKIPEDIA_ARTICLE: Final = re.compile(
-    r"\Ahttps://([a-z0-9-]{2,32})\.wikipedia\.org/wiki/[^\s\"'<>]+\Z"
-)
+_WIKIPEDIA_ARTICLE: Final = re.compile(r"\Ahttps://([a-z0-9-]{2,32})\.wikipedia\.org/wiki/[^\s\"'<>]+\Z")
 
 #: The Wikidata item's own page, which is where a person with no article goes.
 #:
@@ -1698,9 +1673,7 @@ async def wikipedia_articles(
     # twice: an unfiltered entity reaches 64,449 bytes where a filtered one is
     # about 300, so the fifty that is safe above is six times the response cap
     # here. See `_UNFILTERED_ITEMS_PER_REQUEST`.
-    missing = tuple(item for item in answered if not articles.get(item))[
-        :MAX_UNFILTERED_ITEMS
-    ]
+    missing = tuple(item for item in answered if not articles.get(item))[:MAX_UNFILTERED_ITEMS]
     for start in range(0, len(missing), _UNFILTERED_ITEMS_PER_REQUEST):
         chunk = missing[start : start + _UNFILTERED_ITEMS_PER_REQUEST]
         found = await _sitelinks(chunk, None, deadline)
@@ -1713,9 +1686,7 @@ async def wikipedia_articles(
         resolved[item] = (
             WikipediaArticle(url=best[1], language=best[0])
             if best is not None
-            else WikipediaArticle(
-                url=_WIKIDATA_ITEM_URL.format(item=item), language=None
-            )
+            else WikipediaArticle(url=_WIKIDATA_ITEM_URL.format(item=item), language=None)
         )
     return resolved
 
@@ -1733,9 +1704,7 @@ async def _lobid(
     that is not there is not a degraded answer, it is no answer.
     """
     try:
-        response = await fetch.get_once(
-            url, params=params, limit=_RESPONSE_LIMIT, deadline=deadline
-        )
+        response = await fetch.get_once(url, params=params, limit=_RESPONSE_LIMIT, deadline=deadline)
     except Exception as failure:
         raise AuthorityUnavailable from failure
     if allow_404 and response.status_code == 404:

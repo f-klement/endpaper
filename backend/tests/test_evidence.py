@@ -30,6 +30,10 @@ from tests.bindings import SourceNames, source_of
 from tests.corpus import BACKEND, shipped_modules
 from tests.test_google_books import VOLUME
 
+TREE_GUARDS = {
+    "TestClassificationsReachAnExistingBookOnlyThroughEvidence": ("shipped_modules",),
+}
+
 
 def _as_match(volume: dict) -> BookMatch:
     """A Google volume through the bound `_apply_match` insists on.
@@ -161,9 +165,7 @@ class TestTheSignatureIsTheBound:
     #: library's. `isbn13` is one printing among several rather than this copy.
     #: `classifications` and `suggested_tag_ids` are not scalars and are
     #: applied by `confirm` and by the caller respectively.
-    NOT_WRITTEN = frozenset(
-        {"source", "title", "isbn13", "classifications", "suggested_tag_ids"}
-    )
+    NOT_WRITTEN = frozenset({"source", "title", "isbn13", "classifications", "suggested_tag_ids"})
 
     def _names_read_off_the_match(self) -> set[str]:
         """Every field name `_apply_match` takes off its argument, from the source.
@@ -250,9 +252,7 @@ class TestTheSignatureIsTheBound:
             if isinstance(node, ast.FunctionDef) and node.name == "_apply_match"
         )
 
-        assert (
-            ast.unparse(fn.args) == "book: Book, match: BookMatch, policy: Policy"
-        )
+        assert ast.unparse(fn.args) == "book: Book, match: BookMatch, policy: Policy"
 
     def test_a_bare_dictionary_raises_rather_than_writing(self):
         """The runtime arm, for a caller mypy never saw.
@@ -301,9 +301,7 @@ class TestBoundingOneRecord:
         assert match.series_index is None
         assert match.year is None
 
-    def test_a_refusal_naming_no_field_gives_up_on_the_record(
-        self, monkeypatch, caplog
-    ):
+    def test_a_refusal_naming_no_field_gives_up_on_the_record(self, monkeypatch, caplog):
         """The arm there is nothing to drop for.
 
         `BookMatch` carries no model level validator today, which is exactly
@@ -353,9 +351,7 @@ class TestBoundingOneRecord:
         assert "series_index" in caplog.text
         assert "Discarded" not in caplog.text
 
-    def test_a_field_the_record_never_supplied_is_not_deleted_from_it(
-        self, monkeypatch
-    ):
+    def test_a_field_the_record_never_supplied_is_not_deleted_from_it(self, monkeypatch):
         """The arm the first mutation round missed, under its right name.
 
         Pydantic reports a **missing** required field at a `loc` naming a key
@@ -449,13 +445,9 @@ class TestEmptyIsNoneOrABlankString:
         evidence.apply_record(book, Record(author=blank), Policy.REFRESH)
 
         assert book.author is None
-        assert "author" not in evidence.apply_record(
-            book, Record(author=blank), Policy.REFRESH
-        )
+        assert "author" not in evidence.apply_record(book, Record(author=blank), Policy.REFRESH)
 
-    @pytest.mark.parametrize(
-        ("column", "value"), [("isbn", "9780441013593"), ("collection_id", 1)]
-    )
+    @pytest.mark.parametrize(("column", "value"), [("isbn", "9780441013593"), ("collection_id", 1)])
     def test_an_importer_may_not_name_a_column_no_file_may_fill(self, column, value):
         """`isbn` is unique across the table, so filling it on a matched Book can
         raise on a row the Member cannot see. `collection_id` is a copy detail no
@@ -467,16 +459,32 @@ class TestEmptyIsNoneOrABlankString:
 #: Every column a refresh may touch, held by a Book before the refresh, and a
 #: record asserting a different value for each of them.
 _HELD: Final[dict[str, Any]] = {
-    "title": "Held", "subtitle": "Held", "author": "Held", "publisher": "Held",
-    "year": 1900, "description": "Held", "language": "de", "page_count": 1,
-    "categories": "Held", "series_name": "Held", "series_index": 1.0,
-    "google_books_id": "heldheldheld", "cover_url": "https://example.com/held.jpg",
+    "title": "Held",
+    "subtitle": "Held",
+    "author": "Held",
+    "publisher": "Held",
+    "year": 1900,
+    "description": "Held",
+    "language": "de",
+    "page_count": 1,
+    "categories": "Held",
+    "series_name": "Held",
+    "series_index": 1.0,
+    "google_books_id": "heldheldheld",
+    "cover_url": "https://example.com/held.jpg",
 }
 _ASSERTED: Final[dict[str, Any]] = {
-    "title": "Dune", "subtitle": "A Novel", "author": "Frank Herbert",
-    "publisher": "Chilton", "year": 1965, "description": "Arrakis.",
-    "language": "en", "page_count": 412, "series_name": "Dune Chronicles",
-    "series_index": 2.0, "google_books_id": "gbid00000001",
+    "title": "Dune",
+    "subtitle": "A Novel",
+    "author": "Frank Herbert",
+    "publisher": "Chilton",
+    "year": 1965,
+    "description": "Arrakis.",
+    "language": "en",
+    "page_count": 412,
+    "series_name": "Dune Chronicles",
+    "series_index": 2.0,
+    "google_books_id": "gbid00000001",
     "cover_url": "https://covers.openlibrary.org/b/id/1-L.jpg",
     "subjects": (Subject("Science fiction"),),
 }
@@ -487,10 +495,19 @@ _ASSERTED: Final[dict[str, Any]] = {
 #: the four it skips past the tuple reddens too: `_ASSERTED` asserts each of
 #: them, `categories` through its subject. Why these nine and not `categories`,
 #: the series fields or `google_books_id` is in `docs/decisions.md`.
-_REFRESHED_NINE: Final = frozenset({
-    "title", "subtitle", "author", "publisher", "year", "description",
-    "language", "page_count", "cover_url",
-})
+_REFRESHED_NINE: Final = frozenset(
+    {
+        "title",
+        "subtitle",
+        "author",
+        "publisher",
+        "year",
+        "description",
+        "language",
+        "page_count",
+        "cover_url",
+    }
+)
 
 
 class TestARefreshWritesExactlyItsNineColumns:
@@ -502,7 +519,9 @@ class TestARefreshWritesExactlyItsNineColumns:
         assert sorted(changed) == sorted(_REFRESHED_NINE)
         assert {*evidence.REFRESHED, "cover_url"} == _REFRESHED_NINE
         assert (book.categories, book.series_name, book.series_index) == (
-            "Held", "Held", 1.0,
+            "Held",
+            "Held",
+            1.0,
         )
         assert book.google_books_id == "heldheldheld"
 
@@ -512,9 +531,13 @@ class TestARefreshWritesExactlyItsNineColumns:
         evidence.apply_record(book, Record(), Policy.REFRESH)
 
         assert (book.title, book.language, book.page_count) == ("Held", "de", 1)
-        assert (
-            book.subtitle, book.author, book.publisher, book.year, book.description
-        ) == (None, None, None, None, None)
+        assert (book.subtitle, book.author, book.publisher, book.year, book.description) == (
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
         assert book.cover_url is None
 
     def test_it_keeps_an_uploaded_cover(self):
@@ -529,9 +552,7 @@ class TestARefreshWritesExactlyItsNineColumns:
 #: writes what a refresh writes, less `title`, which is work identity outside a
 #: refresh. Owner's ruling of 2026-10-15.
 _ENRICHED_EIGHT: Final = _REFRESHED_NINE - {"title"}
-_SELECTED_ONLY: Final = frozenset(
-    {"categories", "series_name", "series_index", "google_books_id"}
-)
+_SELECTED_ONLY: Final = frozenset({"categories", "series_name", "series_index", "google_books_id"})
 
 
 class TestARecordNobodySelectedWritesWhatARefreshWrites:
@@ -548,31 +569,27 @@ class TestARecordNobodySelectedWritesWhatARefreshWrites:
         assert sorted(changed) == sorted(_ENRICHED_EIGHT)
         assert set(evidence.SELECTED_ONLY) == _SELECTED_ONLY
         assert book.title == "Held"
-        assert (
-            book.categories, book.series_name, book.series_index, book.google_books_id
-        ) == tuple(held.get(name) for name in (
-            "categories", "series_name", "series_index", "google_books_id"
-        ))
+        assert (book.categories, book.series_name, book.series_index, book.google_books_id) == tuple(
+            held.get(name) for name in ("categories", "series_name", "series_index", "google_books_id")
+        )
 
     def test_an_own_volume_record_writes_the_eight_and_the_volume_id(self):
         book = Book(title="Held")
 
-        changed = evidence.apply_own_volume(
-            book, Record(**_ASSERTED), "gbid00000001", Policy.FILL_GAPS
-        )
+        changed = evidence.apply_own_volume(book, Record(**_ASSERTED), "gbid00000001", Policy.FILL_GAPS)
 
         assert sorted(changed) == sorted(_ENRICHED_EIGHT | {"google_books_id"})
         assert book.google_books_id == "gbid00000001"
         assert (book.categories, book.series_name, book.series_index) == (
-            None, None, None,
+            None,
+            None,
+            None,
         )
 
     def test_a_record_carrying_another_id_than_the_one_looked_up_writes_no_id(self):
         book = Book(title="Held")
 
-        changed = evidence.apply_own_volume(
-            book, Record(**_ASSERTED), "otherotherid", Policy.FILL_GAPS
-        )
+        changed = evidence.apply_own_volume(book, Record(**_ASSERTED), "otherotherid", Policy.FILL_GAPS)
 
         assert sorted(changed) == sorted(_ENRICHED_EIGHT)
         assert book.google_books_id is None
@@ -581,13 +598,13 @@ class TestARecordNobodySelectedWritesWhatARefreshWrites:
         """The picker is now the only door for them, so its half is pinned."""
         book = Book(title="Held")
 
-        changed = evidence.confirm(
-            book, BookMatch(**Record(**_ASSERTED).as_match()), db, Policy.FILL_GAPS
-        )
+        changed = evidence.confirm(book, BookMatch(**Record(**_ASSERTED).as_match()), db, Policy.FILL_GAPS)
 
         assert set(changed) >= _SELECTED_ONLY
         assert (book.series_name, book.series_index, book.google_books_id) == (
-            "Dune Chronicles", 2.0, "gbid00000001",
+            "Dune Chronicles",
+            2.0,
+            "gbid00000001",
         )
         assert book.categories
 
@@ -635,16 +652,14 @@ _NAMED: Final[tuple[tuple[object, str], ...]] = (
 )
 #: Called, because most names of the model are reads: a query's entity, a
 #: column, the restore's table list.
-_CALLED: Final[tuple[tuple[object, str], ...]] = (
-    (models.Classification, "models.Classification"),
-)
+_CALLED: Final[tuple[tuple[object, str], ...]] = ((models.Classification, "models.Classification"),)
 
 
 def _module(name: str) -> ModuleType | None:
     """The module `name` imports, or None where it is not one."""
     try:
         return importlib.import_module(name)
-    except (ImportError, TypeError, ValueError):
+    except ImportError, TypeError, ValueError:
         return None
 
 
@@ -674,11 +689,7 @@ def _writer(meaning: str, writers: tuple[tuple[object, str], ...]) -> str | None
 def _scope(table: symtable.SymbolTable, name: str, line: int) -> symtable.SymbolTable:
     """The scope `table` opens for the function, class or lambda `name` at `line`."""
     return next(
-        (
-            child
-            for child in table.get_children()
-            if child.get_name() == name and child.get_lineno() == line
-        ),
+        (child for child in table.get_children() if child.get_name() == name and child.get_lineno() == line),
         table,
     )
 
@@ -730,17 +741,11 @@ def _heading_writes(
         node: ast.AST, around: tuple[str, ...], table: symtable.SymbolTable, bound: frozenset[str]
     ) -> None:
         if isinstance(node, ast.Import | ast.ImportFrom):
-            alone = SourceNames(
-                ast.Module(body=[node], type_ignores=[]), package=package, star=_module
-            )
+            alone = SourceNames(ast.Module(body=[node], type_ignores=[]), package=package, star=_module)
             count(around, {binding.target for binding in alone.bindings}, _NAMED)
         elif isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Load):
             count(around, names.means(node), _NAMED)
-        elif (
-            isinstance(node, ast.Name)
-            and isinstance(node.ctx, ast.Load)
-            and _global(node.id, table, bound)
-        ):
+        elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load) and _global(node.id, table, bound):
             own = {f"{module}.{node.id}"} if module else set()
             count(around, names.means(node) | own, _NAMED)
         elif isinstance(node, ast.Call):
@@ -807,20 +812,15 @@ class TestClassificationsReachAnExistingBookOnlyThroughEvidence:
         ("source", "writes"),
         [
             (
-                "from classifications import add_headings\n"
-                "def f(book, db):\n    add_headings(book, [], db)",
-                {"<module>": {"classifications.add_headings": 1},
-                 "f": {"classifications.add_headings": 1}},
+                "from classifications import add_headings\ndef f(book, db):\n    add_headings(book, [], db)",
+                {"<module>": {"classifications.add_headings": 1}, "f": {"classifications.add_headings": 1}},
             ),
             (
-                "from classifications import add_headings as more\n"
-                "def f(book, db):\n    more(book, [], db)",
-                {"<module>": {"classifications.add_headings": 1},
-                 "f": {"classifications.add_headings": 1}},
+                "from classifications import add_headings as more\ndef f(book, db):\n    more(book, [], db)",
+                {"<module>": {"classifications.add_headings": 1}, "f": {"classifications.add_headings": 1}},
             ),
             (
-                "import classifications\n"
-                "def f(book, db):\n    classifications.add_headings(book, [], db)",
+                "import classifications\ndef f(book, db):\n    classifications.add_headings(book, [], db)",
                 {"f": {"classifications.add_headings": 1}},
             ),
             (
@@ -829,21 +829,17 @@ class TestClassificationsReachAnExistingBookOnlyThroughEvidence:
                 {"C.m": {"classifications.add_headings": 1}},
             ),
             (
-                "from evidence import add_headings\n"
-                "def f(book, db):\n    add_headings(book, [], db)",
-                {"<module>": {"classifications.add_headings": 1},
-                 "f": {"classifications.add_headings": 1}},
+                "from evidence import add_headings\ndef f(book, db):\n    add_headings(book, [], db)",
+                {"<module>": {"classifications.add_headings": 1}, "f": {"classifications.add_headings": 1}},
             ),
             (
-                "import evidence\n"
-                "def f(book, db):\n    evidence.add_headings(book, [], db)",
+                "import evidence\ndef f(book, db):\n    evidence.add_headings(book, [], db)",
                 {"f": {"classifications.add_headings": 1}},
             ),
             (
                 "from classifications import add_headings\nwrite = add_headings\n"
                 "def f(book, db):\n    write(book, [], db)",
-                {"<module>": {"classifications.add_headings": 2},
-                 "f": {"classifications.add_headings": 1}},
+                {"<module>": {"classifications.add_headings": 2}, "f": {"classifications.add_headings": 1}},
             ),
             (
                 "import classifications\nfrom functools import partial\n"
@@ -856,8 +852,7 @@ class TestClassificationsReachAnExistingBookOnlyThroughEvidence:
                 {"C.__init__": {"classifications.add_headings": 1}},
             ),
             (
-                "import classifications\n"
-                "@classifications.add_headings\ndef f():\n    pass",
+                "import classifications\n@classifications.add_headings\ndef f():\n    pass",
                 {"f": {"classifications.add_headings": 1}},
             ),
             (
@@ -879,8 +874,7 @@ class TestClassificationsReachAnExistingBookOnlyThroughEvidence:
                 {"f": {"models.Classification": 1}},
             ),
             (
-                "import evidence\n"
-                "def f(book, db):\n    evidence.confirm_file_headings(book, [], db)",
+                "import evidence\ndef f(book, db):\n    evidence.confirm_file_headings(book, [], db)",
                 {"f": {"evidence.confirm_file_headings": 1}},
             ),
             (
@@ -892,8 +886,7 @@ class TestClassificationsReachAnExistingBookOnlyThroughEvidence:
             ("def add_headings(*args):\n    pass\ndef f():\n    add_headings()", {}),
             ("import catalogue\ndef f(db):\n    db.confirm()\n    catalogue.confirm()", {}),
             (
-                "from helpers import attach_headings\n"
-                "def f(book, db):\n    attach_headings(book, [], db)",
+                "from helpers import attach_headings\ndef f(book, db):\n    attach_headings(book, [], db)",
                 {},
             ),
             (
@@ -938,9 +931,7 @@ class TestClassificationsReachAnExistingBookOnlyThroughEvidence:
             "miss: bulk_insert_mappings",
         ],
     )
-    def test_what_counts_as_a_heading_write(
-        self, source: str, writes: dict[str, dict[str, int]]
-    ) -> None:
+    def test_what_counts_as_a_heading_write(self, source: str, writes: dict[str, dict[str, int]]) -> None:
         assert _heading_writes(source) == writes
 
     def test_a_writer_named_bare_in_its_own_module_counts(self) -> None:
@@ -951,9 +942,7 @@ class TestClassificationsReachAnExistingBookOnlyThroughEvidence:
             "def f(book, db):\n    add_headings(book, [], db)"
         )
 
-        assert _heading_writes(source, module="classifications") == {
-            "f": {"classifications.add_headings": 1}
-        }
+        assert _heading_writes(source, module="classifications") == {"f": {"classifications.add_headings": 1}}
 
     @pytest.mark.parametrize(
         ("source", "writes"),

@@ -152,9 +152,7 @@ def test_every_key_is_a_division():
     """The mapping is division level by design: `ddc.division` produces keys of
     exactly this shape, so a key of any other shape can never be looked up."""
     wrong = sorted(
-        key
-        for key in ddc.DIVISION_TAGS
-        if len(key) != 3 or not key.isdigit() or not key.endswith("0")
+        key for key in ddc.DIVISION_TAGS if len(key) != 3 or not key.isdigit() or not key.endswith("0")
     )
 
     assert wrong == []

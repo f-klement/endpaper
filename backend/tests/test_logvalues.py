@@ -59,9 +59,7 @@ class TestTheDegradeCannotFillADisk:
         assert len(caplog.records) == 1
         assert len(caplog.records[0].getMessage()) < 400
 
-    def test_the_column_still_refuses_a_shape_a_string_column_refuses(
-        self, db
-    ) -> None:
+    def test_the_column_still_refuses_a_shape_a_string_column_refuses(self, db) -> None:
         """The write half. `str()` in the bind would store `"{'a': 1}"` here,
         which is a forged value in a column whose read end then logs it on every
         page. An archive carries dictionaries and `backup._parse_row` passes

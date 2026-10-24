@@ -79,9 +79,7 @@ class TestReadingAPage:
             {
                 "results": [
                     _entry(
-                        highlights=[
-                            {"id": 1, "text": "x", "highlighted_at": "2026-03-01T22:15:09.5+01:00"}
-                        ]
+                        highlights=[{"id": 1, "text": "x", "highlighted_at": "2026-03-01T22:15:09.5+01:00"}]
                     )
                 ]
             }
@@ -109,9 +107,7 @@ class TestAPageThatLostARace:
         def delete(session, *_):
             with SessionLocal() as other:
                 other.add(
-                    DeletedHighlight(
-                        user_id=member_id, source=HighlightSource.READWISE, source_key="9"
-                    )
+                    DeletedHighlight(user_id=member_id, source=HighlightSource.READWISE, source_key="9")
                 )
                 other.flush()
                 other.query(Highlight).filter(Highlight.id == row_id).delete()
@@ -182,9 +178,7 @@ class TestAPageListingOneHighlightUnderTwoBooks:
         assert (counts.created, counts.skipped) == (0, 1)
         assert db.query(Highlight).count() == 0
 
-    def test_writes_it_once_when_both_are_one_book_and_the_later_wins(
-        self, db, member, make_book
-    ):
+    def test_writes_it_once_when_both_are_one_book_and_the_later_wins(self, db, member, make_book):
         make_book(member["headers"], title="Dune", author="Frank Herbert")
         member_id = member["user"]["id"]
         twice = (
@@ -216,9 +210,7 @@ class TestAPageListingOneHighlightLiveAndDeleted:
         db.query(Highlight).update({"is_shared": True})
         db.commit()
         live = _entry(user_book_id=7, highlights=[{"id": 9, "text": text}])
-        gone = _entry(
-            user_book_id=8, title="Emma", is_deleted=True, highlights=[{"id": 9, "text": "first"}]
-        )
+        gone = _entry(user_book_id=8, title="Emma", is_deleted=True, highlights=[{"id": 9, "text": "first"}])
 
         apply(db, member_id, *((gone, live) if deleted_first else (live, gone)))
 
@@ -236,8 +228,7 @@ class TestTheSealedToken:
         envelope = credentials.seal_member_login(key, "readwise", 1, readwise.READWISE_ORIGIN, "t0ken")
 
         assert (
-            credentials.unseal_member_login(key, "readwise", 1, readwise.READWISE_ORIGIN, envelope)
-            == "t0ken"
+            credentials.unseal_member_login(key, "readwise", 1, readwise.READWISE_ORIGIN, envelope) == "t0ken"
         )
         with pytest.raises(credentials.UnreadableCredential):
             credentials.unseal_member_login(key, "readwise", 2, readwise.READWISE_ORIGIN, envelope)
@@ -283,11 +274,7 @@ class TestTheEnvelopeCeilingIsOnBytes:
     character arm cannot see."""
 
     def _insert(self, db, member_id: int, envelope: str) -> None:
-        db.execute(
-            insert(MemberLogin).values(
-                user_id=member_id, service="readwise", envelope=envelope
-            )
-        )
+        db.execute(insert(MemberLogin).values(user_id=member_id, service="readwise", envelope=envelope))
         db.commit()
 
     def test_the_byte_arm_refuses_what_the_characters_admit(self, db, member):

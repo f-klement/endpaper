@@ -101,6 +101,10 @@ from tests.strategies import (
     xml_of,
 )
 
+TREE_GUARDS = {
+    "TestTheCarrierTestIsTheOnlyWayIn": ("application_modules",),
+}
+
 #: The `backend/` directory, so a doc guard can reach the repository root.
 BACKEND = Path(__file__).resolve().parent.parent
 
@@ -121,9 +125,7 @@ BACKEND = Path(__file__).resolve().parent.parent
 ALL_SOURCES = sources.DEFAULT_PLAN
 
 
-def patch_lookup_adapters(
-    monkeypatch: pytest.MonkeyPatch, table: dict[CatalogueSource, Any]
-) -> None:
+def patch_lookup_adapters(monkeypatch: pytest.MonkeyPatch, table: dict[CatalogueSource, Any]) -> None:
     """Stand a `{source: adapter}` table in front of the one SRU door.
 
     The adapters were a dispatch table keyed on a source and are one function
@@ -135,9 +137,7 @@ def patch_lookup_adapters(
     a source the plan asks about should fail loudly rather than record a miss.
     """
 
-    async def door(
-        target: Any, isbn: str, api_key: str, *, credential: Any = None
-    ) -> metadata.Lookup:
+    async def door(target: Any, isbn: str, api_key: str, *, credential: Any = None) -> metadata.Lookup:
         return await table[target.source](isbn, api_key)
 
     monkeypatch.setattr(metadata, "_lookup_one", door)
@@ -145,9 +145,7 @@ def patch_lookup_adapters(
 
 def _nlg_search(query: str, limit: int):
     """The NLG's title search, which is now the shared SRU door plus a row."""
-    return metadata._search_one(
-        targets.SEEDED[CatalogueSource.NLG], query, limit, "", credential=None
-    )
+    return metadata._search_one(targets.SEEDED[CatalogueSource.NLG], query, limit, "", credential=None)
 
 
 def _nkp_query(value: str) -> str:
@@ -329,9 +327,7 @@ GOOGLE_VOLUME = {
                 "publishedDate": "1965",
                 "pageCount": 412,
                 "language": "en",
-                "industryIdentifiers": [
-                    {"type": "ISBN_13", "identifier": "9780441013593"}
-                ],
+                "industryIdentifiers": [{"type": "ISBN_13", "identifier": "9780441013593"}],
             },
         }
     ]
@@ -340,10 +336,7 @@ GOOGLE_VOLUME = {
 
 def _marc(*records: str) -> str:
     """An SRU envelope around zero or more MARCXML records."""
-    body = "".join(
-        f"<zs:record><zs:recordData>{record}</zs:recordData></zs:record>"
-        for record in records
-    )
+    body = "".join(f"<zs:record><zs:recordData>{record}</zs:recordData></zs:record>" for record in records)
     return (
         '<?xml version="1.0" encoding="UTF-8"?>'
         '<zs:searchRetrieveResponse xmlns:zs="http://www.loc.gov/zing/srw/">'
@@ -387,8 +380,7 @@ def _oenb_envelope(*records: str) -> str:
     copied from a live response should look like one.
     """
     body = "".join(
-        f"<record><recordSchema>marcxml</recordSchema>"
-        f"<recordData>{record}</recordData></record>"
+        f"<record><recordSchema>marcxml</recordSchema><recordData>{record}</recordData></record>"
         for record in records
     )
     return (
@@ -624,7 +616,7 @@ OENB_RECORD = _oenb_envelope(
     '<subfield code="0">(DE-588)138150680</subfield>'
     '<subfield code="4">aut</subfield></datafield>'
     '<datafield tag="245" ind1="1" ind2="0">'
-    "<subfield code=\"a\">&lt;&lt;Das&gt;&gt; angehaltene Leben</subfield>"
+    '<subfield code="a">&lt;&lt;Das&gt;&gt; angehaltene Leben</subfield>'
     '<subfield code="b">Roman</subfield></datafield>'
     '<datafield tag="264" ind1=" " ind2="1">'
     '<subfield code="a">Wien</subfield>'
@@ -696,8 +688,8 @@ OENB_ARTICLE = (
     '<subfield code="a">DeMeritt, Linda C.</subfield>'
     '<subfield code="4">aut</subfield></datafield>'
     '<datafield tag="245" ind1="1" ind2="0">'
-    "<subfield code=\"a\">&lt;&lt;A&gt;&gt; \"healthier marriage\"</subfield>"
-    "<subfield code=\"b\">Elfriede Jelinek's marxist feminism</subfield></datafield>"
+    '<subfield code="a">&lt;&lt;A&gt;&gt; "healthier marriage"</subfield>'
+    '<subfield code="b">Elfriede Jelinek\'s marxist feminism</subfield></datafield>'
     '<datafield tag="264" ind1=" " ind2="1">'
     '<subfield code="c">1994</subfield></datafield>'
     '<datafield tag="773" ind1="0" ind2="8">'
@@ -720,7 +712,7 @@ OENB_MONOGRAPH = (
     '<datafield tag="020" ind1=" " ind2=" ">'
     '<subfield code="a">9783552058217</subfield></datafield>'
     '<datafield tag="245" ind1="1" ind2="0">'
-    "<subfield code=\"a\">&lt;&lt;Das&gt;&gt; angehaltene Leben</subfield></datafield>"
+    '<subfield code="a">&lt;&lt;Das&gt;&gt; angehaltene Leben</subfield></datafield>'
     '<datafield tag="100" ind1="1" ind2=" ">'
     '<subfield code="a">Torchio, Maurizio</subfield>'
     '<subfield code="0">(DE-588)138150680</subfield>'
@@ -800,10 +792,7 @@ OENB_WRONG_BOOK = _oenb_envelope(
 
 def _marc_element(datafields: str) -> ElementTree.Element:
     """One MARC record element, built from the datafields a test cares about."""
-    return ElementTree.fromstring(
-        '<record xmlns="http://www.loc.gov/MARC21/slim">'
-        f"{datafields}</record>"
-    )
+    return ElementTree.fromstring(f'<record xmlns="http://www.loc.gov/MARC21/slim">{datafields}</record>')
 
 
 def _xml(body: str) -> httpx.Response:
@@ -864,14 +853,10 @@ class TestSourceOrder:
     async def test_a_german_isbn_asks_the_dnb_first(self):
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
-            mock.get(url__startswith=K10PLUS).mock(
-                return_value=_xml(K10PLUS_EMPTY)
-            )
+            mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
             silence_covers(mock)
             dnb = mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_RECORD))
-            open_library = mock.get(url__startswith=OPEN_LIBRARY).mock(
-                return_value=httpx.Response(404)
-            )
+            open_library = mock.get(url__startswith=OPEN_LIBRARY).mock(return_value=httpx.Response(404))
             result = await lookup(GERMAN_ISBN)
 
         assert result.source == "dnb"
@@ -890,9 +875,7 @@ class TestSourceOrder:
         """
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
-            mock.get(url__startswith=K10PLUS).mock(
-                return_value=_xml(K10PLUS_RECORD)
-            )
+            mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_RECORD))
             open_library = mock.get(url__startswith=OPEN_LIBRARY).mock(
                 return_value=httpx.Response(200, json=OPEN_LIBRARY_RECORD)
             )
@@ -907,9 +890,7 @@ class TestSourceOrder:
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
             silence_other_lookup_catalogues(mock, K10PLUS, DNB)
-            mock.get(url__startswith=K10PLUS).mock(
-                return_value=_xml(K10PLUS_EMPTY)
-            )
+            mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
             silence_covers(mock)
             mock.get(url__startswith=OPEN_LIBRARY).mock(
                 return_value=httpx.Response(200, json=OPEN_LIBRARY_RECORD)
@@ -929,13 +910,9 @@ class TestSourceOrder:
         """
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
-            k10plus = mock.get(url__startswith=K10PLUS).mock(
-                return_value=_xml(K10PLUS_EMPTY)
-            )
+            k10plus = mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
             dnb = mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_RECORD))
-            mock.get(url__startswith=OPEN_LIBRARY).mock(
-                return_value=httpx.Response(404)
-            )
+            mock.get(url__startswith=OPEN_LIBRARY).mock(return_value=httpx.Response(404))
             await lookup(GERMAN_ISBN)
 
         assert dnb.called
@@ -946,16 +923,10 @@ class TestSourceOrder:
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
             silence_other_lookup_catalogues(mock, K10PLUS, DNB)
-            mock.get(url__startswith=K10PLUS).mock(
-                return_value=_xml(K10PLUS_EMPTY)
-            )
+            mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
             silence_covers(mock)
-            mock.get(url__startswith=OPEN_LIBRARY).mock(
-                return_value=httpx.Response(404)
-            )
-            mock.get(url__startswith=GOOGLE_BOOKS).mock(
-                return_value=httpx.Response(200, json=GOOGLE_VOLUME)
-            )
+            mock.get(url__startswith=OPEN_LIBRARY).mock(return_value=httpx.Response(404))
+            mock.get(url__startswith=GOOGLE_BOOKS).mock(return_value=httpx.Response(200, json=GOOGLE_VOLUME))
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
             result = await lookup(ENGLISH_ISBN)
 
@@ -980,12 +951,8 @@ class TestSourceOrder:
             silence_other_lookup_catalogues(mock, K10PLUS, DNB)
             mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
-            mock.get(url__startswith=OPEN_LIBRARY).mock(
-                return_value=httpx.Response(404)
-            )
-            mock.get(url__startswith=GOOGLE_BOOKS).mock(
-                return_value=httpx.Response(200, json=GOOGLE_VOLUME)
-            )
+            mock.get(url__startswith=OPEN_LIBRARY).mock(return_value=httpx.Response(404))
+            mock.get(url__startswith=GOOGLE_BOOKS).mock(return_value=httpx.Response(200, json=GOOGLE_VOLUME))
             result = await lookup(ENGLISH_ISBN)
 
         assert result.record is not None
@@ -1004,13 +971,9 @@ class TestSourceOrder:
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
             silence_other_lookup_catalogues(mock, K10PLUS, DNB)
-            mock.get(url__startswith=K10PLUS).mock(
-                return_value=_xml(K10PLUS_EMPTY)
-            )
+            mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
             silence_covers(mock)
-            mock.get(url__startswith=OPEN_LIBRARY).mock(
-                return_value=httpx.Response(404)
-            )
+            mock.get(url__startswith=OPEN_LIBRARY).mock(return_value=httpx.Response(404))
             google = mock.get(url__startswith=GOOGLE_BOOKS).mock(
                 return_value=httpx.Response(200, json=GOOGLE_VOLUME)
             )
@@ -1026,16 +989,10 @@ class TestOutcome:
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
             silence_other_lookup_catalogues(mock, K10PLUS, DNB)
-            mock.get(url__startswith=K10PLUS).mock(
-                return_value=_xml(K10PLUS_EMPTY)
-            )
+            mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
             silence_covers(mock)
-            mock.get(url__startswith=OPEN_LIBRARY).mock(
-                return_value=httpx.Response(404)
-            )
-            mock.get(url__startswith=GOOGLE_BOOKS).mock(
-                return_value=httpx.Response(429)
-            )
+            mock.get(url__startswith=OPEN_LIBRARY).mock(return_value=httpx.Response(404))
+            mock.get(url__startswith=GOOGLE_BOOKS).mock(return_value=httpx.Response(429))
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
             result = await lookup(ENGLISH_ISBN)
 
@@ -1051,16 +1008,10 @@ class TestOutcome:
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
             silence_other_lookup_catalogues(mock, K10PLUS, DNB)
-            mock.get(url__startswith=K10PLUS).mock(
-                return_value=_xml(K10PLUS_EMPTY)
-            )
+            mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
             silence_covers(mock)
-            mock.get(url__startswith=OPEN_LIBRARY).mock(
-                return_value=httpx.Response(429)
-            )
-            mock.get(url__startswith=GOOGLE_BOOKS).mock(
-                return_value=httpx.Response(200, json={"items": []})
-            )
+            mock.get(url__startswith=OPEN_LIBRARY).mock(return_value=httpx.Response(429))
+            mock.get(url__startswith=GOOGLE_BOOKS).mock(return_value=httpx.Response(200, json={"items": []}))
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
             result = await lookup(ENGLISH_ISBN)
 
@@ -1071,16 +1022,10 @@ class TestOutcome:
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
             silence_other_lookup_catalogues(mock, K10PLUS, DNB)
-            mock.get(url__startswith=K10PLUS).mock(
-                return_value=_xml(K10PLUS_EMPTY)
-            )
+            mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
             silence_covers(mock)
-            mock.get(url__startswith=OPEN_LIBRARY).mock(
-                return_value=httpx.Response(404)
-            )
-            mock.get(url__startswith=GOOGLE_BOOKS).mock(
-                return_value=httpx.Response(200, json={"items": []})
-            )
+            mock.get(url__startswith=OPEN_LIBRARY).mock(return_value=httpx.Response(404))
+            mock.get(url__startswith=GOOGLE_BOOKS).mock(return_value=httpx.Response(200, json={"items": []}))
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
             result = await lookup(ENGLISH_ISBN)
 
@@ -1091,19 +1036,11 @@ class TestOutcome:
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
             silence_other_lookup_catalogues(mock, K10PLUS, DNB)
-            mock.get(url__startswith=K10PLUS).mock(
-                return_value=_xml(K10PLUS_EMPTY)
-            )
+            mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
             silence_covers(mock)
-            mock.get(url__startswith=OPEN_LIBRARY).mock(
-                side_effect=httpx.ConnectError("no route")
-            )
-            mock.get(url__startswith=GOOGLE_BOOKS).mock(
-                side_effect=httpx.ConnectError("no route")
-            )
-            mock.get(url__startswith=DNB).mock(
-                side_effect=httpx.ConnectError("no route")
-            )
+            mock.get(url__startswith=OPEN_LIBRARY).mock(side_effect=httpx.ConnectError("no route"))
+            mock.get(url__startswith=GOOGLE_BOOKS).mock(side_effect=httpx.ConnectError("no route"))
+            mock.get(url__startswith=DNB).mock(side_effect=httpx.ConnectError("no route"))
             result = await lookup(ENGLISH_ISBN)
 
         assert result.outcome is Outcome.UNAVAILABLE
@@ -1112,13 +1049,9 @@ class TestOutcome:
     async def test_a_string_that_is_not_an_isbn_costs_no_request(self):
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
-            mock.get(url__startswith=K10PLUS).mock(
-                return_value=_xml(K10PLUS_EMPTY)
-            )
+            mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
             silence_covers(mock)
-            any_call = mock.get(url__regex=r".*").mock(
-                return_value=httpx.Response(200, json={})
-            )
+            any_call = mock.get(url__regex=r".*").mock(return_value=httpx.Response(200, json={}))
             result = await lookup("not-an-isbn")
 
         assert result.outcome is Outcome.NOT_FOUND
@@ -1130,9 +1063,7 @@ class TestCache:
     async def test_a_repeat_lookup_reuses_the_record(self):
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
-            mock.get(url__startswith=K10PLUS).mock(
-                return_value=_xml(K10PLUS_EMPTY)
-            )
+            mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
             silence_covers(mock)
             route = mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_RECORD))
             await lookup(GERMAN_ISBN)
@@ -1145,9 +1076,7 @@ class TestCache:
         """Canonicalising before the cache is what makes one book one entry."""
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
-            mock.get(url__startswith=K10PLUS).mock(
-                return_value=_xml(K10PLUS_EMPTY)
-            )
+            mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
             silence_covers(mock)
             route = mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_RECORD))
             await lookup(GERMAN_ISBN)
@@ -1159,9 +1088,7 @@ class TestCache:
     async def test_clearing_the_cache_lets_a_source_answer_again(self):
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
-            mock.get(url__startswith=K10PLUS).mock(
-                return_value=_xml(K10PLUS_EMPTY)
-            )
+            mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
             silence_covers(mock)
             route = mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_RECORD))
             await lookup(GERMAN_ISBN)
@@ -1169,7 +1096,6 @@ class TestCache:
             await lookup(GERMAN_ISBN)
 
         assert route.call_count == 2
-
 
     def test_an_answer_past_its_lifetime_is_forgotten(self):
         metadata._cache[GERMAN_ISBN] = (-1.0, metadata.Lookup(Outcome.NOT_FOUND, source="dnb"))
@@ -1203,9 +1129,7 @@ class TestDnbRecord:
     async def test_maps_the_record_onto_book_fields(self):
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
-            mock.get(url__startswith=K10PLUS).mock(
-                return_value=_xml(K10PLUS_EMPTY)
-            )
+            mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
             silence_covers(mock)
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_RECORD))
             result = await lookup(GERMAN_ISBN)
@@ -1223,9 +1147,7 @@ class TestDnbRecord:
         """A translator credited as the author is worse than no author at all."""
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
-            mock.get(url__startswith=K10PLUS).mock(
-                return_value=_xml(K10PLUS_EMPTY)
-            )
+            mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
             silence_covers(mock)
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_RECORD))
             result = await lookup(GERMAN_ISBN)
@@ -1238,9 +1160,7 @@ class TestDnbRecord:
         """A heading reaches `subjects` as words, so a tag name can match it."""
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
-            mock.get(url__startswith=K10PLUS).mock(
-                return_value=_xml(K10PLUS_EMPTY)
-            )
+            mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
             silence_covers(mock)
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_RECORD))
             result = await lookup(GERMAN_ISBN)
@@ -1253,9 +1173,7 @@ class TestDnbRecord:
         """A record restates its 650 headings in the 689 chain."""
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
-            mock.get(url__startswith=K10PLUS).mock(
-                return_value=_xml(K10PLUS_EMPTY)
-            )
+            mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
             silence_covers(mock)
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_RECORD))
             result = await lookup(GERMAN_ISBN)
@@ -1268,9 +1186,7 @@ class TestDnbRecord:
         """The identifier is the whole reason this source reads MARC."""
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
-            mock.get(url__startswith=K10PLUS).mock(
-                return_value=_xml(K10PLUS_EMPTY)
-            )
+            mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
             silence_covers(mock)
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_RECORD))
             result = await lookup(GERMAN_ISBN)
@@ -1284,9 +1200,7 @@ class TestDnbRecord:
         a tag suggestion is projected from."""
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
-            mock.get(url__startswith=K10PLUS).mock(
-                return_value=_xml(K10PLUS_EMPTY)
-            )
+            mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
             silence_covers(mock)
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_RECORD))
             result = await lookup(GERMAN_ISBN)
@@ -1306,23 +1220,19 @@ class TestDnbRecord:
         )
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
-            mock.get(url__startswith=K10PLUS).mock(
-                return_value=_xml(K10PLUS_EMPTY)
-            )
+            mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
             silence_covers(mock)
             mock.get(url__startswith=DNB).mock(return_value=_xml(record))
             result = await lookup(GERMAN_ISBN)
 
         assert result.record is not None
         assert [
-            entry.number
-            for entry in result.record.headings
-            if entry.scheme is ClassificationScheme.DDC
+            entry.number for entry in result.record.headings if entry.scheme is ClassificationScheme.DDC
         ] == ["004"]
 
     @pytest.mark.asyncio
     async def test_a_free_text_heading_starting_with_three_digits_is_not_dewey(self):
-        """"100 Jahre Bauhaus" is a subject heading, and `ddc.parse_heading`
+        """ "100 Jahre Bauhaus" is a subject heading, and `ddc.parse_heading`
         would read it as Dewey 100 with the caption "Jahre Bauhaus".
 
         The floor in `ddc` cannot tell the two apart, so the separation is
@@ -1335,18 +1245,14 @@ class TestDnbRecord:
         )
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
-            mock.get(url__startswith=K10PLUS).mock(
-                return_value=_xml(K10PLUS_EMPTY)
-            )
+            mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
             silence_covers(mock)
             mock.get(url__startswith=DNB).mock(return_value=_xml(record))
             result = await lookup(GERMAN_ISBN)
 
         assert result.record is not None
         assert [
-            entry.number
-            for entry in result.record.headings
-            if entry.scheme is ClassificationScheme.DDC
+            entry.number for entry in result.record.headings if entry.scheme is ClassificationScheme.DDC
         ] == ["004"]
         assert Heading(ClassificationScheme.GND, "4026894-9", "100 Jahre Bauhaus") in result.record.headings
 
@@ -1378,9 +1284,7 @@ class TestDnbRecord:
         )
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
-            mock.get(url__startswith=K10PLUS).mock(
-                return_value=_xml(K10PLUS_EMPTY)
-            )
+            mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
             silence_covers(mock)
             mock.get(url__startswith=DNB).mock(return_value=_xml(answer))
             result = await lookup(GERMAN_ISBN)
@@ -1399,9 +1303,7 @@ class TestDnbRecord:
         )
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
-            mock.get(url__startswith=K10PLUS).mock(
-                return_value=_xml(K10PLUS_EMPTY)
-            )
+            mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
             silence_covers(mock)
             mock.get(url__startswith=DNB).mock(return_value=_xml(answer))
             result = await lookup(GERMAN_ISBN)
@@ -1421,17 +1323,11 @@ class TestDnbRecord:
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
             silence_other_lookup_catalogues(mock, K10PLUS, DNB)
-            mock.get(url__startswith=K10PLUS).mock(
-                return_value=_xml(K10PLUS_EMPTY)
-            )
+            mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
             silence_covers(mock)
             mock.get(url__startswith=DNB).mock(return_value=_xml(answer))
-            mock.get(url__startswith=OPEN_LIBRARY).mock(
-                return_value=httpx.Response(404)
-            )
-            mock.get(url__startswith=GOOGLE_BOOKS).mock(
-                return_value=httpx.Response(200, json={"items": []})
-            )
+            mock.get(url__startswith=OPEN_LIBRARY).mock(return_value=httpx.Response(404))
+            mock.get(url__startswith=GOOGLE_BOOKS).mock(return_value=httpx.Response(200, json={"items": []}))
             result = await lookup(GERMAN_ISBN)
 
         assert result.outcome is Outcome.NOT_FOUND
@@ -1448,9 +1344,7 @@ class TestDnbRecord:
         """
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
-            mock.get(url__startswith=K10PLUS).mock(
-                return_value=_xml(K10PLUS_EMPTY)
-            )
+            mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
             silence_covers(mock)
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_RECORD))
             result = await lookup(GERMAN_ISBN)
@@ -1468,9 +1362,7 @@ class TestDnbRecord:
         `CATALOGUE` provenance mean anything."""
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
-            mock.get(url__startswith=K10PLUS).mock(
-                return_value=_xml(K10PLUS_EMPTY)
-            )
+            mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
             silence_covers(mock)
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_RECORD))
             result = await lookup(GERMAN_ISBN)
@@ -1484,17 +1376,11 @@ class TestDnbRecord:
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
             silence_other_lookup_catalogues(mock, K10PLUS, DNB)
-            mock.get(url__startswith=K10PLUS).mock(
-                return_value=_xml(K10PLUS_EMPTY)
-            )
+            mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
             silence_covers(mock)
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
-            mock.get(url__startswith=OPEN_LIBRARY).mock(
-                return_value=httpx.Response(404)
-            )
-            mock.get(url__startswith=GOOGLE_BOOKS).mock(
-                return_value=httpx.Response(200, json={"items": []})
-            )
+            mock.get(url__startswith=OPEN_LIBRARY).mock(return_value=httpx.Response(404))
+            mock.get(url__startswith=GOOGLE_BOOKS).mock(return_value=httpx.Response(200, json={"items": []}))
             result = await lookup(GERMAN_ISBN)
 
         assert result.outcome is Outcome.NOT_FOUND
@@ -1517,10 +1403,7 @@ class TestSearchMatches:
         record = Record(
             source="dnb",
             title="Ein Buch",
-            headings=tuple(
-                Heading(ClassificationScheme.GND, f"{index}", "x")
-                for index in range(12)
-            ),
+            headings=tuple(Heading(ClassificationScheme.GND, f"{index}", "x") for index in range(12)),
         )
 
         assert len(record.match_headings()) == MAX_CLASSIFICATIONS_PER_BOOK
@@ -1556,17 +1439,11 @@ class TestCatalogueXml:
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
             silence_other_lookup_catalogues(mock, K10PLUS, DNB)
-            mock.get(url__startswith=K10PLUS).mock(
-                return_value=_xml(K10PLUS_EMPTY)
-            )
+            mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
             silence_covers(mock)
             mock.get(url__startswith=DNB).mock(return_value=_xml(hostile))
-            mock.get(url__startswith=OPEN_LIBRARY).mock(
-                return_value=httpx.Response(404)
-            )
-            mock.get(url__startswith=GOOGLE_BOOKS).mock(
-                return_value=httpx.Response(200, json={"items": []})
-            )
+            mock.get(url__startswith=OPEN_LIBRARY).mock(return_value=httpx.Response(404))
+            mock.get(url__startswith=GOOGLE_BOOKS).mock(return_value=httpx.Response(200, json={"items": []}))
             result = await lookup(GERMAN_ISBN)
 
         assert result.outcome is not Outcome.FOUND
@@ -1627,9 +1504,7 @@ class TestTheResponseSizeCap:
         return self._padded(_marc(_marc_record()), "</zs:records>")
 
     def _oenb_over_cap(self) -> str:
-        return self._padded(
-            _oenb_envelope(OENB_MONOGRAPH), "</records>"
-        )
+        return self._padded(_oenb_envelope(OENB_MONOGRAPH), "</records>")
 
     def _nkp_over_cap(self) -> str:
         """The Czech envelope, which is neither `_marc` nor the BnF's."""
@@ -1689,14 +1564,8 @@ class TestTheResponseSizeCap:
         marc_record = _parsed(self._marc_over_cap()).find(f".//{marc_fields.RECORD_TAG}")
         assert marc_record is not None
         assert Fields(marc_record).get("245")
-        assert (
-            _parsed(self._oenb_over_cap()).find(f".//{marc_fields.RECORD_TAG}")
-            is not None
-        )
-        assert (
-            _parsed(self._dublincore_over_cap()).find(f".//{metadata._DC}title")
-            is not None
-        )
+        assert _parsed(self._oenb_over_cap()).find(f".//{marc_fields.RECORD_TAG}") is not None
+        assert _parsed(self._dublincore_over_cap()).find(f".//{metadata._DC}title") is not None
         assert _parsed(self._mods_over_cap()).find(f".//{metadata._MODS}mods") is not None
         assert _parsed(self._nkp_over_cap()).find(".//dc-record") is not None
 
@@ -1723,23 +1592,15 @@ class TestTheResponseSizeCap:
             (BNE, "_oenb_over_cap", ENGLISH_ISBN),
         ],
     )
-    async def test_an_oversized_lookup_answer_costs_that_source(
-        self, host, body, isbn
-    ):
+    async def test_an_oversized_lookup_answer_costs_that_source(self, host, body, isbn):
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
             for other in SRU_LOOKUP_HOSTS:
                 mock.get(url__startswith=other).mock(
-                    return_value=_xml(
-                        getattr(self, body)() if other == host else OENB_EMPTY
-                    )
+                    return_value=_xml(getattr(self, body)() if other == host else OENB_EMPTY)
                 )
-            mock.get(url__startswith=OPEN_LIBRARY).mock(
-                return_value=httpx.Response(404)
-            )
-            mock.get(url__startswith=GOOGLE_BOOKS).mock(
-                return_value=httpx.Response(200, json={"items": []})
-            )
+            mock.get(url__startswith=OPEN_LIBRARY).mock(return_value=httpx.Response(404))
+            mock.get(url__startswith=GOOGLE_BOOKS).mock(return_value=httpx.Response(200, json={"items": []}))
             result = await lookup(isbn)
 
         name = SRU_LOOKUP_HOSTS[host]
@@ -1758,9 +1619,7 @@ class TestTheResponseSizeCap:
             ("http://lx2.loc.gov", "_mods_over_cap"),
         ],
     )
-    async def test_an_oversized_search_answer_costs_that_source_its_rows(
-        self, host, body
-    ):
+    async def test_an_oversized_search_answer_costs_that_source_its_rows(self, host, body):
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
             for other, empty in (
@@ -1772,13 +1631,9 @@ class TestTheResponseSizeCap:
                 ("http://lx2.loc.gov", DNB_EMPTY),
             ):
                 mock.get(url__startswith=other).mock(
-                    return_value=_xml(
-                        getattr(self, body)() if other == host else empty
-                    )
+                    return_value=_xml(getattr(self, body)() if other == host else empty)
                 )
-            mock.get(url__startswith=OPEN_LIBRARY).mock(
-                return_value=httpx.Response(200, json={"docs": []})
-            )
+            mock.get(url__startswith=OPEN_LIBRARY).mock(return_value=httpx.Response(200, json={"docs": []}))
             rows = await search("clean code")
 
         assert rows == []
@@ -1788,16 +1643,10 @@ class TestTheResponseSizeCap:
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
             silence_other_lookup_catalogues(mock, K10PLUS, DNB)
-            mock.get(url__startswith=K10PLUS).mock(
-                return_value=_xml(K10PLUS_EMPTY)
-            )
+            mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
             mock.get(url__startswith=DNB).mock(return_value=_xml(self.ENORMOUS))
-            mock.get(url__startswith=OPEN_LIBRARY).mock(
-                return_value=httpx.Response(404)
-            )
-            mock.get(url__startswith=GOOGLE_BOOKS).mock(
-                return_value=httpx.Response(200, json={"items": []})
-            )
+            mock.get(url__startswith=OPEN_LIBRARY).mock(return_value=httpx.Response(404))
+            mock.get(url__startswith=GOOGLE_BOOKS).mock(return_value=httpx.Response(200, json={"items": []}))
             result = await lookup(GERMAN_ISBN)
 
         assert ("dnb", Outcome.UNAVAILABLE) in result.attempts
@@ -1809,12 +1658,8 @@ class TestTheResponseSizeCap:
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
             mock.get(url__startswith=DNB).mock(return_value=_xml(self.ENORMOUS))
-            mock.get(url__startswith=K10PLUS).mock(
-                return_value=_xml(K10PLUS_RECORD)
-            )
-            mock.get(url__startswith=OPEN_LIBRARY).mock(
-                return_value=httpx.Response(404)
-            )
+            mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_RECORD))
+            mock.get(url__startswith=OPEN_LIBRARY).mock(return_value=httpx.Response(404))
             result = await lookup(ENGLISH_ISBN)
 
         assert result.source == "k10plus"
@@ -1859,8 +1704,7 @@ class TestASubjectCarriesTheVocabularyTheRecordDeclared:
         """Null and never guessed at, which is 199 of 199 live DNB `689`
         fields and 130 of 133 live K10plus `650` fields."""
         assert self._subjects(
-            '<datafield tag="650" ind1=" " ind2=" ">'
-            '<subfield code="a">Kochbuch</subfield></datafield>'
+            '<datafield tag="650" ind1=" " ind2=" "><subfield code="a">Kochbuch</subfield></datafield>'
         ) == [Subject("Kochbuch", None, None)]
 
     def test_an_identifier_with_no_vocabulary_beside_it_is_still_kept(self):
@@ -1914,13 +1758,15 @@ class TestASubjectCarriesTheVocabularyTheRecordDeclared:
         classification row, while the subject beside it carried no identifier at
         all off the same field.
         """
-        entry = Fields(_marc_element(
-            '<datafield tag="650" ind1=" " ind2="7">'
-            '<subfield code="a">Informatik</subfield>'
-            '<subfield code="0"/>'
-            '<subfield code="0">(DE-588)4026894-9</subfield>'
-            '<subfield code="2">gnd</subfield></datafield>'
-        )).get("650")[0]
+        entry = Fields(
+            _marc_element(
+                '<datafield tag="650" ind1=" " ind2="7">'
+                '<subfield code="a">Informatik</subfield>'
+                '<subfield code="0"/>'
+                '<subfield code="0">(DE-588)4026894-9</subfield>'
+                '<subfield code="2">gnd</subfield></datafield>'
+            )
+        ).get("650")[0]
 
         assert entry.all("0") == ["", "(DE-588)4026894-9"]
         assert entry.subject_identifier() == "(DE-588)4026894-9"
@@ -1930,11 +1776,13 @@ class TestASubjectCarriesTheVocabularyTheRecordDeclared:
         """The diagonal for the test above: skipping empties must not invent
         one. Without this, a reader returning the last value would pass the
         test above and fail here."""
-        entry = Fields(_marc_element(
-            '<datafield tag="650" ind1=" " ind2="7">'
-            '<subfield code="a">Informatik</subfield>'
-            '<subfield code="0"/></datafield>'
-        )).get("650")[0]
+        entry = Fields(
+            _marc_element(
+                '<datafield tag="650" ind1=" " ind2="7">'
+                '<subfield code="a">Informatik</subfield>'
+                '<subfield code="0"/></datafield>'
+            )
+        ).get("650")[0]
 
         assert entry.subject_identifier() is None
 
@@ -1966,11 +1814,13 @@ class TestASubjectCarriesTheVocabularyTheRecordDeclared:
         assertions below pass on a record with no subject field, which is every
         record.
         """
-        fields = Fields(_marc_element(
-            '<datafield tag="082" ind1="0" ind2="4">'
-            '<subfield code="a">940</subfield>'
-            '<subfield code="2">21</subfield></datafield>'
-        ))
+        fields = Fields(
+            _marc_element(
+                '<datafield tag="082" ind1="0" ind2="4">'
+                '<subfield code="a">940</subfield>'
+                '<subfield code="2">21</subfield></datafield>'
+            )
+        )
         subjects, headings = fields.controlled_subjects()
 
         with pytest.raises(ValueError, match="082"):
@@ -1997,9 +1847,7 @@ class TestASubjectCarriesTheVocabularyTheRecordDeclared:
         )
         _, headings = Fields(_marc_element(greek + german)).controlled_subjects()
 
-        assert headings == [
-            Heading(ClassificationScheme.GND, "4026894-9", "Informatik")
-        ]
+        assert headings == [Heading(ClassificationScheme.GND, "4026894-9", "Informatik")]
 
     def test_the_689_restatement_folds_into_the_field_that_declared(self):
         """A whole DNB record, through the parser and the seam. `650` declares
@@ -2009,9 +1857,7 @@ class TestASubjectCarriesTheVocabularyTheRecordDeclared:
         record = metadata._dnb_record(Fields(node), "9783960092353")
 
         assert record is not None
-        assert record.subjects == (
-            Subject("Informatik", "gnd", "(DE-588)4026894-9"),
-        )
+        assert record.subjects == (Subject("Informatik", "gnd", "(DE-588)4026894-9"),)
 
 
 class TestK10plusIdentity:
@@ -2044,21 +1890,15 @@ class TestK10plusIdentity:
                             isbn_qualifier="amerik. Original",
                             title='<subfield code="a">Velykyj Hetsbi</subfield>',
                             extra=(
-                                '<datafield tag="020">'
-                                '<subfield code="a">9786171276895</subfield>'
-                                "</datafield>"
+                                '<datafield tag="020"><subfield code="a">9786171276895</subfield></datafield>'
                             ),
                         )
                     )
                 )
             )
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
-            mock.get(url__startswith=OPEN_LIBRARY).mock(
-                return_value=httpx.Response(404)
-            )
-            mock.get(url__startswith=GOOGLE_BOOKS).mock(
-                return_value=httpx.Response(200, json={"items": []})
-            )
+            mock.get(url__startswith=OPEN_LIBRARY).mock(return_value=httpx.Response(404))
+            mock.get(url__startswith=GOOGLE_BOOKS).mock(return_value=httpx.Response(200, json={"items": []}))
             result = await lookup(ENGLISH_ISBN)
 
         assert result.outcome is Outcome.NOT_FOUND
@@ -2113,12 +1953,8 @@ class TestK10plusIdentity:
             # target. Registered first it answers for K10plus and this test
             # asserts NOT_FOUND against a source that was never asked.
             silence_sru_catalogues(mock)
-            mock.get(url__startswith=OPEN_LIBRARY).mock(
-                return_value=httpx.Response(404)
-            )
-            mock.get(url__startswith=GOOGLE_BOOKS).mock(
-                return_value=httpx.Response(200, json={"items": []})
-            )
+            mock.get(url__startswith=OPEN_LIBRARY).mock(return_value=httpx.Response(404))
+            mock.get(url__startswith=GOOGLE_BOOKS).mock(return_value=httpx.Response(200, json={"items": []}))
             result = await lookup(ENGLISH_ISBN)
 
         assert result.outcome is Outcome.NOT_FOUND
@@ -2161,12 +1997,8 @@ class TestK10plusIdentity:
             # target. Registered first it answers for K10plus and this test
             # asserts NOT_FOUND against a source that was never asked.
             silence_sru_catalogues(mock)
-            mock.get(url__startswith=OPEN_LIBRARY).mock(
-                return_value=httpx.Response(404)
-            )
-            mock.get(url__startswith=GOOGLE_BOOKS).mock(
-                return_value=httpx.Response(200, json={"items": []})
-            )
+            mock.get(url__startswith=OPEN_LIBRARY).mock(return_value=httpx.Response(404))
+            mock.get(url__startswith=GOOGLE_BOOKS).mock(return_value=httpx.Response(200, json={"items": []}))
             result = await lookup(ENGLISH_ISBN)
 
         assert result.outcome is Outcome.NOT_FOUND
@@ -2185,9 +2017,7 @@ class TestK10plusIdentity:
             silence_covers(mock)
             silence_other_lookup_catalogues(mock, K10PLUS, DNB)
             mock.get(url__startswith=K10PLUS).mock(
-                return_value=_xml(
-                    _marc(_marc_record(isbn=ENGLISH_ISBN, isbn_qualifier="χαρτόδετο"))
-                )
+                return_value=_xml(_marc(_marc_record(isbn=ENGLISH_ISBN, isbn_qualifier="χαρτόδετο")))
             )
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
             result = await lookup(ENGLISH_ISBN)
@@ -2204,9 +2034,7 @@ class TestK10plusIdentity:
         """
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
-            mock.get(url__startswith=K10PLUS).mock(
-                return_value=_xml(_marc_record(isbn="0743273567"))
-            )
+            mock.get(url__startswith=K10PLUS).mock(return_value=_xml(_marc_record(isbn="0743273567")))
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
             result = await lookup(ENGLISH_ISBN)
 
@@ -2224,9 +2052,7 @@ class TestK10plusIdentity:
         )
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
-            mock.get(url__startswith=K10PLUS).mock(
-                return_value=_xml(_marc(sparse, full))
-            )
+            mock.get(url__startswith=K10PLUS).mock(return_value=_xml(_marc(sparse, full)))
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
             result = await lookup(ENGLISH_ISBN)
 
@@ -2268,8 +2094,7 @@ class TestK10plusRecord:
         data = await self._lookup(
             _marc_record(
                 title=(
-                    '<subfield code="a">The Great Gatsby :</subfield>'
-                    '<subfield code="b">a novel</subfield>'
+                    '<subfield code="a">The Great Gatsby :</subfield><subfield code="b">a novel</subfield>'
                 )
             )
         )
@@ -2279,9 +2104,7 @@ class TestK10plusRecord:
     @pytest.mark.asyncio
     async def test_closes_the_filing_space_after_an_elided_article(self):
         """`L' etranger` is a sorting device, not how the title is printed."""
-        data = await self._lookup(
-            _marc_record(title="<subfield code=\"a\">L' etranger</subfield>")
-        )
+        data = await self._lookup(_marc_record(title='<subfield code="a">L\' etranger</subfield>'))
         assert data.title == "L'etranger"
 
     @pytest.mark.asyncio
@@ -2360,9 +2183,7 @@ class TestCrossReferenceGuard:
         )
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
-            mock.get(url__startswith=K10PLUS).mock(
-                return_value=_xml(_marc(_marc_record(isbn=GERMAN_ISBN)))
-            )
+            mock.get(url__startswith=K10PLUS).mock(return_value=_xml(_marc(_marc_record(isbn=GERMAN_ISBN))))
             mock.get(url__startswith=DNB).mock(return_value=_xml(placeholder))
             result = await lookup(GERMAN_ISBN)
 
@@ -2480,10 +2301,7 @@ class TestMerge:
                     _marc(
                         _marc_record(
                             isbn=GERMAN_ISBN,
-                            extra=(
-                                '<datafield tag="082"><subfield code="a">005.133</subfield>'
-                                "</datafield>"
-                            ),
+                            extra=('<datafield tag="082"><subfield code="a">005.133</subfield></datafield>'),
                         )
                     )
                 )
@@ -2492,9 +2310,7 @@ class TestMerge:
             result = await lookup(GERMAN_ISBN)
 
         assert result.record is not None
-        assert result.record.headings == (
-            Heading(ClassificationScheme.DDC, "005.133"),
-        )
+        assert result.record.headings == (Heading(ClassificationScheme.DDC, "005.133"),)
 
     @pytest.mark.asyncio
     async def test_the_marc_segmentation_prime_is_stripped(self):
@@ -2508,10 +2324,7 @@ class TestMerge:
                     _marc(
                         _marc_record(
                             isbn=GERMAN_ISBN,
-                            extra=(
-                                '<datafield tag="082"><subfield code="a">005.13/3</subfield>'
-                                "</datafield>"
-                            ),
+                            extra=('<datafield tag="082"><subfield code="a">005.13/3</subfield></datafield>'),
                         )
                     )
                 )
@@ -2520,9 +2333,7 @@ class TestMerge:
             result = await lookup(GERMAN_ISBN)
 
         assert result.record is not None
-        assert result.record.headings == (
-            Heading(ClassificationScheme.DDC, "005.133"),
-        )
+        assert result.record.headings == (Heading(ClassificationScheme.DDC, "005.133"),)
 
     @pytest.mark.asyncio
     async def test_a_marc_field_that_is_not_a_dewey_number_is_dropped(self):
@@ -2535,10 +2346,7 @@ class TestMerge:
                     _marc(
                         _marc_record(
                             isbn=GERMAN_ISBN,
-                            extra=(
-                                '<datafield tag="082"><subfield code="a">ST 250</subfield>'
-                                "</datafield>"
-                            ),
+                            extra=('<datafield tag="082"><subfield code="a">ST 250</subfield></datafield>'),
                         )
                     )
                 )
@@ -2554,13 +2362,9 @@ class TestMerge:
         """The DNB holds foreign books mostly as cross references, not records."""
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
-            mock.get(url__startswith=K10PLUS).mock(
-                return_value=_xml(_marc(_marc_record(isbn=ENGLISH_ISBN)))
-            )
+            mock.get(url__startswith=K10PLUS).mock(return_value=_xml(_marc(_marc_record(isbn=ENGLISH_ISBN))))
             mock.get(url__startswith=DNB).mock(
-                return_value=_xml(
-                    DNB_RECORD.replace("Praxiswissen Docker", "Etwas anderes")
-                )
+                return_value=_xml(DNB_RECORD.replace("Praxiswissen Docker", "Etwas anderes"))
             )
             result = await lookup(ENGLISH_ISBN)
 
@@ -2665,7 +2469,7 @@ class TestRanking:
         assert self.rank([study, novel], "l'etranger camus")[0] is novel
 
     def test_a_complete_row_never_outranks_a_matching_one(self):
-        """"Christmas at Hogwarts" came second for "harry potter" this way."""
+        """ "Christmas at Hogwarts" came second for "harry potter" this way."""
         matching = self.match(title="Harry Potter and the Philosopher's Stone")
         unrelated = self.match(
             title="Christmas at Hogwarts",
@@ -2710,7 +2514,9 @@ class TestRanking:
     def test_a_regional_row_a_primary_also_found_is_not_penalised(self):
         """Being confirmed by a second catalogue is not a reason to demote."""
         confirmed = self.match(
-            title="Der Schwarm", author="Frank Schätzing", source="bnf+k10plus",
+            title="Der Schwarm",
+            author="Frank Schätzing",
+            source="bnf+k10plus",
             isbn="9783596164530",
         )
         thin = self.match(title="Der Schwarm", author="Frank Schätzing", source="k10plus")
@@ -2732,9 +2538,7 @@ class TestRanking:
             page_count=444,
         )
         without = self.match(title="Clean Code", author="Robert Martin", year=2025)
-        assert self.rank([without, with_subtitle], "clean code robert martin")[0] is (
-            with_subtitle
-        )
+        assert self.rank([without, with_subtitle], "clean code robert martin")[0] is (with_subtitle)
 
     def test_a_row_matching_nothing_scores_zero(self):
         unrelated = self.match(title="Something else", author="Nobody")
@@ -2767,9 +2571,7 @@ class TestPickabilityIsNotRecordCompleteness:
     def relevance(
         self, match: Record, query: str, prefer_language: str | None = None
     ) -> tuple[int, int, int]:
-        return metadata._relevance(
-            match, metadata._search_terms(query), prefer_language
-        )
+        return metadata._relevance(match, metadata._search_terms(query), prefer_language)
 
     def test_a_row_carrying_an_isbn_outranks_an_identical_row_without_one(self):
         """A title query supplies no ISBN, so carrying one is the row's own.
@@ -2780,13 +2582,9 @@ class TestPickabilityIsNotRecordCompleteness:
         `TestASearchRowsCoverIsDerivedFromItsOwnIsbn`. What this arm holds is
         what the field is worth in the tuple, not what a live row looks like.
         """
-        scannable = self.match(
-            title="Dune", author="Frank Herbert", isbn="9780441013593"
-        )
+        scannable = self.match(title="Dune", author="Frank Herbert", isbn="9780441013593")
         bare = self.match(title="Dune", author="Frank Herbert")
-        assert self.relevance(scannable, "dune herbert")[1] > self.relevance(
-            bare, "dune herbert"
-        )[1]
+        assert self.relevance(scannable, "dune herbert")[1] > self.relevance(bare, "dune herbert")[1]
 
     def test_a_row_carrying_a_cover_outranks_an_identical_row_without_one(self):
         """The picker shows the cover, so a row without one is harder to pick.
@@ -2802,9 +2600,7 @@ class TestPickabilityIsNotRecordCompleteness:
             cover_url="https://example.com/cover.jpg",
         )
         bare = self.match(title="Dune", author="Frank Herbert")
-        assert self.relevance(illustrated, "dune herbert")[1] > self.relevance(
-            bare, "dune herbert"
-        )[1]
+        assert self.relevance(illustrated, "dune herbert")[1] > self.relevance(bare, "dune herbert")[1]
 
     def test_a_blurb_does_not_lift_a_row_above_an_identical_one(self):
         """Which rows carry one is a fact about the catalogue, not the book.
@@ -2812,13 +2608,9 @@ class TestPickabilityIsNotRecordCompleteness:
         `_open_library_search` writes no description at all and the DNB carries
         a 520 on 1 of 85 live records, so scoring it ranks by source.
         """
-        blurbed = self.match(
-            title="Dune", author="Frank Herbert", description="A desert planet."
-        )
+        blurbed = self.match(title="Dune", author="Frank Herbert", description="A desert planet.")
         bare = self.match(title="Dune", author="Frank Herbert")
-        assert self.relevance(blurbed, "dune herbert") == self.relevance(
-            bare, "dune herbert"
-        )
+        assert self.relevance(blurbed, "dune herbert") == self.relevance(bare, "dune herbert")
 
     def test_subjects_do_not_lift_a_row_above_an_identical_one(self):
         """The same source signal: an Open Library search row carries none."""
@@ -2828,15 +2620,11 @@ class TestPickabilityIsNotRecordCompleteness:
             subjects=uncontrolled(("Science fiction",)),
         )
         bare = self.match(title="Dune", author="Frank Herbert")
-        assert self.relevance(classified, "dune herbert") == self.relevance(
-            bare, "dune herbert"
-        )
+        assert self.relevance(classified, "dune herbert") == self.relevance(bare, "dune herbert")
 
     def test_a_series_name_is_worth_its_weight_once(self):
         """It is already scored in the matching term, which is the stronger one."""
-        in_series = self.match(
-            title="Dune", author="Frank Herbert", series_name="Dune Chronicles"
-        )
+        in_series = self.match(title="Dune", author="Frank Herbert", series_name="Dune Chronicles")
         bare = self.match(title="Dune", author="Frank Herbert")
         scored = self.relevance(in_series, "dune chronicles")
         unscored = self.relevance(bare, "dune chronicles")
@@ -2877,9 +2665,7 @@ class TestPickabilityIsNotRecordCompleteness:
         works.
         """
         record = Record()
-        assert [
-            name for name in metadata._PICKABLE_FIELDS if not hasattr(record, name)
-        ] == []
+        assert [name for name in metadata._PICKABLE_FIELDS if not hasattr(record, name)] == []
 
 
 #: One record per SRU serialisation, with a slot for its identifier, beside the
@@ -2931,8 +2717,7 @@ SRU_PROBE_MARC = (
     "</record>"
 )
 SRU_PROBE_MARC_IDENTIFIER = (
-    '<datafield tag="020" ind1=" " ind2=" ">'
-    '<subfield code="a">9783161484100</subfield></datafield>'
+    '<datafield tag="020" ind1=" " ind2=" "><subfield code="a">9783161484100</subfield></datafield>'
 )
 
 #: The BnF's shape. `dc:type` and `dc:format` are its printed book gate.
@@ -2988,18 +2773,12 @@ SRU_PROBE_BODIES = {
 #: carry a search capability and appear here, where an arm reading three named
 #: tables would not see a fourth at all.
 SEEDED_SEARCH_ROWS = tuple(
-    target
-    for target in targets.SEEDED.values()
-    if target.can(Capability.ANSWERS_TITLE_SEARCH)
+    target for target in targets.SEEDED.values() if target.can(Capability.ANSWERS_TITLE_SEARCH)
 )
 
 #: The seeded search rows whose answer is an element a reader here can drive.
 SEEDED_ELEMENT_SEARCH_SOURCES = tuple(
-    sorted(
-        target.source
-        for target in SEEDED_SEARCH_ROWS
-        if target.reader in SRU_PROBE_BODIES
-    )
+    sorted(target.source for target in SEEDED_SEARCH_ROWS if target.reader in SRU_PROBE_BODIES)
 )
 
 
@@ -3051,9 +2830,7 @@ class TestASearchRowsCoverIsDerivedFromItsOwnIsbn:
 
     #: The two search doors that take no element, named because each has its
     #: own arm below rather than a record body.
-    BESPOKE_SEARCH_SOURCES = frozenset(
-        {CatalogueSource.OPEN_LIBRARY, CatalogueSource.GOOGLE_BOOKS}
-    )
+    BESPOKE_SEARCH_SOURCES = frozenset({CatalogueSource.OPEN_LIBRARY, CatalogueSource.GOOGLE_BOOKS})
 
     GOOGLE_VOLUMES = targets.SEEDED[CatalogueSource.GOOGLE_BOOKS].base_url
 
@@ -3114,9 +2891,7 @@ class TestASearchRowsCoverIsDerivedFromItsOwnIsbn:
         being read as covering every door.
         """
         dispatched = (
-            set(metadata._SEARCH_READERS)
-            | set(metadata._FREE_SEARCHES)
-            | set(metadata._METERED_SEARCHES)
+            set(metadata._SEARCH_READERS) | set(metadata._FREE_SEARCHES) | set(metadata._METERED_SEARCHES)
         )
         graded = set(SRU_PROBE_BODIES) | {
             decoders.Reader.OPEN_LIBRARY,
@@ -3157,9 +2932,7 @@ class TestASearchRowsCoverIsDerivedFromItsOwnIsbn:
         """Its search index answers with its own `cover_i`, which resolves for
         editions the cover service has no ISBN mapping for, so here the pair is
         two facts and the score counts nothing twice."""
-        carried = await self._open_library_row(
-            {"title": "A Probe", "isbn": ["9783161484100"]}
-        )
+        carried = await self._open_library_row({"title": "A Probe", "isbn": ["9783161484100"]})
         covered = await self._open_library_row({"title": "A Probe", "cover_i": 12345})
 
         assert carried.isbn
@@ -3173,9 +2946,7 @@ class TestASearchRowsCoverIsDerivedFromItsOwnIsbn:
         carried = await self._google_row(
             {
                 "title": "A Probe",
-                "industryIdentifiers": [
-                    {"type": "ISBN_13", "identifier": "9783161484100"}
-                ],
+                "industryIdentifiers": [{"type": "ISBN_13", "identifier": "9783161484100"}],
             }
         )
         covered = await self._google_row(
@@ -3403,9 +3174,7 @@ class TestARecordedSearchComesBackInItsPinnedOrder:
         real_ranked = metadata._ranked
         real_search_one = metadata._search_one
 
-        def ranked(
-            matches: list[Record], terms: list[str], prefer_language: str | None
-        ) -> list[Record]:
+        def ranked(matches: list[Record], terms: list[str], prefer_language: str | None) -> list[Record]:
             seen["merged"] = list(matches)
             seen["ranked"] = real_ranked(matches, terms, prefer_language)
             return seen["ranked"]
@@ -3426,9 +3195,7 @@ class TestARecordedSearchComesBackInItsPinnedOrder:
                     f"{target.source} is recorded, and its {target.transport} door "
                     "would reach the network: respx serves httpx only"
                 )
-            return await real_search_one(
-                target, query, limit, api_key, credential=credential
-            )
+            return await real_search_one(target, query, limit, api_key, credential=credential)
 
         monkeypatch.setattr(metadata, "_ranked", ranked)
         monkeypatch.setattr(metadata, "_search_one", search_one)
@@ -3437,13 +3204,9 @@ class TestARecordedSearchComesBackInItsPinnedOrder:
                 body = path.read_text(encoding="utf-8")
                 kind = "text/xml" if path.suffix == ".xml" else "application/json"
                 mock.get(url__startswith=targets.SEEDED[source].base_url).mock(
-                    return_value=httpx.Response(
-                        200, text=body, headers={"content-type": kind}
-                    )
+                    return_value=httpx.Response(200, text=body, headers={"content-type": kind})
                 )
-            returned = await search(
-                self.QUERY, limit=self.LIMIT, prefer_language=self.LANGUAGE
-            )
+            returned = await search(self.QUERY, limit=self.LIMIT, prefer_language=self.LANGUAGE)
         return RecordedSearch(returned, seen["ranked"], seen["merged"], tuple(asked))
 
     def test_every_search_source_is_recorded_or_says_why_not(self):
@@ -3467,9 +3230,7 @@ class TestARecordedSearchComesBackInItsPinnedOrder:
         )
         assert sorted(set(self.UNRECORDED) - keyless_cannot_ask) == []
 
-    async def test_only_a_recorded_source_is_called_through(
-        self, monkeypatch: pytest.MonkeyPatch
-    ):
+    async def test_only_a_recorded_source_is_called_through(self, monkeypatch: pytest.MonkeyPatch):
         """The fan out asks the whole roster once each, and the sources whose
         door really ran are exactly the recorded ones."""
         searched = await self._search(monkeypatch)
@@ -3483,9 +3244,9 @@ class TestARecordedSearchComesBackInItsPinnedOrder:
         unless `REFUSED_WHOLE` names it, and then it must answer nothing."""
         answering = {part for entry in self.ORDER for part in entry[1].split("+")}
 
-        assert {
-            source for source in self._recordings() if source.value not in answering
-        } == set(self.REFUSED_WHOLE)
+        assert {source for source in self._recordings() if source.value not in answering} == set(
+            self.REFUSED_WHOLE
+        )
 
     async def test_a_recording_refused_whole_answers_once_its_code_is_lifted(
         self, monkeypatch: pytest.MonkeyPatch
@@ -3530,16 +3291,12 @@ class TestARecordedSearchComesBackInItsPinnedOrder:
         """
         merged = (await self._search(monkeypatch)).merged
         reversed_rows = self._ranks(
-            metadata._ranked(
-                merged[::-1], metadata._search_terms(self.QUERY), self.LANGUAGE
-            )
+            metadata._ranked(merged[::-1], metadata._search_terms(self.QUERY), self.LANGUAGE)
         )
 
         assert reversed_rows == self.ORDER, self._as_literal(reversed_rows)
 
-    async def test_a_search_returns_the_head_of_the_order(
-        self, monkeypatch: pytest.MonkeyPatch
-    ):
+    async def test_a_search_returns_the_head_of_the_order(self, monkeypatch: pytest.MonkeyPatch):
         """The cut falls between two ranks, so which rows are returned is the
         ranking's decision and not the catalogues' order."""
         returned = (await self._search(monkeypatch)).returned
@@ -3583,8 +3340,7 @@ class TestAHostileSourceCostsItsOwnRows:
         reason. This one did, on the first attempt.
         """
         isbn_field = (
-            f'<datafield tag="020" ind1=" " ind2=" ">'
-            f'<subfield code="a">{isbn}</subfield></datafield>'
+            f'<datafield tag="020" ind1=" " ind2=" "><subfield code="a">{isbn}</subfield></datafield>'
             if isbn
             else ""
         )
@@ -3593,7 +3349,7 @@ class TestAHostileSourceCostsItsOwnRows:
             "<leader>01533nam a2200505 c 4500</leader>"
             f"{isbn_field}"
             '<datafield tag="245" ind1="1" ind2="0">'
-            "<subfield code=\"a\">Poisoned</subfield></datafield>"
+            '<subfield code="a">Poisoned</subfield></datafield>'
             '<datafield tag="300" ind1=" " ind2=" ">'
             f'<subfield code="a">{self.POISONED_EXTENT}</subfield></datafield>'
             "</record>"
@@ -3616,15 +3372,9 @@ class TestAHostileSourceCostsItsOwnRows:
             mock.get(url__startswith="https://openlibrary.org/search.json").mock(
                 return_value=httpx.Response(200, json={"docs": []})
             )
-            mock.get(url__startswith="https://catalogue.bnf.fr").mock(
-                return_value=httpx.Response(500)
-            )
-            mock.get(url__startswith="http://lx2.loc.gov").mock(
-                return_value=httpx.Response(500)
-            )
-            oenb = mock.get(url__startswith=OENB).mock(
-                return_value=_xml(self._poisoned_marc())
-            )
+            mock.get(url__startswith="https://catalogue.bnf.fr").mock(return_value=httpx.Response(500))
+            mock.get(url__startswith="http://lx2.loc.gov").mock(return_value=httpx.Response(500))
+            oenb = mock.get(url__startswith=OENB).mock(return_value=_xml(self._poisoned_marc()))
             rows = await search("poisoned")
 
         assert oenb.called
@@ -3642,15 +3392,9 @@ class TestAHostileSourceCostsItsOwnRows:
             silence_other_lookup_catalogues(mock, DNB, K10PLUS, OENB)
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
             mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
-            mock.get(url__startswith=OENB).mock(
-                return_value=_xml(self._poisoned_marc("9783700316206"))
-            )
-            mock.get(url__startswith=OPEN_LIBRARY).mock(
-                return_value=httpx.Response(404)
-            )
-            mock.get(url__startswith=GOOGLE_BOOKS).mock(
-                return_value=httpx.Response(200, json={"items": []})
-            )
+            mock.get(url__startswith=OENB).mock(return_value=_xml(self._poisoned_marc("9783700316206")))
+            mock.get(url__startswith=OPEN_LIBRARY).mock(return_value=httpx.Response(404))
+            mock.get(url__startswith=GOOGLE_BOOKS).mock(return_value=httpx.Response(200, json={"items": []}))
             result = await lookup("9783700316206")
 
         assert result.outcome is Outcome.FOUND
@@ -3676,13 +3420,9 @@ class TestAHostileSourceCostsItsOwnRows:
             mock.get(url__startswith="https://openlibrary.org/search.json").mock(
                 return_value=httpx.Response(200, json={"docs": []})
             )
-            mock.get(url__startswith="https://catalogue.bnf.fr").mock(
-                return_value=httpx.Response(500)
-            )
+            mock.get(url__startswith="https://catalogue.bnf.fr").mock(return_value=httpx.Response(500))
             loc = mock.get(url__startswith="http://lx2.loc.gov").mock(
-                return_value=httpx.Response(
-                    302, headers={"location": "http://xn--a.gov/x"}
-                )
+                return_value=httpx.Response(302, headers={"location": "http://xn--a.gov/x"})
             )
             rows = await search("anything at all")
 
@@ -3823,9 +3563,7 @@ class TestSearchDeadline:
 
         # Order matters downstream: the merge reads source precedence from the
         # order rows arrive in, and `asyncio.wait` returns an unordered set.
-        results = await metadata._within_deadline(
-            [first(), second()], metadata.SEARCH_DEADLINE_SECONDS
-        )
+        results = await metadata._within_deadline([first(), second()], metadata.SEARCH_DEADLINE_SECONDS)
 
         assert results == [[Record(title="One")], [Record(title="Two")]]
 
@@ -3851,15 +3589,11 @@ class TestALibraryOfCongressSearchPageIsReadWhole:
             "LoC search_cap no longer matches the recorded page: record a page "
             "of the new size and count its names against xml_parse.MAX_NAMES"
         )
-        unbounded = metadata._SEARCH_READERS[target.reader](
-            ElementTree.fromstring(page), target.decoding
-        )
+        unbounded = metadata._SEARCH_READERS[target.reader](ElementTree.fromstring(page), target.decoding)
         assert unbounded
         with respx.mock(assert_all_called=False) as mock:
             mock.get(url__startswith="http://lx2.loc.gov").mock(return_value=_xml(page))
-            rows = await metadata._search_one(
-                target, "war and peace", limit, "", credential=None
-            )
+            rows = await metadata._search_one(target, "war and peace", limit, "", credential=None)
 
         assert [row.title for row in rows] == [row.title for row in unbounded]
 
@@ -3904,11 +3638,7 @@ class TestLibraryOfCongressClassifications:
         )
         parsed = _loc_record(ElementTree.fromstring(mods), source="loc")
         assert parsed is not None
-        numbers = [
-            entry.number
-            for entry in parsed.headings
-            if entry.scheme is ClassificationScheme.DDC
-        ]
+        numbers = [entry.number for entry in parsed.headings if entry.scheme is ClassificationScheme.DDC]
 
         assert numbers == ["005.133"]
 
@@ -3980,9 +3710,7 @@ class TestLibraryOfCongressSubjectHeadings:
     )
 
     def _classifications(self, mods: str | None = None) -> tuple[Heading, ...]:
-        parsed = _loc_record(
-            ElementTree.fromstring(mods or self.MODS), source="loc"
-        )
+        parsed = _loc_record(ElementTree.fromstring(mods or self.MODS), source="loc")
         assert parsed is not None
         return parsed.headings
 
@@ -4005,11 +3733,7 @@ class TestLibraryOfCongressSubjectHeadings:
     def test_the_heading_is_the_number_and_no_caption_is_stored(self):
         """The record supplies no identifier, so the string is the access
         point. Writing it into `label` as well would store one fact twice."""
-        rows = [
-            entry
-            for entry in self._classifications()
-            if entry.scheme is ClassificationScheme.LCSH
-        ]
+        rows = [entry for entry in self._classifications() if entry.scheme is ClassificationScheme.LCSH]
 
         assert rows
         assert all(entry.label is None for entry in rows)
@@ -4032,9 +3756,7 @@ class TestLibraryOfCongressSubjectHeadings:
         """289 of 2,280 live `<subject>` elements name no authority. A heading
         whose vocabulary is unstated cannot be matched against another
         catalogue, which is the only thing this store is for."""
-        anonymous = self.MODS.replace(
-            "</mods>", "<subject><topic>Uncontrolled</topic></subject></mods>"
-        )
+        anonymous = self.MODS.replace("</mods>", "<subject><topic>Uncontrolled</topic></subject></mods>")
 
         assert self._lcsh(anonymous) == self._lcsh()
 
@@ -4066,9 +3788,7 @@ class TestLibraryOfCongressSubjectHeadings:
         assert "S\u00fcssheim, Karl, 1878-1947 -- Sources" in self._lcsh(about_a_person)
 
     def test_a_subject_element_with_no_text_yields_no_row(self):
-        empty = self.MODS.replace(
-            "</mods>", '<subject authority="lcsh"><topic>  </topic></subject></mods>'
-        )
+        empty = self.MODS.replace("</mods>", '<subject authority="lcsh"><topic>  </topic></subject></mods>')
 
         assert self._lcsh(empty) == self._lcsh()
 
@@ -4099,8 +3819,7 @@ class TestLibraryOfCongressSubjectHeadings:
         crowded = self.MODS.replace(
             "</mods>",
             "".join(
-                f'<subject authority="lcsh"><topic>Thema {index}</topic></subject>'
-                for index in range(14)
+                f'<subject authority="lcsh"><topic>Thema {index}</topic></subject>' for index in range(14)
             )
             + "</mods>",
         )
@@ -4145,6 +3864,7 @@ OL_WORK = {
     "authors": [{"author": {"key": "/authors/OL23919A"}}],
 }
 
+
 class TestWhatEachReaderCanSupply:
     """#134 is bounded by the formats, and the bound is worth pinning.
 
@@ -4181,8 +3901,7 @@ class TestWhatEachReaderCanSupply:
     def test_a_mods_subject_naming_no_authority_leaves_the_vocabulary_null(self):
         """33 of 432 live elements, and null is the honest answer."""
         mods = ElementTree.fromstring(
-            '<mods xmlns="http://www.loc.gov/mods/v3">'
-            "<subject><topic>Uncontrolled</topic></subject></mods>"
+            '<mods xmlns="http://www.loc.gov/mods/v3"><subject><topic>Uncontrolled</topic></subject></mods>'
         )
 
         assert _loc_subjects(mods) == (Subject("Uncontrolled", None),)
@@ -4253,28 +3972,30 @@ class TestWhatEachReaderCanSupply:
         a reader that is correct only while a catalogue's habits hold is the
         thing #134 exists to stop."""
         record = metadata._k10plus_record(
-            Fields(_marc_element(
-                '<datafield tag="650" ind1=" " ind2="7">'
-                "<subfield code=\"a\">Psychology</subfield>"
-                '<subfield code="0">(OCoLC)fst01081447</subfield>'
-                '<subfield code="2">DLC</subfield></datafield>'
-            ))
+            Fields(
+                _marc_element(
+                    '<datafield tag="650" ind1=" " ind2="7">'
+                    '<subfield code="a">Psychology</subfield>'
+                    '<subfield code="0">(OCoLC)fst01081447</subfield>'
+                    '<subfield code="2">DLC</subfield></datafield>'
+                )
+            )
         )
 
-        assert record.subjects == (
-            Subject("Psychology", "dlc", "(OCoLC)fst01081447"),
-        )
+        assert record.subjects == (Subject("Psychology", "dlc", "(OCoLC)fst01081447"),)
 
     def test_a_k10plus_subdivision_shares_the_fields_one_vocabulary(self):
         """`$x` subdivides the `$a` above it rather than being a heading of its
         own, so the joined string takes the field's one `$2`."""
         record = metadata._k10plus_record(
-            Fields(_marc_element(
-                '<datafield tag="650" ind1=" " ind2="7">'
-                "<subfield code=\"a\">Frankreich</subfield>"
-                "<subfield code=\"x\">Geschichte</subfield>"
-                '<subfield code="2">gnd</subfield></datafield>'
-            ))
+            Fields(
+                _marc_element(
+                    '<datafield tag="650" ind1=" " ind2="7">'
+                    '<subfield code="a">Frankreich</subfield>'
+                    '<subfield code="x">Geschichte</subfield>'
+                    '<subfield code="2">gnd</subfield></datafield>'
+                )
+            )
         )
 
         assert record.subjects == (Subject("Frankreich Geschichte", "gnd", None),)
@@ -4293,15 +4014,9 @@ def _open_library_routes(mock: respx.Router, **parts: httpx.Response) -> None:
     One catch-all would answer the edition, the work and the author with the
     same body, which is exactly the confusion these tests exist to rule out.
     """
-    mock.get(url__startswith=OL_ISBN).mock(
-        return_value=parts.get("edition", httpx.Response(404))
-    )
-    mock.get(url__startswith=OL_AUTHORS).mock(
-        return_value=parts.get("author", httpx.Response(404))
-    )
-    mock.get(url__startswith=OL_WORKS).mock(
-        return_value=parts.get("work", httpx.Response(404))
-    )
+    mock.get(url__startswith=OL_ISBN).mock(return_value=parts.get("edition", httpx.Response(404)))
+    mock.get(url__startswith=OL_AUTHORS).mock(return_value=parts.get("author", httpx.Response(404)))
+    mock.get(url__startswith=OL_WORKS).mock(return_value=parts.get("work", httpx.Response(404)))
 
 
 class TestMergingTwoSearchRows:
@@ -4318,9 +4033,7 @@ class TestMergingTwoSearchRows:
         merging fills gaps rather than overwriting.
         """
         leading = Record(source="bnf", title="The Hobbit", author="Tolkien", year=1937)
-        following = Record(
-            source="loc", title="Hobbit", author="Tolkien", year=1937, publisher="Allen"
-        )
+        following = Record(source="loc", title="Hobbit", author="Tolkien", year=1937, publisher="Allen")
 
         merged = metadata._merge_matches([leading, following])
 
@@ -4356,9 +4069,7 @@ class TestMergingTwoSearchRows:
         merged = metadata._merge_matches([leading, following])
 
         assert len(merged) == 1
-        assert merged[0].headings == (
-            Heading(ClassificationScheme.LCSH, "France -- History"),
-        )
+        assert merged[0].headings == (Heading(ClassificationScheme.LCSH, "France -- History"),)
 
     def test_a_zero_is_a_value_and_not_an_absence(self):
         """A scalar is tested with `is None`, pinned.
@@ -4453,9 +4164,7 @@ class TestTheOpenLibraryLookup:
         with respx.mock(assert_all_called=False) as mock:
             _open_library_routes(
                 mock,
-                edition=httpx.Response(
-                    200, json=_ol_edition(subjects=["Set theory"])
-                ),
+                edition=httpx.Response(200, json=_ol_edition(subjects=["Set theory"])),
                 work=httpx.Response(200, json=OL_WORK),
                 author=httpx.Response(200, json=OL_AUTHOR),
             )
@@ -4512,9 +4221,7 @@ class TestTheOpenLibraryLookup:
                 mock,
                 edition=httpx.Response(
                     200,
-                    json=_ol_edition(
-                        dewey_decimal_class=["[Fic]"], lc_classifications=None
-                    ),
+                    json=_ol_edition(dewey_decimal_class=["[Fic]"], lc_classifications=None),
                 ),
                 work=httpx.Response(200, json=OL_WORK),
                 author=httpx.Response(200, json=OL_AUTHOR),
@@ -4618,15 +4325,9 @@ class TestTheOpenLibraryLookup:
         the code always handled, so it passed while this did not.
         """
         with respx.mock(assert_all_called=False) as mock:
-            mock.get(url__startswith=OL_ISBN).mock(
-                return_value=httpx.Response(200, json=_ol_edition())
-            )
-            mock.get(url__startswith=OL_AUTHORS).mock(
-                return_value=httpx.Response(200, json=OL_AUTHOR)
-            )
-            mock.get(url__startswith=OL_WORKS).mock(
-                side_effect=httpx.ReadTimeout("too slow")
-            )
+            mock.get(url__startswith=OL_ISBN).mock(return_value=httpx.Response(200, json=_ol_edition()))
+            mock.get(url__startswith=OL_AUTHORS).mock(return_value=httpx.Response(200, json=OL_AUTHOR))
+            mock.get(url__startswith=OL_WORKS).mock(side_effect=httpx.ReadTimeout("too slow"))
             result = await self._lookup(mock)
 
         assert result.found
@@ -4637,15 +4338,9 @@ class TestTheOpenLibraryLookup:
     @pytest.mark.asyncio
     async def test_an_author_timing_out_costs_the_author_only(self):
         with respx.mock(assert_all_called=False) as mock:
-            mock.get(url__startswith=OL_ISBN).mock(
-                return_value=httpx.Response(200, json=_ol_edition())
-            )
-            mock.get(url__startswith=OL_WORKS).mock(
-                return_value=httpx.Response(200, json=OL_WORK)
-            )
-            mock.get(url__startswith=OL_AUTHORS).mock(
-                side_effect=httpx.ReadTimeout("too slow")
-            )
+            mock.get(url__startswith=OL_ISBN).mock(return_value=httpx.Response(200, json=_ol_edition()))
+            mock.get(url__startswith=OL_WORKS).mock(return_value=httpx.Response(200, json=OL_WORK))
+            mock.get(url__startswith=OL_AUTHORS).mock(side_effect=httpx.ReadTimeout("too slow"))
             result = await self._lookup(mock)
 
         assert result.found
@@ -4695,9 +4390,7 @@ class TestTheOpenLibraryLookup:
         with respx.mock(assert_all_called=False) as mock:
             _open_library_routes(
                 mock,
-                edition=httpx.Response(
-                    200, json=_ol_edition(number_of_pages=10**19)
-                ),
+                edition=httpx.Response(200, json=_ol_edition(number_of_pages=10**19)),
                 work=httpx.Response(200, json=OL_WORK),
                 author=httpx.Response(200, json=OL_AUTHOR),
             )
@@ -4736,16 +4429,12 @@ class TestAMalformedOpenLibraryFieldCostsThatFieldAlone:
 
     @pytest.mark.asyncio
     async def test_a_dewey_entry_that_is_not_text_is_skipped(self):
-        record = await self._record(
-            {"dewey_decimal_class": [5, "005.1"], "lc_classifications": None}
-        )
+        record = await self._record({"dewey_decimal_class": [5, "005.1"], "lc_classifications": None})
         assert record.headings == (Heading(ClassificationScheme.DDC, "005.1"),)
 
     @pytest.mark.asyncio
     async def test_a_call_number_that_is_not_text_is_not_stored(self):
-        record = await self._record(
-            {"dewey_decimal_class": None, "lc_classifications": [{"a": 1}]}
-        )
+        record = await self._record({"dewey_decimal_class": None, "lc_classifications": [{"a": 1}]})
         assert record.headings == ()
 
     @pytest.mark.asyncio
@@ -4795,15 +4484,11 @@ class TestTheEditionCluster:
 
     @staticmethod
     def _routes(mock: respx.Router, listing: object = OL_EDITIONS) -> None:
-        mock.get(url__startswith=OL_ISBN).mock(
-            return_value=httpx.Response(200, json=_ol_edition())
-        )
+        mock.get(url__startswith=OL_ISBN).mock(return_value=httpx.Response(200, json=_ol_edition()))
         mock.get(url__regex=r"https://openlibrary\.org/works/[^/]+/editions\.json.*").mock(
             return_value=httpx.Response(200, json=listing)
         )
-        mock.get(url__startswith=OL_AUTHORS).mock(
-            return_value=httpx.Response(200, json=OL_AUTHOR)
-        )
+        mock.get(url__startswith=OL_AUTHORS).mock(return_value=httpx.Response(200, json=OL_AUTHOR))
 
     @pytest.mark.asyncio
     async def test_the_cluster_answers_with_the_other_printings(self):
@@ -4907,9 +4592,7 @@ class TestTheEditionCluster:
             self._routes(mock)
             rows = await editions(ENGLISH_ISBN, 5)
 
-        assert rows[0].headings == (
-            Heading(ClassificationScheme.DDC, "005.1"),
-        )
+        assert rows[0].headings == (Heading(ClassificationScheme.DDC, "005.1"),)
 
     @pytest.mark.asyncio
     async def test_an_isbn_that_is_not_one_asks_nothing(self):
@@ -4937,9 +4620,7 @@ class TestTheEditionCluster:
     async def test_an_edition_body_that_is_not_an_object_costs_no_rows(self):
         with respx.mock(assert_all_called=False) as mock:
             self._routes(mock)
-            mock.get(url__startswith=OL_ISBN).mock(
-                return_value=httpx.Response(200, json="just a string")
-            )
+            mock.get(url__startswith=OL_ISBN).mock(return_value=httpx.Response(200, json="just a string"))
             rows = await editions(ENGLISH_ISBN, 5)
 
         assert rows == []
@@ -5021,21 +4702,15 @@ class TestTheCandidates:
         mock.get(url__startswith="https://openlibrary.org/search.json").mock(
             return_value=httpx.Response(200, json={"docs": []})
         )
-        mock.get(url__startswith="https://catalogue.bnf.fr").mock(
-            return_value=httpx.Response(500)
-        )
-        mock.get(url__startswith="http://lx2.loc.gov").mock(
-            return_value=httpx.Response(500)
-        )
+        mock.get(url__startswith="https://catalogue.bnf.fr").mock(return_value=httpx.Response(500))
+        mock.get(url__startswith="http://lx2.loc.gov").mock(return_value=httpx.Response(500))
         silence_other_lookup_catalogues(mock, K10PLUS, DNB)
 
     @pytest.mark.asyncio
     async def test_the_cluster_leads(self):
         with respx.mock(assert_all_called=False) as mock:
             self._routes(mock)
-            rows = await candidates(
-                "Introduction to Algorithms", isbn=ENGLISH_ISBN, limit=5
-            )
+            rows = await candidates("Introduction to Algorithms", isbn=ENGLISH_ISBN, limit=5)
 
         assert rows[0].isbn == "9780262270830"
 
@@ -5046,18 +4721,15 @@ class TestTheCandidates:
         crowded = {
             "size": 9,
             "entries": [
-                {"title": f"Printing {index}", "publish_date": str(2000 + index)}
-                for index in range(9)
+                {"title": f"Printing {index}", "publish_date": str(2000 + index)} for index in range(9)
             ],
         }
         with respx.mock(assert_all_called=False) as mock:
             self._routes(mock)
-            mock.get(
-                url__regex=r"https://openlibrary\.org/works/[^/]+/editions\.json.*"
-            ).mock(return_value=httpx.Response(200, json=crowded))
-            rows = await candidates(
-                "Introduction to Algorithms", isbn=ENGLISH_ISBN, limit=5
+            mock.get(url__regex=r"https://openlibrary\.org/works/[^/]+/editions\.json.*").mock(
+                return_value=httpx.Response(200, json=crowded)
             )
+            rows = await candidates("Introduction to Algorithms", isbn=ENGLISH_ISBN, limit=5)
 
         assert len(rows) == 4
 
@@ -5083,9 +4755,7 @@ class TestTheCandidates:
                     },
                 )
             )
-            rows = await candidates(
-                "Introduction to Algorithms", isbn=ENGLISH_ISBN, limit=5
-            )
+            rows = await candidates("Introduction to Algorithms", isbn=ENGLISH_ISBN, limit=5)
 
         assert rows[0].title == rows[-1].title
         assert "9780262046305" in [row.isbn for row in rows]
@@ -5108,9 +4778,7 @@ class TestTheCandidates:
                     },
                 )
             )
-            rows = await candidates(
-                "Introduction to Algorithms", isbn=ENGLISH_ISBN, limit=5
-            )
+            rows = await candidates("Introduction to Algorithms", isbn=ENGLISH_ISBN, limit=5)
 
         assert [row.isbn for row in rows].count("9780262270830") == 1
 
@@ -5122,15 +4790,11 @@ class TestTheCandidates:
                 return_value=httpx.Response(
                     200,
                     json={
-                        "docs": [
-                            {"title": "Introduction to Algorithms", "author_name": ["Thomas H. Cormen"]}
-                        ]
+                        "docs": [{"title": "Introduction to Algorithms", "author_name": ["Thomas H. Cormen"]}]
                     },
                 )
             )
-            rows = await candidates(
-                "Introduction to Algorithms", isbn=ENGLISH_ISBN, limit=5
-            )
+            rows = await candidates("Introduction to Algorithms", isbn=ENGLISH_ISBN, limit=5)
 
         # One from the cluster, its 1990 printing, and one from the search.
         assert [row.isbn for row in rows].count(None) == 2
@@ -5142,23 +4806,15 @@ class TestTheCandidates:
             mock.get(url__startswith="https://openlibrary.org/search.json").mock(
                 return_value=httpx.Response(
                     200,
-                    json={
-                        "docs": [
-                            {"title": "Introduction to Algorithms", "isbn": ["9780262046305"]}
-                        ]
-                    },
+                    json={"docs": [{"title": "Introduction to Algorithms", "isbn": ["9780262046305"]}]},
                 )
             )
-            rows = await candidates(
-                "Introduction to Algorithms", isbn=None, limit=5
-            )
+            rows = await candidates("Introduction to Algorithms", isbn=None, limit=5)
 
         assert [row.isbn for row in rows] == ["9780262046305"]
 
     @pytest.mark.asyncio
-    async def test_a_slow_cluster_costs_its_rows_and_not_the_response(
-        self, monkeypatch
-    ):
+    async def test_a_slow_cluster_costs_its_rows_and_not_the_response(self, monkeypatch):
         """One live editions listing answered in 10.1s against a 0.64s to 2.19s
         norm, which is what the deadline is for."""
         with respx.mock(assert_all_called=False) as mock:
@@ -5166,11 +4822,7 @@ class TestTheCandidates:
             mock.get(url__startswith="https://openlibrary.org/search.json").mock(
                 return_value=httpx.Response(
                     200,
-                    json={
-                        "docs": [
-                            {"title": "Introduction to Algorithms", "isbn": ["9780262046305"]}
-                        ]
-                    },
+                    json={"docs": [{"title": "Introduction to Algorithms", "isbn": ["9780262046305"]}]},
                 )
             )
 
@@ -5186,11 +4838,11 @@ class TestTheCandidates:
 
             monkeypatch.setattr(metadata, "editions", _forever)
             monkeypatch.setattr(metadata, "SEARCH_DEADLINE_SECONDS", 0.05)
-            rows = await candidates(
-                "Introduction to Algorithms", isbn=ENGLISH_ISBN, limit=5
-            )
+            rows = await candidates("Introduction to Algorithms", isbn=ENGLISH_ISBN, limit=5)
 
         assert [row.isbn for row in rows] == ["9780262046305"]
+
+
 class TestTheAustrianNationalLibrary:
     """The third MARCXML source and the fifth SRU one, and what it is here for.
 
@@ -5220,9 +4872,7 @@ class TestTheAustrianNationalLibrary:
             silence_covers(mock)
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_RECORD))
             mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
-            oenb = mock.get(url__startswith=OENB).mock(
-                return_value=_xml(OENB_RECORD)
-            )
+            oenb = mock.get(url__startswith=OENB).mock(return_value=_xml(OENB_RECORD))
             result = await lookup(GERMAN_ISBN)
 
         assert result.source == "dnb"
@@ -5237,9 +4887,7 @@ class TestTheAustrianNationalLibrary:
             silence_other_lookup_catalogues(mock, DNB, K10PLUS, OENB)
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
             mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
-            mock.get(url__startswith=OENB).mock(
-                return_value=_xml(OENB_AUSTRIAN_ONLY)
-            )
+            mock.get(url__startswith=OENB).mock(return_value=_xml(OENB_AUSTRIAN_ONLY))
             result = await lookup("9783700316206")
 
         assert result.outcome is Outcome.FOUND
@@ -5271,9 +4919,7 @@ class TestTheAustrianNationalLibrary:
             silence_covers(mock)
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
             mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
-            oenb = mock.get(url__startswith=OENB).mock(
-                return_value=_xml(OENB_AUSTRIAN_ONLY)
-            )
+            oenb = mock.get(url__startswith=OENB).mock(return_value=_xml(OENB_AUSTRIAN_ONLY))
             mock.get(url__startswith=OPEN_LIBRARY).mock(
                 return_value=httpx.Response(200, json=OPEN_LIBRARY_RECORD)
             )
@@ -5297,15 +4943,9 @@ class TestTheAustrianNationalLibrary:
             silence_other_lookup_catalogues(mock, DNB, K10PLUS, OENB)
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
             mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
-            mock.get(url__startswith=OENB).mock(
-                return_value=_xml(OENB_WRONG_BOOK)
-            )
-            mock.get(url__startswith=OPEN_LIBRARY).mock(
-                return_value=httpx.Response(404)
-            )
-            mock.get(url__startswith=GOOGLE_BOOKS).mock(
-                return_value=httpx.Response(200, json={"items": []})
-            )
+            mock.get(url__startswith=OENB).mock(return_value=_xml(OENB_WRONG_BOOK))
+            mock.get(url__startswith=OPEN_LIBRARY).mock(return_value=httpx.Response(404))
+            mock.get(url__startswith=GOOGLE_BOOKS).mock(return_value=httpx.Response(200, json={"items": []}))
             result = await lookup("9783700316206")
 
         assert result.outcome is not Outcome.FOUND
@@ -5359,9 +4999,7 @@ class TestTheAustrianNationalLibrary:
 
         assert result.record is not None
         assert "Roman" in result.record.subject_labels
-        assert not [
-            heading for heading in result.record.headings if heading.number == "Roman"
-        ]
+        assert not [heading for heading in result.record.headings if heading.number == "Roman"]
 
     @pytest.mark.asyncio
     async def test_no_author_identifier_is_taken_from_this_catalogue_yet(self):
@@ -5420,9 +5058,7 @@ class TestTheAustrianNationalLibrary:
             silence_other_lookup_catalogues(mock, DNB, K10PLUS, OENB)
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
             mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
-            route = mock.get(url__startswith=OENB).mock(
-                return_value=_xml(OENB_AUSTRIAN_ONLY)
-            )
+            route = mock.get(url__startswith=OENB).mock(return_value=_xml(OENB_AUSTRIAN_ONLY))
             await lookup("9783700316206")
 
         params = route.calls.last.request.url.params
@@ -5438,12 +5074,8 @@ class TestTheAustrianNationalLibrary:
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
             mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
             mock.get(url__startswith=OENB).mock(return_value=httpx.Response(429))
-            mock.get(url__startswith=OPEN_LIBRARY).mock(
-                return_value=httpx.Response(404)
-            )
-            mock.get(url__startswith=GOOGLE_BOOKS).mock(
-                return_value=httpx.Response(200, json={"items": []})
-            )
+            mock.get(url__startswith=OPEN_LIBRARY).mock(return_value=httpx.Response(404))
+            mock.get(url__startswith=GOOGLE_BOOKS).mock(return_value=httpx.Response(200, json={"items": []}))
             result = await lookup("9783700316206")
 
         assert ("oenb", Outcome.RATE_LIMITED) in result.attempts
@@ -5471,15 +5103,9 @@ class TestTheAustrianNationalLibrary:
             silence_other_lookup_catalogues(mock, DNB, K10PLUS, OENB)
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
             mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
-            mock.get(url__startswith=OENB).mock(
-                return_value=_xml(OENB_DIAGNOSTIC)
-            )
-            mock.get(url__startswith=OPEN_LIBRARY).mock(
-                return_value=httpx.Response(404)
-            )
-            mock.get(url__startswith=GOOGLE_BOOKS).mock(
-                return_value=httpx.Response(200, json={"items": []})
-            )
+            mock.get(url__startswith=OENB).mock(return_value=_xml(OENB_DIAGNOSTIC))
+            mock.get(url__startswith=OPEN_LIBRARY).mock(return_value=httpx.Response(404))
+            mock.get(url__startswith=GOOGLE_BOOKS).mock(return_value=httpx.Response(200, json={"items": []}))
             result = await lookup("9783700316206")
 
         assert (CatalogueSource.OENB, Outcome.UNAVAILABLE) in result.attempts
@@ -5500,15 +5126,9 @@ class TestTheAustrianNationalLibrary:
             silence_other_lookup_catalogues(mock, DNB, K10PLUS, OENB)
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
             mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
-            mock.get(url__startswith=OENB).mock(
-                return_value=_xml("<x>" + "y" * 4096 + "</x>")
-            )
-            mock.get(url__startswith=OPEN_LIBRARY).mock(
-                return_value=httpx.Response(404)
-            )
-            mock.get(url__startswith=GOOGLE_BOOKS).mock(
-                return_value=httpx.Response(200, json={"items": []})
-            )
+            mock.get(url__startswith=OENB).mock(return_value=_xml("<x>" + "y" * 4096 + "</x>"))
+            mock.get(url__startswith=OPEN_LIBRARY).mock(return_value=httpx.Response(404))
+            mock.get(url__startswith=GOOGLE_BOOKS).mock(return_value=httpx.Response(200, json={"items": []}))
             with pytest.MonkeyPatch.context() as patch:
                 patch.setattr(fetch, "MAX_RESPONSE_BYTES", 1024)
                 result = await lookup("9783700316206")
@@ -5531,15 +5151,9 @@ class TestTheAustrianNationalLibrarySearch:
         silence_other_lookup_catalogues(mock, DNB, K10PLUS, OENB)
         mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
         mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
-        mock.get(url__startswith=OPEN_LIBRARY).mock(
-            return_value=httpx.Response(200, json={"docs": []})
-        )
-        mock.get(url__startswith="https://catalogue.bnf.fr").mock(
-            return_value=httpx.Response(500)
-        )
-        mock.get(url__startswith="http://lx2.loc.gov").mock(
-            return_value=httpx.Response(500)
-        )
+        mock.get(url__startswith=OPEN_LIBRARY).mock(return_value=httpx.Response(200, json={"docs": []}))
+        mock.get(url__startswith="https://catalogue.bnf.fr").mock(return_value=httpx.Response(500))
+        mock.get(url__startswith="http://lx2.loc.gov").mock(return_value=httpx.Response(500))
 
     @pytest.mark.asyncio
     async def test_a_journal_article_is_not_offered_as_a_book(self):
@@ -5582,9 +5196,7 @@ class TestTheAustrianNationalLibrarySearch:
         """
         with respx.mock(assert_all_called=False) as mock:
             self._quiet(mock)
-            route = mock.get(url__startswith=OENB).mock(
-                return_value=_xml(OENB_EMPTY)
-            )
+            route = mock.get(url__startswith=OENB).mock(return_value=_xml(OENB_EMPTY))
             await search("angehaltene leben")
 
         query = route.calls.last.request.url.params["query"]
@@ -5626,9 +5238,7 @@ class TestTheAustrianNationalLibrarySearch:
         """
         with respx.mock(assert_all_called=False) as mock:
             self._quiet(mock)
-            mock.get(url__startswith=OENB).mock(
-                return_value=_xml(OENB_SEARCH_WITH_ONLINE)
-            )
+            mock.get(url__startswith=OENB).mock(return_value=_xml(OENB_SEARCH_WITH_ONLINE))
             rows = await search("nur online")
 
         assert [row.title for row in rows] == ["Das angehaltene Leben"]
@@ -5661,19 +5271,11 @@ class TestTheAustrianNationalLibrarySearch:
             silence_covers(mock)
             silence_other_lookup_catalogues(mock, OENB, K10PLUS, DNB)
             mock.get(url__startswith=OENB).mock(return_value=httpx.Response(500))
-            mock.get(url__startswith=K10PLUS).mock(
-                return_value=_xml(K10PLUS_RECORD)
-            )
+            mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_RECORD))
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
-            mock.get(url__startswith=OPEN_LIBRARY).mock(
-                return_value=httpx.Response(200, json={"docs": []})
-            )
-            mock.get(url__startswith="https://catalogue.bnf.fr").mock(
-                return_value=httpx.Response(500)
-            )
-            mock.get(url__startswith="http://lx2.loc.gov").mock(
-                return_value=httpx.Response(500)
-            )
+            mock.get(url__startswith=OPEN_LIBRARY).mock(return_value=httpx.Response(200, json={"docs": []}))
+            mock.get(url__startswith="https://catalogue.bnf.fr").mock(return_value=httpx.Response(500))
+            mock.get(url__startswith="http://lx2.loc.gov").mock(return_value=httpx.Response(500))
             rows = await search("great gatsby")
 
         assert [row.title for row in rows] == ["The Great Gatsby"]
@@ -5909,19 +5511,11 @@ class TestTheAustrianNationalLibrarySearch:
             silence_covers(mock)
             silence_other_lookup_catalogues(mock, OENB, K10PLUS, DNB)
             mock.get(url__startswith=OENB).mock(side_effect=_crawl)
-            mock.get(url__startswith=K10PLUS).mock(
-                return_value=_xml(K10PLUS_RECORD)
-            )
+            mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_RECORD))
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
-            mock.get(url__startswith=OPEN_LIBRARY).mock(
-                return_value=httpx.Response(200, json={"docs": []})
-            )
-            mock.get(url__startswith="https://catalogue.bnf.fr").mock(
-                return_value=httpx.Response(500)
-            )
-            mock.get(url__startswith="http://lx2.loc.gov").mock(
-                return_value=httpx.Response(500)
-            )
+            mock.get(url__startswith=OPEN_LIBRARY).mock(return_value=httpx.Response(200, json={"docs": []}))
+            mock.get(url__startswith="https://catalogue.bnf.fr").mock(return_value=httpx.Response(500))
+            mock.get(url__startswith="http://lx2.loc.gov").mock(return_value=httpx.Response(500))
             started = asyncio.get_running_loop().time()
             rows = await search("great gatsby")
             elapsed = asyncio.get_running_loop().time() - started
@@ -6009,9 +5603,9 @@ class TestTheNationalLibraryOfGreece:
             )
 
         assert result.record is not None
-        assert [
-            (heading.scheme, heading.number) for heading in result.record.headings
-        ] == [(ClassificationScheme.DDC, "940")]
+        assert [(heading.scheme, heading.number) for heading in result.record.headings] == [
+            (ClassificationScheme.DDC, "940")
+        ]
         assert "Ευρώπη" in result.record.subject_labels
 
     @pytest.mark.asyncio
@@ -6056,9 +5650,7 @@ class TestTheNationalLibraryOfGreece:
     async def test_a_component_part_is_not_a_book(self):
         """Measured zero times of 400 live records, and kept: an article is
         never a book, and the leader is one read."""
-        article = NLG_RECORD.replace(
-            "01665nam a2200385 a 4500", "01665naa a2200385 a 4500"
-        )
+        article = NLG_RECORD.replace("01665nam a2200385 a 4500", "01665naa a2200385 a 4500")
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
             mock.get(url__startswith=NLG).mock(return_value=_xml(article))
@@ -6081,9 +5673,7 @@ class TestTheNationalLibraryOfGreeceSearch:
             route = mock.get(url__startswith=NLG).mock(return_value=_xml(NLG_EMPTY))
             await _nlg_search("moby dick", 5)
 
-        assert route.calls[0].request.url.params["query"] == (
-            "dc.title=moby and dc.title=dick"
-        )
+        assert route.calls[0].request.url.params["query"] == ("dc.title=moby and dc.title=dick")
 
     @pytest.mark.asyncio
     async def test_the_request_is_bounded_because_the_endpoint_bounds_nothing(self):
@@ -6158,8 +5748,8 @@ class TestTheNkpQueryIsQuotedByThePqfRule:
     #: strips `=` and so cannot reassemble `@attr 1=4`, but PQF's operators need
     #: no `=`.
     HOSTILE = (
-        '@1=1016 praha',
-        'praha\\',
+        "@1=1016 praha",
+        "praha\\",
         'moby" @attr 1=1016 "x',
         "@and",
         "@or",
@@ -6258,9 +5848,7 @@ class TestTheCzechNationalLibrary:
     async def test_a_czech_book_resolves(self):
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
-            mock.get(url__startswith=NKP).mock(
-                return_value=_xml(_nkp_envelope(NKP_RECORD))
-            )
+            mock.get(url__startswith=NKP).mock(return_value=_xml(_nkp_envelope(NKP_RECORD)))
             result = await metadata._lookup_one(
                 targets.SEEDED[CatalogueSource.NKP], self.ISBN, "", credential=None
             )
@@ -6281,9 +5869,7 @@ class TestTheCzechNationalLibrary:
         """
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
-            mock.get(url__startswith=NKP).mock(
-                return_value=_xml(_nkp_envelope(NKP_RECORD, empty_stubs=19))
-            )
+            mock.get(url__startswith=NKP).mock(return_value=_xml(_nkp_envelope(NKP_RECORD, empty_stubs=19)))
             result = await metadata._lookup_one(
                 targets.SEEDED[CatalogueSource.NKP], self.ISBN, "", credential=None
             )
@@ -6297,9 +5883,7 @@ class TestTheCzechNationalLibrary:
         `Argo (firma)` is a company."""
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
-            mock.get(url__startswith=NKP).mock(
-                return_value=_xml(_nkp_envelope(NKP_RECORD))
-            )
+            mock.get(url__startswith=NKP).mock(return_value=_xml(_nkp_envelope(NKP_RECORD)))
             result = await metadata._lookup_one(
                 targets.SEEDED[CatalogueSource.NKP], self.ISBN, "", credential=None
             )
@@ -6314,11 +5898,7 @@ class TestTheCzechNationalLibrary:
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
             mock.get(url__startswith=NKP).mock(
-                return_value=_xml(
-                    _nkp_envelope(
-                        NKP_RECORD.replace("978-80-257-1294-8", "978-80-000-0000-0")
-                    )
-                )
+                return_value=_xml(_nkp_envelope(NKP_RECORD.replace("978-80-257-1294-8", "978-80-000-0000-0")))
             )
             result = await metadata._lookup_one(
                 targets.SEEDED[CatalogueSource.NKP], self.ISBN, "", credential=None
@@ -6329,9 +5909,7 @@ class TestTheCzechNationalLibrary:
     @pytest.mark.asyncio
     async def test_the_hyphenated_identifier_matches_the_isbn_asked_for(self):
         """The catalogue prints `978-80-257-1294-8`; the scan is 13 digits."""
-        assert metadata._nkp_claims_isbn(
-            ElementTree.fromstring(NKP_RECORD), self.ISBN
-        )
+        assert metadata._nkp_claims_isbn(ElementTree.fromstring(NKP_RECORD), self.ISBN)
 
     @pytest.mark.asyncio
     async def test_the_query_goes_in_the_parameter_this_target_reads(self):
@@ -6340,9 +5918,7 @@ class TestTheCzechNationalLibrary:
         rather than a style."""
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
-            route = mock.get(url__startswith=NKP).mock(
-                return_value=_xml(NKP_EMPTY)
-            )
+            route = mock.get(url__startswith=NKP).mock(return_value=_xml(NKP_EMPTY))
             await metadata._lookup_one(targets.SEEDED[CatalogueSource.NKP], self.ISBN, "", credential=None)
 
         params = route.calls[0].request.url.params
@@ -6353,9 +5929,7 @@ class TestTheCzechNationalLibrary:
     async def test_one_record_is_asked_for_because_one_is_all_that_arrives(self):
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
-            route = mock.get(url__startswith=NKP).mock(
-                return_value=_xml(NKP_EMPTY)
-            )
+            route = mock.get(url__startswith=NKP).mock(return_value=_xml(NKP_EMPTY))
             await metadata._lookup_one(targets.SEEDED[CatalogueSource.NKP], self.ISBN, "", credential=None)
 
         assert route.calls[0].request.url.params["maximumRecords"] == "1"
@@ -6369,9 +5943,7 @@ class TestTheCzechNationalLibrary:
         )
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
-            mock.get(url__startswith=NKP).mock(
-                return_value=_xml(_nkp_envelope(online))
-            )
+            mock.get(url__startswith=NKP).mock(return_value=_xml(_nkp_envelope(online)))
             result = await metadata._lookup_one(
                 targets.SEEDED[CatalogueSource.NKP], self.ISBN, "", credential=None
             )
@@ -6510,9 +6082,7 @@ class TestTheBibliotecaNacionalArgentina:
         an unknown URI, and one carrying none at all, both refuse.
         """
         unknown = BNA_UNAUTHENTICATED.replace("1/3", "1/999")
-        no_uri = BNA_UNAUTHENTICATED.replace(
-            "<diag:uri>info:srw/diagnostic/1/3</diag:uri>", ""
-        )
+        no_uri = BNA_UNAUTHENTICATED.replace("<diag:uri>info:srw/diagnostic/1/3</diag:uri>", "")
 
         for body in (unknown, no_uri):
             result = await self._lookup(body)
@@ -6598,12 +6168,8 @@ class TestTheBibliotecaNacionalArgentina:
         """
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
-            route = mock.get(url__startswith=BNA).mock(
-                return_value=_xml(_nkp_envelope(BNA_RECORD))
-            )
-            await metadata._lookup_one(
-                targets.SEEDED[CatalogueSource.BNA], self.ISBN, "", credential=None
-            )
+            route = mock.get(url__startswith=BNA).mock(return_value=_xml(_nkp_envelope(BNA_RECORD)))
+            await metadata._lookup_one(targets.SEEDED[CatalogueSource.BNA], self.ISBN, "", credential=None)
 
         params = route.calls.last.request.url.params
         assert params["x-pquery"] == f'@attr 1=7 "{self.ISBN}"'
@@ -6733,18 +6299,10 @@ class TestTheCarrierTestIsTheOnlyWayIn:
 
         found: dict[str, set[str]] = {}
 
-        def visit(
-            node: ast.AST, path: str, qualified: str, aliases: dict[str, str]
-        ) -> None:
+        def visit(node: ast.AST, path: str, qualified: str, aliases: dict[str, str]) -> None:
             for child in ast.iter_child_nodes(node):
-                if isinstance(
-                    child, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef
-                ):
-                    inner = (
-                        child.name
-                        if qualified == "<module>"
-                        else f"{qualified}.{child.name}"
-                    )
+                if isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+                    inner = child.name if qualified == "<module>" else f"{qualified}.{child.name}"
                     if not isinstance(child, ast.ClassDef):
                         found.setdefault(f"{path}::{inner}", set())
                     visit(child, path, inner, aliases)
@@ -6837,10 +6395,7 @@ class TestTheCarrierTestIsTheOnlyWayIn:
         ranking has tests of its own, and this closes it so the class
         docstring's claim is true of both arms.
         """
-        assert (
-            "describes_a_book"
-            in self._functions()["metadata.py::_fullest_physical"]
-        )
+        assert "describes_a_book" in self._functions()["metadata.py::_fullest_physical"]
 
     @staticmethod
     def _plant(root: Path, **modules: str) -> Path:
@@ -6878,9 +6433,7 @@ class TestTheCarrierTestIsTheOnlyWayIn:
             "_fullest_physical",
         }
 
-    def test_a_parse_path_that_imports_the_door_under_another_name_is_reported(
-        self, tmp_path
-    ):
+    def test_a_parse_path_that_imports_the_door_under_another_name_is_reported(self, tmp_path):
         """The ordinary spelling of the evasion, which is the import and not a
         rebinding inside the module.
 
@@ -6892,9 +6445,7 @@ class TestTheCarrierTestIsTheOnlyWayIn:
         root = self._plant(
             tmp_path / "backend",
             intruder=(
-                "from marc_fields import Fields as F\n\n\n"
-                "def _read(node):\n"
-                "    return F(node).isbn()\n"
+                "from marc_fields import Fields as F\n\n\ndef _read(node):\n    return F(node).isbn()\n"
             ),
         )
         readers = self._readers(self._functions(root))
@@ -7029,10 +6580,7 @@ class TestTheDublinCoreAndModsSourcesRefuseInTheirOwnTerms:
     def test_a_dematerialised_resource_is_refused_although_the_type_says_printed(self):
         """The 6 records where the type is simply wrong, which is why the type
         gate above is not the whole BnF answer and prose survives here."""
-        assert (
-            self._bnf("texte imprime | printed text | text", "1 ressource dematerialisee")
-            is None
-        )
+        assert self._bnf("texte imprime | printed text | text", "1 ressource dematerialisee") is None
         assert bibliographic.is_physical_book("1 ressource dematerialisee", "Clean Code")
 
     @pytest.mark.parametrize(
@@ -7160,9 +6708,7 @@ class TestTheBnfPublisherRuleIsLinear:
         differently, plus anything, so a disagreement is reachable rather than
         sampled for. Exact, never a predicate: the rule's whole job is one
         string."""
-        assert metadata._without_trailing_place(publisher) == (
-            _BNF_PLACE.sub("", publisher).strip()
-        )
+        assert metadata._without_trailing_place(publisher) == (_BNF_PLACE.sub("", publisher).strip())
 
     def test_the_leftmost_parenthesis_after_the_last_closed_one_is_where_it_cuts(self):
         """The input on which the obvious linear form, the last `(`, differs
@@ -7232,9 +6778,7 @@ def a_catalogue_answer(answer: CatalogueAnswer) -> fetch.Fetched:
         '<searchRetrieveResponse xmlns="http://www.loc.gov/zing/srw/">'
         f"<numberOfRecords>{len(answer.records)}</numberOfRecords>"
         f"<records>{inner}</records>"
-        + xml_of(
-            Node("extraResponseData", text=answer.extra, nest=answer.nest, width=answer.width)
-        )
+        + xml_of(Node("extraResponseData", text=answer.extra, nest=answer.nest, width=answer.width))
         + "</searchRetrieveResponse>"
     )
     return fetch.Fetched(200, encoded(text, answer.charset), answer.charset)
@@ -7277,8 +6821,7 @@ _SRU_SEARCHES: Final = sorted(
     (
         target
         for target in targets.SEEDED.values()
-        if target.transport is targets.Transport.SRU
-        and target.can(Capability.ANSWERS_TITLE_SEARCH)
+        if target.transport is targets.Transport.SRU and target.can(Capability.ANSWERS_TITLE_SEARCH)
     ),
     key=lambda target: target.source,
 )
@@ -7322,9 +6865,7 @@ class TestACatalogueAnswerIsReadOrRefusedByName:
         looked_up=st.sampled_from(_SRU_LOOKUPS),
         searched=st.sampled_from(_SRU_SEARCHES),
     )
-    def test_both_answer_and_neither_raises_inside_the_allocation_bound(
-        self, answer, looked_up, searched
-    ):
+    def test_both_answer_and_neither_raises_inside_the_allocation_bound(self, answer, looked_up, searched):
         """**Generated at the `fetch.Fetched` seam, as `(bytes, charset)`**: the
         charset from the codec registry, weighted to the ones that decode to a
         lone surrogate, and the text built with one in it, which is the only
@@ -7341,8 +6882,7 @@ class TestACatalogueAnswerIsReadOrRefusedByName:
         # its text, and dividing by it loosened this bound fourfold on every
         # draw of that charset.
         assert got.peak <= (
-            metadata.ALLOCATION_FACTOR * len(response.text.encode())
-            + xml_parse.ALLOCATION_FLOOR
+            metadata.ALLOCATION_FACTOR * len(response.text.encode()) + xml_parse.ALLOCATION_FLOOR
         )
 
     def test_the_generator_still_reaches_a_charset_that_yields_a_lone_surrogate(self):
@@ -7350,14 +6890,14 @@ class TestACatalogueAnswerIsReadOrRefusedByName:
         is about; after the repair no `.text` carries one, by construction."""
         witness(
             CATALOGUE_ANSWERS,
-            lambda answer: any(
-                0xD800 <= ord(character) <= 0xDFFF
-                for character in a_catalogue_answer(answer).content.decode(
-                    answer.charset, "replace"
+            lambda answer: (
+                any(
+                    0xD800 <= ord(character) <= 0xDFFF
+                    for character in a_catalogue_answer(answer).content.decode(answer.charset, "replace")
                 )
-            )
-            if answer.charset != "idna"
-            else False,
+                if answer.charset != "idna"
+                else False
+            ),
             reaches="a response whose charset decodes to a lone surrogate",
         )
 
@@ -7374,9 +6914,7 @@ class TestACatalogueAnswerIsReadOrRefusedByName:
     def test_the_generator_still_reaches_a_book_found_by_a_search(self):
         witness(
             st.tuples(CATALOGUE_ANSWERS, st.sampled_from(_SRU_SEARCHES)),
-            lambda pair: bool(
-                asked(a_catalogue_answer(pair[0]), _SRU_LOOKUPS[0], pair[1])[1]
-            ),
+            lambda pair: bool(asked(a_catalogue_answer(pair[0]), _SRU_LOOKUPS[0], pair[1])[1]),
             reaches="a record a search reader accepts",
         )
 
@@ -7540,26 +7078,26 @@ class TestEverySourceSetsTheIsbnItWasAskedFor:
             '<record xmlns="http://www.loc.gov/MARC21/slim">'
             "<leader>01533nam a2200505 c 4500</leader>"
             '<datafield tag="020" ind1=" " ind2=" ">'
-            "<subfield code=\"a\">0743273567</subfield></datafield>"
+            '<subfield code="a">0743273567</subfield></datafield>'
             '<datafield tag="245" ind1="1" ind2="0">'
-            "<subfield code=\"a\">The Great Gatsby</subfield></datafield>"
+            '<subfield code="a">The Great Gatsby</subfield></datafield>'
             '<datafield tag="264" ind1=" " ind2="1">'
-            "<subfield code=\"c\">1925</subfield></datafield>"
+            '<subfield code="c">1925</subfield></datafield>'
             '<datafield tag="300" ind1=" " ind2=" ">'
-            "<subfield code=\"a\">218 S.</subfield></datafield>"
+            '<subfield code="a">218 S.</subfield></datafield>'
             "</record>"
         )
         oenb = _oenb_envelope(
             '<record xmlns="http://www.loc.gov/MARC21/slim">'
             "<leader>01533nam a2200505 c 4500</leader>"
             '<datafield tag="020" ind1=" " ind2=" ">'
-            "<subfield code=\"a\">0743273567</subfield></datafield>"
+            '<subfield code="a">0743273567</subfield></datafield>'
             '<datafield tag="245" ind1="1" ind2="0">'
-            "<subfield code=\"a\">The Great Gatsby</subfield></datafield>"
+            '<subfield code="a">The Great Gatsby</subfield></datafield>'
             '<datafield tag="264" ind1=" " ind2="1">'
-            "<subfield code=\"c\">1925</subfield></datafield>"
+            '<subfield code="c">1925</subfield></datafield>'
             '<datafield tag="300" ind1=" " ind2=" ">'
-            "<subfield code=\"a\">218 S.</subfield></datafield>"
+            '<subfield code="a">218 S.</subfield></datafield>'
             "</record>"
         )
         return {
@@ -7609,11 +7147,7 @@ class TestEverySourceSetsTheIsbnItWasAskedFor:
                 GOOGLE_BOOKS,
                 httpx.Response(
                     200,
-                    json={
-                        "items": [
-                            {"id": "gb-1", "volumeInfo": {"title": "The Great Gatsby"}}
-                        ]
-                    },
+                    json={"items": [{"id": "gb-1", "volumeInfo": {"title": "The Great Gatsby"}}]},
                 ),
             ),
         }
@@ -7642,9 +7176,7 @@ class TestEverySourceSetsTheIsbnItWasAskedFor:
             mock.get(url__startswith=host).mock(return_value=response)
             result = await metadata._lookup_one(targets.SEEDED[name], self.ISBN, "a-key", credential=None)
 
-        assert result.outcome is Outcome.FOUND, (
-            f"the {name} body no longer resolves, so this asserts nothing"
-        )
+        assert result.outcome is Outcome.FOUND, f"the {name} body no longer resolves, so this asserts nothing"
         assert result.record is not None
         assert result.record.isbn == self.ISBN
 
@@ -7833,9 +7365,7 @@ class TestNoOrderOfTheRosterFindsMoreBooks:
     }
 
     def _plan(self, order: tuple[CatalogueSource, ...]) -> sources.Plan:
-        return sources.parse(
-            {"sources": [{"source": name.value, "enabled": True} for name in order]}
-        )
+        return sources.parse({"sources": [{"source": name.value, "enabled": True} for name in order]})
 
     @staticmethod
     def _only(holder: CatalogueSource):
@@ -7920,9 +7450,9 @@ class TestNoOrderOfTheRosterFindsMoreBooks:
             for index, name in enumerate(self._plan(order).lookup_chain):
                 reached.setdefault(name, set()).add(index)
         every_index = set(range(len(sources.LOOKUP_SOURCES)))
-        assert {
-            name: reached.get(name, set()) for name in sources.LOOKUP_SOURCES
-        } == dict.fromkeys(sources.LOOKUP_SOURCES, every_index)
+        assert {name: reached.get(name, set()) for name in sources.LOOKUP_SOURCES} == dict.fromkeys(
+            sources.LOOKUP_SOURCES, every_index
+        )
 
     @staticmethod
     def _every_ordered_pair() -> set[tuple[CatalogueSource, CatalogueSource]]:
@@ -8041,16 +7571,12 @@ class TestNoOrderOfTheRosterFindsMoreBooks:
         bound checked at one point is a bound checked where it does not yet
         bite.
         """
-        for size in range(
-            len(sources.DEFAULT_ORDER), len(sources.DEFAULT_ORDER) + 12
-        ):
+        for size in range(len(sources.DEFAULT_ORDER), len(sources.DEFAULT_ORDER) + 12):
             count = len(_orders_worth_asking(tuple(range(size))))
             assert size <= count <= size + _SAMPLED_ORDERS, size
 
     @pytest.mark.asyncio
-    async def test_a_tail_that_is_never_asked_would_fail_this(
-        self, monkeypatch: pytest.MonkeyPatch
-    ):
+    async def test_a_tail_that_is_never_asked_would_fail_this(self, monkeypatch: pytest.MonkeyPatch):
         """The evasion for the covering set, run rather than argued.
 
         A per tier deadline that abandons the tail is the change this class
@@ -8075,9 +7601,7 @@ class TestNoOrderOfTheRosterFindsMoreBooks:
             assert missed, holder
 
     @pytest.mark.asyncio
-    async def test_a_source_no_order_reaches_would_fail_this(
-        self, monkeypatch: pytest.MonkeyPatch
-    ):
+    async def test_a_source_no_order_reaches_would_fail_this(self, monkeypatch: pytest.MonkeyPatch):
         """The evasion, run rather than argued.
 
         A holder that is dropped from the plan is unreachable under **every**
@@ -8087,9 +7611,7 @@ class TestNoOrderOfTheRosterFindsMoreBooks:
         """
         patch_lookup_adapters(monkeypatch, self._only(CatalogueSource.OPEN_LIBRARY))
         metadata.clear_cache()
-        without = sources.parse(
-            {"sources": [{"source": "open_library", "enabled": False}]}
-        )
+        without = sources.parse({"sources": [{"source": "open_library", "enabled": False}]})
         result = await metadata.lookup(self.ISBN, access=access(without, "a-key"))
         assert result.outcome is not metadata.Outcome.FOUND
 
@@ -8110,12 +7632,7 @@ class TestALibraryThatAsksNothing:
     @staticmethod
     def _nothing_on() -> sources.Plan:
         return sources.parse(
-            {
-                "sources": [
-                    {"source": source.value, "enabled": False}
-                    for source in sources.DEFAULT_ORDER
-                ]
-            }
+            {"sources": [{"source": source.value, "enabled": False} for source in sources.DEFAULT_ORDER]}
         )
 
     @pytest.mark.asyncio
@@ -8124,9 +7641,7 @@ class TestALibraryThatAsksNothing:
 
     @pytest.mark.asyncio
     async def test_the_edition_candidates_answer_nothing_rather_than_raising(self):
-        rows = await metadata.candidates(
-            "anything", isbn=ENGLISH_ISBN, access=access(self._nothing_on())
-        )
+        rows = await metadata.candidates("anything", isbn=ENGLISH_ISBN, access=access(self._nothing_on()))
         assert rows == []
 
     @pytest.mark.asyncio
@@ -8140,15 +7655,11 @@ class TestALibraryThatAsksNothing:
     @pytest.mark.asyncio
     async def test_the_edition_cluster_is_not_asked_with_open_library_off(self):
         """Open Library is the only source of a cluster, so off means empty."""
-        without = sources.parse(
-            {"sources": [{"source": "open_library", "enabled": False}]}
-        )
+        without = sources.parse({"sources": [{"source": "open_library", "enabled": False}]})
         assert await metadata.editions(ENGLISH_ISBN, 5, plan=without) == []
 
 
-def _newcombe(
-    first_hits: int, first_n: int, second_hits: int, second_n: int
-) -> tuple[float, float, float]:
+def _newcombe(first_hits: int, first_n: int, second_hits: int, second_n: int) -> tuple[float, float, float]:
     """The difference between two proportions and its 95% interval, as percentages.
 
     Newcombe's method 10, which builds the difference interval out of the two Wilson
@@ -8161,24 +7672,14 @@ def _newcombe(
         share = hits / total
         spread = 1 + z * z / total
         centre = (share + z * z / (2 * total)) / spread
-        half = (
-            z
-            * math.sqrt(
-                share * (1 - share) / total + z * z / (4 * total * total)
-            )
-            / spread
-        )
+        half = z * math.sqrt(share * (1 - share) / total + z * z / (4 * total * total)) / spread
         return max(0.0, centre - half), min(1.0, centre + half)
 
     first, second = first_hits / first_n, second_hits / second_n
     first_low, first_high = wilson(first_hits, first_n)
     second_low, second_high = wilson(second_hits, second_n)
-    low = (first - second) - math.sqrt(
-        (first - first_low) ** 2 + (second_high - second) ** 2
-    )
-    high = (first - second) + math.sqrt(
-        (first_high - first) ** 2 + (second - second_low) ** 2
-    )
+    low = (first - second) - math.sqrt((first - first_low) ** 2 + (second_high - second) ** 2)
+    high = (first - second) + math.sqrt((first_high - first) ** 2 + (second - second_low) ** 2)
     return 100 * (first - second), 100 * low, 100 * high
 
 
@@ -8225,9 +7726,7 @@ class TestTheLibraryOfCongressTableAgreesWithItself:
 
     def test_every_percentage_is_the_fraction_beside_it(self):
         _, fractions, percentages = self._rows()
-        for country, fraction, stated in zip(
-            self.COUNTRIES, fractions, percentages, strict=True
-        ):
+        for country, fraction, stated in zip(self.COUNTRIES, fractions, percentages, strict=True):
             held, _, asked = fraction.partition("/")
             shown = float(stated.strip("*").rstrip("%"))
             assert round(100 * int(held) / int(asked), 1) == shown, (
@@ -8272,8 +7771,8 @@ class TestTheLibraryOfCongressTableAgreesWithItself:
     #:
     #: Named here rather than spelled inside a test, because the prose reasons about two
     #: groups and a subtraction and all three have to agree with the same table.
-    _LATIN_AMERICA = (0, 3, 5)   # Uruguay, Brazil, Argentina
-    _THE_TWO_DROPPED = (1, 2)    # Spain, Italy
+    _LATIN_AMERICA = (0, 3, 5)  # Uruguay, Brazil, Argentina
+    _THE_TWO_DROPPED = (1, 2)  # Spain, Italy
     _LATIN_AMERICA_WITHOUT_URUGUAY = (3, 5)
 
     @staticmethod
@@ -8289,10 +7788,7 @@ class TestTheLibraryOfCongressTableAgreesWithItself:
         return " ".join((metadata.title_search.__doc__ or "").split())
 
     def _sum(self, fractions: list[str], columns: tuple[int, ...]) -> tuple[int, int]:
-        pairs = [
-            (int(fractions[i].split("/")[0]), int(fractions[i].split("/")[1]))
-            for i in columns
-        ]
+        pairs = [(int(fractions[i].split("/")[0]), int(fractions[i].split("/")[1])) for i in columns]
         return sum(p[0] for p in pairs), sum(p[1] for p in pairs)
 
     def test_the_aggregate_figures_recompute_from_the_table_too(self):
@@ -8329,9 +7825,7 @@ class TestTheLibraryOfCongressTableAgreesWithItself:
         assert stated is not None, "the docstring no longer states the aggregate sentence"
         assert (int(stated.group(1)), int(stated.group(2))) == region
         assert (int(stated.group(3)), int(stated.group(4))) == europe
-        assert [round(v, 1) for v in (difference, low, high)] == [
-            float(g) for g in stated.group(5, 6, 7)
-        ]
+        assert [round(v, 1) for v in (difference, low, high)] == [float(g) for g in stated.group(5, 6, 7)]
 
         rest = self._sum(fractions, self._LATIN_AMERICA_WITHOUT_URUGUAY)
         without = re.search(r"without Uruguay it is (\d+)/(\d+), or (\d+\.\d)%", prose)
@@ -8349,18 +7843,14 @@ class TestTheLibraryOfCongressTableAgreesWithItself:
         guard's own coverage had picked the case that was already right.
         """
         _, fractions, _ = self._rows()
-        uruguay, spain = (
-            (int(f.split("/")[0]), int(f.split("/")[1])) for f in fractions[:2]
-        )
+        uruguay, spain = ((int(f.split("/")[0]), int(f.split("/")[1])) for f in fractions[:2])
         difference, low, high = _newcombe(*uruguay, *spain)
         stated = re.search(
             r"\+(\d+\.\d) points over Spain, 95% Newcombe \+(\d+\.\d) to \+(\d+\.\d)",
             self._prose(),
         )
         assert stated is not None, "the docstring no longer states the three figures"
-        assert [round(v, 1) for v in (difference, low, high)] == [
-            float(g) for g in stated.groups()
-        ], (
+        assert [round(v, 1) for v in (difference, low, high)] == [float(g) for g in stated.groups()], (
             f"the docstring says {stated.groups()} and the table gives "
             f"{difference:.1f}, {low:.1f}, {high:.1f}"
         )
@@ -8649,29 +8139,19 @@ class TestACatalogueIsNotAskedAboutAForeignIsbn:
         return seen
 
     @pytest.mark.asyncio
-    async def test_a_national_catalogue_in_the_tail_is_skipped_for_a_foreign_isbn(
-        self, asked: list[str]
-    ):
-        await metadata.lookup(
-            ENGLISH_ISBN, access=access(self._plan("dnb", "k10plus", "nlg", "oenb"))
-        )
+    async def test_a_national_catalogue_in_the_tail_is_skipped_for_a_foreign_isbn(self, asked: list[str]):
+        await metadata.lookup(ENGLISH_ISBN, access=access(self._plan("dnb", "k10plus", "nlg", "oenb")))
         assert asked == ["dnb", "k10plus"]
 
     @pytest.mark.asyncio
-    async def test_the_same_plan_asks_it_about_a_book_from_its_own_group(
-        self, asked: list[str]
-    ):
+    async def test_the_same_plan_asks_it_about_a_book_from_its_own_group(self, asked: list[str]):
         """The other half, and without it the test above passes on a `lookup`
         that never reaches the tail at all."""
-        await metadata.lookup(
-            GREEK_ISBN, access=access(self._plan("dnb", "k10plus", "nlg", "oenb"))
-        )
+        await metadata.lookup(GREEK_ISBN, access=access(self._plan("dnb", "k10plus", "nlg", "oenb")))
         assert asked == ["dnb", "k10plus", "nlg"]
 
     @pytest.mark.asyncio
-    async def test_the_leading_tier_is_asked_whatever_the_isbn(
-        self, asked: list[str]
-    ):
+    async def test_the_leading_tier_is_asked_whatever_the_isbn(self, asked: list[str]):
         """**The tier is gathered, so it costs its slowest member and not their
         sum**, measured in `sources.DEFAULT_ORDER` at 0.389s for the German pair
         against 0.388s for K10plus alone. There is no round trip to save, and
@@ -8690,18 +8170,14 @@ class TestACatalogueIsNotAskedAboutAForeignIsbn:
         assert asked[sources.ALWAYS_ASKED :] == ["dnb"]
 
     @pytest.mark.asyncio
-    async def test_an_isbn_with_no_decodable_group_asks_everyone(
-        self, asked: list[str]
-    ):
+    async def test_an_isbn_with_no_decodable_group_asks_everyone(self, asked: list[str]):
         """**Fail open.** `isbn.registration_group` returns None for a group the
         published ranges do not cover, and the answer to no claim is to ask
         everyone, because the alternative is a catalogue quietly not asked about
         a book it holds.
         """
         assert registration_group("9789999912341") is None
-        await metadata.lookup(
-            "9789999912341", access=access(self._plan("dnb", "k10plus", "nlg", "oenb"))
-        )
+        await metadata.lookup("9789999912341", access=access(self._plan("dnb", "k10plus", "nlg", "oenb")))
         assert asked == ["dnb", "k10plus", "nlg", "oenb"]
 
     @pytest.mark.asyncio
@@ -8727,9 +8203,7 @@ class TestACatalogueIsNotAskedAboutAForeignIsbn:
         assert result.outcome is metadata.Outcome.NOT_FOUND
 
     @pytest.mark.asyncio
-    async def test_a_library_with_every_catalogue_off_still_says_nothing_was_asked(
-        self, asked: list[str]
-    ):
+    async def test_a_library_with_every_catalogue_off_still_says_nothing_was_asked(self, asked: list[str]):
         """The arm that keeps the test above from deleting `NO_SOURCES`."""
         result = await metadata.lookup(ENGLISH_ISBN, access=access(self._plan()))
         assert asked == []
@@ -8817,14 +8291,10 @@ class TestSearchingHarder:
 
     @pytest.fixture
     def slow_oenb(self, monkeypatch):
-        monkeypatch.setattr(
-            sources, "SLOW_SEARCHES", frozenset({CatalogueSource.OENB})
-        )
+        monkeypatch.setattr(sources, "SLOW_SEARCHES", frozenset({CatalogueSource.OENB}))
 
     @pytest.mark.asyncio
-    async def test_the_default_search_asks_the_fast_roster_on_the_short_deadline(
-        self, fan_out, slow_oenb
-    ):
+    async def test_the_default_search_asks_the_fast_roster_on_the_short_deadline(self, fan_out, slow_oenb):
         asked, budgets = fan_out
         await metadata.search("moby dick", access=access(sources.DEFAULT_PLAN, "key"))
 
@@ -8833,13 +8303,9 @@ class TestSearchingHarder:
         assert budgets == [metadata.SEARCH_DEADLINE_SECONDS]
 
     @pytest.mark.asyncio
-    async def test_searching_harder_asks_the_slow_one_on_the_long_deadline(
-        self, fan_out, slow_oenb
-    ):
+    async def test_searching_harder_asks_the_slow_one_on_the_long_deadline(self, fan_out, slow_oenb):
         asked, budgets = fan_out
-        await metadata.search(
-            "moby dick", access=access(sources.DEFAULT_PLAN, "key"), harder=True
-        )
+        await metadata.search("moby dick", access=access(sources.DEFAULT_PLAN, "key"), harder=True)
 
         assert CatalogueSource.OENB in asked
         assert set(asked) == set(sources.DEFAULT_PLAN.searched_harder)
@@ -8848,15 +8314,10 @@ class TestSearchingHarder:
     @pytest.mark.asyncio
     async def test_the_two_deadlines_are_not_the_same_number(self):
         """Or every test above passes on a build where the feature does nothing."""
-        assert (
-            metadata.SEARCH_HARDER_DEADLINE_SECONDS
-            > metadata.SEARCH_DEADLINE_SECONDS
-        )
+        assert metadata.SEARCH_HARDER_DEADLINE_SECONDS > metadata.SEARCH_DEADLINE_SECONDS
 
     @pytest.mark.asyncio
-    async def test_asking_harder_with_no_slow_catalogue_keeps_the_short_deadline(
-        self, fan_out
-    ):
+    async def test_asking_harder_with_no_slow_catalogue_keeps_the_short_deadline(self, fan_out):
         """The rosters are equal, so the longer wait would buy nothing.
 
         `harder` is a query parameter and not a button: nothing obliges a caller
@@ -8865,9 +8326,7 @@ class TestSearchingHarder:
         slow catalogue, which is every install today.
         """
         asked, budgets = fan_out
-        await metadata.search(
-            "moby dick", access=access(sources.DEFAULT_PLAN, "key"), harder=True
-        )
+        await metadata.search("moby dick", access=access(sources.DEFAULT_PLAN, "key"), harder=True)
 
         assert set(asked) == set(sources.DEFAULT_PLAN.searched)
         assert budgets == [metadata.SEARCH_DEADLINE_SECONDS]
@@ -8895,17 +8354,13 @@ class TestSearchingHarder:
 
         monkeypatch.setattr(metadata, "_within_deadline", hold)
         holding = asyncio.ensure_future(
-            metadata.search(
-                "moby dick", access=access(sources.DEFAULT_PLAN, "key"), harder=True
-            )
+            metadata.search("moby dick", access=access(sources.DEFAULT_PLAN, "key"), harder=True)
         )
         await first_is_in.wait()
 
         monkeypatch.setattr(metadata, "_within_deadline", real)
         second = asyncio.ensure_future(
-            metadata.search(
-                "moby dick", access=access(sources.DEFAULT_PLAN, "key"), harder=True
-            )
+            metadata.search("moby dick", access=access(sources.DEFAULT_PLAN, "key"), harder=True)
         )
         await second
 
@@ -8916,9 +8371,7 @@ class TestSearchingHarder:
         await holding
 
     @pytest.mark.asyncio
-    async def test_the_slot_is_given_back_when_the_fan_out_raises(
-        self, fan_out, slow_oenb, monkeypatch
-    ):
+    async def test_the_slot_is_given_back_when_the_fan_out_raises(self, fan_out, slow_oenb, monkeypatch):
         """A slot leaked once is a slot leaked for the life of the process.
 
         Nothing below `_within_deadline` raises today: every adapter swallows
@@ -8933,9 +8386,7 @@ class TestSearchingHarder:
 
         monkeypatch.setattr(metadata, "_within_deadline", boom)
         with pytest.raises(RuntimeError, match="the fan out fell over"):
-            await metadata.search(
-                "moby dick", access=access(sources.DEFAULT_PLAN, "key"), harder=True
-            )
+            await metadata.search("moby dick", access=access(sources.DEFAULT_PLAN, "key"), harder=True)
 
         assert not metadata._HARDER_AT_ONCE.locked()
 
@@ -8964,9 +8415,7 @@ class TestGoogleIdentifiersAreParsedRatherThanTrusted:
             "id": "x",
             "volumeInfo": {
                 "title": "T",
-                "industryIdentifiers": [
-                    {"type": "ISBN_13", "identifier": identifier}
-                ],
+                "industryIdentifiers": [{"type": "ISBN_13", "identifier": identifier}],
             },
         }
         return google_books._volume_to_fields(volume)
@@ -8980,9 +8429,7 @@ class TestGoogleIdentifiersAreParsedRatherThanTrusted:
     @pytest.mark.parametrize("identifier", NOT_AN_ISBN)
     def test_the_response_schema_can_still_be_built(self, identifier):
         """The 500 this closes. `lookup_isbn` catches no `ValidationError`."""
-        assert BookLookup(**metadata._google_record(
-            self._fields(identifier), "9783596294336"
-        ).as_lookup())
+        assert BookLookup(**metadata._google_record(self._fields(identifier), "9783596294336").as_lookup())
 
     @pytest.mark.parametrize("identifier", NOT_AN_ISBN)
     def test_a_search_row_carries_no_isbn_rather_than_a_bogus_one(self, identifier):
@@ -9027,9 +8474,7 @@ class TestACatalogueLoginReachesTheRequestItWasStoredFor:
     SENT = "Basic " + b64encode(b"alice:hunter2").decode()
 
     def _login(self, base_url: str) -> credentials.Credential:
-        return credentials.Credential(
-            credentials.origin_of(base_url), "alice", "hunter2"
-        )
+        return credentials.Credential(credentials.origin_of(base_url), "alice", "hunter2")
 
     async def _headers_the_dnb_saw(self, credential) -> httpx.Headers:
         with respx.mock(assert_all_called=False) as mock:
@@ -9091,9 +8536,7 @@ class TestACatalogueLoginReachesTheRequestItWasStoredFor:
         """
         with respx.mock(assert_all_called=False) as mock:
             dnb = mock.get(url__startswith=DNB).mock(return_value=sru_response())
-            k10plus = mock.get(url__startswith=K10PLUS).mock(
-                return_value=sru_response()
-            )
+            k10plus = mock.get(url__startswith=K10PLUS).mock(return_value=sru_response())
             silence_catalogues(mock)
             await metadata.lookup(
                 self.ISBN,
@@ -9109,9 +8552,7 @@ class TestACatalogueLoginReachesTheRequestItWasStoredFor:
         """The same mapping down the other path, which threads through `search`."""
         with respx.mock(assert_all_called=False) as mock:
             dnb = mock.get(url__startswith=DNB).mock(return_value=sru_response())
-            k10plus = mock.get(url__startswith=K10PLUS).mock(
-                return_value=sru_response()
-            )
+            k10plus = mock.get(url__startswith=K10PLUS).mock(return_value=sru_response())
             silence_catalogues(mock)
             await metadata.search(
                 "praxiswissen docker",
@@ -9193,12 +8634,8 @@ class TestOnlyTheKeysOwnerIsHandedIt:
             seen.append((isbn, api_key))
             return metadata.Lookup(Outcome.NOT_FOUND, source="")
 
-        monkeypatch.setattr(
-            metadata, "_FREE_LOOKUPS", dict.fromkeys(metadata._FREE_LOOKUPS, free)
-        )
-        monkeypatch.setattr(
-            metadata, "_KEYED_LOOKUPS", dict.fromkeys(metadata._KEYED_LOOKUPS, keyed)
-        )
+        monkeypatch.setattr(metadata, "_FREE_LOOKUPS", dict.fromkeys(metadata._FREE_LOOKUPS, free))
+        monkeypatch.setattr(metadata, "_KEYED_LOOKUPS", dict.fromkeys(metadata._KEYED_LOOKUPS, keyed))
         return seen
 
     def test_the_table_covers_every_bespoke_lookup_row(self):
@@ -9207,14 +8644,10 @@ class TestOnlyTheKeysOwnerIsHandedIt:
         assert sorted(self.EXPECTED, key=lambda name: name.value) == self.BESPOKE
 
     @pytest.mark.parametrize("source", BESPOKE, ids=lambda source: source.value)
-    async def test_a_seeded_door_is_handed_what_the_table_says(
-        self, source, monkeypatch
-    ):
+    async def test_a_seeded_door_is_handed_what_the_table_says(self, source, monkeypatch):
         seen = self._captured(monkeypatch)
 
-        await metadata._lookup_one(
-            targets.SEEDED[source], self.ISBN, self.KEY, credential=None
-        )
+        await metadata._lookup_one(targets.SEEDED[source], self.ISBN, self.KEY, credential=None)
 
         assert seen == [self.EXPECTED[source]]
 
@@ -9236,27 +8669,21 @@ class TestOnlyTheKeysOwnerIsHandedIt:
 
         assert seen == [(self.ISBN,)]
 
-    async def test_being_metered_does_not_entitle_a_row_to_the_key(
-        self, monkeypatch
-    ):
+    async def test_being_metered_does_not_entitle_a_row_to_the_key(self, monkeypatch):
         """The first row the roster has not got, and the one that separates
         `metered` from the secret's owner.
 
         Being billed per request and being entitled to one named source's key
         are different facts, and no seeded row holds one without the other.
         """
-        row = dataclasses.replace(
-            targets.SEEDED[CatalogueSource.OPEN_LIBRARY], metered=True
-        )
+        row = dataclasses.replace(targets.SEEDED[CatalogueSource.OPEN_LIBRARY], metered=True)
         seen = self._captured(monkeypatch)
 
         await metadata._lookup_one(row, self.ISBN, self.KEY, credential=None)
 
         assert seen == [(self.ISBN,)]
 
-    async def test_needing_a_credential_does_not_entitle_a_row_to_the_key(
-        self, monkeypatch
-    ):
+    async def test_needing_a_credential_does_not_entitle_a_row_to_the_key(self, monkeypatch):
         """The second, and the one the plan's own remedy would have failed.
 
         Substituting `Capability.NEEDS_A_CREDENTIAL` for the metered test was
@@ -9264,9 +8691,7 @@ class TestOnlyTheKeysOwnerIsHandedIt:
         this row needs a credential, owns no key, and under that predicate is
         handed Google's.
         """
-        row = dataclasses.replace(
-            targets.SEEDED[CatalogueSource.OPEN_LIBRARY], needs_key=True
-        )
+        row = dataclasses.replace(targets.SEEDED[CatalogueSource.OPEN_LIBRARY], needs_key=True)
         seen = self._captured(monkeypatch)
 
         await metadata._lookup_one(row, self.ISBN, self.KEY, credential=None)
@@ -9332,9 +8757,7 @@ class TestOnlyTheKeysOwnerIsHandedIt:
         None`, reddens a different named arm of this class, so a dispatch
         reading that instead is covered without a second arm here.
         """
-        row = dataclasses.replace(
-            targets.SEEDED[CatalogueSource.GOOGLE_BOOKS], secret=targets.Secret.NONE
-        )
+        row = dataclasses.replace(targets.SEEDED[CatalogueSource.GOOGLE_BOOKS], secret=targets.Secret.NONE)
         seen = self._captured(monkeypatch)
 
         with pytest.raises(KeyError, match=r"Reader\.GOOGLE_BOOKS"):
@@ -9370,9 +8793,7 @@ class TestOnlyTheKeysOwnerIsHandedIt:
             seen.append((query, limit, api_key))
             return []
 
-        monkeypatch.setattr(
-            metadata, "_FREE_SEARCHES", dict.fromkeys(metadata._FREE_SEARCHES, free)
-        )
+        monkeypatch.setattr(metadata, "_FREE_SEARCHES", dict.fromkeys(metadata._FREE_SEARCHES, free))
         monkeypatch.setattr(
             metadata,
             "_METERED_SEARCHES",
@@ -9381,28 +8802,17 @@ class TestOnlyTheKeysOwnerIsHandedIt:
         return seen
 
     def test_the_search_table_covers_every_bespoke_search_row(self):
-        assert (
-            sorted(self.EXPECTED_SEARCH, key=lambda name: name.value)
-            == self.BESPOKE_SEARCH
-        )
+        assert sorted(self.EXPECTED_SEARCH, key=lambda name: name.value) == self.BESPOKE_SEARCH
 
-    @pytest.mark.parametrize(
-        "source", BESPOKE_SEARCH, ids=lambda source: source.value
-    )
-    async def test_a_seeded_search_door_is_handed_what_the_table_says(
-        self, source, monkeypatch
-    ):
+    @pytest.mark.parametrize("source", BESPOKE_SEARCH, ids=lambda source: source.value)
+    async def test_a_seeded_search_door_is_handed_what_the_table_says(self, source, monkeypatch):
         seen = self._captured_search(monkeypatch)
 
-        await metadata._search_one(
-            targets.SEEDED[source], self.QUERY, self.LIMIT, self.KEY, credential=None
-        )
+        await metadata._search_one(targets.SEEDED[source], self.QUERY, self.LIMIT, self.KEY, credential=None)
 
         assert seen == [self.EXPECTED_SEARCH[source]]
 
-    async def test_being_metered_does_not_entitle_a_search_door_to_the_key(
-        self, monkeypatch
-    ):
+    async def test_being_metered_does_not_entitle_a_search_door_to_the_key(self, monkeypatch):
         """The search door reads the row, and it used to read `METERED`.
 
         **The same latent leak, one screen from the lookup door.** The two
@@ -9412,14 +8822,10 @@ class TestOnlyTheKeysOwnerIsHandedIt:
         arriving. Whose key it is has nothing to do with which question is being
         asked, so both doors read the same field.
         """
-        row = dataclasses.replace(
-            targets.SEEDED[CatalogueSource.OPEN_LIBRARY], metered=True
-        )
+        row = dataclasses.replace(targets.SEEDED[CatalogueSource.OPEN_LIBRARY], metered=True)
         seen = self._captured_search(monkeypatch)
 
-        await metadata._search_one(
-            row, self.QUERY, self.LIMIT, self.KEY, credential=None
-        )
+        await metadata._search_one(row, self.QUERY, self.LIMIT, self.KEY, credential=None)
 
         assert seen == [(self.QUERY, self.LIMIT)]
 
@@ -9476,9 +8882,7 @@ class TestOnlyTheKeysOwnerIsHandedIt:
     def test_the_roster_holds_a_door_of_each_kind(self):
         """Or the parametrised arm is over one answer and proves half of it."""
         owners = [
-            source
-            for source in self.BESPOKE
-            if targets.SEEDED[source].secret is not targets.Secret.NONE
+            source for source in self.BESPOKE if targets.SEEDED[source].secret is not targets.Secret.NONE
         ]
 
         assert owners
@@ -9514,27 +8918,20 @@ class TestWhichDoorCarriesALogin:
     @pytest.mark.parametrize("source", ASKED, ids=lambda source: source.value)
     async def test_the_rule_predicts_what_reaches_the_wire(self, source):
         target = targets.SEEDED[source]
-        login = credentials.Credential(
-            credentials.origin_of(target.base_url), "alice", "hunter2"
-        )
+        login = credentials.Credential(credentials.origin_of(target.base_url), "alice", "hunter2")
 
         with respx.mock(assert_all_called=False) as mock:
             silence_catalogues(mock)
             await metadata._lookup_one(target, self.ISBN, "a-key", credential=login)
             # Read inside the block: respx clears the router's call log on exit,
             # and an empty log after it looks exactly like a source never asked.
-            asked = [
-                call.request
-                for call in mock.calls
-                if str(call.request.url).startswith(target.base_url)
-            ]
+            asked = [call.request for call in mock.calls if str(call.request.url).startswith(target.base_url)]
 
         assert asked, f"{source.value} was never asked, so its verdict is vacuous"
         sent = any("authorization" in request.headers for request in asked)
 
         assert sent is metadata.carries_a_credential(target), (
-            f"{source.value}: the rule says "
-            f"{metadata.carries_a_credential(target)} and the wire says {sent}"
+            f"{source.value}: the rule says {metadata.carries_a_credential(target)} and the wire says {sent}"
         )
 
 
@@ -9630,19 +9027,14 @@ class TestEveryDoorThatNeedsALoginDeclaresOneAndEveryRouteSuppliesIt:
         errors by restoring the default, which is the one edit that would put
         the walk's whole job back with nothing else going red.
         """
-        logins = next(
-            field
-            for field in dataclasses.fields(metadata.Access)
-            if field.name == "logins"
-        )
+        logins = next(field for field in dataclasses.fields(metadata.Access) if field.name == "logins")
 
         assert logins.default is dataclasses.MISSING, (
             "metadata.Access.logins has a default again, so an access assembled "
             "by hand type checks and sends no login"
         )
         assert logins.default_factory is dataclasses.MISSING, (
-            "metadata.Access.logins has a default factory, which is the same "
-            "hole spelled differently"
+            "metadata.Access.logins has a default factory, which is the same hole spelled differently"
         )
 
 
@@ -9687,22 +9079,15 @@ class TestNoDoorTakesTheKeyAndThePlanApart:
         """
         tree = ast.parse((BACKEND / "metadata.py").read_text())
         return {
-            node.name: {
-                argument.arg
-                for argument in ast.walk(node.args)
-                if isinstance(argument, ast.arg)
-            }
+            node.name: {argument.arg for argument in ast.walk(node.args) if isinstance(argument, ast.arg)}
             for node in tree.body
-            if isinstance(node, ast.AsyncFunctionDef)
-            and not node.name.startswith("_")
+            if isinstance(node, ast.AsyncFunctionDef) and not node.name.startswith("_")
         }
 
     def test_the_rule_is_asked_of_every_public_door(self):
         """Not of the ones that happen to fail it, which is how a walk goes
         vacuous on the day its subject is renamed."""
-        assert set(self._doors()) == self.LOGINS.DOORS | set(
-            self.LOGINS.NO_LOGIN_NEEDED
-        )
+        assert set(self._doors()) == self.LOGINS.DOORS | set(self.LOGINS.NO_LOGIN_NEEDED)
 
     def test_every_exemption_names_a_door_that_is_still_there(self):
         """A stale exemption is an excuse nothing is using, and it reads as a
@@ -9731,9 +9116,7 @@ class TestNoDoorTakesTheKeyAndThePlanApart:
     def test_no_door_takes_the_logins_apart_from_the_plan_either(self):
         """The third of the three. It reaches a door inside the access or not at
         all, which is what makes one resolution the only resolution."""
-        loose = {
-            name for name, parameters in self._doors().items() if "logins" in parameters
-        }
+        loose = {name for name, parameters in self._doors().items() if "logins" in parameters}
         assert loose == set(), f"{sorted(loose)} take a login beside the plan"
 
     def test_a_door_taking_an_access_takes_none_of_the_three_beside_it(self):
@@ -9793,9 +9176,7 @@ class TestAnAccessPrintsNoSecret:
             plan=ALL_SOURCES,
             api_key=self.KEY,
             logins={
-                CatalogueSource.DNB: credentials.Credential(
-                    "https://services.dnb.de", "alice", self.PASSWORD
-                )
+                CatalogueSource.DNB: credentials.Credential("https://services.dnb.de", "alice", self.PASSWORD)
             },
         )
 
@@ -9847,9 +9228,7 @@ class TestLookupVolume:
                 "title": "Dune",
                 "authors": ["Frank Herbert"],
                 "pageCount": 412,
-                "industryIdentifiers": [
-                    {"type": "ISBN_13", "identifier": "9780441013593"}
-                ],
+                "industryIdentifiers": [{"type": "ISBN_13", "identifier": "9780441013593"}],
             },
         }
 
@@ -9877,9 +9256,7 @@ class TestLookupVolume:
             {"type": "ISBN_13", "identifier": "not an isbn at all"}
         ]
         with respx.mock(assert_all_called=False) as mock:
-            mock.get(f"{GOOGLE_BOOKS}/{self.VOLUME_ID}").mock(
-                return_value=httpx.Response(200, json=volume)
-            )
+            mock.get(f"{GOOGLE_BOOKS}/{self.VOLUME_ID}").mock(return_value=httpx.Response(200, json=volume))
             result = await lookup_volume(self.VOLUME_ID, "key")
 
         assert result.found
@@ -9902,36 +9279,28 @@ class TestLookupVolume:
             route = mock.get(url__startswith=GOOGLE_BOOKS).mock(
                 return_value=httpx.Response(200, json=self._volume())
             )
-            result = await lookup_volume(
-                self.VOLUME_ID, "key", plan=without_google
-            )
+            result = await lookup_volume(self.VOLUME_ID, "key", plan=without_google)
 
         assert result.outcome is metadata.Outcome.NO_SOURCES
         assert route.call_count == 0
 
     async def test_a_volume_google_does_not_have_is_not_found(self):
         with respx.mock(assert_all_called=False) as mock:
-            mock.get(f"{GOOGLE_BOOKS}/{self.VOLUME_ID}").mock(
-                return_value=httpx.Response(404)
-            )
+            mock.get(f"{GOOGLE_BOOKS}/{self.VOLUME_ID}").mock(return_value=httpx.Response(404))
             result = await lookup_volume(self.VOLUME_ID, "key")
 
         assert result.outcome is metadata.Outcome.NOT_FOUND
 
     async def test_a_rate_limit_is_reported_as_one(self):
         with respx.mock(assert_all_called=False) as mock:
-            mock.get(f"{GOOGLE_BOOKS}/{self.VOLUME_ID}").mock(
-                return_value=httpx.Response(429)
-            )
+            mock.get(f"{GOOGLE_BOOKS}/{self.VOLUME_ID}").mock(return_value=httpx.Response(429))
             result = await lookup_volume(self.VOLUME_ID, "key")
 
         assert result.outcome is metadata.Outcome.RATE_LIMITED
 
     async def test_an_outage_is_reported_as_one(self):
         with respx.mock(assert_all_called=False) as mock:
-            mock.get(f"{GOOGLE_BOOKS}/{self.VOLUME_ID}").mock(
-                return_value=httpx.Response(503)
-            )
+            mock.get(f"{GOOGLE_BOOKS}/{self.VOLUME_ID}").mock(return_value=httpx.Response(503))
             result = await lookup_volume(self.VOLUME_ID, "key")
 
         assert result.outcome is metadata.Outcome.UNAVAILABLE
@@ -9943,9 +9312,7 @@ class TestLookupVolume:
         "unavailable" here exactly as it does on the ISBN path.
         """
         with respx.mock(assert_all_called=False) as mock:
-            mock.get(f"{GOOGLE_BOOKS}/{self.VOLUME_ID}").mock(
-                side_effect=httpx.ConnectError("no route")
-            )
+            mock.get(f"{GOOGLE_BOOKS}/{self.VOLUME_ID}").mock(side_effect=httpx.ConnectError("no route"))
             result = await lookup_volume(self.VOLUME_ID, "key")
 
         assert result.outcome is metadata.Outcome.UNAVAILABLE
@@ -9959,9 +9326,7 @@ class TestLookupVolume:
         """
         body = b'{"a":' * 100_000 + b"1" + b"}" * 100_000
         with respx.mock(assert_all_called=False) as mock:
-            mock.get(f"{GOOGLE_BOOKS}/{self.VOLUME_ID}").mock(
-                return_value=httpx.Response(200, content=body)
-            )
+            mock.get(f"{GOOGLE_BOOKS}/{self.VOLUME_ID}").mock(return_value=httpx.Response(200, content=body))
             result = await lookup_volume(self.VOLUME_ID, "key")
 
         assert result.outcome is metadata.Outcome.UNAVAILABLE
@@ -9982,9 +9347,7 @@ class TestLookupVolume:
             )
         )
         with respx.mock(assert_all_called=False) as mock:
-            mock.get(url__startswith=GOOGLE_BOOKS).mock(
-                return_value=httpx.Response(200, content=body)
-            )
+            mock.get(url__startswith=GOOGLE_BOOKS).mock(return_value=httpx.Response(200, content=body))
             assert await search("dune", "key", limit=1, plan=google_only) == []
 
     async def test_a_value_that_is_not_a_volume_id_is_never_requested(self):

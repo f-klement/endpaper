@@ -170,9 +170,7 @@ class TitleQuery(StrEnum):
 #: parameter names case insensitively sees two `recordSchema` values and picks
 #: one, and which one it picks is its business rather than ours. Found by
 #: attacking the check rather than reading it.
-_RESERVED_SRU_PARAMETERS: Final = frozenset(
-    {"version", "operation", "maximumrecords", "recordschema"}
-)
+_RESERVED_SRU_PARAMETERS: Final = frozenset({"version", "operation", "maximumrecords", "recordschema"})
 
 #: The sources that may waive the ISBN identity check, which is one.
 #:
@@ -590,9 +588,7 @@ class Target:
 
     def __post_init__(self) -> None:
         if self.transport is Transport.Z3950:
-            raise ValueError(
-                f"{self.source}: no Z39.50 door yet, the transport dispatch is #129"
-            )
+            raise ValueError(f"{self.source}: no Z39.50 door yet, the transport dispatch is #129")
         if not isinstance(self.reader, Reader):
             # **A `StrEnum` member hashes as its own value, so a bare string is
             # a key of a reader table exactly where its member is, and is not
@@ -626,8 +622,7 @@ class Target:
             # declares a capability, so a row naming this reader and answering
             # nothing would otherwise construct and sit in the roster.
             raise ValueError(
-                f"{self.source}: {self.reader} belongs to the import family, "
-                "which no catalogue row may name"
+                f"{self.source}: {self.reader} belongs to the import family, which no catalogue row may name"
             )
         if self.transport is Transport.SRU:
             self._check_sru()
@@ -635,22 +630,15 @@ class Target:
             self._check_no_sru()
         if self.reader not in MARC_READERS:
             self._check_no_marc_knobs()
-        if (
-            not self.requires_isbn_claim
-            and self.source not in _MAY_WAIVE_THE_ISBN_CLAIM
-        ):
-            raise ValueError(
-                f"{self.source}: only the DNB may waive the ISBN identity check"
-            )
+        if not self.requires_isbn_claim and self.source not in _MAY_WAIVE_THE_ISBN_CLAIM:
+            raise ValueError(f"{self.source}: only the DNB may waive the ISBN identity check")
         if self.shipped_credential is not None and not self.needs_key:
             # A default on a row that authenticates nothing is a credential
             # published for no reason, and it would put the source in
             # `credentials`' ladder while `sources.NEEDS_A_KEY` says the source
             # asks for nothing. Refused at construction rather than ignored,
             # which is the rule the bespoke fields above already follow.
-            raise ValueError(
-                f"{self.source}: a shipped login on a row that needs no credential"
-            )
+            raise ValueError(f"{self.source}: a shipped login on a row that needs no credential")
         self._check_secret()
 
     def _check_secret(self) -> None:
@@ -682,27 +670,19 @@ class Target:
             # `fetch` bound to the origin it was sealed for, so a secret on an
             # SRU row is a value nothing would ever read.
             if not self.needs_key:
-                raise ValueError(
-                    f"{self.source}: names {self.secret} on a row that needs no credential"
-                )
+                raise ValueError(f"{self.source}: names {self.secret} on a row that needs no credential")
             if self.transport is Transport.SRU:
-                raise ValueError(
-                    f"{self.source}: an SRU row's login is sealed, not an adapter argument"
-                )
+                raise ValueError(f"{self.source}: an SRU row's login is sealed, not an adapter argument")
 
     def _check_sru(self) -> None:
         if not self.sru_version or not self.query_parameter:
-            raise ValueError(
-                f"{self.source}: an SRU target needs a version and a parameter"
-            )
+            raise ValueError(f"{self.source}: an SRU target needs a version and a parameter")
         # **The query goes in a dict beside four fixed keys**, so a parameter
         # named like one of them replaces it and no query is sent at all. A
         # critic measured `query_parameter="version"` constructing cleanly and
         # `sru_params` returning a request whose SRU version was the CQL query.
         if self.query_parameter.lower() in _RESERVED_SRU_PARAMETERS:
-            raise ValueError(
-                f"{self.source}: {self.query_parameter!r} is an SRU parameter already"
-            )
+            raise ValueError(f"{self.source}: {self.query_parameter!r} is an SRU parameter already")
         if self.query_language is None:
             raise ValueError(f"{self.source}: an SRU target needs a query language")
         if self.answers_lookup:
@@ -711,19 +691,14 @@ class Target:
             if self.query_language is QueryLanguage.CQL:
                 if not _INDEX.fullmatch(self.isbn_index):
                     raise ValueError(f"{self.source}: not an index name: {self.isbn_index!r}")
-            elif (
-                type(self.isbn_attribute) is not int
-                or self.isbn_attribute not in _USE_ATTRIBUTES
-            ):
+            elif type(self.isbn_attribute) is not int or self.isbn_attribute not in _USE_ATTRIBUTES:
                 # **`type(...) is not int` and not `isinstance`, and not
                 # membership alone.** `7.0 in {7}` is True, because a float
                 # compares equal to an integer, so membership admitted a value
                 # `z3950.query` then refuses at request time with `BadQuery`.
                 # That is the same rule enforced in two places and disagreeing:
                 # one arm built a row the other would not send.
-                raise ValueError(
-                    f"{self.source}: not a PQF use attribute: {self.isbn_attribute!r}"
-                )
+                raise ValueError(f"{self.source}: not a PQF use attribute: {self.isbn_attribute!r}")
         if self.answers_search:
             if self.query_language is not QueryLanguage.CQL:
                 raise ValueError(f"{self.source}: only a CQL target can answer a search")
@@ -1298,6 +1273,4 @@ def origin(base_url: str) -> str:
 #: widen the browser policy to pay for a fetch policy.
 #:
 #: Derived from `SEEDED` rather than written out, so it cannot drift.
-SEEDED_ORIGINS: Final[frozenset[str]] = frozenset(
-    origin(target.base_url) for target in SEEDED.values()
-)
+SEEDED_ORIGINS: Final[frozenset[str]] = frozenset(origin(target.base_url) for target in SEEDED.values())

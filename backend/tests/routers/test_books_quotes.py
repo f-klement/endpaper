@@ -127,9 +127,7 @@ class TestRefusingBadInput:
     def test_a_quote_id_past_what_sqlite_stores(self, client, admin, make_book):
         """`RowId` bounds the path segment, for the same reason."""
         book = make_book(admin["headers"])
-        res = client.delete(
-            f"/api/books/{book['id']}/quotes/{2**63}", headers=admin["headers"]
-        )
+        res = client.delete(f"/api/books/{book['id']}/quotes/{2**63}", headers=admin["headers"])
         assert res.status_code == 422
 
 
@@ -159,9 +157,7 @@ class TestListingOneBook:
             "unpaged",
         ]
 
-    def test_two_quotes_on_one_page_keep_the_order_they_were_added(
-        self, client, admin, make_book
-    ):
+    def test_two_quotes_on_one_page_keep_the_order_they_were_added(self, client, admin, make_book):
         book = make_book(admin["headers"])
         add(client, admin["headers"], book["id"], text="first", page=7)
         add(client, admin["headers"], book["id"], text="second", page=7)
@@ -171,17 +167,13 @@ class TestListingOneBook:
             "second",
         ]
 
-    def test_a_member_sees_another_members_quote_on_a_shared_book(
-        self, client, admin, member, make_book
-    ):
+    def test_a_member_sees_another_members_quote_on_a_shared_book(self, client, admin, member, make_book):
         """The shelf is shared, so a passage copied out of a book on it is the
         library's to read. Same rule as notes, deliberately."""
         book = make_book(admin["headers"])
         add(client, admin["headers"], book["id"], text="Mine")
 
-        assert [q["text"] for q in listing(client, member["headers"], book["id"]).json()] == [
-            "Mine"
-        ]
+        assert [q["text"] for q in listing(client, member["headers"], book["id"]).json()] == ["Mine"]
 
     def test_requires_authentication(self, client, admin, make_book):
         book = make_book(admin["headers"])
@@ -189,18 +181,14 @@ class TestListingOneBook:
 
 
 class TestPrivacy:
-    def test_the_quotes_on_someone_elses_private_book_are_404(
-        self, client, admin, member, make_book
-    ):
+    def test_the_quotes_on_someone_elses_private_book_are_404(self, client, admin, member, make_book):
         """404 rather than 403, because a 403 confirms the book exists."""
         private = make_book(member["headers"], title="Secret", is_private=True)
         add(client, member["headers"], private["id"], text="Hidden")
 
         assert listing(client, admin["headers"], private["id"]).status_code == 404
 
-    def test_a_quote_cannot_be_added_to_someone_elses_private_book(
-        self, client, admin, member, make_book
-    ):
+    def test_a_quote_cannot_be_added_to_someone_elses_private_book(self, client, admin, member, make_book):
         private = make_book(member["headers"], is_private=True)
         assert add(client, admin["headers"], private["id"]).status_code == 404
 
@@ -253,9 +241,7 @@ class TestEditing:
         book = make_book(member["headers"])
         quote = add(client, member["headers"], book["id"]).json()
 
-        res = client.delete(
-            f"/api/books/{book['id']}/quotes/{quote['id']}", headers=admin["headers"]
-        )
+        res = client.delete(f"/api/books/{book['id']}/quotes/{quote['id']}", headers=admin["headers"])
 
         assert res.status_code == 204
 
@@ -263,9 +249,7 @@ class TestEditing:
         book = make_book(member["headers"])
         quote = add(client, member["headers"], book["id"]).json()
 
-        res = client.delete(
-            f"/api/books/{book['id']}/quotes/{quote['id']}", headers=member["headers"]
-        )
+        res = client.delete(f"/api/books/{book['id']}/quotes/{quote['id']}", headers=member["headers"])
 
         assert res.status_code == 204
         assert listing(client, member["headers"], book["id"]).json() == []
@@ -340,9 +324,7 @@ class TestTheCrossBookListing:
 
         assert row["author"]["username"] == "member"
 
-    def test_it_omits_a_quote_on_someone_elses_private_book(
-        self, client, admin, member, make_book
-    ):
+    def test_it_omits_a_quote_on_someone_elses_private_book(self, client, admin, member, make_book):
         """Without `visible_to` this prints the private book's title and cover
         beside the passage, in one 200, to anybody signed in."""
         private = make_book(member["headers"], title="Secret", is_private=True)
@@ -353,9 +335,7 @@ class TestTheCrossBookListing:
         assert body["items"] == []
         assert body["total"] == 0
 
-    def test_the_owner_of_a_private_book_still_sees_their_own(
-        self, client, member, make_book
-    ):
+    def test_the_owner_of_a_private_book_still_sees_their_own(self, client, member, make_book):
         private = make_book(member["headers"], is_private=True)
         add(client, member["headers"], private["id"], text="Hidden")
 
@@ -386,9 +366,7 @@ class TestTheCrossBookListing:
         assert (len(body["items"]), body["total"], body["page"]) == (1, 3, 2)
 
     def test_the_page_size_is_capped(self, client, admin):
-        res = client.get(
-            "/api/books/quotes", params={"page_size": 10_000}, headers=admin["headers"]
-        )
+        res = client.get("/api/books/quotes", params={"page_size": 10_000}, headers=admin["headers"])
         assert res.status_code == 422
 
     def test_the_page_number_is_capped(self, client, admin):
@@ -448,8 +426,6 @@ class TestQuotesAndTheBookTheyCameFrom:
         book = make_book(admin["headers"], title="Dune")
         add(client, admin["headers"], book["id"], page=214)
 
-        copy = client.post(
-            f"/api/books/{book['id']}/copies", json={}, headers=admin["headers"]
-        ).json()
+        copy = client.post(f"/api/books/{book['id']}/copies", json={}, headers=admin["headers"]).json()
 
         assert listing(client, admin["headers"], copy["id"]).json() == []

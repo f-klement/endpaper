@@ -47,8 +47,7 @@ router = APIRouter(prefix="/api/opds", tags=["opds"])
 
 #: The 409 for a sync Postgres aborted to break a deadlock.
 _MET_ANOTHER_CHANGE = (
-    "Another change to the same books met this sync, and nothing was imported. "
-    "Sync the server again."
+    "Another change to the same books met this sync, and nothing was imported. Sync the server again."
 )
 
 
@@ -81,10 +80,7 @@ def _listed(db: Session) -> list[OpdsServerOut]:
     # `credentials.KeyState`, which exists because `_supplied` reads the
     # keychain and runs a BIP-39 decode on every call.
     state = credentials.key_state()
-    return [
-        _out(db, row, state)
-        for row in db.query(OpdsServer).order_by(OpdsServer.id).all()
-    ]
+    return [_out(db, row, state) for row in db.query(OpdsServer).order_by(OpdsServer.id).all()]
 
 
 def _checked_address(base_url: str) -> str:
@@ -266,9 +262,7 @@ def set_server_credential(
     """
     row = _server(db, server_id)
     try:
-        credentials.put(
-            db, row.credential_key, row.base_url, payload.username, payload.password
-        )
+        credentials.put(db, row.credential_key, row.base_url, payload.username, payload.password)
     except credentials.KeyConfigurationError as refusal:
         raise HTTPException(status_code=409, detail=str(refusal)) from None
     except credentials.NoKeyConfigured as refusal:

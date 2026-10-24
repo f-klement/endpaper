@@ -172,6 +172,7 @@ class _Budget:
         self.left -= 1
         return True
 
+
 #: Characters that separate the people in a credit line.
 #:
 #: Only the comma. `&` and `and` are deliberately not separators: "Simon and
@@ -385,9 +386,7 @@ def build_index(
     chosen = {author_key(canonical): canonical for canonical in resolved.values()}
 
     book_ids: defaultdict[str, set[int]] = defaultdict(set)
-    counts: defaultdict[str, defaultdict[str, int]] = defaultdict(
-        lambda: defaultdict(int)
-    )
+    counts: defaultdict[str, defaultdict[str, int]] = defaultdict(lambda: defaultdict(int))
     folded: defaultdict[str, set[str]] = defaultdict(set)
 
     for book_id, credit in rows:
@@ -429,6 +428,7 @@ def build_index(
 # row and nothing else, and deleting that row puts the shelf back exactly as it
 # was. Reversibility is what buys the licence to guess here, and it is why the
 # same licence is *not* taken by `author_key`, which folds with nobody asked.
+
 
 class SuggestionReason(StrEnum):
     """Which rule offered a group, so a person can tell a certainty from a guess.
@@ -698,11 +698,7 @@ def _edges_on_identity(
         # sure of.
         if len(values) == 1:
             buckets[next(iter(values))].append(key)
-    return [
-        (keys[0], other, SuggestionReason.IDENTITY)
-        for keys in buckets.values()
-        for other in keys[1:]
-    ]
+    return [(keys[0], other, SuggestionReason.IDENTITY) for keys in buckets.values() for other in keys[1:]]
 
 
 def _edges_on_squashed_key(
@@ -719,11 +715,7 @@ def _edges_on_squashed_key(
     buckets: defaultdict[str, list[str]] = defaultdict(list)
     for key, entry in by_key.items():
         buckets[squashed_key(entry.name)].append(key)
-    return [
-        (keys[0], other, SuggestionReason.SPELLING)
-        for keys in buckets.values()
-        for other in keys[1:]
-    ]
+    return [(keys[0], other, SuggestionReason.SPELLING) for keys in buckets.values() for other in keys[1:]]
 
 
 def _edges_on_initials(
@@ -801,9 +793,7 @@ def _edges_on_fragments(
     least productive of the three, because a bucket of names sharing one word
     yields no fragment edge at all: the subset test fails on every pair of it.
     """
-    words = {
-        key: frozenset(author_key(entry.name).split()) for key, entry in by_key.items()
-    }
+    words = {key: frozenset(author_key(entry.name).split()) for key, entry in by_key.items()}
     buckets: defaultdict[str, list[str]] = defaultdict(list)
     for key, tokens in words.items():
         for token in tokens:
@@ -824,9 +814,7 @@ def _edges_on_fragments(
                 # comparison costs one subset test and a duplicate edge, and
                 # the union below is idempotent.
                 left, right = words[key], words[other]
-                shorter, longer = (
-                    (left, right) if len(left) < len(right) else (right, left)
-                )
+                shorter, longer = (left, right) if len(left) < len(right) else (right, left)
                 if len(shorter) >= 2 and shorter < longer:
                     edges.append((key, other, SuggestionReason.FRAGMENT))
     return edges
@@ -897,9 +885,7 @@ _RULES: Mapping[SuggestionReason, _RuleSpec] = {
 #: from somebody who can see what it proposed is not this matcher's job.
 EXACT_MATCHER = Matcher(
     name=MatcherName.EXACT,
-    rules=frozenset(
-        reason for reason, rule in _RULES.items() if not rule.spends_budget
-    ),
+    rules=frozenset(reason for reason, rule in _RULES.items() if not rule.spends_budget),
 )
 
 #: Every matcher a caller may name, so the API and the rules have one home each.

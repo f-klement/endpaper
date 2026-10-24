@@ -187,16 +187,12 @@ def _user_from_token(token: str, db: Session, *, scope: str | None = None) -> Us
     from accounts import session_is_live
 
     issued_at = payload.get("iat")
-    if not session_is_live(
-        db, user, issued_at if isinstance(issued_at, int | float) else None
-    ):
+    if not session_is_live(db, user, issued_at if isinstance(issued_at, int | float) else None):
         return None
     return user
 
 
-def _switch_session(
-    token: str | None, db: Session, *, scope: str | None = None
-) -> User | None:
+def _switch_session(token: str | None, db: Session, *, scope: str | None = None) -> User | None:
     """The test account a switch token names, or None if it names anything else.
 
     Only consulted under proxy auth, where the upstream owns identity and the
@@ -250,9 +246,7 @@ def get_current_user_for_cover(
         # every cover it may see and the proxy identity may not used to be.
         switched = _switch_session(token, db)
         if switched is None:
-            switched = _switch_session(
-                request.cookies.get(COVER_COOKIE_NAME), db, scope=COVER_SCOPE
-            )
+            switched = _switch_session(request.cookies.get(COVER_COOKIE_NAME), db, scope=COVER_SCOPE)
         if switched is not None:
             return switched
 

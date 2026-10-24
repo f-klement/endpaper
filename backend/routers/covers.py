@@ -168,9 +168,7 @@ _MULTIPART_BYTERANGES: Final = "multipart/byteranges"
 #: body, and an `If-None-Match` echoing the etag this route has just sent
 #: answers 200 with the whole file. Declaring an answer the framework cannot
 #: send is the same defect as not declaring one it can.
-_DECLARED_PARTIAL_CONTENT: Final[dict[str, dict[str, Any]]] = _DECLARED_CONTENT | {
-    _MULTIPART_BYTERANGES: {}
-}
+_DECLARED_PARTIAL_CONTENT: Final[dict[str, dict[str, Any]]] = _DECLARED_CONTENT | {_MULTIPART_BYTERANGES: {}}
 
 
 def _not_found() -> HTTPException:

@@ -56,6 +56,11 @@ from models import (
 # other rule scans. See its docstring for why the exclusion lives there.
 from tests.corpus import application_sources
 
+TREE_GUARDS = {
+    "TestAHighlightReadIsNarrowedToItsReader": ("application_sources",),
+    "TestANoteReadIsNarrowedToItsReader": ("application_sources",),
+}
+
 BACKEND = Path(__file__).resolve().parent.parent
 
 
@@ -114,9 +119,7 @@ class TestIsSwitchTarget:
         return account
 
     def test_an_admin_created_test_account_is_one(self, db):
-        account = self._stored(
-            db, username="tester", password_hash="x", is_test_account=True
-        )
+        account = self._stored(db, username="tester", password_hash="x", is_test_account=True)
         assert is_switch_target(account) is True
 
     def test_nobody_is_not(self):
@@ -142,9 +145,7 @@ class TestIsSwitchTarget:
 
     def test_a_test_account_with_no_password_is_not(self, db):
         """There would be nothing to check, which is the whole guarantee."""
-        account = self._stored(
-            db, username="tester", password_hash=None, is_test_account=True
-        )
+        account = self._stored(db, username="tester", password_hash=None, is_test_account=True)
         assert is_switch_target(account) is False
 
     def test_an_admin_is_not_even_when_flagged(self, db):
@@ -187,9 +188,7 @@ class TestIsSwitchTarget:
             self._stored(db, **fields)
 
         by_query = {user.username for user in db.query(User).filter(switch_targets())}
-        in_python = {
-            user.username for user in db.query(User) if is_switch_target(user)
-        }
+        in_python = {user.username for user in db.query(User) if is_switch_target(user)}
 
         assert by_query == in_python == {"target"}
 
@@ -358,8 +357,7 @@ class TestQuote:
         # The same trap `backup.py` and `conftest.py` both document for
         # `insert` and `delete`.
         shapes = {
-            tuple(column.name for column in index.columns)
-            for index in Base.metadata.tables["quotes"].indexes
+            tuple(column.name for column in index.columns) for index in Base.metadata.tables["quotes"].indexes
         }
         assert ("book_id", "page") in shapes, shapes
         assert ("book_id",) not in shapes, shapes
@@ -457,9 +455,7 @@ class TestCollection:
     def test_a_book_starts_unfiled(self, db, book):
         assert book.collection_id is None
 
-    def test_deleting_a_collection_unfiles_its_books_rather_than_deleting_them(
-        self, db, book
-    ):
+    def test_deleting_a_collection_unfiles_its_books_rather_than_deleting_them(self, db, book):
         """A shelf label is not the books on it. This is the ORM path, which is
         the one the handler takes; the test below is the database's own rule."""
         shelf = Collection(name="Ebooks")
@@ -666,9 +662,7 @@ class TestRelationships:
         borrower = User(username="borrower", password_hash="x")
         db.add_all([lender, borrower])
         db.commit()
-        loan = Loan(
-            book_id=book.id, loaned_by_user_id=lender.id, loaned_to_user_id=borrower.id
-        )
+        loan = Loan(book_id=book.id, loaned_by_user_id=lender.id, loaned_to_user_id=borrower.id)
         db.add(loan)
         db.commit()
         assert loan.loaned_by.username == "lender"
@@ -708,9 +702,7 @@ class TestTheBorrowerRule:
         assert db.query(Loan).count() == 1
 
     def test_a_named_borrower_is_accepted(self, db, book, user):
-        db.add(
-            Loan(book_id=book.id, loaned_to_name="the neighbour", loaned_by_user_id=user.id)
-        )
+        db.add(Loan(book_id=book.id, loaned_to_name="the neighbour", loaned_by_user_id=user.id))
         db.commit()
         assert db.query(Loan).one().loaned_to is None
 
@@ -951,8 +943,7 @@ class TestTheBorrowerRuleHasOneSpelling:
         """
         connection = sqlite3.connect(":memory:")
         connection.execute(
-            "CREATE TABLE probe (loaned_to_user_id INTEGER, loaned_to_name TEXT, "
-            f"CHECK ({ONE_BORROWER_SQL}))"
+            f"CREATE TABLE probe (loaned_to_user_id INTEGER, loaned_to_name TEXT, CHECK ({ONE_BORROWER_SQL}))"
         )
 
         def accepted(user_id: int | None, name: str | None) -> bool:
@@ -990,9 +981,7 @@ class TestTheBorrowerRuleHasOneSpelling:
         assert any(not accepted(None, name) for name in names if name is not None)
         assert {"\x00", "\t", " ", "\xa0"} <= names
 
-    def test_a_borrower_of_one_tab_is_stored_and_nothing_here_refuses_it(
-        self, db, book, user
-    ):
+    def test_a_borrower_of_one_tab_is_stored_and_nothing_here_refuses_it(self, db, book, user):
         """The gap both spellings now agree on, pinned rather than left open.
 
         `trim()` strips the space character alone, so a name of one tab is a
@@ -1038,8 +1027,7 @@ class TestTheBorrowerRuleHasOneSpelling:
         checks = [
             constraint
             for constraint in table.constraints
-            if isinstance(constraint, CheckConstraint)
-            and constraint.name == "ck_loans_one_borrower"
+            if isinstance(constraint, CheckConstraint) and constraint.name == "ck_loans_one_borrower"
         ]
         assert [str(check.sqltext) for check in checks] == [ONE_BORROWER_SQL]
 
@@ -1066,9 +1054,7 @@ class TestTheBorrowerRuleHasOneSpelling:
         breaks the constraint was written with.
         """
         wanted = " ".join(ONE_BORROWER_SQL.split())
-        stored = db.execute(
-            text("SELECT sql FROM sqlite_master WHERE name = 'loans'")
-        ).scalar()
+        stored = db.execute(text("SELECT sql FROM sqlite_master WHERE name = 'loans'")).scalar()
         collapsed = " ".join((stored or "").split())
         assert "ck_loans_one_borrower" in collapsed, collapsed
         assert wanted in collapsed, (
@@ -1126,7 +1112,6 @@ class TestCoversAreStoredOverHttps:
         book.cover_url = "//evil.invalid/x.jpg"
         db.commit()
         assert book.cover_url is None
-
 
 
 class TestTheAuthorityIdentifierConstraints:
@@ -1283,9 +1268,8 @@ class TestTheAuthorityIdentifierConstraints:
         # index, where it names a CHECK by its own name. Matching on the pair is
         # therefore the strongest form available here, and it is still specific:
         # a foreign key or a NOT NULL firing instead would not print it.
-        assert (
-            "UNIQUE constraint failed: author_identifiers.author_key, "
-            "author_identifiers.scheme" in str(refusal.value)
+        assert "UNIQUE constraint failed: author_identifiers.author_key, author_identifiers.scheme" in str(
+            refusal.value
         )
 
     def test_two_spellings_may_share_one_identifier(self, db):
@@ -1323,8 +1307,7 @@ class TestTheShelfKeyFitsItsColumn:
 
     def test_the_widest_key_the_number_column_can_produce_still_fits(self):
         widest = max(
-            len(filing.rule_for(scheme).sort_key(self._worst_number()))
-            for scheme in ClassificationScheme
+            len(filing.rule_for(scheme).sort_key(self._worst_number())) for scheme in ClassificationScheme
         )
 
         assert widest == CLASSIFICATION_SORT_KEY_MAX
@@ -1351,11 +1334,7 @@ class TestAnOpdsServerNeverBorrowsACatalogueLogin:
     """
 
     def test_no_catalogue_source_is_spelled_with_the_opds_prefix(self):
-        assert not [
-            source
-            for source in CatalogueSource
-            if source.value.startswith(OPDS_CREDENTIAL_PREFIX)
-        ]
+        assert not [source for source in CatalogueSource if source.value.startswith(OPDS_CREDENTIAL_PREFIX)]
 
     def test_a_generated_key_carries_the_prefix_and_is_a_safe_source(self):
         """Safe in `credentials.is_safe_source`'s sense, because this value
@@ -1428,17 +1407,14 @@ class TestAnOpdsServerNeverBorrowsACatalogueLogin:
                 )
             )
 
-    @pytest.mark.parametrize(
-        "address", ["file:///etc/passwd", "gopher://h/opds", "http://", ""]
-    )
+    @pytest.mark.parametrize("address", ["file:///etc/passwd", "gopher://h/opds", "http://", ""])
     def test_the_address_column_refuses_a_scheme_no_sync_would_fetch(self, db, address):
         """The last line for a write that never came through the route, which is
         what a restore is."""
         with pytest.raises(IntegrityError):
             db.execute(
                 text(
-                    "INSERT INTO opds_servers (name, base_url, credential_key) "
-                    "VALUES ('x', :url, 'opds-abc')"
+                    "INSERT INTO opds_servers (name, base_url, credential_key) VALUES ('x', :url, 'opds-abc')"
                 ),
                 {"url": address},
             )
@@ -1527,18 +1503,14 @@ def _own_body(function: ast.FunctionDef | ast.AsyncFunctionDef) -> list[ast.AST]
         if isinstance(inner, ast.FunctionDef | ast.AsyncFunctionDef)
     }
     skip = {node for outer in nested for node in ast.walk(outer)}
-    annotations = [
-        node.annotation for node in ast.walk(function.args) if isinstance(node, ast.arg)
-    ]
+    annotations = [node.annotation for node in ast.walk(function.args) if isinstance(node, ast.arg)]
     for annotation in [function.returns, *annotations]:
         if annotation is not None:
             skip |= set(ast.walk(annotation))
     return [node for node in ast.walk(function) if node not in skip and node is not function]
 
 
-def _reads_and_returns_a_note(
-    function: ast.FunctionDef | ast.AsyncFunctionDef, aliases: set[str]
-) -> bool:
+def _reads_and_returns_a_note(function: ast.FunctionDef | ast.AsyncFunctionDef, aliases: set[str]) -> bool:
     """Whether this function **reaches for** an existing note and **returns**
     one.
 
@@ -1562,18 +1534,13 @@ def _reads_and_returns_a_note(
     annotation = function.returns
     if annotation is None:
         return False
-    if not any(
-        isinstance(node, ast.Name) and node.id in aliases for node in ast.walk(annotation)
-    ):
+    if not any(isinstance(node, ast.Name) and node.id in aliases for node in ast.walk(annotation)):
         return False
     body = _own_body(function)
     constructed = {
         node.func for node in body if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
     }
-    return any(
-        isinstance(node, ast.Name) and node.id in aliases and node not in constructed
-        for node in body
-    )
+    return any(isinstance(node, ast.Name) and node.id in aliases and node not in constructed for node in body)
 
 
 def _narrows_to_its_reader(
@@ -1594,10 +1561,7 @@ def _narrows_to_its_reader(
     home: a second accepted way to say it is a second place for it to be said
     wrongly.
     """
-    return any(
-        isinstance(node, ast.Name) and node.id == predicate
-        for node in _own_body(function)
-    )
+    return any(isinstance(node, ast.Name) and node.id == predicate for node in _own_body(function))
 
 
 class TestAHighlightReadIsNarrowedToItsReader:
@@ -1616,9 +1580,9 @@ class TestAHighlightReadIsNarrowedToItsReader:
             tree = ast.parse(source)
             aliases = _note_aliases(tree, "Highlight")
             for node in ast.walk(tree):
-                if isinstance(
-                    node, ast.FunctionDef | ast.AsyncFunctionDef
-                ) and _reads_and_returns_a_note(node, aliases):
+                if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) and _reads_and_returns_a_note(
+                    node, aliases
+                ):
                     found[f"{name}:{node.name}"] = _narrows_to_its_reader(
                         node, aliases, "highlight_visible_to"
                     )
@@ -1737,9 +1701,7 @@ class TestANoteReadIsNarrowedToItsReader:
         )
         tree = ast.parse(source)
         aliases = _note_aliases(tree)
-        function = next(
-            node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)
-        )
+        function = next(node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef))
         assert _reads_and_returns_a_note(function, aliases)
         assert not _narrows_to_its_reader(function, aliases)
 
@@ -1750,9 +1712,7 @@ class TestANoteReadIsNarrowedToItsReader:
             "    return db.query(N).filter(N.book_id == 1).all()\n"
         )
         tree = ast.parse(source)
-        function = next(
-            node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)
-        )
+        function = next(node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef))
         assert _reads_and_returns_a_note(function, _note_aliases(tree))
 
     def test_a_function_that_moves_notes_without_returning_them_is_not_in_it(self):
@@ -1765,9 +1725,7 @@ class TestANoteReadIsNarrowedToItsReader:
             "        note.book_id = 1\n"
         )
         tree = ast.parse(source)
-        function = next(
-            node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)
-        )
+        function = next(node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef))
         assert not _reads_and_returns_a_note(function, _note_aliases(tree))
 
     def test_a_primary_key_fetch_is_in_the_population(self):
@@ -1780,9 +1738,7 @@ class TestANoteReadIsNarrowedToItsReader:
             "    return db.get(Note, note_id)\n"
         )
         tree = ast.parse(source)
-        function = next(
-            node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)
-        )
+        function = next(node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef))
         assert _reads_and_returns_a_note(function, _note_aliases(tree))
         assert not _narrows_to_its_reader(function, _note_aliases(tree))
 
@@ -1799,9 +1755,7 @@ class TestANoteReadIsNarrowedToItsReader:
             "    return read_back(db, note.id)\n"
         )
         tree = ast.parse(source)
-        function = next(
-            node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)
-        )
+        function = next(node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef))
         assert not _reads_and_returns_a_note(function, _note_aliases(tree))
 
     def test_a_bare_mention_of_the_author_column_is_not_a_narrowing(self):
@@ -1816,24 +1770,16 @@ class TestANoteReadIsNarrowedToItsReader:
             ".order_by(Note.user_id).all()\n"
         )
         tree = ast.parse(source)
-        function = next(
-            node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)
-        )
+        function = next(node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef))
         assert _reads_and_returns_a_note(function, _note_aliases(tree))
         assert not _narrows_to_its_reader(function, _note_aliases(tree))
 
     def test_an_annotation_alone_does_not_satisfy_the_population_rule(self):
         """What `_own_body` dropping the annotations buys. A function whose only
         `Note` is its own return type reaches for nothing."""
-        source = (
-            "from models import Note\n"
-            "def nothing(db) -> list[Note]:\n"
-            "    return []\n"
-        )
+        source = "from models import Note\ndef nothing(db) -> list[Note]:\n    return []\n"
         tree = ast.parse(source)
-        function = next(
-            node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)
-        )
+        function = next(node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef))
         assert not _reads_and_returns_a_note(function, _note_aliases(tree))
 
     @pytest.mark.parametrize(
@@ -1846,22 +1792,14 @@ class TestANoteReadIsNarrowedToItsReader:
             "**kw: Note",
         ],
     )
-    def test_an_argument_annotation_is_not_a_body_mention_however_it_is_spelled(
-        self, signature
-    ):
+    def test_an_argument_annotation_is_not_a_body_mention_however_it_is_spelled(self, signature):
         """An `ast.arguments` node holds annotations in five buckets, and a rule
         naming one of them decides the same function differently depending on
         how its arguments were written. Nothing in this class read an argument
         at all until this arm."""
-        source = (
-            "from models import Note\n"
-            f"def pass_through({signature}) -> Note:\n"
-            "    return note\n"
-        )
+        source = f"from models import Note\ndef pass_through({signature}) -> Note:\n    return note\n"
         tree = ast.parse(source)
-        function = next(
-            node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)
-        )
+        function = next(node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef))
         assert not _reads_and_returns_a_note(function, _note_aliases(tree))
 
     def test_a_nested_helper_does_not_lend_its_predicate_to_its_parent(self):
@@ -1877,9 +1815,7 @@ class TestANoteReadIsNarrowedToItsReader:
         )
         tree = ast.parse(source)
         outer = next(
-            node
-            for node in ast.walk(tree)
-            if isinstance(node, ast.FunctionDef) and node.name == "outer"
+            node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef) and node.name == "outer"
         )
         assert _reads_and_returns_a_note(outer, _note_aliases(tree))
         assert not _narrows_to_its_reader(outer, _note_aliases(tree))
@@ -1975,7 +1911,9 @@ class TestTheColumnRefusesWhatTheSchemaWouldHaveRefused:
 
     def _insert(self, db: Any, book_id: int, **fields: Any) -> None:
         db.execute(
-            Base.metadata.tables["digital_references"].insert().values(
+            Base.metadata.tables["digital_references"]
+            .insert()
+            .values(
                 book_id=book_id,
                 root_label=fields.pop("root_label", "/books"),
                 relative_path=fields.pop("relative_path", "a.epub"),
@@ -2035,9 +1973,7 @@ class TestTheColumnRefusesWhatTheSchemaWouldHaveRefused:
                 relative_path="p",
             )
 
-    def test_the_byte_arm_refuses_nothing_nul_free_the_character_arm_admits(
-        self, db
-    ):
+    def test_the_byte_arm_refuses_nothing_nul_free_the_character_arm_admits(self, db):
         """The other side, without which the test above is satisfied by a
         constraint that refuses everything.
 
@@ -2129,24 +2065,16 @@ class TestADegradingEnumColumnReadsAStrayValue:
         db.expunge_all()
         return book_id
 
-    @pytest.mark.parametrize(
-        "column", ["format", "condition", "lending"]
-    )
-    def test_a_value_outside_the_enum_reads_as_null_rather_than_raising(
-        self, db, column: str
-    ) -> None:
+    @pytest.mark.parametrize("column", ["format", "condition", "lending"])
+    def test_a_value_outside_the_enum_reads_as_null_rather_than_raising(self, db, column: str) -> None:
         book_id = self._poison(db, column, "vinyl")
 
         book = db.get(Book, book_id)
 
         assert getattr(book, column) is None
 
-    @pytest.mark.parametrize(
-        "column", ["format", "condition", "lending"]
-    )
-    def test_it_says_which_value_it_could_not_read(
-        self, db, column: str, caplog
-    ) -> None:
+    @pytest.mark.parametrize("column", ["format", "condition", "lending"])
+    def test_it_says_which_value_it_could_not_read(self, db, column: str, caplog) -> None:
         """The degrade is data loss nobody can see. A restore goes quiet, and
         without this nothing afterwards says which rows changed their reading.
         """
@@ -2174,9 +2102,7 @@ class TestADegradingEnumColumnReadsAStrayValue:
         db.add(book)
         db.commit()
 
-        stored = db.execute(
-            text("SELECT format FROM books WHERE id = :id"), {"id": book.id}
-        ).scalar_one()
+        stored = db.execute(text("SELECT format FROM books WHERE id = :id"), {"id": book.id}).scalar_one()
 
         assert stored == "audiobook"
 
@@ -2187,9 +2113,7 @@ class TestADegradingEnumColumnReadsAStrayValue:
         db.add(Book(title="Paper", format=BookFormat.PAPERBACK))
         db.commit()
 
-        found = db.scalars(
-            select(Book).where(Book.format == BookFormat.AUDIOBOOK)
-        ).all()
+        found = db.scalars(select(Book).where(Book.format == BookFormat.AUDIOBOOK)).all()
 
         assert [book.title for book in found] == ["Sound"]
 
@@ -2321,8 +2245,7 @@ class TestNoConstraintSpellsAnEnumListOutByHand:
             constraint.name: str(constraint.sqltext)
             for table in Base.metadata.tables.values()
             for constraint in table.constraints
-            if isinstance(constraint, CheckConstraint)
-            and isinstance(constraint.name, str)
+            if isinstance(constraint, CheckConstraint) and isinstance(constraint.name, str)
         }
 
     @staticmethod
@@ -2341,9 +2264,7 @@ class TestNoConstraintSpellsAnEnumListOutByHand:
             if not isinstance(node, ast.Call):
                 continue
             func = node.func
-            called = (
-                func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", "")
-            )
+            called = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", "")
             if called != "CheckConstraint":
                 continue
             name = next(
@@ -2368,11 +2289,7 @@ class TestNoConstraintSpellsAnEnumListOutByHand:
     def _lists_an_enum(cls) -> dict[str, str]:
         """The population this rule reads: every named CHECK whose rendered text
         carries a quoted `IN` list, the exemption included."""
-        return {
-            name: text
-            for name, text in cls._rendered().items()
-            if cls._A_QUOTED_IN_LIST.search(text)
-        }
+        return {name: text for name, text in cls._rendered().items() if cls._A_QUOTED_IN_LIST.search(text)}
 
     @classmethod
     def _derived(cls, name: str, sites: dict[str, ast.expr]) -> bool:
@@ -2393,10 +2310,7 @@ class TestNoConstraintSpellsAnEnumListOutByHand:
         person resolves.
         """
         handed = sites.get(name)
-        return (
-            isinstance(handed, ast.Call)
-            and getattr(handed.func, "id", "") in cls._DERIVATIONS
-        )
+        return isinstance(handed, ast.Call) and getattr(handed.func, "id", "") in cls._DERIVATIONS
 
     def test_every_quoted_in_list_is_derived_from_its_enum(self) -> None:
         sites = self._call_sites()
@@ -2409,8 +2323,7 @@ class TestNoConstraintSpellsAnEnumListOutByHand:
         assert wrong == [], (
             "a constraint listing an enum's values by hand says nothing about "
             "the enum it came from, and both copies of it agree with each "
-            "other while the enum moves past them. Call `_enum_check`:\n"
-            + "\n".join(wrong)
+            "other while the enum moves past them. Call `_enum_check`:\n" + "\n".join(wrong)
         )
 
     def test_the_rule_reads_the_population_it_reports_on(self) -> None:

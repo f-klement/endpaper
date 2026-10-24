@@ -33,9 +33,7 @@ class TestAddingACopy:
         assert res.json()["id"] != book["id"]
 
     def test_the_copy_carries_the_same_work(self, client, admin, make_book):
-        book = make_book(
-            admin["headers"], title="Dune", author="Frank Herbert", isbn="9780441013593"
-        )
+        book = make_book(admin["headers"], title="Dune", author="Frank Herbert", isbn="9780441013593")
 
         copy = add_copy(client, admin["headers"], book["id"]).json()
 
@@ -50,16 +48,15 @@ class TestAddingACopy:
         copy = add_copy(client, admin["headers"], book["id"], location="Loft").json()
 
         assert copy["location"] == "Loft"
-        assert client.get(f"/api/books/{book['id']}", headers=admin["headers"]).json()[
-            "location"
-        ] == "Living room"
+        assert (
+            client.get(f"/api/books/{book['id']}", headers=admin["headers"]).json()["location"]
+            == "Living room"
+        )
 
     def test_the_copy_starts_unread(self, client, admin, make_book):
         """Reading is a fact about a person and an object, and this object is new."""
         book = make_book(admin["headers"], title="Dune")
-        client.put(
-            f"/api/books/{book['id']}/status", json={"status": "read"}, headers=admin["headers"]
-        )
+        client.put(f"/api/books/{book['id']}/status", json={"status": "read"}, headers=admin["headers"])
 
         copy = add_copy(client, admin["headers"], book["id"]).json()
 
@@ -67,12 +64,8 @@ class TestAddingACopy:
 
     def test_the_copy_inherits_the_tags(self, client, admin, make_book, db):
         book = make_book(admin["headers"], title="Dune")
-        tag = client.post(
-            "/api/books/tags", json={"name": "Signed"}, headers=admin["headers"]
-        ).json()
-        client.post(
-            f"/api/books/{book['id']}/tags/{tag['id']}", headers=admin["headers"]
-        )
+        tag = client.post("/api/books/tags", json={"name": "Signed"}, headers=admin["headers"]).json()
+        client.post(f"/api/books/{book['id']}/tags/{tag['id']}", headers=admin["headers"])
 
         copy = add_copy(client, admin["headers"], book["id"]).json()
 
@@ -95,10 +88,7 @@ class TestAddingACopy:
         second = add_copy(client, admin["headers"], book["id"]).json()
         third = add_copy(client, admin["headers"], second["id"]).json()
 
-        tokens = {
-            db.get(Book, row_id).copy_group
-            for row_id in (book["id"], second["id"], third["id"])
-        }
+        tokens = {db.get(Book, row_id).copy_group for row_id in (book["id"], second["id"], third["id"])}
         assert len(tokens) == 1
         assert third["copy_count"] == 3
 
@@ -187,9 +177,7 @@ class TestPrivacy:
 
         assert copy["is_private"] is True
 
-    def test_another_member_never_sees_the_private_copy(
-        self, client, admin, member, make_book
-    ):
+    def test_another_member_never_sees_the_private_copy(self, client, admin, member, make_book):
         private = make_book(admin["headers"], title="Diary", is_private=True)
         add_copy(client, admin["headers"], private["id"])
 
@@ -197,9 +185,7 @@ class TestPrivacy:
 
         assert listed["items"] == []
 
-    def test_the_count_shows_only_what_the_caller_may_see(
-        self, client, admin, member, make_book
-    ):
+    def test_the_count_shows_only_what_the_caller_may_see(self, client, admin, member, make_book):
         """A member who makes their own copy private does not thereby announce
         it on everybody else's card."""
         book = make_book(admin["headers"], title="Dune")
@@ -265,9 +251,7 @@ class TestTheIsbnRule:
 
         assert res.json()["detail"]["book_id"] == book["id"]
 
-    def test_rescanning_still_conflicts_once_copies_exist(
-        self, client, admin, make_book
-    ):
+    def test_rescanning_still_conflicts_once_copies_exist(self, client, admin, make_book):
         """A group suspends the index, not the check. Two copies must not become
         three because somebody walked past the shelf again. The 409 names the
         group's lowest id, the original, so the client offers one Book to open."""
@@ -307,7 +291,6 @@ class TestTheIsbnRule:
 
         assert res.status_code == 409
         assert db.get(Book, second["id"]) is not None
-
 
     def test_re_adding_when_every_copy_is_trashed(self, client, admin, make_book, db):
         """Two trashed copies used to answer **500**: one row was purged, the
@@ -349,13 +332,9 @@ class TestTheIsbnRule:
 
         assert res.status_code == 201, res.text
         remaining = db.query(Book).filter(Book.isbn == "9780441013593").all()
-        assert [(row.id, row.copy_group) for row in remaining] == [
-            (res.json()["id"], None)
-        ]
+        assert [(row.id, row.copy_group) for row in remaining] == [(res.json()["id"], None)]
 
-    def test_a_copy_nobody_may_purge_keeps_the_409(
-        self, client, admin, member, make_book, db
-    ):
+    def test_a_copy_nobody_may_purge_keeps_the_409(self, client, admin, member, make_book, db):
         """One member's trashed copy of a shared book is theirs. The whole
         group stays where it is rather than being partly destroyed."""
         book = make_book(admin["headers"], title="Dune", isbn="9780441013593")
@@ -381,9 +360,7 @@ class TestTheIsbnRule:
         assert db.get(Book, book["id"]) is not None
         assert db.get(Book, theirs["id"]) is not None
 
-    def test_a_refused_add_keeps_the_cover_file(
-        self, client, admin, member, make_book, db, covers_dir
-    ):
+    def test_a_refused_add_keeps_the_cover_file(self, client, admin, member, make_book, db, covers_dir):
         """The second half of the same bug: `_purge` unlinked the cover before
         the DELETE, so a 409 part way through a group left a book on the shelf
         whose `cover_url` named a file that no longer existed."""
@@ -475,9 +452,7 @@ class TestLoans:
         assert first.status_code == 201, first.text
         assert second.status_code == 201, second.text
 
-    def test_one_copy_out_leaves_the_other_on_the_shelf(
-        self, client, admin, member, make_book
-    ):
+    def test_one_copy_out_leaves_the_other_on_the_shelf(self, client, admin, member, make_book):
         book = make_book(admin["headers"], title="Dune")
         copy = add_copy(client, admin["headers"], book["id"]).json()
         client.post(
@@ -491,9 +466,7 @@ class TestLoans:
         out = {row["id"]: row["active_loan"] is not None for row in listed}
         assert out == {book["id"]: True, copy["id"]: False}
 
-    def test_the_same_copy_cannot_go_to_two_people(
-        self, client, admin, member, make_book
-    ):
+    def test_the_same_copy_cannot_go_to_two_people(self, client, admin, member, make_book):
         book = make_book(admin["headers"], title="Dune")
         client.post(
             "/api/loans",
@@ -520,9 +493,7 @@ class TestDuplicatesLeaveCopiesAlone:
         body = client.get("/api/books/duplicates", headers=admin["headers"]).json()
         assert body["groups"] == []
 
-    def test_a_real_duplicate_beside_a_copy_is_still_found(
-        self, client, admin, make_book
-    ):
+    def test_a_real_duplicate_beside_a_copy_is_still_found(self, client, admin, make_book):
         book = make_book(admin["headers"], title="Dune", author="Frank Herbert")
         add_copy(client, admin["headers"], book["id"])
         stray = make_book(admin["headers"], title="dune", author="frank herbert")
@@ -536,9 +507,7 @@ class TestDuplicatesLeaveCopiesAlone:
 
 
 class TestMerging:
-    def test_merging_two_copies_leaves_one_ordinary_book(
-        self, client, admin, make_book, db
-    ):
+    def test_merging_two_copies_leaves_one_ordinary_book(self, client, admin, make_book, db):
         """A member saying they were never two objects. The survivor must not
         keep a group token, or its ISBN stays out of the unique index."""
         book = make_book(admin["headers"], title="Dune", isbn="9780441013593")
@@ -554,9 +523,7 @@ class TestMerging:
         assert db.get(Book, book["id"]).copy_group is None
         assert res.json()["copy_count"] == 1
 
-    def test_merging_a_stray_into_a_copy_leaves_the_group_alone(
-        self, client, admin, make_book, db
-    ):
+    def test_merging_a_stray_into_a_copy_leaves_the_group_alone(self, client, admin, make_book, db):
         book = make_book(admin["headers"], title="Dune", author="Frank Herbert")
         copy = add_copy(client, admin["headers"], book["id"]).json()
         stray = make_book(admin["headers"], title="dune", author="frank herbert")
@@ -585,18 +552,13 @@ class TestMerging:
 
         assert db.get(Book, stray["id"]).copy_group is None
 
-
-    def test_a_survivor_that_would_clash_keeps_its_group(
-        self, client, admin, make_book, db
-    ):
+    def test_a_survivor_that_would_clash_keeps_its_group(self, client, admin, make_book, db):
         """The guard in `_normalise_copy_group`, which nothing in the app can
         reach on its own and a hand-edited database can. Merging a copy into a
         stray hands the stray the group's ISBN, so clearing the last member's
         token would leave two ungrouped rows holding it and the delete would
         raise from inside somebody's merge."""
-        book = make_book(
-            admin["headers"], title="Dune", author="Frank Herbert", isbn="9780441013593"
-        )
+        book = make_book(admin["headers"], title="Dune", author="Frank Herbert", isbn="9780441013593")
         copy = add_copy(client, admin["headers"], book["id"]).json()
         stray = make_book(admin["headers"], title="dune", author="frank herbert")
 
@@ -630,9 +592,7 @@ class TestPurging:
         client.delete(f"/api/books/{copy['id']}", headers=admin["headers"])
 
         assert db.get(Book, book["id"]).copy_group is not None
-        restored = client.post(
-            f"/api/books/{copy['id']}/restore", headers=admin["headers"]
-        )
+        restored = client.post(f"/api/books/{copy['id']}/restore", headers=admin["headers"])
         assert restored.status_code == 200, restored.text
 
     def test_purging_one_of_three_keeps_the_group(self, client, admin, make_book, db):

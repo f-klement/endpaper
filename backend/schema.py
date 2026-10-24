@@ -72,9 +72,7 @@ def apply_legacy_fixups() -> None:
         if "is_private" not in columns:
             logger.info("legacy fixup: adding books.is_private")
             with engine.connect() as connection:
-                connection.execute(
-                    text("ALTER TABLE books ADD COLUMN is_private BOOLEAN NOT NULL DEFAULT 0")
-                )
+                connection.execute(text("ALTER TABLE books ADD COLUMN is_private BOOLEAN NOT NULL DEFAULT 0"))
                 connection.commit()
 
     if "user_books" in tables:
@@ -92,10 +90,7 @@ def apply_legacy_fixups() -> None:
                     )
                 )
                 connection.execute(
-                    text(
-                        "CREATE UNIQUE INDEX uq_user_books_user_book "
-                        "ON user_books (user_id, book_id)"
-                    )
+                    text("CREATE UNIQUE INDEX uq_user_books_user_book ON user_books (user_id, book_id)")
                 )
                 connection.commit()
 

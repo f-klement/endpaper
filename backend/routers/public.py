@@ -116,9 +116,7 @@ def public_reader(
         # 404, never 403. A 403 confirms that this deployment holds a catalogue
         # and is declining to show it, which is exactly what an unpublished
         # catalogue withholds, and it confirms it to anybody at all.
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
 
 
 #: The catalogue routes, every one of them gated.
@@ -130,9 +128,7 @@ def public_reader(
 #: mistake publishes the catalogue.
 #: `tests/routers/test_public.py::TestEveryPublicRouteIsGated` asserts it
 #: against the live route table rather than against this comment.
-catalogue = APIRouter(
-    prefix=PUBLIC_PREFIX, tags=["public"], dependencies=[Depends(public_reader)]
-)
+catalogue = APIRouter(prefix=PUBLIC_PREFIX, tags=["public"], dependencies=[Depends(public_reader)])
 
 #: `robots.txt` hangs off the app root and must answer whether or not anything
 #: is published, so it is outside the gated router rather than inside it.
@@ -223,15 +219,9 @@ def get_public_book(
     reused: it depends on `get_current_user`, so it 401s before it ever reaches
     a Book. This is the same shape written against the shelf that has no viewer.
     """
-    books = (
-        Shelf.seen_by_the_public(db)
-        .where(Book.id == book_id)
-        .outbound_first(load=Loading.PUBLISHED)
-    )
+    books = Shelf.seen_by_the_public(db).where(Book.id == book_id).outbound_first(load=Loading.PUBLISHED)
     if not books:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Book not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found")
     return books_to_public_out(books)[0]
 
 
@@ -267,11 +257,7 @@ def robots_txt(db: DbSession) -> PlainTextResponse:
     """
     if not settings_store.public_catalogue_may_be_indexed(db):
         return PlainTextResponse("User-agent: *\nDisallow: /\n")
-    return PlainTextResponse(
-        "User-agent: *\n"
-        f"Allow: {PUBLIC_PAGE_PREFIX}\n"
-        "Disallow: /\n"
-    )
+    return PlainTextResponse(f"User-agent: *\nAllow: {PUBLIC_PAGE_PREFIX}\nDisallow: /\n")
 
 
 router.include_router(catalogue)

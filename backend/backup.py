@@ -435,9 +435,7 @@ def _parse_row(
     return parsed
 
 
-def _parse_dates(
-    parsed: dict[str, Any], parsers: dict[str, type[date] | type[datetime]]
-) -> None:
+def _parse_dates(parsed: dict[str, Any], parsers: dict[str, type[date] | type[datetime]]) -> None:
     """Each date and timestamp column of a row, parsed from the archive's ISO text."""
     for name, kind in parsers.items():
         value = parsed.get(name)
@@ -445,9 +443,7 @@ def _parse_dates(
             try:
                 parsed[name] = kind.fromisoformat(value)
             except ValueError as error:
-                raise RestoreError(
-                    f"{name!r} in the backup is not a date: {value!r}"
-                ) from error
+                raise RestoreError(f"{name!r} in the backup is not a date: {value!r}") from error
 
 
 def _storable_cover(parsed: dict[str, Any]) -> None:
@@ -625,10 +621,7 @@ def _file_classification(parsed: dict[str, Any], table: Table) -> None:
         # The slice is on the repr, because everything reaching this line is by
         # definition not a `str`.
         if not isinstance(number, str):
-            raise RestoreError(
-                f"A row in {table.name!r} has a number that is not text: "
-                f"{repr(number)[:120]}"
-            )
+            raise RestoreError(f"A row in {table.name!r} has a number that is not text: {repr(number)[:120]}")
         parsed["sort_key"] = filing.sort_key_for(parsed.get("scheme"), number)
 
 
@@ -654,9 +647,7 @@ def _refuse_a_bad_credential(parsed: dict[str, Any], table: Table) -> None:
     """
     if table.name == "catalogue_credentials":
         if not credentials.generation_of(str(parsed.get("envelope") or "")):
-            raise RestoreError(
-                f"A row in {table.name!r} does not carry an encrypted credential."
-            )
+            raise RestoreError(f"A row in {table.name!r} does not carry an encrypted credential.")
         # **The key travels too, and that is newer than the column.** The
         # settings screen is sent the source of any login it cannot open so
         # somebody can remove it, and a client puts that value in a URL path.
@@ -694,9 +685,7 @@ def _stored_values(db: Session, table: Table) -> list[dict[str, Any]]:
     enum does not know may be one the next build adds.
     """
     columns = [
-        type_coerce(column, String).label(column.name)
-        if isinstance(column.type, DegradingEnum)
-        else column
+        type_coerce(column, String).label(column.name) if isinstance(column.type, DegradingEnum) else column
         for column in table.columns
     ]
     return [
@@ -732,9 +721,7 @@ def build_archive(db: Session) -> bytes:
     # The tag association carries no model of its own, so it is read straight
     # from the table. Forgetting it loses every book's tags while looking like
     # a complete backup.
-    manifest["tables"]["book_tags"] = [
-        dict(row._mapping) for row in db.execute(book_tags.select())
-    ]
+    manifest["tables"]["book_tags"] = [dict(row._mapping) for row in db.execute(book_tags.select())]
 
     buffer = BytesIO()
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
@@ -777,9 +764,7 @@ def read_manifest(data: bytes) -> dict[str, Any]:
     try:
         raw = archive.read(MANIFEST_NAME)
     except KeyError as error:
-        raise RestoreError(
-            f"The archive has no {MANIFEST_NAME}, so it is not an Endpaper backup."
-        ) from error
+        raise RestoreError(f"The archive has no {MANIFEST_NAME}, so it is not an Endpaper backup.") from error
     except Exception as error:
         # **Blind, and the breadth is the point.** Reading one entry raised
         # eight unrelated types over single byte patches of a two entry backup
@@ -818,11 +803,7 @@ def read_manifest(data: bytes) -> dict[str, Any]:
     if not isinstance(tables, dict):
         raise RestoreError("The backup lists no tables.")
 
-    missing = [
-        name
-        for name, _model, _table in _TABLES
-        if name in _REQUIRED_TABLES and name not in tables
-    ]
+    missing = [name for name, _model, _table in _TABLES if name in _REQUIRED_TABLES and name not in tables]
     if missing:
         raise RestoreError(f"The backup is missing: {', '.join(missing)}.")
 
@@ -1052,11 +1033,7 @@ def _without_household_logins(rows: list[dict[str, Any]]) -> list[dict[str, Any]
     choosing, which is this attack one step around this filter. The two do not
     otherwise name each other, so it is said here.
     """
-    return [
-        row
-        for row in rows
-        if not str(row.get("source", "")).startswith(OPDS_CREDENTIAL_PREFIX)
-    ]
+    return [row for row in rows if not str(row.get("source", "")).startswith(OPDS_CREDENTIAL_PREFIX)]
 
 
 def restore(db: Session, data: bytes) -> dict[str, int]:
@@ -1140,7 +1117,7 @@ def restore(db: Session, data: bytes) -> dict[str, int]:
             # writer from this loop by a one word edit; that function carries
             # the whole reasoning, the lowercasing included.
             cover_store.restore(filename, body)
-        except (OSError, ValueError):
+        except OSError, ValueError:
             # **Declined, never raised.** This loop runs after `db.commit()` and
             # after the directory was emptied, so anything escaping here is a
             # 500 on a library whose rows are restored and whose covers are

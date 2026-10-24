@@ -140,9 +140,7 @@ class TestWhatOneEntryBecomes:
     def test_an_acquisition_entry_becomes_a_record(self):
         page = opds.read_page(_feed(_book("Small Gods", author="Terry Pratchett")))
 
-        assert [(r.title, r.author) for r in page.records] == [
-            ("Small Gods", "Terry Pratchett")
-        ]
+        assert [(r.title, r.author) for r in page.records] == [("Small Gods", "Terry Pratchett")]
 
     def test_several_authors_arrive_as_one_credit_list(self):
         """Joined with a comma, which is what `books.author` is: see `authors.py`."""
@@ -261,10 +259,7 @@ class TestWhatOneEntryBecomes:
 
     def test_a_navigation_entry_is_not_a_book(self):
         """The rule that stops a shelf index being filed as a title."""
-        entry = (
-            "<entry><title>Recently added</title>"
-            '<link rel="subsection" href="/opds/recent"/></entry>'
-        )
+        entry = '<entry><title>Recently added</title><link rel="subsection" href="/opds/recent"/></entry>'
 
         page = opds.read_page(_feed(entry))
 
@@ -328,9 +323,8 @@ class TestWhatOneEntryBecomes:
 
     def test_one_unusable_entry_does_not_cost_the_page(self):
         """The failure rule both source families share: a bad record fails alone."""
-        entries = (
-            '<entry><link rel="http://opds-spec.org/acquisition" href="/d/1"/></entry>'
-            + _book("Survivor")
+        entries = '<entry><link rel="http://opds-spec.org/acquisition" href="/d/1"/></entry>' + _book(
+            "Survivor"
         )
 
         assert [r.title for r in opds.read_page(_feed(entries)).records] == ["Survivor"]
@@ -344,8 +338,7 @@ class TestWhatOneEntryBecomes:
 class TestTheIdentifierTheCensusSaysIsNotThere:
     @pytest.mark.parametrize(
         "written",
-        ["urn:isbn:9780552152976", "URN:ISBN:9780552152976", "9780552152976",
-         "978-0-552-15297-6"],
+        ["urn:isbn:9780552152976", "URN:ISBN:9780552152976", "9780552152976", "978-0-552-15297-6"],
     )
     def test_a_dcterms_isbn_is_read_where_a_server_emits_one(self, written):
         """The URN form is what the specification's own example writes, and the
@@ -385,9 +378,7 @@ class TestTheIdentifierTheCensusSaysIsNotThere:
         """`isbn.parse` is the whole of the trust placed in this field: thirteen
         digits that check, or absent. The third case is a real ISBN with the
         check digit changed."""
-        entry = _book(
-            "Small Gods", extra=f"<dcterms:identifier>{identifier}</dcterms:identifier>"
-        )
+        entry = _book("Small Gods", extra=f"<dcterms:identifier>{identifier}</dcterms:identifier>")
 
         assert opds.read_page(_feed(entry)).records[0].isbn is None
 
@@ -434,10 +425,7 @@ def page_text(spec: FeedSpec) -> str:
     if spec.declaration is not None:
         prolog = f'<?xml version="1.0" encoding="{spec.declaration}"?>'
     return (
-        prolog
-        + f'<feed xmlns="{opds.ATOM[1:-1]}">'
-        + "".join(xml_of(entry) for entry in entries)
-        + "</feed>"
+        prolog + f'<feed xmlns="{opds.ATOM[1:-1]}">' + "".join(xml_of(entry) for entry in entries) + "</feed>"
     )
 
 
@@ -572,9 +560,7 @@ class TestWhatThisReaderRefusesToParse:
         """Was read, at 39.7 times its bytes by `tracemalloc`, with no answer
         showing it. The literal `TestAPageIsReadOrRefusedByName` printed
         against the tree before the depth bound."""
-        page = a_page(
-            FeedSpec(entries=(), declaration=None, nest_depth=FAR_PAST_ANY_DEPTH, charset="037")
-        )
+        page = a_page(FeedSpec(entries=(), declaration=None, nest_depth=FAR_PAST_ANY_DEPTH, charset="037"))
         got = answer_of(opds.read_page, page, answers=opds.Page, refuses=opds.FeedUnreadable)
         assert got.refusal is not None
         assert "nested more than" in str(got.refusal)
@@ -645,9 +631,7 @@ class TestWhatThisReaderRefusesToParse:
         assert summary.count('="') > xml_parse.MAX_ATTRIBUTES
         entry = _book("Small Gods", extra=f'<summary type="html">{summary}</summary>')
 
-        assert [record.title for record in opds.read_page(_feed(entry)).records] == [
-            "Small Gods"
-        ]
+        assert [record.title for record in opds.read_page(_feed(entry)).records] == ["Small Gods"]
 
 
 class TestADecoderWorksOnAFile:
@@ -711,16 +695,12 @@ class TestNoResponseMovesTheOrigin:
             opds._next_page(BASE, href, origin)
 
     def test_a_relative_paging_link_resolves_against_the_page_it_was_on(self):
-        following = opds._next_page(
-            BASE, "?page=2", "http://10.0.9.9:8083"
-        )
+        following = opds._next_page(BASE, "?page=2", "http://10.0.9.9:8083")
 
         assert following == "http://10.0.9.9:8083/opds/books?page=2"
 
     def test_an_absolute_path_on_the_same_server_is_admitted(self):
-        following = opds._next_page(
-            BASE, "/opds/books/2", "http://10.0.9.9:8083"
-        )
+        following = opds._next_page(BASE, "/opds/books/2", "http://10.0.9.9:8083")
 
         assert following == "http://10.0.9.9:8083/opds/books/2"
 
@@ -732,9 +712,7 @@ class TestNoResponseMovesTheOrigin:
         it is compared to is the one an admin configured.
         """
         with pytest.raises(opds.UnusableAddress):
-            opds._next_page(
-                "http://evil.invalid/opds", "/page/2", "http://10.0.9.9:8083"
-            )
+            opds._next_page("http://evil.invalid/opds", "/page/2", "http://10.0.9.9:8083")
 
 
 class TestWalkingAFeed:
@@ -747,9 +725,7 @@ class TestWalkingAFeed:
             ),
             headers={"content-type": "application/atom+xml"},
         )
-        respx.get("http://10.0.9.9:8083/opds/books/2").respond(
-            text=_feed(_book("Two"))
-        )
+        respx.get("http://10.0.9.9:8083/opds/books/2").respond(text=_feed(_book("Two")))
 
         found = await opds.holdings(BASE)
 
@@ -760,9 +736,7 @@ class TestWalkingAFeed:
     @respx.mock
     async def test_a_feed_whose_next_points_at_a_page_already_read_stops(self):
         """A loop ends the walk rather than spending the page cap on it."""
-        route = respx.get(BASE).respond(
-            text=_feed(_book("One"), links=f'<link rel="next" href="{BASE}"/>')
-        )
+        route = respx.get(BASE).respond(text=_feed(_book("One"), links=f'<link rel="next" href="{BASE}"/>'))
 
         found = await opds.holdings(BASE)
 
@@ -783,9 +757,7 @@ class TestWalkingAFeed:
 
     @respx.mock
     async def test_the_page_cap_stops_the_walk_and_says_so(self):
-        respx.get(BASE).respond(
-            text=_feed(_book("One"), links='<link rel="next" href="/opds/books/2"/>')
-        )
+        respx.get(BASE).respond(text=_feed(_book("One"), links='<link rel="next" href="/opds/books/2"/>'))
         respx.get("http://10.0.9.9:8083/opds/books/2").respond(
             text=_feed(_book("Two"), links='<link rel="next" href="/opds/books/3"/>')
         )
@@ -806,9 +778,7 @@ class TestWalkingAFeed:
 
     @respx.mock
     async def test_the_deadline_stops_the_walk(self):
-        respx.get(BASE).respond(
-            text=_feed(_book("One"), links='<link rel="next" href="/opds/books/2"/>')
-        )
+        respx.get(BASE).respond(text=_feed(_book("One"), links='<link rel="next" href="/opds/books/2"/>'))
 
         found = await opds.holdings(BASE, deadline_seconds=-1)
 
@@ -853,9 +823,7 @@ class TestWalkingAFeed:
     async def test_a_body_over_the_fetch_cap_is_refused(self):
         """The byte bound is `fetch.MAX_RESPONSE_BYTES` counted raw, and this
         route goes through the same door the catalogue sources do."""
-        respx.get(BASE).respond(
-            content=b"<feed>" + b"x" * (fetch.MAX_RESPONSE_BYTES + 1) + b"</feed>"
-        )
+        respx.get(BASE).respond(content=b"<feed>" + b"x" * (fetch.MAX_RESPONSE_BYTES + 1) + b"</feed>")
 
         with pytest.raises(opds.OpdsError):
             await opds.holdings(BASE)
@@ -948,16 +916,14 @@ class TestTheBoundsAreStatedInOnePlace:
         `fetch.FetchRefused` formats `{url[:200]}`, so an over-cap body is a
         failure that really does carry it.
         """
-        respx.get(BASE).respond(
-            content=b"<feed>" + b"x" * (fetch.MAX_RESPONSE_BYTES + 1) + b"</feed>"
-        )
+        respx.get(BASE).respond(content=b"<feed>" + b"x" * (fetch.MAX_RESPONSE_BYTES + 1) + b"</feed>")
 
         with pytest.raises(opds.OpdsError) as refusal:
             await opds.holdings(BASE)
 
-        assert "10.0.9.9" in str(
-            fetch.ResponseTooLarge(f"{BASE} answered with more than N bytes")
-        ), "the control: this failure kind does name the address"
+        assert "10.0.9.9" in str(fetch.ResponseTooLarge(f"{BASE} answered with more than N bytes")), (
+            "the control: this failure kind does name the address"
+        )
         assert "10.0.9.9" not in str(refusal.value)
         assert "8083" not in str(refusal.value)
 
@@ -970,14 +936,10 @@ class TestTheBoundsAreStatedInOnePlace:
         def record(request):
             seen.append(time.monotonic())
             page = len(seen)
-            link = (
-                f'<link rel="next" href="/opds/books/{page + 1}"/>' if page < 3 else ""
-            )
+            link = f'<link rel="next" href="/opds/books/{page + 1}"/>' if page < 3 else ""
             return httpx.Response(200, text=_feed(_book(f"Book {page}"), links=link))
 
-        respx.get(url__startswith="http://10.0.9.9:8083/opds/books").mock(
-            side_effect=record
-        )
+        respx.get(url__startswith="http://10.0.9.9:8083/opds/books").mock(side_effect=record)
 
         await opds.holdings(BASE)
 
@@ -1017,9 +979,7 @@ class TestAnAddressIsResolvedAndPinned:
         after resolution, so the name spelling makes no difference to it.
         """
         with respx.mock:
-            route = respx.get(url__startswith="http://169.254.169.254").respond(
-                text=_feed(_book("Metadata"))
-            )
+            route = respx.get(url__startswith="http://169.254.169.254").respond(text=_feed(_book("Metadata")))
 
             with pytest.raises(opds.UnusableAddress) as refusal:
                 await opds.holdings(
@@ -1063,12 +1023,8 @@ class TestAnAddressIsResolvedAndPinned:
         """
         resolver = _Answers(("10.0.9.9",), ("169.254.169.254",))
         with respx.mock:
-            respx.get(BASE).respond(
-                text=_feed(_book("One"), links='<link rel="next" href="/opds/books/2"/>')
-            )
-            page_two = respx.get("http://10.0.9.9:8083/opds/books/2").respond(
-                text=_feed(_book("Two"))
-            )
+            respx.get(BASE).respond(text=_feed(_book("One"), links='<link rel="next" href="/opds/books/2"/>'))
+            page_two = respx.get("http://10.0.9.9:8083/opds/books/2").respond(text=_feed(_book("Two")))
 
             with pytest.raises(opds.UnusableAddress):
                 await opds.holdings(self.NAME, resolver=resolver)
@@ -1110,9 +1066,7 @@ class TestThePoliciesTheProseNames:
     REFUSED = sorted(set(fetch.AddressClass) - fetch.HOUSEHOLD_ADDRESSES.admits, key=str)
 
     @pytest.mark.parametrize("address_class", REFUSED)
-    def test_a_class_the_policy_refuses_is_named_in_the_module_docstring(
-        self, address_class
-    ):
+    def test_a_class_the_policy_refuses_is_named_in_the_module_docstring(self, address_class):
         assert self._phrase(address_class) in (opds.__doc__ or "").casefold()
 
     def test_the_policy_refuses_the_four_classes_this_file_was_written_against(self):

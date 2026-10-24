@@ -13,8 +13,6 @@ if TYPE_CHECKING:
     from schemas.book import BookColumns
 
 
-
-
 class LoanCreate(BaseModel):
     book_id: RowIdField
     #: A member of the library...
@@ -64,9 +62,7 @@ class LoanCreate(BaseModel):
         """
         self.loaned_to_name = (self.loaned_to_name or "").strip() or None
         if not names_exactly_one_borrower(self.loaned_to_user_id, self.loaned_to_name):
-            raise ValueError(
-                "Name exactly one borrower: either loaned_to_user_id or loaned_to_name."
-            )
+            raise ValueError("Name exactly one borrower: either loaned_to_user_id or loaned_to_name.")
         return self
 
 

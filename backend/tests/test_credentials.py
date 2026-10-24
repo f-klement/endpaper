@@ -30,6 +30,10 @@ from tests.corpus import application_modules
 from tests.helpers import sealed_before_the_origin_was_bound
 from tests.test_house_rules import _docstring_nodes
 
+TREE_GUARDS = {
+    "TestTheSupersededSchemeIsSafeOnlyWhileARosterAddressIsCode": ("application_modules",),
+}
+
 #: The address the roster holds for the source these tests use.
 #:
 #: **The roster's own, not an invented one**, because `view` and `for_request`
@@ -228,9 +232,7 @@ def _the_checksum_holds(words: list[str]) -> bool:
     return hashlib.sha256(material).digest()[0] == int(bits[entropy_bits:], 2)
 
 
-def _a_swap_the_checksum_rejects(
-    words: list[str], pairs: list[tuple[int, int]], *, among: str
-) -> list[str]:
+def _a_swap_the_checksum_rejects(words: list[str], pairs: list[tuple[int, int]], *, among: str) -> list[str]:
     """The first of `pairs` whose swap BIP-39 refuses, as the swapped words.
 
     **Derived rather than drawn.** Swapping two words of a valid phrase leaves a
@@ -326,9 +328,7 @@ class TestAMistypedPhraseFailsAtInput:
     #: anything but a whole key, and `test_the_round_trip_is_exact` is what
     #: says its output reads back; an unlucky label would make the swap below a
     #: no op, which fails the test after this one by name on its first run.
-    SWAP_BREAKS_THE_CHECKSUM = credentials.key_to_phrase(
-        hashlib.sha256(SWAP_FIXTURE_LABEL).digest()
-    )
+    SWAP_BREAKS_THE_CHECKSUM = credentials.key_to_phrase(hashlib.sha256(SWAP_FIXTURE_LABEL).digest())
 
     def test_two_swapped_words_fail_the_checksum(self):
         words = self.SWAP_BREAKS_THE_CHECKSUM.split()
@@ -433,9 +433,7 @@ class TestAKeyIsKeptWhereTheMachineCanKeepIt:
             credentials.store_key(credentials.generate_phrase())
         assert "CREDENTIAL_ENCRYPTION_KEY" in str(refusal.value)
 
-    def test_forgetting_a_key_kept_in_the_keychain_takes_it_out_of_the_keychain(
-        self, keychain
-    ):
+    def test_forgetting_a_key_kept_in_the_keychain_takes_it_out_of_the_keychain(self, keychain):
         """`forget_key` clears every store it reads a key from, and on a desktop
         that is the keychain. Answering one store cleared while the key stayed
         in force is the silent success the function exists to refuse."""
@@ -459,9 +457,7 @@ class TestAStoreThatCannotAnswerIsNeverReadAsEmpty:
     So a store that exists and refused says so, and only a store that is not
     there at all answers empty."""
 
-    def test_a_build_without_the_keychain_package_keeps_its_key_in_a_file(
-        self, db, monkeypatch
-    ):
+    def test_a_build_without_the_keychain_package_keeps_its_key_in_a_file(self, db, monkeypatch):
         """The published image, which leaves the package out on purpose. The
         suite installs it, so this is the one arm that runs the image's path."""
         monkeypatch.setitem(sys.modules, "keyring", None)
@@ -471,33 +467,25 @@ class TestAStoreThatCannotAnswerIsNeverReadAsEmpty:
         assert where == "file"
         assert credentials.key_material() == credentials.phrase_to_key(phrase)
 
-    def test_a_locked_keychain_is_reported_rather_than_read_as_no_key(
-        self, locked_keychain
-    ):
+    def test_a_locked_keychain_is_reported_rather_than_read_as_no_key(self, locked_keychain):
         with pytest.raises(credentials.KeyConfigurationError, match="Unlock it"):
             credentials.key_material()
 
-    def test_a_locked_keychain_refuses_a_new_key_rather_than_passing_it_to_a_file(
-        self, locked_keychain
-    ):
+    def test_a_locked_keychain_refuses_a_new_key_rather_than_passing_it_to_a_file(self, locked_keychain):
         """It exists, so it is where the key belongs: a file written instead
         would be found beside whatever the keychain holds once it unlocks."""
         with pytest.raises(credentials.KeyConfigurationError, match="refused to store"):
             credentials.store_key(credentials.generate_phrase())
         assert not credentials.key_file().exists()
 
-    def test_a_keychain_that_keeps_the_key_is_not_reported_as_cleared(
-        self, keeping_keychain
-    ):
+    def test_a_keychain_that_keeps_the_key_is_not_reported_as_cleared(self, keeping_keychain):
         credentials.store_key(credentials.generate_phrase())
 
         with pytest.raises(credentials.KeyConfigurationError):
             credentials.forget_key()
         assert credentials.key_material() is not None
 
-    def test_a_key_file_that_exists_and_cannot_be_read_is_reported(
-        self, monkeypatch, tmp_path
-    ):
+    def test_a_key_file_that_exists_and_cannot_be_read_is_reported(self, monkeypatch, tmp_path):
         """A directory where the file should be is the read error every
         account can produce, root included."""
         monkeypatch.setenv("CREDENTIAL_ENCRYPTION_KEY_FILE", str(tmp_path))
@@ -598,9 +586,7 @@ class TestAnEnvelopeIsBoundToTheAddressItIsFor:
             ("https://HOST.invalid/opds", "https://host.invalid/opds"),
         ],
     )
-    def test_the_same_machine_written_differently_is_one_address(
-        self, key: bytes, sealed_at, asked_at
-    ):
+    def test_the_same_machine_written_differently_is_one_address(self, key: bytes, sealed_at, asked_at):
         """The origin is bound, not the URL, or a path edit would cost a retype.
 
         `origin_of` is what decides, and `PUT /api/opds/servers/{id}` keeps the
@@ -722,9 +708,7 @@ class TestAnEnvelopeSealedBeforeTheBindingIsOpenedAndCarriedForward:
         """It used to, and that was right while no key opened it."""
         credentials.store_key(credentials.key_to_phrase(key))
         db.add(
-            CatalogueCredential(
-                source="bne", envelope=sealed_before_the_origin_was_bound(key, "bne", "a:b")
-            )
+            CatalogueCredential(source="bne", envelope=sealed_before_the_origin_was_bound(key, "bne", "a:b"))
         )
         db.commit()
         assert credentials.unreadable_sources(db) == []
@@ -732,9 +716,7 @@ class TestAnEnvelopeSealedBeforeTheBindingIsOpenedAndCarriedForward:
     def test_and_the_row_reports_itself_held_and_readable(self, db, key: bytes):
         credentials.store_key(credentials.key_to_phrase(key))
         db.add(
-            CatalogueCredential(
-                source="bne", envelope=sealed_before_the_origin_was_bound(key, "bne", "a:b")
-            )
+            CatalogueCredential(source="bne", envelope=sealed_before_the_origin_was_bound(key, "bne", "a:b"))
         )
         db.commit()
         seen = credentials.view(db, "bne", BNE_URL)
@@ -747,9 +729,7 @@ class TestAnEnvelopeSealedBeforeTheBindingIsOpenedAndCarriedForward:
     def test_and_an_outbound_request_carries_it(self, db, key: bytes):
         credentials.store_key(credentials.key_to_phrase(key))
         db.add(
-            CatalogueCredential(
-                source="bne", envelope=sealed_before_the_origin_was_bound(key, "bne", "a:b")
-            )
+            CatalogueCredential(source="bne", envelope=sealed_before_the_origin_was_bound(key, "bne", "a:b"))
         )
         db.commit()
         assert credentials.for_request(db, "bne", BNE_URL) is not None
@@ -763,9 +743,7 @@ class TestAnEnvelopeSealedBeforeTheBindingIsOpenedAndCarriedForward:
         """
         credentials.store_key(credentials.key_to_phrase(key))
         db.add(
-            CatalogueCredential(
-                source="bne", envelope=sealed_before_the_origin_was_bound(key, "bne", "a:b")
-            )
+            CatalogueCredential(source="bne", envelope=sealed_before_the_origin_was_bound(key, "bne", "a:b"))
         )
         db.commit()
 
@@ -774,9 +752,7 @@ class TestAnEnvelopeSealedBeforeTheBindingIsOpenedAndCarriedForward:
         assert after.split(".")[0] == credentials.VERSION
         assert credentials.stored(db, "bne", BNE_URL) == ("a", "b")
 
-    def test_a_re_seal_that_cannot_be_written_still_answers_the_read(
-        self, db, key: bytes, monkeypatch
-    ):
+    def test_a_re_seal_that_cannot_be_written_still_answers_the_read(self, db, key: bytes, monkeypatch):
         """A failure to write is not a failure to read: the old envelope stays,
         and the next read tries again."""
         credentials.store_key(credentials.key_to_phrase(key))
@@ -796,9 +772,7 @@ class TestAnEnvelopeSealedBeforeTheBindingIsOpenedAndCarriedForward:
         """Which is the whole point of carrying it forward rather than keeping it."""
         credentials.store_key(credentials.key_to_phrase(key))
         db.add(
-            CatalogueCredential(
-                source="bne", envelope=sealed_before_the_origin_was_bound(key, "bne", "a:b")
-            )
+            CatalogueCredential(source="bne", envelope=sealed_before_the_origin_was_bound(key, "bne", "a:b"))
         )
         db.commit()
         credentials.stored(db, "bne", BNE_URL)
@@ -818,9 +792,7 @@ class TestTheSupersededSchemeIsRefusedWhereTheAddressIsARow:
     its own. That is the case the origin binding was made for.
     """
 
-    def test_a_household_server_envelope_from_the_old_scheme_is_refused(
-        self, key: bytes
-    ):
+    def test_a_household_server_envelope_from_the_old_scheme_is_refused(self, key: bytes):
         source = "opds-9685983b245e650e"
         envelope = sealed_before_the_origin_was_bound(key, source, "house:pw")
         with pytest.raises(credentials.UnboundCredential):
@@ -857,7 +829,11 @@ class TestASupersededEnvelopeOpensAtOneAddressAndNoOther:
         return [
             ("a roster source at another roster's address", "dnb", bne),
             ("a roster source at an address a row could supply", "dnb", "https://evil.invalid/sru"),
-            ("a household server at its own address", "opds-9685983b245e650e", "https://calibre.lan:8080/opds"),
+            (
+                "a household server at its own address",
+                "opds-9685983b245e650e",
+                "https://calibre.lan:8080/opds",
+            ),
             ("a household server pointed at a roster origin", "opds-9685983b245e650e", dnb),
             ("an orphan source an archive restored", "notasource", dnb),
         ]
@@ -1216,8 +1192,7 @@ class TestTheSupersededSchemeIsSafeOnlyWhileARosterAddressIsCode:
         assert isinstance(targets.SEEDED, Mapping)
         assert targets.SEEDED
         assert isinstance(targets.SEEDED, MappingProxyType), (
-            "the roster is writable, so an edited row moves the address a "
-            "superseded envelope opens at"
+            "the roster is writable, so an edited row moves the address a superseded envelope opens at"
         )
         for target in targets.SEEDED.values():
             assert isinstance(target.base_url, str)
@@ -1268,9 +1243,7 @@ class TestTheEnvelopeRuleAndItsConstraintAgree:
         # Through the metadata rather than `__table__`, which the ORM types as
         # a `FromClause`. Same object, and the name comes off the model.
         Base.metadata.tables[CatalogueCredential.__tablename__].create(engine)
-        statement = sa.text(
-            "INSERT INTO catalogue_credentials (source, envelope) VALUES ('bne', :e)"
-        )
+        statement = sa.text("INSERT INTO catalogue_credentials (source, envelope) VALUES ('bne', :e)")
         with engine.connect() as connection:
             try:
                 connection.execute(statement, {"e": envelope})
@@ -1324,11 +1297,7 @@ class TestTheEnvelopeRuleAndItsConstraintAgree:
         unknown = [f"v{n}" for n in range(10) if f"v{n}" not in credentials.KNOWN_VERSIONS]
         assert unknown, "every one-digit version is recognised; widen the sweep"
 
-        accepted = [
-            version
-            for version in unknown
-            if self._accepted(f"{version}." + "a" * 40 + ".b.c")
-        ]
+        accepted = [version for version in unknown if self._accepted(f"{version}." + "a" * 40 + ".b.c")]
 
         assert accepted == []
 
@@ -1406,9 +1375,9 @@ class TestACredentialNeverLeavesTheOriginItWasSetFor:
         assert httpx.URL("://x").host == "x"
 
     def test_and_an_unbindable_credential_sends_nothing(self):
-        assert credentials.Credential("", "alice", "hunter2").header_for(
-            "https://catalogue.example/sru"
-        ) == {}
+        assert (
+            credentials.Credential("", "alice", "hunter2").header_for("https://catalogue.example/sru") == {}
+        )
 
     def test_a_url_with_no_host_gets_nothing(self, credential):
         assert credential.header_for("file:///etc/passwd") == {}
@@ -1491,13 +1460,9 @@ class TestAnOperatorCanWithholdTheFeatureEntirely:
     `os.access` answers True there for a 0400 file.
     """
 
-    def test_a_key_file_in_a_directory_that_does_not_exist_turns_it_off(
-        self, tmp_path, monkeypatch
-    ):
+    def test_a_key_file_in_a_directory_that_does_not_exist_turns_it_off(self, tmp_path, monkeypatch):
         monkeypatch.delenv("CREDENTIAL_ENCRYPTION_KEY", raising=False)
-        monkeypatch.setenv(
-            "CREDENTIAL_ENCRYPTION_KEY_FILE", str(tmp_path / "absent" / "key")
-        )
+        monkeypatch.setenv("CREDENTIAL_ENCRYPTION_KEY_FILE", str(tmp_path / "absent" / "key"))
 
         assert credentials.key_material() is None
         with pytest.raises(credentials.KeyConfigurationError) as refusal:
@@ -1517,9 +1482,7 @@ class TestAnOperatorCanWithholdTheFeatureEntirely:
         assert credentials.store_key(credentials.generate_phrase()) == "file"
         assert credentials.key_material() is not None
 
-    def test_and_a_read_only_file_holding_a_key_is_not_the_same_thing(
-        self, tmp_path, monkeypatch
-    ):
+    def test_and_a_read_only_file_holding_a_key_is_not_the_same_thing(self, tmp_path, monkeypatch):
         """The trap the same paragraph warns about, which is a mounted secret.
 
         A Docker secret and a Kubernetes Secret both arrive as a read only file,
@@ -1573,9 +1536,7 @@ class TestTheStoreSealsWhatItIsGiven:
         with pytest.raises(credentials.UnreadableCredential, match="No credential is stored"):
             credentials.stored(db, "bne", BNE_URL)
 
-    def test_a_state_resolved_over_two_disagreeing_stores_refuses_naming_them(
-        self, db, monkeypatch
-    ):
+    def test_a_state_resolved_over_two_disagreeing_stores_refuses_naming_them(self, db, monkeypatch):
         """Not as "no key", which tells an admin to type the login in again when
         the thing to fix is the second store."""
         credentials.generate_key(db)
@@ -1704,11 +1665,7 @@ class TestAnUnreadableCredentialIsNotSentRatherThanRaising:
 #: from the row fails these rather than quietly passing them.
 #: `TestThisBuildShipsExactlyTheDefaultsItSaysItDoes` is what keeps the set
 #: itself honest.
-SHIPPING = [
-    source
-    for source, target in targets.SEEDED.items()
-    if target.shipped_credential is not None
-]
+SHIPPING = [source for source, target in targets.SEEDED.items() if target.shipped_credential is not None]
 
 
 def _url(source: CatalogueSource) -> str:
@@ -1745,9 +1702,7 @@ class TestThisBuildShipsExactlyTheDefaultsItSaysItDoes:
         """The rule is enforced at construction, not only true of the roster."""
         row = targets.SEEDED[CatalogueSource.BNE]
         with pytest.raises(ValueError, match="needs no credential"):
-            dataclasses.replace(
-                row, shipped_credential=targets.ShippedCredential("u", "p")
-            )
+            dataclasses.replace(row, shipped_credential=targets.ShippedCredential("u", "p"))
 
     @pytest.mark.parametrize(
         ("username", "password", "refusal"),
@@ -1757,9 +1712,7 @@ class TestThisBuildShipsExactlyTheDefaultsItSaysItDoes:
             ("a:b", "p", "may not contain a colon"),
         ],
     )
-    def test_a_shipped_pair_follows_the_rule_every_other_pair_follows(
-        self, username, password, refusal
-    ):
+    def test_a_shipped_pair_follows_the_rule_every_other_pair_follows(self, username, password, refusal):
         """One representation for the shipped, sealed and pinned spellings."""
         with pytest.raises(ValueError, match=refusal):
             targets.ShippedCredential(username, password)
@@ -1806,16 +1759,12 @@ class TestAShippedLoginLosesToEverythingElse:
         for source in SHIPPING:
             _a_key(db)
             credentials.put(db, source.value, targets.SEEDED[source].base_url, "alice", "hunter2")
-            monkeypatch.setenv(
-                credentials.env_variable_name(source.value), "bob:correcthorse"
-            )
+            monkeypatch.setenv(credentials.env_variable_name(source.value), "bob:correcthorse")
             request = credentials.for_request(db, source.value, _url(source))
             assert request is not None
             assert (request.username, request.password) == ("bob", "correcthorse")
 
-    def test_removing_the_pin_falls_back_to_what_the_admin_entered(
-        self, db, monkeypatch
-    ):
+    def test_removing_the_pin_falls_back_to_what_the_admin_entered(self, db, monkeypatch):
         for source in SHIPPING:
             _a_key(db)
             credentials.put(db, source.value, targets.SEEDED[source].base_url, "alice", "hunter2")
@@ -1861,9 +1810,7 @@ class TestAShippedLoginLosesToEverythingElse:
             )
 
     @pytest.mark.parametrize("value", ["", " ", "bob", "bob:", ":hunter2"])
-    def test_a_pinned_variable_set_to_nonsense_does_not_fall_through_either(
-        self, db, monkeypatch, value
-    ):
+    def test_a_pinned_variable_set_to_nonsense_does_not_fall_through_either(self, db, monkeypatch, value):
         """**Parametrised, and the empty string is why.**
 
         This arm asserted one spelling, `bob:`, and the spelling it did not
@@ -1912,16 +1859,12 @@ class TestTheScreenIsToldWhichOfTheFourIsInForce:
 
     def test_a_pinned_one_is_named_as_pinned(self, db, monkeypatch):
         for source in SHIPPING:
-            monkeypatch.setenv(
-                credentials.env_variable_name(source.value), "bob:correcthorse"
-            )
+            monkeypatch.setenv(credentials.env_variable_name(source.value), "bob:correcthorse")
             held = credentials.view(db, source.value, _url(source))
             assert held.provenance is CredentialProvenance.ENV
             assert held.username == "bob"
 
-    def test_a_shipped_source_counts_as_ready_on_an_install_that_typed_nothing(
-        self, db
-    ):
+    def test_a_shipped_source_counts_as_ready_on_an_install_that_typed_nothing(self, db):
         for source in SHIPPING:
             assert credentials.is_held(db, source.value, _url(source)) is True
 
@@ -1962,9 +1905,7 @@ class TestAShippedLoginGoesOnlyWhereItsLibraryPublishedIt:
     def test_and_the_request_path_withholds_it_there_too(self, db):
         assert credentials.for_request(db, "bna", "http://evil.test:9991/x") is None
 
-    def test_two_addresses_the_parser_refuses_do_not_compare_equal(
-        self, monkeypatch
-    ):
+    def test_two_addresses_the_parser_refuses_do_not_compare_equal(self, monkeypatch):
         """**Empty never matches**, which is `origin_of`'s own rule.
 
         Unreachable from today's roster, whose addresses all parse, so it is
@@ -1993,9 +1934,7 @@ class TestAShippedLoginGoesOnlyWhereItsLibraryPublishedIt:
         assert credentials.shipped("bna", "http://[::1") is None
         assert credentials.shipped("bna", "not a url either") is None
 
-    def test_the_screen_and_the_sender_part_company_at_an_address_nothing_parses(
-        self, db, monkeypatch
-    ):
+    def test_the_screen_and_the_sender_part_company_at_an_address_nothing_parses(self, db, monkeypatch):
         """**`is_held` answers the sender; `view` answers the screen.**
 
         The whole of what `is_held` gained by asking `for_request` rather than
@@ -2055,10 +1994,7 @@ class TestThePurposeStringNamesExactlyOneSource:
     """What stops an envelope opening on a row it was not written for."""
 
     def test_the_purpose_string_differs_per_source(self):
-        purposes = {
-            credentials._purpose(source.value, "https://a.invalid:443")
-            for source in CatalogueSource
-        }
+        purposes = {credentials._purpose(source.value, "https://a.invalid:443") for source in CatalogueSource}
         assert len(purposes) == len(list(CatalogueSource))
 
 
@@ -2079,9 +2015,7 @@ class TestAKeyIsNotMintedOverLoginsItCannotOpen:
             credentials.generate_key(db)
         assert "recovery phrase" in str(refusal.value)
 
-    def test_a_login_from_before_the_binding_is_blamed_on_the_key_too(
-        self, db, key: bytes
-    ):
+    def test_a_login_from_before_the_binding_is_blamed_on_the_key_too(self, db, key: bytes):
         """It used to get its own sentence, and that was right while no key
         opened it. The phrase now does, so sending somebody to remove it would
         be sending them to destroy a login that is about to work.
@@ -2116,9 +2050,7 @@ class TestAKeyIsNotMintedOverLoginsItCannotOpen:
         credentials.store_key(credentials.key_to_phrase(key))
         assert credentials.stored(db, "bne", BNE_URL) == ("alice", "hunter2")
 
-    def test_both_kinds_of_stranded_login_are_named_in_one_sentence(
-        self, db, key: bytes
-    ):
+    def test_both_kinds_of_stranded_login_are_named_in_one_sentence(self, db, key: bytes):
         """One cause now, so one sentence naming both sources rather than two
         sentences splitting them."""
         credentials.store_key(credentials.key_to_phrase(key))
@@ -2192,9 +2124,7 @@ class TestTheSuiteCanForgetAKeyItCannotReach:
     creates.
     """
 
-    def test_a_key_path_under_a_regular_file_is_forgotten_without_raising(
-        self, monkeypatch, tmp_path
-    ):
+    def test_a_key_path_under_a_regular_file_is_forgotten_without_raising(self, monkeypatch, tmp_path):
         blocked = tmp_path / "not-a-directory"
         blocked.write_text("")
         monkeypatch.setenv("CREDENTIAL_ENCRYPTION_KEY_FILE", str(blocked / "key"))
@@ -2244,9 +2174,7 @@ class TestTheKeyFileIsWrittenSafelyOrNotAtAll:
         credentials.store_key(credentials.generate_phrase())
         assert path.stat().st_mode & 0o777 == 0o600
 
-    def test_a_place_no_file_can_go_is_reported_rather_than_raising_an_oserror(
-        self, monkeypatch, tmp_path
-    ):
+    def test_a_place_no_file_can_go_is_reported_rather_than_raising_an_oserror(self, monkeypatch, tmp_path):
         """A parent that is a file, rather than a directory mode 0500.
 
         The suite runs as root in its container, where `os.access` answers True
@@ -2278,9 +2206,7 @@ class TestAPinnedCredentialThatIsSetAndUnusableIsReported:
             credentials.from_env("bne")
 
     @pytest.mark.parametrize("value", ["", " ", "bob", "bob:", ":hunter2"])
-    def test_and_the_deployment_still_counts_as_having_pinned_it(
-        self, monkeypatch, value
-    ):
+    def test_and_the_deployment_still_counts_as_having_pinned_it(self, monkeypatch, value):
         monkeypatch.setenv("CATALOGUE_CREDENTIAL_BNE", value)
         assert credentials.is_from_env("bne") is True
 
@@ -2315,9 +2241,7 @@ class TestTheKeyIsResolvedOncePerCaller:
         assert credentials.view(db, "bne", BNE_URL, state).username == "alice"
         assert credentials.view(db, "bne", BNE_URL).unreadable is True
 
-    def test_a_configuration_problem_is_a_sentence_rather_than_a_raise(
-        self, db, monkeypatch
-    ):
+    def test_a_configuration_problem_is_a_sentence_rather_than_a_raise(self, db, monkeypatch):
         credentials.generate_key(db)
         monkeypatch.setenv("CREDENTIAL_ENCRYPTION_KEY", credentials.generate_phrase())
         state = credentials.key_state()
@@ -2389,13 +2313,8 @@ class TestASealedLoginNeedsATransportThatCarriesIt:
         sealed = sources.NEEDS_A_KEY - settings_store._SECRET_IS_A_SETTINGS_ROW
         if not sealed:
             pytest.skip("no roster source needs a sealed login yet")
-        stranded = sorted(
-            source.value for source in sealed if not _carries_a_sealed_login(source)
-        )
-        assert not stranded, (
-            f"{stranded} need a sealed login on a transport that sends none. "
-            "See #210."
-        )
+        stranded = sorted(source.value for source in sealed if not _carries_a_sealed_login(source))
+        assert not stranded, f"{stranded} need a sealed login on a transport that sends none. See #210."
 
 
 class TestWhatCannotBeOpenedIsCountedOffTheTableAndNotTheRoster:
@@ -2423,9 +2342,7 @@ class TestWhatCannotBeOpenedIsCountedOffTheTableAndNotTheRoster:
         assert "a-catalogue-that-went-away" in str(refusal.value)
         assert credentials.unreadable_sources(db) == ["a-catalogue-that-went-away"]
 
-    def test_a_sealed_row_whose_source_is_pinned_still_blocks_a_new_key(
-        self, db, monkeypatch
-    ):
+    def test_a_sealed_row_whose_source_is_pinned_still_blocks_a_new_key(self, db, monkeypatch):
         """The arm the first four tests all walked around.
 
         Built on `view`, this answered `[]` here, because `view` short-circuits
@@ -2463,9 +2380,7 @@ class TestWhatCannotBeOpenedIsCountedOffTheTableAndNotTheRoster:
         credentials.put(db, "bne", BNE_URL, "alice", "hunter2")
         assert credentials.unreadable_sources(db) == []
 
-    def test_a_damaged_envelope_on_a_pinned_source_is_no_longer_listed(
-        self, db, monkeypatch
-    ):
+    def test_a_damaged_envelope_on_a_pinned_source_is_no_longer_listed(self, db, monkeypatch):
         """The accepted loss, pinned so that it stays a decision.
 
         An envelope is sealed over its address now, and this function has none,
@@ -2519,9 +2434,7 @@ class TestDiscardingAKeyThatCannotBeDiscardedSaysSo:
     where `_file_is_writable` refuses it.
     """
 
-    def test_a_key_file_that_cannot_be_written_is_refused_rather_than_skipped(
-        self, monkeypatch, tmp_path
-    ):
+    def test_a_key_file_that_cannot_be_written_is_refused_rather_than_skipped(self, monkeypatch, tmp_path):
         readable = tmp_path / "key"
         readable.write_text(credentials.generate_phrase())
         monkeypatch.setattr(credentials, "key_file", lambda: readable)
@@ -2529,9 +2442,7 @@ class TestDiscardingAKeyThatCannotBeDiscardedSaysSo:
         # is the point of it, so the source is rebuilt and the tuple swapped.
         # A mode based case would not do: the suite runs as root, where
         # `os.access` answers True for a file nobody else could write.
-        unwritable = dataclasses.replace(
-            credentials.KEY_SOURCES[2], available=lambda: False
-        )
+        unwritable = dataclasses.replace(credentials.KEY_SOURCES[2], available=lambda: False)
         monkeypatch.setattr(
             credentials,
             "KEY_SOURCES",
@@ -2541,9 +2452,7 @@ class TestDiscardingAKeyThatCannotBeDiscardedSaysSo:
             credentials.forget_key()
         assert "cannot be removed from here" in str(refusal.value)
 
-    def test_a_key_file_whose_directory_refuses_the_removal_is_refused_naming_it(
-        self, monkeypatch, tmp_path
-    ):
+    def test_a_key_file_whose_directory_refuses_the_removal_is_refused_naming_it(self, monkeypatch, tmp_path):
         """Writable, so `available()` passes, and its directory refuses the
         unlink: a file mounted on its own. That was an `OSError` and a 500.
 
@@ -2591,11 +2500,7 @@ class TestASourceIsNotSomethingShapedLikeAPath:
 
     def test_every_roster_member_passes(self):
         """Checked rather than assumed, since the rule is narrower than the type."""
-        refused = [
-            source.value
-            for source in CatalogueSource
-            if not credentials.is_safe_source(source.value)
-        ]
+        refused = [source.value for source in CatalogueSource if not credentials.is_safe_source(source.value)]
         assert refused == []
 
     @pytest.mark.parametrize(
@@ -2621,11 +2526,7 @@ class TestASourceIsNotSomethingShapedLikeAPath:
         """The last line, for a write that does not come through the Python."""
         from sqlalchemy.exc import IntegrityError
 
-        db.add(
-            CatalogueCredential(
-                source="../../books/5?", envelope="v1." + "a" * 40 + ".b.c"
-            )
-        )
+        db.add(CatalogueCredential(source="../../books/5?", envelope="v1." + "a" * 40 + ".b.c"))
         with pytest.raises(IntegrityError):
             db.commit()
         db.rollback()
@@ -2695,9 +2596,7 @@ class TestTheSourceRuleAndItsConstraintAgree:
 
         expected = credentials.is_safe_source(source)
         try:
-            db.add(
-                CatalogueCredential(source=source, envelope="v1." + "a" * 40 + ".b.c")
-            )
+            db.add(CatalogueCredential(source=source, envelope="v1." + "a" * 40 + ".b.c"))
             db.commit()
             accepted = True
         except IntegrityError:
@@ -2714,11 +2613,7 @@ class TestTheSourceRuleAndItsConstraintAgree:
         from sqlalchemy.exc import IntegrityError
 
         assert credentials.is_safe_source("bne\x00../../books/5?") is False
-        db.add(
-            CatalogueCredential(
-                source="bne\x00../../books/5?", envelope="v1." + "a" * 40 + ".b.c"
-            )
-        )
+        db.add(CatalogueCredential(source="bne\x00../../books/5?", envelope="v1." + "a" * 40 + ".b.c"))
         with pytest.raises(IntegrityError):
             db.commit()
         db.rollback()

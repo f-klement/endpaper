@@ -1308,7 +1308,7 @@ describe("the guard fails a run", () => {
    * The hook the fixture's reporter wrapper overrides, held against the class it
    * overrides it on.
    *
-   * The wrapper is a string, so nothing in the gate checks this name: prettier
+   * The wrapper is a string, so nothing in the gate checks this name: oxfmt
    * does not format a template literal's contents, oxlint sees no code there and
    * `tsc` sees a string. Interpolated into all three of the wrapper's spellings
    * so the name has one home, and asserted below against the real reporter's own
@@ -1576,7 +1576,7 @@ describe("the guard fails a run", () => {
     const real = (name: string) => JSON.stringify(join(root, "tests", name));
 
     // **These three files are strings, and nothing in the gate reads them.**
-    // prettier does not format a template literal's contents, oxlint sees no
+    // oxfmt does not format a template literal's contents, oxlint sees no
     // code there and `tsc` sees a string, so the middle of this guard is the
     // one part of the tree no check covers.
     //

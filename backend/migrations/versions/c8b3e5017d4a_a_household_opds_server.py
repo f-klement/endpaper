@@ -107,7 +107,7 @@ _SAFE_KEY = (
 #: whole of it: the ceiling above already bounds the rest.
 _SAFE_KEY_PG = (
     "length(credential_key) BETWEEN 1 AND 32 "
-    'AND (credential_key COLLATE "C") !~ \'[^a-z0-9_-]\' '
+    "AND (credential_key COLLATE \"C\") !~ '[^a-z0-9_-]' "
     "AND credential_key ~ '^opds-'"
 )
 

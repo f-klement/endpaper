@@ -313,9 +313,7 @@ class TestRunDigest:
 
         assert result["reason"] is OverdueNotifyReason.NO_URL
 
-    async def test_an_address_a_restore_wrote_that_cannot_be_parsed_is_refused_too(
-        self, db, lend, caplog
-    ):
+    async def test_an_address_a_restore_wrote_that_cannot_be_parsed_is_refused_too(self, db, lend, caplog):
         """An unclosed IPv6 bracket makes the URL parser raise rather than
         answer. Refused, it names the setting; caught as unexpected, it would
         read as a code defect. The log names no host, because there is none to
@@ -338,9 +336,7 @@ class TestRunDigest:
         passed through respx deliberately: the suite's own router would
         otherwise answer for the connect and hide the failure this is about."""
         settings_store.set_value(db, SettingKey.OVERDUE_WEBHOOK_ENABLED, "true")
-        settings_store.set_value(
-            db, SettingKey.OVERDUE_WEBHOOK_URL, "https://127.0.0.1:99999/hooks/t/abcdef"
-        )
+        settings_store.set_value(db, SettingKey.OVERDUE_WEBHOOK_URL, "https://127.0.0.1:99999/hooks/t/abcdef")
         lend()
 
         with respx.mock(assert_all_called=False) as mock:
@@ -425,9 +421,7 @@ class TestRunDigest:
             mock.post(HOOK).mock(
                 return_value=httpx.Response(302, headers={"Location": "https://elsewhere.test/x"})
             )
-            elsewhere = mock.post("https://elsewhere.test/x").mock(
-                return_value=httpx.Response(200)
-            )
+            elsewhere = mock.post("https://elsewhere.test/x").mock(return_value=httpx.Response(200))
             result = await notifications.run_digest(configured)
 
         assert elsewhere.call_count == 0
@@ -442,9 +436,7 @@ class TestRunDigest:
 
         request = route.calls[0].request
         expected = hmac.new(b"s3cret", request.content, hashlib.sha256).hexdigest()
-        assert hmac.compare_digest(
-            request.headers["X-Endpaper-Signature"], f"sha256={expected}"
-        )
+        assert hmac.compare_digest(request.headers["X-Endpaper-Signature"], f"sha256={expected}")
 
     async def test_it_sends_no_signature_without_a_secret(self, configured, lend):
         lend()
@@ -544,9 +536,7 @@ class TestTheReplyIsNeverRead:
         assert result["reason"] is OverdueNotifyReason.UNREACHABLE
         assert spent < 5.0
 
-    async def test_a_redirect_naming_an_unusable_host_is_unreachable(
-        self, configured, lend
-    ):
+    async def test_a_redirect_naming_an_unusable_host_is_unreachable(self, configured, lend):
         """Redirects are not followed, and httpx still builds the next request.
 
         `_build_redirect_request` reads `URL.host`, which calls `idna.decode`,
@@ -557,11 +547,7 @@ class TestTheReplyIsNeverRead:
         """
         loan = lend()
         with respx.mock(assert_all_called=False) as mock:
-            mock.post(HOOK).mock(
-                return_value=httpx.Response(
-                    302, headers={"location": "http://xn--a.gov/x"}
-                )
-            )
+            mock.post(HOOK).mock(return_value=httpx.Response(302, headers={"location": "http://xn--a.gov/x"}))
             result = await notifications.run_digest(configured)
 
         assert result["sent"] is False
@@ -739,9 +725,7 @@ class TestRenderText:
     def test_a_limit_drops_entries_and_says_how_many(self, db, lend):
         for index in range(20):
             lend(title=f"Book {index}")
-        digest = notifications.build_digest(
-            notifications.due_for_reminder(db, now(), 7), now()
-        )
+        digest = notifications.build_digest(notifications.due_for_reminder(db, now(), 7), now())
         text = notifications.render_text(digest, limit=200)
 
         assert units(text) <= 200
@@ -760,9 +744,7 @@ class TestRenderText:
         """
         for _index in range(50):
             lend(title="\U0001f600" * 100)
-        digest = notifications.build_digest(
-            notifications.due_for_reminder(db, now(), 7), now()
-        )
+        digest = notifications.build_digest(notifications.due_for_reminder(db, now(), 7), now())
         text = notifications.render_text(digest, limit=notifications.TELEGRAM_MAX_UNITS)
 
         assert units(text) <= notifications.TELEGRAM_MAX_UNITS
@@ -775,9 +757,7 @@ class TestRenderText:
         a code point at a time cannot land between the halves of a pair, which
         a slice counted in units could."""
         lend(title="\U0001f600" * 40)
-        digest = notifications.build_digest(
-            notifications.due_for_reminder(db, now(), 7), now()
-        )
+        digest = notifications.build_digest(notifications.due_for_reminder(db, now(), 7), now())
         text = notifications.render_text(digest, limit=5)
 
         assert units(text) <= 5
@@ -786,17 +766,13 @@ class TestRenderText:
 
     def test_it_leaves_a_short_list_whole(self, db, lend):
         lend(title="Dune")
-        digest = notifications.build_digest(
-            notifications.due_for_reminder(db, now(), 7), now()
-        )
+        digest = notifications.build_digest(notifications.due_for_reminder(db, now(), 7), now())
         assert "more." not in notifications.render_text(digest, limit=4096)
 
     def test_the_dropped_count_matches_what_was_dropped(self, db, lend):
         for index in range(20):
             lend(title=f"Book {index}")
-        digest = notifications.build_digest(
-            notifications.due_for_reminder(db, now(), 7), now()
-        )
+        digest = notifications.build_digest(notifications.due_for_reminder(db, now(), 7), now())
         text = notifications.render_text(digest, limit=300)
 
         kept = sum(1 for line in text.splitlines() if "days overdue" in line)
@@ -810,9 +786,7 @@ class TestTelegram:
         has that the webhook does not: the app chose the destination."""
         assert notifications.TELEGRAM_API == "https://api.telegram.org"
         assert not [key for key in SettingKey if "telegram_api" in key.value]
-        assert notifications.telegram_url(BOT_TOKEN).startswith(
-            "https://api.telegram.org/bot"
-        )
+        assert notifications.telegram_url(BOT_TOKEN).startswith("https://api.telegram.org/bot")
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
@@ -907,9 +881,7 @@ class TestTelegram:
         assert result["senders"][0]["skipped_private"] == 1
 
     @pytest.mark.asyncio
-    async def test_a_long_digest_is_one_message_telegram_will_accept(
-        self, telegram_on, lend
-    ):
+    async def test_a_long_digest_is_one_message_telegram_will_accept(self, telegram_on, lend):
         """One message rather than several: two sends is a run that can half
         succeed, and `run_digest` would then have to decide what that means."""
         for index in range(400):
@@ -945,9 +917,7 @@ class TestMailSender:
         assert "Kim" in body
 
     @pytest.mark.asyncio
-    async def test_a_private_book_never_reaches_the_mailbox(
-        self, mail_on, lend, sent_mail
-    ):
+    async def test_a_private_book_never_reaches_the_mailbox(self, mail_on, lend, sent_mail):
         lend(title="Public")
         lend(title="Secret", private=True)
         result = await notifications.run_digest(mail_on)
@@ -956,9 +926,7 @@ class TestMailSender:
         assert result["senders"][0]["skipped_private"] == 1
 
     @pytest.mark.asyncio
-    async def test_a_refused_configuration_is_recorded_not_silently_accepted(
-        self, db, lend
-    ):
+    async def test_a_refused_configuration_is_recorded_not_silently_accepted(self, db, lend):
         settings_store.set_value(db, SettingKey.OVERDUE_MAIL_ENABLED, "true")
         lend()
         result = await notifications.run_digest(db)
@@ -968,9 +936,7 @@ class TestMailSender:
         assert result["senders"][0]["sender"] is OverdueSender.EMAIL
 
     @pytest.mark.asyncio
-    async def test_a_refused_send_leaves_the_loan_to_retry(
-        self, mail_on, lend, monkeypatch
-    ):
+    async def test_a_refused_send_leaves_the_loan_to_retry(self, mail_on, lend, monkeypatch):
         loan = lend()
 
         def refuse(config, subject, body):
@@ -1060,9 +1026,7 @@ class TestThreeSendersOneDigest:
         assert [entry["sender"] for entry in failed] == [OverdueSender.WEBHOOK]
 
     @pytest.mark.asyncio
-    async def test_one_delivery_is_enough_to_stamp_the_loan(
-        self, configured, telegram_on, lend
-    ):
+    async def test_one_delivery_is_enough_to_stamp_the_loan(self, configured, telegram_on, lend):
         """The column records that the loan was chased, and it was. Stamping
         only on a clean sweep would make one broken receiver repeat the same
         list hourly on the channels that work."""
@@ -1076,9 +1040,7 @@ class TestThreeSendersOneDigest:
         assert loan.notified_at is not None
 
     @pytest.mark.asyncio
-    async def test_nothing_delivered_leaves_every_loan_to_retry(
-        self, configured, telegram_on, lend
-    ):
+    async def test_nothing_delivered_leaves_every_loan_to_retry(self, configured, telegram_on, lend):
         loan = lend()
         with respx.mock as mock:
             mock.post(HOOK).mock(side_effect=httpx.ConnectError("refused"))
@@ -1097,9 +1059,7 @@ class TestThreeSendersOneDigest:
             mock.post(HOOK).mock(return_value=httpx.Response(200))
             result = await notifications.run_digest(configured)
 
-        assert [entry["sender"] for entry in result["senders"]] == [
-            OverdueSender.WEBHOOK
-        ]
+        assert [entry["sender"] for entry in result["senders"]] == [OverdueSender.WEBHOOK]
 
     @pytest.mark.asyncio
     async def test_no_sender_at_all_is_still_a_single_disabled_answer(self, db, lend):
@@ -1230,9 +1190,7 @@ class TestASenderFailingUnexpectedly:
         """Mail goes before Telegram. With the raise escaping, the stamp loop
         was skipped and the mail that did go out went out again every hour."""
         loan = lend()
-        monkeypatch.setattr(
-            notifications, "send_telegram", self.raising(RuntimeError(TELEGRAM_SEND))
-        )
+        monkeypatch.setattr(notifications, "send_telegram", self.raising(RuntimeError(TELEGRAM_SEND)))
 
         result = await notifications.run_digest(mail_on)
 
@@ -1248,9 +1206,7 @@ class TestASenderFailingUnexpectedly:
             BaseExceptionGroup("send", [asyncio.CancelledError()]),
         ],
     )
-    async def test_a_cancellation_still_stops_the_run(
-        self, secret_hook, lend, monkeypatch, error
-    ):
+    async def test_a_cancellation_still_stops_the_run(self, secret_hook, lend, monkeypatch, error):
         """Stopping the ticker has to stop it mid send, and a group holding the
         cancellation is not an `Exception` either."""
         lend()
@@ -1295,9 +1251,7 @@ class TestARefusedWebhookDoesNotStopTheOthers:
             "https://127.0.0.1:99999/hooks/t/PATHMARKER",
         ],
     )
-    async def test_mail_still_delivers(
-        self, db, mail_on, lend, sent_mail, caplog, url
-    ):
+    async def test_mail_still_delivers(self, db, mail_on, lend, sent_mail, caplog, url):
         """The loopback host is passed through for the reason
         `test_a_port_out_of_range_is_refused_before_any_connect` gives."""
         settings_store.set_value(db, SettingKey.OVERDUE_WEBHOOK_ENABLED, "true")
@@ -1371,9 +1325,9 @@ class TestTheInAppChannel:
         senders `run_digest` attempts and which may stamp `notified_at`, so a
         second non-pushing sender arriving unnoticed would silently stop
         stamping for a channel that does deliver."""
-        assert [
-            sender for sender in OverdueSender if not notifications.pushes_outward(sender)
-        ] == [OverdueSender.IN_APP]
+        assert [sender for sender in OverdueSender if not notifications.pushes_outward(sender)] == [
+            OverdueSender.IN_APP
+        ]
 
     @pytest.mark.asyncio
     async def test_the_in_app_channel_is_never_handed_to_a_sender(self, db):
@@ -1428,9 +1382,7 @@ class TestTheInAppChannel:
         assert any(entry["sender"] is OverdueSender.IN_APP for entry in result["senders"])
 
     @pytest.mark.asyncio
-    async def test_a_pushing_sender_still_stamps_beside_it(
-        self, configured, in_app_on, lend
-    ):
+    async def test_a_pushing_sender_still_stamps_beside_it(self, configured, in_app_on, lend):
         loan = lend()
         with respx.mock as mock:
             mock.post(HOOK).mock(return_value=httpx.Response(200))
@@ -1441,7 +1393,7 @@ class TestTheInAppChannel:
 
     @pytest.mark.asyncio
     async def test_it_is_reported_on_a_run_with_nothing_overdue(self, in_app_on, configured):
-        """"Is this on" is what a household with no receiver is asking, and a
+        """ "Is this on" is what a household with no receiver is asking, and a
         quiet week used to answer with an empty list."""
         result = await notifications.run_digest(configured)
 
@@ -1477,21 +1429,15 @@ class TestWhoTheInAppNoticeIsFor:
         loan = lend_to(borrower=member["user"]["id"])
         viewer = db.get(User, member["user"]["id"])
         # The row, not the count: a count of one cannot say it is the right one.
-        assert [row.id for row in notifications.overdue_for_viewer(db, viewer, now())] == [
-            loan.id
-        ]
+        assert [row.id for row in notifications.overdue_for_viewer(db, viewer, now())] == [loan.id]
 
     def test_a_member_is_told_about_a_loan_they_made(self, db, member, lend_to):
         """They lent it out, so chasing it is theirs to do."""
         loan = lend_to(owner=member["user"]["id"], lender=member["user"]["id"])
         viewer = db.get(User, member["user"]["id"])
-        assert [row.id for row in notifications.overdue_for_viewer(db, viewer, now())] == [
-            loan.id
-        ]
+        assert [row.id for row in notifications.overdue_for_viewer(db, viewer, now())] == [loan.id]
 
-    def test_a_member_is_not_told_about_somebody_elses_loan(
-        self, db, member, other_user, lend_to
-    ):
+    def test_a_member_is_not_told_about_somebody_elses_loan(self, db, member, other_user, lend_to):
         """The loans page is the household's ledger and shows every loan the
         viewer may see. This is a nudge, and a nudge about a book you neither
         lent nor borrowed is noise."""
@@ -1499,33 +1445,23 @@ class TestWhoTheInAppNoticeIsFor:
         viewer = db.get(User, member["user"]["id"])
         assert notifications.overdue_for_viewer(db, viewer, now()).all() == []
 
-    def test_an_admin_is_told_about_every_loan_on_their_shelf(
-        self, db, admin, other_user, lend_to
-    ):
+    def test_an_admin_is_told_about_every_loan_on_their_shelf(self, db, admin, other_user, lend_to):
         """Staff read open reminders and outstanding books. `sees_every_loan`
         is the seam library mode widens."""
         loan = lend_to(owner=other_user["user"]["id"], lender=other_user["user"]["id"])
         viewer = db.get(User, admin["user"]["id"])
-        assert [row.id for row in notifications.overdue_for_viewer(db, viewer, now())] == [
-            loan.id
-        ]
+        assert [row.id for row in notifications.overdue_for_viewer(db, viewer, now())] == [loan.id]
 
-    def test_a_member_is_told_about_their_own_private_book(
-        self, db, member, lend_to
-    ):
+    def test_a_member_is_told_about_their_own_private_book(self, db, member, lend_to):
         """The capability no outward channel can have. `visible_to()` has always
         said a private book is visible to the member who added it, and being
         told about your own book is not a disclosure."""
         loan = lend_to(owner=member["user"]["id"], lender=member["user"]["id"], private=True)
         viewer = db.get(User, member["user"]["id"])
-        assert [row.id for row in notifications.overdue_for_viewer(db, viewer, now())] == [
-            loan.id
-        ]
+        assert [row.id for row in notifications.overdue_for_viewer(db, viewer, now())] == [loan.id]
 
-    def test_an_admin_is_not_told_about_somebody_elses_private_book(
-        self, db, admin, other_user, lend_to
-    ):
-        """"Staff see everything" must not become "an admin is a superuser over
+    def test_an_admin_is_not_told_about_somebody_elses_private_book(self, db, admin, other_user, lend_to):
+        """ "Staff see everything" must not become "an admin is a superuser over
         private books". The Shelf is applied first, on both arms."""
         lend_to(
             owner=other_user["user"]["id"],
@@ -1547,13 +1483,9 @@ class TestWhoTheInAppNoticeIsFor:
         settings_store.set_value(db, SettingKey.LIBRARY_MODE, "true")
         loan = lend_to(owner=other_user["user"]["id"], lender=other_user["user"]["id"])
         viewer = db.get(User, member["user"]["id"])
-        assert [row.id for row in notifications.overdue_for_viewer(db, viewer, now())] == [
-            loan.id
-        ]
+        assert [row.id for row in notifications.overdue_for_viewer(db, viewer, now())] == [loan.id]
 
-    def test_library_mode_does_not_reach_somebody_elses_private_book(
-        self, db, member, other_user, lend_to
-    ):
+    def test_library_mode_does_not_reach_somebody_elses_private_book(self, db, member, other_user, lend_to):
         """The test the relaxation exists to pass.
 
         The mode widens the arm about the loan's **parties**. The Shelf is
@@ -1726,9 +1658,7 @@ class TestTheStandingRecord:
         assert stored_health(db)["email"]["failures"] == 1
 
     @pytest.mark.asyncio
-    async def test_a_run_records_itself_without_anybody_reading_the_result(
-        self, configured, lend
-    ):
+    async def test_a_run_records_itself_without_anybody_reading_the_result(self, configured, lend):
         """The whole of #82: `ticker()` discards what `run_digest` returns, and
         the fix is that the run keeps its own record. Nothing here reads the
         return value, exactly as the ticker does not."""
@@ -1821,9 +1751,7 @@ class TestWhenAChannelCountsAsBroken:
 
 
 class TestReadingTheRecord:
-    def test_only_switched_on_channels_that_push_are_reported(
-        self, configured, in_app_on
-    ):
+    def test_only_switched_on_channels_that_push_are_reported(self, configured, in_app_on):
         """The in app notice is switched on here and absent anyway.
 
         It hands the digest to nobody, so a row for it could only ever report a
@@ -1856,7 +1784,7 @@ class TestReadingTheRecord:
         assert stored_health(configured) == {}
 
     def test_a_channel_that_has_never_run_says_so(self, configured):
-        """"Not yet" and "fine" are the two answers a household most needs to
+        """ "Not yet" and "fine" are the two answers a household most needs to
         tell apart on the day they configure a channel."""
         entry = notifications.health(configured, now())[0]
         assert entry["sender"] is OverdueSender.WEBHOOK
@@ -1921,9 +1849,7 @@ class TestReadingTheRecord:
         """Stripping `+02:00` would move the timestamp two hours, which is the
         kind of wrong that reads as right: a channel broken since 09:00 local
         would report 09:00 UTC and cross the window an hour early."""
-        assert notifications._parsed("2026-08-20T11:00:00+02:00") == datetime(
-            2026, 8, 20, 9, 0, 0
-        )
+        assert notifications._parsed("2026-08-20T11:00:00+02:00") == datetime(2026, 8, 20, 9, 0, 0)
 
     def test_the_failure_window_is_a_constant_of_this_module(self):
         """One of two, and the two catch **disjoint** mutations.
@@ -1950,9 +1876,7 @@ class TestReadingTheRecord:
                 and name
                 in {
                     target.id
-                    for target in (
-                        [node.target] if isinstance(node, ast.AnnAssign) else node.targets
-                    )
+                    for target in ([node.target] if isinstance(node, ast.AnnAssign) else node.targets)
                     if isinstance(target, ast.Name)
                 }
             )
@@ -1982,9 +1906,7 @@ class TestReadingTheRecord:
         """
         tree = ast.parse((BACKEND / "notifications.py").read_text())
         broken = next(
-            node
-            for node in ast.walk(tree)
-            if isinstance(node, ast.FunctionDef) and node.name == "_is_broken"
+            node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef) and node.name == "_is_broken"
         )
         named = {
             node.id if isinstance(node, ast.Name) else node.attr
@@ -2064,9 +1986,7 @@ class TestEverySenderSettingIsOwned:
         """`MAIL_KEYS` is spliced in rather than retyped, so an eighth mail
         setting is owned the day it is added. Retyping the seven is how the
         commonest fix, a corrected server or port, would have been left out."""
-        assert set(settings_store.MAIL_KEYS) <= notifications._CONFIGURED_BY[
-            OverdueSender.EMAIL
-        ]
+        assert set(settings_store.MAIL_KEYS) <= notifications._CONFIGURED_BY[OverdueSender.EMAIL]
 
 
 class TestTheInAppCountIsCounted:
@@ -2096,9 +2016,7 @@ class TestTheInAppCountIsCounted:
         finally:
             event.remove(bind, "before_cursor_execute", record)
 
-        loans_held = [
-            obj for obj in db.identity_map.values() if isinstance(obj, Loan)
-        ]
+        loans_held = [obj for obj in db.identity_map.values() if isinstance(obj, Loan)]
 
         assert counted == 20
         # Not one Loan in the session. The list form loaded twenty, one per

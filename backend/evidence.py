@@ -66,8 +66,14 @@ class Policy(Enum):
 #: `categories`, the series fields and `google_books_id` is in
 #: `docs/decisions.md`.
 REFRESHED: Final[tuple[str, ...]] = (
-    "title", "subtitle", "author", "publisher", "year", "description",
-    "language", "page_count",
+    "title",
+    "subtitle",
+    "author",
+    "publisher",
+    "year",
+    "description",
+    "language",
+    "page_count",
 )
 
 #: The work's details a record nobody selected does not write: `categories`, the
@@ -124,18 +130,14 @@ def apply_record(book: Book, record: Record, policy: Policy) -> list[str]:
     arrives as None and is read like a source that carries no such field.
     """
     if policy is Policy.REFRESH:
-        changed = _write(
-            book, {name: getattr(record, name) for name in REFRESHED}, policy
-        )
+        changed = _write(book, {name: getattr(record, name) for name in REFRESHED}, policy)
         if _write_cover(book, record.cover_url, policy):
             changed.append("cover_url")
         return changed
     return _apply_match(book, _unselected(record, SELECTED_ONLY), policy)
 
 
-def apply_own_volume(
-    book: Book, record: Record, volume_id: str, policy: Policy
-) -> list[str]:
+def apply_own_volume(book: Book, record: Record, volume_id: str, policy: Policy) -> list[str]:
     """Apply the record a lookup by the Book's own `volume_id` returned.
 
     The door for the identifier backfill and for `POST /{id}/enrich` when the
@@ -154,9 +156,7 @@ def apply_own_volume(
     if policy is Policy.REFRESH:
         raise ValueError("A refresh is found by ISBN, not by a volume id")
     withheld = tuple(
-        name
-        for name in SELECTED_ONLY
-        if name != "google_books_id" or record.google_books_id != volume_id
+        name for name in SELECTED_ONLY if name != "google_books_id" or record.google_books_id != volume_id
     )
     return _apply_match(book, _unselected(record, withheld), policy)
 
@@ -180,9 +180,7 @@ def confirm(book: Book, match: BookMatch, db: Session, policy: Policy) -> list[s
     return changed
 
 
-def confirm_file_headings(
-    book: Book, headings: Sequence[Heading], db: Session
-) -> list[str]:
+def confirm_file_headings(book: Book, headings: Sequence[Heading], db: Session) -> list[str]:
     """Add an imported MARC file's headings to `book`, returning the numbers changed.
 
     The importer's door for Classifications, matched Book or created one.
@@ -298,9 +296,7 @@ def _bounded_match(fields: dict[str, Any]) -> BookMatch:
         try:
             return BookMatch(**kept)
         except ValidationError as exc:
-            refused = {
-                str(error["loc"][0]) for error in exc.errors() if error["loc"]
-            } & kept.keys()
+            refused = {str(error["loc"][0]) for error in exc.errors() if error["loc"]} & kept.keys()
             if not refused:
                 break
             logger.info(

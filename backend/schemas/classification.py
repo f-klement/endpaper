@@ -83,9 +83,7 @@ class ClassificationIn(BaseModel):
 
     @field_validator("kind")
     @classmethod
-    def a_subject_is_the_absence_of_a_kind(
-        cls, value: HeadingKind | None
-    ) -> HeadingKind | None:
+    def a_subject_is_the_absence_of_a_kind(cls, value: HeadingKind | None) -> HeadingKind | None:
         """`subject` posted by a client is stored as the null it means.
 
         **The client-facing half of `ck_classifications_kind`**, which refuses
@@ -150,9 +148,7 @@ class ClassificationIn(BaseModel):
         if not cleaned:
             raise ValueError("A classification needs a number.")
         if any(unicodedata.category(character) in _INVISIBLE for character in cleaned):
-            raise ValueError(
-                "A classification number holds no control or formatting characters."
-            )
+            raise ValueError("A classification number holds no control or formatting characters.")
         return cleaned
 
     @model_validator(mode="after")
@@ -196,12 +192,9 @@ class ClassificationIn(BaseModel):
         # answer, and asking each one here would newly refuse a Library of
         # Congress call number this app cannot parse, which loses a
         # catalogue's assertion where mis-filing it only mis-files it.
-        if self.scheme is ClassificationScheme.DDC and not filing.DEWEY.recognises(
-            self.number
-        ):
+        if self.scheme is ClassificationScheme.DDC and not filing.DEWEY.recognises(self.number):
             raise ValueError(
-                f"{self.number!r} is not a Dewey number: three digits, "
-                "optionally a decimal fraction."
+                f"{self.number!r} is not a Dewey number: three digits, optionally a decimal fraction."
             )
         return self
 

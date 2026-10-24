@@ -255,10 +255,7 @@ def ignore_patterns(ignore_file: Path, *, refuse_empty: bool) -> list[IgnoreEntr
         anchored = anchored or "/" in entry
         refused = _unsupported(entry, anchored=anchored, negated=negated)
         if refused is not None:
-            raise SystemExit(
-                f"unsupported .gitignore form, teach this walk about it: {entry} "
-                f"({refused})"
-            )
+            raise SystemExit(f"unsupported .gitignore form, teach this walk about it: {entry} ({refused})")
         patterns.append((entry, anchored, directory_only))
     if refuse_empty and not patterns:
         raise SystemExit(f"{ignore_file} parsed to no patterns, so the population has no bound")

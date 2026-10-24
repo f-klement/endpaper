@@ -34,15 +34,12 @@ def upgrade() -> None:
         sa.Column("book_id", sa.Integer(), nullable=False),
         sa.Column("requested_by_user_id", sa.Integer(), nullable=False),
         sa.Column("holder_user_id", sa.Integer(), nullable=False),
-        sa.Column(
-            "requested_at", sa.DateTime(), server_default=sa.func.now(), nullable=False
-        ),
+        sa.Column("requested_at", sa.DateTime(), server_default=sa.func.now(), nullable=False),
         sa.Column("granted", sa.Boolean(), nullable=True),
         sa.Column("decided_by_user_id", sa.Integer(), nullable=True),
         sa.Column("decided_at", sa.DateTime(), nullable=True),
         sa.CheckConstraint(
-            "(granted IS NULL) = (decided_at IS NULL) "
-            "AND (granted IS NULL) = (decided_by_user_id IS NULL)",
+            "(granted IS NULL) = (decided_at IS NULL) AND (granted IS NULL) = (decided_by_user_id IS NULL)",
             name="ck_access_requests_decision",
         ),
         sa.CheckConstraint(
@@ -77,9 +74,7 @@ def upgrade() -> None:
 def downgrade() -> None:
     op.drop_index(op.f("ix_access_requests_decided_by_user_id"), table_name="access_requests")
     op.drop_index(op.f("ix_access_requests_holder_user_id"), table_name="access_requests")
-    op.drop_index(
-        op.f("ix_access_requests_requested_by_user_id"), table_name="access_requests"
-    )
+    op.drop_index(op.f("ix_access_requests_requested_by_user_id"), table_name="access_requests")
     op.drop_index(op.f("ix_access_requests_book_id"), table_name="access_requests")
     op.drop_index(op.f("ix_access_requests_id"), table_name="access_requests")
     op.drop_table("access_requests")

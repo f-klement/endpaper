@@ -109,6 +109,7 @@ def pytest_configure(config: pytest.Config) -> None:
         returncode=pytest.ExitCode.USAGE_ERROR,
     )
 
+
 # ── What the property based tests are allowed to spend ────────────────────────
 #
 # **The budget is the constraint the property tests were designed around, not a
@@ -157,6 +158,7 @@ ACTIVE_PROPERTY_PROFILE = os.environ.get("HYPOTHESIS_PROFILE", "suite")
 hypothesis_settings.load_profile(ACTIVE_PROPERTY_PROFILE)
 
 # ── Environment must be set before the app is imported ────────────────────────
+
 
 def _fastest_scratch() -> str | None:
     """A tmpfs to put the test database on, or None to take the default.
@@ -948,9 +950,7 @@ def clean_database(_schema_once: None) -> None:
     _empty_and_reseed()
 
 
-_HAS_A_SEQUENCE = text(
-    "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'sqlite_sequence'"
-)
+_HAS_A_SEQUENCE = text("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'sqlite_sequence'")
 
 
 def _empty_and_reseed() -> None:
@@ -1187,9 +1187,7 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
 
 
 @event.listens_for(engine, "before_cursor_execute")
-def _record_sqlites_own_sql(
-    _connection: Any, _cursor: Any, statement: str, *_rest: Any
-) -> None:
+def _record_sqlites_own_sql(_connection: Any, _cursor: Any, statement: str, *_rest: Any) -> None:
     """Note a statement SQLite alone understands that the test tree spelled.
 
     Registered once rather than per test, so twelve thousand tests do not each
@@ -1215,9 +1213,7 @@ def sqlite_only_sql_is_marked(request: pytest.FixtureRequest) -> Iterator[None]:
     way the crash net above is, so a test that catches the error a statement
     raises is still judged on the statement.
     """
-    sqlite_only.JUDGING.update(
-        marked=request.node.get_closest_marker(sqlite_only.MARK) is not None, seen=[]
-    )
+    sqlite_only.JUDGING.update(marked=request.node.get_closest_marker(sqlite_only.MARK) is not None, seen=[])
     try:
         yield
     finally:

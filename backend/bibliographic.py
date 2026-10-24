@@ -192,9 +192,7 @@ def pages_from_extent(raw: str | None) -> int | None:
     """
     if not raw:
         return None
-    match = re.search(
-        r"(?<!\d)(\d{1,6})\s*(?:Seiten|Bl\.|S\.|pages|p\.|pp\.|stran)", raw
-    )
+    match = re.search(r"(?<!\d)(\d{1,6})\s*(?:Seiten|Bl\.|S\.|pages|p\.|pp\.|stran)", raw)
     if not match:
         return None
     pages = int(match.group(1))
@@ -252,9 +250,7 @@ def is_placeholder_title(title: str) -> bool:
 #: it still changes what all nine refuse, and #124 is the record of what that
 #: buys: the wording is a property of the language, the language list is open,
 #: and six of the nine never needed the wording at all.
-_ONLINE_FORMS: Final = (
-    r"online[- ]?(?:ressource|resource)|elektronische ressource|streaming"
-)
+_ONLINE_FORMS: Final = r"online[- ]?(?:ressource|resource)|elektronische ressource|streaming"
 _DISC_FORMS: Final = r"audio disc|sound (?:disc|recording)|videodisc|dvd|blu-?ray"
 
 _NOT_A_BOOK: Final = re.compile(f"{_ONLINE_FORMS}|{_DISC_FORMS}", re.IGNORECASE)
@@ -347,9 +343,7 @@ _BEFORE_AN_INITIAL: Final = ("^", r"[\s.]")
 #: `_drop_isbd_stop` takes off `Melville, Herman.` looks exactly the same to a
 #: regex.
 #: Measured: 2 of 53 live DNB records credit an author with a trailing initial.
-_TRAILING_INITIAL: Final = re.compile(
-    f"(?:{'|'.join(_BEFORE_AN_INITIAL)}){_AN_INITIAL}\\.$"
-)
+_TRAILING_INITIAL: Final = re.compile(f"(?:{'|'.join(_BEFORE_AN_INITIAL)}){_AN_INITIAL}\\.$")
 
 #: The same shape, as a refusal, for the one noise arm that must not anchor on
 #: a full stop the name owns.
@@ -360,9 +354,7 @@ _TRAILING_INITIAL: Final = re.compile(
 #: `A. Auteur, 1948-2020` that way and the dates stay, then the cell flips
 #: around the date's comma. A zero width refusal leaves the text for the arm
 #: that owns it.
-_NOT_AN_INITIALS_STOP: Final = "".join(
-    f"(?<!{before}{_AN_INITIAL})" for before in _BEFORE_AN_INITIAL
-)
+_NOT_AN_INITIALS_STOP: Final = "".join(f"(?<!{before}{_AN_INITIAL})" for before in _BEFORE_AN_INITIAL)
 
 #: What a catalogue hangs off a person's name. The BnF writes
 #: `Zafón, Carlos (1964-2020). Auteur du texte`; MARC and MODS write
@@ -374,7 +366,9 @@ _PERSON_NOISE: Final = re.compile(
     # catalogue separates an appended designation, and a flip manufactures one
     # out of a trailing initial: `Autrice, A A.` becomes `A A. Autrice`, and
     # without the refusal the next pass takes the surname off as noise.
-    r"|\s*" + _NOT_AN_INITIALS_STOP + r"\.\s*(?:"
+    r"|\s*"
+    + _NOT_AN_INITIALS_STOP
+    + r"\.\s*(?:"
     + "|".join(re.escape(role) for role in _PERSON_ROLES)
     + r")[^.]*\.?\s*$"
     # The `\.?` before the anchor is what lets this arm fire on its own.
@@ -508,9 +502,7 @@ def flip_catalogue_name(raw: str) -> str:
 #: A segment that is only a life span, as a comma list leaves one behind:
 #: `J. R. R. Tolkien, 1892-1973` split on its commas. The dash is required, so
 #: a bare year, which a title or a corporate name can be, is not a life span.
-_LIFE_SPAN_ALONE: Final = re.compile(
-    r"\(?\s*\d{3,4}\s*[-\u2013]\s*\d{0,4}\s*\)?\.?"
-)
+_LIFE_SPAN_ALONE: Final = re.compile(r"\(?\s*\d{3,4}\s*[-\u2013]\s*\d{0,4}\s*\)?\.?")
 
 
 def display_name(raw: str) -> str:

@@ -14,6 +14,10 @@ from auth import verify_password
 from models import User
 from tests.corpus import BACKEND, shipped_modules
 
+TREE_GUARDS = {
+    "TestNothingImportsIt": ("shipped_modules",),
+}
+
 
 class TestNothingImportsIt:
     def test_no_module_of_the_app_imports_recover(self) -> None:
@@ -84,9 +88,7 @@ class TestSettingAPassword:
         user = db.query(User).filter(User.username == "member").one()
         assert not verify_password("newpassword1", user.password_hash or "")
 
-    def test_the_registration_length_floor_applies(
-        self, monkeypatch, db, member
-    ) -> None:
+    def test_the_registration_length_floor_applies(self, monkeypatch, db, member) -> None:
         """A command line is not a reason to store a password the app would
         refuse in a form."""
         typed = iter(["short", "short"])

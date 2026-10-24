@@ -34,8 +34,7 @@ def _inner_run(*args: str, sanctioned: bool) -> subprocess.CompletedProcess[str]
     env = {
         key: value
         for key, value in os.environ.items()
-        if not key.startswith("PYTEST_")
-        and key not in {SANCTIONED, "ENDPAPER_TEST_DATABASE_URL"}
+        if not key.startswith("PYTEST_") and key not in {SANCTIONED, "ENDPAPER_TEST_DATABASE_URL"}
     }
     if sanctioned:
         env[SANCTIONED] = "1"

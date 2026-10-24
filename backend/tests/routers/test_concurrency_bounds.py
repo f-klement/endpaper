@@ -139,6 +139,10 @@ from routers import books
 from tests.corpus import BACKEND, application_modules
 from tests.test_house_rules import _declared_route_handlers, _is_route_handler
 
+TREE_GUARDS = {
+    "TestEveryConcurrencyBoundIsBuiltOnceForThePodAndNotPerRequest": ("application_modules",),
+}
+
 #: Where a concurrency primitive can come from, each entry standing for itself
 #: **and its submodules**, so `multiprocessing.pool` is inside `multiprocessing`
 #: as a reader of this tuple would assume. An enumeration, and the guard's weakest
@@ -182,6 +186,7 @@ EXCLUDED: Final[dict[str, str]] = {
         "rationing anything the pod owns, so a per request one is correct"
     ),
 }
+
 
 def _route_modules() -> list[Path]:
     """Every module of the route layer, from the directory rather than a list.
@@ -231,9 +236,7 @@ def _dotted(callee: ast.expr) -> str | None:
     return ".".join(reversed(parts))
 
 
-def _constructed(
-    node: ast.Call, imported: dict[str, tuple[str, str]]
-) -> tuple[str, str] | None:
+def _constructed(node: ast.Call, imported: dict[str, tuple[str, str]]) -> tuple[str, str] | None:
     """`(module, attribute)` for a call on a concurrency import, else `None`."""
     callee = node.func
     if isinstance(callee, ast.Name):
@@ -294,10 +297,7 @@ def _concurrency_classes(tree: ast.Module) -> dict[str, tuple[str, str]]:
             and node.module is not None
             and _is_concurrency_module(node.module)
         ):
-            found |= {
-                alias.asname or alias.name: (node.module, alias.name)
-                for alias in node.names
-            }
+            found |= {alias.asname or alias.name: (node.module, alias.name) for alias in node.names}
     return found
 
 
@@ -315,7 +315,7 @@ def _concurrency_module(name: str) -> object | None:
     try:
         if importlib.util.find_spec(name) is None:
             return None
-    except (ImportError, ValueError):
+    except ImportError, ValueError:
         return None
     return importlib.import_module(name)
 
@@ -383,8 +383,7 @@ def _module_level_bounds(module: ModuleType) -> dict[str, object]:
     return {
         name: value
         for name, value in vars(module).items()
-        if not name.startswith("__")
-        and _is_concurrency_module(type(value).__module__)
+        if not name.startswith("__") and _is_concurrency_module(type(value).__module__)
     }
 
 
@@ -418,8 +417,7 @@ def _used_in(tree: ast.Module, name: str) -> tuple[bool, bool]:
     acquired = released = False
     for node in ast.walk(tree):
         if isinstance(node, ast.AsyncWith) and any(
-            isinstance(item.context_expr, ast.Name) and item.context_expr.id == name
-            for item in node.items
+            isinstance(item.context_expr, ast.Name) and item.context_expr.id == name for item in node.items
         ):
             acquired = released = True
         if (
@@ -458,11 +456,7 @@ def _the_bound(module: ModuleType) -> tuple[str, object]:
     """
     tree = ast.parse(Path(module.__file__ or "").read_text())
     every = _module_level_bounds(module)
-    held = {
-        name: value
-        for name, value in every.items()
-        if _used_in(tree, name) == (True, True)
-    }
+    held = {name: value for name, value in every.items() if _used_in(tree, name) == (True, True)}
     assert len(held) == 1, (
         "this arm's subject is the one module level concurrency object this module "
         f"acquires and releases, and it found {sorted(held)} among {sorted(every)}. "
@@ -505,12 +499,9 @@ def _built_to(module: ModuleType, name: str) -> int:
         size = eval(expression, vars(module))
     except Exception as exc:
         raise AssertionError(
-            f"the size {name} is built to cannot be read in "
-            f"{module.__name__}: {expression!r} raised {exc!r}"
+            f"the size {name} is built to cannot be read in {module.__name__}: {expression!r} raised {exc!r}"
         ) from exc
-    assert isinstance(size, int), (
-        f"{name} is built to {size!r}, which is not a number of slots"
-    )
+    assert isinstance(size, int), f"{name} is built to {size!r}, which is not a number of slots"
     return size
 
 
@@ -696,8 +687,7 @@ class TestEveryConcurrencyBoundIsBuiltOnceForThePodAndNotPerRequest:
         name, bound = _the_bound(books)
 
         assert isinstance(bound, asyncio.Semaphore), (
-            f"{name} is a {type(bound).__qualname__}, which hands out capacity "
-            "differently from a semaphore"
+            f"{name} is a {type(bound).__qualname__}, which hands out capacity differently from a semaphore"
         )
 
         built_by = _sized_from(source, name)
@@ -708,12 +698,10 @@ class TestEveryConcurrencyBoundIsBuiltOnceForThePodAndNotPerRequest:
         )
         where = _constructed(built_by, _concurrency_classes(tree))
         assert where is not None, (
-            "the bound is not built by a class of a concurrency module: "
-            f"{ast.unparse(built_by.func)}"
+            f"the bound is not built by a class of a concurrency module: {ast.unparse(built_by.func)}"
         )
         assert _is_a_class_of(*where), (
-            "the bound is not built by a class of a concurrency module: "
-            f"{ast.unparse(built_by.func)}"
+            f"the bound is not built by a class of a concurrency module: {ast.unparse(built_by.func)}"
         )
 
         sizing = built_by.args[0]
@@ -740,11 +728,7 @@ class TestTheImageRunsOneWorkerSoProcessWideIsPodWide:
 
     def test_the_image_passes_no_worker_count_above_one(self) -> None:
         dockerfile = (BACKEND.parent / "Dockerfile").read_text()
-        run = [
-            line
-            for line in dockerfile.splitlines()
-            if line.upper().startswith(("CMD", "ENTRYPOINT"))
-        ]
+        run = [line for line in dockerfile.splitlines() if line.upper().startswith(("CMD", "ENTRYPOINT"))]
 
         assert run, "no CMD or ENTRYPOINT found, so this arm is measuring nothing"
         for line in run:

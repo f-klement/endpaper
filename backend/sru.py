@@ -219,9 +219,7 @@ def _safe(value: str) -> str:
     a dropped character in a message and the alternative is a document no client
     can parse.
     """
-    return "".join(character for character in value if character.isprintable())[
-        :_DETAILS_CHARS
-    ]
+    return "".join(character for character in value if character.isprintable())[:_DETAILS_CHARS]
 
 
 # ── The bounds ────────────────────────────────────────────────────────────────
@@ -502,9 +500,7 @@ _RELATION_SYMBOLS: Final = ("==", "<=", ">=", "<>", "=", "<", ">")
 #: The relations spelled as words. `within`, `encloses` and `adj` are recognised
 #: and then refused with diagnostic 19, which is a better answer than the syntax
 #: error a parser that did not know them would give.
-_RELATION_WORDS: Final = frozenset(
-    {"all", "any", "exact", "within", "encloses", "adj"}
-)
+_RELATION_WORDS: Final = frozenset({"all", "any", "exact", "within", "encloses", "adj"})
 
 #: The booleans. `prox` is recognised for the same reason `within` is.
 _BOOLEANS: Final = frozenset({"and", "or", "not", "prox"})
@@ -574,24 +570,15 @@ def _tokenise(query: str) -> list[_Token]:
             # This is the round's own lesson landing on the round's own fix: the
             # first version pinned the one spelling a review named, and an
             # example is not a family.
-            if any(
-                token.kind is _Kind.WORD and token.text.lower() == "sortby"
-                for token in tokens
-            ):
+            if any(token.kind is _Kind.WORD and token.text.lower() == "sortby" for token in tokens):
                 raise SruError(Diagnostic.SORT_NOT_SUPPORTED, "sortby")
-            raise SruError(
-                Diagnostic.UNSUPPORTED_RELATION_MODIFIER, "no relation modifiers"
-            )
+            raise SruError(Diagnostic.UNSUPPORTED_RELATION_MODIFIER, "no relation modifiers")
         if character == '"':
             text, position = _scan_quoted(query, position)
             tokens.append(_Token(_Kind.QUOTED, text))
             continue
         symbol = next(
-            (
-                candidate
-                for candidate in _RELATION_SYMBOLS
-                if query.startswith(candidate, position)
-            ),
+            (candidate for candidate in _RELATION_SYMBOLS if query.startswith(candidate, position)),
             None,
         )
         if symbol is not None:
@@ -649,14 +636,10 @@ def _pieces(raw: str) -> Term:
         character = raw[position]
         if character == "\\":
             if position + 1 >= len(raw):
-                raise SruError(
-                    Diagnostic.QUERY_SYNTAX_ERROR, "a term ends with a backslash"
-                )
+                raise SruError(Diagnostic.QUERY_SYNTAX_ERROR, "a term ends with a backslash")
             escaped = raw[position + 1]
             if escaped not in _ESCAPABLE:
-                raise SruError(
-                    Diagnostic.NON_SPECIAL_CHARACTER_ESCAPED, f"\\{escaped}"
-                )
+                raise SruError(Diagnostic.NON_SPECIAL_CHARACTER_ESCAPED, f"\\{escaped}")
             literal.append(escaped)
             position += 2
             continue
@@ -746,9 +729,7 @@ class _Parser:
     def _clause(self, depth: int) -> Node:
         token = self._take()
         if token.kind is _Kind.CLOSE:
-            raise SruError(
-                Diagnostic.UNSUPPORTED_USE_OF_PARENTHESES, "an unmatched )"
-            )
+            raise SruError(Diagnostic.UNSUPPORTED_USE_OF_PARENTHESES, "an unmatched )")
         if token.kind is _Kind.OPEN:
             # **The depth bound is here and nowhere else.** One frame of this
             # method per level, so a bound checked after the parse is a bound
@@ -761,24 +742,18 @@ class _Parser:
             node = self._query(depth + 1)
             closing = self._peek()
             if closing is None or closing.kind is not _Kind.CLOSE:
-                raise SruError(
-                    Diagnostic.UNSUPPORTED_USE_OF_PARENTHESES, "an unclosed ("
-                )
+                raise SruError(Diagnostic.UNSUPPORTED_USE_OF_PARENTHESES, "an unclosed (")
             self._position += 1
             return node
         if token.kind is _Kind.RELATION:
-            raise SruError(
-                Diagnostic.QUERY_SYNTAX_ERROR, "a relation with nothing before it"
-            )
+            raise SruError(Diagnostic.QUERY_SYNTAX_ERROR, "a relation with nothing before it")
 
         relation, term_token = self._relation_and_term()
         if relation is None:
             index, relation, raw = "", "=", token.text
         else:
             if token.kind is not _Kind.WORD or not _INDEX_NAME.fullmatch(token.text):
-                raise SruError(
-                    Diagnostic.UNSUPPORTED_INDEX, _safe(token.text) or "an index"
-                )
+                raise SruError(Diagnostic.UNSUPPORTED_INDEX, _safe(token.text) or "an index")
             index, raw = token.text.lower(), term_token.text
 
         self._clauses += 1
@@ -821,9 +796,7 @@ class _Parser:
         if term is None:
             raise SruError(Diagnostic.EMPTY_TERM, "a relation with no term after it")
         if term.kind not in (_Kind.WORD, _Kind.QUOTED):
-            raise SruError(
-                Diagnostic.QUERY_SYNTAX_ERROR, "a relation with no term after it"
-            )
+            raise SruError(Diagnostic.QUERY_SYNTAX_ERROR, "a relation with no term after it")
         self._position += 1
         return relation, term
 
@@ -1002,8 +975,7 @@ class _Budget:
         if self.left < 0:
             raise SruError(
                 Diagnostic.TOO_MANY_BOOLEAN_OPERATORS,
-                f"{index.qualified}: {charge} a comparison, "
-                f"{MAX_COMPARISON_BUDGET} a query",
+                f"{index.qualified}: {charge} a comparison, {MAX_COMPARISON_BUDGET} a query",
             )
 
 
@@ -1089,12 +1061,20 @@ INDEXES: Final = (
     Index("dc", "identifier", Field.IDENTIFIER, "ISBN", TEXT_RELATIONS, Cost.CHEAP),
     Index("dc", "language", Field.LANGUAGE, "Language", TEXT_RELATIONS, Cost.CHEAP),
     Index(
-        "dc", "description", Field.DESCRIPTION, "Description", TEXT_RELATIONS,
+        "dc",
+        "description",
+        Field.DESCRIPTION,
+        "Description",
+        TEXT_RELATIONS,
         # The one unbounded column: `books.description` is `Text`.
         Cost.EXPENSIVE,
     ),
     Index(
-        "dc", "subject", Field.SUBJECT, "Subject", TEXT_RELATIONS,
+        "dc",
+        "subject",
+        Field.SUBJECT,
+        "Subject",
+        TEXT_RELATIONS,
         # A correlated EXISTS over a join, which measures the same as scanning
         # the unbounded column above even though its own column is String(100).
         Cost.EXPENSIVE,
@@ -1242,16 +1222,12 @@ def _integer(term: Term, index: Index) -> int:
     `SQLITE_MAX_INTEGER`.
     """
     if term.masked:
-        raise SruError(
-            Diagnostic.TERM_IN_INVALID_FORMAT, f"{index.qualified} takes a number"
-        )
+        raise SruError(Diagnostic.TERM_IN_INVALID_FORMAT, f"{index.qualified} takes a number")
     text = term.text.strip()
     try:
         value = int(text)
     except ValueError:
-        raise SruError(
-            Diagnostic.TERM_IN_INVALID_FORMAT, f"{index.qualified} takes a number"
-        ) from None
+        raise SruError(Diagnostic.TERM_IN_INVALID_FORMAT, f"{index.qualified} takes a number") from None
     if not SQLITE_MIN_INTEGER <= value <= SQLITE_MAX_INTEGER:
         raise SruError(
             Diagnostic.TERM_IN_INVALID_FORMAT,
@@ -1294,15 +1270,11 @@ def _clause_criteria(clause: Clause, budget: _Budget) -> ColumnElement[bool]:
     if clause.relation in ("any", "all"):
         words = clause.term.words()
         joiner = or_ if clause.relation == "any" else and_
-        return joiner(
-            *(_field_criteria(index, word, budget, exact=False) for word in words)
-        )
+        return joiner(*(_field_criteria(index, word, budget, exact=False) for word in words))
     return _field_criteria(index, clause.term, budget, exact=exact)
 
 
-def _field_criteria(
-    index: Index, term: Term, budget: _Budget, *, exact: bool
-) -> ColumnElement[bool]:
+def _field_criteria(index: Index, term: Term, budget: _Budget, *, exact: bool) -> ColumnElement[bool]:
     """One term against whichever columns an index covers, charged to the budget.
 
     **The charge is here rather than at the clause**, because this is the only
@@ -1312,20 +1284,13 @@ def _field_criteria(
     """
     if index.field is Field.ANYWHERE:
         budget.spend(len(_ANYWHERE_COLUMNS), index.cost, index)
-        return or_(
-            *(
-                _matches(column, term, contains=not exact)
-                for column in _ANYWHERE_COLUMNS
-            )
-        )
+        return or_(*(_matches(column, term, contains=not exact) for column in _ANYWHERE_COLUMNS))
     if index.field is Field.SUBJECT:
         budget.spend(1, index.cost, index)
         # A correlated exists over the tag join, which is the shape
         # `Shelf.matching` already uses for a tag filter. It needs no NULL
         # guard: `NOT EXISTS` is two valued, so `not` over it means what it says.
-        return Book.tags.any(
-            Tag.name.ilike(_pattern(term, contains=not exact), escape=_LIKE_ESCAPE)
-        )
+        return Book.tags.any(Tag.name.ilike(_pattern(term, contains=not exact), escape=_LIKE_ESCAPE))
     budget.spend(1, index.cost, index)
     return _matches(_COLUMNS[index.field], term, contains=not exact)
 
@@ -1462,9 +1427,7 @@ def _single(values: Sequence[str], name: str) -> str:
     tell which it got. There is no answer here that is right for both.
     """
     if len(values) > 1:
-        raise SruError(
-            Diagnostic.UNSUPPORTED_PARAMETER_VALUE, f"{name} was sent twice"
-        )
+        raise SruError(Diagnostic.UNSUPPORTED_PARAMETER_VALUE, f"{name} was sent twice")
     return values[0]
 
 
@@ -1489,9 +1452,7 @@ def _bounded_int(value: str, name: str, *, minimum: int) -> int:
     try:
         number = int(value)
     except ValueError:
-        raise SruError(
-            Diagnostic.UNSUPPORTED_PARAMETER_VALUE, f"{name} is not a number"
-        ) from None
+        raise SruError(Diagnostic.UNSUPPORTED_PARAMETER_VALUE, f"{name} is not a number") from None
     if not minimum <= number <= SQLITE_MAX_INTEGER:
         raise SruError(
             Diagnostic.UNSUPPORTED_PARAMETER_VALUE,
@@ -1536,9 +1497,7 @@ def _read_request(query_string: str) -> _Request:
     if operation not in ("explain", "searchRetrieve"):
         raise SruError(Diagnostic.UNSUPPORTED_OPERATION, _safe(operation))
 
-    allowed = (
-        _SEARCH_PARAMETERS if operation == "searchRetrieve" else _EXPLAIN_PARAMETERS
-    )
+    allowed = _SEARCH_PARAMETERS if operation == "searchRetrieve" else _EXPLAIN_PARAMETERS
     for name in parameters:
         if name.startswith("x-"):
             continue
@@ -1548,11 +1507,7 @@ def _read_request(query_string: str) -> _Request:
                 _safe(name),
             )
 
-    version = (
-        _single(parameters["version"], "version")
-        if "version" in parameters
-        else DEFAULT_VERSION
-    )
+    version = _single(parameters["version"], "version") if "version" in parameters else DEFAULT_VERSION
     if version not in SUPPORTED_VERSIONS:
         raise SruError(Diagnostic.UNSUPPORTED_VERSION, _safe(version))
 
@@ -1616,9 +1571,7 @@ DATABASE_TITLE: Final = "Endpaper"
 MEDIA_TYPE: Final = "application/xml; charset=utf-8"
 
 
-def _element(
-    parent: ElementTree.Element, tag: str, text: str | None = None
-) -> ElementTree.Element:
+def _element(parent: ElementTree.Element, tag: str, text: str | None = None) -> ElementTree.Element:
     child = ElementTree.SubElement(parent, tag)
     if text is not None:
         child.text = text
@@ -1643,9 +1596,7 @@ def _diagnostic_response(error: SruError, version: str) -> str:
     _element(root, "version", version)
     _element(root, "numberOfRecords", "0")
     diagnostics = _element(root, "diagnostics")
-    diagnostic = ElementTree.SubElement(
-        diagnostics, "diagnostic", {"xmlns": DIAGNOSTIC_NAMESPACE}
-    )
+    diagnostic = ElementTree.SubElement(diagnostics, "diagnostic", {"xmlns": DIAGNOSTIC_NAMESPACE})
     _element(diagnostic, "uri", f"{DIAGNOSTIC_URI}{error.diagnostic.value}")
     if error.details:
         _element(diagnostic, "details", error.details)
@@ -1687,9 +1638,7 @@ def _explain_response(version: str, server: Server) -> str:
     indexes = _element(explain, "indexInfo")
     for prefix, identifier in CONTEXT_SETS.items():
         if any(index.context_set == prefix for index in INDEXES):
-            ElementTree.SubElement(
-                indexes, "set", {"identifier": identifier, "name": prefix}
-            )
+            ElementTree.SubElement(indexes, "set", {"identifier": identifier, "name": prefix})
     for index in INDEXES:
         element = ElementTree.SubElement(
             indexes, "index", {"search": "true", "scan": "false", "sort": "false"}
@@ -1711,9 +1660,7 @@ def _explain_response(version: str, server: Server) -> str:
     _element(schema, "title", "MARC21 in XML")
 
     configuration = _element(explain, "configInfo")
-    _element(configuration, "default", str(DEFAULT_RECORDS)).set(
-        "type", "numberOfRecords"
-    )
+    _element(configuration, "default", str(DEFAULT_RECORDS)).set("type", "numberOfRecords")
     _element(configuration, "setting", str(MAX_RECORDS)).set("type", "maximumRecords")
     for feature in ("and", "or", "not"):
         _element(configuration, "supports", feature).set("type", "booleanModifier")
@@ -1722,9 +1669,7 @@ def _explain_response(version: str, server: Server) -> str:
     return _serialise(root)
 
 
-def _records_element(
-    root: ElementTree.Element, books: Outbound, start_record: int
-) -> None:
+def _records_element(root: ElementTree.Element, books: Outbound, start_record: int) -> None:
     """The `<records>` block, from rows that are allowed to leave the instance.
 
     **`Outbound` and not `Sequence[Book]`, which is what makes the rule
@@ -1787,9 +1732,7 @@ def _search_response(request: _Request, db: Session) -> str:
     # specification has a diagnostic for it; `startRecord` inside an empty
     # result set is not an error, because there was nothing to be past.
     if total and request.start_record > total:
-        raise SruError(
-            Diagnostic.FIRST_RECORD_OUT_OF_RANGE, f"{total} records matched"
-        )
+        raise SruError(Diagnostic.FIRST_RECORD_OUT_OF_RANGE, f"{total} records matched")
 
     root = ElementTree.Element("searchRetrieveResponse", {"xmlns": SRW_NAMESPACE})
     _element(root, "version", request.version)

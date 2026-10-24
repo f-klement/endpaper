@@ -1,0 +1,17 @@
+{
+  // oxfmt, replacing prettier 3.9 on 2026-10-24. The reasons are in
+  // `docs/decisions.md`; what follows is what breaks if a line here moves.
+  //
+  // **`printWidth` is the only option, because it is the only default oxfmt
+  // and prettier disagree on**: oxfmt's is 100 and prettier's is 80. Left at
+  // 100, oxfmt rewrites 485 of the 780 files under `src tests`; at 80 it
+  // rewrites 10, all one union layout (oxc issue 25841). Everything else here
+  // is prettier's default and oxfmt's alike, so naming it would be a second
+  // copy of a default that can drift from the first.
+  //
+  // **`tests/COVERAGE.md` is formatted by this file too**, and the tool that
+  // writes that register depends on its column padding. Any option added here
+  // is checked against that file staying byte identical.
+  "$schema": "./node_modules/oxfmt/configuration_schema.json",
+  "printWidth": 80
+}

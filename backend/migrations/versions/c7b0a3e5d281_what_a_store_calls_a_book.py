@@ -91,9 +91,7 @@ def upgrade() -> None:
         sa.Column("book_id", sa.Integer(), nullable=False),
         sa.Column("scheme", sa.String(length=20), nullable=False),
         sa.Column("value", sa.String(length=_VALUE_MAX), nullable=False),
-        sa.Column(
-            "created_at", sa.DateTime(), server_default=sa.func.now(), nullable=False
-        ),
+        sa.Column("created_at", sa.DateTime(), server_default=sa.func.now(), nullable=False),
         sa.CheckConstraint(
             f"scheme IN ({schemes})",
             name="ck_book_identifiers_scheme",
@@ -106,10 +104,7 @@ def upgrade() -> None:
         # asserts the type rather than this comment asserting the engine.
         sa.CheckConstraint(
             DialectSQL(
-                sqlite=(
-                    f"length(value) > 0 AND length(value) <= {_VALUE_MAX}"
-                    " AND instr(value, char(0)) = 0"
-                ),
+                sqlite=(f"length(value) > 0 AND length(value) <= {_VALUE_MAX} AND instr(value, char(0)) = 0"),
                 postgresql=f"length(value) > 0 AND length(value) <= {_VALUE_MAX}",
             ),
             name="ck_book_identifiers_bounds",
@@ -130,8 +125,6 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_index(
-        "uq_book_identifiers_book_scheme_value", table_name="book_identifiers"
-    )
+    op.drop_index("uq_book_identifiers_book_scheme_value", table_name="book_identifiers")
     op.drop_index(op.f("ix_book_identifiers_id"), table_name="book_identifiers")
     op.drop_table("book_identifiers")

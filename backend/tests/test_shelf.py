@@ -307,6 +307,14 @@ from tests.helpers import peak_rows, rows_at_the_engine
 # One list, so a shape added for one reader is a shape every reader gets.
 from tests.test_filing import CORPUS
 
+TREE_GUARDS = {
+    "TestOnlyTheShelfSaysWhatMayLeave": ("application_sources",),
+    "TestTheModulesTheseRulesWalk": ("application_sources",),
+    "TestThePublicShelfHasNoOwnershipArm": ("application_sources",),
+    "TestTheSerialisersThatMayBuildAnOutboundPayload": ("application_sources",),
+    "TestTheShelfIsTheOnlyWayIn": ("application_sources",),
+}
+
 BACKEND = Path(__file__).resolve().parent.parent
 
 #: The predicates that decide which Books a Member may see. Every application of
@@ -399,9 +407,7 @@ INDIRECT_READERS = {"backup.py"}
 #:
 #: `test_a_parameterised_reader_is_genuinely_invisible_to_this_pass` is what
 #: stops an entry outliving the gap it describes.
-PARAMETERISED_READERS = frozenset(
-    {"backup.py", "folding.py", "serialisation.py", "shelf.py", "targets.py"}
-)
+PARAMETERISED_READERS = frozenset({"backup.py", "folding.py", "serialisation.py", "shelf.py", "targets.py"})
 
 #: The entity the first three passes guard.
 _BOOK = frozenset({"Book"})
@@ -653,9 +659,13 @@ BOOK_OWNED, UNNAMEABLE_BOOK_OWNED = _book_owned_entities()
 # Equality is what `test_folding.NOT_A_DATABASE_READ` already keyed on, over a
 # **call** as `ast.unparse` writes it rather than over a statement, so the
 # precedent is the comparison and not the cost: a key here is up to six source
-# lines. What makes that affordable is that `_statement_at` flattens
-# whitespace, so rewrapping a statement changes no key, and that nothing in
-# this project runs `ruff format`.
+# lines. What makes that affordable is that `ruff format` owns the layout, so a
+# statement is rewrapped only when its own text, its nesting, the formatter's
+# version or the configured line length (110, in `pyproject.toml`) changes, and
+# the first two are edits its entry should be re-read for anyway.
+# **Flattening alone does not make a key independent of layout**: a
+# break beside a bracket flattens to a space the joined line does not have, so
+# `filter(\n    x\n)` keys as `filter( x )` and `filter(x)` as itself.
 #
 # Without that check the reasons were a list beside a list, lined up by
 # counting and verified by nothing, which under this rule is the one fact
@@ -683,8 +693,8 @@ BOOK_OWNED, UNNAMEABLE_BOOK_OWNED = _book_owned_entities()
 BOOK_OWNED_READERS = {
     "backup.py": [
         (
-            "manifest[\"tables\"][\"book_tags\"] = [ dict(row._mapping) for row in "
-            "db.execute(book_tags.select()) ]",
+            'manifest["tables"]["book_tags"] = [dict(row._mapping) for row in '
+            "db.execute(book_tags.select())]",
             "reads the whole `book_tags` table into the archive manifest. Not "
             "scoped to anything and deliberately so: an archive that omitted "
             "another member's rows would restore a library missing them. Admin "
@@ -694,8 +704,7 @@ BOOK_OWNED_READERS = {
     ],
     "custom_fields.py": [
         (
-            "removed = ( db.query(CustomFieldValue).filter(CustomFieldValue.field_id == "
-            "field.id).delete() )",
+            "removed = db.query(CustomFieldValue).filter(CustomFieldValue.field_id == field.id).delete()",
             "deletes every value of a custom field the admin is removing, keyed "
             "on `field_id`. A write, and the count it returns describes rows "
             "that no longer exist.",
@@ -712,12 +721,12 @@ BOOK_OWNED_READERS = {
         (
             "row = ( db.query(CustomFieldValue) .filter( CustomFieldValue.book_id == book.id, "
             "CustomFieldValue.field_id == field.id, ) .one_or_none() )",
-            "reads one `(book, field)` value to decide insert or update. Takes "
-            "a `Book`, as above.",
+            "reads one `(book, field)` value to decide insert or update. Takes a `Book`, as above.",
         ),
         (
-            "taken = { row.field_id for row in db.query(CustomFieldValue).filter( "
-            "CustomFieldValue.book_id == keeper_id ) }",
+            "taken = {row.field_id for row in "
+            "db.query(CustomFieldValue).filter(CustomFieldValue.book_id == "
+            "keeper_id)}",
             "reads the keeper's field ids during a Book merge, to know which of "
             "the losers' values would collide. The ids came from a route that "
             "resolved every Book in the merge.",
@@ -851,8 +860,9 @@ BOOK_OWNED_READERS = {
         ),
         (
             "shelf = Shelf.seen_by(db, current_user.id).where( Book.id > after_id, "
-            "Book.isbn.is_(None), Book.google_books_id.is_(None), Book.identifiers.any( "
-            "BookIdentifier.scheme == BookIdentifierScheme.GOOGLE_BOOKS ), )",
+            "Book.isbn.is_(None), Book.google_books_id.is_(None), "
+            "Book.identifiers.any(BookIdentifier.scheme == "
+            "BookIdentifierScheme.GOOGLE_BOOKS), )",
             "narrows the identifier backfill to Books carrying a store "
             "identifier, as a correlated EXISTS inside `Shelf.where` rather "
             "than a query of its own: the FROM is the Shelf's filtered `books` "
@@ -918,10 +928,11 @@ BOOK_OWNED_READERS = {
     ],
     "routers/stats.py": [
         (
-            "by_tag = ( shelf.select( Tag.name, Tag.category, Tag.key, "
-            "func.count(book_tags.c.book_id).label(\"count\") ) .join(book_tags, Book.id == "
-            "book_tags.c.book_id) .join(Tag, Tag.id == book_tags.c.tag_id) .group_by(Tag.id) "
-            ".order_by(Tag.category, func.count(book_tags.c.book_id).desc(), Tag.name) .all() )",
+            "by_tag = ( shelf.select(Tag.name, Tag.category, Tag.key, "
+            'func.count(book_tags.c.book_id).label("count")) .join(book_tags, Book.id '
+            "== book_tags.c.book_id) .join(Tag, Tag.id == book_tags.c.tag_id) "
+            ".group_by(Tag.id) .order_by(Tag.category, "
+            "func.count(book_tags.c.book_id).desc(), Tag.name) .all() )",
             "Tag counts for the statistics page, written through "
             "`Shelf.select()` and joined to `books`. "
             # Kept on one line. The paragraph above points a grep at this
@@ -969,9 +980,7 @@ def _statement_at(source: str, line: int) -> str:
     return " ".join((ast.get_source_segment(source, widest) or "").split())
 
 
-def _entries_off_their_statements(
-    source: str, lines: list[int], entries: list[tuple[str, str]]
-) -> list[str]:
+def _entries_off_their_statements(source: str, lines: list[int], entries: list[tuple[str, str]]) -> list[str]:
     """Which allowlist entries are not keyed on the statement they sit against.
 
     **The comparison `BOOK_OWNED_READERS` is enforced by, in one place**, so the
@@ -1044,9 +1053,7 @@ def _backend_module_names() -> frozenset[str]:
     return frozenset(names)
 
 
-def _entity_aliases(
-    tree: ast.Module, roots: frozenset[str], module: str = "models"
-) -> set[str]:
+def _entity_aliases(tree: ast.Module, roots: frozenset[str], module: str = "models") -> set[str]:
     """Every local name bound to one of `roots` in one module.
 
     Resolved rather than assumed, because `from models import Book as B` binds
@@ -1234,9 +1241,7 @@ def _query_offences(source: str) -> list[int]:
 #: (`db.query(Loan.id).add_columns(Book.location)` compiles to
 #: `SELECT loans.id, books.location FROM loans, books`). Each was fixed as an
 #: instance and the class was missed twice.
-_QUERY_BUILDERS = frozenset(
-    {"query", "select_from", "with_entities", "add_columns", "add_entity"}
-)
+_QUERY_BUILDERS = frozenset({"query", "select_from", "with_entities", "add_columns", "add_entity"})
 
 #: Methods that reach another table by joining it.
 #:
@@ -1300,9 +1305,7 @@ def _is_sqlalchemy(module: str | None) -> bool:
     The prefix, so no list of submodules has to be kept current. `None` is a
     relative import, which cannot reach the package.
     """
-    return module is not None and (
-        module == "sqlalchemy" or module.startswith("sqlalchemy.")
-    )
+    return module is not None and (module == "sqlalchemy" or module.startswith("sqlalchemy."))
 
 
 def _rooted_at_module(node: ast.expr, module_names: set[str]) -> bool:
@@ -1320,9 +1323,7 @@ def _rooted_at_module(node: ast.expr, module_names: set[str]) -> bool:
     return isinstance(node, ast.Name) and node.id in module_names
 
 
-def _builds_a_query(
-    func: ast.expr, select_names: set[str], module_names: set[str]
-) -> bool:
+def _builds_a_query(func: ast.expr, select_names: set[str], module_names: set[str]) -> bool:
     """Whether this call is one that starts a query.
 
     `db.query(...)`, the bare `select(...)` `serialisation.py` imports from
@@ -1403,8 +1404,7 @@ def _join_offences(source: str) -> list[int]:
 #: rest and get no special handling, which is the whole point: a narrowing
 #: clause naming a guarded entity is a statement naming a guarded entity.
 _READING_METHODS = frozenset(
-    {name for cls in (Query, Select) for name in dir(cls) if not name.startswith("_")}
-    | {"query"}
+    {name for cls in (Query, Select) for name in dir(cls) if not name.startswith("_")} | {"query"}
 )
 
 #: The reading paths `_READING_METHODS` must contain, whatever SQLAlchemy does.
@@ -1436,19 +1436,49 @@ _READING_METHODS = frozenset(
 _READING_FLOOR = frozenset(
     {
         # The five a hand-written version of this set got wrong twice.
-        "query", "select_from", "with_entities", "add_columns", "add_entity",
+        "query",
+        "select_from",
+        "with_entities",
+        "add_columns",
+        "add_entity",
         # Joining.
-        "join", "outerjoin", "join_from", "outerjoin_from",
+        "join",
+        "outerjoin",
+        "join_from",
+        "outerjoin_from",
         # Choosing and narrowing.
-        "select", "filter", "where", "having", "group_by", "order_by",
-        "distinct", "with_only_columns", "column", "values", "correlate",
+        "select",
+        "filter",
+        "where",
+        "having",
+        "group_by",
+        "order_by",
+        "distinct",
+        "with_only_columns",
+        "column",
+        "values",
+        "correlate",
         # Slicing, which publishes a sample rather than the whole table.
-        "limit", "offset", "slice",
+        "limit",
+        "offset",
+        "slice",
         # Composition, each of which reads the table into something else.
-        "union", "union_all", "intersect", "except_", "subquery", "cte",
-        "lateral", "alias", "scalar_subquery", "exists", "from_statement",
+        "union",
+        "union_all",
+        "intersect",
+        "except_",
+        "subquery",
+        "cte",
+        "lateral",
+        "alias",
+        "scalar_subquery",
+        "exists",
+        "from_statement",
         # Terminals that return rows or a count of them.
-        "get", "count", "delete", "update",
+        "get",
+        "count",
+        "delete",
+        "update",
     }
 )
 
@@ -1474,9 +1504,7 @@ def _enclosing_statements(tree: ast.Module) -> dict[int, ast.stmt]:
     return owner
 
 
-def _book_owned_offences(
-    source: str, entities: frozenset[str] = BOOK_OWNED
-) -> list[int]:
+def _book_owned_offences(source: str, entities: frozenset[str] = BOOK_OWNED) -> list[int]:
     """Statement line numbers where this module reads one of these entities.
 
     **`entities` defaults to `BOOK_OWNED` and the default is the rule this file
@@ -1530,15 +1558,10 @@ def _book_owned_offences(
         arguments = [*node.args, *(keyword.value for keyword in node.keywords)]
         named = any(_entities_named_in(a, aliases) for a in arguments)
         core_select = (
-            isinstance(func, ast.Attribute)
-            and func.attr == "select"
-            and _names_entity(func.value, aliases)
+            isinstance(func, ast.Attribute) and func.attr == "select" and _names_entity(func.value, aliases)
         )
         reading_method = isinstance(func, ast.Attribute) and func.attr in _READING_METHODS
-        if core_select or (
-            named
-            and (reading_method or _builds_a_query(func, select_names, module_names))
-        ):
+        if core_select or (named and (reading_method or _builds_a_query(func, select_names, module_names))):
             statement = owner.get(id(node))
             offences.add(statement.lineno if statement is not None else node.lineno)
     return sorted(offences)
@@ -1591,17 +1614,11 @@ def _parameterised_reads(source: str) -> list[int]:
     owner = _enclosing_statements(tree)
 
     def runtime(argument: ast.expr) -> bool:
-        return any(
-            isinstance(node, ast.Name) and node.id not in bound
-            for node in ast.walk(argument)
-        )
+        return any(isinstance(node, ast.Name) and node.id not in bound for node in ast.walk(argument))
 
     found = set()
     for node in ast.walk(tree):
-        if not (
-            isinstance(node, ast.Call)
-            and _builds_a_query(node.func, select_names, module_names)
-        ):
+        if not (isinstance(node, ast.Call) and _builds_a_query(node.func, select_names, module_names)):
             continue
         arguments = [*node.args, *(keyword.value for keyword in node.keywords)]
         if any(runtime(argument) for argument in arguments):
@@ -1748,8 +1765,7 @@ def _predicate_calls(source: str) -> set[str]:
     return {
         node.func.id if isinstance(node.func, ast.Name) else node.func.attr
         for node in ast.walk(tree)
-        if isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Name | ast.Attribute)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name | ast.Attribute)
     } & named
 
 
@@ -1802,8 +1818,7 @@ class TestTheShelfIsTheOnlyWayIn:
             for predicate in _imported_predicates(source)
         )
         assert offenders == [], (
-            "These modules import a visibility predicate instead of asking the "
-            f"Shelf for one: {offenders}"
+            f"These modules import a visibility predicate instead of asking the Shelf for one: {offenders}"
         )
 
     def test_no_module_but_the_shelf_builds_a_query_over_books(self):
@@ -1815,9 +1830,7 @@ class TestTheShelfIsTheOnlyWayIn:
             if name not in QUERY_BUILDERS
             for line in _query_offences(source)
         )
-        assert offenders == [], (
-            f"These statements build a query over books outside the Shelf: {offenders}"
-        )
+        assert offenders == [], f"These statements build a query over books outside the Shelf: {offenders}"
 
     def test_only_the_named_exception_reaches_books_through_a_join(self):
         """The blind spot the old guard documented and this rule closes.
@@ -1833,9 +1846,7 @@ class TestTheShelfIsTheOnlyWayIn:
             if name not in QUERY_BUILDERS | JOIN_CALLERS
             for line in _join_offences(source)
         )
-        assert offenders == [], (
-            f"These statements reach books through a join outside the Shelf: {offenders}"
-        )
+        assert offenders == [], f"These statements reach books through a join outside the Shelf: {offenders}"
 
     def test_only_the_counted_statements_read_a_table_that_belongs_only_to_a_book(self):
         """The fourth pass, over the tables the three above structurally cannot
@@ -1852,14 +1863,9 @@ class TestTheShelfIsTheOnlyWayIn:
         carries the reason and the next step rather than a verdict.
         """
         sources = {
-            name: source
-            for name, source in application_sources().items()
-            if name not in QUERY_BUILDERS
+            name: source for name, source in application_sources().items() if name not in QUERY_BUILDERS
         }
-        found = {
-            name: _book_owned_offences(source)
-            for name, source in sources.items()
-        }
+        found = {name: _book_owned_offences(source) for name, source in sources.items()}
         found = {name: lines for name, lines in found.items() if lines}
         allowed = {name: len(entries) for name, entries in BOOK_OWNED_READERS.items()}
         counted = {name: len(lines) for name, lines in found.items()}
@@ -1876,14 +1882,12 @@ class TestTheShelfIsTheOnlyWayIn:
                 # table. A truncated source line was enough while an entry was a
                 # fragment somebody picked out of it.
                 shown = [
-                    f"      {name}:{line}  "
-                    f"{_statement_at(sources.get(name, ''), line)}"
+                    f"      {name}:{line}  {_statement_at(sources.get(name, ''), line)}"
                     for line in lines
                     if line - 1 < len(body)
                 ]
                 report.append(
-                    f"  {name}: {len(lines)} reading statements, "
-                    f"{len(entries)} allowed\n" + "\n".join(shown)
+                    f"  {name}: {len(lines)} reading statements, {len(entries)} allowed\n" + "\n".join(shown)
                 )
                 continue
             # The entries are positional, in line order, and each is keyed on
@@ -1892,9 +1896,7 @@ class TestTheShelfIsTheOnlyWayIn:
             # module is edited.
             report += [
                 f"  {name}:{one}"
-                for one in _entries_off_their_statements(
-                    sources.get(name, ""), lines, entries
-                )
+                for one in _entries_off_their_statements(sources.get(name, ""), lines, entries)
             ]
         if not report and counted == allowed:
             return
@@ -1907,7 +1909,7 @@ class TestTheShelfIsTheOnlyWayIn:
             + f"\n\n  The tables are {', '.join(sorted(BOOK_OWNED))}. They carry no "
             "member of their own, so nothing in a row says who may read it: the "
             "answer is whoever may read its Book. Publishing a set of values out "
-            "of one of them (\"every DDC number in the library, with a count\") "
+            'of one of them ("every DDC number in the library, with a count") '
             "discloses what is on other members' Private Books without ever "
             "returning one.\n\n"
             "  This rule reports every read and asks nothing about whether yours "
@@ -1948,10 +1950,7 @@ class TestTheShelfIsTheOnlyWayIn:
             "        .scalar()\n"
             "    )\n"
         )
-        widened = (
-            "def f(db, book):\n"
-            "    return db.query(func.count(Reference.id)).scalar()\n"
-        )
+        widened = "def f(db, book):\n    return db.query(func.count(Reference.id)).scalar()\n"
         token = "func.count(Reference.id)"
         statement = _statement_at(narrowed, 2)
         assert token in statement
@@ -2064,8 +2063,7 @@ class TestTheShelfIsTheOnlyWayIn:
             "query",
         ),
         "add_entity": (
-            "from models import Book, Loan\n"
-            "def f(db):\n    return db.query(Loan).add_entity(Book).all()\n",
+            "from models import Book, Loan\ndef f(db):\n    return db.query(Loan).add_entity(Book).all()\n",
             "query",
         ),
         "outerjoin_from": (
@@ -2245,8 +2243,7 @@ class TestTheShelfIsTheOnlyWayIn:
             "    return db.query(Tag.name).outerjoin(book_tags, book_tags.c.tag_id == Tag.id).all()\n"
         ),
         "core select on the association table": (
-            "from models import book_tags\n"
-            "def f(db):\n    return db.execute(book_tags.select()).all()\n"
+            "from models import book_tags\ndef f(db):\n    return db.execute(book_tags.select()).all()\n"
         ),
         "select_from": (
             "from models import Classification, Tag\n"
@@ -2291,8 +2288,7 @@ class TestTheShelfIsTheOnlyWayIn:
             "def f(db):\n    return db.query(C.number).distinct().all()\n"
         ),
         "qualified name": (
-            "import models\n"
-            "def f(db):\n    return db.query(models.Classification.number).all()\n"
+            "import models\ndef f(db):\n    return db.query(models.Classification.number).all()\n"
         ),
         "rebound name": (
             "from models import Classification\n"
@@ -2317,9 +2313,7 @@ class TestTheShelfIsTheOnlyWayIn:
             "    return db.query(Tag).join(target=Classification, onclause=Tag.id == 1).all()\n"
         ),
         "qualified rebinding": (
-            "import models\n"
-            "M = models.Classification\n"
-            "def f(db):\n    return db.query(M.number).all()\n"
+            "import models\nM = models.Classification\ndef f(db):\n    return db.query(M.number).all()\n"
         ),
         # Round 7. Written through the door this rule tells authors to use, and
         # measured leaking against a real database rather than argued from the
@@ -2435,12 +2429,12 @@ class TestTheShelfIsTheOnlyWayIn:
             "from models import Book, Classification\n"
             "def f(shelf):\n"
             "    return (shelf.select(Book.title)\n"
-            "        .filter(Classification.number == \"616.89\").all())\n"
+            '        .filter(Classification.number == "616.89").all())\n'
         ),
         "a filter oracle with no viewer at all": (
             "from models import Classification, Tag\n"
             "def f(db):\n"
-            "    return db.query(Tag.name).filter(Classification.number.like(\"6%\")).all()\n"
+            '    return db.query(Tag.name).filter(Classification.number.like("6%")).all()\n'
         ),
         # Round 12. `filter` and `order_by` were pinned by the two above;
         # `having` and `group_by` were not, because every other fixture that
@@ -2453,7 +2447,7 @@ class TestTheShelfIsTheOnlyWayIn:
             "def f(shelf):\n"
             "    return (shelf.select(func.count())\n"
             "        .group_by(Book.id)\n"
-            "        .having(Classification.number == \"616.89\").all())\n"
+            '        .having(Classification.number == "616.89").all())\n'
         ),
         "a group_by clause and nothing else": (
             "from sqlalchemy import func\n"
@@ -2496,12 +2490,10 @@ class TestTheShelfIsTheOnlyWayIn:
         source = self.BOOK_OWNED_EVASIONS[shape]
         assert _book_owned_offences(source), f"{shape} evades the book-owned rule"
         assert _query_offences(source) == [], (
-            f"{shape} is caught by an older pass, so it proves nothing about "
-            "the fourth one"
+            f"{shape} is caught by an older pass, so it proves nothing about the fourth one"
         )
         assert _join_offences(source) == [], (
-            f"{shape} is caught by an older pass, so it proves nothing about "
-            "the fourth one"
+            f"{shape} is caught by an older pass, so it proves nothing about the fourth one"
         )
 
     def test_the_derived_reading_methods_still_cover_every_known_path(self):
@@ -2538,18 +2530,14 @@ class TestTheShelfIsTheOnlyWayIn:
         shapes and left a sentence alone. Parsed and compared rather than
         proof-read, which is the only fix that survives a fourth round.
         """
-        docstring = (
-            self.test_the_rule_catches_the_shapes_that_defeated_its_earlier_versions.__doc__
-            or ""
-        )
+        docstring = self.test_the_rule_catches_the_shapes_that_defeated_its_earlier_versions.__doc__ or ""
         table = re.findall(r"^\s*\|\s*(\d+)\s*\|.*?\|\s*(\d+)\s*\|\s*$", docstring, re.MULTILINE)
         assert table, "the round table is gone from the docstring"
         assert [int(r) for r, _ in table] == list(range(1, len(table) + 1)), (
             f"the rounds are not numbered 1..N: {[r for r, _ in table]}"
         )
         assert sum(int(n) for _, n in table) == len(self.EVASIONS), (
-            f"the table claims {sum(int(n) for _, n in table)} shapes and the "
-            f"dict holds {len(self.EVASIONS)}"
+            f"the table claims {sum(int(n) for _, n in table)} shapes and the dict holds {len(self.EVASIONS)}"
         )
 
     def test_a_correct_index_through_the_shelf_is_reported_too(self):
@@ -2613,20 +2601,12 @@ class TestTheShelfIsTheOnlyWayIn:
             "def f(db, ids: Collection[int]):\n"
             "    return db.query(Collection).all()\n"
         )
-        model = (
-            "from models import Collection\n"
-            "def f(db):\n"
-            "    return db.query(Collection).all()\n"
-        )
+        model = "from models import Collection\ndef f(db):\n    return db.query(Collection).all()\n"
         # The subject is the import's SOURCE being a module this backend has,
         # not anything inside it, so what arms this is `shelving.py` existing.
         # Renaming that file reddens this arm rather than quietly disarming it,
         # which is the direction a data dependency has to fail in.
-        re_exported = (
-            "from shelving import Collection\n"
-            "def f(db):\n"
-            "    return db.query(Collection).all()\n"
-        )
+        re_exported = "from shelving import Collection\ndef f(db):\n    return db.query(Collection).all()\n"
         entity = frozenset({"Collection"})
 
         assert _book_owned_offences(stdlib, entity) == []
@@ -2739,11 +2719,7 @@ class TestTheShelfIsTheOnlyWayIn:
         person's answer, asked once, the first time a module appears, exactly as
         `test_every_child_of_books_is_classified` asks it of a new table.
         """
-        derived = {
-            name
-            for name, source in application_sources().items()
-            if _parameterised_reads(source)
-        }
+        derived = {name for name, source in application_sources().items() if _parameterised_reads(source)}
         assert derived == set(PARAMETERISED_READERS), (
             "a module started or stopped handing a reading call a name bound at "
             "runtime. This pass cannot see what table it reads, so say which it "
@@ -2756,9 +2732,7 @@ class TestTheShelfIsTheOnlyWayIn:
         of the tree only restates the modules that already answer."""
         runtime = "def carry(db, model):\n    return db.query(model).all()\n"
         attribute = "def carry(db, carrier):\n    return db.query(carrier.entry).all()\n"
-        imported = (
-            "from models import Book\n\ndef carry(db):\n    return db.query(Book).all()\n"
-        )
+        imported = "from models import Book\n\ndef carry(db):\n    return db.query(Book).all()\n"
 
         assert _parameterised_reads(runtime) == [2]
         assert _parameterised_reads(attribute) == [2]
@@ -2803,8 +2777,7 @@ class TestTheShelfIsTheOnlyWayIn:
             for name in sorted(PARAMETERISED_READERS)
             if (
                 overlap := sorted(
-                    set(_parameterised_reads(sources[name]))
-                    & set(_book_owned_offences(sources[name]))
+                    set(_parameterised_reads(sources[name])) & set(_book_owned_offences(sources[name]))
                 )
             )
         }
@@ -2858,11 +2831,7 @@ class TestTheShelfIsTheOnlyWayIn:
         rooting deleted. A guard satisfied by the prose arguing for the rule
         guards nothing.
         """
-        return {
-            ast.unparse(node.func)
-            for node in ast.walk(ast.parse(source))
-            if isinstance(node, ast.Call)
-        }
+        return {ast.unparse(node.func) for node in ast.walk(ast.parse(source)) if isinstance(node, ast.Call)}
 
     @staticmethod
     def _privacy_calls(source: str) -> set[str]:
@@ -2875,8 +2844,7 @@ class TestTheShelfIsTheOnlyWayIn:
         return {
             ast.unparse(node)
             for node in ast.walk(ast.parse(source))
-            if isinstance(node, ast.Call)
-            and ast.unparse(node.func) == "Book.is_private.is_"
+            if isinstance(node, ast.Call) and ast.unparse(node.func) == "Book.is_private.is_"
         }
 
     def test_notifications_reads_books_and_is_deliberately_not_a_shelf(self):
@@ -2978,9 +2946,7 @@ class TestTheShelfIsTheOnlyWayIn:
             ("dotted alias", "import models as m\nq.filter(m.in_trash_for(1))\n"),
         ],
     )
-    def test_the_predicate_call_rule_reports_every_way_of_reaching_one(
-        self, shape, source
-    ):
+    def test_the_predicate_call_rule_reports_every_way_of_reaching_one(self, shape, source):
         """Attacked rather than read, which is what this file's own header says
         about every guard in it.
 
@@ -3047,9 +3013,7 @@ class TestTheShelfIsTheOnlyWayIn:
                 for alias in node.names
             } & set(PREDICATES)
 
-        missed = {
-            shape for shape, source in self._IMPORT_SPELLINGS if not superseded(source)
-        }
+        missed = {shape for shape, source in self._IMPORT_SPELLINGS if not superseded(source)}
 
         assert missed == {
             "aliased",
@@ -3262,11 +3226,7 @@ class TestTheShelfIsTheOnlyWayIn:
                 continue
             tree = ast.parse(source)
             for node in ast.walk(tree):
-                if (
-                    isinstance(node, ast.Call)
-                    and isinstance(node.func, ast.Name)
-                    and node.func.id in calls
-                ):
+                if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in calls:
                     calls[node.func.id].append(f"{name}:{node.lineno}")
 
         # **Call sites, not modules.** A set of module names does not count
@@ -3378,12 +3338,7 @@ class TestNarrowing:
         )
         db.commit()
 
-        rows = (
-            Shelf.seen_by(db, user.id)
-            .where(Book.location == "study")
-            .select(Book.title)
-            .all()
-        )
+        rows = Shelf.seen_by(db, user.id).where(Book.location == "study").select(Book.title).all()
         assert [title for (title,) in rows] == ["Kept"]
 
     def test_select_refuses_a_shelf_narrowed_by_read_status(self, db, user):
@@ -3442,9 +3397,7 @@ class TestFilters:
         assert shelf.matching(BookFilters(q="findable")).count() == 2
         assert shelf.matching(BookFilters(q="978000000001")).count() == 1
 
-    def test_a_wildcard_in_the_search_term_is_a_character_and_not_a_wildcard(
-        self, db, user
-    ):
+    def test_a_wildcard_in_the_search_term_is_a_character_and_not_a_wildcard(self, db, user):
         """`100%` finds the four characters, not every title holding `100`.
 
         Both directions, because a fix that escaped everything would pass a
@@ -3536,9 +3489,7 @@ class TestFilters:
         db.commit()
 
         found = (
-            Shelf.seen_by(db, user.id)
-            .matching(BookFilters(status=ReadStatus.READING, unrated=True))
-            .all()
+            Shelf.seen_by(db, user.id).matching(BookFilters(status=ReadStatus.READING, unrated=True)).all()
         )
         assert [book.title for book in found] == ["Reading and unrated"]
 
@@ -3716,9 +3667,7 @@ class TestStatementCost:
 
         def page():
             db.expunge_all()
-            books, total = Shelf.seen_by(db, viewer_id).page(
-                0, 25, Book.id.asc(), load=Loading.SERIALISED
-            )
+            books, total = Shelf.seen_by(db, viewer_id).page(0, 25, Book.id.asc(), load=Loading.SERIALISED)
             assert len(books) == 25
             assert total == 25
             assert books[0].added_by is not None
@@ -3749,8 +3698,7 @@ class TestStatementCost:
         `added_by` is answered from the identity map and nothing here pins it.
         """
         db.add_all(
-            Book(title=f"Book {n}", collection_id=shelved.id, added_by_user_id=other.id)
-            for n in range(5)
+            Book(title=f"Book {n}", collection_id=shelved.id, added_by_user_id=other.id) for n in range(5)
         )
         db.commit()
         viewer_id = user.id
@@ -3813,9 +3761,7 @@ class TestStatementCost:
 
         def page(size):
             def work():
-                Shelf.seen_by(db, user.id).page(
-                    0, size, Book.id.asc(), load=Loading.SERIALISED
-                )
+                Shelf.seen_by(db, user.id).page(0, size, Book.id.asc(), load=Loading.SERIALISED)
 
             return work
 
@@ -3943,16 +3889,11 @@ class TestAPageIsWholeHoweverTheLoadingJoins:
         viewer_id = user.id
         self.a_shelf(db, viewer_id, self.PAGE + 1)
         db.expunge_all()
-        expected = [
-            book.id
-            for book in db.query(Book).order_by(Book.id.asc()).limit(self.PAGE).all()
-        ]
+        expected = [book.id for book in db.query(Book).order_by(Book.id.asc()).limit(self.PAGE).all()]
         db.expunge_all()
 
         with rows_at_the_engine() as seen:
-            books, total = Shelf.seen_by(db, viewer_id).page(
-                0, self.PAGE, Book.id.asc(), load=load
-            )
+            books, total = Shelf.seen_by(db, viewer_id).page(0, self.PAGE, Book.id.asc(), load=load)
 
         assert total == self.PAGE + 1
         assert [book.id for book in books] == expected, (
@@ -4173,8 +4114,7 @@ def _enclosing_class_of(source: str, function: str) -> str | None:
     tree = ast.parse(source)
     for node in ast.walk(tree):
         if isinstance(node, ast.ClassDef) and any(
-            isinstance(member, ast.FunctionDef) and member.name == function
-            for member in node.body
+            isinstance(member, ast.FunctionDef) and member.name == function for member in node.body
         ):
             return node.name
     return None
@@ -4189,8 +4129,7 @@ def _called_names(node: ast.AST) -> set[str]:
     return {
         call.func.id if isinstance(call.func, ast.Name) else call.func.attr
         for call in ast.walk(node)
-        if isinstance(call, ast.Call)
-        and isinstance(call.func, ast.Name | ast.Attribute)
+        if isinstance(call, ast.Call) and isinstance(call.func, ast.Name | ast.Attribute)
     }
 
 
@@ -4317,18 +4256,12 @@ class TestThePublicShelfHasNoOwnershipArm:
             "this class searches for that name, so they now all pass by "
             "finding nothing. Rename the constant with the column."
         )
-        assert OWNER_COLUMN in Book.__table__.c, (
-            f"{OWNER_COLUMN} is no longer a column of the books table."
-        )
+        assert OWNER_COLUMN in Book.__table__.c, f"{OWNER_COLUMN} is no longer a column of the books table."
 
     def test_the_constructor_this_rule_guards_exists(self):
         """A guard whose subject has been deleted passes clean, which has
         happened twice in this repository. This is the check that does not."""
-        found = [
-            key
-            for key in _reachable_from("seen_by_the_public")
-            if key.endswith(":seen_by_the_public")
-        ]
+        found = [key for key in _reachable_from("seen_by_the_public") if key.endswith(":seen_by_the_public")]
         assert found, (
             "Shelf.seen_by_the_public was not found in shelf.py. Either it was "
             "renamed, in which case rename it here too, or it was removed, in "
@@ -4373,9 +4306,7 @@ class TestThePublicShelfHasNoOwnershipArm:
         """Every narrowing a public caller reaches for, not only the
         constructor. `matching` is the whole filter chain and `select` rebuilds
         the query from the stored criteria, so either could reintroduce it."""
-        shelf = Shelf.seen_by_the_public(db).matching(
-            BookFilters(q="dune", series="Dune", location="study")
-        )
+        shelf = Shelf.seen_by_the_public(db).matching(BookFilters(q="dune", series="Dune", location="study"))
         assert OWNER_COLUMN not in _sql_after_the_projection(shelf._query)
         assert OWNER_COLUMN not in _sql_after_the_projection(shelf.select(Book.location))
 
@@ -4544,8 +4475,7 @@ class TestTheDivisionProjectionsAgree:
         mismatches = [
             (number, in_sql, ddc.division(number))
             for number in (f"{n:03d}" for n in range(1000))
-            if f"{(in_sql := self._sql(db, _division_key(literal(number))))}0"
-            != ddc.division(number)
+            if f"{(in_sql := self._sql(db, _division_key(literal(number))))}0" != ddc.division(number)
         ]
 
         assert mismatches == []
@@ -4646,9 +4576,7 @@ class TestTheStoredKeyIsTheRulesKey:
         book = Book(title="Refiled", added_by_user_id=user.id)
         db.add(book)
         db.flush()
-        row = Classification(
-            book_id=book.id, scheme=ClassificationScheme.LCC, number="BF75"
-        )
+        row = Classification(book_id=book.id, scheme=ClassificationScheme.LCC, number="BF75")
         db.add(row)
         db.flush()
 
@@ -4665,9 +4593,7 @@ class TestTheStoredKeyIsTheRulesKey:
         book = Book(title="Rescheming", added_by_user_id=user.id)
         db.add(book)
         db.flush()
-        row = Classification(
-            book_id=book.id, scheme=ClassificationScheme.GND, number="005.13/3"
-        )
+        row = Classification(book_id=book.id, scheme=ClassificationScheme.GND, number="005.13/3")
         db.add(row)
         db.flush()
         assert row.sort_key == "005.13/3"
@@ -4687,19 +4613,13 @@ class TestTheStoredKeyIsTheRulesKey:
         book = Book(title="Either way", added_by_user_id=user.id)
         db.add(book)
         db.flush()
-        scheme_first = Classification(
-            book_id=book.id, scheme=ClassificationScheme.LCC, number="BF75"
-        )
-        number_first = Classification(
-            number="BF75", scheme=ClassificationScheme.LCC, book_id=book.id
-        )
+        scheme_first = Classification(book_id=book.id, scheme=ClassificationScheme.LCC, number="BF75")
+        number_first = Classification(number="BF75", scheme=ClassificationScheme.LCC, book_id=book.id)
 
         assert scheme_first.sort_key == number_first.sort_key
         assert scheme_first.sort_key == filing.LIBRARY_OF_CONGRESS.sort_key("BF75")
 
-    def test_a_writer_that_skips_the_hook_is_refused_rather_than_filed_last(
-        self, db, user
-    ):
+    def test_a_writer_that_skips_the_hook_is_refused_rather_than_filed_last(self, db, user):
         """The enforcement, and the reason the column is NOT NULL with no default.
 
         A null key files last under `nullslast`, so a row written past the hook
@@ -4785,9 +4705,7 @@ class TestTheShelfOrdersByEachSchemesOwnRule:
 
         assert sorted(numbers).index("BF75") == 6
 
-    def test_a_dewey_shelf_files_a_segmentation_prime_where_the_notation_goes(
-        self, db
-    ):
+    def test_a_dewey_shelf_files_a_segmentation_prime_where_the_notation_goes(self, db):
         """`005.1/33` is `005.133` and files after `005.12`, not before it.
 
         The prime reaches the column because `ClassificationIn` validates
@@ -4809,9 +4727,7 @@ class TestTheShelfOrdersByEachSchemesOwnRule:
 #: `routers/public.py` declares a second router named `catalogue`, and a
 #: `SERIALISED` call site added through that door moved no number and failed no
 #: test.
-_HTTP_VERBS = frozenset(
-    {"get", "post", "put", "patch", "delete", "head", "options"}
-)
+_HTTP_VERBS = frozenset({"get", "post", "put", "patch", "delete", "head", "options"})
 
 
 def _book_dependency(annotation) -> str | None:
@@ -4831,19 +4747,11 @@ def _book_dependency(annotation) -> str | None:
         return None
     if ast.unparse(annotation.value) != "Annotated":
         return None
-    parts = (
-        annotation.slice.elts
-        if isinstance(annotation.slice, ast.Tuple)
-        else [annotation.slice]
-    )
+    parts = annotation.slice.elts if isinstance(annotation.slice, ast.Tuple) else [annotation.slice]
     if not parts or ast.unparse(parts[0]) != "Book":
         return None
     for part in parts[1:]:
-        if (
-            isinstance(part, ast.Call)
-            and ast.unparse(part.func) == "Depends"
-            and part.args
-        ):
+        if isinstance(part, ast.Call) and ast.unparse(part.func) == "Depends" and part.args:
             return ast.unparse(part.args[0])
     return None
 
@@ -4863,10 +4771,7 @@ def _fetch_chain(tree) -> tuple[dict[str, bool], dict[str, str | None]]:
         if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
             continue
         fetches[node.name] = any(
-            any(
-                kw.arg == "load" and ast.unparse(kw.value) == "Loading.SERIALISED"
-                for kw in call.keywords
-            )
+            any(kw.arg == "load" and ast.unparse(kw.value) == "Loading.SERIALISED" for kw in call.keywords)
             for call in ast.walk(node)
             if isinstance(call, ast.Call)
         )
@@ -4980,9 +4885,7 @@ class TestTheRoutesThisDocstringCounts:
         import pathlib
 
         if source is None:
-            source = (
-                pathlib.Path(__file__).resolve().parent.parent / "dependencies.py"
-            ).read_text()
+            source = (pathlib.Path(__file__).resolve().parent.parent / "dependencies.py").read_text()
         tree = ast.parse(source)
 
         fetches, parents = _fetch_chain(tree)
@@ -5088,15 +4991,11 @@ class TestTheRoutesThisDocstringCounts:
         assert len(falsifying) == self._stated(r"\*\*(\d+) of the \d+ routes\*\*")
 
     def test_the_sub_resource_count_is_the_stated_one(self):
-        assert len(self._bucket("sub_resource")) == self._stated(
-            r"\*\*(\d+)\*\* serialise a sub-resource"
-        )
+        assert len(self._bucket("sub_resource")) == self._stated(r"\*\*(\d+)\*\* serialise a sub-resource")
 
     def test_the_count_that_serialises_nothing_is_the_stated_one(self):
         """Asserted apart from the sub-resource count, not summed with it."""
-        assert len(self._bucket("nothing")) == self._stated(
-            r"\*\*(\d+)\*\* answer 204 and serialise nothing"
-        )
+        assert len(self._bucket("nothing")) == self._stated(r"\*\*(\d+)\*\* answer 204 and serialise nothing")
 
     def test_the_three_sub_resource_deletes_are_counted_as_serialising_nothing(self):
         """The three routes the two review seats put in different buckets.
@@ -5140,13 +5039,8 @@ class TestTheRoutesThisDocstringCounts:
         """
         import pathlib
 
-        source = (
-            pathlib.Path(__file__).resolve().parent.parent / "dependencies.py"
-        ).read_text()
-        mutated = (
-            source
-            + "\n\nBookForSomethingNew = Annotated[Book, Depends(book_for_write)]\n"
-        )
+        source = (pathlib.Path(__file__).resolve().parent.parent / "dependencies.py").read_text()
+        mutated = source + "\n\nBookForSomethingNew = Annotated[Book, Depends(book_for_write)]\n"
 
         aliases = self._dependency_aliases(mutated)
 
@@ -5297,9 +5191,12 @@ class TestOnlyTheShelfSaysWhatMayLeave:
         """The other side of the diagonal: reporting every mention would make
         the rule above unusable, since the serialisers must name the type to
         take it, and an unusable rule is one somebody deletes."""
-        assert _outbound_constructions(
-            "from shelf import Outbound\ndef f(rows: Outbound) -> int:\n    return len(rows)\n"
-        ) == []
+        assert (
+            _outbound_constructions(
+                "from shelf import Outbound\ndef f(rows: Outbound) -> int:\n    return len(rows)\n"
+            )
+            == []
+        )
 
     def test_the_only_shelf_with_no_viewer_is_the_public_one(self, db):
         """The value the rule above rests on, pinned where the rule cannot see
@@ -5319,9 +5216,7 @@ class TestOnlyTheShelfSaysWhatMayLeave:
             attribute = inspect.getattr_static(shelf_module.Shelf, name)
             if not isinstance(attribute, classmethod):
                 continue
-            parameters = list(
-                inspect.signature(getattr(shelf_module.Shelf, name)).parameters
-            )
+            parameters = list(inspect.signature(getattr(shelf_module.Shelf, name)).parameters)
             built = (
                 getattr(shelf_module.Shelf, name)(db)
                 if parameters == ["db"]
@@ -5417,9 +5312,7 @@ class TestRowsThatMayLeaveTheInstance:
     def test_the_public_shelf_hands_over_its_rows(self, db, user):
         db.add(Book(title="Published", added_by_user_id=user.id))
         db.commit()
-        rows, total = shelf_module.Shelf.seen_by_the_public(db).outbound_page(
-            0, 10, Book.title.asc()
-        )
+        rows, total = shelf_module.Shelf.seen_by_the_public(db).outbound_page(0, 10, Book.title.asc())
         assert total == 1
         assert [book.title for book in rows] == ["Published"]
 
@@ -5429,9 +5322,7 @@ class TestRowsThatMayLeaveTheInstance:
         db.add(Book(title="Published", added_by_user_id=user.id))
         db.add(Book(title="Not published", added_by_user_id=user.id, is_private=True))
         db.commit()
-        rows, total = shelf_module.Shelf.seen_by_the_public(db).outbound_page(
-            0, 10, Book.title.asc()
-        )
+        rows, total = shelf_module.Shelf.seen_by_the_public(db).outbound_page(0, 10, Book.title.asc())
         assert total == 1
         assert len(rows) == 1
 
@@ -5449,11 +5340,7 @@ class TestRowsThatMayLeaveTheInstance:
         db.add(private)
         db.commit()
         db.refresh(private)
-        rows = (
-            shelf_module.Shelf.seen_by_the_public(db)
-            .where(Book.id == private.id)
-            .outbound_first()
-        )
+        rows = shelf_module.Shelf.seen_by_the_public(db).where(Book.id == private.id).outbound_first()
         assert len(rows) == 0
         assert not rows
 
@@ -5525,10 +5412,7 @@ def _outbound_signatures(source: str) -> list[str]:
         node.name
         for node in ast.walk(tree)
         if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
-        and any(
-            _names_the_type(annotation, local_names)
-            for annotation in _annotations(node.args)
-        )
+        and any(_names_the_type(annotation, local_names) for annotation in _annotations(node.args))
     ]
 
 
@@ -5592,8 +5476,7 @@ class TestTheSerialisersThatMayBuildAnOutboundPayload:
     #: `docs/data-model.md` that has stopped being true.
     OUTBOUND_DOORS: dict[str, str] = {
         "serialisation.py: books_to_public_out takes an Outbound": (
-            "the JSON catalogue. Takes no Session and no User, so it "
-            "structurally cannot ask who is reading"
+            "the JSON catalogue. Takes no Session and no User, so it structurally cannot ask who is reading"
         ),
         "sru.py: _records_element takes an Outbound": (
             "the SRU records element. Takes the type rather than looping "
@@ -5601,12 +5484,9 @@ class TestTheSerialisersThatMayBuildAnOutboundPayload:
             "bare list"
         ),
         "routers/public.py: asks a shelf for one": (
-            "the two published catalogue routes, which is also where the "
-            "publish switch is read"
+            "the two published catalogue routes, which is also where the publish switch is read"
         ),
-        "sru.py: asks a shelf for one": (
-            "the SRU searchRetrieve response, gated by the same switch"
-        ),
+        "sru.py: asks a shelf for one": ("the SRU searchRetrieve response, gated by the same switch"),
     }
 
     @staticmethod
@@ -5618,10 +5498,7 @@ class TestTheSerialisersThatMayBuildAnOutboundPayload:
         # this rule would not see it.
         found: set[str] = set()
         for name, source in application_sources().items():
-            found |= {
-                f"{name}: {function} takes an Outbound"
-                for function in _outbound_signatures(source)
-            }
+            found |= {f"{name}: {function} takes an Outbound" for function in _outbound_signatures(source)}
             if _outbound_requests(source):
                 found.add(f"{name}: asks a shelf for one")
         return found
@@ -5681,10 +5558,7 @@ class TestTheSerialisersThatMayBuildAnOutboundPayload:
         Reporting a return as well would make the rule unusable, since minting
         one is the shelf's job and is guarded by the class above."""
         assert (
-            _outbound_signatures(
-                "from shelf import Outbound\ndef f() -> Outbound:\n    return g()\n"
-            )
-            == []
+            _outbound_signatures("from shelf import Outbound\ndef f() -> Outbound:\n    return g()\n") == []
         )
 
     @pytest.mark.parametrize(
@@ -5722,6 +5596,4 @@ class TestTheModulesTheseRulesWalk:
     def test_it_returns_the_modules_these_rules_are_about(self):
         """Anti vacuity, and it names one module per shape the rules read: the
         seam itself, a router and a module reached only through a join."""
-        assert {"shelf.py", "routers/books.py", "notifications.py"} <= set(
-            application_sources()
-        )
+        assert {"shelf.py", "routers/books.py", "notifications.py"} <= set(application_sources())

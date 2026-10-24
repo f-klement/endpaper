@@ -6,6 +6,10 @@ import pytest
 
 from tests.corpus import REPO, browser_modules
 
+TREE_GUARDS = {
+    "TestContentSecurityPolicy": ("browser_modules",),
+}
+
 
 @pytest.fixture
 def headers(client):
@@ -37,8 +41,7 @@ class TestContentSecurityPolicy:
     @pytest.fixture
     def csp(self, headers):
         return {
-            part.strip().split(" ")[0]: part.strip()
-            for part in headers["content-security-policy"].split(";")
+            part.strip().split(" ")[0]: part.strip() for part in headers["content-security-policy"].split(";")
         }
 
     def test_the_whole_policy_is_what_it_is(self, headers):
@@ -240,8 +243,7 @@ class TestBodySizeLimit:
         `BodySizeLimitMiddleware`, which used to claim otherwise."""
         res = client.post(
             "/api/books",
-            headers=admin["headers"]
-            | {"transfer-encoding": "chunked", "content-type": "application/json"},
+            headers=admin["headers"] | {"transfer-encoding": "chunked", "content-type": "application/json"},
             content=b'{"title": "Dune", "author": "Herbert"}',
         )
         assert res.status_code == 201

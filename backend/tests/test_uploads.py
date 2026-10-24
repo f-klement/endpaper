@@ -135,9 +135,7 @@ class TestReplaceImage:
 
         assert (tmp_path / "8.jpg").exists()
 
-    def test_two_threads_writing_one_book_do_not_share_a_scratch_name(
-        self, tmp_path, monkeypatch
-    ):
+    def test_two_threads_writing_one_book_do_not_share_a_scratch_name(self, tmp_path, monkeypatch):
         """The pid used to be the whole of the uniqueness, which was true while
         the only concurrency here was separate processes.
 
@@ -176,10 +174,7 @@ class TestReplaceImage:
             except BaseException as error:  # noqa: BLE001  collected, then asserted on
                 failures.append(error)
 
-        threads = [
-            threading.Thread(target=write, args=(PNG_BYTES + bytes([n]),))
-            for n in (1, 2)
-        ]
+        threads = [threading.Thread(target=write, args=(PNG_BYTES + bytes([n]),)) for n in (1, 2)]
         for thread in threads:
             thread.start()
         for thread in threads:
@@ -252,8 +247,7 @@ class TestTheSnifferAnswersOnlyWhatTheAppServes:
         function = next(
             node
             for node in ast.walk(source)
-            if isinstance(node, ast.FunctionDef)
-            and node.name == "sniff_image_extension"
+            if isinstance(node, ast.FunctionDef) and node.name == "sniff_image_extension"
         )
         returned = {
             node.value.value
@@ -278,10 +272,7 @@ class TestTheSnifferAnswersOnlyWhatTheAppServes:
             if isinstance(node, ast.Return)
             and not (
                 node.value is None
-                or (
-                    isinstance(node.value, ast.Constant)
-                    and isinstance(node.value.value, str | None)
-                )
+                or (isinstance(node.value, ast.Constant) and isinstance(node.value.value, str | None))
             )
         ]
         assert not unreadable, (
@@ -321,9 +312,7 @@ class TestTheSniffWindow:
         the constant stops describing the sniffer.
         """
         one_short = SNIFF_BYTES - 1
-        answers = [
-            sniff_image_extension(body[:one_short]) for body in SNIFFABLE.values()
-        ]
+        answers = [sniff_image_extension(body[:one_short]) for body in SNIFFABLE.values()]
 
         assert None in answers
 

@@ -136,9 +136,7 @@ def open_library_hit():
         # has it" case, so its cover service answers with a real image; the
         # DNB's has nothing for an English ISBN.
         mock.get(url__startswith=AT_OPEN_LIBRARY_COVERS).mock(
-            return_value=httpx.Response(
-                200, content=JPEG_BYTES, headers={"content-type": "image/jpeg"}
-            )
+            return_value=httpx.Response(200, content=JPEG_BYTES, headers={"content-type": "image/jpeg"})
         )
         silence_covers(mock)
         yield mock
@@ -162,9 +160,7 @@ def open_library_miss():
     unmocked request rather than letting it reach the real service.
     """
     with respx.mock(assert_all_called=False) as mock:
-        mock.get(url__startswith="https://openlibrary.org/").mock(
-            return_value=httpx.Response(404)
-        )
+        mock.get(url__startswith="https://openlibrary.org/").mock(return_value=httpx.Response(404))
         mock.get(url__startswith=DNB).mock(return_value=_sru_empty())
         mock.get(url__startswith=K10PLUS).mock(return_value=_sru_empty())
         silence_sru_catalogues(mock)
@@ -232,19 +228,13 @@ def dnb_hit():
     with respx.mock(assert_all_called=False) as mock:
         mock.get(url__startswith=K10PLUS).mock(return_value=_sru_empty())
         mock.get(url__startswith=DNB).mock(
-            return_value=httpx.Response(
-                200, text=DNB_RECORD, headers={"content-type": "text/xml"}
-            )
+            return_value=httpx.Response(200, text=DNB_RECORD, headers={"content-type": "text/xml"})
         )
         # After the DNB route, never before: routes resolve in registration
         # order and this one is a catch-all over every SRU target.
         silence_sru_catalogues(mock)
-        mock.get(url__startswith="https://openlibrary.org/").mock(
-            return_value=httpx.Response(404)
-        )
-        mock.get(url__startswith=GOOGLE_BOOKS).mock(
-            return_value=httpx.Response(200, json={"items": []})
-        )
+        mock.get(url__startswith="https://openlibrary.org/").mock(return_value=httpx.Response(404))
+        mock.get(url__startswith=GOOGLE_BOOKS).mock(return_value=httpx.Response(200, json={"items": []}))
         silence_covers(mock)
         yield mock
 
@@ -299,9 +289,7 @@ class TestIsbnLookup:
         body = client.get(
             "/api/books/lookup", params={"isbn": "9780743273565"}, headers=admin["headers"]
         ).json()
-        suggested = {
-            db.get(Tag, tag_id).name for tag_id in body["suggested_tag_ids"]
-        }
+        suggested = {db.get(Tag, tag_id).name for tag_id in body["suggested_tag_ids"]}
         assert "Literary Fiction" in suggested
         assert "Historical Fiction" in suggested
 
@@ -318,9 +306,7 @@ class TestIsbnLookup:
                                 "authors": ["Frank Herbert", "Brian Herbert"],
                                 "publisher": "Chilton",
                                 "publishedDate": "1965-08-01",
-                                "industryIdentifiers": [
-                                    {"type": "ISBN_13", "identifier": "9780441013593"}
-                                ],
+                                "industryIdentifiers": [{"type": "ISBN_13", "identifier": "9780441013593"}],
                                 "categories": ["Science Fiction"],
                             }
                         }
@@ -355,9 +341,7 @@ class TestIsbnLookup:
         open_library_miss.get(url__startswith=GOOGLE_BOOKS).mock(
             return_value=httpx.Response(200, json={"items": []})
         )
-        res = client.get(
-            "/api/books/lookup", params={"isbn": "9780743273565"}, headers=admin["headers"]
-        )
+        res = client.get("/api/books/lookup", params={"isbn": "9780743273565"}, headers=admin["headers"])
         assert res.status_code == 404
 
     def test_a_throttled_source_is_503_not_404(self, client, admin, db, open_library_miss):
@@ -368,12 +352,8 @@ class TestIsbnLookup:
         was the live failure: Google throttled every keyless request and the
         API reported each one as a book nobody has ever catalogued.
         """
-        open_library_miss.get(url__startswith=GOOGLE_BOOKS).mock(
-            return_value=httpx.Response(429)
-        )
-        res = client.get(
-            "/api/books/lookup", params={"isbn": "9780743273565"}, headers=admin["headers"]
-        )
+        open_library_miss.get(url__startswith=GOOGLE_BOOKS).mock(return_value=httpx.Response(429))
+        res = client.get("/api/books/lookup", params={"isbn": "9780743273565"}, headers=admin["headers"])
         assert res.status_code == 503
         assert "rate limiting" in res.json()["detail"]
 
@@ -389,9 +369,7 @@ class TestIsbnLookup:
         assert body["language"] == "de"
         assert body["page_count"] == 390
 
-    def test_a_repeat_lookup_does_not_call_the_source_again(
-        self, client, admin, open_library_hit
-    ):
+    def test_a_repeat_lookup_does_not_call_the_source_again(self, client, admin, open_library_hit):
         """Holding a barcode in frame produces the same ISBN many times a second."""
         for _ in range(3):
             client.get(
@@ -400,15 +378,11 @@ class TestIsbnLookup:
                 headers=admin["headers"],
             )
         edition_calls = [
-            call
-            for call in open_library_hit.calls
-            if call.request.url.path == "/isbn/9780743273565.json"
+            call for call in open_library_hit.calls if call.request.url.path == "/isbn/9780743273565.json"
         ]
         assert len(edition_calls) == 1
 
-    def test_a_lone_surrogate_in_a_json_answer_is_mojibake_and_not_a_500(
-        self, client, admin
-    ):
+    def test_a_lone_surrogate_in_a_json_answer_is_mojibake_and_not_a_500(self, client, admin):
         """`json.loads` turns a `\\ud800` escape into a surrogate with no
         partner, which no encoder writes back out, so serialising the lookup
         answered 500. `fetch.Fetched.json` now repairs it, the way `.text`
@@ -438,9 +412,7 @@ class TestIsbnLookup:
     def test_requires_authentication(self, client):
         assert client.get("/api/books/lookup", params={"isbn": "9780743273565"}).status_code == 401
 
-    def test_a_unicode_digit_isbn_is_rejected_rather_than_raising(
-        self, client, member
-    ):
+    def test_a_unicode_digit_isbn_is_rejected_rather_than_raising(self, client, member):
         """**A 500 out of the router, executed against the app.**
 
         `978` and ten superscript twos is thirteen characters, so it passed the
@@ -462,9 +434,7 @@ class TestIsbnLookup:
 
 class TestAddBook:
     def test_creates_a_book(self, client, admin):
-        res = client.post(
-            "/api/books", json={"title": "Book", "author": "Author"}, headers=admin["headers"]
-        )
+        res = client.post("/api/books", json={"title": "Book", "author": "Author"}, headers=admin["headers"])
         assert res.status_code == 201
         assert res.json()["title"] == "Book"
 
@@ -484,9 +454,7 @@ class TestAddBook:
         )
         assert res.status_code == 409
 
-    def test_a_unicode_digit_isbn_cannot_forge_a_second_copy(
-        self, client, admin, make_book
-    ):
+    def test_a_unicode_digit_isbn_cannot_forge_a_second_copy(self, client, admin, make_book):
         """**The quiet half, and the worse one.**
 
         `978316148410` and an Arabic-Indic zero is thirteen `isdigit()`
@@ -518,9 +486,7 @@ class TestAddBook:
         assert res.status_code == 422
 
     def test_scan_endpoint_creates_a_book_too(self, client, admin):
-        res = client.post(
-            "/api/books/scan", json={"title": "Scanned"}, headers=admin["headers"]
-        )
+        res = client.post("/api/books/scan", json={"title": "Scanned"}, headers=admin["headers"])
         assert res.status_code == 201
 
     def test_scan_rejects_a_duplicate_isbn(self, client, admin, make_book):
@@ -586,20 +552,14 @@ class TestListBooks:
         """A book only gets a user_books row once its status is set."""
         make_book(admin["headers"], title="Never Touched")
         read_me = make_book(admin["headers"], title="Read")
-        client.put(
-            f"/api/books/{read_me['id']}/status", json={"status": "read"}, headers=admin["headers"]
-        )
-        unread = items(client.get(
-            "/api/books", params={"status": "unread"}, headers=admin["headers"]
-        ))
+        client.put(f"/api/books/{read_me['id']}/status", json={"status": "read"}, headers=admin["headers"])
+        unread = items(client.get("/api/books", params={"status": "unread"}, headers=admin["headers"]))
         assert [b["title"] for b in unread] == ["Never Touched"]
 
     def test_status_filter_finds_read_books(self, client, admin, make_book):
         book = make_book(admin["headers"], title="Read")
         make_book(admin["headers"], title="Unread")
-        client.put(
-            f"/api/books/{book['id']}/status", json={"status": "read"}, headers=admin["headers"]
-        )
+        client.put(f"/api/books/{book['id']}/status", json={"status": "read"}, headers=admin["headers"])
         found = items(client.get("/api/books", params={"status": "read"}, headers=admin["headers"]))
         assert [b["title"] for b in found] == ["Read"]
 
@@ -608,9 +568,7 @@ class TestListBooks:
         tagged = make_book(admin["headers"], title="Tagged")
         make_book(admin["headers"], title="Untagged")
         client.post(f"/api/books/{tagged['id']}/tags/{fantasy.id}", headers=admin["headers"])
-        found = items(client.get(
-            "/api/books", params={"tags": str(fantasy.id)}, headers=admin["headers"]
-        ))
+        found = items(client.get("/api/books", params={"tags": str(fantasy.id)}, headers=admin["headers"]))
         assert [b["title"] for b in found] == ["Tagged"]
 
     def test_multiple_tags_are_combined_with_and(self, client, admin, make_book, db):
@@ -621,9 +579,9 @@ class TestListBooks:
         for tag in (fantasy, adult):
             client.post(f"/api/books/{both['id']}/tags/{tag.id}", headers=admin["headers"])
         client.post(f"/api/books/{one['id']}/tags/{fantasy.id}", headers=admin["headers"])
-        found = items(client.get(
-            "/api/books", params={"tags": f"{fantasy.id},{adult.id}"}, headers=admin["headers"]
-        ))
+        found = items(
+            client.get("/api/books", params={"tags": f"{fantasy.id},{adult.id}"}, headers=admin["headers"])
+        )
         assert [b["title"] for b in found] == ["Both"]
 
     def test_non_numeric_tag_ids_are_ignored(self, client, admin, make_book):
@@ -644,9 +602,7 @@ class TestPrivacy:
         make_book(admin["headers"], title="Secret", is_private=True)
         assert len(items(client.get("/api/books", headers=admin["headers"]))) == 1
 
-    def test_fetching_someone_elses_private_book_is_404_not_403(
-        self, client, admin, member, make_book
-    ):
+    def test_fetching_someone_elses_private_book_is_404_not_403(self, client, admin, member, make_book):
         """404 rather than 403: a 403 would confirm the book exists."""
         book = make_book(admin["headers"], title="Secret", is_private=True)
         res = client.get(f"/api/books/{book['id']}", headers=member["headers"])
@@ -703,9 +659,7 @@ class TestUpdateStatus:
     @pytest.mark.parametrize("status", ["unread", "reading", "read"])
     def test_accepts_each_valid_status(self, client, admin, make_book, status):
         book = make_book(admin["headers"])
-        res = client.put(
-            f"/api/books/{book['id']}/status", json={"status": status}, headers=admin["headers"]
-        )
+        res = client.put(f"/api/books/{book['id']}/status", json={"status": status}, headers=admin["headers"])
         assert res.status_code == 200
         assert res.json()["my_status"] == status
 
@@ -718,9 +672,7 @@ class TestUpdateStatus:
 
     def test_status_is_per_user(self, client, admin, member, make_book):
         book = make_book(admin["headers"])
-        client.put(
-            f"/api/books/{book['id']}/status", json={"status": "read"}, headers=admin["headers"]
-        )
+        client.put(f"/api/books/{book['id']}/status", json={"status": "read"}, headers=admin["headers"])
         seen_by_member = client.get(f"/api/books/{book['id']}", headers=member["headers"]).json()
         assert seen_by_member["my_status"] == "unread"
 
@@ -729,9 +681,7 @@ class TestUpdateStatus:
 
         book = make_book(admin["headers"])
         for status in ("reading", "read"):
-            client.put(
-                f"/api/books/{book['id']}/status", json={"status": status}, headers=admin["headers"]
-            )
+            client.put(f"/api/books/{book['id']}/status", json={"status": status}, headers=admin["headers"])
         assert db.query(UserBook).filter(UserBook.book_id == book["id"]).count() == 1
 
     def test_unknown_book_is_404(self, client, admin):
@@ -786,9 +736,7 @@ class TestDeleteBook:
     def test_unknown_id_is_404(self, client, admin):
         assert client.delete("/api/books/9999", headers=admin["headers"]).status_code == 404
 
-    def test_deleting_keeps_the_notes_so_a_restore_is_whole(
-        self, client, admin, make_book, db
-    ):
+    def test_deleting_keeps_the_notes_so_a_restore_is_whole(self, client, admin, make_book, db):
         """A trashed book keeps everything hanging off it.
 
         This used to cascade, and the cascade is what made a delete final.
@@ -798,9 +746,7 @@ class TestDeleteBook:
         from models import Note
 
         book = make_book(admin["headers"])
-        client.post(
-            f"/api/books/{book['id']}/notes", json={"content": "note"}, headers=admin["headers"]
-        )
+        client.post(f"/api/books/{book['id']}/notes", json={"content": "note"}, headers=admin["headers"])
         client.delete(f"/api/books/{book['id']}", headers=admin["headers"])
         assert db.query(Note).filter(Note.book_id == book["id"]).count() == 1
 
@@ -821,9 +767,7 @@ class TestDeleteBook:
         from models import Note
 
         book = make_book(admin["headers"])
-        client.post(
-            f"/api/books/{book['id']}/notes", json={"content": "note"}, headers=admin["headers"]
-        )
+        client.post(f"/api/books/{book['id']}/notes", json={"content": "note"}, headers=admin["headers"])
         client.delete(f"/api/books/{book['id']}", headers=admin["headers"])
         client.delete(f"/api/books/{book['id']}/permanent", headers=admin["headers"])
         assert db.query(Note).filter(Note.book_id == book["id"]).count() == 0
@@ -843,9 +787,7 @@ class TestDeleteBook:
 
 
 class TestCoverUpload:
-    def test_uploads_and_points_the_book_at_the_file(
-        self, client, admin, make_book, covers_dir
-    ):
+    def test_uploads_and_points_the_book_at_the_file(self, client, admin, make_book, covers_dir):
         book = make_book(admin["headers"])
         res = client.post(
             f"/api/books/{book['id']}/cover",
@@ -865,9 +807,7 @@ class TestCoverUpload:
         )
         assert res.status_code == 400
 
-    def test_replacing_a_cover_removes_the_previous_file(
-        self, client, admin, make_book, covers_dir
-    ):
+    def test_replacing_a_cover_removes_the_previous_file(self, client, admin, make_book, covers_dir):
         book = make_book(admin["headers"])
         client.post(
             f"/api/books/{book['id']}/cover",
@@ -917,9 +857,7 @@ def open_library_oversized():
             )
         )
         mock.get(url__startswith=AT_OPEN_LIBRARY_COVERS).mock(
-            return_value=httpx.Response(
-                200, content=JPEG_BYTES, headers={"content-type": "image/jpeg"}
-            )
+            return_value=httpx.Response(200, content=JPEG_BYTES, headers={"content-type": "image/jpeg"})
         )
         silence_covers(mock)
         yield mock
@@ -932,9 +870,7 @@ class TestRefreshMetadata:
         assert res.status_code == 200
         assert res.json()["title"] == "The Great Gatsby"
 
-    def test_keeps_a_locally_uploaded_cover(
-        self, client, admin, make_book, covers_dir, open_library_hit
-    ):
+    def test_keeps_a_locally_uploaded_cover(self, client, admin, make_book, covers_dir, open_library_hit):
         """A cover the user uploaded outranks whatever Open Library offers."""
         book = make_book(admin["headers"], isbn="9780743273565")
         client.post(
@@ -971,9 +907,7 @@ class TestRefreshMetadata:
         assert res.json()["cover_url"] == "/held/1.png"
 
     def test_replaces_a_remote_cover(self, client, admin, make_book, open_library_hit):
-        book = make_book(
-            admin["headers"], isbn="9780743273565", cover_url="https://example.com/old.jpg"
-        )
+        book = make_book(admin["headers"], isbn="9780743273565", cover_url="https://example.com/old.jpg")
         res = client.put(f"/api/books/{book['id']}/refresh", headers=admin["headers"])
         assert res.json()["cover_url"].startswith("https://covers.openlibrary.org/")
 
@@ -993,9 +927,7 @@ class TestRefreshMetadata:
         after = client.get(f"/api/books/{book['id']}", headers=admin["headers"]).json()
         assert after["title"] == "Typed by hand"
 
-    def test_a_catalogue_that_cannot_be_reached_is_503_and_keeps_what_it_had(
-        self, client, admin, make_book
-    ):
+    def test_a_catalogue_that_cannot_be_reached_is_503_and_keeps_what_it_had(self, client, admin, make_book):
         """Not 404: that tells the member to type the book in by hand, when the
         honest answer is to try again."""
         book = make_book(admin["headers"], title="Typed by hand", isbn="9780743273565")
@@ -1003,9 +935,7 @@ class TestRefreshMetadata:
             mock.get(url__startswith=DNB).mock(return_value=_sru_empty())
             mock.get(url__startswith=K10PLUS).mock(return_value=_sru_empty())
             silence_sru_catalogues(mock)
-            mock.get(url__startswith="https://openlibrary.org/").mock(
-                return_value=httpx.Response(503)
-            )
+            mock.get(url__startswith="https://openlibrary.org/").mock(return_value=httpx.Response(503))
             silence_covers(mock)
             res = client.put(f"/api/books/{book['id']}/refresh", headers=admin["headers"])
 
@@ -1054,9 +984,7 @@ class TestRefreshMetadata:
         without this test being edited."""
         book = make_book(admin["headers"], title="Stale", isbn="9780743273565")
 
-        body = client.put(
-            f"/api/books/{book['id']}/refresh", headers=admin["headers"]
-        ).json()
+        body = client.put(f"/api/books/{book['id']}/refresh", headers=admin["headers"]).json()
 
         too_wide = {
             name: len(body[name])
@@ -1122,9 +1050,7 @@ class TestNotes:
         note = client.post(
             f"/api/books/{book['id']}/notes", json={"content": "theirs"}, headers=member["headers"]
         ).json()
-        res = client.delete(
-            f"/api/books/{book['id']}/notes/{note['id']}", headers=admin["headers"]
-        )
+        res = client.delete(f"/api/books/{book['id']}/notes/{note['id']}", headers=admin["headers"])
         assert res.status_code == 204
 
     def test_an_admin_may_edit_someone_else_s_note(self, client, admin, member, make_book):
@@ -1148,9 +1074,7 @@ class TestNotes:
         note = client.post(
             f"/api/books/{book_a['id']}/notes", json={"content": "x"}, headers=admin["headers"]
         ).json()
-        res = client.delete(
-            f"/api/books/{book_b['id']}/notes/{note['id']}", headers=admin["headers"]
-        )
+        res = client.delete(f"/api/books/{book_b['id']}/notes/{note['id']}", headers=admin["headers"])
         assert res.status_code == 404
 
     def test_notes_on_an_unknown_book_are_404(self, client, admin):
@@ -1181,9 +1105,7 @@ class TestExport:
 
     def test_csv_includes_the_reader_s_own_status(self, client, admin, make_book):
         book = make_book(admin["headers"])
-        client.put(
-            f"/api/books/{book['id']}/status", json={"status": "read"}, headers=admin["headers"]
-        )
+        client.put(f"/api/books/{book['id']}/status", json={"status": "read"}, headers=admin["headers"])
         rows = self._rows(client.get("/api/books/export", headers=admin["headers"]))
         assert rows[0]["My Status"] == "read"
 
@@ -1194,9 +1116,7 @@ class TestExport:
 
     def test_txt_format_is_served_as_plain_text(self, client, admin, make_book):
         make_book(admin["headers"], title="Exported")
-        res = client.get(
-            "/api/books/export", params={"format": "txt"}, headers=admin["headers"]
-        )
+        res = client.get("/api/books/export", params={"format": "txt"}, headers=admin["headers"])
         assert "text/plain" in res.headers["content-type"]
         assert "Title: Exported" in res.text
 
@@ -1207,9 +1127,7 @@ class TestExport:
         assert ".csv" in res.headers["content-disposition"]
 
     def test_an_unknown_format_is_rejected(self, client, admin):
-        res = client.get(
-            "/api/books/export", params={"format": "pdf"}, headers=admin["headers"]
-        )
+        res = client.get("/api/books/export", params={"format": "pdf"}, headers=admin["headers"])
         assert res.status_code == 422
 
     def test_export_excludes_other_users_private_books(self, client, admin, member, make_book):
@@ -1240,9 +1158,7 @@ class TestExport:
         assert books_router._FORMULA_LEAD == ("=", "+", "-", "@", "\t", "\r")
 
     @pytest.mark.parametrize("lead", books_router._FORMULA_LEAD)
-    def test_every_lead_a_spreadsheet_would_run_is_neutralised(
-        self, client, admin, make_book, lead
-    ):
+    def test_every_lead_a_spreadsheet_would_run_is_neutralised(self, client, admin, make_book, lead):
         """Driven off `_FORMULA_LEAD` itself, so a character added to it is
         covered by construction.
 
@@ -1255,9 +1171,7 @@ class TestExport:
         rows = self._rows(client.get("/api/books/export", headers=admin["headers"]))
         assert rows[0]["Title"] == f"'{lead}=1+1"
 
-    def test_a_currency_that_is_a_formula_reaches_the_file_as_text(
-        self, client, admin, make_book
-    ):
+    def test_a_currency_that_is_a_formula_reaches_the_file_as_text(self, client, admin, make_book):
         """`Purchase Currency` looks like the enum columns beside it and is not.
 
         Its validator asks for three characters and upper cases them, which
@@ -1291,9 +1205,7 @@ def _underlying(member: object) -> object | None:
     return member if inspect.isfunction(member) else None
 
 
-def _watched_members(
-    owner: type, matches, subject: str, *, refuse_descriptors: bool
-) -> list[str]:
+def _watched_members(owner: type, matches, subject: str, *, refuse_descriptors: bool) -> list[str]:
     """Every plain function on `owner` that hands back `matches`, and a refusal.
 
     **Derived from each member's declared return type rather than from a list
@@ -1614,9 +1526,7 @@ def _shelf_resolvers() -> list[str]:
 def _shelf_query_doors() -> list[str]:
     # The one caller that still refuses a descriptor it cannot wrap, because
     # a door resolves no rows and the row counter has nothing to see.
-    return _watched_members(
-        Shelf, _is_a_query, "an unresolved query", refuse_descriptors=True
-    )
+    return _watched_members(Shelf, _is_a_query, "an unresolved query", refuse_descriptors=True)
 
 
 def _named(key: tuple[type | None, bool]) -> str:
@@ -1832,8 +1742,7 @@ class TestNoExportArmResolvesMoreBooksThanAPage:
         db.add_all(books)
         db.commit()
         db.add_all(
-            UserBook(user_id=owner["user"]["id"], book_id=book.id, status=ReadStatus.READ)
-            for book in books
+            UserBook(user_id=owner["user"]["id"], book_id=book.id, status=ReadStatus.READ) for book in books
         )
         for book in books:
             # Named off the book's own id rather than off `titled`, because
@@ -1878,14 +1787,11 @@ class TestNoExportArmResolvesMoreBooksThanAPage:
         settings_store.set_value(db, SettingKey.LIBRARY_MODE, "true")
         self.a_shelf(db, admin, self.BOOKS)
 
-        res = client.get(
-            "/api/books/export", params={"format": format.value}, headers=admin["headers"]
-        )
+        res = client.get("/api/books/export", params={"format": format.value}, headers=admin["headers"])
 
         assert res.status_code == 200
         assert resolved.books, (
-            "no resolution was recorded, so this arm watched nothing and "
-            "would pass whatever the route did."
+            "no resolution was recorded, so this arm watched nothing and would pass whatever the route did."
         )
         assert max(resolved.books) <= small_pages, (
             f"the {format.value} arm resolved {max(resolved.books)} books at "
@@ -1946,13 +1852,9 @@ class TestNoExportArmResolvesMoreBooksThanAPage:
         settings_store.set_value(db, SettingKey.LIBRARY_MODE, "true")
         self.a_shelf(db, admin, self.BOOKS)
 
-        peaks = {
-            format: self._exported_rows(client, admin, format) for format in ExportFormat
-        }
+        peaks = {format: self._exported_rows(client, admin, format) for format in ExportFormat}
         for entity in self.PAGED:
-            loaded = {
-                format.value: peaks[format].get((entity, False)) for format in ExportFormat
-            }
+            loaded = {format.value: peaks[format].get((entity, False)) for format in ExportFormat}
             read = {name: rows for name, rows in loaded.items() if rows}
             assert read, (
                 f"no arm put a row of {entity.__name__} across the driver: "
@@ -1984,17 +1886,13 @@ class TestNoExportArmResolvesMoreBooksThanAPage:
         statements.
         """
         with rows_at_the_engine() as seen:
-            res = client.get(
-                "/api/books/export", params={"format": format.value}, headers=admin["headers"]
-            )
+            res = client.get("/api/books/export", params={"format": format.value}, headers=admin["headers"])
         assert res.status_code == 200
         return peak_rows(seen)
 
     @pytest.mark.parametrize("format", list(ExportFormat))
     @pytest.mark.sqlite_only(reason="counts rows through sqlite3's row_factory, which no other driver has")
-    def test_the_rows_behind_an_arm_do_not_grow_with_the_shelf(
-        self, client, admin, db, small_pages, format
-    ):
+    def test_the_rows_behind_an_arm_do_not_grow_with_the_shelf(self, client, admin, db, small_pages, format):
         """The fourth reading: what the driver handed over, at two shelf sizes.
 
         **Relative rather than a row ceiling, and that is the design rather
@@ -2050,9 +1948,7 @@ class TestNoExportArmResolvesMoreBooksThanAPage:
             "statement of zero rows satisfies the key."
         )
         grew = {
-            _named(key): (small.get(key, 0), rows)
-            for key, rows in grown.items()
-            if rows > small.get(key, 0)
+            _named(key): (small.get(key, 0), rows) for key, rows in grown.items() if rows > small.get(key, 0)
         }
         assert grew == {}, (
             f"the {format.value} arm grew with the shelf: {grew}, as "
@@ -2101,9 +1997,7 @@ class TestNoExportArmResolvesMoreBooksThanAPage:
         def recording(content, *args, **kwargs):
             # `None` is what a list or a string reports, which is the shape an
             # arm that built the file first would hand over.
-            states.append(
-                inspect.getgeneratorstate(content) if inspect.isgenerator(content) else None
-            )
+            states.append(inspect.getgeneratorstate(content) if inspect.isgenerator(content) else None)
 
             def counted():
                 for piece in content:
@@ -2116,9 +2010,7 @@ class TestNoExportArmResolvesMoreBooksThanAPage:
         # of its declared surface, which mypy refuses to reach through.
         monkeypatch.setattr("routers.books.StreamingResponse", recording)
 
-        res = client.get(
-            "/api/books/export", params={"format": format.value}, headers=admin["headers"]
-        )
+        res = client.get("/api/books/export", params={"format": format.value}, headers=admin["headers"])
 
         assert res.status_code == 200
         assert states == [inspect.GEN_CREATED], (
@@ -2131,9 +2023,7 @@ class TestNoExportArmResolvesMoreBooksThanAPage:
             f"over {pages} pages, so it accumulated before it yielded."
         )
 
-    def test_a_book_made_private_ahead_of_the_walk_is_in_no_page(
-        self, admin, member, db, small_pages
-    ):
+    def test_a_book_made_private_ahead_of_the_walk_is_in_no_page(self, admin, member, db, small_pages):
         """Every page is a fresh query, so the privacy rule is re-applied.
 
         **This is the only arm in the tree that watches visibility change
@@ -2163,9 +2053,7 @@ class TestNoExportArmResolvesMoreBooksThanAPage:
         first = next(pages)
         other = SessionLocal()
         try:
-            ahead = (
-                other.query(Book).filter(Book.id > first[-1].id).order_by(Book.id).first()
-            )
+            ahead = other.query(Book).filter(Book.id > first[-1].id).order_by(Book.id).first()
             # The position is asserted rather than assumed: a fixture that
             # drifted so the flip landed behind the cursor would leave an arm
             # that passes because the book was already written.
@@ -2196,9 +2084,7 @@ class TestNoExportArmResolvesMoreBooksThanAPage:
         """
         assert typing.get_type_hints(books_router.export_books)["format"] is ExportFormat
 
-    def test_the_books_channel_tells_a_whole_shelf_from_a_page(
-        self, admin, db, small_pages, resolved
-    ):
+    def test_the_books_channel_tells_a_whole_shelf_from_a_page(self, admin, db, small_pages, resolved):
         """The diagonal: the shape this class exists to catch, driven past the
         same recorder.
 
@@ -2263,9 +2149,7 @@ class TestNoExportArmResolvesMoreBooksThanAPage:
         assert (whole, whole_again) == (self.BOOKS, self.BOOKS * 2)
 
     @pytest.mark.sqlite_only(reason="counts rows through sqlite3's row_factory, which no other driver has")
-    def test_the_row_counter_sees_a_reading_load_hoisted_off_the_page(
-        self, admin, db, small_pages
-    ):
+    def test_the_row_counter_sees_a_reading_load_hoisted_off_the_page(self, admin, db, small_pages):
         """What the retired reading records channel watched, read off the driver.
 
         **Stronger in population and weaker in bound, and the two directions
@@ -2327,9 +2211,7 @@ class TestNoExportArmResolvesMoreBooksThanAPage:
                 raise NotImplementedError
 
         with pytest.raises(AssertionError, match="door"):
-            _watched_members(
-                Opening, _is_a_query, "an unresolved query", refuse_descriptors=True
-            )
+            _watched_members(Opening, _is_a_query, "an unresolved query", refuse_descriptors=True)
 
         assert "all" in _shelf_resolvers()
 
@@ -2364,9 +2246,7 @@ class TestNoExportArmResolvesMoreBooksThanAPage:
             def narrowed(query: Query[Book]) -> Query[Book]:
                 raise NotImplementedError
 
-        watched = _watched_members(
-            Helping, _is_a_query, "an unresolved query", refuse_descriptors=True
-        )
+        watched = _watched_members(Helping, _is_a_query, "an unresolved query", refuse_descriptors=True)
 
         assert watched == ["door"], (
             f"{watched}. A staticmethod handed the query it narrows is "
@@ -2454,9 +2334,7 @@ class TestNoExportArmResolvesMoreBooksThanAPage:
         shut: dict[str, list[str]] = {}
         for name in _shelf_resolvers():
             hint = typing.get_type_hints(getattr(Shelf, name))["return"]
-            for container in sorted(
-                _containers_holding_book_rows(hint), key=lambda kind: kind.__name__
-            ):
+            for container in sorted(_containers_holding_book_rows(hint), key=lambda kind: kind.__name__):
                 if inspect.isabstract(container):
                     abstract.setdefault(name, []).append(container.__name__)
                 elif not _opens(container):
@@ -2517,9 +2395,7 @@ def _export_columns() -> list[tuple[str, bool]]:
         "paired with the cell below it, and this guard would skip it."
     )
     escaped = [
-        isinstance(cell, ast.Call)
-        and isinstance(cell.func, ast.Name)
-        and cell.func.id == "_csv_safe"
+        isinstance(cell, ast.Call) and isinstance(cell.func, ast.Name) and cell.func.id == "_csv_safe"
         for cell in row_elements
     ]
     assert len(names) == len(escaped), (
@@ -2877,9 +2753,7 @@ class TestTheTextExportCannotBeMadeToForgeALine:
     """
 
     def _export(self, client, admin) -> str:
-        res = client.get(
-            "/api/books/export", params={"format": "txt"}, headers=admin["headers"]
-        )
+        res = client.get("/api/books/export", params={"format": "txt"}, headers=admin["headers"])
         assert res.status_code == 200
         return res.text
 
@@ -2905,9 +2779,7 @@ class TestTheTextExportCannotBeMadeToForgeALine:
         every arm below with it. `_BREAKS_AS_MEASURED` is the floor that catches
         that, for the reason recorded beside it.
         """
-        missing = [
-            hex(ord(char)) for char in _BREAKS_AS_MEASURED if char not in _LINE_BREAKS
-        ]
+        missing = [hex(ord(char)) for char in _BREAKS_AS_MEASURED if char not in _LINE_BREAKS]
         assert missing == [], (
             f"{missing} broke a line when this was measured and the sweep no "
             "longer finds them, so every arm in this class just got narrower."
@@ -2935,12 +2807,8 @@ class TestTheTextExportCannotBeMadeToForgeALine:
             "still opens a line of its own in the export."
         )
 
-    @pytest.mark.parametrize(
-        "line_break", _LINE_BREAKS, ids=[hex(ord(char)) for char in _LINE_BREAKS]
-    )
-    def test_no_line_break_can_open_a_second_added_by_line(
-        self, client, admin, make_book, line_break
-    ):
+    @pytest.mark.parametrize("line_break", _LINE_BREAKS, ids=[hex(ord(char)) for char in _LINE_BREAKS])
+    def test_no_line_break_can_open_a_second_added_by_line(self, client, admin, make_book, line_break):
         r"""One arm per break, derived, so the set the arms cover and the set
         `_one_line` claims cannot drift apart.
 
@@ -2954,8 +2822,7 @@ class TestTheTextExportCannotBeMadeToForgeALine:
         make_book(
             admin["headers"],
             title="Dune",
-            description=f"A good read.{line_break}Added By: mallory"
-            f"{line_break}Description: and mine",
+            description=f"A good read.{line_break}Added By: mallory{line_break}Description: and mine",
         )
 
         exported = self._export(client, admin)
@@ -2963,9 +2830,7 @@ class TestTheTextExportCannotBeMadeToForgeALine:
         assert self._lines_opening(exported, "Added By:") == ["Added By: admin"]
         assert len(self._lines_opening(exported, "Description:")) == 1, exported
 
-    def test_the_words_of_a_description_survive_on_their_line(
-        self, client, admin, make_book
-    ):
+    def test_the_words_of_a_description_survive_on_their_line(self, client, admin, make_book):
         """The loss is the paragraph break and nothing else. A fix that dropped
         the value, or truncated it at the newline, would pass the test above
         and silently empty every multi line description in the library."""
@@ -2991,9 +2856,7 @@ class TestTheTextExportCannotBeMadeToForgeALine:
             for label in sorted(_PLANTERS)
         ],
     )
-    def test_no_value_on_the_record_can_open_a_line(
-        self, client, admin, db, make_book, label
-    ):
+    def test_no_value_on_the_record_can_open_a_line(self, client, admin, db, make_book, label):
         """Not only the description, which is the one the report named.
 
         Eight of the ten lines carry a stored value, and each is its own way in.
@@ -3014,8 +2877,7 @@ class TestTheTextExportCannotBeMadeToForgeALine:
 
         assert len(self._lines_opening(exported, "Added By:")) == 1, exported
         assert _FORGERY_FLATTENED in exported, (
-            f"the {label} arm planted nothing the export carries, so it would "
-            "pass with `_one_line` deleted."
+            f"the {label} arm planted nothing the export carries, so it would pass with `_one_line` deleted."
         )
 
     def test_every_label_on_the_record_is_attacked_or_named_as_not_attacked(self):
@@ -3044,9 +2906,7 @@ class TestTheTextExportCannotBeMadeToForgeALine:
             "`_NOT_DRIVEN_HERE` with what refuses the break on the read side."
         )
 
-    def test_a_forged_line_cannot_begin_with_a_formula_lead(
-        self, client, admin, make_book
-    ):
+    def test_a_forged_line_cannot_begin_with_a_formula_lead(self, client, admin, make_book):
         """The spreadsheet half of the same defect. Excel's text import reads
         this file, and a line beginning `=` is a formula. Flattening closes it
         by construction: every line now begins with a label, so no value this
@@ -3147,9 +3007,7 @@ class TestOwnership:
 
         assert res.status_code == 200
 
-    def test_another_member_cannot_touch_a_private_book(
-        self, client, admin, member, make_book
-    ):
+    def test_another_member_cannot_touch_a_private_book(self, client, admin, member, make_book):
         book = make_book(admin["headers"], is_private=True)
 
         res = client.patch(
@@ -3181,9 +3039,7 @@ class TestOwnership:
             headers=admin["headers"],
         )
 
-        found = items(
-            client.get("/api/books", params={"ownership": "unknown"}, headers=admin["headers"])
-        )
+        found = items(client.get("/api/books", params={"ownership": "unknown"}, headers=admin["headers"]))
 
         assert [book["title"] for book in found] == ["Only Read It"]
         assert owned["id"] not in {book["id"] for book in found}
@@ -3195,9 +3051,7 @@ class TestTheDuplicateConflictPointsAtTheBook:
 
     ISBN = "9780441013593"
 
-    def test_it_carries_the_id_of_the_book_that_holds_the_isbn(
-        self, client, admin, make_book
-    ):
+    def test_it_carries_the_id_of_the_book_that_holds_the_isbn(self, client, admin, make_book):
         existing = make_book(admin["headers"], title="Dune", isbn=self.ISBN)
 
         res = client.post(
@@ -3232,9 +3086,7 @@ class TestTheDuplicateConflictPointsAtTheBook:
         promise too. The message is identical in both cases, so a test reading
         that passes whether or not the id travels.
         """
-        holder = make_book(
-            admin["headers"], title="A diary", isbn=self.ISBN, is_private=True
-        )
+        holder = make_book(admin["headers"], title="A diary", isbn=self.ISBN, is_private=True)
 
         res = client.post(
             "/api/books",
@@ -3276,9 +3128,7 @@ class TestTheDuplicateConflictPointsAtTheBook:
         assert hidden.json()["detail"] == shown.json()["detail"]["message"]
         assert shown.json()["detail"]["book_id"] == mine["id"]
 
-    def test_two_books_holding_the_isbn_outside_a_copy_group_answer_naming_neither(
-        self, client, admin, db
-    ):
+    def test_two_books_holding_the_isbn_outside_a_copy_group_answer_naming_neither(self, client, admin, db):
         """An ISBN-10 row written before canonicalisation beside its ISBN-13 is
         two Books the tie rule does not settle. The client acts on the id a 409
         names, so naming the lower one would pick between them."""
@@ -3297,9 +3147,7 @@ class TestTheDuplicateConflictPointsAtTheBook:
         assert res.status_code == 409
         assert isinstance(res.json()["detail"], str)
 
-    def test_your_own_private_book_is_still_pointed_at(
-        self, client, admin, make_book
-    ):
+    def test_your_own_private_book_is_still_pointed_at(self, client, admin, make_book):
         """It is your book. Withholding it here would be protecting you from
         yourself and leaving you with the dead end."""
         existing = make_book(admin["headers"], title="A diary", isbn=self.ISBN, is_private=True)
@@ -3343,9 +3191,7 @@ class TestTheCostOfAListing:
         for index in range(start, start + count):
             make_book(owner["headers"], title=f"Cost {index}", author=f"Author {index}")
 
-    def test_a_page_of_books_costs_the_same_whatever_its_length(
-        self, client, admin, member, make_book
-    ):
+    def test_a_page_of_books_costs_the_same_whatever_its_length(self, client, admin, member, make_book):
         """Two lengths, and an exact number rather than a ceiling.
 
         **A ceiling cannot see the regression it exists for.** The loans twin
@@ -3414,48 +3260,32 @@ class TestACatalogueLoginLeavesTheDeploymentWithItsRequest:
     SENT = "Basic " + b64encode(b"alice:hunter2").decode()
 
     def _asked_the_dnb(self, mock) -> list[httpx.Request]:
-        sent = [
-            call.request
-            for call in mock.calls
-            if str(call.request.url).startswith(DNB)
-        ]
+        sent = [call.request for call in mock.calls if str(call.request.url).startswith(DNB)]
         assert sent, "the DNB was never asked, so the headers say nothing"
         return sent
 
-    def test_a_login_this_deployment_holds_reaches_the_catalogue(
-        self, client, admin, dnb_hit, monkeypatch
-    ):
-        monkeypatch.setattr(
-            sources, "NEEDS_A_KEY", frozenset({CatalogueSource.DNB})
-        )
+    def test_a_login_this_deployment_holds_reaches_the_catalogue(self, client, admin, dnb_hit, monkeypatch):
+        monkeypatch.setattr(sources, "NEEDS_A_KEY", frozenset({CatalogueSource.DNB}))
         monkeypatch.setenv(credentials.env_variable_name("dnb"), "alice:hunter2")
 
-        res = client.get(
-            "/api/books/lookup", params={"isbn": self.ISBN}, headers=admin["headers"]
-        )
+        res = client.get("/api/books/lookup", params={"isbn": self.ISBN}, headers=admin["headers"])
 
         assert res.status_code == 200
         for request in self._asked_the_dnb(dnb_hit):
             assert request.headers.get("authorization") == self.SENT
 
-    def test_a_catalogue_needing_no_login_is_asked_anonymously(
-        self, client, admin, dnb_hit
-    ):
+    def test_a_catalogue_needing_no_login_is_asked_anonymously(self, client, admin, dnb_hit):
         """The arm that makes the one above evidence rather than a tautology.
 
         Nothing is patched here, so this is the roster as it ships.
         """
-        res = client.get(
-            "/api/books/lookup", params={"isbn": self.ISBN}, headers=admin["headers"]
-        )
+        res = client.get("/api/books/lookup", params={"isbn": self.ISBN}, headers=admin["headers"])
 
         assert res.status_code == 200
         for request in self._asked_the_dnb(dnb_hit):
             assert "authorization" not in request.headers
 
-    def test_a_login_held_for_another_catalogue_reaches_nothing(
-        self, client, admin, dnb_hit, monkeypatch
-    ):
+    def test_a_login_held_for_another_catalogue_reaches_nothing(self, client, admin, dnb_hit, monkeypatch):
         """A login resolved for K10plus is not attached to the DNB's request.
 
         The refusal is the credential's own origin binding, reached here through
@@ -3463,25 +3293,15 @@ class TestACatalogueLoginLeavesTheDeploymentWithItsRequest:
         K10plus is asserted to have received it, or this passes on a login that
         was never resolved at all.
         """
-        monkeypatch.setattr(
-            sources, "NEEDS_A_KEY", frozenset({CatalogueSource.K10PLUS})
-        )
-        monkeypatch.setenv(
-            credentials.env_variable_name("k10plus"), "alice:hunter2"
-        )
+        monkeypatch.setattr(sources, "NEEDS_A_KEY", frozenset({CatalogueSource.K10PLUS}))
+        monkeypatch.setenv(credentials.env_variable_name("k10plus"), "alice:hunter2")
 
-        res = client.get(
-            "/api/books/lookup", params={"isbn": self.ISBN}, headers=admin["headers"]
-        )
+        res = client.get("/api/books/lookup", params={"isbn": self.ISBN}, headers=admin["headers"])
 
         assert res.status_code == 200
         for request in self._asked_the_dnb(dnb_hit):
             assert "authorization" not in request.headers
-        asked = [
-            call.request
-            for call in dnb_hit.calls
-            if str(call.request.url).startswith(K10PLUS)
-        ]
+        asked = [call.request for call in dnb_hit.calls if str(call.request.url).startswith(K10PLUS)]
         assert asked, "K10plus was never asked, so its login was never resolved"
         for request in asked:
             assert request.headers.get("authorization") == self.SENT
@@ -3523,9 +3343,7 @@ class TestTheLookupRouteDoesNotPayPerSourceEither:
         phrase = credentials.generate_phrase()
         monkeypatch.setenv("CREDENTIAL_ENCRYPTION_KEY", phrase)
         for name in ("dnb", "k10plus"):
-            credentials.put(
-                db, name, targets.SEEDED[CatalogueSource(name)].base_url, "alice", "hunter2"
-            )
+            credentials.put(db, name, targets.SEEDED[CatalogueSource(name)].base_url, "alice", "hunter2")
 
         counts = []
         for roster in (
@@ -3555,7 +3373,6 @@ class TestTheLookupRouteDoesNotPayPerSourceEither:
         )
 
 
-
 class TestAPatchCannotClearAColumnThatRefusesNull:
     """`{"title": null}` was `UPDATE books SET title=NULL`, and a **500**.
 
@@ -3570,30 +3387,22 @@ class TestAPatchCannotClearAColumnThatRefusesNull:
     status, and that clearing a nullable column still works.
     """
 
-    def test_clearing_the_title_is_refused_and_the_row_is_unchanged(
-        self, client, admin, make_book
-    ):
+    def test_clearing_the_title_is_refused_and_the_row_is_unchanged(self, client, admin, make_book):
         book = make_book(admin["headers"], title="Still Here")
 
-        res = client.patch(
-            f"/api/books/{book['id']}", json={"title": None}, headers=admin["headers"]
-        )
+        res = client.patch(f"/api/books/{book['id']}", json={"title": None}, headers=admin["headers"])
 
         assert res.status_code == 422, res.text
         after = client.get(f"/api/books/{book['id']}", headers=admin["headers"])
         assert after.json()["title"] == "Still Here"
 
-    def test_the_refusal_carries_the_detail_the_schema_declares(
-        self, client, admin, make_book
-    ):
+    def test_the_refusal_carries_the_detail_the_schema_declares(self, client, admin, make_book):
         """`HTTPValidationError.detail` is an array of entries, and this refusal
         is FastAPI's own rather than a hand raised one, so the body matches the
         committed schema instead of contradicting it."""
         book = make_book(admin["headers"])
 
-        res = client.patch(
-            f"/api/books/{book['id']}", json={"title": None}, headers=admin["headers"]
-        )
+        res = client.patch(f"/api/books/{book['id']}", json={"title": None}, headers=admin["headers"])
 
         assert isinstance(res.json()["detail"], list), res.text
 
@@ -3602,9 +3411,7 @@ class TestAPatchCannotClearAColumnThatRefusesNull:
         pass: an explicit null is still how a field gets emptied."""
         book = make_book(admin["headers"], subtitle="Or, The Whale")
 
-        res = client.patch(
-            f"/api/books/{book['id']}", json={"subtitle": None}, headers=admin["headers"]
-        )
+        res = client.patch(f"/api/books/{book['id']}", json={"subtitle": None}, headers=admin["headers"])
 
         assert res.status_code == 200, res.text
         assert res.json()["subtitle"] is None

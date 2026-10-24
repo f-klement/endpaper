@@ -61,21 +61,13 @@ def upgrade() -> None:
     # copy of `users`, which is the one operation this revision is written to
     # avoid: the table is referenced by nine others and this column makes it
     # self referential.
-    op.execute(
-        "ALTER TABLE users ADD COLUMN email_verified_by_user_id "
-        "INTEGER REFERENCES users (id)"
-    )
-    op.add_column(
-        "users", sa.Column("verification_code_hash", sa.String(length=255), nullable=True)
-    )
-    op.add_column(
-        "users", sa.Column("verification_code_expires_at", sa.DateTime(), nullable=True)
-    )
+    op.execute("ALTER TABLE users ADD COLUMN email_verified_by_user_id INTEGER REFERENCES users (id)")
+    op.add_column("users", sa.Column("verification_code_hash", sa.String(length=255), nullable=True))
+    op.add_column("users", sa.Column("verification_code_expires_at", sa.DateTime(), nullable=True))
     op.add_column("users", sa.Column("sessions_valid_from", sa.DateTime(), nullable=True))
 
     op.execute(
-        "UPDATE users SET email_verified_at = CURRENT_TIMESTAMP, "
-        "email_verification_source = 'not_required'"
+        "UPDATE users SET email_verified_at = CURRENT_TIMESTAMP, email_verification_source = 'not_required'"
     )
 
     op.create_table(
@@ -134,9 +126,7 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.drop_index("uq_password_reset_requests_live", table_name="password_reset_requests")
-    op.drop_index(
-        op.f("ix_password_reset_requests_id"), table_name="password_reset_requests"
-    )
+    op.drop_index(op.f("ix_password_reset_requests_id"), table_name="password_reset_requests")
     op.drop_table("password_reset_requests")
     with op.batch_alter_table("users") as batch_op:
         batch_op.drop_column("sessions_valid_from")

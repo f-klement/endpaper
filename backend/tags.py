@@ -418,9 +418,7 @@ class Vocabulary:
         """
         if self._seeded is None:
             rows = self._db.query(Tag.id, Tag.key).filter(Tag.key.isnot(None)).all()
-            self._seeded = frozenset(
-                row_id for row_id, key in rows if _is_seeded_key(key)
-            )
+            self._seeded = frozenset(row_id for row_id, key in rows if _is_seeded_key(key))
         return tag_id in self._seeded
 
 

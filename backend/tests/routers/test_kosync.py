@@ -105,9 +105,7 @@ class TestSigningADeviceIn:
         client.delete("/api/kosync/account/password", headers=member["headers"])
         assert client.get("/kosync/users/auth", headers=device).status_code == 401
 
-    def test_the_account_says_whether_a_password_is_set_and_never_what_it_is(
-        self, client, member
-    ):
+    def test_the_account_says_whether_a_password_is_set_and_never_what_it_is(self, client, member):
         sign_in(client, member)
         body = client.get("/api/kosync/account", headers=member["headers"]).json()
         assert body["username"] == member["user"]["username"]
@@ -133,9 +131,7 @@ class TestSigningADeviceIn:
     def test_a_refused_sign_in_is_logged_without_the_key(self, client, member, caplog):
         key = "f" * 32
         with caplog.at_level(logging.WARNING, logger="endpaper.kosync"):
-            client.get(
-                "/kosync/users/auth", headers={"x-auth-user": "nobody", "x-auth-key": key}
-            )
+            client.get("/kosync/users/auth", headers={"x-auth-user": "nobody", "x-auth-key": key})
         logged = [r.getMessage() for r in caplog.records if r.name == "endpaper.kosync"]
         assert len(logged) == 1
         assert "'nobody'" in logged[0]
@@ -143,9 +139,7 @@ class TestSigningADeviceIn:
 
     def test_an_admin_signs_a_members_devices_out(self, client, admin, member):
         device = sign_in(client, member)
-        res = client.delete(
-            f"/api/kosync/members/{member['user']['id']}/password", headers=admin["headers"]
-        )
+        res = client.delete(f"/api/kosync/members/{member['user']['id']}/password", headers=admin["headers"])
         assert res.status_code == 204
         assert client.get("/kosync/users/auth", headers=device).status_code == 401
 
@@ -153,15 +147,11 @@ class TestSigningADeviceIn:
         """Under directory auth an issued token stays good for its week, so a
         revoke that left it would let the member mint another password."""
         sign_in(client, member)
-        client.delete(
-            f"/api/kosync/members/{member['user']['id']}/password", headers=admin["headers"]
-        )
+        client.delete(f"/api/kosync/members/{member['user']['id']}/password", headers=admin["headers"])
         res = client.post("/api/kosync/account/password", headers=member["headers"])
         assert res.status_code == 401
 
-    def test_a_member_cannot_sign_another_members_devices_out(
-        self, client, member, other_user
-    ):
+    def test_a_member_cannot_sign_another_members_devices_out(self, client, member, other_user):
         res = client.delete(
             f"/api/kosync/members/{other_user['user']['id']}/password",
             headers=member["headers"],
@@ -230,9 +220,7 @@ class TestAPushAndAPull:
             ({"progress": "p" * 2049}, 2003),
         ],
     )
-    def test_a_malformed_push_is_refused_with_the_references_code(
-        self, client, member, change, code
-    ):
+    def test_a_malformed_push_is_refused_with_the_references_code(self, client, member, change, code):
         res = push(client, sign_in(client, member), **change)
         assert (res.status_code, res.json()["code"]) == (403, code)
 
@@ -241,9 +229,7 @@ class TestAPushAndAPull:
         [(b"{not json", 103), (b"[]", 104), (b"[" * 100_000, 103)],
         ids=["unparseable", "a list", "too deep"],
     )
-    def test_a_body_that_is_not_an_object_is_the_references_400(
-        self, client, member, raw, code
-    ):
+    def test_a_body_that_is_not_an_object_is_the_references_400(self, client, member, raw, code):
         res = client.put(
             "/kosync/syncs/progress",
             content=raw,
@@ -252,13 +238,8 @@ class TestAPushAndAPull:
         assert (res.status_code, res.json()["code"]) == (400, code)
 
     def test_a_lone_surrogate_in_the_position_is_an_invalid_request(self, client, member):
-        raw = (
-            b'{"document": "%s", "progress": "\\ud800", "percentage": 0.5, '
-            b'"device": "d"}' % DIGEST.encode()
-        )
-        res = client.put(
-            "/kosync/syncs/progress", content=raw, headers=sign_in(client, member)
-        )
+        raw = b'{"document": "%s", "progress": "\\ud800", "percentage": 0.5, "device": "d"}' % DIGEST.encode()
+        res = client.put("/kosync/syncs/progress", content=raw, headers=sign_in(client, member))
         assert (res.status_code, res.json()["code"]) == (403, 2003)
 
     def test_a_pull_of_an_unroutable_name_is_refused_with_2004(self, client, member):
@@ -280,9 +261,7 @@ class TestAPushAndAPull:
         push(client, sign_in(client, member), metadata={"title": "t" * (TITLE_MAX + 1)})
         assert len(db.query(KosyncDocument).one().title or "") == TITLE_MAX
 
-    def test_two_first_pushes_at_once_leave_one_row(
-        self, client, member, db, monkeypatch
-    ):
+    def test_two_first_pushes_at_once_leave_one_row(self, client, member, db, monkeypatch):
         """The second push looked before the first committed, so it inserts and
         the unique index refuses it: it updates the row that won instead."""
         device = sign_in(client, member)
@@ -309,15 +288,11 @@ class TestAPushAndAPull:
 
 
 class TestWhichBookADocumentIs:
-    def test_a_fingerprint_on_a_book_the_member_sees_links_it(
-        self, client, admin, member, make_book
-    ):
+    def test_a_fingerprint_on_a_book_the_member_sees_links_it(self, client, admin, member, make_book):
         book = make_book(admin["headers"])
         file_on(client, admin, book["id"])
         push(client, sign_in(client, member))
-        linked = client.get(
-            f"/api/kosync/books/{book['id']}/documents", headers=member["headers"]
-        ).json()
+        linked = client.get(f"/api/kosync/books/{book['id']}/documents", headers=member["headers"]).json()
         assert [row["document"] for row in linked] == [DIGEST]
 
     def test_a_fingerprint_on_a_private_book_of_somebody_else_does_not(
@@ -329,9 +304,7 @@ class TestWhichBookADocumentIs:
         inbox = client.get("/api/kosync/inbox", headers=member["headers"]).json()
         assert [row["book_id"] for row in inbox] == [None]
 
-    def test_two_books_holding_the_fingerprint_leave_it_in_the_inbox(
-        self, client, admin, member, make_book
-    ):
+    def test_two_books_holding_the_fingerprint_leave_it_in_the_inbox(self, client, admin, member, make_book):
         # The same bytes in two folders: one location is one Book's, so the
         # second copy is at a location of its own.
         for title in ("One", "Two"):
@@ -344,31 +317,21 @@ class TestWhichBookADocumentIs:
         book = make_book(member["headers"])
         device = sign_in(client, member)
         push(client, device)
-        res = client.put(
-            f"/api/kosync/books/{book['id']}/documents/{DIGEST}", headers=member["headers"]
-        )
+        res = client.put(f"/api/kosync/books/{book['id']}/documents/{DIGEST}", headers=member["headers"])
         assert (res.status_code, res.json()["book_id"]) == (200, book["id"])
         push(client, device, percentage=0.5)
         assert client.get("/api/kosync/inbox", headers=member["headers"]).json() == []
 
-    def test_a_book_the_member_cannot_see_cannot_be_linked(
-        self, client, member, other_user, make_book
-    ):
+    def test_a_book_the_member_cannot_see_cannot_be_linked(self, client, member, other_user, make_book):
         theirs = make_book(other_user["headers"], is_private=True)
         push(client, sign_in(client, member))
-        res = client.put(
-            f"/api/kosync/books/{theirs['id']}/documents/{DIGEST}", headers=member["headers"]
-        )
+        res = client.put(f"/api/kosync/books/{theirs['id']}/documents/{DIGEST}", headers=member["headers"])
         assert res.status_code == 404
 
-    def test_another_members_document_cannot_be_linked(
-        self, client, member, other_user, make_book
-    ):
+    def test_another_members_document_cannot_be_linked(self, client, member, other_user, make_book):
         book = make_book(member["headers"])
         push(client, sign_in(client, other_user))
-        res = client.put(
-            f"/api/kosync/books/{book['id']}/documents/{DIGEST}", headers=member["headers"]
-        )
+        res = client.put(f"/api/kosync/books/{book['id']}/documents/{DIGEST}", headers=member["headers"])
         assert res.status_code == 404
 
     def test_an_unlinked_document_stays_in_the_inbox_through_later_pushes(
@@ -388,14 +351,10 @@ class TestWhichBookADocumentIs:
         inbox = client.get("/api/kosync/inbox", headers=member["headers"]).json()
         assert [row["document"] for row in inbox] == [DIGEST]
 
-    def test_purging_the_book_sends_the_document_back_to_the_inbox(
-        self, client, member, make_book, db
-    ):
+    def test_purging_the_book_sends_the_document_back_to_the_inbox(self, client, member, make_book, db):
         book = make_book(member["headers"])
         push(client, sign_in(client, member))
-        client.put(
-            f"/api/kosync/books/{book['id']}/documents/{DIGEST}", headers=member["headers"]
-        )
+        client.put(f"/api/kosync/books/{book['id']}/documents/{DIGEST}", headers=member["headers"])
         client.delete(f"/api/books/{book['id']}", headers=member["headers"])
         client.delete(f"/api/books/{book['id']}/permanent", headers=member["headers"])
         assert db.query(KosyncDocument).one().book_id is None
@@ -404,9 +363,7 @@ class TestWhichBookADocumentIs:
         keeper = make_book(admin["headers"], title="Dune")
         loser = make_book(admin["headers"], title="Dune")
         push(client, sign_in(client, admin))
-        client.put(
-            f"/api/kosync/books/{loser['id']}/documents/{DIGEST}", headers=admin["headers"]
-        )
+        client.put(f"/api/kosync/books/{loser['id']}/documents/{DIGEST}", headers=admin["headers"])
         res = client.post(
             "/api/books/merge",
             json={"book_ids": [keeper["id"], loser["id"]], "keep_id": keeper["id"]},
@@ -425,9 +382,7 @@ class TestWhatAPositionDoesToTheReadingRecord:
         book = make_book(member["headers"])
         device = sign_in(client, member)
         push(client, device, percentage=0.1)
-        client.put(
-            f"/api/kosync/books/{book['id']}/documents/{DIGEST}", headers=member["headers"]
-        )
+        client.put(f"/api/kosync/books/{book['id']}/documents/{DIGEST}", headers=member["headers"])
         return book["id"], device
 
     def rows(self, db, book_id):
@@ -461,9 +416,7 @@ class TestWhatAPositionDoesToTheReadingRecord:
         push(client, device, percentage=0.4)
         assert self.rows(db, book_id) == [10, 40]
 
-    def test_the_next_day_logs_nothing_when_the_whole_percent_stood_still(
-        self, client, linked, db
-    ):
+    def test_the_next_day_logs_nothing_when_the_whole_percent_stood_still(self, client, linked, db):
         book_id, device = linked
         row = db.query(ReadingProgress).one()
         row.recorded_at = row.recorded_at - timedelta(days=1)
@@ -477,9 +430,7 @@ class TestWhatAPositionDoesToTheReadingRecord:
         row.recorded_at = row.recorded_at - timedelta(days=1)
         db.commit()
 
-    def test_a_percentage_that_floats_short_of_its_percent_logs_that_percent(
-        self, client, linked, db
-    ):
+    def test_a_percentage_that_floats_short_of_its_percent_logs_that_percent(self, client, linked, db):
         """0.29 * 100 is 28.999999999999996 in binary."""
         book_id, device = linked
         self.yesterday(db)
@@ -487,26 +438,20 @@ class TestWhatAPositionDoesToTheReadingRecord:
         assert self.rows(db, book_id) == [10, 29]
 
     @pytest.mark.parametrize("percentage", [1.5, -0.1])
-    def test_a_percentage_outside_the_book_is_stored_and_logs_nothing(
-        self, client, linked, db, percentage
-    ):
+    def test_a_percentage_outside_the_book_is_stored_and_logs_nothing(self, client, linked, db, percentage):
         book_id, device = linked
         self.yesterday(db)
         assert push(client, device, percentage=percentage).status_code == 200
         assert self.rows(db, book_id) == [10]
 
-    def test_a_book_opened_at_zero_percent_records_nothing(
-        self, client, member, make_book, db
-    ):
+    def test_a_book_opened_at_zero_percent_records_nothing(self, client, member, make_book, db):
         book = make_book(member["headers"])
         file_on(client, member, book["id"])
         push(client, sign_in(client, member), percentage=0.0)
         assert self.rows(db, book["id"]) == []
         assert db.query(UserBook).count() == 0
 
-    def test_resting_on_the_end_does_not_overrule_the_member(
-        self, client, member, linked, db
-    ):
+    def test_resting_on_the_end_does_not_overrule_the_member(self, client, member, linked, db):
         """Only the crossing into 100 marks read: the device pushes 100 on every
         suspend while it sits on the last page."""
         book_id, device = linked
@@ -534,9 +479,7 @@ class TestWhatAPositionDoesToTheReadingRecord:
     ):
         book = make_book(member["headers"])
         push(client, sign_in(client, member), percentage=1.0)
-        client.put(
-            f"/api/kosync/books/{book['id']}/documents/{DIGEST}", headers=member["headers"]
-        )
+        client.put(f"/api/kosync/books/{book['id']}/documents/{DIGEST}", headers=member["headers"])
         assert self.status(db, book["id"]) is ReadStatus.READ
 
     def test_a_linked_book_in_the_trash_records_nothing(self, client, member, linked, db):

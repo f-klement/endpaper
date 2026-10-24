@@ -42,11 +42,11 @@ from enums import BookFormat, ReadStatus
 from import_readers import ImportReader
 from models import AUTHOR_LINE_MAX
 
-GOODREADS = b'''Book Id,Title,Author,Author l-f,ISBN,ISBN13,My Rating,Publisher,Binding,\
+GOODREADS = b"""Book Id,Title,Author,Author l-f,ISBN,ISBN13,My Rating,Publisher,Binding,\
 Number of Pages,Year Published,Date Read,Bookshelves,Exclusive Shelf,My Review
 1,Dune,Frank Herbert,"Herbert, Frank",="0441013597",="9780441013593",5,Ace,Paperback,\
 604,2005,2021/03/14,"sci-fi, favourites",read,A desert planet.
-'''
+"""
 
 LIBRARYTHING = (
     "Book Id\tTitle\tPrimary Author\tISBN\tRating\tDate Read\tCollections\tTags\n"
@@ -54,17 +54,17 @@ LIBRARYTHING = (
     "[Your library]\t[Übersetzung, klassiker]\n"
 ).encode("latin-1")
 
-STORYGRAPH = b'''Title,Authors,ISBN/UID,Format,Read Status,Last Date Read,Star Rating,Tags
+STORYGRAPH = b"""Title,Authors,ISBN/UID,Format,Read Status,Last Date Read,Star Rating,Tags
 The Hobbit,J.R.R. Tolkien,9780261102217,audiobook,currently-reading,,4.0,fantasy
-'''
+"""
 
-LIBIB = b'''title,creator,isbn,ean,publisher,publish_date,status,tags,notes,rating
+LIBIB = b"""title,creator,isbn,ean,publisher,publish_date,status,tags,notes,rating
 Stoner,John Williams,9783423280150,,dtv,2014,Not Begun,"novel; sad",,3
-'''
+"""
 
-OPENREADS = b'''title,author,status,rating,pages,publication_year,isbn,tags
+OPENREADS = b"""title,author,status,rating,pages,publication_year,isbn,tags
 Piranesi,Susanna Clarke,in_progress,5,272,2020,9781526622426,fantasy
-'''
+"""
 
 
 class TestGoodreads:
@@ -260,9 +260,7 @@ class TestAColumnIsClaimedOnce:
 
 class TestOverrides:
     def test_a_named_header_replaces_the_guess(self):
-        parsed = parse(
-            b"Name,Real Title\nWrong,Right\n", {"title": "Real Title"}
-        )
+        parsed = parse(b"Name,Real Title\nWrong,Right\n", {"title": "Real Title"})
         assert parsed.rows[0].title == "Right"
 
     def test_an_override_naming_a_missing_header_is_ignored(self):
@@ -350,9 +348,7 @@ class TestFieldParsing:
     def test_format_vocabularies(self, raw, expected):
         assert _match_format(raw) is expected
 
-    @pytest.mark.parametrize(
-        "raw", ["2021/03/14", "2021-03-14", "14/03/2021", "14.03.2021"]
-    )
+    @pytest.mark.parametrize("raw", ["2021/03/14", "2021-03-14", "14/03/2021", "14.03.2021"])
     def test_date_shapes(self, raw):
         parsed = _parse_date(raw)
         assert parsed is not None
@@ -393,9 +389,7 @@ class TestFieldParsing:
         [(b"0" * 5000, None), (b"0" * 5000 + b"12", 12)],
         ids=["zeros", "zeros then twelve"],
     )
-    def test_leading_zeros_past_what_python_converts_are_read_as_the_number(
-        self, cell, pages
-    ):
+    def test_leading_zeros_past_what_python_converts_are_read_as_the_number(self, cell, pages):
         """The 4300 digit limit counts leading zeros, so a bound that measured
         only the significant digits still handed `int()` all of them."""
         [row] = parse(b"Title,Pages\nDune," + cell + b"\n").rows
@@ -431,7 +425,7 @@ class TestDecoding:
 class TestDelimiterSniffing:
     def test_a_comma_in_a_quoted_title_does_not_outvote_the_tabs(self):
         """Counted on the header line only, for exactly this reason."""
-        sample = "Title\tAuthor\n\"Dune, or the Desert\"\tFrank Herbert\n"
+        sample = 'Title\tAuthor\n"Dune, or the Desert"\tFrank Herbert\n'
         assert _sniff_delimiter(sample) == "\t"
 
     def test_an_ordinary_csv(self):
@@ -451,12 +445,12 @@ class TestDelimiterSniffing:
 #: Open Library's reading log, `ReadingLogExport.fieldnames` in
 #: `openlibrary/plugins/upstream/account.py` at `acfa38d17f`, committed
 #: 2026-09-01. Taken from the generator rather than a sample.
-OPEN_LIBRARY = b'''Work ID,Title,Authors,First Publish Year,Edition ID,Edition Count,\
+OPEN_LIBRARY = b"""Work ID,Title,Authors,First Publish Year,Edition ID,Edition Count,\
 Bookshelf,My Ratings,Ratings Average,Ratings Count,Has Ebook,Subjects,Subject People,\
 Subject Places,Subject Times
 OL1W,The Left Hand of Darkness,Ursula K. Le Guin,1969,OL2M,12,Already Read,5,4.2,900,\
 true,Science fiction,,,
-'''
+"""
 
 #: The same export before 2022, from `bookwyrm/tests/data/openlibrary.csv`,
 #: committed 2021-12-14. Work keys only, so there is nothing to import.
@@ -464,52 +458,45 @@ OPEN_LIBRARY_2021 = b"Work Id,Edition Id,Bookshelf\nOL1W,OL2M,Already Read\n"
 
 #: BookWyrm's own account export, from `bookwyrm/tests/data/bookwyrm.csv`,
 #: committed 2024-08-10.
-BOOKWYRM = b'''title,author_text,remote_id,openlibrary_key,inventaire_id,librarything_key,\
+BOOKWYRM = b"""title,author_text,remote_id,openlibrary_key,inventaire_id,librarything_key,\
 goodreads_key,bnf_id,viaf,wikidata,asin,aasin,isfdb,isbn_10,isbn_13,oclc_number,start_date,\
 finish_date,stopped_date,rating,review_name,review_cw,review_content,review_published,\
 shelf,shelf_name,shelf_date
 Solaris,Stanislaw Lem,https://example.test/book/1,,,,,,,,,,,0156027607,9780156027601,,\
 2024-01-02,2024-02-03,,4,On Solaris,,An ocean that thinks.,2024-02-04,read,Read,2024-02-03
-'''
+"""
 
 #: Libib's bulk import template, from `support.libib.com/libib/website/add-items.html`,
 #: read 2026-09-05. UNVERIFIED that Libib's export uses these same names: the
 #: vendor's exports page names `creators` and `copies` in prose, which is this
 #: vocabulary, but no real export file was obtained.
-LIBIB_TEMPLATE = b'''added,creators,began_date,completed_date,copies,description,group,\
+LIBIB_TEMPLATE = b"""added,creators,began_date,completed_date,copies,description,group,\
 upc_isbn10,ean_isbn13,ddc,lcc,lccn,oclc,lexile,length_of,notes,price,publish_date,\
 publisher,rating,review,review_date,status,tags,title
 2026-01-05,Ursula K. Le Guin,,2026-02-06,1,,,0441478123,9780441478125,,,,,,304,,,1974,\
 Harper,4,,,Completed,sci-fi,The Dispossessed
-'''
+"""
 
 #: This app's own CSV export. The header is written by the `/export` route in
 #: `backend/routers/books.py` and pinned by
 #: `tests/routers/test_books.py::TestExport`, so a drift fails there, not here.
-ENDPAPER_OWN = b'''Title,Author,ISBN,Publisher,Year,Description,Tags,My Status,Date Added,\
+ENDPAPER_OWN = b"""Title,Author,ISBN,Publisher,Year,Description,Tags,My Status,Date Added,\
 Added By,Format,Condition,Location,Collection,Purchase Price,Purchase Currency,\
 Purchased On,Purchased From
 Solaris,Stanislaw Lem,9780156027601,Harcourt,1970,An ocean that thinks.,sci-fi,read,\
 2026-01-05,ada,paperback,good,Shelf 2,,12.00,EUR,2026-01-05,a shop
-'''
+"""
 
 #: LibraryThing's column order, from `bookwyrm/tests/data/librarything.tsv`,
 #: committed 2021-12-28, and confirmed unchanged by the column indices in
 #: `vandinem/tsv-to-csv`, pushed 2024-01-24. `Length` is a physical dimension
 #: and stands before `Page Count`, which is the point of this fixture.
-LIBRARYTHING_DIMENSIONS = (
-    b"Title\tLength\tPage Count\n" b"A Winter in Kaliningrad\t5.12 inches\t471\n"
-)
+LIBRARYTHING_DIMENSIONS = b"Title\tLength\tPage Count\nA Winter in Kaliningrad\t5.12 inches\t471\n"
 
 #: A file that is UTF-8 apart from one MARC-8 byte in a column nothing maps.
 #: This is the real shape of a LibraryThing export: measured on the 2021 file,
 #: one line of five failed UTF-8, at `Cort\xe2azar` in `Subjects`.
-MIXED_ENCODING = (
-    b"Title\tSubjects\n"
-    + "Ein Winter in Königsberg\t".encode()
-    + b"Bl\xe2umer, Ines"
-    + b"\n"
-)
+MIXED_ENCODING = b"Title\tSubjects\n" + "Ein Winter in Königsberg\t".encode() + b"Bl\xe2umer, Ines" + b"\n"
 
 
 class TestTheCandidateListSetsPriority:
@@ -535,9 +522,7 @@ class TestTheCandidateListSetsPriority:
         assert _build_mapping(list(reversed(headers))) == first_written
 
     def test_a_named_status_column_beats_a_bare_shelf_listed_before_it(self):
-        assert _build_mapping(["Title", "Shelf", "Exclusive Shelf"])["status"] == (
-            "Exclusive Shelf"
-        )
+        assert _build_mapping(["Title", "Shelf", "Exclusive Shelf"])["status"] == ("Exclusive Shelf")
 
     def test_a_page_count_beats_a_column_that_holds_a_shelf_dimension(self):
         assert _build_mapping(["Title", "Length", "Page Count"])["pages"] == "Page Count"
@@ -615,11 +600,7 @@ class TestOneStrayByteDoesNotDecideTheEncodingOfTheWholeFile:
         arriving through a second door.
         """
         content = (
-            b"Title\n"
-            + "�".encode() * (csv_import._STRAY_RUN_BUDGET + 1)
-            + b"\x81"
-            + "…".encode()
-            + b"\n"
+            b"Title\n" + "�".encode() * (csv_import._STRAY_RUN_BUDGET + 1) + b"\x81" + "…".encode() + b"\n"
         )
 
         text = _decode(content)
@@ -634,9 +615,7 @@ class TestOneStrayByteDoesNotDecideTheEncodingOfTheWholeFile:
         against the other branch. What it gives up is asserted rather than
         described: the one valid UTF-8 run in this file is read as cp1252 too.
         """
-        content = (
-            b"Title\n" + b"caf\xe9 " * (csv_import._STRAY_RUN_BUDGET + 1) + "…".encode()
-        )
+        content = b"Title\n" + b"caf\xe9 " * (csv_import._STRAY_RUN_BUDGET + 1) + "…".encode()
 
         text = _decode(content)
 
@@ -645,9 +624,7 @@ class TestOneStrayByteDoesNotDecideTheEncodingOfTheWholeFile:
 
     def test_a_file_just_under_the_budget_keeps_its_valid_utf_8(self):
         """The same file one run shorter, which is the diagonal of the one above."""
-        content = (
-            b"Title\n" + b"caf\xe9 " * csv_import._STRAY_RUN_BUDGET + "…".encode()
-        )
+        content = b"Title\n" + b"caf\xe9 " * csv_import._STRAY_RUN_BUDGET + "…".encode()
 
         text = _decode(content)
 
@@ -710,9 +687,7 @@ class TestAnAuthorCellIsSplitOnlyWhereItsColumnIsKnownDisplayOrder:
     def test_an_author_column_no_export_has_shown_is_flipped_whole_as_before(self):
         """A column not known to be display order may be surname first, and
         split on its comma `Herbert, Frank` was two people."""
-        [row] = parse(
-            b'Title,Second Author\nDune,"Herbert, Frank"\n', {"author": "Second Author"}
-        ).rows
+        [row] = parse(b'Title,Second Author\nDune,"Herbert, Frank"\n', {"author": "Second Author"}).rows
         assert row.author == "Frank Herbert"
 
     def test_a_surname_first_cell_with_a_separator_at_its_edge_leaves_no_empty_name(self):
@@ -886,14 +861,14 @@ class TestOpenreads:
 #: `Kindle.KindleDocs/datasets/Kindle.KindleDocs.DocumentMetadata/`. Header taken
 #: from a real 2022 export a member published; **no 2026 export was obtained**,
 #: so treat the column names as of that date and not as current.
-KINDLE_DOCUMENTS = b'''DocumentId,Title,DocumentProvider,Filename,DocumentOriginalType,\
+KINDLE_DOCUMENTS = b"""DocumentId,Title,DocumentProvider,Filename,DocumentOriginalType,\
 DocumentSizeInBytes,DocumentTypeAndConvertionCompletionStatus,HasBeenDeleted,\
 EntryCreationDate
 AAAA,Solaris,Stanislaw Lem,solaris.azw3,application/x-mobipocket-ebook,100,\
 documentType = document,true,2019-01-01
 BBBB,Roadside Picnic,Arkady Strugatsky,picnic.azw3,application/x-mobipocket-ebook,100,\
 documentType = document,false,2019-01-02
-'''
+"""
 
 #: A Goodreads export with a row exclusion column bolted onto it, and one row
 #: marked deleted. **Derived rather than quoted**: no service is attested as
@@ -951,9 +926,7 @@ class TestOneCellCannotBuyUnboundedWork:
     across the rows instead.
     """
 
-    def test_a_cell_of_rubbish_reaches_the_date_parser_and_not_the_date_format(
-        self, monkeypatch
-    ):
+    def test_a_cell_of_rubbish_reaches_the_date_parser_and_not_the_date_format(self, monkeypatch):
         """The gate is in `_parse_date` rather than in the unpacker, so it covers
         every caller that loops over parts, including one written later."""
         calls = 0
@@ -970,11 +943,7 @@ class TestOneCellCannotBuyUnboundedWork:
 
         monkeypatch.setattr(csv_import, "datetime", Counting)
 
-        content = (
-            b"title,book_format,readings\nPiranesi,paperback,"
-            + b"a|" * 20_000
-            + b"\n"
-        )
+        content = b"title,book_format,readings\nPiranesi,paperback," + b"a|" * 20_000 + b"\n"
         [row] = parse(content).rows
 
         assert row.date_read is None
@@ -1054,9 +1023,7 @@ class TestOneCellCannotBuyUnboundedWork:
         [row] = parse(OPENREADS_READINGS).rows
         assert row.date_read == date(2024, 3, 4)
 
-    def test_a_publication_cell_of_commas_is_tried_a_bounded_number_of_times(
-        self, monkeypatch
-    ):
+    def test_a_publication_cell_of_commas_is_tried_a_bounded_number_of_times(self, monkeypatch):
         calls = 0
         real = csv_import._match_format
 
@@ -1228,12 +1195,7 @@ class TestEachServicesOwnReaderIsTheOneThatRunsOnItsOwnFile:
 
         assert parsed.reader is ImportReader.GENERIC
         assert parsed.rows[0].author == "Frank Herbert"
-        claimed = {
-            name
-            for _, claim in CLAIMS
-            if isinstance(claim, _HeaderNames)
-            for name in claim.names
-        }
+        claimed = {name for _, claim in CLAIMS if isinstance(claim, _HeaderNames) for name in claim.names}
         assert "hasbeendeleted" not in claimed
 
     def test_a_compound_readers_column_is_one_of_the_names_that_found_the_file(self):
@@ -1251,9 +1213,7 @@ class TestEachServicesOwnReaderIsTheOneThatRunsOnItsOwnFile:
             assert isinstance(claim, _HeaderNames)
             assert column in claim.names
 
-    def test_a_claim_may_be_about_something_other_than_a_header_row(
-        self, monkeypatch
-    ):
+    def test_a_claim_may_be_about_something_other_than_a_header_row(self, monkeypatch):
         """The property the next reader needs, run rather than asserted.
 
         Google Play Books' library export is nested JSON, so no set of header
@@ -1514,9 +1474,7 @@ class TestARowTheFileMarksAsDeletedDoesNotComeBack:
         named = str(error.value).split("called ")[1].split(", so which")[0]
         assert len(named.split(", ")) == csv_import._MAX_HEADERS_QUOTED
 
-    def test_a_name_longer_than_a_header_may_be_quoted_at_is_cut(
-        self, monkeypatch
-    ):
+    def test_a_name_longer_than_a_header_may_be_quoted_at_is_cut(self, monkeypatch):
         """The length bound, which today's one name cannot reach.
 
         A header that reduces to `hasbeendeleted` carries no separator, so it is
@@ -1542,11 +1500,7 @@ class TestARowTheFileMarksAsDeletedDoesNotComeBack:
         """Two spellings of the name are two columns, and they disagree in one
         direction only: a column saying the member deleted this row is what the
         file says, and a second column silent about it takes nothing back."""
-        both = (
-            b"Title,HasBeenDeleted,hasbeendeleted\n"
-            b"Solaris,false,true\n"
-            b"Roadside Picnic,false,false\n"
-        )
+        both = b"Title,HasBeenDeleted,hasbeendeleted\nSolaris,false,true\nRoadside Picnic,false,false\n"
         parsed = parse(both)
         assert (parsed.excluded, [row.title for row in parsed.rows]) == (
             1,
@@ -1666,9 +1620,7 @@ class TestLibraryThingsPublicationCellIsThreeFields:
         """The conservative half. Read the other way round, `Gallimard, Poche`
         would produce a year out of nothing, and a wrong value here is worse
         than an absent one."""
-        content = LIBRARYTHING_PUBLICATION.replace(
-            b"Gallimard (1979), Paperback", b"Gallimard, Poche"
-        )
+        content = LIBRARYTHING_PUBLICATION.replace(b"Gallimard (1979), Paperback", b"Gallimard, Poche")
         [row] = parse(content).rows
         assert (row.publisher, row.year, row.format) == ("Gallimard, Poche", None, None)
 
@@ -1743,9 +1695,7 @@ class TestOpenreadsReadingsCellIsAFinishDate:
         assert row.date_read == date(2021, 2, 3)
 
     def test_a_row_with_only_an_open_session_gets_no_date_at_all(self):
-        content = OPENREADS_READINGS.replace(
-            b"2021-01-02|2021-02-03|;2024-01-01|2024-03-04|", b"2024-01-01|"
-        )
+        content = OPENREADS_READINGS.replace(b"2021-01-02|2021-02-03|;2024-01-01|2024-03-04|", b"2024-01-01|")
         [row] = parse(content).rows
         assert row.date_read is None
 
@@ -1761,10 +1711,7 @@ class TestOpenreadsReadingsCellIsAFinishDate:
         """The status rule runs after the cell is unpacked, which is the reason
         it is a function rather than a line inside the row builder: this date
         does not exist yet while the row is being built."""
-        content = (
-            b"title,book_format,readings\n"
-            b"Piranesi,paperback,2024-01-01|2024-03-04|\n"
-        )
+        content = b"title,book_format,readings\nPiranesi,paperback,2024-01-01|2024-03-04|\n"
         [row] = parse(content).rows
         assert (row.status, row.date_read) == (ReadStatus.READ, date(2024, 3, 4))
 
@@ -1833,19 +1780,11 @@ class TestTheModulePublishesADoorAndSomeTables:
         source = Path(inspect.getsourcefile(csv_import) or "").read_text()
         bound: set[str] = set()
         for node in ast.parse(source).body:
-            if isinstance(
-                node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef
-            ):
+            if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
                 bound.add(node.name)
             elif isinstance(node, ast.Assign):
-                bound.update(
-                    target.id
-                    for target in node.targets
-                    if isinstance(target, ast.Name)
-                )
-            elif isinstance(node, ast.AnnAssign) and isinstance(
-                node.target, ast.Name
-            ):
+                bound.update(target.id for target in node.targets if isinstance(target, ast.Name))
+            elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
                 bound.add(node.target.id)
         return bound
 

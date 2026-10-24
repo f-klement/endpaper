@@ -30,6 +30,10 @@ import database
 from database import Base, engine, get_db
 from tests.corpus import BACKEND, application_modules
 
+TREE_GUARDS = {
+    "TestEveryEngineHidesItsParameters": ("application_modules",),
+}
+
 #: A Postgres URL of the one spelling this project supports, for the arms that
 #: resolve connect arguments. Nothing dials it: `_connect_args` decides the
 #: whole posture before a socket exists, which is what makes a mode testable
@@ -88,9 +92,7 @@ class TestAStatementErrorNamesNoValue:
     def test_a_failed_write_renders_its_statement_and_not_its_values(self):
         marker = "BOUND-VALUE-MARKER"
         with engine.connect() as connection:
-            connection.execute(
-                text("INSERT INTO settings (key, value) VALUES ('probe_key', 'first')")
-            )
+            connection.execute(text("INSERT INTO settings (key, value) VALUES ('probe_key', 'first')"))
             with pytest.raises(exc.IntegrityError) as raised:
                 connection.execute(
                     text("INSERT INTO settings (key, value) VALUES (:key, :value)"),
@@ -106,9 +108,7 @@ class TestAStatementErrorNamesNoValue:
 #: Where this backend builds an engine, by the function that builds one. The
 #: walk below matches the name at the call, so the third rule in the class
 #: refuses importing any of them under another one.
-_ENGINE_BUILDERS: Final = frozenset(
-    {"create_engine", "create_async_engine", "engine_from_config"}
-)
+_ENGINE_BUILDERS: Final = frozenset({"create_engine", "create_async_engine", "engine_from_config"})
 
 
 def _engine_calls() -> list[tuple[str, int, ast.Call]]:
@@ -192,9 +192,7 @@ class TestSqlitePragmas:
         # Case blind, because SQLite says `FOREIGN KEY constraint failed` and
         # Postgres `violates foreign key constraint`.
         with engine.connect() as connection, pytest.raises(Exception, match=r"(?i)foreign key"):
-            connection.execute(
-                text("INSERT INTO notes (book_id, user_id, content) VALUES (9999, 9999, 'x')")
-            )
+            connection.execute(text("INSERT INTO notes (book_id, user_id, content) VALUES (9999, 9999, 'x')"))
 
     @pytest.mark.sqlite_only(reason="reads SQLite's pragmas")
     def test_the_journal_is_write_ahead(self, pragma):
@@ -260,9 +258,9 @@ class TestGetDb:
 
 class TestMetadata:
     def test_every_expected_table_is_registered(self):
-        assert {
-            "users", "books", "tags", "book_tags", "user_books", "loans", "notes"
-        } <= set(Base.metadata.tables)
+        assert {"users", "books", "tags", "book_tags", "user_books", "loans", "notes"} <= set(
+            Base.metadata.tables
+        )
 
 
 class TestSynchronousIsWhitelisted:
@@ -398,9 +396,7 @@ class TestEveryTlsModeIsTheContextItsNamePromises:
         assert context.verify_mode is verify_mode
 
     @pytest.mark.parametrize("mode", ["verify-ca", "verify-full"])
-    def test_a_verifying_mode_with_no_ca_file_is_the_stock_default_context(
-        self, mode: str
-    ) -> None:
+    def test_a_verifying_mode_with_no_ca_file_is_the_stock_default_context(self, mode: str) -> None:
         """The managed server case, which the supplied CA arm cannot see.
 
         Build the empty case as a bare `SSLContext` instead of
@@ -513,9 +509,7 @@ class TestTheDefaultChangesNoDeploymentsBehaviour:
 
     def test_a_sqlite_url_is_untouched(self) -> None:
         """The primary target opens no socket, so none of this reaches it."""
-        assert database._connect_args("sqlite:///./data/library.db", "", "") == {
-            "check_same_thread": False
-        }
+        assert database._connect_args("sqlite:///./data/library.db", "", "") == {"check_same_thread": False}
 
 
 class TestASettingTheConnectionCannotHonourIsRefused:
@@ -584,9 +578,7 @@ class TestASettingTheConnectionCannotHonourIsRefused:
         with pytest.raises(RuntimeError, match="mounted in"):
             database._connect_args(_PG_URL, "verify-full", str(tmp_path / "absent.pem"))
 
-    def test_a_ca_file_that_is_there_is_loaded_into_the_verifying_context(
-        self, tmp_path: Path
-    ) -> None:
+    def test_a_ca_file_that_is_there_is_loaded_into_the_verifying_context(self, tmp_path: Path) -> None:
         """The positive result the refusals above are measured against.
 
         Every arm in this class asserts a raise, and a function that raised
@@ -879,16 +871,12 @@ class TestTheApplicationsOwnEngineIsBuiltFromTheSetting:
     and nothing more.
     """
 
-    def test_require_refuses_through_the_engine_the_app_actually_builds(
-        self, tmp_path: Path
-    ) -> None:
+    def test_require_refuses_through_the_engine_the_app_actually_builds(self, tmp_path: Path) -> None:
         said, streams = _the_engine_said("refused-tls", "require", tmp_path)
 
         assert said, streams
 
-    def test_the_same_server_fails_differently_when_the_mode_does_not_insist(
-        self, tmp_path: Path
-    ) -> None:
+    def test_the_same_server_fails_differently_when_the_mode_does_not_insist(self, tmp_path: Path) -> None:
         """That the permissive mode has not quietly started insisting.
 
         **Not a control against a broken dial, which is what this said first
@@ -926,9 +914,7 @@ class _ARecordedCursor:
         # **The state is read while the statement runs, not afterwards.** The
         # listener restores it, so a check taken after the call reports the
         # state it was handed and says nothing about the statement.
-        self._connection.autocommitting_while_executing.append(
-            self._connection.autocommit
-        )
+        self._connection.autocommitting_while_executing.append(self._connection.autocommit)
 
     def close(self) -> None:
         self._connection.cursors_closed += 1
@@ -941,9 +927,7 @@ class _ARecordedConnection:
     factory and a mutable `autocommit`. Both are what the listener touches.
     """
 
-    def __init__(
-        self, *, autocommit: bool = False, refuse_the_statement: bool = False
-    ) -> None:
+    def __init__(self, *, autocommit: bool = False, refuse_the_statement: bool = False) -> None:
         self.autocommit = autocommit
         self.refuse_the_statement = refuse_the_statement
         self.statements: list[str] = []
@@ -976,9 +960,7 @@ class TestThePostgresSessionZoneIsSetUnderAutocommit:
 
         assert connection.statements == ["SET TIME ZONE 'UTC'"]
 
-    def test_the_statement_runs_with_autocommit_on(
-        self, speaking_postgres: None
-    ) -> None:
+    def test_the_statement_runs_with_autocommit_on(self, speaking_postgres: None) -> None:
         """**The arm the whole listener turns on, and it is not decoration.**
 
         Measured with pg8000 against a real server: issued inside the implicit
@@ -993,9 +975,7 @@ class TestThePostgresSessionZoneIsSetUnderAutocommit:
 
         assert connection.autocommitting_while_executing == [True]
 
-    def test_autocommit_is_put_back_the_way_it_was_found(
-        self, speaking_postgres: None
-    ) -> None:
+    def test_autocommit_is_put_back_the_way_it_was_found(self, speaking_postgres: None) -> None:
         """Both ways round, because restoring to a constant is the same code
         as restoring to what was there and only one of them is right.
 
@@ -1019,9 +999,7 @@ class TestThePostgresSessionZoneIsSetUnderAutocommit:
             ["SET TIME ZONE 'UTC'"],
         )
 
-    def test_the_cursor_is_closed_on_the_way_out(
-        self, speaking_postgres: None
-    ) -> None:
+    def test_the_cursor_is_closed_on_the_way_out(self, speaking_postgres: None) -> None:
         """A cursor per physical connection, leaked once per connection.
 
         **Named for what it holds.** It was named for the statement not being
@@ -1036,9 +1014,7 @@ class TestThePostgresSessionZoneIsSetUnderAutocommit:
 
         assert connection.cursors_closed == 1
 
-    def test_a_refused_statement_is_not_swallowed(
-        self, speaking_postgres: None
-    ) -> None:
+    def test_a_refused_statement_is_not_swallowed(self, speaking_postgres: None) -> None:
         """A connection whose zone was not set is worse than one that failed.
 
         Wrapping the statement in a bare `except` reddened none of the arms
@@ -1141,9 +1117,7 @@ class TestTheZoneGateReadsTheDialectAndNotTheDriver:
         assert database._speaks_postgres(other) is True
         assert make_url(other).drivername != database._PG8000
 
-    def test_the_constant_is_true_under_a_postgres_url(
-        self, tmp_path: Path
-    ) -> None:
+    def test_the_constant_is_true_under_a_postgres_url(self, tmp_path: Path) -> None:
         """The listener reads the constant, so the constant is what to ask.
 
         **An equality between the function and the constant held nothing.**
@@ -1158,15 +1132,11 @@ class TestTheZoneGateReadsTheDialectAndNotTheDriver:
         `create_engine` opens no socket, so a port with no listener is enough
         to carry a Postgres URL into the module.
         """
-        said = _what_the_child_said_the_gate_is(
-            "postgresql+pg8000://u:p@127.0.0.1:1/db", tmp_path
-        )
+        said = _what_the_child_said_the_gate_is("postgresql+pg8000://u:p@127.0.0.1:1/db", tmp_path)
 
         assert said == "True", said
 
-    def test_the_constant_is_false_under_the_url_the_suite_runs(
-        self, tmp_path: Path
-    ) -> None:
+    def test_the_constant_is_false_under_the_url_the_suite_runs(self, tmp_path: Path) -> None:
         """The other half, so a constant hardcoded true reds here.
 
         The in process arm above it asserts the same thing about the live
@@ -1273,18 +1243,11 @@ def _what_the_name_is_bound_to(name: str) -> list[ast.expr]:
     for node in ast.walk(_database_module()):
         if isinstance(node, ast.AnnAssign | ast.AugAssign | ast.NamedExpr):
             target = node.target
-            if (
-                isinstance(target, ast.Name)
-                and target.id == name
-                and node.value is not None
-            ):
+            if isinstance(target, ast.Name) and target.id == name and node.value is not None:
                 found.append(node.value)
         elif isinstance(node, ast.Assign):
             for assigned in node.targets:
-                if any(
-                    isinstance(inner, ast.Name) and inner.id == name
-                    for inner in ast.walk(assigned)
-                ):
+                if any(isinstance(inner, ast.Name) and inner.id == name for inner in ast.walk(assigned)):
                     found.append(node.value)
     return found
 
@@ -1294,8 +1257,7 @@ def _the_zone_listener() -> ast.FunctionDef:
     listener = [
         node
         for node in _database_module().body
-        if isinstance(node, ast.FunctionDef)
-        and node.name == "_pin_the_postgres_session_zone"
+        if isinstance(node, ast.FunctionDef) and node.name == "_pin_the_postgres_session_zone"
     ]
     assert len(listener) == 1, "the listener is not defined once"
     return listener[0]
@@ -1312,16 +1274,12 @@ def _what_the_zone_statement_interpolates() -> tuple[ast.expr, list[str]]:
     executes = [
         node
         for node in ast.walk(_the_zone_listener())
-        if isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Attribute)
-        and node.func.attr == "execute"
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "execute"
     ]
     assert len(executes) == 1, f"{len(executes)} execute calls, expected one"
     argument = executes[0].args[0]
     interpolated = [
-        ast.unparse(part.value)
-        for part in ast.walk(argument)
-        if isinstance(part, ast.FormattedValue)
+        ast.unparse(part.value) for part in ast.walk(argument) if isinstance(part, ast.FormattedValue)
     ]
     return argument, interpolated
 

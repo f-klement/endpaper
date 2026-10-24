@@ -304,9 +304,7 @@ class ResetRedeem(BaseModel):
 
     username: str = Field(min_length=1, max_length=USERNAME_MAX)
     code: str = Field(min_length=1, max_length=MAX_CODE_LENGTH)
-    new_password: str = Field(
-        min_length=MIN_PASSWORD_LENGTH, max_length=MAX_PASSWORD_BYTES
-    )
+    new_password: str = Field(min_length=MIN_PASSWORD_LENGTH, max_length=MAX_PASSWORD_BYTES)
 
 
 class VerificationRequest(BaseModel):

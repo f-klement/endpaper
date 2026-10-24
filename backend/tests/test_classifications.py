@@ -37,6 +37,10 @@ from schemas import MAX_CLASSIFICATIONS_PER_BOOK
 from schemas.classification import ClassificationIn
 from tests.corpus import BACKEND, application_modules
 
+TREE_GUARDS = {
+    "TestHowManyCataloguescanFeedOneBooksHeadings": ("application_modules",),
+}
+
 
 class TestReadingAKindOffARow:
     """`kind_of` is the only interpreter of the null, so it carries the fallback."""
@@ -73,8 +77,9 @@ class TestASubjectIsNeverAValueTheColumnHolds:
 
     def test_a_client_posting_subject_gets_the_null_it_means(self):
         assert (
-            ClassificationIn(scheme=ClassificationScheme.GND, number="4139307-7",
-                             kind=HeadingKind.SUBJECT).kind
+            ClassificationIn(
+                scheme=ClassificationScheme.GND, number="4139307-7", kind=HeadingKind.SUBJECT
+            ).kind
             is None
         )
 
@@ -83,10 +88,7 @@ class TestASubjectIsNeverAValueTheColumnHolds:
         the test above and throw the feature away."""
         for kind in _STORABLE:
             assert (
-                ClassificationIn(
-                    scheme=ClassificationScheme.GND, number="4139307-7", kind=kind
-                ).kind
-                is kind
+                ClassificationIn(scheme=ClassificationScheme.GND, number="4139307-7", kind=kind).kind is kind
             )
 
     @pytest.mark.parametrize("stored", ["subject", "pwned", "SUBJECT", ""])
@@ -280,9 +282,7 @@ class TestCorrectingAHeadingWrittenBeforeTheKindExisted:
         assert book.classifications[0].kind == HeadingKind.CARRIER
         assert len(book.classifications) == 1
 
-    def test_the_correction_counts_as_a_change_so_the_session_is_committed(
-        self, db
-    ):
+    def test_the_correction_counts_as_a_change_so_the_session_is_committed(self, db):
         """`apply_enrichment` commits only `if updated:` and `get_db` closes
         without committing, so a fill-in this did not report would be rolled
         back and the row would stay wrong with nothing to see. The same reason
@@ -379,16 +379,22 @@ class TestCorrectingAHeadingWrittenBeforeTheKindExisted:
         )
         db.flush()
 
-        assert (
-            db.query(Classification).filter(Classification.book_id == book.id).count()
-            == 1
-        )
+        assert db.query(Classification).filter(Classification.book_id == book.id).count() == 1
 
 
 #: English for the small numbers this repository's prose spells out.
 _NUMERALS = {
-    "two": 2, "three": 3, "four": 4, "five": 5, "six": 6,
-    "seven": 7, "eight": 8, "nine": 9, "ten": 10, "eleven": 11, "twelve": 12,
+    "two": 2,
+    "three": 3,
+    "four": 4,
+    "five": 5,
+    "six": 6,
+    "seven": 7,
+    "eight": 8,
+    "nine": 9,
+    "ten": 10,
+    "eleven": 11,
+    "twelve": 12,
 }
 
 
@@ -476,9 +482,7 @@ def _imported(node: ast.Import | ast.ImportFrom) -> Iterator[tuple[str, str]]:
             yield head, head
 
 
-def _bindings(
-    body: Iterable[ast.AST], prefix: str, outer: Iterable[_Scope] = ()
-) -> _Scope:
+def _bindings(body: Iterable[ast.AST], prefix: str, outer: Iterable[_Scope] = ()) -> _Scope:
     """The names one scope binds, under Python's rule that any binding makes it local.
 
     A definition or an import is followed. So is a name bound by `name = <expr>`
@@ -515,9 +519,7 @@ def _bindings(
             held[target.id] = node.value
     # `_own_nodes` yields a body from its end, so without the sort `alias =
     # fields` is read before `fields` is typed and stays untyped itself.
-    in_source_order = sorted(
-        held.items(), key=lambda item: (item[1].lineno, item[1].col_offset)
-    )
+    in_source_order = sorted(held.items(), key=lambda item: (item[1].lineno, item[1].col_offset))
     for name, value in in_source_order:
         if bound.get(name) is None:
             bound[name] = _named(value, [*outer, bound])
@@ -574,10 +576,7 @@ def _signature(
 
     A method's first parameter denotes its class, unless the method is static.
     """
-    bound = {
-        parameter.arg: _named(parameter.annotation, scopes)
-        for parameter in _parameters(node.args)
-    }
+    bound = {parameter.arg: _named(parameter.annotation, scopes) for parameter in _parameters(node.args)}
     positional = [*node.args.posonlyargs, *node.args.args]
     static = any(
         isinstance(decorator, ast.Name) and decorator.id == "staticmethod"
@@ -693,9 +692,7 @@ def _graph_of(trees: Mapping[str, ast.Module]) -> tuple[dict[str, set[str]], set
 
     def defined(dotted: str, hops: int = 0) -> str:
         parts = dotted.split(".")
-        cut = next(
-            (i for i in range(len(parts), 0, -1) if ".".join(parts[:i]) in trees), 0
-        )
+        cut = next((i for i in range(len(parts), 0, -1) if ".".join(parts[:i]) in trees), 0)
         # The bound is a re-export cycle, which would otherwise not end.
         if not cut or hops > len(trees):
             return dotted
@@ -841,7 +838,7 @@ def _marc_probe(reader: decoders.Reader, extra: str) -> bool:
     record = ElementTree.fromstring(
         '<record xmlns="http://www.loc.gov/MARC21/slim">'
         '<datafield tag="245" ind1="1" ind2="0">'
-        "<subfield code=\"a\">Praxiswissen Docker</subfield></datafield>"
+        '<subfield code="a">Praxiswissen Docker</subfield></datafield>'
         f"{extra}</record>"
     )
     built = metadata._marc_build(
@@ -856,11 +853,11 @@ def _marc_probe(reader: decoders.Reader, extra: str) -> bool:
 #: from: an `082` Dewey number and a `650` with a GND identifier on it.
 _CLASSIFIED = (
     '<datafield tag="082" ind1="0" ind2="4">'
-    "<subfield code=\"a\">004</subfield></datafield>"
+    '<subfield code="a">004</subfield></datafield>'
     '<datafield tag="650" ind1=" " ind2="7">'
-    "<subfield code=\"a\">Informatik</subfield>"
+    '<subfield code="a">Informatik</subfield>'
     '<subfield code="0">(DE-588)4026894-9</subfield>'
-    "<subfield code=\"2\">gnd</subfield></datafield>"
+    '<subfield code="2">gnd</subfield></datafield>'
 )
 
 
@@ -886,9 +883,7 @@ class TestTheCeilingIsCountedAsTheBookStands:
             assert len(held.classifications) == MAX_CLASSIFICATIONS_PER_BOOK - 1
             db.add(Classification(book_id=book.id, scheme=ClassificationScheme.DDC, number="990"))
             db.commit()
-            add_headings(
-                held, [ClassificationIn(scheme=ClassificationScheme.DDC, number="991")], writing
-            )
+            add_headings(held, [ClassificationIn(scheme=ClassificationScheme.DDC, number="991")], writing)
             writing.commit()
 
         stored = db.query(Classification).filter(Classification.book_id == book.id).count()
@@ -965,9 +960,7 @@ class TestTheCallGraphResolvesACallTheWayPythonDoes:
                 fields.ddc_headings()
             """)
 
-        assert _edges(tree, "m") == {
-            "m.load": {f"{_UNTYPED}.read", "marc_fields.Fields.ddc_headings"}
-        }
+        assert _edges(tree, "m") == {"m.load": {f"{_UNTYPED}.read", "marc_fields.Fields.ddc_headings"}}
 
     def test_a_method_s_first_parameter_is_its_class_unless_the_method_is_static(self):
         tree = _parsed("""
@@ -1016,9 +1009,7 @@ class TestTheCallGraphResolvesACallTheWayPythonDoes:
                 alias.ddc_headings()
             """)
 
-        assert _edges(tree, "m") == {
-            "m.load": {"marc_fields.Fields", "marc_fields.Fields.ddc_headings"}
-        }
+        assert _edges(tree, "m") == {"m.load": {"marc_fields.Fields", "marc_fields.Fields.ddc_headings"}}
 
     def test_a_type_alias_types_an_annotation_spelled_through_it(self):
         tree = _parsed("""
@@ -1205,11 +1196,7 @@ class TestHowManyCataloguescanFeedOneBooksHeadings:
     def _derived(self) -> set[decoders.Reader]:
         calls, builds = _call_graph()
         reaching = _reaching(calls, builds)
-        return {
-            reader
-            for reader, names in _registered_entries().items()
-            if names & reaching
-        }
+        return {reader for reader, names in _registered_entries().items() if names & reaching}
 
     def test_the_walk_finds_the_construction_sites_at_all(self):
         """Anti vacuity, and the first thing to break if `Heading` is renamed or
@@ -1260,9 +1247,7 @@ class TestHowManyCataloguescanFeedOneBooksHeadings:
         functions = {
             name
             for path in application_modules()
-            for name, node in _definitions(
-                ast.parse(path.read_text()).body, _module_name(path)
-            )
+            for name, node in _definitions(ast.parse(path.read_text()).body, _module_name(path))
             if isinstance(node, _FUNCTION)
         }
         registered = set().union(*_registered_entries().values())
@@ -1318,26 +1303,18 @@ class TestHowManyCataloguescanFeedOneBooksHeadings:
         shared = {
             reader
             for reader, names in entries.items()
-            if any(
-                names & other
-                for another, other in entries.items()
-                if another is not reader
-            )
+            if any(names & other for another, other in entries.items() if another is not reader)
         }
 
         assert shared == {decoders.Reader.MARC_GND, decoders.Reader.MARC_PLAIN}
 
-    @pytest.mark.parametrize(
-        "reader", [decoders.Reader.MARC_GND, decoders.Reader.MARC_PLAIN]
-    )
+    @pytest.mark.parametrize("reader", [decoders.Reader.MARC_GND, decoders.Reader.MARC_PLAIN])
     def test_each_marc_reader_builds_a_heading_when_asked(self, reader):
         """The second instrument. Both are counted, so both have to earn it on
         their own rather than through the dispatcher they share."""
         assert _marc_probe(reader, _CLASSIFIED)
 
-    @pytest.mark.parametrize(
-        "reader", [decoders.Reader.MARC_GND, decoders.Reader.MARC_PLAIN]
-    )
+    @pytest.mark.parametrize("reader", [decoders.Reader.MARC_GND, decoders.Reader.MARC_PLAIN])
     def test_the_probe_can_answer_no(self, reader):
         """Sensitivity for the pair above: a probe that answered yes on a record
         with nothing to classify would prove nothing about either reader."""
@@ -1372,8 +1349,7 @@ class TestHowManyCataloguescanFeedOneBooksHeadings:
         stated = _catalogues_stated_in(bounded_headings.__doc__ or "")
 
         assert stated is not None, (
-            "`bounded_headings` no longer says how many catalogues a merge can "
-            "have concatenated"
+            "`bounded_headings` no longer says how many catalogues a merge can have concatenated"
         )
         assert stated == len(derived), (
             f"the docstring says {stated} catalogues; the readers that "
@@ -1390,12 +1366,9 @@ class TestHowManyCataloguescanFeedOneBooksHeadings:
         the derivation rather than against each other."""
         readers = self._derived()
         derived = sum(target.reader in readers for target in targets.SEEDED.values())
-        stated = _catalogues_stated_in(
-            (BACKEND.parent / "docs" / "data-model.md").read_text()
-        )
+        stated = _catalogues_stated_in((BACKEND.parent / "docs" / "data-model.md").read_text())
 
         assert stated is not None, (
-            "`docs/data-model.md` no longer states how many catalogues a merge "
-            "can have concatenated"
+            "`docs/data-model.md` no longer states how many catalogues a merge can have concatenated"
         )
         assert stated == derived

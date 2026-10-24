@@ -99,9 +99,7 @@ def _as_stored(when: datetime) -> datetime:
 #: direction has to be re-decided at that moment while a policy applied by
 #: position does not. On a body it is inert: FastAPI never serialises a request
 #: model, and python mode is excluded above.
-UtcDateTime = Annotated[
-    datetime, PlainSerializer(_as_utc, return_type=datetime, when_used="json")
-]
+UtcDateTime = Annotated[datetime, PlainSerializer(_as_utc, return_type=datetime, when_used="json")]
 
 #: A `datetime` a **client** writes, normalised to the frame its column holds.
 #:
@@ -149,9 +147,7 @@ _CONTROL_CHARACTERS = dict.fromkeys([*range(0x00, 0x20), 0x7F, *range(0x80, 0xA0
 #: **Deleting a tab is therefore a decision, not a tidying.** It welds the two
 #: words either side of it together, which is right for a value that may be a
 #: URL and wrong for a name somebody pasted out of a two line cell.
-_INVISIBLE_CHARACTERS = {
-    point: None for point in _CONTROL_CHARACTERS if not chr(point).isspace()
-}
+_INVISIBLE_CHARACTERS = {point: None for point in _CONTROL_CHARACTERS if not chr(point).isspace()}
 
 
 def one_line(value: str) -> str:

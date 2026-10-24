@@ -17,6 +17,10 @@ from tests import corpus
 from tests.bindings import ModuleNames, SourceNames, source_of, stated
 from tests.corpus import BACKEND, suite_modules
 
+TREE_GUARDS = {
+    "TestOnlyTheResolverReadsAnAlias": ("suite_modules",),
+}
+
 
 def _means(source: str, expression: str, package: str | None = None) -> set[str]:
     return set(SourceNames(source, package=package).means(ast.parse(expression, mode="eval").body))
@@ -52,9 +56,7 @@ class TestWhatANameMeans:
             "a call's result",
         ],
     )
-    def test_a_name_means_what_it_was_bound_to(
-        self, source: str, expression: str, meaning: set[str]
-    ) -> None:
+    def test_a_name_means_what_it_was_bound_to(self, source: str, expression: str, meaning: set[str]) -> None:
         assert _means(source, expression) == meaning
 
     @pytest.mark.parametrize(
@@ -78,18 +80,14 @@ class TestWhatANameMeans:
             "a module bound to a local, then refined to a submodule",
         ],
     )
-    def test_a_name_bound_twice_means_both(
-        self, source: str, expression: str, meaning: set[str]
-    ) -> None:
+    def test_a_name_bound_twice_means_both(self, source: str, expression: str, meaning: set[str]) -> None:
         """Flow insensitive, so a guard over-reports rather than missing one, and
         a rebinding through the name itself adds one meaning however long the module."""
         assert _means(source, expression) == meaning
 
     def test_a_relative_import_resolves_only_against_a_package(self) -> None:
         assert _means("from . import corpus", "corpus", package="tests") == {"tests.corpus"}
-        assert _means("from .. import corpus", "corpus", package="tests.routers") == {
-            "tests.corpus"
-        }
+        assert _means("from .. import corpus", "corpus", package="tests.routers") == {"tests.corpus"}
         assert _means("from . import corpus", "corpus") == {".corpus"}
 
     def test_an_import_answers_both_its_names(self) -> None:
@@ -131,9 +129,7 @@ class TestWhatANameMeans:
         assert ModuleNames(corpus).means(defined) == {"tests.corpus.suite_modules"}
 
     def test_the_module_adapter_reads_the_value_itself(self) -> None:
-        assert ModuleNames(corpus).value(ast.parse("REPO.name", mode="eval").body) == (
-            corpus.REPO.name
-        )
+        assert ModuleNames(corpus).value(ast.parse("REPO.name", mode="eval").body) == (corpus.REPO.name)
 
 
 #: Every published module under `backend/tests` that reads an import alias, and

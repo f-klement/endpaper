@@ -350,10 +350,7 @@ def _is_held(entry: ElementTree.Element) -> bool:
     # attribute. So it widened the rule in a direction its own comment did not
     # name, which is the tell this repository records: the code is defensible
     # and the stated reason is wrong. No surveyed server writes a padded `rel`.
-    return any(
-        (link.get("rel") or "") in HOLDING_RELS
-        for link in entry.findall(f"{ATOM}link")
-    )
+    return any((link.get("rel") or "") in HOLDING_RELS for link in entry.findall(f"{ATOM}link"))
 
 
 def _entry_isbn(entry: ElementTree.Element) -> str | None:
@@ -497,9 +494,7 @@ def read_page(body: str, decoding: Decoding = DECODING) -> Page:
         # multi-byte encoding, and without this arm that is a 500.
         raise FeedUnreadable(f"That address did not answer with a feed: {error}") from error
     if root.tag != f"{ATOM}feed":
-        raise FeedUnreadable(
-            "That address answered with XML that is not an Atom feed."
-        )
+        raise FeedUnreadable("That address answered with XML that is not an Atom feed.")
 
     records: list[Record] = []
     not_held = 0
@@ -545,8 +540,7 @@ def _next_page(here: str, href: str, origin: str) -> str:
     if not is_fetchable(there) or origin_of(there) != origin:
         logger.warning("Refused an OPDS paging link off %s", origin)
         raise UnusableAddress(
-            "That feed's next page is at a different address than the server "
-            "this library was told about."
+            "That feed's next page is at a different address than the server this library was told about."
         )
     return there
 
@@ -593,9 +587,7 @@ async def _fetch_page(
         # the two need different messages: "unavailable" would send
         # somebody looking for a server that answered fine.
         logger.warning("OPDS feed at %s is at a refused address: %s", origin, refusal)
-        raise UnusableAddress(
-            "That server is at an address this library will not connect to."
-        ) from refusal
+        raise UnusableAddress("That server is at an address this library will not connect to.") from refusal
     except httpx.HTTPError as refusal:
         # `fetch.FetchRefused` is an `httpx.HTTPError` on purpose, so
         # one arm covers this module's four bounds and every transport
@@ -609,15 +601,11 @@ async def _fetch_page(
         # will actually hit. The address goes to the log, where the
         # person who configured it can read it.
         logger.warning("OPDS feed at %s could not be read: %s", origin, refusal)
-        raise OpdsError(
-            "That server did not answer with a feed this library could read."
-        ) from refusal
+        raise OpdsError("That server did not answer with a feed this library could read.") from refusal
     if answer.status_code >= 400:
         # 401 is the ordinary one and it is the message a person acts
         # on, so the status is named rather than folded into "failed".
-        raise OpdsError(
-            f"That server answered {answer.status_code} for its feed."
-        )
+        raise OpdsError(f"That server answered {answer.status_code} for its feed.")
     return answer
 
 
@@ -686,9 +674,7 @@ async def holdings(
     # `fetch.HOUSEHOLD_ADDRESSES`, and the connection is made to that same
     # address. Swapping this line for `catalogue_client` puts the range refusal
     # back to nothing while every other bound still reads as present.
-    async with fetch.pinned_client(
-        fetch.HOUSEHOLD_ADDRESSES, resolver=resolver
-    ) as client:
+    async with fetch.pinned_client(fetch.HOUSEHOLD_ADDRESSES, resolver=resolver) as client:
         while target is not None:
             if pages >= max_pages or len(found) >= max_entries:
                 truncated = True

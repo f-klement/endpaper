@@ -78,17 +78,11 @@ def upgrade() -> None:
         sa.Column("book_id", sa.Integer(), nullable=False),
         sa.Column("root_label", sa.String(length=_PATH_MAX), nullable=False),
         sa.Column("relative_path", sa.String(length=_PATH_MAX), nullable=False),
-        sa.Column(
-            "root_confirmed", sa.Boolean(), server_default="0", nullable=False
-        ),
+        sa.Column("root_confirmed", sa.Boolean(), server_default="0", nullable=False),
         sa.Column("size_bytes", sa.Integer(), nullable=True),
         sa.Column("file_modified_at", sa.DateTime(), nullable=True),
-        sa.Column(
-            "created_at", sa.DateTime(), server_default=sa.func.now(), nullable=False
-        ),
-        sa.Column(
-            "confirmed_at", sa.DateTime(), server_default=sa.func.now(), nullable=False
-        ),
+        sa.Column("created_at", sa.DateTime(), server_default=sa.func.now(), nullable=False),
+        sa.Column("confirmed_at", sa.DateTime(), server_default=sa.func.now(), nullable=False),
         sa.Column("missing_since", sa.DateTime(), nullable=True),
         # **`octet_length` is Postgres's spelling of the byte arm and the arm is
         # kept on both.** It is not redundant beside the character ceiling on

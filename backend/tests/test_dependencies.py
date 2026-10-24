@@ -41,12 +41,8 @@ class TestPrivateBooksAreInvisible:
     @pytest.mark.parametrize(
         ("label", "method", "suffix", "body"), BOOK_ENDPOINTS, ids=[e[0] for e in BOOK_ENDPOINTS]
     )
-    def test_another_member_gets_404(
-        self, client, member, private_book, label, method, suffix, body
-    ):
-        res = call(
-            client, method, f"/api/books/{private_book['id']}{suffix}", member["headers"], body
-        )
+    def test_another_member_gets_404(self, client, member, private_book, label, method, suffix, body):
+        res = call(client, method, f"/api/books/{private_book['id']}{suffix}", member["headers"], body)
         # 404 rather than 403: a 403 confirms the book exists, which is exactly
         # what privacy is meant to withhold.
         assert res.status_code == 404, f"{label} leaked a private book"
@@ -65,9 +61,7 @@ class TestPrivateBooksAreInvisible:
         res = client.get(f"/api/books/{private_book['id']}/notes", headers=member["headers"])
         assert res.status_code == 404
 
-    def test_cover_cannot_be_overwritten_by_another_member(
-        self, client, member, private_book, covers_dir
-    ):
+    def test_cover_cannot_be_overwritten_by_another_member(self, client, member, private_book, covers_dir):
         res = client.post(
             f"/api/books/{private_book['id']}/cover",
             files={"file": ("x.png", PNG_BYTES, "image/png")},
@@ -83,9 +77,7 @@ class TestPrivateBooksAreInvisible:
         from models import Tag
 
         tag = db.query(Tag).first()
-        res = client.post(
-            f"/api/books/{private_book['id']}/tags/{tag.id}", headers=member["headers"]
-        )
+        res = client.post(f"/api/books/{private_book['id']}/tags/{tag.id}", headers=member["headers"])
         assert res.status_code == 404
 
     def test_a_private_book_is_absent_from_listings(self, client, member, private_book):
@@ -106,9 +98,7 @@ class TestPublicBooksAreASharedShelf:
         res = client.post(f"/api/books/{public_book['id']}/tags/{tag.id}", headers=member["headers"])
         assert res.status_code == 200
 
-    def test_another_member_may_replace_the_cover(
-        self, client, member, public_book, covers_dir
-    ):
+    def test_another_member_may_replace_the_cover(self, client, member, public_book, covers_dir):
         res = client.post(
             f"/api/books/{public_book['id']}/cover",
             files={"file": ("x.png", PNG_BYTES, "image/png")},
@@ -136,9 +126,7 @@ class TestPublicBooksAreASharedShelf:
             json={"status": "read"},
             headers=member["headers"],
         )
-        seen_by_owner = client.get(
-            f"/api/books/{public_book['id']}", headers=admin["headers"]
-        ).json()
+        seen_by_owner = client.get(f"/api/books/{public_book['id']}", headers=admin["headers"]).json()
         assert seen_by_owner["my_status"] == "unread"
 
 
@@ -207,22 +195,18 @@ class TestPagination:
         assert body["page"] == 1
 
     def test_page_size_limits_the_rows(self, client, admin, twelve_books):
-        body = client.get(
-            "/api/books", params={"page_size": 5}, headers=admin["headers"]
-        ).json()
+        body = client.get("/api/books", params={"page_size": 5}, headers=admin["headers"]).json()
         assert len(body["items"]) == 5
 
     def test_total_counts_matches_not_the_page(self, client, admin, twelve_books):
         """`total` is what the grid needs to know when to stop asking."""
-        body = client.get(
-            "/api/books", params={"page_size": 5}, headers=admin["headers"]
-        ).json()
+        body = client.get("/api/books", params={"page_size": 5}, headers=admin["headers"]).json()
         assert body["total"] == 12
 
     def test_pages_do_not_overlap(self, client, admin, twelve_books):
-        first = client.get(
-            "/api/books", params={"page_size": 5, "page": 1}, headers=admin["headers"]
-        ).json()["items"]
+        first = client.get("/api/books", params={"page_size": 5, "page": 1}, headers=admin["headers"]).json()[
+            "items"
+        ]
         second = client.get(
             "/api/books", params={"page_size": 5, "page": 2}, headers=admin["headers"]
         ).json()["items"]
@@ -243,9 +227,7 @@ class TestPagination:
         assert len(set(seen)) == 12
 
     def test_a_page_past_the_end_is_empty_not_an_error(self, client, admin, twelve_books):
-        body = client.get(
-            "/api/books", params={"page": 99}, headers=admin["headers"]
-        ).json()
+        body = client.get("/api/books", params={"page": 99}, headers=admin["headers"]).json()
         assert body["items"] == []
         assert body["total"] == 12
 
@@ -261,9 +243,7 @@ class TestPagination:
     def test_the_filtered_total_reflects_the_filter(self, client, admin, make_book):
         make_book(admin["headers"], title="Dune")
         make_book(admin["headers"], title="Neuromancer")
-        body = client.get(
-            "/api/books", params={"q": "dune"}, headers=admin["headers"]
-        ).json()
+        body = client.get("/api/books", params={"q": "dune"}, headers=admin["headers"]).json()
         assert body["total"] == 1
 
     def test_loans_are_paginated_too(self, client, admin, member, make_book):
@@ -274,9 +254,7 @@ class TestPagination:
                 json={"book_id": book["id"], "loaned_to_user_id": member["user"]["id"]},
                 headers=admin["headers"],
             )
-        body = client.get(
-            "/api/loans", params={"page_size": 2}, headers=admin["headers"]
-        ).json()
+        body = client.get("/api/loans", params={"page_size": 2}, headers=admin["headers"]).json()
         assert len(body["items"]) == 2
         assert body["total"] == 3
 

@@ -214,9 +214,7 @@ def _series_from(info: dict[str, Any]) -> tuple[str | None, float | None]:
 #: "Dune, Book 1". The parenthesised shape is `_series_in_parentheses`, read
 #: without an expression for the reason it gives. The number is `[0-9]` for the
 #: reason it gives too: `\d` reads another script's digits as a number.
-_BOOK_SUFFIX: Final = re.compile(
-    r"^(?P<ignored>.*?),\s*book\s+([0-9]+(?:\.[0-9]+)?)\s*$", re.IGNORECASE
-)
+_BOOK_SUFFIX: Final = re.compile(r"^(?P<ignored>.*?),\s*book\s+([0-9]+(?:\.[0-9]+)?)\s*$", re.IGNORECASE)
 
 
 def _series_from_title(title: str) -> tuple[str | None, float | None]:
@@ -348,7 +346,7 @@ def _folds_to(text: str, word: str) -> bool:
 def _to_index(raw: str) -> float | None:
     try:
         return float(raw)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
 
 
@@ -563,8 +561,6 @@ async def search(query: str, api_key: str, limit: int = 5) -> list[dict[str, Any
     if not query.strip():
         return []
 
-    payload = await _request(
-        {"q": query.strip(), "maxResults": str(min(limit, 20))}, api_key
-    )
+    payload = await _request({"q": query.strip(), "maxResults": str(min(limit, 20))}, api_key)
     items = payload.get("items") or []
     return [_volume_to_fields(item) for item in items[:limit]]

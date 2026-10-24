@@ -207,9 +207,7 @@ def volume_route(mock, response=None):
     answered = "|".join(re.escape(volume_id) for volume_id in (VOLUME_ID, *LIBRARY_VOLUME_IDS))
 
     def answer(request: httpx.Request) -> httpx.Response:
-        return response or httpx.Response(
-            200, json=volume_body(request.url.path.rsplit("/", 1)[-1])
-        )
+        return response or httpx.Response(200, json=volume_body(request.url.path.rsplit("/", 1)[-1]))
 
     route = mock.get(url__regex=rf"{re.escape(GOOGLE_BOOKS)}/(?:{answered})(?:\?.*)?$").mock(
         side_effect=answer
@@ -230,10 +228,7 @@ def imported_book(client, headers, make_book, volume_id: str = VOLUME_ID) -> dic
 
 def imported_library(client, headers, make_book, books: int) -> list[dict]:
     """`books` imported Books, each carrying its own volume id."""
-    return [
-        imported_book(client, headers, make_book, volume_id)
-        for volume_id in LIBRARY_VOLUME_IDS[:books]
-    ]
+    return [imported_book(client, headers, make_book, volume_id) for volume_id in LIBRARY_VOLUME_IDS[:books]]
 
 
 class TestWhatOneImportedBookCosts:
@@ -255,9 +250,7 @@ class TestWhatOneImportedBookCosts:
         book = make_book(admin["headers"], title="Dune", author="Frank Herbert")
         silence_catalogues(catalogues)
 
-        res = client.post(
-            f"/api/books/{book['id']}/enrich", headers=admin["headers"]
-        )
+        res = client.post(f"/api/books/{book['id']}/enrich", headers=admin["headers"])
 
         assert res.status_code == 200
         # **Derived from the roster rather than written down.** A literal here
@@ -273,9 +266,7 @@ class TestWhatOneImportedBookCosts:
         book = imported_book(client, admin["headers"], make_book)
         volume_route(catalogues)
 
-        res = client.post(
-            f"/api/books/{book['id']}/enrich", headers=admin["headers"]
-        )
+        res = client.post(f"/api/books/{book['id']}/enrich", headers=admin["headers"])
 
         assert res.status_code == 200
         assert res.json()["found"] is True
@@ -340,9 +331,7 @@ class TestWhatABatchCostsTheDatabase:
             imported_book(client, headers, make_book, volume_id)
         return statements_for(client, "/api/books/identifiers/backfill", headers)
 
-    def test_one_statement_per_book_and_no_more(
-        self, client, admin, make_book, google_enabled, catalogues
-    ):
+    def test_one_statement_per_book_and_no_more(self, client, admin, make_book, google_enabled, catalogues):
         volume_route(catalogues)
 
         two = self._measure(client, admin["headers"], make_book, LIBRARY_VOLUME_IDS[:2])
@@ -361,9 +350,7 @@ class TestWhatABatchCostsTheDatabase:
             "what says which part of it is per book."
         )
 
-    def test_the_slope_is_one_statement_a_book(
-        self, client, admin, make_book, google_enabled, catalogues
-    ):
+    def test_the_slope_is_one_statement_a_book(self, client, admin, make_book, google_enabled, catalogues):
         volume_route(catalogues)
 
         one = self._measure(client, admin["headers"], make_book, LIBRARY_VOLUME_IDS[:1])
@@ -400,14 +387,12 @@ class TestTheSingleBookBranch:
         volume = catalogues.get(f"{GOOGLE_BOOKS}/{VOLUME_ID}").mock(
             return_value=httpx.Response(200, json=volume_body())
         )
-        catalogues.get(
-            GOOGLE_BOOKS, params__contains={"q": "isbn:9780441013593"}
-        ).mock(return_value=httpx.Response(200, json={"items": [volume_body()]}))
+        catalogues.get(GOOGLE_BOOKS, params__contains={"q": "isbn:9780441013593"}).mock(
+            return_value=httpx.Response(200, json={"items": [volume_body()]})
+        )
         silence_catalogues(catalogues)
 
-        res = client.post(
-            f"/api/books/{book['id']}/enrich", headers=admin["headers"]
-        )
+        res = client.post(f"/api/books/{book['id']}/enrich", headers=admin["headers"])
 
         assert res.json()["found"] is True
         assert volume.call_count == 0
@@ -428,9 +413,7 @@ class TestTheSingleBookBranch:
         )
         route = volume_route(catalogues)
 
-        res = client.post(
-            f"/api/books/{book['id']}/enrich", headers=admin["headers"]
-        )
+        res = client.post(f"/api/books/{book['id']}/enrich", headers=admin["headers"])
 
         assert route.call_count == 1
         assert res.json()["book"]["page_count"] == 412
@@ -445,21 +428,15 @@ class TestTheSingleBookBranch:
             catalogues,
             response=httpx.Response(
                 200,
-                json=volume_body(
-                    title="Dune (Dune Chronicles #1)", categories=["Fiction"]
-                ),
+                json=volume_body(title="Dune (Dune Chronicles #1)", categories=["Fiction"]),
             ),
         )
 
-        res = client.post(
-            f"/api/books/{book['id']}/enrich", headers=admin["headers"]
-        )
+        res = client.post(f"/api/books/{book['id']}/enrich", headers=admin["headers"])
 
         written = res.json()["book"]
         assert written["google_books_id"] == VOLUME_ID
-        assert (
-            written["categories"], written["series_name"], written["series_index"]
-        ) == ([], None, None)
+        assert (written["categories"], written["series_name"], written["series_index"]) == ([], None, None)
 
     def test_a_miss_falls_through_to_the_title_search(
         self, client, admin, make_book, google_enabled, catalogues
@@ -472,9 +449,7 @@ class TestTheSingleBookBranch:
         book = imported_book(client, admin["headers"], make_book)
         volume_route(catalogues, response=httpx.Response(404))
 
-        res = client.post(
-            f"/api/books/{book['id']}/enrich", headers=admin["headers"]
-        )
+        res = client.post(f"/api/books/{book['id']}/enrich", headers=admin["headers"])
 
         assert res.status_code == 200
         # One volume request, then the whole search roster, derived for the
@@ -487,27 +462,19 @@ class TestTheSingleBookBranch:
         """The id the search found is not the Book's own, whoever set a flag."""
         book = imported_book(client, admin["headers"], make_book)
         # Both before `silence_catalogues`: the first matching route wins.
-        catalogues.get(f"{GOOGLE_BOOKS}/{VOLUME_ID}").mock(
-            return_value=httpx.Response(404)
-        )
+        catalogues.get(f"{GOOGLE_BOOKS}/{VOLUME_ID}").mock(return_value=httpx.Response(404))
         catalogues.get(GOOGLE_BOOKS).mock(
-            return_value=httpx.Response(
-                200, json={"items": [volume_body(OTHER_VOLUME_ID)]}
-            )
+            return_value=httpx.Response(200, json={"items": [volume_body(OTHER_VOLUME_ID)]})
         )
         silence_catalogues(catalogues)
 
-        res = client.post(
-            f"/api/books/{book['id']}/enrich", headers=admin["headers"]
-        )
+        res = client.post(f"/api/books/{book['id']}/enrich", headers=admin["headers"])
 
         assert res.json()["found"] is True
         assert res.json()["book"]["page_count"] == 412
         assert res.json()["book"]["google_books_id"] is None
 
-    def test_google_switched_off_asks_nothing_and_still_searches(
-        self, client, admin, make_book, catalogues
-    ):
+    def test_google_switched_off_asks_nothing_and_still_searches(self, client, admin, make_book, catalogues):
         """No key, so Google is not in the plan and the volume is not asked.
 
         The route does not fail: the rest of the roster still answers a title
@@ -517,9 +484,7 @@ class TestTheSingleBookBranch:
         book = imported_book(client, admin["headers"], make_book)
         route = volume_route(catalogues)
 
-        res = client.post(
-            f"/api/books/{book['id']}/enrich", headers=admin["headers"]
-        )
+        res = client.post(f"/api/books/{book['id']}/enrich", headers=admin["headers"])
 
         assert res.status_code == 200
         assert route.call_count == 0
@@ -541,22 +506,15 @@ class TestTheSingleBookBranch:
 
         client.post(f"/api/books/{book['id']}/enrich", headers=admin["headers"])
 
-        assert all(
-            "/volumes/not-an-id" not in str(call.request.url)
-            for call in route.calls
-        )
+        assert all("/volumes/not-an-id" not in str(call.request.url) for call in route.calls)
 
 
 class TestTheBackfill:
-    def test_resolves_a_library_of_imported_books(
-        self, client, admin, make_book, google_enabled, catalogues
-    ):
+    def test_resolves_a_library_of_imported_books(self, client, admin, make_book, google_enabled, catalogues):
         imported_library(client, admin["headers"], make_book, 3)
         volume_route(catalogues)
 
-        res = client.post(
-            "/api/books/identifiers/backfill", headers=admin["headers"]
-        )
+        res = client.post("/api/books/identifiers/backfill", headers=admin["headers"])
 
         assert res.status_code == 200
         body = res.json()
@@ -565,9 +523,7 @@ class TestTheBackfill:
         assert body["remaining"] == 0
         assert body["next_after_id"] == 0
 
-    def test_one_request_per_book(
-        self, client, admin, make_book, google_enabled, catalogues
-    ):
+    def test_one_request_per_book(self, client, admin, make_book, google_enabled, catalogues):
         """The headline. Three books, three outbound requests.
 
         The same three books enriched by title and author are three times the
@@ -587,18 +543,13 @@ class TestTheBackfill:
         imported_book(client, admin["headers"], make_book)
         imported_book(client, admin["headers"], make_book, OTHER_VOLUME_ID)
         volume_route(catalogues)
-        catalogues.get(f"{GOOGLE_BOOKS}/{OTHER_VOLUME_ID}").mock(
-            return_value=httpx.Response(404)
-        )
+        catalogues.get(f"{GOOGLE_BOOKS}/{OTHER_VOLUME_ID}").mock(return_value=httpx.Response(404))
 
-        body = client.post(
-            "/api/books/identifiers/backfill", headers=admin["headers"]
-        ).json()
+        body = client.post("/api/books/identifiers/backfill", headers=admin["headers"]).json()
 
         assert body["examined"] == 2
         assert (
-            body["enriched"] + body["not_found"] + body["unavailable"]
-            + body["unresolvable"]
+            body["enriched"] + body["not_found"] + body["unavailable"] + body["unresolvable"]
             == body["examined"]
         )
         assert body["not_found"] == 1
@@ -615,9 +566,7 @@ class TestTheBackfill:
         )
         route = volume_route(catalogues)
 
-        body = client.post(
-            "/api/books/identifiers/backfill", headers=admin["headers"]
-        ).json()
+        body = client.post("/api/books/identifiers/backfill", headers=admin["headers"]).json()
 
         assert body["examined"] == 0
         assert route.call_count == 0
@@ -634,9 +583,7 @@ class TestTheBackfill:
         volume_route(catalogues)
 
         client.post("/api/books/identifiers/backfill", headers=admin["headers"])
-        body = client.post(
-            "/api/books/identifiers/backfill", headers=admin["headers"]
-        ).json()
+        body = client.post("/api/books/identifiers/backfill", headers=admin["headers"]).json()
 
         assert body["examined"] == 0
 
@@ -653,9 +600,7 @@ class TestTheBackfill:
         imported_book(client, admin["headers"], make_book, "not-an-id")
         volume_route(catalogues)
 
-        body = client.post(
-            "/api/books/identifiers/backfill", headers=admin["headers"]
-        ).json()
+        body = client.post("/api/books/identifiers/backfill", headers=admin["headers"]).json()
 
         assert body["examined"] == 1
         assert body["unresolvable"] == 1
@@ -677,9 +622,7 @@ class TestTheBackfill:
         imported_book(client, admin["headers"], make_book)
         volume_route(catalogues, response=httpx.Response(404))
 
-        body = client.post(
-            "/api/books/identifiers/backfill", headers=admin["headers"]
-        ).json()
+        body = client.post("/api/books/identifiers/backfill", headers=admin["headers"]).json()
 
         assert body["unresolvable"] == 1
         assert body["not_found"] == 1
@@ -700,9 +643,7 @@ class TestTheBackfill:
             response=httpx.Response(200, json={"volumeInfo": {"title": "Dune"}}),
         )
 
-        body = client.post(
-            "/api/books/identifiers/backfill", headers=admin["headers"]
-        ).json()
+        body = client.post("/api/books/identifiers/backfill", headers=admin["headers"]).json()
 
         assert body["enriched"] == 0
         assert body["not_found"] == 1
@@ -716,9 +657,7 @@ class TestTheBackfill:
         imported_library(client, admin["headers"], make_book, 3)
         volume_route(catalogues)
 
-        first = client.post(
-            "/api/books/identifiers/backfill", headers=admin["headers"]
-        ).json()
+        first = client.post("/api/books/identifiers/backfill", headers=admin["headers"]).json()
         assert first["examined"] == 2
         assert first["remaining"] == 1
         assert first["next_after_id"] > 0
@@ -742,9 +681,7 @@ class TestTheBackfill:
         imported_book(client, admin["headers"], make_book)
         volume_route(catalogues, response=httpx.Response(503))
 
-        body = client.post(
-            "/api/books/identifiers/backfill", headers=admin["headers"]
-        ).json()
+        body = client.post("/api/books/identifiers/backfill", headers=admin["headers"]).json()
 
         assert body["unavailable"] == 1
         assert body["not_found"] == 0
@@ -756,16 +693,12 @@ class TestTheBackfill:
         imported_book(client, admin["headers"], make_book)
         volume_route(catalogues, response=httpx.Response(429))
 
-        body = client.post(
-            "/api/books/identifiers/backfill", headers=admin["headers"]
-        ).json()
+        body = client.post("/api/books/identifiers/backfill", headers=admin["headers"]).json()
 
         assert body["unavailable"] == 1
 
         # Still a candidate, because nothing was written.
-        again = client.post(
-            "/api/books/identifiers/backfill", headers=admin["headers"]
-        ).json()
+        again = client.post("/api/books/identifiers/backfill", headers=admin["headers"]).json()
         assert again["examined"] == 1
 
     def test_without_a_key_it_refuses_rather_than_reporting_a_clean_run(
@@ -779,9 +712,7 @@ class TestTheBackfill:
         imported_book(client, admin["headers"], make_book)
         volume_route(catalogues)
 
-        res = client.post(
-            "/api/books/identifiers/backfill", headers=admin["headers"]
-        )
+        res = client.post("/api/books/identifiers/backfill", headers=admin["headers"])
 
         assert res.status_code == 409
         assert "Google Books" in res.json()["detail"]
@@ -798,16 +729,12 @@ class TestTheBackfill:
         )
         route = volume_route(catalogues)
 
-        body = client.post(
-            "/api/books/identifiers/backfill", headers=admin["headers"]
-        ).json()
+        body = client.post("/api/books/identifiers/backfill", headers=admin["headers"]).json()
 
         assert body["examined"] == 0
         assert route.call_count == 0
 
-    def test_an_asin_is_not_a_candidate(
-        self, client, admin, make_book, google_enabled, catalogues
-    ):
+    def test_an_asin_is_not_a_candidate(self, client, admin, make_book, google_enabled, catalogues):
         """Amazon publishes no catalogue API, so an ASIN is not resolvable here.
 
         Counting one would report a library as repairable that is not.
@@ -819,9 +746,7 @@ class TestTheBackfill:
         )
         route = volume_route(catalogues)
 
-        body = client.post(
-            "/api/books/identifiers/backfill", headers=admin["headers"]
-        ).json()
+        body = client.post("/api/books/identifiers/backfill", headers=admin["headers"]).json()
 
         assert body["examined"] == 0
         assert route.call_count == 0
@@ -836,9 +761,7 @@ class TestTheBackfill:
         )
 
         with caplog.at_level(logging.INFO, logger="endpaper.books"):
-            res = client.post(
-                "/api/books/identifiers/backfill", headers=admin["headers"]
-            )
+            res = client.post("/api/books/identifiers/backfill", headers=admin["headers"])
 
         assert res.json()["not_found"] == 1
         assert res.json()["enriched"] == 0
@@ -861,9 +784,7 @@ class TestTheBackfill:
 
         client.post("/api/books/identifiers/backfill", headers=admin["headers"])
 
-        after = client.get(
-            f"/api/books/{book['id']}", headers=admin["headers"]
-        ).json()
+        after = client.get(f"/api/books/{book['id']}", headers=admin["headers"]).json()
         assert after["publisher"] == "A publisher somebody typed"
         assert after["page_count"] == 412
 
@@ -911,9 +832,7 @@ class TestTheBatchIsBoundedInWallClockAndNotOnlyInBooks:
         )
         import routers.books as books_router
 
-        monkeypatch.setattr(
-            books_router, "IDENTIFIER_BACKFILL_DEADLINE_SECONDS", seconds
-        )
+        monkeypatch.setattr(books_router, "IDENTIFIER_BACKFILL_DEADLINE_SECONDS", seconds)
 
     @staticmethod
     def _starved(monkeypatch, at_most: int = 0) -> None:
@@ -956,9 +875,7 @@ class TestTheBatchIsBoundedInWallClockAndNotOnlyInBooks:
         imported_library(client, admin["headers"], make_book, 3)
         volume_route(catalogues)
 
-        res = client.post(
-            "/api/books/identifiers/backfill", headers=admin["headers"]
-        )
+        res = client.post("/api/books/identifiers/backfill", headers=admin["headers"])
 
         assert res.status_code == 200
         assert catalogues.calls.call_count == 0
@@ -975,9 +892,7 @@ class TestTheBatchIsBoundedInWallClockAndNotOnlyInBooks:
         imported_library(client, admin["headers"], make_book, 3)
         volume_route(catalogues)
 
-        body = client.post(
-            "/api/books/identifiers/backfill?after_id=0", headers=admin["headers"]
-        ).json()
+        body = client.post("/api/books/identifiers/backfill?after_id=0", headers=admin["headers"]).json()
 
         assert catalogues.calls.call_count == 0
         assert body["examined"] == 0
@@ -996,9 +911,7 @@ class TestTheBatchIsBoundedInWallClockAndNotOnlyInBooks:
         imported_library(client, admin["headers"], make_book, 3)
         volume_route(catalogues)
 
-        body = client.post(
-            "/api/books/identifiers/backfill?after_id=0", headers=admin["headers"]
-        ).json()
+        body = client.post("/api/books/identifiers/backfill?after_id=0", headers=admin["headers"]).json()
 
         assert body["next_after_id"] == 0
         assert body["remaining"] > 0
@@ -1020,9 +933,7 @@ class TestTheBatchIsBoundedInWallClockAndNotOnlyInBooks:
         books = imported_library(client, admin["headers"], make_book, 4)
         volume_route(catalogues)
 
-        body = client.post(
-            "/api/books/identifiers/backfill", headers=admin["headers"]
-        ).json()
+        body = client.post("/api/books/identifiers/backfill", headers=admin["headers"]).json()
 
         assert body["examined"] == 2
         assert body["enriched"] == 2
@@ -1046,9 +957,7 @@ class TestTheBatchIsBoundedInWallClockAndNotOnlyInBooks:
         imported_library(client, admin["headers"], make_book, 4)
         volume_route(catalogues)
 
-        body = client.post(
-            "/api/books/identifiers/backfill", headers=admin["headers"]
-        ).json()
+        body = client.post("/api/books/identifiers/backfill", headers=admin["headers"]).json()
 
         assert body["remaining"] > 0
         assert body["next_after_id"] != 0
@@ -1066,9 +975,7 @@ class TestTheBatchIsBoundedInWallClockAndNotOnlyInBooks:
         imported_library(client, admin["headers"], make_book, 4)
         volume_route(catalogues)
 
-        first = client.post(
-            "/api/books/identifiers/backfill", headers=admin["headers"]
-        ).json()
+        first = client.post("/api/books/identifiers/backfill", headers=admin["headers"]).json()
         monkeypatch.setattr(
             books_router,
             "_BACKFILL_LOOKUPS_AT_ONCE",
@@ -1117,9 +1024,7 @@ class TestTheBatchIsBoundedInWallClockAndNotOnlyInBooks:
         imported_book(client, admin["headers"], make_book, last)
         volume_route(catalogues)
 
-        body = client.post(
-            "/api/books/identifiers/backfill", headers=admin["headers"]
-        ).json()
+        body = client.post("/api/books/identifiers/backfill", headers=admin["headers"]).json()
 
         assert slots.peak == 2, (
             "a wave held one lookup where two were available, so the wave is "
@@ -1145,9 +1050,7 @@ class TestTheBatchIsBoundedInWallClockAndNotOnlyInBooks:
         imported_book(client, admin["headers"], make_book, "not-an-id")
         volume_route(catalogues)
 
-        res = client.post(
-            "/api/books/identifiers/backfill", headers=admin["headers"]
-        )
+        res = client.post("/api/books/identifiers/backfill", headers=admin["headers"])
 
         assert res.status_code == 200
         assert res.json()["unresolvable"] == 1
@@ -1187,9 +1090,7 @@ class TestTheDeadlineIsDerivedRatherThanChosen:
 
         limit = ratelimit.IDENTIFIER_BACKFILL_LIMIT
         per_second = limit.max_attempts / limit.window_seconds
-        hold = (
-            books_router.IDENTIFIER_BACKFILL_DEADLINE_SECONDS + fetch.TIMEOUT_SECONDS
-        )
+        hold = books_router.IDENTIFIER_BACKFILL_DEADLINE_SECONDS + fetch.TIMEOUT_SECONDS
 
         assert per_second * hold <= 4
 
@@ -1199,11 +1100,7 @@ class TestTheDeadlineIsDerivedRatherThanChosen:
         import fetch
         import routers.books as books_router
 
-        assert (
-            books_router.IDENTIFIER_BACKFILL_DEADLINE_SECONDS
-            % fetch.TIMEOUT_SECONDS
-            == 0
-        )
+        assert books_router.IDENTIFIER_BACKFILL_DEADLINE_SECONDS % fetch.TIMEOUT_SECONDS == 0
 
 
 class TestTheCountingStandInHoldsItsOwnPremise:

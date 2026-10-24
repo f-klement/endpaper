@@ -76,9 +76,9 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.execute(
-        sa.text(
-            "DELETE FROM classifications WHERE length(number) > :bound"
-        ).bindparams(bound=_NUMBER_MAX_BEFORE)
+        sa.text("DELETE FROM classifications WHERE length(number) > :bound").bindparams(
+            bound=_NUMBER_MAX_BEFORE
+        )
     )
     with op.batch_alter_table("classifications") as batch:
         batch.alter_column(

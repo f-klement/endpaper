@@ -55,9 +55,17 @@ WORK_IDENTITY: Final[tuple[str, ...]] = ("isbn", "title")
 #: `BookMatch`'s own fields against the names this loop walks. A work fact no
 #: catalogue can assert belongs in `WORK_IDENTITY` or in a cell of its own.
 WORK_DETAIL: Final[tuple[str, ...]] = (
-    "subtitle", "author", "publisher", "year", "description",
-    "page_count", "language", "categories", "google_books_id",
-    "series_name", "series_index",
+    "subtitle",
+    "author",
+    "publisher",
+    "year",
+    "description",
+    "page_count",
+    "language",
+    "categories",
+    "google_books_id",
+    "series_name",
+    "series_index",
 )
 
 #: The one work fact whose value names a file rather than being one.
@@ -78,8 +86,15 @@ WORK_COVER: Final[tuple[str, ...]] = ("cover_url",)
 #: sits on. Another row of the same book may fill them, which is why a merge
 #: carries them.
 COPY_DETAIL: Final[tuple[str, ...]] = (
-    "location", "collection_id", "format", "condition", "lending",
-    "purchase_price_minor", "purchase_currency", "purchased_at", "purchase_source",
+    "location",
+    "collection_id",
+    "format",
+    "condition",
+    "lending",
+    "purchase_price_minor",
+    "purchase_currency",
+    "purchased_at",
+    "purchase_source",
 )
 
 #: What this row claims about the library's relation to the object, asserted by
@@ -107,7 +122,11 @@ COPY_STANDING: Final[tuple[str, ...]] = ("copy_group", "ownership")
 #: and a copy inherits it because a copy of a private book that came back public
 #: would disclose the book.
 ROW_KEEPING: Final[tuple[str, ...]] = (
-    "id", "added_at", "added_by_user_id", "deleted_at", "is_private",
+    "id",
+    "added_at",
+    "added_by_user_id",
+    "deleted_at",
+    "is_private",
 )
 
 PARTITION: Final[tuple[tuple[str, ...], ...]] = (
@@ -152,11 +171,7 @@ def _misfiled(cells: Iterable[Sequence[str]], columns: Iterable[str]) -> set[str
     """
     counted = Counter(chain.from_iterable(cells))
     held = set(columns)
-    return {
-        name
-        for name in set(counted) | held
-        if counted[name] != 1 or name not in held
-    }
+    return {name for name in set(counted) | held if counted[name] != 1 or name not in held}
 
 
 #: Refused at import, not at the first write.

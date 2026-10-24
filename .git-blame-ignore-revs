@@ -11,3 +11,12 @@
 
 # Apply Prettier to the frontend, and enforce it
 38f3e4e1db9cb2b32fd6a0cc3e27ec6d56f142d7
+
+# Apply oxfmt to the frontend
+bb95f8b4152d57d0a681d859ab17778889101449
+
+# Apply ruff format to the backend and the tooling tree
+63245c56fcf8f96d4b5ba49c2ba71a12660227a9
+
+# Apply ruff format to the tooling tree at Python 3.14
+49eef7d07e2d32d3a227324e1847022d4089bc07

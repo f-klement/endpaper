@@ -107,9 +107,7 @@ def authenticate(db: Session, username: str | None, key: str | None) -> User | N
     **No username is told apart from a wrong key**, in the answer or in the
     work: both compare a digest, so the protocol's 401 is all a caller learns.
     """
-    member = (
-        db.query(User).filter(User.username == username).first() if username and key else None
-    )
+    member = db.query(User).filter(User.username == username).first() if username and key else None
     stored = member.kosync_key_digest if member is not None else None
     presented = key_digest(key or "")
     if not hmac.compare_digest(presented, stored or _NOBODY) or stored is None:
@@ -158,9 +156,7 @@ def _no_document() -> Refused:
 
 
 def _unservable_document() -> Refused:
-    return Refused(
-        403, 2007, "Field 'document' contains characters the read route cannot serve."
-    )
+    return Refused(403, 2007, "Field 'document' contains characters the read route cannot serve.")
 
 
 def _invalid() -> Refused:
@@ -178,8 +174,7 @@ def checked_document(document: object) -> str:
     if not isinstance(document, str) or not document or ":" in document:
         raise _no_document()
     if len(document) > KOSYNC_DOCUMENT_MAX or not all(
-        character.isascii() and (character.isalnum() or character == "_")
-        for character in document
+        character.isascii() and (character.isalnum() or character == "_") for character in document
     ):
         raise _unservable_document()
     return document
@@ -219,7 +214,7 @@ def _percentage(value: object) -> float:
         raise _invalid()
     try:
         number = float(value) if isinstance(value, int | float | str) else math.nan
-    except (ValueError, OverflowError):
+    except ValueError, OverflowError:
         raise _invalid() from None
     if not math.isfinite(number):
         raise _invalid()
@@ -358,9 +353,7 @@ def _can_see(db: Session, member_id: int, book_id: int) -> bool:
     return Shelf.seen_by(db, member_id).where(Book.id == book_id).count() > 0
 
 
-def apply(
-    db: Session, member_id: int, book_id: int, percentage: float, before: float | None
-) -> None:
+def apply(db: Session, member_id: int, book_id: int, percentage: float, before: float | None) -> None:
     """What a device's position does to the member's reading record of a Book.
 
     **A percent row in the reading log when the whole percent moved**, and at
@@ -484,4 +477,3 @@ def link(db: Session, row: KosyncDocument, book_id: int) -> None:
     # Applied as a first position: linking is the member's own act, so a
     # document already at its end marks the Book read once, here.
     apply(db, row.user_id, book_id, row.percentage, None)
-

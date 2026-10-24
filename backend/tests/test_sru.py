@@ -92,9 +92,7 @@ def details_of(root: ElementTree.Element) -> str | None:
 def record_ids(root: ElementTree.Element) -> list[int]:
     """The `001` of every record in a response, in the order they came back."""
     return [
-        int(field.text or "0")
-        for field in root.iter(f"{MARC21}controlfield")
-        if field.get("tag") == "001"
+        int(field.text or "0") for field in root.iter(f"{MARC21}controlfield") if field.get("tag") == "001"
     ]
 
 
@@ -175,9 +173,7 @@ def shelf(db, admin, member):
     db.add(tag)
     db.flush()
 
-    public = Book(
-        isbn="9780000000001", added_by_user_id=admin["user"]["id"], **SHARED
-    )
+    public = Book(isbn="9780000000001", added_by_user_id=admin["user"]["id"], **SHARED)
     private = Book(
         isbn="9780000000002",
         added_by_user_id=member["user"]["id"],
@@ -370,9 +366,7 @@ class TestExplainReportsTheIndexesThatExist:
         index and one that invents one, and the second is the worse failure: a
         client builds a query against it and gets diagnostic 16."""
         reported = self._reported(self._explain(db))
-        assert reported == {
-            index.qualified: index.relations for index in sru.INDEXES
-        }
+        assert reported == {index.qualified: index.relations for index in sru.INDEXES}
 
     def test_every_index_explain_names_actually_answers(self, db, shelf):
         """The half a document comparison cannot make: the index compiles.
@@ -394,18 +388,13 @@ class TestExplainReportsTheIndexesThatExist:
 
     def test_the_context_sets_declared_are_the_ones_used(self, db):
         explain = self._explain(db)
-        declared = {
-            element.get("name") for element in explain.iter(f"{EXPLAIN}set")
-        }
+        declared = {element.get("name") for element in explain.iter(f"{EXPLAIN}set")}
         assert declared == {index.context_set for index in sru.INDEXES}
 
     def test_the_record_cap_is_advertised(self, db):
         """A client cannot size its paging against a number it is not told."""
         explain = self._explain(db)
-        settings = {
-            element.get("type"): element.text
-            for element in explain.iter(f"{EXPLAIN}setting")
-        }
+        settings = {element.get("type"): element.text for element in explain.iter(f"{EXPLAIN}setting")}
         assert settings["maximumRecords"] == str(sru.MAX_RECORDS)
 
 
@@ -413,9 +402,7 @@ class TestTheBoundsAreRefusedWithADiagnostic:
     """Four bounds, each refused as a diagnostic in a 200 and never as a crash."""
 
     def test_a_query_longer_than_the_bound_is_refused(self, db):
-        response = respond(
-            db, operation="searchRetrieve", query="a" * (sru.MAX_QUERY_CHARS + 1)
-        )
+        response = respond(db, operation="searchRetrieve", query="a" * (sru.MAX_QUERY_CHARS + 1))
         assert diagnostic_of(response) == sru.Diagnostic.TOO_MANY_CHARACTERS_IN_QUERY
 
     def test_a_query_at_the_bound_is_accepted(self, db):
@@ -436,16 +423,12 @@ class TestTheBoundsAreRefusedWithADiagnostic:
         than a diagnostic. The query here is the longest one the length bound
         admits, so it is the worst case the parser can be handed.
         """
-        response = respond(
-            db, operation="searchRetrieve", query="(" * sru.MAX_QUERY_CHARS
-        )
+        response = respond(db, operation="searchRetrieve", query="(" * sru.MAX_QUERY_CHARS)
         assert diagnostic_of(response) == sru.Diagnostic.UNSUPPORTED_USE_OF_PARENTHESES
 
     def test_nesting_at_the_bound_is_accepted(self, db):
         depth = sru.MAX_NESTING_DEPTH
-        response = respond(
-            db, operation="searchRetrieve", query="(" * depth + "dog" + ")" * depth
-        )
+        response = respond(db, operation="searchRetrieve", query="(" * depth + "dog" + ")" * depth)
         assert diagnostic_of(response) is None
 
     def test_more_search_clauses_than_the_bound_is_refused(self, db):
@@ -460,9 +443,7 @@ class TestTheBoundsAreRefusedWithADiagnostic:
 
     def test_more_words_in_a_term_than_the_bound_is_refused(self, db):
         words = " ".join(f"w{n}" for n in range(sru.MAX_WORDS_IN_A_TERM + 1))
-        response = respond(
-            db, operation="searchRetrieve", query=f'dc.title all "{words}"'
-        )
+        response = respond(db, operation="searchRetrieve", query=f'dc.title all "{words}"')
         assert diagnostic_of(response) == sru.Diagnostic.TOO_MANY_BOOLEAN_OPERATORS
 
     def test_more_masks_in_a_term_than_the_bound_is_refused(self, db):
@@ -527,7 +508,7 @@ class TestTheCostOfTheWorstLegalQueryIsBounded:
         """64 cheap comparisons are spendable, 65 are not."""
         assert self._comparisons(self._widest("dc.title", 8, 8)) == 64
         with pytest.raises(sru.SruError) as refused:
-            sru.criteria(sru.parse(self._widest("dc.title", 8, 8) + ' or dc.title=x'))
+            sru.criteria(sru.parse(self._widest("dc.title", 8, 8) + " or dc.title=x"))
         assert refused.value.diagnostic == sru.Diagnostic.TOO_MANY_BOOLEAN_OPERATORS
 
     def test_the_expensive_ceiling_is_an_eighth_of_it(self):
@@ -567,10 +548,16 @@ class TestTheCostOfTheWorstLegalQueryIsBounded:
             'cql.serverChoice all "one two three four five six seven eight"',
             'dc.description="a whole phrase"',
             'dc.description all "four separate words here"',
-            'dc.title=a and dc.creator=b and dc.date>1990 and bath.isbn=978',
+            "dc.title=a and dc.creator=b and dc.date>1990 and bath.isbn=978",
         ],
-        ids=["phrase", "two words", "anywhere eight", "description phrase",
-             "description four", "four indexes"],
+        ids=[
+            "phrase",
+            "two words",
+            "anywhere eight",
+            "description phrase",
+            "description four",
+            "four indexes",
+        ],
     )
     def test_the_queries_a_client_actually_sends_are_well_inside_it(self, query):
         """**The half a ceiling test always needs.** A bound that refuses real
@@ -608,8 +595,7 @@ class TestTheCostOfTheWorstLegalQueryIsBounded:
         with pytest.raises(sru.SruError) as refused:
             sru.criteria(sru.parse(self._widest(qualified, 16, 8)))
         assert refused.value.details == (
-            f"{qualified}: {charge} a comparison, "
-            f"{sru.MAX_COMPARISON_BUDGET} a query"
+            f"{qualified}: {charge} a comparison, {sru.MAX_COMPARISON_BUDGET} a query"
         )
 
     #: How much of `_DETAILS_CHARS` the longest refusal must leave unused.
@@ -948,10 +934,7 @@ class TestTheCostOfTheWidestLegalResponseIsBounded:
         record: a 10,000 character run of `w` contains every shorter run of
         `w`, so one column reaching the document answered for all of them.
         """
-        return {
-            key: f"reaches{index}therecord"
-            for index, key in enumerate(sorted(cls.wide_columns()))
-        }
+        return {key: f"reaches{index}therecord" for index, key in enumerate(sorted(cls.wide_columns()))}
 
     @classmethod
     def emitted_columns(cls) -> set[str]:
@@ -968,9 +951,7 @@ class TestTheCostOfTheWidestLegalResponseIsBounded:
         # sentinel and a column that took it and was not written look the same
         # in the document.** Without this the derivation reports the second
         # where the first happened, which is how `cover_url` fell out silently.
-        rewritten = {
-            key for key, value in sentinels.items() if getattr(book, key) != value
-        }
+        rewritten = {key for key, value in sentinels.items() if getattr(book, key) != value}
         # **Equality, not a subtraction.** A subtraction can only ever find the
         # exemption too small: remove the hook and the entry's whole stated
         # reason goes with it while nothing here reddens, leaving a published
@@ -993,11 +974,7 @@ class TestTheCostOfTheWidestLegalResponseIsBounded:
     @classmethod
     def filled(cls) -> dict[str, int]:
         """Every column a fill can widen, at what an API write holds it to."""
-        return {
-            key: width
-            for key, width in sorted(cls.CEILINGS.items())
-            if key in cls.emitted_columns()
-        }
+        return {key: width for key, width in sorted(cls.CEILINGS.items()) if key in cls.emitted_columns()}
 
     @classmethod
     def widest_kind(cls) -> HeadingKind | None:
@@ -1045,9 +1022,7 @@ class TestTheCostOfTheWidestLegalResponseIsBounded:
         values: dict[str, Any] = {}
         for key, width in self.filled().items():
             if key == "author":
-                values[key] = (
-                    fill * width if credits == 1 else (fill + ",") * (width // 2)
-                )
+                values[key] = fill * width if credits == 1 else (fill + ",") * (width // 2)
             else:
                 values[key] = fill * width
         book = Book(
@@ -1114,14 +1089,10 @@ class TestTheCostOfTheWidestLegalResponseIsBounded:
             db.execute(text("DELETE FROM sqlite_sequence WHERE name = 'books'"))
         db.commit()
 
-    def page_bytes(
-        self, db: Any, admin: dict, fill: str, credits: int = 1, links: bool = True
-    ) -> int:
+    def page_bytes(self, db: Any, admin: dict, fill: str, credits: int = 1, links: bool = True) -> int:
         self.empty_the_shelf(db)
         group = copy_group_token()
-        books = [
-            self.widest_book(fill, credits, group, links) for _ in range(sru.MAX_RECORDS)
-        ]
+        books = [self.widest_book(fill, credits, group, links) for _ in range(sru.MAX_RECORDS)]
         for book in books:
             book.added_by_user_id = admin["user"]["id"]
         db.add_all(books)
@@ -1238,8 +1209,7 @@ class TestTheCostOfTheWidestLegalResponseIsBounded:
             "whole field rather than a few characters of it, and the field "
             "tag arm reddens too and names it by its tag."
             if not rendered_code
-            else "The page understates by "
-            f"{widest_code - len(rendered_code)} bytes a record."
+            else f"The page understates by {widest_code - len(rendered_code)} bytes a record."
         )
         assert len(rendered_code) == widest_code, (
             f"this fixture renders `041 $a {rendered_code}`, "
@@ -1301,9 +1271,7 @@ class TestTheCostOfTheWidestLegalResponseIsBounded:
         exists because a figure this same document published was the wrong one.
         So the two are tied by an arm rather than by somebody remembering.
         """
-        published = (
-            Path(__file__).resolve().parents[2] / "docs" / "security.md"
-        ).read_text(encoding="utf-8")
+        published = (Path(__file__).resolve().parents[2] / "docs" / "security.md").read_text(encoding="utf-8")
         assert f"{self.WIDEST_RESPONSE_BYTES:,} bytes" in published, (
             f"docs/security.md does not carry {self.WIDEST_RESPONSE_BYTES:,} "
             "bytes, which is what a page of the widest records weighs. That "
@@ -1326,9 +1294,7 @@ class TestTheCostOfTheWidestLegalResponseIsBounded:
             "and is half of why the figure above is a figure at all."
         )
 
-    def test_a_full_page_of_the_widest_records_still_weighs_what_it_did(
-        self, db, admin
-    ):
+    def test_a_full_page_of_the_widest_records_still_weighs_what_it_did(self, db, admin):
         """Equality rather than an inequality: the headroom is the defect.
 
         **This arm cannot say what changed** and its message does not pretend
@@ -1359,9 +1325,7 @@ class TestTheCostOfTheWidestLegalResponseIsBounded:
         weighs the same in every fill and only dilutes the ratio this arm is
         about, which is the one `max_length` columns owe.
         """
-        one_byte, two_byte, escaped = (
-            self.page_bytes(db, admin, fill, links=False) for fill in self.FILLS
-        )
+        one_byte, two_byte, escaped = (self.page_bytes(db, admin, fill, links=False) for fill in self.FILLS)
 
         assert one_byte < two_byte < escaped
         assert escaped > 4 * one_byte
@@ -1376,9 +1340,7 @@ class TestTheCostOfTheWidestLegalResponseIsBounded:
         many_names = self.page_bytes(db, admin, "&", self.MOST_CREDITS)
 
         extra_names = self.MOST_CREDITS - 1
-        assert many_names - one_name > (
-            sru.MAX_RECORDS * extra_names * self.SCAFFOLDING_PER_CREDIT
-        )
+        assert many_names - one_name > (sru.MAX_RECORDS * extra_names * self.SCAFFOLDING_PER_CREDIT)
 
 
 class TestMaximumRecordsIsClamped:
@@ -1393,16 +1355,12 @@ class TestMaximumRecordsIsClamped:
         return len(books)
 
     def test_a_request_above_the_cap_gets_the_cap(self, db, many):
-        response = respond(
-            db, operation="searchRetrieve", query="Windmill", maximumRecords="1000"
-        )
+        response = respond(db, operation="searchRetrieve", query="Windmill", maximumRecords="1000")
         assert len(record_ids(response)) == sru.MAX_RECORDS
         assert number_of_records(response) == many
 
     def test_a_request_below_the_cap_gets_what_it_asked_for(self, db, many):
-        response = respond(
-            db, operation="searchRetrieve", query="Windmill", maximumRecords="3"
-        )
+        response = respond(db, operation="searchRetrieve", query="Windmill", maximumRecords="3")
         assert len(record_ids(response)) == 3
 
     def test_the_default_is_ten(self, db, many):
@@ -1411,9 +1369,7 @@ class TestMaximumRecordsIsClamped:
 
     def test_zero_records_is_a_count_with_no_records(self, db, many):
         """A client asking how many there are without wanting any of them."""
-        response = respond(
-            db, operation="searchRetrieve", query="Windmill", maximumRecords="0"
-        )
+        response = respond(db, operation="searchRetrieve", query="Windmill", maximumRecords="0")
         assert record_ids(response) == []
         assert number_of_records(response) == many
 
@@ -1421,16 +1377,11 @@ class TestMaximumRecordsIsClamped:
 class TestPagingThroughAResultSet:
     @pytest.fixture
     def many(self, db, admin):
-        db.add_all(
-            Book(title=f"Windmill {n:03d}", added_by_user_id=admin["user"]["id"])
-            for n in range(5)
-        )
+        db.add_all(Book(title=f"Windmill {n:03d}", added_by_user_id=admin["user"]["id"]) for n in range(5))
         db.commit()
 
     def test_start_record_offsets_the_page(self, db, many):
-        first = respond(
-            db, operation="searchRetrieve", query="Windmill", maximumRecords="2"
-        )
+        first = respond(db, operation="searchRetrieve", query="Windmill", maximumRecords="2")
         second = respond(
             db,
             operation="searchRetrieve",
@@ -1441,9 +1392,7 @@ class TestPagingThroughAResultSet:
         assert not set(record_ids(first)) & set(record_ids(second))
 
     def test_the_next_position_points_at_the_next_page(self, db, many):
-        response = respond(
-            db, operation="searchRetrieve", query="Windmill", maximumRecords="2"
-        )
+        response = respond(db, operation="searchRetrieve", query="Windmill", maximumRecords="2")
         following = response.find(f"{SRW}nextRecordPosition")
         assert following is not None
         assert following.text == "3"
@@ -1459,17 +1408,13 @@ class TestPagingThroughAResultSet:
         assert response.find(f"{SRW}nextRecordPosition") is None
 
     def test_starting_past_the_end_is_a_diagnostic(self, db, many):
-        response = respond(
-            db, operation="searchRetrieve", query="Windmill", startRecord="99"
-        )
+        response = respond(db, operation="searchRetrieve", query="Windmill", startRecord="99")
         assert diagnostic_of(response) == sru.Diagnostic.FIRST_RECORD_OUT_OF_RANGE
 
     def test_starting_past_the_end_of_nothing_is_not_an_error(self, db, many):
         """An empty result set has no end to be past, so a client paging
         through a query that matched nothing is not told it made a mistake."""
-        response = respond(
-            db, operation="searchRetrieve", query="Sawmill", startRecord="99"
-        )
+        response = respond(db, operation="searchRetrieve", query="Sawmill", startRecord="99")
         assert diagnostic_of(response) is None
         assert number_of_records(response) == 0
 
@@ -1545,9 +1490,7 @@ class TestEveryDiagnosticIsReachable:
     def test_the_table_covers_the_register(self):
         assert set(REACHABLE) == set(sru.Diagnostic)
 
-    @pytest.mark.parametrize(
-        "expected", list(REACHABLE), ids=lambda d: f"{d.value}-{d.name.lower()}"
-    )
+    @pytest.mark.parametrize("expected", list(REACHABLE), ids=lambda d: f"{d.value}-{d.name.lower()}")
     def test_the_query_produces_the_diagnostic(self, db, shelf, expected):
         assert diagnostic_of(respond(db, **REACHABLE[expected])) == expected
 
@@ -1624,9 +1567,7 @@ class TestAnIntegerTheCatalogueCannotHoldIsRefusedRatherThanRaised:
         response = respond(db, query="Chartreuse", maximumRecords=self.OVER)
         assert diagnostic_of(response) == sru.Diagnostic.UNSUPPORTED_PARAMETER_VALUE
 
-    def test_a_maximum_records_a_client_might_really_send_is_still_clamped(
-        self, db, shelf
-    ):
+    def test_a_maximum_records_a_client_might_really_send_is_still_clamped(self, db, shelf):
         """The half that says the ceiling did not turn the clamp into a
         refusal for anything anybody sends."""
         response = respond(db, query="Chartreuse", maximumRecords="1000000")
@@ -1686,9 +1627,7 @@ class TestSortingIsRefusedInBothSpellings:
         ],
         ids=["bare", "modifier", "qualified modifier", "two keys"],
     )
-    def test_every_spelling_of_the_cql_clause_is_refused_as_sorting(
-        self, db, shelf, spec
-    ):
+    def test_every_spelling_of_the_cql_clause_is_refused_as_sorting(self, db, shelf, spec):
         """**The family, not the one spelling a review named.**
 
         A sort spec carries its modifiers on a `/`, and `_tokenise` refuses a
@@ -1746,9 +1685,7 @@ class TestAHostileQueryCannotBreakTheDocument:
         string, which is what says the escaping is escaping rather than
         stripping."""
         raw = sru.respond(
-            urlencode(
-                {"operation": "searchRetrieve", "query": "dog", "<script>": "1"}
-            ),
+            urlencode({"operation": "searchRetrieve", "query": "dog", "<script>": "1"}),
             db,
             SERVER,
         )
@@ -1771,9 +1708,7 @@ class TestAHostileQueryCannotBreakTheDocument:
         """Neither taking the first nor taking the last is right, because the
         client cannot tell which it got. `targets.py` records the same hazard
         from the writing side."""
-        response = ElementTree.fromstring(
-            sru.respond("operation=explain&operation=scan", db, SERVER)
-        )
+        response = ElementTree.fromstring(sru.respond("operation=explain&operation=scan", db, SERVER))
         assert diagnostic_of(response) == sru.Diagnostic.UNSUPPORTED_PARAMETER_VALUE
 
 
@@ -1781,9 +1716,7 @@ class TestMaskingMeansWhatTheClientMeant:
     @pytest.fixture
     def books(self, db, admin):
         titles = ["Discount 100% Cotton", "Discount 100 Percent", "The Windmill"]
-        db.add_all(
-            Book(title=title, added_by_user_id=admin["user"]["id"]) for title in titles
-        )
+        db.add_all(Book(title=title, added_by_user_id=admin["user"]["id"]) for title in titles)
         db.commit()
         return titles
 
@@ -1806,15 +1739,12 @@ class TestMaskingMeansWhatTheClientMeant:
 
     def test_a_literal_underscore_is_not_a_wildcard(self, db, admin):
         db.add_all(
-            Book(title=title, added_by_user_id=admin["user"]["id"])
-            for title in ("Volume A_B", "Volume AxB")
+            Book(title=title, added_by_user_id=admin["user"]["id"]) for title in ("Volume A_B", "Volume AxB")
         )
         db.commit()
         assert self._titles(db, 'dc.title="A_B"') == {"Volume A_B"}
 
-    def test_a_query_of_masks_at_the_bound_is_answered_rather_than_slow(
-        self, db, books
-    ):
+    def test_a_query_of_masks_at_the_bound_is_answered_rather_than_slow(self, db, books):
         """The measurement behind `MAX_MASKS_IN_A_TERM`, as a shape it admits.
 
         **The figure this pinned was taken on a fixture that could not match.**
@@ -1831,9 +1761,7 @@ class TestMaskingMeansWhatTheClientMeant:
         assert diagnostic_of(response) is None
 
     def test_a_star_is_a_wildcard(self, db, books):
-        assert self._titles(db, "dc.title=Discount*Cotton") == {
-            "Discount 100% Cotton"
-        }
+        assert self._titles(db, "dc.title=Discount*Cotton") == {"Discount 100% Cotton"}
 
     def test_an_escaped_star_is_a_literal_asterisk(self, db, admin):
         """The pair that makes the point: one query, one backslash, two answers."""
@@ -1849,10 +1777,7 @@ class TestMaskingMeansWhatTheClientMeant:
         assert self._titles(db, "dc.title=Star\\*Struck") == {"Star*Struck"}
 
     def test_a_question_mark_matches_one_character(self, db, admin):
-        db.add_all(
-            Book(title=title, added_by_user_id=admin["user"]["id"])
-            for title in ("Cat", "Coat")
-        )
+        db.add_all(Book(title=title, added_by_user_id=admin["user"]["id"]) for title in ("Cat", "Coat"))
         db.commit()
         assert self._titles(db, "dc.title=C?t") == {"Cat"}
 
@@ -1886,12 +1811,8 @@ class TestTheQueryLanguageBehavesAsCqlSaysRatherThanAsSqlWould:
         """CQL has one precedence level and SQL has three. `a or b and c` is
         `(a or b) and c` here, which is the whole reason a client that assumes
         otherwise gets a different answer than it expected."""
-        assert self._count(db, "Alpha or Beta and Gamma") == self._count(
-            db, "(Alpha or Beta) and Gamma"
-        )
-        assert self._count(db, "Alpha or Beta and Gamma") != self._count(
-            db, "Alpha or (Beta and Gamma)"
-        )
+        assert self._count(db, "Alpha or Beta and Gamma") == self._count(db, "(Alpha or Beta) and Gamma")
+        assert self._count(db, "Alpha or Beta and Gamma") != self._count(db, "Alpha or (Beta and Gamma)")
 
     def test_not_is_binary_rather_than_a_negation_of_the_library(self, db, books):
         """Three titles carry an `a` and one of them is Alpha, so `not` leaves
@@ -1950,11 +1871,7 @@ class TestEveryIndexSearchesOnlyAPublishedColumn:
 
         term = "1990" if index.field in (sru.Field.DATE, sru.Field.RECORD_ID) else "x"
         clause = sru.criteria(sru.parse(f'{index.qualified}="{term}"'))
-        rendered = str(
-            clause.compile(
-                dialect=sqlite.dialect(), compile_kwargs={"literal_binds": True}
-            )
-        )
+        rendered = str(clause.compile(dialect=sqlite.dialect(), compile_kwargs={"literal_binds": True}))
         return set(re.findall(r"books\.(\w+)", rendered))
 
     def test_the_rule_can_read_the_columns_at_all(self):
@@ -2035,9 +1952,7 @@ class TestTheRecordCarriesNoColumnThePublicPayloadWithholds:
     @staticmethod
     def _withheld() -> set[str]:
         return {
-            column.key
-            for column in Book.__table__.columns
-            if column.key not in PublicBookOut.model_fields
+            column.key for column in Book.__table__.columns if column.key not in PublicBookOut.model_fields
         }
 
     def test_there_are_withheld_columns_to_check(self):
@@ -2051,8 +1966,7 @@ class TestTheRecordCarriesNoColumnThePublicPayloadWithholds:
 
     def test_no_withheld_value_appears_in_a_rendered_record(self):
         sentinels = {
-            key: f"withheld{n}sentinel"
-            for n, key in enumerate(sorted(self._withheld() - self.UNSENTINELLED))
+            key: f"withheld{n}sentinel" for n, key in enumerate(sorted(self._withheld() - self.UNSENTINELLED))
         }
         # A transient Book, never added to a session, so a CHECK constraint on
         # `ownership` or `condition` cannot refuse a sentinel and there is no
@@ -2140,10 +2054,7 @@ class TestTheRecordCarriesNoClassificationColumnThePublicPayloadWithholds:
         # overwritten by the derivation and the arm would assert nothing about
         # that column. A transient row, never added to a session, so no type
         # refuses a string in an integer column and no flush regenerates a key.
-        sentinels = {
-            key: f"withheldheading{n}sentinel"
-            for n, key in enumerate(sorted(self._withheld()))
-        }
+        sentinels = {key: f"withheldheading{n}sentinel" for n, key in enumerate(sorted(self._withheld()))}
         for key, value in sentinels.items():
             setattr(heading, key, value)
 
@@ -2173,9 +2084,7 @@ class TestTheParametersClientsActuallySend:
 
     @pytest.mark.parametrize("version", sru.SUPPORTED_VERSIONS)
     def test_a_supported_version_is_echoed_back(self, db, shelf, version):
-        response = respond(
-            db, operation="searchRetrieve", query="Chartreuse", version=version
-        )
+        response = respond(db, operation="searchRetrieve", query="Chartreuse", version=version)
         echoed = response.find(f"{SRW}version")
         assert echoed is not None
         assert echoed.text == version
@@ -2194,15 +2103,11 @@ class TestTheParametersClientsActuallySend:
         """The specification reserves `x-` for extensions, so a client sending
         one must not be refused for it."""
         params = {"operation": "searchRetrieve", "query": "Chartreuse"}
-        response = ElementTree.fromstring(
-            sru.respond(urlencode(params) + "&x-anything=1", db, SERVER)
-        )
+        response = ElementTree.fromstring(sru.respond(urlencode(params) + "&x-anything=1", db, SERVER))
         assert diagnostic_of(response) is None
 
     def test_the_one_packing_this_answers_in_may_be_asked_for(self, db, shelf):
-        response = respond(
-            db, operation="searchRetrieve", query="Chartreuse", recordPacking="xml"
-        )
+        response = respond(db, operation="searchRetrieve", query="Chartreuse", recordPacking="xml")
         assert diagnostic_of(response) is None
         assert number_of_records(response) == 1
 
@@ -2212,9 +2117,7 @@ class TestTheParametersClientsActuallySend:
 
     @pytest.mark.parametrize("name", sorted(sru.SCHEMA_NAMES))
     def test_both_spellings_of_the_marcxml_schema_are_accepted(self, db, shelf, name):
-        response = respond(
-            db, operation="searchRetrieve", query="Chartreuse", recordSchema=name
-        )
+        response = respond(db, operation="searchRetrieve", query="Chartreuse", recordSchema=name)
         assert diagnostic_of(response) is None
 
     def test_record_packing_string_is_refused_rather_than_ignored(self, db, shelf):
@@ -2228,12 +2131,8 @@ class TestTheParametersClientsActuallySend:
         )
         assert diagnostic_of(response) == sru.Diagnostic.UNSUPPORTED_XML_ESCAPING_VALUE
 
-    @pytest.mark.parametrize(
-        "name", sorted(sru._DECLINED_PARAMETERS), ids=lambda n: n
-    )
-    def test_a_declined_feature_is_not_reported_as_an_unknown_parameter(
-        self, db, shelf, name
-    ):
+    @pytest.mark.parametrize("name", sorted(sru._DECLINED_PARAMETERS), ids=lambda n: n)
+    def test_a_declined_feature_is_not_reported_as_an_unknown_parameter(self, db, shelf, name):
         """**The distinction the table exists for, asserted rather than
         described.** Each of these is a parameter the specification defines and
         this server does not implement, so answering 8 would tell a client there
@@ -2262,9 +2161,7 @@ class TestTheResponseIsARecordAnotherSystemCanRead:
         client as SRU elements with MARC names.
         """
         response = respond(db, operation="searchRetrieve", query="Chartreuse")
-        record = response.find(
-            f"{SRW}records/{SRW}record/{SRW}recordData/{MARC21}record"
-        )
+        record = response.find(f"{SRW}records/{SRW}record/{SRW}recordData/{MARC21}record")
         assert record is not None
         assert record.find(f"{MARC21}leader") is not None
 
@@ -2278,9 +2175,7 @@ class TestTheResponseIsARecordAnotherSystemCanRead:
             assert packing is not None
             assert packing.text == "xml"
 
-    def test_a_record_reads_back_through_this_application_own_marc_reader(
-        self, db, shelf
-    ):
+    def test_a_record_reads_back_through_this_application_own_marc_reader(self, db, shelf):
         """The strongest test available, and it is `marc.py`'s own: a record
         this server writes is a record this application's live catalogue parser
         accepts, rather than one that merely validates against a schema."""
@@ -2292,13 +2187,9 @@ class TestTheResponseIsARecordAnotherSystemCanRead:
         root = ElementTree.fromstring(response)
         record = root.find(f"{SRW}records/{SRW}record/{SRW}recordData/{MARC21}record")
         assert record is not None
-        collection = ElementTree.Element(
-            "collection", {"xmlns": "http://www.loc.gov/MARC21/slim"}
-        )
+        collection = ElementTree.Element("collection", {"xmlns": "http://www.loc.gov/MARC21/slim"})
         collection.append(record)
-        parsed = marc.read(
-            ElementTree.tostring(collection, encoding="unicode").encode()
-        )
+        parsed = marc.read(ElementTree.tostring(collection, encoding="unicode").encode())
         assert [entry.title for entry in parsed.records] == [SHARED["title"]]
 
 
@@ -2323,9 +2214,7 @@ class TestARecordSaysWhatEachHeadingWasAsserting:
         the writer off a stored row and `Classification._file_the_number`
         derives the sort key that the column's NOT NULL demands.
         """
-        book = Book(
-            isbn="9780000000004", added_by_user_id=admin["user"]["id"], **SHARED
-        )
+        book = Book(isbn="9780000000004", added_by_user_id=admin["user"]["id"], **SHARED)
         book.classifications.append(
             Classification(
                 scheme=ClassificationScheme.GND,
@@ -2369,9 +2258,7 @@ class TestARecordSaysWhatEachHeadingWasAsserting:
             )
         ]
 
-    def test_the_shelf_without_the_row_carries_no_heading_field_at_all(
-        self, db, shelf
-    ):
+    def test_the_shelf_without_the_row_carries_no_heading_field_at_all(self, db, shelf):
         """The control: no row, no field.
 
         **It holds less than a first version of this docstring claimed**, and
@@ -2410,9 +2297,7 @@ _INDEX_NAMES = st.sampled_from(
 
 #: Every relation, spelled as a symbol and as a word, including the three that
 #: are recognised in order to be refused by name.
-_RELATIONS = st.sampled_from(
-    [*sru._RELATION_SYMBOLS, " all ", " any ", " exact ", " within ", " adj ", ""]
-)
+_RELATIONS = st.sampled_from([*sru._RELATION_SYMBOLS, " all ", " any ", " exact ", " within ", " adj ", ""])
 
 #: A term as a client writes one: the masks, the escapes, the anchor, the
 #: quote and the space are all in the alphabet, because each of them is a
@@ -2476,8 +2361,7 @@ class TestTheGeneratorStillReachesBothAnswers:
         """The bound that stands between a client and a `RecursionError`."""
         witness(
             ANY_QUERY,
-            lambda query: _diagnostic_of(query)
-            is sru.Diagnostic.UNSUPPORTED_USE_OF_PARENTHESES,
+            lambda query: _diagnostic_of(query) is sru.Diagnostic.UNSUPPORTED_USE_OF_PARENTHESES,
             reaches="a query refused for its parentheses",
         )
 
@@ -2586,9 +2470,7 @@ class TestAControlCharacterNeverReachesTheTokeniser:
         somebody asked for into a different query and then answers that one."""
         allowed = set("\t\r\n")
         hostile = [
-            character
-            for character in query
-            if not character.isprintable() and character not in allowed
+            character for character in query if not character.isprintable() and character not in allowed
         ]
         if not hostile:
             return
@@ -2600,8 +2482,7 @@ class TestAControlCharacterNeverReachesTheTokeniser:
         witness(
             text_around(invisible_characters(), padding=6),
             lambda query: any(
-                not character.isprintable() and character not in "\t\r\n"
-                for character in query
+                not character.isprintable() and character not in "\t\r\n" for character in query
             ),
             reaches="a control character CQL has no meaning for",
         )
@@ -2618,9 +2499,7 @@ _ORACLE = sqlite3.connect(":memory:")
 
 def _like(text: str, pattern: str) -> bool:
     """Whether SQLite's LIKE, with this module's escape, matches."""
-    matched = _ORACLE.execute(
-        "SELECT ? LIKE ? ESCAPE ?", (text, pattern, sru._LIKE_ESCAPE)
-    ).fetchone()[0]
+    matched = _ORACLE.execute("SELECT ? LIKE ? ESCAPE ?", (text, pattern, sru._LIKE_ESCAPE)).fetchone()[0]
     return bool(matched)
 
 
@@ -2648,9 +2527,7 @@ def _folded(value: str) -> str:
     alone, so a comparison written with `str.lower()` would disagree with the
     engine on the Turkish dotless i and on every other script that has a case.
     """
-    return "".join(
-        character.lower() if character.isascii() else character for character in value
-    )
+    return "".join(character.lower() if character.isascii() else character for character in value)
 
 
 @pytest.mark.property

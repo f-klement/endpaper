@@ -134,9 +134,7 @@ class TestCheckedConfig:
             mailer.checked_config(configured)
 
     def test_takes_several_recipients_under_the_cap(self, configured):
-        settings_store.set_value(
-            configured, SettingKey.OVERDUE_MAIL_TO, "a@example.org, b@example.org"
-        )
+        settings_store.set_value(configured, SettingKey.OVERDUE_MAIL_TO, "a@example.org, b@example.org")
         assert mailer.checked_config(configured).recipients == (
             "a@example.org",
             "b@example.org",
@@ -185,9 +183,7 @@ class TestCheckedConfig:
             ("libr" + chr(0xE4) + "ry", "pass", "username"),
         ],
     )
-    def test_refuses_a_credential_the_mail_library_cannot_encode(
-        self, configured, username, password, field
-    ):
+    def test_refuses_a_credential_the_mail_library_cannot_encode(self, configured, username, password, field):
         """`smtplib` encodes both as ASCII under PLAIN, LOGIN and CRAM-MD5, so
         no server can accept them: a setting to change, not an outage. The
         refusal names the field and never the value."""
@@ -197,9 +193,7 @@ class TestCheckedConfig:
             mailer.checked_config(configured)
         assert chr(0xE4) not in str(raised.value)
 
-    def test_a_password_no_login_will_send_is_not_refused_for_its_characters(
-        self, configured
-    ):
+    def test_a_password_no_login_will_send_is_not_refused_for_its_characters(self, configured):
         """No username, no login: `_deliver` sends no credential at all."""
         settings_store.set_value(configured, SettingKey.MAIL_PASSWORD, "p" + chr(0xE4) + "ss")
         mailer.checked_config(configured)
@@ -248,9 +242,7 @@ class TestSend:
         """The rule above, stated as a rule: nothing configurable names TLS
         verification, so there is no value an admin or a restore could write."""
         assert not [
-            key
-            for key in SettingKey
-            if any(word in key.value for word in ("verify", "insecure", "cert"))
+            key for key in SettingKey if any(word in key.value for word in ("verify", "insecure", "cert"))
         ]
 
     def test_a_server_without_starttls_fails_rather_than_continuing_in_the_clear(
@@ -312,9 +304,7 @@ class TestSend:
         assert message["Message-ID"]
 
     def test_every_recipient_is_on_the_envelope(self, configured, smtp):
-        settings_store.set_value(
-            configured, SettingKey.OVERDUE_MAIL_TO, "a@example.org,b@example.org"
-        )
+        settings_store.set_value(configured, SettingKey.OVERDUE_MAIL_TO, "a@example.org,b@example.org")
         mailer.send(mailer.checked_config(configured), "subject", "body")
         assert smtp.made[0].messages[0]["To"] == "a@example.org, b@example.org"
 
@@ -328,9 +318,7 @@ class TestTheEnvironmentTable:
         assert "MAIL_DEBUG" not in config._ENV_OVERRIDES.values()
 
     def test_the_seven_mail_settings_all_read_the_environment(self):
-        assert all(
-            config.env_variable_name(key) for key in settings_store.MAIL_KEYS
-        )
+        assert all(config.env_variable_name(key) for key in settings_store.MAIL_KEYS)
 
 
 class TestWhatCountsAsAnAddress:

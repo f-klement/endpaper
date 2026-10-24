@@ -195,9 +195,7 @@ class SourceNames:
             self._meanings.setdefault(local, set()).add(meaning)
         imported = {(binding.local, binding.target) for binding in found}
         found |= {
-            Binding(local, meaning)
-            for local, meaning, _ in derived
-            if (local, meaning) not in imported
+            Binding(local, meaning) for local, meaning, _ in derived if (local, meaning) not in imported
         }
         self.bindings = frozenset(found)
 
@@ -221,12 +219,7 @@ class SourceNames:
         wants the name it took, since `from models import Book as B` reaches
         `Book` whatever it calls it.
         """
-        return {
-            name
-            for b in self.bindings
-            if b.written is not None
-            for name in (b.local, b.written)
-        }
+        return {name for b in self.bindings if b.written is not None for name in (b.local, b.written)}
 
 
 class ModuleNames:
@@ -259,7 +252,6 @@ class ModuleNames:
         if isinstance(home, str) and isinstance(qualname, str):
             return frozenset({f"{home}.{qualname}"})
         return frozenset()
-
 
 
 def source_of(path: Path) -> str:

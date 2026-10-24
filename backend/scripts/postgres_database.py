@@ -46,8 +46,7 @@ _CREATE = (
 )
 
 _LOCALE = text(
-    "SELECT datcollate, pg_encoding_to_char(encoding) "
-    "FROM pg_database WHERE datname = current_database()"
+    "SELECT datcollate, pg_encoding_to_char(encoding) FROM pg_database WHERE datname = current_database()"
 )
 
 _EXISTS = text("SELECT 1 FROM pg_database WHERE datname = :name")

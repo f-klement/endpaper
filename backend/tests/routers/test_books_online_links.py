@@ -21,9 +21,7 @@ def with_links(db, book_id, *urls):
 
 
 class TestForgettingALink:
-    def test_the_member_who_added_the_book_removes_one_and_the_rest_stay(
-        self, client, admin, db, make_book
-    ):
+    def test_the_member_who_added_the_book_removes_one_and_the_rest_stay(self, client, admin, db, make_book):
         book = make_book(admin["headers"], title="Stoner")
         first, second = with_links(db, book["id"], "https://a.example/", "https://b.example/")
 
@@ -55,9 +53,7 @@ class TestForgettingALink:
         book = make_book(admin["headers"], title="Stoner")
         [row] = with_links(db, book["id"], "https://a.example/")
 
-        res = client.delete(
-            f"/api/books/{book['id']}/online-links/{row.id + 1000}", headers=admin["headers"]
-        )
+        res = client.delete(f"/api/books/{book['id']}/online-links/{row.id + 1000}", headers=admin["headers"])
 
         assert res.status_code == 404
         assert [stored.id for stored in links(book["id"], db)] == [row.id]

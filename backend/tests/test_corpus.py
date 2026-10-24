@@ -11,12 +11,12 @@ import ast
 import inspect
 from collections.abc import Callable, Iterable
 from pathlib import Path
-from typing import Final
+from typing import Any, Final
 
 import pytest
 
 from tests import corpus
-from tests.bindings import SourceNames, source_of, stated
+from tests.bindings import SourceNames, assignments, source_of, stated
 from tests.corpus import (
     BACKEND,
     application_modules,
@@ -27,6 +27,18 @@ from tests.corpus import (
     unowned_files,
 )
 from tests.declaration import SENTENCE, declares
+
+TREE_GUARDS = {
+    "TestEveryWalkSaysWhichTestsMakeIt": ("suite_modules",),
+    "TestOnlyTheCorpusWalks": ("suite_modules",),
+    "TestThisCheckoutsPopulationsAreTheWholeOfIt": (
+        "application_modules",
+        "every_python_file",
+        "shipped_modules",
+        "suite_modules",
+        "unowned_files",
+    ),
+}
 
 
 class TestTheVendoredRuleIsAShape:
@@ -110,9 +122,7 @@ def _populations() -> dict[str, Callable[[Path], Iterable[Path | str]]]:
     return {
         name: function
         for name, function in inspect.getmembers(corpus, inspect.isfunction)
-        if function.__module__ == corpus.__name__
-        and not name.startswith("_")
-        and name != "is_vendored"
+        if function.__module__ == corpus.__name__ and not name.startswith("_") and name != "is_vendored"
     }
 
 
@@ -154,8 +164,7 @@ class TestEveryPopulationRefusesVendoredCode:
         # `application_sources` keys by the relative path already.
         reached = {
             name: {
-                str(path.relative_to(root)) if isinstance(path, Path) else path
-                for path in population(root)
+                str(path.relative_to(root)) if isinstance(path, Path) else path for path in population(root)
             }
             for name, population in _populations().items()
         }
@@ -188,9 +197,7 @@ class TestThisCheckoutsPopulationsAreTheWholeOfIt:
         assert directories == ["routers", "schemas", "scripts"]
 
     def test_the_application_has_every_module_at_its_root(self) -> None:
-        roots = {
-            path.name for path in application_modules() if path.parent == BACKEND
-        }
+        roots = {path.name for path in application_modules() if path.parent == BACKEND}
         globbed = {path.name for path in BACKEND.glob("*.py") if not path.name.startswith(".")}
 
         assert roots == globbed
@@ -228,9 +235,10 @@ class TestThisCheckoutsPopulationsAreTheWholeOfIt:
         """
         left_out = set(unowned_files()) - set(every_python_file())
 
-        assert sorted(
-            str(path) for path in left_out if path.suffix == ".py" and not path.name.startswith(".")
-        ) == []
+        assert (
+            sorted(str(path) for path in left_out if path.suffix == ".py" and not path.name.startswith("."))
+            == []
+        )
         assert left_out, "the backend holds files that are not Python"
 
 
@@ -345,10 +353,7 @@ class TestOnlyTheCorpusWalks:
 
     def test_only_the_stated_modules_walk_a_tree(self) -> None:
         tests = BACKEND / "tests"
-        sources = {
-            path.relative_to(tests).as_posix(): source_of(path)
-            for path in suite_modules()
-        }
+        sources = {path.relative_to(tests).as_posix(): source_of(path) for path in suite_modules()}
         wrong = {
             relative: f"{_walk_calls(source)} walks, {_stated(source, relative)} stated"
             for relative, source in sources.items()
@@ -366,9 +371,7 @@ class TestOnlyTheCorpusWalks:
         )
         assert set(WALKS) <= set(sources), sorted(set(WALKS) - set(sources))
 
-    def test_a_bare_carriage_return_starts_no_line_for_the_declaration(
-        self, tmp_path: Path
-    ) -> None:
+    def test_a_bare_carriage_return_starts_no_line_for_the_declaration(self, tmp_path: Path) -> None:
         """The gate publishes a module whose declaration follows a bare carriage
         return, so its walks are counted from a row here, not from its own word."""
         written = f'"""Notes.\r\r{SENTENCE}\r"""\rWALKS_OF_MY_OWN = 2\r'
@@ -463,3 +466,286 @@ class TestOnlyTheCorpusWalks:
     )
     def test_what_counts_as_a_walk(self, source: str, calls: int) -> None:
         assert _walk_calls(source) == calls
+
+
+def _bound(statement: ast.stmt) -> set[str]:
+    """The module level names one statement binds."""
+    if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+        return {statement.name}
+    return {
+        name.id
+        for target, _value in assignments(statement)
+        for name in ast.walk(target)
+        if isinstance(name, ast.Name)
+    }
+
+
+def _mentions(statement: ast.stmt) -> set[str]:
+    """Every name a statement could reach a module level binding by.
+
+    A loaded name, a parameter, which is how a test asks for a fixture, and a
+    string, which is how `usefixtures` and an indirect parametrisation do.
+    """
+    found: set[str] = set()
+    for node in ast.walk(statement):
+        if isinstance(node, ast.Name):
+            found.add(node.id)
+        elif isinstance(node, ast.arg):
+            found.add(node.arg)
+        elif isinstance(node, ast.Constant) and isinstance(node.value, str):
+            found.add(node.value)
+    return found
+
+
+def _is_a_test(statement: ast.stmt) -> bool:
+    return (isinstance(statement, ast.ClassDef) and statement.name.startswith("Test")) or (
+        isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef)) and statement.name.startswith("test")
+    )
+
+
+#: The population a call to `project_files` reads when it passes `readmit`: the
+#: directories the tool rule prunes as well, so a path the others never reach.
+READMITTED: Final = "project_files.readmit"
+
+
+def _populations_of(call: ast.Call, names: SourceNames) -> set[str]:
+    """The populations one call reads: none where it calls none."""
+    called = {
+        meaning.removeprefix("tests.corpus.")
+        for meaning in names.means(call.func)
+        if meaning.startswith("tests.corpus.")
+    } & set(_populations())
+    if any(keyword.arg == "readmit" for keyword in call.keywords) and "project_files" in called:
+        called = called - {"project_files"} | {READMITTED}
+    return called
+
+
+def _walking_tests(source: str, package: str = "tests") -> tuple[dict[str, set[str]], set[str]]:
+    """The module level tests whose run calls a population, each with the populations it
+    reads, and the walks no test reaches.
+
+    **A call counts by what it means, through `tests/bindings.py`**, so an alias
+    or a module import of `tests.corpus` is the population, and a string holding
+    its name is not. A test reads what it calls and what every module level
+    binding it names reads, to any depth. The second set holds each module level
+    name that walks and that no test names, which is a walk this cannot say
+    which test makes, and so a walk in a helper module or a `conftest.py`
+    fixture is reported: the module whose test judges with a population calls
+    it. Past it: a population reached through another test module or
+    `getattr`, and one used by value, handed to `parametrize` or a helper or
+    re-exported from a helper module, which goes undeclared.
+    """
+    tree = ast.parse(source)
+    names = SourceNames(tree, package=package)
+    called = {
+        id(node): populations
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call) and (populations := _populations_of(node, names))
+    }
+    # The declarations name the walking tests, so read as a mention they would walk too.
+    statements = [
+        s
+        for s in tree.body
+        if not isinstance(s, (ast.Import, ast.ImportFrom))
+        and not _bound(s) & {"TREE_GUARDS", "TREE_GUARDS_LEFT_OUT"}
+    ]
+    reads: dict[str, set[str]] = {}
+    for statement in statements:
+        direct = set().union(*(called.get(id(node), set()) for node in ast.walk(statement)))
+        if direct:
+            for name in _bound(statement) or {f"<line {statement.lineno}>"}:
+                reads.setdefault(name, set()).update(direct)
+    grew = True
+    while grew:
+        grew = False
+        for statement in statements:
+            reached = set().union(*(reads[m] for m in _mentions(statement) & set(reads)))
+            for name in _bound(statement):
+                if reached - reads.get(name, set()):
+                    reads.setdefault(name, set()).update(reached)
+                    grew = True
+    tests = {name: reads[name] for s in statements if _is_a_test(s) for name in _bound(s) & set(reads)}
+    named: set[str] = set()
+    reached_statements = [s for s in statements if _is_a_test(s)]
+    while reached_statements:
+        mentioned = set().union(*(_mentions(s) for s in reached_statements)) - named
+        named |= mentioned
+        reached_statements = [s for s in statements if _bound(s) & mentioned and not _is_a_test(s)]
+    return tests, set(reads) - set(tests) - named
+
+
+def _declared(source: str, constant: str) -> Any:
+    """The value a module binds to `constant` at module level, or None where it binds none."""
+    for statement in ast.parse(source).body:
+        for target, value in assignments(statement):
+            if isinstance(target, ast.Name) and target.id == constant:
+                return ast.literal_eval(value)
+    return None
+
+
+def _misdeclared(
+    source: str, package: str = "tests"
+) -> tuple[dict[str, list[str]], dict[str, list[str]], list[str]] | None:
+    """What a module's declarations get wrong against what it calls, or None.
+
+    Returned as the tests that walk with what each reads, the tests declared
+    with what each is said to read, and the walks no test reaches.
+    """
+    walking, unreached = _walking_tests(source, package)
+    declared = _declared(source, "TREE_GUARDS")
+    said = {name: set(populations) for name, populations in dict(declared or {}).items()}
+    left_out = set(_declared(source, "TREE_GUARDS_LEFT_OUT") or ())
+    if (
+        set(said) | left_out == set(walking)
+        and not set(said) & left_out
+        and not unreached
+        and (declared is not None) == bool(walking)
+        and all(said[name] == walking[name] for name in said)
+    ):
+        return None
+    return (
+        {name: sorted(populations) for name, populations in walking.items()},
+        {name: sorted(populations) for name, populations in said.items()},
+        sorted(unreached),
+    )
+
+
+class TestEveryWalkSaysWhichTestsMakeIt:
+    """A test module calling a population names the tests that do, in `TREE_GUARDS`,
+    each with the populations it reads.
+
+    A run choosing tests by the paths a branch changed can then add such a test
+    by its populations, so a change is judged by the guards reading it and not
+    only by the files it touched; twice a targeted run was green and the full run
+    red on such a guard. A declaration is read and never derived at run time, so
+    this holds the tests and their populations to what the module calls. A test
+    left out of the added set on purpose is in `TREE_GUARDS_LEFT_OUT` instead,
+    with its reason.
+    """
+
+    def test_every_module_declares_exactly_the_tests_that_walk(self) -> None:
+        tests = BACKEND / "tests"
+        wrong = {}
+        for path in suite_modules():
+            relative = path.relative_to(tests)
+            if relative.as_posix() == "corpus.py":
+                continue
+            source = path.read_text(encoding="utf-8")
+            package = ".".join(("tests", *relative.parent.parts))
+            if (found := _misdeclared(source, package)) is not None:
+                wrong[relative.as_posix()] = found
+
+        assert wrong == {}, (
+            "each module calling a population binds TREE_GUARDS, at module level, to a "
+            "dict from each test that walks to the populations it reads, and a module "
+            "calling none binds nothing. Per module: the tests that walk with what each "
+            "reads, the tests declared, the walks no test reaches. A walk no test reaches "
+            "in a helper module or a conftest.py fixture is moved into the test module "
+            "that judges with it, which then declares it; no declaration clears it where "
+            "it is."
+        )
+
+    @pytest.mark.parametrize(("constant", "opening"), [("TREE_GUARDS", "{"), ("TREE_GUARDS_LEFT_OUT", "(")])
+    def test_a_declaration_starts_one_line_with_its_name(self, constant: str, opening: str) -> None:
+        """A declaration is also read as text rather than parsed, from the line it starts."""
+        wrong = [
+            path.name
+            for path in suite_modules()
+            if (source := path.read_text(encoding="utf-8")).count(f"\n{constant} = {opening}")
+            != (_declared(source, constant) is not None)
+        ]
+
+        assert wrong == []
+
+    @pytest.mark.parametrize(
+        ("source", "tests"),
+        [
+            (
+                "from tests.corpus import suite_modules\nclass TestA:\n    def test_a(self):\n"
+                "        suite_modules()\n",
+                {"TestA": {"suite_modules"}},
+            ),
+            (
+                "from tests import corpus as c\ndef test_a():\n    c.project_files()\n",
+                {"test_a": {"project_files"}},
+            ),
+            (
+                'X = "from tests.corpus import suite_modules"\nclass TestA:\n    def test_a(self):\n'
+                "        print(X)\n",
+                {},
+            ),
+            (
+                "from tests.corpus import suite_modules\nclass TestA:\n    def test_a(self):\n"
+                '        "suite_modules()"\n',
+                {},
+            ),
+            (
+                "from tests.corpus import application_modules\nMODULES = application_modules()\n"
+                "def _names():\n    return MODULES\nclass TestA:\n    def test_a(self):\n"
+                "        _names()\nclass TestB:\n    def test_b(self):\n        pass\n",
+                {"TestA": {"application_modules"}},
+            ),
+            (
+                "import pytest\nfrom tests.corpus import markdown_files\n"
+                "@pytest.fixture\ndef files():\n    return markdown_files()\n"
+                "def test_a(files):\n    pass\n",
+                {"test_a": {"markdown_files"}},
+            ),
+            (
+                'from tests.corpus import suite_modules\nTREE_GUARDS = {"TestA": ("suite_modules",)}\n'
+                "class TestA:\n    def test_a(self):\n        suite_modules()\n",
+                {"TestA": {"suite_modules"}},
+            ),
+            (
+                "from tests.corpus import browser_modules, suite_modules\nTOP = suite_modules()\n"
+                "class TestA:\n    def test_a(self):\n        browser_modules()\n        print(TOP)\n",
+                {"TestA": {"browser_modules", "suite_modules"}},
+            ),
+            (
+                "from tests.corpus import project_files\ndef test_a():\n"
+                "    project_files(readmit=lambda _: True)\n",
+                {"test_a": {"project_files.readmit"}},
+            ),
+        ],
+        ids=[
+            "a call in a test",
+            "a module alias",
+            "a fixture's string naming one",
+            "a string inside a test",
+            "through a constant and a helper",
+            "through a fixture",
+            "beside its own declaration",
+            "two populations, one through a constant",
+            "the ignore file's directories readmitted",
+        ],
+    )
+    def test_what_counts_as_a_test_that_walks(self, source: str, tests: dict[str, set[str]]) -> None:
+        assert _walking_tests(source) == (tests, set())
+
+    def test_a_walk_no_test_names_is_reported(self) -> None:
+        source = (
+            "from tests.corpus import suite_modules\nMODULES = suite_modules()\ndef test_a():\n    pass\n"
+        )
+
+        assert _walking_tests(source) == ({}, {"MODULES"})
+
+    def test_a_walker_declared_with_another_population_is_refused(self) -> None:
+        """A walker is added to a run by its declared populations, so one declared
+        reading the test tree while it reads the application would not run for an
+        application change."""
+        source = (
+            "from tests.corpus import application_modules\n"
+            'TREE_GUARDS = {"TestA": ("suite_modules",)}\n'
+            "class TestA:\n    def test_a(self):\n        application_modules()\n"
+        )
+
+        assert _misdeclared(source) is not None
+
+    def test_a_walker_declared_with_what_it_reads_is_accepted(self) -> None:
+        source = (
+            "from tests.corpus import application_modules\n"
+            'TREE_GUARDS = {"TestA": ("application_modules",)}\n'
+            "class TestA:\n    def test_a(self):\n        application_modules()\n"
+        )
+
+        assert _misdeclared(source) is None

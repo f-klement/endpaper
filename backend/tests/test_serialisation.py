@@ -38,7 +38,7 @@ class TestMatchSubjectsToTags:
         assert match_subjects_to_tags(["EPIC FANTASY"], tags) == [1]
 
     def test_it_ignores_a_parenthetical_suffix_on_the_tag(self):
-        """"Young Adult (13-18)" has to match a source saying "young adult"."""
+        """ "Young Adult (13-18)" has to match a source saying "young adult"."""
         tags = [Tag(id=7, name="Young Adult (13 to 18)")]
         assert match_subjects_to_tags(["young adult fiction"], tags) == [7]
 
@@ -93,7 +93,7 @@ class TestSuggestedTagIds:
         assert suggested_tag_ids(["Computing"], [], self.TAGS) == [1]
 
     def test_a_german_record_resolves_through_its_number(self):
-        """"004 Informatik" matches no English tag name, and this is the whole
+        """ "004 Informatik" matches no English tag name, and this is the whole
         reason the number is stored."""
         assert suggested_tag_ids(["Informatik"], [self._ddc("004")], self.TAGS) == [1]
 
@@ -102,9 +102,7 @@ class TestSuggestedTagIds:
 
     def test_an_lcc_number_is_not_projected(self):
         """Only DDC has a division mapping short enough to ship."""
-        entry = ClassificationOut(
-            scheme=ClassificationScheme.LCC, number="QA76.73.P98"
-        )
+        entry = ClassificationOut(scheme=ClassificationScheme.LCC, number="QA76.73.P98")
         assert suggested_tag_ids([], [entry], self.TAGS) == []
 
     def test_a_number_with_no_mapped_tag_suggests_nothing(self):
@@ -397,9 +395,7 @@ class TestWhoWantsToBeAsked:
         assert out.my_wants_to_discuss is False
         assert [user.username for user in out.discuss_with] == ["member"]
 
-    def test_it_does_not_bleed_between_books_on_a_page(
-        self, db, admin, member, two_books
-    ):
+    def test_it_does_not_bleed_between_books_on_a_page(self, db, admin, member, two_books):
         me = db.get(User, admin["user"]["id"])
         them = db.get(User, member["user"]["id"])
         db.add(UserBook(user_id=them.id, book_id=two_books[1].id, wants_to_discuss=True))

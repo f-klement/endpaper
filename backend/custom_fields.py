@@ -321,9 +321,7 @@ def definitions(db: Session) -> list[CustomField]:
     return db.query(CustomField).order_by(CustomField.id).all()
 
 
-def define(
-    db: Session, name: str, kind: CustomFieldKind, defined_by_user_id: int
-) -> CustomField:
+def define(db: Session, name: str, kind: CustomFieldKind, defined_by_user_id: int) -> CustomField:
     """Define a field, or hand back the one that already has the name.
 
     **A collision returns the existing row rather than a 409**, which is what
@@ -399,11 +397,7 @@ def rename(db: Session, field: CustomField, name: str) -> CustomField:
     """
     folded = name.lower()
     clash = next(
-        (
-            row
-            for row in definitions(db)
-            if row.id != field.id and row.name.lower() == folded
-        ),
+        (row for row in definitions(db) if row.id != field.id and row.name.lower() == folded),
         None,
     )
     if clash is not None:
@@ -438,9 +432,7 @@ def remove(db: Session, field: CustomField) -> int:
     of Books that *do* hold a field would be a disclosure, which is why this
     feature does not offer one: see `docs/security.md`.
     """
-    removed = (
-        db.query(CustomFieldValue).filter(CustomFieldValue.field_id == field.id).delete()
-    )
+    removed = db.query(CustomFieldValue).filter(CustomFieldValue.field_id == field.id).delete()
     db.delete(field)
     return int(removed)
 
@@ -515,9 +507,7 @@ def values_on(db: Session, book: Book) -> list[Filled]:
     return filled
 
 
-def write(
-    db: Session, book: Book, field: CustomField, value: str
-) -> CustomFieldValue | None:
+def write(db: Session, book: Book, field: CustomField, value: str) -> CustomFieldValue | None:
     """Set this Book's value for one field, or clear it with an empty string.
 
     Returns the row, or None when the value was cleared and there is no row.
@@ -590,12 +580,7 @@ def resolve_merge(db: Session, keeper_id: int, loser_ids: Collection[int]) -> No
     ids = frozenset(loser_ids)
     if not ids:
         return
-    taken = {
-        row.field_id
-        for row in db.query(CustomFieldValue).filter(
-            CustomFieldValue.book_id == keeper_id
-        )
-    }
+    taken = {row.field_id for row in db.query(CustomFieldValue).filter(CustomFieldValue.book_id == keeper_id)}
     for row in (
         db.query(CustomFieldValue)
         .filter(CustomFieldValue.book_id.in_(ids))

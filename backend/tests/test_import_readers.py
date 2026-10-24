@@ -51,9 +51,7 @@ class TestAReaderWorksOnTextNoUploadProduced:
     """
 
     def test_a_reader_reads_text_handed_to_it_directly(self):
-        parsed = csv_import.READERS[ImportReader.GENERIC](
-            PLAIN, Extraction(reader=ImportReader.GENERIC)
-        )
+        parsed = csv_import.READERS[ImportReader.GENERIC](PLAIN, Extraction(reader=ImportReader.GENERIC))
         assert [row.title for row in parsed.rows] == ["Solaris"]
 
     def test_it_reports_which_reader_read_it(self):
@@ -117,9 +115,10 @@ class TestAReaderIsNeverToldHowTheFileArrived:
         """
         for reader, function in csv_import.READERS.items():
             signature = inspect.signature(function)
-            assert [
-                parameter.annotation for parameter in signature.parameters.values()
-            ] == [str, Extraction], (reader, signature)
+            assert [parameter.annotation for parameter in signature.parameters.values()] == [
+                str,
+                Extraction,
+            ], (reader, signature)
             assert signature.return_annotation is ParsedFile, reader
 
     def test_that_check_would_notice_a_reader_handed_an_upload(self):
@@ -128,10 +127,7 @@ class TestAReaderIsNeverToldHowTheFileArrived:
         def welded(upload: object, extraction: Extraction) -> ParsedFile:
             return ParsedFile()
 
-        annotations = [
-            parameter.annotation
-            for parameter in inspect.signature(welded).parameters.values()
-        ]
+        annotations = [parameter.annotation for parameter in inspect.signature(welded).parameters.values()]
         assert annotations != [str, Extraction]
 
     def test_the_implementations_reach_no_session_and_no_request(self):
@@ -162,13 +158,9 @@ class TestTheClosedSetHasNoMemberWithoutAReader:
         """
         for missing in ImportReader:
             partial = {
-                reader: function
-                for reader, function in csv_import.READERS.items()
-                if reader is not missing
+                reader: function for reader, function in csv_import.READERS.items() if reader is not missing
             }
-            with pytest.raises(
-                RuntimeError, match="import readers with no implementation"
-            ) as error:
+            with pytest.raises(RuntimeError, match="import readers with no implementation") as error:
                 csv_import._complete(partial)
             assert missing.value in str(error.value)
 
@@ -200,12 +192,8 @@ class TestEveryReaderHonoursAColumnCorrection:
     #: correction is what fills the field or nothing does.
     SAMPLES = {
         ImportReader.GENERIC: "Title,Written By\nSolaris,Stanislaw Lem\n",
-        ImportReader.LIBRARYTHING: (
-            "Title\tWritten By\tPublication\nSolaris\tStanislaw Lem\tFaber (1970)\n"
-        ),
-        ImportReader.OPENREADS: (
-            "title,Written By,readings\nSolaris,Stanislaw Lem,2021-01-02|2021-02-03|\n"
-        ),
+        ImportReader.LIBRARYTHING: ("Title\tWritten By\tPublication\nSolaris\tStanislaw Lem\tFaber (1970)\n"),
+        ImportReader.OPENREADS: ("title,Written By,readings\nSolaris,Stanislaw Lem,2021-01-02|2021-02-03|\n"),
     }
 
     def test_every_registered_reader_has_a_sample_here(self):
@@ -249,9 +237,7 @@ class TestEveryReaderHonoursAColumnCorrection:
 def _every_module_of_ours() -> set[str]:
     """Every top level module and package of this application, off the tree."""
     return {path.stem for path in BACKEND.glob("*.py")} | {
-        path.name
-        for path in BACKEND.iterdir()
-        if path.is_dir() and not path.name.startswith(("_", "."))
+        path.name for path in BACKEND.iterdir() if path.is_dir() and not path.name.startswith(("_", "."))
     }
 
 

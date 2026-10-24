@@ -59,17 +59,21 @@ def share(client, headers, book_id, highlight_id, is_shared=True):
 
 
 class TestAnImportRunsAgainSafely:
-    def test_the_same_sidecar_twice_writes_nothing_the_second_time(
-        self, client, member, make_book, db
-    ):
+    def test_the_same_sidecar_twice_writes_nothing_the_second_time(self, client, member, make_book, db):
         book = make_book(member["headers"])
         holding(client, member["headers"], book["id"])
 
         assert send(client, member["headers"], book["id"]).json() == {
-            "created": 1, "updated": 0, "unchanged": 0, "left_deleted": 0,
+            "created": 1,
+            "updated": 0,
+            "unchanged": 0,
+            "left_deleted": 0,
         }
         assert send(client, member["headers"], book["id"]).json() == {
-            "created": 0, "updated": 0, "unchanged": 1, "left_deleted": 0,
+            "created": 0,
+            "updated": 0,
+            "unchanged": 1,
+            "left_deleted": 0,
         }
         assert db.query(Highlight).count() == 1
 
@@ -81,13 +85,9 @@ class TestAnImportRunsAgainSafely:
         res = send(client, member["headers"], book["id"], mark(note="the litany"))
 
         assert res.json() == {"created": 0, "updated": 1, "unchanged": 0, "left_deleted": 0}
-        assert [h["note"] for h in listed(client, member["headers"], book["id"])] == [
-            "the litany"
-        ]
+        assert [h["note"] for h in listed(client, member["headers"], book["id"])] == ["the litany"]
 
-    def test_the_same_position_in_another_file_is_another_highlight(
-        self, client, member, make_book
-    ):
+    def test_the_same_position_in_another_file_is_another_highlight(self, client, member, make_book):
         """Positions are only meaningful inside one file, so the fingerprint is
         part of the key; without it two books' first marks would be one row."""
         dune = make_book(member["headers"], title="Dune")
@@ -181,9 +181,7 @@ class TestAnImportOntoAnotherBookTakesTheShareBack:
 
         assert listed(client, other_user["headers"], second["id"]) == []
 
-    def test_from_a_private_book_to_a_public_one(
-        self, client, member, other_user, make_book
-    ):
+    def test_from_a_private_book_to_a_public_one(self, client, member, other_user, make_book):
         first = make_book(member["headers"], is_private=True)
         self._shared_on(client, member, first["id"])
         second = make_book(other_user["headers"])
@@ -197,9 +195,7 @@ class TestAnImportOntoAnotherBookTakesTheShareBack:
 
 
 class TestAHighlightIsPrivateUntilShared:
-    def test_another_member_does_not_see_an_imported_one(
-        self, client, member, other_user, make_book
-    ):
+    def test_another_member_does_not_see_an_imported_one(self, client, member, other_user, make_book):
         book = make_book(member["headers"])
         holding(client, member["headers"], book["id"])
         send(client, member["headers"], book["id"])
@@ -207,9 +203,7 @@ class TestAHighlightIsPrivateUntilShared:
         assert listed(client, other_user["headers"], book["id"]) == []
         assert len(listed(client, member["headers"], book["id"])) == 1
 
-    def test_sharing_shows_it_to_whoever_sees_the_book(
-        self, client, member, other_user, make_book
-    ):
+    def test_sharing_shows_it_to_whoever_sees_the_book(self, client, member, other_user, make_book):
         book = make_book(member["headers"])
         holding(client, member["headers"], book["id"])
         send(client, member["headers"], book["id"])
@@ -217,9 +211,7 @@ class TestAHighlightIsPrivateUntilShared:
 
         assert share(client, member["headers"], book["id"], highlight["id"]).status_code == 200
 
-        assert [h["id"] for h in listed(client, other_user["headers"], book["id"])] == [
-            highlight["id"]
-        ]
+        assert [h["id"] for h in listed(client, other_user["headers"], book["id"])] == [highlight["id"]]
 
     def test_unsharing_withdraws_it(self, client, member, other_user, make_book):
         book = make_book(member["headers"])
@@ -232,9 +224,7 @@ class TestAHighlightIsPrivateUntilShared:
 
         assert listed(client, other_user["headers"], book["id"]) == []
 
-    def test_a_shared_one_on_a_private_book_stays_hidden(
-        self, client, member, other_user, make_book
-    ):
+    def test_a_shared_one_on_a_private_book_stays_hidden(self, client, member, other_user, make_book):
         """The book rule comes first: a private Book hides its shared marks."""
         book = make_book(member["headers"], is_private=True)
         holding(client, member["headers"], book["id"])
@@ -264,9 +254,7 @@ class TestWhatTheImportRefuses:
 
 
 class TestOnlyTheAuthorShares:
-    def test_another_member_s_private_highlight_is_not_found(
-        self, client, member, other_user, make_book
-    ):
+    def test_another_member_s_private_highlight_is_not_found(self, client, member, other_user, make_book):
         book = make_book(member["headers"])
         holding(client, member["headers"], book["id"])
         send(client, member["headers"], book["id"])
@@ -274,9 +262,7 @@ class TestOnlyTheAuthorShares:
 
         assert share(client, other_user["headers"], book["id"], highlight["id"]).status_code == 404
 
-    def test_another_member_s_shared_highlight_is_forbidden(
-        self, client, member, other_user, make_book
-    ):
+    def test_another_member_s_shared_highlight_is_forbidden(self, client, member, other_user, make_book):
         book = make_book(member["headers"])
         holding(client, member["headers"], book["id"])
         send(client, member["headers"], book["id"])
@@ -300,9 +286,7 @@ class TestOnlyTheAuthorShares:
         assert res.status_code == 409
         assert res.json()["detail"]["code"] == "too_long_to_share"
 
-    def test_a_share_racing_an_import_that_moved_it_leaves_it_private(
-        self, client, member, make_book, db
-    ):
+    def test_a_share_racing_an_import_that_moved_it_leaves_it_private(self, client, member, make_book, db):
         """The share reads the row on this book, and an import moving it to
         another commits before the share writes: the share answers as though
         the row were not here, and the new book's readers never see it."""
@@ -359,9 +343,7 @@ class TestOnlyTheAuthorShares:
                 return
             lengthened.append(instance.id)
             with SessionLocal() as other:
-                other.query(Highlight).filter(Highlight.id == instance.id).update(
-                    {"text": longer}
-                )
+                other.query(Highlight).filter(Highlight.id == instance.id).update({"text": longer})
                 other.commit()
 
         event.listen(SessionLocal, "loaded_as_persistent", the_import_lengthens_it_first)
@@ -376,9 +358,7 @@ class TestOnlyTheAuthorShares:
 
 
 class TestNoAdminArm:
-    def test_an_admin_does_not_read_a_private_highlight(
-        self, client, admin, member, make_book
-    ):
+    def test_an_admin_does_not_read_a_private_highlight(self, client, admin, member, make_book):
         book = make_book(member["headers"])
         holding(client, member["headers"], book["id"])
         send(client, member["headers"], book["id"])
@@ -414,9 +394,7 @@ class TestAMerge:
         assert res.status_code == 200
         assert db.query(Highlight).one().book_id == keeper["id"]
 
-    def test_takes_the_share_back_on_the_survivor(
-        self, client, member, other_user, make_book
-    ):
+    def test_takes_the_share_back_on_the_survivor(self, client, member, other_user, make_book):
         """A merge changes a highlight's Book, so it is private again: the
         survivor's readers are not the audience its author chose."""
         keeper = make_book(member["headers"], title="Dune", author="Frank Herbert")
@@ -462,9 +440,7 @@ class TestAMemberDeletesTheirOwn:
 
         assert listed(client, member["headers"], book["id"]) == []
 
-    def test_a_reimport_still_carrying_it_leaves_it_deleted(
-        self, client, member, make_book, db
-    ):
+    def test_a_reimport_still_carrying_it_leaves_it_deleted(self, client, member, make_book, db):
         book = make_book(member["headers"])
         holding(client, member["headers"], book["id"])
         send(client, member["headers"], book["id"])
@@ -485,9 +461,7 @@ class TestAMemberDeletesTheirOwn:
         holding(client, member["headers"], book["id"])
         other = mark(pos0="/body/p[9]/text().0", pos1="/body/p[9]/text().5", text="other")
         send(client, member["headers"], book["id"], mark(), other)
-        [first] = [
-            h for h in listed(client, member["headers"], book["id"]) if h["text"] != "other"
-        ]
+        [first] = [h for h in listed(client, member["headers"], book["id"]) if h["text"] != "other"]
         delete(client, member["headers"], book["id"], first["id"])
 
         res = send(client, member["headers"], book["id"], mark())
@@ -495,9 +469,7 @@ class TestAMemberDeletesTheirOwn:
         assert res.json()["left_deleted"] == 1
         assert [h.text for h in db.query(Highlight)] == ["other"]
 
-    def test_another_member_importing_the_same_mark_keeps_theirs(
-        self, client, member, other_user, make_book
-    ):
+    def test_another_member_importing_the_same_mark_keeps_theirs(self, client, member, other_user, make_book):
         """The key is remembered per member: one member's deletion is nothing
         to another's import of the same file."""
         book = make_book(member["headers"])
@@ -524,13 +496,9 @@ class TestAMemberDeletesTheirOwn:
         res = delete(client, other_user["headers"], book["id"], highlight["id"])
 
         assert res.status_code == 404
-        assert [h["id"] for h in listed(client, other_user["headers"], book["id"])] == [
-            highlight["id"]
-        ]
+        assert [h["id"] for h in listed(client, other_user["headers"], book["id"])] == [highlight["id"]]
 
-    def test_an_admin_cannot_delete_a_member_s_highlight(
-        self, client, admin, member, make_book, db
-    ):
+    def test_an_admin_cannot_delete_a_member_s_highlight(self, client, admin, member, make_book, db):
         book = make_book(member["headers"])
         holding(client, member["headers"], book["id"])
         send(client, member["headers"], book["id"])
@@ -550,9 +518,7 @@ class TestAMemberDeletesTheirOwn:
         assert delete(client, member["headers"], elsewhere["id"], highlight["id"]).status_code == 404
         assert len(listed(client, member["headers"], book["id"])) == 1
 
-    def test_on_a_book_the_caller_cannot_see_it_is_not_found(
-        self, client, member, other_user, make_book
-    ):
+    def test_on_a_book_the_caller_cannot_see_it_is_not_found(self, client, member, other_user, make_book):
         book = make_book(other_user["headers"], is_private=True)
         holding(client, other_user["headers"], book["id"])
         send(client, other_user["headers"], book["id"])

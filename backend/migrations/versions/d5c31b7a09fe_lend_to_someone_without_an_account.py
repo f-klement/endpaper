@@ -61,9 +61,7 @@ def upgrade() -> None:
 
     with op.batch_alter_table("loans") as batch_op:
         batch_op.add_column(sa.Column("loaned_to_name", sa.String(length=120), nullable=True))
-        batch_op.alter_column(
-            "loaned_to_user_id", existing_type=sa.Integer(), nullable=True
-        )
+        batch_op.alter_column("loaned_to_user_id", existing_type=sa.Integer(), nullable=True)
         batch_op.create_check_constraint(
             _BORROWER_CHECK,
             # The trim clause matters: '' and '   ' both satisfy IS NOT NULL,
@@ -93,9 +91,7 @@ def downgrade() -> None:
 
     with op.batch_alter_table("loans") as batch_op:
         batch_op.drop_constraint(_BORROWER_CHECK, type_="check")
-        batch_op.alter_column(
-            "loaned_to_user_id", existing_type=sa.Integer(), nullable=False
-        )
+        batch_op.alter_column("loaned_to_user_id", existing_type=sa.Integer(), nullable=False)
         batch_op.drop_column("loaned_to_name")
 
     _create_open_loan_index()

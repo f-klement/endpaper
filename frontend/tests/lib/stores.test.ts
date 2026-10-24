@@ -1034,7 +1034,7 @@ describe("the store seam reaches its readers and they do not reach back", () => 
     // walked past, measured by the security seat. What is left unmatched is a
     // statement whose `await import` lands on an indented continuation line,
     // and one inside a top level block or after a label; neither is written
-    // here and prettier produces neither at this width.
+    // here and oxfmt produces neither at this width.
     expect([...source.matchAll(/^\s*import\s*"[^"]+"/gm)]).toEqual([]);
     const dynamic = [...source.matchAll(/await\s+import\s*\(/g)];
     expect(dynamic.length).toBeGreaterThan(0);
@@ -1246,7 +1246,7 @@ describe("a reader's library says nothing the seam drops", () => {
         reads,
         // **`readonly` is optional and nothing in this repository requires
         // it**: `frontend/` has no eslint config, `tsc` does not check it and
-        // prettier does not add it, and `lib/audiobookGroups.ts`,
+        // oxfmt does not add it, and `lib/audiobookGroups.ts`,
         // `lib/audiobook.ts` and `lib/bookFilters.ts` declare members without
         // it today. A pattern spelling the keyword read a dead member added
         // with it and passed over the same member added without, on three of

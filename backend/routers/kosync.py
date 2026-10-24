@@ -63,11 +63,7 @@ async def refused_answer(request: Request, exc: Exception) -> JSONResponse:
     routes raise. Not the application's `{"detail": ...}`: a device shows
     `message` to its reader.
     """
-    refused = (
-        exc
-        if isinstance(exc, kosync.Refused)
-        else kosync.Refused(502, 2000, "Unknown server error.")
-    )
+    refused = exc if isinstance(exc, kosync.Refused) else kosync.Refused(502, 2000, "Unknown server error.")
     return JSONResponse(
         status_code=refused.status,
         content={"message": refused.message, "code": refused.code},
@@ -79,7 +75,7 @@ async def _body(request: Request) -> object:
     raw = await request.body()
     try:
         body = json.loads(raw) if raw else None
-    except (ValueError, RecursionError):
+    except ValueError, RecursionError:
         # `RecursionError` for a body nested deeper than the parser recurses,
         # which fits under the body limit and would otherwise be a 500.
         raise kosync.Refused(400, 103, "Could not parse JSON in body.") from None
@@ -178,9 +174,7 @@ def kosync_not_found(rest: str) -> JSONResponse:
 # ── The member's own screens ──────────────────────────────────────────────────
 
 #: A document name in a path, the shape a device can push and nothing else.
-DocumentName = Annotated[
-    str, Path(min_length=1, max_length=KOSYNC_DOCUMENT_MAX, pattern="^[A-Za-z0-9_]+$")
-]
+DocumentName = Annotated[str, Path(min_length=1, max_length=KOSYNC_DOCUMENT_MAX, pattern="^[A-Za-z0-9_]+$")]
 
 
 def _out(row: KosyncDocument) -> KosyncDocumentOut:
@@ -296,9 +290,7 @@ def link_kosync_document(
     return _out(row)
 
 
-@member.delete(
-    "/books/{book_id}/documents/{document}", status_code=status.HTTP_204_NO_CONTENT
-)
+@member.delete("/books/{book_id}/documents/{document}", status_code=status.HTTP_204_NO_CONTENT)
 @refuses(404)
 def unlink_kosync_document(
     document: DocumentName, book: BookForRead, current_user: CurrentUser, db: DbSession

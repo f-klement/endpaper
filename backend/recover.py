@@ -66,8 +66,7 @@ def main(argv: list[str]) -> int:
         # recovered, which is worse than being told to look elsewhere.
         if not app_holds_the_password(user):
             print(
-                f"{username!r} is authenticated by a directory. Its password is "
-                "held there, not here.",
+                f"{username!r} is authenticated by a directory. Its password is held there, not here.",
                 file=sys.stderr,
             )
             return 1
@@ -77,8 +76,7 @@ def main(argv: list[str]) -> int:
         db.commit()
 
     print(
-        f"Password set for {username}. Every session and every KOReader device "
-        "on that account is signed out."
+        f"Password set for {username}. Every session and every KOReader device on that account is signed out."
     )
     return 0
 

@@ -49,6 +49,10 @@ from schemas.classification import MAX_CLASSIFICATIONS_PER_BOOK
 from tests.corpus import application_modules
 from tests.test_errors import postgres_shaped_error
 
+TREE_GUARDS = {
+    "TestNoProductionModuleWritesAWholeCollection": ("application_modules",),
+}
+
 MARCXML = "http://www.loc.gov/MARC21/slim"
 
 
@@ -129,7 +133,9 @@ class TestLibraryModeGatesEverySurface:
     def test_the_preview_refuses_with_library_mode_off(self, client, admin, db):
         library_mode(db, False)
         res = upload(
-            client, admin["headers"], collection(a_marc_book("T")),
+            client,
+            admin["headers"],
+            collection(a_marc_book("T")),
             path="/api/imports/marc/preview",
         )
         assert res.status_code == 403
@@ -145,9 +151,7 @@ class TestLibraryModeGatesEverySurface:
         """Library mode is a property of the deployment. A cataloguer is not
         necessarily the account that installed it."""
         library_mode(db)
-        res = client.get(
-            "/api/books/export", params={"format": "marcxml"}, headers=member["headers"]
-        )
+        res = client.get("/api/books/export", params={"format": "marcxml"}, headers=member["headers"])
         assert res.status_code == 200
 
 
@@ -196,18 +200,14 @@ class TestTheExport:
         make_book(admin["headers"], title="Secret", is_private=True)
         make_book(member["headers"], title="Shared")
 
-        res = client.get(
-            "/api/books/export", params={"format": "marcxml"}, headers=member["headers"]
-        )
+        res = client.get("/api/books/export", params={"format": "marcxml"}, headers=member["headers"])
 
         assert "Shared" in res.text
         assert "Secret" not in res.text
 
     def test_an_empty_shelf_is_an_empty_collection_and_not_an_error(self, client, member, db):
         library_mode(db)
-        res = client.get(
-            "/api/books/export", params={"format": "marcxml"}, headers=member["headers"]
-        )
+        res = client.get("/api/books/export", params={"format": "marcxml"}, headers=member["headers"])
         assert res.status_code == 200
         assert "<collection" in res.text
 
@@ -267,9 +267,7 @@ class TestTheExportIsPagedRatherThanWhole:
         return isbns
 
     def export(self, client, headers):
-        return client.get(
-            "/api/books/export", params={"format": "marcxml"}, headers=headers
-        )
+        return client.get("/api/books/export", params={"format": "marcxml"}, headers=headers)
 
     def test_every_book_is_written_exactly_once_when_the_shelf_outruns_a_page(
         self, client, admin, db, small_pages
@@ -375,9 +373,7 @@ class TestTheExportIsPagedRatherThanWhole:
         assert self.export(client, admin["headers"]).status_code == 200
         assert states == [(inspect.GEN_CREATED, inspect.GEN_CREATED)]
 
-    def test_a_book_deleted_behind_the_walk_does_not_take_a_later_one_with_it(
-        self, db, admin, small_pages
-    ):
+    def test_a_book_deleted_behind_the_walk_does_not_take_a_later_one_with_it(self, db, admin, small_pages):
         """What an offset would have lost, and the reason the walk uses a key.
 
         Pages of one export are separate reads: pysqlite leaves a `SELECT`
@@ -406,9 +402,7 @@ class TestTheExportIsPagedRatherThanWhole:
         about how many times the walk asked."""
         assert list(books_router._marcxml_pages(db, admin["user"]["id"])) == []
 
-    def test_a_shelf_of_exactly_one_page_yields_no_empty_page_after_it(
-        self, db, admin, small_pages
-    ):
+    def test_a_shelf_of_exactly_one_page_yields_no_empty_page_after_it(self, db, admin, small_pages):
         """A last page that is exactly full is indistinguishable from a full
         page with more behind it, so the walk asks again and the answer is
         empty. What this pins is that the empty answer is not handed on as a
@@ -421,9 +415,7 @@ class TestTheExportIsPagedRatherThanWhole:
 
         assert [len(page) for page in pages] == [small_pages]
 
-    def test_a_book_retitled_behind_the_walk_is_still_written(
-        self, db, admin, small_pages
-    ):
+    def test_a_book_retitled_behind_the_walk_is_still_written(self, db, admin, small_pages):
         """What a walk resuming on the title would have lost.
 
         `PATCH /api/books/{book_id}` can retitle a book, so a title is a key
@@ -485,9 +477,7 @@ class TestTheExportIsPagedRatherThanWhole:
             ElementTree.fromstring(res.content)
 
     @pytest.mark.answers_500(raises=(RuntimeError,))
-    def test_a_failure_before_the_first_page_is_also_a_200(
-        self, admin, db, monkeypatch, small_pages
-    ):
+    def test_a_failure_before_the_first_page_is_also_a_200(self, admin, db, monkeypatch, small_pages):
         """The half of that property a failure on page two does not reach.
 
         The opening tag is yielded before the walk is touched, so the status
@@ -538,9 +528,7 @@ class TestTheExportIsPagedRatherThanWhole:
 
         res = self.export(client, admin["headers"])
 
-        probe = ElementTree.tostring(
-            ElementTree.Element("probe"), encoding="unicode", xml_declaration=True
-        )
+        probe = ElementTree.tostring(ElementTree.Element("probe"), encoding="unicode", xml_declaration=True)
         assert res.text.startswith(probe[: probe.index("<probe")])
         # Parsed from bytes: `ElementTree` refuses a `str` carrying an encoding
         # declaration, which is the declaration asserted one line above.
@@ -696,9 +684,7 @@ class TestThePageSizeThatBoundsTheExport:
                 "fill AUTHOR_LINE_MAX, and anything between them measures a "
                 "record narrower than this fixture claims to build"
             )
-        author = (
-            fill * AUTHOR_LINE_MAX if credits == 1 else (fill + ",") * self.MOST_CREDITS
-        )
+        author = fill * AUTHOR_LINE_MAX if credits == 1 else (fill + ",") * self.MOST_CREDITS
         book = Book(
             title=fill * TITLE_MAX,
             subtitle=fill * SUBTITLE_MAX,
@@ -724,10 +710,7 @@ class TestThePageSizeThatBoundsTheExport:
         return book
 
     def page_bytes(self, fill: str, credits: int = 1, links: bool = True) -> int:
-        page = [
-            self.widest_book(fill, credits, links)
-            for _ in range(marc.EXPORT_PAGE_RECORDS)
-        ]
+        page = [self.widest_book(fill, credits, links) for _ in range(marc.EXPORT_PAGE_RECORDS)]
         written = "".join(marc.stream([page]))
         assert written.count("<record>") == marc.EXPORT_PAGE_RECORDS
         return len(written.encode())
@@ -784,9 +767,7 @@ class TestThePageSizeThatBoundsTheExport:
         weighs the same in every fill and only dilutes the ratio this arm is
         about, which is the one `max_length` columns owe.
         """
-        one_byte, two_byte, escaped = (
-            self.page_bytes(fill, links=False) for fill in self.FILLS
-        )
+        one_byte, two_byte, escaped = (self.page_bytes(fill, links=False) for fill in self.FILLS)
 
         assert one_byte < two_byte < escaped
         assert escaped > 4 * one_byte
@@ -816,9 +797,7 @@ class TestThePageSizeThatBoundsTheExport:
         many_names = self.page_bytes("&", self.MOST_CREDITS)
 
         extra_names = self.MOST_CREDITS - 1
-        assert many_names - one_name > (
-            marc.EXPORT_PAGE_RECORDS * extra_names * self.SCAFFOLDING_PER_CREDIT
-        )
+        assert many_names - one_name > (marc.EXPORT_PAGE_RECORDS * extra_names * self.SCAFFOLDING_PER_CREDIT)
 
 
 class TestNoProductionModuleWritesAWholeCollection:
@@ -927,7 +906,8 @@ class TestTheImport:
         library_mode(db)
 
         res = upload(
-            client, admin["headers"],
+            client,
+            admin["headers"],
             collection(a_marc_book("Stoner", "John Williams", "9780099561545")),
         )
 
@@ -947,7 +927,8 @@ class TestTheImport:
         library_mode(db)
 
         upload(
-            client, admin["headers"],
+            client,
+            admin["headers"],
             collection(
                 record(
                     field("245", ("a", "Stoner")),
@@ -976,7 +957,8 @@ class TestTheImport:
         library_mode(db)
 
         res = upload(
-            client, admin["headers"],
+            client,
+            admin["headers"],
             collection(
                 record(field("020", ("a", "9780099561545"))),
                 a_marc_book("Kept"),
@@ -990,7 +972,9 @@ class TestTheImport:
         library_mode(db)
 
         res = upload(
-            client, admin["headers"], collection(a_marc_book("Stoner")),
+            client,
+            admin["headers"],
+            collection(a_marc_book("Stoner")),
             create_missing=False,
         )
 
@@ -999,7 +983,7 @@ class TestTheImport:
         assert db.query(Book).filter(Book.title == "Stoner").count() == 0
 
     def test_a_file_that_is_not_marc_is_a_400_with_a_reason(self, client, admin, db):
-        """"0 books imported" tells somebody who picked the wrong file
+        """ "0 books imported" tells somebody who picked the wrong file
         nothing."""
         library_mode(db)
         res = upload(client, admin["headers"], b"Title,Author\nStoner,John Williams\n")
@@ -1024,7 +1008,8 @@ class TestAnOnlineLinkIsKeptOnTheBook:
     def test_the_link_is_served_on_the_book(self, client, admin, db):
         library_mode(db)
         upload(
-            client, admin["headers"],
+            client,
+            admin["headers"],
             collection(
                 record(field("245", ("a", "Stoner")), link_field("https://a.example/x", "Volltext", "0"))
             ),
@@ -1063,7 +1048,8 @@ class TestAnOnlineLinkIsKeptOnTheBook:
         library_mode(db)
         urls = [f"https://a{n}.example/" for n in range(MAX_ONLINE_LINKS_PER_BOOK + 2)]
         upload(
-            client, admin["headers"],
+            client,
+            admin["headers"],
             collection(record(field("245", ("a", "Stoner")), *(link_field(url) for url in urls))),
         )
 
@@ -1073,7 +1059,8 @@ class TestAnOnlineLinkIsKeptOnTheBook:
     def test_the_export_writes_the_stored_link_back(self, client, admin, db):
         library_mode(db)
         upload(
-            client, admin["headers"],
+            client,
+            admin["headers"],
             collection(record(field("245", ("a", "Stoner")), link_field("https://a.example/x"))),
         )
 
@@ -1116,9 +1103,7 @@ class TestImportingTwiceDoesNotDoubleTheCatalogue:
         library_mode(db)
         make_book(admin["headers"], title="The Stoner", author="John Williams")
 
-        res = upload(
-            client, admin["headers"], collection(a_marc_book("Stoner", "John Williams"))
-        )
+        res = upload(client, admin["headers"], collection(a_marc_book("Stoner", "John Williams")))
 
         assert res.json()["matched"] == 1
         assert db.query(Book).count() == 1
@@ -1131,7 +1116,8 @@ class TestImportingTwiceDoesNotDoubleTheCatalogue:
         make_book(admin["headers"], title="Selected poems", author="Sylvia Plath")
 
         res = upload(
-            client, admin["headers"],
+            client,
+            admin["headers"],
             collection(a_marc_book("Selected poems", "Ted Hughes")),
         )
 
@@ -1145,7 +1131,8 @@ class TestImportingTwiceDoesNotDoubleTheCatalogue:
         make_book(admin["headers"], title="Stoner", author="John Williams", publisher="Vintage")
 
         upload(
-            client, admin["headers"],
+            client,
+            admin["headers"],
             collection(
                 record(
                     field("245", ("a", "Stoner")),
@@ -1166,7 +1153,9 @@ class TestThePreview:
         library_mode(db)
 
         res = upload(
-            client, admin["headers"], collection(a_marc_book("Stoner")),
+            client,
+            admin["headers"],
+            collection(a_marc_book("Stoner")),
             path="/api/imports/marc/preview",
         )
 
@@ -1180,7 +1169,8 @@ class TestThePreview:
         make_book(admin["headers"], title="Stoner", author="John Williams")
 
         res = upload(
-            client, admin["headers"],
+            client,
+            admin["headers"],
             collection(a_marc_book("Stoner", "John Williams"), a_marc_book("New Book")),
             path="/api/imports/marc/preview",
         )
@@ -1192,7 +1182,8 @@ class TestThePreview:
         library_mode(db)
 
         res = upload(
-            client, admin["headers"],
+            client,
+            admin["headers"],
             collection(record(field("245", ("a", "Stoner")), field("082", ("a", "813.54")))),
             path="/api/imports/marc/preview",
         )
@@ -1265,7 +1256,8 @@ class TestWhatAnUploadedRecordMayStore:
         library_mode(db)
 
         upload(
-            client, admin["headers"],
+            client,
+            admin["headers"],
             collection(
                 record(
                     field("245", ("a", "Stoner")),
@@ -1285,7 +1277,8 @@ class TestWhatAnUploadedRecordMayStore:
         library_mode(db)
 
         upload(
-            client, admin["headers"],
+            client,
+            admin["headers"],
             collection(record(field("245", ("a", "Stoner")), field("264", ("c", "9999")))),
         )
 
@@ -1301,7 +1294,8 @@ class TestWhatAnUploadedRecordMayStore:
         library_mode(db)
 
         upload(
-            client, admin["headers"],
+            client,
+            admin["headers"],
             collection(
                 record(
                     field("245", ("a", "Harry Potter"), ("n", "1000000000"), ("p", "The Stone")),
@@ -1321,7 +1315,8 @@ class TestWhatAnUploadedRecordMayStore:
         make_book(admin["headers"], title="Stoner", author="John Williams")
 
         upload(
-            client, admin["headers"],
+            client,
+            admin["headers"],
             collection(
                 record(
                     field("245", ("a", "Stoner")),
@@ -1363,15 +1358,11 @@ class TestTruncationDoesNotBreakMatching:
         payload = collection(a_marc_book("T" * 600, "A" * 600))
         upload(client, admin["headers"], payload)
 
-        body = upload(
-            client, admin["headers"], payload, path="/api/imports/marc/preview"
-        ).json()
+        body = upload(client, admin["headers"], payload, path="/api/imports/marc/preview").json()
 
         assert body["already_held"] == 1
 
-    def test_two_titles_agreeing_for_500_characters_merge_and_lose_an_isbn(
-        self, client, admin, db
-    ):
+    def test_two_titles_agreeing_for_500_characters_merge_and_lose_an_isbn(self, client, admin, db):
         """The cost of matching on the truncated key, named rather than glossed.
 
         Two titles agreeing for 500 characters are byte identical in the column,
@@ -1387,7 +1378,8 @@ class TestTruncationDoesNotBreakMatching:
         library_mode(db)
 
         res = upload(
-            client, admin["headers"],
+            client,
+            admin["headers"],
             collection(
                 a_marc_book("X" * 500 + "AAA", "One Author", "9780099561545"),
                 a_marc_book("X" * 500 + "BBB", "One Author", "9780345339683"),
@@ -1410,10 +1402,9 @@ class TestTruncationDoesNotBreakMatching:
         library_mode(db)
 
         upload(
-            client, admin["headers"],
-            collection(
-                record(field("245", ("a", "Stoner")), field("520", ("a", "D" * 20_000)))
-            ),
+            client,
+            admin["headers"],
+            collection(record(field("245", ("a", "Stoner")), field("520", ("a", "D" * 20_000)))),
         )
 
         assert len(db.query(Book).one().description) == 10_000
@@ -1467,7 +1458,8 @@ class TestAMatchedBookNeverGainsAnIsbn:
         make_book(member["headers"], title="Stoner", author="John Williams")
 
         res = upload(
-            client, member["headers"],
+            client,
+            member["headers"],
             collection(a_marc_book("Stoner", "John Williams", "9780099561545")),
         )
 
@@ -1486,8 +1478,7 @@ class TestTheWholeFileBeingWrong:
         answered 500 with a traceback on a 92 byte body."""
         library_mode(db)
         body = (
-            '<?xml version="1.0" encoding="EUC-JP"?>'
-            f'<collection xmlns="{MARCXML}"><record/></collection>'
+            f'<?xml version="1.0" encoding="EUC-JP"?><collection xmlns="{MARCXML}"><record/></collection>'
         ).encode("ascii")
 
         res = upload(client, admin["headers"], body)
@@ -1523,7 +1514,8 @@ class TestThePreviewCountsBothRefusals:
         make_book(admin["headers"], title="Secret", isbn="9780099561545", is_private=True)
 
         res = upload(
-            client, member["headers"],
+            client,
+            member["headers"],
             collection(a_marc_book("Something else", "An Author", "9780099561545")),
             path="/api/imports/marc/preview",
         )
@@ -1531,18 +1523,14 @@ class TestThePreviewCountsBothRefusals:
         body = res.json()
         assert (body["readable"], body["already_held"], body["blocked"]) == (1, 0, 1)
 
-    def test_the_preview_and_the_import_agree_on_that_record(
-        self, client, admin, member, db, make_book
-    ):
+    def test_the_preview_and_the_import_agree_on_that_record(self, client, admin, member, db, make_book):
         """The two numbers are computed by the same index and the same
         predicates, so this is what says they cannot drift."""
         library_mode(db)
         make_book(admin["headers"], title="Secret", isbn="9780099561545", is_private=True)
         payload = collection(a_marc_book("Something else", "An Author", "9780099561545"))
 
-        preview = upload(
-            client, member["headers"], payload, path="/api/imports/marc/preview"
-        ).json()
+        preview = upload(client, member["headers"], payload, path="/api/imports/marc/preview").json()
         result = upload(client, member["headers"], payload).json()
 
         assert preview["blocked"] == 1
@@ -1557,7 +1545,8 @@ class TestThePreviewCountsBothRefusals:
         make_book(admin["headers"], title="Secret", isbn="9780099561545", is_private=True)
 
         res = upload(
-            client, member["headers"],
+            client,
+            member["headers"],
             collection(a_marc_book("Something else", "An Author", "9780099561545")),
         )
 
@@ -1572,9 +1561,7 @@ class TestOnlyALostRaceAsksForTheFileAgain:
     itself is driven in `test_database_ceilings_on_a_real_server.py`."""
 
     @pytest.mark.answers_500(raises=(IntegrityError,))
-    def test_a_unique_violation_is_not_answered_as_a_deadlock(
-        self, client, admin, db, monkeypatch
-    ):
+    def test_a_unique_violation_is_not_answered_as_a_deadlock(self, client, admin, db, monkeypatch):
         library_mode(db)
 
         def violates(*args, **kwargs):
@@ -1625,9 +1612,7 @@ class TestAMatchedBookDeletedMidImportAsksForTheFileAgain:
         assert db.query(Book).filter(Book.title == "Mort").count() == 0
 
     @pytest.mark.answers_500(raises=(NoResultFound,))
-    def test_an_unrelated_missing_row_in_the_gap_fill_answers_500(
-        self, client, admin, db, monkeypatch
-    ):
+    def test_an_unrelated_missing_row_in_the_gap_fill_answers_500(self, client, admin, db, monkeypatch):
         """The matched Book is still present, so the missing row is not a race
         a second send would win."""
         library_mode(db)
@@ -1639,9 +1624,7 @@ class TestAMatchedBookDeletedMidImportAsksForTheFileAgain:
 
         monkeypatch.setattr(importing, "_fill_marc_gaps", missing)
 
-        res = upload(
-            client, admin["headers"], collection(a_marc_book("Small Gods", isbn="9780552152976"))
-        )
+        res = upload(client, admin["headers"], collection(a_marc_book("Small Gods", isbn="9780552152976")))
 
         assert res.status_code == 500
 
@@ -1653,9 +1636,7 @@ class TestAFailureAfterARecordMatchedABookThisImportCreatedAnswers500:
     way: a 409 would ask for the file again on every send."""
 
     @pytest.mark.answers_500(raises=(IntegrityError,))
-    def test_an_unrelated_failure_on_the_matching_record_answers_500(
-        self, client, admin, db, monkeypatch
-    ):
+    def test_an_unrelated_failure_on_the_matching_record_answers_500(self, client, admin, db, monkeypatch):
         library_mode(db)
 
         def unrelated(*args):

@@ -154,40 +154,32 @@ _CEILINGS: tuple[SwappedRule, ...] = (
         "ck_author_identifiers_bounds",
         "length(identifier) > 0 AND length(identifier) <= 60",
         "length(identifier) > 0 AND length(identifier) <= 60",
-        "length(identifier) > 0 AND length(identifier) <= 60"
-        " AND length(CAST(identifier AS BLOB)) <= 240",
-        "length(identifier) > 0 AND length(identifier) <= 60"
-        " AND octet_length(identifier) <= 240",
+        "length(identifier) > 0 AND length(identifier) <= 60 AND length(CAST(identifier AS BLOB)) <= 240",
+        "length(identifier) > 0 AND length(identifier) <= 60 AND octet_length(identifier) <= 240",
     ),
     SwappedRule(
         "custom_fields",
         "ck_custom_fields_name_bounds",
         "length(name) > 0 AND length(name) <= 60",
         "length(name) > 0 AND length(name) <= 60",
-        "length(name) > 0 AND length(name) <= 60"
-        " AND length(CAST(name AS BLOB)) <= 240",
-        "length(name) > 0 AND length(name) <= 60"
-        " AND octet_length(name) <= 240",
+        "length(name) > 0 AND length(name) <= 60 AND length(CAST(name AS BLOB)) <= 240",
+        "length(name) > 0 AND length(name) <= 60 AND octet_length(name) <= 240",
     ),
     SwappedRule(
         "custom_field_values",
         "ck_custom_field_values_bounds",
         "length(value) > 0 AND length(value) <= 500",
         "length(value) > 0 AND length(value) <= 500",
-        "length(value) > 0 AND length(value) <= 500"
-        " AND length(CAST(value AS BLOB)) <= 2000",
-        "length(value) > 0 AND length(value) <= 500"
-        " AND octet_length(value) <= 2000",
+        "length(value) > 0 AND length(value) <= 500 AND length(CAST(value AS BLOB)) <= 2000",
+        "length(value) > 0 AND length(value) <= 500 AND octet_length(value) <= 2000",
     ),
     SwappedRule(
         "opds_servers",
         "ck_opds_servers_name",
         "length(name) BETWEEN 1 AND 100",
         "length(name) BETWEEN 1 AND 100",
-        "length(name) BETWEEN 1 AND 100 "
-        "AND length(CAST(name AS BLOB)) <= 400",
-        "length(name) BETWEEN 1 AND 100 "
-        "AND octet_length(name) <= 400",
+        "length(name) BETWEEN 1 AND 100 AND length(CAST(name AS BLOB)) <= 400",
+        "length(name) BETWEEN 1 AND 100 AND octet_length(name) <= 400",
     ),
 )
 
@@ -203,9 +195,7 @@ def _swap(table: str, constraint: str, sqlite: str, postgresql: str) -> None:
     """
     with op.batch_alter_table(table) as batch:
         batch.drop_constraint(constraint, type_="check")
-        batch.create_check_constraint(
-            constraint, DialectSQL(sqlite=sqlite, postgresql=postgresql)
-        )
+        batch.create_check_constraint(constraint, DialectSQL(sqlite=sqlite, postgresql=postgresql))
 
 
 def upgrade() -> None:

@@ -366,7 +366,7 @@ def _text_codecs() -> list[str]:
         try:
             "".encode(name)
             b"".decode(name)
-        except (LookupError, UnicodeError):
+        except LookupError, UnicodeError:
             # `LookupError` is a bytes to bytes codec; `UnicodeError` is
             # `undefined`, the codec that refuses everything by design.
             continue
@@ -449,9 +449,7 @@ def patched(data: bytes, patches: tuple[tuple[int, int], ...]) -> bytes:
     return bytes(out)
 
 
-PATCHES: Final = st.lists(
-    st.tuples(st.integers(0, 1 << 20), st.integers(0, 255)), max_size=2
-).map(tuple)
+PATCHES: Final = st.lists(st.tuples(st.integers(0, 1 << 20), st.integers(0, 255)), max_size=2).map(tuple)
 
 
 # ── The two instruments a property at a byte door reads ───────────────────────

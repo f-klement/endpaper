@@ -17,7 +17,8 @@ interface ErrorStateProps {
  * `ApiError` or a string that was thrown, which nothing here can translate.
  */
 export type RequestFailure =
-  { kind: "unreachable" } | { kind: "said"; message: string };
+  | { kind: "unreachable" }
+  | { kind: "said"; message: string };
 
 /**
  * Which of those a thrown value is.

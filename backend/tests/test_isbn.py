@@ -41,9 +41,7 @@ X_CHECK_10 = "043942089X"
 
 
 class TestNormalise:
-    @pytest.mark.parametrize(
-        "raw", ["978-0-441-01359-3", "978 0 441 01359 3", "  9780441013593  "]
-    )
+    @pytest.mark.parametrize("raw", ["978-0-441-01359-3", "978 0 441 01359 3", "  9780441013593  "])
     def test_strips_the_grouping_publishers_use(self, raw):
         assert normalise(raw) == DUNE_13
 
@@ -268,8 +266,7 @@ class TestRegistrationGroup:
                     for value in range(int(long_low), int(long_high) + 1):
                         head = str(value).zfill(long_len)[:short_len]
                         assert not short_low <= head <= short_high, (
-                            f"{head} is both a {short_len} digit group "
-                            f"and the start of {value}"
+                            f"{head} is both a {short_len} digit group and the start of {value}"
                         )
 
 
@@ -449,9 +446,7 @@ def isbn10s(draw) -> str:
     over it would pass by construction.
     """
     body = draw(st.text(alphabet=_DIGITS, min_size=9, max_size=9))
-    remainder = (
-        11 - sum(int(digit) * (10 - at) for at, digit in enumerate(body)) % 11
-    ) % 11
+    remainder = (11 - sum(int(digit) * (10 - at) for at, digit in enumerate(body)) % 11) % 11
     return body + ("X" if remainder == 10 else str(remainder))
 
 
@@ -466,9 +461,7 @@ def ean13s(draw) -> str:
 @st.composite
 def isbn13s(draw) -> str:
     """A valid EAN-13 that is also a book, which is the Bookland half of them."""
-    body = draw(st.sampled_from(BOOKLAND_PREFIXES)) + draw(
-        st.text(alphabet=_DIGITS, min_size=9, max_size=9)
-    )
+    body = draw(st.sampled_from(BOOKLAND_PREFIXES)) + draw(st.text(alphabet=_DIGITS, min_size=9, max_size=9))
     total = sum(int(digit) * (1 if at % 2 == 0 else 3) for at, digit in enumerate(body))
     return body + str((10 - total % 10) % 10)
 
@@ -483,9 +476,7 @@ def discarded_characters() -> st.SearchStrategy[str]:
     Arabic-Indic digit and a superscript two, each of which reached storage or a
     500 through this exact door.
     """
-    return st.characters().filter(
-        lambda character: not (character.isascii() and character.isalnum())
-    )
+    return st.characters().filter(lambda character: not (character.isascii() and character.isalnum()))
 
 
 @st.composite
@@ -552,8 +543,7 @@ class TestTheGeneratorsReachBothBranches:
     def test_a_scanned_value_reaches_a_barcode_that_is_not_a_book(self):
         witness(
             ANYTHING_SCANNED,
-            lambda raw: is_valid_isbn13(normalise(raw))
-            and not normalise(raw).startswith(BOOKLAND_PREFIXES),
+            lambda raw: is_valid_isbn13(normalise(raw)) and not normalise(raw).startswith(BOOKLAND_PREFIXES),
             reaches="a valid EAN-13 that is not Bookland",
         )
 
@@ -588,9 +578,7 @@ class TestParseAnswersForAnything:
 class TestNormaliseKeepsOnlyWhatItSaysItKeeps:
     @given(raw=st.text(max_size=60))
     def test_every_character_kept_is_ascii_alphanumeric(self, raw):
-        assert all(
-            character.isascii() and character.isalnum() for character in normalise(raw)
-        )
+        assert all(character.isascii() and character.isalnum() for character in normalise(raw))
 
     @given(raw=st.text(max_size=60))
     def test_normalising_a_normalised_value_changes_nothing(self, raw):
@@ -601,9 +589,7 @@ class TestNormaliseKeepsOnlyWhatItSaysItKeeps:
         noise=discarded_characters(),
         at=st.integers(min_value=0, max_value=60),
     )
-    def test_inserting_a_discarded_character_anywhere_changes_nothing(
-        self, raw, noise, at
-    ):
+    def test_inserting_a_discarded_character_anywhere_changes_nothing(self, raw, noise, at):
         """**The property the browser has to agree with**, and the one the
         `isascii()` guard exists for. `conformance/cases/isbn.json` pins three
         instances of it in both languages; this is the rule they are instances
@@ -624,11 +610,7 @@ class TestACheckDigitIsUniqueWhichIsWhatMakesItOne:
 
     @given(body=st.text(alphabet=_DIGITS, min_size=9, max_size=9))
     def test_one_character_completes_an_isbn10(self, body):
-        accepted = [
-            character
-            for character in _CHECK_CHARACTERS
-            if is_valid_isbn10(body + character)
-        ]
+        accepted = [character for character in _CHECK_CHARACTERS if is_valid_isbn10(body + character)]
         assert len(accepted) == 1
 
     @given(body=st.text(alphabet=_DIGITS, min_size=12, max_size=12))

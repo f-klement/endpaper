@@ -59,9 +59,7 @@ def lend_between_strangers(client, make_book, password_hash: str, index: int) ->
         json={
             "book_id": book["id"],
             "loaned_to_user_id": borrower["user"]["id"],
-            "due_at": (datetime.now(UTC) - timedelta(days=3))
-            .replace(tzinfo=None)
-            .isoformat(),
+            "due_at": (datetime.now(UTC) - timedelta(days=3)).replace(tzinfo=None).isoformat(),
         },
         headers=lender["headers"],
     )
@@ -161,9 +159,7 @@ class TestLendingABookMarkedNeverLent:
     def test_the_first_attempt_is_refused(self, client, admin, member, never_lent):
         assert self.lend(client, admin, member, never_lent).status_code == 409
 
-    def test_the_refusal_says_why_in_a_form_the_client_can_branch_on(
-        self, client, admin, member, never_lent
-    ):
+    def test_the_refusal_says_why_in_a_form_the_client_can_branch_on(self, client, admin, member, never_lent):
         """A code beside the sentence, because this 409 and the already-lent
         one mean different things and only one of them can be acknowledged."""
         detail = self.lend(client, admin, member, never_lent).json()["detail"]
@@ -171,42 +167,28 @@ class TestLendingABookMarkedNeverLent:
 
     def test_nothing_was_recorded_by_the_refusal(self, client, admin, member, never_lent):
         self.lend(client, admin, member, never_lent)
-        fetched = client.get(
-            f"/api/books/{never_lent['id']}", headers=admin["headers"]
-        ).json()
+        fetched = client.get(f"/api/books/{never_lent['id']}", headers=admin["headers"]).json()
         assert fetched["active_loan"] is None
 
     def test_acknowledging_it_lends_the_book(self, client, admin, member, never_lent):
-        res = self.lend(
-            client, admin, member, never_lent, acknowledge_not_lendable=True
-        )
+        res = self.lend(client, admin, member, never_lent, acknowledge_not_lendable=True)
         assert res.status_code == 201
         assert res.json()["loaned_to"]["username"] == "member"
 
-    def test_the_acknowledgement_is_not_remembered(
-        self, client, admin, member, never_lent
-    ):
+    def test_the_acknowledgement_is_not_remembered(self, client, admin, member, never_lent):
         """It is about one request, not about the book. A library that lent
         this once has not changed its mind about lending it in general."""
-        loan = self.lend(
-            client, admin, member, never_lent, acknowledge_not_lendable=True
-        ).json()
+        loan = self.lend(client, admin, member, never_lent, acknowledge_not_lendable=True).json()
         client.put(f"/api/loans/{loan['id']}/return", headers=admin["headers"])
 
         assert self.lend(client, admin, member, never_lent).status_code == 409
 
-    def test_the_book_still_says_it_is_never_lent(
-        self, client, admin, member, never_lent
-    ):
+    def test_the_book_still_says_it_is_never_lent(self, client, admin, member, never_lent):
         self.lend(client, admin, member, never_lent, acknowledge_not_lendable=True)
-        fetched = client.get(
-            f"/api/books/{never_lent['id']}", headers=admin["headers"]
-        ).json()
+        fetched = client.get(f"/api/books/{never_lent['id']}", headers=admin["headers"]).json()
         assert fetched["lending"] == "never"
 
-    def test_the_other_two_values_are_not_checked_at_all(
-        self, client, admin, member, make_book
-    ):
+    def test_the_other_two_values_are_not_checked_at_all(self, client, admin, member, make_book):
         """`in_use` is "come back later", which is a conversation rather than a
         rule, and `happy` is a yes."""
         for value in ("in_use", "happy"):
@@ -218,9 +200,7 @@ class TestLendingABookMarkedNeverLent:
             )
             assert self.lend(client, admin, member, book).status_code == 201
 
-    def test_an_unanswered_book_lends_without_a_prompt(
-        self, client, admin, member, book
-    ):
+    def test_an_unanswered_book_lends_without_a_prompt(self, client, admin, member, book):
         assert self.lend(client, admin, member, book).status_code == 201
 
     def test_an_acknowledgement_does_not_override_the_already_lent_409(
@@ -230,9 +210,7 @@ class TestLendingABookMarkedNeverLent:
         it. A book that is out is out."""
         self.lend(client, admin, member, never_lent, acknowledge_not_lendable=True)
 
-        res = self.lend(
-            client, admin, member, never_lent, acknowledge_not_lendable=True
-        )
+        res = self.lend(client, admin, member, never_lent, acknowledge_not_lendable=True)
 
         assert res.status_code == 409
         assert res.json()["detail"] == "Book is already loaned out"
@@ -279,9 +257,7 @@ class TestListLoans:
 
     def test_active_only_false_includes_returned_loans(self, client, admin, loan):
         client.put(f"/api/loans/{loan['id']}/return", headers=admin["headers"])
-        listed = items(
-            client.get("/api/loans", params={"active_only": "false"}, headers=admin["headers"])
-        )
+        listed = items(client.get("/api/loans", params={"active_only": "false"}, headers=admin["headers"]))
         assert len(listed) == 1
 
     def test_lists_an_active_loan(self, client, admin, loan):
@@ -368,9 +344,7 @@ class TestDueDates:
         self.lend(client, admin, member, late, self.past())
         self.lend(client, admin, member, fine, self.future())
 
-        res = client.get(
-            "/api/loans", params={"overdue_only": True}, headers=admin["headers"]
-        )
+        res = client.get("/api/loans", params={"overdue_only": True}, headers=admin["headers"])
 
         assert [item["book"]["title"] for item in res.json()["items"]] == ["Late"]
 
@@ -382,21 +356,15 @@ class TestDueDates:
         self.lend(client, admin, member, late, self.past())
         self.lend(client, admin, member, fine, self.future())
 
-        res = client.get(
-            "/api/loans", params={"overdue_only": True}, headers=admin["headers"]
-        )
+        res = client.get("/api/loans", params={"overdue_only": True}, headers=admin["headers"])
 
         assert res.json()["total"] == 1
 
-    def test_overdue_only_excludes_a_loan_with_no_deadline(
-        self, client, admin, member, make_book
-    ):
+    def test_overdue_only_excludes_a_loan_with_no_deadline(self, client, admin, member, make_book):
         book = make_book(admin["headers"])
         self.lend(client, admin, member, book)
 
-        res = client.get(
-            "/api/loans", params={"overdue_only": True}, headers=admin["headers"]
-        )
+        res = client.get("/api/loans", params={"overdue_only": True}, headers=admin["headers"])
 
         assert res.json()["total"] == 0
 
@@ -437,9 +405,7 @@ class TestTheNestedBook:
 
         return set(ViewerFields.model_fields)
 
-    def test_the_nested_book_carries_none_of_them(
-        self, client, admin, member, make_book
-    ):
+    def test_the_nested_book_carries_none_of_them(self, client, admin, member, make_book):
         book = make_book(admin["headers"], title="Dune")
         client.put(
             f"/api/books/{book['id']}/status",
@@ -456,9 +422,7 @@ class TestTheNestedBook:
 
         assert set(loan["book"]) & self._viewer_fields() == set()
 
-    def test_the_single_loan_routes_agree_with_the_listing(
-        self, client, admin, member, make_book
-    ):
+    def test_the_single_loan_routes_agree_with_the_listing(self, client, admin, member, make_book):
         """The two that carried the defect, and the reason this asserts they
         match rather than asserting a value on each: one type serves all three,
         so the shapes agreeing is the whole claim."""
@@ -474,9 +438,7 @@ class TestTheNestedBook:
         assert set(created["book"]) == set(listed["book"])
         assert created["book"]["title"] == "Dune"
 
-    def test_it_still_carries_what_the_row_reading_it_needs(
-        self, client, admin, member, make_book
-    ):
+    def test_it_still_carries_what_the_row_reading_it_needs(self, client, admin, member, make_book):
         """`LoanRow` renders the title, the author and the cover. Pinned so the
         narrowing above cannot quietly take one of them."""
         book = make_book(admin["headers"], title="Dune", author="Frank Herbert")
@@ -584,9 +546,7 @@ class TestTheNestedBook:
                 short_cost, short_total = selects_for(
                     client, admin["headers"], "/api/loans?active_only=false"
                 )
-        long_cost, long_total = selects_for(
-            client, admin["headers"], "/api/loans?active_only=false"
-        )
+        long_cost, long_total = selects_for(client, admin["headers"], "/api/loans?active_only=false")
 
         assert (short_total, long_total) == (3, 10)
 
@@ -621,9 +581,7 @@ class TestOneOpenLoanPerBook:
         with pytest.raises(IntegrityError):
             db.commit()
 
-    def test_a_returned_loan_does_not_block_the_next_one(
-        self, client, admin, member, make_book
-    ):
+    def test_a_returned_loan_does_not_block_the_next_one(self, client, admin, member, make_book):
         """Partial, not plain: a book lent, returned and lent again is two rows
         with the same book_id, and that is the normal case."""
         book = make_book(admin["headers"])
@@ -673,9 +631,7 @@ class TestLendingToSomeoneWithoutAnAccount:
         assert res.status_code == 422
 
     def test_naming_neither_is_422(self, client, admin, book):
-        res = client.post(
-            "/api/loans", json={"book_id": book["id"]}, headers=admin["headers"]
-        )
+        res = client.post("/api/loans", json={"book_id": book["id"]}, headers=admin["headers"])
         assert res.status_code == 422
 
     def test_a_whitespace_name_is_422(self, client, admin, book):
@@ -745,9 +701,7 @@ class TestLendingToSomeoneWithoutAnAccount:
         rows = items(client.get("/api/loans", headers=admin["headers"]))
         assert [row["loaned_to_name"] for row in rows] == ["the neighbour"]
 
-    def test_an_external_loan_of_an_invisible_book_stays_hidden(
-        self, client, admin, member, make_book
-    ):
+    def test_an_external_loan_of_an_invisible_book_stays_hidden(self, client, admin, member, make_book):
         """The borrower being external changes nothing about the privacy rule."""
         private = make_book(admin["headers"], title="A diary", is_private=True)
         client.post(
@@ -783,16 +737,13 @@ class TestOverdueNotify:
         res = client.post("/api/loans/overdue/notify", headers=admin["headers"])
         assert res.status_code == 200
 
-
     def test_a_webhook_port_out_of_range_is_refused_at_the_endpoint(self, client, admin, db):
         """Written by a restore, past the settings check: the send refuses it
         rather than failing inside the connect. The host is passed through so
         the suite's own router cannot answer for the connect. The reason is
         what pins the refusal: any failure inside a sender answers 200 now."""
         settings_store.set_value(db, SettingKey.OVERDUE_WEBHOOK_ENABLED, "true")
-        settings_store.set_value(
-            db, SettingKey.OVERDUE_WEBHOOK_URL, "https://127.0.0.1:99999/hooks/t/abcdef"
-        )
+        settings_store.set_value(db, SettingKey.OVERDUE_WEBHOOK_URL, "https://127.0.0.1:99999/hooks/t/abcdef")
         book = Book(title="Dune", is_private=False, added_by_user_id=admin["user"]["id"])
         db.add(book)
         db.flush()
@@ -857,9 +808,7 @@ class TestMyOverdue:
         body = client.get("/api/loans/overdue/mine", headers=member["headers"]).json()
         assert body["enabled"] is True
 
-    def test_switching_it_off_reports_nothing_rather_than_a_count(
-        self, client, admin, member, make_book
-    ):
+    def test_switching_it_off_reports_nothing_rather_than_a_count(self, client, admin, member, make_book):
         """A household that turned the banner off should see no banner, and the
         page should not have to read the admin-only settings record to find
         that out."""
@@ -952,9 +901,7 @@ class TestListOverdue:
         self.lend(client, admin["headers"], book, other_user["user"]["id"])
 
         overdue = client.get("/api/loans/overdue", headers=member["headers"]).json()
-        wider = client.get(
-            "/api/loans", params={"overdue_only": True}, headers=member["headers"]
-        ).json()
+        wider = client.get("/api/loans", params={"overdue_only": True}, headers=member["headers"]).json()
 
         assert overdue["total"] == 0
         assert wider["total"] == 1
@@ -989,9 +936,7 @@ class TestListOverdue:
 
         assert body["total"] == 0
 
-    def test_switching_the_in_app_channel_off_empties_it(
-        self, client, admin, member, make_book
-    ):
+    def test_switching_the_in_app_channel_off_empties_it(self, client, admin, member, make_book):
         """The setting is spelled "show overdue loans in the app", and this page
         is what it shows."""
         book = make_book(admin["headers"], title="Hidden by the switch")
@@ -1006,9 +951,7 @@ class TestListOverdue:
 
         assert body == {"items": [], "total": 0, "page": 1, "page_size": 50}
 
-    def test_the_loans_list_is_not_affected_by_that_switch(
-        self, client, admin, member, make_book
-    ):
+    def test_the_loans_list_is_not_affected_by_that_switch(self, client, admin, member, make_book):
         """A loan list is not the reminder channel. Switching the channel off
         must not hide a household's loans from the loans page."""
         book = make_book(admin["headers"], title="Still on the loans page")
@@ -1019,9 +962,7 @@ class TestListOverdue:
             headers=admin["headers"],
         )
 
-        body = client.get(
-            "/api/loans", params={"overdue_only": True}, headers=member["headers"]
-        ).json()
+        body = client.get("/api/loans", params={"overdue_only": True}, headers=member["headers"]).json()
 
         assert body["total"] == 1
 
@@ -1036,9 +977,7 @@ class TestListOverdue:
                 json={
                     "book_id": book["id"],
                     "loaned_to_user_id": member["user"]["id"],
-                    "due_at": (datetime.now(UTC) - timedelta(days=days))
-                    .replace(tzinfo=None)
-                    .isoformat(),
+                    "due_at": (datetime.now(UTC) - timedelta(days=days)).replace(tzinfo=None).isoformat(),
                 },
                 headers=admin["headers"],
             )
@@ -1047,9 +986,7 @@ class TestListOverdue:
 
         assert [row["book"]["title"] for row in body["items"]] == ["Older", "Newer"]
 
-    def test_a_returned_loan_is_gone_however_late_it_was(
-        self, client, admin, member, make_book
-    ):
+    def test_a_returned_loan_is_gone_however_late_it_was(self, client, admin, member, make_book):
         book = make_book(admin["headers"], title="Came back")
         loan = self.lend(client, admin["headers"], book, member["user"]["id"])
         client.put(f"/api/loans/{loan['id']}/return", headers=member["headers"])
@@ -1101,15 +1038,11 @@ class TestListOverdue:
         """
         for index in range(3):
             lend_between_strangers(client, make_book, password_hash, index)
-        short_cost, short_total = selects_for(
-            client, admin["headers"], "/api/loans/overdue"
-        )
+        short_cost, short_total = selects_for(client, admin["headers"], "/api/loans/overdue")
 
         for index in range(3, 10):
             lend_between_strangers(client, make_book, password_hash, index)
-        long_cost, long_total = selects_for(
-            client, admin["headers"], "/api/loans/overdue"
-        )
+        long_cost, long_total = selects_for(client, admin["headers"], "/api/loans/overdue")
 
         # The rows really were built, so a cost met by returning nothing cannot
         # pass, and the two runs really do differ in length.
@@ -1168,9 +1101,7 @@ class TestLibraryModeAndWhoReadsWhichLoan:
 
         body = client.get("/api/loans/overdue", headers=member["headers"]).json()
 
-        assert [row["book"]["title"] for row in body["items"]] == [
-            "Somebody else's business"
-        ]
+        assert [row["book"]["title"] for row in body["items"]] == ["Somebody else's business"]
 
     def test_with_the_mode_off_that_loan_is_still_refused(
         self, client, db, admin, member, other_user, make_book
@@ -1202,9 +1133,7 @@ class TestLibraryModeAndWhoReadsWhichLoan:
 
         assert (overdue["total"], listed["total"]) == (0, 0)
 
-    def test_a_member_still_reads_their_own_private_book(
-        self, client, db, member, other_user, make_book
-    ):
+    def test_a_member_still_reads_their_own_private_book(self, client, db, member, other_user, make_book):
         """The other direction, and the reason the ticket's literal wording was
         not implemented. "Every Book that is not private" is a **subset** of
         what `visible_to` admits, so narrowing to it would have taken a
@@ -1293,16 +1222,12 @@ class TestHowLongItHasBeenOut:
         row = self.only(client, admin["headers"], active_only="false")
         assert (row["days_out"], row["is_overdue"]) == (3, False)
 
-    def test_an_overdue_loan_reports_how_far_past_its_date_it_is(
-        self, client, db, admin
-    ):
+    def test_an_overdue_loan_reports_how_far_past_its_date_it_is(self, client, db, admin):
         self.lend_days_ago(db, admin, out=40, due=13)
         row = self.only(client, admin["headers"])
         assert (row["is_overdue"], row["days_overdue"], row["days_out"]) == (True, 13, 40)
 
-    def test_it_is_the_number_the_digest_reports_for_the_same_loan(
-        self, client, db, admin
-    ):
+    def test_it_is_the_number_the_digest_reports_for_the_same_loan(self, client, db, admin):
         """The ticket's rule: one place, not two.
 
         Asserted against `notifications.build_digest`, which is the existing
@@ -1317,9 +1242,7 @@ class TestHowLongItHasBeenOut:
 
         assert served == digested == lending.days_overdue(loan, moment)
 
-    def test_a_book_payload_carries_a_loan_summary_with_no_clock_facts(
-        self, client, admin, book, member
-    ):
+    def test_a_book_payload_carries_a_loan_summary_with_no_clock_facts(self, client, admin, book, member):
         """`serialisation.loan_summary` fills the borrower and nothing dated,
         and it did so before this change: `due_at` and `is_overdue` were
         already absent there. So the two new fields read 0 on a book payload
@@ -1336,9 +1259,7 @@ class TestHowLongItHasBeenOut:
             headers=admin["headers"],
         )
 
-        active = client.get(f"/api/books/{book['id']}", headers=admin["headers"]).json()[
-            "active_loan"
-        ]
+        active = client.get(f"/api/books/{book['id']}", headers=admin["headers"]).json()["active_loan"]
 
         assert (
             active["due_at"],
@@ -1395,9 +1316,7 @@ class TestOneClockPerRequest:
     REQUESTS = {
         "list_loans": [
             lambda ctx: ctx.client.get("/api/loans", headers=ctx.headers),
-            lambda ctx: ctx.client.get(
-                "/api/loans", params={"overdue_only": True}, headers=ctx.headers
-            ),
+            lambda ctx: ctx.client.get("/api/loans", params={"overdue_only": True}, headers=ctx.headers),
         ],
         "create_loan": [
             lambda ctx: ctx.client.post(
@@ -1406,20 +1325,10 @@ class TestOneClockPerRequest:
                 headers=ctx.headers,
             )
         ],
-        "list_overdue": [
-            lambda ctx: ctx.client.get("/api/loans/overdue", headers=ctx.headers)
-        ],
-        "my_overdue": [
-            lambda ctx: ctx.client.get("/api/loans/overdue/mine", headers=ctx.headers)
-        ],
-        "notify_overdue": [
-            lambda ctx: ctx.client.post("/api/loans/overdue/notify", headers=ctx.headers)
-        ],
-        "return_loan": [
-            lambda ctx: ctx.client.put(
-                f"/api/loans/{ctx.loan_id}/return", headers=ctx.headers
-            )
-        ],
+        "list_overdue": [lambda ctx: ctx.client.get("/api/loans/overdue", headers=ctx.headers)],
+        "my_overdue": [lambda ctx: ctx.client.get("/api/loans/overdue/mine", headers=ctx.headers)],
+        "notify_overdue": [lambda ctx: ctx.client.post("/api/loans/overdue/notify", headers=ctx.headers)],
+        "return_loan": [lambda ctx: ctx.client.put(f"/api/loans/{ctx.loan_id}/return", headers=ctx.headers)],
     }
 
     @pytest.fixture
@@ -1457,9 +1366,7 @@ class TestOneClockPerRequest:
         without a figure fails, and a figure with nothing issuing a request for
         it fails too. The second half is the one the first version lacked."""
         declared = {
-            route.endpoint.__name__
-            for route in loans_module.router.routes
-            if hasattr(route, "endpoint")
+            route.endpoint.__name__ for route in loans_module.router.routes if hasattr(route, "endpoint")
         }
         assert declared == set(self.CLOCK_READS), (
             "every route in routers/loans.py needs a clock figure: "
@@ -1474,11 +1381,7 @@ class TestOneClockPerRequest:
 
     @pytest.mark.parametrize(
         ("route", "shape"),
-        [
-            (route, shape)
-            for route, calls in REQUESTS.items()
-            for shape in range(len(calls))
-        ],
+        [(route, shape) for route, calls in REQUESTS.items() for shape in range(len(calls))],
     )
     def test_a_request_reads_the_clock_its_figure_says(self, ctx, clock, route, shape):
         """One case per request shape, generated from the map rather than
@@ -1551,11 +1454,7 @@ class TestEveryClockInThisFileGoesThroughNow:
                     and child.func.attr in self.CLOCK_CALLS
                 ):
                     found.add(owner)
-                inner = (
-                    child.name
-                    if isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef)
-                    else owner
-                )
+                inner = child.name if isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef) else owner
                 visit(child, inner)
 
         visit(tree, self.MODULE_LEVEL)
@@ -1623,9 +1522,7 @@ class TestTheSingleLoanHelperIsScoped:
 
         assert refusal.value.status_code == 404
 
-    def test_it_answers_for_a_viewer_who_can_see_the_book(
-        self, client, db, member, other_user, make_book
-    ):
+    def test_it_answers_for_a_viewer_who_can_see_the_book(self, client, db, member, other_user, make_book):
         """The other direction, so the arm above cannot be met by refusing
         everybody."""
         loan = self._private_loan(client, make_book, member, other_user)
@@ -1697,9 +1594,7 @@ class TestADigitalCopyIsNotLent:
             headers=admin["headers"],
         )
 
-    def test_a_new_loan_on_an_ebook_is_refused_with_a_code(
-        self, client, admin, member, make_book
-    ):
+    def test_a_new_loan_on_an_ebook_is_refused_with_a_code(self, client, admin, member, make_book):
         res = self.lend(client, admin, member, make_book(admin["headers"], format="ebook"))
         assert res.status_code == 409
         assert res.json()["detail"]["code"] == "digital_copy"
@@ -1713,24 +1608,18 @@ class TestADigitalCopyIsNotLent:
         )
         assert self.lend(client, admin, member, book).status_code == 409
 
-    def test_an_audiobook_with_no_file_is_a_disc_and_lends(
-        self, client, admin, member, make_book
-    ):
+    def test_an_audiobook_with_no_file_is_a_disc_and_lends(self, client, admin, member, make_book):
         """The CSV import folds "audio cd" onto audiobook."""
         book = make_book(admin["headers"], format="audiobook")
         assert self.lend(client, admin, member, book).status_code == 201
 
-    def test_an_open_loan_from_before_the_rule_still_closes(
-        self, client, admin, member, make_book
-    ):
+    def test_an_open_loan_from_before_the_rule_still_closes(self, client, admin, member, make_book):
         book = make_book(admin["headers"], format="paperback")
         loan = client.post(
             "/api/loans",
             json={"book_id": book["id"], "loaned_to_user_id": member["user"]["id"]},
             headers=admin["headers"],
         ).json()
-        client.patch(
-            f"/api/books/{book['id']}", json={"format": "ebook"}, headers=admin["headers"]
-        )
+        client.patch(f"/api/books/{book['id']}", json={"format": "ebook"}, headers=admin["headers"])
         res = client.put(f"/api/loans/{loan['id']}/return", headers=admin["headers"])
         assert res.status_code == 200

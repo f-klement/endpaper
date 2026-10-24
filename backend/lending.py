@@ -208,9 +208,7 @@ class Loans:
         narrowing is `sees_every_loan`'s decision and not a property of the
         Loan.
         """
-        return cls(
-            Shelf.seen_by(db, viewer_id).select(Loan).join(Loan, Loan.book_id == Book.id)
-        )
+        return cls(Shelf.seen_by(db, viewer_id).select(Loan).join(Loan, Loan.book_id == Book.id))
 
     @classmethod
     def for_a_channel(cls, db: Session) -> Loans:
@@ -245,9 +243,7 @@ class Loans:
         a private title in a payload. What the channel is not being told is
         `notifications.count_private_overdue`, which counts without naming.
         """
-        return cls(
-            Shelf.seen_by_the_public(db).select(Loan).join(Loan, Loan.book_id == Book.id)
-        )
+        return cls(Shelf.seen_by_the_public(db).select(Loan).join(Loan, Loan.book_id == Book.id))
 
     @classmethod
     def open_on(cls, db: Session, book_ids: Collection[int]) -> dict[int, Loan]:
@@ -279,10 +275,7 @@ class Loans:
         if not ids:
             return {}
         rows = (
-            db.query(Loan)
-            .options(*_PARTIES)
-            .filter(Loan.book_id.in_(ids), Loan.returned_at.is_(None))
-            .all()
+            db.query(Loan).options(*_PARTIES).filter(Loan.book_id.in_(ids), Loan.returned_at.is_(None)).all()
         )
         return {row.book_id: row for row in rows}
 
@@ -343,9 +336,7 @@ class Loans:
         """
         return self._query.filter(Loan.id == loan_id).first()
 
-    def page(
-        self, offset: int, limit: int, *order: UnaryExpression[Any]
-    ) -> tuple[list[Loan], int]:
+    def page(self, offset: int, limit: int, *order: UnaryExpression[Any]) -> tuple[list[Loan], int]:
         """One page of this scope, and how many loans it was cut from.
 
         `offset` and `limit` rather than the `Paging` dependency, exactly as
@@ -360,13 +351,7 @@ class Loans:
         will not accept an ORDER BY over a bare COUNT.
         """
         total = self._query.with_entities(func.count(Loan.id)).order_by(None).scalar() or 0
-        rows = (
-            self._query.options(*RENDERED)
-            .order_by(*order)
-            .offset(offset)
-            .limit(limit)
-            .all()
-        )
+        rows = self._query.options(*RENDERED).order_by(*order).offset(offset).limit(limit).all()
         return rows, total
 
     def as_query(self) -> Query[Loan]:

@@ -348,7 +348,7 @@ describe("the vocabulary the readers share", () => {
       // **The one direction it is wrong in, stated so nobody loosens it away.**
       // The specifier is matched in double quotes only, so a re-export written
       // with single quotes carries no captured `from` and reads here as an
-      // alias. That fires rather than passing, prettier settles the quoting, and
+      // alias. That fires rather than passing, oxfmt settles the quoting, and
       // the fix if somebody ever meets it is the quote and not this pattern. The
       // same looseness costs one thing worth knowing, and it is two cases rather
       // than the one it is tempting to write down. This half reads the seam's
@@ -370,7 +370,7 @@ describe("the vocabulary the readers share", () => {
       // lexically, which is why every pattern in this file spells it
       // `\bexport\b\s*` rather than `export\s+`. `export{a}` is valid
       // ECMAScript, and the `\s+` spelling let the alias below back in with the
-      // space removed, measured green on all 11. Prettier would rewrite it and
+      // space removed, measured green on all 11. oxfmt would rewrite it and
       // `format:check` runs in CI, so it could not reach main by the ordinary
       // route, which is a different tool holding a rule this arm claims to hold.
       // The leading `\b` is the other half: without it `myexport {}` matched.
@@ -662,13 +662,13 @@ describe("the vocabulary the readers share", () => {
     expect([...guard.matchAll(/^\s*import\s*"[^"]+"/gm)]).toEqual([]);
     // **And a top level `await import`, which is an eager edge with a call in
     // it**: measured green by the design seat against the two matchers above,
-    // and prettier leaves it alone, so nothing else in this tree would have
+    // and oxfmt leaves it alone, so nothing else in this tree would have
     // caught it.
     expect([...guard.matchAll(/\bawait\s+import\s*\(/g)]).toEqual([]);
     // **The one spelling all three still miss, stated rather than chased.** A
     // side effect import sharing a line with another statement,
     // `const x = 0;import "./fileReaders";`, defeats the `^\s*` anchor.
-    // Prettier splits that line and `format:check` runs in CI, so what closes
+    // oxfmt splits that line and `format:check` runs in CI, so what closes
     // it is a different tool holding a rule this arm claims, and the honest
     // reading is that these three matchers cover what an author writes.
   });
@@ -744,7 +744,7 @@ function withoutProse(source: string): string {
  * A dynamic import's specifier, in either spelling of a string.
  *
  * One pattern for the registry and for a hop, because they are one question.
- * Quoting is settled by prettier and prettier is a formatter rather than a
+ * Quoting is settled by oxfmt and oxfmt is a formatter rather than a
  * guard, the same reason the site pattern reads a quoted key.
  */
 const IMPORT_CALL = /\bimport\(\s*["']([^"']+)["']\s*\)/g;
@@ -767,7 +767,7 @@ const LITERAL = /^"[^"]*"$|^'[^']*'$/;
  * shorthand has no text to read, so it is reported as a computed scheme and
  * falls to the table below.
  *
- * **The quoted key is here because prettier is not a guard.** `quoteProps` is
+ * **The quoted key is here because oxfmt is not a guard.** `quoteProps` is
  * unset in this repository, so the default `as-needed` rewrites that spelling
  * and `format:check` fails it; `preserve` would reopen the hole in a config
  * change nobody would read as one.
@@ -952,7 +952,7 @@ describe("what may name a scheme this app stores", () => {
     expect(
       schemeSites('const four = { ["scheme"]: "asin", value: v };'),
     ).toEqual(['"asin"']);
-    // The spelling prettier rewrites, held here rather than by a formatter.
+    // The spelling oxfmt rewrites, held here rather than by a formatter.
     expect(schemeSites('const five = { "scheme": "asin", value: v };')).toEqual(
       ['"asin"'],
     );
@@ -1128,7 +1128,7 @@ describe("what may name a scheme this app stores", () => {
  *
  * **Without this the arms below are beaten by the wrap, which is how the first
  * version of them failed.** Three of the four readers carry the phrase across two
- * lines because it runs past eighty columns, and prettier is what puts it there, so
+ * lines because it runs past eighty columns, and oxfmt is what puts it there, so
  * the blind spot would have been the one spelling the gate mandates rather than one
  * anybody chooses. Measured: matching the raw source found the phrase in one of the
  * four modules that carry it.
@@ -1262,7 +1262,7 @@ describe("what a reader says about a subject, and where it says it", () => {
     // The arms above assert two of them appear nowhere, which is satisfied by
     // a typo as happily as by a corrected tree: a constant nothing can match
     // is an arm about nothing, and only `THE_POINTER` had a probe. These are
-    // the sentences as their own sites spelled them, wrapped the way prettier
+    // the sentences as their own sites spelled them, wrapped the way oxfmt
     // wraps them, so the flattener is exercised rather than trusted.
     const pointer = [
       " * **`Genre`.** Read by nothing, because `FileMetadata` declares no",

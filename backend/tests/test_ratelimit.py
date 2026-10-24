@@ -48,11 +48,7 @@ def _limiters_ratelimit_declares() -> dict[str, SlidingWindowLimiter]:
     """
     import ratelimit
 
-    return {
-        name: value
-        for name, value in vars(ratelimit).items()
-        if isinstance(value, SlidingWindowLimiter)
-    }
+    return {name: value for name, value in vars(ratelimit).items() if isinstance(value, SlidingWindowLimiter)}
 
 
 def _limiters_ratelimit_constructs() -> int:
@@ -173,9 +169,7 @@ def tight_register_limit(monkeypatch):
 
 
 class TestLoginRateLimit:
-    def test_repeated_wrong_passwords_are_eventually_refused(
-        self, client, admin, tight_login_limit
-    ):
+    def test_repeated_wrong_passwords_are_eventually_refused(self, client, admin, tight_login_limit):
         for _ in range(TIGHT.max_attempts):
             client.post("/auth/login", json={"username": "admin", "password": "wrong"})
         res = client.post("/auth/login", json={"username": "admin", "password": "wrong"})
@@ -202,9 +196,7 @@ class TestLoginRateLimit:
             client.post("/auth/login", json={"username": "admin", "password": "wrong"})
 
         assert (
-            client.post(
-                "/auth/login", json={"username": "admin", "password": "password123"}
-            ).status_code
+            client.post("/auth/login", json={"username": "admin", "password": "password123"}).status_code
             == 200
         )
 
@@ -232,12 +224,8 @@ class TestLoginRateLimit:
 class TestRegisterRateLimit:
     def test_repeated_registrations_are_eventually_refused(self, client, tight_register_limit):
         for index in range(TIGHT.max_attempts):
-            client.post(
-                "/auth/register", json={"username": f"user{index}", "password": "password123"}
-            )
-        res = client.post(
-            "/auth/register", json={"username": "onemore", "password": "password123"}
-        )
+            client.post("/auth/register", json={"username": f"user{index}", "password": "password123"})
+        res = client.post("/auth/register", json={"username": "onemore", "password": "password123"})
         assert res.status_code == 429
 
 
@@ -274,21 +262,14 @@ class TestTheMetadataLimit:
             yield silence_catalogues(mock)
 
     def _lookup(self, client, account):
-        return client.get(
-            "/api/books/lookup", params={"isbn": self.ISBN}, headers=account["headers"]
-        )
+        return client.get("/api/books/lookup", params={"isbn": self.ISBN}, headers=account["headers"])
 
     def test_a_burst_of_lookups_is_cut_off(self, client, admin, catalogues):
-        codes = [
-            self._lookup(client, admin).status_code
-            for _ in range(METADATA_LIMIT.max_attempts + 1)
-        ]
+        codes = [self._lookup(client, admin).status_code for _ in range(METADATA_LIMIT.max_attempts + 1)]
         assert codes[-1] == 429
         assert 429 not in codes[:-1]
 
-    def test_one_member_burning_the_quota_does_not_ration_another(
-        self, client, admin, member, catalogues
-    ):
+    def test_one_member_burning_the_quota_does_not_ration_another(self, client, admin, member, catalogues):
         for _ in range(METADATA_LIMIT.max_attempts + 1):
             self._lookup(client, admin)
 
@@ -320,10 +301,7 @@ class TestTheExportDoorIsRationed:
         return client.get("/api/books/export", headers=account["headers"])
 
     def test_a_burst_of_exports_is_cut_off(self, client, admin):
-        codes = [
-            self._export(client, admin).status_code
-            for _ in range(EXPORT_LIMIT.max_attempts + 1)
-        ]
+        codes = [self._export(client, admin).status_code for _ in range(EXPORT_LIMIT.max_attempts + 1)]
 
         assert codes[-1] == 429
         assert 429 not in codes[:-1]
@@ -339,9 +317,7 @@ class TestTheExportDoorIsRationed:
         assert res.status_code == 429
         assert int(res.headers["Retry-After"]) > 0
 
-    def test_one_member_burning_the_budget_does_not_ration_another(
-        self, client, admin, member
-    ):
+    def test_one_member_burning_the_budget_does_not_ration_another(self, client, admin, member):
         """Keyed on the authenticated username, so the counter is the member's
         own. An address key would collapse a household into one bucket behind
         the reverse proxy this app is documented to sit behind, and the retry

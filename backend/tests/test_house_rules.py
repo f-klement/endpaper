@@ -51,6 +51,51 @@ from tests.corpus import (
 from tests.helpers import silence_catalogues
 from tests.ignorefile import ignore_patterns, is_ignored
 
+TREE_GUARDS = {
+    "TestAOneTimeCodeIsServedOnlyWhereItIsNamed": ("application_modules",),
+    "TestAnAddressIsServedOnlyWhereItIsNamed": ("application_modules",),
+    "TestAnAlphanumericPredicateIsAlwaysNarrowedToAscii": ("application_modules",),
+    "TestEveryByteDoorIsRegistered": ("shipped_modules",),
+    "TestEveryDirectoryDoorWritesThroughOneFunnel": ("application_modules",),
+    "TestEveryEnumColumnIsConstrainedOrExemptWithAReason": ("every_python_file",),
+    "TestEveryIntParameterFromTheOutsideIsBounded": ("application_modules",),
+    "TestEveryMarkdownFileHasBalancedCodeFences": ("markdown_files",),
+    "TestEveryNumericQueryParamIsBoundedBothWays": ("application_modules",),
+    "TestEveryPythonFileCompilesWithoutAWarning": ("every_python_file",),
+    "TestEveryRequestBodyRowIdIsBounded": ("application_modules",),
+    "TestEveryTextCeilingComesFromTheColumn": ("application_modules",),
+    "TestNoDatabaseFoldIsComparedAgainstAPythonFold": ("application_modules",),
+    "TestNoDocstringCarriesTheCharacterItDescribes": (
+        "application_modules",
+        "every_python_file",
+    ),
+    "TestNoExceptionInstanceIsShared": ("application_modules",),
+    "TestNoFixtureLooksLikeACredential": ("every_python_file",),
+    "TestNoModuleHardCodesASourceOrder": ("application_modules",),
+    "TestNoModuleStartsAProcessTheLinterCannotSee": ("shipped_modules",),
+    "TestNothingStripsAnAssertOutOfTheImage": ("shipped_modules",),
+    "TestOneDoorParsesAResponseBody": ("application_modules",),
+    "TestOneInstanceIssuesALoan": ("application_sources",),
+    "TestOneReaderPerAmbiguousSubfield": ("application_modules",),
+    "TestOnlyOneHelperTurnsForeignKeysOff": ("suite_modules",),
+    "TestOnlyTheCatalogueBuildsAnUnfoldedRecord": (
+        "application_modules",
+        "suite_modules",
+    ),
+    "TestOnlyTheLendingDeskNamesReturnedAt": ("application_sources",),
+    "TestOnlyThreeModulesTurnOutsideXmlIntoATree": ("shipped_modules",),
+    "TestProvenanceColumnsAreNeverRead": (
+        "application_modules",
+        "application_sources",
+    ),
+    "TestTheDeclarationReaderAndThePopulationItWalks": (
+        "application_modules",
+        "application_sources",
+    ),
+    "TestTheLendingCycleStaysPlain": ("application_sources",),
+    "TestTheRouteHandlerPopulationIsDerivedTwice": ("application_modules",),
+}
+
 
 def _docstring_nodes(tree: ast.Module) -> set[ast.AST]:
     """Every string constant that is a module, class or function docstring.
@@ -61,9 +106,7 @@ def _docstring_nodes(tree: ast.Module) -> set[ast.AST]:
     """
     found: set[ast.AST] = set()
     for node in ast.walk(tree):
-        if not isinstance(
-            node, ast.Module | ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef
-        ):
+        if not isinstance(node, ast.Module | ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef):
             continue
         first = node.body[0] if node.body else None
         if (
@@ -109,14 +152,9 @@ def _docstrings_carrying_a_control_character(source: str) -> list[int]:
         # A module carries no line number and its docstring opens the file.
         getattr(node, "lineno", 1)
         for node in ast.walk(ast.parse(source))
-        if isinstance(
-            node, ast.Module | ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef
-        )
+        if isinstance(node, ast.Module | ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef)
         for text in [ast.get_docstring(node, clean=False) or ""]
-        if any(
-            unicodedata.category(character) == "Cc" and character != "\n"
-            for character in text
-        )
+        if any(unicodedata.category(character) == "Cc" and character != "\n" for character in text)
     )
 
 
@@ -135,9 +173,7 @@ _FOREIGN_KEYS_OFF_HELPER = "_with_foreign_keys_off"
 
 #: Callables that carry a validation bound, whatever the layer: a query
 #: parameter, a path parameter, a header, a body field.
-BOUNDING_CALLS = frozenset(
-    {"Query", "Path", "PathParam", "Body", "Header", "Cookie", "Form", "Field"}
-)
+BOUNDING_CALLS = frozenset({"Query", "Path", "PathParam", "Body", "Header", "Cookie", "Form", "Field"})
 LOWER_BOUNDS = frozenset({"ge", "gt"})
 UPPER_BOUNDS = frozenset({"le", "lt"})
 ROUTE_METHODS = frozenset({"get", "post", "put", "patch", "delete"})
@@ -174,9 +210,7 @@ def _is_bounding_call(node: ast.AST) -> bool:
     if not isinstance(node, ast.Call):
         return False
     func = node.func
-    name = func.id if isinstance(func, ast.Name) else (
-        func.attr if isinstance(func, ast.Attribute) else None
-    )
+    name = func.id if isinstance(func, ast.Name) else (func.attr if isinstance(func, ast.Attribute) else None)
     if name not in BOUNDING_CALLS:
         return False
     keywords = {keyword.arg for keyword in node.keywords if keyword.arg}
@@ -191,10 +225,7 @@ def _mentions_int(annotation: ast.AST | None) -> bool:
     """
     if annotation is None:
         return False
-    return any(
-        isinstance(child, ast.Name) and child.id == "int"
-        for child in ast.walk(annotation)
-    )
+    return any(isinstance(child, ast.Name) and child.id == "int" for child in ast.walk(annotation))
 
 
 def _preceding_comment_block(lines: list[str], lineno: int) -> str:
@@ -250,9 +281,7 @@ def _is_route_handler(
 _A_FUNCTION: Final = (ast.FunctionDef, ast.AsyncFunctionDef)
 
 
-def _route_handlers_declared_in(
-    paths: Iterable[Path], root: Path
-) -> dict[tuple[str, str], frozenset[str]]:
+def _route_handlers_declared_in(paths: Iterable[Path], root: Path) -> dict[tuple[str, str], frozenset[str]]:
     """The parse and the collision refusal, over the modules handed to it.
 
     **`paths` rather than a root to walk**, because a corpus is asked of
@@ -278,9 +307,7 @@ def _route_handlers_declared_in(
             if not isinstance(node, _A_FUNCTION) or not _is_route_handler(node):
                 continue
             handlers += 1
-            declared[str(path.relative_to(root)), node.name] = (
-                _decorator_attributes(node) & ROUTE_DECORATORS
-            )
+            declared[str(path.relative_to(root)), node.name] = _decorator_attributes(node) & ROUTE_DECORATORS
     assert len(declared) == handlers, (
         f"{handlers} route handlers occupy {len(declared)} names, so two of them "
         "share a module and a name and this population cannot tell them apart"
@@ -385,8 +412,7 @@ def _a_route_module_declaring(path: Path, *handlers: str) -> None:
     path.write_text(
         "from fastapi import APIRouter\n\nrouter = APIRouter()\n\n"
         + "\n".join(
-            f'@router.get("/{index}")\ndef {name}() -> None: ...\n'
-            for index, name in enumerate(handlers)
+            f'@router.get("/{index}")\ndef {name}() -> None: ...\n' for index, name in enumerate(handlers)
         )
     )
 
@@ -465,9 +491,7 @@ class TestTheRouteHandlerPopulationIsDerivedTwice:
         neither side.
         """
         declared = _declared_route_handlers()
-        used = frozenset(
-            attribute for attributes in declared.values() for attribute in attributes
-        )
+        used = frozenset(attribute for attributes in declared.values() for attribute in attributes)
         carried_ahead = frozenset(DECORATORS_CARRIED_AHEAD)
 
         assert ROUTE_DECORATORS - used - carried_ahead == set(), (
@@ -502,9 +526,7 @@ class TestTheRouteHandlerPopulationIsDerivedTwice:
         """
         declared = _declared_route_handlers()
         whole = set(declared)
-        used = frozenset(
-            attribute for attributes in declared.values() for attribute in attributes
-        )
+        used = frozenset(attribute for attributes in declared.values() for attribute in attributes)
 
         assert used, (
             "no handler in this corpus carries a route decorator, so this arm has "
@@ -516,8 +538,7 @@ class TestTheRouteHandlerPopulationIsDerivedTwice:
         covered = sorted(
             one
             for one in used
-            if {handler for handler, attributes in declared.items() if attributes - {one}}
-            == whole
+            if {handler for handler, attributes in declared.items() if attributes - {one}} == whole
         )
         assert covered == [], (
             "every handler carrying each of these carries another route decorator "
@@ -526,9 +547,7 @@ class TestTheRouteHandlerPopulationIsDerivedTwice:
             f"the handler that depended on it alone changed shape: {covered}"
         )
 
-    def test_two_handlers_of_one_name_in_one_module_are_refused(
-        self, tmp_path: Path
-    ) -> None:
+    def test_two_handlers_of_one_name_in_one_module_are_refused(self, tmp_path: Path) -> None:
         """The collision the population cannot represent, driven rather than measured.
 
         Both handlers take the same key, here and on the framework's side, so a
@@ -545,9 +564,7 @@ class TestTheRouteHandlerPopulationIsDerivedTwice:
         _a_route_module_declaring(root / "routers" / "two.py", "trash_book")
 
         with pytest.raises(AssertionError, match="share a module and a name"):
-            _route_handlers_declared_in(
-                [root / "routers" / "one.py", root / "routers" / "two.py"], root
-            )
+            _route_handlers_declared_in([root / "routers" / "one.py", root / "routers" / "two.py"], root)
 
     def test_the_same_tree_without_the_collision_is_read(self, tmp_path: Path) -> None:
         """The other half, without which a refusal of everything passes the arm above.
@@ -610,8 +627,10 @@ class TestEveryNumericQueryParamIsBoundedBothWays:
             for node in ast.walk(tree):
                 if not isinstance(node, ast.Call):
                     continue
-                name = node.func.id if isinstance(node.func, ast.Name) else (
-                    node.func.attr if isinstance(node.func, ast.Attribute) else None
+                name = (
+                    node.func.id
+                    if isinstance(node.func, ast.Name)
+                    else (node.func.attr if isinstance(node.func, ast.Attribute) else None)
                 )
                 if name != "Query":
                     continue
@@ -720,14 +739,12 @@ class TestEveryIntParameterFromTheOutsideIsBounded:
         while changed:
             changed = False
             for names, value in assignments:
-                named = {
-                    child.id for child in ast.walk(value) if isinstance(child, ast.Name)
-                }
+                named = {child.id for child in ast.walk(value) if isinstance(child, ast.Name)}
                 if not (_mentions_int(value) or named & aliases.keys()):
                     continue
-                bounded = any(
-                    _is_bounding_call(child) for child in ast.walk(value)
-                ) or any(aliases.get(name, False) for name in named)
+                bounded = any(_is_bounding_call(child) for child in ast.walk(value)) or any(
+                    aliases.get(name, False) for name in named
+                )
                 for name in names:
                     if aliases.get(name) is not bounded:
                         aliases[name] = bounded
@@ -742,8 +759,10 @@ class TestEveryIntParameterFromTheOutsideIsBounded:
                 if not isinstance(node, ast.Call):
                     continue
                 func = node.func
-                called = func.id if isinstance(func, ast.Name) else (
-                    func.attr if isinstance(func, ast.Attribute) else None
+                called = (
+                    func.id
+                    if isinstance(func, ast.Name)
+                    else (func.attr if isinstance(func, ast.Attribute) else None)
                 )
                 if called != "Depends":
                     continue
@@ -776,7 +795,7 @@ class TestEveryIntParameterFromTheOutsideIsBounded:
                 arguments = node.args.args + node.args.kwonlyargs
                 defaults = dict(
                     zip(
-                        node.args.args[len(node.args.args) - len(node.args.defaults):],
+                        node.args.args[len(node.args.args) - len(node.args.defaults) :],
                         node.args.defaults,
                         strict=True,
                     )
@@ -785,19 +804,13 @@ class TestEveryIntParameterFromTheOutsideIsBounded:
                     annotation = argument.annotation
                     if annotation is None:
                         continue
-                    named = {
-                        child.id
-                        for child in ast.walk(annotation)
-                        if isinstance(child, ast.Name)
-                    }
+                    named = {child.id for child in ast.walk(annotation) if isinstance(child, ast.Name)}
                     # In scope when the annotation carries an int itself **or**
                     # names an int alias. The second half is what makes the
                     # acceptance below reachable at all.
                     if not (_mentions_int(annotation) or named & aliases.keys()):
                         continue
-                    if any(
-                        _is_bounding_call(child) for child in ast.walk(annotation)
-                    ):
+                    if any(_is_bounding_call(child) for child in ast.walk(annotation)):
                         continue
                     if any(aliases.get(name, False) for name in named):
                         continue
@@ -805,9 +818,7 @@ class TestEveryIntParameterFromTheOutsideIsBounded:
                     if default is not None and _is_bounding_call(default):
                         continue
 
-                    if "unbounded ok:" in _preceding_comment_block(
-                        lines, argument.lineno
-                    ):
+                    if "unbounded ok:" in _preceding_comment_block(lines, argument.lineno):
                         continue
                     offenders.append(
                         f"{path.relative_to(BACKEND)}:{argument.lineno} ({node.name}.{argument.arg})"
@@ -816,9 +827,7 @@ class TestEveryIntParameterFromTheOutsideIsBounded:
         return sorted(offenders)
 
     def test_every_caller_supplied_int_is_bounded_at_both_ends(self) -> None:
-        offenders = self._offenders(
-            {path: path.read_text() for path in application_modules()}
-        )
+        offenders = self._offenders({path: path.read_text() for path in application_modules()})
 
         assert not offenders, (
             "These int parameters come from a caller and are not bounded at both ends, "
@@ -835,10 +844,7 @@ class TestEveryIntParameterFromTheOutsideIsBounded:
 
     def _probe(self, annotation: str, alias: str | None = None) -> list[str]:
         sources = {
-            self.PROBE: (
-                "@router.get('/{book_id}')\n"
-                f"def probe(book_id: {annotation}) -> None: ...\n"
-            )
+            self.PROBE: (f"@router.get('/{{book_id}}')\ndef probe(book_id: {annotation}) -> None: ...\n")
         }
         if alias is not None:
             sources[self.ALIASES] = f"{alias}\n"
@@ -862,17 +868,14 @@ class TestEveryIntParameterFromTheOutsideIsBounded:
         the alias is bounded, so the whole acceptance branch was dead and the
         lint stayed green through exactly this change.
         """
-        assert self._probe(
-            "LooseId", "LooseId = Annotated[int, PathParam(ge=1)]"
-        ) == ["probe.py:2 (probe.book_id)"]
+        assert self._probe("LooseId", "LooseId = Annotated[int, PathParam(ge=1)]") == [
+            "probe.py:2 (probe.book_id)"
+        ]
 
     def test_the_guard_accepts_a_bounded_alias(self) -> None:
         """The other half, or the rule above could be satisfied by rejecting
         every alias, which would make `RowId` unusable."""
-        assert (
-            self._probe("TightId", "TightId = Annotated[int, PathParam(ge=1, le=9)]")
-            == []
-        )
+        assert self._probe("TightId", "TightId = Annotated[int, PathParam(ge=1, le=9)]") == []
 
     def test_the_guard_would_notice_an_alias_of_a_loosened_alias(self) -> None:
         """One hop further out than the case above, and invisible without the
@@ -900,10 +903,7 @@ class TestEveryIntParameterFromTheOutsideIsBounded:
         """`CurrentUser` and `DbSession` are `Annotated[..., Depends(...)]` with
         no int in them. Dragging every alias into scope rather than only the int
         ones would report each of them for having no numeric bound."""
-        assert (
-            self._probe("CurrentUser", "CurrentUser = Annotated[User, Depends(get_it)]")
-            == []
-        )
+        assert self._probe("CurrentUser", "CurrentUser = Annotated[User, Depends(get_it)]") == []
 
 
 class TestEveryRequestBodyRowIdIsBounded:
@@ -1034,9 +1034,7 @@ class TestEveryRequestBodyRowIdIsBounded:
                     changed = True
         return models
 
-    def _body_models(
-        self, sources: dict[Path, str], models: dict[str, ast.ClassDef]
-    ) -> set[str]:
+    def _body_models(self, sources: dict[Path, str], models: dict[str, ast.ClassDef]) -> set[str]:
         """Models a route handler takes as a parameter, transitively.
 
         Transitive through **fields**, because a body model may hold another one
@@ -1099,27 +1097,19 @@ class TestEveryRequestBodyRowIdIsBounded:
                     annotation = statement.annotation
                     if not _mentions_int(annotation):
                         continue
-                    named = {
-                        child.id
-                        for child in ast.walk(annotation)
-                        if isinstance(child, ast.Name)
-                    }
+                    named = {child.id for child in ast.walk(annotation) if isinstance(child, ast.Name)}
                     if "RowIdField" in named:
                         continue
                     assigned = statement.value
-                    if any(
-                        _is_bounding_call(child) for child in ast.walk(annotation)
-                    ) or (assigned is not None and _is_bounding_call(assigned)):
-                        continue
-                    if "unbounded ok:" in _preceding_comment_block(
-                        lines, statement.lineno
+                    if any(_is_bounding_call(child) for child in ast.walk(annotation)) or (
+                        assigned is not None and _is_bounding_call(assigned)
                     ):
+                        continue
+                    if "unbounded ok:" in _preceding_comment_block(lines, statement.lineno):
                         continue
                     field = statement.target
                     label = field.id if isinstance(field, ast.Name) else "?"
-                    offenders.append(
-                        f"{path.relative_to(BACKEND)}:{statement.lineno} ({node.name}.{label})"
-                    )
+                    offenders.append(f"{path.relative_to(BACKEND)}:{statement.lineno} ({node.name}.{label})")
         return sorted(offenders)
 
     def test_the_stated_model_counts_are_the_measured_ones(self) -> None:
@@ -1150,9 +1140,7 @@ class TestEveryRequestBodyRowIdIsBounded:
         )
 
     def test_every_int_a_request_body_carries_is_bounded(self) -> None:
-        offenders = self._offenders(
-            {path: path.read_text() for path in application_modules()}
-        )
+        offenders = self._offenders({path: path.read_text() for path in application_modules()})
 
         assert not offenders, (
             "These request-body ints are unbounded, so a value past SQLite's INTEGER "
@@ -1171,10 +1159,7 @@ class TestEveryRequestBodyRowIdIsBounded:
         return self._offenders(
             {
                 self.SCHEMAS: models + "\n",
-                self.ROUTER: (
-                    "@router.post('/thing')\n"
-                    f"def probe(payload: {body}) -> None: ...\n"
-                ),
+                self.ROUTER: (f"@router.post('/thing')\ndef probe(payload: {body}) -> None: ...\n"),
             }
         )
 
@@ -1191,40 +1176,27 @@ class TestEveryRequestBodyRowIdIsBounded:
         scope altogether and every field it declares goes unchecked. This is
         `CollectionUpdate(CollectionCreate)`, which is a real request body.
         """
-        assert self._probe(
-            "class Parent(BaseModel):\n    pass\n\n"
-            "class Body(Parent):\n    book_id: int"
-        ) == ["schemas/probe_schemas.py:5 (Body.book_id)"]
+        assert self._probe("class Parent(BaseModel):\n    pass\n\nclass Body(Parent):\n    book_id: int") == [
+            "schemas/probe_schemas.py:5 (Body.book_id)"
+        ]
 
     def test_the_guard_checks_the_fields_a_body_inherits(self) -> None:
         """The other direction of the same edge: a subclass body arrives
         carrying its parent's fields, so the parent is in scope too even though
         no handler names it."""
-        assert self._probe(
-            "class Parent(BaseModel):\n    book_id: int\n\n"
-            "class Body(Parent):\n    pass"
-        ) == ["schemas/probe_schemas.py:2 (Parent.book_id)"]
+        assert self._probe("class Parent(BaseModel):\n    book_id: int\n\nclass Body(Parent):\n    pass") == [
+            "schemas/probe_schemas.py:2 (Parent.book_id)"
+        ]
 
     def test_the_guard_accepts_a_bounded_body_int(self) -> None:
         """Or the rule above could be satisfied by reporting every field."""
-        assert (
-            self._probe(
-                "class Body(BaseModel):\n    book_id: int = Field(ge=1, le=9)"
-            )
-            == []
-        )
+        assert self._probe("class Body(BaseModel):\n    book_id: int = Field(ge=1, le=9)") == []
 
     def test_the_guard_leaves_a_response_model_alone(self) -> None:
         """No handler takes it as a parameter, so its ints come from the
         database rather than from a caller. Scoping this wrongly would bury the
         rule in `BookOut.id` and every count in the app."""
-        assert (
-            self._probe(
-                "class Body(BaseModel):\n    pass\n\n"
-                "class Out(BaseModel):\n    id: int"
-            )
-            == []
-        )
+        assert self._probe("class Body(BaseModel):\n    pass\n\nclass Out(BaseModel):\n    id: int") == []
 
     def test_the_guard_sees_the_models_a_route_takes(self) -> None:
         """The scope is the load-bearing half: too narrow and the rule inspects
@@ -1493,9 +1465,7 @@ def column_mentions(tree: ast.Module, columns: Container[str]) -> list[ColumnMen
                 and isinstance(node.args[1].value, str)
                 and node.args[1].value in columns
             ):
-                found.append(
-                    ColumnMention(node.lineno, node.args[1].value, node.args[0], False)
-                )
+                found.append(ColumnMention(node.lineno, node.args[1].value, node.args[0], False))
             receiver = node.func.value if isinstance(node.func, ast.Attribute) else node.func
             for keyword in node.keywords:
                 if keyword.arg is not None and keyword.arg in columns:
@@ -2041,10 +2011,7 @@ class TestTheDeclarationReaderAndThePopulationItWalks:
         rebuilt = set()
         for path in application_modules():
             dotted = (
-                str(path.relative_to(BACKEND))
-                .removesuffix(".py")
-                .replace("/", ".")
-                .removesuffix(".__init__")
+                str(path.relative_to(BACKEND)).removesuffix(".py").replace("/", ".").removesuffix(".__init__")
             )
             if dotted != "__init__":
                 rebuilt.add(dotted)
@@ -2145,9 +2112,7 @@ class TestTheDeclarationReaderAndThePopulationItWalks:
         is the population, which that comprehension does not own.
         """
         reached = {name for name, _ in _extras_rows()}
-        population = {
-            f"{cls.__module__}.{cls.__name__}" for cls in application_models()
-        }
+        population = {f"{cls.__module__}.{cls.__name__}" for cls in application_models()}
 
         assert reached, "the population is empty, so the extras rule is vacuous"
         assert reached == population
@@ -2328,9 +2293,7 @@ class TestTheDeclarationReaderAndThePopulationItWalks:
 
         Stopping at `BaseModel.__subclasses__()` is one token and reds here.
         """
-        indirect = [
-            cls for cls in application_models() if BaseModel not in cls.__bases__
-        ]
+        indirect = [cls for cls in application_models() if BaseModel not in cls.__bases__]
 
         assert indirect, (
             "no model in this corpus inherits from another, so nothing here "
@@ -2386,17 +2349,13 @@ class TestTheDeclarationReaderAndThePopulationItWalks:
                     (BaseModel,),
                     {
                         "__module__": __name__,
-                        "model_config": pydantic.ConfigDict(
-                            alias_generator=lambda _name: guarded
-                        ),
+                        "model_config": pydantic.ConfigDict(alias_generator=lambda _name: guarded),
                         "__annotations__": {"definer": int | None},
                         "definer": None,
                     },
                 )
             case _:
-                field = pydantic.Field(
-                    default=None, validation_alias=AliasChoices("definer", guarded)
-                )
+                field = pydantic.Field(default=None, validation_alias=AliasChoices("definer", guarded))
         return type(
             "Planted",
             (BaseModel,),
@@ -2479,9 +2438,7 @@ class TestTheDeclarationReaderAndThePopulationItWalks:
 
         # What the walk would hand back without the check, which is the
         # reason it is here rather than a tidiness.
-        assert set(_compiled_node(lender, "model-fields")["fields"]) == {
-            "created_by_user_id"
-        }
+        assert set(_compiled_node(lender, "model-fields")["fields"]) == {"created_by_user_id"}
         assert set(borrower.model_fields) == {"harmless"}
 
         with pytest.raises(LookupError, match="belongs to"):
@@ -2661,9 +2618,7 @@ class TestProvenanceColumnsAreNeverRead:
         nothing with no other failure. Either is a decision and reds here.
         """
         marked, unmarked = _declared_provenance()
-        declared = sorted(
-            (column, owner) for column, owners in marked.items() for owner in owners
-        )
+        declared = sorted((column, owner) for column, owners in marked.items() for owner in owners)
 
         assert declared == [
             ("created_by_user_id", "AuthorAlias"),
@@ -2678,11 +2633,7 @@ class TestProvenanceColumnsAreNeverRead:
         # exemption, which is the direction an exemption must never move in on
         # its own. Narrowed to the marked names, since the whole set is every
         # column of every model.
-        sharing = sorted(
-            (column, owner)
-            for column in marked
-            for owner in unmarked.get(column, set())
-        )
+        sharing = sorted((column, owner) for column in marked for owner in unmarked.get(column, set()))
 
         assert sharing == [("created_by_user_id", "CustomField")]
 
@@ -2715,8 +2666,7 @@ class TestProvenanceColumnsAreNeverRead:
             f"{owner}.{column}"
             for column, owners in marked.items()
             for owner in owners
-            if mappers[owner].columns[column].name
-            not in mappers[owner].class_.__table__.columns
+            if mappers[owner].columns[column].name not in mappers[owner].class_.__table__.columns
         ]
         assert not missing, missing
 
@@ -2724,9 +2674,7 @@ class TestProvenanceColumnsAreNeverRead:
         marked, _unmarked = _declared_provenance()
         offenders: list[str] = []
         for path in application_modules():
-            offenders += _provenance_reads(
-                path.read_text(), str(path.relative_to(BACKEND))
-            )
+            offenders += _provenance_reads(path.read_text(), str(path.relative_to(BACKEND)))
 
         assert not offenders, (
             "These read a column a model declares as provenance only, and something "
@@ -2734,8 +2682,7 @@ class TestProvenanceColumnsAreNeverRead:
             + "\n  ".join(sorted(offenders))
             + "\nEither stop reading it, or delete the promise where "
             + "; ".join(
-                f"{column}: {', '.join(sorted(owners.values()))}"
-                for column, owners in sorted(marked.items())
+                f"{column}: {', '.join(sorted(owners.values()))}" for column, owners in sorted(marked.items())
             )
             + "."
         )
@@ -2756,9 +2703,7 @@ class TestProvenanceColumnsAreNeverRead:
         assert not offenders, (
             "These Pydantic fields are named for a column a model declares as "
             "provenance only, and something in the tree promises nothing reads "
-            "it:\n  "
-            + "\n  ".join(offenders)
-            + "\nA field named for a column is read off the row by the "
+            "it:\n  " + "\n  ".join(offenders) + "\nA field named for a column is read off the row by the "
             "validator, with no attribute access anywhere in the source. "
             "Publish a derived answer instead, or delete the promise."
         )
@@ -2785,8 +2730,7 @@ class TestProvenanceColumnsAreNeverRead:
         )
 
         assert declared_schema_fields(marked, [planted]) == [
-            f"{__name__}.CollectionOutWithItsAuthor.created_by_user_id "
-            "(created_by_user_id)"
+            f"{__name__}.CollectionOutWithItsAuthor.created_by_user_id (created_by_user_id)"
         ]
 
     def test_a_declaration_is_reported_for_the_owner_the_source_half_clears(
@@ -2890,9 +2834,9 @@ class TestProvenanceColumnsAreNeverRead:
         """A receiver that is not a model name resolves to nothing, so the read
         is reported. `Loan` carries no such column, and a reader cannot know
         that from the attribute alone."""
-        assert _provenance_reads(
-            "from models import Loan\n" "x = Loan.created_by_user_id\n"
-        ) == ["probe.py:2 (created_by_user_id)"]
+        assert _provenance_reads("from models import Loan\nx = Loan.created_by_user_id\n") == [
+            "probe.py:2 (created_by_user_id)"
+        ]
 
     #: Receivers this rule refuses, each one driven rather than reasoned.
     #:
@@ -2906,12 +2850,11 @@ class TestProvenanceColumnsAreNeverRead:
             "from models import CustomField\n"
             "from sqlalchemy.orm import aliased\n"
             "V = aliased(CustomField)\n"
-            "x = V.created_by_user_id\n"
+            "x = V.created_by_user_id\n",
         ),
         (
             "the table columns accessor",
-            "from models import CustomField\n"
-            "x = CustomField.__table__.c.created_by_user_id\n"
+            "from models import CustomField\nx = CustomField.__table__.c.created_by_user_id\n",
         ),
         ("a relative models import", "from .models import CustomField\nx = CustomField.created_by_user_id\n"),
         ("a row", "def f(row):\n    return row.created_by_user_id\n"),
@@ -2923,35 +2866,27 @@ class TestProvenanceColumnsAreNeverRead:
             "@dataclasses.dataclass\n"
             "class Row:\n"
             "    created_by_user_id: int\n"
-            "x = Row.created_by_user_id\n"
+            "x = Row.created_by_user_id\n",
         ),
         (
             "models.py itself, which imports nothing from models",
-            "class CustomField:\n"
-            "    pass\n"
-            "x = CustomField.created_by_user_id\n"
+            "class CustomField:\n    pass\nx = CustomField.created_by_user_id\n",
         ),
         (
             "the module shadowed by a parameter",
-            "import models\n"
-            "def f(models):\n"
-            "    return models.CustomField.created_by_user_id\n"
+            "import models\ndef f(models):\n    return models.CustomField.created_by_user_id\n",
         ),
         (
             "a class name rebound as a local",
-            "from models import CustomField\n"
-            "CustomField = fetch()\n"
-            "x = CustomField.created_by_user_id\n"
+            "from models import CustomField\nCustomField = fetch()\nx = CustomField.created_by_user_id\n",
         ),
         (
             "a lambda parameter",
-            "from models import CustomField\n"
-            "f = lambda CustomField: CustomField.created_by_user_id\n"
+            "from models import CustomField\nf = lambda CustomField: CustomField.created_by_user_id\n",
         ),
         (
             "a star import, which binds no name this walk can see",
-            "from models import *\n"
-            "x = CustomField.created_by_user_id\n"
+            "from models import *\nx = CustomField.created_by_user_id\n",
         ),
         # **The two spellings where binding twice is deliberate**, and the
         # ones a reader is least likely to expect from a rule that drops a
@@ -2964,7 +2899,7 @@ class TestProvenanceColumnsAreNeverRead:
             "if TYPE_CHECKING:\n"
             "    from models import CustomField\n"
             "from models import CustomField\n"
-            "x = CustomField.created_by_user_id\n"
+            "x = CustomField.created_by_user_id\n",
         ),
         (
             "a try and except import pair",
@@ -2972,7 +2907,7 @@ class TestProvenanceColumnsAreNeverRead:
             "    from models import CustomField\n"
             "except ImportError:\n"
             "    from models import CustomField\n"
-            "x = CustomField.created_by_user_id\n"
+            "x = CustomField.created_by_user_id\n",
         ),
     )
 
@@ -2985,9 +2920,7 @@ class TestProvenanceColumnsAreNeverRead:
     )
 
     @pytest.mark.parametrize(("shape", "source"), REFUSED, ids=[name for name, _ in REFUSED])
-    def test_a_receiver_this_rule_cannot_resolve_is_refused(
-        self, shape: str, source: str
-    ) -> None:
+    def test_a_receiver_this_rule_cannot_resolve_is_refused(self, shape: str, source: str) -> None:
         """What the class docstring says the cost is, written down as the
         members rather than as a number. Every one reads a column no model in
         the source marks, and every one is reported, because the rule refuses
@@ -2995,9 +2928,7 @@ class TestProvenanceColumnsAreNeverRead:
         assert _provenance_reads(source), shape
 
     @pytest.mark.parametrize(("shape", "source"), ACCEPTED, ids=[name for name, _ in ACCEPTED])
-    def test_the_accepted_spellings_are_these_and_no_others(
-        self, shape: str, source: str
-    ) -> None:
+    def test_the_accepted_spellings_are_these_and_no_others(self, shape: str, source: str) -> None:
         """The other side of the list above, so "there is one accepted
         spelling" is checkable rather than asserted in prose."""
         assert _provenance_reads(source) == [], shape
@@ -3010,20 +2941,13 @@ class TestProvenanceColumnsAreNeverRead:
         resolver returning the class's own name rather than the local one.
         """
         assert _provenance_reads(
-            "from models import Collection as CustomField\n"
-            "x = CustomField.created_by_user_id\n"
+            "from models import Collection as CustomField\nx = CustomField.created_by_user_id\n"
         ) == ["probe.py:2 (created_by_user_id)"]
 
     def test_the_one_reader_may_alias_its_own_import(self) -> None:
         """The other direction of the same line, and it was a false refusal:
         the legitimate reader was reported for aliasing an import."""
-        assert (
-            _provenance_reads(
-                "from models import CustomField as CF\n"
-                "x = CF.created_by_user_id\n"
-            )
-            == []
-        )
+        assert _provenance_reads("from models import CustomField as CF\nx = CF.created_by_user_id\n") == []
 
     def test_the_models_module_is_resolved_under_any_alias(self) -> None:
         """No inclusion list of spellings: the import says which local name is
@@ -3067,8 +2991,7 @@ class TestProvenanceColumnsAreNeverRead:
         Both live write sites are constructors."""
         assert (
             _provenance_reads(
-                "from models import Collection\n"
-                "row = Collection(name='x', created_by_user_id=7)\n"
+                "from models import Collection\nrow = Collection(name='x', created_by_user_id=7)\n"
             )
             == []
         )
@@ -3089,8 +3012,7 @@ class TestProvenanceColumnsAreNeverRead:
     def test_the_one_reader_may_getattr_its_own_model(self) -> None:
         assert (
             _provenance_reads(
-                "from models import CustomField\n"
-                "x = getattr(CustomField, 'created_by_user_id')\n"
+                "from models import CustomField\nx = getattr(CustomField, 'created_by_user_id')\n"
             )
             == []
         )
@@ -3155,9 +3077,7 @@ class TestTheBoundsActuallyRefuse:
 
         assert response.status_code == 422, response.text
 
-    def test_the_largest_accepted_id_still_reaches_the_handler(
-        self, client, admin
-    ) -> None:
+    def test_the_largest_accepted_id_still_reaches_the_handler(self, client, admin) -> None:
         """The bound must refuse what the database cannot hold and nothing else.
         No row has this id, so the honest answer is 404, not 422."""
         from schemas.common import MAX_ROW_ID
@@ -3198,20 +3118,17 @@ class TestTheBoundsActuallyRefuse:
             for key, value in payload.items()
         }
 
-        response = client.post(
-            url.format(book=book["id"]), json=filled, headers=admin["headers"]
-        )
+        response = client.post(url.format(book=book["id"]), json=filled, headers=admin["headers"])
 
         assert response.status_code == 422, response.text
 
     def test_the_largest_accepted_page_still_works(self, client, admin) -> None:
         from dependencies import MAX_PAGE_NUMBER
 
-        response = client.get(
-            "/api/books", params={"page": MAX_PAGE_NUMBER}, headers=admin["headers"]
-        )
+        response = client.get("/api/books", params={"page": MAX_PAGE_NUMBER}, headers=admin["headers"])
         assert response.status_code == 200
         assert response.json()["items"] == []
+
 
 #: The names an `HTTPException` can be constructed under in this tree.
 #:
@@ -3293,17 +3210,13 @@ def _executed_once(tree: ast.Module):
         if isinstance(node, ast.ClassDef):
             pending.extend(node.body)
             continue
-        pending.extend(
-            child for child in ast.iter_child_nodes(node) if isinstance(child, ast.stmt)
-        )
+        pending.extend(child for child in ast.iter_child_nodes(node) if isinstance(child, ast.stmt))
         # An `except` clause is an `ExceptHandler`, not a statement, so the
         # filter above drops it and its whole body with it. Measured: the body
         # of a module level `try` was inspected and its handler was not, while
         # the docstring and the fixture both claimed `try` was covered.
         if isinstance(node, ast.Try):
-            pending.extend(
-                statement for handler in node.handlers for statement in handler.body
-            )
+            pending.extend(statement for handler in node.handlers for statement in handler.body)
 
 
 class TestNoExceptionInstanceIsShared:
@@ -3368,9 +3281,7 @@ class TestNoExceptionInstanceIsShared:
         "tuple unpacking": (
             "from fastapi import HTTPException\n_A, _B = HTTPException(404), HTTPException(403)\n"
         ),
-        "annotated": (
-            "from fastapi import HTTPException\n_NF: HTTPException = HTTPException(404)\n"
-        ),
+        "annotated": ("from fastapi import HTTPException\n_NF: HTTPException = HTTPException(404)\n"),
         "class attribute": (
             "from fastapi import HTTPException\nclass E:\n    NOT_FOUND = HTTPException(404)\n"
         ),
@@ -3439,10 +3350,7 @@ class TestNoExceptionInstanceIsShared:
         ),
         "lambda factory": "from fastapi import HTTPException\n_MK = lambda: HTTPException(404)\n",
         "local in a function": (
-            "from fastapi import HTTPException\n"
-            "def f():\n"
-            "    exc = HTTPException(404)\n"
-            "    raise exc\n"
+            "from fastapi import HTTPException\ndef f():\n    exc = HTTPException(404)\n    raise exc\n"
         ),
     }
 
@@ -3452,9 +3360,7 @@ class TestNoExceptionInstanceIsShared:
 
     def test_no_module_shares_an_http_exception_instance(self) -> None:
         offenders = [
-            hit
-            for path in application_modules()
-            for hit in self._offenders(path.name, path.read_text())
+            hit for path in application_modules() for hit in self._offenders(path.name, path.read_text())
         ]
         assert offenders == [], (
             "These modules hold an HTTPException instance rather than building one "
@@ -3521,8 +3427,7 @@ class TestNoDatabaseFoldIsComparedAgainstAPythonFold:
         tree = ast.parse("rows = query.order_by(func.lower(Collection.name)).all()")
 
         assert not any(
-            isinstance(node, ast.Compare) and self._folds_in_sql(node.left)
-            for node in ast.walk(tree)
+            isinstance(node, ast.Compare) and self._folds_in_sql(node.left) for node in ast.walk(tree)
         )
 
     def test_the_rule_reports_the_shape_it_exists_for(self) -> None:
@@ -3576,9 +3481,7 @@ class TestOnlyOneHelperTurnsForeignKeysOff:
     def _turns_foreign_keys_off(self, value: str) -> bool:
         squeezed = "".join(value.split()).lower()
         return any(
-            self.KEY + separator + off in squeezed
-            for separator in self.SEPARATORS
-            for off in self.OFF
+            self.KEY + separator + off in squeezed for separator in self.SEPARATORS for off in self.OFF
         )
 
     def test_no_test_writes_the_pragma_outside_the_helper(self) -> None:
@@ -3604,8 +3507,7 @@ class TestOnlyOneHelperTurnsForeignKeysOff:
             allowed |= {
                 node
                 for parent in ast.walk(tree)
-                if isinstance(parent, ast.ClassDef)
-                and parent.name == type(self).__name__
+                if isinstance(parent, ast.ClassDef) and parent.name == type(self).__name__
                 for node in ast.walk(parent)
             }
             for node in ast.walk(tree):
@@ -3632,14 +3534,10 @@ class TestOnlyOneHelperTurnsForeignKeysOff:
         helper = next(
             node
             for node in ast.walk(tree)
-            if isinstance(node, ast.FunctionDef)
-            and node.name == _FOREIGN_KEYS_OFF_HELPER
+            if isinstance(node, ast.FunctionDef) and node.name == _FOREIGN_KEYS_OFF_HELPER
         )
 
-        assert any(
-            isinstance(node, ast.Attribute) and node.attr == "invalidate"
-            for node in ast.walk(helper)
-        )
+        assert any(isinstance(node, ast.Attribute) and node.attr == "invalidate" for node in ast.walk(helper))
 
     @pytest.mark.parametrize(
         "spelling",
@@ -3716,11 +3614,9 @@ GROWING_ENUM_COLUMNS: dict[str, str] = {
         "ClassificationScheme grows whenever a catalogue source is added, which "
         "is an open issue rather than a hypothetical."
     ),
-    "tags.category": (
-        "TagCategory is the seeded vocabulary's shape, and the bilingual tag "
-        "work touches it."
-    ),
+    "tags.category": ("TagCategory is the seeded vocabulary's shape, and the bilingual tag work touches it."),
 }
+
 
 def _enum_types(annotation: object) -> list[type[StrEnum]]:
     """Every `StrEnum` anywhere inside an annotation, at any depth.
@@ -3731,9 +3627,7 @@ def _enum_types(annotation: object) -> list[type[StrEnum]]:
     """
     if isinstance(annotation, type) and issubclass(annotation, StrEnum):
         return [annotation]
-    return [
-        found for arg in get_args(annotation) for found in _enum_types(arg)
-    ]
+    return [found for arg in get_args(annotation) for found in _enum_types(arg)]
 
 
 def _enum_columns() -> dict[str, str]:
@@ -3941,10 +3835,7 @@ def _installed_checks(table_name: str) -> list[str]:
     from database import engine
 
     _require_a_migrated_database()
-    return [
-        constraint["sqltext"]
-        for constraint in reflect(engine).get_check_constraints(table_name)
-    ]
+    return [constraint["sqltext"] for constraint in reflect(engine).get_check_constraints(table_name)]
 
 
 def _installs_check(qualified: str) -> bool:
@@ -3954,10 +3845,7 @@ def _installs_check(qualified: str) -> bool:
     reads the one `--autogenerate` and `create_all` work from.
     """
     table_name, column_name = qualified.split(".")
-    return any(
-        _bounds_column(sqltext, column_name)
-        for sqltext in _installed_checks(table_name)
-    )
+    return any(_bounds_column(sqltext, column_name) for sqltext in _installed_checks(table_name))
 
 
 class TestEveryEnumColumnIsConstrainedOrExemptWithAReason:
@@ -4048,14 +3936,10 @@ class TestEveryEnumColumnIsConstrainedOrExemptWithAReason:
         """
         columns = _enum_columns()
         declared_only = sorted(
-            column
-            for column in columns
-            if _declares_check(column) and not _installs_check(column)
+            column for column in columns if _declares_check(column) and not _installs_check(column)
         )
         installed_only = sorted(
-            column
-            for column in columns
-            if _installs_check(column) and not _declares_check(column)
+            column for column in columns if _installs_check(column) and not _declares_check(column)
         )
         assert not declared_only, (
             "models.py bounds these and no revision installs the bound, so the "
@@ -4127,8 +4011,7 @@ class TestEveryEnumColumnIsConstrainedOrExemptWithAReason:
             if "tests" not in path.relative_to(BACKEND).parts
             for node in ast.walk(ast.parse(path.read_text()))
             if isinstance(node, ast.Call)
-            and getattr(node.func, "attr", getattr(node.func, "id", None))
-            == "create_all"
+            and getattr(node.func, "attr", getattr(node.func, "id", None)) == "create_all"
         ]
         assert not offenders, (
             "an application module builds tables itself, so a deployment's schema "
@@ -4143,8 +4026,7 @@ class TestEveryEnumColumnIsConstrainedOrExemptWithAReason:
         )
         assert any(
             isinstance(node, ast.Call)
-            and getattr(node.func, "attr", getattr(node.func, "id", None))
-            == "upgrade_to_head"
+            and getattr(node.func, "attr", getattr(node.func, "id", None)) == "upgrade_to_head"
             for node in ast.walk(init_db)
         ), (
             "`init_db` no longer reaches the schema through `upgrade_to_head`, so "
@@ -4216,23 +4098,21 @@ class TestEveryEnumColumnIsConstrainedOrExemptWithAReason:
 
         def callers_of(predicate) -> set[str]:
             """Every function containing a node the predicate accepts."""
-            return {
-                parents[node].name
-                for node in ast.walk(tree)
-                if predicate(node) and node in parents
-            }
+            return {parents[node].name for node in ast.walk(tree) if predicate(node) and node in parents}
 
         walks = callers_of(
-            lambda node: isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Name)
-            and node.func.id == "get_args"
+            lambda node: (
+                isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "get_args"
+            )
         )
         # The pattern rather than the helper's name: a second `IN (` matcher is
         # a second spelling of `_bounds_column` whatever it ends up called.
         matchers = callers_of(
-            lambda node: isinstance(node, ast.Constant)
-            and isinstance(node.value, str)
-            and re.search(r"IN\\s\*\\\(", node.value) is not None
+            lambda node: (
+                isinstance(node, ast.Constant)
+                and isinstance(node.value, str)
+                and re.search(r"IN\\s\*\\\(", node.value) is not None
+            )
         )
 
         assert len(walks) == 1, (
@@ -4258,9 +4138,7 @@ class TestEveryEnumColumnIsConstrainedOrExemptWithAReason:
         which is the evasion this pair pins rather than describes.
         """
         assert _bounds_column("provenance IN ('catalogue', 'member')", "provenance")
-        assert not _bounds_column(
-            "provenance <> 'catalogue' OR created_by_user_id IS NULL", "provenance"
-        )
+        assert not _bounds_column("provenance <> 'catalogue' OR created_by_user_id IS NULL", "provenance")
         assert _declares_check("author_identifiers.provenance")
         # The migrated database carries both constraints too, so the same
         # evasion is available there and is pinned there.
@@ -4316,9 +4194,7 @@ class TestEveryEnumColumnIsConstrainedOrExemptWithAReason:
         on every tree and would be one reader wearing two names.
         """
         both = sorted(
-            column
-            for column in _enum_columns()
-            if _installs_check(column) and _degrades_at_the_read(column)
+            column for column in _enum_columns() if _installs_check(column) and _degrades_at_the_read(column)
         )
         assert both == []
 
@@ -4433,9 +4309,7 @@ class TestNoFixtureLooksLikeACredential:
         `notexample.com` does not. The dot is what makes it a label boundary,
         and the equality is what still admits the bare name.
         """
-        return any(
-            domain == base or domain.endswith("." + base) for base in self.RESERVED
-        )
+        return any(domain == base or domain.endswith("." + base) for base in self.RESERVED)
 
     def test_no_published_file_contains_a_realistic_bot_token(self):
         pattern = re.compile(r"[0-9]{6,}:[A-Za-z0-9_-]{25,}")
@@ -4479,7 +4353,12 @@ class TestNoFixtureLooksLikeACredential:
         Deliberately looser than `mailer._ADDRESS`: this is looking for what a
         **reader** would take for an address, and a stranger triaging the public
         mirror does not run our validator over it first.
+
+        **A backslash escape is a boundary**, because a reader takes `\\n` in a
+        string literal for a line break and not for the letter n. Without that,
+        `"import x\\n@x.decorate"` reads as the address `n@x.decorate`.
         """
+        text = re.sub(r"\\[A-Za-z]", " ", text)
         return re.findall(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", text)
 
     def test_no_published_file_carries_an_address_outside_reserved_space(self):
@@ -4517,6 +4396,9 @@ class TestNoFixtureLooksLikeACredential:
         # personal one does not, which is the only distinction it draws.
         found = self._addresses("write to kim.jones@gmail.com or sam@example.org")
         assert found == ["kim.jones@gmail.com", "sam@example.org"]
+        # An escape ends the local part and does not join it.
+        assert self._addresses(r'"import x\n@x.decorate"') == []
+        assert self._addresses(r'"line\nkim.jones@gmail.com"') == ["kim.jones@gmail.com"]
         assert not self._is_reserved(found[0].rsplit("@", 1)[1])
         assert self._is_reserved(found[1].rsplit("@", 1)[1])
 
@@ -4571,11 +4453,7 @@ def _dataclasses_modules(tree: ast.Module) -> set[str]:
     found = {"dataclasses"}
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
-            found |= {
-                alias.asname or alias.name
-                for alias in node.names
-                if alias.name == "dataclasses"
-            }
+            found |= {alias.asname or alias.name for alias in node.names if alias.name == "dataclasses"}
     return found
 
 
@@ -4584,11 +4462,7 @@ def _replace_aliases(tree: ast.Module) -> set[str]:
     found: set[str] = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom) and node.module == "dataclasses":
-            found |= {
-                alias.asname or alias.name
-                for alias in node.names
-                if alias.name == "replace"
-            }
+            found |= {alias.asname or alias.name for alias in node.names if alias.name == "replace"}
     return found
 
 
@@ -4602,9 +4476,7 @@ def _holds_a_record(tree: ast.Module) -> bool:
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom) and node.module == "catalogue":
             return True
-        if isinstance(node, ast.Import) and any(
-            alias.name == "catalogue" for alias in node.names
-        ):
+        if isinstance(node, ast.Import) and any(alias.name == "catalogue" for alias in node.names):
             return True
     return False
 
@@ -4690,8 +4562,7 @@ class TestOnlyTheCatalogueBuildsAnUnfoldedRecord:
                     offenders += [
                         f"{_label(path)}:{argument.lineno}"
                         for argument in node.args
-                        if isinstance(argument, ast.Constant)
-                        and argument.value == "_folded"
+                        if isinstance(argument, ast.Constant) and argument.value == "_folded"
                     ]
                 elif isinstance(node, ast.Dict):
                     # `Record(**{"_folded": True})` is a Dict key, not a keyword.
@@ -4703,9 +4574,7 @@ class TestOnlyTheCatalogueBuildsAnUnfoldedRecord:
         return offenders
 
     def test_no_module_outside_the_catalogue_names_the_fold_flag(self) -> None:
-        offenders = self._offenders_naming_the_flag(
-            application_modules() + suite_modules()
-        )
+        offenders = self._offenders_naming_the_flag(application_modules() + suite_modules())
         assert not offenders, (
             "`Record._folded` decides whether `__post_init__` deduplicates. "
             "Setting it from outside `catalogue.py` ships a record holding "
@@ -4754,9 +4623,9 @@ class TestOnlyTheCatalogueBuildsAnUnfoldedRecord:
             "def g() -> Record:\n"
             "    return Record(_folded=True)\n"
             "def h(record: Record) -> None:\n"
-            "    object.__setattr__(record, \"_folded\", True)\n"
+            '    object.__setattr__(record, "_folded", True)\n'
             "def i() -> Record:\n"
-            "    return Record(**{\"_folded\": True})\n"
+            '    return Record(**{"_folded": True})\n'
             "def j(record: Record) -> bool:\n"
             "    return record._folded\n"
         )
@@ -4784,6 +4653,7 @@ class TestOnlyTheCatalogueBuildsAnUnfoldedRecord:
         innocent.write_text("import dataclasses\ndataclasses.replace(thing, a=1)\n")
         assert not _holds_a_record(ast.parse(innocent.read_text()))
         assert not self._offenders_naming_the_flag([innocent])
+
 
 class TestAnAddressIsServedOnlyWhereItIsNamed:
     """A member's address reaches the three schemas that exist for it, and no other.
@@ -4933,7 +4803,7 @@ class TestAnAddressIsServedOnlyWhereItIsNamed:
                 seen.add(subclass)
                 try:
                     source = Path(inspect_module.getfile(subclass))
-                except (TypeError, OSError):
+                except TypeError, OSError:
                     source = None
                 if (
                     source is not None
@@ -4999,10 +4869,7 @@ class TestAnAddressIsServedOnlyWhereItIsNamed:
         carriers: set[str] = set()
         for name, model in models.items():
             try:
-                schemas = [
-                    model.model_json_schema(mode=mode)
-                    for mode in ("validation", "serialization")
-                ]
+                schemas = [model.model_json_schema(mode=mode) for mode in ("validation", "serialization")]
             except Exception as error:  # noqa: BLE001  reported, never skipped
                 unreadable.append(f"{name}: {type(error).__name__}: {error}")
                 continue
@@ -5045,10 +4912,7 @@ class TestAnAddressIsServedOnlyWhereItIsNamed:
                     # A read off a named receiver this module may read, and only
                     # that. `payload.email` passes; `user.email` in the same
                     # module is reported.
-                    if (
-                        isinstance(node.value, ast.Name)
-                        and node.value.id in allowed
-                    ):
+                    if isinstance(node.value, ast.Name) and node.value.id in allowed:
                         continue
                     offenders.append(f"{where}:{node.lineno}")
                 elif (
@@ -5080,8 +4944,7 @@ class TestAnAddressIsServedOnlyWhereItIsNamed:
 
         models_found = self._our_models()
         assert len(models_found) >= 40, (
-            f"the model walk found too little to be checking anything: "
-            f"{len(models_found)} models"
+            f"the model walk found too little to be checking anything: {len(models_found)} models"
         )
         assert "UserOut" in models_found, "the walk missed the model this rule exists for"
 
@@ -5131,7 +4994,6 @@ class TestAnAddressIsServedOnlyWhereItIsNamed:
             )
 
 
-
 class TestEveryTargetResolvesToADoorAndAReader:
     """One roster, and every row in it names something this application implements.
 
@@ -5171,14 +5033,10 @@ class TestEveryTargetResolvesToADoorAndAReader:
         """
         readable = targets.SEEDED[CatalogueSource.LOC]
         with pytest.raises(ValueError, match="answers a search and open_library reads none"):
-            metadata.resolve(
-                dataclasses.replace(readable, reader=targets.Reader.OPEN_LIBRARY)
-            )
+            metadata.resolve(dataclasses.replace(readable, reader=targets.Reader.OPEN_LIBRARY))
         bespoke = targets.SEEDED[CatalogueSource.OPEN_LIBRARY]
         with pytest.raises(ValueError, match="answers a lookup and marc_gnd reads none"):
-            metadata.resolve(
-                dataclasses.replace(bespoke, reader=targets.Reader.MARC_GND)
-            )
+            metadata.resolve(dataclasses.replace(bespoke, reader=targets.Reader.MARC_GND))
 
     def test_the_derived_sets_are_the_rows(self):
         """Not a restatement of the derivation: it names the roster's answer.
@@ -5190,12 +5048,25 @@ class TestEveryTargetResolvesToADoorAndAReader:
         it still costs nothing.
         """
         assert {source.value for source in sources.LOOKUP_SOURCES} == {
-            "dnb", "k10plus", "oenb", "nlg", "nkp", "bne", "open_library",
-            "google_books", "bna",
+            "dnb",
+            "k10plus",
+            "oenb",
+            "nlg",
+            "nkp",
+            "bne",
+            "open_library",
+            "google_books",
+            "bna",
         }
         assert {source.value for source in sources.SEARCH_SOURCES} == {
-            "dnb", "k10plus", "oenb", "nlg", "open_library", "google_books",
-            "bnf", "loc",
+            "dnb",
+            "k10plus",
+            "oenb",
+            "nlg",
+            "open_library",
+            "google_books",
+            "bnf",
+            "loc",
         }
         assert {source.value for source in sources.METERED} == {"google_books"}
 
@@ -5205,9 +5076,7 @@ class TestEveryTargetResolvesToADoorAndAReader:
 
     def test_every_source_in_the_roster_can_answer_something(self):
         """A member of the enum nothing can ask is a row the screen cannot explain."""
-        assert set(sources.DEFAULT_ORDER) == (
-            sources.LOOKUP_SOURCES | sources.SEARCH_SOURCES
-        )
+        assert set(sources.DEFAULT_ORDER) == (sources.LOOKUP_SOURCES | sources.SEARCH_SOURCES)
 
     def test_the_default_order_names_the_whole_roster_exactly_once(self):
         assert sorted(sources.DEFAULT_ORDER) == sorted(CatalogueSource)
@@ -5253,9 +5122,7 @@ class TestBeliefIsStatedOnceRatherThanTwice:
 
     def test_precedence_names_every_source_and_nothing_else(self):
         """A source missing here sorts last by default, silently."""
-        assert sorted(metadata._MATCH_PRECEDENCE) == sorted(
-            source.value for source in CatalogueSource
-        )
+        assert sorted(metadata._MATCH_PRECEDENCE) == sorted(source.value for source in CatalogueSource)
 
 
 def test_every_seeded_source_is_covered_by_a_silencer():
@@ -5292,8 +5159,7 @@ def test_every_seeded_source_is_covered_by_a_silencer():
                 unanswered.append(f"{target.source.value}: {error!r}"[:120])
     assert not unanswered, (
         "these seeded sources are not answered by `silence_catalogues`, so a "
-        "test that reaches one fails on an unmocked request instead:\n  "
-        + "\n  ".join(unanswered)
+        "test that reaches one fails on an unmocked request instead:\n  " + "\n  ".join(unanswered)
     )
 
 
@@ -5457,9 +5323,7 @@ class TestNoModuleHardCodesASourceOrder:
                 if bound is None or not isinstance(value, ast.AST):
                     continue
                 written = bound if isinstance(bound, list) else [bound]
-                if allowed & {
-                    target.id for target in written if isinstance(target, ast.Name)
-                }:
+                if allowed & {target.id for target in written if isinstance(target, ast.Name)}:
                     exempt.update(id(inner) for inner in ast.walk(value))
 
             for node in ast.walk(tree):
@@ -5601,19 +5465,14 @@ class TestNoModuleHardCodesASourceOrder:
                     f"{module}:{name} surfaced {sorted(reported)}; dropping one "
                     "exemption should surface exactly that constant's literal"
                 )
-                surfaced[f"{module}:{name}"] = frozenset(
-                    f"{module}:{literal}" for literal in reported
-                )
+                surfaced[f"{module}:{name}"] = frozenset(f"{module}:{literal}" for literal in reported)
 
         assert len(set(surfaced.values())) == len(surfaced), (
-            "two exemptions surface the same literal, so neither is pinned by "
-            f"itself: {surfaced}"
+            f"two exemptions surface the same literal, so neither is pinned by itself: {surfaced}"
         )
 
 
-def _source_named(
-    element: ast.expr, names: set[str], members: set[str]
-) -> str | None:
+def _source_named(element: ast.expr, names: set[str], members: set[str]) -> str | None:
     """The source this element names, in any spelling, or None.
 
     **The receiver is deliberately not checked.** Requiring
@@ -5686,7 +5545,7 @@ def _source_named(
 
 
 class TestEveryOutboundEntryPointTakesTheProviderList:
-    """"Off means not asked" holds by signature, not by discipline.
+    """ "Off means not asked" holds by signature, not by discipline.
 
     **A required parameter rather than a rule somebody remembers.** Every public
     coroutine in `metadata.py` reaches a catalogue, and each takes the provider
@@ -5736,14 +5595,9 @@ class TestEveryOutboundEntryPointTakesTheProviderList:
         """
         tree = ast.parse((BACKEND / "metadata.py").read_text())
         return {
-            node.name: {
-                argument.arg
-                for argument in ast.walk(node.args)
-                if isinstance(argument, ast.arg)
-            }
+            node.name: {argument.arg for argument in ast.walk(node.args) if isinstance(argument, ast.arg)}
             for node in tree.body
-            if isinstance(node, ast.AsyncFunctionDef)
-            and not node.name.startswith("_")
+            if isinstance(node, ast.AsyncFunctionDef) and not node.name.startswith("_")
         }
 
     def test_every_public_entry_point_takes_a_plan(self):
@@ -5752,9 +5606,7 @@ class TestEveryOutboundEntryPointTakesTheProviderList:
             for name, arguments in self._public_coroutines().items()
             if not {"plan", "access"} & arguments
         }
-        assert missing == set(), (
-            f"these reach a catalogue with no provider list: {sorted(missing)}"
-        )
+        assert missing == set(), f"these reach a catalogue with no provider list: {sorted(missing)}"
 
     def test_the_doors_are_the_ones_this_rule_was_written_against(self):
         """A door removed or renamed is a finding, not a quieter pass."""
@@ -5789,9 +5641,7 @@ class TestEveryOutboundEntryPointTakesTheProviderList:
 #: two against `dir(str)`. A predicate CPython adds fails that test rather than
 #: falling through the gap this one fell through, and a name deleted from here
 #: fails it too.
-_ALPHANUMERIC_PREDICATES: Final = frozenset(
-    {"isalnum", "isdecimal", "isdigit", "isnumeric"}
-)
+_ALPHANUMERIC_PREDICATES: Final = frozenset({"isalnum", "isdecimal", "isdigit", "isnumeric"})
 
 #: Every other `str` predicate whose name begins `is`, mapped to the reason this
 #: rule is not about it.
@@ -5954,12 +5804,9 @@ class TestAnAlphanumericPredicateIsAlwaysNarrowedToAscii:
                 current: ast.AST | None = node
                 while current is not None and not narrowed:
                     parent = parents.get(current)
-                    if isinstance(parent, ast.BoolOp) and isinstance(
-                        parent.op, ast.And
-                    ):
+                    if isinstance(parent, ast.BoolOp) and isinstance(parent.op, ast.And):
                         narrowed = any(
-                            operand is not current
-                            and receiver in _isascii_receivers(operand)
+                            operand is not current and receiver in _isascii_receivers(operand)
                             for operand in parent.values
                         )
                     current = parent
@@ -6013,9 +5860,7 @@ class TestAnAlphanumericPredicateIsAlwaysNarrowedToAscii:
             ),
         ],
     )
-    def test_the_rule_sees_every_way_of_getting_it_wrong(
-        self, tmp_path: Path, shape: str, source: str
-    ):
+    def test_the_rule_sees_every_way_of_getting_it_wrong(self, tmp_path: Path, shape: str, source: str):
         """One shape per case, so a shape that stops being reported names itself."""
         fixture = tmp_path / "offender.py"
         fixture.write_text(source + "\n")
@@ -6048,13 +5893,13 @@ class TestAnAlphanumericPredicateIsAlwaysNarrowedToAscii:
             ),
         ],
     )
-    def test_the_rule_leaves_the_correct_shape_alone(
-        self, tmp_path: Path, shape: str, source: str
-    ):
+    def test_the_rule_leaves_the_correct_shape_alone(self, tmp_path: Path, shape: str, source: str):
         """The other half of the diagonal: it must not report everything."""
         fixture = tmp_path / "innocent.py"
         fixture.write_text(source + "\n")
         assert self._offenders([fixture]) == [], f"{shape} is reported and should not be"
+
+
 class TestOneReaderPerAmbiguousSubfield:
     """`$2` means a vocabulary on a subject field and a Dewey edition on `082`.
 
@@ -6178,11 +6023,7 @@ class TestOneReaderPerAmbiguousSubfield:
                 continue
             owned = set(ast.walk(parent))
             in_a_function |= owned
-            if any(
-                cls._spells_the_code(node)
-                for node in owned
-                if node not in docstrings
-            ):
+            if any(cls._spells_the_code(node) for node in owned if node not in docstrings):
                 found.append((where, parent.name))
         if any(
             cls._spells_the_code(node)
@@ -6195,9 +6036,7 @@ class TestOneReaderPerAmbiguousSubfield:
     def test_only_the_two_named_sites_spell_the_subfield_code(self):
         found: list[tuple[str, str]] = []
         for path in application_modules():
-            found += self._sites_in(
-                path.read_text(), str(path.relative_to(BACKEND))
-            )
+            found += self._sites_in(path.read_text(), str(path.relative_to(BACKEND)))
 
         assert sorted(found) == sorted(self.SITES), sorted(found)
 
@@ -6210,7 +6049,7 @@ class TestOneReaderPerAmbiguousSubfield:
         """
         source = (
             'def _subject_vocabulary(e):\n    return e.get("2")\n\n\n'
-            'class _Reader:\n    def _subject_vocabulary(self, e):\n'
+            "class _Reader:\n    def _subject_vocabulary(self, e):\n"
             '        return e.get("2")\n'
         )
         found = self._sites_in(source, "metadata.py")
@@ -6230,9 +6069,7 @@ class TestOneReaderPerAmbiguousSubfield:
         """
         reader = 'def _subject_vocabulary(e):\n    return e.get("2")\n'
 
-        assert self._sites_in(reader, "metadata.py") != self._sites_in(
-            reader, "routers/metadata.py"
-        )
+        assert self._sites_in(reader, "metadata.py") != self._sites_in(reader, "routers/metadata.py")
 
     def test_the_stems_that_already_collide_are_still_only_these(self):
         """A count in prose does not recount itself, so this recounts it.
@@ -6307,30 +6144,19 @@ class TestOneReaderPerAmbiguousSubfield:
         two added are the two blind spots the enumerating version admitted to
         and this one closes: a name bound first, and a default argument.
         """
-        assert self._sites_in(spelling, "elsewhere.py") == [
-            ("elsewhere.py", "_sneak")
-        ]
+        assert self._sites_in(spelling, "elsewhere.py") == [("elsewhere.py", "_sneak")]
 
     def test_a_constant_outside_every_function_is_caught(self):
         """Both shapes: module level, and a class body with no function in it."""
-        assert self._sites_in('X = ENTRY.get("2")\n', "elsewhere.py") == [
-            ("elsewhere.py", "<module>")
-        ]
-        assert self._sites_in('class C:\n    CODE = "2"\n', "elsewhere.py") == [
-            ("elsewhere.py", "<module>")
-        ]
+        assert self._sites_in('X = ENTRY.get("2")\n', "elsewhere.py") == [("elsewhere.py", "<module>")]
+        assert self._sites_in('class C:\n    CODE = "2"\n', "elsewhere.py") == [("elsewhere.py", "<module>")]
 
     def test_prose_naming_the_subfield_is_not_a_site(self):
         """A rule that cannot be written down without tripping itself gets
         deleted rather than obeyed, so a docstring is not a site. This is the
         diagonal for the exemption: the same text as an expression **is**."""
-        assert (
-            self._sites_in('def _fine(e):\n    """$2 and e.get("2")."""\n', "x.py")
-            == []
-        )
-        assert self._sites_in('def _bad(e):\n    """d"""\n    "2"\n', "x.py") == [
-            ("x.py", "_bad")
-        ]
+        assert self._sites_in('def _fine(e):\n    """$2 and e.get("2")."""\n', "x.py") == []
+        assert self._sites_in('def _bad(e):\n    """d"""\n    "2"\n', "x.py") == [("x.py", "_bad")]
 
     def test_another_subfield_is_not_reported(self):
         """The diagonal: the rule is about this code and not about subfield
@@ -6486,9 +6312,7 @@ class TestEveryPythonFileCompilesWithoutAWarning:
             ]
             if failure is not None:
                 # `type(...)` rather than a literal, so a subclass names itself.
-                found.append(
-                    f"{_label(path)}:{failure.lineno}: {type(failure).__name__}: {failure.msg}"
-                )
+                found.append(f"{_label(path)}:{failure.lineno}: {type(failure).__name__}: {failure.msg}")
         return found
 
     def test_every_python_file_under_backend_compiles_clean(self) -> None:
@@ -6562,9 +6386,7 @@ class TestEveryPythonFileCompilesWithoutAWarning:
         fixture.write_text(source)
         offences = self._offences([fixture])
         assert len(offences) == 1, f"{shape} gave {offences}"
-        assert offences[0].startswith(f"offender.py:{line}: {category}: "), (
-            f"{shape} gave {offences[0]}"
-        )
+        assert offences[0].startswith(f"offender.py:{line}: {category}: "), f"{shape} gave {offences[0]}"
 
     @pytest.mark.parametrize(
         ("shape", "source"),
@@ -6577,9 +6399,7 @@ class TestEveryPythonFileCompilesWithoutAWarning:
             ("equality against a literal", 'def f(x):\n    return x == "book"\n'),
         ],
     )
-    def test_the_rule_leaves_the_correct_shape_alone(
-        self, tmp_path: Path, shape: str, source: str
-    ) -> None:
+    def test_the_rule_leaves_the_correct_shape_alone(self, tmp_path: Path, shape: str, source: str) -> None:
         """The other half of the diagonal: it must not report everything. A rule
         that grepped for a backslash would pass the cases above and fail here."""
         fixture = tmp_path / "innocent.py"
@@ -6597,9 +6417,7 @@ class TestEveryPythonFileCompilesWithoutAWarning:
         assert offences[0].startswith("offender.py:1: SyntaxWarning: ")
         assert offences[1].startswith("offender.py:2: SyntaxWarning: ")
 
-    def test_a_null_byte_is_reported_with_no_line_rather_than_dropped(
-        self, tmp_path: Path
-    ) -> None:
+    def test_a_null_byte_is_reported_with_no_line_rather_than_dropped(self, tmp_path: Path) -> None:
         """The one offence that names no line, pinned so the docstring's
         exception stays true. CPython raises this `SyntaxError` with `lineno`
         unset, and `None` in the report is better than a file nobody checked."""
@@ -6620,8 +6438,6 @@ class TestEveryPythonFileCompilesWithoutAWarning:
         assert self._offences([fixture]) == []
         with pytest.raises(UnicodeDecodeError):
             fixture.read_text(encoding="utf-8")
-
-
 
 
 def _floor_from_a_constructed_parse(root: Path, scratch: Path) -> set[Path]:
@@ -6659,10 +6475,7 @@ def _floor_from_a_constructed_parse(root: Path, scratch: Path) -> set[Path]:
     which is what the two arms below do: a floor that cannot be driven over a
     fixture is on the measured once rung, whatever its docstring says.
     """
-    region = {
-        path.relative_to(root)
-        for path in [*root.glob("*.md"), *root.glob("docs/*.md")]
-    }
+    region = {path.relative_to(root) for path in [*root.glob("*.md"), *root.glob("docs/*.md")]}
     one_line = scratch / "one-line" / ".gitignore"
     one_line.parent.mkdir(parents=True, exist_ok=True)
     excluded: set[Path] = set()
@@ -6676,9 +6489,7 @@ def _floor_from_a_constructed_parse(root: Path, scratch: Path) -> set[Path]:
             continue
         for member in region:
             names_a_directory = any(
-                is_ignored(parent, parsed, is_dir=True)
-                for parent in member.parents
-                if parent != Path(".")
+                is_ignored(parent, parsed, is_dir=True) for parent in member.parents if parent != Path(".")
             )
             if is_ignored(member, parsed, is_dir=False) and not names_a_directory:
                 excluded.add(member)
@@ -6725,9 +6536,7 @@ class TestEveryMarkdownFileHasBalancedCodeFences:
         odd = {name: n for name, n in counts.items() if n % 2}
         assert odd == {}, f"{odd}, of {len(counts)} files walked"
 
-    def test_the_walk_never_narrows_below_the_globs_it_replaced(
-        self, tmp_path: Path
-    ) -> None:
+    def test_the_walk_never_narrows_below_the_globs_it_replaced(self, tmp_path: Path) -> None:
         """Anti vacuity, as a ratchet. A walk that returned nothing would pass
         the rule above in silence, which is the shape this repository calls an
         instrument that cannot see the failure reporting its absence, and the
@@ -6775,9 +6584,7 @@ class TestEveryMarkdownFileHasBalancedCodeFences:
         assert Path("CHANGELOG.md") in walked
         assert Path("docs/decisions.md") in walked
 
-    def test_the_floor_is_the_parse_this_arm_builds_and_not_the_one_under_test(
-        self, tmp_path: Path
-    ) -> None:
+    def test_the_floor_is_the_parse_this_arm_builds_and_not_the_one_under_test(self, tmp_path: Path) -> None:
         """The one shape where the two floors differ, so the construction is
         observed rather than asserted.
 
@@ -6794,10 +6601,7 @@ class TestEveryMarkdownFileHasBalancedCodeFences:
         (root / "CHANGELOG.md").write_text("# a register\n", encoding="utf-8")
         (root / "docs" / "decisions.md").write_text("# the other one\n", encoding="utf-8")
 
-        region = {
-            path.relative_to(root)
-            for path in [*root.glob("*.md"), *root.glob("docs/*.md")]
-        }
+        region = {path.relative_to(root) for path in [*root.glob("*.md"), *root.glob("docs/*.md")]}
         constructed = _floor_from_a_constructed_parse(root, tmp_path / "scratch")
         shared = {
             member
@@ -6818,9 +6622,7 @@ class TestEveryMarkdownFileHasBalancedCodeFences:
             "this arm has stopped showing the two apart"
         )
 
-    def test_a_file_shaped_glob_the_walk_honours_does_not_move_the_floor(
-        self, tmp_path: Path
-    ) -> None:
+    def test_a_file_shaped_glob_the_walk_honours_does_not_move_the_floor(self, tmp_path: Path) -> None:
         """The false refusal the first version of that construction had.
 
         Selecting the floor's lines by the spelling `.md` dropped `notes-*`, an
@@ -6842,9 +6644,7 @@ class TestEveryMarkdownFileHasBalancedCodeFences:
         assert floor == {Path("CHANGELOG.md")}, sorted(str(p) for p in floor)
         assert floor <= walked, sorted(str(p) for p in floor - walked)
 
-    def test_a_file_the_repository_does_not_version_is_not_walked(
-        self, tmp_path: Path
-    ) -> None:
+    def test_a_file_the_repository_does_not_version_is_not_walked(self, tmp_path: Path) -> None:
         """The gate exports a committed ref, so an ignored file cannot be
         published and has no business in a rule about published documents.
 
@@ -6859,9 +6659,7 @@ class TestEveryMarkdownFileHasBalancedCodeFences:
         # a published file may not point at a stripped path: the literal passes
         # today only because the escape before it sits inside the gate's own
         # character class, which one reformat would undo.
-        (tmp_path / ".gitignore").write_text(
-            "/public/\nnotes/\nnode_modules/\nscratch.md\n"
-        )
+        (tmp_path / ".gitignore").write_text("/public/\nnotes/\nnode_modules/\nscratch.md\n")
         (tmp_path / "docs").mkdir()
         (tmp_path / "docs" / "real.md").write_text("# real\n")
         (tmp_path / "public" / "docs").mkdir(parents=True)
@@ -6881,9 +6679,7 @@ class TestEveryMarkdownFileHasBalancedCodeFences:
         walked = {str(path.relative_to(tmp_path)) for path in markdown_files(tmp_path)}
         assert walked == {"docs/real.md"}
 
-    def test_a_directory_only_rule_does_not_drop_a_versioned_file_of_that_name(
-        self, tmp_path: Path
-    ) -> None:
+    def test_a_directory_only_rule_does_not_drop_a_versioned_file_of_that_name(self, tmp_path: Path) -> None:
         """git's trailing slash says directory, and throwing it away hides a
         **file** of that name as well: `data/` is an unanchored directory only
         entry in this repository's own ignore file, and a versioned file called
@@ -6905,9 +6701,7 @@ class TestEveryMarkdownFileHasBalancedCodeFences:
         walked = {str(path.relative_to(tmp_path)) for path in markdown_files(tmp_path)}
         assert walked == {"docs/notes.md"}
 
-    def test_an_anchored_directory_only_rule_spares_a_file_at_that_path(
-        self, tmp_path: Path
-    ) -> None:
+    def test_an_anchored_directory_only_rule_spares_a_file_at_that_path(self, tmp_path: Path) -> None:
         """The marker has two branches and the arm above reaches one. Discarding
         it in the anchored branch survives that arm, and the anchored directory
         only entries here include the backend data directory and the agent
@@ -6925,9 +6719,7 @@ class TestEveryMarkdownFileHasBalancedCodeFences:
         walked = {str(path.relative_to(tmp_path)) for path in markdown_files(tmp_path)}
         assert walked == {"build/out.md", "docs/real.md"}
 
-    def test_an_anchored_rule_stops_at_the_separator_rather_than_the_prefix(
-        self, tmp_path: Path
-    ) -> None:
+    def test_an_anchored_rule_stops_at_the_separator_rather_than_the_prefix(self, tmp_path: Path) -> None:
         """Written `startswith(pattern)` the anchored arm takes every sibling
         whose name begins with the same characters, and it drops them **from the
         walk**, silently. `backend/data` is an anchored entry in this
@@ -6975,9 +6767,7 @@ class TestEveryMarkdownFileHasBalancedCodeFences:
             ("/*", "a bare `*`"),
         ],
     )
-    def test_an_ignore_form_this_cannot_honour_is_refused(
-        self, tmp_path: Path, form: str, term: str
-    ) -> None:
+    def test_an_ignore_form_this_cannot_honour_is_refused(self, tmp_path: Path, form: str, term: str) -> None:
         """Under-excluding walks something extra and says so; over-excluding
         drops a versioned file in silence. These are the forms that would do the
         second, so they raise rather than being approximated.
@@ -7082,9 +6872,7 @@ class TestEveryMarkdownFileHasBalancedCodeFences:
         patterns = ignore_patterns(tmp_path / ".gitignore", refuse_empty=True)
         assert is_ignored(Path(f"{chr(0xE9)}.md"), patterns, is_dir=False) is ignored
 
-    def test_a_byte_order_mark_does_not_disarm_the_entry_behind_it(
-        self, tmp_path: Path
-    ) -> None:
+    def test_a_byte_order_mark_does_not_disarm_the_entry_behind_it(self, tmp_path: Path) -> None:
         """Read as plain `utf-8` the mark stays on the text, so the first entry
         becomes a pattern beginning with a character no path holds. It matches
         nothing, it is still counted, so the parse is non-empty and the empty
@@ -7100,17 +6888,14 @@ class TestEveryMarkdownFileHasBalancedCodeFences:
         ignore_file = tmp_path / ".gitignore"
         ignore_file.write_bytes("\ufeffnotes/\nkept.md\n".encode())
         assert ignore_file.read_bytes().startswith(b"\xef\xbb\xbf"), (
-            "the fixture no longer carries a byte order mark, so it no longer "
-            "tells the two encodings apart"
+            "the fixture no longer carries a byte order mark, so it no longer tells the two encodings apart"
         )
         assert ignore_patterns(ignore_file, refuse_empty=True) == [
             ("notes", False, True),
             ("kept.md", False, False),
         ]
 
-    def test_an_anchored_entry_loses_its_marker_characters_and_keeps_its_anchor(
-        self, tmp_path: Path
-    ) -> None:
+    def test_an_anchored_entry_loses_its_marker_characters_and_keeps_its_anchor(self, tmp_path: Path) -> None:
         """The parse's own output, compared against a value rather than fed back
         into the matcher.
 
@@ -7154,16 +6939,12 @@ class TestEveryMarkdownFileHasBalancedCodeFences:
         for node in module.body:
             if not isinstance(node, ast.FunctionDef) or node.name.startswith("_"):
                 continue
-            checked[node.name] = sorted(
-                argument.arg for argument in node.args.kwonlyargs
-            )
+            checked[node.name] = sorted(argument.arg for argument in node.args.kwonlyargs)
             assert not node.args.defaults, (
-                f"{node.name} carries a default, so a call site can leave the "
-                "answer to it"
+                f"{node.name} carries a default, so a call site can leave the answer to it"
             )
             assert not any(node.args.kw_defaults), (
-                f"{node.name} carries a default, so a call site can leave the "
-                "answer to it"
+                f"{node.name} carries a default, so a call site can leave the answer to it"
             )
         assert checked == {
             "ignore_patterns": ["refuse_empty"],
@@ -7187,9 +6968,7 @@ class TestEveryMarkdownFileHasBalancedCodeFences:
         fixture.write_text("- item\n\n   ```\n   ls\n   ```\n\n```\nx\n```\n")
         assert len(_fence_lines(fixture.read_text(encoding="utf-8"))) == 4
 
-    def test_four_spaces_is_an_indented_code_block_rather_than_a_fence(
-        self, tmp_path: Path
-    ) -> None:
+    def test_four_spaces_is_an_indented_code_block_rather_than_a_fence(self, tmp_path: Path) -> None:
         """The other edge of the same rule: at four spaces the backticks are
         content, so counting them would report a false odd."""
         fixture = tmp_path / "indented.md"
@@ -7238,19 +7017,15 @@ class TestAOneTimeCodeIsServedOnlyWhereItIsNamed:
         unreadable: list[str] = []
         for name, model in models.items():
             try:
-                schemas = [
-                    model.model_json_schema(mode=mode)
-                    for mode in ("validation", "serialization")
-                ]
+                schemas = [model.model_json_schema(mode=mode) for mode in ("validation", "serialization")]
             except Exception as error:  # noqa: BLE001  reported, never skipped
                 unreadable.append(f"{name}: {type(error).__name__}: {error}")
                 continue
             if any(self._serves_a_code(schema) for schema in schemas):
                 carriers.add(name)
 
-        assert not unreadable, (
-            "These models could not be asked what they put on the wire:\n  "
-            + "\n  ".join(sorted(unreadable))
+        assert not unreadable, "These models could not be asked what they put on the wire:\n  " + "\n  ".join(
+            sorted(unreadable)
         )
         offenders = sorted(carriers - set(self.CODE_MODELS))
         assert not offenders, (
@@ -7328,9 +7103,7 @@ def _loan_names(tree: ast.Module) -> set[str]:
             isinstance(value, ast.Attribute) and value.attr == "Loan"
         )
         names |= {
-            target.id
-            for target in _assignment_targets(node)
-            if isinstance(target, ast.Name) and means_loan
+            target.id for target in _assignment_targets(node) if isinstance(target, ast.Name) and means_loan
         }
     return names
 
@@ -7407,11 +7180,7 @@ def _issuers(source: str) -> list[str]:
             # **render** it (`LoanOut(loaned_by_user_id=loan.loaned_by_user_id)`),
             # and reading that as a write would put a read into a set this arm
             # pins to one expression.
-            bound = [
-                keyword.value
-                for keyword in node.keywords
-                if keyword.arg == "loaned_by_user_id"
-            ]
+            bound = [keyword.value for keyword in node.keywords if keyword.arg == "loaned_by_user_id"]
             found += [ast.unparse(value) for value in bound] or ["<omitted>"]
         if isinstance(node, ast.Assign | ast.AugAssign | ast.AnnAssign):
             value = node.value
@@ -7533,11 +7302,7 @@ class TestOneInstanceIssuesALoan:
         client outbox does by default. Nothing about the shape of such a
         feature makes it look wrong at review; this is what makes it red.
         """
-        found = {
-            source_of
-            for _, source in application_sources().items()
-            for source_of in _issuers(source)
-        }
+        found = {source_of for _, source in application_sources().items() for source_of in _issuers(source)}
         assert found == {"current_user.id"}, (
             f"These decide who lent a book: {sorted(found)}. Only the member "
             "this instance resolved from the session may be the issuer: a "
@@ -7550,9 +7315,7 @@ class TestOneInstanceIssuesALoan:
         """Anti vacuity. Both equalities above are satisfied by a resolver that
         finds nothing, which is what a rename of the model would produce."""
         found = [
-            (name, kind)
-            for name, source in application_sources().items()
-            for kind, _ in _loan_writes(source)
+            (name, kind) for name, source in application_sources().items() for kind, _ in _loan_writes(source)
         ]
         assert len(found) >= 5
         assert {name for name, _ in found} >= {"routers/loans.py"}
@@ -7634,8 +7397,7 @@ class TestOneInstanceIssuesALoan:
         declaring = {
             subclass.__name__
             for subclass in seen
-            if subclass.__module__.startswith("schemas")
-            and "loaned_by_user_id" in subclass.model_fields
+            if subclass.__module__.startswith("schemas") and "loaned_by_user_id" in subclass.model_fields
         }
         assert declaring == {"LoanOut"}, (
             f"{sorted(declaring)} declare who issued a loan. `LoanOut` is a "
@@ -7710,9 +7472,7 @@ class TestEverySchemeCheckListsItsOwnEnum:
     #: is `scheme`, over `Base.metadata`. The lookbehind changes nothing that
     #: exists, a clause at position 0 included, because a lookbehind there
     #: succeeds.
-    AN_IN_LIST = re.compile(
-        r"(?<![A-Za-z0-9_])scheme\s+IN\s*\(([^)]*)\)", re.IGNORECASE
-    )
+    AN_IN_LIST = re.compile(r"(?<![A-Za-z0-9_])scheme\s+IN\s*\(([^)]*)\)", re.IGNORECASE)
 
     @staticmethod
     def _enum_on(table_name: str, column_name: str = "scheme") -> type[StrEnum] | None:
@@ -7844,19 +7604,14 @@ class TestEverySchemeCheckListsItsOwnEnum:
         wrong = [
             found
             for table_name, constraint in self._scheme_checks()
-            if (
-                found := self._disagreement(
-                    table_name, str(constraint.sqltext), str(constraint.name)
-                )
-            )
+            if (found := self._disagreement(table_name, str(constraint.sqltext), str(constraint.name)))
             is not None
         ]
 
         assert not wrong, (
             "A scheme constraint does not list the enum its own column is typed "
             "as. A value the application accepts and the database rejects "
-            "arrives as an IntegrityError on somebody's first write:\n  "
-            + "\n  ".join(wrong)
+            "arrives as an IntegrityError on somebody's first write:\n  " + "\n  ".join(wrong)
         )
 
     def test_the_guard_would_notice_the_wrong_enum(self):
@@ -7960,20 +7715,13 @@ class TestEverySchemeCheckListsItsOwnEnum:
         # Both spellings, because the rule has to be one rule: the shallow walk
         # resolved the first and answered `None` for the second.
         assert _enum_types(Mapped[BookIdentifierScheme]) == [BookIdentifierScheme]
-        assert _enum_types(Mapped[BookIdentifierScheme | None]) == [
-            BookIdentifierScheme
-        ]
+        assert _enum_types(Mapped[BookIdentifierScheme | None]) == [BookIdentifierScheme]
 
     def test_the_guard_would_notice_a_column_it_cannot_read_an_enum_off(self):
         """The other hole the first version had: a table this rule cannot pair
         with an enum has to be **reported**, never passed over, because
         unguarded and silent is the failure the whole file exists to prevent."""
-        assert (
-            self._disagreement(
-                "books", "scheme IN ('asin')", "ck_books_scheme"
-            )
-            is not None
-        )
+        assert self._disagreement("books", "scheme IN ('asin')", "ck_books_scheme") is not None
 
 
 class TestEveryTextCeilingBindsOnBytesToo:
@@ -8275,9 +8023,7 @@ class TestEveryTextCeilingBindsOnBytesToo:
     #: **There is no third answer here and the default is the safe one**: a
     #: conjunct this cannot read is not a confinement, so the ceiling is
     #: reported, wanting the byte arm.
-    AN_ASCII_CONFINEMENT: Final = re.compile(
-        r"^(\w+) NOT GLOB '\*\[\^([^'\[\]]+)\]\*'$", re.IGNORECASE
-    )
+    AN_ASCII_CONFINEMENT: Final = re.compile(r"^(\w+) NOT GLOB '\*\[\^([^'\[\]]+)\]\*'$", re.IGNORECASE)
 
     @classmethod
     def _confined_to_single_bytes(cls, column: str, conjuncts: list[str]) -> bool:
@@ -8298,12 +8044,8 @@ class TestEveryTextCeilingBindsOnBytesToo:
         constraints: dict[str, str] = {}
         for table in Base.metadata.tables.values():
             for constraint in table.constraints:
-                if isinstance(constraint, CheckConstraint) and isinstance(
-                    constraint.name, str
-                ):
-                    constraints[constraint.name] = " ".join(
-                        str(constraint.sqltext).split()
-                    )
+                if isinstance(constraint, CheckConstraint) and isinstance(constraint.name, str):
+                    constraints[constraint.name] = " ".join(str(constraint.sqltext).split())
         return constraints
 
     @classmethod
@@ -8319,8 +8061,7 @@ class TestEveryTextCeilingBindsOnBytesToo:
         declared = cls._canonical(raw)
         ceilings, unreadable = cls._ceilings(declared)
         offences = [
-            f"{name}: this rule cannot read `{one}`, so it is skipping a "
-            "bound rather than clearing it"
+            f"{name}: this rule cannot read `{one}`, so it is skipping a bound rather than clearing it"
             for one in unreadable
         ]
         if ceilings and cls._has_a_top_level_or(declared):
@@ -8352,9 +8093,7 @@ class TestEveryTextCeilingBindsOnBytesToo:
             wanted = cls._wanted(columns, ceiling)
             if re.search(f"{re.escape(wanted)}(?!\\d)", declared):
                 continue
-            offences.append(
-                f"{name}: a ceiling of {ceiling} on {columns} wants `{wanted}`"
-            )
+            offences.append(f"{name}: a ceiling of {ceiling} on {columns} wants `{wanted}`")
         return offences
 
     #: One constraint's text, and whether this rule must object to it.
@@ -8369,8 +8108,7 @@ class TestEveryTextCeilingBindsOnBytesToo:
         # own it clears nothing.
         ("length(text) <= 500 AND instr(text, char(0)) = 0", True),
         (
-            "length(text) <= 500 AND instr(text, char(0)) = 0 "
-            "AND text NOT GLOB '*[^a-z0-9_-]*'",
+            "length(text) <= 500 AND instr(text, char(0)) = 0 AND text NOT GLOB '*[^a-z0-9_-]*'",
             False,
         ),
         # The charset rule without the NUL clause: `GLOB` stops at the first
@@ -8379,48 +8117,41 @@ class TestEveryTextCeilingBindsOnBytesToo:
         # A class naming one character wider than ASCII admits one, and the
         # bytes stop equalling the characters.
         (
-            "length(text) <= 500 AND instr(text, char(0)) = 0 "
-            "AND text NOT GLOB '*[^a-z\u00e4]*'",
+            "length(text) <= 500 AND instr(text, char(0)) = 0 AND text NOT GLOB '*[^a-z\u00e4]*'",
             True,
         ),
         # Anchored at the start, so it is a rule about the first character
         # rather than about every one.
         (
-            "length(text) <= 500 AND instr(text, char(0)) = 0 "
-            "AND text NOT GLOB '[^a-z]*'",
+            "length(text) <= 500 AND instr(text, char(0)) = 0 AND text NOT GLOB '[^a-z]*'",
             True,
         ),
         # Inside a disjunction, so it binds on some rows and clears none.
         (
-            "length(text) <= 500 AND instr(text, char(0)) = 0 "
-            "AND (page IS NULL OR text NOT GLOB '*[^a-z]*')",
+            "length(text) <= 500 AND instr(text, char(0)) = 0 AND (page IS NULL OR text NOT GLOB '*[^a-z]*')",
             True,
         ),
         # Two classes with pattern between them, which a greedy body read as
         # one class. Measured on the engine: one counted character at 1,001
         # bytes satisfies it, so it confines nothing.
         (
-            "length(text) <= 500 AND instr(text, char(0)) = 0 "
-            "AND text NOT GLOB '*[^a-z]x[^a-z]*'",
+            "length(text) <= 500 AND instr(text, char(0)) = 0 AND text NOT GLOB '*[^a-z]x[^a-z]*'",
             True,
         ),
         # A positive rule admits what it matches rather than what it names, so
         # the class says nothing about what the column may hold.
         (
-            "length(text) <= 500 AND instr(text, char(0)) = 0 "
-            "AND text GLOB '*[^a-z]*'",
+            "length(text) <= 500 AND instr(text, char(0)) = 0 AND text GLOB '*[^a-z]*'",
             True,
         ),
         # A confinement on some other column.
         (
-            "length(text) <= 500 AND instr(text, char(0)) = 0 "
-            "AND other NOT GLOB '*[^a-z]*'",
+            "length(text) <= 500 AND instr(text, char(0)) = 0 AND other NOT GLOB '*[^a-z]*'",
             True,
         ),
         # Anchored at the end, so it is a rule about the last character.
         (
-            "length(text) <= 500 AND instr(text, char(0)) = 0 "
-            "AND text NOT GLOB '*[^a-z]'",
+            "length(text) <= 500 AND instr(text, char(0)) = 0 AND text NOT GLOB '*[^a-z]'",
             True,
         ),
         # There is no empty class in GLOB: a `]` straight after the `^` is a
@@ -8428,8 +8159,7 @@ class TestEveryTextCeilingBindsOnBytesToo:
         # matches nothing and the refusal admits every value. Either way this
         # is not a confinement, and the reader must not take it for one.
         (
-            "length(text) <= 500 AND instr(text, char(0)) = 0 "
-            "AND text NOT GLOB '*[^]*'",
+            "length(text) <= 500 AND instr(text, char(0)) = 0 AND text NOT GLOB '*[^]*'",
             True,
         ),
         # A bound on a **pair** wants both halves confined, the shape
@@ -8467,9 +8197,7 @@ class TestEveryTextCeilingBindsOnBytesToo:
     )
 
     @pytest.mark.parametrize(("declared", "objects"), CLEARANCES)
-    def test_what_clears_a_ceiling_and_what_only_looks_like_it(
-        self, declared: str, objects: bool
-    ) -> None:
+    def test_what_clears_a_ceiling_and_what_only_looks_like_it(self, declared: str, objects: bool) -> None:
         """The two clearing branches, driven against text.
 
         A ceiling cleared by a **byte arm** has a behavioural backstop, since
@@ -8495,15 +8223,9 @@ class TestEveryTextCeilingBindsOnBytesToo:
         person too.
         """
         conditional = {
-            name
-            for name, raw in self._declared().items()
-            if self._has_a_top_level_or(self._canonical(raw))
+            name for name, raw in self._declared().items() if self._has_a_top_level_or(self._canonical(raw))
         }
-        both = {
-            name
-            for name in conditional
-            if self._ceilings(self._canonical(self._declared()[name]))[0]
-        }
+        both = {name for name in conditional if self._ceilings(self._canonical(self._declared()[name]))[0]}
 
         # Anti vacuity, and deliberately not a count. `both` is empty both when
         # the rule holds and when `_has_a_top_level_or` has stopped detecting
@@ -8545,9 +8267,7 @@ class TestEveryTextCeilingBindsOnBytesToo:
 
     def test_every_character_ceiling_binds_on_bytes(self) -> None:
         offences = {
-            name: found
-            for name, raw in self._declared().items()
-            if (found := self._offences(name, raw))
+            name: found for name, raw in self._declared().items() if (found := self._offences(name, raw))
         }
 
         assert offences == self.STILL_OPEN, (
@@ -8578,8 +8298,7 @@ class TestEveryTextCeilingBindsOnBytesToo:
 
         try:
             counted, stored, nul = connection.execute(
-                f"SELECT length({value}), length(CAST({value} AS BLOB)), "
-                f"instr({value}, char(0))"
+                f"SELECT length({value}), length(CAST({value} AS BLOB)), instr({value}, char(0))"
             ).fetchone()
         finally:
             connection.close()
@@ -8663,9 +8382,7 @@ class TestEveryTextCeilingBindsOnBytesToo:
     )
 
     @pytest.mark.parametrize(("spelling", "expected"), SPELLINGS)
-    def test_the_rule_reads_every_spelling_of_a_bound(
-        self, spelling: str, expected: object
-    ) -> None:
+    def test_the_rule_reads_every_spelling_of_a_bound(self, spelling: str, expected: object) -> None:
         """The diagonal, against constraint text this builds.
 
         **Against constructed text, because against this tree it is vacuous.**
@@ -8702,16 +8419,10 @@ class TestEveryTextCeilingBindsOnBytesToo:
         The floor is what the tree holds today and is a lower bound rather than a
         census, so adding a ceiling never fails this.
         """
-        ceilings = [
-            one
-            for declared in self._declared().values()
-            for one in self._ceilings(declared)[0]
-        ]
+        ceilings = [one for declared in self._declared().values() for one in self._ceilings(declared)[0]]
 
         assert len(ceilings) >= 9, ceilings
-        assert self._wanted(["a", "b"], 10) == (
-            "length(CAST(a AS BLOB)) + length(CAST(b AS BLOB)) <= 40"
-        )
+        assert self._wanted(["a", "b"], 10) == ("length(CAST(a AS BLOB)) + length(CAST(b AS BLOB)) <= 40")
 
 
 class TestEveryGlobRuleIsToldAboutTheNul:
@@ -8767,9 +8478,7 @@ class TestEveryGlobRuleIsToldAboutTheNul:
     #: captured `a*`, which ends in `*` and was exempted, while the real
     #: pattern ends in `b` and is exactly the shape a NUL can smuggle past.
     #: That was the one mis reading that erred towards clearing.
-    A_GLOB_CLAUSE: Final = re.compile(
-        r"(\w+)\s+(NOT\s+)?GLOB\s+'((?:[^']|'')*)'", re.IGNORECASE
-    )
+    A_GLOB_CLAUSE: Final = re.compile(r"(\w+)\s+(NOT\s+)?GLOB\s+'((?:[^']|'')*)'", re.IGNORECASE)
 
     #: The word itself, which is how many clauses there are to read.
     THE_WORD: Final = re.compile(r"\bGLOB\b", re.IGNORECASE)
@@ -8855,9 +8564,7 @@ class TestEveryGlobRuleIsToldAboutTheNul:
     )
 
     @pytest.mark.parametrize(("declared", "objects"), CLAUSES)
-    def test_what_a_glob_rule_needs_beside_it(
-        self, declared: str, objects: bool
-    ) -> None:
+    def test_what_a_glob_rule_needs_beside_it(self, declared: str, objects: bool) -> None:
         """Both answers and the third one, against text this builds.
 
         Over `Base.metadata` every constraint passes, so a branch that exempted
@@ -8893,8 +8600,7 @@ class TestEveryGlobRuleIsToldAboutTheNul:
 
         assert not offenders, (
             "SQLite's GLOB stops at the first NUL, so these claim something "
-            "about a value that a Core insert can make false past the NUL: "
-            + "; ".join(offenders)
+            "about a value that a Core insert can make false past the NUL: " + "; ".join(offenders)
         )
 
     def test_a_smuggled_suffix_satisfies_a_charset_rule(self) -> None:
@@ -8911,8 +8617,7 @@ class TestEveryGlobRuleIsToldAboutTheNul:
 
         try:
             passes, counted, stored = connection.execute(
-                f"SELECT {value} NOT GLOB '*[^a-z0-9_-]*', length({value}), "
-                f"length(CAST({value} AS BLOB))"
+                f"SELECT {value} NOT GLOB '*[^a-z0-9_-]*', length({value}), length(CAST({value} AS BLOB))"
             ).fetchone()
         finally:
             connection.close()
@@ -8957,26 +8662,17 @@ class TestEveryTableIsInTheDataModelDocument:
     #: A paragraph opening with a bold run that is one table's name, or two
     #: joined, and nothing else. The trailing full stop is optional because two
     #: of the twenty one sections are written without it.
-    AN_OPENER = re.compile(
-        r"^\*\*(`[a-z_]+`(?: and `[a-z_]+`)*)\.?\*\*", re.MULTILINE
-    )
+    AN_OPENER = re.compile(r"^\*\*(`[a-z_]+`(?: and `[a-z_]+`)*)\.?\*\*", re.MULTILINE)
 
     @classmethod
     def _documented(cls, prose: str) -> set[str]:
-        return {
-            name
-            for run in cls.AN_OPENER.findall(prose)
-            for name in re.findall(r"`([a-z_]+)`", run)
-        }
+        return {name for run in cls.AN_OPENER.findall(prose) for name in re.findall(r"`([a-z_]+)`", run)}
 
     def test_every_table_has_a_section(self) -> None:
-        undocumented = sorted(
-            set(Base.metadata.tables) - self._documented(self.DOCUMENT.read_text())
-        )
+        undocumented = sorted(set(Base.metadata.tables) - self._documented(self.DOCUMENT.read_text()))
 
         assert not undocumented, (
-            "these tables are in the schema and not in the document that "
-            f"describes it: {undocumented}"
+            f"these tables are in the schema and not in the document that describes it: {undocumented}"
         )
 
     def test_the_matcher_reads_an_opener_and_not_a_mention(self) -> None:
@@ -9020,9 +8716,7 @@ def _parses_json_itself(tree: ast.Module) -> list[str]:
         function = node.func
         if isinstance(function, ast.Attribute) and function.attr == "loads":
             owner = function.value
-            found.append(
-                f"{owner.id}.loads" if isinstance(owner, ast.Name) else "?.loads"
-            )
+            found.append(f"{owner.id}.loads" if isinstance(owner, ast.Name) else "?.loads")
         elif isinstance(function, ast.Name) and function.id == "loads":
             found.append("loads")
     return found
@@ -9381,21 +9075,15 @@ class TestEveryTextCeilingComesFromTheColumn:
         """
         offence = "username: str = Field(min_length=1, max_length=50)\n"
 
-        assert self._offenders([("planted.py", offence)]) == [
-            "planted.py: username bounds a bare 50"
-        ]
+        assert self._offenders([("planted.py", offence)]) == ["planted.py: username bounds a bare 50"]
         assert self._bare_ceilings(offence, set(self._book_widths())) == []
-        assert self._bare_ceilings(offence, self._column_names()) == [
-            "username bounds a bare 50"
-        ]
+        assert self._bare_ceilings(offence, self._column_names()) == ["username bounds a bare 50"]
 
     def test_every_deliberately_different_field_carries_a_reason(self) -> None:
         """Empty today. An exemption with an empty string beside it is an
         exemption nobody argued for, and `tests/schemas/test_public.py` pays a
         review round for this each time it is missing."""
-        assert [
-            field for field, reason in self.DELIBERATELY_DIFFERENT.items() if not reason
-        ] == []
+        assert [field for field, reason in self.DELIBERATELY_DIFFERENT.items() if not reason] == []
 
     def test_the_walk_finds_the_fields_it_is_meant_to(self) -> None:
         """A tripwire. A walk that imported nothing, or read `metadata` on a
@@ -9470,9 +9158,7 @@ class TestEveryTextCeilingComesFromTheColumn:
                 if not isinstance(call, ast.Call):
                     continue
                 for keyword in call.keywords:
-                    if keyword.arg == "max_length" and isinstance(
-                        keyword.value, ast.Constant
-                    ):
+                    if keyword.arg == "max_length" and isinstance(keyword.value, ast.Constant):
                         bare_aliases[target.id] = keyword.value.value
 
         found: list[str] = []
@@ -9499,16 +9185,11 @@ class TestEveryTextCeilingComesFromTheColumn:
                 continue
             for node in ast.walk(expression):
                 if isinstance(node, ast.Name) and node.id in bare_aliases:
-                    found.append(
-                        f"{name} bounds a bare {bare_aliases[node.id]!r} "
-                        f"through {node.id}"
-                    )
+                    found.append(f"{name} bounds a bare {bare_aliases[node.id]!r} through {node.id}")
                 if not isinstance(node, ast.Call):
                     continue
                 for keyword in node.keywords:
-                    if keyword.arg == "max_length" and isinstance(
-                        keyword.value, ast.Constant
-                    ):
+                    if keyword.arg == "max_length" and isinstance(keyword.value, ast.Constant):
                         found.append(f"{name} bounds a bare {keyword.value.value!r}")
         return found
 
@@ -9524,14 +9205,9 @@ class TestEveryTextCeilingComesFromTheColumn:
         the root is what distinguishes `opds.py` from `routers/opds.py` and
         `schemas/opds.py`, and it is what the report names.
         """
-        return [
-            (str(path.relative_to(BACKEND)), path.read_text())
-            for path in application_modules()
-        ]
+        return [(str(path.relative_to(BACKEND)), path.read_text()) for path in application_modules()]
 
-    def _offenders(
-        self, sources: Sequence[tuple[str, str]] | None = None
-    ) -> list[str]:
+    def _offenders(self, sources: Sequence[tuple[str, str]] | None = None) -> list[str]:
         """What the shipped rule reports, over the sources and the population it
         actually ships with.
 
@@ -9555,9 +9231,7 @@ class TestEveryTextCeilingComesFromTheColumn:
         names = self._column_names()
 
         return sorted(
-            f"{where}: {offender}"
-            for where, text in sources
-            for offender in self._bare_ceilings(text, names)
+            f"{where}: {offender}" for where, text in sources for offender in self._bare_ceilings(text, names)
         )
 
     def test_the_ceilings_are_the_named_constants_and_not_their_values(
@@ -9630,14 +9304,10 @@ class TestEveryTextCeilingComesFromTheColumn:
 
         field = "location: str | None = Field(default=None, max_length=120)\n"
         parameter = (
-            "def search(\n"
-            "    title: Annotated[str | None, Query(max_length=500)] = None,\n"
-            ") -> None: ...\n"
+            "def search(\n    title: Annotated[str | None, Query(max_length=500)] = None,\n) -> None: ...\n"
         )
 
-        annotated = (
-            "location: Annotated[str | None, Field(max_length=120)] = None\n"
-        )
+        annotated = "location: Annotated[str | None, Field(max_length=120)] = None\n"
         no_default = "location: Annotated[str, Field(max_length=120)]\n"
 
         assert self._bare_ceilings(field, names) == ["location bounds a bare 120"]
@@ -9646,22 +9316,15 @@ class TestEveryTextCeilingComesFromTheColumn:
         # assignment puts the bound in the annotation rather than the default,
         # which is the spelling `routers/books.py` already uses, and a field
         # with no default was skipped before its annotation was read at all.
-        assert self._bare_ceilings(annotated, names) == [
-            "location bounds a bare 120"
-        ]
-        assert self._bare_ceilings(no_default, names) == [
-            "location bounds a bare 120"
-        ]
+        assert self._bare_ceilings(annotated, names) == ["location bounds a bare 120"]
+        assert self._bare_ceilings(no_default, names) == ["location bounds a bare 120"]
 
         # The third shape, and the one two rounds of review walked past: the
         # bound is in an alias and the field names the alias.
         alias = (
-            "LocationField = Annotated[str | None, Field(max_length=120)]\n"
-            "location: LocationField = None\n"
+            "LocationField = Annotated[str | None, Field(max_length=120)]\nlocation: LocationField = None\n"
         )
-        assert self._bare_ceilings(alias, names) == [
-            "location bounds a bare 120 through LocationField"
-        ]
+        assert self._bare_ceilings(alias, names) == ["location bounds a bare 120 through LocationField"]
 
     def test_an_alias_is_reported_where_it_is_used_and_not_where_it_is_declared(
         self,
@@ -9676,10 +9339,7 @@ class TestEveryTextCeilingComesFromTheColumn:
         """
         names = {"location"}
         declared_only = "RowIds = Annotated[list[int], Field(max_length=500)]\n"
-        used_by_another_name = (
-            "RowIds = Annotated[list[int], Field(max_length=500)]\n"
-            "book_ids: RowIds = []\n"
-        )
+        used_by_another_name = "RowIds = Annotated[list[int], Field(max_length=500)]\nbook_ids: RowIds = []\n"
 
         assert self._bare_ceilings(declared_only, names) == []
         assert self._bare_ceilings(used_by_another_name, names) == []
@@ -9716,9 +9376,7 @@ class TestEveryTextCeilingComesFromTheColumn:
         exempt it by hand."""
         names = {"title"}
 
-        assert self._bare_ceilings(
-            "book_ids: list[int] = Field(min_length=2, max_length=500)\n", names
-        ) == []
+        assert self._bare_ceilings("book_ids: list[int] = Field(min_length=2, max_length=500)\n", names) == []
 
     def test_the_bare_literal_rule_reads_more_than_one_file(self) -> None:
         """A tripwire on the walk, because a walk that returned one module would
@@ -9751,9 +9409,7 @@ class TestEveryTextCeilingComesFromTheColumn:
         assert len({where for where, _ in sources}) == len(walked)
         # The basename collision this was written for, named so the arm cannot
         # be satisfied by a tree that happens to have none.
-        assert {"opds.py", "routers/opds.py", "schemas/opds.py"} <= {
-            where for where, _ in sources
-        }
+        assert {"opds.py", "routers/opds.py", "schemas/opds.py"} <= {where for where, _ in sources}
 
 
 class TestTheShippedImageCarriesThePostgresDriver:
@@ -9778,9 +9434,7 @@ class TestTheShippedImageCarriesThePostgresDriver:
 
     def test_pg8000_is_a_runtime_dependency_and_not_a_dev_one(self) -> None:
         manifest = tomllib.loads((BACKEND / "pyproject.toml").read_text())
-        runtime = [
-            spec for spec in manifest["project"]["dependencies"] if spec.startswith("pg8000")
-        ]
+        runtime = [spec for spec in manifest["project"]["dependencies"] if spec.startswith("pg8000")]
         dev = manifest["dependency-groups"]["dev"]
 
         assert runtime, (
@@ -9882,6 +9536,7 @@ def _build_block(text: str) -> list[tuple[int, str, str]]:
     four review rounds on this one rule, the shapes are getting rarer and the
     arms are not getting cheaper. A known bound beats an unknown one.
     """
+
     def clean(value: str) -> str:
         return value.split("#")[0].strip().strip("\"'")
 
@@ -9897,7 +9552,7 @@ def _build_block(text: str) -> list[tuple[int, str, str]]:
         if key.strip() == "build":
             inline = clean(rest)
             if not inline:
-                depth = indent          # the block form, entries follow below
+                depth = indent  # the block form, entries follow below
             elif inline.startswith("{"):
                 # The flow mapping. `build: {context: ., dockerfile: x}` starts
                 # the line with `build:`, so a rule reading keys never sees one.
@@ -9914,6 +9569,7 @@ def _build_block(text: str) -> list[tuple[int, str, str]]:
             continue
         found.append((number, key.strip(), clean(rest)))
     return found
+
 
 #: Programs this rule can reason about, as the first word of a start command.
 #:
@@ -10208,21 +9864,15 @@ class TestOnlyThreeModulesTurnOutsideXmlIntoATree:
         """
         seen = {
             "import ... as ET": "import xml.etree.ElementTree as ET\nET.XML(b)\n",
-            "import ..., dotted call": (
-                "import xml.etree.ElementTree\nxml.etree.ElementTree.XML(b)\n"
-            ),
+            "import ..., dotted call": ("import xml.etree.ElementTree\nxml.etree.ElementTree.XML(b)\n"),
             "from xml.etree import ElementTree as ET": (
                 "from xml.etree import ElementTree as ET\nET.XML(b)\n"
             ),
-            "from xml.etree import ElementTree": (
-                "from xml.etree import ElementTree\nElementTree.XML(b)\n"
-            ),
+            "from xml.etree import ElementTree": ("from xml.etree import ElementTree\nElementTree.XML(b)\n"),
             "from xml import etree": "from xml import etree\netree.ElementTree.XML(b)\n",
             "import xml.etree": "import xml.etree\nxml.etree.ElementTree.XML(b)\n",
             "import xml.etree as e": "import xml.etree as e\ne.ElementTree.XML(b)\n",
-            "the function imported directly": (
-                "from xml.etree.ElementTree import XML\nXML(b)\n"
-            ),
+            "the function imported directly": ("from xml.etree.ElementTree import XML\nXML(b)\n"),
         }
         missed = [name for name, source in seen.items() if not _xml_parse_calls(source)]
         assert not missed, f"a spelling of the parser is invisible to this rule: {missed}"
@@ -10256,8 +9906,7 @@ class TestOnlyThreeModulesTurnOutsideXmlIntoATree:
         missed = [
             name
             for name, call in self._ONE_CALL_PER_PARSER.items()
-            if _xml_parse_calls(f"import xml.etree.ElementTree as ET\n{call}\n")
-            != [(2, name)]
+            if _xml_parse_calls(f"import xml.etree.ElementTree as ET\n{call}\n") != [(2, name)]
         ]
         assert not missed, f"a parse entry point is not seen when called: {missed}"
 
@@ -10391,9 +10040,7 @@ def _parse_sites(source: str) -> list[tuple[str, tuple[str, ...]]]:
 #: bytes from elsewhere inside a registered door is read by eye.
 _BYTE_DOORS: Final[dict[str, str]] = {
     "marc.py::_parsed": "tests/test_marc.py::TestAnUploadIsReadOrRefusedByName",
-    "metadata.py::_parsed": (
-        "tests/test_metadata.py::TestACatalogueAnswerIsReadOrRefusedByName"
-    ),
+    "metadata.py::_parsed": ("tests/test_metadata.py::TestACatalogueAnswerIsReadOrRefusedByName"),
     "opds.py::read_page": "tests/test_opds.py::TestAPageIsReadOrRefusedByName",
     "backup.py::read_manifest": "tests/test_backup.py::TestAnArchiveIsReadOrRefusedByName",
     "backup.py::restore": (
@@ -10407,8 +10054,7 @@ _BYTE_DOORS: Final[dict[str, str]] = {
         "surrogate repaired, each a named case"
     ),
     "csv_import.py::_read_table": (
-        "second round: any member's upload, hardened by named cases, with a "
-        "decode of its own"
+        "second round: any member's upload, hardened by named cases, with a decode of its own"
     ),
     "csv_import.py::_headers_of": "second round, with `_read_table`",
     "routers/kosync.py::_body": (
@@ -10438,9 +10084,7 @@ def is_generated(decorators: list[str]) -> bool:
 def _is_skipped(decorators: list[str]) -> bool:
     """Whether a test or class so decorated is skipped or expected to fail, on
     any condition, read off the decorator call's last name as `is_generated` is."""
-    return any(
-        name.split("(", 1)[0].split(".")[-1] in {"skip", "skipif", "xfail"} for name in decorators
-    )
+    return any(name.split("(", 1)[0].split(".")[-1] in {"skip", "skipif", "xfail"} for name in decorators)
 
 
 def _mirror_of(module: str) -> str:
@@ -10496,9 +10140,7 @@ class TestEveryByteDoorIsRegistered:
             "loads imported": "from json import loads\ndef f(b):\n    return loads(b)\n",
             "zipfile": "import zipfile\ndef f(b):\n    return zipfile.ZipFile(b)\n",
             "csv": "import csv\ndef f(t):\n    return csv.DictReader(t)\n",
-            "a method": (
-                "import json\nclass C:\n    def f(self, b):\n        return json.load(b)\n"
-            ),
+            "a method": ("import json\nclass C:\n    def f(self, b):\n        return json.load(b)\n"),
             "a parser built elsewhere and fed here": (
                 "import xml_parse\ndef f(parser, b):\n    return xml_parse.fed(parser, b)\n"
             ),
@@ -10520,10 +10162,7 @@ class TestEveryByteDoorIsRegistered:
         for reference in named:
             path, cls = reference.split("::")
             tree = ast.parse((BACKEND / path).read_text())
-            classes = [
-                node for node in ast.walk(tree)
-                if isinstance(node, ast.ClassDef) and node.name == cls
-            ]
+            classes = [node for node in ast.walk(tree) if isinstance(node, ast.ClassDef) and node.name == cls]
             generates = any(
                 isinstance(item, ast.FunctionDef)
                 and is_generated([ast.unparse(d) for d in item.decorator_list])
@@ -10545,8 +10184,7 @@ class TestEveryByteDoorIsRegistered:
         misplaced = [
             f"{door} -> {value}"
             for door, value in _BYTE_DOORS.items()
-            if value.startswith("tests/")
-            and value.split("::")[0] != _mirror_of(door.split("::")[0])
+            if value.startswith("tests/") and value.split("::")[0] != _mirror_of(door.split("::")[0])
         ]
         assert not misplaced, f"a door's property is in another module's test file: {misplaced}"
 
@@ -10559,8 +10197,12 @@ class TestEveryByteDoorIsRegistered:
 #: configuration. `os.spawnv` and `os.execv` are reported, so they are not here.
 _UNREPORTED_PROCESS_CALLS: Final = frozenset(
     {
-        "create_subprocess_shell", "create_subprocess_exec", "subprocess_shell",
-        "subprocess_exec", "posix_spawn", "posix_spawnp",
+        "create_subprocess_shell",
+        "create_subprocess_exec",
+        "subprocess_shell",
+        "subprocess_exec",
+        "posix_spawn",
+        "posix_spawnp",
     }
 )
 
@@ -10636,13 +10278,11 @@ class TestNoModuleStartsAProcessTheLinterCannotSee:
             "spawn from the pty module": "from pty import spawn\n",
             "the pty module by string": 'importlib.import_module("pty")\n',
         }
-        missed = [
-            name for name, source in spellings.items() if not _names_an_unreported_process_call(source)
-        ]
+        missed = [name for name, source in spellings.items() if not _names_an_unreported_process_call(source)]
         assert missed == [], f"a spelling of an unreported process call is invisible: {missed}"
-        assert _names_an_unreported_process_call(
-            "import subprocess\nsubprocess.run(c)\nworker.spawn()\n"
-        ) == []
+        assert (
+            _names_an_unreported_process_call("import subprocess\nsubprocess.run(c)\nworker.spawn()\n") == []
+        )
 
 
 class TestNothingStripsAnAssertOutOfTheImage:
@@ -10721,9 +10361,7 @@ class TestNothingStripsAnAssertOutOfTheImage:
             "found no start command in any container surface, so this rule read "
             "nothing and would pass on an image that runs optimised."
         )
-        unreadable = [
-            site for site, program in commands if program not in _PROGRAMS_THIS_RULE_CAN_READ
-        ]
+        unreadable = [site for site, program in commands if program not in _PROGRAMS_THIS_RULE_CAN_READ]
         assert not unreadable, (
             f"a start command runs something this rule cannot read: {unreadable}. "
             f"It knows {sorted(_PROGRAMS_THIS_RULE_CAN_READ)}; anything else may reach "
@@ -10755,16 +10393,12 @@ class TestNothingStripsAnAssertOutOfTheImage:
             keys = [
                 line
                 for line, logical in _logical_lines(text)
-                if logical.partition(":")[0].strip().strip('"\'') == "build"
+                if logical.partition(":")[0].strip().strip("\"'") == "build"
             ]
             entries = [line for line, _, _ in _build_block(text)]
             for position, line in enumerate(keys):
                 nextkey = keys[position + 1] if position + 1 < len(keys) else None
-                own = [
-                    entry
-                    for entry in entries
-                    if entry >= line and (nextkey is None or entry < nextkey)
-                ]
+                own = [entry for entry in entries if entry >= line and (nextkey is None or entry < nextkey)]
                 if not own:
                     blind.append(f"{path.name}:{line}")
         assert not blind, (
@@ -10797,16 +10431,13 @@ class TestNothingStripsAnAssertOutOfTheImage:
             (tmp_path / name).write_text("")
         assert [path.name for path in _container_surfaces(tmp_path)] == sorted(carried)
 
-    def test_it_finds_the_flag_wherever_a_start_command_can_hide_it(
-        self, tmp_path: Path
-    ) -> None:
+    def test_it_finds_the_flag_wherever_a_start_command_can_hide_it(self, tmp_path: Path) -> None:
         """One spelling per file, so a miss names the spelling that was missed."""
         written = {
             "Dockerfile": 'CMD ["uvicorn", \\\n  "-O", "main:app"]',
             "Dockerfile.lower": 'entrypoint ["python", "-O", "-m", "uvicorn"]',
             "compose.yaml": '    command: ["python", "-OO", "-m", "uvicorn"]',
             "docker-compose.env.yml": "    env_file: ./optimise.env",
-
             "compose.override.yml": "    environment:\n      PYTHONOPTIMIZE: 1",
         }
         for name, body in written.items():
@@ -10816,15 +10447,11 @@ class TestNothingStripsAnAssertOutOfTheImage:
             site.split(":", 1)[0]
             for site in _sites(tmp_path, _has_optimise_flag)
             + _sites(tmp_path, lambda line: "PYTHONOPTIMIZE" in line)
-            + _sites(
-                tmp_path, lambda line: line.lower().startswith(_KEYS_REACHING_ANOTHER_FILE)
-            )
+            + _sites(tmp_path, lambda line: line.lower().startswith(_KEYS_REACHING_ANOTHER_FILE))
         }
         assert seen == set(written), f"unseen: {sorted(set(written) - seen)}"
 
-    def test_an_entrypoint_takes_its_arguments_from_the_cmd_beside_it(
-        self, tmp_path: Path
-    ) -> None:
+    def test_an_entrypoint_takes_its_arguments_from_the_cmd_beside_it(self, tmp_path: Path) -> None:
         """The idiom the first refusal arm failed, so it stays accepted.
 
         Docker appends an exec form `CMD` to an exec form `ENTRYPOINT`, so the
@@ -10846,40 +10473,41 @@ class TestNothingStripsAnAssertOutOfTheImage:
             (tmp_path / name).write_text(body + "\n")
         seen = {
             site.split(":", 1)[0]
-            for site in _sites(
-                tmp_path, lambda line: line.lower().startswith(_KEYS_REACHING_ANOTHER_FILE)
-            )
+            for site in _sites(tmp_path, lambda line: line.lower().startswith(_KEYS_REACHING_ANOTHER_FILE))
         }
         assert seen == set(written), f"unseen: {sorted(set(written) - seen)}"
 
-    def test_a_build_block_is_refused_unless_every_entry_is_understood(
-        self, tmp_path: Path
-    ) -> None:
+    def test_a_build_block_is_refused_unless_every_entry_is_understood(self, tmp_path: Path) -> None:
         """One row per escape four rounds of this rule were opened by."""
         readable = {"Dockerfile"}
-        accepted = [("context", "."), ("context", "./"), ("dockerfile", "Dockerfile"),
-                    ("dockerfile", "./Dockerfile"), ("dockerfile", '"Dockerfile"')]
-        refused = [("context", "./deploy"), ("dockerfile", "deploy/Dockerfile.prod"),
-                   ("additional_contexts", "base=../base"), ("ssh", "default")]
+        accepted = [
+            ("context", "."),
+            ("context", "./"),
+            ("dockerfile", "Dockerfile"),
+            ("dockerfile", "./Dockerfile"),
+            ("dockerfile", '"Dockerfile"'),
+        ]
+        refused = [
+            ("context", "./deploy"),
+            ("dockerfile", "deploy/Dockerfile.prod"),
+            ("additional_contexts", "base=../base"),
+            ("ssh", "default"),
+        ]
         # The two shapes that carry no key for a rule to read. `_build_block`
         # turns both into entries; this asserts it does.
         shapes = {
             "shorthand": "services:\n  a:\n    build: ./deploy\n",
-            "flow mapping": (
-                "services:\n  a:\n    build: {context: ., dockerfile: deploy/D.prod}\n"
-            ),
+            "flow mapping": ("services:\n  a:\n    build: {context: ., dockerfile: deploy/D.prod}\n"),
         }
         for label, text in shapes.items():
             entries = _build_block(text)
             assert entries, f"{label}: no build entry seen at all"
-            assert any(
-                not _build_entry_is_readable(k, v, readable) for _, k, v in entries
-            ), f"{label}: every entry read as safe, {entries}"
-        wrong = [f"{k}: {v}" for k, v in accepted
-                 if not _build_entry_is_readable(k, v.strip('"'), readable)]
+            assert any(not _build_entry_is_readable(k, v, readable) for _, k, v in entries), (
+                f"{label}: every entry read as safe, {entries}"
+            )
+        wrong = [f"{k}: {v}" for k, v in accepted if not _build_entry_is_readable(k, v.strip('"'), readable)]
         assert not wrong, f"refused a build entry it reads perfectly well: {wrong}"
-        wrong = [f"{k}: {v}" for k, v in refused
-                 if _build_entry_is_readable(k, v, readable)]
+        wrong = [f"{k}: {v}" for k, v in refused if _build_entry_is_readable(k, v, readable)]
         assert not wrong, f"accepted a build entry reaching outside what it reads: {wrong}"
 
     def test_the_build_block_is_read_by_indentation(self, tmp_path: Path) -> None:
@@ -10903,9 +10531,9 @@ class TestNothingStripsAnAssertOutOfTheImage:
         (tmp_path / "Dockerfile").write_text('CMD ["/app/start.sh"]\n')
         commands = _start_commands(tmp_path)
         assert commands, "the scanner did not see the start command at all"
-        assert all(
-            program not in _PROGRAMS_THIS_RULE_CAN_READ for _, program in commands
-        ), f"a shell script was accepted as readable: {commands}"
+        assert all(program not in _PROGRAMS_THIS_RULE_CAN_READ for _, program in commands), (
+            f"a shell script was accepted as readable: {commands}"
+        )
 
     def test_the_suppressed_asserts_are_the_eight_this_rule_was_written_for(self) -> None:
         """The arm the others do not give you, and it counts rather than names.
@@ -10949,6 +10577,7 @@ class TestNothingStripsAnAssertOutOfTheImage:
             f"the prose in this docstring and in `docs/decisions.md` says eight, and the "
             f"tree carries {sum(counted.values())}."
         )
+
 
 def _names_returned_at(source: str) -> list[int]:
     """Line numbers where a module names the `returned_at` attribute.
@@ -11043,11 +10672,7 @@ class TestOnlyTheLendingDeskNamesReturnedAt:
     }
 
     def test_the_modules_that_name_the_column_are_the_argued_ones(self):
-        found = {
-            name
-            for name, source in application_sources().items()
-            if _names_returned_at(source)
-        }
+        found = {name for name, source in application_sources().items() if _names_returned_at(source)}
         assert found == set(self.NAMES_RETURNED_AT), (
             f"Added: {sorted(found - set(self.NAMES_RETURNED_AT))}. Gone: "
             f"{sorted(set(self.NAMES_RETURNED_AT) - found)}. Whether a book is "
@@ -11226,9 +10851,7 @@ class TestNoDocstringCarriesTheCharacterItDescribes:
         carried = [
             f"{path.relative_to(BACKEND)}:{line}"
             for path in every_python_file()
-            for line in _docstrings_carrying_a_control_character(
-                path.read_text(encoding="utf-8")
-            )
+            for line in _docstrings_carrying_a_control_character(path.read_text(encoding="utf-8"))
         ]
         assert carried == [], (
             f"{carried} hold a control character in a docstring rather than an "
@@ -11244,22 +10867,14 @@ class TestNoDocstringCarriesTheCharacterItDescribes:
         fix produces, so a matcher that flagged it would refuse every repaired
         site.
         """
-        assert _docstrings_carrying_a_control_character(
-            'def f():\n    """a\\x00b"""'
-        ) == [1]
-        assert _docstrings_carrying_a_control_character(
-            'def f():\n    r"""a\\x00b"""'
-        ) == []
-        assert _docstrings_carrying_a_control_character(
-            'def f():\n    """a\\\\x00b"""'
-        ) == []
+        assert _docstrings_carrying_a_control_character('def f():\n    """a\\x00b"""') == [1]
+        assert _docstrings_carrying_a_control_character('def f():\n    r"""a\\x00b"""') == []
+        assert _docstrings_carrying_a_control_character('def f():\n    """a\\\\x00b"""') == []
         # A tab counts, and that is not incidental: it was the character two of
         # the eleven sites carried, in docstrings about a spreadsheet reading a
         # tab as padding before a formula. A first sweep of this tree excluded
         # tabs and reported nine.
-        assert _docstrings_carrying_a_control_character(
-            'def f():\n    """a\\tb"""'
-        ) == [1]
+        assert _docstrings_carrying_a_control_character('def f():\n    """a\\tb"""') == [1]
         # A string that is not a docstring is not the subject.
         assert _docstrings_carrying_a_control_character('x = "a\\x00b"') == []
 
@@ -11269,11 +10884,7 @@ class TestNoDocstringCarriesTheCharacterItDescribes:
         Stated as the difference between the two walks rather than as a count of
         revisions, which moves with every migration anybody writes.
         """
-        migrations = {
-            path
-            for path in every_python_file()
-            if "migrations" in path.relative_to(BACKEND).parts
-        }
+        migrations = {path for path in every_python_file() if "migrations" in path.relative_to(BACKEND).parts}
         assert migrations, "no generated revision in the walk, so this arm reads nothing"
         assert not migrations & set(application_modules()), (
             "`application_modules` now reaches the migrations, so the reason this rule "
@@ -11401,10 +11012,7 @@ class TestEveryDirectoryDoorWritesThroughOneFunnel:
         ),
         "routers/users.py": _Door(
             sites=1,
-            bound=(
-                "an admin creating an account. The same model, the same ceiling, "
-                "the same 422."
-            ),
+            bound=("an admin creating an account. The same model, the same ceiling, the same 422."),
         ),
     }
 
@@ -11433,15 +11041,11 @@ class TestEveryDirectoryDoorWritesThroughOneFunnel:
         exists to catch is there, and this tree has three sites whether the
         census works or not."""
         planted = tmp_path / "doorman.py"
-        planted.write_text(
-            "from models import User\n\n\ndef make(name):\n    return User(username=name)\n"
-        )
+        planted.write_text("from models import User\n\n\ndef make(name):\n    return User(username=name)\n")
 
         assert _user_construction_sites([planted]) == {planted: [5]}
 
-    def test_a_fourth_door_in_a_module_that_already_has_one_is_reported(
-        self, tmp_path: Path
-    ) -> None:
+    def test_a_fourth_door_in_a_module_that_already_has_one_is_reported(self, tmp_path: Path) -> None:
         """The other diagonal, and the one that decides whether this is a
         census.
 

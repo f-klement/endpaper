@@ -96,71 +96,29 @@ LOBID_RECORD = {
         {"id": "https://d-nb.info/gnd/4053309-8", "label": "Schriftsteller"},
         {"id": "https://d-nb.info/gnd/4028781-6", "label": "Journalist"},
     ],
-    "wikipedia": [
-        {"id": "https://de.wikipedia.org/wiki/Robert_Louis_Stevenson"}
-    ],
+    "wikipedia": [{"id": "https://de.wikipedia.org/wiki/Robert_Louis_Stevenson"}],
     "gndIdentifier": "118753711",
     "preferredName": "Stevenson, Robert Louis",
-    "variantName": [
-        "Stivenson, Robert L-jus",
-        "Stevenson, Louis",
-        "Stivenson, Robert Luis"
-    ],
-    "dateOfBirth": [
-        "1850-11-13"
-    ],
-    "dateOfDeath": [
-        "1894-12-03"
-    ],
+    "variantName": ["Stivenson, Robert L-jus", "Stevenson, Louis", "Stivenson, Robert Luis"],
+    "dateOfBirth": ["1850-11-13"],
+    "dateOfDeath": ["1894-12-03"],
     "sameAs": [
-        {
-            "id": "http://id.loc.gov/rwo/agents/n78088964"
-        },
-        {
-            "id": "http://viaf.org/viaf/95207986"
-        },
-        {
-            "id": "http://www.wikidata.org/entity/Q1512"
-        },
-        {
-            "id": "https://d-nb.info/gnd/1013016130"
-        },
-        {
-            "id": "https://d-nb.info/gnd/118753711/about"
-        },
-        {
-            "id": "https://dbpedia.org/resource/Robert_Louis_Stevenson"
-        },
-        {
-            "id": "https://de.wikipedia.org/wiki/Robert_Louis_Stevenson"
-        },
-        {
-            "id": "https://de.wikisource.org/wiki/Robert_Louis_Stevenson"
-        },
-        {
-            "id": "https://en.wikipedia.org/wiki/Robert_Louis_Stevenson"
-        },
-        {
-            "id": "https://isni.org/isni/0000000122831567"
-        },
-        {
-            "id": "https://kalliope-verbund.info/gnd/118753711"
-        },
-        {
-            "id": "https://www.archivportal-d.de/person/gnd/118753711"
-        },
-        {
-            "id": "https://www.deutsche-digitale-bibliothek.de/person/gnd/118753711"
-        },
-        {
-            "id": "https://www.filmportal.de/44223F53A5044152B909B583FFA7E11F"
-        }
+        {"id": "http://id.loc.gov/rwo/agents/n78088964"},
+        {"id": "http://viaf.org/viaf/95207986"},
+        {"id": "http://www.wikidata.org/entity/Q1512"},
+        {"id": "https://d-nb.info/gnd/1013016130"},
+        {"id": "https://d-nb.info/gnd/118753711/about"},
+        {"id": "https://dbpedia.org/resource/Robert_Louis_Stevenson"},
+        {"id": "https://de.wikipedia.org/wiki/Robert_Louis_Stevenson"},
+        {"id": "https://de.wikisource.org/wiki/Robert_Louis_Stevenson"},
+        {"id": "https://en.wikipedia.org/wiki/Robert_Louis_Stevenson"},
+        {"id": "https://isni.org/isni/0000000122831567"},
+        {"id": "https://kalliope-verbund.info/gnd/118753711"},
+        {"id": "https://www.archivportal-d.de/person/gnd/118753711"},
+        {"id": "https://www.deutsche-digitale-bibliothek.de/person/gnd/118753711"},
+        {"id": "https://www.filmportal.de/44223F53A5044152B909B583FFA7E11F"},
     ],
-    "type": [
-        "AuthorityResource",
-        "Person",
-        "DifferentiatedPerson"
-    ]
+    "type": ["AuthorityResource", "Person", "DifferentiatedPerson"],
 }
 
 LOBID_SEARCH: dict[str, Any] = {
@@ -169,93 +127,43 @@ LOBID_SEARCH: dict[str, Any] = {
         {
             "gndIdentifier": "118753711",
             "preferredName": "Stevenson, Robert Louis",
-            "variantName": [
-                "Stivenson, Robert L-jus",
-                "Stevenson, Louis",
-                "Stivenson, Robert Luis"
-            ],
-            "dateOfBirth": [
-                "1850-11-13"
-            ],
-            "dateOfDeath": [
-                "1894-12-03"
-            ],
+            "variantName": ["Stivenson, Robert L-jus", "Stevenson, Louis", "Stivenson, Robert Luis"],
+            "dateOfBirth": ["1850-11-13"],
+            "dateOfDeath": ["1894-12-03"],
             "sameAs": [
-                {
-                    "id": "http://id.loc.gov/rwo/agents/n78088964"
-                },
-                {
-                    "id": "http://viaf.org/viaf/95207986"
-                },
-                {
-                    "id": "http://www.wikidata.org/entity/Q1512"
-                },
-                {
-                    "id": "https://d-nb.info/gnd/1013016130"
-                },
-                {
-                    "id": "https://d-nb.info/gnd/118753711/about"
-                },
-                {
-                    "id": "https://dbpedia.org/resource/Robert_Louis_Stevenson"
-                },
-                {
-                    "id": "https://de.wikipedia.org/wiki/Robert_Louis_Stevenson"
-                },
-                {
-                    "id": "https://de.wikisource.org/wiki/Robert_Louis_Stevenson"
-                },
-                {
-                    "id": "https://en.wikipedia.org/wiki/Robert_Louis_Stevenson"
-                },
-                {
-                    "id": "https://isni.org/isni/0000000122831567"
-                },
-                {
-                    "id": "https://kalliope-verbund.info/gnd/118753711"
-                },
-                {
-                    "id": "https://www.archivportal-d.de/person/gnd/118753711"
-                },
-                {
-                    "id": "https://www.deutsche-digitale-bibliothek.de/person/gnd/118753711"
-                },
-                {
-                    "id": "https://www.filmportal.de/44223F53A5044152B909B583FFA7E11F"
-                }
+                {"id": "http://id.loc.gov/rwo/agents/n78088964"},
+                {"id": "http://viaf.org/viaf/95207986"},
+                {"id": "http://www.wikidata.org/entity/Q1512"},
+                {"id": "https://d-nb.info/gnd/1013016130"},
+                {"id": "https://d-nb.info/gnd/118753711/about"},
+                {"id": "https://dbpedia.org/resource/Robert_Louis_Stevenson"},
+                {"id": "https://de.wikipedia.org/wiki/Robert_Louis_Stevenson"},
+                {"id": "https://de.wikisource.org/wiki/Robert_Louis_Stevenson"},
+                {"id": "https://en.wikipedia.org/wiki/Robert_Louis_Stevenson"},
+                {"id": "https://isni.org/isni/0000000122831567"},
+                {"id": "https://kalliope-verbund.info/gnd/118753711"},
+                {"id": "https://www.archivportal-d.de/person/gnd/118753711"},
+                {"id": "https://www.deutsche-digitale-bibliothek.de/person/gnd/118753711"},
+                {"id": "https://www.filmportal.de/44223F53A5044152B909B583FFA7E11F"},
             ],
-            "type": [
-                "AuthorityResource",
-                "Person",
-                "DifferentiatedPerson"
-            ]
+            "type": ["AuthorityResource", "Person", "DifferentiatedPerson"],
         },
         {
             "gndIdentifier": "131572873",
             "preferredName": "Stevenson, Robert Louis",
             "sameAs": [
-                {
-                    "id": "http://viaf.org/viaf/1148462"
-                },
-                {
-                    "id": "https://d-nb.info/gnd/131572873/about"
-                }
+                {"id": "http://viaf.org/viaf/1148462"},
+                {"id": "https://d-nb.info/gnd/131572873/about"},
             ],
-            "type": [
-                "Person",
-                "AuthorityResource",
-                "DifferentiatedPerson"
-            ]
-        }
-    ]
+            "type": ["Person", "AuthorityResource", "DifferentiatedPerson"],
+        },
+    ],
 }
 
 WIKIDATA_ITEM = {
     "batchcomplete": "",
     "query": {
-        "searchinfo": {
-            "totalhits": 1
-        },
+        "searchinfo": {"totalhits": 1},
         "search": [
             {
                 "ns": 0,
@@ -263,21 +171,13 @@ WIKIDATA_ITEM = {
                 "pageid": 1967,
                 "size": 356850,
                 "wordcount": 1396,
-                "timestamp": "2026-08-26T15:56:47Z"
+                "timestamp": "2026-08-26T15:56:47Z",
             }
-        ]
-    }
+        ],
+    },
 }
 
-WIKIDATA_NO_ITEM = {
-    "batchcomplete": "",
-    "query": {
-        "searchinfo": {
-            "totalhits": 0
-        },
-        "search": []
-    }
-}
+WIKIDATA_NO_ITEM = {"batchcomplete": "", "query": {"searchinfo": {"totalhits": 0}, "search": []}}
 
 WIKIDATA_DESCRIPTION = {
     "entities": {
@@ -285,28 +185,16 @@ WIKIDATA_DESCRIPTION = {
             "type": "item",
             "id": "Q1512",
             "labels": {
-                "de": {
-                    "language": "de",
-                    "value": "Robert Louis Stevenson"
-                },
-                "en": {
-                    "language": "en",
-                    "value": "Robert Louis Stevenson"
-                }
+                "de": {"language": "de", "value": "Robert Louis Stevenson"},
+                "en": {"language": "en", "value": "Robert Louis Stevenson"},
             },
             "descriptions": {
-                "de": {
-                    "language": "de",
-                    "value": "schottischer Schriftsteller"
-                },
-                "en": {
-                    "language": "en",
-                    "value": "Scottish novelist and poet (1850–1894)"
-                }
-            }
+                "de": {"language": "de", "value": "schottischer Schriftsteller"},
+                "en": {"language": "en", "value": "Scottish novelist and poet (1850–1894)"},
+            },
         }
     },
-    "success": 1
+    "success": 1,
 }
 
 WIKIDATA_VIAF = {
@@ -316,14 +204,11 @@ WIKIDATA_VIAF = {
                 "mainsnak": {
                     "snaktype": "value",
                     "property": "P214",
-                    "datavalue": {
-                        "value": "95207986",
-                        "type": "string"
-                    },
-                    "datatype": "external-id"
+                    "datavalue": {"value": "95207986", "type": "string"},
+                    "datatype": "external-id",
                 },
                 "type": "statement",
-                "rank": "normal"
+                "rank": "normal",
             }
         ]
     }
@@ -339,14 +224,11 @@ WIKIDATA_ISNI = {
                 "mainsnak": {
                     "snaktype": "value",
                     "property": "P213",
-                    "datavalue": {
-                        "value": "0000000122831567",
-                        "type": "string"
-                    },
-                    "datatype": "external-id"
+                    "datavalue": {"value": "0000000122831567", "type": "string"},
+                    "datatype": "external-id",
                 },
                 "type": "statement",
-                "rank": "normal"
+                "rank": "normal",
             }
         ]
     }
@@ -382,12 +264,12 @@ _LARGEST_SAMPLED_ENTITY = 64_449
 #: `TestWikidataIsAFallbackAndNotAComparator` a real test rather than one that
 #: cannot tell the two suppliers apart.
 WIKIDATA_NATIONAL_VALUES = {
-    "P4619": "000560463",   # BLBNB, agrees with the cluster
-    "P3788": "000035867",   # ARBABN, agrees
-    "P950": "XX900250",     # BNE, cluster says 981060880923108606
-    "P1005": "27012",       # PTBNP, agrees
-    "P396": "CFIV000439",   # ICCU, agrees
-    "P1890": "000034753",   # BNCHL, cluster says 10000000000000000007303
+    "P4619": "000560463",  # BLBNB, agrees with the cluster
+    "P3788": "000035867",  # ARBABN, agrees
+    "P950": "XX900250",  # BNE, cluster says 981060880923108606
+    "P1005": "27012",  # PTBNP, agrees
+    "P396": "CFIV000439",  # ICCU, agrees
+    "P1890": "000034753",  # BNCHL, cluster says 10000000000000000007303
 }
 
 
@@ -416,18 +298,22 @@ def _claims_body(prop: str, *values: str, rank: str = "normal") -> dict:
     }
 
 
-WIKIDATA_NATIONAL = {
-    prop: _claims_body(prop, value)
-    for prop, value in WIKIDATA_NATIONAL_VALUES.items()
-}
+WIKIDATA_NATIONAL = {prop: _claims_body(prop, value) for prop, value in WIKIDATA_NATIONAL_VALUES.items()}
 
 
 def _json(body: object, status: int = 200) -> httpx.Response:
     return httpx.Response(status, json=body)
 
 
-def _wikidata_router(mock, *, item=WIKIDATA_ITEM, description=WIKIDATA_DESCRIPTION,
-                     viaf=WIKIDATA_VIAF, isni=WIKIDATA_ISNI, national=None):
+def _wikidata_router(
+    mock,
+    *,
+    item=WIKIDATA_ITEM,
+    description=WIKIDATA_DESCRIPTION,
+    viaf=WIKIDATA_VIAF,
+    isni=WIKIDATA_ISNI,
+    national=None,
+):
     """Route each Wikidata action to its own answer.
 
     One route per `action` rather than one catch-all, because the module makes
@@ -447,6 +333,7 @@ def _wikidata_router(mock, *, item=WIKIDATA_ITEM, description=WIKIDATA_DESCRIPTI
     `viaf`, whose body holds `P214` and therefore answers nothing, which is what
     every test written before the fallback existed already expected.
     """
+
     def handler(request: httpx.Request) -> httpx.Response:
         action = request.url.params.get("action")
         if action == "query":
@@ -516,9 +403,7 @@ class TestResolvingAnIdentifierACatalogueAsserted:
 
         assert candidate is not None
         assert "http://viaf.org/viaf/95207986" in candidate.same_as
-        assert not any(
-            "viaf.org" in str(call.request.url) for call in mock.calls
-        )
+        assert not any("viaf.org" in str(call.request.url) for call in mock.calls)
 
     @pytest.mark.asyncio
     async def test_wikidata_confirms_the_item_independently(self):
@@ -557,9 +442,7 @@ class TestResolvingAnIdentifierACatalogueAsserted:
         encodes a path segment and does not collapse `..`. A hand edit or a
         restore is how a row like this arrives."""
         with respx.mock(assert_all_called=False) as mock:
-            route = mock.get(url__startswith=LOBID).mock(
-                return_value=_json(LOBID_RECORD)
-            )
+            route = mock.get(url__startswith=LOBID).mock(return_value=_json(LOBID_RECORD))
             assert await resolve("../search?q=x") is None
 
         assert route.call_count == 0
@@ -703,15 +586,11 @@ class TestSearchingByName:
         school ahead of either Stevenson. Measured live 2026-08-27: 117 records
         unfiltered against 60 filtered."""
         with respx.mock(assert_all_called=False) as mock:
-            route = mock.get(url__startswith=LOBID).mock(
-                return_value=_json(LOBID_SEARCH)
-            )
+            route = mock.get(url__startswith=LOBID).mock(return_value=_json(LOBID_SEARCH))
             _wikidata_router(mock)
             await search("Robert Louis Stevenson")
 
-        assert route.calls[0].request.url.params["filter"] == (
-            "type:DifferentiatedPerson"
-        )
+        assert route.calls[0].request.url.params["filter"] == ("type:DifferentiatedPerson")
 
     @pytest.mark.asyncio
     async def test_more_rows_than_the_ceiling_are_cut(self):
@@ -737,9 +616,7 @@ class TestSearchingByName:
     @pytest.mark.asyncio
     async def test_an_empty_name_asks_nobody_anything(self):
         with respx.mock(assert_all_called=False) as mock:
-            route = mock.get(url__startswith=LOBID).mock(
-                return_value=_json(LOBID_SEARCH)
-            )
+            route = mock.get(url__startswith=LOBID).mock(return_value=_json(LOBID_SEARCH))
             assert await search("   ") == []
 
         assert route.call_count == 0
@@ -754,9 +631,7 @@ class TestTheNameNeverBecomesQuerySyntax:
         in an author's name is ordinary catalogue data. Escaping is mandatory
         here rather than defensive."""
         with respx.mock(assert_all_called=False) as mock:
-            route = mock.get(url__startswith=LOBID).mock(
-                return_value=_json({"member": []})
-            )
+            route = mock.get(url__startswith=LOBID).mock(return_value=_json({"member": []}))
             await search("Stevenson (")
 
         assert route.calls[0].request.url.params["q"] == "Stevenson \\("
@@ -766,9 +641,7 @@ class TestTheNameNeverBecomesQuerySyntax:
         """Unescaped, `Stevenson" OR preferredName:"Kane` is two clauses and
         changes the result set. Escaped it is three literal terms."""
         with respx.mock(assert_all_called=False) as mock:
-            route = mock.get(url__startswith=LOBID).mock(
-                return_value=_json({"member": []})
-            )
+            route = mock.get(url__startswith=LOBID).mock(return_value=_json({"member": []}))
             await search('Stevenson" OR preferredName:"Kane')
 
         sent = route.calls[0].request.url.params["q"]
@@ -781,9 +654,7 @@ class TestTheNameNeverBecomesQuerySyntax:
         nothing: `Jean\\-Pierre Naugrette` and `Jean-Pierre Naugrette` both
         answer with one record."""
         with respx.mock(assert_all_called=False) as mock:
-            route = mock.get(url__startswith=LOBID).mock(
-                return_value=_json({"member": []})
-            )
+            route = mock.get(url__startswith=LOBID).mock(return_value=_json({"member": []}))
             await search("Jean-Pierre Naugrette")
 
         assert route.calls[0].request.url.params["q"] == "Jean\\-Pierre Naugrette"
@@ -793,9 +664,7 @@ class TestTheNameNeverBecomesQuerySyntax:
         """The bound is on what a member sent, not on what escaping made of it:
         escaping can double the length."""
         with respx.mock(assert_all_called=False) as mock:
-            route = mock.get(url__startswith=LOBID).mock(
-                return_value=_json({"member": []})
-            )
+            route = mock.get(url__startswith=LOBID).mock(return_value=_json({"member": []}))
             await search("(" * 400)
 
         sent = route.calls[0].request.url.params["q"]
@@ -913,9 +782,7 @@ class TestTheRefusalsAreStructural:
         seen = 0
         for node in ast.walk(tree):
             if not (
-                isinstance(node, ast.Call)
-                and isinstance(node.func, ast.Name)
-                and node.func.id == "_wikidata"
+                isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "_wikidata"
             ):
                 continue
             # The request body, which is the first positional argument or the
@@ -950,9 +817,7 @@ class TestTheRefusalsAreStructural:
                 if key.value != "props":
                     continue
                 seen += 1
-                assert isinstance(value, ast.Constant), (
-                    "a computed `props` cannot be checked here"
-                )
+                assert isinstance(value, ast.Constant), "a computed `props` cannot be checked here"
                 assert value.value in allowed, value.value
 
         assert seen == 3, f"expected three `props` arguments, walked {seen}"
@@ -1177,6 +1042,7 @@ VIAF_AUTOSUGGEST: dict[str, Any] = {
     ],
 }
 
+
 #: The Stevenson candidate as `resolve` builds it, without going near a network.
 #:
 #: Built from `LOBID_RECORD` through the module's own parser rather than typed
@@ -1217,8 +1083,7 @@ def _patched_fetch_get(replacement):
         fetch.get = original
 
 
-def _viaf_router(mock, *, brief=VIAF_BRIEF, bare=VIAF_BARE, suggest=VIAF_AUTOSUGGEST,
-                 brief_status=200):
+def _viaf_router(mock, *, brief=VIAF_BRIEF, bare=VIAF_BARE, suggest=VIAF_AUTOSUGGEST, brief_status=200):
     """Route each of VIAF's three endpoints to its own answer.
 
     One route per endpoint rather than one catch-all, for the reason
@@ -1228,6 +1093,7 @@ def _viaf_router(mock, *, brief=VIAF_BRIEF, bare=VIAF_BARE, suggest=VIAF_AUTOSUG
     `brief_status` is how the 5xx fallback is exercised. VIAF's own body on that
     failure is XML rather than JSON, which is why the failing answer is text.
     """
+
     def handler(request: httpx.Request) -> httpx.Response:
         path = request.url.path
         if path.endswith("/AutoSuggest"):
@@ -1329,9 +1195,9 @@ class TestTheClusterIsVerifiedRatherThanTrusted:
         """A merged cluster fails the check by construction, because a code the
         cluster names twice is dropped rather than picked from."""
         doubled = deepcopy(VIAF_BRIEF)
-        block = doubled["searchRetrieveResponse"]["records"]["record"]["recordData"][
-            "v:VIAFCluster"
-        ]["v:mainHeadings"]["v:data"][0]
+        block = doubled["searchRetrieveResponse"]["records"]["record"]["recordData"]["v:VIAFCluster"][
+            "v:mainHeadings"
+        ]["v:data"][0]
         block["v:sources"]["v:sid"].append("DNB|131572873")
 
         with respx.mock(assert_all_called=False) as mock:
@@ -1346,12 +1212,8 @@ class TestTheClusterIsVerifiedRatherThanTrusted:
         holds one row per scheme, so keeping the first would decide by ordering
         which record the Chilean library means."""
         doubled = deepcopy(VIAF_BRIEF)
-        cluster = doubled["searchRetrieveResponse"]["records"]["record"]["recordData"][
-            "v:VIAFCluster"
-        ]
-        cluster["v:mainHeadings"]["v:data"][0]["v:sources"]["v:sid"].append(
-            "BNCHL|10000000000000000853494"
-        )
+        cluster = doubled["searchRetrieveResponse"]["records"]["record"]["recordData"]["v:VIAFCluster"]
+        cluster["v:mainHeadings"]["v:data"][0]["v:sources"]["v:sid"].append("BNCHL|10000000000000000853494")
         sources = authority._viaf_sources(authority._viaf_cluster_record(doubled), _CODES_THE_FIXTURES_CARRY)
 
         assert "BNCHL" not in sources
@@ -1409,9 +1271,7 @@ class TestTheClusterIsFoundByKeyWhenLobidNamesNone:
             name="Benedetti, Mario",
             identifier="123000327",
             same_as=tuple(
-                uri
-                for uri in _certain_candidate().same_as
-                if not uri.startswith("http://viaf.org/")
+                uri for uri in _certain_candidate().same_as if not uri.startswith("http://viaf.org/")
             ),
         )
 
@@ -1648,9 +1508,7 @@ class TestTheSruSerialiserFailsOnSomeRecordsAndRetryingIsUseless:
         page. `fetch.Fetched` carries no headers, so the content type is not
         reachable; decoding as JSON is the stronger check for the same fault."""
         with respx.mock(assert_all_called=False) as mock:
-            mock.get(url__startswith=VIAF).mock(
-                return_value=httpx.Response(200, text="<!DOCTYPE html>")
-            )
+            mock.get(url__startswith=VIAF).mock(return_value=httpx.Response(200, text="<!DOCTYPE html>"))
             found = await authority.national_identifiers(_certain_candidate())
 
         assert found == {}
@@ -1702,9 +1560,9 @@ class TestBothOfViafsResponseShapesReadTheSame:
         pipe with no bound would be fine; `split(":")` anywhere near this would
         not, which is why the prefix strip and the code split are two steps."""
         record = deepcopy(VIAF_BRIEF)
-        record["searchRetrieveResponse"]["records"]["record"]["recordData"][
-            "v:VIAFCluster"
-        ]["v:mainHeadings"]["v:data"][1]["v:sources"]["v:sid"] = "LIH|LNB:V-174543;=BK"
+        record["searchRetrieveResponse"]["records"]["record"]["recordData"]["v:VIAFCluster"][
+            "v:mainHeadings"
+        ]["v:data"][1]["v:sources"]["v:sid"] = "LIH|LNB:V-174543;=BK"
         sources = authority._viaf_sources(authority._viaf_cluster_record(record), _CODES_THE_FIXTURES_CARRY)
 
         assert sources["LIH"] == "LNB:V-174543;=BK"
@@ -1713,9 +1571,7 @@ class TestBothOfViafsResponseShapesReadTheSame:
         record = deepcopy(VIAF_BRIEF)
         records = record["searchRetrieveResponse"]["records"]
         records["record"] = [records["record"], {}]
-        sources = authority._viaf_sources(
-            authority._viaf_cluster_record(record), _CODES_THE_FIXTURES_CARRY
-        )
+        sources = authority._viaf_sources(authority._viaf_cluster_record(record), _CODES_THE_FIXTURES_CARRY)
 
         assert sources["DNB"] == "118753711"
 
@@ -1729,9 +1585,7 @@ class TestBothOfViafsResponseShapesReadTheSame:
             }
         }
 
-        assert authority._viaf_sources(cluster, frozenset({"DNB"})) == {
-            "DNB": "118753711"
-        }
+        assert authority._viaf_sources(cluster, frozenset({"DNB"})) == {"DNB": "118753711"}
 
     def test_a_body_in_neither_shape_is_nothing_rather_than_a_crash(self):
         bodies: tuple[Any, ...] = (
@@ -1786,9 +1640,7 @@ class TestWikidataIsAFallbackAndNotAComparator:
             name="Benedetti, Mario",
             identifier="123000327",
             same_as=tuple(
-                uri
-                for uri in _certain_candidate().same_as
-                if not uri.startswith("http://viaf.org/")
+                uri for uri in _certain_candidate().same_as if not uri.startswith("http://viaf.org/")
             ),
             **overrides,
         )
@@ -1850,9 +1702,7 @@ class TestWikidataIsAFallbackAndNotAComparator:
         was a Next.js page. `_viaf_cluster_sources` returns None for both, which
         is the distinction it was given a nullable return type to make."""
         with respx.mock(assert_all_called=False) as mock:
-            mock.get(url__startswith=VIAF).mock(
-                return_value=httpx.Response(200, text="<!DOCTYPE html>")
-            )
+            mock.get(url__startswith=VIAF).mock(return_value=httpx.Response(200, text="<!DOCTYPE html>"))
             _wikidata_router(mock, national=WIKIDATA_NATIONAL)
             found = await authority.national_identifiers(self._confirmable())
 
@@ -1876,9 +1726,7 @@ class TestWikidataIsAFallbackAndNotAComparator:
         pinned by nothing.
         """
         with respx.mock(assert_all_called=False) as mock:
-            _viaf_router(
-                mock, brief={"message": "no Route matched with those values"}
-            )
+            _viaf_router(mock, brief={"message": "no Route matched with those values"})
             _wikidata_router(mock, national=WIKIDATA_NATIONAL)
             found = await authority.national_identifiers(self._confirmable())
             asked = _national_asks(mock)
@@ -1934,9 +1782,9 @@ class TestWikidataIsAFallbackAndNotAComparator:
         names the confirmed GND back and carries no national file, which is
         coverage rather than supply, so the fallback stays shut."""
         empty = deepcopy(VIAF_BRIEF)
-        block = empty["searchRetrieveResponse"]["records"]["record"]["recordData"][
-            "v:VIAFCluster"
-        ]["v:mainHeadings"]["v:data"]
+        block = empty["searchRetrieveResponse"]["records"]["record"]["recordData"]["v:VIAFCluster"][
+            "v:mainHeadings"
+        ]["v:data"]
         for heading in block:
             sid = heading["v:sources"]["v:sid"]
             keep = [entry for entry in sid if entry.startswith("DNB|")] if isinstance(sid, list) else []
@@ -1975,9 +1823,7 @@ class TestWikidataIsAFallbackAndNotAComparator:
         is not what decides it: `wikidata_id` is supplied the way `_cross_check`
         supplies it."""
         with respx.mock(assert_all_called=False) as mock:
-            mock.get(url__startswith=VIAF).mock(
-                return_value=httpx.Response(200, text="<!DOCTYPE html>")
-            )
+            mock.get(url__startswith=VIAF).mock(return_value=httpx.Response(200, text="<!DOCTYPE html>"))
             _wikidata_router(mock, national=WIKIDATA_NATIONAL)
             found = await authority.national_identifiers(self._no_cluster())
             asked = _national_asks(mock)
@@ -2012,9 +1858,7 @@ class TestWikidataIsAFallbackAndNotAComparator:
 
         candidate = self._confirmable(
             same_as=tuple(
-                f"https://viaf.org/viaf/{long_id}"
-                if uri.startswith("http://viaf.org/")
-                else uri
+                f"https://viaf.org/viaf/{long_id}" if uri.startswith("http://viaf.org/") else uri
                 for uri in _certain_candidate().same_as
             )
         )
@@ -2022,9 +1866,7 @@ class TestWikidataIsAFallbackAndNotAComparator:
             _viaf_router(mock)
             _wikidata_router(mock, national=WIKIDATA_NATIONAL)
             found = await authority.national_identifiers(candidate)
-            viaf_calls = [
-                call for call in mock.calls if str(call.request.url).startswith(VIAF)
-            ]
+            viaf_calls = [call for call in mock.calls if str(call.request.url).startswith(VIAF)]
 
         assert viaf_calls == []
         assert found[AuthorityScheme.BNE] == "XX900250"
@@ -2198,8 +2040,7 @@ class TestTheOutwardWikipediaLink:
                     "type": "item",
                     "id": item,
                     "sitelinks": {
-                        site: {"site": site, "title": "T", "url": url}
-                        for site, url in links.items()
+                        site: {"site": site, "title": "T", "url": url} for site, url in links.items()
                     },
                 }
                 for item, links in by_item.items()
@@ -2252,9 +2093,7 @@ class TestTheOutwardWikipediaLink:
         rather than one code: with only the first tier a German reader would
         fall straight past English to the item page for the 12.8% of authors
         measured to have no German article."""
-        body = self._sitelinks(
-            Q1512={"enwiki": "https://en.wikipedia.org/wiki/Robert_Louis_Stevenson"}
-        )
+        body = self._sitelinks(Q1512={"enwiki": "https://en.wikipedia.org/wiki/Robert_Louis_Stevenson"})
         with respx.mock(assert_all_called=False) as mock:
             self._router(mock, filtered=body)
             found = await authority.wikipedia_articles(("Q1512",), prefer=("de", "en"))
@@ -2275,9 +2114,7 @@ class TestTheOutwardWikipediaLink:
             seen = self._router(
                 mock,
                 filtered=self._sitelinks(Q1512={}),
-                unfiltered=self._sitelinks(
-                    Q1512={"zhwiki": "https://zh.wikipedia.org/wiki/%E7%BE%85"}
-                ),
+                unfiltered=self._sitelinks(Q1512={"zhwiki": "https://zh.wikipedia.org/wiki/%E7%BE%85"}),
             )
             found = await authority.wikipedia_articles(("Q1512",), prefer=("de", "en"))
 
@@ -2291,9 +2128,7 @@ class TestTheOutwardWikipediaLink:
         with respx.mock(assert_all_called=False) as mock:
             seen = self._router(
                 mock,
-                filtered=self._sitelinks(
-                    Q1512={"dewiki": "https://de.wikipedia.org/wiki/X"}
-                ),
+                filtered=self._sitelinks(Q1512={"dewiki": "https://de.wikipedia.org/wiki/X"}),
             )
             await authority.wikipedia_articles(("Q1512",), prefer=("de", "en"))
 
@@ -2379,9 +2214,7 @@ class TestTheOutwardWikipediaLink:
         beats right 97.3% of the time and failing invisibly."""
         with respx.mock(assert_all_called=False) as mock:
             mock.get(url__startswith=WIKIDATA).mock(side_effect=httpx.ConnectError("no"))
-            found = await authority.wikipedia_articles(
-                ("Q1512", "Q909"), prefer=("de", "en")
-            )
+            found = await authority.wikipedia_articles(("Q1512", "Q909"), prefer=("de", "en"))
 
         assert found["Q1512"].url == "https://www.wikidata.org/wiki/Q1512"
         assert found["Q909"].url == "https://www.wikidata.org/wiki/Q909"
@@ -2445,9 +2278,7 @@ class TestTheOutwardWikipediaLink:
             body = self._sitelinks(Q1512={site: links[site] for site in order})
             with respx.mock(assert_all_called=False) as mock:
                 self._router(mock, filtered=self._sitelinks(Q1512={}), unfiltered=body)
-                found = await authority.wikipedia_articles(
-                    ("Q1512",), prefer=("de", "en")
-                )
+                found = await authority.wikipedia_articles(("Q1512",), prefer=("de", "en"))
             assert found["Q1512"].language == "ar"
 
     @pytest.mark.asyncio
@@ -2458,17 +2289,10 @@ class TestTheOutwardWikipediaLink:
         with respx.mock(assert_all_called=False) as mock:
             self._router(
                 mock,
-                filtered=self._sitelinks(
-                    Q1512={"dewiki": "https://de.wikipedia.org/wiki/X"}
-                ),
+                filtered=self._sitelinks(Q1512={"dewiki": "https://de.wikipedia.org/wiki/X"}),
             )
-            found = await authority.wikipedia_articles(
-                ("../w/api.php", "Q1512", ""), prefer=("de", "en")
-            )
-            asked = [
-                call.request.url.params.get("ids")
-                for call in mock.calls
-            ]
+            found = await authority.wikipedia_articles(("../w/api.php", "Q1512", ""), prefer=("de", "en"))
+            asked = [call.request.url.params.get("ids") for call in mock.calls]
 
         assert asked == ["Q1512"]
         assert set(found) == {"Q1512"}
@@ -2533,9 +2357,7 @@ class TestTheOutwardWikipediaLink:
             )
             found = await authority.wikipedia_articles(many, prefer=("de", "en"))
             asked = {
-                one
-                for call in mock.calls
-                for one in (call.request.url.params.get("ids") or "").split("|")
+                one for call in mock.calls for one in (call.request.url.params.get("ids") or "").split("|")
             }
 
         assert found["Q250"].language == "de"
@@ -2590,8 +2412,7 @@ class TestTheOutwardWikipediaLink:
         # which `_VIAF_LIMIT`'s comment gives the reason for. At two that is
         # 257,796 and passes; at three it is 386,694 and does not.
         assert (
-            _LARGEST_SAMPLED_ENTITY * authority._UNFILTERED_ITEMS_PER_REQUEST * 2
-            <= authority._RESPONSE_LIMIT
+            _LARGEST_SAMPLED_ENTITY * authority._UNFILTERED_ITEMS_PER_REQUEST * 2 <= authority._RESPONSE_LIMIT
         )
 
     @pytest.mark.asyncio
@@ -2631,13 +2452,9 @@ class TestTheOutwardWikipediaLink:
         with respx.mock(assert_all_called=False) as mock:
             self._router(
                 mock,
-                filtered=self._sitelinks(
-                    Q1512={"dewiki": "https://de.wikipedia.org/wiki/X"}
-                ),
+                filtered=self._sitelinks(Q1512={"dewiki": "https://de.wikipedia.org/wiki/X"}),
             )
-            await authority.wikipedia_articles(
-                ("Q1512", "Q1512", "Q1512"), prefer=("de", "en")
-            )
+            await authority.wikipedia_articles(("Q1512", "Q1512", "Q1512"), prefer=("de", "en"))
             ids = [call.request.url.params.get("ids") for call in mock.calls]
 
         assert ids == ["Q1512"]
@@ -2889,10 +2706,7 @@ class TestTheOutwardWikipediaLink:
         def escapes(model: Any) -> bool:
             """Does this model get prose past **either** mechanism?"""
             instance = model(key="k", url="u")
-            return (
-                self._wire_names(model) != expected
-                or set(instance.model_dump()) != expected
-            )
+            return self._wire_names(model) != expected or set(instance.model_dump()) != expected
 
         # The diagonal: the permitted shape must pass both, or a guard that
         # refused everything would satisfy the loop below.
@@ -2924,9 +2738,7 @@ class TestTheParserIsAskedForABoundedSetOfCodes:
         """The filter, seen from the only side a test can see it from."""
         cluster = self._cluster(["DNB|118753711", "SELIBR|94215", "NKC|jn19990008249"])
 
-        assert authority._viaf_sources(cluster, frozenset({"DNB"})) == {
-            "DNB": "118753711"
-        }
+        assert authority._viaf_sources(cluster, frozenset({"DNB"})) == {"DNB": "118753711"}
 
     def test_one_wanted_code_repeated_with_new_values_does_not_grow(self):
         """**Filtering by code alone is a step short of the family.** A body
@@ -2947,9 +2759,7 @@ class TestTheParserIsAskedForABoundedSetOfCodes:
         """A scheme in `_NATIONAL_SOURCES` that the parser is not asked for
         would look exactly like VIAF not carrying it: no error, no log line, an
         empty column. Derived rather than written out for that reason."""
-        from_the_mapping = frozenset(authority._NATIONAL_SOURCES) | {
-            authority._GND_SOURCE
-        }
+        from_the_mapping = frozenset(authority._NATIONAL_SOURCES) | {authority._GND_SOURCE}
 
         assert from_the_mapping == authority._WANTED_SOURCES
 
@@ -3085,9 +2895,7 @@ class TestTheEnumAndTheParserDescribeOneSet:
         Written as an equality against `_NATIONAL_SOURCES` rather than against a
         list typed out again, because the list above is already the one that
         pins the six by name. Two hand written lists would drift together."""
-        assert set(authority._NATIONAL_PROPERTIES) == set(
-            authority._NATIONAL_SOURCES.values()
-        )
+        assert set(authority._NATIONAL_PROPERTIES) == set(authority._NATIONAL_SOURCES.values())
 
     def test_every_property_is_named_once(self):
         """A copied line with the wrong scheme beside it would read `P950` twice
@@ -3102,9 +2910,7 @@ class TestTheEnumAndTheParserDescribeOneSet:
         reads a cluster. `_cross_references_for` merges them with `|`, which is
         a merge only while the two are disjoint: an overlap would make the
         result depend on which side of that operator a scheme sat."""
-        assert not set(authority._CROSS_REFERENCE_URIS) & set(
-            authority._NATIONAL_SOURCES.values()
-        )
+        assert not set(authority._CROSS_REFERENCE_URIS) & set(authority._NATIONAL_SOURCES.values())
 
     def test_every_member_of_the_enum_has_exactly_one_writer(self):
         """The one that catches a member added with nothing to produce it. GND
@@ -3123,9 +2929,7 @@ class TestUnusableAnswers:
     @pytest.mark.asyncio
     async def test_a_record_with_no_name_is_dropped_rather_than_raised(self):
         with respx.mock(assert_all_called=False) as mock:
-            mock.get(url__startswith=LOBID).mock(
-                return_value=_json({"gndIdentifier": "118753711"})
-            )
+            mock.get(url__startswith=LOBID).mock(return_value=_json({"gndIdentifier": "118753711"}))
             assert await resolve("118753711") is None
 
     @pytest.mark.asyncio
@@ -3149,9 +2953,7 @@ class TestUnusableAnswers:
     @pytest.mark.asyncio
     async def test_a_body_that_is_not_json_is_unavailable_rather_than_a_crash(self):
         with respx.mock(assert_all_called=False) as mock:
-            mock.get(url__startswith=LOBID).mock(
-                return_value=httpx.Response(200, text="<!DOCTYPE html>")
-            )
+            mock.get(url__startswith=LOBID).mock(return_value=httpx.Response(200, text="<!DOCTYPE html>"))
             with pytest.raises(AuthorityUnavailable):
                 await search("anybody")
 
@@ -3161,9 +2963,7 @@ class TestUnusableAnswers:
         a query parameter."""
         with respx.mock(assert_all_called=False) as mock:
             mock.get(url__startswith=LOBID).mock(return_value=_json(LOBID_RECORD))
-            _wikidata_router(
-                mock, item={"query": {"search": [{"title": "Not an item"}]}}
-            )
+            _wikidata_router(mock, item={"query": {"search": [{"title": "Not an item"}]}})
             candidate = await resolve("118753711")
 
         assert candidate is not None
@@ -3295,9 +3095,7 @@ class TestTheFanOutIsBoundedInTimeAsWellAsInCount:
         """`fetch.get` raises `DeadlineExceeded` before opening a connection, and
         lobid failing is `AuthorityUnavailable` rather than a 500."""
         with respx.mock(assert_all_called=False) as mock:
-            route = mock.get(url__startswith=LOBID).mock(
-                return_value=_json(LOBID_RECORD)
-            )
+            route = mock.get(url__startswith=LOBID).mock(return_value=_json(LOBID_RECORD))
             with pytest.raises(AuthorityUnavailable):
                 await search("Stevenson", deadline=time.monotonic() - 1)
 
@@ -3318,9 +3116,7 @@ class TestTheFanOutIsBoundedInTimeAsWellAsInCount:
         """
         body = b'{"a":' * 100_000 + b"1" + b"}" * 100_000
         with respx.mock(assert_all_called=False) as mock:
-            mock.get(url__startswith=LOBID).mock(
-                return_value=httpx.Response(200, content=body)
-            )
+            mock.get(url__startswith=LOBID).mock(return_value=httpx.Response(200, content=body))
             with pytest.raises(AuthorityUnavailable):
                 await search("Stevenson")
 
@@ -3428,9 +3224,7 @@ class TestTheCrossReferencesThatArriveWithTheRecord:
         # would be a second, drifting description of the capture.
         same_as = cast(list[dict[str, str]], LOBID_RECORD["sameAs"])
         without_item = LOBID_RECORD | {
-            "sameAs": [
-                entry for entry in same_as if "wikidata.org/entity" not in entry["id"]
-            ]
+            "sameAs": [entry for entry in same_as if "wikidata.org/entity" not in entry["id"]]
         }
         candidate = await self._resolved(without_item)
 

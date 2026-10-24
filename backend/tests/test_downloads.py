@@ -23,6 +23,7 @@ JUST_AFTER_LOCAL_MIDNIGHT = datetime(2026, 3, 13, 15, 30, tzinfo=UTC)
 THE_UTC_DAY = "2026-03-13"
 THE_LOCAL_DAY = "2026-03-14"
 
+
 @pytest.fixture
 def frozen(monkeypatch):
     """Freeze `downloads`'s own clock at the instant above.

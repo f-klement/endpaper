@@ -74,8 +74,7 @@ def upgrade() -> None:
             name="ck_quotes_page_bounds",
         ),
         sa.CheckConstraint(
-            f"length(text) <= {_TEXT_MAX} "
-            f"AND (note IS NULL OR length(note) <= {_NOTE_MAX})",
+            f"length(text) <= {_TEXT_MAX} AND (note IS NULL OR length(note) <= {_NOTE_MAX})",
             name="ck_quotes_text_bounds",
         ),
         sa.ForeignKeyConstraint(["book_id"], ["books.id"]),

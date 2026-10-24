@@ -46,9 +46,7 @@ class TestAddingThem:
             book,
             [
                 asin("B00J4YQKHY"),
-                BookIdentifierIn(
-                    scheme=BookIdentifierScheme.GOOGLE_BOOKS, value="zyTCAlFPjgYC"
-                ),
+                BookIdentifierIn(scheme=BookIdentifierScheme.GOOGLE_BOOKS, value="zyTCAlFPjgYC"),
             ],
             db,
         )
@@ -86,9 +84,7 @@ class TestItAddsRatherThanReplaces:
         """Two identical rows in one flush trip the unique index rather than
         the check above it, so the deduplication has to be within the payload
         as well as against the Book."""
-        assert add_identifiers(book, [asin("B00J4YQKHY"), asin("B00J4YQKHY")], db) == [
-            "B00J4YQKHY"
-        ]
+        assert add_identifiers(book, [asin("B00J4YQKHY"), asin("B00J4YQKHY")], db) == ["B00J4YQKHY"]
         db.commit()
         assert len(book.identifiers) == 1
 
@@ -131,9 +127,7 @@ class TestTheCeilingIsCountedAgainstTheBook:
         """The rule the per request `max_length` cannot supply: every caller is
         bounded per request and this writer is additive across them, so without
         the count here the per Book total is unbounded."""
-        add_identifiers(
-            book, [asin(f"B{index:09d}") for index in range(MAX_IDENTIFIERS_PER_BOOK)], db
-        )
+        add_identifiers(book, [asin(f"B{index:09d}") for index in range(MAX_IDENTIFIERS_PER_BOOK)], db)
         db.commit()
 
         assert add_identifiers(book, [asin("B999999999")], db) == []
@@ -144,9 +138,7 @@ class TestTheCeilingIsCountedAgainstTheBook:
         """A dropped identifier came out of a member's own file and nothing
         regenerates it, so a silent drop is a loss with nowhere to read it off.
         `classifications.add_headings` logs its own for the same reason."""
-        add_identifiers(
-            book, [asin(f"B{index:09d}") for index in range(MAX_IDENTIFIERS_PER_BOOK)], db
-        )
+        add_identifiers(book, [asin(f"B{index:09d}") for index in range(MAX_IDENTIFIERS_PER_BOOK)], db)
         db.commit()
 
         with caplog.at_level(logging.INFO, logger="endpaper.identifiers"):

@@ -541,7 +541,7 @@ class TestEveryOperationWasAskedSomething:
         assert not silent, (
             "these operations never produced a response, so nothing above is a "
             f"statement about them: {silent}. Refusals by the suite's network "
-            f"guard: {({label: _refused[label] for label in silent})}"
+            f"guard: { ({label: _refused[label] for label in silent}) }"
         )
 
     def test_a_generated_path_parameter_named_a_row_that_exists(self):
@@ -636,9 +636,7 @@ class TestTheBudgetIsInForce:
         raised = {
             label
             for label in _labels()
-            if sum(counts[label] for counts in _requests.values())
-            - _refused[label]
-            - _answered[label]
+            if sum(counts[label] for counts in _requests.values()) - _refused[label] - _answered[label]
         }
         assert raised == _failed["call"], (
             f"{len(raised)} operations had a call raise and "

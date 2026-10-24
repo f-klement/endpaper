@@ -120,9 +120,7 @@ _SAFE_SOURCE = (
 #:
 #: **Unanchored negative, and `-` last.** A tidy to `\-` or a reorder inside the
 #: bracket makes it a range. `COLLATE "C"` for the reason `b7d4e6f01a95` states.
-_SAFE_SOURCE_PG = (
-    'length(source) BETWEEN 1 AND 32 AND (source COLLATE "C") !~ \'[^a-z0-9_-]\''
-)
+_SAFE_SOURCE_PG = "length(source) BETWEEN 1 AND 32 AND (source COLLATE \"C\") !~ '[^a-z0-9_-]'"
 
 #: The envelope's shape on Postgres, and the highest risk line in this file.
 #:

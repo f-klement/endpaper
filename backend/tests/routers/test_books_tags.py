@@ -50,8 +50,7 @@ def _names_a_route_can_receive(route) -> frozenset[str]:
         annotation = body.field_info.annotation
         fields = frozenset(getattr(annotation, "model_fields", None) or ())
     parameters = frozenset(
-        parameter.name
-        for parameter in [*route.dependant.query_params, *route.dependant.path_params]
+        parameter.name for parameter in [*route.dependant.query_params, *route.dependant.path_params]
     )
     return fields | parameters
 
@@ -60,9 +59,7 @@ class TestCreating:
     def test_a_member_can_invent_one(self, client, member):
         """Not admin-only. A vocabulary only an admin can extend is one nobody
         uses, and public books are a shared shelf anyone may curate."""
-        res = client.post(
-            "/api/books/tags", json={"name": "Holiday reads"}, headers=member["headers"]
-        )
+        res = client.post("/api/books/tags", json={"name": "Holiday reads"}, headers=member["headers"])
 
         assert res.status_code == 201
         assert res.json()["name"] == "Holiday reads"
@@ -77,14 +74,10 @@ class TestCreating:
         there. See `docs/decisions.md`, "SQLite folds case in ASCII and Python
         does not".
         """
-        first = client.post(
-            "/api/books/tags", json={"name": "Ästhetik"}, headers=admin["headers"]
-        )
+        first = client.post("/api/books/tags", json={"name": "Ästhetik"}, headers=admin["headers"])
         assert first.status_code == 201
 
-        again = client.post(
-            "/api/books/tags", json={"name": "Ästhetik"}, headers=admin["headers"]
-        )
+        again = client.post("/api/books/tags", json={"name": "Ästhetik"}, headers=admin["headers"])
 
         assert again.status_code == 201
         assert again.json()["id"] == first.json()["id"]
@@ -93,37 +86,24 @@ class TestCreating:
         """The other half of the same fold. Without it "Ästhetik" and
         "ästhetik" both exist, which is the promise this route makes broken
         quietly rather than loudly."""
-        first = client.post(
-            "/api/books/tags", json={"name": "Ästhetik"}, headers=admin["headers"]
-        )
+        first = client.post("/api/books/tags", json={"name": "Ästhetik"}, headers=admin["headers"])
 
-        lower = client.post(
-            "/api/books/tags", json={"name": "ästhetik"}, headers=admin["headers"]
-        )
+        lower = client.post("/api/books/tags", json={"name": "ästhetik"}, headers=admin["headers"])
 
         assert lower.status_code == 201
         assert lower.json()["id"] == first.json()["id"]
 
     def test_it_lands_in_the_custom_group(self, client, admin):
-        res = client.post(
-            "/api/books/tags", json={"name": "Holiday reads"}, headers=admin["headers"]
-        )
+        res = client.post("/api/books/tags", json={"name": "Holiday reads"}, headers=admin["headers"])
         assert res.json()["category"] == "custom"
         assert res.json()["is_predefined"] is False
 
-    def test_it_appears_in_the_list_once_a_book_carries_it(
-        self, client, admin, make_book
-    ):
-        tag = client.post(
-            "/api/books/tags", json={"name": "Holiday reads"}, headers=admin["headers"]
-        ).json()
+    def test_it_appears_in_the_list_once_a_book_carries_it(self, client, admin, make_book):
+        tag = client.post("/api/books/tags", json={"name": "Holiday reads"}, headers=admin["headers"]).json()
         book = make_book(admin["headers"])
         client.post(f"/api/books/{book['id']}/tags/{tag['id']}", headers=admin["headers"])
 
-        names = {
-            row["name"]
-            for row in client.get("/api/books/tags", headers=admin["headers"]).json()
-        }
+        names = {row["name"] for row in client.get("/api/books/tags", headers=admin["headers"]).json()}
         assert "Holiday reads" in names
 
     def test_until_then_it_is_in_nobody_s_list(self, client, admin):
@@ -132,14 +112,9 @@ class TestCreating:
         and that gap is where a name typed against a private book used to reach
         everybody. `TestWhoMayBeToldATagExists` is the rule; this is the half
         of it that costs the member who typed the name."""
-        client.post(
-            "/api/books/tags", json={"name": "Holiday reads"}, headers=admin["headers"]
-        )
+        client.post("/api/books/tags", json={"name": "Holiday reads"}, headers=admin["headers"])
 
-        names = {
-            row["name"]
-            for row in client.get("/api/books/tags", headers=admin["headers"]).json()
-        }
+        names = {row["name"] for row in client.get("/api/books/tags", headers=admin["headers"]).json()}
         assert "Holiday reads" not in names
 
     def test_a_name_already_taken_returns_that_tag(self, client, admin, db):
@@ -148,35 +123,25 @@ class TestCreating:
         An error would send them to find it by hand, which is worse than the
         thing they were trying to avoid.
         """
-        first = client.post(
-            "/api/books/tags", json={"name": "Cookbooks"}, headers=admin["headers"]
-        ).json()
-        second = client.post(
-            "/api/books/tags", json={"name": "cookbooks"}, headers=admin["headers"]
-        ).json()
+        first = client.post("/api/books/tags", json={"name": "Cookbooks"}, headers=admin["headers"]).json()
+        second = client.post("/api/books/tags", json={"name": "cookbooks"}, headers=admin["headers"]).json()
 
         assert first["id"] == second["id"]
         assert db.query(Tag).filter(Tag.name.ilike("cookbooks")).count() == 1
 
     def test_it_cannot_shadow_a_seeded_tag(self, client, admin, db):
-        res = client.post(
-            "/api/books/tags", json={"name": "fantasy"}, headers=admin["headers"]
-        )
+        res = client.post("/api/books/tags", json={"name": "fantasy"}, headers=admin["headers"])
 
         assert res.json()["category"] == "genre"
         assert db.query(Tag).filter(Tag.name.ilike("fantasy")).count() == 1
 
     def test_whitespace_is_collapsed(self, client, admin):
         """A name of only spaces renders as a tag nobody can see or find again."""
-        res = client.post(
-            "/api/books/tags", json={"name": "  Holiday   reads  "}, headers=admin["headers"]
-        )
+        res = client.post("/api/books/tags", json={"name": "  Holiday   reads  "}, headers=admin["headers"])
         assert res.json()["name"] == "Holiday reads"
 
     def test_a_name_of_only_spaces_is_refused(self, client, admin):
-        res = client.post(
-            "/api/books/tags", json={"name": "   "}, headers=admin["headers"]
-        )
+        res = client.post("/api/books/tags", json={"name": "   "}, headers=admin["headers"])
         assert res.status_code == 422
 
     def test_a_control_character_is_removed_from_the_name(self, client, admin):
@@ -190,9 +155,7 @@ class TestCreating:
 
         assert res.json()["name"] == "Holidayreads"
 
-    def test_a_name_pasted_out_of_two_lines_keeps_the_break_as_a_space(
-        self, client, admin
-    ):
+    def test_a_name_pasted_out_of_two_lines_keeps_the_break_as_a_space(self, client, admin):
         """The half a strip of every control character would take silently. A
         newline is whitespace, so it separates the words rather than welding
         them: only a value that may be followed as a link wants the weld."""
@@ -246,13 +209,9 @@ class TestPuttingOneOnABook:
 
     def test_a_tag_lands_on_the_book(self, client, admin, make_book):
         book = make_book(admin["headers"])
-        tag = client.post(
-            "/api/books/tags", json={"name": "Holiday reads"}, headers=admin["headers"]
-        ).json()
+        tag = client.post("/api/books/tags", json={"name": "Holiday reads"}, headers=admin["headers"]).json()
 
-        res = client.post(
-            f"/api/books/{book['id']}/tags/{tag['id']}", headers=admin["headers"]
-        )
+        res = client.post(f"/api/books/{book['id']}/tags/{tag['id']}", headers=admin["headers"])
 
         assert res.status_code == 200
         assert [carried["name"] for carried in res.json()["tags"]] == ["Holiday reads"]
@@ -260,13 +219,9 @@ class TestPuttingOneOnABook:
     def test_a_book_at_its_ceiling_refuses_another(self, client, admin, make_book, db):
         book = make_book(admin["headers"])
         self.fill(db, book["id"], MAX_TAGS_PER_BOOK)
-        tag = client.post(
-            "/api/books/tags", json={"name": "Holiday reads"}, headers=admin["headers"]
-        ).json()
+        tag = client.post("/api/books/tags", json={"name": "Holiday reads"}, headers=admin["headers"]).json()
 
-        res = client.post(
-            f"/api/books/{book['id']}/tags/{tag['id']}", headers=admin["headers"]
-        )
+        res = client.post(f"/api/books/{book['id']}/tags/{tag['id']}", headers=admin["headers"])
 
         assert res.status_code == 400
         detail = client.get(f"/api/books/{book['id']}", headers=admin["headers"]).json()
@@ -277,20 +232,14 @@ class TestPuttingOneOnABook:
         book."""
         book = make_book(admin["headers"])
         self.fill(db, book["id"], MAX_TAGS_PER_BOOK - 1)
-        tag = client.post(
-            "/api/books/tags", json={"name": "Holiday reads"}, headers=admin["headers"]
-        ).json()
+        tag = client.post("/api/books/tags", json={"name": "Holiday reads"}, headers=admin["headers"]).json()
 
-        res = client.post(
-            f"/api/books/{book['id']}/tags/{tag['id']}", headers=admin["headers"]
-        )
+        res = client.post(f"/api/books/{book['id']}/tags/{tag['id']}", headers=admin["headers"])
 
         assert res.status_code == 200
         assert len(res.json()["tags"]) == MAX_TAGS_PER_BOOK
 
-    def test_a_book_at_its_ceiling_refuses_another_by_name(
-        self, client, admin, make_book, db
-    ):
+    def test_a_book_at_its_ceiling_refuses_another_by_name(self, client, admin, make_book, db):
         """The picker's other door, which names the tag rather than its id."""
         book = make_book(admin["headers"])
         self.fill(db, book["id"], MAX_TAGS_PER_BOOK)
@@ -305,29 +254,21 @@ class TestPuttingOneOnABook:
         detail = client.get(f"/api/books/{book['id']}", headers=admin["headers"]).json()
         assert "Holiday reads" not in [carried["name"] for carried in detail["tags"]]
 
-    def test_a_full_book_still_answers_for_a_tag_it_already_has(
-        self, client, admin, make_book, db
-    ):
+    def test_a_full_book_still_answers_for_a_tag_it_already_has(self, client, admin, make_book, db):
         """Asking again for something already there is not a refusal, so a client
         retrying a request it did not see the answer to gets the book back."""
         book = make_book(admin["headers"])
         self.fill(db, book["id"], MAX_TAGS_PER_BOOK)
-        carried = client.get(
-            f"/api/books/{book['id']}", headers=admin["headers"]
-        ).json()["tags"][0]
+        carried = client.get(f"/api/books/{book['id']}", headers=admin["headers"]).json()["tags"][0]
 
-        res = client.post(
-            f"/api/books/{book['id']}/tags/{carried['id']}", headers=admin["headers"]
-        )
+        res = client.post(f"/api/books/{book['id']}/tags/{carried['id']}", headers=admin["headers"])
 
         assert res.status_code == 200
 
 
 class TestDeleting:
     def _custom(self, client, headers, name: str = "Holiday reads") -> dict:
-        return client.post(
-            "/api/books/tags", json={"name": name}, headers=headers
-        ).json()
+        return client.post("/api/books/tags", json={"name": name}, headers=headers).json()
 
     def test_a_tag_the_library_invented(self, client, admin, db):
         tag = self._custom(client, admin["headers"])
@@ -359,16 +300,11 @@ class TestDeleting:
         assert db.get(Tag, seeded.id) is not None
 
     def test_an_unknown_tag_is_404(self, client, admin):
-        assert (
-            client.delete("/api/books/tags/9999", headers=admin["headers"]).status_code
-            == 404
-        )
+        assert client.delete("/api/books/tags/9999", headers=admin["headers"]).status_code == 404
 
     def test_tags_is_not_read_as_a_book_id(self, client, admin):
         """Declared before `/{book_id}`, which would otherwise claim the word."""
-        assert (
-            client.get("/api/books/tags", headers=admin["headers"]).status_code == 200
-        )
+        assert client.get("/api/books/tags", headers=admin["headers"]).status_code == 200
 
 
 class TestSeeding:
@@ -376,9 +312,7 @@ class TestSeeding:
         """Without the flag, seeding would either delete these or adopt them."""
         import main
 
-        tag = client.post(
-            "/api/books/tags", json={"name": "Holiday reads"}, headers=admin["headers"]
-        ).json()
+        tag = client.post("/api/books/tags", json={"name": "Holiday reads"}, headers=admin["headers"]).json()
 
         main.seed_tags()
 
@@ -406,15 +340,11 @@ class TestTheKeyTheClientTranslatesBy:
         assert computing["key"] == "computing"
 
     def test_an_invented_tag_carries_none(self, client, admin):
-        created = client.post(
-            "/api/books/tags", json={"name": "Holiday reads"}, headers=admin["headers"]
-        )
+        created = client.post("/api/books/tags", json={"name": "Holiday reads"}, headers=admin["headers"])
 
         assert created.json()["key"] is None
 
-    def test_a_key_this_version_does_not_know_is_forgotten(
-        self, client, admin, db, make_book
-    ):
+    def test_a_key_this_version_does_not_know_is_forgotten(self, client, admin, db, make_book):
         """Not a 500, which is what refusing the row would cost.
 
         A library moved back to an older image holds keys that version never
@@ -431,9 +361,7 @@ class TestTheKeyTheClientTranslatesBy:
         stored.key = "quantum_gardening"
         db.commit()
         book = make_book(admin["headers"])
-        client.post(
-            f"/api/books/{book['id']}/tags/{stored.id}", headers=admin["headers"]
-        )
+        client.post(f"/api/books/{book['id']}/tags/{stored.id}", headers=admin["headers"])
 
         res = client.get("/api/books/tags", headers=admin["headers"])
 
@@ -441,9 +369,7 @@ class TestTheKeyTheClientTranslatesBy:
         computing = next(tag for tag in res.json() if tag["name"] == "Computing")
         assert computing["key"] is None
 
-    def test_a_key_this_version_does_not_know_is_not_the_seeded_exemption(
-        self, client, admin, db
-    ):
+    def test_a_key_this_version_does_not_know_is_not_the_seeded_exemption(self, client, admin, db):
         """What the exemption is for is that the name is in this version's own
         seed list, and a key written by a newer version says the opposite: that
         row was seeded by a release this one does not have, under a name this
@@ -457,10 +383,7 @@ class TestTheKeyTheClientTranslatesBy:
         stored.key = "quantum_gardening"
         db.commit()
 
-        names = {
-            row["name"]
-            for row in client.get("/api/books/tags", headers=admin["headers"]).json()
-        }
+        names = {row["name"] for row in client.get("/api/books/tags", headers=admin["headers"]).json()}
         assert "Computing" not in names
 
 
@@ -473,9 +396,7 @@ class TestWhoMayDelete:
         `Tag` records nobody as its author, so one member quietly unpicking
         the shared vocabulary would leave no trace of who or what.
         """
-        tag = client.post(
-            "/api/books/tags", json={"name": "Holiday reads"}, headers=member["headers"]
-        ).json()
+        tag = client.post("/api/books/tags", json={"name": "Holiday reads"}, headers=member["headers"]).json()
 
         res = client.delete(f"/api/books/tags/{tag['id']}", headers=member["headers"])
 
@@ -484,9 +405,7 @@ class TestWhoMayDelete:
 
     def test_a_member_may_still_invent_one(self, client, member):
         """The asymmetry is the point, so it is pinned from both sides."""
-        res = client.post(
-            "/api/books/tags", json={"name": "Loft boxes"}, headers=member["headers"]
-        )
+        res = client.post("/api/books/tags", json={"name": "Loft boxes"}, headers=member["headers"])
         assert res.status_code == 201
 
 
@@ -497,14 +416,10 @@ class TestBookCounts:
         "Delete this tag" and "take this off 214 books" are different
         decisions, and only one of them is obvious from the name.
         """
-        tag = client.post(
-            "/api/books/tags", json={"name": "Holiday reads"}, headers=admin["headers"]
-        ).json()
+        tag = client.post("/api/books/tags", json={"name": "Holiday reads"}, headers=admin["headers"]).json()
         for title in ("One", "Two"):
             book = make_book(admin["headers"], title=title)
-            client.post(
-                f"/api/books/{book['id']}/tags/{tag['id']}", headers=admin["headers"]
-            )
+            client.post(f"/api/books/{book['id']}/tags/{tag['id']}", headers=admin["headers"])
 
         tags = client.get("/api/books/tags", headers=admin["headers"]).json()
         counted = next(row for row in tags if row["id"] == tag["id"])
@@ -522,12 +437,8 @@ class TestBookCounts:
 
         book = make_book(admin["headers"])
         for name in ("A", "B", "C"):
-            tag = client.post(
-                "/api/books/tags", json={"name": name}, headers=admin["headers"]
-            ).json()
-            client.post(
-                f"/api/books/{book['id']}/tags/{tag['id']}", headers=admin["headers"]
-            )
+            tag = client.post("/api/books/tags", json={"name": name}, headers=admin["headers"]).json()
+            client.post(f"/api/books/{book['id']}/tags/{tag['id']}", headers=admin["headers"])
 
         statements: list[str] = []
 
@@ -553,24 +464,18 @@ class TestTheCountsRespectPrivacy:
     additions accrue in a number their own listing reported as zero.
     """
 
-    def test_another_member_s_private_book_is_not_counted(
-        self, client, admin, member, make_book, db
-    ):
+    def test_another_member_s_private_book_is_not_counted(self, client, admin, member, make_book, db):
         """A tag on one visible book and one private one counts the visible one.
 
         The row is present here because the public book carries it, which is
         what separates this from `TestWhoMayBeToldATagExists`: that rule is
         about the tag whose **only** books are hidden.
         """
-        tag = client.post(
-            "/api/books/tags", json={"name": "Holiday reads"}, headers=admin["headers"]
-        ).json()
+        tag = client.post("/api/books/tags", json={"name": "Holiday reads"}, headers=admin["headers"]).json()
         shared = make_book(admin["headers"], title="Shared")
         diary = make_book(admin["headers"], title="Diary", is_private=True)
         for book in (shared, diary):
-            client.post(
-                f"/api/books/{book['id']}/tags/{tag['id']}", headers=admin["headers"]
-            )
+            client.post(f"/api/books/{book['id']}/tags/{tag['id']}", headers=admin["headers"])
 
         tags = client.get("/api/books/tags", headers=member["headers"]).json()
         counted = next(row for row in tags if row["id"] == tag["id"])
@@ -580,27 +485,19 @@ class TestTheCountsRespectPrivacy:
         """Two books carry it and one goes to the trash, so the row stays and
         the number falls. With one book the row leaves the list entirely, which
         is `TestWhoMayBeToldATagExists`'s subject and not this one's."""
-        tag = client.post(
-            "/api/books/tags", json={"name": "Holiday reads"}, headers=admin["headers"]
-        ).json()
+        tag = client.post("/api/books/tags", json={"name": "Holiday reads"}, headers=admin["headers"]).json()
         kept = make_book(admin["headers"], title="Kept")
         binned = make_book(admin["headers"], title="Binned")
         for book in (kept, binned):
-            client.post(
-                f"/api/books/{book['id']}/tags/{tag['id']}", headers=admin["headers"]
-            )
+            client.post(f"/api/books/{book['id']}/tags/{tag['id']}", headers=admin["headers"])
         client.delete(f"/api/books/{binned['id']}", headers=admin["headers"])
 
         tags = client.get("/api/books/tags", headers=admin["headers"]).json()
         counted = next(row for row in tags if row["id"] == tag["id"])
         assert counted["book_count"] == 1
 
-    def test_the_owner_still_sees_their_own_private_book(
-        self, client, admin, make_book
-    ):
-        tag = client.post(
-            "/api/books/tags", json={"name": "Holiday reads"}, headers=admin["headers"]
-        ).json()
+    def test_the_owner_still_sees_their_own_private_book(self, client, admin, make_book):
+        tag = client.post("/api/books/tags", json={"name": "Holiday reads"}, headers=admin["headers"]).json()
         book = make_book(admin["headers"], title="Diary", is_private=True)
         client.post(f"/api/books/{book['id']}/tags/{tag['id']}", headers=admin["headers"])
 
@@ -628,12 +525,8 @@ class TestTheTagFilterSurvivesADigitThatIsNotOne:
 
     SUPERSCRIPT_TWO = "²"
 
-    def test_an_unreadable_id_is_dropped_rather_than_raising(
-        self, client, admin, make_book
-    ):
-        tag = client.post(
-            "/api/books/tags", json={"name": "Holiday reads"}, headers=admin["headers"]
-        ).json()
+    def test_an_unreadable_id_is_dropped_rather_than_raising(self, client, admin, make_book):
+        tag = client.post("/api/books/tags", json={"name": "Holiday reads"}, headers=admin["headers"]).json()
         book = make_book(admin["headers"], title="Tagged")
         client.post(f"/api/books/{book['id']}/tags/{tag['id']}", headers=admin["headers"])
         make_book(admin["headers"], title="Untagged")
@@ -677,13 +570,9 @@ class TestWhoMayBeToldATagExists:
     """
 
     def _hidden_tag(self, client, owner, make_book, name="Divorce Law"):
-        tag = client.post(
-            "/api/books/tags", json={"name": name}, headers=owner["headers"]
-        ).json()
+        tag = client.post("/api/books/tags", json={"name": name}, headers=owner["headers"]).json()
         book = make_book(owner["headers"], title="A private matter", is_private=True)
-        client.post(
-            f"/api/books/{book['id']}/tags/{tag['id']}", headers=owner["headers"]
-        )
+        client.post(f"/api/books/{book['id']}/tags/{tag['id']}", headers=owner["headers"])
         return tag
 
     def _names(self, client, who):
@@ -703,12 +592,8 @@ class TestWhoMayBeToldATagExists:
 
         assert "Divorce Law" in self._names(client, admin)
 
-    def test_a_tag_on_a_book_you_can_see_is_listed(
-        self, client, admin, member, make_book
-    ):
-        tag = client.post(
-            "/api/books/tags", json={"name": "Holiday reads"}, headers=admin["headers"]
-        ).json()
+    def test_a_tag_on_a_book_you_can_see_is_listed(self, client, admin, member, make_book):
+        tag = client.post("/api/books/tags", json={"name": "Holiday reads"}, headers=admin["headers"]).json()
         book = make_book(admin["headers"], title="Shared")
         client.post(f"/api/books/{book['id']}/tags/{tag['id']}", headers=admin["headers"])
 
@@ -722,17 +607,13 @@ class TestWhoMayBeToldATagExists:
         assert [row for row in rows if row["is_predefined"]]
         assert all(row["key"] for row in rows if row["is_predefined"])
 
-    def test_attaching_a_tag_you_may_not_see_is_a_404(
-        self, client, admin, member, make_book
-    ):
+    def test_attaching_a_tag_you_may_not_see_is_a_404(self, client, admin, member, make_book):
         """The stronger channel: `book_to_out` returns the book with its tags,
         so attaching a guessed id to a book you own handed back the name."""
         hidden = self._hidden_tag(client, admin, make_book)
         mine = make_book(member["headers"], title="Mine")
 
-        response = client.post(
-            f"/api/books/{mine['id']}/tags/{hidden['id']}", headers=member["headers"]
-        )
+        response = client.post(f"/api/books/{mine['id']}/tags/{hidden['id']}", headers=member["headers"])
 
         assert response.status_code == 404
 
@@ -768,55 +649,39 @@ class TestWhoMayBeToldATagExists:
         hidden = self._hidden_tag(client, admin, make_book)
         mine = make_book(member["headers"], title="Mine")
 
-        response = client.delete(
-            f"/api/books/{mine['id']}/tags/{hidden['id']}", headers=member["headers"]
-        )
+        response = client.delete(f"/api/books/{mine['id']}/tags/{hidden['id']}", headers=member["headers"])
 
         assert response.status_code == 200
         assert response.json()["tags"] == []
 
-    def test_a_tag_you_have_just_invented_can_go_on_a_book(
-        self, client, member, make_book
-    ):
+    def test_a_tag_you_have_just_invented_can_go_on_a_book(self, client, member, make_book):
         """The false refusal the list rule causes if it is reused for writes.
         Both clients mint a tag and then attach it by id, on the next line at
         the book page and at `confirm()` on the scan form, and the tag is on no
         book in between."""
-        fresh = client.post(
-            "/api/books/tags", json={"name": "My New Idea"}, headers=member["headers"]
-        ).json()
+        fresh = client.post("/api/books/tags", json={"name": "My New Idea"}, headers=member["headers"]).json()
         mine = make_book(member["headers"], title="Mine")
 
-        response = client.post(
-            f"/api/books/{mine['id']}/tags/{fresh['id']}", headers=member["headers"]
-        )
+        response = client.post(f"/api/books/{mine['id']}/tags/{fresh['id']}", headers=member["headers"])
 
         assert response.status_code == 200
         assert "My New Idea" in self._names(client, member)
 
-    def test_a_tag_whose_last_book_you_trashed_can_go_on_another(
-        self, client, member, make_book
-    ):
+    def test_a_tag_whose_last_book_you_trashed_can_go_on_another(self, client, member, make_book):
         """Without the trash arm a member who trashes the last carrier can never
         use that tag again: creating it by name returns the existing row and
         attaching that row would 404 forever."""
-        tag = client.post(
-            "/api/books/tags", json={"name": "Shelved"}, headers=member["headers"]
-        ).json()
+        tag = client.post("/api/books/tags", json={"name": "Shelved"}, headers=member["headers"]).json()
         first = make_book(member["headers"], title="First")
         client.post(f"/api/books/{first['id']}/tags/{tag['id']}", headers=member["headers"])
         client.delete(f"/api/books/{first['id']}", headers=member["headers"])
         second = make_book(member["headers"], title="Second")
 
-        response = client.post(
-            f"/api/books/{second['id']}/tags/{tag['id']}", headers=member["headers"]
-        )
+        response = client.post(f"/api/books/{second['id']}/tags/{tag['id']}", headers=member["headers"])
 
         assert response.status_code == 200
 
-    def test_a_renamed_seeded_tag_loses_the_exemption(
-        self, client, admin, member, make_book, db
-    ):
+    def test_a_renamed_seeded_tag_loses_the_exemption(self, client, admin, member, make_book, db):
         """The exemption is keyed on `key`, not on `is_predefined`, so it rests
         on no premise about rename routes: `Tag._drop_the_key_on_a_rename`
         clears the key and the row falls back on the count arm."""
@@ -845,23 +710,15 @@ class TestTheSuggestionFeedAnswersWithTheSameVocabulary:
         with respx.mock(assert_all_called=False) as mock:
             mock.get(url__startswith=DNB).mock(return_value=sru_response(DNB_RECORD))
             silence_catalogues(mock)
-            return client.get(
-                f"/api/books/lookup?isbn={GERMAN_ISBN}", headers=headers
-            )
+            return client.get(f"/api/books/lookup?isbn={GERMAN_ISBN}", headers=headers)
 
     def _hidden_tag_named(self, client, owner, make_book, name):
-        tag = client.post(
-            "/api/books/tags", json={"name": name}, headers=owner["headers"]
-        ).json()
+        tag = client.post("/api/books/tags", json={"name": name}, headers=owner["headers"]).json()
         book = make_book(owner["headers"], title="A private matter", is_private=True)
-        client.post(
-            f"/api/books/{book['id']}/tags/{tag['id']}", headers=owner["headers"]
-        )
+        client.post(f"/api/books/{book['id']}/tags/{tag['id']}", headers=owner["headers"])
         return tag
 
-    def test_a_lookup_does_not_suggest_a_tag_the_caller_may_not_see(
-        self, client, admin, member, make_book
-    ):
+    def test_a_lookup_does_not_suggest_a_tag_the_caller_may_not_see(self, client, admin, member, make_book):
         """The record's own caption is "Informatik", so a custom tag of that
         name is exactly what the caption route matches."""
         hidden = self._hidden_tag_named(client, admin, make_book, "Informatik")
@@ -870,9 +727,7 @@ class TestTheSuggestionFeedAnswersWithTheSameVocabulary:
 
         assert hidden["id"] not in suggested
 
-    def test_and_still_suggests_the_ones_it_may(
-        self, client, admin, member, make_book, db
-    ):
+    def test_and_still_suggests_the_ones_it_may(self, client, admin, member, make_book, db):
         """The diagonal. A feed that suggested nothing at all would pass the
         arm above and be a different defect."""
         self._hidden_tag_named(client, admin, make_book, "Informatik")
@@ -882,9 +737,7 @@ class TestTheSuggestionFeedAnswersWithTheSameVocabulary:
 
         assert computing.id in suggested
 
-    def test_its_owner_is_still_suggested_it(
-        self, client, admin, member, make_book
-    ):
+    def test_its_owner_is_still_suggested_it(self, client, admin, member, make_book):
         """The second diagonal: the feed is scoped to the **caller**, not to
         the tag's books. A vocabulary built for the wrong viewer passes the
         first arm and leaks to everybody else."""
@@ -920,18 +773,12 @@ class TestTheSuggestionFeedAnswersWithTheSameVocabulary:
                 return_value=httpx.Response(200, json={"docs": []})
             )
             mock.get(url__startswith=GOOGLE_BOOKS).mock(
-                return_value=httpx.Response(
-                    200, json={"items": [volume(categories=categories)]}
-                )
+                return_value=httpx.Response(200, json={"items": [volume(categories=categories)]})
             )
             silence_catalogues(mock)
-            return client.get(
-                "/api/books/search", params={"q": "moby"}, headers=headers
-            ).json()["matches"]
+            return client.get("/api/books/search", params={"q": "moby"}, headers=headers).json()["matches"]
 
-    def test_a_search_does_not_suggest_a_tag_the_caller_may_not_see(
-        self, client, admin, member, make_book
-    ):
+    def test_a_search_does_not_suggest_a_tag_the_caller_may_not_see(self, client, admin, member, make_book):
         self._enable_google(client, admin)
         hidden = self._hidden_tag_named(client, admin, make_book, "Whaling")
 
@@ -939,9 +786,7 @@ class TestTheSuggestionFeedAnswersWithTheSameVocabulary:
 
         assert hidden["id"] not in match["suggested_tag_ids"]
 
-    def test_and_a_search_still_suggests_the_ones_it_may(
-        self, client, admin, member, make_book
-    ):
+    def test_and_a_search_still_suggests_the_ones_it_may(self, client, admin, member, make_book):
         """The diagonal. A feed that suggested nothing would pass the arm above
         and be a different defect."""
         self._enable_google(client, admin)
@@ -950,14 +795,11 @@ class TestTheSuggestionFeedAnswersWithTheSameVocabulary:
         [match] = self._search(client, member["headers"], ["Whaling", "Fiction"])
 
         names = {
-            row["id"]: row["name"]
-            for row in client.get("/api/books/tags", headers=member["headers"]).json()
+            row["id"]: row["name"] for row in client.get("/api/books/tags", headers=member["headers"]).json()
         }
         assert "Fiction" in {names[i] for i in match["suggested_tag_ids"]}
 
-    def test_and_its_owner_is_still_suggested_it_in_a_search(
-        self, client, admin, make_book
-    ):
+    def test_and_its_owner_is_still_suggested_it_in_a_search(self, client, admin, make_book):
         """Scoped to the caller, not to the tag's books, on this door too."""
         self._enable_google(client, admin)
         hidden = self._hidden_tag_named(client, admin, make_book, "Whaling")
@@ -1025,50 +867,34 @@ class TestANameTypedAgainstAHiddenTagIsNotAttached:
 
     def _hidden_tag(self, client, owner, make_book):
         """A tag whose only carrier is a private book of `owner`'s."""
-        tag = client.post(
-            "/api/books/tags", json={"name": "Divorce Law"}, headers=owner["headers"]
-        ).json()
+        tag = client.post("/api/books/tags", json={"name": "Divorce Law"}, headers=owner["headers"]).json()
         book = make_book(owner["headers"], title="A private matter", is_private=True)
-        client.post(
-            f"/api/books/{book['id']}/tags/{tag['id']}", headers=owner["headers"]
-        )
+        client.post(f"/api/books/{book['id']}/tags/{tag['id']}", headers=owner["headers"])
         return tag
 
-    def test_the_create_still_hands_back_the_hidden_row(
-        self, client, admin, member, make_book
-    ):
+    def test_the_create_still_hands_back_the_hidden_row(self, client, admin, member, make_book):
         """Unchanged, and asserted so that the residue is a fact in the suite
         rather than a sentence in a docstring."""
         hidden = self._hidden_tag(client, admin, make_book)
 
-        response = client.post(
-            "/api/books/tags", json={"name": "Divorce Law"}, headers=member["headers"]
-        )
+        response = client.post("/api/books/tags", json={"name": "Divorce Law"}, headers=member["headers"])
 
         assert response.status_code == 201
         assert response.json()["id"] == hidden["id"]
 
-    def test_and_the_attach_by_id_still_refuses(
-        self, client, admin, member, make_book
-    ):
+    def test_and_the_attach_by_id_still_refuses(self, client, admin, member, make_book):
         """The gate this branch did not widen. It is asked about an id, which
         the caller may have guessed, and that is a different question from the
         one the door beside it answers."""
         self._hidden_tag(client, admin, make_book)
-        same = client.post(
-            "/api/books/tags", json={"name": "Divorce Law"}, headers=member["headers"]
-        ).json()
+        same = client.post("/api/books/tags", json={"name": "Divorce Law"}, headers=member["headers"]).json()
         mine = make_book(member["headers"], title="Mine")
 
-        response = client.post(
-            f"/api/books/{mine['id']}/tags/{same['id']}", headers=member["headers"]
-        )
+        response = client.post(f"/api/books/{mine['id']}/tags/{same['id']}", headers=member["headers"])
 
         assert response.status_code == 404
 
-    def test_the_import_no_longer_puts_it_on_the_member_s_book(
-        self, client, admin, member, make_book
-    ):
+    def test_the_import_no_longer_puts_it_on_the_member_s_book(self, client, admin, member, make_book):
         """**The inverted arm, and the one the repair is for.** One CSV row
         carrying the name used to attach it with no gate in the way, which is
         what made the hidden name public."""
@@ -1077,21 +903,15 @@ class TestANameTypedAgainstAHiddenTagIsNotAttached:
 
         client.post(
             "/api/imports/csv",
-            files={
-                "file": ("shelf.csv", b"Title,Tags\nMine,Divorce Law\n", "text/csv")
-            },
+            files={"file": ("shelf.csv", b"Title,Tags\nMine,Divorce Law\n", "text/csv")},
             headers=member["headers"],
             params={"apply_tags": True},
         )
 
-        carried = client.get(
-            f"/api/books/{mine['id']}", headers=member["headers"]
-        ).json()["tags"]
+        carried = client.get(f"/api/books/{mine['id']}", headers=member["headers"]).json()["tags"]
         assert "Divorce Law" not in {tag["name"] for tag in carried}
 
-    def test_and_says_how_many_names_it_left_off(
-        self, client, admin, member, make_book
-    ):
+    def test_and_says_how_many_names_it_left_off(self, client, admin, member, make_book):
         """Read off the report rather than the book, because a drop nobody can
         see is a loss with nowhere to read it off. The number folds four
         causes on purpose: `Import._apply_tags` says which and what that
@@ -1101,18 +921,14 @@ class TestANameTypedAgainstAHiddenTagIsNotAttached:
 
         result = client.post(
             "/api/imports/csv",
-            files={
-                "file": ("shelf.csv", b"Title,Tags\nMine,Divorce Law\n", "text/csv")
-            },
+            files={"file": ("shelf.csv", b"Title,Tags\nMine,Divorce Law\n", "text/csv")},
             headers=member["headers"],
             params={"apply_tags": True},
         ).json()
 
         assert result["tags_dropped"] == 1
 
-    def test_nor_does_the_by_name_door_attach_it(
-        self, client, admin, member, make_book
-    ):
+    def test_nor_does_the_by_name_door_attach_it(self, client, admin, member, make_book):
         """**200 with the book, not a 404 and not a 409.** A status telling a
         refused name from an accepted one would answer in the status line the
         question this refusal exists to narrow."""
@@ -1128,9 +944,7 @@ class TestANameTypedAgainstAHiddenTagIsNotAttached:
         assert response.status_code == 200
         assert "Divorce Law" not in {tag["name"] for tag in response.json()["tags"]}
 
-    def test_the_hidden_name_stays_out_of_the_member_s_vocabulary(
-        self, client, admin, member, make_book
-    ):
+    def test_the_hidden_name_stays_out_of_the_member_s_vocabulary(self, client, admin, member, make_book):
         """**The harm, which is not the refusal.** Attaching the name to a
         member's book is what counts it for everybody and puts it in the list
         the client draws on nearly every page. Read off that list rather than
@@ -1148,9 +962,7 @@ class TestANameTypedAgainstAHiddenTagIsNotAttached:
 
         assert "Divorce Law" not in {tag["name"] for tag in listed}
 
-    def test_while_a_name_the_member_may_use_lands_in_one_request(
-        self, client, member, make_book
-    ):
+    def test_while_a_name_the_member_may_use_lands_in_one_request(self, client, member, make_book):
         """The door, doing the thing it was added for: a name nobody has typed
         before is invented and put on the book in one gesture, where the
         clients used to send two requests and reconcile the answers."""
@@ -1165,9 +977,7 @@ class TestANameTypedAgainstAHiddenTagIsNotAttached:
         assert response.status_code == 200
         assert "Holiday reads" in {tag["name"] for tag in response.json()["tags"]}
 
-    def test_including_one_the_library_holds_and_no_book_carries(
-        self, client, member, make_book
-    ):
+    def test_including_one_the_library_holds_and_no_book_carries(self, client, member, make_book):
         """The state every invented tag is in before something carries it, and
         the reason `Vocabulary.writable` keeps its last arm."""
         client.post(
@@ -1200,13 +1010,9 @@ class TestANameTypedAgainstAHiddenTagIsNotAttached:
         invisible to a sweep by construction, and because the prose that
         invited the misreading was in `tags.py` and in the shelf register
         rather than only in the prediction."""
-        tag = client.post(
-            "/api/books/tags", json={"name": "Divorce Law"}, headers=admin["headers"]
-        ).json()
+        tag = client.post("/api/books/tags", json={"name": "Divorce Law"}, headers=admin["headers"]).json()
         theirs = make_book(admin["headers"], title="Theirs")
-        client.post(
-            f"/api/books/{theirs['id']}/tags/{tag['id']}", headers=admin["headers"]
-        )
+        client.post(f"/api/books/{theirs['id']}/tags/{tag['id']}", headers=admin["headers"])
         client.delete(f"/api/books/{theirs['id']}", headers=admin["headers"])
         mine = make_book(member["headers"], title="Mine")
 

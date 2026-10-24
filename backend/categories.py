@@ -104,9 +104,9 @@ CATEGORY_MAX: Final = 120
 #: direction.
 #: `tests/schemas/test_book.py::test_the_categories_ceiling_assumes_the_separator_it_is_derived_from`
 #: pins the width with literals so this line cannot be a restatement of itself.
-CATEGORIES_MAX: Final = MAX_CATEGORIES_PER_BOOK * CATEGORY_MAX + (
-    MAX_CATEGORIES_PER_BOOK - 1
-) * len(CATEGORY_SEPARATOR)
+CATEGORIES_MAX: Final = MAX_CATEGORIES_PER_BOOK * CATEGORY_MAX + (MAX_CATEGORIES_PER_BOOK - 1) * len(
+    CATEGORY_SEPARATOR
+)
 
 _BARE: Final = CATEGORY_SEPARATOR.strip()
 
@@ -123,9 +123,7 @@ def split_categories(value: str | None) -> list[str]:
     return [part.strip() for part in value.split(_BARE) if part.strip()]
 
 
-def kept_categories(
-    subjects: Iterable[str], *, limit: int | None = MAX_CATEGORIES_PER_BOOK
-) -> list[str]:
+def kept_categories(subjects: Iterable[str], *, limit: int | None = MAX_CATEGORIES_PER_BOOK) -> list[str]:
     """Drop and cap: the subjects a catalogue supplied, as a reader would get them back.
 
     **Dropped rather than raised**, because this runs inside a catalogue read and
@@ -172,9 +170,7 @@ def kept_categories(
     return [subject.strip() for subject in keepable if subject.strip()]
 
 
-def join_categories(
-    subjects: Iterable[str], *, limit: int | None = MAX_CATEGORIES_PER_BOOK
-) -> str | None:
+def join_categories(subjects: Iterable[str], *, limit: int | None = MAX_CATEGORIES_PER_BOOK) -> str | None:
     """The stored form of a subject list: `kept_categories`, joined.
 
     None for an empty list, so a list of nothing stays a stored NULL rather than an
@@ -238,10 +234,7 @@ def rebound_categories(value: str | None) -> str | None:
         # it, so an empty value stays a stored NULL rather than becoming "".
         return None
     if len(subjects) > MAX_CATEGORIES_PER_BOOK:
-        raise ValueError(
-            f"At most {MAX_CATEGORIES_PER_BOOK} subjects, and this carries "
-            f"{len(subjects)}"
-        )
+        raise ValueError(f"At most {MAX_CATEGORIES_PER_BOOK} subjects, and this carries {len(subjects)}")
     # Rejoined rather than returned as parts, so what the model hands on is what
     # the column stores, and the width below is measured against that rather than
     # against what arrived. Idempotent by construction: no part `split_categories`

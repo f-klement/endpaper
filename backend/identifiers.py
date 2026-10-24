@@ -29,9 +29,7 @@ from schemas.identifier import MAX_IDENTIFIERS_PER_BOOK, BookIdentifierIn
 logger = logging.getLogger("endpaper.identifiers")
 
 
-def add_identifiers(
-    book: Book, entries: Sequence[BookIdentifierIn], db: Session
-) -> list[str]:
+def add_identifiers(book: Book, entries: Sequence[BookIdentifierIn], db: Session) -> list[str]:
     """Add this Book's identifiers. Returns the values it **added**.
 
     **Additive, and never a replacement or a retype.** A stored row says which
@@ -67,9 +65,7 @@ def add_identifiers(
     # plain VARCHAR as a `str` and the payload's is a `BookIdentifierScheme`, so
     # comparing them raw works only for as long as that is a `StrEnum`;
     # coercing removes the dependency instead of commenting on it.
-    existing = {
-        (BookIdentifierScheme(row.scheme), row.value) for row in book.identifiers
-    }
+    existing = {(BookIdentifierScheme(row.scheme), row.value) for row in book.identifiers}
     added: list[str] = []
     for entry in entries:
         key = (BookIdentifierScheme(entry.scheme), entry.value)

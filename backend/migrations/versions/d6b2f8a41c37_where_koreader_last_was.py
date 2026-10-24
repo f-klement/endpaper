@@ -62,9 +62,7 @@ def _bounds(blob: str) -> str:
 
 def upgrade() -> None:
     with op.batch_alter_table("users") as batch:
-        batch.add_column(
-            sa.Column("kosync_key_digest", sa.String(length=_DIGEST_HEX), nullable=True)
-        )
+        batch.add_column(sa.Column("kosync_key_digest", sa.String(length=_DIGEST_HEX), nullable=True))
         batch.add_column(sa.Column("kosync_key_set_at", sa.DateTime(), nullable=True))
 
     op.create_table(

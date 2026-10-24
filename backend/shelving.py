@@ -201,9 +201,7 @@ class Shelving:
         """
         return [
             row
-            for row in self._db.query(Collection)
-            .order_by(func.lower(Collection.name))
-            .all()
+            for row in self._db.query(Collection).order_by(func.lower(Collection.name)).all()
             if self._rule.may_be_told(row.id)
         ]
 

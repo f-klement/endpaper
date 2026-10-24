@@ -96,7 +96,7 @@ describe("the probe the ordered lists are checked with", () => {
     // found per round: an **annotated** wrapped list, which has no witness and
     // no constant level refusal either; the **broken** spelling
     // `export const NAME =\n  everyOneOf<...>`, which is not a choice but what
-    // prettier writes once the line passes 80 columns, so the longer the union
+    // oxfmt writes once the line passes 80 columns, so the longer the union
     // name the likelier it is; and a **docstring** naming a constant, which an
     // unanchored pattern captures instead of the declaration below it, losing
     // the real one from the population.

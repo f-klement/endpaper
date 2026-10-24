@@ -41,9 +41,7 @@ class TestTheDigestIsStoredOnTheReference:
         res = report(client, admin["headers"], book["id"], partial_md5=DIGEST.upper())
         assert res.status_code == 422
 
-    def test_a_report_without_a_digest_keeps_the_one_stored(
-        self, client, admin, make_book
-    ):
+    def test_a_report_without_a_digest_keeps_the_one_stored(self, client, admin, make_book):
         """A look that could not read the file has nothing to say about its
         bytes, and clearing the digest would leave the file unrecognised by
         them until somebody picked it again."""
@@ -93,9 +91,7 @@ class TestWhichBooksHoldAFile:
         [answer] = holders(client, admin["headers"], {"partial_md5": DIGEST}).json()
         assert [one["book_id"] for one in answer["holders"]] == [book["id"]]
 
-    def test_the_same_path_under_another_root_is_another_file(
-        self, client, admin, make_book
-    ):
+    def test_the_same_path_under_another_root_is_another_file(self, client, admin, make_book):
         """The statement narrows on the path alone and the root is compared
         after it, so this is the case that comparison exists for."""
         book = make_book(admin["headers"])
@@ -104,9 +100,7 @@ class TestWhichBooksHoldAFile:
         [answer] = holders(client, admin["headers"], at(root="Laptop")).json()
         assert answer == {"holders": []}
 
-    def test_each_answer_is_in_the_place_its_file_was_asked(
-        self, client, admin, make_book
-    ):
+    def test_each_answer_is_in_the_place_its_file_was_asked(self, client, admin, make_book):
         book = make_book(admin["headers"])
         report(client, admin["headers"], book["id"], partial_md5=DIGEST)
 
@@ -118,9 +112,7 @@ class TestWhichBooksHoldAFile:
         ).json()
         assert [len(answer["holders"]) for answer in answers] == [0, 1]
 
-    def test_a_reference_matching_both_keys_is_one_holder(
-        self, client, admin, make_book
-    ):
+    def test_a_reference_matching_both_keys_is_one_holder(self, client, admin, make_book):
         book = make_book(admin["headers"])
         report(client, admin["headers"], book["id"], partial_md5=DIGEST)
 
@@ -131,9 +123,7 @@ class TestWhichBooksHoldAFile:
 
 
 class TestABookTheCallerCannotSeeHoldsNothing:
-    def test_a_private_book_answers_exactly_as_no_book_does(
-        self, client, member, other_user, make_book
-    ):
+    def test_a_private_book_answers_exactly_as_no_book_does(self, client, member, other_user, make_book):
         """**The leak this route must never make**, and the test that goes red if
         the lookup stops starting from the Shelf. A holder here would confirm
         that another member privately holds this exact file."""
@@ -141,9 +131,7 @@ class TestABookTheCallerCannotSeeHoldsNothing:
         report(client, member["headers"], theirs["id"], partial_md5=DIGEST)
 
         hidden = holders(client, other_user["headers"], at(partial_md5=DIGEST))
-        unknown = holders(
-            client, other_user["headers"], at(path="Nowhere.epub", partial_md5=OTHER_DIGEST)
-        )
+        unknown = holders(client, other_user["headers"], at(path="Nowhere.epub", partial_md5=OTHER_DIGEST))
         assert hidden.status_code == unknown.status_code == 200
         assert hidden.json() == unknown.json() == [{"holders": []}]
 

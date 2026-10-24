@@ -214,15 +214,13 @@ class Directory:
                     stream.sendall(_response(message_id, _SEARCH_DONE, _SUCCESS))
                 elif operation == _EXTENDED_REQUEST:
                     name = bytes([0x8A, len(_START_TLS_OID)]) + _START_TLS_OID
-                    stream.sendall(
-                        _response(message_id, _EXTENDED_RESPONSE, self._start_tls_result, name)
-                    )
+                    stream.sendall(_response(message_id, _EXTENDED_RESPONSE, self._start_tls_result, name))
                     if self._start_tls_result == _SUCCESS:
                         stream = self._upgrade(stream)
                         over_tls = True
                 elif operation == _UNBIND_REQUEST:
                     return
-        except (ConnectionError, OSError):
+        except ConnectionError, OSError:
             return
 
     def close(self) -> None:
@@ -302,9 +300,7 @@ class TestLdapsChecksTheCertificate:
 
         assert server.received == []
 
-    def test_the_ca_file_is_trusted_and_the_bind_arrives_encrypted(
-        self, directory, monkeypatch, pki
-    ):
+    def test_the_ca_file_is_trusted_and_the_bind_arrives_encrypted(self, directory, monkeypatch, pki):
         """Dialled by IP address, which the certificate names in its SAN: the
         standard library's check matches an address, where the matcher ldap3
         falls back to on this Python refuses one."""
@@ -322,17 +318,13 @@ class TestTheCaFileReplacesTheImageStore:
     """`SSL_CERT_FILE` points OpenSSL's default store at a second CA, which is
     the store the image would otherwise supply."""
 
-    def test_with_no_ca_file_the_image_store_is_what_is_trusted(
-        self, directory, monkeypatch, pki
-    ):
+    def test_with_no_ca_file_the_image_store_is_what_is_trusted(self, directory, monkeypatch, pki):
         monkeypatch.setenv("SSL_CERT_FILE", str(pki.image_authority))
         _serve(directory, monkeypatch, pki.from_the_image_store, ldaps=True)
 
         assert _bind() is True
 
-    def test_with_a_ca_file_the_image_store_is_no_longer_trusted(
-        self, directory, monkeypatch, pki
-    ):
+    def test_with_a_ca_file_the_image_store_is_no_longer_trusted(self, directory, monkeypatch, pki):
         monkeypatch.setenv("SSL_CERT_FILE", str(pki.image_authority))
         monkeypatch.setenv("LDAP_CA_FILE", str(pki.authority))
         server = _serve(directory, monkeypatch, pki.from_the_image_store, ldaps=True)
@@ -369,9 +361,7 @@ class TestStartTlsChecksTheCertificate:
         assert not server.password_reached_it()
         assert _BIND_REQUEST not in server.operations()
 
-    def test_the_ca_file_is_trusted_and_the_bind_arrives_encrypted(
-        self, directory, monkeypatch, pki
-    ):
+    def test_the_ca_file_is_trusted_and_the_bind_arrives_encrypted(self, directory, monkeypatch, pki):
         monkeypatch.setenv("LDAP_CA_FILE", str(pki.authority))
         server = _serve(directory, monkeypatch, pki.for_this_address, ldaps=False)
 
@@ -383,9 +373,7 @@ class TestStartTlsChecksTheCertificate:
 
 
 class TestStartTlsFailsClosed:
-    def test_a_directory_that_declines_start_tls_gets_no_password(
-        self, directory, monkeypatch, pki
-    ):
+    def test_a_directory_that_declines_start_tls_gets_no_password(self, directory, monkeypatch, pki):
         """ldap3 2.9.1's synchronous strategy raises on a declined StartTLS,
         so this is the path a real refusal takes."""
         server = _serve(
@@ -410,6 +398,7 @@ class TestStartTlsFailsClosed:
         would have sent: before the answer was read, this bind reached it in
         the clear, password included.
         """
+
         def reports_no_upgrade(*args: object, **kwargs: object) -> object:
             connection = Connection(*args, **kwargs)
             connection.start_tls = lambda *_, **__: False
@@ -476,7 +465,5 @@ class TestAReferralIsNotFollowed:
         with caplog.at_level(logging.WARNING, logger="endpaper.auth"):
             auth_backends.authenticate_ldap(db, "kim", "the-member-password")
 
-        warnings = [
-            record.getMessage() for record in caplog.records if record.levelno == logging.WARNING
-        ]
+        warnings = [record.getMessage() for record in caplog.records if record.levelno == logging.WARNING]
         assert any(referred.elsewhere.url in line for line in warnings)

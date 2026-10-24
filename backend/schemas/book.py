@@ -356,9 +356,7 @@ class BookCreate(BaseModel):
     #: them. Bounded: every entry becomes a row. Duplicates within one payload
     #: are dropped by `classifications.add_headings` rather than refused, because the
     #: catalogues themselves repeat a number across sources.
-    classifications: list[ClassificationIn] = Field(
-        default=[], max_length=MAX_CLASSIFICATIONS_PER_BOOK
-    )
+    classifications: list[ClassificationIn] = Field(default=[], max_length=MAX_CLASSIFICATIONS_PER_BOOK)
     #: What a store calls this Book, where that is not an ISBN.
     #:
     #: **A second identifier field rather than a wider `isbn`**, and that is the
@@ -370,9 +368,7 @@ class BookCreate(BaseModel):
     #: Bounded: every entry becomes a row. Duplicates within one payload are
     #: dropped by `identifiers.add_identifiers` rather than refused, because a
     #: client reading two of its own files may find one book in both.
-    identifiers: list[BookIdentifierIn] = Field(
-        default=[], max_length=MAX_IDENTIFIERS_PER_BOOK
-    )
+    identifiers: list[BookIdentifierIn] = Field(default=[], max_length=MAX_IDENTIFIERS_PER_BOOK)
     #: Subjects a client asserts about this book, stored and never interpreted.
     #:
     #: **Deliberately not the Tag system**, which is the distinction
@@ -391,9 +387,7 @@ class BookCreate(BaseModel):
     #: A list on the wire and one delimited string in the column, for the reason
     #: `BookColumns.categories` states: making every client parse the same
     #: delimiter is how one of them eventually parses it differently.
-    categories: list[CategoryField] = Field(
-        default=[], max_length=MAX_CATEGORIES_PER_BOOK
-    )
+    categories: list[CategoryField] = Field(default=[], max_length=MAX_CATEGORIES_PER_BOOK)
 
     #: What this book's arrival establishes about ownership.
     #:
@@ -558,9 +552,7 @@ RESHAPED_FOR_ITS_COLUMN: Final[tuple[str, ...]] = ("categories",)
 #: What `routers/books._create_book` takes out of the dump before the
 #: constructor. The router loops this rather than spelling one `pop` per name, so
 #: the popped set and the refusal below are one object and cannot drift.
-POPPED_BEFORE_THE_CONSTRUCTOR: Final[tuple[str, ...]] = (
-    CARRIED_AS_CHILD_ROWS + RESHAPED_FOR_ITS_COLUMN
-)
+POPPED_BEFORE_THE_CONSTRUCTOR: Final[tuple[str, ...]] = CARRIED_AS_CHILD_ROWS + RESHAPED_FOR_ITS_COLUMN
 
 
 def _without_annotations(annotation: object) -> object:
@@ -680,8 +672,7 @@ def _unconstructable_fields(
     # for a field nobody sends.
     for name in sorted((set(child_rows) & held) - (popped - set(fields))):
         faults[name] = (
-            "is popped as a child row but IS a column of `books`, so it should "
-            "pass through or be reshaped"
+            "is popped as a child row but IS a column of `books`, so it should pass through or be reshaped"
         )
     for name in sorted(set(reshaped) - held - (popped - set(fields))):
         faults[name] = (
@@ -693,8 +684,7 @@ def _unconstructable_fields(
             faults[name] = "is written to the row unchanged but is not a column of `books`"
         elif admits_a_container(fields[name]):
             faults[name] = (
-                "is written to the row unchanged as a container, which no column "
-                "of `books` can be handed"
+                "is written to the row unchanged as a container, which no column of `books` can be handed"
             )
     return faults
 
@@ -721,11 +711,7 @@ def dumped_fields(model: type[BaseModel], folded: Iterable[str]) -> dict[str, ob
             "excluded field needs a validator writing its value into one that "
             "is dumped, and a name in that tuple."
         )
-    return {
-        name: field.annotation
-        for name, field in model.model_fields.items()
-        if name not in excluded
-    }
+    return {name: field.annotation for name, field in model.model_fields.items() if name not in excluded}
 
 
 #: Refused at import, not at the first create.
@@ -1217,9 +1203,7 @@ class BookMatch(BaseModel):
     series_index: float | None = Field(default=None, ge=0, le=MAX_SERIES_INDEX)
     #: Bounded for the same reason `year` is: this model is a request body, and
     #: `POST /api/books/{id}/enrich/apply` turns every entry into a row.
-    classifications: list[ClassificationIn] = Field(
-        default=[], max_length=MAX_CLASSIFICATIONS_PER_BOOK
-    )
+    classifications: list[ClassificationIn] = Field(default=[], max_length=MAX_CLASSIFICATIONS_PER_BOOK)
     # Populated by the pre-creation search, where the result is about to
     # become a new book and the tag guess saves the person picking them by
     # hand. Left empty by the enrichment candidates endpoint, where the book
@@ -1420,9 +1404,7 @@ class BookDetailsUpdate(BaseModel):
     #: constants, so the list shaped doors onto this column cannot accept
     #: different things. `BookMatch` is bounded differently on purpose, being
     #: handed one already joined string.
-    categories: list[CategoryField] = Field(
-        default=[], max_length=MAX_CATEGORIES_PER_BOOK
-    )
+    categories: list[CategoryField] = Field(default=[], max_length=MAX_CATEGORIES_PER_BOOK)
 
     @field_validator("categories", mode="before")
     @classmethod
@@ -1657,13 +1639,9 @@ class DuplicateGroup(BaseModel):
         """
         shown = len(self.books)
         if shown < MERGE_BOOKS_MAX and self.size != shown:
-            raise ValueError(
-                f"an uncapped group of {shown} cannot claim a size of {self.size}"
-            )
+            raise ValueError(f"an uncapped group of {shown} cannot claim a size of {self.size}")
         if self.size < shown:
-            raise ValueError(
-                f"a group of {shown} cannot claim a size of {self.size}"
-            )
+            raise ValueError(f"a group of {shown} cannot claim a size of {self.size}")
         return self
 
 

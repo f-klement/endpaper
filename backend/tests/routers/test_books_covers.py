@@ -58,28 +58,20 @@ class TestAddingABook:
     def test_the_cover_is_stored_rather_than_hotlinked(
         self, client, admin, make_book, covers_dir, covers_that_store
     ):
-        book = make_book(
-            admin["headers"], cover_url="https://covers.openlibrary.org/b/isbn/x-L.jpg"
-        )
+        book = make_book(admin["headers"], cover_url="https://covers.openlibrary.org/b/isbn/x-L.jpg")
         assert book["cover_url"] == f"/covers/{book['id']}.jpg"
 
-    def test_it_runs_after_the_row_exists(
-        self, client, admin, make_book, covers_dir, covers_that_store
-    ):
+    def test_it_runs_after_the_row_exists(self, client, admin, make_book, covers_dir, covers_that_store):
         """The file is named by the book's id, so there is nothing to name until
         the insert has happened."""
         book = make_book(admin["headers"], isbn="9780441013593")
         assert covers_that_store == [book["id"]]
 
-    def test_a_book_no_image_service_has_keeps_no_cover(
-        self, client, admin, make_book, covers_dir
-    ):
+    def test_a_book_no_image_service_has_keeps_no_cover(self, client, admin, make_book, covers_dir):
         book = make_book(admin["headers"], isbn="9780441013593")
         assert book["cover_url"] is None
 
-    def test_the_bytes_are_served_from_here(
-        self, client, admin, make_book, covers_dir, covers_that_store
-    ):
+    def test_the_bytes_are_served_from_here(self, client, admin, make_book, covers_dir, covers_that_store):
         book = make_book(admin["headers"], isbn="9780441013593")
 
         res = client.get(f"/covers/{book['id']}.jpg", headers=admin["headers"])
@@ -87,7 +79,6 @@ class TestAddingABook:
         assert res.status_code == 200
         assert res.headers["content-type"] == "image/jpeg"
         assert res.content == JPEG_BYTES
-
 
 
 class TestBackfill:
@@ -138,10 +129,7 @@ class TestBackfill:
         assert body["still_missing"] == 0
         listed = client.get(f"/api/books/{book['id']}", headers=admin["headers"]).json()
         assert listed["cover_url"] == f"/covers/{book['id']}.jpg"
-        assert (
-            client.get(f"/covers/{book['id']}.jpg", headers=admin["headers"]).content
-            == JPEG_BYTES
-        )
+        assert client.get(f"/covers/{book['id']}.jpg", headers=admin["headers"]).content == JPEG_BYTES
 
     def test_a_cover_this_app_already_holds_is_left_out(
         self, client, admin, make_book, covers_dir, monkeypatch
@@ -200,9 +188,7 @@ class TestBackfill:
         second = make_book(admin["headers"], title="B")
         monkeypatch.setattr(books_router, "MAX_BACKFILL_BOOKS", 1)
 
-        first_run = client.post(
-            "/api/books/covers/backfill", headers=admin["headers"]
-        ).json()
+        first_run = client.post("/api/books/covers/backfill", headers=admin["headers"]).json()
         second_run = client.post(
             "/api/books/covers/backfill",
             params={"after_id": first_run["next_after_id"]},
@@ -214,9 +200,7 @@ class TestBackfill:
         assert second_run["next_after_id"] == 0
         assert second["id"] > first_run["next_after_id"]
 
-    def test_a_cursor_too_large_for_the_database_is_refused_not_a_500(
-        self, client, admin, covers_dir
-    ):
+    def test_a_cursor_too_large_for_the_database_is_refused_not_a_500(self, client, admin, covers_dir):
         """Python ints have no ceiling and SQLite's do, so an unbounded `int`
         query parameter reaches the driver and raises `OverflowError`, which
         lands in the unhandled-exception handler: a bad request classed as a bug
@@ -230,9 +214,7 @@ class TestBackfill:
 
         assert res.status_code == 422
 
-    def test_reaching_the_end_resets_the_cursor(
-        self, client, admin, make_book, covers_dir
-    ):
+    def test_reaching_the_end_resets_the_cursor(self, client, admin, make_book, covers_dir):
         """So pressing again starts over and re-tries the ones that failed,
         which may since have become fixable."""
         make_book(admin["headers"], title="A")
@@ -256,9 +238,7 @@ class TestBackfill:
 def _give_a_cover(db, covers_dir, book_id: int) -> None:
     """Put a cover file behind a book and point its column at it."""
     (covers_dir / f"{book_id}.jpg").write_bytes(JPEG_BYTES)
-    db.query(Book).filter(Book.id == book_id).update(
-        {"cover_url": f"/covers/{book_id}.jpg"}
-    )
+    db.query(Book).filter(Book.id == book_id).update({"cover_url": f"/covers/{book_id}.jpg"})
     db.commit()
 
 
@@ -267,9 +247,7 @@ class TestTheDirectoryDoesNotDriftFromTheDatabase:
     standing cost of holding covers on disk. These are the three places it is
     paid."""
 
-    def test_purging_a_book_deletes_its_cover(
-        self, client, admin, make_book, covers_dir, monkeypatch
-    ):
+    def test_purging_a_book_deletes_its_cover(self, client, admin, make_book, covers_dir, monkeypatch):
         """A cover whose book is gone is dead bytes no query will ever find, and
         where SQLite can still issue the id again (one freed before revision
         0850786d1753, or on a downgraded database), the next book would
@@ -280,15 +258,11 @@ class TestTheDirectoryDoesNotDriftFromTheDatabase:
         assert cover_store.book_ids() == {book["id"]}
 
         client.delete(f"/api/books/{book['id']}", headers=admin["headers"])
-        client.delete(
-            f"/api/books/{book['id']}/permanent", headers=admin["headers"]
-        )
+        client.delete(f"/api/books/{book['id']}/permanent", headers=admin["headers"])
 
         assert cover_store.book_ids() == set()
 
-    def test_emptying_the_trash_deletes_them_too(
-        self, client, admin, make_book, covers_dir, monkeypatch
-    ):
+    def test_emptying_the_trash_deletes_them_too(self, client, admin, make_book, covers_dir, monkeypatch):
         store_locally(monkeypatch)
         book = make_book(admin["headers"], title="A")
         client.post("/api/books/covers/backfill", headers=admin["headers"])
@@ -298,9 +272,7 @@ class TestTheDirectoryDoesNotDriftFromTheDatabase:
 
         assert cover_store.book_ids() == set()
 
-    def test_trashing_a_book_keeps_its_cover(
-        self, client, admin, make_book, covers_dir, monkeypatch
-    ):
+    def test_trashing_a_book_keeps_its_cover(self, client, admin, make_book, covers_dir, monkeypatch):
         """A trashed book can be restored, and restoring one to a placeholder
         would be a delete that half happened."""
         store_locally(monkeypatch)
@@ -311,9 +283,7 @@ class TestTheDirectoryDoesNotDriftFromTheDatabase:
 
         assert cover_store.book_ids() == {book["id"]}
 
-    def test_merging_moves_the_cover_it_kept(
-        self, client, admin, make_book, covers_dir, db
-    ):
+    def test_merging_moves_the_cover_it_kept(self, client, admin, make_book, covers_dir, db):
         """The keeper can absorb the loser's `cover_url`, which names a file
         about to be deleted with the loser."""
         keeper = make_book(admin["headers"], title="Dune")
@@ -363,9 +333,7 @@ class TestTheDirectoryDoesNotDriftFromTheDatabase:
         assert cover_store.book_ids() == {loser["id"]}
         assert res.json()["cover_url"] is None
 
-    def test_merging_deletes_a_cover_it_did_not_keep(
-        self, client, admin, make_book, covers_dir, db
-    ):
+    def test_merging_deletes_a_cover_it_did_not_keep(self, client, admin, make_book, covers_dir, db):
         keeper = make_book(admin["headers"], title="Dune")
         loser = make_book(admin["headers"], title="Dune")
         _give_a_cover(db, covers_dir, keeper["id"])
@@ -389,9 +357,7 @@ class TestTheDirectoryDoesNotDriftFromTheDatabase:
         client.post("/api/books/covers/backfill", headers=admin["headers"])
         (covers_dir / f"{book['id']}.jpg").unlink()
 
-        body = client.post(
-            "/api/books/covers/backfill", headers=admin["headers"]
-        ).json()
+        body = client.post("/api/books/covers/backfill", headers=admin["headers"]).json()
 
         assert body["examined"] == 1
         assert body["stored"] == 1
@@ -467,25 +433,19 @@ class TestARaiseInTheBodyRunsNoTail:
     reaches the removal by its own path.
     """
 
-    def test_purging_one_book(
-        self, client, admin, make_book, covers_dir, db, refuse_commits
-    ):
+    def test_purging_one_book(self, client, admin, make_book, covers_dir, db, refuse_commits):
         book = make_book(admin["headers"], title="A")
         _give_a_cover(db, covers_dir, book["id"])
         client.delete(f"/api/books/{book['id']}", headers=admin["headers"])
         refuse_commits()
 
-        res = client.delete(
-            f"/api/books/{book['id']}/permanent", headers=admin["headers"]
-        )
+        res = client.delete(f"/api/books/{book['id']}/permanent", headers=admin["headers"])
 
         assert res.status_code == 500
         assert db.get(Book, book["id"]) is not None
         assert cover_store.book_ids() == {book["id"]}
 
-    def test_emptying_the_trash(
-        self, client, admin, make_book, covers_dir, db, refuse_commits
-    ):
+    def test_emptying_the_trash(self, client, admin, make_book, covers_dir, db, refuse_commits):
         books = [make_book(admin["headers"], title=title) for title in ("A", "B")]
         for book in books:
             _give_a_cover(db, covers_dir, book["id"])
@@ -498,9 +458,7 @@ class TestARaiseInTheBodyRunsNoTail:
         assert all(db.get(Book, book["id"]) is not None for book in books)
         assert cover_store.book_ids() == {book["id"] for book in books}
 
-    def test_re_adding_a_trashed_isbn(
-        self, client, admin, make_book, covers_dir, db, refuse_commits
-    ):
+    def test_re_adding_a_trashed_isbn(self, client, admin, make_book, covers_dir, db, refuse_commits):
         """The add purges the caller's own trashed holder of the ISBN first."""
         book = make_book(admin["headers"], title="Dune", isbn="9780441013593")
         _give_a_cover(db, covers_dir, book["id"])
@@ -570,9 +528,7 @@ class TestAMemberCannotChooseWhereTheServerConnects:
 
         monkeypatch.setattr(covers, "resolve_and_store", REAL_RESOLVE_AND_STORE)
 
-    def test_a_supplied_url_on_an_unlisted_host_is_never_requested(
-        self, client, admin, covers_dir
-    ):
+    def test_a_supplied_url_on_an_unlisted_host_is_never_requested(self, client, admin, covers_dir):
         """respx fails the test on any unmocked request, and nothing is mocked."""
         with respx.mock:
             res = client.post(
@@ -589,18 +545,12 @@ class TestAMemberCannotChooseWhereTheServerConnects:
         assert res.json()["cover_url"] == "https://evil.test/x.jpg"
         assert cover_store.book_ids() == set()
 
-    def test_a_redirect_into_private_space_is_refused_rather_than_followed(
-        self, client, admin, covers_dir
-    ):
+    def test_a_redirect_into_private_space_is_refused_rather_than_followed(self, client, admin, covers_dir):
         with respx.mock(assert_all_called=False) as mock:
             mock.get(url__startswith=AT_OPEN_LIBRARY_COVERS).mock(
-                return_value=httpx.Response(
-                    302, headers={"location": "http://10.0.0.1/x.jpg"}
-                )
+                return_value=httpx.Response(302, headers={"location": "http://10.0.0.1/x.jpg"})
             )
-            mock.get(url__startswith=AT_DNB_COVERS).mock(
-                return_value=httpx.Response(404)
-            )
+            mock.get(url__startswith=AT_DNB_COVERS).mock(return_value=httpx.Response(404))
             res = client.post(
                 "/api/books",
                 json={
@@ -656,9 +606,7 @@ class TestACoverFailureNeverFailsTheRequest:
         assert res.status_code == 200
         assert res.json()["still_missing"] == 1
 
-    def test_one_poisoned_book_does_not_take_the_run_down(
-        self, client, admin, make_book, covers_dir, db
-    ):
+    def test_one_poisoned_book_does_not_take_the_run_down(self, client, admin, make_book, covers_dir, db):
         """A member could store `https://books.google.com:99999/x.jpg`, which
         `storable` admits because it only tests the scheme."""
         make_book(admin["headers"], title="Poison")

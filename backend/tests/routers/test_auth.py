@@ -43,9 +43,9 @@ class TestRegister:
         assert res.json()["token"]["user"]["is_admin"] is False
 
     def test_registration_returns_a_usable_token(self, client):
-        token = client.post(
-            "/auth/register", json={"username": "first", "password": "pw12345678"}
-        ).json()["token"]["access_token"]
+        token = client.post("/auth/register", json={"username": "first", "password": "pw12345678"}).json()[
+            "token"
+        ]["access_token"]
         res = client.get("/auth/me", headers={"Authorization": f"Bearer {token}"})
         assert res.status_code == 200
 
@@ -55,9 +55,9 @@ class TestRegister:
         assert "taken" in res.json()["detail"].lower()
 
     def test_password_is_never_returned(self, client):
-        body = client.post(
-            "/auth/register", json={"username": "first", "password": "pw12345678"}
-        ).json()["token"]
+        body = client.post("/auth/register", json={"username": "first", "password": "pw12345678"}).json()[
+            "token"
+        ]
         assert "password" not in body["user"]
         assert "password_hash" not in body["user"]
 
@@ -99,9 +99,7 @@ class TestAnAddressCanBeGivenWhileTheAccountIsBeingMade:
             },
         )
         assert res.status_code == 201
-        assert db.query(User).filter(User.username == "first").one().email == (
-            "first@example.org"
-        )
+        assert db.query(User).filter(User.username == "first").one().email == ("first@example.org")
 
     def test_an_account_made_without_one_still_has_none(self, client, db):
         client.post("/auth/register", json={"username": "first", "password": "pw12345678"})
@@ -189,9 +187,7 @@ class TestAConfirmationCodeIsMailedAfterTheResponse:
             json={"username": "kim", "password": "pw12345678", "email": "kim@example.org"},
         )
 
-    def test_the_code_goes_to_the_address_the_account_was_made_with(
-        self, client, confirming
-    ):
+    def test_the_code_goes_to_the_address_the_account_was_made_with(self, client, confirming):
         res = self._register(client)
 
         assert res.status_code == 201
@@ -199,9 +195,7 @@ class TestAConfirmationCodeIsMailedAfterTheResponse:
         [(config, _, _)] = confirming
         assert config.recipients == ("kim@example.org",)
 
-    def test_the_code_the_mail_carries_is_the_one_that_confirms_the_account(
-        self, client, confirming
-    ):
+    def test_the_code_the_mail_carries_is_the_one_that_confirms_the_account(self, client, confirming):
         self._register(client)
         [(_, _, body)] = confirming
         code = re.search(r"Your confirmation code is: (\S+)", body)
@@ -242,6 +236,7 @@ class TestAConfirmationCodeIsMailedAfterTheResponse:
     ):
         """The send's own message can be the address it refused, or anything
         else nobody checked."""
+
         def refuse(config, subject, body):
             raise error
 
@@ -329,17 +324,12 @@ class TestLogin:
             client.post("/auth/login", json={"username": "admin", "password": "wrong"})
 
         assert (
-            client.post(
-                "/auth/login", json={"username": "admin", "password": "password123"}
-            ).status_code
+            client.post("/auth/login", json={"username": "admin", "password": "password123"}).status_code
             == 200
         )
         for _ in range(9):
             assert (
-                client.post(
-                    "/auth/login", json={"username": "admin", "password": "wrong"}
-                ).status_code
-                == 401
+                client.post("/auth/login", json={"username": "admin", "password": "wrong"}).status_code == 401
             )
 
     def test_guesses_are_bounded(self, client, admin):
@@ -410,9 +400,7 @@ class TestLdapMode:
         exhaust a real budget on a route that can never succeed."""
         for _ in range(10):
             assert (
-                client.post(
-                    "/auth/register", json={"username": "kim", "password": "pw12345678"}
-                ).status_code
+                client.post("/auth/register", json={"username": "kim", "password": "pw12345678"}).status_code
                 == 403
             )
 
@@ -451,9 +439,9 @@ class TestLdapMode:
 
     def test_the_token_from_a_bind_works_on_me(self, client, monkeypatch):
         directory_with(monkeypatch)
-        token = client.post(
-            "/auth/login", json={"username": "kim", "password": "password123"}
-        ).json()["access_token"]
+        token = client.post("/auth/login", json={"username": "kim", "password": "password123"}).json()[
+            "access_token"
+        ]
 
         res = client.get("/auth/me", headers={"Authorization": f"Bearer {token}"})
         assert res.json()["username"] == "kim"
@@ -482,9 +470,9 @@ class TestProxyMode:
         """There need not be one: the upstream may be an SSO portal or a header
         the reverse proxy sets. Naming a directory sends people to ask an
         administrator who does not exist."""
-        detail = client.post(
-            "/auth/register", json={"username": "kim", "password": "pw12345678"}
-        ).json()["detail"]
+        detail = client.post("/auth/register", json={"username": "kim", "password": "pw12345678"}).json()[
+            "detail"
+        ]
         assert "directory" not in detail.lower()
 
     def test_register_creates_nothing(self, client, db):
@@ -553,9 +541,7 @@ def test_account(client, admin) -> dict:
 
 
 class TestSwitchAccount:
-    def test_the_right_password_returns_a_token_for_the_target(
-        self, client, admin, test_account
-    ):
+    def test_the_right_password_returns_a_token_for_the_target(self, client, admin, test_account):
         res = client.post(
             "/auth/switch",
             json={"username": "tester", "password": "pw12345678"},
@@ -630,9 +616,7 @@ class TestSwitchAccount:
         assert res.status_code == 403
 
     def test_it_needs_a_session(self, client, admin, test_account):
-        res = client.post(
-            "/auth/switch", json={"username": "tester", "password": "pw12345678"}
-        )
+        res = client.post("/auth/switch", json={"username": "tester", "password": "pw12345678"})
         assert res.status_code == 401
 
     def test_guesses_are_bounded(self, client, admin, test_account):
@@ -694,9 +678,7 @@ class TestSwitchAccount:
         )
         assert res.status_code == 403
 
-    def test_a_switched_session_cannot_create_a_test_account(
-        self, client, admin, test_account, db
-    ):
+    def test_a_switched_session_cannot_create_a_test_account(self, client, admin, test_account, db):
         token = client.post(
             "/auth/switch",
             json={"username": "tester", "password": "pw12345678"},
@@ -788,9 +770,7 @@ class TestSwitchInProxyMode:
         return str(res.json()["access_token"])
 
     def test_the_switch_token_beats_the_proxy_header(self, client, boss, switched):
-        res = client.get(
-            "/auth/me", headers={**boss, "Authorization": f"Bearer {switched}"}
-        )
+        res = client.get("/auth/me", headers={**boss, "Authorization": f"Bearer {switched}"})
         assert res.json()["username"] == "tester"
 
     def test_dropping_the_token_restores_the_proxy_identity(self, client, boss, switched):
@@ -815,18 +795,14 @@ class TestSwitchInProxyMode:
         res = client.get("/auth/me", headers={**boss, **admin["headers"]})
         assert res.json()["username"] == "boss"
 
-    def test_a_switch_token_stops_working_when_the_flag_comes_off(
-        self, client, boss, switched, db
-    ):
+    def test_a_switch_token_stops_working_when_the_flag_comes_off(self, client, boss, switched, db):
         """`is_switch_target` is re-read per request rather than frozen into
         the token, so the row is what decides."""
         account = db.query(User).filter(User.username == "tester").one()
         account.is_test_account = False
         db.commit()
 
-        res = client.get(
-            "/auth/me", headers={**boss, "Authorization": f"Bearer {switched}"}
-        )
+        res = client.get("/auth/me", headers={**boss, "Authorization": f"Bearer {switched}"})
         assert res.json()["username"] == "boss"
 
     def test_a_switch_token_alone_still_works_without_a_header(self, client, boss, switched):
@@ -850,8 +826,7 @@ def _routes_answering_with_a_bare_response() -> list[Any]:
     return [
         route
         for route in main.iter_api_routes(main.app.routes)
-        if route.include_in_schema
-        and typing.get_type_hints(route.endpoint).get("return") is Response
+        if route.include_in_schema and typing.get_type_hints(route.endpoint).get("return") is Response
     ]
 
 
@@ -1054,9 +1029,7 @@ def _a_body_for(route: Any) -> dict[str, Any]:
         try:
             model.model_validate(body)
         except ValidationError as refusal:
-            elsewhere = [
-                error for error in refusal.errors() if error["loc"] != ("username",)
-            ]
+            elsewhere = [error for error in refusal.errors() if error["loc"] != ("username",)]
             assert not elsewhere, (
                 f"{route.path}: this helper built a body that {model.__name__} "
                 f"refuses for a field other than the username, so the sweep "
@@ -1140,11 +1113,7 @@ def _lines_forged_in(text: str) -> list[str]:
     and refusing those would make this arm a rule about tracebacks rather than
     about an injected value.
     """
-    return [
-        line
-        for line in text.splitlines()
-        if line.startswith(_THE_FORGED_LINES)
-    ]
+    return [line for line in text.splitlines() if line.startswith(_THE_FORGED_LINES)]
 
 
 class TestAnUntrustedUsernameCannotForgeALogLine:
@@ -1350,9 +1319,7 @@ class TestAnUntrustedUsernameCannotForgeALogLine:
         # exists to refuse. The fifty seven non breaking members are the same
         # fifty seven the equality arm found resting on the literal.
         non_breaking = {
-            character
-            for character in _CONTROL_CHARACTERS
-            if character.splitlines() == [character]
+            character for character in _CONTROL_CHARACTERS if character.splitlines() == [character]
         }
         assert non_breaking, "every member of the set breaks a line, so this arm is vacuous"
         for name in _THE_FORGED_NAMES:
@@ -1362,9 +1329,7 @@ class TestAnUntrustedUsernameCannotForgeALogLine:
                 "would pass every arm in this file"
             )
 
-    def test_no_route_taking_a_username_writes_a_control_character(
-        self, client, caplog
-    ) -> None:
+    def test_no_route_taking_a_username_writes_a_control_character(self, client, caplog) -> None:
         """Every method of every such route, not one of them per run.
 
         `sorted` rather than `next(iter(...))`: str hashing is randomised per
@@ -1420,30 +1385,19 @@ class TestADirectoryFailureCannotBeMadeToForgeALogLine:
             self._sign_in(client)
 
         failures = [
-            record
-            for record in caplog.records
-            if "LDAP authentication failed" in record.getMessage()
+            record for record in caplog.records if "LDAP authentication failed" in record.getMessage()
         ]
         assert failures, "this arm's own path emitted nothing, so it proved nothing"
         assert all(_one_line(record) for record in caplog.records)
 
     def test_an_ambiguous_filter(self, client, monkeypatch, caplog) -> None:
-        entries = [
-            FakeEntry(f"uid=kim{n},ou=people,dc=example,dc=org", f"kim{n}", [])
-            for n in (1, 2)
-        ]
-        install_directory(
-            monkeypatch, [FakeConnection(bind_results=[True], entries=entries)]
-        )
+        entries = [FakeEntry(f"uid=kim{n},ou=people,dc=example,dc=org", f"kim{n}", []) for n in (1, 2)]
+        install_directory(monkeypatch, [FakeConnection(bind_results=[True], entries=entries)])
 
         with caplog.at_level(logging.DEBUG):
             self._sign_in(client)
 
-        matches = [
-            record
-            for record in caplog.records
-            if "LDAP filter matched" in record.getMessage()
-        ]
+        matches = [record for record in caplog.records if "LDAP filter matched" in record.getMessage()]
         assert matches, "this arm's own path emitted nothing, so it proved nothing"
         assert all(_one_line(record) for record in caplog.records)
 
@@ -1469,12 +1423,8 @@ class TestADirectoryFailureCannotBeMadeToForgeALogLine:
         """
 
         class _ADirectoryThatRefusesTheValue(FakeConnection):
-            def search(
-                self, search_base: str, search_filter: str, attributes: list[str]
-            ) -> None:
-                raise LDAPInvalidValueError(
-                    f"value '{search_filter}' non valid for attribute 'uidNumber'"
-                )
+            def search(self, search_base: str, search_filter: str, attributes: list[str]) -> None:
+                raise LDAPInvalidValueError(f"value '{search_filter}' non valid for attribute 'uidNumber'")
 
         install_directory(
             monkeypatch,
@@ -1485,9 +1435,7 @@ class TestADirectoryFailureCannotBeMadeToForgeALogLine:
             self._sign_in(client)
 
         failures = [
-            record
-            for record in caplog.records
-            if "LDAP authentication failed" in record.getMessage()
+            record for record in caplog.records if "LDAP authentication failed" in record.getMessage()
         ]
         assert failures, "this arm's own path emitted nothing, so it proved nothing"
         assert all(_one_line(record) for record in caplog.records)
@@ -1496,9 +1444,7 @@ class TestADirectoryFailureCannotBeMadeToForgeALogLine:
             "escaping on the argument beside it"
         )
 
-    def test_the_refusal_still_says_which_failure_it_was(
-        self, client, monkeypatch, caplog
-    ) -> None:
+    def test_the_refusal_still_says_which_failure_it_was(self, client, monkeypatch, caplog) -> None:
         """What the traceback was traded for, asserted rather than assumed.
 
         Dropping to `logger.error` gives up the frames. The exception class is
@@ -1507,9 +1453,7 @@ class TestADirectoryFailureCannotBeMadeToForgeALogLine:
         """
 
         class _ADirectoryThatRefusesTheValue(FakeConnection):
-            def search(
-                self, search_base: str, search_filter: str, attributes: list[str]
-            ) -> None:
+            def search(self, search_base: str, search_filter: str, attributes: list[str]) -> None:
                 raise LDAPInvalidValueError("value non valid for attribute 'uidNumber'")
 
         install_directory(
@@ -1520,10 +1464,7 @@ class TestADirectoryFailureCannotBeMadeToForgeALogLine:
         with caplog.at_level(logging.DEBUG):
             self._sign_in(client)
 
-        assert any(
-            "LDAPInvalidValueError" in record.getMessage()
-            for record in caplog.records
-        )
+        assert any("LDAPInvalidValueError" in record.getMessage() for record in caplog.records)
 
 
 class TestALoginNameIsNotCheckedAgainstTheRegistrationPattern:
@@ -1541,17 +1482,11 @@ class TestALoginNameIsNotCheckedAgainstTheRegistrationPattern:
     answer.
     """
 
-    def test_a_name_the_registration_pattern_refuses_reaches_the_password_check(
-        self, client, admin
-    ) -> None:
-        res = client.post(
-            "/auth/login", json={"username": " admin", "password": "pw12345678"}
-        )
+    def test_a_name_the_registration_pattern_refuses_reaches_the_password_check(self, client, admin) -> None:
+        res = client.post("/auth/login", json={"username": " admin", "password": "pw12345678"})
         assert res.status_code == 401
 
     def test_registration_refuses_that_same_name(self, client) -> None:
         """The diagonal: without it the arm above is a fact about any bad name."""
-        res = client.post(
-            "/auth/register", json={"username": " admin", "password": "pw12345678"}
-        )
+        res = client.post("/auth/register", json={"username": " admin", "password": "pw12345678"})
         assert res.status_code == 422

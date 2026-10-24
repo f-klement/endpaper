@@ -79,9 +79,7 @@ def auth_config(db: DbSession) -> AuthConfigOut:
     )
 
 
-@router.post(
-    "/register", response_model=RegistrationOut, status_code=status.HTTP_201_CREATED
-)
+@router.post("/register", response_model=RegistrationOut, status_code=status.HTTP_201_CREATED)
 @refuses(403)
 def register(
     payload: UserCreate,
@@ -154,9 +152,7 @@ def register(
         return RegistrationOut(verification_required=True)
 
     token = create_access_token(db, user.id, user.username)
-    set_cover_cookie(
-        response, create_cover_token(db, user.id, user.username), secure=_is_https(request)
-    )
+    set_cover_cookie(response, create_cover_token(db, user.id, user.username), secure=_is_https(request))
     return RegistrationOut(
         verification_required=False,
         token=Token(access_token=token, user=UserOut.model_validate(user)),
@@ -214,9 +210,7 @@ def _signup_refusal() -> str:
 
 @router.post("/login", response_model=Token)
 @refuses(401, 403)
-def login(
-    payload: LoginRequest, request: Request, response: Response, db: DbSession
-) -> Token:
+def login(payload: LoginRequest, request: Request, response: Response, db: DbSession) -> Token:
     key = login_key(payload.username, request)
     login_limiter.check(key)
 
@@ -248,9 +242,7 @@ def login(
     # send the Authorization header this token normally travels in. See
     # auth.COVER_COOKIE_NAME for why that is safe on that route and nowhere
     # else.
-    set_cover_cookie(
-        response, create_cover_token(db, user.id, user.username), secure=_is_https(request)
-    )
+    set_cover_cookie(response, create_cover_token(db, user.id, user.username), secure=_is_https(request))
     return Token(
         access_token=token,
         user=UserOut.model_validate(user),
@@ -294,9 +286,7 @@ def _charge_a_request(username: str, request: Request) -> None:
     response_class=Response,
 )
 @refuses(403)
-def request_password_reset(
-    payload: ResetRequest, request: Request, db: DbSession
-) -> Response:
+def request_password_reset(payload: ResetRequest, request: Request, db: DbSession) -> Response:
     """Ask an admin to approve a password reset for this account.
 
     **Unauthenticated, because there is no other moment.** A member who could
@@ -324,9 +314,7 @@ def request_password_reset(
 
 @router.post("/reset/redeem", status_code=status.HTTP_204_NO_CONTENT)
 @refuses(403)
-def redeem_password_reset(
-    payload: ResetRedeem, request: Request, db: DbSession
-) -> Response:
+def redeem_password_reset(payload: ResetRedeem, request: Request, db: DbSession) -> Response:
     """Spend an approved code on a new password.
 
     204 and no token. The code is not a session and never becomes one: the
@@ -342,9 +330,7 @@ def redeem_password_reset(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=refusal)
     key = login_key(payload.username, request)
     recovery_code_limiter.check(key)
-    if not accounts.redeem_reset(
-        db, payload.username, payload.code, payload.new_password
-    ):
+    if not accounts.redeem_reset(db, payload.username, payload.code, payload.new_password):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="That code is not usable. Ask an admin to approve a reset.",
@@ -390,9 +376,7 @@ def request_verification(
 
 
 @router.post("/verify", status_code=status.HTTP_204_NO_CONTENT)
-def confirm_address(
-    payload: VerificationRedeem, request: Request, db: DbSession
-) -> Response:
+def confirm_address(payload: VerificationRedeem, request: Request, db: DbSession) -> Response:
     """Settle an account by returning the code sent to its address.
 
     204 and no token, for the reason the reset redemption returns none: a code
@@ -508,10 +492,7 @@ def _is_https(request: Request) -> bool:
     without a certificate would lose its covers with nothing to explain why.
     The forwarded header is what carries the browser's side of it.
     """
-    return (
-        request.url.scheme == "https"
-        or request.headers.get("x-forwarded-proto", "") == "https"
-    )
+    return request.url.scheme == "https" or request.headers.get("x-forwarded-proto", "") == "https"
 
 
 @router.get("/me", response_model=UserOut)

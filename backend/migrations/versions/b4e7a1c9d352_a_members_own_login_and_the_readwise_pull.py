@@ -111,8 +111,7 @@ def upgrade() -> None:
                     f"AND length(CAST(resume_cursor AS BLOB)) <= {4 * _CURSOR}"
                 ),
                 postgresql=(
-                    f"length(resume_cursor) <= {_CURSOR} "
-                    f"AND octet_length(resume_cursor) <= {4 * _CURSOR}"
+                    f"length(resume_cursor) <= {_CURSOR} AND octet_length(resume_cursor) <= {4 * _CURSOR}"
                 ),
             ),
             name="ck_member_logins_resume_cursor",

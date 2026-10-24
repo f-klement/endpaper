@@ -40,6 +40,15 @@ from tags import (
 from tests.corpus import BACKEND, application_sources, shipped_modules
 from tests.test_importing import selects
 
+TREE_GUARDS = {
+    "TestNothingElseDecidesATagFromAName": (
+        "application_sources",
+        "shipped_modules",
+    ),
+    "TestNothingElseDecidesWhoMaySeeATag": ("application_sources",),
+    "TestNothingElseIsHandedATagResolvedFromAName": ("application_sources",),
+}
+
 
 #: The modules that may decide a tag, and what each one is.
 #:
@@ -663,12 +672,8 @@ class TestNothingElseDecidesATagFromAName:
             f"the caps are decided again wherever they are: {offenders}"
         )
 
-    @pytest.mark.parametrize(
-        "census", [constructions_by_ast, constructions_by_token], ids=["tree", "token"]
-    )
-    def test_each_exempt_file_holds_only_the_construction_it_was_exempted_for(
-        self, census
-    ) -> None:
+    @pytest.mark.parametrize("census", [constructions_by_ast, constructions_by_token], ids=["tree", "token"])
+    def test_each_exempt_file_holds_only_the_construction_it_was_exempted_for(self, census) -> None:
         """A file is exempt for one construction, and this is the arm that says
         so: a second one there, and the covered one having moved, are its two
         failures and they carry different messages.
@@ -1156,9 +1161,7 @@ class TestNamingATagForAWriter:
     def hidden(self, db, stranger) -> Tag:
         """A Tag whose only carrier is somebody else's private Book."""
         tag = Tag(name="Divorce Law", category="custom", is_predefined=False)
-        book = Book(
-            title="A private matter", is_private=True, added_by_user_id=stranger.id
-        )
+        book = Book(title="A private matter", is_private=True, added_by_user_id=stranger.id)
         book.tags.append(tag)
         db.add_all([tag, book])
         db.commit()
@@ -1170,14 +1173,10 @@ class TestNamingATagForAWriter:
         assert tag is not None
         assert tag.name == "Holiday reads"
 
-    def test_a_name_whose_every_book_is_hidden_is_refused(
-        self, db, writer, hidden
-    ) -> None:
+    def test_a_name_whose_every_book_is_hidden_is_refused(self, db, writer, hidden) -> None:
         assert Naming.for_member(db, writer.id).tag("Divorce Law") is None
 
-    def test_and_folding_still_finds_it_rather_than_minting_a_second_row(
-        self, db, writer, hidden
-    ) -> None:
+    def test_and_folding_still_finds_it_rather_than_minting_a_second_row(self, db, writer, hidden) -> None:
         """**The refusal must not be a miss**, which is the whole reason the
         viewer is here and not on the match: a miss falls to the mint and
         inserts a name the binary unique index already holds."""
@@ -1187,9 +1186,7 @@ class TestNamingATagForAWriter:
 
         assert db.query(Tag).count() == before
 
-    def test_a_name_it_has_already_handed_over_stays_handed_over(
-        self, db, writer, mine
-    ) -> None:
+    def test_a_name_it_has_already_handed_over_stays_handed_over(self, db, writer, mine) -> None:
         """**The false refusal a live read would introduce into every
         ordinary upload.** The rule reads each set once, before the attach, so
         the name stays admitted by the arm that first admitted it. Read the
@@ -1204,9 +1201,7 @@ class TestNamingATagForAWriter:
 
         assert naming.tag("Holiday reads") is first
 
-    def test_and_a_later_unit_of_work_reaches_the_same_answer_without_it(
-        self, db, writer, mine
-    ) -> None:
+    def test_and_a_later_unit_of_work_reaches_the_same_answer_without_it(self, db, writer, mine) -> None:
         """What says the snapshot's answer is the true one rather than a stale
         read: a fresh Naming reads fresh sets, sees the Book on this writer's
         own shelf, and admits the name on the visible arm."""
@@ -1217,9 +1212,7 @@ class TestNamingATagForAWriter:
 
         assert Naming.for_member(db, writer.id).tag("Holiday reads") is first
 
-    def test_a_name_that_normalises_to_nothing_is_the_same_answer(
-        self, db, writer
-    ) -> None:
+    def test_a_name_that_normalises_to_nothing_is_the_same_answer(self, db, writer) -> None:
         """One outcome for every reason, because separating them is the oracle
         the refusal exists to narrow."""
         assert Naming.for_member(db, writer.id).tag("  \x00 ") is None
@@ -1245,19 +1238,19 @@ class TestNamingATagForAWriter:
 TAG_READERS: Final = {
     "backup.py": [
         (
-            '_repair_seeded_tags: for tag in db.query(Tag).all(): # **One pass,'
-            ' and that it is safe rests on `_parse_row` blanking the # key.** '
-            '`uq_tags_key` is unique, so a key moving from one row to # another'
-            ' would need the old holder cleared in an earlier statement, # and '
-            'the order SQLAlchemy flushes these in is not the order of this # '
-            'loop. No key can move here: every row arrives null, `tags.name` is'
-            ' # unique, and `PREDEFINED_TAGS` maps 105 distinct names onto 105 '
-            '# distinct keys, so this writes each key at most once. Delete # '
-            '`_blank_tag_key` and this becomes an `IntegrityError` on a restore. '
-            'seeded_key = keys_by_name.get(tag.name) should_be = '
-            'seeded_key is not None if tag.is_predefined != should_be or '
-            'tag.key != seeded_key: tag.is_predefined = should_be tag.key = '
-            'seeded_key changed += 1',
+            "_repair_seeded_tags: for tag in db.query(Tag).all(): # **One pass,"
+            " and that it is safe rests on `_parse_row` blanking the # key.** "
+            "`uq_tags_key` is unique, so a key moving from one row to # another"
+            " would need the old holder cleared in an earlier statement, # and "
+            "the order SQLAlchemy flushes these in is not the order of this # "
+            "loop. No key can move here: every row arrives null, `tags.name` is"
+            " # unique, and `PREDEFINED_TAGS` maps 105 distinct names onto 105 "
+            "# distinct keys, so this writes each key at most once. Delete # "
+            "`_blank_tag_key` and this becomes an `IntegrityError` on a restore. "
+            "seeded_key = keys_by_name.get(tag.name) should_be = "
+            "seeded_key is not None if tag.is_predefined != should_be or "
+            "tag.key != seeded_key: tag.is_predefined = should_be tag.key = "
+            "seeded_key changed += 1",
             "reads every Tag into the archive, names included. Admin only, and "
             "`tests/test_shelf.py` already names `backup.py` as one of the ways "
             "past a viewer: an archive that omitted another member's rows would "
@@ -1290,11 +1283,11 @@ TAG_READERS: Final = {
     ],
     "routers/stats.py": [
         (
-            'get_stats: by_tag = ( shelf.select( Tag.name, Tag.category, '
-            'Tag.key, func.count(book_tags.c.book_id).label("count") ) '
-            '.join(book_tags, Book.id == book_tags.c.book_id) .join(Tag, Tag.id'
-            ' == book_tags.c.tag_id) .group_by(Tag.id) .order_by(Tag.category, '
-            'func.count(book_tags.c.book_id).desc(), Tag.name) .all() )',
+            "get_stats: by_tag = ( shelf.select(Tag.name, Tag.category, Tag.key, "
+            'func.count(book_tags.c.book_id).label("count")) .join(book_tags, Book.id '
+            "== book_tags.c.book_id) .join(Tag, Tag.id == book_tags.c.tag_id) "
+            ".group_by(Tag.id) .order_by(Tag.category, "
+            "func.count(book_tags.c.book_id).desc(), Tag.name) .all() )",
             "the statistics page's tag counts, rooted at the Shelf and inner "
             "joined out to `tags`, so a Tag no visible Book carries produces no "
             "row. Correct, and reported anyway, which is the cost of not trying "
@@ -1303,7 +1296,7 @@ TAG_READERS: Final = {
     ],
     "shelf.py": [
         (
-            'matching: shelf = shelf.where(Book.tags.any(Tag.id == tag_id))',
+            "matching: shelf = shelf.where(Book.tags.any(Tag.id == tag_id))",
             "the tag filter, which narrows a Shelf that already carries the "
             "viewer's predicate. It reads an id the caller supplied and returns "
             "Books, never a Tag, so no name is resolved here at all.",
@@ -1319,8 +1312,7 @@ TAG_READERS: Final = {
     # is that plant.
     "tags.py": [
         (
-            "_by_folded_name: self._index = _first_wins(self._db.query(Tag)"
-            ".order_by(Tag.id).all())",
+            "_by_folded_name: self._index = _first_wins(self._db.query(Tag).order_by(Tag.id).all())",
             "the Mint's deduplication index: every Tag row, unscoped. **Library "
             "wide of necessity and not a disclosure**, because no name leaves "
             "it. Two spellings of one name must not both exist, so deciding a "
@@ -1350,8 +1342,7 @@ TAG_READERS: Final = {
             "beside their own gate.",
         ),
         (
-            "_is_seeded_id: rows = self._db.query(Tag.id, Tag.key)"
-            ".filter(Tag.key.isnot(None)).all()",
+            "_is_seeded_id: rows = self._db.query(Tag.id, Tag.key).filter(Tag.key.isnot(None)).all()",
             "the seeded arm by id, so the gate can run before the row is read. "
             "**Two columns and never a name**, and every row it admits is one "
             "whose name is in `PREDEFINED_TAGS`, which the mirror publishes. "
@@ -1537,12 +1528,9 @@ class TestNothingElseDecidesWhoMaySeeATag:
             entries = TAG_READERS.get(name, [])
             if len(lines) != len(entries):
                 shown = "\n".join(
-                    f"      {name}:{line}  {self._key(sources.get(name, ''), line)}"
-                    for line in lines
+                    f"      {name}:{line}  {self._key(sources.get(name, ''), line)}" for line in lines
                 )
-                report.append(
-                    f"  {name}: {len(lines)} reads, {len(entries)} classified\n{shown}"
-                )
+                report.append(f"  {name}: {len(lines)} reads, {len(entries)} classified\n{shown}")
                 continue
             for line, (expected, _) in zip(lines, entries, strict=True):
                 actual = self._key(sources.get(name, ""), line)
@@ -1598,8 +1586,7 @@ class TestNothingElseDecidesWhoMaySeeATag:
         # turns the replace into a no op and leaves this arm passing on a tree
         # it did not plant anything in. Asserted rather than assumed.
         assert rewritten != sources["routers/books.py"], (
-            "the route no longer spells the call this plant rewrites, so "
-            "nothing was planted"
+            "the route no longer spells the call this plant rewrites, so nothing was planted"
         )
         sources["routers/books.py"] = rewritten
 
@@ -1670,13 +1657,8 @@ class TestNothingElseDecidesWhoMaySeeATag:
         the corpus holding exactly one spare offence.
         """
         sources = dict(application_sources())
-        sources["tags.py"] += (
-            "\n\ndef every_tag_there_is(db):\n"
-            "    return db.query(Tag).all()\n"
-        )
-        knocked_out = sources["routers/stats.py"].replace(
-            "Tag.name, Tag.category, Tag.key,", "1,", 1
-        )
+        sources["tags.py"] += "\n\ndef every_tag_there_is(db):\n    return db.query(Tag).all()\n"
+        knocked_out = sources["routers/stats.py"].replace("Tag.name, Tag.category, Tag.key,", "1,", 1)
         # Same reason, and worse here: this one is the **control**. If the
         # replace no ops, the arm still passes and has quietly stopped
         # deleting the unrelated thing it exists to delete.
@@ -1805,9 +1787,9 @@ class TestNothingElseIsHandedATagResolvedFromAName:
     #: named them and would drop a classmethod, which is the idiom
     #: `Vocabulary.seen_by` and `Naming.for_member` are both written in, and
     #: so is the `Mint.for_import` somebody writes next.
-    RESOLVERS: Final = frozenset(
-        name for name in vars(Mint) if not name.startswith("_")
-    ) - frozenset(Mint.__slots__)
+    RESOLVERS: Final = frozenset(name for name in vars(Mint) if not name.startswith("_")) - frozenset(
+        Mint.__slots__
+    )
 
     def test_the_mint_exposes_one_resolver_and_this_is_it(self) -> None:
         """Derive it and assert it, so a widening is noticed rather than taken.
@@ -1842,8 +1824,7 @@ class TestNothingElseIsHandedATagResolvedFromAName:
         found = {
             name: sites
             for name, source in sources.items()
-            if name != self.OWNER
-            and (sites := _reaches_private(source, self.RESOLVERS))
+            if name != self.OWNER and (sites := _reaches_private(source, self.RESOLVERS))
         }
 
         report: list[str] = []
@@ -1852,12 +1833,9 @@ class TestNothingElseIsHandedATagResolvedFromAName:
             entries = TAGS_RESOLVED_WITHOUT_A_VIEWER.get(name, [])
             if len(sites) != len(entries):
                 shown = "\n".join(
-                    f"      {name}:{site}  {self._keyed(sources.get(name, ''), site)}"
-                    for site in sites
+                    f"      {name}:{site}  {self._keyed(sources.get(name, ''), site)}" for site in sites
                 )
-                report.append(
-                    f"  {name}: {len(sites)} calls, {len(entries)} classified\n{shown}"
-                )
+                report.append(f"  {name}: {len(sites)} calls, {len(entries)} classified\n{shown}")
                 continue
             for site, (expected, _) in zip(sites, entries, strict=True):
                 actual = self._keyed(sources.get(name, ""), site)
@@ -1905,6 +1883,4 @@ class TestNothingElseIsHandedATagResolvedFromAName:
 
         stale = sorted(set(TAGS_RESOLVED_WITHOUT_A_VIEWER) - set(sources))
 
-        assert not stale, (
-            f"these are classified and are no longer modules here: {stale}"
-        )
+        assert not stale, f"these are classified and are no longer modules here: {stale}"

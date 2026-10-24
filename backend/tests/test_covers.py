@@ -42,6 +42,11 @@ from tests.helpers import (
     WEBP_BYTES,
 )
 
+TREE_GUARDS = {
+    "TestNoOtherModuleBuildsACoverUrl": ("application_modules",),
+    "TestNoOtherModuleDecidesWhetherACoverIsLocal": ("application_modules",),
+}
+
 #: The two image services as a member, a candidate builder or a `Location`
 #: spells them. Assertions about what this module *produces* use these.
 OPEN_LIBRARY = "https://covers.openlibrary.org/"
@@ -107,9 +112,7 @@ class TestChecking:
     async def test_a_200_that_is_not_an_image_is_refused(self):
         """An error page served with the wrong status is the other failure."""
         with respx.mock(assert_all_called=False) as mock:
-            mock.get(url__regex=r".*").mock(
-                return_value=httpx.Response(200, text="<html>not found</html>")
-            )
+            mock.get(url__regex=r".*").mock(return_value=httpx.Response(200, text="<html>not found</html>"))
             assert await covers.resolve(ENGLISH) is None
 
 
@@ -127,9 +130,7 @@ class TestTransientFailures:
     @pytest.mark.asyncio
     async def test_a_timeout_keeps_the_url_too(self):
         with respx.mock(assert_all_called=False) as mock:
-            mock.get(url__startswith=AT_OPEN_LIBRARY).mock(
-                side_effect=httpx.ConnectTimeout("slow")
-            )
+            mock.get(url__startswith=AT_OPEN_LIBRARY).mock(side_effect=httpx.ConnectTimeout("slow"))
             mock.get(url__startswith=AT_DNB).mock(return_value=httpx.Response(404))
 
             assert await covers.resolve(ENGLISH) == covers.open_library_url(ENGLISH)
@@ -163,9 +164,7 @@ class TestASuppliedUrl:
             mock.get(self.AT_SUPPLIED).mock(return_value=httpx.Response(404))
             mock.get(url__startswith=AT_OPEN_LIBRARY).mock(return_value=image())
 
-            assert await covers.resolve(ENGLISH, self.SUPPLIED) == covers.open_library_url(
-                ENGLISH
-            )
+            assert await covers.resolve(ENGLISH, self.SUPPLIED) == covers.open_library_url(ENGLISH)
 
 
 class TestBadInput:
@@ -190,18 +189,12 @@ class TestHttpsUpgrade:
     """
 
     def test_an_http_url_is_upgraded(self):
-        assert (
-            covers.https_url("http://books.google.com/c.jpg")
-            == "https://books.google.com/c.jpg"
-        )
+        assert covers.https_url("http://books.google.com/c.jpg") == "https://books.google.com/c.jpg"
 
     def test_the_scheme_is_matched_case_insensitively(self):
         # RFC 3986 says a scheme is case-insensitive, and the one-shot data
         # migration matches with SQLite's LIKE, which is too.
-        assert (
-            covers.https_url("HTTP://books.google.com/c.jpg")
-            == "https://books.google.com/c.jpg"
-        )
+        assert covers.https_url("HTTP://books.google.com/c.jpg") == "https://books.google.com/c.jpg"
 
     def test_an_https_url_is_untouched(self):
         assert covers.https_url("https://x/y.jpg") == "https://x/y.jpg"
@@ -216,10 +209,7 @@ class TestHttpsUpgrade:
     def test_only_the_scheme_changes(self):
         # A naive replace would also rewrite a query parameter that happens to
         # carry a URL of its own.
-        assert (
-            covers.https_url("http://x/y?src=http://z")
-            == "https://x/y?src=http://z"
-        )
+        assert covers.https_url("http://x/y?src=http://z") == "https://x/y?src=http://z"
 
 
 #: Every URL this module can build, for the two tests that check the host list
@@ -288,10 +278,7 @@ class TestStorable:
 
     def test_it_upgrades_before_it_judges(self):
         # The other order would refuse every http cover rather than fix it.
-        assert (
-            covers.storable("http://books.google.com/c.jpg")
-            == "https://books.google.com/c.jpg"
-        )
+        assert covers.storable("http://books.google.com/c.jpg") == "https://books.google.com/c.jpg"
 
     def test_it_keeps_a_cover_that_is_already_fine(self):
         assert covers.storable("https://x/y.jpg") == "https://x/y.jpg"
@@ -324,9 +311,7 @@ class TestTheHostList:
 
     def test_every_url_this_module_builds_has_a_listed_host(self):
         for url in every_buildable_url():
-            assert any(
-                url.startswith(f"{host}/") for host in covers.COVER_HOSTS
-            ), url
+            assert any(url.startswith(f"{host}/") for host in covers.COVER_HOSTS), url
 
     def test_every_listed_host_is_https(self):
         # An http entry would put the CSP back in the business of permitting
@@ -376,11 +361,7 @@ def _our_modules() -> list[Path]:
     could hold an image host or the prefix and neither rule below would see
     it.
     """
-    return [
-        path
-        for path in application_modules()
-        if path.relative_to(BACKEND).as_posix() != "covers.py"
-    ]
+    return [path for path in application_modules() if path.relative_to(BACKEND).as_posix() != "covers.py"]
 
 
 class TestNoOtherModuleBuildsACoverUrl:
@@ -417,15 +398,10 @@ class TestNoOtherModuleBuildsACoverUrl:
         for node in ast.walk(tree):
             if isinstance(node, ast.Dict):
                 for key, value in zip(node.keys, node.values, strict=True):
-                    if (
-                        isinstance(key, ast.Constant)
-                        and key.value == "cover_url"
-                        and value is not None
-                    ):
+                    if isinstance(key, ast.Constant) and key.value == "cover_url" and value is not None:
                         found.append(value)
             elif isinstance(node, ast.Assign) and any(
-                isinstance(target, ast.Attribute) and target.attr == "cover_url"
-                for target in node.targets
+                isinstance(target, ast.Attribute) and target.attr == "cover_url" for target in node.targets
             ):
                 found.append(node.value)
         return found
@@ -435,15 +411,11 @@ class TestNoOtherModuleBuildsACoverUrl:
         for path in self.modules():
             tree = ast.parse(path.read_text())
             for expression in self._cover_url_expressions(tree):
-                if any(
-                    part.startswith("http")
-                    for part in self._literal_parts(expression)
-                ):
+                if any(part.startswith("http") for part in self._literal_parts(expression)):
                     offenders.append(f"{path.name}:{expression.lineno}")
 
         assert offenders == [], (
-            "these build a cover URL from a literal; call covers.py instead: "
-            + ", ".join(offenders)
+            "these build a cover URL from a literal; call covers.py instead: " + ", ".join(offenders)
         )
 
     def test_no_module_mentions_an_image_host_at_all(self):
@@ -466,10 +438,7 @@ class TestNoOtherModuleBuildsACoverUrl:
         # against code that builds no URL at all. Requiring the scheme separator
         # keeps exactly what the rule is for, a module assembling a cover URL,
         # and cannot match a mention.
-        hosts = [
-            "//" + host.removeprefix("https://").removeprefix("*.")
-            for host in covers.COVER_HOSTS
-        ]
+        hosts = ["//" + host.removeprefix("https://").removeprefix("*.") for host in covers.COVER_HOSTS]
 
         offenders: list[str] = []
         for path in self.modules():
@@ -480,9 +449,7 @@ class TestNoOtherModuleBuildsACoverUrl:
                     if host in node.value:
                         offenders.append(f"{path.name}:{node.lineno} ({host})")
 
-        assert offenders == [], (
-            "only covers.py may know an image host: " + ", ".join(offenders)
-        )
+        assert offenders == [], "only covers.py may know an image host: " + ", ".join(offenders)
 
     def test_it_reads_the_backend_at_all(self):
         # A glob that matched nothing would make both tests above pass forever.
@@ -617,8 +584,7 @@ class TestNoOtherModuleDecidesWhetherACoverIsLocal:
         ]
 
         assert offenders == [], (
-            "only covers.py may read LOCAL_COVER_PREFIX; ask covers.is_local: "
-            + ", ".join(offenders)
+            "only covers.py may read LOCAL_COVER_PREFIX; ask covers.is_local: " + ", ".join(offenders)
         )
 
     #: How many times `covers.py` itself may read the constant: the two
@@ -635,9 +601,7 @@ class TestNoOtherModuleDecidesWhetherACoverIsLocal:
         loads = [
             node.lineno
             for node in ast.walk(ast.parse(source))
-            if isinstance(node, ast.Name)
-            and node.id == self.PREFIX_NAME
-            and isinstance(node.ctx, ast.Load)
+            if isinstance(node, ast.Name) and node.id == self.PREFIX_NAME and isinstance(node.ctx, ast.Load)
         ]
 
         assert len(loads) == self.READERS_INSIDE_COVERS, loads
@@ -648,8 +612,7 @@ class TestNoOtherModuleDecidesWhetherACoverIsLocal:
             occurrences = sum(
                 1
                 for node in ast.walk(ast.parse(path.read_text()))
-                if isinstance(node, ast.Constant)
-                and node.value == covers.LOCAL_COVER_PREFIX
+                if isinstance(node, ast.Constant) and node.value == covers.LOCAL_COVER_PREFIX
             )
             if occurrences:
                 found[path.relative_to(BACKEND).as_posix()] = occurrences
@@ -815,18 +778,14 @@ class TestDownloading:
 
     def test_something_that_is_not_an_image_is_refused(self):
         """A 200 carrying an error page is how both services report a bad day."""
-        page = httpx.Response(
-            200, content=b"<html>no cover</html>", headers={"content-type": "text/html"}
-        )
+        page = httpx.Response(200, content=b"<html>no cover</html>", headers={"content-type": "text/html"})
         with respx.mock(assert_all_called=False) as mock:
             mock.get(url__startswith=AT_OPEN_LIBRARY).mock(return_value=page)
             assert covers.download(covers.open_library_url(ENGLISH)) is None
 
     def test_a_refused_connection_is_not_an_exception(self):
         with respx.mock(assert_all_called=False) as mock:
-            mock.get(url__startswith=AT_OPEN_LIBRARY).mock(
-                side_effect=httpx.ConnectError("no route")
-            )
+            mock.get(url__startswith=AT_OPEN_LIBRARY).mock(side_effect=httpx.ConnectError("no route"))
             assert covers.download(covers.open_library_url(ENGLISH)) is None
 
     def test_compression_is_not_requested(self):
@@ -929,9 +888,7 @@ class TestDownloading:
                 )
             )
             started = monotonic()
-            fetched = covers.download(
-                covers.open_library_url(ENGLISH), deadline=monotonic() + 1.0
-            )
+            fetched = covers.download(covers.open_library_url(ENGLISH), deadline=monotonic() + 1.0)
             spent = monotonic() - started
 
         assert fetched is None
@@ -1026,9 +983,7 @@ class TestWhatIsOnDisk:
     def test_a_book_with_no_file_has_no_url(self, covers_dir):
         assert covers.local_url_for(7) is None
 
-    def test_the_url_is_stable_when_a_book_holds_two_formats(
-        self, covers_dir, monkeypatch
-    ):
+    def test_the_url_is_stable_when_a_book_holds_two_formats(self, covers_dir, monkeypatch):
         """`ALLOWED_IMAGE_EXTENSIONS` is a frozenset and its iteration order is
         not stable between processes, and a book can hold two formats: an upload
         sweeps the losers and `backup.restore` deliberately does not.
@@ -1124,9 +1079,7 @@ class TestResolveAndStore:
         work from the reader's browser even when it does not from the pod."""
         supplied = covers.open_library_url(ENGLISH)
         with respx.mock(assert_all_called=False) as mock:
-            mock.get(url__startswith=AT_OPEN_LIBRARY).mock(
-                side_effect=httpx.ConnectError("no route")
-            )
+            mock.get(url__startswith=AT_OPEN_LIBRARY).mock(side_effect=httpx.ConnectError("no route"))
             assert covers.resolve_and_store(3, ENGLISH, supplied) == supplied
 
     def test_with_no_supplied_url_it_asks_the_image_services(self, covers_dir):
@@ -1245,9 +1198,7 @@ class TestTheInteractiveBudget:
         the client's own `timeout=` alone.
         """
         with respx.mock(assert_all_called=False) as mock:
-            mock.get(url__startswith=AT_OPEN_LIBRARY).mock(
-                side_effect=_headers_after_three_seconds
-            )
+            mock.get(url__startswith=AT_OPEN_LIBRARY).mock(side_effect=_headers_after_three_seconds)
             started = monotonic()
             verdict = _await(_check_one(covers.open_library_url(ENGLISH), budget=1.0))
             spent = monotonic() - started
@@ -1293,9 +1244,7 @@ class TestTheInteractiveBudget:
         either.
         """
         with respx.mock(assert_all_called=False) as mock:
-            mock.get(url__startswith=AT_OPEN_LIBRARY).mock(
-                side_effect=_slow_redirect_to_the_dnb
-            )
+            mock.get(url__startswith=AT_OPEN_LIBRARY).mock(side_effect=_slow_redirect_to_the_dnb)
             mock.get(url__startswith=AT_DNB).mock(
                 return_value=httpx.Response(
                     200, stream=_NeverAnswers(), headers={"content-type": "image/jpeg"}
@@ -1486,13 +1435,9 @@ class TestFetchesAreRefusedBeforeTheyHappen:
         """
         with respx.mock(assert_all_called=False) as mock:
             mock.get(url__startswith=AT_OPEN_LIBRARY).mock(
-                return_value=httpx.Response(
-                    302, headers={"location": "https://evil.test/x.jpg"}
-                )
+                return_value=httpx.Response(302, headers={"location": "https://evil.test/x.jpg"})
             )
-            elsewhere = mock.get(url__startswith=f"https://{AT_ANY_COVER_HOST}").mock(
-                return_value=image()
-            )
+            elsewhere = mock.get(url__startswith=f"https://{AT_ANY_COVER_HOST}").mock(return_value=image())
 
             assert covers.download(covers.open_library_url(ENGLISH)) is None
 
@@ -1507,14 +1452,10 @@ class TestFetchesAreRefusedBeforeTheyHappen:
         """
         with respx.mock(assert_all_called=False) as mock:
             mock.get(url__startswith=AT_OPEN_LIBRARY).mock(
-                return_value=httpx.Response(
-                    302, headers={"location": "https://evil.test/x.jpg"}
-                )
+                return_value=httpx.Response(302, headers={"location": "https://evil.test/x.jpg"})
             )
             mock.get(url__startswith=AT_DNB).mock(return_value=httpx.Response(404))
-            elsewhere = mock.get(url__startswith=f"https://{AT_ANY_COVER_HOST}").mock(
-                return_value=image()
-            )
+            elsewhere = mock.get(url__startswith=f"https://{AT_ANY_COVER_HOST}").mock(return_value=image())
 
             assert _await(covers.resolve(ENGLISH)) is None
 
@@ -1538,9 +1479,7 @@ class TestFetchesAreRefusedBeforeTheyHappen:
             ("7-M.jpg", "/b/isbn/7-M.jpg"),
         ],
     )
-    def test_a_relative_location_is_resolved_against_the_hop_it_came_from(
-        self, location, path
-    ):
+    def test_a_relative_location_is_resolved_against_the_hop_it_came_from(self, location, path):
         """`_next_hop` exists to hold that rule in one place, and every other
         `Location` in this file is absolute, so `urljoin(current, location)`
         could be replaced by `location` with nothing red.
@@ -1574,9 +1513,7 @@ class TestFetchesAreRefusedBeforeTheyHappen:
     def test_a_redirect_loop_gives_up(self):
         with respx.mock(assert_all_called=False) as mock:
             mock.get(url__startswith=AT_OPEN_LIBRARY).mock(
-                return_value=httpx.Response(
-                    302, headers={"location": covers.open_library_url(ENGLISH)}
-                )
+                return_value=httpx.Response(302, headers={"location": covers.open_library_url(ENGLISH)})
             )
             assert covers.download(covers.open_library_url(ENGLISH)) is None
 
@@ -1585,9 +1522,7 @@ class TestFetchesAreRefusedBeforeTheyHappen:
         rather than absent, so a service looping for a minute costs no cover."""
         with respx.mock(assert_all_called=False) as mock:
             hops = mock.get(url__startswith=AT_OPEN_LIBRARY).mock(
-                return_value=httpx.Response(
-                    302, headers={"location": covers.open_library_url(ENGLISH)}
-                )
+                return_value=httpx.Response(302, headers={"location": covers.open_library_url(ENGLISH)})
             )
 
             assert _await(_check_one(covers.open_library_url(ENGLISH))) is None
@@ -1637,14 +1572,10 @@ class TestWhereAListedHostAnswers:
 
         return resolve_to
 
-    def test_a_listed_host_answering_inside_the_cluster_is_not_checked(
-        self, monkeypatch
-    ):
+    def test_a_listed_host_answering_inside_the_cluster_is_not_checked(self, monkeypatch):
         monkeypatch.setattr(covers, "resolver", self._answering(self.INSIDE))
         with respx.mock(assert_all_called=False) as mock:
-            route = mock.get(url__startswith=f"https://{self.INSIDE}").mock(
-                return_value=image()
-            )
+            route = mock.get(url__startswith=f"https://{self.INSIDE}").mock(return_value=image())
             _await(covers.resolve(ENGLISH))
 
         assert route.call_count == 0
@@ -1653,14 +1584,10 @@ class TestWhereAListedHostAnswers:
         # rather than a cover being thrown away.
         assert covers.outcome_counts().get(covers.CoverOutcome.VERIFIED.value, 0) == 0
 
-    def test_a_listed_host_answering_inside_the_cluster_is_not_downloaded(
-        self, monkeypatch
-    ):
+    def test_a_listed_host_answering_inside_the_cluster_is_not_downloaded(self, monkeypatch):
         monkeypatch.setattr(covers, "resolver", self._answering(self.INSIDE))
         with respx.mock(assert_all_called=False) as mock:
-            route = mock.get(url__startswith=f"https://{self.INSIDE}").mock(
-                return_value=image()
-            )
+            route = mock.get(url__startswith=f"https://{self.INSIDE}").mock(return_value=image())
             fetched = covers.download(covers.open_library_url(ENGLISH))
 
         assert fetched is None
@@ -1682,9 +1609,7 @@ class TestWhereAListedHostAnswers:
         certificate.
         """
         with respx.mock(assert_all_called=False) as mock:
-            route = mock.get(url__startswith=AT_OPEN_LIBRARY).mock(
-                return_value=image()
-            )
+            route = mock.get(url__startswith=AT_OPEN_LIBRARY).mock(return_value=image())
             covers.download(covers.open_library_url(ENGLISH))
 
         assert route.calls[0].request.headers["host"] == "covers.openlibrary.org"
@@ -1700,9 +1625,7 @@ class TestWhereAListedHostAnswers:
         """
         supplied = "https://lh3.googleusercontent.com/x"
         with respx.mock(assert_all_called=False) as mock:
-            route = mock.get(url__startswith=f"https://{AT_ANY_COVER_HOST}").mock(
-                return_value=image()
-            )
+            route = mock.get(url__startswith=f"https://{AT_ANY_COVER_HOST}").mock(return_value=image())
             assert _await(covers.resolve(ENGLISH, supplied)) == supplied
 
         assert route.call_count == 1
@@ -1770,9 +1693,7 @@ class TestAHostIdnaCannotDecode:
         assert covers.is_fetchable(self.SUPPLIED) is True
 
         with respx.mock(assert_all_called=False) as mock:
-            mock.get(url__startswith=AT_OPEN_LIBRARY).mock(
-                return_value=httpx.Response(404)
-            )
+            mock.get(url__startswith=AT_OPEN_LIBRARY).mock(return_value=httpx.Response(404))
             mock.get(url__startswith=AT_DNB).mock(return_value=httpx.Response(404))
 
             assert _await(covers.resolve(ENGLISH, self.SUPPLIED)) is None
@@ -1829,4 +1750,3 @@ def await_resolve(isbn: str, supplied: str) -> str | None:
 def await_resolve_with_deadline(isbn: str, budget: float) -> str | None:
     """`resolve` with an already spent budget, from a sync test."""
     return asyncio.run(covers.resolve(isbn, deadline=monotonic() + budget))
-

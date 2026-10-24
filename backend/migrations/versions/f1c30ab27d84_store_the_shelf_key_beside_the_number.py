@@ -121,16 +121,11 @@ def upgrade() -> None:
     # Backfilled rather than left null. A null files last under `nullslast`, so
     # a row this missed would sit at the end of every shelf order with nothing
     # to see: no error, no empty cell, just a book in the wrong place.
-    rows = connection.execute(
-        sa.text("SELECT id, scheme, number FROM classifications")
-    ).all()
+    rows = connection.execute(sa.text("SELECT id, scheme, number FROM classifications")).all()
     if rows:
         connection.execute(
             sa.text("UPDATE classifications SET sort_key = :key WHERE id = :row_id"),
-            [
-                {"row_id": row_id, "key": _sort_key(scheme, number)}
-                for row_id, scheme, number in rows
-            ],
+            [{"row_id": row_id, "key": _sort_key(scheme, number)} for row_id, scheme, number in rows],
         )
 
     # SQLite cannot ALTER a column to NOT NULL, so this rebuilds the table.

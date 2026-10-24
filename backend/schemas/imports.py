@@ -19,17 +19,13 @@ class ImportResultOut(BaseModel):
     skipped: int = Field(
         ge=0,
         description=(
-            "Rows this import could not act on: no title, or an ISBN held by a "
-            "book the caller cannot see"
+            "Rows this import could not act on: no title, or an ISBN held by a book the caller cannot see"
         ),
     )
     excluded: int = Field(
         default=0,
         ge=0,
-        description=(
-            "Rows the file itself marked as not wanted, such as a title deleted "
-            "at the source"
-        ),
+        description=("Rows the file itself marked as not wanted, such as a title deleted at the source"),
     )
     tags_dropped: int = Field(
         default=0,
@@ -208,16 +204,11 @@ class MarcPreviewOut(BaseModel):
     total_records: int = Field(ge=0, description="Records in the file")
     readable: int = Field(ge=0, description="Records with a title this app can store")
     skipped: int = Field(ge=0, description="Records with no title")
-    already_held: int = Field(
-        ge=0, description="Records matching a book this member can already see"
-    )
+    already_held: int = Field(ge=0, description="Records matching a book this member can already see")
     blocked: int = Field(
         default=0,
         ge=0,
-        description=(
-            "Records the import will refuse: their ISBN belongs to a book this "
-            "member cannot see"
-        ),
+        description=("Records the import will refuse: their ISBN belongs to a book this member cannot see"),
     )
     in_trash: int = Field(
         default=0,

@@ -18,9 +18,7 @@ from tests.routers.test_books_authors import count_selects
 
 
 def merge(client, headers, book_ids, keep_id):
-    return client.post(
-        "/api/books/merge", json={"book_ids": book_ids, "keep_id": keep_id}, headers=headers
-    )
+    return client.post("/api/books/merge", json={"book_ids": book_ids, "keep_id": keep_id}, headers=headers)
 
 
 def report(client, headers):
@@ -58,9 +56,7 @@ class TestDetection:
 
         assert len(groups(client, admin["headers"])) == 1
 
-    def test_an_isbd_mark_left_by_a_catalogue_does_not_hide_a_duplicate(
-        self, client, admin, make_book
-    ):
+    def test_an_isbd_mark_left_by_a_catalogue_does_not_hide_a_duplicate(self, client, admin, make_book):
         """MARC 245 carries this punctuation, so it arrives on real rows.
 
         The mark used to leave its own space in the key, so the pair was never
@@ -77,9 +73,7 @@ class TestDetection:
 
         assert len(groups(client, admin["headers"])) == 1
 
-    def test_two_surnames_differing_by_an_article_word_are_not_a_duplicate(
-        self, client, admin, make_book
-    ):
+    def test_two_surnames_differing_by_an_article_word_are_not_a_duplicate(self, client, admin, make_book):
         """`Das Gupta` is a surname and the fold used to eat the `Das`.
 
         Offering these two for merge invites somebody to destroy one of them.
@@ -102,9 +96,7 @@ class TestDetection:
 
         assert groups(client, admin["headers"]) == []
 
-    def test_the_same_title_by_different_authors_is_not_a_duplicate(
-        self, client, admin, make_book
-    ):
+    def test_the_same_title_by_different_authors_is_not_a_duplicate(self, client, admin, make_book):
         make_book(admin["headers"], title="Ulysses", author="James Joyce")
         make_book(admin["headers"], title="Ulysses", author="Alfred Tennyson")
 
@@ -114,18 +106,14 @@ class TestDetection:
         make_book(admin["headers"], title="Dune", author="Frank Herbert")
         assert groups(client, admin["headers"]) == []
 
-    def test_another_members_private_book_is_never_grouped(
-        self, client, admin, member, make_book
-    ):
+    def test_another_members_private_book_is_never_grouped(self, client, admin, member, make_book):
         # Otherwise the duplicates view discloses a private book's title.
         make_book(admin["headers"], title="Dune", author="Frank Herbert", is_private=True)
         make_book(member["headers"], title="Dune", author="Frank Herbert")
 
         assert groups(client, member["headers"]) == []
 
-    def test_a_private_sibling_does_not_inflate_a_group_that_exists(
-        self, client, admin, member, make_book
-    ):
+    def test_a_private_sibling_does_not_inflate_a_group_that_exists(self, client, admin, member, make_book):
         """Two visible rows and one private one is a group of exactly two.
 
         The arm above covers the group that must not exist at all. This is the
@@ -134,9 +122,7 @@ class TestDetection:
         a count taken over anything but the survivors would announce a book
         the viewer cannot see without naming it.
         """
-        make_book(
-            admin["headers"], title="Dune", author="Frank Herbert", is_private=True
-        )
+        make_book(admin["headers"], title="Dune", author="Frank Herbert", is_private=True)
         make_book(member["headers"], title="Dune", author="Frank Herbert")
         make_book(member["headers"], title="dune", author="frank herbert")
 
@@ -157,10 +143,7 @@ class TestDetection:
         exists, carrying an id nobody can act on. That is the same class as
         the dead merge button the member cap closed.
         """
-        kept = [
-            make_book(admin["headers"], title="Dune", author="Frank Herbert")
-            for _ in range(2)
-        ]
+        kept = [make_book(admin["headers"], title="Dune", author="Frank Herbert") for _ in range(2)]
         gone = make_book(admin["headers"], title="Dune", author="Frank Herbert")
 
         client.delete(f"/api/books/{gone['id']}", headers=admin["headers"])
@@ -169,9 +152,7 @@ class TestDetection:
         assert group["size"] == 2
         assert {row["id"] for row in group["books"]} == {row["id"] for row in kept}
 
-    def test_the_viewers_own_private_duplicates_are_on_their_own_page(
-        self, client, member, make_book
-    ):
+    def test_the_viewers_own_private_duplicates_are_on_their_own_page(self, client, member, make_book):
         """The direction every other arm here is blind to.
 
         The rest of this class asks whether somebody else's book is absent,
@@ -183,17 +164,13 @@ class TestDetection:
         and nothing says so.
         """
         for _ in range(2):
-            make_book(
-                member["headers"], title="Solaris", author="Lem", is_private=True
-            )
+            make_book(member["headers"], title="Solaris", author="Lem", is_private=True)
 
         body = report(client, member["headers"])
 
         assert (len(body["groups"]), body["total_groups"]) == (1, 1)
 
-    def test_the_total_counts_only_groups_this_viewer_can_see(
-        self, client, admin, member, make_book
-    ):
+    def test_the_total_counts_only_groups_this_viewer_can_see(self, client, admin, member, make_book):
         """A viewer blind total, beside a group whose size is right.
 
         The arm above plants the private row **inside** an existing group, so
@@ -202,9 +179,7 @@ class TestDetection:
         the shape only the total can see.
         """
         for _ in range(2):
-            make_book(
-                admin["headers"], title="Solaris", author="Lem", is_private=True
-            )
+            make_book(admin["headers"], title="Solaris", author="Lem", is_private=True)
         make_book(member["headers"], title="Dune", author="Frank Herbert")
         make_book(member["headers"], title="dune", author="frank herbert")
 
@@ -235,9 +210,7 @@ class TestEveryColumnLandsWhereItBelongs:
     the collapse dedupe on publisher and silently drop real duplicates.
     """
 
-    def test_each_column_lands_in_its_own_field_and_the_token_lands_nowhere(
-        self, client, admin, db
-    ):
+    def test_each_column_lands_in_its_own_field_and_the_token_lands_nowhere(self, client, admin, db):
         """One row, every value distinctive, compared whole.
 
         A whole dict rather than a field at a time: an equality over the
@@ -301,17 +274,13 @@ class TestTheScanCostsOneStatement:
     measured either; this is what stops the next one being silent.
     """
 
-    def test_it_costs_one_statement_whatever_the_shelf_holds(
-        self, client, admin, make_book
-    ):
+    def test_it_costs_one_statement_whatever_the_shelf_holds(self, client, admin, make_book):
         """Measured at two sizes rather than one: a claim that the cost does
         not grow is a claim about two shelf sizes, and asserting it over one
         would pass just as well on a query issued per book."""
 
         def over_books() -> int:
-            statements = count_selects(
-                lambda: client.get("/api/books/duplicates", headers=admin["headers"])
-            )
+            statements = count_selects(lambda: client.get("/api/books/duplicates", headers=admin["headers"]))
             return len([row for row in statements if "FROM books" in row])
 
         make_book(admin["headers"], title="Dune", author="Frank Herbert")
@@ -339,9 +308,7 @@ class TestTheMemberCap:
         for _ in range(size):
             make_book(admin["headers"], title="Dune", author="Frank Herbert")
 
-    def test_it_shows_no_more_members_than_a_merge_accepts(
-        self, client, admin, make_book
-    ):
+    def test_it_shows_no_more_members_than_a_merge_accepts(self, client, admin, make_book):
         self._one_group_of(make_book, admin, MERGE_BOOKS_MAX + 1)
 
         [group] = groups(client, admin["headers"])
@@ -470,9 +437,7 @@ class TestMerge:
         second = make_book(admin["headers"], title="Dune", publisher="Chilton")
         third = make_book(admin["headers"], title="Dune", year=1965)
 
-        res = merge(
-            client, admin["headers"], [keeper["id"], second["id"], third["id"]], keeper["id"]
-        )
+        res = merge(client, admin["headers"], [keeper["id"], second["id"], third["id"]], keeper["id"])
 
         assert res.json()["publisher"] == "Chilton"
         assert res.json()["year"] == 1965
@@ -482,9 +447,7 @@ class TestMerge:
         fiction = next(t for t in tags if t["name"] == "Fiction")
         keeper = make_book(admin["headers"], title="Dune")
         loser = make_book(admin["headers"], title="Dune")
-        client.post(
-            f"/api/books/{loser['id']}/tags/{fiction['id']}", headers=admin["headers"]
-        )
+        client.post(f"/api/books/{loser['id']}/tags/{fiction['id']}", headers=admin["headers"])
 
         res = merge(client, admin["headers"], [keeper["id"], loser["id"]], keeper["id"])
 
@@ -540,16 +503,12 @@ class TestMerge:
         merge(client, admin["headers"], [keeper["id"], loser["id"]], keeper["id"])
 
         notes = client.get(f"/api/books/{keeper['id']}/notes", headers=admin["headers"]).json()
-        assert [(n["content"], n["is_private"]) for n in notes] == [
-            ("what I actually thought", True)
-        ]
+        assert [(n["content"], n["is_private"]) for n in notes] == [("what I actually thought", True)]
 
     def test_moves_a_reading_status_across(self, client, admin, make_book):
         keeper = make_book(admin["headers"], title="Dune")
         loser = make_book(admin["headers"], title="Dune")
-        client.put(
-            f"/api/books/{loser['id']}/status", json={"status": "read"}, headers=admin["headers"]
-        )
+        client.put(f"/api/books/{loser['id']}/status", json={"status": "read"}, headers=admin["headers"])
 
         res = merge(client, admin["headers"], [keeper["id"], loser["id"]], keeper["id"])
 
@@ -561,12 +520,8 @@ class TestMerge:
         row already on the keeper wins."""
         keeper = make_book(admin["headers"], title="Dune")
         loser = make_book(admin["headers"], title="Dune")
-        client.put(
-            f"/api/books/{keeper['id']}/status", json={"status": "reading"}, headers=admin["headers"]
-        )
-        client.put(
-            f"/api/books/{loser['id']}/status", json={"status": "read"}, headers=admin["headers"]
-        )
+        client.put(f"/api/books/{keeper['id']}/status", json={"status": "reading"}, headers=admin["headers"])
+        client.put(f"/api/books/{loser['id']}/status", json={"status": "read"}, headers=admin["headers"])
 
         res = merge(client, admin["headers"], [keeper["id"], loser["id"]], keeper["id"])
 
@@ -575,12 +530,8 @@ class TestMerge:
     def test_two_members_statuses_both_survive(self, client, admin, member, make_book):
         keeper = make_book(admin["headers"], title="Dune")
         loser = make_book(admin["headers"], title="Dune")
-        client.put(
-            f"/api/books/{loser['id']}/status", json={"status": "read"}, headers=admin["headers"]
-        )
-        client.put(
-            f"/api/books/{loser['id']}/status", json={"status": "reading"}, headers=member["headers"]
-        )
+        client.put(f"/api/books/{loser['id']}/status", json={"status": "read"}, headers=admin["headers"])
+        client.put(f"/api/books/{loser['id']}/status", json={"status": "reading"}, headers=member["headers"])
 
         merge(client, admin["headers"], [keeper["id"], loser["id"]], keeper["id"])
 
@@ -623,9 +574,7 @@ class TestMergeRefusals:
         res = merge(client, admin["headers"], [book["id"], 9999], book["id"])
         assert res.status_code == 400
 
-    def test_another_members_private_book_cannot_be_merged_in(
-        self, client, admin, member, make_book
-    ):
+    def test_another_members_private_book_cannot_be_merged_in(self, client, admin, member, make_book):
         private = make_book(admin["headers"], title="Dune", is_private=True)
         mine = make_book(member["headers"], title="Dune")
 
@@ -633,9 +582,7 @@ class TestMergeRefusals:
 
         assert res.status_code == 400
 
-    def test_a_keeper_the_caller_cannot_see_is_404_and_nothing_moves(
-        self, client, admin, member, make_book
-    ):
+    def test_a_keeper_the_caller_cannot_see_is_404_and_nothing_moves(self, client, admin, member, make_book):
         """404 and not 400, which is how a book that is not there answers: a
         400 here would confirm the private row exists."""
         private = make_book(admin["headers"], title="Dune", is_private=True)
@@ -668,9 +615,7 @@ class TestTheLoanInvariant:
         )
         return book
 
-    def test_merging_two_lent_books_leaves_one_open_loan(
-        self, client, admin, member, make_book, db
-    ):
+    def test_merging_two_lent_books_leaves_one_open_loan(self, client, admin, member, make_book, db):
         from models import Loan
 
         first = self._lent_book(client, admin, member, make_book, "Dune")
@@ -684,16 +629,10 @@ class TestTheLoanInvariant:
 
         assert res.status_code == 200
         db.expire_all()
-        open_loans = (
-            db.query(Loan)
-            .filter(Loan.book_id == first["id"], Loan.returned_at.is_(None))
-            .count()
-        )
+        open_loans = db.query(Loan).filter(Loan.book_id == first["id"], Loan.returned_at.is_(None)).count()
         assert open_loans == 1
 
-    def test_the_survivor_can_still_be_lent_after_it_comes_back(
-        self, client, admin, member, make_book
-    ):
+    def test_the_survivor_can_still_be_lent_after_it_comes_back(self, client, admin, member, make_book):
         first = self._lent_book(client, admin, member, make_book, "Dune")
         second = self._lent_book(client, admin, member, make_book, "Dune")
         client.post(

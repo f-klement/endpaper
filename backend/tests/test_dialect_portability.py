@@ -77,9 +77,7 @@ class TestTheMonthBucket:
     """One concept, one spelling per dialect, and a refusal for the rest."""
 
     def test_sqlite_gets_strftime(self):
-        assert "strftime('%Y-%m', books.added_at)" in _compiled(
-            select(MonthBucket(Book.added_at)), SQLITE
-        )
+        assert "strftime('%Y-%m', books.added_at)" in _compiled(select(MonthBucket(Book.added_at)), SQLITE)
 
     def test_postgres_gets_to_char(self):
         """`to_char`, and its pattern carries no `%`.

@@ -444,11 +444,7 @@ class Authorship:
         # Only keys a visible Book evidences. `_evidenced_keys` carries the
         # measurement of what including `entry.key` here let a member read and
         # delete.
-        rows = [
-            row
-            for key in sorted(_evidenced_keys(entry))
-            for row in identifiers.get(key, [])
-        ]
+        rows = [row for key in sorted(_evidenced_keys(entry)) for row in identifiers.get(key, [])]
         return AuthorOut(
             key=entry.key,
             name=entry.name,
@@ -456,9 +452,7 @@ class Authorship:
             spellings=list(entry.spellings),
             merged=sorted(
                 (
-                    AuthorMergeOut(
-                        alias_id=alias_ids[key], spelling=spelling_for.get(key, entry.name)
-                    )
+                    AuthorMergeOut(alias_id=alias_ids[key], spelling=spelling_for.get(key, entry.name))
                     for key in entry.alias_keys
                     # The author's own key is not a spelling folded **into**
                     # them. A merge writes a row for every key it was given, the
@@ -554,9 +548,7 @@ class Authorship:
         return self._out(merged, alias_ids, self._identifiers_by_key())
 
     @staticmethod
-    def _resolved_keep_name(
-        keep_name: str, requested: set[str], aliases: list[AuthorAlias]
-    ) -> str:
+    def _resolved_keep_name(keep_name: str, requested: set[str], aliases: list[AuthorAlias]) -> str:
         """The name to keep, followed one hop if it is itself already folded.
 
         Following it keeps the map flat: without this the new rows would point
@@ -585,9 +577,7 @@ class Authorship:
             return existing_target.canonical_name
         return keep_name
 
-    def merge_batch(
-        self, groups: Sequence[AuthorMergeGroup], *, by_user_id: int
-    ) -> AuthorBatchMergeOut:
+    def merge_batch(self, groups: Sequence[AuthorMergeGroup], *, by_user_id: int) -> AuthorBatchMergeOut:
         """Apply several merges as one, or none of them.
 
         **Two index reads, one pass, one commit, whatever the batch holds**: one
@@ -672,9 +662,7 @@ class Authorship:
         identifiers = self._identifiers_by_key()
         merged: list[AuthorOut] = []
         for _requested_keys, keep_name in planned:
-            entry = next(
-                (item for item in entries if item.key == author_key(keep_name)), None
-            )
+            entry = next((item for item in entries if item.key == author_key(keep_name)), None)
             # Unreachable while every key named an author with a visible Book,
             # which the check above enforces. Here for the race `merge` records:
             # another Member trashing the last of those Books between the two
@@ -783,9 +771,7 @@ class Authorship:
         shelf does carry.
         """
         carried = {
-            key
-            for spelling in split_authors(credited or "")
-            if (key := _storable_key(spelling)) is not None
+            key for spelling in split_authors(credited or "") if (key := _storable_key(spelling)) is not None
         }
         stored: list[AuthorIdentifier] = []
         refused: list[RefusedAssertion] = []
@@ -803,8 +789,7 @@ class Authorship:
                 # than a disagreement, so it is logged and not reported: there
                 # is nothing for a Member to act on and nothing was overruled.
                 logger.info(
-                    "Dropped an assertion for %r, which is not in this book's "
-                    "credit line",
+                    "Dropped an assertion for %r, which is not in this book's credit line",
                     assertion.name,
                 )
                 continue
@@ -1015,11 +1000,7 @@ class Authorship:
         if entry is None:
             raise AuthorNotFound
         identifiers = self._identifiers_by_key()
-        return [
-            row
-            for key in sorted(_evidenced_keys(entry))
-            for row in identifiers.get(key, [])
-        ]
+        return [row for key in sorted(_evidenced_keys(entry)) for row in identifiers.get(key, [])]
 
     def spelling_for(self, key: str) -> str:
         """The shelf spelling one stored key belongs to.
@@ -1053,9 +1034,7 @@ class Authorship:
             raise AuthorNotFound
         return entry.name
 
-    def _identifier_row(
-        self, key: str, scheme: AuthorityScheme
-    ) -> AuthorIdentifier | None:
+    def _identifier_row(self, key: str, scheme: AuthorityScheme) -> AuthorIdentifier | None:
         """The row this spelling already carries under one scheme, if any."""
         return (
             self._db.query(AuthorIdentifier)
@@ -1214,9 +1193,7 @@ def _batch_keep_name(
         return None
     already = sorted(requested & decided)
     if already:
-        candidate = next(
-            (entry.name for entry in entries if entry.key == already[0]), None
-        )
+        candidate = next((entry.name for entry in entries if entry.key == already[0]), None)
     else:
         # Most Books first, then the index's own order, which is what
         # `build_index` sorts by. `min` on the negated count keeps both
@@ -1278,9 +1255,7 @@ def _evidenced_keys(entry: AuthorEntry) -> set[str]:
     So nothing this app writes lands on an unevidenced key. A hand edit, a
     restore or a deleted Book can still produce one.
     """
-    return set(entry.alias_keys) | {
-        author_key(spelling) for spelling in entry.spellings
-    }
+    return set(entry.alias_keys) | {author_key(spelling) for spelling in entry.spellings}
 
 
 def _disagreements(rows: list[AuthorIdentifier]) -> set[AuthorityScheme]:

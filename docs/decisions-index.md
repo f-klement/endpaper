@@ -745,7 +745,7 @@ repeat the argument.
 | The structural house rules stay in the test tree, and both contract tools are refused | [What would change the answer](decisions.md#what-would-change-the-answer) | 92 |
 |  | [An absence is not a verdict, and the ratchet now proves its report arrived](decisions.md#an-absence-is-not-a-verdict-and-the-ratchet-now-proves-its-report-arrived) | 1,686 |
 |  | [The publish gate's forbidden list cannot hold every node name](decisions.md#the-publish-gates-forbidden-list-cannot-hold-every-node-name) | 100 |
-|  | [A documented command is validated, not generated](decisions.md#a-documented-command-is-validated-not-generated) | 1,128 |
+|  | [A documented command is validated, not generated](decisions.md#a-documented-command-is-validated-not-generated) | 1,130 |
 |  | [The house rule learned what the revision beside it already knew](decisions.md#the-house-rule-learned-what-the-revision-beside-it-already-knew) | 568 |
 |  | [A `GLOB` rule claims only what a NUL lets it read](decisions.md#a-glob-rule-claims-only-what-a-nul-lets-it-read) | 452 |
 |  | [A bound on a confined column is written in bytes, once, not in both units](decisions.md#a-bound-on-a-confined-column-is-written-in-bytes-once-not-in-both-units) | 528 |
@@ -756,7 +756,7 @@ repeat the argument.
 |  | [`AddedRule` moved to `dialect.py`, and the move was measured rather than asserted](decisions.md#addedrule-moved-to-dialectpy-and-the-move-was-measured-rather-than-asserted) | 302 |
 |  | [What the envelope ceiling's derivation still cannot see](decisions.md#what-the-envelope-ceilings-derivation-still-cannot-see) | 453 |
 |  | [A guard over another tree's source names no file in it](decisions.md#a-guard-over-another-trees-source-names-no-file-in-it) | 254 |
-|  | [An allowlist entry is keyed on the statement, because a fragment names a token](decisions.md#an-allowlist-entry-is-keyed-on-the-statement-because-a-fragment-names-a-token) | 290 |
+|  | [An allowlist entry is keyed on the statement, because a fragment names a token](decisions.md#an-allowlist-entry-is-keyed-on-the-statement-because-a-fragment-names-a-token) | 319 |
 |  | [Every CHECK is compared as text, and a fourth premise arm asks a boot what it built](decisions.md#every-check-is-compared-as-text-and-a-fourth-premise-arm-asks-a-boot-what-it-built) | 810 |
 |  | [An enum list in a CHECK is derived from its enum, so growing the enum names the missing revision](decisions.md#an-enum-list-in-a-check-is-derived-from-its-enum-so-growing-the-enum-names-the-missing-revision) | 1,220 |
 |  | [The diagonal that drives a walk reads the test tree, not one file](decisions.md#the-diagonal-that-drives-a-walk-reads-the-test-tree-not-one-file) | 732 |
@@ -780,7 +780,7 @@ repeat the argument.
 |  | [A generated `TError` is not the type of any error this app throws](decisions.md#a-generated-terror-is-not-the-type-of-any-error-this-app-throws) | 209 |
 |  | [A contract derived from a measured pair survives review; one reasoned out from scratch did not](decisions.md#a-contract-derived-from-a-measured-pair-survives-review-one-reasoned-out-from-scratch-did-not) | 266 |
 |  | [The words beside a guard are read as its extent, and they were wrong in both directions](decisions.md#the-words-beside-a-guard-are-read-as-its-extent-and-they-were-wrong-in-both-directions) | 306 |
-|  | [Every population derived by matching source text in this wave was wrong at least once](decisions.md#every-population-derived-by-matching-source-text-in-this-wave-was-wrong-at-least-once) | 252 |
+|  | [Every population derived by matching source text in this wave was wrong at least once](decisions.md#every-population-derived-by-matching-source-text-in-this-wave-was-wrong-at-least-once) | 253 |
 |  | [A refactor moved the data out of the set the privacy guard watched](decisions.md#a-refactor-moved-the-data-out-of-the-set-the-privacy-guard-watched) | 300 |
 |  | [A fix round is better where it was aimed and weaker where nobody looked again](decisions.md#a-fix-round-is-better-where-it-was-aimed-and-weaker-where-nobody-looked-again) | 215 |
 |  | [A shared helper takes the wider type, and a caller that has narrowed one keeps its own](decisions.md#a-shared-helper-takes-the-wider-type-and-a-caller-that-has-narrowed-one-keeps-its-own) | 211 |
@@ -946,4 +946,5 @@ repeat the argument.
 |  | [build:smoke and scan:image take the digest build pushed](decisions.md#buildsmoke-and-scanimage-take-the-digest-build-pushed) | 306 |
 |  | [The smoke test refuses a world writable entry](decisions.md#the-smoke-test-refuses-a-world-writable-entry) | 301 |
 |  | [The release pin guard reads globs with PurePosixPath.full_match](decisions.md#the-release-pin-guard-reads-globs-with-pureposixpathfull_match) | 318 |
+|  | [oxfmt formats the frontend, not prettier or Biome](decisions.md#oxfmt-formats-the-frontend-not-prettier-or-biome) | 422 |
 <!-- index: end -->

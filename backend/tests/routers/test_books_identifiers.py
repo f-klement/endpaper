@@ -29,10 +29,7 @@ def identifiers(book_id, db):
     """
     db.expire_all()
     return (
-        db.query(BookIdentifier)
-        .filter(BookIdentifier.book_id == book_id)
-        .order_by(BookIdentifier.id)
-        .all()
+        db.query(BookIdentifier).filter(BookIdentifier.book_id == book_id).order_by(BookIdentifier.id).all()
     )
 
 
@@ -101,9 +98,7 @@ class TestAddingABookWithIdentifiers:
         assert res.status_code == 201
         assert len(identifiers(res.json()["id"], db)) == 2
 
-    def test_the_same_identifier_twice_in_one_payload_becomes_one_row(
-        self, client, admin, db
-    ):
+    def test_the_same_identifier_twice_in_one_payload_becomes_one_row(self, client, admin, db):
         """A member reading two of their own files may find one book in both,
         and two identical rows in one flush trip the unique index rather than
         the check before it."""
@@ -201,9 +196,7 @@ class TestAnAsinRecognisesTheBook:
         assert again.status_code == 409
         assert again.json()["detail"]["book_id"] == first.json()["id"]
 
-    def test_two_books_carrying_it_outside_a_copy_group_answer_409_naming_neither(
-        self, client, admin, db
-    ):
+    def test_two_books_carrying_it_outside_a_copy_group_answer_409_naming_neither(self, client, admin, db):
         """The pair an earlier defect left, two imports of one Kindle library.
         A client lands files on the Book a 409 names and offers a copy of it,
         so naming the lower id would pick between two Books. The second row is
@@ -219,9 +212,7 @@ class TestAnAsinRecognisesTheBook:
         assert res.status_code == 409
         assert isinstance(res.json()["detail"], str)
 
-    def test_another_members_private_book_carrying_it_answers_as_no_book(
-        self, client, admin, member
-    ):
+    def test_another_members_private_book_carrying_it_answers_as_no_book(self, client, admin, member):
         """Refusing would confirm somebody holds that edition, and nothing makes
         an identifier unique the way an ISBN is."""
         body = {"title": "Docker", "identifiers": [{"scheme": "asin", "value": ASIN}]}
@@ -236,9 +227,7 @@ class TestAGoogleVolumeIdRecognisesTheBook:
     """A second Play Books import, whose entries carry a volume id and no ISBN,
     added every book again, as a second Kindle import did before the ASIN."""
 
-    def test_a_second_add_carrying_the_volume_id_answers_409_naming_the_book(
-        self, client, admin
-    ):
+    def test_a_second_add_carrying_the_volume_id_answers_409_naming_the_book(self, client, admin):
         body = {"title": "Dune", "identifiers": [{"scheme": "google_books", "value": VOLUME_ID}]}
         first = client.post("/api/books/scan", json=body, headers=admin["headers"])
 
@@ -274,9 +263,7 @@ class TestAMergeMovesThem:
         )
 
         assert res.status_code == 200
-        assert sorted(row.value for row in identifiers(keeper["id"], db)) == sorted(
-            [ASIN, VOLUME_ID]
-        )
+        assert sorted(row.value for row in identifiers(keeper["id"], db)) == sorted([ASIN, VOLUME_ID])
 
     def test_two_differing_values_of_one_scheme_both_survive(self, client, admin, db):
         """The reason the unique index carries the value. Two Kindle entries a
@@ -308,9 +295,7 @@ class TestAMergeMovesThem:
         assert res.status_code == 200
         assert len(identifiers(keeper["id"], db)) == 2
 
-    def test_an_exact_repeat_is_dropped_rather_than_flushed_twice(
-        self, client, admin, db
-    ):
+    def test_an_exact_repeat_is_dropped_rather_than_flushed_twice(self, client, admin, db):
         """Two Books carrying one identifier are two imports of one library made
         before an add refused the second, or a private Book made public: without
         the drop the flush trips `uq_book_identifiers_book_scheme_value` and the
@@ -324,9 +309,7 @@ class TestAMergeMovesThem:
             },
             headers=admin["headers"],
         ).json()
-        loser = client.post(
-            "/api/books", json={"title": "Docker"}, headers=admin["headers"]
-        ).json()
+        loser = client.post("/api/books", json={"title": "Docker"}, headers=admin["headers"]).json()
         db.add(BookIdentifier(book_id=loser["id"], scheme="asin", value=ASIN))
         db.commit()
 
@@ -339,9 +322,7 @@ class TestAMergeMovesThem:
         assert res.status_code == 200
         assert len(identifiers(keeper["id"], db)) == 1
 
-    def test_a_merge_cannot_carry_the_survivor_past_the_ceiling(
-        self, client, admin, db
-    ):
+    def test_a_merge_cannot_carry_the_survivor_past_the_ceiling(self, client, admin, db):
         """The merge is the second capped writer of this table and the larger
         hole if it is left out: `MergeRequest.book_ids` takes 20 books and
         carries no rate limiter, so an uncapped move is a stored write nobody
@@ -351,8 +332,7 @@ class TestAMergeMovesThem:
             json={
                 "title": "Docker",
                 "identifiers": [
-                    {"scheme": "asin", "value": f"B{index:09d}"}
-                    for index in range(MAX_IDENTIFIERS_PER_BOOK)
+                    {"scheme": "asin", "value": f"B{index:09d}"} for index in range(MAX_IDENTIFIERS_PER_BOOK)
                 ],
             },
             headers=admin["headers"],
@@ -388,15 +368,9 @@ class TestPurgingABookTakesThem:
             headers=admin["headers"],
         ).json()
 
+        assert client.delete(f"/api/books/{book['id']}", headers=admin["headers"]).status_code == 204
         assert (
-            client.delete(f"/api/books/{book['id']}", headers=admin["headers"]).status_code
-            == 204
-        )
-        assert (
-            client.delete(
-                f"/api/books/{book['id']}/permanent", headers=admin["headers"]
-            ).status_code
-            == 204
+            client.delete(f"/api/books/{book['id']}/permanent", headers=admin["headers"]).status_code == 204
         )
         assert identifiers(book["id"], db) == []
 
@@ -476,9 +450,7 @@ class TestRemovingOne:
         book = self.a_book_with_one(client, admin["headers"])
         [row] = identifiers(book["id"], db)
 
-        res = client.delete(
-            f"/api/books/{book['id']}/identifiers/{row.id}", headers=admin["headers"]
-        )
+        res = client.delete(f"/api/books/{book['id']}/identifiers/{row.id}", headers=admin["headers"])
 
         assert res.status_code == 204
         assert identifiers(book["id"], db) == []
@@ -487,16 +459,12 @@ class TestRemovingOne:
         book = self.a_book_with_one(client, admin["headers"])
         [row] = identifiers(book["id"], db)
 
-        client.delete(
-            f"/api/books/{book['id']}/identifiers/{row.id}", headers=admin["headers"]
-        )
+        client.delete(f"/api/books/{book['id']}/identifiers/{row.id}", headers=admin["headers"])
 
         res = client.get(f"/api/books/{book['id']}", headers=admin["headers"])
         assert res.json()["identifiers"] == []
 
-    def test_another_member_removes_one_from_a_public_book(
-        self, client, admin, member, db
-    ):
+    def test_another_member_removes_one_from_a_public_book(self, client, admin, member, db):
         """A public Book is a shared shelf, which is what `BookForWrite` means.
 
         The same member may already retag it, re-cover it and refresh it, so an
@@ -506,9 +474,7 @@ class TestRemovingOne:
         book = self.a_book_with_one(client, admin["headers"])
         [row] = identifiers(book["id"], db)
 
-        res = client.delete(
-            f"/api/books/{book['id']}/identifiers/{row.id}", headers=member["headers"]
-        )
+        res = client.delete(f"/api/books/{book['id']}/identifiers/{row.id}", headers=member["headers"])
 
         assert res.status_code == 204
         assert identifiers(book["id"], db) == []
@@ -527,15 +493,11 @@ class TestRemovingOne:
         ).json()
         asin = next(row for row in identifiers(book["id"], db) if row.scheme == "asin")
 
-        client.delete(
-            f"/api/books/{book['id']}/identifiers/{asin.id}", headers=admin["headers"]
-        )
+        client.delete(f"/api/books/{book['id']}/identifiers/{asin.id}", headers=admin["headers"])
 
         assert [row.value for row in identifiers(book["id"], db)] == [VOLUME_ID]
 
-    def test_a_row_belonging_to_another_book_is_404_and_survives(
-        self, client, admin, db
-    ):
+    def test_a_row_belonging_to_another_book_is_404_and_survives(self, client, admin, db):
         """The pairing is in the query, not only in the path.
 
         Both Books here are the caller's own, so nothing about visibility
@@ -546,9 +508,7 @@ class TestRemovingOne:
         theirs = self.a_book_with_one(client, admin["headers"], value="B00OTHER01")
         [row] = identifiers(theirs["id"], db)
 
-        res = client.delete(
-            f"/api/books/{mine['id']}/identifiers/{row.id}", headers=admin["headers"]
-        )
+        res = client.delete(f"/api/books/{mine['id']}/identifiers/{row.id}", headers=admin["headers"])
 
         assert res.status_code == 404
         assert [stored.id for stored in identifiers(theirs["id"], db)] == [row.id]
@@ -607,9 +567,7 @@ class TestRemovingOne:
         assert res.status_code == 401
         assert identifiers(book["id"], db) != []
 
-    def test_importing_the_file_again_offers_the_book_and_not_the_row(
-        self, client, admin, db
-    ):
+    def test_importing_the_file_again_offers_the_book_and_not_the_row(self, client, admin, db):
         """Half of the route's own claim, and the half a client repeats.
 
         `add_identifiers` is reached only from `_create_book`, which always
@@ -623,18 +581,14 @@ class TestRemovingOne:
         """
         book = self.a_book_with_one(client, admin["headers"])
         [row] = identifiers(book["id"], db)
-        client.delete(
-            f"/api/books/{book['id']}/identifiers/{row.id}", headers=admin["headers"]
-        )
+        client.delete(f"/api/books/{book['id']}/identifiers/{row.id}", headers=admin["headers"])
 
         again = self.a_book_with_one(client, admin["headers"])
 
         assert again["id"] != book["id"]
         assert identifiers(book["id"], db) == []
 
-    def test_merging_that_second_book_in_carries_the_row_across(
-        self, client, admin, db
-    ):
+    def test_merging_that_second_book_in_carries_the_row_across(self, client, admin, db):
         """The other half, and the reason the client does not promise finality.
 
         **The prose said the removal could not be undone and that was wrong.**
@@ -650,9 +604,7 @@ class TestRemovingOne:
         """
         book = self.a_book_with_one(client, admin["headers"])
         [row] = identifiers(book["id"], db)
-        client.delete(
-            f"/api/books/{book['id']}/identifiers/{row.id}", headers=admin["headers"]
-        )
+        client.delete(f"/api/books/{book['id']}/identifiers/{row.id}", headers=admin["headers"])
         again = self.a_book_with_one(client, admin["headers"])
 
         res = client.post(
@@ -664,9 +616,7 @@ class TestRemovingOne:
         assert res.status_code == 200
         assert [stored.value for stored in identifiers(book["id"], db)] == [ASIN]
 
-    def test_a_book_holding_an_isbn_has_no_second_book_to_merge(
-        self, client, admin, db
-    ):
+    def test_a_book_holding_an_isbn_has_no_second_book_to_merge(self, client, admin, db):
         """The condition that closes the road, and the common half rather than
         the corner.
 
@@ -690,9 +640,7 @@ class TestRemovingOne:
             headers=admin["headers"],
         ).json()
         [row] = identifiers(book["id"], db)
-        client.delete(
-            f"/api/books/{book['id']}/identifiers/{row.id}", headers=admin["headers"]
-        )
+        client.delete(f"/api/books/{book['id']}/identifiers/{row.id}", headers=admin["headers"])
 
         again = client.post(
             "/api/books",
@@ -743,9 +691,7 @@ class TestACalibreRecordIsRecognisedByItsUuid:
 
         assert res.status_code == 201
 
-    def test_a_hidden_or_trashed_holder_answers_exactly_as_no_holder(
-        self, client, admin, member
-    ):
+    def test_a_hidden_or_trashed_holder_answers_exactly_as_no_holder(self, client, admin, member):
         """Same status, same body and the same statements as a uuid nobody
         holds, so the answer carries nothing about the holder. Trashed is the
         caller's own Book: the Shelf excludes the trash, so a re-import beside
@@ -792,9 +738,7 @@ class TestACalibreRecordIsRecognisedByItsUuid:
         assert answer(hidden) == nobody
         assert answer(trashed) == nobody
 
-    def test_the_uuid_holder_answers_where_the_isbn_names_another_book(
-        self, client, admin
-    ):
+    def test_the_uuid_holder_answers_where_the_isbn_names_another_book(self, client, admin):
         """Asked before the ISBN walk, so the 409 names the Book this record
         already is rather than one that merely shares its ISBN."""
         client.post(

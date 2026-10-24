@@ -49,6 +49,10 @@ from tests.strategies import (
     xml_of,
 )
 
+TREE_GUARDS = {
+    "TestNoModuleReadsAnotherModulesPrivateNames": ("application_modules",),
+}
+
 #: The kinds a stored row can actually declare, driven from the enum.
 #:
 #: **`SUBJECT` is excluded because the column refuses the word**, which is
@@ -116,9 +120,7 @@ def a_heading(scheme, number, label=None, kind=None):
     the writer reads the attribute, so a stub without one would fail with an
     `AttributeError` that says nothing about the record.
     """
-    return types.SimpleNamespace(
-        scheme=scheme, number=number, label=label, kind=kind
-    )
+    return types.SimpleNamespace(scheme=scheme, number=number, label=label, kind=kind)
 
 
 def round_trip(**overrides):
@@ -186,11 +188,7 @@ def marc_document(document: MarcDocument) -> bytes:
                 sibling=document.sibling,
             )
         )
-    body = (
-        f'<collection xmlns="{MARCXML}">'
-        + "".join(xml_of(record) for record in records)
-        + "</collection>"
-    )
+    body = f'<collection xmlns="{MARCXML}">' + "".join(xml_of(record) for record in records) + "</collection>"
     prolog = ""
     if document.declaration is not None:
         prolog = f'<?xml version="1.0" encoding="{document.declaration}"?>'
@@ -224,9 +222,7 @@ class TestEveryFieldMapsBothWays:
         assert round_trip(author="John Williams").author == "John Williams"
 
     def test_several_authors_survive_in_order(self):
-        assert round_trip(author="Terry Pratchett, Neil Gaiman").author == (
-            "Terry Pratchett, Neil Gaiman"
-        )
+        assert round_trip(author="Terry Pratchett, Neil Gaiman").author == ("Terry Pratchett, Neil Gaiman")
 
     def test_the_publisher_survives(self):
         assert round_trip(publisher="Hanser").publisher == "Hanser"
@@ -244,9 +240,7 @@ class TestEveryFieldMapsBothWays:
         assert round_trip(language="de").language == "de"
 
     def test_a_series_survives_as_the_part_and_its_collective_title(self):
-        record = round_trip(
-            title="The Philosopher's Stone", series_name="Harry Potter", series_index=1.0
-        )
+        record = round_trip(title="The Philosopher's Stone", series_name="Harry Potter", series_index=1.0)
         assert (record.title, record.series_name, record.series_index) == (
             "The Philosopher's Stone",
             "Harry Potter",
@@ -255,33 +249,19 @@ class TestEveryFieldMapsBothWays:
 
     def test_a_dewey_number_survives(self):
         record = round_trip(classifications=[a_heading(ClassificationScheme.DDC, "830")])
-        assert record.headings == (
-            Heading(ClassificationScheme.DDC, "830", None),
-        )
+        assert record.headings == (Heading(ClassificationScheme.DDC, "830", None),)
 
     def test_a_library_of_congress_call_number_survives(self):
-        record = round_trip(
-            classifications=[a_heading(ClassificationScheme.LCC, "PT2663.A67 S8 2005")]
-        )
-        assert record.headings == (
-            Heading(ClassificationScheme.LCC, "PT2663.A67 S8 2005", None),
-        )
+        record = round_trip(classifications=[a_heading(ClassificationScheme.LCC, "PT2663.A67 S8 2005")])
+        assert record.headings == (Heading(ClassificationScheme.LCC, "PT2663.A67 S8 2005", None),)
 
     def test_a_gnd_heading_survives_with_its_caption(self):
-        record = round_trip(
-            classifications=[a_heading(ClassificationScheme.GND, "4203576-4", "Schatz")]
-        )
-        assert record.headings == (
-            Heading(ClassificationScheme.GND, "4203576-4", "Schatz"),
-        )
+        record = round_trip(classifications=[a_heading(ClassificationScheme.GND, "4203576-4", "Schatz")])
+        assert record.headings == (Heading(ClassificationScheme.GND, "4203576-4", "Schatz"),)
 
     def test_a_subject_heading_survives(self):
-        record = round_trip(
-            classifications=[a_heading(ClassificationScheme.LCSH, "Treasure troves")]
-        )
-        assert record.headings == (
-            Heading(ClassificationScheme.LCSH, "Treasure troves", None),
-        )
+        record = round_trip(classifications=[a_heading(ClassificationScheme.LCSH, "Treasure troves")])
+        assert record.headings == (Heading(ClassificationScheme.LCSH, "Treasure troves", None),)
 
     #: What each declared kind writes: `(kind, tag, $2)`.
     #:
@@ -315,9 +295,7 @@ class TestEveryFieldMapsBothWays:
     ]
 
     @pytest.mark.parametrize(("scheme", "number", "label", "code"), DECLARED_NOTHING)
-    def test_a_row_declaring_no_kind_is_written_as_an_ordinary_subject(
-        self, scheme, number, label, code
-    ):
+    def test_a_row_declaring_no_kind_is_written_as_an_ordinary_subject(self, scheme, number, label, code):
         """`650`, its two indicators, and the vocabulary's plain code.
 
         **The indicators are observed by this arm and by the one below, and by
@@ -329,17 +307,13 @@ class TestEveryFieldMapsBothWays:
         what stops the ordinary path being given a field call of its own and
         quietly losing them.
         """
-        written = marc.write(
-            [a_book(classifications=[a_heading(scheme, number, label)])]
-        )
+        written = marc.write([a_book(classifications=[a_heading(scheme, number, label)])])
         assert '<datafield tag="650" ind1=" " ind2="7">' in written
         assert 'tag="655"' not in written
         assert f">{code}<" in written
 
     @pytest.mark.parametrize(("kind", "tag", "code"), WRITTEN_AS)
-    def test_a_declared_kind_is_written_as_its_own_field_and_code(
-        self, kind, tag, code
-    ):
+    def test_a_declared_kind_is_written_as_its_own_field_and_code(self, kind, tag, code):
         """The field and the `$2` together, asserted against the bytes.
 
         The round trip alone is satisfied by anything this application's own
@@ -351,15 +325,7 @@ class TestEveryFieldMapsBothWays:
         asserted on what leaves rather than on what comes back.
         """
         written = marc.write(
-            [
-                a_book(
-                    classifications=[
-                        a_heading(
-                            ClassificationScheme.GND, "4139307-7", "CD-ROM", kind
-                        )
-                    ]
-                )
-            ]
+            [a_book(classifications=[a_heading(ClassificationScheme.GND, "4139307-7", "CD-ROM", kind)])]
         )
         assert f'<datafield tag="{tag}" ind1=" " ind2="7">' in written
         assert 'tag="650"' not in written
@@ -374,13 +340,9 @@ class TestEveryFieldMapsBothWays:
         the row.
         """
         record = round_trip(
-            classifications=[
-                a_heading(ClassificationScheme.GND, "4139307-7", "CD-ROM", kind)
-            ]
+            classifications=[a_heading(ClassificationScheme.GND, "4139307-7", "CD-ROM", kind)]
         )
-        assert record.headings == (
-            Heading(ClassificationScheme.GND, "4139307-7", "CD-ROM", kind),
-        )
+        assert record.headings == (Heading(ClassificationScheme.GND, "4139307-7", "CD-ROM", kind),)
 
     def test_there_are_kinds_for_the_arm_above_to_drive(self):
         """A `parametrize` over an empty population collects nothing and reports
@@ -466,9 +428,7 @@ class TestOnlineLinksMapBothWays:
         parsed = marc.read(
             a_record(
                 datafield("245", ("a", "Stoner")),
-                datafield(
-                    "856", ("z", "note"), ("3", "part"), ("y", "text"), ("u", "https://a.example/")
-                ),
+                datafield("856", ("z", "note"), ("3", "part"), ("y", "text"), ("u", "https://a.example/")),
                 datafield("856", ("z", "note"), ("3", "part"), ("u", "https://b.example/")),
                 datafield("856", ("z", "note"), ("u", "https://c.example/")),
             )
@@ -491,9 +451,7 @@ class TestOnlineLinksMapBothWays:
     )
     def test_a_url_this_app_will_not_render_is_dropped(self, url):
         escaped = url.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-        parsed = marc.read(
-            a_record(datafield("245", ("a", "Stoner")), datafield("856", ("u", escaped)))
-        )
+        parsed = marc.read(a_record(datafield("245", ("a", "Stoner")), datafield("856", ("u", escaped))))
 
         assert parsed.records[0].title == "Stoner"
         assert parsed.links == ((),)
@@ -562,21 +520,14 @@ class TestWhatTheRoundTripCannotCarry:
         exactly the gap the old name papered over. Putting the identifier in
         `$a` instead would print a number where a catalogue prints a phrase.
         """
-        written = marc.write(
-            [a_book(classifications=[a_heading(ClassificationScheme.GND, "4203576-4")])]
-        )
+        written = marc.write([a_book(classifications=[a_heading(ClassificationScheme.GND, "4203576-4")])])
         # **The whole field, not a substring.** `code="a"` appears in the `245`
         # of every record, so asserting its absence across the document is a
         # test of the title rather than of this heading: it failed on the first
         # run for exactly that reason. An exact field pins the tag, both
         # indicators, both subfields and the absence of `$a` at once.
-        assert (
-            datafield("650", ("0", "(DE-588)4203576-4"), ("2", "gnd"), ind2="7")
-            in written
-        )
-        assert round_trip(
-            classifications=[a_heading(ClassificationScheme.GND, "4203576-4")]
-        ).headings == ()
+        assert datafield("650", ("0", "(DE-588)4203576-4"), ("2", "gnd"), ind2="7") in written
+        assert round_trip(classifications=[a_heading(ClassificationScheme.GND, "4203576-4")]).headings == ()
 
     def test_a_kind_on_a_vocabulary_that_cannot_spell_one_is_dropped(self):
         """There is no `lcsh-carrier`, and inventing one would be worse.
@@ -604,9 +555,7 @@ class TestWhatTheRoundTripCannotCarry:
                 )
             ]
         )
-        assert record.headings == (
-            Heading(ClassificationScheme.LCSH, "CD-ROM", None, None),
-        )
+        assert record.headings == (Heading(ClassificationScheme.LCSH, "CD-ROM", None, None),)
 
     def test_a_name_typed_in_catalogue_order_becomes_two_people_in_the_record(self):
         """The cost of `author` being one free text column, and it is a cost to
@@ -715,9 +664,7 @@ class TestTheWriter:
         """`700` without `$4` is a translator or an editor as far as
         `marc_fields.Fields` is concerned, so every author after the first would
         vanish with nothing failing."""
-        assert '<subfield code="4">aut</subfield>' in marc.write(
-            [a_book(author="One Writer, Two Writer")]
-        )
+        assert '<subfield code="4">aut</subfield>' in marc.write([a_book(author="One Writer, Two Writer")])
 
 
 class TestTheReaderRefusesAWholeFile:
@@ -787,8 +734,7 @@ class TestTheReaderRefusesAWholeFile:
         route before this arm existed: a 92 byte body was a 500 with a
         traceback."""
         body = (
-            '<?xml version="1.0" encoding="EUC-JP"?>'
-            f'<collection xmlns="{MARCXML}"><record/></collection>'
+            f'<?xml version="1.0" encoding="EUC-JP"?><collection xmlns="{MARCXML}"><record/></collection>'
         ).encode("ascii")
         with pytest.raises(marc.MarcError, match="multi-byte"):
             marc.read(body)
@@ -968,11 +914,9 @@ class TestTheReaderRefusesAWholeFile:
         transfer is an institution being told its holdings moved when most of
         them did not, silently."""
         record = f"<record><leader>{marc.LEADER}</leader>{datafield('245', ('a', 'T'))}</record>"
-        many = (
-            f'<collection xmlns="{MARCXML}">'
-            + record * (marc.MAX_RECORDS + 1)
-            + "</collection>"
-        ).encode("utf-8")
+        many = (f'<collection xmlns="{MARCXML}">' + record * (marc.MAX_RECORDS + 1) + "</collection>").encode(
+            "utf-8"
+        )
         with pytest.raises(marc.MarcError, match="Split it"):
             marc.read(many)
 
@@ -1019,9 +963,7 @@ class TestAnUploadIsReadOrRefusedByName:
     """
 
     @given(document=MARC_DOCUMENTS)
-    def test_it_answers_records_or_a_marc_error_inside_its_allocation_bound(
-        self, document
-    ):
+    def test_it_answers_records_or_a_marc_error_inside_its_allocation_bound(self, document):
         """**Three oracles, because "it did not throw" is one of the defects.**
         The type of the outcome; the record count, which is the spec's own,
         since an unpatched file read whole holds every record placed in it,
@@ -1042,17 +984,16 @@ class TestAnUploadIsReadOrRefusedByName:
     def test_the_generator_still_reaches_records_read(self):
         witness(
             MARC_DOCUMENTS,
-            lambda document: _refusal_of(document) is None
-            and bool(marc.read(marc_document(document)).records),
+            lambda document: (
+                _refusal_of(document) is None and bool(marc.read(marc_document(document)).records)
+            ),
             reaches="an upload read into records",
         )
 
     def test_the_generator_still_reaches_an_encoding_python_does_not_know(self):
         witness(
             MARC_DOCUMENTS,
-            lambda document: isinstance(
-                getattr(_refusal_of(document), "__cause__", None), LookupError
-            ),
+            lambda document: isinstance(getattr(_refusal_of(document), "__cause__", None), LookupError),
             reaches="a declaration naming an encoding Python has never heard of",
         )
 
@@ -1076,9 +1017,9 @@ class TestAnUploadIsReadOrRefusedByName:
         doctype is refused before any element is built."""
         witness(
             MARC_DOCUMENTS,
-            lambda document: document.width > 0
-            and document.sibling == "<x/>"
-            and _refusal_of(document) is None,
+            lambda document: (
+                document.width > 0 and document.sibling == "<x/>" and _refusal_of(document) is None
+            ),
             reaches="a record of `WIDE` empty siblings, read",
         )
 
@@ -1087,9 +1028,9 @@ class TestAnUploadIsReadOrRefusedByName:
         reaching `marc_fields.Fields`, asked of what the door answered."""
         witness(
             MARC_DOCUMENTS,
-            lambda document: document.width > 0
-            and document.sibling == MARC_READ_SIBLING
-            and _refusal_of(document) is None,
+            lambda document: (
+                document.width > 0 and document.sibling == MARC_READ_SIBLING and _refusal_of(document) is None
+            ),
             reaches="a record of `WIDE` empty fields, read",
         )
 
@@ -1125,9 +1066,7 @@ class TestAnUploadIsReadOrRefusedByName:
             patches=(),
             width=WIDE,
         )
-        got = answer_of(
-            marc.read, marc_document(document), answers=marc.ParsedMarc, refuses=marc.MarcError
-        )
+        got = answer_of(marc.read, marc_document(document), answers=marc.ParsedMarc, refuses=marc.MarcError)
         assert got.value is not None
         assert got.peak > 2 * xml_parse.ALLOCATION_FLOOR
 
@@ -1145,9 +1084,7 @@ class TestOneBadRecordCostsOneRecord:
         years and is not uniformly clean."""
         good = f"<record><leader>{marc.LEADER}</leader>{datafield('245', ('a', 'Kept'))}</record>"
         bad = f"<record><leader>{marc.LEADER}</leader>{datafield('020', ('a', '123'))}</record>"
-        parsed = marc.read(
-            f'<collection xmlns="{MARCXML}">{bad}{good}{bad}</collection>'.encode()
-        )
+        parsed = marc.read(f'<collection xmlns="{MARCXML}">{bad}{good}{bad}</collection>'.encode())
 
         assert [record.title for record in parsed.records] == ["Kept"]
         assert parsed.skipped == 2
@@ -1195,9 +1132,7 @@ class TestReadingRealCatalogueShapes:
     readers were measured against and what this reader inherits."""
 
     def test_isbd_punctuation_introducing_the_next_subfield_is_stripped(self):
-        parsed = marc.read(
-            a_record(datafield("245", ("a", "Stoner :"), ("b", "a novel")))
-        )
+        parsed = marc.read(a_record(datafield("245", ("a", "Stoner :"), ("b", "a novel"))))
         assert parsed.records[0].title == "Stoner"
 
     def test_a_cross_referenced_isbn_is_not_taken_as_this_record_s(self):
@@ -1296,9 +1231,7 @@ class TestReadingRealCatalogueShapes:
         """A `650` with no `$0` and no `$2 lcsh` is somebody's uncontrolled
         word. It feeds the tag suggestion and never the classifications table,
         which is `Fields.controlled_subjects` structurally rather than by a filter."""
-        parsed = marc.read(
-            a_record(datafield("245", ("a", "T")), datafield("650", ("a", "Cookery")))
-        )
+        parsed = marc.read(a_record(datafield("245", ("a", "T")), datafield("650", ("a", "Cookery"))))
         assert parsed.records[0].headings == ()
         assert parsed.records[0].subject_labels == ["Cookery"]
 
@@ -1332,9 +1265,7 @@ class TestReadingRealCatalogueShapes:
             )
         )
 
-        assert shouted.records[0].headings == (
-            Heading(ClassificationScheme.LCSH, "Treasure troves", None),
-        )
+        assert shouted.records[0].headings == (Heading(ClassificationScheme.LCSH, "Treasure troves", None),)
         assert shouted.records[0].headings == quiet.records[0].headings
 
 
@@ -1461,9 +1392,7 @@ class TestNoModuleReadsAnotherModulesPrivateNames:
             # `from metadata import _parsed` reaches the same name by the
             # other door and used to be invisible here.
             elif isinstance(node, ast.ImportFrom) and node.module:
-                private = {
-                    alias.name for alias in node.names if alias.name.startswith("_")
-                }
+                private = {alias.name for alias in node.names if alias.name.startswith("_")}
                 if private:
                     found.setdefault(node.module.split(".")[0], set()).update(private)
         return found
@@ -1520,9 +1449,7 @@ class TestNoModuleReadsAnotherModulesPrivateNames:
         """
         sources = application_modules(root)
         packages = {
-            path.relative_to(root).parts[0]
-            for path in sources
-            if len(path.relative_to(root).parts) > 1
+            path.relative_to(root).parts[0] for path in sources if len(path.relative_to(root).parts) > 1
         }
 
         # Only this application's own modules, so `metadata._parsed` would count
@@ -1539,9 +1466,7 @@ class TestNoModuleReadsAnotherModulesPrivateNames:
         for path in sources:
             found = {
                 f"{module}.{attr}"
-                for module, attrs in cls._private_reads(
-                    path.read_text(encoding="utf-8")
-                ).items()
+                for module, attrs in cls._private_reads(path.read_text(encoding="utf-8")).items()
                 if module in ours
                 for attr in attrs
             }

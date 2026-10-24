@@ -76,9 +76,7 @@ def _fetches_that_store(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]
     """
     asked: list[dict[str, Any]] = []
 
-    def fake(
-        book_id: int, isbn: str | None, supplied: str | None, budget: float | None = None
-    ) -> str:
+    def fake(book_id: int, isbn: str | None, supplied: str | None, budget: float | None = None) -> str:
         asked.append({"book_id": book_id, "budget": budget})
         (COVERS_DIR / f"{book_id}.jpg").write_bytes(JPEG_BYTES)
         return f"/covers/{book_id}.jpg"
@@ -198,12 +196,7 @@ class TestTheFetchPoolOutlivesTheRequest:
 
         for _ in range(2):
             seen.append(set())
-            assert (
-                client.post(
-                    "/api/books/covers/backfill", headers=admin["headers"]
-                ).status_code
-                == 200
-            )
+            assert client.post("/api/books/covers/backfill", headers=admin["headers"]).status_code == 200
 
         first, second = seen
         assert first, f"no fetch ran, so this arm measured nothing: {seen}"
@@ -258,14 +251,10 @@ class TestEveryBookIsBoundedAndNotOnlyEveryHop:
         _books(admin["headers"], make_book, 2)
         asked = _fetches_that_store(monkeypatch)
 
-        body = client.post(
-            "/api/books/covers/backfill", headers=admin["headers"]
-        ).json()
+        body = client.post("/api/books/covers/backfill", headers=admin["headers"]).json()
 
         assert body["examined"] == 2
-        assert [one["budget"] for one in asked] == [
-            books_router.COVER_BACKFILL_BUDGET_SECONDS
-        ] * 2
+        assert [one["budget"] for one in asked] == [books_router.COVER_BACKFILL_BUDGET_SECONDS] * 2
 
 
 class TestTheRunIsBoundedInWallClockAndNotOnlyInBooks:
@@ -326,9 +315,7 @@ class TestTheRunIsBoundedInWallClockAndNotOnlyInBooks:
         monkeypatch.setattr(covers, "MAX_CONCURRENT_FETCHES", len(books))
         _deadline(monkeypatch, 0.1)
 
-        body = client.post(
-            "/api/books/covers/backfill", headers=admin["headers"]
-        ).json()
+        body = client.post("/api/books/covers/backfill", headers=admin["headers"]).json()
 
         assert body["examined"] == 1
         assert body["next_after_id"] == books[0]["id"]
@@ -376,9 +363,7 @@ class TestTheRunIsBoundedInWallClockAndNotOnlyInBooks:
             "be about a run that was never cut at all"
         )
 
-        body = client.post(
-            "/api/books/covers/backfill", headers=admin["headers"]
-        ).json()
+        body = client.post("/api/books/covers/backfill", headers=admin["headers"]).json()
 
         assert pool.asked == covers.MAX_CONCURRENT_FETCHES, (
             f"the run handed the pod's pool {pool.asked} fetches where one wave is "
@@ -404,9 +389,7 @@ class TestTheRunIsBoundedInWallClockAndNotOnlyInBooks:
         _deadline(monkeypatch, 0.5)
         slots(2)
 
-        body = client.post(
-            "/api/books/covers/backfill", headers=admin["headers"]
-        ).json()
+        body = client.post("/api/books/covers/backfill", headers=admin["headers"]).json()
 
         assert body["examined"] == 2
         assert body["stored"] == 2
@@ -424,9 +407,7 @@ class TestTheRunIsBoundedInWallClockAndNotOnlyInBooks:
         _deadline(monkeypatch, 0.5)
         slots(2)
 
-        body = client.post(
-            "/api/books/covers/backfill", headers=admin["headers"]
-        ).json()
+        body = client.post("/api/books/covers/backfill", headers=admin["headers"]).json()
 
         assert body["remaining"] > 0
         assert body["next_after_id"] != 0
@@ -442,9 +423,7 @@ class TestTheRunIsBoundedInWallClockAndNotOnlyInBooks:
         _deadline(monkeypatch, 0.5)
         slots(2)
 
-        first = client.post(
-            "/api/books/covers/backfill", headers=admin["headers"]
-        ).json()
+        first = client.post("/api/books/covers/backfill", headers=admin["headers"]).json()
         slots(4)
         second = client.post(
             "/api/books/covers/backfill",
@@ -499,14 +478,10 @@ class TestTheCursorNeverPassesABookTheRunNeverStarted:
         books = _books(admin["headers"], make_book, 3)
         _fetches_that_store(monkeypatch)
         monkeypatch.setattr(covers, "MAX_CONCURRENT_FETCHES", 3)
-        monkeypatch.setattr(
-            covers, "FETCHES_AT_ONCE", _AWaveWhoseMiddleNeverStarted(pending_at=1)
-        )
+        monkeypatch.setattr(covers, "FETCHES_AT_ONCE", _AWaveWhoseMiddleNeverStarted(pending_at=1))
         _deadline(monkeypatch, 0.1)
 
-        body = client.post(
-            "/api/books/covers/backfill", headers=admin["headers"]
-        ).json()
+        body = client.post("/api/books/covers/backfill", headers=admin["headers"]).json()
 
         assert body["examined"] == 1
         assert body["stored"] == 1
@@ -545,9 +520,7 @@ class TestARunNeverDropsACoverItDidNotChoose:
             lambda book_id, isbn, supplied, budget=None: supplied,
         )
 
-        body = client.post(
-            "/api/books/covers/backfill", headers=admin["headers"]
-        ).json()
+        body = client.post("/api/books/covers/backfill", headers=admin["headers"]).json()
 
         assert body["examined"] == 1
         assert body["unreachable"] == 1
@@ -588,22 +561,14 @@ class TestTheDeadlineAndTheBudgetAreDerivedRatherThanChosen:
         """
         ours = ratelimit.COVER_BACKFILL_LIMIT
         theirs = ratelimit.IDENTIFIER_BACKFILL_LIMIT
-        assert (
-            ours.max_attempts / ours.window_seconds
-            == theirs.max_attempts / theirs.window_seconds
-        ), (
+        assert ours.max_attempts / ours.window_seconds == theirs.max_attempts / theirs.window_seconds, (
             "the two backfills no longer admit presses at the same rate, so their "
             "holds cannot be compared directly and this arm has to carry the "
             f"arrival rate: {ours} against {theirs}"
         )
 
-        hold = (
-            books_router.COVER_BACKFILL_DEADLINE_SECONDS
-            + books_router.COVER_BACKFILL_BUDGET_SECONDS
-        )
-        sibling = (
-            books_router.IDENTIFIER_BACKFILL_DEADLINE_SECONDS + fetch.TIMEOUT_SECONDS
-        )
+        hold = books_router.COVER_BACKFILL_DEADLINE_SECONDS + books_router.COVER_BACKFILL_BUDGET_SECONDS
+        sibling = books_router.IDENTIFIER_BACKFILL_DEADLINE_SECONDS + fetch.TIMEOUT_SECONDS
 
         assert hold <= sibling, (
             f"a cover backfill run may hold a connection for {hold}s against the "
@@ -619,11 +584,7 @@ class TestTheDeadlineAndTheBudgetAreDerivedRatherThanChosen:
     def test_a_cut_lands_on_a_wave_boundary_rather_than_mid_wave(self):
         """Whole books of budget, so no wave is abandoned half done in the case
         where every book spends its whole budget."""
-        assert (
-            books_router.COVER_BACKFILL_DEADLINE_SECONDS
-            % books_router.COVER_BACKFILL_BUDGET_SECONDS
-            == 0
-        )
+        assert books_router.COVER_BACKFILL_DEADLINE_SECONDS % books_router.COVER_BACKFILL_BUDGET_SECONDS == 0
 
     def test_a_books_budget_is_whole_hops(self):
         """A budget that is not a multiple of `covers.TIMEOUT_SECONDS` buys a
@@ -636,6 +597,4 @@ class TestTheDeadlineAndTheBudgetAreDerivedRatherThanChosen:
         the constant to change is `COVER_BACKFILL_BUDGET_SECONDS`, whose own comment
         says so.
         """
-        assert (
-            books_router.COVER_BACKFILL_BUDGET_SECONDS % covers.TIMEOUT_SECONDS == 0
-        )
+        assert books_router.COVER_BACKFILL_BUDGET_SECONDS % covers.TIMEOUT_SECONDS == 0

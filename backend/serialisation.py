@@ -91,9 +91,7 @@ def match_subjects_to_tags(subjects: list[str], tags: list[Tag]) -> list[int]:
         tag_core = re.sub(r"\s*\([^)]+\)", "", tag.name).strip().lower()
         # Lookaround rather than `\b`, because a tag name can end in a
         # non-word character ("C++"), where `\b` asserts the opposite thing.
-        if tag_core and re.search(
-            rf"(?<!\w){re.escape(tag_core)}(?!\w)", subjects_blob
-        ):
+        if tag_core and re.search(rf"(?<!\w){re.escape(tag_core)}(?!\w)", subjects_blob):
             matched.append(tag.id)
     return matched
 
@@ -137,17 +135,11 @@ def suggested_tag_ids(
     `subjects` too).
     """
     matched = list(match_subjects_to_tags(subjects, tags))
-    numbers = [
-        entry.number
-        for entry in classifications
-        if entry.scheme is ClassificationScheme.DDC
-    ]
+    numbers = [entry.number for entry in classifications if entry.scheme is ClassificationScheme.DDC]
     wanted = {name.lower() for name in ddc.tag_names(numbers)}
     if wanted:
         seen = set(matched)
-        matched.extend(
-            tag.id for tag in tags if tag.name.lower() in wanted and tag.id not in seen
-        )
+        matched.extend(tag.id for tag in tags if tag.name.lower() in wanted and tag.id not in seen)
     return matched
 
 
@@ -206,9 +198,7 @@ def derived_percent(page: int | None, percent: int | None, page_count: int | Non
     return percent
 
 
-def _latest_progress(
-    book_ids: list[int], current_user: User, db: Session
-) -> dict[int, ReadingProgress]:
+def _latest_progress(book_ids: list[int], current_user: User, db: Session) -> dict[int, ReadingProgress]:
     """The caller's newest recorded position per book, in one statement.
 
     A window function rather than a query per book: adding a per-request field
@@ -241,10 +231,7 @@ def _latest_progress(
         .subquery()
     )
     entity = aliased(ReadingProgress, ranked)
-    return {
-        row.book_id: row
-        for row in db.query(entity).filter(ranked.c.rank == 1).all()
-    }
+    return {row.book_id: row for row in db.query(entity).filter(ranked.c.rank == 1).all()}
 
 
 def _discussers(book_ids: list[int], db: Session) -> dict[int, list[UserOut]]:
@@ -427,15 +414,9 @@ def books_to_out(books: list[Book], current_user: User, db: Session) -> list[Boo
             # statements, and a name nobody can look up is a null rather than a
             # 500 in the middle of a listing.
             collection_name=(
-                collection_names.get(book.collection_id)
-                if book.collection_id is not None
-                else None
+                collection_names.get(book.collection_id) if book.collection_id is not None else None
             ),
-            copy_count=(
-                copy_counts.get(book.copy_group, 1)
-                if book.copy_group is not None
-                else 1
-            ),
+            copy_count=(copy_counts.get(book.copy_group, 1) if book.copy_group is not None else 1),
             discuss_with=discuss_with.get(book.id, []),
             # No row means unread, and `status_of` is the one place that says
             # so. It also coerces back to the enum, which matters because the
@@ -444,14 +425,10 @@ def books_to_out(books: list[Book], current_user: User, db: Session) -> list[Boo
             my_rating=user_book.rating if user_book else None,
             my_started_at=user_book.started_at if user_book else None,
             my_finished_at=user_book.finished_at if user_book else None,
-            my_wants_to_discuss=(
-                bool(user_book.wants_to_discuss) if user_book else False
-            ),
+            my_wants_to_discuss=(bool(user_book.wants_to_discuss) if user_book else False),
             my_progress_page=progress.page if progress else None,
             my_progress_percent=(
-                derived_percent(progress.page, progress.percent, book.page_count)
-                if progress
-                else None
+                derived_percent(progress.page, progress.percent, book.page_count) if progress else None
             ),
             my_progress_recorded_at=progress.recorded_at if progress else None,
         )
@@ -461,8 +438,6 @@ def books_to_out(books: list[Book], current_user: User, db: Session) -> list[Boo
 
 def book_to_out(book: Book, current_user: User, db: Session) -> BookOut:
     return books_to_out([book], current_user, db)[0]
-
-
 
 
 def books_to_public_out(books: Outbound) -> list[PublicBookOut]:

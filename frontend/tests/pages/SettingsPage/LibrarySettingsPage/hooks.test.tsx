@@ -253,14 +253,14 @@ describe("what a session that never opens this card pays", () => {
     // a third of a megabyte of WebAssembly into the chunk the shell loads. The
     // type import is exempt because it is erased before a bundler sees it.
     // **The statement, not the line.** A line anchored, newline bounded pattern
-    // is evaded by prettier: one more name in the braces and the import is
+    // is evaded by oxfmt: one more name in the braces and the import is
     // broken across lines, after which no single line both starts with `import`
     // and names the module. `[^;]` is what makes this a statement: every import
     // ends in a semicolon, so the match cannot run on into the next one.
     expect(HOOKS_SOURCE).not.toMatch(
       /^import(?!\s+type\b)[^;]*?from "[^"]*lib\/sqlite"/m,
     );
-    // The call form, not `await import(...)` adjacent: prettier puts the two
+    // The call form, not `await import(...)` adjacent: oxfmt puts the two
     // dynamic imports inside a `Promise.all` and breaks the line between them,
     // so an assertion on the adjacency fails on formatting rather than on the
     // property. `import(` is a call and a static import is `from "..."`, so

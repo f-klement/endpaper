@@ -20,26 +20,25 @@ from tests.corpus import application_sources
 from tests.test_shelf import _builds_a_query, _sqlalchemy_names
 from tests.test_tags import _reaches_private
 
+TREE_GUARDS = {
+    "TestTheRuleReadsThroughTheShelfAndCarriesOnlyTheEntry": ("application_sources",),
+    "test_the_rule_s_private_state_is_reached_from_nowhere_else": ("application_sources",),
+}
+
 #: A door: how to ask it about one id as the viewer, given what the fixture built.
 Door = Callable[..., object]
 
 
 def _hidden_tag(client, owner, make_book) -> int:
-    tag = client.post(
-        "/api/books/tags", json={"name": "Divorce Law"}, headers=owner["headers"]
-    ).json()
+    tag = client.post("/api/books/tags", json={"name": "Divorce Law"}, headers=owner["headers"]).json()
     book = make_book(owner["headers"], title="A private matter", is_private=True)
-    attached = client.post(
-        f"/api/books/{book['id']}/tags/{tag['id']}", headers=owner["headers"]
-    )
+    attached = client.post(f"/api/books/{book['id']}/tags/{tag['id']}", headers=owner["headers"])
     assert attached.status_code == 200, attached.text
     return tag["id"]
 
 
 def _hidden_collection(client, owner, make_book) -> int:
-    shelf = client.post(
-        "/api/collections", json={"name": "Hidden"}, headers=owner["headers"]
-    ).json()
+    shelf = client.post("/api/collections", json={"name": "Hidden"}, headers=owner["headers"]).json()
     book = make_book(owner["headers"], title="A private matter", is_private=True)
     filed = client.patch(
         f"/api/books/{book['id']}/collection",
@@ -234,10 +233,7 @@ class TestTheRuleReadsThroughTheShelfAndCarriesOnlyTheEntry:
                 value = node.value
             if (
                 value is not None
-                and any(
-                    isinstance(target, ast.Name) and target.id == "shelf"
-                    for target in targets
-                )
+                and any(isinstance(target, ast.Name) and target.id == "shelf" for target in targets)
                 and ast.unparse(value) not in self.RECEIVERS
             ):
                 found.append(f"{value.lineno}: shelf = {ast.unparse(value)}")
@@ -269,8 +265,7 @@ class TestTheRuleReadsThroughTheShelfAndCarriesOnlyTheEntry:
 
     def test_a_query_begun_past_the_shelf_is_reported(self) -> None:
         source = application_sources()["disclosure.py"] + (
-            "\n\ndef every_entry(self):\n"
-            "    return self._db.query(self._carrier.entry).all()\n"
+            "\n\ndef every_entry(self):\n    return self._db.query(self._carrier.entry).all()\n"
         )
 
         assert any("self._db.query" in line for line in self._offences(source))
@@ -284,10 +279,7 @@ class TestTheRuleReadsThroughTheShelfAndCarriesOnlyTheEntry:
             "    return shelf.select(self._carrier.entry).all()\n"
         )
 
-        assert any(
-            "shelf = Shelf.seen_by(self._db, owner_id)" in line
-            for line in self._offences(source)
-        )
+        assert any("shelf = Shelf.seen_by(self._db, owner_id)" in line for line in self._offences(source))
 
     def test_a_second_column_in_a_shelf_read_is_reported(self) -> None:
         source = application_sources()["disclosure.py"].replace(

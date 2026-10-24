@@ -44,7 +44,7 @@ const ROW = /^\|[ \t]*`([^`]+)`[ \t]*\|[ \t]*(\d+)[ \t]*\|/gm;
  * that cell, so nothing after the digits can be digits. A pattern carrying the
  * same digits sits before them and is therefore not the last.
  *
- * **No alignment is reproduced, deliberately.** Prettier pads this column to a
+ * **No alignment is reproduced, deliberately.** oxfmt pads this column to a
  * fixed width, so a write that changes a count's digit count leaves the file
  * needing the formatter the gate already runs last. Reproducing that padding
  * here would be a second implementation of the formatter's rule, in two
@@ -318,7 +318,7 @@ export function render(census: Census, patterns: string[]): string {
     .filter(([file]) => census.internal.has(file))
     .reduce((carried, [, count]) => carried + count, 0);
   return [
-    // Two, because prettier separates the opening fence from what follows it
+    // Two, because oxfmt separates the opening fence from what follows it
     // and a block this does not render byte for byte is one the formatter and
     // the guard argue about on every run.
     "",

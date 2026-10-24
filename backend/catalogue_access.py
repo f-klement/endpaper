@@ -287,9 +287,7 @@ class Enquiry:
         `NOTHING_ANSWERS_A_TITLE_SEARCH`.
         """
         self._refuse_if_no_title_search()
-        return await metadata.title_search(
-            query, limit, prefer_language, access=self._access, harder=harder
-        )
+        return await metadata.title_search(query, limit, prefer_language, access=self._access, harder=harder)
 
     async def search(self, query: str, *, limit: int) -> list[catalogue.Record]:
         """The rows of a title search alone, for a caller with no use for the roster.
@@ -342,9 +340,7 @@ class Enquiry:
         is absent from the plan, and the caller that needs to refuse a whole batch on
         that has `GoogleVolumes` instead.
         """
-        return await metadata.lookup_volume(
-            volume_id, self._access.api_key, plan=self._access.plan
-        )
+        return await metadata.lookup_volume(volume_id, self._access.api_key, plan=self._access.plan)
 
     def _refuse_if_no_title_search(self) -> None:
         if not self._access.plan.searched_harder:

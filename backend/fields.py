@@ -196,9 +196,7 @@ class Fields:
         self._db = db
         self._viewer_id = viewer_id
         self._authors: dict[int, int | None] | None = None
-        self._rule = Disclosure.seen_by(
-            db, viewer_id, Carrier.CUSTOM_FIELD_VALUES, self._defined_by
-        )
+        self._rule = Disclosure.seen_by(db, viewer_id, Carrier.CUSTOM_FIELD_VALUES, self._defined_by)
 
     @classmethod
     def seen_by(cls, db: Session, viewer_id: int) -> Self:
@@ -224,11 +222,7 @@ class Fields:
         comprehension, which is what a reader can see and an allowlist entry
         can check.
         """
-        return [
-            row
-            for row in custom_fields.definitions(self._db)
-            if self._rule.may_be_told(row.id)
-        ]
+        return [row for row in custom_fields.definitions(self._db) if self._rule.may_be_told(row.id)]
 
     def addressable(self, field_id: int) -> bool:
         """Whether this Member may act on a field they have named by id.
@@ -336,9 +330,7 @@ class Fields:
         `addressable` having answered first.
         """
         if self._authors is None:
-            rows = self._db.query(
-                CustomField.id, CustomField.created_by_user_id
-            ).all()
+            rows = self._db.query(CustomField.id, CustomField.created_by_user_id).all()
             self._authors = {row[0]: row[1] for row in rows}
         return self._authors
 
@@ -367,7 +359,5 @@ class Fields:
         `disclosure` states, not the cost.
         """
         return frozenset(
-            field_id
-            for field_id, author in self._author_of.items()
-            if author == self._viewer_id
+            field_id for field_id, author in self._author_of.items() if author == self._viewer_id
         )

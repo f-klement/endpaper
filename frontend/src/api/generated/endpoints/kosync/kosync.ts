@@ -988,7 +988,8 @@ export type RevokeMemberKosyncPasswordMutationResult = NonNullable<
 >;
 
 export type RevokeMemberKosyncPasswordMutationError =
-  Refusal | HTTPValidationError;
+  | Refusal
+  | HTTPValidationError;
 export type RevokeMemberKosyncPasswordMutationVariables = { userId: number };
 
 /**

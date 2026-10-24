@@ -81,8 +81,7 @@ MAX_NAMESPACE: Final = 256
 
 #: Why a namespace is refused, by `fed` before the parse or by the builder in it.
 _TOO_LONG: Final = (
-    f"A namespace is longer than {MAX_NAMESPACE} bytes, which no document this "
-    "reads ever declares."
+    f"A namespace is longer than {MAX_NAMESPACE} bytes, which no document this reads ever declares."
 )
 
 #: A namespace declaration as written, `xmlns` or `xmlns:prefix` then its
@@ -190,8 +189,7 @@ MAX_ATTRIBUTES: Final = 64
 
 #: Why a document is refused by `fed` for one of its tags.
 _TOO_MANY_ATTRIBUTES: Final = (
-    f"A tag carries more than {MAX_ATTRIBUTES} attributes, which no document "
-    "this reads ever does."
+    f"A tag carries more than {MAX_ATTRIBUTES} attributes, which no document this reads ever does."
 )
 
 #: XML's whitespace, the only characters it allows between the parts of a tag.
@@ -199,9 +197,7 @@ _SPACE: Final = r"[ \t\r\n]"
 
 #: One attribute as a start tag writes it: whitespace, a name, `=` and a
 #: value in either quote, which may hold a `>` and never a `<`.
-_ATTRIBUTE: Final = (
-    rf"""{_SPACE}++[^ \t\r\n<>/="']++{_SPACE}*+={_SPACE}*+(?:"[^"<]*+"|'[^'<]*+')"""
-)
+_ATTRIBUTE: Final = rf"""{_SPACE}++[^ \t\r\n<>/="']++{_SPACE}*+={_SPACE}*+(?:"[^"<]*+"|'[^'<]*+')"""
 
 #: A start tag carrying more than `MAX_ATTRIBUTES` attributes, walked by a
 #: tag's own grammar: `<`, a name, then attributes until one does not parse.
@@ -324,8 +320,7 @@ class DepthBoundedTree(ElementTree.TreeBuilder):
         self._depth += 1
         if self._depth > MAX_DEPTH:
             raise ElementTree.ParseError(
-                f"An element is nested more than {MAX_DEPTH} deep, which no "
-                "document this reads ever is."
+                f"An element is nested more than {MAX_DEPTH} deep, which no document this reads ever is."
             )
         self._elements.add(tag)
         self._attributes.update(attrs)

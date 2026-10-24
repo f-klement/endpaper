@@ -30,6 +30,10 @@ from google_books import (
 )
 from tests.corpus import browser_modules
 
+TREE_GUARDS = {
+    "TestTheShapeIsSpelledOncePerTree": ("browser_modules",),
+}
+
 VOLUMES = "https://www.googleapis.com/books/v1/volumes"
 
 #: The checkout root, for the one test that reads the browser's spelling of a
@@ -76,15 +80,8 @@ class TestFieldMapping:
         """Google really does serve these over http, and the repository's own
         fixtures assumed https, so this was untested. An http image on an https
         page is mixed content and never renders."""
-        volume = {
-            "volumeInfo": {
-                "imageLinks": {"thumbnail": "http://books.google.com/cover.jpg"}
-            }
-        }
-        assert (
-            _volume_to_fields(volume)["cover_url"]
-            == "https://books.google.com/cover.jpg"
-        )
+        volume = {"volumeInfo": {"imageLinks": {"thumbnail": "http://books.google.com/cover.jpg"}}}
+        assert _volume_to_fields(volume)["cover_url"] == "https://books.google.com/cover.jpg"
 
     def test_a_thumbnail_no_image_tag_should_load_is_dropped(self):
         """A search result is rendered in an `<img>` long before anything is
@@ -124,17 +121,13 @@ class TestFieldMapping:
 
 class TestLookupByIsbn:
     async def test_returns_the_first_match(self, google):
-        google.get(url__startswith=VOLUMES).mock(
-            return_value=httpx.Response(200, json={"items": [VOLUME]})
-        )
+        google.get(url__startswith=VOLUMES).mock(return_value=httpx.Response(200, json={"items": [VOLUME]}))
         fields = await lookup_by_isbn("9780441013593", "key")
         assert fields is not None
         assert fields["title"] == "Dune"
 
     async def test_returns_none_when_google_has_nothing(self, google):
-        google.get(url__startswith=VOLUMES).mock(
-            return_value=httpx.Response(200, json={"items": []})
-        )
+        google.get(url__startswith=VOLUMES).mock(return_value=httpx.Response(200, json={"items": []}))
         assert await lookup_by_isbn("9780441013593", "key") is None
 
     async def test_an_invalid_isbn_is_not_looked_up_at_all(self, google):
@@ -155,9 +148,7 @@ class TestLookupByIsbn:
         """The key rides in the query string, so the HTTP library's own request
         line names it. Captured at DEBUG because that line is logged at INFO,
         which a capture at WARNING cannot see."""
-        google.get(url__startswith=VOLUMES).mock(
-            return_value=httpx.Response(200, json={"items": [VOLUME]})
-        )
+        google.get(url__startswith=VOLUMES).mock(return_value=httpx.Response(200, json={"items": [VOLUME]}))
         with caplog.at_level(logging.DEBUG):
             await lookup_by_isbn("9780441013593", "secret-key")
         assert "secret-key" not in caplog.text
@@ -181,9 +172,7 @@ class TestErrors:
         with pytest.raises(GoogleBooksError, match="not responding"):
             await lookup_by_isbn("9780441013593", "key")
 
-    async def test_an_enormous_volume_body_is_refused_at_the_cap(
-        self, google, monkeypatch
-    ):
+    async def test_an_enormous_volume_body_is_refused_at_the_cap(self, google, monkeypatch):
         """Google is trusted for records and not for byte counts.
 
         `_request` used to hand the whole body to `.json()` whichever size it
@@ -213,9 +202,7 @@ class TestSearch:
         assert len(await search("dune", "key", limit=3)) == 3
 
     async def test_an_empty_query_makes_no_request(self, google):
-        route = google.get(url__startswith=VOLUMES).mock(
-            return_value=httpx.Response(200, json={"items": []})
-        )
+        route = google.get(url__startswith=VOLUMES).mock(return_value=httpx.Response(200, json={"items": []}))
         assert await search("   ", "key") == []
         assert route.call_count == 0
 
@@ -231,8 +218,29 @@ _SERIES_IN_PARENTHESES: Final = re.compile(
 #: the characters whose class is not obvious: a Kelvin sign is a case blind `k`,
 #: an Arabic-Indic three is a `\d`, U+001C and U+00A0 are `\s`.
 _SERIES_UNITS: Final = [
-    "(", ")", " ", ",", "#", ".", "1", "2", "\u0663", "b", "o", "k", "B", "K",
-    "\N{KELVIN SIGN}", "\n", "\x1c", "\u00a0", "a", "book", "bk", " #", "1.5",
+    "(",
+    ")",
+    " ",
+    ",",
+    "#",
+    ".",
+    "1",
+    "2",
+    "\u0663",
+    "b",
+    "o",
+    "k",
+    "B",
+    "K",
+    "\N{KELVIN SIGN}",
+    "\n",
+    "\x1c",
+    "\u00a0",
+    "a",
+    "book",
+    "bk",
+    " #",
+    "1.5",
 ]
 
 
@@ -246,10 +254,7 @@ class TestTheParenthesisedSeriesIsReadInOnePass:
     """
 
     @pytest.mark.property
-    @given(
-        title=st.lists(st.sampled_from(_SERIES_UNITS), max_size=14).map("".join)
-        | st.text(max_size=24)
-    )
+    @given(title=st.lists(st.sampled_from(_SERIES_UNITS), max_size=14).map("".join) | st.text(max_size=24))
     def test_it_answers_what_the_expression_answered(self, title):
         match = _SERIES_IN_PARENTHESES.search(title)
         expected = (match.group(1), match.group(2)) if match else None
@@ -333,9 +338,7 @@ class TestSeriesParsing:
         )
 
     def test_the_volume_mapper_surfaces_it(self):
-        fields = _volume_to_fields(
-            {"id": "x", "volumeInfo": {"title": "Dune (Dune Chronicles #1)"}}
-        )
+        fields = _volume_to_fields({"id": "x", "volumeInfo": {"title": "Dune (Dune Chronicles #1)"}})
         assert (fields["series_name"], fields["series_index"]) == ("Dune Chronicles", 1.0)
 
     def test_series_info_improves_the_index_but_not_the_name(self):
@@ -432,9 +435,7 @@ class TestTheVolumeIdBound:
         assert not is_a_volume_id("abcdefghijkl\n")
 
     async def test_a_refused_value_makes_no_request(self, google):
-        route = google.get(url__startswith=VOLUMES).mock(
-            return_value=httpx.Response(200, json=VOLUME)
-        )
+        route = google.get(url__startswith=VOLUMES).mock(return_value=httpx.Response(200, json=VOLUME))
         assert await lookup_by_volume_id("abcdefghijk/", "key") is None
         assert route.call_count == 0
 
@@ -537,9 +538,7 @@ class TestTheShapeIsSpelledOncePerTree:
         )
 
         carrying = {
-            path: source.count(self.LITERAL)
-            for path, source in sources.items()
-            if self.LITERAL in source
+            path: source.count(self.LITERAL) for path, source in sources.items() if self.LITERAL in source
         }
         # **Three outcomes and three sentences**, because the message is what a
         # person meets: gone, written twice, and written twice in one file are
@@ -587,15 +586,12 @@ class TestTheShapeIsSpelledOncePerTree:
         alone, which is the arm that would otherwise never fail on its own.
         Found by the design seat.
         """
-        mentions_the_shape = (
-            f"  google_books: /^[A-Za-z0-9_.~%-]{{1,60}}$/, // was {self.SHAPE}\n"
-        )
+        mentions_the_shape = f"  google_books: /^[A-Za-z0-9_.~%-]{{1,60}}$/, // was {self.SHAPE}\n"
         assert self.LITERAL not in mentions_the_shape
         assert self.BINDING not in mentions_the_shape
 
         mentions_the_literal = (
-            f"  // the rule was {self.LITERAL}\n"
-            "  google_books: /^[A-Za-z0-9_.~%-]{1,60}$/,\n"
+            f"  // the rule was {self.LITERAL}\n  google_books: /^[A-Za-z0-9_.~%-]{{1,60}}$/,\n"
         )
         assert mentions_the_literal.count(self.LITERAL) == 1
         assert self.BINDING not in mentions_the_literal
@@ -618,9 +614,7 @@ class TestLookupByVolumeId:
         assert fields["page_count"] == 412
 
     async def test_the_id_goes_in_the_path_and_not_in_a_query(self, google):
-        route = google.get(VOLUME_URL).mock(
-            return_value=httpx.Response(200, json=VOLUME)
-        )
+        route = google.get(VOLUME_URL).mock(return_value=httpx.Response(200, json=VOLUME))
         await lookup_by_volume_id("gbid00000001", "key")
 
         url = route.calls[0].request.url
@@ -628,9 +622,7 @@ class TestLookupByVolumeId:
         assert "q" not in url.params
 
     async def test_the_key_is_sent(self, google):
-        route = google.get(VOLUME_URL).mock(
-            return_value=httpx.Response(200, json=VOLUME)
-        )
+        route = google.get(VOLUME_URL).mock(return_value=httpx.Response(200, json=VOLUME))
         await lookup_by_volume_id("gbid00000001", "key")
 
         assert route.calls[0].request.url.params["key"] == "key"
@@ -642,9 +634,7 @@ class TestLookupByVolumeId:
         `fetch.catalogue_client` sets for every catalogue. No cookie, no
         `Authorization`, no member name and no `Referer`.
         """
-        route = google.get(VOLUME_URL).mock(
-            return_value=httpx.Response(200, json=VOLUME)
-        )
+        route = google.get(VOLUME_URL).mock(return_value=httpx.Response(200, json=VOLUME))
         await lookup_by_volume_id("gbid00000001", "key")
 
         request = route.calls[0].request
@@ -665,9 +655,7 @@ class TestLookupByVolumeId:
         "identifier",
         ["x" * 60, "short", "", "abcdefghijk/", 12, None],
     )
-    async def test_a_volume_whose_id_is_not_a_volume_id_is_not_an_answer(
-        self, google, identifier
-    ):
+    async def test_a_volume_whose_id_is_not_a_volume_id_is_not_an_answer(self, google, identifier):
         """The bound is the id's own, not merely that it is a string.
 
         `models.GOOGLE_BOOKS_ID_MAX` is 50, so a 60 character id is a string
@@ -690,9 +678,7 @@ class TestLookupByVolumeId:
         matches. Read as a volume it is a record with every field absent, which
         would be reported as an answer and enrich nothing.
         """
-        google.get(VOLUME_URL).mock(
-            return_value=httpx.Response(200, json={"items": []})
-        )
+        google.get(VOLUME_URL).mock(return_value=httpx.Response(200, json={"items": []}))
         assert await lookup_by_volume_id("gbid00000001", "key") is None
 
     @pytest.mark.parametrize("status", [401, 403])
@@ -711,9 +697,7 @@ class TestLookupByVolumeId:
         with pytest.raises(GoogleBooksError, match="not responding"):
             await lookup_by_volume_id("gbid00000001", "key")
 
-    async def test_an_enormous_volume_body_is_refused_at_the_cap(
-        self, google, monkeypatch
-    ):
+    async def test_an_enormous_volume_body_is_refused_at_the_cap(self, google, monkeypatch):
         """The same bound the search path has, on the new door.
 
         A cap that covered one entry point and not its neighbour would be a
@@ -721,9 +705,7 @@ class TestLookupByVolumeId:
         """
         monkeypatch.setattr(fetch, "MAX_RESPONSE_BYTES", 1024)
         google.get(VOLUME_URL).mock(
-            return_value=httpx.Response(
-                200, content=b'{"volumeInfo":{"title":"' + b"x" * 4096 + b'"}}'
-            )
+            return_value=httpx.Response(200, content=b'{"volumeInfo":{"title":"' + b"x" * 4096 + b'"}}')
         )
         with pytest.raises(httpx.HTTPError):
             await lookup_by_volume_id("gbid00000001", "key")
@@ -749,9 +731,7 @@ class TestThePayloadGuardsHoldOnTheTwoDoorlessPaths:
     ODD = {"id": "gbid00000001", "volumeInfo": "ab"}
 
     async def test_the_isbn_path_answers_rather_than_raising(self, google):
-        google.get(url__startswith=VOLUMES).mock(
-            return_value=httpx.Response(200, json={"items": [self.ODD]})
-        )
+        google.get(url__startswith=VOLUMES).mock(return_value=httpx.Response(200, json={"items": [self.ODD]}))
 
         fields = await lookup_by_isbn("9780441013593", "key")
 
@@ -759,9 +739,7 @@ class TestThePayloadGuardsHoldOnTheTwoDoorlessPaths:
         assert fields["title"] is None
 
     async def test_the_search_path_answers_rather_than_raising(self, google):
-        google.get(url__startswith=VOLUMES).mock(
-            return_value=httpx.Response(200, json={"items": [self.ODD]})
-        )
+        google.get(url__startswith=VOLUMES).mock(return_value=httpx.Response(200, json={"items": [self.ODD]}))
 
         matches = await search("dune", "key")
 
@@ -785,9 +763,7 @@ class TestAHostileVolumePayload:
 
     async def _fields(self, google, info):
         google.get(VOLUME_URL).mock(
-            return_value=httpx.Response(
-                200, json={"id": self.ID, "volumeInfo": info}
-            )
+            return_value=httpx.Response(200, json={"id": self.ID, "volumeInfo": info})
         )
         return await lookup_by_volume_id(self.ID, "key")
 
@@ -801,16 +777,12 @@ class TestAHostileVolumePayload:
 
     async def test_authors_that_is_a_string(self, google):
         """`", ".join("Dune")` is `"D, u, n, e"`, silently."""
-        fields = await self._fields(
-            google, {"title": "Dune", "authors": "Herbert"}
-        )
+        fields = await self._fields(google, {"title": "Dune", "authors": "Herbert"})
         assert fields is not None
         assert fields["author"] is None
 
     async def test_industry_identifiers_of_strings(self, google):
-        fields = await self._fields(
-            google, {"title": "Dune", "industryIdentifiers": ["a"]}
-        )
+        fields = await self._fields(google, {"title": "Dune", "industryIdentifiers": ["a"]})
         assert fields is not None
         assert fields["isbn13"] is None
 
@@ -828,16 +800,21 @@ class TestAHostileVolumePayload:
         assert fields["series_name"] is None
 
     async def test_series_info_that_is_a_string(self, google):
-        fields = await self._fields(
-            google, {"title": "Dune", "seriesInfo": {"volumeSeries": "ab"}}
-        )
+        fields = await self._fields(google, {"title": "Dune", "seriesInfo": {"volumeSeries": "ab"}})
         assert fields is not None
         assert fields["series_index"] is None
 
     @pytest.mark.parametrize(
         "links",
-        ["http://x/y", ["a"], 5, {"thumbnail": 5}, {"thumbnail": ["a"]},
-         {"thumbnail": {"a": 1}}, {"thumbnail": True}],
+        [
+            "http://x/y",
+            ["a"],
+            5,
+            {"thumbnail": 5},
+            {"thumbnail": ["a"]},
+            {"thumbnail": {"a": 1}},
+            {"thumbnail": True},
+        ],
     )
     async def test_image_links_of_any_wrong_shape(self, google, links):
         """Seven shapes, and every one of them was a 500 until 2026-09-11.
@@ -848,9 +825,7 @@ class TestAHostileVolumePayload:
         so each escaped the handler; on the backfill that loses the whole batch
         before the commit rather than one book. Found by the security seat.
         """
-        fields = await self._fields(
-            google, {"title": "Dune", "imageLinks": links}
-        )
+        fields = await self._fields(google, {"title": "Dune", "imageLinks": links})
         assert fields is not None
         assert fields["cover_url"] is None
 
@@ -876,9 +851,7 @@ class TestAHostileVolumePayload:
             await lookup_by_volume_id("gbid00000001", "key")
 
     async def test_categories_of_mixed_types(self, google):
-        fields = await self._fields(
-            google, {"title": "Dune", "categories": ["Fiction", 7]}
-        )
+        fields = await self._fields(google, {"title": "Dune", "categories": ["Fiction", 7]})
         assert fields is not None
         assert fields["categories"] == ["Fiction"]
 
@@ -893,8 +866,6 @@ class TestTheAdapterDropsASubjectThatWouldReadBackAsTwo:
     def test_a_volume_whose_category_carries_the_separator_keeps_neither_half(
         self,
     ) -> None:
-        fields = _volume_to_fields(
-            {"volumeInfo": {"title": "T", "categories": ["Fiction; general"]}}
-        )
+        fields = _volume_to_fields({"volumeInfo": {"title": "T", "categories": ["Fiction; general"]}})
 
         assert fields["categories"] == []

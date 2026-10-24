@@ -43,6 +43,10 @@ from tests.conftest import ACTIVE_PROPERTY_PROFILE, PROPERTY_PROFILES
 from tests.corpus import BACKEND, suite_modules
 from tests.test_house_rules import is_generated
 
+TREE_GUARDS = {
+    "TestEveryGeneratedTestSaysSo": ("suite_modules",),
+}
+
 #: The fewest examples any profile here may spend on one property.
 #:
 #: Not a target and not what any profile spends: it is the point below which a
@@ -101,10 +105,7 @@ class TestTheBudgetIsSpent:
     def test_the_deep_profile_is_deeper_than_the_one_the_suite_runs(self):
         """Otherwise there is one profile wearing two names, and the deep run is
         something somebody believes they did."""
-        assert (
-            settings.get_profile("thorough").max_examples
-            > settings.get_profile("suite").max_examples
-        )
+        assert settings.get_profile("thorough").max_examples > settings.get_profile("suite").max_examples
 
 
 #: The two settings keywords that lower how much a test actually runs.
@@ -147,9 +148,7 @@ def _lowers_the_budget(node: ast.AST) -> list[str]:
         if not isinstance(decorator, ast.Call):
             continue
         found += [
-            keyword.arg
-            for keyword in decorator.keywords
-            if keyword.arg in _KEYWORDS_THAT_LOWER_THE_BUDGET
+            keyword.arg for keyword in decorator.keywords if keyword.arg in _KEYWORDS_THAT_LOWER_THE_BUDGET
         ]
     return found
 
@@ -179,9 +178,7 @@ class TestEveryGeneratedTestSaysSo:
             for parent in ast.walk(tree):
                 if not isinstance(parent, ast.Module | ast.ClassDef):
                     continue
-                on_the_class = (
-                    _decorator_names(parent) if isinstance(parent, ast.ClassDef) else []
-                )
+                on_the_class = _decorator_names(parent) if isinstance(parent, ast.ClassDef) else []
                 for node in ast.iter_child_nodes(parent):
                     if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
                         continue
@@ -192,9 +189,7 @@ class TestEveryGeneratedTestSaysSo:
                         continue
                     marked = "pytest.mark.property" in own + on_the_class
                     lowered = _lowers_the_budget(node) + _lowers_the_budget(parent)
-                    found.append(
-                        (str(path.relative_to(_TESTS)), node.name, marked, lowered)
-                    )
+                    found.append((str(path.relative_to(_TESTS)), node.name, marked, lowered))
         return found, modules
 
     def test_the_walk_finds_the_tree_it_is_about(self):
@@ -226,11 +221,7 @@ class TestEveryGeneratedTestSaysSo:
         own example count is a conversation, not an edit.
         """
         found, _ = self._generated()
-        lowered = [
-            f"{path}::{name} sets {keywords}"
-            for path, name, _, keywords in found
-            if keywords
-        ]
+        lowered = [f"{path}::{name} sets {keywords}" for path, name, _, keywords in found if keywords]
         assert not lowered, (
             "these tests override the example budget for themselves, so no "
             f"measurement of the profile describes what they ran: {lowered}"

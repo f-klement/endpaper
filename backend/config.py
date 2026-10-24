@@ -202,8 +202,7 @@ def auth_mode() -> AuthMode:
         return AuthMode(raw)
     except ValueError:
         raise RuntimeError(
-            f"AUTH_MODE={raw!r} is not one of: "
-            f"{', '.join(mode.value for mode in AuthMode)}"
+            f"AUTH_MODE={raw!r} is not one of: {', '.join(mode.value for mode in AuthMode)}"
         ) from None
 
 
@@ -329,9 +328,7 @@ def validate_auth_config() -> None:
             if not value
         ]
         if missing:
-            raise RuntimeError(
-                f"AUTH_MODE=ldap requires {' and '.join(missing)} to be set."
-            )
+            raise RuntimeError(f"AUTH_MODE=ldap requires {' and '.join(missing)} to be set.")
 
         # A bind DN with no password is an "unauthenticated bind", which the
         # directory treats as anonymous. It would appear to work while quietly

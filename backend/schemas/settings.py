@@ -348,9 +348,7 @@ class SettingsOut(BaseModel):
     #: for the signing secret and every reason not to hold it.
     overdue_webhook_secret_preview: str = ""
     has_overdue_webhook_secret: bool = False
-    overdue_reminder_days: int = Field(
-        default=7, ge=MIN_REMINDER_DAYS, le=MAX_REMINDER_DAYS
-    )
+    overdue_reminder_days: int = Field(default=7, ge=MIN_REMINDER_DAYS, le=MAX_REMINDER_DAYS)
 
     # ── Mail ─────────────────────────────────────────────────────────────
     #: Every one of these reports the value **in force**, the environment's
@@ -563,12 +561,8 @@ class SettingsUpdate(BaseModel):
     #: Write only, like the Google key: the browser never received the stored
     #: value, so an absent field has to mean "leave alone" or every unrelated
     #: toggle would blank the secret.
-    overdue_webhook_secret: str | None = Field(
-        default=None, max_length=MAX_WEBHOOK_SECRET
-    )
-    overdue_reminder_days: int | None = Field(
-        default=None, ge=MIN_REMINDER_DAYS, le=MAX_REMINDER_DAYS
-    )
+    overdue_webhook_secret: str | None = Field(default=None, max_length=MAX_WEBHOOK_SECRET)
+    overdue_reminder_days: int | None = Field(default=None, ge=MIN_REMINDER_DAYS, le=MAX_REMINDER_DAYS)
 
     overdue_mail_enabled: bool | None = None
     overdue_mail_to: str | None = Field(default=None, max_length=MAX_MAIL_RECIPIENT_LIST)

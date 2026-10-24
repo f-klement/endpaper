@@ -49,9 +49,7 @@ def _named(db: Session, name: str, *, other_than: int | None = None) -> Collecti
     `Collection.__table_args__` and `docs/decisions.md`, "SQLite folds case in
     ASCII and Python does not".
     """
-    query = db.query(Collection).filter(
-        Collection.name_folded == fold_collection_name(name)
-    )
+    query = db.query(Collection).filter(Collection.name_folded == fold_collection_name(name))
     if other_than is not None:
         query = query.filter(Collection.id != other_than)
     return query.first()
@@ -75,17 +73,13 @@ def list_collections(db: DbSession, current_user: CurrentUser) -> list[Collectio
     """
     shelving = Shelving.seen_by(db, current_user.id)
     return [
-        CollectionOut(
-            id=row.id, name=row.name, book_count=shelving.counts.get(row.id, 0)
-        )
+        CollectionOut(id=row.id, name=row.name, book_count=shelving.counts.get(row.id, 0))
         for row in shelving.listable()
     ]
 
 
 @router.post("", response_model=CollectionOut, status_code=status.HTTP_201_CREATED)
-def create_collection(
-    payload: CollectionCreate, db: DbSession, current_user: CurrentUser
-) -> CollectionOut:
+def create_collection(payload: CollectionCreate, db: DbSession, current_user: CurrentUser) -> CollectionOut:
     """Invent a collection.
 
     Any member, like `POST /api/books/tags` and for the same reason: a shelf

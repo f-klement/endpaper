@@ -39,18 +39,10 @@ class TestTheProviderRowCarriesEveryDerivedFact:
 
     def test_the_two_field_sets_are_the_same(self, db):
         described = {field.name for field in dataclasses.fields(sources.Described)}
-        credential = set(
-            settings_router._credential_view(
-                db, CatalogueSource.BNE, credentials.key_state()
-            )
-        )
+        credential = set(settings_router._credential_view(db, CatalogueSource.BNE, credentials.key_state()))
         assert described | credential == set(CatalogueSourceOut.model_fields)
 
     def test_and_neither_splat_can_overwrite_the_other(self, db):
         described = {field.name for field in dataclasses.fields(sources.Described)}
-        credential = set(
-            settings_router._credential_view(
-                db, CatalogueSource.BNE, credentials.key_state()
-            )
-        )
+        credential = set(settings_router._credential_view(db, CatalogueSource.BNE, credentials.key_state()))
         assert described & credential == set()

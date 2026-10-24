@@ -1158,7 +1158,8 @@ export type ConfirmAuthorIdentifierMutationResult = NonNullable<
 >;
 export type ConfirmAuthorIdentifierMutationBody = AuthorIdentifierRequest;
 export type ConfirmAuthorIdentifierMutationError =
-  Refusal | HTTPValidationError;
+  | Refusal
+  | HTTPValidationError;
 export type ConfirmAuthorIdentifierMutationVariables = {
   data: AuthorIdentifierRequest;
 };
@@ -3117,7 +3118,8 @@ export type ListDigitalReferencesUnderRootQueryResult = NonNullable<
   Awaited<ReturnType<typeof listDigitalReferencesUnderRoot>>
 >;
 export type ListDigitalReferencesUnderRootQueryError =
-  Refusal | HTTPValidationError;
+  | Refusal
+  | HTTPValidationError;
 
 export function useListDigitalReferencesUnderRoot<
   TData = Awaited<ReturnType<typeof listDigitalReferencesUnderRoot>>,
@@ -3360,7 +3362,8 @@ export type ListMissingDigitalReferencesQueryResult = NonNullable<
   Awaited<ReturnType<typeof listMissingDigitalReferences>>
 >;
 export type ListMissingDigitalReferencesQueryError =
-  Refusal | HTTPValidationError;
+  | Refusal
+  | HTTPValidationError;
 
 export function useListMissingDigitalReferences<
   TData = Awaited<ReturnType<typeof listMissingDigitalReferences>>,
@@ -4222,7 +4225,8 @@ export type BackfillFromIdentifiersMutationResult = NonNullable<
 >;
 
 export type BackfillFromIdentifiersMutationError =
-  Refusal | HTTPValidationError;
+  | Refusal
+  | HTTPValidationError;
 export type BackfillFromIdentifiersMutationVariables = {
   params?: BackfillFromIdentifiersParams;
 };
@@ -8074,7 +8078,8 @@ export type ReportDigitalReferenceMissingMutationResult = NonNullable<
 >;
 
 export type ReportDigitalReferenceMissingMutationError =
-  Refusal | HTTPValidationError;
+  | Refusal
+  | HTTPValidationError;
 export type ReportDigitalReferenceMissingMutationVariables = {
   bookId: number;
   referenceId: number;
@@ -8962,7 +8967,8 @@ export type ImportKoreaderHighlightsMutationResult = NonNullable<
 >;
 export type ImportKoreaderHighlightsMutationBody = KoreaderImportIn;
 export type ImportKoreaderHighlightsMutationError =
-  Refusal | HTTPValidationError;
+  | Refusal
+  | HTTPValidationError;
 export type ImportKoreaderHighlightsMutationVariables = {
   bookId: number;
   data: KoreaderImportIn;

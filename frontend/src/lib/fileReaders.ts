@@ -41,7 +41,11 @@ import { supportedExtension, type SupportedExtension } from "./fileName";
  * than reading this map, so an extension the door drops fails there too.
  */
 export type FileFailure =
-  CbzFailure | EpubFailure | Fb2Failure | MobiFailure | PdfFailure;
+  | CbzFailure
+  | EpubFailure
+  | Fb2Failure
+  | MobiFailure
+  | PdfFailure;
 
 /** One identifier a file carried, with whatever the file said it was. */
 export interface FileIdentifier {

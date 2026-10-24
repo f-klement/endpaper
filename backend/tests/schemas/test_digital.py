@@ -22,9 +22,7 @@ from schemas.digital import (
 
 
 def reference(**fields):
-    return DigitalReferenceIn(
-        **({"root_label": "/books", "relative_path": "a/b.epub"} | fields)
-    )
+    return DigitalReferenceIn(**({"root_label": "/books", "relative_path": "a/b.epub"} | fields))
 
 
 class TestThePairIsBoundedAndNotOnlyEachHalf:
@@ -46,9 +44,7 @@ class TestThePairIsBoundedAndNotOnlyEachHalf:
         as wide as the whole budget, so the inequality on the pair is the only
         thing that ever refuses a path."""
         field = DigitalReferenceIn.model_fields["relative_path"]
-        widest = max(
-            data.max_length for data in field.metadata if hasattr(data, "max_length")
-        )
+        widest = max(data.max_length for data in field.metadata if hasattr(data, "max_length"))
         assert widest >= DIGITAL_REFERENCE_PATH_MAX - 1
 
     def test_two_halves_that_together_exceed_it_are_refused(self):
@@ -75,9 +71,7 @@ class TestTheSchemaCeilingIsTheColumnCeiling:
     def test_the_field_is_bounded_at_the_column_width(self, name):
         column = DigitalReference.__table__.c[name].type.length
         field = DigitalReferenceIn.model_fields[name]
-        assert [
-            data.max_length for data in field.metadata if hasattr(data, "max_length")
-        ] == [column]
+        assert [data.max_length for data in field.metadata if hasattr(data, "max_length")] == [column]
 
     def test_the_field_ceilings_are_not_a_second_register(self):
         """`catalogue._TEXT_CEILINGS` bounds what a **catalogue** asserted about
@@ -148,9 +142,7 @@ class TestWhatAClientMayNotSay:
     the server can make.
     """
 
-    @pytest.mark.parametrize(
-        "name", ["confirmed_at", "missing_since", "created_at", "id", "book_id"]
-    )
+    @pytest.mark.parametrize("name", ["confirmed_at", "missing_since", "created_at", "id", "book_id"])
     def test_a_client_cannot_set_it(self, name):
         assert name not in DigitalReferenceIn.model_fields
 
@@ -162,9 +154,7 @@ class TestWhatAClientMayNotSay:
     def test_every_client_reported_field_comes_back_out(self):
         """A field a client may set and cannot read back would be a claim stored
         where nobody can check it."""
-        assert set(DigitalReferenceIn.model_fields) <= set(
-            DigitalReferenceOut.model_fields
-        )
+        assert set(DigitalReferenceIn.model_fields) <= set(DigitalReferenceOut.model_fields)
 
 
 class TestTheRowOfTheShelfWideListing:

@@ -258,6 +258,21 @@ from tests.corpus import is_vendored, markdown_files, project_files
 from tests.declaration import HEADER_LINES, SENTENCE, declares, declares_itself_internal
 from tests.ignorefile import ignore_patterns, is_ignored
 
+TREE_GUARDS = {
+    "TestEveryRosterCountInTheTreeIsAccountedFor": ("project_files",),
+    "TestTheCensusSeesWhatItClaimsTo": ("project_files",),
+    "TestTheWalkIsTheTreeRatherThanAListOfPlaces": (
+        "markdown_files",
+        "project_files",
+    ),
+    "TestThisFileCountsItself": ("project_files",),
+    "test_a_dated_register_is_out_of_scope": ("project_files",),
+    "test_a_file_that_declares_itself_internal_is_out_of_scope": ("project_files",),
+    "test_every_sentence_the_census_stopped_seeing_is_named": ("project_files",),
+    "test_the_register_of_decisions_is_read": ("project_files",),
+    "test_the_register_states_the_partition_the_census_gives_it": ("project_files",),
+}
+
 #: This module's own docstring, bound while it is still the nearest one.
 #: `__doc__` inside a method body is an ordinary global lookup and reads
 #: whichever docstring the enclosing scope happens to expose, which is not
@@ -326,9 +341,7 @@ CARDINALITIES = {
     # No constant of its own, and deliberately: it is what one measurement pass
     # ran against, not a set anything asks. `sources.MEASURED` is bound to the
     # same expression by `test_sources.py`, which is where it earns a name.
-    "the lookup sources that need no credential": (
-        lambda: len(sources.LOOKUP_SOURCES - sources.NEEDS_A_KEY)
-    ),
+    "the lookup sources that need no credential": (lambda: len(sources.LOOKUP_SOURCES - sources.NEEDS_A_KEY)),
     "lookup or search": lambda: len(sources.LOOKUP_SOURCES | sources.SEARCH_SOURCES),
 }
 
@@ -353,10 +366,7 @@ NOT_A_ROSTER_COUNT = {
     # is a mapping of measurements keyed on the source rather than a count of
     # sources, and its size equalling a cardinality is a coincidence of today's
     # roster.
-    "MEASURED": (
-        "what each source a stock install asks was measured to do, keyed on "
-        "the source"
-    ),
+    "MEASURED": ("what each source a stock install asks was measured to do, keyed on the source"),
 }
 
 #: The words a count is spelled with here, and the digits it may be written as.
@@ -365,8 +375,18 @@ NOT_A_ROSTER_COUNT = {
 #: spelled, and covering the digit costs one alternation. A guard that covers
 #: only the shape that has failed before is a guard one edit behind.
 SPELLED = {
-    "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6,
-    "seven": 7, "eight": 8, "nine": 9, "ten": 10, "eleven": 11, "twelve": 12,
+    "one": 1,
+    "two": 2,
+    "three": 3,
+    "four": 4,
+    "five": 5,
+    "six": 6,
+    "seven": 7,
+    "eight": 8,
+    "nine": 9,
+    "ten": 10,
+    "eleven": 11,
+    "twelve": 12,
 }
 
 _NUMBER = rf"(?:{'|'.join(SPELLED)}|\d{{1,3}})"
@@ -406,9 +426,7 @@ _NOUN = r"(?:sources?|catalogues?|providers?)"
 #: on the sentences that document the refusal. The guard proper is
 #: `test_a_number_in_one_table_cell_does_not_claim_the_next_one`, which does not
 #: depend on any prose surviving.
-_CLAIM = re.compile(
-    rf"(?=\b({_NUMBER})\b((?:[ \t]+[^\s|]+){{0,2}}[ \t]+)({_NOUN})\b)", re.IGNORECASE
-)
+_CLAIM = re.compile(rf"(?=\b({_NUMBER})\b((?:[ \t]+[^\s|]+){{0,2}}[ \t]+)({_NOUN})\b)", re.IGNORECASE)
 
 #: A line break plus whatever prefix the next line carries in a comment or a
 #: docstring.
@@ -625,10 +643,7 @@ def _paragraph(text: str, offset: int) -> tuple[str, int]:
     end = index
     while end + 1 < len(lines) and not blank(end + 1):
         end += 1
-    joined = " ".join(
-        re.sub(r"^[ \t]*(?:#:?|\*|//)[ \t]?", "", line)
-        for line in lines[start : end + 1]
-    )
+    joined = " ".join(re.sub(r"^[ \t]*(?:#:?|\*|//)[ \t]?", "", line) for line in lines[start : end + 1])
     return re.sub(r"\s+", " ", joined).strip(), start + 1
 
 
@@ -834,17 +849,14 @@ def scope(root: Path | None = None) -> list[Path]:
     return [
         path
         for path in paths
-        if not declares_itself_internal(path)
-        and not internal.intersection(path.relative_to(root).parents)
+        if not declares_itself_internal(path) and not internal.intersection(path.relative_to(root).parents)
     ]
 
 
 def census():
     """Every candidate in the whole scope, in file order."""
     for path in scope():
-        yield from scan(
-            str(path.relative_to(REPO)), path.read_text(encoding="utf-8")
-        )
+        yield from scan(str(path.relative_to(REPO)), path.read_text(encoding="utf-8"))
 
 
 #: The dict methods that only read. Anything else on `CLAIMS` is refused.
@@ -962,11 +974,7 @@ def claims_keys_in(source: str) -> list:
             )
 
     bindings = sum(
-        (
-            isinstance(node, ast.Name)
-            and node.id == "CLAIMS"
-            and isinstance(node.ctx, ast.Store)
-        )
+        (isinstance(node, ast.Name) and node.id == "CLAIMS" and isinstance(node.ctx, ast.Store))
         or any(getattr(node, field, None) == "CLAIMS" for field in BINDS_A_NAME)
         for node in _module_scope(tree)
     )
@@ -988,9 +996,7 @@ def claims_keys_in(source: str) -> list:
             continue
         if any(isinstance(t, ast.Name) and t.id == "CLAIMS" for t in targets):
             dicts.append(node.value)
-    assert len(dicts) == 1, (
-        f"CLAIMS is bound {len(dicts)} times; this can audit exactly one literal"
-    )
+    assert len(dicts) == 1, f"CLAIMS is bound {len(dicts)} times; this can audit exactly one literal"
     literal = dicts[0]
     assert isinstance(literal, ast.Dict), (
         "CLAIMS is no longer a dict literal, so its keys cannot be read back"
@@ -1021,15 +1027,13 @@ def claims_keys_in(source: str) -> list:
             and isinstance(node.value, ast.Name)
             and node.value.id == "CLAIMS"
         ):
-            raise AssertionError(
-                "CLAIMS is assigned into or deleted from after the literal"
-            )
+            raise AssertionError("CLAIMS is assigned into or deleted from after the literal")
         if isinstance(node, ast.Assign) and any(
             isinstance(t, ast.Name) and t.id != "CLAIMS" for t in node.targets
         ):
-            assert not (
-                isinstance(node.value, ast.Name) and node.value.id == "CLAIMS"
-            ), "CLAIMS is bound to a second name, which can be mutated out of sight"
+            assert not (isinstance(node.value, ast.Name) and node.value.id == "CLAIMS"), (
+                "CLAIMS is bound to a second name, which can be mutated out of sight"
+            )
     return [ast.literal_eval(key) for key in literal.keys if key is not None]
 
 
@@ -1065,18 +1069,13 @@ def judge(occurrence: Occurrence, entries, occurrences: int):
             f"occurrences with {len(entries)} verdicts, so every one of them needs "
             f"a `near` to say which sentence it judges. {len(without)} has none."
         )
-    matched = [
-        i for i, e in enumerate(entries)
-        if e.near is not None and e.near in occurrence.paragraph
-    ]
+    matched = [i for i, e in enumerate(entries) if e.near is not None and e.near in occurrence.paragraph]
     if len(matched) == 1:
         return matched[0], None
     return None, (
         f"{occurrence.where()}\n"
         f"  {len(matched)} of {len(entries)} verdicts match this paragraph and "
-        "exactly one must. Their anchors are "
-        + ", ".join(repr(e.near) for e in entries)
-        + "."
+        "exactly one must. Their anchors are " + ", ".join(repr(e.near) for e in entries) + "."
     )
 
 
@@ -1114,10 +1113,7 @@ def judgements():
         grouped.setdefault((occurrence.path, occurrence.phrase), []).append(occurrence)
     for key, occurrences in grouped.items():
         entries = CLAIMS.get(key, [])
-        judged = [
-            (occurrence, *judge(occurrence, entries, len(occurrences)))
-            for occurrence in occurrences
-        ]
+        judged = [(occurrence, *judge(occurrence, entries, len(occurrences))) for occurrence in occurrences]
         covered: dict[int, list[Occurrence]] = {}
         for occurrence, index, _ in judged:
             if index is not None:
@@ -1158,8 +1154,7 @@ def _known_stale_now_fixed(pairs) -> list[str]:
             continue
         if occurrence.value == CARDINALITIES[verdict.of]():
             fixed.append(
-                f"{occurrence.where()}\n"
-                f"  now agrees with {verdict.of}, so delete its KnownStale entry"
+                f"{occurrence.where()}\n  now agrees with {verdict.of}, so delete its KnownStale entry"
             )
     return fixed
 
@@ -1189,9 +1184,7 @@ def unbounded_census():
     synthetic file and ask which verdict each belongs to.
     """
     for path in scope():
-        yield from scan_unbounded(
-            str(path.relative_to(REPO)), path.read_text(encoding="utf-8")
-        )
+        yield from scan_unbounded(str(path.relative_to(REPO)), path.read_text(encoding="utf-8"))
 
 
 def _verdict_reach() -> dict[tuple[tuple[str, str], int], tuple[bool, bool]]:
@@ -1204,9 +1197,7 @@ def _verdict_reach() -> dict[tuple[tuple[str, str], int], tuple[bool, bool]]:
     used = {(key, index) for _, key, index, _ in judgements() if index is not None}
     reachable: dict[tuple[str, str], list[Occurrence]] = {}
     for occurrence in unbounded_census():
-        reachable.setdefault((occurrence.path, occurrence.phrase), []).append(
-            occurrence
-        )
+        reachable.setdefault((occurrence.path, occurrence.phrase), []).append(occurrence)
 
     def written(key, entry) -> bool:
         found = reachable.get(key, [])
@@ -1276,10 +1267,7 @@ def out_of_bound() -> list[str]:
 
 
 #: The one path in `OUT_OF_BOUND` too long to sit on a line with its phrase.
-_MARC_IMPORT = (
-    "frontend/tests/pages/SettingsPage/LibrarySettingsPage/components/"
-    "MarcImport.test.tsx"
-)
+_MARC_IMPORT = "frontend/tests/pages/SettingsPage/LibrarySettingsPage/components/MarcImport.test.tsx"
 
 #: The verdicts whose sentence is still written and whose value the census can
 #: no longer see, pinned one by one rather than counted.
@@ -1298,21 +1286,23 @@ _MARC_IMPORT = (
 #: until the roster happens to reach their number again. They are not errors.
 #: Each was read when it was added here and found to be a dated statement, a
 #: count of something that is not the roster, or both.
-OUT_OF_BOUND: frozenset[str] = frozenset({
-    "backend/sources.py '{n} frames a source' entry[0]",
-    "backend/tests/routers/test_books_search.py '{n} sources' entry[0]",
-    "backend/tests/test_marc.py '{n} source' entry[0]",
-    "backend/tests/test_authority.py '{n} viaf source' entry[0]",
-    "backend/tests/test_fetch.py '{n} sources' entry[0]",
-    "backend/tests/test_fetch.py '{n} sources' entry[3]",
-    "backend/tests/test_fetch.py '{n} sources' entry[4]",
-    "backend/tests/test_roster_counts.py '{n} sources' entry[1]",
-    "docs/decisions.md '{n} source' entry[0]",
-    "docs/security.md '{n} sources' entry[0]",
-    # Split only to fit the line: this is one path and two entries on it.
-    _MARC_IMPORT + " '{n} records this catalogue' entry[0]",
-    _MARC_IMPORT + " '{n} records this catalogue' entry[1]",
-})
+OUT_OF_BOUND: frozenset[str] = frozenset(
+    {
+        "backend/sources.py '{n} frames a source' entry[0]",
+        "backend/tests/routers/test_books_search.py '{n} sources' entry[0]",
+        "backend/tests/test_marc.py '{n} source' entry[0]",
+        "backend/tests/test_authority.py '{n} viaf source' entry[0]",
+        "backend/tests/test_fetch.py '{n} sources' entry[0]",
+        "backend/tests/test_fetch.py '{n} sources' entry[3]",
+        "backend/tests/test_fetch.py '{n} sources' entry[4]",
+        "backend/tests/test_roster_counts.py '{n} sources' entry[1]",
+        "docs/decisions.md '{n} source' entry[0]",
+        "docs/security.md '{n} sources' entry[0]",
+        # Split only to fit the line: this is one path and two entries on it.
+        _MARC_IMPORT + " '{n} records this catalogue' entry[0]",
+        _MARC_IMPORT + " '{n} records this catalogue' entry[1]",
+    }
+)
 
 #: Every occurrence the census finds, and what each one counts.
 #:
@@ -1336,9 +1326,7 @@ CLAIMS: dict[tuple[str, str], list[Counts | NotTheRoster | KnownStale]] = {
     ],
     ("backend/fetch.py", "{n} catalogue"): [Counts("the whole roster")],
     ("backend/targets.py", "{n} catalogues"): [Counts("the whole roster")],
-    ("backend/tests/test_house_rules.py", "{n} catalogue"): [
-        Counts("the whole roster")
-    ],
+    ("backend/tests/test_house_rules.py", "{n} catalogue"): [Counts("the whole roster")],
     ("backend/fetch.py", "{n} third party catalogues"): [Counts("the whole roster")],
     # Both sides of one sentence about which doors the address policy is wired
     # to. "Seeded" is the distinction being drawn, not a smaller set: every
@@ -1352,9 +1340,7 @@ CLAIMS: dict[tuple[str, str], list[Counts | NotTheRoster | KnownStale]] = {
     # hosted ebook server holds.
     ("backend/opds.py", "{n} different catalogues"): [Counts("SEARCH_SOURCES")],
     ("backend/routers/opds.py", "{n} catalogues"): [Counts("SEARCH_SOURCES")],
-    ("backend/tests/routers/test_opds.py", "{n} catalogues"): [
-        Counts("SEARCH_SOURCES")
-    ],
+    ("backend/tests/routers/test_opds.py", "{n} catalogues"): [Counts("SEARCH_SOURCES")],
     ("backend/fetch.py", "{n} sources"): [
         Counts("SEARCH_SOURCES", near="`metadata.search` asks"),
         Counts("the whole roster", near="compression is not requested"),
@@ -1429,9 +1415,7 @@ CLAIMS: dict[tuple[str, str], list[Counts | NotTheRoster | KnownStale]] = {
         ),
     ],
     ("backend/tests/helpers.py", "{n} sources"): [Counts("lookup or search")],
-    ("backend/tests/routers/test_books_google.py", "{n} sources"): [
-        Counts("the whole roster")
-    ],
+    ("backend/tests/routers/test_books_google.py", "{n} sources"): [Counts("the whole roster")],
     ("backend/tests/routers/test_books_search.py", "{n} sources"): [
         NotTheRoster("a quotation of a sentence that was wrong when it was written")
     ],
@@ -1456,8 +1440,7 @@ CLAIMS: dict[tuple[str, str], list[Counts | NotTheRoster | KnownStale]] = {
             near="not written here",
         ),
         NotTheRoster(
-            "the count that leaves the assertion above passing, which is why this "
-            "test exists beside it",
+            "the count that leaves the assertion above passing, which is why this test exists beside it",
             near="weaker",
         ),
     ],
@@ -1481,12 +1464,8 @@ CLAIMS: dict[tuple[str, str], list[Counts | NotTheRoster | KnownStale]] = {
         Counts("the whole roster", near="family it counts is gone"),
         Counts("the whole roster", near="grows by one per source"),
     ],
-    ("backend/tests/test_metadata.py", "{n} lookup sources"): [
-        Counts("LOOKUP_SOURCES")
-    ],
-    ("backend/tests/test_ratelimit.py", "{n} public catalogues"): [
-        Counts("LOOKUP_SOURCES")
-    ],
+    ("backend/tests/test_metadata.py", "{n} lookup sources"): [Counts("LOOKUP_SOURCES")],
+    ("backend/tests/test_ratelimit.py", "{n} public catalogues"): [Counts("LOOKUP_SOURCES")],
     ("backend/tests/test_roster_counts.py", "{n} sources"): [
         NotTheRoster(
             "an example phrase, in the file that states the rule",
@@ -1619,15 +1598,11 @@ CLAIMS: dict[tuple[str, str], list[Counts | NotTheRoster | KnownStale]] = {
     # verdict and the merge is where it surfaced. That is the census working
     # rather than failing: the alternative is the number going stale in a screen
     # nobody re-reads.
-    ("frontend/src/pages/ScanPage/hooks.ts", "{n} sources"): [
-        Counts("SEARCH_SOURCES")
-    ],
+    ("frontend/src/pages/ScanPage/hooks.ts", "{n} sources"): [Counts("SEARCH_SOURCES")],
     ("frontend/tests/pages/ScanPage/components/RapidQueue.test.tsx", "{n} sources"): [
         Counts("SEARCH_SOURCES")
     ],
-    ("frontend/tests/pages/ScanPage/hooks.test.tsx", "{n} sources"): [
-        Counts("SEARCH_SOURCES")
-    ],
+    ("frontend/tests/pages/ScanPage/hooks.test.tsx", "{n} sources"): [Counts("SEARCH_SOURCES")],
     # The owner's decision of 2026-09-07 on the Z39.50 transport, which surveyed
     # eight national libraries rather than counting this roster. **This entry is a
     # pre-existing gap rather than one this ticket opened**: 8 has been a live
@@ -1637,8 +1612,7 @@ CLAIMS: dict[tuple[str, str], list[Counts | NotTheRoster | KnownStale]] = {
     # never had one.
     ("docs/decisions.md", "{n} national catalogues"): [
         NotTheRoster(
-            "the national libraries surveyed for a Z39.50 transport, in the entry "
-            "recording that decision"
+            "the national libraries surveyed for a Z39.50 transport, in the entry recording that decision"
         )
     ],
     ("docs/legend.md", "{n} catalogues"): [
@@ -1657,12 +1631,9 @@ CLAIMS: dict[tuple[str, str], list[Counts | NotTheRoster | KnownStale]] = {
             "sentence says so and gives today's count in the line after it"
         )
     ],
-    ("frontend/src/pages/BookDetail/hooks.ts", "{n} catalogue"): [
-        Counts("SEARCH_SOURCES")
-    ],
+    ("frontend/src/pages/BookDetail/hooks.ts", "{n} catalogue"): [Counts("SEARCH_SOURCES")],
     (
-        "frontend/tests/pages/SettingsPage/LibrarySettingsPage/components"
-        "/MarcImport.test.tsx",
+        "frontend/tests/pages/SettingsPage/LibrarySettingsPage/components/MarcImport.test.tsx",
         "{n} records this catalogue",
     ): [
         NotTheRoster("MARC records in an uploaded file", near="not the whole file"),
@@ -1699,11 +1670,7 @@ class TestEveryRosterCountInTheTreeIsAccountedFor:
         which drives every population against a tree planted with vendored
         code and cannot go vacuous.
         """
-        vendored = [
-            str(path.relative_to(REPO))
-            for path in candidates()
-            if is_vendored(path, REPO)
-        ]
+        vendored = [str(path.relative_to(REPO)) for path in candidates() if is_vendored(path, REPO)]
 
         assert not vendored, f"the census reached code this project did not write: {vendored}"
 
@@ -1843,8 +1810,7 @@ class TestEveryRosterCountInTheTreeIsAccountedFor:
         assert keys, "CLAIMS holds no keys"
         assert len(keys) == len(set(keys)), (
             "these keys are written into CLAIMS more than once, and every entry "
-            "but the last was discarded: "
-            + str(sorted(k for k in set(keys) if keys.count(k) > 1))
+            "but the last was discarded: " + str(sorted(k for k in set(keys) if keys.count(k) > 1))
         )
         assert len(CLAIMS) == len(keys), (
             f"the literal holds {len(keys)} keys and the table that runs holds "
@@ -1864,10 +1830,7 @@ class TestEveryRosterCountInTheTreeIsAccountedFor:
                 continue
             expected = CARDINALITIES[verdict.of]()
             if occurrence.value != expected:
-                wrong.append(
-                    f"{occurrence.where()}\n"
-                    f"  says {occurrence.value}; {verdict.of} is {expected}"
-                )
+                wrong.append(f"{occurrence.where()}\n  says {occurrence.value}; {verdict.of} is {expected}")
         assert not wrong, "\n".join(wrong)
 
     def test_a_known_stale_claim_is_deleted_once_it_is_fixed(self):
@@ -1882,17 +1845,13 @@ class TestEveryRosterCountInTheTreeIsAccountedFor:
         shape this repository calls a guard going quiet with nothing failing,
         so the rule is driven from a fixture below as well as from the tree.
         """
-        assert not _known_stale_now_fixed(verdicts()), "\n".join(
-            _known_stale_now_fixed(verdicts())
-        )
+        assert not _known_stale_now_fixed(verdicts()), "\n".join(_known_stale_now_fixed(verdicts()))
 
     def test_the_rule_reports_a_known_stale_that_has_started_agreeing(self):
         """Anti vacuity. Built rather than found, because the live table is
         empty and an empty table cannot show that the arm still works."""
         agreeing = _occurrence_valued(CARDINALITIES["SEARCH_SOURCES"]())
-        reported = _known_stale_now_fixed(
-            [(agreeing, KnownStale("SEARCH_SOURCES", because="a fixture"))]
-        )
+        reported = _known_stale_now_fixed([(agreeing, KnownStale("SEARCH_SOURCES", because="a fixture"))])
         assert len(reported) == 1, reported
         assert "delete its KnownStale entry" in reported[0]
 
@@ -1901,10 +1860,7 @@ class TestEveryRosterCountInTheTreeIsAccountedFor:
         reports everything."""
         still_wrong = _occurrence_valued(CARDINALITIES["SEARCH_SOURCES"]() + 1)
         assert (
-            _known_stale_now_fixed(
-                [(still_wrong, KnownStale("SEARCH_SOURCES", because="a fixture"))]
-            )
-            == []
+            _known_stale_now_fixed([(still_wrong, KnownStale("SEARCH_SOURCES", because="a fixture"))]) == []
         )
 
     def test_a_dated_exemption_names_a_date_that_is_really_beside_it(self):
@@ -1940,9 +1896,7 @@ class TestTheCensusBoundIsDerivedAndNotChosen:
         found = roster_sets()
         assert found, "reflection found no roster set at all in `sources.py`"
         unaccounted = sorted(
-            name
-            for name in found
-            if name not in CARDINALITIES and name not in NOT_A_ROSTER_COUNT
+            name for name in found if name not in CARDINALITIES and name not in NOT_A_ROSTER_COUNT
         )
         assert not unaccounted, (
             f"{unaccounted} are collections of CatalogueSource in `sources.py` "
@@ -1961,9 +1915,7 @@ class TestTheCensusBoundIsDerivedAndNotChosen:
         when they do. A literal range is a range somebody narrows until a
         failure goes quiet.
         """
-        assert live_cardinalities() == {
-            factory() for factory in CARDINALITIES.values()
-        }
+        assert live_cardinalities() == {factory() for factory in CARDINALITIES.values()}
         assert len(sources.SEARCH_SOURCES) in live_cardinalities()
         assert len(CatalogueSource) in live_cardinalities()
 
@@ -2045,9 +1997,9 @@ class TestTheCensusSeesWhatItClaimsTo:
 
     def test_it_reads_across_two_intervening_words(self):
         word, _value = a_spelled_cardinality()
-        assert [
-            o.phrase for o in scan("t.py", f"{word} third party catalogues.\n")
-        ] == ["{n} third party catalogues"]
+        assert [o.phrase for o in scan("t.py", f"{word} third party catalogues.\n")] == [
+            "{n} third party catalogues"
+        ]
 
     def test_it_stops_at_three_intervening_words(self):
         """Stated because it is the edge the grammar was drawn at, not because
@@ -2087,9 +2039,7 @@ class TestTheCensusSeesWhatItClaimsTo:
         """The failure a bare elided phrase would hide: `backend/fetch.py`
         spells `{n} sources` for the search fan out and for the whole roster."""
         occurrence = Occurrence("f.py", 1, 8, "{n} sources", "anything", 1)
-        index, complaint = judge(
-            occurrence, [Counts("SEARCH_SOURCES"), Counts("x")], occurrences=1
-        )
+        index, complaint = judge(occurrence, [Counts("SEARCH_SOURCES"), Counts("x")], occurrences=1)
         assert index is None
         assert "needs a `near`" in complaint
 
@@ -2105,9 +2055,7 @@ class TestTheCensusSeesWhatItClaimsTo:
         occurrence = Occurrence("f.py", 1, 8, "{n} catalogues", "anything", 1)
         alone = judge(occurrence, [NotTheRoster("the table above")], occurrences=1)
         assert alone == (0, None)
-        index, complaint = judge(
-            occurrence, [NotTheRoster("the table above")], occurrences=2
-        )
+        index, complaint = judge(occurrence, [NotTheRoster("the table above")], occurrences=2)
         assert index is None
         assert "needs a `near`" in complaint
         assert "covers 2 occurrences" in complaint
@@ -2135,9 +2083,7 @@ class TestTheCensusSeesWhatItClaimsTo:
             Occurrence("f.py", 9, 7, "{n} sources", "beta here", 9),
         ]
         monkeypatch.setitem(CLAIMS, ("f.py", "{n} sources"), entries)
-        monkeypatch.setattr(
-            "tests.test_roster_counts.census", lambda: iter(rows)
-        )
+        monkeypatch.setattr("tests.test_roster_counts.census", lambda: iter(rows))
         judged = {o.line: (i, c) for o, _, i, c in judgements()}
         assert judged[9][0] == 1, "the discriminated one still resolves"
         for line in (1, 5):
@@ -2149,16 +2095,12 @@ class TestTheCensusSeesWhatItClaimsTo:
             Occurrence("f.py", 1, 8, "{n} sources", "alpha here", 1),
             Occurrence("f.py", 40, 8, "{n} sources", "alpha here", 40),
         ]
-        monkeypatch.setattr(
-            "tests.test_roster_counts.census", lambda: iter(same_words)
-        )
+        monkeypatch.setattr("tests.test_roster_counts.census", lambda: iter(same_words))
         assert all(i is None for _, _, i, _ in judgements()), (
             "identical words in two blocks are two sentences, not one paragraph"
         )
 
-    def test_a_sentence_reworded_out_of_the_grammar_orphans_its_verdict(
-        self, monkeypatch
-    ):
+    def test_a_sentence_reworded_out_of_the_grammar_orphans_its_verdict(self, monkeypatch):
         """What holds a count that was corrected by bringing it into the grammar.
 
         Three counts here were stale because the census could not see them, and
@@ -2176,9 +2118,7 @@ class TestTheCensusSeesWhatItClaimsTo:
         """
         # The premise. The census reads a number beside a roster noun, so the
         # reworded sentence yields nothing and there is an orphan to find.
-        assert not list(
-            scan("f.py", "# An empty object rather than the nine entries.\n")
-        )
+        assert not list(scan("f.py", "# An empty object rather than the nine entries.\n"))
 
         key = ("f.py", "{n} sources")
         monkeypatch.setitem(
@@ -2198,16 +2138,12 @@ class TestTheCensusSeesWhatItClaimsTo:
 
         # The second sentence reworded out. The first still resolves, so a rule
         # that asked only whether the key was reached would report nothing.
-        monkeypatch.setattr(
-            "tests.test_roster_counts.census", lambda: iter(both[:1])
-        )
+        monkeypatch.setattr("tests.test_roster_counts.census", lambda: iter(both[:1]))
         named = [o for o in orphans() if o.startswith("f.py")]
         assert len(named) == 1, named
         assert "entry[1]" in named[0], named
 
-    def test_an_unanchored_verdict_whose_sentence_is_gone_is_still_an_orphan(
-        self, monkeypatch
-    ):
+    def test_an_unanchored_verdict_whose_sentence_is_gone_is_still_an_orphan(self, monkeypatch):
         """The `near is None` arm of the written test, which nothing reached.
 
         **Unobservable on the real tree, and that is why it needs a synthetic
@@ -2225,14 +2161,10 @@ class TestTheCensusSeesWhatItClaimsTo:
         monkeypatch.setitem(CLAIMS, key, [Counts("DEFAULT_ORDER")])
         monkeypatch.setattr("tests.test_roster_counts.census", lambda: iter(()))
 
-        assert [o for o in orphans() if o.startswith("f.py")] == [
-            "f.py '{n} sources' entry[0] near=None"
-        ]
+        assert [o for o in orphans() if o.startswith("f.py")] == ["f.py '{n} sources' entry[0] near=None"]
         assert not [o for o in out_of_bound() if o.startswith("f.py")]
 
-    def test_the_anchor_decides_which_of_two_sentences_a_verdict_is_about(
-        self, monkeypatch
-    ):
+    def test_the_anchor_decides_which_of_two_sentences_a_verdict_is_about(self, monkeypatch):
         """The anchored arm of `written`, which nothing reached.
 
         **Both other orphan tests use a file `scope()` does not contain**, so
@@ -2257,16 +2189,10 @@ class TestTheCensusSeesWhatItClaimsTo:
         # the bounded census reaches neither verdict.
         surviving = Occurrence("f.py", 1, 3, "{n} sources", "alpha here", 1)
         monkeypatch.setattr("tests.test_roster_counts.census", lambda: iter(()))
-        monkeypatch.setattr(
-            "tests.test_roster_counts.unbounded_census", lambda: iter([surviving])
-        )
+        monkeypatch.setattr("tests.test_roster_counts.unbounded_census", lambda: iter([surviving]))
 
-        assert [o for o in orphans() if o.startswith("f.py")] == [
-            "f.py '{n} sources' entry[1] near='beta'"
-        ]
-        assert [o for o in out_of_bound() if o.startswith("f.py")] == [
-            "f.py '{n} sources' entry[0]"
-        ]
+        assert [o for o in orphans() if o.startswith("f.py")] == ["f.py '{n} sources' entry[1] near='beta'"]
+        assert [o for o in out_of_bound() if o.startswith("f.py")] == ["f.py '{n} sources' entry[0]"]
 
     def test_an_anchor_that_matches_nothing_is_a_failure_not_a_default(self):
         occurrence = Occurrence("f.py", 1, 8, "{n} sources", "nothing here", 1)
@@ -2299,12 +2225,10 @@ class TestThisFileCountsItself:
         assert named is not None, "the docstring no longer states the name count"
         assert sizes is not None, "the docstring no longer states the size count"
         assert SPELLED.get(named.group(1).lower()) == len(CARDINALITIES), (
-            f"the docstring says {named.group(1)} named sets; CARDINALITIES holds "
-            f"{len(CARDINALITIES)}"
+            f"the docstring says {named.group(1)} named sets; CARDINALITIES holds {len(CARDINALITIES)}"
         )
         assert SPELLED.get(sizes.group(1).lower()) == len(live_cardinalities()), (
-            f"the docstring says {sizes.group(1)} distinct sizes; there are "
-            f"{len(live_cardinalities())}"
+            f"the docstring says {sizes.group(1)} distinct sizes; there are {len(live_cardinalities())}"
         )
 
     def test_the_docstring_states_what_the_binding_count_carries(self):
@@ -2357,9 +2281,7 @@ class TestThisFileCountsItself:
                 released += 1
 
         doc = (
-            TestEveryRosterCountInTheTreeIsAccountedFor
-            .test_a_table_it_cannot_audit_is_refused.__doc__
-            or ""
+            TestEveryRosterCountInTheTreeIsAccountedFor.test_a_table_it_cannot_audit_is_refused.__doc__ or ""
         )
         stated = re.search(r"\*\*(\w+) of these are carried by the binding count", doc)
         assert stated is not None, "that docstring no longer states the count"
@@ -2397,13 +2319,9 @@ class TestThisFileCountsItself:
         held = [
             occurrence
             for path in self._declaring()
-            for occurrence in scan(
-                str(path.relative_to(REPO)), path.read_text(encoding="utf-8")
-            )
+            for occurrence in scan(str(path.relative_to(REPO)), path.read_text(encoding="utf-8"))
         ]
-        stated = re.search(
-            r"they hold \*\*(\w+)\*\* census candidate", self._source()
-        )
+        stated = re.search(r"they hold \*\*(\w+)\*\* census candidate", self._source())
         assert stated is not None, "that comment no longer states the coverage cost"
         assert SPELLED.get(stated.group(1).lower()) == len(held), (
             f"the comment says {stated.group(1)}; the declaration rule now drops "
@@ -2425,9 +2343,7 @@ class TestThisFileCountsItself:
             if SENTENCE.encode() in b"\n".join(path.read_bytes().split(b"\n")[:HEADER_LINES]):
                 substring.add(path)
         assert anchored, "no file carries the declaration, so this compares nothing"
-        assert anchored == substring, sorted(
-            str(path.relative_to(REPO)) for path in anchored ^ substring
-        )
+        assert anchored == substring, sorted(str(path.relative_to(REPO)) for path in anchored ^ substring)
 
     def test_the_line_every_declaration_sits_by_is_the_line_it_states(self):
         """What says the window still has slack, and the only reason a number
@@ -2439,9 +2355,7 @@ class TestThisFileCountsItself:
         """
         latest = 0
         for path in self._declaring():
-            for number, line in enumerate(
-                path.read_bytes().split(b"\n")[:HEADER_LINES], start=1
-            ):
+            for number, line in enumerate(path.read_bytes().split(b"\n")[:HEADER_LINES], start=1):
                 if declares(line):
                     latest = max(latest, number)
                     break
@@ -2494,8 +2408,10 @@ def test_every_sentence_the_census_stopped_seeing_is_named():
         "the set of verdicts the census can no longer see has moved, which is "
         "what a roster change does. Every entry below is a sentence nothing is "
         "checking. Read each one before editing OUT_OF_BOUND.\n"
-        "  no longer out of bound: " + ", ".join(sorted(set(named) - set(found)))
-        + "\n  newly out of bound: " + ", ".join(sorted(set(found) - set(named)))
+        "  no longer out of bound: "
+        + ", ".join(sorted(set(named) - set(found)))
+        + "\n  newly out of bound: "
+        + ", ".join(sorted(set(found) - set(named)))
     )
 
 
@@ -2540,25 +2456,28 @@ class TestTheWalkIsTheTreeRatherThanAListOfPlaces:
     """
 
     def _tree(self, tmp_path):
-        return _fixture_tree(tmp_path, {
-            ".gitignore": "frontend/node_modules/\nbuilt/\nscratch.md\n",
-            "README.md": "a published document\n",
-            "docs/api.md": "a published document\n",
-            "nowhere/anybody/listed/GUIDE.md": "a document in a new directory\n",
-            "nowhere/anybody/listed/helper.py": "# a module in a new directory\n",
-            "built/output.md": "the build output, which the repository ignores\n",
-            "scratch.md": "a working note, which the repository ignores\n",
-            ".hidden/notes.md": "hidden, so not versioned\n",
-            "frontend/node_modules/dep.ts": "// somebody else's source, ignored\n",
-            "vendor/node_modules/lib.ts": "// somebody else's source, not ignored\n",
-            ".hidden.ts": "// a dotted file rather than a dotted directory\n",
-            "src/api/generated/model.ts": "// written by a generator\n",
-            "tooling/README.md": f"{SENTENCE}\n\nthe tooling's own notes\n",
-            "tooling/run.py": "# carrying no declaration of its own\n",
-            "tooling/deeper/probe.py": "# in a subdirectory with no document at all\n",
-            "registers/COVERAGE.md": f"{SENTENCE}\n\nnot this tree's README\n",
-            "registers/module.py": "# 91 of these sit under the live instance\n",
-        })
+        return _fixture_tree(
+            tmp_path,
+            {
+                ".gitignore": "frontend/node_modules/\nbuilt/\nscratch.md\n",
+                "README.md": "a published document\n",
+                "docs/api.md": "a published document\n",
+                "nowhere/anybody/listed/GUIDE.md": "a document in a new directory\n",
+                "nowhere/anybody/listed/helper.py": "# a module in a new directory\n",
+                "built/output.md": "the build output, which the repository ignores\n",
+                "scratch.md": "a working note, which the repository ignores\n",
+                ".hidden/notes.md": "hidden, so not versioned\n",
+                "frontend/node_modules/dep.ts": "// somebody else's source, ignored\n",
+                "vendor/node_modules/lib.ts": "// somebody else's source, not ignored\n",
+                ".hidden.ts": "// a dotted file rather than a dotted directory\n",
+                "src/api/generated/model.ts": "// written by a generator\n",
+                "tooling/README.md": f"{SENTENCE}\n\nthe tooling's own notes\n",
+                "tooling/run.py": "# carrying no declaration of its own\n",
+                "tooling/deeper/probe.py": "# in a subdirectory with no document at all\n",
+                "registers/COVERAGE.md": f"{SENTENCE}\n\nnot this tree's README\n",
+                "registers/module.py": "# 91 of these sit under the live instance\n",
+            },
+        )
 
     def _named(self, paths, root):
         return sorted(str(path.relative_to(root)) for path in paths)
@@ -2609,14 +2528,11 @@ class TestTheWalkIsTheTreeRatherThanAListOfPlaces:
         patterns = ignore_patterns(root / ".gitignore", refuse_empty=True)
         for name in ("vendor/node_modules/lib.ts", ".hidden.ts"):
             assert not is_ignored(Path(name), patterns, is_dir=False), (
-                f"{name} is ignored here, so this drives the ignore rule and not "
-                "the vendor rule"
+                f"{name} is ignored here, so this drives the ignore rule and not the vendor rule"
             )
             assert name not in self._named(candidates(root), root)
 
-    def test_a_tree_whose_own_readme_declares_itself_is_out_of_scope(
-        self, tmp_path
-    ):
+    def test_a_tree_whose_own_readme_declares_itself_is_out_of_scope(self, tmp_path):
         """The build tooling, and the reason is at `internal_trees`. The module
         beside the declaring README carries no declaration of its own, so the
         per file rule cannot reach it and the census would demand a verdict
@@ -2641,20 +2557,21 @@ class TestTheWalkIsTheTreeRatherThanAListOfPlaces:
         """The discriminating half. A rule that read the README's existence
         rather than what it says would drop every tree that has one, which is
         most of them, and the census would go quiet."""
-        root = _fixture_tree(tmp_path, {
-            ".gitignore": "\n",
-            "mixed/README.md": "a published document\n",
-            "mixed/PRIVATE.md": f"{SENTENCE}\n",
-            "mixed/module.py": "# code beside both\n",
-        })
+        root = _fixture_tree(
+            tmp_path,
+            {
+                ".gitignore": "\n",
+                "mixed/README.md": "a published document\n",
+                "mixed/PRIVATE.md": f"{SENTENCE}\n",
+                "mixed/module.py": "# code beside both\n",
+            },
+        )
         seen = self._named(scope(root), root)
         assert "mixed/module.py" in seen
         assert "mixed/README.md" in seen
         assert "mixed/PRIVATE.md" not in seen
 
-    def test_a_declaring_document_that_is_not_the_readme_leaves_its_tree_alone(
-        self, tmp_path
-    ):
+    def test_a_declaring_document_that_is_not_the_readme_leaves_its_tree_alone(self, tmp_path):
         """The finding that narrowed this rule from every document to the README.
 
         Quantifying over every document under a directory quantifies over an
@@ -2668,8 +2585,7 @@ class TestTheWalkIsTheTreeRatherThanAListOfPlaces:
         root = self._tree(tmp_path)
         seen = self._named(scope(root), root)
         assert "registers/module.py" in seen, (
-            "a declaring document that is not the tree's README took its whole "
-            "tree out of the census"
+            "a declaring document that is not the tree's README took its whole tree out of the census"
         )
         assert "registers/COVERAGE.md" not in seen, (
             "the per file rule still has to drop the declaring document itself"
@@ -2681,11 +2597,14 @@ class TestTheWalkIsTheTreeRatherThanAListOfPlaces:
         of scope, so the root is excluded. The publish gate refuses such a
         README too, which is the second of the two and not a reason to drop
         this one: this is the arm that keeps the census reading."""
-        root = _fixture_tree(tmp_path, {
-            ".gitignore": "\n",
-            "README.md": f"{SENTENCE}\n",
-            "module.py": "# code beside it\n",
-        })
+        root = _fixture_tree(
+            tmp_path,
+            {
+                ".gitignore": "\n",
+                "README.md": f"{SENTENCE}\n",
+                "module.py": "# code beside it\n",
+            },
+        )
         assert internal_trees(candidates(root), root) == set()
         assert "module.py" in self._named(scope(root), root)
 
@@ -2703,9 +2622,7 @@ class TestTheWalkIsTheTreeRatherThanAListOfPlaces:
             str(path.relative_to(REPO))
             for path in markdown_files()
             if path not in walked
-            and not any(
-                register in str(path.relative_to(REPO)) for register in DATED_REGISTERS
-            )
+            and not any(register in str(path.relative_to(REPO)) for register in DATED_REGISTERS)
         )
         assert missing == [], missing
 
@@ -2759,9 +2676,7 @@ def test_every_excluded_register_is_pinned_above():
     somebody happened to write down first.
     """
     unpinned = sorted(set(DATED_REGISTERS) - set(PINNED_OUT_OF_SCOPE))
-    assert not unpinned, (
-        f"{unpinned} are excluded by DATED_REGISTERS and pinned by nothing"
-    )
+    assert not unpinned, f"{unpinned} are excluded by DATED_REGISTERS and pinned by nothing"
 
 
 def test_the_register_states_the_partition_the_census_gives_it():
@@ -2793,26 +2708,22 @@ def test_the_register_states_the_partition_the_census_gives_it():
         "either the sentence was reworded or the section was deleted"
     )
     total, counted, not_counted = (int(g) for g in stated.groups())
-    rows = [verdict for occurrence, verdict in verdicts()
-            if occurrence.path == "docs/decisions.md"]
+    rows = [verdict for occurrence, verdict in verdicts() if occurrence.path == "docs/decisions.md"]
     # **The total first, then the sum.** A wrong total also breaks the sum, so
     # checking the sum first diagnoses a stale number as a new verdict kind,
     # which sends the next reader looking for a `KnownStale` that is not there.
     assert total == len(rows), (
-        f"the sentence says the census raises {total} candidates there; it raises "
-        f"{len(rows)}"
+        f"the sentence says the census raises {total} candidates there; it raises {len(rows)}"
     )
     assert counted + not_counted == total, (
         f"the sentence says {counted} and {not_counted} of {total}, which is not "
         "a partition, so a verdict kind it names nothing for has appeared"
     )
     assert counted == sum(1 for v in rows if isinstance(v, Counts)), (
-        f"the sentence says {counted} are live claims; "
-        f"{sum(1 for v in rows if isinstance(v, Counts))} are"
+        f"the sentence says {counted} are live claims; {sum(1 for v in rows if isinstance(v, Counts))} are"
     )
     assert not_counted == sum(1 for v in rows if isinstance(v, NotTheRoster)), (
-        f"the sentence says {not_counted} are not; "
-        f"{sum(1 for v in rows if isinstance(v, NotTheRoster))} are"
+        f"the sentence says {not_counted} are not; {sum(1 for v in rows if isinstance(v, NotTheRoster))} are"
     )
 
 

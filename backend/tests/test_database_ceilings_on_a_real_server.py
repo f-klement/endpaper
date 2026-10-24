@@ -90,9 +90,7 @@ class TestAMergeHoldsTheKeepersCeilingsAgainstAWriterCountingFirst:
     """The races of `test_folding.py::TestAMergeHoldsTheKeepersCeilings` through
     the two writers that count before they write."""
 
-    def test_a_heading_added_to_the_keeper_mid_merge_stays_within_the_ceiling(
-        self, admin, make_book, db
-    ):
+    def test_a_heading_added_to_the_keeper_mid_merge_stays_within_the_ceiling(self, admin, make_book, db):
         """The same race through the other capped writer, an enrichment's
         headings: without the merge's lock it counts 7, adds one, and the
         merge's commit carries the loser's past it to 9."""
@@ -293,9 +291,7 @@ class TestAMergeDeadlockingWithAnotherWriterAnswers409:
     the loser that reaches for the keeper closes a cycle, and Postgres aborts
     whichever side started waiting first."""
 
-    def test_a_merge_aborted_for_a_deadlock_answers_409_and_merges_nothing(
-        self, client, admin, db
-    ):
+    def test_a_merge_aborted_for_a_deadlock_answers_409_and_merges_nothing(self, client, admin, db):
         """The merge waits first, on the loser the writer holds, so Postgres
         aborts the merge and the writer commits. The writer reaches for the
         keeper once the merge is waiting, inside the one `deadlock_timeout`
@@ -524,9 +520,7 @@ class TestAMatchedBookAMergeDeletesAfterItsLoadRaisesMetAnotherChange:
     failure as the same race."""
 
     @pytest.mark.parametrize("shape", list(_SHAPES.values()), ids=list(_SHAPES))
-    def test_the_failure_on_the_gone_row_becomes_met_another_change(
-        self, db, member, monkeypatch, shape
-    ):
+    def test_the_failure_on_the_gone_row_becomes_met_another_change(self, db, member, monkeypatch, shape):
         owner = member["user"]["id"]
         keeper = Book(title="Small Gods", isbn=_KEEPER_ISBN, added_by_user_id=owner)
         loser = Book(title="Pyramids", isbn=_LOSER_ISBN, added_by_user_id=owner)

@@ -30,6 +30,12 @@ export default defineConfig({
       // linger and keep compiling.
       clean: true,
       indexFiles: true,
+      // Format the output with the formatter `format:check` holds the tree
+      // to, so a regeneration writes what the check accepts. **orval logs a
+      // missing or failing formatter as a warning and exits 0**, so the CI
+      // step that diffs the committed client against a fresh generation is
+      // what catches a formatter that did not run.
+      formatter: "oxfmt",
       override: {
         mutator: {
           path: "./src/api/mutator.ts",
@@ -78,11 +84,6 @@ export default defineConfig({
           },
         },
       },
-    },
-    hooks: {
-      // Format the generated output so it does not fight the repo's style and
-      // produce noisy diffs.
-      afterAllFilesWrite: "bunx prettier --write",
     },
   },
 });

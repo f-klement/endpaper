@@ -120,7 +120,11 @@ export class ZipError extends Error {
  * turned out not to be is the word its reader supplies.
  */
 export type ZipSharedFailure =
-  "damaged" | "protected" | "too-large" | "unsupported" | "no-inflate";
+  | "damaged"
+  | "protected"
+  | "too-large"
+  | "unsupported"
+  | "no-inflate";
 
 /**
  * The answer for every arm but the one a reader has to supply.

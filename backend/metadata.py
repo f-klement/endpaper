@@ -94,6 +94,7 @@ logger = logging.getLogger("endpaper.metadata")
 #: catalogue does.
 Logins = Mapping[CatalogueSource, fetch.Credential]
 
+
 @dataclass(frozen=True, slots=True)
 class Access:
     """What one request may ask of the catalogues, resolved once.
@@ -454,9 +455,7 @@ def _open_library_author_key(entries: object) -> str | None:
     if not isinstance(entries, list) or not entries:
         return None
     first = entries[0]
-    return _open_library_key(
-        first.get("key") if isinstance(first, dict) else None, _OL_AUTHOR_KEY
-    )
+    return _open_library_key(first.get("key") if isinstance(first, dict) else None, _OL_AUTHOR_KEY)
 
 
 def _open_library_description(raw: object) -> str | None:
@@ -480,14 +479,10 @@ def _open_library_work_author_key(work: dict[str, Any]) -> str | None:
         return None
     first = entries[0]
     nested = first.get("author") if isinstance(first, dict) else None
-    return _open_library_key(
-        nested.get("key") if isinstance(nested, dict) else None, _OL_AUTHOR_KEY
-    )
+    return _open_library_key(nested.get("key") if isinstance(nested, dict) else None, _OL_AUTHOR_KEY)
 
 
-async def _open_library_author(
-    client: httpx.AsyncClient, key: str | None
-) -> str | None:
+async def _open_library_author(client: httpx.AsyncClient, key: str | None) -> str | None:
     """One author key resolved to a name, which no other record carries.
 
     **Its own `except`, and that is load bearing rather than defensive.** This
@@ -505,7 +500,7 @@ async def _open_library_author(
         if response.status_code != 200:
             return None
         name = _open_library_object(response).get("name")
-    except (httpx.HTTPError, ValueError):
+    except httpx.HTTPError, ValueError:
         logger.info("Open Library author %s did not answer", key, exc_info=True)
         return None
     return name if isinstance(name, str) else None
@@ -516,14 +511,10 @@ def _open_library_work_key(entries: object) -> str | None:
     if not isinstance(entries, list) or not entries:
         return None
     first = entries[0]
-    return _open_library_key(
-        first.get("key") if isinstance(first, dict) else None, _OL_WORK_KEY
-    )
+    return _open_library_key(first.get("key") if isinstance(first, dict) else None, _OL_WORK_KEY)
 
 
-async def _open_library_work(
-    client: httpx.AsyncClient, key: str | None
-) -> dict[str, Any]:
+async def _open_library_work(client: httpx.AsyncClient, key: str | None) -> dict[str, Any]:
     """The work record, for the subjects the edition record mostly lacks.
 
     Measured over nine live editions on 2026-08-24: the edition carried
@@ -542,7 +533,7 @@ async def _open_library_work(
         if response.status_code != 200:
             return {}
         return _open_library_object(response)
-    except (httpx.HTTPError, ValueError):
+    except httpx.HTTPError, ValueError:
         logger.info("Open Library work %s did not answer", key, exc_info=True)
         return {}
 
@@ -580,15 +571,12 @@ async def _open_library(isbn: str) -> Lookup:
             # The work first, because it is the fallback for the author: an
             # edition record names one on a minority of records and the work
             # behind it almost always does.
-            work = await _open_library_work(
-                client, _open_library_work_key(data.get("works"))
-            )
+            work = await _open_library_work(client, _open_library_work_key(data.get("works")))
             author = await _open_library_author(
                 client,
-                _open_library_author_key(data.get("authors"))
-                or _open_library_work_author_key(work),
+                _open_library_author_key(data.get("authors")) or _open_library_work_author_key(work),
             )
-    except (httpx.HTTPError, ValueError):
+    except httpx.HTTPError, ValueError:
         logger.warning("Open Library lookup failed for %s", isbn, exc_info=True)
         return Lookup(Outcome.UNAVAILABLE, source="open_library")
 
@@ -639,21 +627,17 @@ async def _google_books(isbn: str, api_key: str) -> Lookup:
     except google_books.GoogleBooksError as error:
         # `google_books` raises one exception type for every refusal, so the
         # message is the only thing carrying which one it was.
-        outcome = (
-            Outcome.RATE_LIMITED if "rate limiting" in str(error) else Outcome.UNAVAILABLE
-        )
+        outcome = Outcome.RATE_LIMITED if "rate limiting" in str(error) else Outcome.UNAVAILABLE
         logger.info("Google Books declined %s: %s", isbn, error)
         return Lookup(outcome, source="google_books")
-    except (httpx.HTTPError, ValueError):
+    except httpx.HTTPError, ValueError:
         logger.warning("Google Books lookup failed for %s", isbn, exc_info=True)
         return Lookup(Outcome.UNAVAILABLE, source="google_books")
 
     if fields is None:
         return Lookup(Outcome.NOT_FOUND, source="google_books")
 
-    return Lookup(
-        Outcome.FOUND, source="google_books", record=_google_record(fields, isbn)
-    )
+    return Lookup(Outcome.FOUND, source="google_books", record=_google_record(fields, isbn))
 
 
 async def _google_volume(volume_id: str, api_key: str) -> Lookup:
@@ -674,12 +658,10 @@ async def _google_volume(volume_id: str, api_key: str) -> Lookup:
     try:
         fields = await google_books.lookup_by_volume_id(volume_id, api_key)
     except google_books.GoogleBooksError as error:
-        outcome = (
-            Outcome.RATE_LIMITED if "rate limiting" in str(error) else Outcome.UNAVAILABLE
-        )
+        outcome = Outcome.RATE_LIMITED if "rate limiting" in str(error) else Outcome.UNAVAILABLE
         logger.info("Google Books declined volume %s: %s", volume_id, error)
         return Lookup(outcome, source="google_books")
-    except (httpx.HTTPError, ValueError):
+    except httpx.HTTPError, ValueError:
         logger.warning("Google Books volume lookup failed for %s", volume_id, exc_info=True)
         return Lookup(Outcome.UNAVAILABLE, source="google_books")
 
@@ -693,9 +675,7 @@ async def _google_volume(volume_id: str, api_key: str) -> Lookup:
     return Lookup(Outcome.FOUND, source="google_books", record=_google_record(fields))
 
 
-async def lookup_volume(
-    volume_id: str, api_key: str, *, plan: sources.Plan
-) -> Lookup:
+async def lookup_volume(volume_id: str, api_key: str, *, plan: sources.Plan) -> Lookup:
     """Resolve a Google volume id, if this library asks Google Books at all.
 
     **One source, and that is the difference from `lookup`.** An ISBN is a name
@@ -1020,9 +1000,7 @@ def _dnb_record(
         # writes the same subfield and is deliberately not read for it: see
         # `_k10plus_record`. The ÖNB writes it too and is held to the same
         # rule: see `read_author_identifiers`.
-        author_identifiers=(
-            tuple(fields.author_identifiers()) if read_author_identifiers else ()
-        ),
+        author_identifiers=(tuple(fields.author_identifiers()) if read_author_identifiers else ()),
     )
 
 
@@ -1440,11 +1418,7 @@ def _nkp_records(root: ElementTree.Element) -> list[ElementTree.Element]:
 
 def _nkp_text(record: ElementTree.Element, tag: str) -> list[str]:
     """Every non empty value of one un-namespaced element."""
-    return [
-        element.text.strip()
-        for element in record.findall(tag)
-        if element.text and element.text.strip()
-    ]
+    return [element.text.strip() for element in record.findall(tag) if element.text and element.text.strip()]
 
 
 def _nkp_claims_isbn(record: ElementTree.Element, isbn: str) -> bool:
@@ -1456,9 +1430,7 @@ def _nkp_claims_isbn(record: ElementTree.Element, isbn: str) -> bool:
     plaintext connection is the reason it is here even though this target
     diagnoses a wrong attribute rather than answering with the catalogue.
     """
-    return any(
-        parse_isbn(value) == isbn for value in _nkp_text(record, "identifier")
-    )
+    return any(parse_isbn(value) == isbn for value in _nkp_text(record, "identifier"))
 
 
 #: What this catalogue calls an online resource.
@@ -1488,9 +1460,7 @@ def _nkp_claims_isbn(record: ElementTree.Element, isbn: str) -> bool:
 _NKP_ONLINE: Final = re.compile(r"online\s+zdroj|elektronick\w*\s+zdroj", re.IGNORECASE)
 
 
-def _nkp_record(
-    record: ElementTree.Element, isbn: str, *, source: str
-) -> Record | None:
+def _nkp_record(record: ElementTree.Element, isbn: str, *, source: str) -> Record | None:
     """One bare Dublin Core record as book fields, or None if it is not a book.
 
     **`source` is keyword only and passed in rather than spelled here**, because
@@ -1559,9 +1529,7 @@ def _nkp_record(
     # Two refusals rather than one: the shared rule for the forms every source
     # writes, and this catalogue's own Czech phrasing, which the shared one
     # cannot see. See `_NKP_ONLINE`.
-    if not is_physical_book(extent, title) or (
-        extent is not None and _NKP_ONLINE.search(extent)
-    ):
+    if not is_physical_book(extent, title) or (extent is not None and _NKP_ONLINE.search(extent)):
         return None
 
     contributors = _nkp_text(record, "contributor")
@@ -1914,9 +1882,7 @@ def _nkp_record(
 #: scope. The decoder is already separate inside each: `_open_library_edition`
 #: and `_google_record` take parsed JSON and return a `Record`, and neither
 #: mentions a request. What is missing is only the registry entry for them.
-_FREE_LOOKUPS: Final[
-    dict[decoders.Reader, Callable[[str], Awaitable[Lookup]]]
-] = {
+_FREE_LOOKUPS: Final[dict[decoders.Reader, Callable[[str], Awaitable[Lookup]]]] = {
     decoders.Reader.OPEN_LIBRARY: _open_library,
 }
 
@@ -1929,9 +1895,7 @@ _FREE_LOOKUPS: Final[
 #: `_search_one` read it. **`_METERED_SEARCHES` one screen down still carries
 #: the older word in its name** and is selected on this same fact; the name is
 #: the last of that spelling and is not what anything asks.
-_KEYED_LOOKUPS: Final[
-    dict[decoders.Reader, Callable[[str, str], Awaitable[Lookup]]]
-] = {
+_KEYED_LOOKUPS: Final[dict[decoders.Reader, Callable[[str, str], Awaitable[Lookup]]]] = {
     decoders.Reader.GOOGLE_BOOKS: _google_books,
 }
 
@@ -1947,6 +1911,7 @@ _KEYED_LOOKUPS: Final[
 #: Recorded here rather than in a session note, which is deleted when the wave
 #: ships.
 _GERMAN_PREFIX: Final = "9783"
+
 
 #: Which of the fast pair to believe when both answer and they disagree.
 #:
@@ -2052,7 +2017,7 @@ async def _open_library_search(query: str, limit: int) -> list[Record]:
             logger.info("Open Library search returned %s", response.status_code)
             return []
         payload = response.json()
-    except (httpx.HTTPError, ValueError):
+    except httpx.HTTPError, ValueError:
         logger.warning("Open Library search failed for %r", query, exc_info=True)
         return []
 
@@ -2079,9 +2044,7 @@ async def _open_library_search(query: str, limit: int) -> list[Record]:
                 language=LANGUAGES.get((google_books.strings(doc.get("language")) or [""])[0].lower()),
                 # By Open Library's own cover id, which the search index
                 # carries and which resolves where an ISBN lookup does not.
-                cover_url=(
-                    covers.open_library_id_url(cover_id) if cover_id else None
-                ),
+                cover_url=(covers.open_library_id_url(cover_id) if cover_id else None),
                 isbn=_first_isbn13(google_books.strings(doc.get("isbn"))),
             )
         )
@@ -2277,9 +2240,7 @@ def _bnf_record(record: ElementTree.Element, *, source: str) -> Record | None:
     # Two refusals, the same pair `_nkp_record` makes: the shared rule for the
     # forms every source writes, and this catalogue's own French, which the
     # shared one cannot see. See `_BNF_ONLINE`.
-    if not is_physical_book(extent, title) or (
-        extent is not None and _BNF_ONLINE.search(extent)
-    ):
+    if not is_physical_book(extent, title) or (extent is not None and _BNF_ONLINE.search(extent)):
         return None
 
     # `dc:identifier` holds an ARK URL and sometimes "ISBN 0333532945".
@@ -2356,8 +2317,7 @@ def _bnf_authors(creators: list[str]) -> str | None:
     return credit_line(
         creator
         for creator in creators
-        if not _BNF_ANY_ROLE.search(creator)
-        or any(role in creator.casefold() for role in _BNF_AUTHOR_ROLES)
+        if not _BNF_ANY_ROLE.search(creator) or any(role in creator.casefold() for role in _BNF_AUTHOR_ROLES)
     )
 
 
@@ -2435,19 +2395,13 @@ def _loc_record(record: ElementTree.Element, *, source: str) -> Record | None:
     )
 
     years = [
-        element.text
-        for element in record.findall(f"{_MODS}originInfo/{_MODS}dateIssued")
-        if element.text
+        element.text for element in record.findall(f"{_MODS}originInfo/{_MODS}dateIssued") if element.text
     ]
     year_match = re.search(r"\d{4}", " ".join(years))
 
-    language_element = record.find(
-        f"{_MODS}language/{_MODS}languageTerm"
-    )
+    language_element = record.find(f"{_MODS}language/{_MODS}languageTerm")
     language = (
-        LANGUAGES.get((language_element.text or "").strip().lower())
-        if language_element is not None
-        else None
+        LANGUAGES.get((language_element.text or "").strip().lower()) if language_element is not None else None
     )
 
     return Record(
@@ -2503,9 +2457,7 @@ def _loc_title(record: ElementTree.Element) -> tuple[str, str | None] | None:
 
     subtitle_element = title_info.find(f"{_MODS}subTitle")
     subtitle = (
-        subtitle_element.text.strip()
-        if subtitle_element is not None and subtitle_element.text
-        else None
+        subtitle_element.text.strip() if subtitle_element is not None and subtitle_element.text else None
     )
     return title, subtitle
 
@@ -2519,8 +2471,7 @@ def _loc_authors(record: ElementTree.Element) -> str | None:
     authors: list[str] = []
     for name in record.findall(f"{_MODS}name"):
         roles = " ".join(
-            (role.text or "").strip().casefold()
-            for role in name.findall(f"{_MODS}role/{_MODS}roleTerm")
+            (role.text or "").strip().casefold() for role in name.findall(f"{_MODS}role/{_MODS}roleTerm")
         )
         if roles and "author" not in roles and "creator" not in roles:
             continue
@@ -2534,13 +2485,9 @@ def _loc_publisher(record: ElementTree.Element) -> str | None:
     """A MODS record's publisher, from `originInfo` or, failing that, its agent."""
     publisher_element = record.find(f"{_MODS}originInfo/{_MODS}publisher")
     if publisher_element is None:
-        publisher_element = record.find(
-            f"{_MODS}originInfo/{_MODS}agent/{_MODS}namePart"
-        )
+        publisher_element = record.find(f"{_MODS}originInfo/{_MODS}agent/{_MODS}namePart")
     return (
-        publisher_element.text.strip()
-        if publisher_element is not None and publisher_element.text
-        else None
+        publisher_element.text.strip() if publisher_element is not None and publisher_element.text else None
     )
 
 
@@ -2728,11 +2675,7 @@ def _loc_subject_headings(record: ElementTree.Element) -> list[Heading]:
                 # Nested rather than absent: see the docstring. A name's parts
                 # are joined with a space because the record already writes the
                 # comma, `Süssheim, Karl,` then `1878-1947`.
-                words = [
-                    word
-                    for child in part
-                    for word in (child.text or "").split()
-                ]
+                words = [word for child in part for word in (child.text or "").split()]
             if words:
                 parts.append(" ".join(words))
         if not parts:
@@ -2755,9 +2698,7 @@ def _loc_subject_headings(record: ElementTree.Element) -> list[Heading]:
 # `is_physical_book` and `Fields.isbn` are what sit on our side of it.
 
 
-def _marc_nodes(
-    root: ElementTree.Element, decoding: decoders.Decoding
-) -> list[ElementTree.Element]:
+def _marc_nodes(root: ElementTree.Element, decoding: decoders.Decoding) -> list[ElementTree.Element]:
     """Every MARC record in a response that this decoding wants read.
 
     **An SRU diagnostic needs no branch of its own here**, and it is worth
@@ -2808,9 +2749,7 @@ def _marc_build(
     )
 
 
-def _marc_lookup(
-    root: ElementTree.Element, isbn: str, decoding: decoders.Decoding
-) -> Lookup:
+def _marc_lookup(root: ElementTree.Element, isbn: str, decoding: decoders.Decoding) -> Lookup:
     """The best MARC record in a response for the ISBN that was asked about.
 
     **Two behaviours, and the row picks which.** Everywhere but the DNB a record
@@ -2857,9 +2796,7 @@ def _marc_lookup(
     return Lookup(Outcome.FOUND, source=name, record=ranked[0][1])
 
 
-def _dublin_core_bare_lookup(
-    root: ElementTree.Element, isbn: str, decoding: decoders.Decoding
-) -> Lookup:
+def _dublin_core_bare_lookup(root: ElementTree.Element, isbn: str, decoding: decoders.Decoding) -> Lookup:
     """The best un-namespaced Dublin Core record for the ISBN that was asked about.
 
     The Czech National Library's shape, and the Biblioteca Nacional Argentina's,
@@ -2888,9 +2825,7 @@ def _dublin_core_bare_lookup(
     )
 
 
-def _marc_record(
-    record: ElementTree.Element, decoding: decoders.Decoding
-) -> Record | None:
+def _marc_record(record: ElementTree.Element, decoding: decoders.Decoding) -> Record | None:
     """One MARC record as a `catalogue.Record`, or None for what is not a book.
 
     **The refusals are here and not in the caller**, which is what makes this a
@@ -2912,16 +2847,12 @@ def _marc_record(
     return built
 
 
-def _dublin_core_record(
-    record: ElementTree.Element, decoding: decoders.Decoding
-) -> Record | None:
+def _dublin_core_record(record: ElementTree.Element, decoding: decoders.Decoding) -> Record | None:
     """One namespaced Dublin Core record. The BnF's shape."""
     return _bnf_record(record, source=decoding.source)
 
 
-def _mods_record(
-    record: ElementTree.Element, decoding: decoders.Decoding
-) -> Record | None:
+def _mods_record(record: ElementTree.Element, decoding: decoders.Decoding) -> Record | None:
     """One MODS record. The Library of Congress's shape."""
     return _loc_record(record, source=decoding.source)
 
@@ -2970,39 +2901,26 @@ READERS: Final[
 NOT_DECODERS: Final[dict[decoders.Reader, str]] = {
     decoders.Reader.OPEN_LIBRARY: "answers in JSON, not in XML elements",
     decoders.Reader.GOOGLE_BOOKS: "answers in JSON, not in XML elements",
-    decoders.Reader.DUBLIN_CORE_BARE: (
-        "stamps the ISBN that was asked, which a file has not asked"
-    ),
+    decoders.Reader.DUBLIN_CORE_BARE: ("stamps the ISBN that was asked, which a file has not asked"),
 }
 
 
-def _records(
-    nodes: Iterable[ElementTree.Element], decoding: decoders.Decoding
-) -> list[Record]:
+def _records(nodes: Iterable[ElementTree.Element], decoding: decoders.Decoding) -> list[Record]:
     """Every node a decoder accepted, through `READERS` and never by name.
 
     One dispatch for all three search shapes, so a reader reachable from a
     search is a reader in the published table by construction.
     """
     reader = READERS[decoding.reader]
-    return [
-        record
-        for node in nodes
-        for record in [reader(node, decoding)]
-        if record is not None
-    ]
+    return [record for node in nodes for record in [reader(node, decoding)] if record is not None]
 
 
-def _marc_search(
-    root: ElementTree.Element, decoding: decoders.Decoding
-) -> list[Record]:
+def _marc_search(root: ElementTree.Element, decoding: decoders.Decoding) -> list[Record]:
     """Every book in a MARC response. `_marc_record` is what refuses."""
     return _records(_marc_nodes(root, decoding), decoding)
 
 
-def _dublin_core_search(
-    root: ElementTree.Element, decoding: decoders.Decoding
-) -> list[Record]:
+def _dublin_core_search(root: ElementTree.Element, decoding: decoders.Decoding) -> list[Record]:
     """Every book in a namespaced Dublin Core response. The BnF's shape.
 
     The selector is the format's and not the row's; the decoder the row names
@@ -3035,9 +2953,7 @@ def _parents_of(root: ElementTree.Element, tag: str) -> list[ElementTree.Element
     return list(found)
 
 
-def _mods_search(
-    root: ElementTree.Element, decoding: decoders.Decoding
-) -> list[Record]:
+def _mods_search(root: ElementTree.Element, decoding: decoders.Decoding) -> list[Record]:
     """Every book in a MODS response. The Library of Congress's shape."""
     return _records(root.iter(f"{_MODS}mods"), decoding)
 
@@ -3167,9 +3083,7 @@ def _sru_refusal(root: ElementTree.Element) -> str | None:
     return None
 
 
-async def _sru_lookup(
-    target: targets.Target, isbn: str, credential: fetch.Credential | None
-) -> Lookup:
+async def _sru_lookup(target: targets.Target, isbn: str, credential: fetch.Credential | None) -> Lookup:
     """One ISBN lookup against an SRU target.
 
     **`credential` is offered to the request and attached by nothing else.**
@@ -3186,9 +3100,7 @@ async def _sru_lookup(
     name = target.source.value
     try:
         params = target.sru_params(target.isbn_query(isbn), target.lookup_records)
-        response = await fetch.get_once(
-            target.base_url, params=params, credential=credential
-        )
+        response = await fetch.get_once(target.base_url, params=params, credential=credential)
         if response.status_code == 429:
             return Lookup(Outcome.RATE_LIMITED, source=name)
         if response.status_code != 200:
@@ -3233,19 +3145,13 @@ async def _sru_search(
     if not terms:
         return []
     try:
-        params = target.sru_params(
-            target.title_query(terms), target.search_records(limit)
-        )
-        response = await fetch.get_once(
-            target.base_url, params=params, credential=credential
-        )
+        params = target.sru_params(target.title_query(terms), target.search_records(limit))
+        response = await fetch.get_once(target.base_url, params=params, credential=credential)
         if response.status_code != 200:
             return []
         root = _parsed(response.text)
-    except (httpx.HTTPError, ElementTree.ParseError, targets.BadQuery):
-        logger.warning(
-            "%s search failed for %r", target.source.value, query, exc_info=True
-        )
+    except httpx.HTTPError, ElementTree.ParseError, targets.BadQuery:
+        logger.warning("%s search failed for %r", target.source.value, query, exc_info=True)
         return []
     return _SEARCH_READERS[target.reader](root, target.decoding)
 
@@ -3293,9 +3199,7 @@ def resolve(target: targets.Target) -> None:
         # unauthenticated and came back as an ordinary miss. Written into the
         # lookup arm alone it would have missed a row whose only door is the
         # search door.
-        raise ValueError(
-            f"{target.source}: needs a credential and no bespoke door carries one"
-        )
+        raise ValueError(f"{target.source}: needs a credential and no bespoke door carries one")
     if target.can(Capability.ANSWERS_ISBN):
         lookup_readers: Collection[decoders.Reader]
         if target.transport is targets.Transport.SRU:
@@ -3305,9 +3209,7 @@ def resolve(target: targets.Target) -> None:
         else:
             lookup_readers = _FREE_LOOKUPS.keys()
         if target.reader not in lookup_readers:
-            raise ValueError(
-                f"{target.source}: answers a lookup and {target.reader} reads none"
-            )
+            raise ValueError(f"{target.source}: answers a lookup and {target.reader} reads none")
     if target.can(Capability.ANSWERS_TITLE_SEARCH):
         readers: Collection[decoders.Reader]
         if target.transport is targets.Transport.SRU:
@@ -3324,9 +3226,7 @@ def resolve(target: targets.Target) -> None:
         else:
             readers = _FREE_SEARCHES.keys()
         if target.reader not in readers:
-            raise ValueError(
-                f"{target.source}: answers a search and {target.reader} reads none"
-            )
+            raise ValueError(f"{target.source}: answers a search and {target.reader} reads none")
 
 
 def carries_a_credential(target: targets.Target) -> bool:
@@ -3515,9 +3415,7 @@ def _matches_any(term: str, words: set[str]) -> bool:
     budget = _edit_budget(term)
     if not budget:
         return False
-    return any(
-        Levenshtein.distance(term, word, score_cutoff=budget) <= budget for word in words
-    )
+    return any(Levenshtein.distance(term, word, score_cutoff=budget) <= budget for word in words)
 
 
 #: What one query term matching is worth. Title and author score the **same**,
@@ -3561,9 +3459,7 @@ _LANGUAGE_WEIGHT: Final = 3
 #: a wrong default in place the day one does, which is the same reasoning
 #: `_MATCH_PRECEDENCE` records for the same three. A reader meeting this line
 #: should not conclude that any of them appears in search results.
-_SECONDARY_SOURCES: Final = frozenset(
-    {"bnf", "loc", "oenb", "nlg", "nkp", "bne", "bna"}
-)
+_SECONDARY_SOURCES: Final = frozenset({"bnf", "loc", "oenb", "nlg", "nkp", "bne", "bna"})
 _SECONDARY_PENALTY: Final = 1
 
 #: Fields that make a search row pickable rather than a stub. Scored
@@ -3624,9 +3520,7 @@ _PICKABLE_FIELDS: Final = (
 )
 
 
-def _relevance(
-    match: Record, terms: list[str], prefer_language: str | None
-) -> tuple[int, int, int]:
+def _relevance(match: Record, terms: list[str], prefer_language: str | None) -> tuple[int, int, int]:
     """How well one result answers the query, most significant part first.
 
     A tuple rather than a number, and that is the point: the parts are ranked
@@ -3693,9 +3587,7 @@ def _relevance(
     return (score, pickable, match.year or 0)
 
 
-def _ranked(
-    matches: list[Record], terms: list[str], prefer_language: str | None
-) -> list[Record]:
+def _ranked(matches: list[Record], terms: list[str], prefer_language: str | None) -> list[Record]:
     """Every match, best answer first. The ordering a search actually returns.
 
     **A function rather than the `sorted` that was written at its one call
@@ -3705,9 +3597,7 @@ def _ranked(
     green. The fixtures call this, so the ordering under test is the ordering
     that ships.
     """
-    return sorted(
-        matches, key=lambda match: _relevance(match, terms, prefer_language), reverse=True
-    )
+    return sorted(matches, key=lambda match: _relevance(match, terms, prefer_language), reverse=True)
 
 
 @dataclass(frozen=True)
@@ -3931,9 +3821,7 @@ async def title_search(
 #: step with the roster used to read the fan out with `ast`, as a list literal
 #: handed to `_within_deadline`, and it broke the moment the fan out stopped
 #: being a literal. A table a test can import cannot go stale that way.
-_FREE_SEARCHES: Final[
-    dict[decoders.Reader, Callable[[str, int], Coroutine[Any, Any, list[Record]]]]
-] = {
+_FREE_SEARCHES: Final[dict[decoders.Reader, Callable[[str, int], Coroutine[Any, Any, list[Record]]]]] = {
     decoders.Reader.OPEN_LIBRARY: _open_library_search,
 }
 
@@ -3957,7 +3845,7 @@ async def _google_search(query: str, limit: int, api_key: str) -> list[Record]:
         return []
     try:
         found = await google_books.search(query, api_key, limit=limit)
-    except (google_books.GoogleBooksError, httpx.HTTPError, ValueError):
+    except google_books.GoogleBooksError, httpx.HTTPError, ValueError:
         logger.info("Google Books search unavailable for %r", query, exc_info=True)
         return []
     return [_google_record(item) for item in found]
@@ -4274,9 +4162,7 @@ _OPEN_LIBRARY_EDITIONS: Final = 20
 _OPEN_LIBRARY_AUTHOR_LOOKUPS: Final = 3
 
 
-async def _open_library_author_names(
-    client: httpx.AsyncClient, entries: list[Any]
-) -> dict[str, str]:
+async def _open_library_author_names(client: httpx.AsyncClient, entries: list[Any]) -> dict[str, str]:
     """Author key to name, for the whole cluster, in at most three requests."""
     keys: list[str] = []
     for entry in entries:
@@ -4297,9 +4183,7 @@ async def _open_library_author_names(
         return key, found if isinstance(found, str) else None
 
     names: dict[str, str] = {}
-    for result in await asyncio.gather(
-        *(_name(key) for key in wanted), return_exceptions=True
-    ):
+    for result in await asyncio.gather(*(_name(key) for key in wanted), return_exceptions=True):
         # One author record failing costs that author's name, not the cluster.
         if isinstance(result, BaseException):
             continue
@@ -4317,16 +4201,11 @@ def _open_library_edition(entry: dict[str, Any], names: dict[str, str]) -> Recor
     carrying its own copy of any of them.
     """
     identifiers = [
-        value
-        for key in ("isbn_13", "isbn_10")
-        for value in (entry.get(key) or [])
-        if isinstance(value, str)
+        value for key in ("isbn_13", "isbn_10") for value in (entry.get(key) or []) if isinstance(value, str)
     ]
     isbn13 = _first_isbn13(identifiers)
     cover_ids = entry.get("covers")
-    cover_id = (
-        cover_ids[0] if isinstance(cover_ids, list) and cover_ids else None
-    )
+    cover_id = cover_ids[0] if isinstance(cover_ids, list) and cover_ids else None
     author_key = _open_library_author_key(entry.get("authors"))
     publishers = entry.get("publishers")
     title = entry.get("title")
@@ -4336,9 +4215,7 @@ def _open_library_edition(entry: dict[str, Any], names: dict[str, str]) -> Recor
         title=title if isinstance(title, str) else None,
         subtitle=entry.get("subtitle"),
         author=names.get(author_key) if author_key else None,
-        publisher=(
-            publishers[0] if isinstance(publishers, list) and publishers else None
-        ),
+        publisher=(publishers[0] if isinstance(publishers, list) and publishers else None),
         year=_open_library_year(entry.get("publish_date")),
         description=_open_library_description(entry.get("description")),
         page_count=_open_library_pages(entry.get("number_of_pages")),
@@ -4452,19 +4329,13 @@ async def editions(
             if not isinstance(entries, list):
                 return []
             names = await _open_library_author_names(client, entries)
-    except (httpx.HTTPError, ValueError):
+    except httpx.HTTPError, ValueError:
         logger.warning("Open Library editions failed for %s", isbn, exc_info=True)
         return []
 
-    records = [
-        _open_library_edition(entry, names)
-        for entry in entries
-        if isinstance(entry, dict)
-    ]
+    records = [_open_library_edition(entry, names) for entry in entries if isinstance(entry, dict)]
     if prefer_language:
-        records = [
-            record for record in records if record.language in (prefer_language, None)
-        ]
+        records = [record for record in records if record.language in (prefer_language, None)]
     records.sort(
         key=lambda record: (
             # First, not a tiebreak. A printing that says it is the wanted
@@ -4684,9 +4555,7 @@ async def lookup(raw_isbn: str, *, access: Access) -> Lookup:
             for name in together
         )
     )
-    attempts.extend(
-        (name, result.outcome) for name, result in zip(together, fast, strict=True)
-    )
+    attempts.extend((name, result.outcome) for name, result in zip(together, fast, strict=True))
 
     hits = [result.record for result in fast if result.found and result.record]
     if hits:
@@ -4700,9 +4569,7 @@ async def lookup(raw_isbn: str, *, access: Access) -> Lookup:
         # `merged.source` rather than a second join of the same names: folding
         # two records already names both catalogues, and it is the same string
         # the search path builds and the one the cache and the log carry.
-        found = Lookup(
-            Outcome.FOUND, record=merged, source=merged.source, attempts=attempts
-        )
+        found = Lookup(Outcome.FOUND, record=merged, source=merged.source, attempts=attempts)
         async with _cache_lock:
             _remember(isbn, found)
         logger.info("Resolved %s from %s", isbn, merged.source)
@@ -4726,12 +4593,8 @@ async def lookup(raw_isbn: str, *, access: Access) -> Lookup:
             # carries a thumbnail from the volume record. Both are checked
             # here too: an Open Library edition record does not guarantee the
             # cover service has an image for it.
-            record = result.record.with_cover(
-                await covers.resolve(isbn, result.record.cover_url)
-            )
-            found = Lookup(
-                Outcome.FOUND, record=record, source=name, attempts=attempts
-            )
+            record = result.record.with_cover(await covers.resolve(isbn, result.record.cover_url))
+            found = Lookup(Outcome.FOUND, record=record, source=name, attempts=attempts)
             async with _cache_lock:
                 _remember(isbn, found)
             logger.info("Resolved %s from %s", isbn, name)

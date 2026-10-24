@@ -51,9 +51,7 @@ class TestMemberOr:
     def test_the_default_is_the_callers_and_is_not_always_none(self) -> None:
         assert member_or(Colour, "green", Colour.BLUE) is Colour.BLUE
 
-    def test_a_missing_value_takes_the_default_without_complaining(
-        self, caplog
-    ) -> None:
+    def test_a_missing_value_takes_the_default_without_complaining(self, caplog) -> None:
         """NULL is the column saying nobody answered, which is not a stray
         value and is not worth a line in a log."""
         with caplog.at_level(logging.WARNING, logger="endpaper.enums"):
@@ -71,9 +69,7 @@ class TestMemberOr:
         assert len(caplog.records) == 1
         assert "puce" in caplog.records[0].getMessage()
 
-    def test_the_context_names_the_row_when_the_caller_knows_it(
-        self, caplog
-    ) -> None:
+    def test_the_context_names_the_row_when_the_caller_knows_it(self, caplog) -> None:
         """A column type reading a value does not know which row it came out
         of. `custom_fields._kind_of` does, and that is the difference the
         keyword exists for."""
@@ -82,9 +78,7 @@ class TestMemberOr:
 
         assert "field 3" in caplog.records[0].getMessage()
 
-    @pytest.mark.parametrize(
-        "enum", [BookFormat, BookCondition, LendingWillingness, CustomFieldKind]
-    )
+    @pytest.mark.parametrize("enum", [BookFormat, BookCondition, LendingWillingness, CustomFieldKind])
     def test_every_member_of_a_real_enum_survives_a_round_trip(self, enum) -> None:
         """The rule is only safe if it is inert on good data. A degrade that
         also rewrote a valid value would be invisible in exactly the same way,

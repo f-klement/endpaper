@@ -77,9 +77,7 @@ class TestEditingDetails:
         book = make_book(admin["headers"])
         assert patch_details(client, admin["headers"], book["id"], title="").status_code == 422
 
-    def test_another_members_private_book_is_not_editable(
-        self, client, admin, member, make_book
-    ):
+    def test_another_members_private_book_is_not_editable(self, client, admin, member, make_book):
         book = make_book(admin["headers"], is_private=True)
         res = patch_details(client, member["headers"], book["id"], location="Mine now")
         assert res.status_code == 404
@@ -123,9 +121,7 @@ class TestSeriesListing:
 
         assert series["missing_indexes"] == []
 
-    def test_a_series_starting_at_two_reports_the_first_as_missing(
-        self, client, admin, make_book
-    ):
+    def test_a_series_starting_at_two_reports_the_first_as_missing(self, client, admin, make_book):
         make_series(client, admin["headers"], make_book, "Dune", [2, 3])
 
         [series] = client.get("/api/books/series", headers=admin["headers"]).json()
@@ -140,9 +136,7 @@ class TestSeriesListing:
 
         assert series["missing_indexes"] == []
 
-    def test_a_series_with_no_numbers_at_all_reports_none_missing(
-        self, client, admin, make_book
-    ):
+    def test_a_series_with_no_numbers_at_all_reports_none_missing(self, client, admin, make_book):
         book = make_book(admin["headers"])
         patch_details(client, admin["headers"], book["id"], series_name="Unnumbered")
 
@@ -155,9 +149,7 @@ class TestSeriesListing:
         make_book(admin["headers"], title="Standalone")
         assert client.get("/api/books/series", headers=admin["headers"]).json() == []
 
-    def test_another_members_private_book_is_not_counted(
-        self, client, admin, member, make_book
-    ):
+    def test_another_members_private_book_is_not_counted(self, client, admin, member, make_book):
         private = make_book(admin["headers"], is_private=True)
         patch_details(client, admin["headers"], private["id"], series_name="Dune", series_index=1)
 
@@ -231,9 +223,7 @@ class TestLocations:
 
         assert [b["title"] for b in res.json()["items"]] == ["Here"]
 
-    def test_another_members_private_book_is_not_counted(
-        self, client, admin, member, make_book
-    ):
+    def test_another_members_private_book_is_not_counted(self, client, admin, member, make_book):
         private = make_book(admin["headers"], is_private=True)
         patch_details(client, admin["headers"], private["id"], location="Loft")
 
@@ -281,9 +271,7 @@ class TestOneRowCannotCostEveryMemberTheRequest:
         book.series_index = index
         db.commit()
 
-    def test_an_index_past_the_ceiling_does_not_enumerate_up_to_it(
-        self, client, admin, make_book, db
-    ):
+    def test_an_index_past_the_ceiling_does_not_enumerate_up_to_it(self, client, admin, make_book, db):
         from models import MAX_SERIES_INDEX
 
         book = make_book(admin["headers"], title="Restored")
@@ -295,9 +283,7 @@ class TestOneRowCannotCostEveryMemberTheRequest:
         row = next(r for r in res.json() if r["name"] == "Restored")
         assert len(row["missing_indexes"]) == MAX_SERIES_INDEX
 
-    def test_the_gaps_below_the_ceiling_are_still_reported(
-        self, client, admin, make_book, db
-    ):
+    def test_the_gaps_below_the_ceiling_are_still_reported(self, client, admin, make_book, db):
         """Truncated, not discarded, and the ceiling is exactly where it says.
 
         The last assertion is what pins the value of the cap, and it is here
@@ -332,9 +318,7 @@ class TestABlankIsStoredAsNull:
     """Over HTTP, the two doors the scan form and the editor use. The rule and
     its other arms are in `tests/schemas/test_book.py`."""
 
-    def test_a_cleared_box_on_the_edit_form_clears_the_column(
-        self, client, admin, make_book
-    ):
+    def test_a_cleared_box_on_the_edit_form_clears_the_column(self, client, admin, make_book):
         book = make_book(admin["headers"], author="Frank Herbert")
 
         res = patch_details(client, admin["headers"], book["id"], author="")

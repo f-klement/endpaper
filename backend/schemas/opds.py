@@ -52,9 +52,7 @@ class OpdsServerIn(BaseModel):
     #: 422. Measured through the route.
     name: Annotated[
         str,
-        StringConstraints(
-            strip_whitespace=True, min_length=1, max_length=SERVER_NAME_MAX
-        ),
+        StringConstraints(strip_whitespace=True, min_length=1, max_length=SERVER_NAME_MAX),
     ]
     base_url: Annotated[
         str,

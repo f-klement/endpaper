@@ -92,6 +92,7 @@ _SENDER_BOOL: Final[dict[str, SettingKey]] = {
     "overdue_in_app_enabled": SettingKey.OVERDUE_IN_APP_ENABLED,
 }
 
+
 def _store(db: DbSession, key: SettingKey, value: str | dict[str, Any]) -> None:
     """Write one settings row, and drop the health record it invalidates.
 
@@ -172,9 +173,7 @@ async def set_login_image(
 # ── Runtime settings ──────────────────────────────────────────────────────────
 
 
-def _credential_view(
-    db: DbSession, source: CatalogueSource, state: credentials.KeyState
-) -> dict[str, Any]:
+def _credential_view(db: DbSession, source: CatalogueSource, state: credentials.KeyState) -> dict[str, Any]:
     """The credential fields on one roster row, and no secret among them.
 
     **Built here rather than in `sources.describe`**, which is where the other
@@ -225,13 +224,9 @@ def _read_settings(db: DbSession) -> SettingsOut:
         google_books_api_key_preview=settings_store.mask(key),
         has_google_books_api_key=bool(key),
         google_books_api_key_from_env=bool(from_env),
-        goodreads_lookup_enabled=settings_store.get_bool(
-            db, SettingKey.GOODREADS_LOOKUP_ENABLED
-        ),
+        goodreads_lookup_enabled=settings_store.get_bool(db, SettingKey.GOODREADS_LOOKUP_ENABLED),
         default_locale=settings_store.get_locale(db, SettingKey.DEFAULT_LOCALE),
-        overdue_webhook_enabled=settings_store.get_bool(
-            db, SettingKey.OVERDUE_WEBHOOK_ENABLED
-        ),
+        overdue_webhook_enabled=settings_store.get_bool(db, SettingKey.OVERDUE_WEBHOOK_ENABLED),
         # In full, unlike the secret below it. A destination an admin cannot
         # read back is a destination nobody can proofread, and spotting a wrong
         # one is what the field is for.
@@ -256,30 +251,20 @@ def _read_settings(db: DbSession) -> SettingsOut:
         mail_use_ssl=settings_store.bool_in_force(db, SettingKey.MAIL_USE_SSL),
         mail_default_sender=settings_store.in_force(db, SettingKey.MAIL_DEFAULT_SENDER),
         mail_from_env=[
-            pinned.value
-            for pinned in settings_store.MAIL_KEYS
-            if settings_store.is_from_env(pinned)
+            pinned.value for pinned in settings_store.MAIL_KEYS if settings_store.is_from_env(pinned)
         ],
-        overdue_telegram_enabled=settings_store.get_bool(
-            db, SettingKey.OVERDUE_TELEGRAM_ENABLED
-        ),
+        overdue_telegram_enabled=settings_store.get_bool(db, SettingKey.OVERDUE_TELEGRAM_ENABLED),
         telegram_bot_token_preview=settings_store.mask(telegram_token),
         has_telegram_bot_token=bool(telegram_token),
-        telegram_bot_token_from_env=settings_store.is_from_env(
-            SettingKey.TELEGRAM_BOT_TOKEN
-        ),
+        telegram_bot_token_from_env=settings_store.is_from_env(SettingKey.TELEGRAM_BOT_TOKEN),
         telegram_chat_id=settings_store.in_force(db, SettingKey.TELEGRAM_CHAT_ID),
         telegram_chat_id_from_env=settings_store.is_from_env(SettingKey.TELEGRAM_CHAT_ID),
-        overdue_in_app_enabled=settings_store.get_bool(
-            db, SettingKey.OVERDUE_IN_APP_ENABLED
-        ),
+        overdue_in_app_enabled=settings_store.get_bool(db, SettingKey.OVERDUE_IN_APP_ENABLED),
         # The two switches as stored, so the form shows what an admin typed,
         # plus the conjunction that decides whether anything is actually
         # served. See `SettingsOut` for why the screen needs all three.
         library_mode=settings_store.get_bool(db, SettingKey.LIBRARY_MODE),
-        public_catalogue_enabled=settings_store.get_bool(
-            db, SettingKey.PUBLIC_CATALOGUE_ENABLED
-        ),
+        public_catalogue_enabled=settings_store.get_bool(db, SettingKey.PUBLIC_CATALOGUE_ENABLED),
         public_catalogue_indexing_enabled=settings_store.get_bool(
             db, SettingKey.PUBLIC_CATALOGUE_INDEXING_ENABLED
         ),
@@ -290,9 +275,7 @@ def _read_settings(db: DbSession) -> SettingsOut:
         # would be one they cannot use, since they would switch it on and watch
         # it come back off. `ready` beside it is what says it cannot answer yet.
         catalogue_sources=[
-            CatalogueSourceOut(
-                **vars(described), **_credential_view(db, described.source, encryption_key)
-            )
+            CatalogueSourceOut(**vars(described), **_credential_view(db, described.source, encryption_key))
             for described in sources.describe(
                 settings_store.stored_catalogue_sources(db),
                 ready=settings_store.ready_sources(db),
@@ -317,9 +300,7 @@ def get_feature_flags(db: DbSession) -> FeatureFlagsOut:
         # The conjunction alone. The raw toggle is admin-only on purpose: see
         # `FeatureFlagsOut.google_books_ready`.
         google_books_ready=google_books_enabled and has_key,
-        goodreads_lookup_enabled=settings_store.get_bool(
-            db, SettingKey.GOODREADS_LOOKUP_ENABLED
-        ),
+        goodreads_lookup_enabled=settings_store.get_bool(db, SettingKey.GOODREADS_LOOKUP_ENABLED),
         default_locale=settings_store.get_locale(db, SettingKey.DEFAULT_LOCALE),
         # The raw row here, because every MARC route gates on the raw row and a
         # client reading this has to get the answer they give. The field below
@@ -393,9 +374,7 @@ def update_settings(
                 ),
             )
         # An empty string is a deliberate clear; None never reaches here.
-        _store(
-            db, SettingKey.GOOGLE_BOOKS_API_KEY, payload.google_books_api_key.strip()
-        )
+        _store(db, SettingKey.GOOGLE_BOOKS_API_KEY, payload.google_books_api_key.strip())
 
     if payload.goodreads_lookup_enabled is not None:
         _store(
@@ -422,16 +401,12 @@ def update_settings(
 
     if payload.overdue_webhook_secret is not None:
         # An empty string is a deliberate clear, like the Google key.
-        _store(
-            db, SettingKey.OVERDUE_WEBHOOK_SECRET, payload.overdue_webhook_secret.strip()
-        )
+        _store(db, SettingKey.OVERDUE_WEBHOOK_SECRET, payload.overdue_webhook_secret.strip())
 
     if payload.overdue_reminder_days is not None:
         # Not a channel's configuration: it says how often a loan is chased, so
         # `sender_for` answers None and no health record is dropped.
-        _store(
-            db, SettingKey.OVERDUE_REMINDER_DAYS, str(payload.overdue_reminder_days)
-        )
+        _store(db, SettingKey.OVERDUE_REMINDER_DAYS, str(payload.overdue_reminder_days))
 
     for field, key in _SENDER_TEXT.items():
         value = getattr(payload, field)
@@ -451,10 +426,7 @@ def update_settings(
             SettingKey.CATALOGUE_SOURCES,
             sources.serialise(
                 sources.from_wire(
-                    [
-                        sources.Preference(entry.source, entry.enabled)
-                        for entry in payload.catalogue_sources
-                    ],
+                    [sources.Preference(entry.source, entry.enabled) for entry in payload.catalogue_sources],
                     settings_store.stored_catalogue_sources(db),
                 )
             ),

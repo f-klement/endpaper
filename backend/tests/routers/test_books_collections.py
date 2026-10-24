@@ -55,9 +55,7 @@ class TestFilingABook:
         assert res.json()["collection_id"] is None
         assert res.json()["collection_name"] is None
 
-    def test_an_id_too_big_for_the_database_is_refused_not_a_500(
-        self, client, admin, make_book
-    ):
+    def test_an_id_too_big_for_the_database_is_refused_not_a_500(self, client, admin, make_book):
         book = make_book(admin["headers"], title="Dune")
 
         res = client.patch(
@@ -93,23 +91,16 @@ class TestFilingABook:
         """Two copies are two objects, and which shelf each is on is per object."""
         shelf = make_collection(client, admin["headers"], "Ebooks")
         book = make_book(admin["headers"], title="Dune", isbn="9780441013593")
-        copy = client.post(
-            f"/api/books/{book['id']}/copies", json={}, headers=admin["headers"]
-        ).json()
+        copy = client.post(f"/api/books/{book['id']}/copies", json={}, headers=admin["headers"]).json()
 
         file_book(client, admin["headers"], copy["id"], shelf["id"])
 
         assert copy["collection_id"] is None
         assert (
-            client.get(f"/api/books/{book['id']}", headers=admin["headers"]).json()[
-                "collection_id"
-            ]
-            is None
+            client.get(f"/api/books/{book['id']}", headers=admin["headers"]).json()["collection_id"] is None
         )
         assert (
-            client.get(f"/api/books/{copy['id']}", headers=admin["headers"]).json()[
-                "collection_id"
-            ]
+            client.get(f"/api/books/{copy['id']}", headers=admin["headers"]).json()["collection_id"]
             == shelf["id"]
         )
 
@@ -117,17 +108,10 @@ class TestFilingABook:
         """It answers "how many do we own", not "how many are on this screen"."""
         shelf = make_collection(client, admin["headers"], "Ebooks")
         book = make_book(admin["headers"], title="Dune", isbn="9780441013593")
-        copy = client.post(
-            f"/api/books/{book['id']}/copies", json={}, headers=admin["headers"]
-        ).json()
+        copy = client.post(f"/api/books/{book['id']}/copies", json={}, headers=admin["headers"]).json()
         file_book(client, admin["headers"], copy["id"], shelf["id"])
 
-        assert (
-            client.get(f"/api/books/{copy['id']}", headers=admin["headers"]).json()[
-                "copy_count"
-            ]
-            == 2
-        )
+        assert client.get(f"/api/books/{copy['id']}", headers=admin["headers"]).json()["copy_count"] == 2
 
 
 class TestFilingAtCreation:
@@ -165,9 +149,7 @@ class TestFilingAtCreation:
     def test_a_copy_can_be_added_into_a_different_one(self, client, admin, make_book):
         physical = make_collection(client, admin["headers"], "Physical")
         digital = make_collection(client, admin["headers"], "Ebooks")
-        book = make_book(
-            admin["headers"], title="Dune", isbn="9780441013593", collection_id=physical["id"]
-        )
+        book = make_book(admin["headers"], title="Dune", isbn="9780441013593", collection_id=physical["id"])
 
         copy = client.post(
             f"/api/books/{book['id']}/copies",
@@ -182,13 +164,9 @@ class TestFilingAtCreation:
         is on is a fact about the object, and the answer for a new one is not
         known."""
         shelf = make_collection(client, admin["headers"], "Physical")
-        book = make_book(
-            admin["headers"], title="Dune", isbn="9780441013593", collection_id=shelf["id"]
-        )
+        book = make_book(admin["headers"], title="Dune", isbn="9780441013593", collection_id=shelf["id"])
 
-        copy = client.post(
-            f"/api/books/{book['id']}/copies", json={}, headers=admin["headers"]
-        ).json()
+        copy = client.post(f"/api/books/{book['id']}/copies", json={}, headers=admin["headers"]).json()
 
         assert copy["collection_id"] is None
 
@@ -237,9 +215,7 @@ class TestFilteringTheLibrary:
 
         assert listed(client, admin["headers"], collection_id=999) == []
 
-    def test_an_id_too_big_for_the_database_is_refused_not_a_500(
-        self, client, admin, make_book
-    ):
+    def test_an_id_too_big_for_the_database_is_refused_not_a_500(self, client, admin, make_book):
         """A Python int has no ceiling and SQLite's does. Unbounded, this
         reached the driver and raised `OverflowError` from inside the query,
         which the unhandled-exception handler answers 500 to: the app calling
@@ -301,9 +277,7 @@ class TestAShelfOnlyYourOwnPrivateBooksAreOnStaysWritable:
         return shelf
 
     def test_the_assign_door_still_takes_it(self, client, member, make_book):
-        shelf = self._shelf_holding_only_my_private_book(
-            client, member["headers"], make_book
-        )
+        shelf = self._shelf_holding_only_my_private_book(client, member["headers"], make_book)
         book = make_book(member["headers"], title="Dune")
 
         res = file_book(client, member["headers"], book["id"], shelf["id"])
@@ -312,9 +286,7 @@ class TestAShelfOnlyYourOwnPrivateBooksAreOnStaysWritable:
         assert res.json()["collection_name"] == "Divorce paperwork"
 
     def test_the_create_door_still_takes_it(self, client, member, make_book):
-        shelf = self._shelf_holding_only_my_private_book(
-            client, member["headers"], make_book
-        )
+        shelf = self._shelf_holding_only_my_private_book(client, member["headers"], make_book)
 
         res = client.post(
             "/api/books",
@@ -326,9 +298,7 @@ class TestAShelfOnlyYourOwnPrivateBooksAreOnStaysWritable:
         assert res.json()["collection_id"] == shelf["id"]
 
     def test_the_bulk_door_still_takes_it(self, client, member, make_book):
-        shelf = self._shelf_holding_only_my_private_book(
-            client, member["headers"], make_book
-        )
+        shelf = self._shelf_holding_only_my_private_book(client, member["headers"], make_book)
         book = make_book(member["headers"], title="Dune")
 
         res = client.post(
@@ -345,9 +315,7 @@ class TestAShelfOnlyYourOwnPrivateBooksAreOnStaysWritable:
         assert res.json()["updated"] == 1
 
     def test_the_copy_door_still_takes_it(self, client, member, make_book):
-        shelf = self._shelf_holding_only_my_private_book(
-            client, member["headers"], make_book
-        )
+        shelf = self._shelf_holding_only_my_private_book(client, member["headers"], make_book)
         book = make_book(member["headers"], title="Dune", isbn="9780441013593")
 
         res = client.post(
@@ -419,9 +387,7 @@ class TestTheBulkVerb:
         assert res.status_code == 400
         assert listed(client, admin["headers"], unfiled=True) == ["Dune"]
 
-    def test_an_id_too_big_for_the_database_is_refused_not_a_500(
-        self, client, admin, make_book
-    ):
+    def test_an_id_too_big_for_the_database_is_refused_not_a_500(self, client, admin, make_book):
         """`BulkRequest.value` is deliberately loose, so this path validates
         nothing before the id reaches `db.get`. Past SQLite's INTEGER that is an
         `OverflowError` and a 500."""
@@ -464,9 +430,7 @@ class TestTheBulkVerb:
 
 
 class TestMerging:
-    def test_the_survivor_inherits_a_collection_it_did_not_have(
-        self, client, admin, make_book
-    ):
+    def test_the_survivor_inherits_a_collection_it_did_not_have(self, client, admin, make_book):
         """Same rule as `location`: a merge fills the keeper's gaps."""
         shelf = make_collection(client, admin["headers"], "Ebooks")
         keeper = make_book(admin["headers"], title="Dune")
@@ -600,9 +564,7 @@ class TestAGuessedIdIsNoLongerAnOracle:
             ),
         }
 
-    def test_the_library_filter_stays_the_one_door_that_is_not_a_gate(
-        self, client, admin, member, make_book
-    ):
+    def test_the_library_filter_stays_the_one_door_that_is_not_a_gate(self, client, admin, member, make_book):
         """`?collection_id=` validates nothing and must go on validating nothing.
 
         An unknown id and a real one holding only books the caller cannot see
@@ -616,19 +578,13 @@ class TestAGuessedIdIsNoLongerAnOracle:
         file_book(client, admin["headers"], secret["id"], hidden["id"])
         unused = hidden["id"] + 1000
 
-        withheld = client.get(
-            "/api/books", params={"collection_id": hidden["id"]}, headers=member["headers"]
-        )
-        absent = client.get(
-            "/api/books", params={"collection_id": unused}, headers=member["headers"]
-        )
+        withheld = client.get("/api/books", params={"collection_id": hidden["id"]}, headers=member["headers"])
+        absent = client.get("/api/books", params={"collection_id": unused}, headers=member["headers"])
 
         assert (withheld.status_code, withheld.json()["total"]) == (200, 0)
         assert (withheld.status_code, withheld.text) == (absent.status_code, absent.text)
 
-    def test_a_hidden_collection_answers_exactly_as_an_unused_id(
-        self, client, admin, member, make_book
-    ):
+    def test_a_hidden_collection_answers_exactly_as_an_unused_id(self, client, admin, member, make_book):
         hidden = make_collection(client, admin["headers"], "Divorce paperwork")
         secret = make_book(admin["headers"], title="Secret", is_private=True)
         file_book(client, admin["headers"], secret["id"], hidden["id"])
@@ -656,9 +612,7 @@ class TestAGuessedIdIsNoLongerAnOracle:
         allowed = self._doors(client, member["headers"], mine["id"], visible["id"])
         absent = self._doors(client, member["headers"], mine["id"], unused)
 
-        assert [res.status_code for res in allowed.values()] != [
-            res.status_code for res in absent.values()
-        ]
+        assert [res.status_code for res in allowed.values()] != [res.status_code for res in absent.values()]
         assert all(res.status_code < 400 for res in allowed.values()), {
             name: (res.status_code, res.text) for name, res in allowed.items()
         }

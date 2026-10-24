@@ -46,6 +46,10 @@ from enums import Capability, CatalogueSource, SourceFamily
 from tests.corpus import BACKEND, shipped_modules
 from tests.strategies import Node, answer_of, field_values, marc_records, witness, xml_of
 
+TREE_GUARDS = {
+    "TestOnlyTheProjectionTurnsARowIntoADecoding": ("shipped_modules",),
+}
+
 FIXTURE = BACKEND / "tests" / "fixtures" / "marc21_one_record.xml"
 
 #: The ISBN the fixture record names in its own 020.
@@ -112,9 +116,7 @@ class TestADecoderWorksOnAFile:
         specifies and nothing else: a parsed record and a `Decoding` in, a
         `catalogue.Record` or `None` out.
         """
-        decoding = decoders.Decoding(
-            source="a folder of files", reader=decoders.Reader.MARC_GND
-        )
+        decoding = decoders.Decoding(source="a folder of files", reader=decoders.Reader.MARC_GND)
 
         record = metadata.READERS[decoding.reader](_one_record_off_disk(), decoding)
 
@@ -132,9 +134,7 @@ class TestADecoderWorksOnAFile:
         on the catalogue registry's key space would put a catalogue's identity
         into the one contract both families share.
         """
-        decoding = decoders.Decoding(
-            source="a folder of files", reader=decoders.Reader.MARC_GND
-        )
+        decoding = decoders.Decoding(source="a folder of files", reader=decoders.Reader.MARC_GND)
 
         record = metadata.READERS[decoding.reader](_one_record_off_disk(), decoding)
 
@@ -161,9 +161,9 @@ class TestADecoderWorksOnAFile:
         )
 
         assert by_hand == from_a_row
-        assert metadata.READERS[by_hand.reader](
-            _one_record_off_disk(), by_hand
-        ) == metadata.READERS[from_a_row.reader](_one_record_off_disk(), from_a_row)
+        assert metadata.READERS[by_hand.reader](_one_record_off_disk(), by_hand) == metadata.READERS[
+            from_a_row.reader
+        ](_one_record_off_disk(), from_a_row)
 
 
 class TestADecoderIsNeverToldHowTheBytesArrived:
@@ -220,14 +220,9 @@ class TestADecoderIsNeverToldHowTheBytesArrived:
         **Both shapes, because the first version asserted three top level
         modules and so could not see a set that held no package at all.**
         """
-        ours = (
-            {path.stem for path in BACKEND.glob("*.py")}
-            | {
-                path.name
-                for path in BACKEND.iterdir()
-                if path.is_dir() and not path.name.startswith(("_", "."))
-            }
-        )
+        ours = {path.stem for path in BACKEND.glob("*.py")} | {
+            path.name for path in BACKEND.iterdir() if path.is_dir() and not path.name.startswith(("_", "."))
+        }
 
         assert {"targets", "fetch", "metadata"} <= ours
         assert {"routers", "schemas", "tests"} <= ours
@@ -257,8 +252,7 @@ class TestADecoderIsNeverToldHowTheBytesArrived:
         assert _registered()
         for decoder in _registered():
             annotations = {
-                str(parameter.annotation)
-                for parameter in inspect.signature(decoder).parameters.values()
+                str(parameter.annotation) for parameter in inspect.signature(decoder).parameters.values()
             }
             assert any("Decoding" in name for name in annotations), _named(decoder)
 
@@ -381,10 +375,7 @@ class TestADecodingIsValidatedWhereverItIsBuilt:
     @pytest.mark.parametrize("reader", list(decoders.Reader))
     def test_and_the_member_itself_is_carried(self, reader):
         """The control: the refusal is on the type and not on the reader."""
-        assert (
-            decoders.Decoding(source="a folder of files", reader=reader).reader
-            is reader
-        )
+        assert decoders.Decoding(source="a folder of files", reader=reader).reader is reader
 
 
 class TestOnlyTheProjectionTurnsARowIntoADecoding:
@@ -449,9 +440,7 @@ class TestOnlyTheProjectionTurnsARowIntoADecoding:
 
     def test_no_module_that_can_reach_a_row_builds_one_itself(self):
         offenders = [
-            path.relative_to(BACKEND).as_posix()
-            for path in shipped_modules()
-            if all(self._reads(path))
+            path.relative_to(BACKEND).as_posix() for path in shipped_modules() if all(self._reads(path))
         ]
 
         assert not offenders, offenders
@@ -592,9 +581,7 @@ class TestEveryReaderBelongsToExactlyOneFamily:
     """
 
     def test_together_they_are_the_whole_enum(self):
-        assert set(decoders.Reader) == (
-            decoders.IMPORT_READERS | decoders.CATALOGUE_READERS
-        )
+        assert set(decoders.Reader) == (decoders.IMPORT_READERS | decoders.CATALOGUE_READERS)
 
     def test_no_reader_is_in_both(self):
         assert not decoders.IMPORT_READERS & decoders.CATALOGUE_READERS
@@ -727,7 +714,7 @@ class TestEverySerialisationDecodesWithNoSocket:
         '<mods xmlns="http://www.loc.gov/mods/v3">'
         "<typeOfResource>text</typeOfResource>"
         "<titleInfo><title>Clean Code</title></titleInfo>"
-        "<physicalDescription><form authority=\"marcform\">print</form>"
+        '<physicalDescription><form authority="marcform">print</form>'
         "<extent>464 p.</extent></physicalDescription></mods>"
     )
 
@@ -740,14 +727,10 @@ class TestEverySerialisationDecodesWithNoSocket:
             (decoders.Reader.MODS, MODS, "Clean Code"),
         ],
     )
-    def test_a_record_of_this_serialisation_decodes_from_a_literal(
-        self, reader, document, title
-    ):
+    def test_a_record_of_this_serialisation_decodes_from_a_literal(self, reader, document, title):
         decoding = decoders.Decoding(source="a folder of files", reader=reader)
 
-        record = metadata.READERS[reader](
-            ElementTree.fromstring(document), decoding
-        )
+        record = metadata.READERS[reader](ElementTree.fromstring(document), decoding)
 
         assert record is not None
         assert record.title == title
@@ -799,9 +782,7 @@ def _marc_elements() -> SearchStrategy[ElementTree.Element]:
 
 def _dublin_core_records() -> SearchStrategy[ElementTree.Element]:
     """A namespaced Dublin Core record, the BnF's shape, over the names it reads."""
-    kinds = st.sampled_from(
-        ["texte imprimé | printed text | text", "text", "electronic resource", "image"]
-    )
+    kinds = st.sampled_from(["texte imprimé | printed text | text", "text", "electronic resource", "image"])
     return _optional(
         _leaf("dc:title"),
         _leaf("dc:creator"),
@@ -840,18 +821,14 @@ def _mods_records() -> SearchStrategy[ElementTree.Element]:
         _branch("subject", _leaf("topic")),
         _leaf("classification", authority="ddc"),
     ).map(
-        lambda children: ElementTree.fromstring(
-            xml_of(Node("mods", (("xmlns", _MODS),), children=children))
-        )
+        lambda children: ElementTree.fromstring(xml_of(Node("mods", (("xmlns", _MODS),), children=children)))
     )
 
 
 def _atom_entries() -> SearchStrategy[ElementTree.Element]:
     """An OPDS entry over the names `opds.entry_record` reads."""
     rels = st.sampled_from([*sorted(opds.HOLDING_RELS), "subsection"])
-    link = st.builds(
-        lambda rel: Node("link", (("rel", rel), ("href", "/d/1"))), rels
-    )
+    link = st.builds(lambda rel: Node("link", (("rel", rel), ("href", "/d/1"))), rels)
     return _optional(
         _leaf("title"),
         _branch("author", _leaf("name")),

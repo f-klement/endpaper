@@ -119,10 +119,7 @@ class _CatalogueIndex:
             # which Books a 5,000 row file will match is not known until it has
             # been walked, and per row would be one SELECT per line.
             statuses=Reading.by(db, user_id).everything(),
-            notes={
-                book_id
-                for (book_id,) in db.query(Note.book_id).filter(Note.user_id == user_id)
-            },
+            notes={book_id for (book_id,) in db.query(Note.book_id).filter(Note.user_id == user_id)},
         )
 
 
@@ -276,9 +273,7 @@ class Import:
         # Built whether or not tags are wanted, because nothing behind it reads
         # until it is asked: the branch this replaced existed only to keep the
         # query off an import that applies no tags.
-        naming = tags.Naming.for_member(
-            self._db, self._member_id, budget=tags.MAX_NEW_TAGS_PER_IMPORT
-        )
+        naming = tags.Naming.for_member(self._db, self._member_id, budget=tags.MAX_NEW_TAGS_PER_IMPORT)
 
         with _a_vanished_match_met_another_change(self._db, self._member_id, tally):
             for row in parsed.rows:
@@ -518,11 +513,7 @@ class Import:
         # Only for Books the export says were finished. A date on a
         # currently-reading row would be a finish date for a Book nobody
         # finished.
-        if (
-            row.status is ReadStatus.READ
-            and row.date_read is not None
-            and existing.finished_at is None
-        ):
+        if row.status is ReadStatus.READ and row.date_read is not None and existing.finished_at is None:
             existing.finished_at = datetime.combine(row.date_read, time.min)
             changed = True
 
@@ -584,9 +575,7 @@ _MEETING_A_GONE_ROW: Final = SQLAlchemyError
 
 
 @contextmanager
-def _a_vanished_match_met_another_change(
-    db: Session, member_id: int, tally: _Tally
-) -> Iterator[None]:
+def _a_vanished_match_met_another_change(db: Session, member_id: int, tally: _Tally) -> Iterator[None]:
     """Raise `errors.MetAnotherChange` where the import failed on a matched
     Book that is gone, and anything else unchanged.
 
@@ -957,9 +946,7 @@ class MarcImport:
     def for_member(cls, db: Session, member_id: int) -> MarcImport:
         return cls(db, member_id)
 
-    def apply(
-        self, parsed: marc.ParsedMarc, *, create_missing: bool = True
-    ) -> ImportResultOut:
+    def apply(self, parsed: marc.ParsedMarc, *, create_missing: bool = True) -> ImportResultOut:
         """Apply every record, and report what happened.
 
         **`create_missing` defaults to true here and to false on the CSV
@@ -975,9 +962,7 @@ class MarcImport:
         uniformly clean, and failing the transfer on record 412 of 5,000 gives
         the cataloguer nothing to act on.
         """
-        index = recognition.Index.build(
-            self._db, self._member_id, recognition.Source.CATALOGUE
-        )
+        index = recognition.Index.build(self._db, self._member_id, recognition.Source.CATALOGUE)
         tally = _Tally()
 
         with _a_vanished_match_met_another_change(self._db, self._member_id, tally):
@@ -1139,9 +1124,7 @@ def _keep_links(book: Book, links: Sequence[Link], db: Session) -> None:
     db.flush()
     db.refresh(book, ["online_links"])
     for link in _links_to_add(book.online_links, links):
-        book.online_links.append(
-            OnlineLink(url=link.url, label=link.label, relation=link.relation)
-        )
+        book.online_links.append(OnlineLink(url=link.url, label=link.label, relation=link.relation))
 
 
 def _fill_marc_gaps(book: Book, stored: Stored) -> None:
@@ -1151,9 +1134,7 @@ def _fill_marc_gaps(book: Book, stored: Stored) -> None:
     reader of a record here, so a matched Book cannot be given a value the create
     path would have cut. What counts as a gap is `evidence`'s.
     """
-    evidence.fill_gaps(
-        book, {attribute: getattr(stored, attribute) for attribute in _MARC_GAP_FIELDS}
-    )
+    evidence.fill_gaps(book, {attribute: getattr(stored, attribute) for attribute in _MARC_GAP_FIELDS})
 
 
 # ── OPDS ──────────────────────────────────────────────────────────────────────
@@ -1215,9 +1196,7 @@ class OpdsImport:
     def for_member(cls, db: Session, member_id: int) -> OpdsImport:
         return cls(db, member_id)
 
-    def apply(
-        self, records: Sequence[Record], *, create_missing: bool = True
-    ) -> ImportResultOut:
+    def apply(self, records: Sequence[Record], *, create_missing: bool = True) -> ImportResultOut:
         """Apply every record the walk found, and report what happened.
 
         **`create_missing` defaults to true, as on the MARC path and against the
@@ -1232,9 +1211,7 @@ class OpdsImport:
         the sync on entry 412 gives nobody anything to act on.
         """
         # The CSV importer's ladder, by the owner's instruction of 2026-09-05.
-        index = recognition.Index.build(
-            self._db, self._member_id, recognition.Source.READING_HISTORY
-        )
+        index = recognition.Index.build(self._db, self._member_id, recognition.Source.READING_HISTORY)
         tally = _Tally()
 
         with _a_vanished_match_met_another_change(self._db, self._member_id, tally):
@@ -1359,8 +1336,6 @@ def _fill_opds_gaps(book: Book, stored: Stored) -> None:
     that carried it matched on its title, which is the weaker key, so this is
     also the case where the ISBN is least likely to be about the same book.
     """
-    evidence.fill_gaps(
-        book, {attribute: getattr(stored, attribute) for attribute in _OPDS_GAP_FIELDS}
-    )
+    evidence.fill_gaps(book, {attribute: getattr(stored, attribute) for attribute in _OPDS_GAP_FIELDS})
     if book.ownership == OwnershipStatus.UNKNOWN:
         book.ownership = OwnershipStatus.OWNED

@@ -1194,9 +1194,7 @@ class ReadwiseOutcome(StrEnum):
 
 
 @overload
-def member_or[E: StrEnum](
-    enum: type[E], stored: object, default: E, *, context: str | None = None
-) -> E: ...
+def member_or[E: StrEnum](enum: type[E], stored: object, default: E, *, context: str | None = None) -> E: ...
 
 
 @overload

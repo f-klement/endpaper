@@ -17749,8 +17749,8 @@ authority per part: a `bun run` script name against the scripts `frontend/packag
 declares, which is the registry bun itself resolves against; a program under `uv run`
 against the distributions `backend/pyproject.toml` declares or a command this repository
 invokes; a verb after such a program against the invocation. The verb is the arm that
-catches the defect: `ruff` is declared and its lint verb is run by a step of `test:backend`, while
-`ruff format` is a verb nothing here runs.
+caught the defect: `ruff` is declared and its lint verb is run by a step of `test:backend`, while
+`ruff format` was then a verb nothing here ran.
 
 **An invocation no arm claims fails rather than passes**, which is the whole design. The
 sketch this replaced was an inclusion list: a command had to appear in the frontend package
@@ -17767,8 +17767,8 @@ Both need a copy of each tool's argument grammar; taking the first non option to
 verb was measured and turns two correct rows red, because an option's value and a verb are
 the same shape. The measured defect was a verb in the ordinary position and that is checked.
 
-**Naming a command is not offering one.** The row that replaced the defect says what
-`ruff format` is and that nothing runs it, and the check has to leave that sentence
+**Naming a command is not offering one.** The row that replaced the defect said what
+`ruff format` is and that nothing ran it, and the check has to leave such a sentence
 writable, so an offer is a code span headed by a runner rather than any mention of a tool.
 Measured: reading every bare program name as a command turns those three sentences red, 8
 spans entering the subject and 3 failing, all three the mention. This register and the
@@ -18159,9 +18159,11 @@ fragment present and fails the equality check by name.
 **Equality is what `test_folding.NOT_A_DATABASE_READ` already used**, and it was named there
 as the rung above this table. It keys on a **call** as `ast.unparse` writes it rather than
 on a statement, so what is borrowed is the comparison and not the cost: a key here is up to
-six source lines. What makes that affordable is that the statement is compared with its
-whitespace flattened, so rewrapping one changes no key, and that nothing in this project
-runs `ruff format`. The other cost is that one entry now carries a `for` loop's body with
+six source lines. What makes that affordable is that `ruff format` owns the layout, so a
+statement is rewrapped only when its text, its nesting, the formatter's version or the
+configured line length changes.
+Flattening the whitespace alone does not make a key independent of layout: a break beside a
+bracket flattens to a space the joined line does not have. The other cost is that one entry now carries a `for` loop's body with
 its query, and that entry's reason says why: every row it reads is deleted or repointed on
 the spot, so the key and the argument cover the same code.
 
@@ -19146,7 +19148,7 @@ was found wrong before it shipped. The failures do not share a spelling, so the 
 about the instrument rather than about any one pattern.
 
 **One was beaten by the line break the formatter itself mandates.** The arm that fails when a
-wrapped ordered list has no witness required a literal space after the `=`, and prettier breaks
+wrapped ordered list has no witness required a literal space after the `=`, and the formatter breaks
 a declaration over 80 columns as the name and `=` on one line and the call on the next. The
 blind spot was therefore not a spelling somebody chooses: it was the one `format:check`
 enforces, and the longer the union name the likelier it was.
@@ -23414,3 +23416,43 @@ and against minimatch 10.2.6 under those options:
   it, as the guard's docstring says.
 
 The guard's glob arm reds on the fnmatch matcher; that was planted and measured.
+
+## oxfmt formats the frontend, not prettier or Biome
+
+**oxfmt 0.74.0 replaced prettier 3.9.10 behind the same two scripts.** `format` and
+`format:check` keep their names and their paths, `src tests`, so CI and every caller are
+unchanged. Measured on builder with 2 CPUs, `format:check` fell from about 12 s to between
+0.2 and 0.28 s.
+
+**Its output is prettier's on all but one layout.** With `printWidth: 80`, the only option in
+`frontend/.oxfmtrc.json`, oxfmt differed on 10 of the 780 files, 58 lines; two of the files
+are the generated client. Every hunk is a union that prettier 3.9 keeps flat after `=`, `:`
+or `as` and oxfmt writes one member per line. oxc holds prettier 3.8's layout there on purpose, as
+`union-annotation-flat-retry` in its divergence list, until the 3.9 style settles (oxc issue
+25841). The reformat is one commit, listed in `.git-blame-ignore-revs`. `tests/COVERAGE.md`,
+whose column padding the coverage register's writer depends on, came out byte identical.
+
+**Pinned exactly, because a bump can move output.** oxfmt is 0.x and releases about weekly.
+A bump that reformats anything reddens `format:check` and so cannot automerge; it is taken
+as a reformat with its own ignored commit. The likeliest one is oxc adopting prettier 3.9's
+union layout, which would undo the 58 lines.
+
+**orval runs it on the generated client**, through its `formatter` option, so a regeneration
+writes what the check accepts. orval logs a formatter that failed as a warning and exits 0;
+the frontend job's client diff is what catches that.
+
+**Why not Biome.** Configured toward prettier it still differed on 20 files and 349 lines,
+in five layout classes rather than one. It refused `src/index.css` without a Tailwind option,
+and it padded the table in `tests/doubles/README.md` one column wider than prettier, which
+is the kind of table the coverage register's padding depends on. It was also 6 to 9 times
+slower than oxfmt.
+
+**Why not Vite+.** It bundles oxfmt with oxlint, Vitest and Vite under one `vp` command, but
+it repackages them, trails upstream by up to a release, and would rewrite the oxlint ratchet's
+config and every test import. Its CI template installs through a curl script, outside the
+checksum discipline. oxfmt alone takes the one part that pays now.
+
+**A trap it brings.** Given a directory inside `frontend/` from a working directory outside it,
+oxfmt finds no config and formats at its default width of 100; given a file, it finds the config
+from the file. A check run that way fails loudly; a write rewrites 485 files. The scripts run
+from `frontend/`, which is why they are the route.

@@ -19,6 +19,11 @@ from enums import BookFormat
 from models import Book, DigitalReference, Loan
 from tests.corpus import application_sources
 
+TREE_GUARDS = {
+    "TestOnlyTheDeskBuildsAScope": ("application_sources",),
+    "TestTheWayOutOfTheDoorHasTheCallersItClaims": ("application_sources",),
+}
+
 
 def now() -> datetime:
     """Naive UTC, which is what the three datetime columns hold."""
@@ -232,9 +237,7 @@ class TestTheSqlRuleAndThePythonRuleAgree:
         # nothing at all.
         assert selected == {loans["overdue"].id}
 
-    def test_the_trashed_book_is_the_one_clause_only_the_query_has(
-        self, db, loans, moment
-    ):
+    def test_the_trashed_book_is_the_one_clause_only_the_query_has(self, db, loans, moment):
         """Stated in `overdue_clauses`' docstring, and this is what makes the
         sentence checkable. The Python rule calls this loan overdue, because it
         is; the query refuses it, because the book is in the trash."""
@@ -338,9 +341,7 @@ class TestTheAudienceIsChosenByAConstructor:
     titles to whatever the channel is.
     """
 
-    def test_a_member_reads_a_loan_over_a_public_book_somebody_else_added(
-        self, db, admin, member
-    ):
+    def test_a_member_reads_a_loan_over_a_public_book_somebody_else_added(self, db, admin, member):
         _book_with_a_loan(db, admin["user"]["id"], title="Dune")
 
         rows, total = lending.Loans.seen_by(db, member["user"]["id"]).page(0, 10)
@@ -348,9 +349,7 @@ class TestTheAudienceIsChosenByAConstructor:
         assert total == 1
         assert [row.book.title for row in rows] == ["Dune"]
 
-    def test_a_member_does_not_read_a_loan_over_somebody_elses_private_book(
-        self, db, admin, member
-    ):
+    def test_a_member_does_not_read_a_loan_over_somebody_elses_private_book(self, db, admin, member):
         _book_with_a_loan(db, admin["user"]["id"], title="Secret", private=True)
 
         _, total = lending.Loans.seen_by(db, member["user"]["id"]).page(0, 10)
@@ -403,9 +402,7 @@ class TestTheAudienceIsChosenByAConstructor:
 
         assert total == 0
 
-    def test_a_channel_is_not_told_about_the_private_book_of_the_member_who_added_it(
-        self, db, admin
-    ):
+    def test_a_channel_is_not_told_about_the_private_book_of_the_member_who_added_it(self, db, admin):
         """The one the second constructor exists for. `seen_by` answers this
         loan for that same member, because it is their own Book; a channel has
         no member, so `is_private IS false` is the whole predicate."""
@@ -477,8 +474,7 @@ class TestTheOpenLoanOnAPageOfBooks:
 
     def test_a_page_of_books_costs_one_statement(self, db, admin):
         ids = [
-            _book_with_a_loan(db, admin["user"]["id"], title=f"Book {index}").book_id
-            for index in range(5)
+            _book_with_a_loan(db, admin["user"]["id"], title=f"Book {index}").book_id for index in range(5)
         ]
 
         statements = _statements_of(lambda: lending.Loans.open_on(db, ids))
@@ -541,9 +537,7 @@ class TestClosingALoan:
 
         assert index.unique
         assert [column.name for column in index.columns] == ["book_id"]
-        assert {
-            str(clause) for clause in index.dialect_kwargs.values()
-        } == {"returned_at IS NULL"}
+        assert {str(clause) for clause in index.dialect_kwargs.values()} == {"returned_at IS NULL"}
 
 
 class TestTheWayOutOfTheDoorHasTheCallersItClaims:
@@ -680,9 +674,7 @@ class TestWhichCopiesAreAskedForRatherThanLent:
             for has_file in (False, True):
                 book = Book(title="t", format=format)
                 if has_file:
-                    book.digital_references.append(
-                        DigitalReference(root_label="/r", relative_path="f")
-                    )
+                    book.digital_references.append(DigitalReference(root_label="/r", relative_path="f"))
                 if lending.is_requested_not_lent(book):
                     requested.append(f"{format.value}:{str(has_file).lower()}")
         assert requested == ["ebook:false", "ebook:true", "audiobook:true"]

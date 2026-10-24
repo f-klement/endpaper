@@ -212,6 +212,7 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 #: parse per connection to answer a question the URL settles at import.
 _SPEAKS_PG8000: Final = make_url(DATABASE_URL).drivername == _PG8000
 
+
 def _speaks_postgres(url: str) -> bool:
     """Whether a URL names the Postgres dialect, whatever drives it.
 
@@ -361,7 +362,6 @@ def _synchronous() -> str:
     return mode if mode in _SYNCHRONOUS_MODES else "FULL"
 
 
-
 #: The session setting every naive timestamp column on Postgres is cast
 #: through, and the one value that makes the two writers of those columns
 #: agree.
@@ -457,6 +457,7 @@ def _pin_the_postgres_session_zone(connection: Any, _record: Any) -> None:
         # reader looking for the reason would otherwise invent one.
         cursor.close()
         connection.autocommit = was_autocommitting
+
 
 # ── Where a query's two dialects differ ──────────────────────────────────────
 #

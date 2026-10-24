@@ -49,11 +49,7 @@ def listing(client, headers, book_id):
 def seed(db, book_id, **fields):
     """A row the report route would now refuse: a location a second Book held
     before the refusal existed, which a merge still meets."""
-    db.add(
-        DigitalReference(
-            book_id=book_id, root_label="/books", relative_path="a/b.epub", **fields
-        )
-    )
+    db.add(DigitalReference(book_id=book_id, root_label="/books", relative_path="a/b.epub", **fields))
     db.commit()
 
 
@@ -74,17 +70,13 @@ class TestReportingWhereAFileIs:
         assert body["size_bytes"] == 481_233
         assert body["root_confirmed"] is True
 
-    def test_a_root_that_was_not_corroborated_defaults_to_the_weaker_claim(
-        self, client, admin, make_book
-    ):
+    def test_a_root_that_was_not_corroborated_defaults_to_the_weaker_claim(self, client, admin, make_book):
         """A client that does not say has not corroborated anything, and the
         row must not read as though it had."""
         book = make_book(admin["headers"])
         assert report(client, admin["headers"], book["id"]).json()["root_confirmed"] is False
 
-    def test_a_second_report_of_the_same_file_does_not_add_a_row(
-        self, client, admin, make_book
-    ):
+    def test_a_second_report_of_the_same_file_does_not_add_a_row(self, client, admin, make_book):
         """The whole reason a reference is identified by where the file is.
         Re-importing a folder somebody imported last month is the case."""
         book = make_book(admin["headers"])
@@ -92,9 +84,7 @@ class TestReportingWhereAFileIs:
         report(client, admin["headers"], book["id"])
         assert len(listing(client, admin["headers"], book["id"]).json()) == 1
 
-    def test_a_second_report_of_a_different_file_adds_a_row(
-        self, client, admin, make_book
-    ):
+    def test_a_second_report_of_a_different_file_adds_a_row(self, client, admin, make_book):
         """The same book at two paths on two machines is the case that made this
         a table rather than a column."""
         book = make_book(admin["headers"])
@@ -102,9 +92,7 @@ class TestReportingWhereAFileIs:
         report(client, admin["headers"], book["id"], root_label="/laptop")
         assert len(listing(client, admin["headers"], book["id"]).json()) == 2
 
-    def test_a_report_never_replaces_a_different_fingerprint(
-        self, client, admin, make_book
-    ):
+    def test_a_report_never_replaces_a_different_fingerprint(self, client, admin, make_book):
         """A root is only a folder name, so a second report of the location can
         be another member's different file. Replacing would put that file's
         fingerprint on the first one's row."""
@@ -120,9 +108,7 @@ class TestReportingWhereAFileIs:
         assert body["size_bytes"] == 100
         assert body["file_modified_at"].startswith("2020")
 
-    def test_a_report_fills_a_fingerprint_the_row_is_missing(
-        self, client, admin, make_book
-    ):
+    def test_a_report_fills_a_fingerprint_the_row_is_missing(self, client, admin, make_book):
         """A first report that could not read the file left the row empty, and a
         later look that could is the only way it ever gets one."""
         book = make_book(admin["headers"])
@@ -148,9 +134,7 @@ class TestReportingWhereAFileIs:
         body = report(client, admin["headers"], book["id"], root_confirmed=False).json()
         assert body["root_confirmed"] is True
 
-    def test_a_book_that_the_caller_cannot_see_takes_no_report(
-        self, client, member, other_user, make_book
-    ):
+    def test_a_book_that_the_caller_cannot_see_takes_no_report(self, client, member, other_user, make_book):
         """404 and not 403, for the reason `dependencies._not_found` gives: a
         403 would confirm the book exists."""
         book = make_book(member["headers"], is_private=True)
@@ -158,9 +142,7 @@ class TestReportingWhereAFileIs:
 
 
 class TestTheServerSaysOnlyWhatItKnows:
-    def test_a_client_cannot_state_when_the_file_was_seen(
-        self, client, admin, make_book
-    ):
+    def test_a_client_cannot_state_when_the_file_was_seen(self, client, admin, make_book):
         """`confirmed_at` is when this server was **told**. A client able to set
         it could write a freshness nobody looked for, which is exactly the claim
         that rots."""
@@ -177,9 +159,7 @@ class TestTheServerSaysOnlyWhatItKnows:
         assert res.status_code == 200
         assert not res.json()["confirmed_at"].startswith("1999")
 
-    def test_a_new_reference_has_not_been_reported_missing(
-        self, client, admin, make_book
-    ):
+    def test_a_new_reference_has_not_been_reported_missing(self, client, admin, make_book):
         book = make_book(admin["headers"])
         assert report(client, admin["headers"], book["id"]).json()["missing_since"] is None
 
@@ -191,9 +171,7 @@ class TestAReferenceThatNoLongerResolves:
     def test_a_missing_report_flags_the_row(self, client, admin, make_book):
         book = make_book(admin["headers"])
         one = self._one(client, admin["headers"], book["id"])
-        res = client.post(
-            f"{URL.format(book['id'])}/{one}/missing", headers=admin["headers"]
-        )
+        res = client.post(f"{URL.format(book['id'])}/{one}/missing", headers=admin["headers"])
         assert res.status_code == 200
         assert res.json()["missing_since"] is not None
 
@@ -206,9 +184,7 @@ class TestAReferenceThatNoLongerResolves:
         client.post(f"{URL.format(book['id'])}/{one}/missing", headers=admin["headers"])
         assert len(listing(client, admin["headers"], book["id"]).json()) == 1
 
-    def test_a_second_missing_report_does_not_move_the_timestamp(
-        self, client, admin, make_book, db
-    ):
+    def test_a_second_missing_report_does_not_move_the_timestamp(self, client, admin, make_book, db):
         """The column records when this was **first** said, so a client
         re-checking hourly cannot keep resetting the age of the problem.
 
@@ -240,16 +216,12 @@ class TestAReferenceThatNoLongerResolves:
         client.post(f"{URL.format(book['id'])}/{one}/missing", headers=admin["headers"])
         assert report(client, admin["headers"], book["id"]).json()["missing_since"] is None
 
-    def test_a_reference_on_another_book_is_not_reachable_through_this_one(
-        self, client, admin, make_book
-    ):
+    def test_a_reference_on_another_book_is_not_reachable_through_this_one(self, client, admin, make_book):
         """The book/reference pairing, without which an id from another book is
         reachable through a book the caller does hold."""
         mine, theirs = make_book(admin["headers"]), make_book(admin["headers"])
         one = self._one(client, admin["headers"], theirs["id"])
-        res = client.post(
-            f"{URL.format(mine['id'])}/{one}/missing", headers=admin["headers"]
-        )
+        res = client.post(f"{URL.format(mine['id'])}/{one}/missing", headers=admin["headers"])
         assert res.status_code == 404
 
 
@@ -263,9 +235,7 @@ class TestTheServerClockIsNotReachableFromThePayload:
     guard on the assignment rather than on the field list.
     """
 
-    def test_a_reported_modification_time_does_not_become_the_confirmation(
-        self, client, admin, make_book
-    ):
+    def test_a_reported_modification_time_does_not_become_the_confirmation(self, client, admin, make_book):
         book = make_book(admin["headers"])
         body = report(
             client,
@@ -287,9 +257,7 @@ class TestTheBrowsersSpellingIsStoredAsNaiveUtc:
     #: The instant both arms send, as the column holds it.
     INSTANT = datetime(2026, 3, 1, 12, 34, 56, 789_000)
 
-    def test_the_millisecond_z_spelling_is_one_file_when_reported_twice(
-        self, client, admin, make_book, db
-    ):
+    def test_the_millisecond_z_spelling_is_one_file_when_reported_twice(self, client, admin, make_book, db):
         """**The second report is the arm.** SQLite drops a zero offset on
         write, so the stored value alone is right with the conversion deleted.
         What breaks is `file_references._settle`, which compares the stored
@@ -298,16 +266,12 @@ class TestTheBrowsersSpellingIsStoredAsNaiveUtc:
         book = make_book(admin["headers"])
         sent = "2026-03-01T12:34:56.789Z"
         report(client, admin["headers"], book["id"], file_modified_at=sent)
-        body = report(
-            client, admin["headers"], book["id"], file_modified_at=sent, size_bytes=200
-        ).json()
+        body = report(client, admin["headers"], book["id"], file_modified_at=sent, size_bytes=200).json()
 
         row = db.get(DigitalReference, body["id"])
         assert (row.file_modified_at, row.size_bytes) == (self.INSTANT, 200)
 
-    def test_a_non_zero_offset_is_stored_at_its_utc_instant(
-        self, client, admin, make_book, db
-    ):
+    def test_a_non_zero_offset_is_stored_at_its_utc_instant(self, client, admin, make_book, db):
         """Without the conversion the column holds the sender's wall clock,
         two hours off, and reads back as UTC."""
         book = make_book(admin["headers"])
@@ -332,9 +296,7 @@ class TestAnOverWidePairIs422AndNot500:
     the two layers.
     """
 
-    def test_one_character_past_the_pair_bound_is_refused_by_the_schema(
-        self, client, admin, make_book
-    ):
+    def test_one_character_past_the_pair_bound_is_refused_by_the_schema(self, client, admin, make_book):
         book = make_book(admin["headers"])
         half = (DIGITAL_REFERENCE_PATH_MAX + 1) // 2
         res = report(
@@ -365,23 +327,17 @@ class TestForgettingAReference:
     def test_a_member_can_delete_one(self, client, admin, make_book):
         book = make_book(admin["headers"])
         one = report(client, admin["headers"], book["id"]).json()["id"]
-        res = client.delete(
-            f"{URL.format(book['id'])}/{one}", headers=admin["headers"]
-        )
+        res = client.delete(f"{URL.format(book['id'])}/{one}", headers=admin["headers"])
         assert res.status_code == 204
         assert listing(client, admin["headers"], book["id"]).json() == []
 
-    def test_a_reference_on_another_book_cannot_be_deleted_through_this_one(
-        self, client, admin, make_book
-    ):
+    def test_a_reference_on_another_book_cannot_be_deleted_through_this_one(self, client, admin, make_book):
         """The pairing on the forget route. The Shelf guard counts the route's
         read but does not run it, so without this arm a lookup by id alone
         would delete another Book's reference with a 204."""
         mine, theirs = make_book(admin["headers"]), make_book(admin["headers"])
         one = report(client, admin["headers"], theirs["id"]).json()["id"]
-        res = client.delete(
-            f"{URL.format(mine['id'])}/{one}", headers=admin["headers"]
-        )
+        res = client.delete(f"{URL.format(mine['id'])}/{one}", headers=admin["headers"])
         assert res.status_code == 404
         assert [r["id"] for r in listing(client, admin["headers"], theirs["id"]).json()] == [one]
 
@@ -402,34 +358,22 @@ class TestTheCeilingIsCountedPerBookAndNotPerRequest:
 
     def _fill(self, client, headers, book_id):
         for index in range(MAX_DIGITAL_REFERENCES_PER_BOOK):
-            assert (
-                report(client, headers, book_id, root_label=f"/root{index}").status_code
-                == 200
-            )
+            assert report(client, headers, book_id, root_label=f"/root{index}").status_code == 200
 
-    def test_a_new_location_past_the_ceiling_is_refused(
-        self, client, admin, make_book
-    ):
+    def test_a_new_location_past_the_ceiling_is_refused(self, client, admin, make_book):
         book = make_book(admin["headers"])
         self._fill(client, admin["headers"], book["id"])
         res = report(client, admin["headers"], book["id"], root_label="/one-too-many")
         assert (res.status_code, res.json()["detail"]["code"]) == (409, "reference_ceiling")
 
-    def test_a_book_at_the_ceiling_can_still_re_confirm_what_it_holds(
-        self, client, admin, make_book
-    ):
+    def test_a_book_at_the_ceiling_can_still_re_confirm_what_it_holds(self, client, admin, make_book):
         """The ceiling binds a **new** location. A library that filled it must
         not lose the ability to say a file is still there."""
         book = make_book(admin["headers"])
         self._fill(client, admin["headers"], book["id"])
-        assert (
-            report(client, admin["headers"], book["id"], root_label="/root0").status_code
-            == 200
-        )
+        assert report(client, admin["headers"], book["id"], root_label="/root0").status_code == 200
 
-    def test_another_books_references_do_not_count_against_this_one(
-        self, client, admin, make_book
-    ):
+    def test_another_books_references_do_not_count_against_this_one(self, client, admin, make_book):
         """**Per book is the whole of the ceiling.** Counted over the table
         instead, one member filling their own shelf refuses everybody else's
         next reference, and every other test here creates far too few rows to
@@ -445,9 +389,7 @@ class TestTwoReportsAtOnceStayWithinTheCeiling:
     the last place cannot both take it, and two racing for one location are one
     sighting. The class is in the pipeline's Postgres selection."""
 
-    def test_two_concurrent_new_locations_on_a_book_one_short_add_one(
-        self, client, admin, make_book
-    ):
+    def test_two_concurrent_new_locations_on_a_book_one_short_add_one(self, client, admin, make_book):
         """Each report runs in its own session and thread, and both reach the
         insert before either commits: a count taken before the insert reads 15
         in both and stores 17."""
@@ -484,14 +426,9 @@ class TestTwoReportsAtOnceStayWithinTheCeiling:
             answers = sorted(pool.map(one, ["/first", "/second"]))
 
         assert answers == [200, 409]
-        assert (
-            len(listing(client, admin["headers"], book["id"]).json())
-            == MAX_DIGITAL_REFERENCES_PER_BOOK
-        )
+        assert len(listing(client, admin["headers"], book["id"]).json()) == MAX_DIGITAL_REFERENCES_PER_BOOK
 
-    def test_two_concurrent_reports_of_one_new_location_both_answer(
-        self, client, admin, make_book
-    ):
+    def test_two_concurrent_reports_of_one_new_location_both_answer(self, client, admin, make_book):
         """Both look the location up before either inserts, so the second
         insert meets the unique constraint: it is the same sighting, and
         answers as one rather than as a 500."""
@@ -510,9 +447,7 @@ class TestTwoReportsAtOnceStayWithinTheCeiling:
                 assert held is not None
                 assert user is not None
                 report_digital_reference(
-                    DigitalReferenceIn(
-                        root_label="/books", relative_path="x.epub", size_bytes=size
-                    ),
+                    DigitalReferenceIn(root_label="/books", relative_path="x.epub", size_bytes=size),
                     held,
                     db,
                     user,
@@ -526,9 +461,7 @@ class TestTwoReportsAtOnceStayWithinTheCeiling:
 
 
 class TestALocationBelongsToOneBookAMemberCanSee:
-    def test_a_location_another_visible_book_holds_is_refused_naming_it(
-        self, client, admin, make_book
-    ):
+    def test_a_location_another_visible_book_holds_is_refused_naming_it(self, client, admin, make_book):
         """The class a client wrote twice: the same file reported onto a second
         Book. The body names the holder so the client can put it there."""
         holder, other = make_book(admin["headers"]), make_book(admin["headers"])
@@ -541,9 +474,7 @@ class TestALocationBelongsToOneBookAMemberCanSee:
             holder["id"],
         )
 
-    def test_a_location_held_only_by_a_hidden_book_is_accepted(
-        self, client, member, other_user, make_book
-    ):
+    def test_a_location_held_only_by_a_hidden_book_is_accepted(self, client, member, other_user, make_book):
         """A refusal here would confirm that another member privately holds
         that exact file, so a hidden holder answers as no Book does."""
         hidden = make_book(member["headers"], is_private=True)
@@ -551,9 +482,7 @@ class TestALocationBelongsToOneBookAMemberCanSee:
         report(client, member["headers"], hidden["id"])
         assert report(client, other_user["headers"], mine["id"]).status_code == 200
 
-    def test_a_location_two_books_already_hold_can_still_be_re_confirmed(
-        self, client, admin, make_book, db
-    ):
+    def test_a_location_two_books_already_hold_can_still_be_re_confirmed(self, client, admin, make_book, db):
         """Rows from before the refusal existed stay where they are, so a Book
         holding one must still be able to say the file is there."""
         first, second = make_book(admin["headers"]), make_book(admin["headers"])
@@ -571,15 +500,11 @@ class TestTheSettingsCardReadsTheCodesTheRouteSends:
         quoted literal; a code moved out of that file is red here too, which is
         the safe way."""
         source = CARD.read_text(encoding="utf-8")
-        assert [
-            code for code in (REFERENCE_CEILING, FILE_HELD_ELSEWHERE) if f'"{code}"' not in source
-        ] == []
+        assert [code for code in (REFERENCE_CEILING, FILE_HELD_ELSEWHERE) if f'"{code}"' not in source] == []
 
 
 class TestTheShelfReachesAReference:
-    def test_another_member_cannot_list_them_on_a_private_book(
-        self, client, member, other_user, make_book
-    ):
+    def test_another_member_cannot_list_them_on_a_private_book(self, client, member, other_user, make_book):
         """A reference is an ordinary field on a book, so it is as invisible as
         the book is. 404 on the book, never a row."""
         book = make_book(member["headers"], is_private=True)
@@ -629,9 +554,7 @@ class TestMergingTwoBooksKeepsTheirReferences:
         row stored write nobody bounded, which is the failure
         `MAX_CLASSIFICATIONS_PER_BOOK` is on record as having been bought by.
         """
-        keeper, loser = make_book(admin["headers"], title="One"), make_book(
-            admin["headers"], title="Two"
-        )
+        keeper, loser = make_book(admin["headers"], title="One"), make_book(admin["headers"], title="Two")
         for index in range(MAX_DIGITAL_REFERENCES_PER_BOOK):
             report(client, admin["headers"], keeper["id"], root_label=f"/root{index}")
         report(client, admin["headers"], loser["id"], root_label="/overflow")
@@ -652,9 +575,7 @@ class TestMergingTwoBooksKeepsTheirReferences:
     ):
         """The other side of the same arm, so the test above measures the
         ceiling rather than the merge."""
-        keeper, loser = make_book(admin["headers"], title="One"), make_book(
-            admin["headers"], title="Two"
-        )
+        keeper, loser = make_book(admin["headers"], title="One"), make_book(admin["headers"], title="Two")
         for index in range(MAX_DIGITAL_REFERENCES_PER_BOOK - 1):
             report(client, admin["headers"], keeper["id"], root_label=f"/root{index}")
         report(client, admin["headers"], loser["id"], root_label="/overflow")
@@ -668,9 +589,7 @@ class TestMergingTwoBooksKeepsTheirReferences:
         held = listing(client, admin["headers"], keeper["id"]).json()
         assert "/overflow" in [entry["root_label"] for entry in held]
 
-    def test_the_same_file_on_both_does_not_break_the_merge(
-        self, client, admin, make_book, db
-    ):
+    def test_the_same_file_on_both_does_not_break_the_merge(self, client, admin, make_book, db):
         """`uq_digital_references_location` would refuse the flush, and two rows
         for one book catalogued from one library is the likely case rather than
         an edge."""
@@ -686,9 +605,7 @@ class TestMergingTwoBooksKeepsTheirReferences:
         assert res.status_code == 200
         assert len(listing(client, admin["headers"], keeper["id"]).json()) == 1
 
-    def test_a_survivor_with_no_fingerprint_takes_the_losers_whole_one(
-        self, client, admin, make_book, db
-    ):
+    def test_a_survivor_with_no_fingerprint_takes_the_losers_whole_one(self, client, admin, make_book, db):
         """Nothing on the server can compute a fingerprint again, so dropping
         the loser's row whole would lose it. Size, time and digest arrive
         together, as one look saw them."""
@@ -712,9 +629,7 @@ class TestMergingTwoBooksKeepsTheirReferences:
         assert (kept["size_bytes"], kept["partial_md5"]) == (300, digest)
         assert kept["file_modified_at"].startswith("2022")
 
-    def test_a_fingerprint_from_a_different_look_is_not_kept(
-        self, client, admin, make_book, db
-    ):
+    def test_a_fingerprint_from_a_different_look_is_not_kept(self, client, admin, make_book, db):
         """A loser that saw another size saw another file, so its digest does
         not join the survivor's sighting."""
         keeper = make_book(admin["headers"], title="One")
@@ -769,9 +684,7 @@ class TestTheShelfWideReaderOfTheFlag:
     and almost every book holds none.
     """
 
-    def test_a_flagged_reference_is_listed_with_its_book(
-        self, client, admin, make_book
-    ):
+    def test_a_flagged_reference_is_listed_with_its_book(self, client, admin, make_book):
         book = make_book(admin["headers"], title="The Dispossessed")
         flag(client, admin["headers"], book["id"], relative_path="ursula/d.epub")
 
@@ -790,9 +703,7 @@ class TestTheShelfWideReaderOfTheFlag:
         flag(client, admin["headers"], book["id"])
         assert missing(client, admin["headers"]).json()["items"][0]["book_id"] == book["id"]
 
-    def test_a_reference_nobody_reported_missing_is_not_listed(
-        self, client, admin, make_book
-    ):
+    def test_a_reference_nobody_reported_missing_is_not_listed(self, client, admin, make_book):
         book = make_book(admin["headers"])
         report(client, admin["headers"], book["id"])
         assert missing(client, admin["headers"]).json()["total"] == 0
@@ -831,9 +742,7 @@ class TestTheShelfWideReaderOfTheFlag:
         assert body["total"] == 1
         assert body["items"][0]["relative_path"] == "their/layout/x.epub"
 
-    def test_a_flagged_reference_on_a_private_book_is_not_listed(
-        self, client, admin, member, make_book
-    ):
+    def test_a_flagged_reference_on_a_private_book_is_not_listed(self, client, admin, member, make_book):
         """**The leak this route must never make**, and the test that goes red
         if the query stops going through the Shelf.
 
@@ -875,9 +784,7 @@ class TestTheShelfWideReaderOfTheFlag:
         )
 
         body = missing(client, admin["headers"]).json()
-        assert [row["relative_path"] for row in body["items"]] == [
-            "mine/on/their/book.epub"
-        ]
+        assert [row["relative_path"] for row in body["items"]] == ["mine/on/their/book.epub"]
 
     def test_a_plain_member_gets_the_reader(self, client, member, make_book):
         """Not an admin report, asserted by somebody who is not one.
@@ -895,9 +802,7 @@ class TestTheShelfWideReaderOfTheFlag:
         body = missing(client, member["headers"]).json()
         assert [row["id"] for row in body["items"]] == [one]
 
-    def test_a_reference_on_a_book_in_the_trash_is_not_listed(
-        self, client, admin, make_book
-    ):
+    def test_a_reference_on_a_book_in_the_trash_is_not_listed(self, client, admin, make_book):
         """The Shelf's other refusal, and the one privacy alone would not make.
 
         A trashed Book is still visible to its adder in the trash, so what
@@ -927,9 +832,7 @@ class TestTheShelfWideReaderOfTheFlag:
         assert body["total"] == 3
         assert body["page_size"] == 2
 
-    def test_the_total_counts_references_and_not_books(
-        self, client, admin, make_book
-    ):
+    def test_the_total_counts_references_and_not_books(self, client, admin, make_book):
         """A book at three paths with two of them gone is two rows, because the
         flag is per location and so is the thing to go and look at."""
         book = make_book(admin["headers"])
@@ -980,11 +883,7 @@ class TestTheShelfWideReaderOfTheFlag:
         # is simply the first of that section today, so anchoring on it would
         # pass a `/{book_id}/missing` declared above it, which is the exact
         # collision the section comment is about.
-        swallowers = [
-            index
-            for index, path in enumerate(paths)
-            if path.startswith("/api/books/{book_id}")
-        ]
+        swallowers = [index for index, path in enumerate(paths) if path.startswith("/api/books/{book_id}")]
         assert swallowers, (
             "no route under /api/books/{book_id} was found, so this guard is "
             "anchored on nothing and is passing for the wrong reason"
@@ -1000,18 +899,14 @@ class TestTheShelfWideReaderOfTheFlag:
         """
         book = make_book(admin["headers"])
         for index in range(3):
-            one = flag(
-                client, admin["headers"], book["id"], relative_path=f"{index}.epub"
-            )
+            one = flag(client, admin["headers"], book["id"], relative_path=f"{index}.epub")
             age(db, one, days=index)
 
         body = missing(client, admin["headers"], page_size=2, page=2).json()
         assert [row["relative_path"] for row in body["items"]] == ["2.epub"]
         assert body["page"] == 2
 
-    def test_two_misses_at_one_instant_come_back_newest_id_first(
-        self, client, admin, make_book, db
-    ):
+    def test_two_misses_at_one_instant_come_back_newest_id_first(self, client, admin, make_book, db):
         """The tiebreak, pinned as the contract rather than as a consequence.
 
         `func.now()` is `CURRENT_TIMESTAMP`, one second wide, and a client
@@ -1040,9 +935,7 @@ class TestTheShelfWideReaderOfTheFlag:
         rows = missing(client, admin["headers"]).json()["items"]
         assert [row["id"] for row in rows] == [second, first]
 
-    def test_the_total_does_not_multiply_by_the_books_on_the_shelf(
-        self, client, admin, make_book
-    ):
+    def test_the_total_does_not_multiply_by_the_books_on_the_shelf(self, client, admin, make_book):
         """One flagged reference is one, however many books the caller holds.
 
         The count is written through `Shelf.select()`, whose docstring records

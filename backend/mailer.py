@@ -163,9 +163,7 @@ def _addresses(raw: str) -> tuple[str, ...]:
     return tuple(parts)
 
 
-def checked_config(
-    db: Session, *, recipients: tuple[str, ...] | None = None
-) -> MailConfig:
+def checked_config(db: Session, *, recipients: tuple[str, ...] | None = None) -> MailConfig:
     """The mail configuration in force, or a refusal naming what is wrong.
 
     **`recipients` overrides the household address, and only two callers may
@@ -201,9 +199,7 @@ def checked_config(
     use_ssl = settings_store.bool_in_force(db, SettingKey.MAIL_USE_SSL)
     use_tls = settings_store.bool_in_force(db, SettingKey.MAIL_USE_TLS)
     if use_ssl and use_tls:
-        raise MailRefused(
-            "Choose implicit TLS or STARTTLS, not both. They are two protocols."
-        )
+        raise MailRefused("Choose implicit TLS or STARTTLS, not both. They are two protocols.")
 
     username = settings_store.in_force(db, SettingKey.MAIL_USERNAME).strip()
     password = settings_store.in_force(db, SettingKey.MAIL_PASSWORD)
@@ -302,9 +298,7 @@ def send(config: MailConfig, subject: str, body: str) -> None:
     context = ssl.create_default_context()
 
     if config.use_ssl:
-        with smtplib.SMTP_SSL(
-            config.host, config.port, timeout=TIMEOUT_SECONDS, context=context
-        ) as smtp:
+        with smtplib.SMTP_SSL(config.host, config.port, timeout=TIMEOUT_SECONDS, context=context) as smtp:
             _deliver(smtp, config, message)
         return
 

@@ -66,6 +66,11 @@ from shelf import Shelf
 from tests.bindings import SourceNames
 from tests.corpus import application_sources
 
+TREE_GUARDS = {
+    "TestEveryCallerOfOf": ("application_sources",),
+    "TestReadingIsTheOnlyWayIn": ("application_sources",),
+}
+
 #: Where `UserBook` may be imported.
 #:
 #: `models.py` defines it. `reading.py` owns it. `shelf.py` joins it in three
@@ -248,9 +253,7 @@ class TestReadingIsTheOnlyWayIn:
         """
         source = "import reading\n\ndef fold(db):\n    reading.resolve_merge(db, 1, [2])\n"
 
-        assert _named_way_callers({"folding.py": source})["resolve_merge"] == [
-            "folding.py:4"
-        ]
+        assert _named_way_callers({"folding.py": source})["resolve_merge"] == ["folding.py:4"]
 
     def test_a_method_of_that_name_on_something_else_is_not_a_caller(self):
         """The other direction, so the rule cannot be satisfied by counting
@@ -305,17 +308,11 @@ def _classify(
     elif isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
         scope.append(("function", node.name))
         pushed = True
-    elif (
-        isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Attribute)
-        and node.func.attr == "of"
-    ):
+    elif isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "of":
         root = _receiver_root(node.func.value)
         path = ".".join(name for _kind, name in scope)
         where = f"{module}.{path}" if path else f"{module}:{node.lineno}"
-        inside_reading = any(
-            kind == "class" and name == "Reading" for kind, name in scope
-        )
+        inside_reading = any(kind == "class" and name == "Reading" for kind, name in scope)
         if root == "Reading" or (root == "self" and inside_reading):
             found["readings"].append(where)
         elif root not in NOT_A_READING:
@@ -551,9 +548,7 @@ class TestAReadingRecordIsPrivateToItsMember:
 
         assert len(Reading.by(db, member.id).everything()) == 0
 
-    def test_marking_a_book_does_not_touch_another_members_row(
-        self, db, member, other, book
-    ):
+    def test_marking_a_book_does_not_touch_another_members_row(self, db, member, other, book):
         Reading.by(db, other.id).mark(book.id, ReadStatus.READ)
         db.commit()
 
@@ -613,9 +608,7 @@ class TestMarkingASelection:
         return books
 
     def test_every_untouched_book_counts_as_changed(self, db, member, three):
-        changed, unchanged = Reading.by(db, member.id).mark_each(
-            [b.id for b in three], ReadStatus.READ
-        )
+        changed, unchanged = Reading.by(db, member.id).mark_each([b.id for b in three], ReadStatus.READ)
 
         assert (changed, unchanged) == (3, 0)
 
@@ -645,9 +638,7 @@ class TestMarkingASelection:
         member_id = member.id
         Reading.by(db, member_id).of(ids)  # warm up outside the counted window
 
-        statements = _count(
-            db, lambda: Reading.by(db, member_id).mark_each(ids, ReadStatus.READ)
-        )
+        statements = _count(db, lambda: Reading.by(db, member_id).mark_each(ids, ReadStatus.READ))
 
         assert len(statements) == 1
 
@@ -806,9 +797,7 @@ class TestMergingTwoBooksThatWereOne:
         resolve_merge(db, keeper.id, [loser.id])
         db.commit()
 
-        assert (
-            Reading.by(db, other.id).of([keeper.id]).status_of(keeper.id) is ReadStatus.READING
-        )
+        assert Reading.by(db, other.id).of([keeper.id]).status_of(keeper.id) is ReadStatus.READING
 
     def test_the_survivors_own_record_wins(self, db, member, pair):
         """`(user_id, book_id)` is unique, so a member holding a record on both
@@ -843,9 +832,7 @@ class TestReportingIsScopedToTheShelf:
         shelf = Shelf.seen_by(db, member.id)
         assert Reading.by(db, member.id).finished_by_month(shelf) == []
 
-    def test_finished_by_month_excludes_a_private_book_of_somebody_elses(
-        self, db, member, other
-    ):
+    def test_finished_by_month_excludes_a_private_book_of_somebody_elses(self, db, member, other):
         hidden = Book(title="Hidden", added_by_user_id=other.id, is_private=True)
         db.add(hidden)
         db.commit()

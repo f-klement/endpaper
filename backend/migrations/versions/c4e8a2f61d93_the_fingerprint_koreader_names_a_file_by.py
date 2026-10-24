@@ -53,10 +53,7 @@ def upgrade() -> None:
         batch.create_check_constraint(
             "ck_digital_references_partial_md5",
             DialectSQL(
-                sqlite=(
-                    "instr(partial_md5, char(0)) = 0 "
-                    f"AND partial_md5 GLOB '{'[0-9a-f]' * _HEX}'"
-                ),
+                sqlite=(f"instr(partial_md5, char(0)) = 0 AND partial_md5 GLOB '{'[0-9a-f]' * _HEX}'"),
                 postgresql=f"(partial_md5 COLLATE \"C\") ~ '^[0-9a-f]{{{_HEX}}}$'",
             ),
         )
@@ -65,8 +62,6 @@ def upgrade() -> None:
 def downgrade() -> None:
     with op.batch_alter_table("digital_references") as batch:
         batch.drop_constraint("ck_digital_references_partial_md5", type_="check")
-    op.drop_index(
-        op.f("ix_digital_references_partial_md5"), table_name="digital_references"
-    )
+    op.drop_index(op.f("ix_digital_references_partial_md5"), table_name="digital_references")
     with op.batch_alter_table("digital_references") as batch:
         batch.drop_column("partial_md5")

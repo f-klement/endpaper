@@ -77,19 +77,19 @@ import models
 from schemas.book import BookDetailsUpdate, BookMatch, CopyCreate
 from tests.corpus import BACKEND, every_python_file
 
+TREE_GUARDS = {
+    "TestTheDoorsAreWhatTheWritersWalk": ("every_python_file",),
+}
+
 BOOK_COLUMNS = Path(__file__).resolve().parent.parent / "book_columns.py"
 
-WORK = set(
-    book_columns.WORK_IDENTITY + book_columns.WORK_DETAIL + book_columns.WORK_COVER
-)
+WORK = set(book_columns.WORK_IDENTITY + book_columns.WORK_DETAIL + book_columns.WORK_COVER)
 
 #: The only `book_columns` names a module that is not a test may read.
 #:
 #: `WORK_DETAIL` is here because it is a cell two record writers walk directly;
 #: the other two are the doors. Everything else is this module's own vocabulary.
-REACHABLE: Final = frozenset(
-    {"WORK_DETAIL", "WORK_FACTS", "FILLABLE_FROM_ANOTHER_ROW"}
-)
+REACHABLE: Final = frozenset({"WORK_DETAIL", "WORK_FACTS", "FILLABLE_FROM_ANOTHER_ROW"})
 
 
 def _columns() -> list[str]:
@@ -114,11 +114,7 @@ def _sets_walked_by(module: ModuleType, function: str) -> list[object]:
     there rather than needing a rule to exclude it.
     """
     tree = ast.parse(inspect.getsource(module))
-    fn = next(
-        node
-        for node in ast.walk(tree)
-        if isinstance(node, ast.FunctionDef) and node.name == function
-    )
+    fn = next(node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef) and node.name == function)
     walked: list[object] = []
     for node in ast.walk(fn):
         if not isinstance(node, ast.For | ast.comprehension):
@@ -146,11 +142,7 @@ def _assigned_after_the_insert(module: ModuleType, function: str, constructor: s
     which row it meant.
     """
     tree = ast.parse(inspect.getsource(module))
-    fn = next(
-        node
-        for node in ast.walk(tree)
-        if isinstance(node, ast.FunctionDef) and node.name == function
-    )
+    fn = next(node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef) and node.name == function)
     rows = [
         node.targets[0].id
         for node in ast.walk(fn)
@@ -272,9 +264,7 @@ class TestEveryColumnOfBooksIsClassifiedExactlyOnce:
     def test_a_column_in_no_cell_is_reported(self):
         """The arm that matters: a column added to the schema and to nothing
         else is written by no writer and says nothing."""
-        assert book_columns._misfiled([["a", "b"]], ["a", "b", "shelf_mark"]) == {
-            "shelf_mark"
-        }
+        assert book_columns._misfiled([["a", "b"]], ["a", "b", "shelf_mark"]) == {"shelf_mark"}
 
     def test_a_name_left_by_a_dropped_column_is_reported(self):
         """The other arm, which a containment check would pass. A cell naming a
@@ -306,17 +296,13 @@ class TestTheModuleRefusesToImport:
         so the column is simply never carried by a merge, a copy or an import.
         This one stops the test run of whoever added the column.
         """
-        monkeypatch.setattr(
-            models, "Book", _book_whose_table_has([*_columns(), "shelf_mark"])
-        )
+        monkeypatch.setattr(models, "Book", _book_whose_table_has([*_columns(), "shelf_mark"]))
         with pytest.raises(RuntimeError, match="shelf_mark"):
             _load_book_columns()
 
     def test_it_refuses_when_a_cell_names_a_column_that_is_gone(self, monkeypatch):
         """The symmetric half, through the import rather than the function."""
-        monkeypatch.setattr(
-            models, "Book", _book_whose_table_has([c for c in _columns() if c != "location"])
-        )
+        monkeypatch.setattr(models, "Book", _book_whose_table_has([c for c in _columns() if c != "location"]))
         with pytest.raises(RuntimeError, match="location"):
             _load_book_columns()
 
@@ -327,12 +313,8 @@ class TestTheModuleRefusesToImport:
         because "this one is bookkeeping, it needs no home" is the reasoning the
         refusal exists to refuse.
         """
-        monkeypatch.setattr(
-            models, "Book", _book_whose_table_has([*_columns(), "shelf_mark"])
-        )
-        with pytest.raises(
-            RuntimeError, match="The column partition and `books` disagree"
-        ) as raised:
+        monkeypatch.setattr(models, "Book", _book_whose_table_has([*_columns(), "shelf_mark"]))
+        with pytest.raises(RuntimeError, match="The column partition and `books` disagree") as raised:
             _load_book_columns()
         message = str(raised.value)
         assert "shelf_mark" in message
@@ -494,12 +476,7 @@ class TestEachCellIsDerivableFromSomethingThatIsNotItself:
         `folding.fold` handles `isbn` ahead of everything else. A second unique
         column added to `FILLABLE_FROM_ANOTHER_ROW` would trip the index on the
         first merge that absorbed it."""
-        unique = {
-            column.name
-            for index in _books_table().indexes
-            if index.unique
-            for column in index.columns
-        }
+        unique = {column.name for index in _books_table().indexes if index.unique for column in index.columns}
 
         assert unique, "no unique index on `books`, so this arm asserts nothing"
         assert set(book_columns.FILLABLE_FROM_ANOTHER_ROW) & unique == set()
@@ -533,18 +510,12 @@ class TestTheDoorsAreWhatTheWritersWalk:
     def test_a_copy_takes_the_work_facts(self):
         import routers.books
 
-        assert any(
-            walked is book_columns.WORK_FACTS
-            for walked in _sets_walked_by(routers.books, "add_copy")
-        )
+        assert any(walked is book_columns.WORK_FACTS for walked in _sets_walked_by(routers.books, "add_copy"))
 
     def test_enrichment_fills_the_work_detail(self):
         import evidence
 
-        assert any(
-            walked is book_columns.WORK_DETAIL
-            for walked in _sets_walked_by(evidence, "_apply_match")
-        )
+        assert any(walked is book_columns.WORK_DETAIL for walked in _sets_walked_by(evidence, "_apply_match"))
 
     def test_nothing_outside_the_tests_reaches_past_those_three_names(self):
         """The four inert moves in this module's docstring rest on this arm.

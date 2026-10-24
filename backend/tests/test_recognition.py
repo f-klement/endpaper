@@ -81,9 +81,7 @@ class TestTheAnswers:
 
         assert index.recognise(title="Elsewhere", isbn=DUNE) == Hidden()
 
-    def test_another_members_trashed_private_book_is_hidden_rather_than_in_the_trash(
-        self, db, member, other
-    ):
+    def test_another_members_trashed_private_book_is_hidden_rather_than_in_the_trash(self, db, member, other):
         """It is in their trash, not this Member's trash view."""
         _book(db, other, "Secret", isbn=DUNE, is_private=True, deleted_at=TRASHED)
 
@@ -133,9 +131,7 @@ class TestTheTieRule:
 
         index = Index.build(db, member.id, Source.CATALOGUE)
 
-        assert index.recognise(title="Dune", author="Frank Herbert") == Tied(
-            frozenset({one.id, two.id})
-        )
+        assert index.recognise(title="Dune", author="Frank Herbert") == Tied(frozenset({one.id, two.id}))
 
     def test_a_tie_on_the_isbn_does_not_fall_through_to_the_title(self, db, member):
         """Two holders of one identifier are a stronger claim than a title."""
@@ -144,20 +140,14 @@ class TestTheTieRule:
 
         index = Index.build(db, member.id, Source.READING_HISTORY)
 
-        assert index.recognise(title="Dune Messiah", isbn=DUNE) == Tied(
-            frozenset({one.id, two.id})
-        )
+        assert index.recognise(title="Dune Messiah", isbn=DUNE) == Tied(frozenset({one.id, two.id}))
 
     def test_readwise_waits_on_a_copy_group_tie(self, db, member):
         """Readwise's ruling of 2026-10-15 stands: the copy rule is the
         importers'."""
         for _ in range(2):
             book = _book(db, member, "Dune", author="Frank Herbert", copy_group="g")
-            db.add(
-                BookIdentifier(
-                    book_id=book.id, scheme=BookIdentifierScheme.ASIN, value="B00B7NPRY8"
-                )
-            )
+            db.add(BookIdentifier(book_id=book.id, scheme=BookIdentifierScheme.ASIN, value="B00B7NPRY8"))
         db.commit()
 
         index = Index.build(db, member.id, Source.HIGHLIGHTS)
@@ -219,9 +209,7 @@ class TestOneRecord:
         takes would refuse an add of a different volume."""
         book = _book(db, member, "Dune")
         db.add(
-            BookIdentifier(
-                book_id=book.id, scheme=BookIdentifierScheme.GOOGLE_BOOKS, value="zytcalfpjgyc"
-            )
+            BookIdentifier(book_id=book.id, scheme=BookIdentifierScheme.GOOGLE_BOOKS, value="zytcalfpjgyc")
         )
         db.commit()
 
@@ -241,9 +229,7 @@ class TestOneRecord:
 
         assert recognise_one(db, member.id, Source.ADD, isbn=DUNE) == Seen(book.id)
 
-    def test_an_isbn_ten_stored_with_a_lower_case_x_answers_the_canonical_one(
-        self, db, member
-    ):
+    def test_an_isbn_ten_stored_with_a_lower_case_x_answers_the_canonical_one(self, db, member):
         book = _book(db, member, "Night Train", isbn=LOWER_X_TEN)
 
         assert recognise_one(db, member.id, Source.ADD, isbn=LOWER_X) == Seen(book.id)

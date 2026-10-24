@@ -59,10 +59,9 @@ class TestTheSeededRosterSaysWhatTheRulesSay:
         Pinned for exactly that reason: a copy nothing reads is a copy nothing
         notices going stale, and #130 is where it starts being read.
         """
-        assert [
-            target.source
-            for target in sorted(targets.SEEDED.values(), key=lambda t: t.rank)
-        ] == list(sources.DEFAULT_ORDER)
+        assert [target.source for target in sorted(targets.SEEDED.values(), key=lambda t: t.rank)] == list(
+            sources.DEFAULT_ORDER
+        )
 
     def test_only_the_dnb_waives_the_isbn_claim(self):
         """Everywhere else that check is the identity test, and at the ÖNB it is
@@ -71,11 +70,9 @@ class TestTheSeededRosterSaysWhatTheRulesSay:
         A set equality rather than a spot check, so widening it costs an argument
         rather than passing quietly.
         """
-        assert {
-            target.source
-            for target in targets.SEEDED.values()
-            if not target.requires_isbn_claim
-        } == {CatalogueSource.DNB}
+        assert {target.source for target in targets.SEEDED.values() if not target.requires_isbn_claim} == {
+            CatalogueSource.DNB
+        }
 
     def test_only_the_dnb_is_read_for_author_identifiers(self):
         """The ÖNB's and the NLG's `100 $0` are withheld rather than unmapped.
@@ -83,11 +80,9 @@ class TestTheSeededRosterSaysWhatTheRulesSay:
         Same shape as the ISBN claim pin, and for the same reason: a decision
         somebody took on a measurement should not be reversible by a default.
         """
-        assert {
-            target.source
-            for target in targets.SEEDED.values()
-            if target.reads_author_identifiers
-        } == {CatalogueSource.DNB}
+        assert {target.source for target in targets.SEEDED.values() if target.reads_author_identifiers} == {
+            CatalogueSource.DNB
+        }
 
     def test_no_seeded_row_carries_a_timeout(self):
         """The column is #132's. Pinned so it cannot be read as working."""
@@ -181,9 +176,7 @@ class TestARowCannotCarryQueryStructure:
         """
         with pytest.raises(ValueError, match="only the DNB may waive the ISBN identity check"):
             _seeded(requires_isbn_claim=False)
-        waived = dataclasses.replace(
-            targets.SEEDED[CatalogueSource.DNB], requires_isbn_claim=False
-        )
+        waived = dataclasses.replace(targets.SEEDED[CatalogueSource.DNB], requires_isbn_claim=False)
         assert not waived.requires_isbn_claim
 
     def test_a_use_attribute_this_application_does_not_know_is_refused(self):
@@ -236,9 +229,7 @@ class TestARowCannotCarryQueryStructure:
         """The control: the arm above passes vacuously against an empty set, and
         an empty set is what a future edit would leave behind."""
         assert decoders.IMPORT_READERS
-        assert not decoders.IMPORT_READERS & {
-            target.reader for target in targets.SEEDED.values()
-        }
+        assert not decoders.IMPORT_READERS & {target.reader for target in targets.SEEDED.values()}
 
     def test_a_bespoke_row_carries_no_query_grammar(self):
         """An index sitting unused on a row is a row somebody reads as the one
@@ -421,10 +412,7 @@ class TestAnAddressThatWillNotParseFailsClosed:
     def test_a_credential_in_an_address_is_a_different_origin(self):
         """`netloc` and not `hostname`, which is what refuses this by comparison
         alone: the host a person reads is not the host a client connects to."""
-        assert (
-            targets.origin("https://services.dnb.de@evil.test/sru/dnb")
-            not in targets.SEEDED_ORIGINS
-        )
+        assert targets.origin("https://services.dnb.de@evil.test/sru/dnb") not in targets.SEEDED_ORIGINS
 
 
 class TestTheIndexPatternIsExact:
@@ -464,9 +452,7 @@ class TestARowDeclaresWhatItCanBeAskedForInOneStatement:
         anywhere else in the module would satisfy a text search on a property
         that never mentions it.
         """
-        module = ast.parse(
-            pathlib.Path(targets.__file__).read_text(encoding="utf-8")
-        )
+        module = ast.parse(pathlib.Path(targets.__file__).read_text(encoding="utf-8"))
         [row] = [
             node
             for node in ast.walk(module)
@@ -492,16 +478,12 @@ class TestARowDeclaresWhatItCanBeAskedForInOneStatement:
         **no** row holds is the one that cannot be right, since nothing on
         either side has yet been measured against it.
         """
-        assert [
-            target for target in targets.SEEDED.values() if target.can(capability)
-        ], capability
+        assert [target for target in targets.SEEDED.values() if target.can(capability)], capability
 
     def test_a_row_can_lack_one(self):
         """The control: the row above would pass on a projection that answered
         True for everything."""
-        assert not targets.SEEDED[CatalogueSource.NKP].can(
-            Capability.ANSWERS_TITLE_SEARCH
-        )
+        assert not targets.SEEDED[CatalogueSource.NKP].can(Capability.ANSWERS_TITLE_SEARCH)
 
 
 class TestARowNamesTheSecretItsOwnDoorTakes:
@@ -554,16 +536,11 @@ class TestARowNamesTheSecretItsOwnDoorTakes:
     def test_the_row_that_owns_the_key_says_so(self):
         """Or both arms above refuse a shape nothing on the roster has, and the
         column is never read in anger."""
-        assert (
-            targets.SEEDED[CatalogueSource.GOOGLE_BOOKS].secret
-            is targets.Secret.GOOGLE_BOOKS_KEY
-        )
+        assert targets.SEEDED[CatalogueSource.GOOGLE_BOOKS].secret is targets.Secret.GOOGLE_BOOKS_KEY
 
     def test_no_other_seeded_row_names_a_secret(self):
         assert [
-            source
-            for source, row in targets.SEEDED.items()
-            if row.secret is not targets.Secret.NONE
+            source for source, row in targets.SEEDED.items() if row.secret is not targets.Secret.NONE
         ] == [CatalogueSource.GOOGLE_BOOKS]
 
     def test_a_bare_string_is_not_a_secret(self):

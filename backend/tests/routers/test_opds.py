@@ -87,18 +87,14 @@ class TestOnlyAnAdminConfiguresWhichMachinesThisServerWillOpen:
 
         assert response.status_code == 403
 
-    def test_a_member_may_still_sync_a_server_an_admin_configured(
-        self, client, admin, member
-    ):
+    def test_a_member_may_still_sync_a_server_an_admin_configured(self, client, admin, member):
         """Syncing writes into the catalogue as the member who asked, exactly as
         a CSV import does. It adds no address."""
         server = make_server(client, admin)
 
         with respx.mock:
             respx.get(BASE).respond(text=FEED)
-            response = client.post(
-                f"/api/opds/servers/{server['id']}/sync", headers=member["headers"]
-            )
+            response = client.post(f"/api/opds/servers/{server['id']}/sync", headers=member["headers"])
 
         assert response.status_code == 200
 
@@ -138,9 +134,7 @@ class TestAddingAndEditingAServer:
 
         listed = client.get("/api/opds/servers", headers=admin["headers"]).json()
 
-        assert [(s["id"], s["name"], s["base_url"]) for s in listed] == [
-            (added["id"], "Home library", BASE)
-        ]
+        assert [(s["id"], s["name"], s["base_url"]) for s in listed] == [(added["id"], "Home library", BASE)]
         assert listed[0]["credential_provenance"] == "none"
 
     @pytest.mark.parametrize(
@@ -153,9 +147,7 @@ class TestAddingAndEditingAServer:
             "not an address",
         ],
     )
-    def test_an_address_this_server_will_not_open_is_refused_at_the_write(
-        self, client, admin, address
-    ):
+    def test_an_address_this_server_will_not_open_is_refused_at_the_write(self, client, admin, address):
         response = client.post(
             "/api/opds/servers",
             json={"name": "Home library", "base_url": address},
@@ -173,9 +165,7 @@ class TestAddingAndEditingAServer:
 
         assert response.status_code == 422
 
-    def test_an_address_only_one_of_the_two_parsers_can_read_is_refused(
-        self, client, admin
-    ):
+    def test_an_address_only_one_of_the_two_parsers_can_read_is_refused(self, client, admin):
         """The write gate and the fetch gate have to be one set. `is_fetchable`
         parses with `urlsplit` and `credentials.origin_of` with `httpx.URL`, and
         a host carrying a fullwidth letter is admitted by the first and answered
@@ -224,9 +214,7 @@ class TestALoginNeverFollowsAServerToADifferentMachine:
 
         assert edited["credential_provenance"] == "stored"
 
-    def test_a_path_change_on_the_same_machine_keeps_the_login(
-        self, client, admin, encryption_key
-    ):
+    def test_a_path_change_on_the_same_machine_keeps_the_login(self, client, admin, encryption_key):
         server = make_server(client, admin)
         client.put(
             f"/api/opds/servers/{server['id']}/credential",
@@ -250,9 +238,7 @@ class TestALoginNeverFollowsAServerToADifferentMachine:
             "http://10.0.9.9:9090/opds/books",
         ],
     )
-    def test_moving_to_another_origin_drops_the_login(
-        self, client, admin, db, encryption_key, moved_to
-    ):
+    def test_moving_to_another_origin_drops_the_login(self, client, admin, db, encryption_key, moved_to):
         """Host, scheme and port each make it a different machine."""
         server = make_server(client, admin)
         client.put(
@@ -271,8 +257,6 @@ class TestALoginNeverFollowsAServerToADifferentMachine:
         assert db.query(CatalogueCredential).count() == 0
 
 
-
-
 class TestAnEnvelopeDoesNotOpenBesideAnAddressAnotherWriterChose:
     """What holds when the route above is not the writer, which is the point.
 
@@ -287,9 +271,7 @@ class TestAnEnvelopeDoesNotOpenBesideAnAddressAnotherWriterChose:
     @staticmethod
     def _move(db, server_id: int, address: str) -> OpdsServer:
         """Straight onto the column, which is what a restore and an UPDATE both do."""
-        db.query(OpdsServer).filter(OpdsServer.id == server_id).update(
-            {OpdsServer.base_url: address}
-        )
+        db.query(OpdsServer).filter(OpdsServer.id == server_id).update({OpdsServer.base_url: address})
         db.commit()
         db.expire_all()
         return db.get(OpdsServer, server_id)
@@ -318,9 +300,7 @@ class TestAnEnvelopeDoesNotOpenBesideAnAddressAnotherWriterChose:
         self._move(db, sealed["id"], MOVED)
         assert db.query(CatalogueCredential).count() == 1
 
-    def test_the_screen_reports_it_held_and_unreadable_rather_than_gone(
-        self, client, admin, db, sealed
-    ):
+    def test_the_screen_reports_it_held_and_unreadable_rather_than_gone(self, client, admin, db, sealed):
         """Or an admin is told the login vanished and types it in again blind."""
         self._move(db, sealed["id"], MOVED)
         listed = client.get("/api/opds/servers", headers=admin["headers"]).json()
@@ -330,9 +310,7 @@ class TestAnEnvelopeDoesNotOpenBesideAnAddressAnotherWriterChose:
         )
 
     @respx.mock
-    def test_and_a_sync_of_the_moved_row_sends_no_authorization_header(
-        self, client, admin, db, sealed
-    ):
+    def test_and_a_sync_of_the_moved_row_sends_no_authorization_header(self, client, admin, db, sealed):
         """The measurement the ticket was raised on, run the other way round.
 
         With the source alone as associated data this request carried the
@@ -346,11 +324,8 @@ class TestAnEnvelopeDoesNotOpenBesideAnAddressAnotherWriterChose:
         assert "authorization" not in route.calls[0].request.headers
 
 
-
 class TestTheCredentialLifecycle:
-    def test_a_stored_login_is_reported_as_stored_and_masked(
-        self, client, admin, encryption_key
-    ):
+    def test_a_stored_login_is_reported_as_stored_and_masked(self, client, admin, encryption_key):
         server = make_server(client, admin)
 
         body = client.put(
@@ -388,21 +363,15 @@ class TestTheCredentialLifecycle:
 
         assert response.status_code == 400
 
-    def test_forgetting_a_login_succeeds_whether_or_not_there_was_one(
-        self, client, admin
-    ):
+    def test_forgetting_a_login_succeeds_whether_or_not_there_was_one(self, client, admin):
         server = make_server(client, admin)
 
-        response = client.delete(
-            f"/api/opds/servers/{server['id']}/credential", headers=admin["headers"]
-        )
+        response = client.delete(f"/api/opds/servers/{server['id']}/credential", headers=admin["headers"])
 
         assert response.status_code == 200
         assert response.json()["credential_provenance"] == "none"
 
-    def test_deleting_a_server_takes_its_sealed_login_with_it(
-        self, client, admin, db, encryption_key
-    ):
+    def test_deleting_a_server_takes_its_sealed_login_with_it(self, client, admin, db, encryption_key):
         server = make_server(client, admin)
         client.put(
             f"/api/opds/servers/{server['id']}/credential",
@@ -431,30 +400,22 @@ class TestTheCredentialLifecycle:
 
 class TestASync:
     @respx.mock
-    def test_only_what_the_member_holds_arrives_and_it_arrives_owned(
-        self, client, admin
-    ):
+    def test_only_what_the_member_holds_arrives_and_it_arrives_owned(self, client, admin):
         """The shelf index and the title offered for sale are both passed over.
         An entitlement is not a holding, and this route's only assertion is
         ownership."""
         respx.get(BASE).respond(text=FEED)
         server = make_server(client, admin)
 
-        body = client.post(
-            f"/api/opds/servers/{server['id']}/sync", headers=admin["headers"]
-        ).json()
+        body = client.post(f"/api/opds/servers/{server['id']}/sync", headers=admin["headers"]).json()
 
         assert (body["created"], body["entries_not_held"]) == (1, 2)
         assert body["pages_read"] == 1
         listed = client.get("/api/books", headers=admin["headers"]).json()
-        assert [(b["title"], b["ownership"]) for b in listed["items"]] == [
-            ("Small Gods", "owned")
-        ]
+        assert [(b["title"], b["ownership"]) for b in listed["items"]] == [("Small Gods", "owned")]
 
     @respx.mock
-    def test_a_holding_with_no_description_is_a_created_row_and_not_a_failure(
-        self, client, admin
-    ):
+    def test_a_holding_with_no_description_is_a_created_row_and_not_a_failure(self, client, admin):
         """**The outcome is deliberate rather than incidental.** A feed carries
         a title and an author and nothing else, so a book added by a sync has no
         description until the catalogue chain supplies one, and for a born
@@ -467,9 +428,7 @@ class TestASync:
         respx.get(BASE).respond(text=FEED)
         server = make_server(client, admin)
 
-        body = client.post(
-            f"/api/opds/servers/{server['id']}/sync", headers=admin["headers"]
-        ).json()
+        body = client.post(f"/api/opds/servers/{server['id']}/sync", headers=admin["headers"]).json()
 
         assert (body["created"], body["skipped"]) == (1, 0)
         book = client.get("/api/books", headers=admin["headers"]).json()["items"][0]
@@ -477,23 +436,17 @@ class TestASync:
         assert (book["title"], book["author"]) == ("Small Gods", "Terry Pratchett")
 
     @respx.mock
-    def test_syncing_twice_matches_rather_than_doubling_the_catalogue(
-        self, client, admin
-    ):
+    def test_syncing_twice_matches_rather_than_doubling_the_catalogue(self, client, admin):
         respx.get(BASE).respond(text=FEED)
         server = make_server(client, admin)
 
         client.post(f"/api/opds/servers/{server['id']}/sync", headers=admin["headers"])
-        second = client.post(
-            f"/api/opds/servers/{server['id']}/sync", headers=admin["headers"]
-        ).json()
+        second = client.post(f"/api/opds/servers/{server['id']}/sync", headers=admin["headers"]).json()
 
         assert (second["created"], second["matched"]) == (0, 1)
 
     @respx.mock
-    def test_a_stored_login_is_sent_to_that_server(
-        self, client, admin, encryption_key
-    ):
+    def test_a_stored_login_is_sent_to_that_server(self, client, admin, encryption_key):
         route = respx.get(BASE).respond(text=FEED)
         server = make_server(client, admin)
         client.put(
@@ -511,9 +464,7 @@ class TestASync:
         respx.get(BASE).respond(status_code=401)
         server = make_server(client, admin)
 
-        response = client.post(
-            f"/api/opds/servers/{server['id']}/sync", headers=admin["headers"]
-        )
+        response = client.post(f"/api/opds/servers/{server['id']}/sync", headers=admin["headers"])
 
         assert response.status_code == 502
         assert "401" in response.json()["detail"]
@@ -527,14 +478,10 @@ class TestASync:
         `ConnectError` does not: with the cheaper failure this guard would pass
         against the code it exists to refuse.
         """
-        respx.get(BASE).respond(
-            content=b"<feed>" + b"x" * (fetch.MAX_RESPONSE_BYTES + 1) + b"</feed>"
-        )
+        respx.get(BASE).respond(content=b"<feed>" + b"x" * (fetch.MAX_RESPONSE_BYTES + 1) + b"</feed>")
         server = make_server(client, admin)
 
-        response = client.post(
-            f"/api/opds/servers/{server['id']}/sync", headers=member["headers"]
-        )
+        response = client.post(f"/api/opds/servers/{server['id']}/sync", headers=member["headers"])
 
         assert response.status_code == 502
         assert "10.0.9.9" not in response.text
@@ -549,9 +496,7 @@ class TestASync:
             headers=admin["headers"],
         )
 
-        response = client.post(
-            f"/api/opds/servers/{server['id']}/sync", headers=admin["headers"]
-        )
+        response = client.post(f"/api/opds/servers/{server['id']}/sync", headers=admin["headers"])
 
         assert "hunter2" not in response.text
         assert "sam" not in response.text
@@ -562,9 +507,7 @@ class TestASync:
         assert response.status_code == 404
 
     @respx.mock
-    def test_a_sync_postgres_aborted_for_a_deadlock_answers_409(
-        self, client, admin, monkeypatch
-    ):
+    def test_a_sync_postgres_aborted_for_a_deadlock_answers_409(self, client, admin, monkeypatch):
         """The sync's import commits once, so the abort left nothing of it behind."""
         respx.get(BASE).respond(text=FEED)
         server = make_server(client, admin)
@@ -574,9 +517,7 @@ class TestASync:
 
         monkeypatch.setattr(importing.OpdsImport, "apply", deadlocked)
 
-        response = client.post(
-            f"/api/opds/servers/{server['id']}/sync", headers=admin["headers"]
-        )
+        response = client.post(f"/api/opds/servers/{server['id']}/sync", headers=admin["headers"])
 
         assert response.status_code == 409
 
@@ -593,9 +534,7 @@ class TestASync:
             "<entry><title>Mort</title><author><name>Terry Pratchett</name></author>"
             '<link rel="http://opds-spec.org/acquisition" href="/d/{}"/></entry>'
         )
-        respx.get(BASE).respond(
-            text=FEED.replace("</feed>", entry.format(2) + entry.format(3) + "</feed>")
-        )
+        respx.get(BASE).respond(text=FEED.replace("</feed>", entry.format(2) + entry.format(3) + "</feed>"))
         server = make_server(client, admin)
 
         def unrelated(*args):
@@ -603,9 +542,7 @@ class TestASync:
 
         monkeypatch.setattr(importing, "_fill_opds_gaps", unrelated)
 
-        response = client.post(
-            f"/api/opds/servers/{server['id']}/sync", headers=admin["headers"]
-        )
+        response = client.post(f"/api/opds/servers/{server['id']}/sync", headers=admin["headers"])
 
         assert response.status_code == 500
 
@@ -629,9 +566,7 @@ class TestASync:
         server = make_server(client, admin)
 
         codes = [
-            client.post(
-                f"/api/opds/servers/{server['id']}/sync", headers=admin["headers"]
-            ).status_code
+            client.post(f"/api/opds/servers/{server['id']}/sync", headers=admin["headers"]).status_code
             for _ in range(4)
         ]
 

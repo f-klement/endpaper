@@ -152,9 +152,7 @@ class TestTheNamespaceBound:
         declaration can open inside one and run on to the real declaration's
         quote. A scan that consumed the look-alike's value would resume past the
         real `xmlns:p=` and leave this to the handler, after the cost."""
-        content = (
-            "<r b=' xmlns=\"" + "A" * 70 + "' " + _declared_and_used_in_one_tag("u" * 10_000, 2_000)[3:]
-        )
+        content = "<r b=' xmlns=\"" + "A" * 70 + "' " + _declared_and_used_in_one_tag("u" * 10_000, 2_000)[3:]
         assert _peak_of_refusing(content, "namespace is longer") <= xml_parse.ALLOCATION_FLOOR
 
 
@@ -186,9 +184,7 @@ class TestTheNameBound:
             _tree("<r>" + "".join(f'<e a{i}=""/>' for i in range(xml_parse.MAX_NAMES)) + "</r>")
 
     @pytest.mark.parametrize("as_bytes", [False, True], ids=["text", "bytes"])
-    def test_distinct_names_under_a_namespace_at_its_bound_are_refused_inside_the_floor(
-        self, as_bytes
-    ):
+    def test_distinct_names_under_a_namespace_at_its_bound_are_refused_inside_the_floor(self, as_bytes):
         """**The construct the bound is for**: every name a new one, each
         carrying the longest namespace `MAX_NAMESPACE` admits, which is what a
         name costs most. Refused at the name past the bound, so the cost stops
@@ -196,17 +192,12 @@ class TestTheNameBound:
         declaration = f' xmlns:p="{"u" * xml_parse.MAX_NAMESPACE}"'
         content = _distinct_elements(50_000, "p:", declaration)
         written = content.encode() if as_bytes else content
-        assert (
-            _peak_of_refusing(written, "distinct element and attribute")
-            <= xml_parse.ALLOCATION_FLOOR
-        )
+        assert _peak_of_refusing(written, "distinct element and attribute") <= xml_parse.ALLOCATION_FLOOR
 
 
 class TestTheAttributeBound:
     def test_a_tag_at_the_bound_is_built(self):
-        assert len(_tree(_one_tag_of(xml_parse.MAX_ATTRIBUTES))[0].attrib) == (
-            xml_parse.MAX_ATTRIBUTES
-        )
+        assert len(_tree(_one_tag_of(xml_parse.MAX_ATTRIBUTES))[0].attrib) == (xml_parse.MAX_ATTRIBUTES)
 
     @pytest.mark.parametrize(
         ("space", "quote"),
@@ -222,23 +213,17 @@ class TestTheAttributeBound:
     def test_a_close_angle_in_a_value_does_not_end_the_count(self):
         """XML allows `>` in a value, so a walk ending the tag at the first `>`
         would count one here."""
-        content = '<r><e z=">"' + "".join(
-            f' a{i}=""' for i in range(xml_parse.MAX_ATTRIBUTES)
-        ) + "/></r>"
+        content = '<r><e z=">"' + "".join(f' a{i}=""' for i in range(xml_parse.MAX_ATTRIBUTES)) + "/></r>"
         with pytest.raises(ElementTree.ParseError, match="tag carries more than"):
             _tree(content)
 
     @pytest.mark.parametrize("as_bytes", [False, True], ids=["text", "bytes"])
-    def test_a_crowded_tag_under_a_namespace_at_its_bound_is_refused_inside_the_floor(
-        self, as_bytes
-    ):
+    def test_a_crowded_tag_under_a_namespace_at_its_bound_is_refused_inside_the_floor(self, as_bytes):
         """**Expat expands one tag's attribute names before any handler runs**,
         so `MAX_NAMES` in `start` comes after their cost. Refused before the
         parse instead, by one scan for text and another for bytes."""
         namespace = "u" * xml_parse.MAX_NAMESPACE
-        content = f'<r xmlns:p="{namespace}"><e' + "".join(
-            f' p:a{i}=""' for i in range(50_000)
-        ) + "/></r>"
+        content = f'<r xmlns:p="{namespace}"><e' + "".join(f' p:a{i}=""' for i in range(50_000)) + "/></r>"
         written = content.encode() if as_bytes else content
         assert _peak_of_refusing(written, "tag carries more than") <= xml_parse.ALLOCATION_FLOOR
 

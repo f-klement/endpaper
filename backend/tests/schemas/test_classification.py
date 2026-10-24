@@ -44,9 +44,7 @@ _NUMBERS = st.one_of(
 
 
 def _invisible(value: str) -> bool:
-    return any(
-        unicodedata.category(character) in INVISIBLE_CATEGORIES for character in value
-    )
+    return any(unicodedata.category(character) in INVISIBLE_CATEGORIES for character in value)
 
 
 def _stored(number: str) -> str | None:
@@ -80,9 +78,7 @@ class TestTheGeneratorStillReachesEveryAnswer:
         this validator admitted, and they are `Cf` rather than `Cc`."""
         witness(
             _NUMBERS,
-            lambda number: any(
-                unicodedata.category(character) == "Cf" for character in number
-            ),
+            lambda number: any(unicodedata.category(character) == "Cf" for character in number),
             reaches="a formatting character",
         )
 
@@ -128,9 +124,7 @@ class TestACaptionIsCollapsedAndAnEmptyOneIsAbsent:
         """Otherwise `null` and `""` are two spellings of "no caption" and every
         client tests for both."""
         heading = ClassificationIn(scheme=_OPAQUE, number="QA76", label=label)
-        assert heading.label is None or (
-            heading.label == " ".join(label.split()) and heading.label != ""
-        )
+        assert heading.label is None or (heading.label == " ".join(label.split()) and heading.label != "")
 
 
 @pytest.mark.property

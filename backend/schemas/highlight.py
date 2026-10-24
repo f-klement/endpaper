@@ -99,9 +99,7 @@ class KoreaderImportIn(BaseModel):
     #: reference carrying it, so a sidecar lands only where its fingerprint
     #: matched and never where a title merely looked right.
     partial_md5: PartialMd5
-    highlights: list[KoreaderHighlightIn] = Field(
-        min_length=1, max_length=MAX_HIGHLIGHTS_PER_IMPORT
-    )
+    highlights: list[KoreaderHighlightIn] = Field(min_length=1, max_length=MAX_HIGHLIGHTS_PER_IMPORT)
 
 
 class HighlightImportOut(BaseModel):

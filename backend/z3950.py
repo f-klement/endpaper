@@ -681,9 +681,7 @@ async def association(
     """
     ends = in_(TIMEOUT_SECONDS) if deadline is None else deadline
     if left(ends) > TIMEOUT_SECONDS:
-        raise ValueError(
-            f"deadline must not be more than TIMEOUT_SECONDS ({TIMEOUT_SECONDS}) away"
-        )
+        raise ValueError(f"deadline must not be more than TIMEOUT_SECONDS ({TIMEOUT_SECONDS}) away")
     open_association = Association(target, ends)
     await open_association._open(client or _default_client())
     try:
@@ -746,18 +744,12 @@ async def search(
         raise ValueError("limit must be at least 1")
     if cap > MAX_RESPONSE_BYTES:
         raise ValueError(f"limit must not exceed MAX_RESPONSE_BYTES ({MAX_RESPONSE_BYTES})")
-    ends = (
-        open_association.deadline
-        if deadline is None
-        else min(open_association.deadline, deadline)
-    )
+    ends = open_association.deadline if deadline is None else min(open_association.deadline, deadline)
     async with open_association._one_exchange():
         return await _exchange(open_association, pqf, records, cap, ends)
 
 
-async def _exchange(
-    open_association: Association, pqf: str, records: int, cap: int, ends: float
-) -> Answer:
+async def _exchange(open_association: Association, pqf: str, records: int, cap: int, ends: float) -> Answer:
     """The search and the bounded record walk.
 
     Split out so the lock and the argument checks are in exactly one place, around the
@@ -768,6 +760,7 @@ async def _exchange(
     fetched, which is `fetch.py`'s behaviour too: a body that stops arriving yields
     nothing rather than a prefix. It is why `MAX_RECORDS` is bounded by time.
     """
+
     def run_search(session: Session) -> int:
         return session.search(pqf)
 

@@ -380,16 +380,12 @@ def _to_file(phrase: str) -> None:
     path = key_file()
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        handle = os.open(
-            path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600
-        )
+        handle = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
         os.fchmod(handle, 0o600)
         with os.fdopen(handle, "w", encoding="utf-8") as opened:
             opened.write(phrase + "\n")
     except OSError as error:
-        raise KeyConfigurationError(
-            f"The key file at {path} could not be written."
-        ) from error
+        raise KeyConfigurationError(f"The key file at {path} could not be written.") from error
 
 
 def _file_is_writable() -> bool:
@@ -416,9 +412,7 @@ def _clear_file() -> None:
     try:
         path.unlink(missing_ok=True)
     except OSError as error:
-        raise KeyConfigurationError(
-            f"The key file at {path} could not be removed."
-        ) from error
+        raise KeyConfigurationError(f"The key file at {path} could not be removed.") from error
 
 
 @dataclass(frozen=True)
@@ -472,9 +466,7 @@ KEY_SOURCES: Final[tuple[KeySource, ...]] = (
         _clear_keychain,
         _keychain_available,
     ),
-    KeySource(
-        "file", "the key file", _from_file, _to_file, _clear_file, _file_is_writable
-    ),
+    KeySource("file", "the key file", _from_file, _to_file, _clear_file, _file_is_writable),
 )
 
 
@@ -638,8 +630,7 @@ def forget_key() -> int:
     """
     if _from_value():
         raise KeyConfigurationError(
-            "CREDENTIAL_ENCRYPTION_KEY pins this deployment's key. Clear it where "
-            "the app is configured."
+            "CREDENTIAL_ENCRYPTION_KEY pins this deployment's key. Clear it where the app is configured."
         )
     cleared = 0
     for source in KEY_SOURCES:
@@ -664,8 +655,7 @@ def forget_key() -> int:
         # while it stays in force.
         if source.read():
             raise KeyConfigurationError(
-                f"The key in {source.name} could not be removed. Remove it there "
-                "and try again."
+                f"The key in {source.name} could not be removed. Remove it there and try again."
             )
         cleared += 1
     return cleared
@@ -723,9 +713,7 @@ def phrase_to_key(text: str) -> bytes:
     """
     words = normalise_phrase(text).split()
     if len(words) != PHRASE_WORDS:
-        raise BadRecoveryPhrase(
-            f"A recovery phrase is {PHRASE_WORDS} words; this one has {len(words)}."
-        )
+        raise BadRecoveryPhrase(f"A recovery phrase is {PHRASE_WORDS} words; this one has {len(words)}.")
     for position, word in enumerate(words, start=1):
         if word not in _WORDS.wordlist:
             raise BadRecoveryPhrase(
@@ -822,7 +810,7 @@ def _may_open_unbound(source: str, base_url: str) -> bool:
     """
     try:
         known = targets.SEEDED[CatalogueSource(source)]
-    except (ValueError, KeyError):
+    except ValueError, KeyError:
         # Not a roster source at all: a household server, an orphan an archive
         # restored, or a kind that does not exist yet. None of those has an
         # address this build chose, so none may open the superseded scheme.
@@ -849,9 +837,10 @@ def _is_a_roster_source(source: str) -> bool:
     """
     try:
         known = targets.SEEDED[CatalogueSource(source)]
-    except (ValueError, KeyError):
+    except ValueError, KeyError:
         return False
     return _may_open_unbound(source, known.base_url)
+
 
 #: Every version this build recognises **as an envelope**, newest last.
 #:
@@ -989,9 +978,7 @@ def _purpose(source: str, origin: str, version: str = VERSION) -> str:
     return shape(source, origin)
 
 
-def _associated(
-    material: bytes, source: str, base_url: str, version: str = VERSION
-) -> bytes:
+def _associated(material: bytes, source: str, base_url: str, version: str = VERSION) -> bytes:
     """The additional authenticated data, and the two refusals that make it one string.
 
     **Built in one place because `seal` and `unseal` must not be able to
@@ -1012,9 +999,7 @@ def _associated(
         raise CredentialError("That is not a catalogue source.")
     origin = origin_of(base_url)
     if not origin:
-        raise CredentialError(
-            "A credential cannot be bound to an address this server cannot parse."
-        )
+        raise CredentialError("A credential cannot be bound to an address this server cannot parse.")
     return f"{version}.{generation_of_key(material)}.{_purpose(source, origin, version)}".encode()
 
 
@@ -1143,9 +1128,7 @@ def _member_associated(material: bytes, service: str, member_id: int, base_url: 
     return f"{VERSION}.{generation_of_key(material)}.{purpose}".encode()
 
 
-def seal_member_login(
-    material: bytes, service: str, member_id: int, base_url: str, secret: str
-) -> str:
+def seal_member_login(material: bytes, service: str, member_id: int, base_url: str, secret: str) -> str:
     """One member's login at `service`, sealed as `seal` seals a catalogue's.
 
     The same envelope shape, key and generation tag, over associated data of
@@ -1158,9 +1141,7 @@ def seal_member_login(
     return ".".join((VERSION, generation_of_key(material), _b64(nonce), _b64(sealed)))
 
 
-def unseal_member_login(
-    material: bytes, service: str, member_id: int, base_url: str, envelope: str
-) -> str:
+def unseal_member_login(material: bytes, service: str, member_id: int, base_url: str, envelope: str) -> str:
     """The member's login back, or the refusal `unseal` would raise.
 
     No superseded version is opened: this kind was first written under
@@ -1497,9 +1478,7 @@ def forget(db: Session, source: str) -> bool:
     return True
 
 
-def stored(
-    db: Session, source: str, base_url: str, state: KeyState | None = None
-) -> tuple[str, str]:
+def stored(db: Session, source: str, base_url: str, state: KeyState | None = None) -> tuple[str, str]:
     """The stored username and password, opened. Raises rather than returning blanks.
 
     **This may write.** An envelope from the superseded scheme is re-sealed to
@@ -1566,7 +1545,7 @@ def _reseal_if_superseded(
         # it was a trap for the next one rather than a live defect.
         with db.begin_nested():
             row.envelope = seal(material, source, base_url, opened)
-    except (CredentialError, SQLAlchemyError):
+    except CredentialError, SQLAlchemyError:
         pass
 
 
@@ -1736,9 +1715,7 @@ class CredentialView:
         return self.provenance is not CredentialProvenance.NONE
 
 
-def view(
-    db: Session, source: str, base_url: str, state: KeyState | None = None
-) -> CredentialView:
+def view(db: Session, source: str, base_url: str, state: KeyState | None = None) -> CredentialView:
     """What a settings screen may say about one source's login.
 
     **`base_url` for the reason `for_request` takes one**: the shipped level is
@@ -1841,16 +1818,12 @@ def unreadable_sources(db: Session, state: KeyState | None = None) -> list[str]:
         envelope = stored_envelope(db, source)
         if not envelope:
             continue
-        if resolved.material is None or not _openable_by(
-            resolved.material, source, envelope
-        ):
+        if resolved.material is None or not _openable_by(resolved.material, source, envelope):
             stranded.append(source)
     return sorted(stranded)
 
 
-def is_held(
-    db: Session, source: str, base_url: str, state: KeyState | None = None
-) -> bool:
+def is_held(db: Session, source: str, base_url: str, state: KeyState | None = None) -> bool:
     """Whether the next request to this source would actually carry a login.
 
     **Asked through `for_request` and not through `view`, and the two are not
@@ -1870,9 +1843,7 @@ def is_held(
     return for_request(db, source, base_url, state) is not None
 
 
-def for_request(
-    db: Session, source: str, base_url: str, state: KeyState | None = None
-) -> Credential | None:
+def for_request(db: Session, source: str, base_url: str, state: KeyState | None = None) -> Credential | None:
     """The credential a request to this target would actually carry, bound to its origin.
 
     **Every outbound caller goes through here rather than reading the row**, the

@@ -105,6 +105,10 @@ from models import Book, CustomField, CustomFieldValue, User
 from tests.bindings import SourceNames
 from tests.corpus import application_sources
 
+TREE_GUARDS = {
+    "TestOnlyABookReachesAValue": ("application_sources",),
+}
+
 BACKEND = Path(__file__).resolve().parent.parent
 
 #: Where `CustomFieldValue` may be imported.
@@ -237,11 +241,7 @@ def _module_functions() -> dict[str, ast.FunctionDef]:
 
 def _public_names(functions: dict[str, ast.FunctionDef]) -> list[str]:
     """The subset a caller outside this module can reach, for the count only."""
-    return sorted(
-        name
-        for name in functions
-        if not any(part.startswith("_") for part in name.split("."))
-    )
+    return sorted(name for name in functions if not any(part.startswith("_") for part in name.split(".")))
 
 
 def _touches_the_table(node: ast.FunctionDef) -> bool:
@@ -252,10 +252,7 @@ def _touches_the_table(node: ast.FunctionDef) -> bool:
     a helper is caught at the helper, which is a name in the same walk. It was
     not, for one round, and this sentence used to claim it was.
     """
-    return any(
-        isinstance(child, ast.Name) and child.id == "CustomFieldValue"
-        for child in ast.walk(node)
-    )
+    return any(isinstance(child, ast.Name) and child.id == "CustomFieldValue" for child in ast.walk(node))
 
 
 def _annotations(node: ast.FunctionDef) -> list[tuple[str, str]]:
@@ -273,8 +270,7 @@ def _annotations(node: ast.FunctionDef) -> list[tuple[str, str]]:
     if arguments.kwarg is not None:
         every.append(arguments.kwarg)
     return [
-        (argument.arg, ast.unparse(argument.annotation) if argument.annotation else "")
-        for argument in every
+        (argument.arg, ast.unparse(argument.annotation) if argument.annotation else "") for argument in every
     ]
 
 
@@ -323,13 +319,11 @@ SIGNATURE_EVASIONS: dict[str, tuple[str, str]] = {
         "touch",
     ),
     "a method reading a mapping by book id": (
-        "def on(self, book_id: int) -> list[Filled]:\n"
-        "    return self._by_book.get(book_id, [])\n",
+        "def on(self, book_id: int) -> list[Filled]:\n    return self._by_book.get(book_id, [])\n",
         "name",
     ),
     "a book shaped parameter typed as an int": (
-        "def values_on(db: Session, book: int) -> list[Filled]:\n"
-        "    return []\n",
+        "def values_on(db: Session, book: int) -> list[Filled]:\n    return []\n",
         "name",
     ),
 }
@@ -354,10 +348,7 @@ NOT_SIGNATURE_OFFENCES: dict[str, str] = {
         "    field.name = name\n"
         "    return field\n"
     ),
-    "the pure rule": (
-        "def link_target(kind: CustomFieldKind, value: str) -> str | None:\n"
-        "    return None\n"
-    ),
+    "the pure rule": ("def link_target(kind: CustomFieldKind, value: str) -> str | None:\n    return None\n"),
 }
 
 
@@ -466,9 +457,7 @@ class TestOnlyABookReachesAValue:
         offenders = sorted(
             name
             for name, node in _module_functions().items()
-            if name not in PAST_A_BOOK
-            and _touches_the_table(node)
-            and not _takes_a_book(node)
+            if name not in PAST_A_BOOK and _touches_the_table(node) and not _takes_a_book(node)
         )
         assert offenders == [], (
             "These read or write a custom field value without being handed a Book, "
@@ -489,9 +478,7 @@ class TestOnlyABookReachesAValue:
             for parameter, annotation in _annotations(node)
             if "book" in parameter.lower() and "Book" not in annotation
         )
-        assert offenders == [], (
-            f"These name a book and are annotated as something else: {offenders}"
-        )
+        assert offenders == [], f"These name a book and are annotated as something else: {offenders}"
 
     @pytest.mark.parametrize("shape", sorted(SIGNATURE_EVASIONS), ids=sorted(SIGNATURE_EVASIONS))
     def test_the_passes_report_the_shapes_they_exist_for(self, shape):
@@ -666,10 +653,7 @@ class TestALinkIsNotWhateverSomebodyTyped:
     def test_an_ipv6_host_keeps_its_brackets(self):
         """`hostname` strips them and a bare `::1` in a netloc is not a URL, so
         a naive rebuild would break exactly the LAN case this feature is for."""
-        assert (
-            link_target(CustomFieldKind.URL, "http://[::1]:8083/book/12")
-            == "http://[::1]:8083/book/12"
-        )
+        assert link_target(CustomFieldKind.URL, "http://[::1]:8083/book/12") == "http://[::1]:8083/book/12"
 
     def test_a_kind_nobody_recognises_reads_as_text(self):
         """Degrades rather than raising, and in the safe direction.
@@ -715,9 +699,7 @@ class TestALinkIsNotWhateverSomebodyTyped:
             "ck_custom_field_values_bounds",
         } <= declared, sorted(declared)
 
-    def test_a_value_the_read_would_rewrite_is_served_as_text(
-        self, db, book, link_field
-    ):
+    def test_a_value_the_read_would_rewrite_is_served_as_text(self, db, book, link_field):
         """The sharpest form of the phishing case, and it is the **read** end.
 
         `backup.restore` inserts through Core, so a row can carry a value the
@@ -756,9 +738,7 @@ class TestALinkIsNotWhateverSomebodyTyped:
             "https://\u4f8b\u3048.jp/x",
         ],
     )
-    def test_a_value_this_app_wrote_keeps_its_link(
-        self, db, book, link_field, value
-    ):
+    def test_a_value_this_app_wrote_keeps_its_link(self, db, book, link_field, value):
         """The other half, and the reason the rule above is free.
 
         `link_target` is idempotent, so anything it produced equals what it
@@ -803,18 +783,12 @@ class TestALinkIsNotWhateverSomebodyTyped:
         validator fires, so a row can reach this table without passing the
         write check. Inserted the same way here.
         """
-        db.add(
-            CustomFieldValue(
-                book_id=book.id, field_id=link_field.id, value="javascript:alert(1)"
-            )
-        )
+        db.add(CustomFieldValue(book_id=book.id, field_id=link_field.id, value="javascript:alert(1)"))
         db.commit()
 
         filled = values_on(db, book)
 
-        assert [(row.value, row.href) for row in filled] == [
-            ("javascript:alert(1)", None)
-        ]
+        assert [(row.value, row.href) for row in filled] == [("javascript:alert(1)", None)]
 
 
 class TestDefiningAField:
@@ -882,9 +856,7 @@ class TestRenamingAField:
         db.commit()
 
         filled = values_on(db, book)
-        assert [(row.field.name, row.value) for row in filled] == [
-            ("Provenance", "Oxfam, Cowley Road")
-        ]
+        assert [(row.field.name, row.value) for row in filled] == [("Provenance", "Oxfam, Cowley Road")]
 
     def test_renaming_onto_another_field_is_refused(self, db, text_field, link_field):
         with pytest.raises(Refused):
@@ -923,17 +895,13 @@ class TestRemovingAField:
 
 
 class TestWritingAValue:
-    def test_a_value_set_on_one_book_is_not_on_another(
-        self, db, book, other_book, text_field
-    ):
+    def test_a_value_set_on_one_book_is_not_on_another(self, db, book, other_book, text_field):
         write(db, book, text_field, "Oxfam")
         db.commit()
 
         assert values_on(db, other_book) == []
 
-    def test_a_field_with_no_value_is_absent_rather_than_empty(
-        self, db, book, text_field, link_field
-    ):
+    def test_a_field_with_no_value_is_absent_rather_than_empty(self, db, book, text_field, link_field):
         write(db, book, text_field, "Oxfam")
         db.commit()
 
@@ -976,9 +944,7 @@ class TestWritingAValue:
         assert row.value == "https://calibre.example.evil.example/x"
         assert row.href == row.value
 
-    def test_a_url_field_refuses_a_value_no_browser_could_follow(
-        self, db, book, link_field
-    ):
+    def test_a_url_field_refuses_a_value_no_browser_could_follow(self, db, book, link_field):
         """A space reaches here because the schema collapses runs rather than
         removing them, and `new URL()` throws on it."""
         with pytest.raises(Refused):
@@ -997,9 +963,7 @@ class TestReadingOneBook:
     def test_a_book_with_nothing_in_it_reads_empty(self, db, book, text_field):
         assert values_on(db, book) == []
 
-    def test_it_costs_one_statement_however_many_fields_are_filled(
-        self, db, book, text_field, link_field
-    ):
+    def test_it_costs_one_statement_however_many_fields_are_filled(self, db, book, text_field, link_field):
         """The definitions are joined on rather than looked up per row.
 
         The obvious implementation reads the values and then the name of each

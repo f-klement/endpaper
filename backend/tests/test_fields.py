@@ -56,6 +56,13 @@ from tests.test_house_rules import (
 from tests.test_shelf import _book_owned_offences, _statement_at
 from tests.test_tags import _reaches_private
 
+TREE_GUARDS = {
+    "TestFieldsIsTheOnlyReaderOfTheAuthorColumn": ("application_sources",),
+    "TestNothingElseDecidesWhoMayBeToldAFieldExists": ("application_sources",),
+    "TestOnlyFieldIdsCrossOutOfTheValueTable": ("application_sources",),
+    "TestTheWholeTableReadHasTheCallersItClaims": ("application_sources",),
+}
+
 #: The entity, as the shared pass takes it.
 #:
 #: `CustomFieldValue` is a different name and is not in this set: that table is
@@ -137,8 +144,7 @@ FIELD_READERS: Final = {
             "moved a broadcast to a poll.",
         ),
         (
-            "_author_of: rows = self._db.query( CustomField.id, "
-            "CustomField.created_by_user_id ).all()",
+            "_author_of: rows = self._db.query(CustomField.id, CustomField.created_by_user_id).all()",
             "**two columns and never a row**, which is both the privacy bound "
             "and the reason the statement is shaped this way. What crosses is "
             "a member id per definition id, for definitions this class decides "
@@ -205,13 +211,8 @@ def _report(sources: dict[str, str]) -> list[str]:
         lines = found.get(name, [])
         entries = FIELD_READERS.get(name, [])
         if len(lines) != len(entries):
-            shown = "\n".join(
-                f"      {name}:{line}  {_key(sources.get(name, ''), line)}"
-                for line in lines
-            )
-            report.append(
-                f"  {name}: {len(lines)} reads, {len(entries)} classified\n{shown}"
-            )
+            shown = "\n".join(f"      {name}:{line}  {_key(sources.get(name, ''), line)}" for line in lines)
+            report.append(f"  {name}: {len(lines)} reads, {len(entries)} classified\n{shown}")
             continue
         for line, (expected, _) in zip(lines, entries, strict=True):
             actual = _key(sources.get(name, ""), line)
@@ -259,14 +260,11 @@ def _definition_bindings(source: str) -> tuple[frozenset[str], frozenset[str]]:
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
-                if alias.name == "custom_fields" or alias.name.endswith(
-                    ".custom_fields"
-                ):
+                if alias.name == "custom_fields" or alias.name.endswith(".custom_fields"):
                     modules.add(alias.asname or alias.name.split(".")[0])
         elif isinstance(node, ast.ImportFrom):
             if node.module is None or not (
-                node.module == "custom_fields"
-                or node.module.endswith(".custom_fields")
+                node.module == "custom_fields" or node.module.endswith(".custom_fields")
             ):
                 continue
             for alias in node.names:
@@ -278,9 +276,7 @@ def _definition_bindings(source: str) -> tuple[frozenset[str], frozenset[str]]:
     return frozenset(modules), frozenset(functions)
 
 
-def _reaches_definitions(
-    target: ast.expr, modules: frozenset[str], functions: frozenset[str]
-) -> bool:
+def _reaches_definitions(target: ast.expr, modules: frozenset[str], functions: frozenset[str]) -> bool:
     """Whether this call target resolves to `custom_fields.definitions`.
 
     A free function rather than a closure over the loop below, because `ruff`
@@ -384,9 +380,7 @@ def _named_attributes_of(source: str, entity: str) -> list[str]:
     named = {
         node.attr
         for node in ast.walk(ast.parse(source))
-        if isinstance(node, ast.Attribute)
-        and isinstance(node.value, ast.Name)
-        and node.value.id == entity
+        if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) and node.value.id == entity
     }
     return sorted(named)
 
@@ -452,8 +446,7 @@ class TestNothingElseDecidesWhoMayBeToldAFieldExists:
             1,
         )
         assert rewritten != sources["routers/books.py"], (
-            "the list route no longer spells the call this plant rewrites, so "
-            "nothing was planted"
+            "the list route no longer spells the call this plant rewrites, so nothing was planted"
         )
         sources["routers/books.py"] = rewritten
 
@@ -469,18 +462,14 @@ class TestNothingElseDecidesWhoMayBeToldAFieldExists:
         the corpus holding exactly one spare offence.
         """
         sources = dict(application_sources())
-        sources["fields.py"] += (
-            "\n\ndef every_field_there_is(db):\n"
-            "    return db.query(CustomField).all()\n"
-        )
+        sources["fields.py"] += "\n\ndef every_field_there_is(db):\n    return db.query(CustomField).all()\n"
         knocked_out = sources["custom_fields.py"].replace(
             "        .order_by(CustomFieldValue.field_id)\n", "", 1
         )
         # The control. If the replace no ops, the arm still passes and has
         # quietly stopped perturbing the unrelated thing it exists to perturb.
         assert knocked_out != sources["custom_fields.py"], (
-            "`values_on` no longer spells the ordering this control removes, "
-            "so nothing unrelated was moved"
+            "`values_on` no longer spells the ordering this control removes, so nothing unrelated was moved"
         )
         sources["custom_fields.py"] = knocked_out
 
@@ -540,9 +529,7 @@ class TestTheWholeTableReadHasTheCallersItClaims:
 
     def test_one_module_outside_custom_fields_calls_it(self) -> None:
         sources = {
-            name: source
-            for name, source in application_sources().items()
-            if name != "custom_fields.py"
+            name: source for name, source in application_sources().items() if name != "custom_fields.py"
         }
 
         callers = _definition_callers(sources)
@@ -580,9 +567,7 @@ class TestTheWholeTableReadHasTheCallersItClaims:
                 for site in _definition_callers({"custom_fields.py": source})
                 for holder in ast.walk(tree)
                 if isinstance(holder, ast.FunctionDef)
-                and holder.lineno
-                <= int(site.rpartition(":")[2])
-                <= (holder.end_lineno or holder.lineno)
+                and holder.lineno <= int(site.rpartition(":")[2]) <= (holder.end_lineno or holder.lineno)
             }
         )
 
@@ -598,13 +583,9 @@ class TestTheWholeTableReadHasTheCallersItClaims:
         """The plant, because an `== [one thing]` is also satisfied by a walk
         that found nothing and a corpus that moved."""
         sources = {
-            name: source
-            for name, source in application_sources().items()
-            if name != "custom_fields.py"
+            name: source for name, source in application_sources().items() if name != "custom_fields.py"
         }
-        sources["routers/books.py"] += (
-            "\n\ndef _every_field(db):\n    return custom_fields.definitions(db)\n"
-        )
+        sources["routers/books.py"] += "\n\ndef _every_field(db):\n    return custom_fields.definitions(db)\n"
 
         callers = _definition_callers(sources)
 
@@ -620,9 +601,7 @@ class TestTheWholeTableReadHasTheCallersItClaims:
         spellings; a non author found them, and this is the one that matters.
         """
         sources = {
-            name: source
-            for name, source in application_sources().items()
-            if name != "custom_fields.py"
+            name: source for name, source in application_sources().items() if name != "custom_fields.py"
         }
         before = _definition_callers(sources)
         sources["routers/books.py"] += (
@@ -650,23 +629,18 @@ class TestTheWholeTableReadHasTheCallersItClaims:
         "the plain qualified call": (
             "import custom_fields\n\ndef f(db):\n    return custom_fields.definitions(db)\n"
         ),
-        "a module alias": (
-            "import custom_fields as cf\n\ndef f(db):\n    return cf.definitions(db)\n"
-        ),
+        "a module alias": ("import custom_fields as cf\n\ndef f(db):\n    return cf.definitions(db)\n"),
         "a from import": (
             "from custom_fields import definitions\n\ndef f(db):\n    return definitions(db)\n"
         ),
         "a from import with an alias": (
-            "from custom_fields import definitions as every\n\n"
-            "def f(db):\n    return every(db)\n"
+            "from custom_fields import definitions as every\n\ndef f(db):\n    return every(db)\n"
         ),
         "the package qualified form": (
-            "import backend.custom_fields\n\n"
-            "def f(db):\n    return backend.custom_fields.definitions(db)\n"
+            "import backend.custom_fields\n\ndef f(db):\n    return backend.custom_fields.definitions(db)\n"
         ),
         "getattr on a literal name": (
-            "import custom_fields as cf\n\n"
-            'def f(db):\n    return getattr(cf, "definitions")(db)\n'
+            'import custom_fields as cf\n\ndef f(db):\n    return getattr(cf, "definitions")(db)\n'
         ),
     }
 
@@ -678,12 +652,10 @@ class TestTheWholeTableReadHasTheCallersItClaims:
     #: why neither is chased.
     REACHES_IT_UNSEEN: Final = {
         "the function bound to a local": (
-            "import custom_fields\n\ndef f(db):\n"
-            "    read = custom_fields.definitions\n    return read(db)\n"
+            "import custom_fields\n\ndef f(db):\n    read = custom_fields.definitions\n    return read(db)\n"
         ),
         "getattr on a computed name": (
-            "import custom_fields as cf\n\ndef f(db, name):\n"
-            "    return getattr(cf, name)(db)\n"
+            "import custom_fields as cf\n\ndef f(db, name):\n    return getattr(cf, name)(db)\n"
         ),
     }
 
@@ -693,12 +665,8 @@ class TestTheWholeTableReadHasTheCallersItClaims:
 
         assert callers == ["somewhere.py:4"], callers
 
-    @pytest.mark.parametrize(
-        "spelling", sorted(REACHES_IT_UNSEEN), ids=sorted(REACHES_IT_UNSEEN)
-    )
-    def test_the_two_shapes_outside_the_rule_are_outside_it(
-        self, spelling: str
-    ) -> None:
+    @pytest.mark.parametrize("spelling", sorted(REACHES_IT_UNSEEN), ids=sorted(REACHES_IT_UNSEEN))
+    def test_the_two_shapes_outside_the_rule_are_outside_it(self, spelling: str) -> None:
         callers = _definition_callers({"somewhere.py": self.REACHES_IT_UNSEEN[spelling]})
 
         assert callers == [], callers
@@ -889,9 +857,7 @@ class TestAFieldOnABookTheViewerCanSee:
 
         assert Fields.seen_by(db, viewer.id).listable() == [field]
 
-    def test_a_private_book_lists_it_for_its_owner_alone(
-        self, db, viewer, stranger, field
-    ) -> None:
+    def test_a_private_book_lists_it_for_its_owner_alone(self, db, viewer, stranger, field) -> None:
         _fill(db, _book(db, stranger, private=True), field)
 
         assert Fields.seen_by(db, stranger.id).listable() == [field]
@@ -916,18 +882,14 @@ class TestAFieldOnABookInTheViewersTrash:
 
         assert Fields.seen_by(db, viewer.id).listable() == [field]
 
-    def test_another_members_trashed_public_book_keeps_it_listed(
-        self, db, viewer, stranger, field
-    ) -> None:
+    def test_another_members_trashed_public_book_keeps_it_listed(self, db, viewer, stranger, field) -> None:
         """`in_trash_for` is not an ownership test: a trashed public book is in
         everybody's trash listing, so its field name is already readable."""
         _fill(db, _book(db, stranger, trashed=True), field)
 
         assert Fields.seen_by(db, viewer.id).listable() == [field]
 
-    def test_another_members_trashed_private_book_does_not(
-        self, db, viewer, stranger, field
-    ) -> None:
+    def test_another_members_trashed_private_book_does_not(self, db, viewer, stranger, field) -> None:
         _fill(db, _book(db, stranger, private=True, trashed=True), field)
 
         assert Fields.seen_by(db, viewer.id).listable() == []
@@ -984,9 +946,7 @@ class TestTheArmForTheMemberWhoDefinedIt:
 
         assert Fields.seen_by(db, viewer.id).listable() == [defined_by_the_viewer]
 
-    def test_the_definer_may_still_name_it_by_id(
-        self, db, viewer, stranger, defined_by_the_viewer
-    ) -> None:
+    def test_the_definer_may_still_name_it_by_id(self, db, viewer, stranger, defined_by_the_viewer) -> None:
         """The half that matters more than the listing: `addressable` is what
         the rename and the value write resolve through, so a definer who could
         see the row and not act on it would be no better off."""
@@ -1018,9 +978,7 @@ class TestTheArmForTheMemberWhoDefinedIt:
 
         assert Fields.seen_by(db, viewer.id).listable() == []
 
-    def test_it_is_asked_before_the_unscoped_arm(
-        self, db, viewer, stranger, field
-    ) -> None:
+    def test_it_is_asked_before_the_unscoped_arm(self, db, viewer, stranger, field) -> None:
         """The order, pinned where the reason lives.
 
         Arm 3 answers True for an id no row carries, so it short circuits on an
@@ -1087,9 +1045,7 @@ class TestListingCostsTheSameWhateverTheNumberOfDefinitions:
     and the ceiling has one home here as it does everywhere else.
     """
 
-    def test_one_definition_costs_what_a_full_library_does(
-        self, db, viewer, stranger
-    ) -> None:
+    def test_one_definition_costs_what_a_full_library_does(self, db, viewer, stranger) -> None:
         hidden = _book(db, stranger, private=True)
         # Read **outside** every measured window, for the reason
         # `test_it_is_asked_before_the_unscoped_arm` records: the commits below
@@ -1099,9 +1055,7 @@ class TestListingCostsTheSameWhateverTheNumberOfDefinitions:
         viewer_id = viewer.id
 
         def define_another(index: int) -> None:
-            field = custom_fields.define(
-                db, f"Field {index}", CustomFieldKind.TEXT, stranger.id
-            )
+            field = custom_fields.define(db, f"Field {index}", CustomFieldKind.TEXT, stranger.id)
             db.commit()
             _fill(db, hidden, field)
 
@@ -1160,13 +1114,9 @@ class TestWhoMayRenameAField:
         assert Fields.seen_by(db, viewer.id).renamable(defined_by_the_viewer.id) is True
 
     def test_another_member_may_not(self, db, stranger, defined_by_the_viewer) -> None:
-        assert (
-            Fields.seen_by(db, stranger.id).renamable(defined_by_the_viewer.id) is False
-        )
+        assert Fields.seen_by(db, stranger.id).renamable(defined_by_the_viewer.id) is False
 
-    def test_a_field_with_no_author_is_renamable_by_anybody(
-        self, db, viewer, stranger, unattributed
-    ) -> None:
+    def test_a_field_with_no_author_is_renamable_by_anybody(self, db, viewer, stranger, unattributed) -> None:
         """The compatibility rule, and the one that bites on day one.
 
         Every row defined before the column has a null here, and so does every
@@ -1186,9 +1136,7 @@ class TestWhoMayRenameAField:
 
         assert Fields.seen_by(db, viewer.id).renamable(field.id) is False
 
-    def test_an_id_no_row_carries_answers_like_an_unattributed_field(
-        self, db, viewer
-    ) -> None:
+    def test_an_id_no_row_carries_answers_like_an_unattributed_field(self, db, viewer) -> None:
         """True, and it is the route that refuses it.
 
         Arm 3 admits an id no row carries and the authorship lookup finds no
@@ -1363,9 +1311,7 @@ class TestFieldsIsTheOnlyReaderOfTheAuthorColumn:
     )
 
     @pytest.mark.parametrize("shape", DECLARED)
-    def test_the_reader_sees_a_declaration_written_this_way(
-        self, shape: str
-    ) -> None:
+    def test_the_reader_sees_a_declaration_written_this_way(self, shape: str) -> None:
         """The arm above holds over a tree declaring nothing, so this says it
         would notice one.
 
@@ -1383,21 +1329,15 @@ class TestFieldsIsTheOnlyReaderOfTheAuthorColumn:
             case "a validation alias":
                 body = {
                     "__annotations__": {"definer": int | None},
-                    "definer": pydantic.Field(
-                        default=None, validation_alias=self.AUTHOR
-                    ),
+                    "definer": pydantic.Field(default=None, validation_alias=self.AUTHOR),
                 }
             case _:
                 body = {
-                    "model_config": pydantic.ConfigDict(
-                        alias_generator=lambda _name: self.AUTHOR
-                    ),
+                    "model_config": pydantic.ConfigDict(alias_generator=lambda _name: self.AUTHOR),
                     "__annotations__": {"definer": int | None},
                     "definer": None,
                 }
-        planted = type(
-            "CustomFieldOutWithItsAuthor", (BaseModel,), {"__module__": __name__} | body
-        )
+        planted = type("CustomFieldOutWithItsAuthor", (BaseModel,), {"__module__": __name__} | body)
 
         assert declared_schema_fields({self.AUTHOR}, [planted]), shape
 
@@ -1438,8 +1378,7 @@ class TestFieldsIsTheOnlyReaderOfTheAuthorColumn:
         ("the module route", "import models\nx = models.CustomField.created_by_user_id\n"),
         (
             "a constant getattr",
-            "from models import CustomField\n"
-            "x = getattr(CustomField, 'created_by_user_id')\n"
+            "from models import CustomField\nx = getattr(CustomField, 'created_by_user_id')\n",
         ),
         ("a row read", "def f(row):\n    return row.created_by_user_id\n"),
         (
@@ -1467,17 +1406,10 @@ class TestFieldsIsTheOnlyReaderOfTheAuthorColumn:
         equality over a walk is only as good as what the walk sees."""
         tree = ast.parse(source)
         resolvable = _model_names_safe_to_resolve(tree)
-        reads = [
-            mention
-            for mention in column_mentions(tree, {self.AUTHOR})
-            if not mention.builds_a_row
-        ]
+        reads = [mention for mention in column_mentions(tree, {self.AUTHOR}) if not mention.builds_a_row]
 
         assert reads, shape
-        assert all(
-            _receiver_model(mention.receiver, resolvable) != "Collection"
-            for mention in reads
-        )
+        assert all(_receiver_model(mention.receiver, resolvable) != "Collection" for mention in reads)
 
     #: The write spellings, plus the two that are not writes and must not be
     #: counted as one.
@@ -1504,12 +1436,8 @@ class TestFieldsIsTheOnlyReaderOfTheAuthorColumn:
         ),
     )
 
-    @pytest.mark.parametrize(
-        ("shape", "source", "is_a_write"), WRITES, ids=[name for name, _, _ in WRITES]
-    )
-    def test_a_write_is_told_from_a_read(
-        self, shape: str, source: str, is_a_write: bool
-    ) -> None:
+    @pytest.mark.parametrize(("shape", "source", "is_a_write"), WRITES, ids=[name for name, _, _ in WRITES])
+    def test_a_write_is_told_from_a_read(self, shape: str, source: str, is_a_write: bool) -> None:
         """**Every write whose callee is not a bare name is counted as a read**,
         which is a false refusal and the loud direction: it reds the reader
         equality, whose message names the right concern, rather than slipping
@@ -1526,8 +1454,7 @@ class TestFieldsIsTheOnlyReaderOfTheAuthorColumn:
         writes = [
             mention
             for mention in column_mentions(tree, {self.AUTHOR})
-            if mention.builds_a_row
-            and _receiver_model(mention.receiver, resolvable) == "CustomField"
+            if mention.builds_a_row and _receiver_model(mention.receiver, resolvable) == "CustomField"
         ]
 
         assert bool(writes) is is_a_write, shape

@@ -50,9 +50,7 @@ def upgrade() -> None:
         sa.Column("alias_key", sa.String(length=500), nullable=False),
         sa.Column("canonical_name", sa.String(length=300), nullable=False),
         sa.Column("created_by_user_id", sa.Integer(), nullable=True),
-        sa.Column(
-            "created_at", sa.DateTime(), server_default=sa.func.now(), nullable=False
-        ),
+        sa.Column("created_at", sa.DateTime(), server_default=sa.func.now(), nullable=False),
         sa.ForeignKeyConstraint(["created_by_user_id"], ["users.id"]),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("alias_key"),

@@ -223,8 +223,7 @@ def _host(url: str) -> str:
         # `UnicodeError` and so one of these.
         return "unknown"
     if not host or not all(
-        (character.isascii() and character.isalnum()) or character in _HOST_PUNCTUATION
-        for character in host
+        (character.isascii() and character.isalnum()) or character in _HOST_PUNCTUATION for character in host
     ):
         return "unknown"
     return host
@@ -330,12 +329,7 @@ def count_overdue(db: Session, now: datetime) -> int:
     app notice is read rather than sent, so nothing about it is quieted by
     `notified_at`.
     """
-    return (
-        db.query(Loan)
-        .join(Book, Loan.book_id == Book.id)
-        .filter(*overdue_clauses(now))
-        .count()
-    )
+    return db.query(Loan).join(Book, Loan.book_id == Book.id).filter(*overdue_clauses(now)).count()
 
 
 def sees_every_loan(db: Session, viewer: User) -> bool:
@@ -421,9 +415,7 @@ def build_digest(loans: list[Loan], now: datetime) -> dict[str, Any]:
                 # A member's username, or the free-text name of somebody with
                 # no account. Exactly one of the two is set; see
                 # `ck_loans_one_borrower`.
-                "borrower": (
-                    loan.loaned_to.username if loan.loaned_to else loan.loaned_to_name
-                ),
+                "borrower": (loan.loaned_to.username if loan.loaned_to else loan.loaned_to_name),
                 "due_at": loan.due_at.isoformat() if loan.due_at else None,
                 # `lending.days_overdue`, not the subtraction that was inline
                 # here, so the number a receiver reads and the number the loans
@@ -476,8 +468,7 @@ def render_text(digest: dict[str, Any], *, limit: int | None = None) -> str:
     count = digest["count"]
     header = f"{count} overdue {'book' if count == 1 else 'books'}."
     lines = [
-        f"{entry['title'] or 'Untitled'}: {entry['borrower']}, "
-        f"{entry['days_overdue']} days overdue"
+        f"{entry['title'] or 'Untitled'}: {entry['borrower']}, {entry['days_overdue']} days overdue"
         for entry in digest["loans"]
     ]
 
@@ -595,9 +586,7 @@ async def send_telegram(db: Session, text: str) -> None:
     if not _TELEGRAM_CHAT.match(chat):
         raise TelegramRefused("The Telegram chat id is not a chat id.")
 
-    body = json.dumps(
-        {"chat_id": chat, "text": text, "disable_web_page_preview": True}
-    ).encode("utf-8")
+    body = json.dumps({"chat_id": chat, "text": text, "disable_web_page_preview": True}).encode("utf-8")
     await _post(telegram_url(token), body, {"Content-Type": "application/json"})
 
 
@@ -719,6 +708,7 @@ def pushes_outward(sender: OverdueSender) -> bool:
             return False
     assert_never(sender)
 
+
 #: Every transport failure, from three protocols, as one clause.
 #:
 #: **Membership decides the classification, not whether the run survives.**
@@ -835,9 +825,7 @@ def _destination(sender: OverdueSender, db: Session) -> str:
     assert_never(sender)
 
 
-async def _deliver(
-    sender: OverdueSender, db: Session, digest: dict[str, Any], subject: str
-) -> None:
+async def _deliver(sender: OverdueSender, db: Session, digest: dict[str, Any], subject: str) -> None:
     """Hand one sender the digest. Raises a refusal or a transport error."""
     if sender is OverdueSender.WEBHOOK:
         url = checked_url(settings_store.in_force(db, SettingKey.OVERDUE_WEBHOOK_URL))
@@ -860,9 +848,7 @@ async def _deliver(
         # line and no stamp, and the banner only if `pushes_outward` is what
         # changed, since the health record skips what it denies. Pinned by
         # `test_the_in_app_channel_is_never_handed_to_a_sender`.
-        raise AssertionError(
-            "The in app channel does not push. See notifications.pushes_outward."
-        )
+        raise AssertionError("The in app channel does not push. See notifications.pushes_outward.")
     else:
         # The `else` used to *be* the Telegram branch, so a fourth sender added
         # to `_ENABLED_KEY` and not here posted the digest to the household's
@@ -1022,9 +1008,7 @@ MIN_FAILURES_TO_INTERRUPT: Final = 2
 #: until somebody changes a setting. Waiting a day to say so would tell the
 #: household nothing it could not have been told at once. `UNREACHABLE` is the
 #: opposite case and is the one the window is for.
-_CONFIGURATION_REASONS: Final = frozenset(
-    {OverdueNotifyReason.NO_URL, OverdueNotifyReason.MISCONFIGURED}
-)
+_CONFIGURATION_REASONS: Final = frozenset({OverdueNotifyReason.NO_URL, OverdueNotifyReason.MISCONFIGURED})
 
 
 def _in_app_entry(db: Session, now: datetime) -> dict[str, Any]:
@@ -1152,10 +1136,7 @@ def _is_broken(entry: dict[str, Any], now: datetime) -> bool:
     failures = entry.get("failures")
     if since is None or not isinstance(failures, int):
         return False
-    return (
-        failures >= MIN_FAILURES_TO_INTERRUPT
-        and now - since >= timedelta(hours=BROKEN_AFTER_HOURS)
-    )
+    return failures >= MIN_FAILURES_TO_INTERRUPT and now - since >= timedelta(hours=BROKEN_AFTER_HOURS)
 
 
 def record_run(db: Session, result: dict[str, Any], now: datetime) -> None:
@@ -1302,11 +1283,7 @@ async def _run_digest(db: Session, now: datetime) -> dict[str, Any]:
     """The pass itself. `run_digest` is what records it; see there for why."""
     days = reminder_days(db)
 
-    enabled = [
-        sender
-        for sender in OverdueSender
-        if settings_store.get_bool(db, _ENABLED_KEY[sender])
-    ]
+    enabled = [sender for sender in OverdueSender if settings_store.get_bool(db, _ENABLED_KEY[sender])]
     if not enabled:
         return _outcome(OverdueNotifyReason.DISABLED, "Overdue reminders are switched off.")
 
@@ -1341,9 +1318,7 @@ async def _run_digest(db: Session, now: datetime) -> dict[str, Any]:
     digest = build_digest(loans, now)
     subject = f"{len(loans)} overdue {'book' if len(loans) == 1 else 'books'}"
     pushed = [
-        await _run_sender(
-            sender, db, digest, subject, loans=len(loans), skipped_private=skipped
-        )
+        await _run_sender(sender, db, digest, subject, loans=len(loans), skipped_private=skipped)
         for sender in pushing
     ]
     outcomes = in_app + pushed

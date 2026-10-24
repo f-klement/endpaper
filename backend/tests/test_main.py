@@ -99,18 +99,10 @@ class TestAppWiring:
         from starlette.routing import Mount
 
         routes = list(main.app.routes)
-        spa = [
-            index
-            for index, route in enumerate(routes)
-            if isinstance(route, Mount) and route.path == "/"
-        ]
+        spa = [index for index, route in enumerate(routes) if isinstance(route, Mount) and route.path == "/"]
         if not spa:
             return
-        routers = [
-            index
-            for index, route in enumerate(routes)
-            if type(route).__name__ == "_IncludedRouter"
-        ]
+        routers = [index for index, route in enumerate(routes) if type(route).__name__ == "_IncludedRouter"]
         assert max(routers) < spa[0]
 
     def test_covers_are_served_by_a_router_not_a_static_mount(self):
@@ -124,9 +116,7 @@ class TestAppWiring:
         from starlette.routing import Mount
 
         mounts = [
-            route.path
-            for route in main.app.routes
-            if isinstance(route, Mount) and route.path == "/covers"
+            route.path for route in main.app.routes if isinstance(route, Mount) and route.path == "/covers"
         ]
         assert mounts == []
 
@@ -607,9 +597,7 @@ class TestTheFrontendCanBeSwitchedOff:
         monkeypatch.delenv("SERVE_FRONTEND", raising=False)
         assert main.mount_frontend_if_enabled(FastAPI(), tmp_path / "nothing") is False
 
-    def test_the_two_ways_to_be_api_only_are_logged_apart(
-        self, monkeypatch, tmp_path, caplog
-    ):
+    def test_the_two_ways_to_be_api_only_are_logged_apart(self, monkeypatch, tmp_path, caplog):
         """A relay that was meant to serve the frontend and a build that failed
         to copy look identical in a running container otherwise."""
         with caplog.at_level(logging.INFO, logger="endpaper"):
@@ -704,9 +692,7 @@ class TestTheOperationIdCheckReachesEveryPublishedRoute:
         anti-vacuity refusal is right to reject. The first version of this arm was
         red for that reason, which is a false refusal the check is entitled to.
         """
-        main.assert_unique_operation_ids(
-            _routes(("published", True), ("hidden", False), ("hidden", False))
-        )
+        main.assert_unique_operation_ids(_routes(("published", True), ("hidden", False), ("hidden", False)))
 
         registered = [route.name for route in main.iter_api_routes(main.app.routes)]
         assert registered.count("api_not_found") == 2
@@ -738,7 +724,5 @@ def _routes(*named: tuple[str, bool]) -> list:
         return None
 
     for index, (name, published) in enumerate(named):
-        router.add_api_route(
-            f"/{index}", endpoint, name=name, include_in_schema=published, methods=["GET"]
-        )
+        router.add_api_route(f"/{index}", endpoint, name=name, include_in_schema=published, methods=["GET"])
     return list(router.routes)

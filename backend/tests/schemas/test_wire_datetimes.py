@@ -120,15 +120,9 @@ def _dated_fields(model: type[BaseModel]) -> list[str]:
     by `TestNothingDatedEscapesTheWalk` instead, which reads with the deep
     reader and reports exactly the fields this one cannot cover.
     """
-    schema = model.model_json_schema(
-        mode="serialization", ref_template="#/$defs/{model}"
-    )
+    schema = model.model_json_schema(mode="serialization", ref_template="#/$defs/{model}")
     properties = schema.get("properties") or {}
-    return [
-        name
-        for name, node in properties.items()
-        if "date-time" in _declared_formats(node)
-    ]
+    return [name for name, node in properties.items() if "date-time" in _declared_formats(node)]
 
 
 def _emitted(model: type[BaseModel], field: str) -> object:
@@ -139,9 +133,7 @@ def _emitted(model: type[BaseModel], field: str) -> object:
     and nothing the model does around it.
     """
     info = model.model_fields[field]
-    annotation = (
-        Annotated[info.annotation, *info.metadata] if info.metadata else info.annotation
-    )
+    annotation = Annotated[info.annotation, *info.metadata] if info.metadata else info.annotation
     # Spelled out, because the annotation is only known at runtime and the type
     # checker otherwise infers `TypeAdapter[Never]` and refuses the argument.
     adapter: TypeAdapter[Any] = TypeAdapter(cast(Any, annotation))
@@ -245,14 +237,10 @@ class TestEveryPublishedDatedFieldCarriesAnOffset:
         """
 
         def another_way(value: datetime) -> datetime:
-            return value if value.tzinfo else datetime.combine(
-                value.date(), value.time(), UTC
-            )
+            return value if value.tzinfo else datetime.combine(value.date(), value.time(), UTC)
 
         class _AnotherSpelling(BaseModel):
-            when: Annotated[
-                datetime, PlainSerializer(another_way, return_type=datetime)
-            ]
+            when: Annotated[datetime, PlainSerializer(another_way, return_type=datetime)]
 
         assert _dated_fields(_AnotherSpelling) == ["when"], (
             "the format reading lost a field whose policy returns a datetime, "
@@ -344,8 +332,7 @@ class TestNothingDatedEscapesTheWalk:
         )
         assert "date-time" in _declared_formats_deep(node)
         assert _dated_fields(_Published) == [], (
-            "the rule's population grew a container field it cannot push a "
-            "value through"
+            "the rule's population grew a container field it cannot push a value through"
         )
         assert _escaping({("_Published", "whens")}) == [("_Published", "whens")]
 
@@ -357,11 +344,7 @@ class TestNothingDatedEscapesTheWalk:
         no model behind it and no arm over it.
         """
         spec = main.app.openapi()
-        inline = [
-            path
-            for path, item in spec["paths"].items()
-            if "date-time" in _declared_formats_deep(item)
-        ]
+        inline = [path for path, item in spec["paths"].items() if "date-time" in _declared_formats_deep(item)]
         assert not inline, (
             "these paths declare `format: date-time` inline rather than "
             f"through a component, so no model carries them: {inline}"

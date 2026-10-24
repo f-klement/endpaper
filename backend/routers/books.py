@@ -440,8 +440,7 @@ def _custom_field_out(field: CustomField, fields: Fields, is_admin: bool) -> Cus
         id=field.id,
         name=field.name,
         kind=field.kind,
-        renamable=fields.addressable(field.id)
-        and (is_admin or fields.renamable(field.id)),
+        renamable=fields.addressable(field.id) and (is_admin or fields.renamable(field.id)),
     )
 
 
@@ -502,10 +501,7 @@ def list_custom_fields(db: DbSession, current_user: CurrentUser) -> list[CustomF
     file cannot know. `docs/security.md` carries the row.
     """
     fields = Fields.seen_by(db, current_user.id)
-    return [
-        _custom_field_out(row, fields, current_user.is_admin)
-        for row in fields.listable()
-    ]
+    return [_custom_field_out(row, fields, current_user.is_admin) for row in fields.listable()]
 
 
 @router.post("/custom-fields", response_model=CustomFieldOut, status_code=status.HTTP_201_CREATED)
@@ -638,9 +634,7 @@ def rename_custom_field(
         raise HTTPException(status_code=409, detail=str(refusal)) from refusal
     db.commit()
     db.refresh(field)
-    logger.info(
-        "Account %r renamed custom field %r to %r", current_user.username, was, field.name
-    )
+    logger.info("Account %r renamed custom field %r to %r", current_user.username, was, field.name)
     # The same `Fields` the two gates above were asked of. A rename moves
     # neither authorship nor what carries the field, so nothing it cached has
     # gone stale, and a second instance would re-issue every arm.
@@ -704,9 +698,7 @@ async def lookup_isbn(
             detail="Not a valid ISBN. Check the digits and try again.",
         )
 
-    enquiry = catalogue_access.Enquiry.for_a_member_request(
-        db, member=current_user.username
-    )
+    enquiry = catalogue_access.Enquiry.for_a_member_request(db, member=current_user.username)
     result = await enquiry.lookup(canonical)
     if not result.found:
         raise _lookup_failure(result)
@@ -724,15 +716,11 @@ async def lookup_isbn(
     return BookLookup(
         **record.as_lookup(),
         classifications=classifications,
-        suggested_tag_ids=suggested_tag_ids(
-            record.subject_labels, classifications, all_tags
-        ),
+        suggested_tag_ids=suggested_tag_ids(record.subject_labels, classifications, all_tags),
     )
 
 
-def _match_rows(
-    matches: list[catalogue.Record], all_tags: list[Tag] | None
-) -> list[BookMatch]:
+def _match_rows(matches: list[catalogue.Record], all_tags: list[Tag] | None) -> list[BookMatch]:
     """Catalogue records as search rows, dropping any the schema refuses.
 
     **The only place a page of `BookMatch` rows is built from third party data**,
@@ -768,9 +756,7 @@ def _match_rows(
         # through a separator, and the classifications come off the validated
         # model so the bounds and the tidying are not run twice.
         if all_tags is not None:
-            row.suggested_tag_ids = suggested_tag_ids(
-                match.subject_labels, row.classifications, all_tags
-            )
+            row.suggested_tag_ids = suggested_tag_ids(match.subject_labels, row.classifications, all_tags)
         rows.append(row)
     return rows
 
@@ -805,10 +791,7 @@ def _lookup_failure(result: metadata.Lookup) -> HTTPException:
     if result.outcome is metadata.Outcome.UNAVAILABLE:
         return HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=(
-                "Could not reach the book catalogues. Check the connection, or add "
-                "the book by hand."
-            ),
+            detail=("Could not reach the book catalogues. Check the connection, or add the book by hand."),
         )
     if result.outcome is metadata.Outcome.NO_SOURCES:
         return catalogue_access.nothing_answers_an_isbn()
@@ -877,9 +860,7 @@ async def search_books(
     # nothing and has nothing left to ask, and subtracting `asked` from the
     # roster here cannot tell that from a library whose catalogues are all slow.
     return BookSearchOut(
-        matches=_match_rows(
-            found.matches, Vocabulary.seen_by(db, current_user.id).listable()
-        ),
+        matches=_match_rows(found.matches, Vocabulary.seen_by(db, current_user.id).listable()),
         asked=list(found.asked),
         unasked=list(found.unasked),
     )
@@ -1201,9 +1182,7 @@ def export_books(
         )
 
     chunks = (
-        _csv_chunks(db, current_user.id)
-        if format is ExportFormat.CSV
-        else _text_chunks(db, current_user.id)
+        _csv_chunks(db, current_user.id) if format is ExportFormat.CSV else _text_chunks(db, current_user.id)
     )
 
     # Handed over unstarted. Both are generator functions, so the shelf is not
@@ -1254,11 +1233,28 @@ def _csv_chunks(db: Session, viewer_id: int) -> Iterator[str]:
     writer = csv.writer(buffer)
     writer.writerow(
         [
-            "Title", "Author", "ISBN", "ISBN13", "Publisher",
-            "Year", "Pages", "Description", "Tags", "My Status",
-            "Rating", "Date Read", "Date Added", "Added By", "Format",
-            "Condition", "Location", "Collection", "Purchase Price",
-            "Purchase Currency", "Purchased On", "Purchased From",
+            "Title",
+            "Author",
+            "ISBN",
+            "ISBN13",
+            "Publisher",
+            "Year",
+            "Pages",
+            "Description",
+            "Tags",
+            "My Status",
+            "Rating",
+            "Date Read",
+            "Date Added",
+            "Added By",
+            "Format",
+            "Condition",
+            "Location",
+            "Collection",
+            "Purchase Price",
+            "Purchase Currency",
+            "Purchased On",
+            "Purchased From",
         ]
     )
     yield _drain(buffer)
@@ -1320,9 +1316,7 @@ def _csv_chunks(db: Session, viewer_id: int) -> Iterator[str]:
                     _csv_safe(statuses.status_of(book.id)),
                     _csv_safe(reading.rating if reading else None),
                     _csv_safe(
-                        reading.finished_at.date().isoformat()
-                        if reading and reading.finished_at
-                        else None
+                        reading.finished_at.date().isoformat() if reading and reading.finished_at else None
                     ),
                     _csv_safe(_added_on(book)),
                     _csv_safe(_added_by(book)),
@@ -1512,6 +1506,7 @@ def _price_column(minor: int | None) -> str:
 
 # ── Listing ───────────────────────────────────────────────────────────────────
 
+
 @router.get("", response_model=Page[BookOut])
 def list_books(
     db: DbSession,
@@ -1545,13 +1540,9 @@ def list_books(
             description="Only books filed in this collection",
         ),
     ] = None,
-    unfiled: Annotated[
-        bool, Query(description="Only books in no collection at all")
-    ] = False,
+    unfiled: Annotated[bool, Query(description="Only books in no collection at all")] = False,
     unrated: Annotated[bool, Query(description="Only books you have not rated")] = False,
-    discuss: Annotated[
-        bool, Query(description="Only books somebody has offered to talk about")
-    ] = False,
+    discuss: Annotated[bool, Query(description="Only books somebody has offered to talk about")] = False,
     classification: HeadingList = None,
     ddc_division: Annotated[DivisionList, Query(alias="ddc")] = None,
     sort: Annotated[BookSort, Query()] = BookSort.TITLE_ASC,
@@ -1583,11 +1574,7 @@ def list_books(
     # again for every page of a filtered listing, and each time it re-reads
     # every visible credit line and re-splits it. Measured in
     # `test_books_authors.py`.
-    author_ids = (
-        None
-        if author is None
-        else Authorship.seen_by(db, current_user.id).book_ids_for(author)
-    )
+    author_ids = None if author is None else Authorship.seen_by(db, current_user.id).book_ids_for(author)
 
     filters = BookFilters(
         q=q,
@@ -1733,9 +1720,7 @@ def _create_book(payload: BookCreate, current_user: User, db: Session, conflict:
     # going to collide and turn a 409 into a 500. `recognition` compares every
     # stored spelling, so a row written before canonicalisation as an ISBN-10
     # is found too.
-    match recognition.recognise_one(
-        db, current_user.id, recognition.Source.ADD, isbn=payload.isbn
-    ):
+    match recognition.recognise_one(db, current_user.id, recognition.Source.ADD, isbn=payload.isbn):
         case recognition.Seen(book_id=book_id):
             _refuse(conflict, book_id)
         case recognition.Tied() | recognition.Hidden():
@@ -1897,8 +1882,7 @@ def _refuse_in_trash() -> NoReturn:
         detail={
             "code": IN_TRASH,
             "message": (
-                "Book with this ISBN is in the trash. "
-                "Restore it, or delete it for good, and add it again."
+                "Book with this ISBN is in the trash. Restore it, or delete it for good, and add it again."
             ),
         },
     )
@@ -2002,9 +1986,7 @@ def _bulk_set_status(
 
     # One statement for the selection, the same stamping the single-book route
     # uses, and the unchanged rule: all three on `Reading.mark_each`.
-    return Reading.by(db, current_user.id).mark_each(
-        [book.id for book in books], new_status
-    )
+    return Reading.by(db, current_user.id).mark_each([book.id for book in books], new_status)
 
 
 def _bulk_set_ownership(
@@ -2013,9 +1995,7 @@ def _bulk_set_ownership(
     try:
         new_ownership = OwnershipStatus(str(value))
     except ValueError:
-        raise HTTPException(
-            status_code=400, detail=f"{value!r} is not an ownership status"
-        ) from None
+        raise HTTPException(status_code=400, detail=f"{value!r} is not an ownership status") from None
 
     updated = unchanged = 0
     for book in books:
@@ -2062,9 +2042,7 @@ def _bulk_set_collection(
         try:
             new_collection = int(str(value))
         except ValueError:
-            raise HTTPException(
-                status_code=400, detail="A collection id is required"
-            ) from None
+            raise HTTPException(status_code=400, detail="A collection id is required") from None
         _checked_collection(db, new_collection, current_user.id)
 
     updated = unchanged = 0
@@ -2117,7 +2095,7 @@ def _require_tag(db: Session, value: str | int | None, viewer_id: int) -> Tag:
     """
     try:
         tag_id = int(str(value))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         raise HTTPException(status_code=400, detail="A tag id is required") from None
     if not 1 <= tag_id <= MAX_ROW_ID:
         raise HTTPException(status_code=400, detail="Tag not found")
@@ -2130,6 +2108,7 @@ def _require_tag(db: Session, value: str | int | None, viewer_id: int) -> Tag:
 #: What every bulk verb is: the books the caller may actually touch, the loose
 #: `value` out of the body, and the (updated, unchanged) it did.
 _BulkHandler = Callable[[Session, list[Book], str | int | None, User], tuple[int, int]]
+
 
 def _undispatched[Verb](dispatched: set[Verb], actions: set[Verb]) -> set[Verb]:
     """The symmetric difference between the verbs dispatched and the verbs there are.
@@ -2146,9 +2125,7 @@ def _undispatched[Verb](dispatched: set[Verb], actions: set[Verb]) -> set[Verb]:
     return dispatched ^ actions
 
 
-def _dispatch_table[Verb, Handler](
-    handlers: dict[Verb, Handler], actions: set[Verb]
-) -> dict[Verb, Handler]:
+def _dispatch_table[Verb, Handler](handlers: dict[Verb, Handler], actions: set[Verb]) -> dict[Verb, Handler]:
     """The verb table, or a refusal at import naming what disagrees.
 
     **The table is built through this rather than checked beside it**, so the
@@ -2274,9 +2251,7 @@ def list_series(db: DbSession, current_user: CurrentUser) -> list[SeriesOut]:
         # the range empty, which is the answer the second arm used to return.
         ceiling = min(max(held), MAX_SERIES_INDEX) if held else 0
         missing = sorted(set(range(1, ceiling + 1)) - held)
-        result.append(
-            SeriesOut(name=name, book_count=counts[name], missing_indexes=missing)
-        )
+        result.append(SeriesOut(name=name, book_count=counts[name], missing_indexes=missing))
     return result
 
 
@@ -2295,6 +2270,7 @@ def list_series(db: DbSession, current_user: CurrentUser) -> list[SeriesOut]:
 # author identity: the pure rules in `authors.py` and the queries and writes that
 # used to sit here. The 404-not-403 rule is the one thing these handlers still
 # do themselves, because it is an HTTP answer rather than a rule about names.
+
 
 def _author_not_found() -> HTTPException:
     """Absent and forbidden reported identically, exactly as
@@ -2397,9 +2373,7 @@ async def author_wikipedia(
 
 @router.post("/authors/merge", response_model=AuthorOut)
 @refuses(404)
-def merge_authors(
-    payload: AuthorMergeRequest, db: DbSession, current_user: CurrentUser
-) -> AuthorOut:
+def merge_authors(payload: AuthorMergeRequest, db: DbSession, current_user: CurrentUser) -> AuthorOut:
     """Say that these spellings are one person.
 
     **Nothing in `books` is written.** Every named author keeps its credit line
@@ -2455,9 +2429,7 @@ def merge_authors_batch(
     assertion wins and the batch is refused rather than applied over it.
     """
     try:
-        return Authorship.seen_by(db, current_user.id).merge_batch(
-            payload.groups, by_user_id=current_user.id
-        )
+        return Authorship.seen_by(db, current_user.id).merge_batch(payload.groups, by_user_id=current_user.id)
     except AuthorNotFound:
         raise _author_not_found() from None
     except DecisionStands as refused:
@@ -2498,9 +2470,7 @@ def unmerge_author(alias_id: RowId, db: DbSession, current_user: CurrentUser) ->
         raise _author_not_found() from None
 
 
-def _with_refusals(
-    out: BookOut, recorded: RecordedAssertions
-) -> BookOut:
+def _with_refusals(out: BookOut, recorded: RecordedAssertions) -> BookOut:
     """The Book, carrying what a catalogue asserted and this Library declined.
 
     `model_copy` rather than a parameter on `book_to_out`: twenty call sites
@@ -2539,9 +2509,7 @@ def _authority_out(candidate: authority.AuthorityCandidate) -> AuthorityCandidat
         wikidata_id=candidate.wikidata_id,
         description=candidate.description,
         disagreements=[
-            AuthorityDisagreementOut(
-                about=row.about, lobid=row.lobid, wikidata=row.wikidata
-            )
+            AuthorityDisagreementOut(about=row.about, lobid=row.lobid, wikidata=row.wikidata)
             for row in candidate.disagreements
         ],
     )
@@ -2642,16 +2610,11 @@ async def author_authority(
                 if candidate is not None
             ]
         else:
-            found = await authority.search(
-                authorship.display_name(author), deadline=deadline
-            )
+            found = await authority.search(authorship.display_name(author), deadline=deadline)
     except authority.AuthorityUnavailable:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=(
-                "Could not reach the authority file. Try again in a moment, or "
-                "leave the name as it is."
-            ),
+            detail=("Could not reach the authority file. Try again in a moment, or leave the name as it is."),
         ) from None
 
     return [_authority_out(row) for row in found]
@@ -2755,9 +2718,7 @@ async def confirm_author_identifier(
         ) from None
 
     references = (
-        await _cross_references_for(payload.identifier)
-        if payload.scheme is AuthorityScheme.GND
-        else {}
+        await _cross_references_for(payload.identifier) if payload.scheme is AuthorityScheme.GND else {}
     )
     recorded = RecordedAssertions(stored=[], refused=[])
     if references:
@@ -2776,8 +2737,7 @@ async def confirm_author_identifier(
     return ConfirmedIdentifierOut(
         identifier=_identifier_out(row, spelling),
         cross_references=[
-            _identifier_out(stored, authorship.spelling_for(stored.author_key))
-            for stored in recorded.stored
+            _identifier_out(stored, authorship.spelling_for(stored.author_key)) for stored in recorded.stored
         ],
         refused=[
             RefusedAssertionOut(
@@ -2792,13 +2752,9 @@ async def confirm_author_identifier(
     )
 
 
-@router.delete(
-    "/authors/identifiers/{identifier_id}", status_code=status.HTTP_204_NO_CONTENT
-)
+@router.delete("/authors/identifiers/{identifier_id}", status_code=status.HTTP_204_NO_CONTENT)
 @refuses(404)
-def forget_author_identifier(
-    identifier_id: RowId, db: DbSession, current_user: CurrentUser
-) -> None:
+def forget_author_identifier(identifier_id: RowId, db: DbSession, current_user: CurrentUser) -> None:
     """Remove a wrong identifier. A later import may write it again.
 
     **The only correction there is**, and it is deliberately destructive rather
@@ -2840,9 +2796,7 @@ def list_locations(db: DbSession, current_user: CurrentUser) -> list[LocationOut
 
 
 @router.get("/classifications", response_model=ClassificationFacets)
-def list_classifications(
-    db: DbSession, current_user: CurrentUser
-) -> ClassificationFacets:
+def list_classifications(db: DbSession, current_user: CurrentUser) -> ClassificationFacets:
     """Every heading in the library and every Dewey division, each with a count.
 
     The source for the classification filter panel, and the counterpart of
@@ -2997,9 +2951,7 @@ def list_duplicates(db: DbSession, current_user: CurrentUser) -> DuplicateReport
     # see would publish that sibling's title. Nothing the viewer cannot see is
     # in `rows` at all, so such a group cannot arise here; `DuplicateGroup`
     # refuses to be constructed with one if it ever does.
-    duplicated = sorted(
-        (key, members) for key, members in groups.items() if len(members) > 1
-    )
+    duplicated = sorted((key, members) for key, members in groups.items() if len(members) > 1)
 
     shown: list[DuplicateGroup] = []
     remaining = DUPLICATE_BOOKS_SHOWN
@@ -3162,8 +3114,7 @@ def merge_books(
 
 #: The 409 for a merge Postgres aborted to break a deadlock.
 _MET_ANOTHER_CHANGE = (
-    "Another change to the same books met this merge, and nothing was merged. "
-    "Merge them again."
+    "Another change to the same books met this merge, and nothing was merged. Merge them again."
 )
 
 
@@ -3405,9 +3356,7 @@ def backfill_covers(
     # and the directory drift apart quietly, and it is also what would stop this
     # being safe to run twice.
     on_disk = cover_store.book_ids()
-    catalogue = (
-        Shelf.seen_by(db, current_user.id).where(Book.id > after_id).all(Book.id.asc())
-    )
+    catalogue = Shelf.seen_by(db, current_user.id).where(Book.id > after_id).all(Book.id.asc())
     candidates = [book for book in catalogue if book.id not in on_disk]
     batch = candidates[:MAX_BACKFILL_BOOKS]
 
@@ -3528,11 +3477,7 @@ def backfill_covers(
         # Cancelling first makes every future still read one that had started at or
         # before the cut, which is what `COVER_BACKFILL_DEADLINE_SECONDS`' hold is
         # derived from, and it leaves nothing queued behind a read that raises.
-        started = [
-            (offset, book, fetching)
-            for offset, book, fetching in asked
-            if not fetching.cancel()
-        ]
+        started = [(offset, book, fetching) for offset, book, fetching in asked if not fetching.cancel()]
         if len(started) != len(asked):
             # A submission that never started is a book this run never examined,
             # and so is everything after it.
@@ -3589,9 +3534,7 @@ def backfill_covers(
         # and a cut can never report the end: a cut means at least one book of the
         # batch has no outcome, so `examined <= len(batch) - 1` and `remaining` is
         # at least 1.
-        next_after_id=(
-            (batch[examined - 1].id if examined else after_id) if remaining > 0 else 0
-        ),
+        next_after_id=((batch[examined - 1].id if examined else after_id) if remaining > 0 else 0),
     )
 
 
@@ -3782,10 +3725,7 @@ def _resolvable_volume_id(book: Book) -> str | None:
     returns None for; the cursor clears them on the pass that examines them.
     """
     for row in book.identifiers:
-        if (
-            row.scheme == BookIdentifierScheme.GOOGLE_BOOKS
-            and google_books.is_a_volume_id(row.value)
-        ):
+        if row.scheme == BookIdentifierScheme.GOOGLE_BOOKS and google_books.is_a_volume_id(row.value):
             return row.value
     return None
 
@@ -3854,9 +3794,7 @@ async def backfill_from_identifiers(
     """
     # Charges the batch's own limiter and refuses unless Google Books is asked,
     # both behind the constructor. Holding one of these means the answer was yes.
-    google = catalogue_access.GoogleVolumes.for_a_batch_backfill(
-        db, member=current_user.username
-    )
+    google = catalogue_access.GoogleVolumes.for_a_batch_backfill(db, member=current_user.username)
 
     # `Book.identifiers.any(...)` is a correlated EXISTS over `books` rather
     # than a second table in the FROM, which is what `Shelf.where` admits: a
@@ -3867,9 +3805,7 @@ async def backfill_from_identifiers(
         Book.id > after_id,
         Book.isbn.is_(None),
         Book.google_books_id.is_(None),
-        Book.identifiers.any(
-            BookIdentifier.scheme == BookIdentifierScheme.GOOGLE_BOOKS
-        ),
+        Book.identifiers.any(BookIdentifier.scheme == BookIdentifierScheme.GOOGLE_BOOKS),
     )
     # Paged rather than fetched whole: `total` is every candidate past the
     # cursor and the page is this batch, from one query each, where reading them
@@ -3953,9 +3889,7 @@ async def backfill_from_identifiers(
         # `apply_record`, because the candidate rule above needs
         # `google_books_id` written and nothing else of this record's that a
         # Member never selected.
-        evidence.apply_own_volume(
-            book, result.record, volume_id, evidence.Policy.FILL_GAPS
-        )
+        evidence.apply_own_volume(book, result.record, volume_id, evidence.Policy.FILL_GAPS)
         # A candidate has no `google_books_id`; `google_books.lookup_by_volume_id`
         # answers only for a payload whose `id` **is a volume id**, so it is
         # twelve characters and fits `GOOGLE_BOOKS_ID_MAX`; `evidence` writes
@@ -4068,9 +4002,7 @@ async def backfill_from_identifiers(
     # another id), which takes it out of the candidate set so the next
     # press does not spend another. It is counted in no bucket, so the reply
     # understates what this run did and never overstates it.
-    cleared = buckets[
-        : next((at for at, bucket in enumerate(buckets) if bucket is None), len(buckets))
-    ]
+    cleared = buckets[: next((at for at, bucket in enumerate(buckets) if bucket is None), len(buckets))]
 
     if "enriched" in buckets:
         # **One commit for the batch, in a thread**, which is where this differs
@@ -4146,9 +4078,7 @@ async def backfill_from_identifiers(
         # this could lose books: a cut means at least one book of the batch has
         # no outcome, so `examined <= len(batch) - 1 <= total - 1`, so
         # `remaining >= 1` and the cursor moves over the prefix rather than to 0.
-        next_after_id=(
-            (batch[examined - 1].id if examined else after_id) if remaining > 0 else 0
-        ),
+        next_after_id=((batch[examined - 1].id if examined else after_id) if remaining > 0 else 0),
     )
 
 
@@ -4303,9 +4233,7 @@ def list_quotes(
     # counted. Left alone because a count of visible books is what this is.
     shelf = Shelf.seen_by(db, current_user.id)
 
-    total = (
-        shelf.select(func.count(Book.id)).join(Quote, Quote.book_id == Book.id).scalar() or 0
-    )
+    total = shelf.select(func.count(Book.id)).join(Quote, Quote.book_id == Book.id).scalar() or 0
 
     rows = (
         shelf.select(Quote, Book.title, Book.author, Book.cover_url)
@@ -4360,9 +4288,7 @@ def empty_trash(db: DbSession, current_user: CurrentUser) -> PurgeResult:
 # `/quotes`, `/trash` and `/export` for that reason.
 
 
-@router.get(
-    "/digital-references/missing", response_model=Page[MissingDigitalReferenceOut]
-)
+@router.get("/digital-references/missing", response_model=Page[MissingDigitalReferenceOut])
 def list_missing_digital_references(
     db: DbSession,
     current_user: CurrentUser,
@@ -4648,9 +4574,7 @@ def list_copies(book: BookForRead, db: DbSession, current_user: CurrentUser) -> 
     return books_to_out(copies, current_user, db)
 
 
-@router.post(
-    "/{book_id}/copies", response_model=BookOut, status_code=status.HTTP_201_CREATED
-)
+@router.post("/{book_id}/copies", response_model=BookOut, status_code=status.HTTP_201_CREATED)
 def add_copy(
     payload: CopyCreate,
     book: BookForWrite,
@@ -5164,9 +5088,7 @@ def set_custom_field(
     try:
         custom_fields.write(db, book, field, payload.value)
     except custom_fields.Refused as refusal:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail=str(refusal)
-        ) from refusal
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(refusal)) from refusal
     db.commit()
     return _custom_fields_out(book, db)
 
@@ -5209,9 +5131,7 @@ async def refresh_metadata(book: BookForWrite, db: DbSession, current_user: Curr
     # Below the refusal above, so a book with no ISBN costs no budget. The
     # constructor is what charges, which is why it is a statement here rather
     # than a dependency: a dependency runs before this handler's own 400.
-    enquiry = catalogue_access.Enquiry.for_a_member_request(
-        db, member=current_user.username
-    )
+    enquiry = catalogue_access.Enquiry.for_a_member_request(db, member=current_user.username)
     lookup_key = isbn_utils.parse(book.isbn) or book.isbn
     result = await enquiry.lookup(lookup_key)
     if not result.found:
@@ -5495,9 +5415,7 @@ TOO_LONG_TO_SHARE: Final = "too_long_to_share"
 
 
 @router.get("/{book_id}/highlights", response_model=list[HighlightOut])
-def get_highlights(
-    book: BookForRead, db: DbSession, current_user: CurrentUser
-) -> list[Highlight]:
+def get_highlights(book: BookForRead, db: DbSession, current_user: CurrentUser) -> list[Highlight]:
     """The highlights on this book the caller may read: their own, and the ones
     other members shared. In the device's page order, then as they were made."""
     return (
@@ -5534,9 +5452,7 @@ def import_koreader_highlights(
     which `BookForRead` has already scoped.
     """
     if not file_references.carries(book, payload.partial_md5):
-        raise _conflict(
-            NOT_HELD, "This book holds no file with that KOReader fingerprint."
-        )
+        raise _conflict(NOT_HELD, "This book holds no file with that KOReader fingerprint.")
     counts = koreader_highlights.import_koreader(
         db, book, current_user.id, payload.partial_md5, payload.highlights
     )
@@ -5548,9 +5464,7 @@ def import_koreader_highlights(
     )
 
 
-@router.delete(
-    "/{book_id}/highlights/{highlight_id}", status_code=status.HTTP_204_NO_CONTENT
-)
+@router.delete("/{book_id}/highlights/{highlight_id}", status_code=status.HTTP_204_NO_CONTENT)
 @refuses(404)
 def delete_highlight(
     highlight_id: RowId,
@@ -5569,9 +5483,7 @@ def delete_highlight(
         raise HTTPException(status_code=404, detail="Highlight not found")
 
 
-def _highlight_for_sharing(
-    highlight_id: int, book: Book, current_user: User, db: Session
-) -> Highlight:
+def _highlight_for_sharing(highlight_id: int, book: Book, current_user: User, db: Session) -> Highlight:
     """A highlight on this book that the caller wrote.
 
     The rule for a row under a Book is in `docs/data-model.md`, under the
@@ -5680,17 +5592,13 @@ def _conflict(code: str, message: str) -> HTTPException:
 
 
 @router.get("/{book_id}/access-requests", response_model=list[AccessRequestOut])
-def list_access_requests(
-    book: BookForRead, db: DbSession, current_user: CurrentUser
-) -> list[AccessRequest]:
+def list_access_requests(book: BookForRead, db: DbSession, current_user: CurrentUser) -> list[AccessRequest]:
     """The requests for access to this copy that the caller is party to.
 
     Those the caller holds and those the caller made, oldest first.
     """
     return (
-        _access_requests(book, current_user, db)
-        .order_by(AccessRequest.requested_at, AccessRequest.id)
-        .all()
+        _access_requests(book, current_user, db).order_by(AccessRequest.requested_at, AccessRequest.id).all()
     )
 
 
@@ -5699,9 +5607,7 @@ def list_access_requests(
     response_model=AccessRequestOut,
     status_code=status.HTTP_201_CREATED,
 )
-def request_access(
-    book: BookForRead, db: DbSession, current_user: CurrentUser
-) -> AccessRequest | None:
+def request_access(book: BookForRead, db: DbSession, current_user: CurrentUser) -> AccessRequest | None:
     """Ask the holder of a digital copy for access to it.
 
     The holder is the member who added the book, recorded now and never
@@ -5727,9 +5633,7 @@ def request_access(
     )
     if open_or_granted is not None:
         raise _conflict(ALREADY_REQUESTED, "You have already asked for this copy.")
-    created = AccessRequest(
-        book_id=book.id, requested_by_user_id=current_user.id, holder_user_id=holder
-    )
+    created = AccessRequest(book_id=book.id, requested_by_user_id=current_user.id, holder_user_id=holder)
     db.add(created)
     db.commit()
     return _access_requests(book, current_user, db).filter(AccessRequest.id == created.id).first()
@@ -5875,10 +5779,7 @@ def report_digital_reference(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail={
-                "message": (
-                    "This book already holds "
-                    f"{MAX_DIGITAL_REFERENCES_PER_BOOK} file references"
-                ),
+                "message": (f"This book already holds {MAX_DIGITAL_REFERENCES_PER_BOOK} file references"),
                 "code": REFERENCE_CEILING,
             },
         ) from None
@@ -6042,7 +5943,6 @@ def forget_online_link(
 # ── Enrichment ────────────────────────────────────────────────────────────────
 
 
-
 @router.post("/{book_id}/enrich", response_model=BookEnrichmentOut)
 async def enrich_book(
     book: BookForWrite,
@@ -6085,9 +5985,7 @@ async def enrich_book(
     # One `Enquiry` for all three paths below, because they must not be able to
     # ask different sets of catalogues or send a different login. It holds the
     # access privately, so there is nothing here to rebuild between them.
-    enquiry = catalogue_access.Enquiry.for_a_member_request(
-        db, member=current_user.username
-    )
+    enquiry = catalogue_access.Enquiry.for_a_member_request(db, member=current_user.username)
     # **Refused up front rather than per half.** Both halves are optional on
     # their own, so without this a library with nothing switched on got the
     # lookup's 409 and then the search's failure from one request. Asking
@@ -6246,9 +6144,7 @@ def apply_enrichment(
         db.commit()
         db.refresh(book)
 
-    return BookEnrichmentOut(
-        book=book_to_out(book, current_user, db), updated_fields=updated, found=True
-    )
+    return BookEnrichmentOut(book=book_to_out(book, current_user, db), updated_fields=updated, found=True)
 
 
 @router.get("/{book_id}/enrich/candidates", response_model=list[BookMatch])

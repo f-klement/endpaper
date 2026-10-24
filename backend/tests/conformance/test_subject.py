@@ -471,9 +471,7 @@ def test_the_server_answers_what_the_case_says_about_the_raw_entry(case):
     )
 
 
-@pytest.mark.parametrize(
-    "case", SENT_BY_THE_BROWSER, ids=[case["id"] for case in SENT_BY_THE_BROWSER]
-)
+@pytest.mark.parametrize("case", SENT_BY_THE_BROWSER, ids=[case["id"] for case in SENT_BY_THE_BROWSER])
 def test_the_server_answers_the_same_about_what_the_browser_sends(case):
     """The equality arm, and it is the whole instrument.
 

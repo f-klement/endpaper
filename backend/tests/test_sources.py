@@ -97,8 +97,16 @@ class TestTheConstantsAreRederivableFromTheCommittedSample:
         rows = _sample()
         assert len(rows) == 500
         assert {row["frame"] for row in rows} == {
-            "argentina", "austria", "brazil", "czechia", "german",
-            "greece", "italy", "portugal", "spain", "uruguay",
+            "argentina",
+            "austria",
+            "brazil",
+            "czechia",
+            "german",
+            "greece",
+            "italy",
+            "portugal",
+            "spain",
+            "uruguay",
         }
         assert all(len(row["isbn"]) == 13 and row["isbn"].isdigit() for row in rows)
         # **Ten frames of fifty, which is the shape `MEASURED` states**, and 500
@@ -109,9 +117,7 @@ class TestTheConstantsAreRederivableFromTheCommittedSample:
         counted = Counter(row["frame"] for row in rows)
         assert set(counted.values()) == {50}
         assert len({row["isbn"] for row in rows}) == len(rows)
-        assert all(
-            row[name] in ("found", "not_found") for row in rows for name in SAMPLED
-        )
+        assert all(row[name] in ("found", "not_found") for row in rows for name in SAMPLED)
 
     def test_every_source_answered_every_isbn_in_the_sample(self):
         """`MEASURED`'s denominators all read 500 because of this. A refusal would
@@ -139,9 +145,7 @@ class TestTheConstantsAreRederivableFromTheCommittedSample:
         of the tier, so it is recomputed rather than asserted."""
         rows = _sample()
         for source, row in sources.MEASURED.items():
-            per_frame = Counter(
-                entry["frame"] for entry in rows if entry[source.value] == "found"
-            )
+            per_frame = Counter(entry["frame"] for entry in rows if entry[source.value] == "found")
             assert per_frame, source
             assert row.largest_frame == max(per_frame.values()), source
 
@@ -150,9 +154,7 @@ class TestTheConstantsAreRederivableFromTheCommittedSample:
         one figure the tail's order rests on and no per source count holds."""
         rows = _sample()
         tier = [source.value for source in sources.DEFAULT_PLAN.lookup_together]
-        missed = [
-            entry for entry in rows if not any(entry[name] == "found" for name in tier)
-        ]
+        missed = [entry for entry in rows if not any(entry[name] == "found" for name in tier)]
         for source, stated in sources.TAIL_MARGINAL.items():
             answered = sum(1 for entry in missed if entry[source.value] == "found")
             assert stated == answered, source
@@ -164,8 +166,7 @@ class TestTheConstantsAreRederivableFromTheCommittedSample:
         within = [
             name
             for name in SAMPLED
-            if _p90([entry[f"seconds_{name}"] for entry in rows])
-            <= sources.FIRST_TIER_BUDGET_SECONDS
+            if _p90([entry[f"seconds_{name}"] for entry in rows]) <= sources.FIRST_TIER_BUDGET_SECONDS
             # The concentration rule, applied here too, or this table prices a
             # tier `_tier_for` cannot build. See `TIER_MAX_CONCENTRATION`.
             and _concentration_of(rows, name) < sources.TIER_MAX_CONCENTRATION
@@ -173,13 +174,9 @@ class TestTheConstantsAreRederivableFromTheCommittedSample:
         for size in range(1, len(within) + 1):
             best = max(
                 itertools.combinations(within, size),
-                key=lambda names: sum(
-                    1 for entry in rows if any(entry[n] == "found" for n in names)
-                ),
+                key=lambda names: sum(1 for entry in rows if any(entry[n] == "found" for n in names)),
             )
-            answered = sum(
-                1 for entry in rows if any(entry[n] == "found" for n in best)
-            )
+            answered = sum(1 for entry in rows if any(entry[n] == "found" for n in best))
             assert sources.TIER_UNION[size] == answered, size
 
     def test_the_tail_marginal_the_order_rests_on_recomputes(self):
@@ -194,9 +191,7 @@ class TestTheConstantsAreRederivableFromTheCommittedSample:
         """
         rows = _sample()
         tier = [source.value for source in sources.DEFAULT_PLAN.lookup_together]
-        missed = [
-            entry for entry in rows if not any(entry[name] == "found" for name in tier)
-        ]
+        missed = [entry for entry in rows if not any(entry[name] == "found" for name in tier)]
         assert len(missed) == 278
         assert sum(1 for entry in missed if entry["open_library"] == "found") == 82
         assert sum(1 for entry in missed if entry["nkp"] == "found") == 42
@@ -308,26 +303,18 @@ class TestTheOrderFollowsTheMeasurement:
         return [
             source
             for source in cls._asked_by_a_stock_install()
-            if sources.MEASURED[source].p90_seconds
-            <= sources.FIRST_TIER_BUDGET_SECONDS
+            if sources.MEASURED[source].p90_seconds <= sources.FIRST_TIER_BUDGET_SECONDS
             and cls._concentration(source) < sources.TIER_MAX_CONCENTRATION
         ]
 
     @classmethod
-    def _tier_for(
-        cls, budget: float, concentration: float | None = None
-    ) -> set[CatalogueSource]:
+    def _tier_for(cls, budget: float, concentration: float | None = None) -> set[CatalogueSource]:
         """The tier the stated rule produces for a given budget and bound."""
-        bound = (
-            sources.TIER_MAX_CONCENTRATION
-            if concentration is None
-            else concentration
-        )
+        bound = sources.TIER_MAX_CONCENTRATION if concentration is None else concentration
         within = [
             source
             for source in cls._asked_by_a_stock_install()
-            if sources.MEASURED[source].p90_seconds <= budget
-            and cls._concentration(source) < bound
+            if sources.MEASURED[source].p90_seconds <= budget and cls._concentration(source) < bound
         ]
         within.sort(key=lambda source: (-cls._rate(source), source.value))
         return set(within[: sources.ALWAYS_ASKED])
@@ -353,17 +340,12 @@ class TestTheOrderFollowsTheMeasurement:
             assert 0 < row.largest_frame <= row.answered, source
 
     def test_the_tier_holds_the_sources_that_answer_most_inside_the_budget(self):
-        assert set(sources.DEFAULT_PLAN.lookup_together) == self._tier_for(
-            sources.FIRST_TIER_BUDGET_SECONDS
-        )
+        assert set(sources.DEFAULT_PLAN.lookup_together) == self._tier_for(sources.FIRST_TIER_BUDGET_SECONDS)
 
     def test_nothing_in_the_tier_is_slower_than_the_budget(self):
         """The tier is gathered, so one slow member is paid on every lookup."""
         for source in sources.DEFAULT_PLAN.lookup_together:
-            assert (
-                sources.MEASURED[source].p90_seconds
-                <= sources.FIRST_TIER_BUDGET_SECONDS
-            )
+            assert sources.MEASURED[source].p90_seconds <= sources.FIRST_TIER_BUDGET_SECONDS
 
     def test_the_budget_is_not_a_threshold_fitted_to_this_roster(self):
         """A bound chosen to produce the answer would move the answer when it moved.
@@ -411,12 +393,8 @@ class TestTheOrderFollowsTheMeasurement:
         return [
             name
             for name in SAMPLED
-            if _p90([row[f"seconds_{name}"] for row in rows])
-            <= sources.FIRST_TIER_BUDGET_SECONDS
-            and (
-                not general_only
-                or _concentration_of(rows, name) < sources.TIER_MAX_CONCENTRATION
-            )
+            if _p90([row[f"seconds_{name}"] for row in rows]) <= sources.FIRST_TIER_BUDGET_SECONDS
+            and (not general_only or _concentration_of(rows, name) < sources.TIER_MAX_CONCENTRATION)
         ]
 
     def test_the_concentration_rule_is_what_holds_the_tier_at_two(self):
@@ -455,9 +433,7 @@ class TestTheOrderFollowsTheMeasurement:
 
     def test_the_concentration_rule_changes_which_sources_a_tier_may_hold(self):
         """Or the two arms above are the same arm twice."""
-        assert self._within_names(general_only=True) != self._within_names(
-            general_only=False
-        )
+        assert self._within_names(general_only=True) != self._within_names(general_only=False)
 
     def test_the_concentration_bound_is_not_fitted_to_this_roster(self):
         """The third stated number, given the treatment the other two have.
@@ -484,8 +460,7 @@ class TestTheOrderFollowsTheMeasurement:
             source
             for source in self._asked_by_a_stock_install()
             if source not in kept
-            and sources.MEASURED[source].p90_seconds
-            <= sources.FIRST_TIER_BUDGET_SECONDS
+            and sources.MEASURED[source].p90_seconds <= sources.FIRST_TIER_BUDGET_SECONDS
         ]
         assert kept
         assert excluded
@@ -507,8 +482,7 @@ class TestTheOrderFollowsTheMeasurement:
             pool = [
                 name
                 for name in SAMPLED
-                if _p90([row[f"seconds_{name}"] for row in _sample()])
-                <= sources.FIRST_TIER_BUDGET_SECONDS
+                if _p90([row[f"seconds_{name}"] for row in _sample()]) <= sources.FIRST_TIER_BUDGET_SECONDS
                 and _concentration_of(_sample(), name) < bound
             ]
             earned = self._best_union(pool, 3) - self._best_union(pool, 2)
@@ -525,13 +499,10 @@ class TestTheOrderFollowsTheMeasurement:
         just_over = [
             name
             for name in SAMPLED
-            if _p90([row[f"seconds_{name}"] for row in _sample()])
-            <= sources.FIRST_TIER_BUDGET_SECONDS
+            if _p90([row[f"seconds_{name}"] for row in _sample()]) <= sources.FIRST_TIER_BUDGET_SECONDS
             and _concentration_of(_sample(), name) < high + 0.001
         ]
-        assert (
-            self._best_union(just_over, 3) - self._best_union(just_over, 2)
-        ) >= sources.SLOT_MUST_EARN
+        assert (self._best_union(just_over, 3) - self._best_union(just_over, 2)) >= sources.SLOT_MUST_EARN
 
     def test_the_union_table_agrees_with_the_per_source_one_where_they_touch(self):
         """The one point at which the two tables can check each other.
@@ -578,10 +549,7 @@ class TestTheOrderFollowsTheMeasurement:
         """
         following = sources.ALWAYS_ASKED + 1
         if following in sources.TIER_UNION:
-            gain = (
-                sources.TIER_UNION[following]
-                - sources.TIER_UNION[sources.ALWAYS_ASKED]
-            )
+            gain = sources.TIER_UNION[following] - sources.TIER_UNION[sources.ALWAYS_ASKED]
             assert gain < sources.SLOT_MUST_EARN, f"slot {following} earned {gain}"
 
     def test_the_slot_threshold_is_not_fitted_to_this_roster(self):
@@ -655,9 +623,7 @@ class TestTheOrderFollowsTheMeasurement:
         answers 37 against the OeNB's 55, marginally it answers 34 against 1.
         """
         measured = [
-            source
-            for source in sources.DEFAULT_PLAN.lookup_in_turn(None)
-            if source in sources.TAIL_MARGINAL
+            source for source in sources.DEFAULT_PLAN.lookup_in_turn(None) if source in sources.TAIL_MARGINAL
         ]
         # Or the ordering assertion below is a statement about one element.
         assert len(measured) >= 2
@@ -696,11 +662,7 @@ class TestTheOrderFollowsTheMeasurement:
     def test_the_marginal_table_covers_the_whole_measured_tail(self):
         """A source in the tail and not in that table is one the ordering rule
         above cannot see, and it would sort wherever it was put."""
-        tail = {
-            source
-            for source in sources.DEFAULT_PLAN.lookup_in_turn(None)
-            if source in sources.MEASURED
-        }
+        tail = {source for source in sources.DEFAULT_PLAN.lookup_in_turn(None) if source in sources.MEASURED}
         assert tail == set(sources.TAIL_MARGINAL)
 
     def test_every_source_is_searched_by_default(self):
@@ -712,9 +674,7 @@ class TestTheOrderFollowsTheMeasurement:
         comparison nobody can read a reason off.
         """
         assert set(sources.DEFAULT_PLAN.searched_harder) == sources.SEARCH_SOURCES
-        assert (
-            set(sources.DEFAULT_PLAN.searched) == sources.SEARCH_SOURCES - sources.SLOW_SEARCHES
-        )
+        assert set(sources.DEFAULT_PLAN.searched) == sources.SEARCH_SOURCES - sources.SLOW_SEARCHES
 
     def test_the_two_lookup_tiers_are_the_whole_lookup_roster(self):
         """Nothing that can answer an ISBN is dropped between the tiers.
@@ -724,10 +684,7 @@ class TestTheOrderFollowsTheMeasurement:
         in which nothing is filtered. Passing a real group here would make this
         a statement about that group rather than about the roster.
         """
-        chain = (
-            sources.DEFAULT_PLAN.lookup_together
-            + sources.DEFAULT_PLAN.lookup_in_turn(None)
-        )
+        chain = sources.DEFAULT_PLAN.lookup_together + sources.DEFAULT_PLAN.lookup_in_turn(None)
         assert set(chain) == sources.LOOKUP_SOURCES
         assert len(chain) == len(sources.LOOKUP_SOURCES)
 
@@ -785,12 +742,7 @@ class TestAStoredRowAlwaysResolvesToTheWholeRoster:
     def test_every_source_switched_off_is_preserved_rather_than_reset(self):
         """Off for everything is a statement, and it is not the same as empty."""
         plan = sources.parse(
-            {
-                "sources": [
-                    {"source": source.value, "enabled": False}
-                    for source in sources.DEFAULT_ORDER
-                ]
-            }
+            {"sources": [{"source": source.value, "enabled": False} for source in sources.DEFAULT_ORDER]}
         )
         assert plan.asked == ()
 
@@ -838,9 +790,7 @@ class TestTheOffSwitchFailsClosed:
         and this is what stops it coming back.
         """
         junk = [{"source": f"nowhere-{index}", "enabled": True} for index in range(500)]
-        plan = sources.parse(
-            {"sources": [*junk, {"source": "google_books", "enabled": False}]}
-        )
+        plan = sources.parse({"sources": [*junk, {"source": "google_books", "enabled": False}]})
         assert CatalogueSource.GOOGLE_BOOKS not in plan.asked
 
 
@@ -855,42 +805,27 @@ class TestAWriteNeverSwitchesSomethingElseOn:
 
     def _all_off(self):
         return sources.parse(
-            {
-                "sources": [
-                    {"source": source.value, "enabled": False}
-                    for source in sources.DEFAULT_ORDER
-                ]
-            }
+            {"sources": [{"source": source.value, "enabled": False} for source in sources.DEFAULT_ORDER]}
         )
 
     def test_a_partial_payload_leaves_the_sources_it_did_not_name_alone(self):
         current = self._all_off()
-        written = sources.from_wire(
-            [sources.Preference(CatalogueSource.DNB, True)], current
-        )
+        written = sources.from_wire([sources.Preference(CatalogueSource.DNB, True)], current)
         assert written.asked == (CatalogueSource.DNB,)
 
     def test_a_partial_payload_still_puts_what_it_named_first(self):
-        written = sources.from_wire(
-            [sources.Preference(CatalogueSource.LOC, True)], sources.DEFAULT_PLAN
-        )
+        written = sources.from_wire([sources.Preference(CatalogueSource.LOC, True)], sources.DEFAULT_PLAN)
         assert written.preferences[0].source is CatalogueSource.LOC
 
     def test_the_sources_a_payload_omitted_keep_their_order(self):
-        written = sources.from_wire(
-            [sources.Preference(CatalogueSource.LOC, True)], sources.DEFAULT_PLAN
-        )
+        written = sources.from_wire([sources.Preference(CatalogueSource.LOC, True)], sources.DEFAULT_PLAN)
         rest = [entry.source for entry in written.preferences[1:]]
-        assert rest == [
-            source for source in sources.DEFAULT_ORDER if source is not CatalogueSource.LOC
-        ]
+        assert rest == [source for source in sources.DEFAULT_ORDER if source is not CatalogueSource.LOC]
 
     def test_a_source_this_build_does_not_know_cannot_be_written(self):
         """The same door as a stored row, so one function decides the roster."""
         written = sources.from_wire([], sources.DEFAULT_PLAN)
-        assert {entry.source for entry in written.preferences} == set(
-            sources.DEFAULT_ORDER
-        )
+        assert {entry.source for entry in written.preferences} == set(sources.DEFAULT_ORDER)
 
 
 class TestWhatTheOrderReaches:
@@ -935,9 +870,7 @@ class TestWhatTheOrderReaches:
         assert plan.lookup_in_turn(None)[0] is CatalogueSource.GOOGLE_BOOKS
 
     def test_a_disabled_source_is_in_no_tier_at_all(self):
-        plan = sources.parse(
-            {"sources": [{"source": "dnb", "enabled": False}]}
-        )
+        plan = sources.parse({"sources": [{"source": "dnb", "enabled": False}]})
         assert CatalogueSource.DNB not in plan.lookup_together
         assert CatalogueSource.DNB not in plan.lookup_in_turn(None)
         assert CatalogueSource.DNB not in plan.searched
@@ -962,9 +895,7 @@ class TestASourceThatCannotAnswerIsNotAsked:
         until a lookup only source joined, and this test then asserted that a
         source answering no title search is not asked at all."""
         plan = sources.in_force(sources.DEFAULT_PLAN, self._ready_without_google())
-        assert set(plan.asked) == set(sources.DEFAULT_ORDER) - {
-            CatalogueSource.GOOGLE_BOOKS
-        }
+        assert set(plan.asked) == set(sources.DEFAULT_ORDER) - {CatalogueSource.GOOGLE_BOOKS}
 
     def test_the_whole_roster_is_still_reported_so_the_screen_can_offer_it_back(self):
         plan = sources.in_force(sources.DEFAULT_PLAN, self._ready_without_google())
@@ -998,9 +929,7 @@ class TestASourceThatCannotAnswerIsNotAsked:
         assert row.ready is False
 
     def test_a_key_that_is_absent_says_so(self):
-        described = self._described(
-            sources.DEFAULT_PLAN, ready=frozenset(), credentials=frozenset()
-        )
+        described = self._described(sources.DEFAULT_PLAN, ready=frozenset(), credentials=frozenset())
         assert described[CatalogueSource.GOOGLE_BOOKS].has_key is False
 
     def test_the_leading_pair_on_screen_is_the_pair_that_is_actually_asked(self):
@@ -1012,9 +941,7 @@ class TestASourceThatCannotAnswerIsNotAsked:
         from this tier for being metered.
         """
         without_dnb = frozenset(set(sources.DEFAULT_ORDER) - {CatalogueSource.DNB})
-        described = self._described(
-            sources.DEFAULT_PLAN, ready=without_dnb, credentials=without_dnb
-        )
+        described = self._described(sources.DEFAULT_PLAN, ready=without_dnb, credentials=without_dnb)
         assert described[CatalogueSource.DNB].asked_first is False
         # **Derived from `DEFAULT_ORDER`, not named**, so a reorder moves it
         # rather than failing it. Reading it back off `describe` would be
@@ -1054,11 +981,7 @@ def _free_plan_names() -> tuple[list[str], list[str]]:
     chain a default install runs is exactly the sampled five.
     """
     tier = [s.value for s in sources.DEFAULT_PLAN.lookup_together]
-    tail = [
-        s.value
-        for s in sources.DEFAULT_PLAN.lookup_in_turn(None)
-        if s in sources.MEASURED
-    ]
+    tail = [s.value for s in sources.DEFAULT_PLAN.lookup_in_turn(None) if s in sources.MEASURED]
     return tier, tail
 
 
@@ -1100,11 +1023,7 @@ def _patched_remits(remits: dict[CatalogueSource, frozenset[str]]):
 def _served_tail(tail: list[str], row: dict) -> list[str]:
     """`tail` as `SERVES_GROUPS` leaves it for this row's ISBN."""
     group = registration_group(row["isbn"])
-    return [
-        name
-        for name in tail
-        if sources._serves(CatalogueSource(name), group)
-    ]
+    return [name for name in tail if sources._serves(CatalogueSource(name), group)]
 
 
 class TestACatalogueIsOnlyAskedAboutTheISBNsItsRemitReaches:
@@ -1131,8 +1050,7 @@ class TestACatalogueIsOnlyAskedAboutTheISBNsItsRemitReaches:
                 prefix, element = group.split("-")
                 body = (prefix + element).ljust(12, "0")[:12]
                 total = sum(
-                    int(digit) * (1 if position % 2 == 0 else 3)
-                    for position, digit in enumerate(body)
+                    int(digit) * (1 if position % 2 == 0 else 3) for position, digit in enumerate(body)
                 )
                 isbn = body + str((10 - total % 10) % 10)
                 assert registration_group(isbn) == group, (source, group)
@@ -1227,9 +1145,7 @@ class TestACatalogueIsOnlyAskedAboutTheISBNsItsRemitReaches:
         the guard rather than argued about at the fixture.
         """
         columns = {
-            key
-            for key in _sample()[0]
-            if key not in {"frame", "isbn"} and not key.startswith("seconds_")
+            key for key in _sample()[0] if key not in {"frame", "isbn"} and not key.startswith("seconds_")
         }
         assert set(sources.SERVES_GROUPS) <= {CatalogueSource(name) for name in columns}
 
@@ -1284,9 +1200,7 @@ class TestACatalogueIsOnlyAskedAboutTheISBNsItsRemitReaches:
         for source, groups in sources.SERVES_GROUPS.items():
             assert groups is targets.SEEDED[source].serves_groups, source
         assert set(sources.SERVES_GROUPS) == {
-            source
-            for source, target in targets.SEEDED.items()
-            if target.serves_groups
+            source for source, target in targets.SEEDED.items() if target.serves_groups
         }
 
     def test_the_rule_costs_the_sample_no_book_at_all(self):
@@ -1416,11 +1330,7 @@ class TestACatalogueIsOnlyAskedAboutTheISBNsItsRemitReaches:
         list is a skip. That is the positive claim the saving comes from, and
         both remits name `978`.
         """
-        assert all(
-            group.startswith("978-")
-            for groups in sources.SERVES_GROUPS.values()
-            for group in groups
-        )
+        assert all(group.startswith("978-") for groups in sources.SERVES_GROUPS.values() for group in groups)
         spanish = sources.DEFAULT_PLAN.lookup_in_turn("978-84")
         assert CatalogueSource.NLG not in spanish
         assert CatalogueSource.OENB not in spanish
@@ -1562,9 +1472,7 @@ class TestACatalogueIsOnlyAskedAboutTheISBNsItsRemitReaches:
         )
         described = {
             row.source: row
-            for row in sources.describe(
-                plan, ready=frozenset(CatalogueSource), credentials=frozenset()
-            )
+            for row in sources.describe(plan, ready=frozenset(CatalogueSource), credentials=frozenset())
         }
         for source in (CatalogueSource.OENB, CatalogueSource.NLG):
             assert described[source].asked_first is True, source
@@ -1594,9 +1502,7 @@ class TestASlowCatalogueIsAskedOnlyWhenSomebodyAsks:
 
     @pytest.fixture
     def slow_oenb(self, monkeypatch):
-        monkeypatch.setattr(
-            sources, "SLOW_SEARCHES", frozenset({CatalogueSource.OENB})
-        )
+        monkeypatch.setattr(sources, "SLOW_SEARCHES", frozenset({CatalogueSource.OENB}))
         return sources.DEFAULT_PLAN
 
     def test_the_marking_can_only_name_a_catalogue_that_answers_a_search(self):
@@ -1609,9 +1515,7 @@ class TestASlowCatalogueIsAskedOnlyWhenSomebodyAsks:
         """
         assert sources.SLOW_SEARCHES <= sources.SEARCH_SOURCES
 
-    def test_marking_a_catalogue_that_answers_no_search_is_silently_inert(
-        self, monkeypatch
-    ):
+    def test_marking_a_catalogue_that_answers_no_search_is_silently_inert(self, monkeypatch):
         """Which is why the subset above is a rule rather than a preference.
 
         Both rosters filter on `SEARCH_SOURCES` before consulting the marking,
@@ -1619,9 +1523,7 @@ class TestASlowCatalogueIsAskedOnlyWhenSomebodyAsks:
         National Library is the live instance: on the roster, answers an ISBN,
         answers no title search.
         """
-        monkeypatch.setattr(
-            sources, "SLOW_SEARCHES", frozenset({CatalogueSource.NKP})
-        )
+        monkeypatch.setattr(sources, "SLOW_SEARCHES", frozenset({CatalogueSource.NKP}))
         plan = sources.DEFAULT_PLAN
         assert CatalogueSource.NKP not in plan.searched
         assert CatalogueSource.NKP not in plan.searched_harder
@@ -1657,19 +1559,13 @@ class TestASlowCatalogueIsAskedOnlyWhenSomebodyAsks:
         pass over `asked` and they become two rules free to disagree, which is
         the shape a corrected partition that does not sum arrives in.
         """
-        assert set(slow_oenb.searched_harder) - set(slow_oenb.searched) == {
-            CatalogueSource.OENB
-        }
-        assert set(slow_oenb.searched) | {CatalogueSource.OENB} == set(
-            slow_oenb.searched_harder
-        )
+        assert set(slow_oenb.searched_harder) - set(slow_oenb.searched) == {CatalogueSource.OENB}
+        assert set(slow_oenb.searched) | {CatalogueSource.OENB} == set(slow_oenb.searched_harder)
 
     def test_the_harder_search_keeps_the_household_order(self, slow_oenb):
         """Position still decides precedence, so the longer roster is not resorted."""
         harder = slow_oenb.searched_harder
-        assert list(harder) == [
-            name for name in slow_oenb.asked if name in sources.SEARCH_SOURCES
-        ]
+        assert list(harder) == [name for name in slow_oenb.asked if name in sources.SEARCH_SOURCES]
 
     def test_slow_searches_names_what_the_default_left_out(self, slow_oenb):
         assert slow_oenb.searched_only_harder == (CatalogueSource.OENB,)
@@ -1678,9 +1574,7 @@ class TestASlowCatalogueIsAskedOnlyWhenSomebodyAsks:
         """What the screen reads to decide whether the second action is offered."""
         assert sources.DEFAULT_PLAN.searched_only_harder == ()
 
-    def test_a_slow_catalogue_that_is_switched_off_is_in_neither_roster(
-        self, monkeypatch
-    ):
+    def test_a_slow_catalogue_that_is_switched_off_is_in_neither_roster(self, monkeypatch):
         """Slow is not a second on switch, in either direction.
 
         The household's off switch still wins: asking harder asks the
@@ -1701,13 +1595,9 @@ class TestASlowCatalogueIsAskedOnlyWhenSomebodyAsks:
         when a reader wants it.
         """
         assert CatalogueSource.OENB in slow_oenb.lookup_chain
-        assert CatalogueSource.OENB in (
-            slow_oenb.lookup_together + slow_oenb.lookup_in_turn(None)
-        )
+        assert CatalogueSource.OENB in (slow_oenb.lookup_together + slow_oenb.lookup_in_turn(None))
 
-    def test_a_library_whose_search_catalogues_are_all_slow_has_an_empty_default(
-        self, monkeypatch
-    ):
+    def test_a_library_whose_search_catalogues_are_all_slow_has_an_empty_default(self, monkeypatch):
         """An empty default roster and a full harder one, rather than an error.
 
         The shape `_within_deadline` once answered with a 500. It is also the
@@ -1732,9 +1622,7 @@ class TestASlowCatalogueIsAskedOnlyWhenSomebodyAsks:
         assert described[CatalogueSource.OENB] is True
         assert described[CatalogueSource.K10PLUS] is False
 
-    def test_the_screen_is_told_even_for_a_catalogue_that_is_switched_off(
-        self, monkeypatch
-    ):
+    def test_the_screen_is_told_even_for_a_catalogue_that_is_switched_off(self, monkeypatch):
         """Unconditional, like `needs_a_key`.
 
         A household switching a slow catalogue on wants to be told what it costs
@@ -1745,9 +1633,7 @@ class TestASlowCatalogueIsAskedOnlyWhenSomebodyAsks:
         plan = sources.parse({"sources": [{"source": "oenb", "enabled": False}]})
         [row] = [
             row
-            for row in sources.describe(
-                plan, ready=frozenset(CatalogueSource), credentials=frozenset()
-            )
+            for row in sources.describe(plan, ready=frozenset(CatalogueSource), credentials=frozenset())
             if row.source is CatalogueSource.OENB
         ]
         assert row.enabled is False
@@ -1775,8 +1661,7 @@ class TestEverySeededTargetAnswersSomething:
         stranded = sorted(
             source.value
             for source in targets.SEEDED
-            if source not in sources.LOOKUP_SOURCES
-            and source not in sources.SEARCH_SOURCES
+            if source not in sources.LOOKUP_SOURCES and source not in sources.SEARCH_SOURCES
         )
 
         assert not stranded, (

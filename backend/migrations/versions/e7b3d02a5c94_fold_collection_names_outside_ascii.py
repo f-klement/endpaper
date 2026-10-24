@@ -156,9 +156,9 @@ def upgrade() -> None:
     for row_id, name in rows:
         grouped.setdefault(name.lower(), []).append((row_id, name))
 
-    repoint = sa.text(
-        "UPDATE books SET collection_id = :keeper WHERE collection_id IN :losers"
-    ).bindparams(sa.bindparam("losers", expanding=True))
+    repoint = sa.text("UPDATE books SET collection_id = :keeper WHERE collection_id IN :losers").bindparams(
+        sa.bindparam("losers", expanding=True)
+    )
     remove = sa.text("DELETE FROM collections WHERE id IN :losers").bindparams(
         sa.bindparam("losers", expanding=True)
     )
@@ -171,9 +171,7 @@ def upgrade() -> None:
 
         # Repoint first, delete second. The other order is the trap the module
         # docstring describes and it leaves no trace when it fires.
-        moved = connection.execute(
-            repoint, {"keeper": keeper_id, "losers": loser_ids}
-        ).rowcount
+        moved = connection.execute(repoint, {"keeper": keeper_id, "losers": loser_ids}).rowcount
         connection.execute(remove, {"losers": loser_ids})
 
         logger.warning(
@@ -193,10 +191,7 @@ def upgrade() -> None:
         sa.Column("name_folded", sa.String(length=_KEY_MAX), nullable=True),
     )
 
-    survivors = [
-        {"row_id": members[0][0], "folded": members[0][1].lower()}
-        for members in grouped.values()
-    ]
+    survivors = [{"row_id": members[0][0], "folded": members[0][1].lower()} for members in grouped.values()]
     if survivors:
         connection.execute(
             sa.text("UPDATE collections SET name_folded = :folded WHERE id = :row_id"),
@@ -217,9 +212,7 @@ def upgrade() -> None:
             nullable=False,
         )
 
-    op.create_index(
-        "uq_collections_name_folded", "collections", ["name_folded"], unique=True
-    )
+    op.create_index("uq_collections_name_folded", "collections", ["name_folded"], unique=True)
 
     # The assertion the issue asks for, held here as an invariant. The rebuild
     # above copies `collections` row for row, ids included, and nothing since

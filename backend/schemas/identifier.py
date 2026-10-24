@@ -109,15 +109,8 @@ class BookIdentifierIn(BaseModel):
         trimmed = value.strip()
         if not trimmed:
             raise ValueError("An identifier needs a value.")
-        if any(
-            character.isspace()
-            or unicodedata.category(character) in _INVISIBLE
-            for character in trimmed
-        ):
-            raise ValueError(
-                "An identifier holds no whitespace, control or formatting "
-                "characters."
-            )
+        if any(character.isspace() or unicodedata.category(character) in _INVISIBLE for character in trimmed):
+            raise ValueError("An identifier holds no whitespace, control or formatting characters.")
         return trimmed
 
 

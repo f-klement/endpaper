@@ -58,6 +58,10 @@ import pytest
 from tests import conftest
 from tests.corpus import suite_modules
 
+TREE_GUARDS = {
+    "TestTheGlobalCeilingIsAFactAboutThisTree": ("suite_modules",),
+}
+
 _BACKEND = Path(__file__).resolve().parents[1]
 _MANIFEST = _BACKEND / "pyproject.toml"
 
@@ -280,16 +284,12 @@ class TestAHangingTestArrivesAsANamedFailure:
     def test_the_hanging_test_is_named_in_the_report(self, hung_inner_run: InnerRun) -> None:
         require_a_report(hung_inner_run, "the armed run")
         cases = hung_inner_run.cases()
-        assert "test_it_hangs" in cases, (
-            f"the ceiling did not name the hanging test. Failing cases: {cases}"
-        )
+        assert "test_it_hangs" in cases, f"the ceiling did not name the hanging test. Failing cases: {cases}"
         tag, message = cases["test_it_hangs"]
         assert tag == "failure"
         assert "Timeout" in message, message
 
-    def test_the_worker_survives_and_the_rest_of_the_run_reports(
-        self, hung_inner_run: InnerRun
-    ) -> None:
+    def test_the_worker_survives_and_the_rest_of_the_run_reports(self, hung_inner_run: InnerRun) -> None:
         """The signal method's whole point, and what makes it affordable.
 
         The thread method calls `os._exit` here instead: measured, nine restarts,
@@ -310,10 +310,7 @@ class TestAHangingTestArrivesAsANamedFailure:
         """
         run = run_a_bounded_inner_pytest(
             tmp_path / "slow",
-            {
-                "test_slow.py": "import time\n\n\ndef test_slow_but_finite():\n"
-                "    time.sleep(0.3)\n"
-            },
+            {"test_slow.py": "import time\n\n\ndef test_slow_but_finite():\n    time.sleep(0.3)\n"},
             ceiling=5.0,
         )
         require_a_report(run, "the slow but finite run")
@@ -349,9 +346,7 @@ class TestTheInnerProjectIsNotDecidedByAnythingAboveIt:
     **That was reasoned and not proved**, which is the state this arm ends.
     """
 
-    def test_a_hostile_ini_above_the_project_does_not_reach_it(
-        self, tmp_path: Path
-    ) -> None:
+    def test_a_hostile_ini_above_the_project_does_not_reach_it(self, tmp_path: Path) -> None:
         """Planted directly above, and chosen so inheriting it would be silent.
 
         `python_files` is what decides whether a file is a test module at all,
@@ -472,9 +467,7 @@ def declared_ceilings() -> list[DeclaredCeiling]:
                     continue
                 value_node = keyword.value
                 seconds: float | None = None
-                if isinstance(value_node, ast.Constant) and isinstance(
-                    value_node.value, int | float
-                ):
+                if isinstance(value_node, ast.Constant) and isinstance(value_node.value, int | float):
                     seconds = float(value_node.value)
                 elif isinstance(value_node, ast.Name):
                     seconds = constants.get(value_node.id)
@@ -485,9 +478,7 @@ def declared_ceilings() -> list[DeclaredCeiling]:
 
 
 def the_global_ceiling() -> float:
-    addopts = shlex.split(
-        tomllib.loads(_MANIFEST.read_text())["tool"]["pytest"]["ini_options"]["addopts"]
-    )
+    addopts = shlex.split(tomllib.loads(_MANIFEST.read_text())["tool"]["pytest"]["ini_options"]["addopts"])
     for opt in addopts:
         if opt.startswith("--timeout="):
             return float(opt.split("=", 1)[1])
@@ -635,9 +626,7 @@ class TestASessionThatLostATestIsRefusedByName:
         assert "t.py::b" in said, said
         assert "t.py::c" in said, said
 
-    def test_a_truncated_failing_run_is_refused_too(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_a_truncated_failing_run_is_refused_too(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """The crash shape, which exits TESTS_FAILED because crash items are real.
 
         So the status this run carries is the one the exemption below lets
@@ -694,9 +683,7 @@ class TestTheExemptionsAreKeyedOnWhatWasMeasured:
     report their collection.
     """
 
-    def test_a_serial_early_stop_is_not_a_short_session(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_a_serial_early_stop_is_not_a_short_session(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """`-x` and `--maxfail` with no xdist, which is the shape that was wrong.
 
         **The status here is `TESTS_FAILED`, not `INTERRUPTED`.** Both flags set
@@ -738,9 +725,7 @@ class TestTheExemptionsAreKeyedOnWhatWasMeasured:
         )
         assert reporter.lines == []
 
-    def test_a_stepwise_stop_is_not_a_short_session(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_a_stepwise_stop_is_not_a_short_session(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """The other flag, and the only thing in the distribution that sets it.
 
         Measured: `--stepwise` gives `shouldstop='Test failed, continuing from
@@ -781,9 +766,7 @@ class TestTheExemptionsAreKeyedOnWhatWasMeasured:
         )
         assert reporter.lines == []
 
-    def test_collect_only_is_not_a_short_session(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_collect_only_is_not_a_short_session(self, monkeypatch: pytest.MonkeyPatch) -> None:
         session, reporter = _finish(
             monkeypatch,
             collected=["t.py::a", "t.py::b"],

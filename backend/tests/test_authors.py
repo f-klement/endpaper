@@ -91,9 +91,7 @@ class TestSplittingACreditLine:
 #: One name as a source might hand it over: no comma, since a comma inside a name
 #: is the residue `split_authors` documents rather than a round trip, and a key,
 #: since a name with none is nobody to the reader.
-_NAMES = st.text(st.characters(exclude_characters=",", exclude_categories=["Cs"])).filter(
-    author_key
-)
+_NAMES = st.text(st.characters(exclude_characters=",", exclude_categories=["Cs"])).filter(author_key)
 
 
 class TestWritingACreditLine:
@@ -179,9 +177,7 @@ class TestFlatteningTheAliasMap:
         assert set(resolved) == {"a", "b"}
 
     def test_a_row_pointing_at_itself_is_left_alone(self):
-        assert resolve_alias_map({"emile zola": "Émile Zola"}) == {
-            "emile zola": "Émile Zola"
-        }
+        assert resolve_alias_map({"emile zola": "Émile Zola"}) == {"emile zola": "Émile Zola"}
 
 
 class TestTheIndex:
@@ -198,9 +194,7 @@ class TestTheIndex:
         assert entries[0].book_ids == (1, 2)
 
     def test_the_most_used_spelling_is_the_one_shown(self):
-        entries = build_index(
-            [(1, "emile zola"), (2, "Emile Zola"), (3, "Emile Zola")], {}
-        )
+        entries = build_index([(1, "emile zola"), (2, "Emile Zola"), (3, "Emile Zola")], {})
         assert entries[0].name == "Emile Zola"
         assert entries[0].spellings == ("Emile Zola", "emile zola")
 
@@ -243,9 +237,7 @@ class TestTheIndex:
         book resolve to a different person for different members, which is
         identity diverging rather than a view narrowing.
         """
-        entries = build_index(
-            [(1, "Zola")], {"zola": "E. Zola", "e zola": "Émile Zola"}
-        )
+        entries = build_index([(1, "Zola")], {"zola": "E. Zola", "e zola": "Émile Zola"})
 
         assert [entry.name for entry in entries] == ["Émile Zola"]
 
@@ -256,9 +248,7 @@ class TestTheIndex:
         assert build_index([], {"anne frank": "Annelies Marie Frank"}) == []
 
     def test_a_book_credited_twice_to_one_person_is_counted_once(self):
-        entries = build_index(
-            [(1, "Le Guin, Ursula K.")], {"le guin": "X", "ursula k": "X"}
-        )
+        entries = build_index([(1, "Le Guin, Ursula K.")], {"le guin": "X", "ursula k": "X"})
         assert [(entry.name, entry.book_ids) for entry in entries] == [("X", (1,))]
 
     def test_an_author_nobody_has_a_book_by_is_not_in_the_index(self):
@@ -293,9 +283,7 @@ class TestSuggestions:
         assert suggest_merges(entries) == []
 
     def test_a_catalogue_order_split_lands_beside_the_whole_name(self):
-        entries = build_index(
-            [(1, "Le Guin, Ursula K."), (2, "Ursula K. Le Guin")], {}
-        )
+        entries = build_index([(1, "Le Guin, Ursula K."), (2, "Ursula K. Le Guin")], {})
         [group] = suggest_merges(entries)
         assert set(group.names) == {"Le Guin", "Ursula K.", "Ursula K. Le Guin"}
         assert Reason.FRAGMENT in group.reasons
@@ -310,9 +298,7 @@ class TestSuggestions:
         assert suggest_merges(entries) == []
 
     def test_two_rules_reaching_the_same_names_make_one_group(self):
-        entries = build_index(
-            [(1, "J. Smith"), (2, "John Smith"), (3, "James Smith")], {}
-        )
+        entries = build_index([(1, "J. Smith"), (2, "John Smith"), (3, "James Smith")], {})
         [group] = suggest_merges(entries)
         assert len(group.keys) == 3
 
@@ -342,12 +328,8 @@ class TestSuggestions:
         pair inside a bucket, and "every author sharing one word" is a set a
         member fills by typing.
         """
-        padding = [
-            (index, f"Padding{index} Guin") for index in range(MAX_BUCKET + 1)
-        ]
-        entries = build_index(
-            [*padding, (9001, "U. K. Le Guin"), (9002, "Ursula K. Le Guin")], {}
-        )
+        padding = [(index, f"Padding{index} Guin") for index in range(MAX_BUCKET + 1)]
+        entries = build_index([*padding, (9001, "U. K. Le Guin"), (9002, "Ursula K. Le Guin")], {})
 
         assert suggest_merges(entries) == []
 
@@ -358,9 +340,7 @@ class TestSuggestions:
         hundred and one.
         """
         padding = [(index, f"Padding{index} Guin") for index in range(10)]
-        entries = build_index(
-            [*padding, (9001, "U. K. Le Guin"), (9002, "Ursula K. Le Guin")], {}
-        )
+        entries = build_index([*padding, (9001, "U. K. Le Guin"), (9002, "Ursula K. Le Guin")], {})
 
         [group] = suggest_merges(entries)
         assert set(group.names) == {"U. K. Le Guin", "Ursula K. Le Guin"}
@@ -378,10 +358,7 @@ class TestSuggestions:
         runner is not a benchmark. What it catches is the budget being removed.
         """
         buckets = 32
-        rows = [
-            (index, f"U{index} K{index % buckets} K{(index + 1) % buckets}")
-            for index in range(3200)
-        ]
+        rows = [(index, f"U{index} K{index % buckets} K{(index + 1) % buckets}") for index in range(3200)]
         entries = build_index(rows, {})
 
         # The shape only proves anything if `MAX_BUCKET` really does not fire.
@@ -436,8 +413,7 @@ class TestTheIdentitySpine:
     def test_two_spellings_sharing_an_isni_are_offered_as_one_person(self):
         [group] = suggest_merges(
             self._dickens(),
-            {author_key("Boz"): frozenset({DICKENS}),
-             author_key("Charles Dickens"): frozenset({DICKENS})},
+            {author_key("Boz"): frozenset({DICKENS}), author_key("Charles Dickens"): frozenset({DICKENS})},
         )
 
         assert set(group.names) == {"Boz", "Charles Dickens"}
@@ -453,8 +429,10 @@ class TestTheIdentitySpine:
         assert (
             suggest_merges(
                 self._dickens(),
-                {author_key("Boz"): frozenset({DICKENS}),
-                 author_key("Charles Dickens"): frozenset({"0000000000000001"})},
+                {
+                    author_key("Boz"): frozenset({DICKENS}),
+                    author_key("Charles Dickens"): frozenset({"0000000000000001"}),
+                },
             )
             == []
         )
@@ -472,9 +450,7 @@ class TestTheIdentitySpine:
         dropping the author, whichever value it keeps, groups one of these two
         with `Boz`.
         """
-        entries = build_index(
-            [(1, "Boz"), (2, "Charles Dickens"), (3, "C. J. H. Dickens")], {}
-        )
+        entries = build_index([(1, "Boz"), (2, "Charles Dickens"), (3, "C. J. H. Dickens")], {})
 
         groups = suggest_merges(
             entries,
@@ -500,14 +476,11 @@ class TestTheIdentitySpine:
     def test_the_spine_and_a_letter_rule_reaching_the_same_names_are_one_group(self):
         """Transitive with the other three, like every rule here. A group
         somebody has to split beats two that hide that they overlap."""
-        entries = build_index(
-            [(1, "Boz"), (2, "Charles Dickens"), (3, "C. Dickens")], {}
-        )
+        entries = build_index([(1, "Boz"), (2, "Charles Dickens"), (3, "C. Dickens")], {})
 
         [group] = suggest_merges(
             entries,
-            {author_key("Boz"): frozenset({DICKENS}),
-             author_key("Charles Dickens"): frozenset({DICKENS})},
+            {author_key("Boz"): frozenset({DICKENS}), author_key("Charles Dickens"): frozenset({DICKENS})},
         )
 
         assert len(group.keys) == 3
@@ -524,12 +497,9 @@ class TestTheIdentitySpine:
         which the unrelated pair below is what shows.
         """
         planted = [(index, f"Nom{index} Sur{index}") for index in range(MAX_BUCKET + 1)]
-        entries = build_index(
-            [*planted, (9001, "U. K. Le Guin"), (9002, "Ursula K. Le Guin")], {}
-        )
+        entries = build_index([*planted, (9001, "U. K. Le Guin"), (9002, "Ursula K. Le Guin")], {})
         spines = {
-            author_key(f"Nom{index} Sur{index}"): frozenset({DICKENS})
-            for index in range(MAX_BUCKET + 1)
+            author_key(f"Nom{index} Sur{index}"): frozenset({DICKENS}) for index in range(MAX_BUCKET + 1)
         }
 
         groups = suggest_merges(entries, spines)
@@ -599,17 +569,21 @@ class TestTheMatcherIsNamed:
         default = {
             frozenset(pair)
             for group in suggest_merges(entries, spines, DEFAULT_MATCHER)
-            for pair in ((group.keys[index], other)
-                         for index in range(len(group.keys))
-                         for other in group.keys[index + 1:])
+            for pair in (
+                (group.keys[index], other)
+                for index in range(len(group.keys))
+                for other in group.keys[index + 1 :]
+            )
         }
         for matcher in MATCHERS.values():
             pairs = {
                 frozenset(pair)
                 for group in suggest_merges(entries, spines, matcher)
-                for pair in ((group.keys[index], other)
-                             for index in range(len(group.keys))
-                             for other in group.keys[index + 1:])
+                for pair in (
+                    (group.keys[index], other)
+                    for index in range(len(group.keys))
+                    for other in group.keys[index + 1 :]
+                )
             }
             assert pairs <= default, matcher.name
 

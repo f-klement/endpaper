@@ -52,9 +52,7 @@ def normalise(raw: str) -> str:
     `parse-strips-a-trailing-non-ascii-digit` is the case that fails if this
     line goes.
     """
-    return "".join(
-        character for character in raw if character.isascii() and character.isalnum()
-    ).upper()
+    return "".join(character for character in raw if character.isascii() and character.isalnum()).upper()
 
 
 def is_valid_isbn10(candidate: str) -> bool:
@@ -100,15 +98,10 @@ def is_valid_isbn13(candidate: str) -> bool:
     `targets.Target.isbn_query` states that promise in its own reasoning, and it was
     asserted before it was true.
     """
-    if len(candidate) != _ISBN13_LENGTH or not (
-        candidate.isascii() and candidate.isdigit()
-    ):
+    if len(candidate) != _ISBN13_LENGTH or not (candidate.isascii() and candidate.isdigit()):
         return False
 
-    total = sum(
-        int(digit) * (1 if position % 2 == 0 else 3)
-        for position, digit in enumerate(candidate)
-    )
+    total = sum(int(digit) * (1 if position % 2 == 0 else 3) for position, digit in enumerate(candidate))
     return total % 10 == 0
 
 
@@ -119,10 +112,7 @@ def isbn10_to_isbn13(isbn10: str) -> str:
     the ISBN-10 check digit is discarded because the two schemes differ.
     """
     body = "978" + isbn10[:9]
-    total = sum(
-        int(digit) * (1 if position % 2 == 0 else 3)
-        for position, digit in enumerate(body)
-    )
+    total = sum(int(digit) * (1 if position % 2 == 0 else 3) for position, digit in enumerate(body))
     return body + str((10 - total % 10) % 10)
 
 

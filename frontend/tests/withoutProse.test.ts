@@ -107,7 +107,7 @@ const STRIPPING: [string, "ts" | "tsx", string, string[], string[]][] = [
   [
     "a line comment ended by a terminator that is not a newline",
     "ts",
-    // Written as escapes because `prettier --check` rewrites all three to a
+    // Written as escapes because `oxfmt --check` rewrites all three to a
     // newline in source, which would quietly delete this row's subject.
     "const kept = 1; // the note\u2028const alsoKept = 2;\n" +
       "const third = 3; // the other note\rconst andFourth = 4;\n" +

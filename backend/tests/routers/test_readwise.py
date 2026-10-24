@@ -83,8 +83,7 @@ class FakeReadwise:
         marks = [
             each
             for each in one["highlights"]  # type: ignore[attr-defined]
-            if (deleted or not each["is_deleted"])
-            and (after is None or _when(each["updated_at"]) > after)
+            if (deleted or not each["is_deleted"]) and (after is None or _when(each["updated_at"]) > after)
         ]
         if one["is_deleted"] and not deleted:
             return None
@@ -106,9 +105,7 @@ class FakeReadwise:
             after = None
         else:
             chosen = [one for _ident, one in sorted(self.library.items())]
-        results = [
-            shown for one in chosen if (shown := self._shown(one, after, deleted)) is not None
-        ]
+        results = [shown for one in chosen if (shown := self._shown(one, after, deleted)) is not None]
         start = int(params.get("pageCursor", "0"))
         following = str(start + 1) if start + 1 < len(results) else None
         return httpx.Response(
@@ -126,9 +123,7 @@ def fake() -> Iterator[FakeReadwise]:
     service = FakeReadwise()
     with respx.mock(assert_all_called=False) as mock:
         service.auth = mock.get(f"{readwise.READWISE_ORIGIN}/api/v2/auth/").respond(204)
-        mock.route(method="GET", host="readwise.io", path="/api/v2/export/").mock(
-            side_effect=service.export
-        )
+        mock.route(method="GET", host="readwise.io", path="/api/v2/export/").mock(side_effect=service.export)
         yield service
 
 
@@ -188,9 +183,7 @@ class TestTheToken:
         assert TOKEN not in account.text
         assert TOKEN not in db.query(MemberLogin).one().envelope
 
-    def test_removing_it_keeps_the_highlights_already_pulled(
-        self, client, linked, make_book, fake, db
-    ):
+    def test_removing_it_keeps_the_highlights_already_pulled(self, client, linked, make_book, fake, db):
         dune(make_book, linked["headers"])
         fake.put(entry())
         pull(client, linked["headers"])
@@ -232,9 +225,7 @@ class TestTheLimiter:
     """Both routes that make this server call Readwise share the import
     limiter, three a minute, and the fourth never reaches Readwise."""
 
-    def test_the_fourth_save_in_a_minute_is_refused_unasked(
-        self, client, member, encryption_key, fake
-    ):
+    def test_the_fourth_save_in_a_minute_is_refused_unasked(self, client, member, encryption_key, fake):
         statuses = [save(client, member["headers"]).status_code for _ in range(4)]
 
         assert statuses == [200, 200, 200, 429]
@@ -244,8 +235,7 @@ class TestTheLimiter:
     def test_the_fourth_pull_in_a_minute_is_refused_unasked(self, client, linked, fake):
         fake.put(entry())
         statuses = [
-            client.post("/api/readwise/sync", headers=linked["headers"]).status_code
-            for _ in range(4)
+            client.post("/api/readwise/sync", headers=linked["headers"]).status_code for _ in range(4)
         ]
 
         assert statuses == [200, 200, 200, 429]
@@ -259,22 +249,22 @@ class TestAPull:
         assert res.status_code == 409
         assert res.json()["detail"]["code"] == "no_token"
 
-    def test_a_highlight_arrives_private_keyed_on_readwise_s_id(
-        self, client, linked, make_book, fake, db
-    ):
+    def test_a_highlight_arrives_private_keyed_on_readwise_s_id(self, client, linked, make_book, fake, db):
         book = dune(make_book, linked["headers"])
         fake.put(entry())
 
         assert pull(client, linked["headers"])["created"] == 1
         row = db.query(Highlight).one()
         assert (row.book_id, row.source, row.source_key, row.is_shared, row.page) == (
-            book["id"], "readwise", "101", False, 12,
+            book["id"],
+            "readwise",
+            "101",
+            False,
+            12,
         )
         assert str(row.highlighted_at) == "2026-03-01 21:15:09"
 
-    def test_only_the_token_and_readwise_s_own_values_leave(
-        self, client, linked, make_book, fake
-    ):
+    def test_only_the_token_and_readwise_s_own_values_leave(self, client, linked, make_book, fake):
         dune(make_book, linked["headers"])
         fake.put(entry())
         pull(client, linked["headers"])
@@ -314,16 +304,12 @@ class TestAPull:
         assert pull(client, linked["headers"])["deleted"] == 1
         assert db.query(Highlight).count() == 0
 
-    def test_a_highlight_deleted_here_is_not_pulled_back(
-        self, client, linked, make_book, fake, db
-    ):
+    def test_a_highlight_deleted_here_is_not_pulled_back(self, client, linked, make_book, fake, db):
         book = dune(make_book, linked["headers"])
         fake.put(entry())
         pull(client, linked["headers"])
         row = db.query(Highlight).one()
-        res = client.delete(
-            f"/api/books/{book['id']}/highlights/{row.id}", headers=linked["headers"]
-        )
+        res = client.delete(f"/api/books/{book['id']}/highlights/{row.id}", headers=linked["headers"])
         assert res.status_code == 204
         fake.put(entry(7, mark(note="edited at Readwise", updated_at=now())))
 
@@ -356,9 +342,7 @@ class TestAPull:
 
     def test_an_asin_on_one_book_decides_it(self, client, linked, make_book, fake, db):
         dune(make_book, linked["headers"])
-        kindle = dune(
-            make_book, linked["headers"], identifiers=[{"scheme": "asin", "value": "B00B7NPRY8"}]
-        )
+        kindle = dune(make_book, linked["headers"], identifiers=[{"scheme": "asin", "value": "B00B7NPRY8"}])
         fake.put(entry(asin="b00b7npry8"))
 
         pull(client, linked["headers"])
@@ -388,9 +372,7 @@ class TestAPull:
         assert pull(client, linked["headers"])["waiting_count"] == 1
         assert db.query(Highlight).count() == 0
 
-    def test_a_waiting_book_is_asked_for_by_id_once_a_book_matches(
-        self, client, linked, make_book, fake, db
-    ):
+    def test_a_waiting_book_is_asked_for_by_id_once_a_book_matches(self, client, linked, make_book, fake, db):
         fake.put(entry())
         pull(client, linked["headers"])
         dune(make_book, linked["headers"])
@@ -414,9 +396,7 @@ class TestAPull:
         assert fake.requests[-1].url.params["ids"] == "7"
         assert {row.source_key for row in db.query(Highlight)} == {"101", "102"}
 
-    def test_a_highlight_moved_to_another_book_is_private_again(
-        self, client, linked, make_book, fake, db
-    ):
+    def test_a_highlight_moved_to_another_book_is_private_again(self, client, linked, make_book, fake, db):
         first = dune(make_book, linked["headers"])
         fake.put(entry())
         pull(client, linked["headers"])
@@ -456,9 +436,7 @@ class TestTheCursorMovesOnlyWhenEverythingArrived:
         assert pull(client, linked["headers"])["outcome"] == "rate_limited"
         assert login(db).synced_through == before
 
-    def test_a_page_bound_leaves_it_and_the_next_pull_resumes(
-        self, client, linked, fake, db, monkeypatch
-    ):
+    def test_a_page_bound_leaves_it_and_the_next_pull_resumes(self, client, linked, fake, db, monkeypatch):
         fake.put(entry())
         pull(client, linked["headers"])
         before = login(db).synced_through
@@ -475,7 +453,6 @@ class TestTheCursorMovesOnlyWhenEverythingArrived:
 
         assert pull(client, linked["headers"])["outcome"] == "synced"
         assert fake.requests[asked].url.params.get("pageCursor") == "1"
-
 
     def test_a_resumed_walk_completes_with_the_time_it_first_began(
         self, client, linked, fake, db, monkeypatch
@@ -496,9 +473,7 @@ class TestTheCursorMovesOnlyWhenEverythingArrived:
         assert pull(client, linked["headers"])["outcome"] == "synced"
         assert login(db).synced_through == began - readwise.OVERLAP
 
-    def test_a_resumed_cursor_readwise_refuses_is_dropped(
-        self, client, linked, fake, db, monkeypatch
-    ):
+    def test_a_resumed_cursor_readwise_refuses_is_dropped(self, client, linked, fake, db, monkeypatch):
         pull(client, linked["headers"])
         fake.put(
             entry(7, mark(updated_at=now())),
@@ -516,9 +491,7 @@ class TestTheCursorMovesOnlyWhenEverythingArrived:
         assert pull(client, linked["headers"])["outcome"] == "synced"
         assert "pageCursor" not in fake.requests[asked].url.params
 
-    def test_a_retried_page_keeps_its_resume_cursor(
-        self, client, linked, make_book, fake, db, monkeypatch
-    ):
+    def test_a_retried_page_keeps_its_resume_cursor(self, client, linked, make_book, fake, db, monkeypatch):
         """A hand delete beats the first page's commit, and the page is written
         again: the rollback took the cursor and the walk's start with it, so the
         retry has to set both again or the next pull starts over."""
@@ -542,9 +515,7 @@ class TestTheCursorMovesOnlyWhenEverythingArrived:
             fired.append(row_id)
             with SessionLocal() as other:
                 other.add(
-                    DeletedHighlight(
-                        user_id=member_id, source=HighlightSource.READWISE, source_key="101"
-                    )
+                    DeletedHighlight(user_id=member_id, source=HighlightSource.READWISE, source_key="101")
                 )
                 other.flush()
                 other.query(Highlight).filter(Highlight.id == row_id).delete()
@@ -560,9 +531,7 @@ class TestTheCursorMovesOnlyWhenEverythingArrived:
         resumed = login(db)
         assert (resumed.resume_cursor, resumed.walk_started_at) == ("1", resumed.last_run_at)
 
-    def test_a_book_whose_history_arrived_is_not_asked_for_again(
-        self, client, linked, make_book, fake, db
-    ):
+    def test_a_book_whose_history_arrived_is_not_asked_for_again(self, client, linked, make_book, fake, db):
         fake.put(entry())
         pull(client, linked["headers"])
         dune(make_book, linked["headers"])

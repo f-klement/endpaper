@@ -249,6 +249,4 @@ class Decoding:
         if self.reader not in MARC_READERS and (
             self.refuses_component_parts or self.reads_author_identifiers
         ):
-            raise ValueError(
-                f"{self.source}: a MARC knob on a reader that reads no MARC"
-            )
+            raise ValueError(f"{self.source}: a MARC knob on a reader that reads no MARC")

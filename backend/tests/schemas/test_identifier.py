@@ -57,16 +57,11 @@ class TestTheValueIsTrimmedAndThenTested:
         """The other side: the trim is for a reader's indentation, which is what
         a store's XML actually hands over, and that is well inside the budget."""
         padded = "\n    " + "B" * 10 + "\n  "
-        assert (
-            len(BookIdentifierIn(scheme=BookIdentifierScheme.ASIN, value=padded).value)
-            == 10
-        )
+        assert len(BookIdentifierIn(scheme=BookIdentifierScheme.ASIN, value=padded).value) == 10
 
     def test_a_value_past_the_ceiling_with_nothing_to_trim_is_refused(self):
         with pytest.raises(ValidationError):
-            BookIdentifierIn(
-                scheme=BookIdentifierScheme.ASIN, value="B" * (BOOK_IDENTIFIER_MAX + 1)
-            )
+            BookIdentifierIn(scheme=BookIdentifierScheme.ASIN, value="B" * (BOOK_IDENTIFIER_MAX + 1))
 
 
 class TestNothingInvisibleSurvivesInsideOne:
@@ -101,10 +96,7 @@ class TestNothingInvisibleSurvivesInsideOne:
         ten characters and a Google volume id is twelve of the URL safe
         alphabet, `-` and `_` included."""
         assert BookIdentifierIn(scheme="asin", value="B00J4YQKHY").value == "B00J4YQKHY"
-        assert (
-            BookIdentifierIn(scheme="google_books", value="zy-CAlFP_gYC").value
-            == "zy-CAlFP_gYC"
-        )
+        assert BookIdentifierIn(scheme="google_books", value="zy-CAlFP_gYC").value == "zy-CAlFP_gYC"
 
 
 class TestTheSchemeIsClosed:
@@ -149,9 +141,7 @@ def _stored(value: str) -> str | None:
 def _opaque(value: str) -> bool:
     """Whether every character in this value is one an opaque token may hold."""
     return not any(
-        character.isspace()
-        or unicodedata.category(character) in INVISIBLE_CATEGORIES
-        for character in value
+        character.isspace() or unicodedata.category(character) in INVISIBLE_CATEGORIES for character in value
     )
 
 
@@ -173,9 +163,7 @@ class TestTheGeneratorStillReachesEveryAnswer:
     def test_it_reaches_an_invisible_character_that_is_not_a_control(self):
         witness(
             _VALUES,
-            lambda value: any(
-                unicodedata.category(character) == "Cf" for character in value
-            ),
+            lambda value: any(unicodedata.category(character) == "Cf" for character in value),
             reaches="a formatting character",
         )
 

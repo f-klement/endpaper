@@ -53,15 +53,11 @@ def duplicate_route():
     try:
         yield
     finally:
-        main.app.routes[:] = [
-            route for route in main.app.routes if getattr(route, "path", None) != PATH
-        ]
+        main.app.routes[:] = [route for route in main.app.routes if getattr(route, "path", None) != PATH]
 
 
 @pytest.mark.answers_500(raises=(IntegrityError,))
-def test_a_unique_violation_logs_the_constraint_and_not_the_value(
-    client, duplicate_route, caplog
-) -> None:
+def test_a_unique_violation_logs_the_constraint_and_not_the_value(client, duplicate_route, caplog) -> None:
     with caplog.at_level(logging.DEBUG):
         res = client.get(PATH, headers={"Accept": "application/json"})
 

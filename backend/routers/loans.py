@@ -87,9 +87,7 @@ def _to_out(loan: Loan, now: datetime) -> LoanOut:
     return out
 
 
-def _loan_with_relations(
-    loan_id: int, db: Session, viewer_id: int, now: datetime
-) -> LoanOut:
+def _loan_with_relations(loan_id: int, db: Session, viewer_id: int, now: datetime) -> LoanOut:
     """One loan, scoped to the caller and loaded through the one plan.
 
     **The scope is new and the answers are not.** This was `db.query(Loan)`
@@ -235,26 +233,19 @@ def create_loan(payload: LoanCreate, db: DbSession, current_user: CurrentUser) -
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail={
-                "message": (
-                    "A digital copy is not lent. Request access to it from "
-                    "its holder instead."
-                ),
+                "message": ("A digital copy is not lent. Request access to it from its holder instead."),
                 "code": DIGITAL_COPY,
             },
         )
 
     # A book the library said it does not lend. Refused once, then allowed:
     # see `_refuse_unless_acknowledged`.
-    if (
-        book.lending == LendingWillingness.NEVER
-        and not payload.acknowledge_not_lendable
-    ):
+    if book.lending == LendingWillingness.NEVER and not payload.acknowledge_not_lendable:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail={
                 "message": (
-                    "This book is marked as never lent. Send "
-                    "acknowledge_not_lendable to lend it anyway."
+                    "This book is marked as never lent. Send acknowledge_not_lendable to lend it anyway."
                 ),
                 "code": NOT_LENDABLE,
             },
@@ -320,9 +311,7 @@ def list_overdue(db: DbSession, current_user: CurrentUser, paging: Paging) -> Pa
     titles adds the loads it needs.
     """
     if not settings_store.get_bool(db, SettingKey.OVERDUE_IN_APP_ENABLED):
-        return Page[LoanOut](
-            items=[], total=0, page=paging.page, page_size=paging.page_size
-        )
+        return Page[LoanOut](items=[], total=0, page=paging.page, page_size=paging.page_size)
 
     now = _now()
     query = notifications.overdue_for_viewer(db, current_user, now)
@@ -345,12 +334,7 @@ def list_overdue(db: DbSession, current_user: CurrentUser, paging: Paging) -> Pa
     # `tests/test_lending.py::TestOnlyTheDeskBuildsAScope` refuses. So this
     # route counts and pages by hand, and the count below is the one spelling
     # of that this file still carries.
-    loans = (
-        query.options(*lending.RENDERED)
-        .offset(paging.offset)
-        .limit(paging.limit)
-        .all()
-    )
+    loans = query.options(*lending.RENDERED).offset(paging.offset).limit(paging.limit).all()
 
     return Page[LoanOut](
         items=_to_out_many(loans, now),
@@ -445,9 +429,7 @@ def return_loan(loan_id: RowId, db: DbSession, current_user: CurrentUser) -> Loa
     try:
         lending.close(loan, now)
     except lending.AlreadyClosed as closed:
-        raise HTTPException(
-            status_code=400, detail="Loan already returned"
-        ) from closed
+        raise HTTPException(status_code=400, detail="Loan already returned") from closed
     db.commit()
     # The same instant the return was stamped with, so `days_out` on the row
     # this answers with counts to the return rather than to a clock read a

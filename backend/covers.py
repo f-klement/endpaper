@@ -195,9 +195,7 @@ MAX_CONCURRENT_FETCHES: Final = 6
 #: `tests/routers/test_concurrency_bounds.py::TestTheImageRunsOneWorkerSoProcessWideIsPodWide`
 #: holds; under `--workers N` this becomes N pools of six and `WEB_CONCURRENCY` in
 #: a deployment is outside any test's reach.
-FETCHES_AT_ONCE: Final = ThreadPoolExecutor(
-    MAX_CONCURRENT_FETCHES, thread_name_prefix="cover-fetch"
-)
+FETCHES_AT_ONCE: Final = ThreadPoolExecutor(MAX_CONCURRENT_FETCHES, thread_name_prefix="cover-fetch")
 
 #: How a cover host's name becomes addresses. The seam the suite replaces.
 #:
@@ -629,9 +627,7 @@ async def _walk[T](
     return _Stopped(_Stop.LOOPED, hop)
 
 
-async def _check(
-    client: httpx.AsyncClient, url: str, deadline: float | None = None
-) -> bool | None:
+async def _check(client: httpx.AsyncClient, url: str, deadline: float | None = None) -> bool | None:
     """True if it is an image, False if it is definitely absent, None if unknown.
 
     The three-way answer is the point. `False` means a service said 404, so the
@@ -653,13 +649,9 @@ async def _check(
         return answer
     match answer.reason:
         case _Stop.UNLISTED:
-            logger.warning(
-                "Refused to check a cover on an unlisted host: %s", answer.hop[:200]
-            )
+            logger.warning("Refused to check a cover on an unlisted host: %s", answer.hop[:200])
         case _Stop.LOOPED:
-            logger.info(
-                "Cover check gave up after %d redirects: %s", MAX_REDIRECTS, url[:200]
-            )
+            logger.info("Cover check gave up after %d redirects: %s", MAX_REDIRECTS, url[:200])
     # A host this server refuses is refused on every retry, so it is dropped
     # where a 5xx or a timeout keeps the URL.
     return False if answer.reason in (_Stop.UNLISTED, _Stop.UNUSABLE) else None
@@ -690,9 +682,7 @@ async def _is_an_image(hop: str, response: httpx.Response) -> bool | None:
     return False
 
 
-async def resolve(
-    raw_isbn: str, supplied: str | None = None, deadline: float | None = None
-) -> str | None:
+async def resolve(raw_isbn: str, supplied: str | None = None, deadline: float | None = None) -> str | None:
     """A cover URL that has been checked, or the best unverified guess.
 
     `supplied` is a URL a metadata source returned itself, which is a different
@@ -899,17 +889,13 @@ async def _download(url: str, deadline: float | None = None) -> bytes | None:
         return answer
     match answer.reason:
         case _Stop.UNLISTED:
-            logger.warning(
-                "Refused to download a cover from an unlisted host: %s", answer.hop[:200]
-            )
+            logger.warning("Refused to download a cover from an unlisted host: %s", answer.hop[:200])
         case _Stop.SPENT:
             logger.info("Cover download ran out of budget: %s", answer.hop[:200])
         case _Stop.FAILED:
             logger.info("Cover download failed for %s: %s", answer.hop, answer.error)
         case _Stop.LOOPED:
-            logger.info(
-                "Cover download gave up after %d redirects: %s", MAX_REDIRECTS, url[:200]
-            )
+            logger.info("Cover download gave up after %d redirects: %s", MAX_REDIRECTS, url[:200])
     return None
 
 

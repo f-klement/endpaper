@@ -36,9 +36,7 @@ class TestUserCreate:
         with pytest.raises(ValidationError):
             UserCreate(username="   ", password="password123")
 
-    @pytest.mark.parametrize(
-        "payload", [{"username": "kim"}, {"password": "password123"}, {}]
-    )
+    @pytest.mark.parametrize("payload", [{"username": "kim"}, {"password": "password123"}, {}])
     def test_both_fields_are_required(self, payload):
         with pytest.raises(ValidationError):
             UserCreate(**payload)
@@ -181,11 +179,7 @@ class TestBookOut:
         placeholder for one: it is written by `routers.books._with_refusals`,
         which copies rather than assigning into the serialiser's loop.
         """
-        own = (
-            set(BookOut.model_fields)
-            - set(ViewerFields.model_fields)
-            - set(BookColumns.model_fields)
-        )
+        own = set(BookOut.model_fields) - set(ViewerFields.model_fields) - set(BookColumns.model_fields)
 
         assert own == {"refused_identifiers"}
 
@@ -227,10 +221,7 @@ def _unguarded(models: Iterable[Any]) -> list[str]:
         if isinstance(model, type) and issubclass(model, BaseModel)
         for name, field in model.model_fields.items()
         if TagKey in get_args(field.annotation) or field.annotation is TagKey
-        if not any(
-            isinstance(entry, BeforeValidator) and entry.func is known_key
-            for entry in field.metadata
-        )
+        if not any(isinstance(entry, BeforeValidator) and entry.func is known_key for entry in field.metadata)
     )
 
 
@@ -495,8 +486,7 @@ class TestSettingsUpdateWebhookUrl:
         from schemas import SettingsUpdate
 
         assert (
-            SettingsUpdate(overdue_webhook_url="https://box/hook").overdue_webhook_url
-            == "https://box/hook"
+            SettingsUpdate(overdue_webhook_url="https://box/hook").overdue_webhook_url == "https://box/hook"
         )
 
     def test_a_non_http_scheme_is_rejected(self):

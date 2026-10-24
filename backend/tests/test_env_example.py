@@ -73,10 +73,7 @@ class TestTheSampleDocumentsWhatTheCodeReads:
         """The other direction, and it is the quieter failure: a variable that
         was renamed leaves a line somebody will set and wonder about."""
         stale = _documented() - _read_by_config()
-        assert not stale, (
-            "These are in .env.example and read nowhere in config.py: "
-            f"{sorted(stale)}"
-        )
+        assert not stale, f"These are in .env.example and read nowhere in config.py: {sorted(stale)}"
 
     def test_the_reader_finds_both_sources(self):
         """A tripwire. If `_read_by_config` ever returns only one of its two
@@ -95,6 +92,5 @@ class TestTheSampleDocumentsWhatTheCodeReads:
             assert match, f"{name} is not in the sample"
             value = match.group(1).strip()
             assert value.startswith("replace-with-"), (
-                f"{name} should carry a placeholder naming what it needs, "
-                f"not {value!r}"
+                f"{name} should carry a placeholder naming what it needs, not {value!r}"
             )

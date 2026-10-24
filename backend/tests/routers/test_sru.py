@@ -24,9 +24,7 @@ from routers.sru import SRU_PREFIX, server_for
 def _publish(db, *, mode: bool = True, published: bool = True, indexed: bool = False):
     """Put the two switches, and the indexing one, where a test wants them."""
     settings_store.set_value(db, SettingKey.LIBRARY_MODE, "true" if mode else "false")
-    settings_store.set_value(
-        db, SettingKey.PUBLIC_CATALOGUE_ENABLED, "true" if published else "false"
-    )
+    settings_store.set_value(db, SettingKey.PUBLIC_CATALOGUE_ENABLED, "true" if published else "false")
     settings_store.set_value(
         db,
         SettingKey.PUBLIC_CATALOGUE_INDEXING_ENABLED,
@@ -81,9 +79,7 @@ class TestTheEndpointDoesNotExistUntilTheCatalogueIsPublished:
         router dependency and a test that only drove the bare path would pass
         with the search arm ungated."""
         _publish(db, mode=False, published=True)
-        response = client.get(
-            SRU_PREFIX, params={"operation": "searchRetrieve", "query": "Windmill"}
-        )
+        response = client.get(SRU_PREFIX, params={"operation": "searchRetrieve", "query": "Windmill"})
         assert response.status_code == 404
 
 
@@ -127,8 +123,7 @@ class TestEverySruRouteIsGated:
             if (route.methods or set()) - {"GET", "HEAD"}
         ]
         assert writing == [], (
-            f"These SRU routes accept a write: {writing}. A caller here has no "
-            "account to attribute one to."
+            f"These SRU routes accept a write: {writing}. A caller here has no account to attribute one to."
         )
 
     def test_the_route_is_not_in_the_openapi_schema(self):
@@ -177,9 +172,7 @@ class TestWhatTheResponseIsLabelledAs:
         response = client.get(SRU_PREFIX)
         assert response.headers["content-type"].startswith("application/xml")
 
-    def test_a_crawler_is_not_invited_even_when_the_catalogue_is_indexable(
-        self, client, db
-    ):
+    def test_a_crawler_is_not_invited_even_when_the_catalogue_is_indexable(self, client, db):
         """**Not in `middleware._INDEXABLE_PATHS`, deliberately.**
 
         Indexing is about the catalogue pages a person lands on. An SRU base URL
@@ -210,9 +203,7 @@ class TestTheServiceAnswersARealRequest:
 
     def test_a_search_returns_marcxml(self, client, db, book):
         _publish(db)
-        body = client.get(
-            SRU_PREFIX, params={"operation": "searchRetrieve", "query": "Windmill"}
-        ).text
+        body = client.get(SRU_PREFIX, params={"operation": "searchRetrieve", "query": "Windmill"}).text
         assert "http://www.loc.gov/MARC21/slim" in body
         assert "Chartreuse Windmill" in body
 
@@ -225,9 +216,7 @@ class TestTheServiceAnswersARealRequest:
         ],
         ids=["rec.id", "dc.date", "startRecord"],
     )
-    def test_an_integer_the_database_cannot_hold_is_not_a_500(
-        self, client, db, book, params
-    ):
+    def test_an_integer_the_database_cannot_hold_is_not_a_500(self, client, db, book, params):
         """**The instrument that found this, kept.**
 
         Both review seats found it by driving the real app with no credentials,
@@ -281,9 +270,7 @@ class TestWhatExplainSaysAboutWhereItIs:
         return Request(scope)
 
     def test_an_ordinary_host_is_echoed(self):
-        assert server_for(self._request("catalogue.example")).host == (
-            "catalogue.example"
-        )
+        assert server_for(self._request("catalogue.example")).host == ("catalogue.example")
 
     def test_a_port_in_the_host_header_is_reported(self):
         assert server_for(self._request("catalogue.example:8443")).port == 8443
@@ -316,9 +303,7 @@ class TestWhatExplainSaysAboutWhereItIs:
         `[0-9]{1,5}` and is not a port, so the pattern bounds what `int()` is
         handed and the range check is what decides."""
         assert server_for(self._request("catalogue.example:99999")).port == 443
-        assert server_for(self._request("catalogue.example:99999")).host == (
-            "catalogue.example"
-        )
+        assert server_for(self._request("catalogue.example:99999")).host == ("catalogue.example")
 
     def test_an_ipv6_literal_falls_back_rather_than_being_echoed(self):
         """Starlette accepts the bracketed form and this does not. Stated as a
@@ -347,9 +332,7 @@ class TestTheFallbackThisAvoids:
     """
 
     def test_starlette_falls_back_to_the_bound_address_on_a_bad_host(self):
-        request = TestWhatExplainSaysAboutWhereItIs._request(
-            "catalogue.example<script>"
-        )
+        request = TestWhatExplainSaysAboutWhereItIs._request("catalogue.example<script>")
         assert request.url.hostname == "ignored.example", (
             "Starlette no longer falls back to scope['server'] for a header it "
             "will not use. The reason `routers/sru.py` gives for reading the "
@@ -359,7 +342,5 @@ class TestTheFallbackThisAvoids:
     def test_and_this_server_answers_localhost_for_the_same_request(self):
         """The pair. The first says the trap is real, this says we are out of
         it, and neither is evidence on its own."""
-        request = TestWhatExplainSaysAboutWhereItIs._request(
-            "catalogue.example<script>"
-        )
+        request = TestWhatExplainSaysAboutWhereItIs._request("catalogue.example<script>")
         assert server_for(request).host == "localhost"

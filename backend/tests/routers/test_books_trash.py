@@ -60,12 +60,7 @@ class TestTheRowSurvives:
     def test_deleting_twice_keeps_the_original_time(self, client, admin, trashed, db):
         """The second delete is a 404: it is already off the shelf."""
         first = db.get(Book, trashed["id"]).deleted_at
-        assert (
-            client.delete(
-                f"/api/books/{trashed['id']}", headers=admin["headers"]
-            ).status_code
-            == 404
-        )
+        assert client.delete(f"/api/books/{trashed['id']}", headers=admin["headers"]).status_code == 404
         db.expire_all()
         assert db.get(Book, trashed["id"]).deleted_at == first
 
@@ -77,9 +72,7 @@ class TestItLeavesEveryView:
         assert client.get("/api/books", headers=admin["headers"]).json()["total"] == 0
 
     def test_it_is_gone_from_a_search(self, client, admin, trashed):
-        res = client.get(
-            "/api/books", params={"q": "Deleted"}, headers=admin["headers"]
-        )
+        res = client.get("/api/books", params={"q": "Deleted"}, headers=admin["headers"])
         assert res.json()["total"] == 0
 
     def test_it_is_gone_from_the_export(self, client, admin, trashed):
@@ -89,9 +82,7 @@ class TestItLeavesEveryView:
     def test_it_is_gone_from_the_statistics(self, client, admin, trashed):
         assert client.get("/api/stats", headers=admin["headers"]).json()["total"] == 0
 
-    def test_it_is_gone_from_the_duplicate_detector(
-        self, client, admin, make_book, trashed
-    ):
+    def test_it_is_gone_from_the_duplicate_detector(self, client, admin, make_book, trashed):
         """Otherwise a deleted book is offered as a duplicate of its replacement."""
         make_book(admin["headers"], title="Deleted Book", author="A Writer")
         report = client.get("/api/books/duplicates", headers=admin["headers"]).json()
@@ -106,9 +97,7 @@ class TestItLeavesEveryView:
         [series] = client.get("/api/books/series", headers=admin["headers"]).json()
         assert series["book_count"] == 1
 
-    def test_it_is_gone_from_the_loans_list(
-        self, client, admin, member, make_book
-    ):
+    def test_it_is_gone_from_the_loans_list(self, client, admin, member, make_book):
         book = make_book(admin["headers"])
         client.post(
             "/api/loans",
@@ -162,9 +151,7 @@ class TestTheTrashListing:
 
 class TestRestore:
     def test_it_comes_back_to_the_shelf(self, client, admin, trashed):
-        res = client.post(
-            f"/api/books/{trashed['id']}/restore", headers=admin["headers"]
-        )
+        res = client.post(f"/api/books/{trashed['id']}/restore", headers=admin["headers"])
 
         assert res.status_code == 200
         assert client.get("/api/books", headers=admin["headers"]).json()["total"] == 1
@@ -184,9 +171,7 @@ class TestRestore:
         client.delete(f"/api/books/{book['id']}", headers=admin["headers"])
         client.post(f"/api/books/{book['id']}/restore", headers=admin["headers"])
 
-        notes = client.get(
-            f"/api/books/{book['id']}/notes", headers=admin["headers"]
-        ).json()
+        notes = client.get(f"/api/books/{book['id']}/notes", headers=admin["headers"]).json()
         assert [note["content"] for note in notes] == ["Borrowed from Ana"]
 
     def test_the_reading_status_comes_back_with_it(self, client, admin, make_book):
@@ -197,9 +182,7 @@ class TestRestore:
             headers=admin["headers"],
         )
         client.delete(f"/api/books/{book['id']}", headers=admin["headers"])
-        restored = client.post(
-            f"/api/books/{book['id']}/restore", headers=admin["headers"]
-        ).json()
+        restored = client.post(f"/api/books/{book['id']}/restore", headers=admin["headers"]).json()
 
         assert restored["my_status"] == "read"
 
@@ -208,13 +191,9 @@ class TestRestore:
 
         book = make_book(admin["headers"])
         tag = db.query(Tag).first()
-        client.post(
-            f"/api/books/{book['id']}/tags/{tag.id}", headers=admin["headers"]
-        )
+        client.post(f"/api/books/{book['id']}/tags/{tag.id}", headers=admin["headers"])
         client.delete(f"/api/books/{book['id']}", headers=admin["headers"])
-        restored = client.post(
-            f"/api/books/{book['id']}/restore", headers=admin["headers"]
-        ).json()
+        restored = client.post(f"/api/books/{book['id']}/restore", headers=admin["headers"]).json()
 
         assert [t["id"] for t in restored["tags"]] == [tag.id]
 
@@ -224,17 +203,12 @@ class TestRestore:
         assert res.status_code == 404
 
     def test_restoring_an_unknown_id_is_404(self, client, admin):
-        assert (
-            client.post("/api/books/9999/restore", headers=admin["headers"]).status_code
-            == 404
-        )
+        assert client.post("/api/books/9999/restore", headers=admin["headers"]).status_code == 404
 
 
 class TestPurge:
     def test_one_book_is_destroyed(self, client, admin, trashed, db):
-        res = client.delete(
-            f"/api/books/{trashed['id']}/permanent", headers=admin["headers"]
-        )
+        res = client.delete(f"/api/books/{trashed['id']}/permanent", headers=admin["headers"])
 
         assert res.status_code == 204
         assert db.get(Book, trashed["id"]) is None
@@ -242,9 +216,7 @@ class TestPurge:
     def test_purging_a_live_book_is_404(self, client, admin, make_book):
         """Permanent deletion is reachable only through the trash, on purpose."""
         book = make_book(admin["headers"])
-        res = client.delete(
-            f"/api/books/{book['id']}/permanent", headers=admin["headers"]
-        )
+        res = client.delete(f"/api/books/{book['id']}/permanent", headers=admin["headers"])
         assert res.status_code == 404
 
     def test_emptying_reports_what_it_destroyed(self, client, admin, make_book):
@@ -289,9 +261,7 @@ class TestPurge:
 
         assert not (covers_dir / f"{book['id']}.jpg").exists()
 
-    def test_trashing_keeps_the_cover_so_a_restore_still_has_one(
-        self, client, admin, make_book, covers_dir
-    ):
+    def test_trashing_keeps_the_cover_so_a_restore_still_has_one(self, client, admin, make_book, covers_dir):
         from tests.helpers import JPEG_BYTES
 
         book = make_book(admin["headers"])
@@ -323,9 +293,7 @@ class TestTheIsbnIsFreedAgain:
         assert res.status_code == 201
         assert res.json()["title"] == "Correct"
 
-    def test_the_trashed_row_is_destroyed_rather_than_restored(
-        self, client, admin, make_book, db
-    ):
+    def test_the_trashed_row_is_destroyed_rather_than_restored(self, client, admin, make_book, db):
         """Restoring instead would hand back the record just rejected.
 
         Asserted on the title and on the trash rather than on the id. Whether
@@ -344,9 +312,7 @@ class TestTheIsbnIsFreedAgain:
         )
 
         db.expire_all()
-        titles = [
-            row.title for row in db.query(Book).all()
-        ]
+        titles = [row.title for row in db.query(Book).all()]
         assert titles == ["Correct"]
         assert client.get("/api/books/trash", headers=admin["headers"]).json()["total"] == 0
 
@@ -372,17 +338,13 @@ class TestTheIsbnIsFreedAgain:
 
 
 class TestPrivacy:
-    def test_another_members_trashed_book_is_invisible(
-        self, client, admin, member, make_book
-    ):
+    def test_another_members_trashed_book_is_invisible(self, client, admin, member, make_book):
         book = make_book(admin["headers"], title="Private", is_private=True)
         client.delete(f"/api/books/{book['id']}", headers=admin["headers"])
 
         assert client.get("/api/books/trash", headers=member["headers"]).json()["total"] == 0
 
-    def test_another_members_trashed_book_cannot_be_restored(
-        self, client, admin, member, make_book
-    ):
+    def test_another_members_trashed_book_cannot_be_restored(self, client, admin, member, make_book):
         book = make_book(admin["headers"], title="Private", is_private=True)
         client.delete(f"/api/books/{book['id']}", headers=admin["headers"])
 
@@ -407,9 +369,7 @@ class TestPrivacy:
         Purging it would destroy data the member never offered up, and the
         409 would confirm the book exists either way.
         """
-        book = make_book(
-            admin["headers"], isbn="9780743273565", title="Private", is_private=True
-        )
+        book = make_book(admin["headers"], isbn="9780743273565", title="Private", is_private=True)
         client.delete(f"/api/books/{book['id']}", headers=admin["headers"])
 
         res = client.post(
@@ -449,20 +409,13 @@ class TestPrivacy:
         assert res.status_code == 409
         assert db.get(Book, mine["id"]) is not None
 
-    def test_a_public_trashed_book_is_shared_like_any_other(
-        self, client, admin, member, make_book
-    ):
+    def test_a_public_trashed_book_is_shared_like_any_other(self, client, admin, member, make_book):
         """Public books are a shared shelf, in the trash as on it."""
         book = make_book(admin["headers"], title="Shared")
         client.delete(f"/api/books/{book['id']}", headers=member["headers"])
 
         assert client.get("/api/books/trash", headers=member["headers"]).json()["total"] == 1
-        assert (
-            client.post(
-                f"/api/books/{book['id']}/restore", headers=member["headers"]
-            ).status_code
-            == 200
-        )
+        assert client.post(f"/api/books/{book['id']}/restore", headers=member["headers"]).status_code == 200
 
 
 class TestAnotherMembersTrashedHolderRefusesTheAdd:
@@ -488,15 +441,11 @@ class TestAnotherMembersTrashedHolderRefusesTheAdd:
         assert "book_id" not in res.json()["detail"]
         assert db.get(Book, book["id"]) is not None
 
-    def test_a_trashed_group_holding_one_of_each_is_refused_whole(
-        self, client, admin, member, make_book, db
-    ):
+    def test_a_trashed_group_holding_one_of_each_is_refused_whole(self, client, admin, member, make_book, db):
         """Purging only the caller's copy would leave the ISBN held, so one
         holder that is not theirs refuses the add and their own is kept too."""
         theirs = make_book(admin["headers"], isbn=self.ISBN, title="Theirs")
-        mine = client.post(
-            f"/api/books/{theirs['id']}/copies", json={}, headers=member["headers"]
-        ).json()
+        mine = client.post(f"/api/books/{theirs['id']}/copies", json={}, headers=member["headers"]).json()
         deletes = [
             client.delete(f"/api/books/{row['id']}", headers=member["headers"]).status_code
             for row in (theirs, mine)
@@ -554,16 +503,9 @@ class TestALentBookGoingToTheTrash:
         client.delete(f"/api/books/{book['id']}", headers=admin["headers"])
 
         db.expire_all()
-        assert (
-            db.query(Loan)
-            .filter(Loan.book_id == book["id"], Loan.returned_at.is_(None))
-            .count()
-            == 0
-        )
+        assert db.query(Loan).filter(Loan.book_id == book["id"], Loan.returned_at.is_(None)).count() == 0
 
-    def test_restoring_it_does_not_reopen_the_loan(
-        self, client, admin, member, make_book
-    ):
+    def test_restoring_it_does_not_reopen_the_loan(self, client, admin, member, make_book):
         """The book comes back to the shelf, not to the borrower."""
         book = make_book(admin["headers"])
         client.post(
@@ -573,15 +515,11 @@ class TestALentBookGoingToTheTrash:
         )
         client.delete(f"/api/books/{book['id']}", headers=admin["headers"])
 
-        restored = client.post(
-            f"/api/books/{book['id']}/restore", headers=admin["headers"]
-        ).json()
+        restored = client.post(f"/api/books/{book['id']}/restore", headers=admin["headers"]).json()
 
         assert restored["active_loan"] is None
 
-    def test_it_can_be_lent_again_once_restored(
-        self, client, admin, member, make_book
-    ):
+    def test_it_can_be_lent_again_once_restored(self, client, admin, member, make_book):
         book = make_book(admin["headers"])
         client.post(
             "/api/loans",

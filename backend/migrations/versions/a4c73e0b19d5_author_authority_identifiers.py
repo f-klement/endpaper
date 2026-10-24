@@ -76,9 +76,7 @@ def upgrade() -> None:
         # reading the two files against each other found it.
         # `tests/test_schema.py::TestTheMigrationsAndTheModelsAgree` compares
         # them now, per column, on nullability and type.
-        sa.Column(
-            "created_at", sa.DateTime(), server_default=sa.func.now(), nullable=False
-        ),
+        sa.Column("created_at", sa.DateTime(), server_default=sa.func.now(), nullable=False),
         sa.CheckConstraint("scheme IN ('gnd')", name="ck_author_identifiers_scheme"),
         sa.CheckConstraint(
             "provenance IN ('catalogue', 'member')",

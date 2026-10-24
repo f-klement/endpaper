@@ -20,6 +20,14 @@ every population.
 "which Python here is ours" and default to `backend/`; the repository
 populations answer "which file here would git version" and default to the
 repository root, where the ignore file lives.
+
+**A test module calling a population names the tests that do**, as a module
+level dict bound to `TREE_GUARDS` from each such test to the populations it
+calls, because such a test judges files it does not live in, so a run choosing
+tests by what a change touched adds it when the change touched a path one of
+them holds. A walking test
+left out of that set on purpose is named in `TREE_GUARDS_LEFT_OUT` with its
+reason. `test_corpus.py` holds each declaration to what its module calls.
 """
 
 from __future__ import annotations
@@ -50,8 +58,9 @@ REPO = BACKEND.parent
 #: `.venv` by convention only, and the pipeline has built one under `backend/`
 #: with no dot, after which a walk reported the standard library's own `xml`.
 #: Everything installed into an environment sits under one of these two, which
-#: is the closed fact the open directory name is not.
-_TOOL_DIRECTORIES = frozenset({"__pycache__", "node_modules", "site-packages", "dist-packages"})
+#: is the closed fact the open directory name is not. Public because a copy is
+#: kept outside this package, and a test compares the two.
+TOOL_DIRECTORIES = frozenset({"__pycache__", "node_modules", "site-packages", "dist-packages"})
 
 
 def is_vendored(path: Path, root: Path = BACKEND) -> bool:
@@ -62,10 +71,7 @@ def is_vendored(path: Path, root: Path = BACKEND) -> bool:
     part is one level deeper from the repository than from `backend/`; the
     wrong root raises `ValueError` rather than answering about nothing.
     """
-    return any(
-        part.startswith(".") or part in _TOOL_DIRECTORIES
-        for part in path.relative_to(root).parts
-    )
+    return any(part.startswith(".") or part in TOOL_DIRECTORIES for part in path.relative_to(root).parts)
 
 
 def _environment(directory: Path) -> bool:
@@ -114,11 +120,7 @@ def every_python_file(root: Path = BACKEND) -> list[Path]:
     **The working tree, not what git tracks.** The suite runner ships the
     working tree, so an untracked module is read before it is committed.
     """
-    return [
-        path
-        for path in unowned_files(root)
-        if path.suffix == ".py" and not is_vendored(path, root)
-    ]
+    return [path for path in unowned_files(root) if path.suffix == ".py" and not is_vendored(path, root)]
 
 
 def _relative_parts(path: Path, root: Path) -> set[str]:
@@ -135,9 +137,7 @@ def application_modules(root: Path = BACKEND) -> list[Path]:
     generated revision has no share in them.
     """
     return [
-        path
-        for path in every_python_file(root)
-        if not {"tests", "migrations"} & _relative_parts(path, root)
+        path for path in every_python_file(root) if not {"tests", "migrations"} & _relative_parts(path, root)
     ]
 
 
@@ -176,15 +176,11 @@ def _unignored(root: Path, top: Path, readmit: Callable[[Path], bool]) -> list[P
         return owned and not readmit(relative)
 
     return [
-        path
-        for path in _walk(top, prune)
-        if not is_ignored(path.relative_to(root), patterns, is_dir=False)
+        path for path in _walk(top, prune) if not is_ignored(path.relative_to(root), patterns, is_dir=False)
     ]
 
 
-def project_files(
-    root: Path = REPO, *, readmit: Callable[[Path], bool] = lambda _: False
-) -> list[Path]:
+def project_files(root: Path = REPO, *, readmit: Callable[[Path], bool] = lambda _: False) -> list[Path]:
     """Every file under `root` the ignore file does not cover, in a directory no tool owns.
 
     **Dotted file names are kept**, as `unowned_files` keeps them: a census of

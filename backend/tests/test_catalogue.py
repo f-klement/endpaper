@@ -28,6 +28,10 @@ from schemas.book import BookCreate, BookLookup, BookMatch
 from schemas.classification import MAX_CLASSIFICATIONS_PER_BOOK
 from tests.corpus import BACKEND, shipped_modules
 
+TREE_GUARDS = {
+    "TestARecordFromAnUploadedFile": ("shipped_modules",),
+}
+
 #: What a text field has to start with to satisfy a validator other than its
 #: length. Only `cover_url` can be helped this way: `BookCreate` refuses
 #: anything that is neither https nor an uploaded cover, and these fixtures are
@@ -133,9 +137,7 @@ def _match_keys(table: dict[str, int] | None = None) -> dict[str, str]:
     `language` at 10, and unique, so the inversion cannot collide.
     """
     fields = catalogue._TEXT_CEILINGS if table is None else table
-    probe: dict[str, Any] = {
-        name: f"p{index}" for index, name in enumerate(sorted(fields))
-    }
+    probe: dict[str, Any] = {name: f"p{index}" for index, name in enumerate(sorted(fields))}
     wire = Record(source="dnb", **probe).as_match()
     landed = {value: key for key, value in wire.items() if isinstance(value, str)}
     return {name: landed[value] for name, value in probe.items() if value in landed}
@@ -154,6 +156,7 @@ def _opens_the_upload_door(source: str) -> bool:
         and node.func.attr == "from_upload"
         for node in ast.walk(ast.parse(source))
     )
+
 
 DDC_004 = Heading(ClassificationScheme.DDC, "004")
 DDC_004_CAPTIONED = Heading(ClassificationScheme.DDC, "004", "Informatik")
@@ -194,9 +197,7 @@ class TestARecordFoldsWhatOneSourceRepeats:
         undeclared copy keeps the place and the declaration is dropped.
         """
         undeclared = Heading(ClassificationScheme.GND, "1071854844", "Fiktionale")
-        declared = Heading(
-            ClassificationScheme.GND, "1071854844", "Fiktionale", HeadingKind.CONTENT
-        )
+        declared = Heading(ClassificationScheme.GND, "1071854844", "Fiktionale", HeadingKind.CONTENT)
         record = Record(headings=(undeclared, declared))
 
         assert record.headings == (declared,)
@@ -207,10 +208,8 @@ class TestARecordFoldsWhatOneSourceRepeats:
         one."""
         record = Record(
             headings=(
-                Heading(ClassificationScheme.GND, "4139307-7", "CD-ROM",
-                        HeadingKind.CARRIER),
-                Heading(ClassificationScheme.GND, "4139307-7", "CD-ROM",
-                        HeadingKind.CONTENT),
+                Heading(ClassificationScheme.GND, "4139307-7", "CD-ROM", HeadingKind.CARRIER),
+                Heading(ClassificationScheme.GND, "4139307-7", "CD-ROM", HeadingKind.CONTENT),
             )
         )
 
@@ -223,14 +222,12 @@ class TestARecordFoldsWhatOneSourceRepeats:
             headings=(
                 Heading(ClassificationScheme.GND, "4139307-7"),
                 Heading(ClassificationScheme.GND, "4139307-7", "CD-ROM"),
-                Heading(ClassificationScheme.GND, "4139307-7", None,
-                        HeadingKind.CARRIER),
+                Heading(ClassificationScheme.GND, "4139307-7", None, HeadingKind.CARRIER),
             )
         )
 
         assert record.headings == (
-            Heading(ClassificationScheme.GND, "4139307-7", "CD-ROM",
-                    HeadingKind.CARRIER),
+            Heading(ClassificationScheme.GND, "4139307-7", "CD-ROM", HeadingKind.CARRIER),
         )
 
     def test_two_numbers_under_one_scheme_are_two_headings(self):
@@ -517,9 +514,7 @@ class TestMergingTwoCataloguesOfOnePrinting:
 
     def test_one_subject_both_catalogues_carry_is_kept_once(self):
         dnb = Record(source="dnb", title="X", subjects=uncontrolled(("Informatik",)))
-        k10plus = Record(
-            source="k10plus", title="X", subjects=uncontrolled(("Informatik",))
-        )
+        k10plus = Record(source="k10plus", title="X", subjects=uncontrolled(("Informatik",)))
 
         assert dnb.merged_with(k10plus).subjects == (Subject("Informatik"),)
 
@@ -532,13 +527,9 @@ class TestMergingTwoCataloguesOfOnePrinting:
             title="X",
             subjects=(Subject("Informatik", "gnd", "(DE-588)4026894-9"),),
         )
-        k10plus = Record(
-            source="k10plus", title="X", subjects=uncontrolled(("Informatik",))
-        )
+        k10plus = Record(source="k10plus", title="X", subjects=uncontrolled(("Informatik",)))
 
-        assert dnb.merged_with(k10plus).subjects == (
-            Subject("Informatik", "gnd", "(DE-588)4026894-9"),
-        )
+        assert dnb.merged_with(k10plus).subjects == (Subject("Informatik", "gnd", "(DE-588)4026894-9"),)
 
     def test_one_number_from_two_sources_keeps_the_caption(self):
         """Taking the leading source whole would throw a caption away.
@@ -638,14 +629,10 @@ class TestTheTwoDraftShapes:
     NOT_FROM_THE_RECORD = {"classifications", "suggested_tag_ids"}
 
     def test_the_lookup_draft_fills_every_key_its_schema_names(self):
-        assert set(Record().as_lookup()) == (
-            set(BookLookup.model_fields) - self.NOT_FROM_THE_RECORD
-        )
+        assert set(Record().as_lookup()) == (set(BookLookup.model_fields) - self.NOT_FROM_THE_RECORD)
 
     def test_the_match_draft_fills_every_key_its_schema_names(self):
-        assert set(Record().as_match()) == (
-            set(BookMatch.model_fields) - self.NOT_FROM_THE_RECORD
-        )
+        assert set(Record().as_match()) == (set(BookMatch.model_fields) - self.NOT_FROM_THE_RECORD)
 
     def test_neither_draft_carries_a_classification(self):
         """ADR 0006 held by the type. Automatic enrichment and Refresh Metadata
@@ -705,9 +692,7 @@ class TestTheHeadingsAPickedRowConfirms:
         record = Record(
             source="dnb",
             title="X",
-            headings=tuple(
-                Heading(ClassificationScheme.GND, f"{index}") for index in range(12)
-            ),
+            headings=tuple(Heading(ClassificationScheme.GND, f"{index}") for index in range(12)),
         )
 
         assert len(record.match_headings()) == MAX_CLASSIFICATIONS_PER_BOOK
@@ -716,9 +701,7 @@ class TestTheHeadingsAPickedRowConfirms:
         """The bound belongs to the row, not to the record: the lookup path
         orders by scheme before it cuts, and cutting first would drop a Dewey
         number an ordering would have saved."""
-        headings = tuple(
-            Heading(ClassificationScheme.GND, f"{index}") for index in range(12)
-        )
+        headings = tuple(Heading(ClassificationScheme.GND, f"{index}") for index in range(12))
 
         assert len(Record(headings=headings).headings) == 12
 
@@ -780,13 +763,9 @@ class TestTheFoldRunsOncePerSetOfCollections:
             source="loc",
             title="X",
             subjects=uncontrolled(f"subject {index}" for index in range(200)),
-            headings=tuple(
-                Heading(ClassificationScheme.LCSH, f"heading {index}")
-                for index in range(200)
-            ),
+            headings=tuple(Heading(ClassificationScheme.LCSH, f"heading {index}") for index in range(200)),
             author_identifiers=tuple(
-                AuthorityAssertion(f"Author {index}", AuthorityScheme.GND, str(index))
-                for index in range(200)
+                AuthorityAssertion(f"Author {index}", AuthorityScheme.GND, str(index)) for index in range(200)
             ),
         )
 
@@ -799,27 +778,21 @@ class TestTheFoldRunsOncePerSetOfCollections:
 
         assert sum(inspected) == 0
 
-    def test_merging_folds_again_because_it_is_the_one_that_concatenates(
-        self, monkeypatch
-    ):
+    def test_merging_folds_again_because_it_is_the_one_that_concatenates(self, monkeypatch):
         """The other half of the rule. `merged_with` passes `_folded=False`, and
         a record that stopped folding there would keep both catalogues' repeats.
         """
         row = self._fat()
         inspected = self._counting(monkeypatch)
 
-        row.merged_with(
-            Record(source="dnb", title="X", subjects=uncontrolled(("subject 0",)))
-        )
+        row.merged_with(Record(source="dnb", title="X", subjects=uncontrolled(("subject 0",))))
 
         assert sum(inspected) > 0
 
     def test_a_repeat_the_second_catalogue_brings_is_still_folded(self):
         """What the count above is protecting, asserted on the values."""
         first = Record(source="dnb", title="X", subjects=uncontrolled(("Informatik",)))
-        second = Record(
-            source="k10plus", title="X", subjects=uncontrolled(("Informatik",))
-        )
+        second = Record(source="k10plus", title="X", subjects=uncontrolled(("Informatik",)))
 
         assert first.merged_with(second).subjects == (Subject("Informatik"),)
 
@@ -975,8 +948,7 @@ class TestARecordFitsTheColumnsItFeeds:
 
         assert len(at_the_ceiling_once_stored) == ceiling - 1
         assert (
-            Record(source="dnb", cover_url=at_the_ceiling_once_stored).cover_url
-            == at_the_ceiling_once_stored
+            Record(source="dnb", cover_url=at_the_ceiling_once_stored).cover_url == at_the_ceiling_once_stored
         )
         assert Record(source="dnb", cover_url=at_the_ceiling_once_stored + "x").cover_url is None
 
@@ -990,9 +962,7 @@ class TestARecordFitsTheColumnsItFeeds:
         assert len(widest) == ceiling
         assert Record(source="dnb", cover_url=widest).cover_url == widest
 
-    def test_a_dropped_field_is_named_in_the_log_with_the_catalogue_that_sent_it(
-        self, caplog
-    ):
+    def test_a_dropped_field_is_named_in_the_log_with_the_catalogue_that_sent_it(self, caplog):
         with caplog.at_level(logging.INFO, logger="endpaper.catalogue"):
             Record(source="dnb", title="x" * (catalogue._TEXT_CEILINGS["title"] + 1))
 
@@ -1112,8 +1082,7 @@ class TestWhichScalarsAreBoundedAndWhichAreNamedInstead:
         normalised form, and an ISBN-10 comes back as something else.
         """
         outcomes = {
-            isbn_utils.parse(raw) == isbn_utils.normalise(raw)
-            for raw in _every_shape_of_a_real_isbn()
+            isbn_utils.parse(raw) == isbn_utils.normalise(raw) for raw in _every_shape_of_a_real_isbn()
         }
 
         assert outcomes == {True, False}
@@ -1139,9 +1108,7 @@ class TestWhichScalarsAreBoundedAndWhichAreNamedInstead:
         """
         argument = "9780743273565"
         wider_than_the_column = "9" * (ISBN_MAX * 2)
-        record = metadata._google_record(
-            {"isbn13": wider_than_the_column, "title": "Dune"}, argument
-        )
+        record = metadata._google_record({"isbn13": wider_than_the_column, "title": "Dune"}, argument)
 
         # Both halves, inverted together: the over-wide identifier is refused,
         # and what survives is the canonicalised argument rather than nothing,
@@ -1209,16 +1176,13 @@ class TestARecordAgreesWithTheColumnsItFeeds:
         """What each bounded column says its own width is. `Text` says nothing,
         so the value is `None` there rather than absent."""
         return {
-            name: getattr(Book.__table__.c[name].type, "length", None)
-            for name in catalogue._TEXT_CEILINGS
+            name: getattr(Book.__table__.c[name].type, "length", None) for name in catalogue._TEXT_CEILINGS
         }
 
     def test_only_the_description_column_declares_no_width_of_its_own(self):
         declared = self._declared()
 
-        assert {name for name, width in declared.items() if width is None} == {
-            "description"
-        }
+        assert {name for name, width in declared.items() if width is None} == {"description"}
 
     def test_every_ceiling_with_a_column_width_is_that_width(self):
         """**A tautology today and kept as a tripwire.** `models.py` supplies
@@ -1231,14 +1195,10 @@ class TestARecordAgreesWithTheColumnsItFeeds:
         here, because 20 is what `ISBN_MAX` is: measured, the whole file stayed
         green. The test below is what catches it, and this one is what catches
         the constant moving afterwards."""
-        declared = {
-            name: width for name, width in self._declared().items() if width is not None
-        }
+        declared = {name: width for name, width in self._declared().items() if width is not None}
 
         assert declared == {
-            name: ceiling
-            for name, ceiling in catalogue._TEXT_CEILINGS.items()
-            if name != "description"
+            name: ceiling for name, ceiling in catalogue._TEXT_CEILINGS.items() if name != "description"
         }
 
     def test_every_ceiling_comes_from_the_module_that_declares_the_columns(self):
@@ -1298,8 +1258,7 @@ class TestARecordAgreesWithTheColumnsItFeeds:
 
         assert elsewhere == {}, (
             "These ceilings are not the constant `models.py` declares for the "
-            "column, so they agree with it today and stop moving with it: "
-            + repr(elsewhere)
+            "column, so they agree with it today and stop moving with it: " + repr(elsewhere)
         )
 
     def test_the_text_column_takes_the_ceiling_its_schemas_already_carry(self):
@@ -1348,9 +1307,7 @@ class TestARecordAgreesWithTheColumnsItFeeds:
         that field was bounded, and this is now also the diagonal for
         `_match_keys`: with it replaced by the identity this assertion fails,
         where before no live rename existed for it to miss."""
-        assert {name: key for name, key in _match_keys().items() if name != key} == {
-            "isbn": "isbn13"
-        }
+        assert {name: key for name, key in _match_keys().items() if name != key} == {"isbn": "isbn13"}
 
     def test_the_derivation_reads_the_table_it_is_handed(self):
         """The other half of the diagonal, which the assertion above cannot
@@ -1437,9 +1394,7 @@ class TestARecordFromAnUploadedFile:
     def test_the_collections_are_still_folded(self):
         """`from_upload` builds through the ordinary constructor, so a parser
         that repeats itself costs nothing here either."""
-        record = Record.from_upload(
-            source="marc_upload", title="X", headings=(DDC_004, DDC_004)
-        )
+        record = Record.from_upload(source="marc_upload", title="X", headings=(DDC_004, DDC_004))
 
         assert record.headings == (DDC_004,)
 
@@ -1447,10 +1402,7 @@ class TestARecordFromAnUploadedFile:
         """Exhaustive by assertion. A text field added to the ceilings and to
         neither set would fall out of `from_upload` silently and be truncated by
         nothing and dropped by nothing on the upload path."""
-        assert (
-            set(catalogue._TEXT_CEILINGS)
-            == catalogue._CUT_ON_UPLOAD | catalogue._KEPT_WHOLE_ON_UPLOAD
-        )
+        assert set(catalogue._TEXT_CEILINGS) == catalogue._CUT_ON_UPLOAD | catalogue._KEPT_WHOLE_ON_UPLOAD
         assert not catalogue._CUT_ON_UPLOAD & catalogue._KEPT_WHOLE_ON_UPLOAD
 
     def test_no_module_but_the_marc_reader_opens_this_door(self):
@@ -1503,9 +1455,7 @@ class TestAScalarThatIsNotTextIsDroppedRatherThanMeasured:
     """
 
     @pytest.mark.parametrize("value", [5, 1.5, True, ["a"], {"a": 1}, object()])
-    @pytest.mark.parametrize(
-        "field", ["title", "subtitle", "publisher", "description", "language"]
-    )
+    @pytest.mark.parametrize("field", ["title", "subtitle", "publisher", "description", "language"])
     def test_a_non_string_is_cleared(self, field, value):
         record = Record(**{field: value})
 
@@ -1603,14 +1553,9 @@ class TestRewritingAScalarKeepsTheFoldClosed:
         collections = {
             declared.name
             for declared in dataclasses.fields(Record)
-            if get_origin(declared.type) is tuple
-            or isinstance(declared.default, tuple)
+            if get_origin(declared.type) is tuple or isinstance(declared.default, tuple)
         }
-        flag = {
-            declared.name
-            for declared in dataclasses.fields(Record)
-            if not declared.compare
-        }
+        flag = {declared.name for declared in dataclasses.fields(Record) if not declared.compare}
 
         assert collections == {"subjects", "headings", "author_identifiers"}
         assert len(flag) == 1

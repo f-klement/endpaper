@@ -35,6 +35,10 @@ from refusals import DECLARED
 from tests.bindings import ModuleNames
 from tests.corpus import BACKEND, application_modules
 
+TREE_GUARDS = {
+    "TestNoRefusalBorrowsAStatusTheSchemaTypesDifferently": ("application_modules",),
+}
+
 HTML = {"Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"}
 JSON = {"Accept": "application/json"}
 
@@ -154,9 +158,7 @@ class TestUnhandledExceptions:
             yield
         finally:
             main.app.routes[:] = [
-                route
-                for route in main.app.routes
-                if getattr(route, "path", None) != "/boom-test"
+                route for route in main.app.routes if getattr(route, "path", None) != "/boom-test"
             ]
 
     def test_returns_500_without_the_traceback(self, client, exploding_route):
@@ -217,8 +219,7 @@ class TestAValidationErrorLogsNoValue:
             main.app.routes[:] = [
                 route
                 for route in main.app.routes
-                if getattr(route, "path", None)
-                not in ("/invalid-response-test", "/invalid-model-test")
+                if getattr(route, "path", None) not in ("/invalid-response-test", "/invalid-model-test")
             ]
 
     @pytest.mark.parametrize(
@@ -267,9 +268,7 @@ def postgres_shaped_error(marker: str) -> IntegrityError:
             "n": "uq_marker_probe",
         }
     )
-    return IntegrityError(
-        "INSERT INTO users (email) VALUES (%s)", (marker,), original, hide_parameters=True
-    )
+    return IntegrityError("INSERT INTO users (email) VALUES (%s)", (marker,), original, hide_parameters=True)
 
 
 def postgres_deadlock() -> ProgrammingError:
@@ -317,9 +316,7 @@ class TestADatabaseErrorLogsNoRow:
 
             with engine.connect() as connection:
                 for _ in range(2):
-                    connection.execute(
-                        text("INSERT INTO settings (key, value) VALUES ('probe_key', 'x')")
-                    )
+                    connection.execute(text("INSERT INTO settings (key, value) VALUES ('probe_key', 'x')"))
 
         try:
             yield
@@ -340,9 +337,7 @@ class TestADatabaseErrorLogsNoRow:
         assert "IntegrityError(IntegrityError) on uq_marker_probe" in line.getMessage()
         assert self.MARKER not in caplog.text
 
-    def test_an_error_quoting_a_flush_error_never_reaches_the_log(
-        self, client, failing_routes, caplog
-    ):
+    def test_an_error_quoting_a_flush_error_never_reaches_the_log(self, client, failing_routes, caplog):
         """`PendingRollbackError` is no driver error and wraps none: it quotes
         one. Logged by its type alone."""
         with caplog.at_level(logging.DEBUG):
@@ -480,8 +475,14 @@ class TestTheServerLogsAValidation500Once:
         with log.open("wb") as written:
             server = subprocess.Popen(
                 [
-                    sys.executable, "-m", "uvicorn", "served_probe:app",
-                    "--host", "127.0.0.1", "--port", str(port),
+                    sys.executable,
+                    "-m",
+                    "uvicorn",
+                    "served_probe:app",
+                    "--host",
+                    "127.0.0.1",
+                    "--port",
+                    str(port),
                 ],
                 cwd=BACKEND,
                 env=env,
@@ -568,9 +569,7 @@ class TestValidatorRejections:
     """
 
     def test_a_rejected_tag_name_is_422_not_500(self, client, admin):
-        res = client.post(
-            "/api/books/tags", json={"name": "   "}, headers=admin["headers"]
-        )
+        res = client.post("/api/books/tags", json={"name": "   "}, headers=admin["headers"])
         assert res.status_code == 422
 
     def test_a_rejected_isbn_is_422_not_500(self, client, admin):
@@ -582,9 +581,7 @@ class TestValidatorRejections:
         assert res.status_code == 422
 
     def test_the_body_is_readable_json(self, client, admin):
-        res = client.post(
-            "/api/books/tags", json={"name": "   "}, headers=admin["headers"]
-        )
+        res = client.post("/api/books/tags", json={"name": "   "}, headers=admin["headers"])
         assert isinstance(res.json()["detail"], list)
 
 
@@ -630,9 +627,7 @@ def _statuses_whose_detail_is_not_a_sentence(schema: dict[str, Any]) -> set[int]
                     continue
                 for media in response.get("content", {}).values():
                     detail = (
-                        _resolved(schema, media.get("schema", {}))
-                        .get("properties", {})
-                        .get("detail", {})
+                        _resolved(schema, media.get("schema", {})).get("properties", {}).get("detail", {})
                     )
                     if detail.get("type") == "array":
                         found.add(int(status))
@@ -886,9 +881,7 @@ class TestNoRefusalBorrowsAStatusTheSchemaTypesDifferently:
 
     def test_every_status_the_walk_read_resolved_to_a_number(self) -> None:
         """An unreadable status is a hole in the rule below, not a pass."""
-        unreadable = [
-            f"{where}:{line}" for where, line, statuses in _refusals() if statuses is None
-        ]
+        unreadable = [f"{where}:{line}" for where, line, statuses in _refusals() if statuses is None]
 
         assert unreadable == [], (
             "the status these refusals were given could not be resolved, so the "

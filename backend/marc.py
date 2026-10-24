@@ -264,9 +264,7 @@ _SUBJECT_SOURCE: Final[dict[ClassificationScheme, str]] = {
 #: a kind exports without it and `tests/test_marc.py` pins that loss. The key
 #: admits a null kind so one lookup answers for every row; no entry carries one,
 #: because a record that declared nothing has nothing to spell.
-_HEADING_KIND_FIELD: Final[
-    dict[tuple[ClassificationScheme, HeadingKind | None], tuple[str, str]]
-] = {
+_HEADING_KIND_FIELD: Final[dict[tuple[ClassificationScheme, HeadingKind | None], tuple[str, str]]] = {
     (ClassificationScheme.GND, HeadingKind.CONTENT): ("655", "gnd-content"),
     (ClassificationScheme.GND, HeadingKind.CARRIER): ("655", "gnd-carrier"),
 }
@@ -285,9 +283,7 @@ _HEADING_KIND_FIELD: Final[
 #: Tab, newline and carriage return are legal and are left alone. Everything
 #: else below U+0020, plus the surrogate and non-character code points, is
 #: dropped.
-_ILLEGAL_XML: Final = re.compile(
-    "[^\x09\x0a\x0d\x20-\ud7ff\ue000-\ufffd\U00010000-\U0010ffff]"
-)
+_ILLEGAL_XML: Final = re.compile("[^\x09\x0a\x0d\x20-\ud7ff\ue000-\ufffd\U00010000-\U0010ffff]")
 
 
 def _text(value: object) -> str:
@@ -438,10 +434,7 @@ def _record_element(book: Book) -> ElementTree.Element:
         _datafield("300", " ", " ", [("a", _extent(book.page_count))]),
         _datafield("520", " ", " ", [("a", book.description)]),
         *_subject_fields(book),
-        *(
-            _datafield("700", "0", " ", [("a", name), ("4", "aut")])
-            for name in names[1:]
-        ),
+        *(_datafield("700", "0", " ", [("a", name), ("4", "aut")]) for name in names[1:]),
         *_online_links(book),
     ]
     for field in fields:
@@ -587,13 +580,9 @@ def _subject_fields(book: Book) -> Iterator[ElementTree.Element | None]:
         # number there and the label everywhere else, which is
         # `ClassificationScheme` saying the same thing from the other side.
         caption = entry.number if scheme is ClassificationScheme.LCSH else entry.label
-        identifier = (
-            f"{_GND_PREFIX}{entry.number}" if scheme is ClassificationScheme.GND else None
-        )
+        identifier = f"{_GND_PREFIX}{entry.number}" if scheme is ClassificationScheme.GND else None
         # ind2 `7`: the source of the heading is named in `$2`.
-        yield _datafield(
-            tag, " ", "7", [("a", caption), ("0", identifier), ("2", source)]
-        )
+        yield _datafield(tag, " ", "7", [("a", caption), ("0", identifier), ("2", source)])
 
 
 def record_element(book: Book) -> ElementTree.Element:
@@ -692,10 +681,7 @@ def stream(pages: Iterable[Iterable[Book]]) -> Iterator[str]:
     """
     yield _COLLECTION_OPEN
     for page in pages:
-        yield "".join(
-            ElementTree.tostring(_record_element(book), encoding="unicode")
-            for book in page
-        )
+        yield "".join(ElementTree.tostring(_record_element(book), encoding="unicode") for book in page)
     yield _COLLECTION_CLOSE
 
 
@@ -797,10 +783,7 @@ def _parsed(content: bytes) -> ElementTree.Element:
       smaller one, so this is the same refusal applied where it matters more.
     """
     if b"\x00" in content[:_SNIFF]:
-        raise MarcError(
-            "That file is not text this reader can take. MARCXML is written in "
-            "UTF-8."
-        )
+        raise MarcError("That file is not text this reader can take. MARCXML is written in UTF-8.")
     if _DOCTYPE_BYTES in content:
         raise MarcError("That file carries a document type declaration, which is refused.")
     try:
@@ -881,8 +864,7 @@ def _extra_headings(fields: Fields) -> list[Heading]:
     headings += [
         Heading(ClassificationScheme.LCSH, heading)
         for entry in fields.get("650")
-        if entry.subject_vocabulary("650") == "lcsh"
-        and entry.gnd_identifier() is None
+        if entry.subject_vocabulary("650") == "lcsh" and entry.gnd_identifier() is None
         for heading in [bibliographic.strip_isbd_punctuation(entry.get("a", ""))]
         if heading
     ]
@@ -980,12 +962,9 @@ def read(content: bytes) -> ParsedMarc:
         # is worth naming rather than reporting an empty file: several tools
         # write MARCXML without declaring the namespace, and the difference is
         # invisible in a text editor.
-        if root.tag.endswith("record") or any(
-            node.tag.endswith("record") for node in root.iter()
-        ):
+        if root.tag.endswith("record") or any(node.tag.endswith("record") for node in root.iter()):
             raise MarcError(
-                "That file has records but no MARCXML namespace on them. "
-                f"Records must be in {NAMESPACE}."
+                f"That file has records but no MARCXML namespace on them. Records must be in {NAMESPACE}."
             )
         raise MarcError("That file holds no MARC records.")
 

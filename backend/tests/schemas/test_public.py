@@ -73,6 +73,7 @@ def _models_in(annotation: object) -> list[type[BaseModel]]:
         found.extend(_models_in(argument))
     return found
 
+
 #: Every field on `BookOut` that a public reader does not get, and why.
 #:
 #: **The reason is the deliverable.** This rule decides nothing on its own: it
@@ -260,7 +261,6 @@ class TestAPublicTagIsNarrowerThanATag:
         assert "key" in PublicTagOut.model_fields
 
 
-
 class TestEveryPublicSortOrdersByAPublishedColumn:
     """A sort is a read of the column it sorts by, in one request.
 
@@ -308,16 +308,13 @@ class TestEveryPublicSortOrdersByAPublishedColumn:
         `PublicBookSort` that had quietly become empty, or on a `_columns` that
         returned nothing."""
         assert BookSort.NEWEST.value not in {sort.value for sort in PublicBookSort}
-        assert self._columns(BookSort.NEWEST) - set(PublicBookOut.model_fields) == {
-            "added_at"
-        }
+        assert self._columns(BookSort.NEWEST) - set(PublicBookOut.model_fields) == {"added_at"}
 
     def test_every_public_sort_is_a_real_book_sort(self):
         """The values are the same strings on purpose: the subset is a narrowing
         of one vocabulary rather than a second one."""
         for sort in PublicBookSort:
             assert sort.as_book_sort().value == sort.value
-
 
 
 class TestThePublicPayloadIsBuiltOnlyFromPublicModels:
@@ -407,9 +404,7 @@ class TestThePublicPayloadIsBuiltOnlyFromPublicModels:
         likely to be reached for: `@computed_field` is how somebody adds a
         derived value without thinking of it as a field."""
         offenders = sorted(
-            f"{model.__name__}.{name}"
-            for model in _public_models()
-            for name in model.model_computed_fields
+            f"{model.__name__}.{name}" for model in _public_models() for name in model.model_computed_fields
         )
         assert offenders == [], (
             f"These public models compute a field: {offenders}. A computed field "

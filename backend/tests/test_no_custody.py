@@ -105,8 +105,9 @@ CARRIES_A_FILE: dict[str, Callable[[Any], bool]] = {
     "the File marker FastAPI attaches": lambda field: isinstance(
         getattr(field, "field_info", None), fastapi_params.File
     ),
-    "an UploadFile in the annotation": lambda field: "UploadFile"
-    in str(getattr(getattr(field, "field_info", None), "annotation", "")),
+    "an UploadFile in the annotation": lambda field: (
+        "UploadFile" in str(getattr(getattr(field, "field_info", None), "annotation", ""))
+    ),
 }
 
 
@@ -178,9 +179,7 @@ class TestNoRouteAcceptsABookFile:
     """
 
     def test_the_routes_that_take_a_file_are_the_named_ones(self) -> None:
-        found = routes_taking_a_file(
-            lambda field: any(carries(field) for carries in CARRIES_A_FILE.values())
-        )
+        found = routes_taking_a_file(lambda field: any(carries(field) for carries in CARRIES_A_FILE.values()))
         assert found == set(ROUTES_TAKING_A_FILE), (
             "The set of routes accepting an uploaded file has changed. README.md and "
             "docs/featurelist.md promise that a book file is read in the browser and "
@@ -278,18 +277,12 @@ class TestTheWalkSeesABodyParameterADependencyDeclares:
         route = self._probe()
         assert route.dependant.body_params == []
         assert [
-            field
-            for dependency in route.dependant.dependencies
-            for field in dependency.body_params
+            field for dependency in route.dependant.dependencies for field in dependency.body_params
         ] == []
 
     def test_the_walk_finds_it_anyway(self) -> None:
         route = self._probe()
-        assert any(
-            carries(field)
-            for field in body_fields(route)
-            for carries in CARRIES_A_FILE.values()
-        )
+        assert any(carries(field) for field in body_fields(route) for carries in CARRIES_A_FILE.values())
 
 
 class TestTheDatabaseHasNowhereToPutABookFile:

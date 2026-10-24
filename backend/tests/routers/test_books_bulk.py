@@ -39,9 +39,7 @@ class TestTagging:
 
         assert res.json() == {"updated": 2, "unchanged": 0, "skipped": 0}
 
-    def test_a_book_that_already_has_it_is_unchanged(
-        self, client, admin, make_book, fiction_id
-    ):
+    def test_a_book_that_already_has_it_is_unchanged(self, client, admin, make_book, fiction_id):
         book = make_book(admin["headers"])
         client.post(f"/api/books/{book['id']}/tags/{fiction_id}", headers=admin["headers"])
 
@@ -50,9 +48,7 @@ class TestTagging:
         assert res.json()["unchanged"] == 1
         assert res.json()["updated"] == 0
 
-    def test_a_book_at_its_ceiling_is_counted_unchanged(
-        self, client, admin, make_book, fiction_id, db
-    ):
+    def test_a_book_at_its_ceiling_is_counted_unchanged(self, client, admin, make_book, fiction_id, db):
         """A refusal and "it already had this tag" are different answers and this
         result has three buckets, the third of which the caller computes from the
         permission walk. So a full book is reported as the no change it is, the
@@ -80,9 +76,7 @@ class TestTagging:
         detail = client.get(f"/api/books/{book['id']}", headers=admin["headers"]).json()
         assert detail["tags"] == []
 
-    def test_removing_a_tag_the_book_lacks_is_unchanged(
-        self, client, admin, make_book, fiction_id
-    ):
+    def test_removing_a_tag_the_book_lacks_is_unchanged(self, client, admin, make_book, fiction_id):
         book = make_book(admin["headers"])
         res = bulk(client, admin["headers"], [book["id"]], "remove_tag", fiction_id)
         assert res.json()["unchanged"] == 1
@@ -115,9 +109,7 @@ class TestATagIdPastTheDatabasesRangeIsRefused:
     TOO_BIG = 9_223_372_036_854_775_808
 
     @pytest.mark.parametrize("action", ["add_tag", "remove_tag"])
-    def test_a_tag_id_past_the_range_is_a_400_not_a_500(
-        self, client, admin, make_book, action: str
-    ):
+    def test_a_tag_id_past_the_range_is_a_400_not_a_500(self, client, admin, make_book, action: str):
         """Both verbs reach `_require_tag`, so both had the defect."""
         book = make_book(admin["headers"])
 
@@ -125,9 +117,7 @@ class TestATagIdPastTheDatabasesRangeIsRefused:
 
         assert res.status_code == 400, res.text
 
-    def test_a_tag_at_the_largest_id_the_column_holds_is_still_applied(
-        self, client, admin, make_book, db
-    ):
+    def test_a_tag_at_the_largest_id_the_column_holds_is_still_applied(self, client, admin, make_book, db):
         """The boundary itself, and it needs a row to be worth anything.
 
         The first version of this asserted a refusal for `MAX_ROW_ID` with no such
@@ -152,9 +142,7 @@ class TestATagIdPastTheDatabasesRangeIsRefused:
         assert res.status_code == 200, res.text
         assert res.json()["updated"] == 1
 
-    def test_an_unused_id_at_the_boundary_is_the_ordinary_400(
-        self, client, admin, make_book
-    ):
+    def test_an_unused_id_at_the_boundary_is_the_ordinary_400(self, client, admin, make_book):
         """The other side of it: the bound refuses what the column cannot hold
         and nothing else, so the largest id it can hold reaches the lookup and
         gets the answer an unused id gets."""
@@ -198,9 +186,7 @@ class TestStatus:
 
     def test_a_book_already_in_that_status_is_unchanged(self, client, admin, make_book):
         book = make_book(admin["headers"])
-        client.put(
-            f"/api/books/{book['id']}/status", json={"status": "read"}, headers=admin["headers"]
-        )
+        client.put(f"/api/books/{book['id']}/status", json={"status": "read"}, headers=admin["headers"])
 
         res = bulk(client, admin["headers"], [book["id"]], "set_status", "read")
 
@@ -249,9 +235,7 @@ class TestOwnershipAndLocation:
         first = make_book(admin["headers"], title="A")
         second = make_book(admin["headers"], title="B")
 
-        res = bulk(
-            client, admin["headers"], [first["id"], second["id"]], "set_location", "Loft box 2"
-        )
+        res = bulk(client, admin["headers"], [first["id"], second["id"]], "set_location", "Loft box 2")
 
         assert res.json()["updated"] == 2
         detail = client.get(f"/api/books/{first['id']}", headers=admin["headers"]).json()
@@ -302,9 +286,7 @@ class TestPermissionsAndCounts:
 
         assert res.json()["skipped"] == 1
 
-    def test_skipped_does_not_distinguish_absent_from_forbidden(
-        self, client, admin, member, make_book
-    ):
+    def test_skipped_does_not_distinguish_absent_from_forbidden(self, client, admin, member, make_book):
         """Reporting which of the two it was would disclose that a private book
         with that id exists."""
         private = make_book(admin["headers"], is_private=True)
@@ -446,9 +428,7 @@ class TestTheTableRefusesToBuild:
             if verb.value != "set_shelf_mark"
         }
 
-        with pytest.raises(
-            RuntimeError, match="BulkAction and the bulk dispatch table disagree"
-        ) as raised:
+        with pytest.raises(RuntimeError, match="BulkAction and the bulk dispatch table disagree") as raised:
             books_router._dispatch_table(handlers, set(verbs))
 
         assert "_BULK_HANDLERS" in str(raised.value)
@@ -488,9 +468,7 @@ class TestNoVerbTurnsAValueIntoA500:
 
     @pytest.mark.parametrize("value", _HOSTILE)
     @pytest.mark.parametrize("action", list(BulkAction), ids=lambda action: action.value)
-    def test_a_hostile_value_is_never_a_500(
-        self, client, admin, make_book, action: BulkAction, value
-    ):
+    def test_a_hostile_value_is_never_a_500(self, client, admin, make_book, action: BulkAction, value):
         book = make_book(admin["headers"])
 
         res = bulk(client, admin["headers"], [book["id"]], action.value, value)

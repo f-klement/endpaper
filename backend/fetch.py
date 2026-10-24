@@ -449,9 +449,7 @@ class AddressPolicy:
 #: the resolved address, which is what `PinnedTransport` makes possible.
 HOUSEHOLD_ADDRESSES: Final = AddressPolicy(
     name="household",
-    admits=frozenset(
-        {AddressClass.LOOPBACK, AddressClass.PRIVATE, AddressClass.PUBLIC}
-    ),
+    admits=frozenset({AddressClass.LOOPBACK, AddressClass.PRIVATE, AddressClass.PUBLIC}),
 )
 
 #: The policy for a host somebody typed into a settings screen.
@@ -472,9 +470,7 @@ HOUSEHOLD_ADDRESSES: Final = AddressPolicy(
 #: walks `_walk_hops`'s two same host hops, which is right for a catalogue and
 #: is not what was specified there. Whoever builds the row adds that refusal;
 #: this constant does not carry it.
-PUBLIC_ADDRESSES: Final = AddressPolicy(
-    name="public", admits=frozenset({AddressClass.PUBLIC})
-)
+PUBLIC_ADDRESSES: Final = AddressPolicy(name="public", admits=frozenset({AddressClass.PUBLIC}))
 
 
 class Resolver(Protocol):
@@ -499,9 +495,7 @@ async def system_resolver(host: str, port: int) -> Sequence[str]:
     for that, and the order matters because the first admitted address is the
     one connected to.
     """
-    infos = await asyncio.get_running_loop().getaddrinfo(
-        host, port, type=socket.SOCK_STREAM
-    )
+    infos = await asyncio.get_running_loop().getaddrinfo(host, port, type=socket.SOCK_STREAM)
     return tuple(dict.fromkeys(str(info[4][0]) for info in infos))
 
 
@@ -594,7 +588,7 @@ class Fetched:
         """
         try:
             text = self.content.decode(self.encoding or "utf-8", errors="replace")
-        except (LookupError, ValueError):
+        except LookupError, ValueError:
             text = self.content.decode("utf-8", errors="replace")
         return _LONE_SURROGATE.sub("\N{REPLACEMENT CHARACTER}", text)
 
@@ -791,18 +785,12 @@ class PinnedTransport(httpx.AsyncBaseTransport):
         # nothing, so this is never empty.
         for address in addresses[:-1]:
             try:
-                return await transport.handle_async_request(
-                    self._pinned(request, name, address)
-                )
-            except (httpx.ConnectError, httpx.ConnectTimeout):
+                return await transport.handle_async_request(self._pinned(request, name, address))
+            except httpx.ConnectError, httpx.ConnectTimeout:
                 logger.info("%s did not answer at %s, trying the next", name, address)
-        return await transport.handle_async_request(
-            self._pinned(request, name, addresses[-1])
-        )
+        return await transport.handle_async_request(self._pinned(request, name, addresses[-1]))
 
-    def _pinned(
-        self, request: httpx.Request, name: str, address: str
-    ) -> httpx.Request:
+    def _pinned(self, request: httpx.Request, name: str, address: str) -> httpx.Request:
         """The same request, addressed to a literal, still speaking as the name.
 
         A second request rather than a rewrite of the caller's, because
@@ -839,9 +827,7 @@ class PinnedTransport(httpx.AsyncBaseTransport):
             # cost of a syscall and of a code path that is not the one read.
             candidates = (name,)
 
-        admitted = tuple(
-            address for address in candidates if self._policy.permits(address)
-        )
+        admitted = tuple(address for address in candidates if self._policy.permits(address))
         if not admitted:
             logger.warning(
                 "Refused %s under the %s address policy: %s",
@@ -849,9 +835,7 @@ class PinnedTransport(httpx.AsyncBaseTransport):
                 self._policy.name,
                 ", ".join(candidates) or "no address",
             )
-            raise AddressRefused(
-                f"{name[:200]} answers at no address this server will connect to"
-            )
+            raise AddressRefused(f"{name[:200]} answers at no address this server will connect to")
         return admitted
 
     async def _lookup(self, name: str, port: int) -> tuple[str, ...]:
@@ -873,9 +857,7 @@ class PinnedTransport(httpx.AsyncBaseTransport):
         try:
             return tuple(await self._resolve(name, port))
         except OSError as unresolvable:
-            raise httpx.ConnectError(
-                f"{name[:200]} could not be resolved"
-            ) from unresolvable
+            raise httpx.ConnectError(f"{name[:200]} could not be resolved") from unresolvable
 
     def _transport_for(self, name: str) -> httpx.AsyncBaseTransport:
         """The pool for one server name. See the class docstring for why per name."""
@@ -890,9 +872,7 @@ class PinnedTransport(httpx.AsyncBaseTransport):
         self._inner.clear()
 
 
-def pinned_client(
-    policy: AddressPolicy, *, resolver: Resolver = system_resolver
-) -> httpx.AsyncClient:
+def pinned_client(policy: AddressPolicy, *, resolver: Resolver = system_resolver) -> httpx.AsyncClient:
     """A catalogue client that resolves, refuses by address class, and pins.
 
     Every bound `catalogue_client` carries, plus `PinnedTransport`. Use it for a
@@ -1036,16 +1016,10 @@ async def _walk_hops(
                 async for chunk in response.aiter_raw():
                     total += len(chunk)
                     if total > cap:
-                        logger.warning(
-                            "Refused a catalogue answer over %d bytes: %s", cap, url[:200]
-                        )
-                        raise ResponseTooLarge(
-                            f"{url[:200]} answered with more than {cap} bytes"
-                        )
+                        logger.warning("Refused a catalogue answer over %d bytes: %s", cap, url[:200])
+                        raise ResponseTooLarge(f"{url[:200]} answered with more than {cap} bytes")
                     chunks.append(chunk)
-                return Fetched(
-                    response.status_code, b"".join(chunks), response.charset_encoding
-                )
+                return Fetched(response.status_code, b"".join(chunks), response.charset_encoding)
         except UnicodeError as error:
             # **A malformed `Location` host raises here, not in `_same_host_hop`,
             # and the hop guard never runs.** httpx builds the redirect request
@@ -1085,12 +1059,8 @@ async def _walk_hops(
             # Wrapping `httpx.URL(...)` in `_same_host_hop` does **not** fix
             # this: `URL()` constructs fine and `.host` is what raises, by which
             # point `stream` has already raised. Measured both ways.
-            logger.warning(
-                "Refused a catalogue redirect with an unusable host: %s", _shown(target)
-            )
-            raise RedirectedOffHost(
-                f"{_shown(target)} sent a Location naming an unusable host"
-            ) from error
+            logger.warning("Refused a catalogue redirect with an unusable host: %s", _shown(target))
+            raise RedirectedOffHost(f"{_shown(target)} sent a Location naming an unusable host") from error
 
     raise TooManyRedirects(f"{url[:200]} redirected more than {MAX_REDIRECTS} times")
 

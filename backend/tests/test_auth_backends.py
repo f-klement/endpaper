@@ -107,9 +107,7 @@ class TestAuthenticateLdap:
         assert first.id == second.id
         assert db.query(User).filter(User.username == "kim").count() == 1
 
-    def test_a_service_account_the_directory_refuses_is_a_failed_login(
-        self, db, ldap_mode, monkeypatch
-    ):
+    def test_a_service_account_the_directory_refuses_is_a_failed_login(self, db, ldap_mode, monkeypatch):
         # The directory holds kim and would accept the member's bind, so only
         # the refused service bind can make this a failure. With no entry the
         # search alone returns None and the bind's answer is never read.
@@ -173,9 +171,7 @@ class TestAuthenticateLdap:
         assert user is not None
         assert user.username == "kim"
 
-    def test_an_unreachable_directory_is_a_failed_login_not_a_500(
-        self, db, ldap_mode, monkeypatch
-    ):
+    def test_an_unreachable_directory_is_a_failed_login_not_a_500(self, db, ldap_mode, monkeypatch):
         from ldap3.core.exceptions import LDAPException
 
         def explode(*args: object, **kwargs: object) -> None:
@@ -228,9 +224,7 @@ class TestLdapAdminGroup:
         assert user is not None
         assert user.is_admin is False
 
-    def test_admin_is_re_evaluated_on_every_sign_in(
-        self, db, ldap_mode, monkeypatch, not_first
-    ):
+    def test_admin_is_re_evaluated_on_every_sign_in(self, db, ldap_mode, monkeypatch, not_first):
         """Removing someone from the admin group in the directory has to take
         effect, rather than being frozen at whatever it was on first login."""
         directory_with(monkeypatch, groups=["cn=librarians,ou=groups,dc=example,dc=org"])
@@ -276,10 +270,7 @@ class TestProxyHeaders:
         assert auth_backends.user_from_proxy_headers(db, request_with({})) is None
 
     def test_an_empty_header_is_no_user(self, db):
-        assert (
-            auth_backends.user_from_proxy_headers(db, request_with({"Remote-User": "  "}))
-            is None
-        )
+        assert auth_backends.user_from_proxy_headers(db, request_with({"Remote-User": "  "})) is None
 
     def test_the_admin_group_grants_admin(self, db):
         user = auth_backends.user_from_proxy_headers(
@@ -300,9 +291,7 @@ class TestProxyHeaders:
     def test_a_custom_header_name_is_honoured(self, db, monkeypatch):
         monkeypatch.setenv("PROXY_USER_HEADER", "X-Forwarded-User")
 
-        user = auth_backends.user_from_proxy_headers(
-            db, request_with({"X-Forwarded-User": "kim"})
-        )
+        user = auth_backends.user_from_proxy_headers(db, request_with({"X-Forwarded-User": "kim"}))
 
         assert user is not None
         assert user.username == "kim"
@@ -336,12 +325,8 @@ class TestDispatch:
 
         assert auth_backends.authenticate(db, "kim", "password123") is None
 
-    @pytest.mark.parametrize(
-        ("mode", "expected"), [("local", True), ("ldap", False), ("proxy", False)]
-    )
-    def test_signup_is_only_offered_when_we_own_the_passwords(
-        self, monkeypatch, mode, expected
-    ):
+    @pytest.mark.parametrize(("mode", "expected"), [("local", True), ("ldap", False), ("proxy", False)])
+    def test_signup_is_only_offered_when_we_own_the_passwords(self, monkeypatch, mode, expected):
         monkeypatch.setenv("AUTH_MODE", mode)
         assert auth_backends.local_signup_allowed() is expected
 
@@ -400,13 +385,9 @@ class TestProxyIdentityIsBounded:
     def test_a_refusal_is_logged_loudly_with_the_peer(self, db, caplog):
         """The only trace the incident left was an INFO line nobody watched."""
         with caplog.at_level(logging.WARNING):
-            auth_backends.user_from_proxy_headers(
-                db, request_with({"Remote-User": "bad name"})
-            )
+            auth_backends.user_from_proxy_headers(db, request_with({"Remote-User": "bad name"}))
 
-        assert any(
-            "Refused a proxy identity" in record.message for record in caplog.records
-        )
+        assert any("Refused a proxy identity" in record.message for record in caplog.records)
 
     def test_a_refused_header_cannot_forge_a_log_line(self, db, caplog):
         """The only username log line an unauthenticated caller reaches.
@@ -433,9 +414,7 @@ class TestProxyIdentityIsBounded:
 
     def test_creating_an_account_is_logged_at_warning(self, db, caplog):
         with caplog.at_level(logging.WARNING):
-            auth_backends.upsert_directory_user(
-                db, "newcomer", is_admin=True, source=AuthMode.PROXY
-            )
+            auth_backends.upsert_directory_user(db, "newcomer", is_admin=True, source=AuthMode.PROXY)
 
         created = [r for r in caplog.records if "Created account" in r.message]
         assert created
@@ -448,9 +427,7 @@ class TestProxyIdentityIsBounded:
         writer, and an audit trail that could never say when anything actually
         changed.
         """
-        auth_backends.upsert_directory_user(
-            db, "rose", is_admin=False, source=AuthMode.PROXY
-        )
+        auth_backends.upsert_directory_user(db, "rose", is_admin=False, source=AuthMode.PROXY)
 
         writes: list[str] = []
 
@@ -459,28 +436,20 @@ class TestProxyIdentityIsBounded:
 
         event.listen(db.get_bind(), "before_cursor_execute", record)
         try:
-            auth_backends.upsert_directory_user(
-                db, "rose", is_admin=False, source=AuthMode.PROXY
-            )
+            auth_backends.upsert_directory_user(db, "rose", is_admin=False, source=AuthMode.PROXY)
         finally:
             event.remove(db.get_bind(), "before_cursor_execute", record)
 
-        assert not any(
-            statement.lstrip().upper().startswith("UPDATE") for statement in writes
-        )
+        assert not any(statement.lstrip().upper().startswith("UPDATE") for statement in writes)
 
     def test_a_change_of_admin_rights_is_logged(self, db, caplog, monkeypatch):
         monkeypatch.setenv("PROXY_ADMIN_GROUP", "librarians")
         db.add(User(username="somebody-else", password_hash=None, is_admin=False))
         db.commit()
-        auth_backends.upsert_directory_user(
-            db, "rose", is_admin=False, source=AuthMode.PROXY
-        )
+        auth_backends.upsert_directory_user(db, "rose", is_admin=False, source=AuthMode.PROXY)
 
         with caplog.at_level(logging.WARNING):
-            auth_backends.upsert_directory_user(
-                db, "rose", is_admin=True, source=AuthMode.PROXY
-            )
+            auth_backends.upsert_directory_user(db, "rose", is_admin=True, source=AuthMode.PROXY)
 
         assert any("Admin rights for" in record.message for record in caplog.records)
 
@@ -500,30 +469,20 @@ class TestAdminBootstrap:
         monkeypatch.setenv("AUTH_MODE", "proxy")
 
     def test_the_first_account_is_an_admin_whatever_the_directory_says(self, db):
-        user = auth_backends.upsert_directory_user(
-            db, "founder", is_admin=False, source=AuthMode.PROXY
-        )
+        user = auth_backends.upsert_directory_user(db, "founder", is_admin=False, source=AuthMode.PROXY)
         assert user is not None
         assert user.is_admin is True
 
     def test_the_second_account_is_not(self, db):
-        auth_backends.upsert_directory_user(
-            db, "founder", is_admin=False, source=AuthMode.PROXY
-        )
-        second = auth_backends.upsert_directory_user(
-            db, "later", is_admin=False, source=AuthMode.PROXY
-        )
+        auth_backends.upsert_directory_user(db, "founder", is_admin=False, source=AuthMode.PROXY)
+        second = auth_backends.upsert_directory_user(db, "later", is_admin=False, source=AuthMode.PROXY)
         assert second is not None
         assert second.is_admin is False
 
     def test_a_configured_group_still_grants_admin(self, db, monkeypatch):
         monkeypatch.setenv("PROXY_ADMIN_GROUP", "librarians")
-        auth_backends.upsert_directory_user(
-            db, "founder", is_admin=False, source=AuthMode.PROXY
-        )
-        second = auth_backends.upsert_directory_user(
-            db, "later", is_admin=True, source=AuthMode.PROXY
-        )
+        auth_backends.upsert_directory_user(db, "founder", is_admin=False, source=AuthMode.PROXY)
+        second = auth_backends.upsert_directory_user(db, "later", is_admin=True, source=AuthMode.PROXY)
         assert second is not None
         assert second.is_admin is True
 
@@ -543,9 +502,7 @@ class TestSwitchingToADirectoryDoesNotDemote:
         db.add(User(username="other", password_hash="x", is_admin=False))
         db.commit()
 
-        user = auth_backends.upsert_directory_user(
-            db, "owner", is_admin=False, source=AuthMode.PROXY
-        )
+        user = auth_backends.upsert_directory_user(db, "owner", is_admin=False, source=AuthMode.PROXY)
 
         assert user is not None
         assert user.is_admin is True
@@ -558,9 +515,7 @@ class TestSwitchingToADirectoryDoesNotDemote:
         db.add(User(username="other", password_hash="x", is_admin=False))
         db.commit()
 
-        user = auth_backends.upsert_directory_user(
-            db, "owner", is_admin=False, source=AuthMode.PROXY
-        )
+        user = auth_backends.upsert_directory_user(db, "owner", is_admin=False, source=AuthMode.PROXY)
 
         assert user is not None
         assert user.is_admin is False
@@ -572,9 +527,7 @@ class TestSwitchingToADirectoryDoesNotDemote:
         db.add(User(username="other", password_hash="x", is_admin=False))
         db.commit()
 
-        user = auth_backends.upsert_directory_user(
-            db, "other", is_admin=False, source=AuthMode.PROXY
-        )
+        user = auth_backends.upsert_directory_user(db, "other", is_admin=False, source=AuthMode.PROXY)
 
         assert user is not None
         assert user.is_admin is False
@@ -611,9 +564,7 @@ class TestATestAccountIsNeverAdopted:
         return account
 
     def test_the_directory_identity_gets_a_row_of_its_own(self, db, alice):
-        user = auth_backends.upsert_directory_user(
-            db, "alice", is_admin=False, source=AuthMode.PROXY
-        )
+        user = auth_backends.upsert_directory_user(db, "alice", is_admin=False, source=AuthMode.PROXY)
 
         assert user is not None
         assert user.id != alice.id
@@ -622,9 +573,7 @@ class TestATestAccountIsNeverAdopted:
         assert user.password_hash is None
 
     def test_the_test_account_is_renamed_rather_than_flipped(self, db, alice):
-        auth_backends.upsert_directory_user(
-            db, "alice", is_admin=False, source=AuthMode.PROXY
-        )
+        auth_backends.upsert_directory_user(db, "alice", is_admin=False, source=AuthMode.PROXY)
 
         db.refresh(alice)
         assert alice.username == "alice-2"
@@ -638,9 +587,7 @@ class TestATestAccountIsNeverAdopted:
         db.add(Book(title="Only alice can see this", is_private=True, added_by_user_id=alice.id))
         db.commit()
 
-        adopted = auth_backends.upsert_directory_user(
-            db, "alice", is_admin=False, source=AuthMode.PROXY
-        )
+        adopted = auth_backends.upsert_directory_user(db, "alice", is_admin=False, source=AuthMode.PROXY)
 
         assert adopted is not None
         book = db.query(Book).filter(Book.title == "Only alice can see this").one()
@@ -651,9 +598,7 @@ class TestATestAccountIsNeverAdopted:
         db.add(User(username="alice-2", password_hash=hash_password("password123")))
         db.commit()
 
-        auth_backends.upsert_directory_user(
-            db, "alice", is_admin=False, source=AuthMode.PROXY
-        )
+        auth_backends.upsert_directory_user(db, "alice", is_admin=False, source=AuthMode.PROXY)
 
         db.refresh(alice)
         assert alice.username == "alice-3"
@@ -676,9 +621,7 @@ class TestATestAccountIsNeverAdopted:
         )
         db.commit()
 
-        auth_backends.upsert_directory_user(
-            db, long_name, is_admin=False, source=AuthMode.PROXY
-        )
+        auth_backends.upsert_directory_user(db, long_name, is_admin=False, source=AuthMode.PROXY)
 
         renamed = db.query(User).filter(User.is_test_account.is_(True)).one()
         # **Against the column, not against the constant this fixture is built
@@ -695,9 +638,7 @@ class TestATestAccountIsNeverAdopted:
     def test_the_rename_is_logged_loudly(self, db, alice, caplog):
         """A username changing without anybody asking has to be findable."""
         with caplog.at_level(logging.WARNING):
-            auth_backends.upsert_directory_user(
-                db, "alice", is_admin=False, source=AuthMode.PROXY
-            )
+            auth_backends.upsert_directory_user(db, "alice", is_admin=False, source=AuthMode.PROXY)
 
         renames = [r for r in caplog.records if "Renamed the test account" in r.message]
         assert renames
@@ -713,14 +654,11 @@ class TestATestAccountIsNeverAdopted:
         db.commit()
         db.refresh(existing)
 
-        adopted = auth_backends.upsert_directory_user(
-            db, "kim", is_admin=False, source=AuthMode.PROXY
-        )
+        adopted = auth_backends.upsert_directory_user(db, "kim", is_admin=False, source=AuthMode.PROXY)
 
         assert adopted is not None
         assert adopted.id == existing.id
         assert adopted.auth_source == AuthMode.PROXY.value
-
 
 
 # ── A directory name the column cannot hold ───────────────────────────────────
@@ -763,12 +701,7 @@ class TestADirectoryNameWiderThanTheColumnIsRefused:
     def test_a_name_one_character_past_the_column_writes_no_row(self, db):
         too_wide = "a" * (_declared_username_width() + 1)
 
-        assert (
-            auth_backends.upsert_directory_user(
-                db, too_wide, is_admin=False, source=AuthMode.LDAP
-            )
-            is None
-        )
+        assert auth_backends.upsert_directory_user(db, too_wide, is_admin=False, source=AuthMode.LDAP) is None
         assert db.query(User).count() == 0
 
     def test_a_name_of_exactly_the_column_width_signs_in(self, db):
@@ -776,9 +709,7 @@ class TestADirectoryNameWiderThanTheColumnIsRefused:
         rule above."""
         widest = "a" * _declared_username_width()
 
-        user = auth_backends.upsert_directory_user(
-            db, widest, is_admin=False, source=AuthMode.LDAP
-        )
+        user = auth_backends.upsert_directory_user(db, widest, is_admin=False, source=AuthMode.LDAP)
 
         assert user is not None
         assert user.username == widest
@@ -797,9 +728,7 @@ class TestADirectoryNameWiderThanTheColumnIsRefused:
         db.commit()
 
         width = _declared_username_width()
-        first = auth_backends.upsert_directory_user(
-            db, "a" * width, is_admin=False, source=AuthMode.LDAP
-        )
+        first = auth_backends.upsert_directory_user(db, "a" * width, is_admin=False, source=AuthMode.LDAP)
         assert first is not None
 
         second = auth_backends.upsert_directory_user(
@@ -836,17 +765,10 @@ class TestADirectoryNameWiderThanTheColumnIsRefused:
         )
         db.commit()
 
-        assert (
-            auth_backends.upsert_directory_user(
-                db, wide, is_admin=False, source=AuthMode.LDAP
-            )
-            is None
-        )
+        assert auth_backends.upsert_directory_user(db, wide, is_admin=False, source=AuthMode.LDAP) is None
         assert db.query(User).filter(User.username == wide).one()
 
-    def test_the_ldap_door_answers_none_rather_than_raising(
-        self, db, ldap_mode, monkeypatch
-    ):
+    def test_the_ldap_door_answers_none_rather_than_raising(self, db, ldap_mode, monkeypatch):
         """A refused sign-in, not a 500. Both callers already answer
         `User | None`, so nothing downstream learns a new shape."""
         entry = FakeEntry(
@@ -890,13 +812,9 @@ class TestADirectoryNameWiderThanTheColumnIsRefused:
         refused = "a" * (width + 1)
 
         with caplog.at_level(logging.WARNING, logger="endpaper.auth"):
-            auth_backends.upsert_directory_user(
-                db, refused, is_admin=False, source=AuthMode.LDAP
-            )
+            auth_backends.upsert_directory_user(db, refused, is_admin=False, source=AuthMode.LDAP)
 
-        refusals = [
-            r for r in caplog.records if "users.username cannot hold" in r.getMessage()
-        ]
+        refusals = [r for r in caplog.records if "users.username cannot hold" in r.getMessage()]
         assert refusals
         assert refusals[0].levelno == logging.WARNING
         assert str(width + 1) in refusals[0].getMessage()
@@ -923,9 +841,7 @@ class TestADirectoryNameWiderThanTheColumnIsRefused:
         than the words that say a refusal happened.
         """
         with caplog.at_level(logging.WARNING, logger="endpaper.auth"):
-            auth_backends.user_from_proxy_headers(
-                db, request_with({"Remote-User": "bad name"})
-            )
+            auth_backends.user_from_proxy_headers(db, request_with({"Remote-User": "bad name"}))
             auth_backends.upsert_directory_user(
                 db,
                 "a" * (_declared_username_width() + 1),
@@ -937,8 +853,7 @@ class TestADirectoryNameWiderThanTheColumnIsRefused:
         assert len(messages) == 2, messages
         header_refusal, funnel_refusal = messages
         assert "Refused a proxy identity" in header_refusal, (
-            "the header refusal is not the message this compared, so the "
-            "comparison below proved nothing"
+            "the header refusal is not the message this compared, so the comparison below proved nothing"
         )
 
         # Two log messages, not paths: the shared characters are what a grep rule
@@ -1080,11 +995,7 @@ def _emitting_calls(tree: ast.Module) -> list[tuple[str, ast.Call]]:
                 and child.func.attr in _TEMPLATE_AT
             ):
                 found.append((enclosing, child))
-            inner = (
-                child.name
-                if isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef)
-                else enclosing
-            )
+            inner = child.name if isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef) else enclosing
             descend(child, inner)
 
     descend(tree, "<module>")
@@ -1145,9 +1056,7 @@ class TestTheDirectorySuccessPathCannotForgeALogLine:
     }
 
     def _directory_resolving(self, monkeypatch, name: str, email: str | None = None):
-        entry = FakeEntry(
-            "uid=kim,ou=people,dc=example,dc=org", name, [], email=email
-        )
+        entry = FakeEntry("uid=kim,ou=people,dc=example,dc=org", name, [], email=email)
         return install_directory(
             monkeypatch,
             [
@@ -1174,9 +1083,7 @@ class TestTheDirectorySuccessPathCannotForgeALogLine:
         assert all(_one_line(record) for record in records)
         assert not _lines_forged_in("\n".join(r.getMessage() for r in records))
 
-    def test_a_renamed_test_account_carries_none_either(
-        self, db, ldap_mode, monkeypatch, caplog
-    ):
+    def test_a_renamed_test_account_carries_none_either(self, db, ldap_mode, monkeypatch, caplog):
         """The second success-path line, and the one that names a stored value
         rather than the directory's: a restored archive can still hold a row
         whose username nothing bounded."""
@@ -1220,11 +1127,7 @@ class TestTheDirectorySuccessPathCannotForgeALogLine:
         assert [r for r in records if "not an address" in r.getMessage()], (
             "the refused-address line did not fire, so this proved nothing"
         )
-        runs = [
-            len(run)
-            for record in records
-            for run in re.findall("w+", record.getMessage())
-        ]
+        runs = [len(run) for record in records for run in re.findall("w+", record.getMessage())]
         assert runs, "no record named the value at all, so this proved nothing"
         assert max(runs) <= LOGGED_VALUE_MAX
 
@@ -1316,9 +1219,7 @@ class TestTheDirectorySuccessPathCannotForgeALogLine:
                 f"line {node.lineno}: the format string is not a string literal, "
                 f"so this rule cannot pair it with its arguments"
             )
-            assert isinstance(
-                template.value, str
-            ), (
+            assert isinstance(template.value, str), (
                 f"line {node.lineno}: the format string is not a string literal, "
                 f"so this rule cannot pair it with its arguments"
             )
@@ -1328,9 +1229,7 @@ class TestTheDirectorySuccessPathCannotForgeALogLine:
                 # literal percent in its prose is correct.
                 continue
             matches = [
-                match
-                for match in _SPECIFIER.finditer(template.value)
-                if match.group("conversion") != "%"
+                match for match in _SPECIFIER.finditer(template.value) if match.group("conversion") != "%"
             ]
             assert not any(match.group("key") for match in matches), (
                 f"line {node.lineno}: a mapping key takes one dict rather than "
@@ -1338,8 +1237,7 @@ class TestTheDirectorySuccessPathCannotForgeALogLine:
             )
             conversions = [match.group("conversion") for match in matches]
             assert len(conversions) == len(arguments), (
-                f"line {node.lineno}: {len(conversions)} specifiers against "
-                f"{len(arguments)} arguments"
+                f"line {node.lineno}: {len(conversions)} specifiers against {len(arguments)} arguments"
             )
             for conversion, argument in zip(conversions, arguments, strict=True):
                 if conversion == "r":
@@ -1397,9 +1295,7 @@ class TestWhoOwnsAnAddress:
 
 
 class TestTheDirectoryWritesTheAddress:
-    def test_an_address_is_stored_when_the_attribute_is_named(
-        self, db, ldap_mode, monkeypatch
-    ):
+    def test_an_address_is_stored_when_the_attribute_is_named(self, db, ldap_mode, monkeypatch):
         monkeypatch.setenv("LDAP_EMAIL_ATTRIBUTE", "mail")
         directory_with(monkeypatch, email="kim@example.org")
 
@@ -1408,9 +1304,7 @@ class TestTheDirectoryWritesTheAddress:
         assert user is not None
         assert user.email == "kim@example.org"
 
-    def test_nothing_is_requested_or_stored_when_it_is_not(
-        self, db, ldap_mode, monkeypatch
-    ):
+    def test_nothing_is_requested_or_stored_when_it_is_not(self, db, ldap_mode, monkeypatch):
         """The shipped default. The search asks for exactly what it always
         asked for, so an upgrade changes no directory traffic."""
         handed_out = directory_with(monkeypatch, email="kim@example.org")
@@ -1421,9 +1315,7 @@ class TestTheDirectoryWritesTheAddress:
         assert user.email is None
         assert handed_out[0].searched_attributes == ["uid", "memberOf"]
 
-    def test_the_attribute_is_added_to_the_search_when_it_is_named(
-        self, db, ldap_mode, monkeypatch
-    ):
+    def test_the_attribute_is_added_to_the_search_when_it_is_named(self, db, ldap_mode, monkeypatch):
         monkeypatch.setenv("LDAP_EMAIL_ATTRIBUTE", "mail")
         handed_out = directory_with(monkeypatch, email="kim@example.org")
 
@@ -1444,9 +1336,7 @@ class TestTheDirectoryWritesTheAddress:
         assert user is not None
         assert user.email == "kim@work.example.org"
 
-    def test_an_entry_with_no_address_clears_a_stored_one(
-        self, db, ldap_mode, monkeypatch
-    ):
+    def test_an_entry_with_no_address_clears_a_stored_one(self, db, ldap_mode, monkeypatch):
         """Absence is the directory speaking, exactly as absence from the admin
         group is a demotion once a group is configured."""
         monkeypatch.setenv("LDAP_EMAIL_ATTRIBUTE", "mail")
@@ -1459,9 +1349,7 @@ class TestTheDirectoryWritesTheAddress:
         assert user is not None
         assert user.email is None
 
-    def test_an_empty_attribute_is_the_same_as_an_absent_one(
-        self, db, ldap_mode, monkeypatch
-    ):
+    def test_an_empty_attribute_is_the_same_as_an_absent_one(self, db, ldap_mode, monkeypatch):
         monkeypatch.setenv("LDAP_EMAIL_ATTRIBUTE", "mail")
         directory_with(monkeypatch, email="")
 
@@ -1470,15 +1358,12 @@ class TestTheDirectoryWritesTheAddress:
         assert user is not None
         assert user.email is None
 
-    def test_an_unconfigured_directory_leaves_a_stored_address_alone(
-        self, db, ldap_mode, monkeypatch
-    ):
+    def test_an_unconfigured_directory_leaves_a_stored_address_alone(self, db, ldap_mode, monkeypatch):
         """The case the whole default turns on. A member typed their address in
         the app; the deployment names no attribute; signing in must not read
         that silence as the directory saying they have none."""
         db.add(
-            User(username="kim", password_hash=None, auth_source=AuthMode.LDAP.value,
-                 email="kim@example.org")
+            User(username="kim", password_hash=None, auth_source=AuthMode.LDAP.value, email="kim@example.org")
         )
         db.commit()
         directory_with(monkeypatch)
@@ -1498,9 +1383,7 @@ class TestTheDirectoryWritesTheAddress:
             "not an address",
         ],
     )
-    def test_a_directory_value_that_is_not_an_address_is_refused(
-        self, db, ldap_mode, monkeypatch, value
-    ):
+    def test_a_directory_value_that_is_not_an_address_is_refused(self, db, ldap_mode, monkeypatch, value):
         """A directory attribute is outside this app. `Bcc: someone` in a `To`
         header is what an unchecked one buys, and a NUL is what a character
         class of `\\s@,;<>` lets through."""
@@ -1532,10 +1415,8 @@ class TestTheDirectoryWritesTheAddress:
         assert user is not None
         assert user.email == "kim@example.org"
 
-    def test_a_refused_directory_value_is_a_warning_and_not_a_shrug(
-        self, db, ldap_mode, monkeypatch, caplog
-    ):
-        """"The directory named no address" and "the directory named something
+    def test_a_refused_directory_value_is_a_warning_and_not_a_shrug(self, db, ldap_mode, monkeypatch, caplog):
+        """ "The directory named no address" and "the directory named something
         this app will not store" both clear the column and are not the same
         event. They were logged identically at INFO until a reviewer said so."""
         monkeypatch.setenv("LDAP_EMAIL_ATTRIBUTE", "mail")
@@ -1577,9 +1458,7 @@ class TestTheDirectoryWritesTheAddress:
         assert user is not None
         assert user.email is None
 
-    def test_the_log_records_the_change_and_never_the_address(
-        self, db, ldap_mode, monkeypatch, caplog
-    ):
+    def test_the_log_records_the_change_and_never_the_address(self, db, ldap_mode, monkeypatch, caplog):
         monkeypatch.setenv("LDAP_EMAIL_ATTRIBUTE", "mail")
         directory_with(monkeypatch, email="kim@example.org")
         auth_backends.authenticate_ldap(db, "kim", "password123")
@@ -1609,9 +1488,7 @@ class TestTheProxyHeaderCarriesAnAddress:
         assert user is not None
         assert user.email == "kim@example.org"
 
-    def test_a_refused_header_is_a_warning_naming_the_peer(
-        self, db, proxy_mode, monkeypatch, caplog
-    ):
+    def test_a_refused_header_is_a_warning_naming_the_peer(self, db, proxy_mode, monkeypatch, caplog):
         """The same shape the refused `Remote-User` above already logs, on the
         same request and from the same unauthenticated source. It also clears
         the stored address, so INFO would have said "no address here" for a

@@ -115,9 +115,7 @@ def generate_code() -> str:
     lives.
     """
     raw = "".join(secrets.choice(CODE_ALPHABET) for _ in range(CODE_LENGTH))
-    return "-".join(
-        raw[index : index + CODE_GROUP] for index in range(0, CODE_LENGTH, CODE_GROUP)
-    )
+    return "-".join(raw[index : index + CODE_GROUP] for index in range(0, CODE_LENGTH, CODE_GROUP))
 
 
 def normalise_code(raw: str) -> str:
@@ -133,9 +131,7 @@ def normalise_code(raw: str) -> str:
     narrowing it would survive normalisation and travel into the comparison,
     which is the defect `isbn.normalise` already carries a test for.
     """
-    return "".join(
-        character for character in raw if character.isascii() and character.isalnum()
-    ).upper()
+    return "".join(character for character in raw if character.isascii() and character.isalnum()).upper()
 
 
 def _code_matches(supplied: str, stored: str | None) -> bool:
@@ -160,9 +156,7 @@ def verification_is_required(db: Session, user: User) -> bool:
     have said its accounts are held by people outside the household, and this app
     has to be the one holding the account's credential.
     """
-    return app_holds_the_password(user) and settings_store.accounts_are_open_to_outsiders(
-        db
-    )
+    return app_holds_the_password(user) and settings_store.accounts_are_open_to_outsiders(db)
 
 
 def verification_blocks(db: Session, user: User) -> bool:
@@ -260,14 +254,10 @@ def override_verification(db: Session, user: User, admin: User) -> None:
     """
     record_verification(user, VerificationProvenance.ADMIN, by=admin)
     db.commit()
-    logger.warning(
-        "Admin %r marked the account %r verified", admin.username, user.username
-    )
+    logger.warning("Admin %r marked the account %r verified", admin.username, user.username)
 
 
-def verification_mail(
-    db: Session, user: User, code: str
-) -> tuple[mailer.MailConfig, str, str] | None:
+def verification_mail(db: Session, user: User, code: str) -> tuple[mailer.MailConfig, str, str] | None:
     """The message that carries a verification code, or None if it cannot be sent.
 
     None for both reasons it might not go: no address on the account, and no

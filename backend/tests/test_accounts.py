@@ -17,6 +17,11 @@ from enums import AuthMode, SettingKey, VerificationProvenance
 from models import PasswordResetRequest, User
 from tests.corpus import BACKEND, application_modules
 
+TREE_GUARDS = {
+    "TestEndingEverySession": ("application_modules",),
+    "TestOnlyAMemberStartsAReset": ("application_modules",),
+}
+
 
 def _turn_the_policy_on(db) -> None:
     settings_store.set_value(db, SettingKey.ACCOUNTS_OPEN_TO_OUTSIDERS, "true")
@@ -96,17 +101,13 @@ class TestTheRecoveryRoutesAreNotARoster:
     for a missing account.
     """
 
-    def test_a_request_answers_the_same_for_a_name_nobody_holds(
-        self, client, member
-    ) -> None:
+    def test_a_request_answers_the_same_for_a_name_nobody_holds(self, client, member) -> None:
         real = client.post("/auth/reset/request", json={"username": "member"})
         absent = client.post("/auth/reset/request", json={"username": "nobody"})
         assert (real.status_code, real.text) == (absent.status_code, absent.text)
         assert real.status_code == 202
 
-    def test_redeeming_answers_the_same_for_a_name_nobody_holds(
-        self, client, member
-    ) -> None:
+    def test_redeeming_answers_the_same_for_a_name_nobody_holds(self, client, member) -> None:
         real = client.post(
             "/auth/reset/redeem",
             json={"username": "member", "code": "AAAA-AAAA-AAAA", "new_password": "abcdefgh"},
@@ -118,15 +119,9 @@ class TestTheRecoveryRoutesAreNotARoster:
         assert (real.status_code, real.json()) == (absent.status_code, absent.json())
         assert real.status_code == 400
 
-    def test_confirming_answers_the_same_for_a_name_nobody_holds(
-        self, client, member
-    ) -> None:
-        real = client.post(
-            "/auth/verify", json={"username": "member", "code": "AAAA-AAAA-AAAA"}
-        )
-        absent = client.post(
-            "/auth/verify", json={"username": "nobody", "code": "AAAA-AAAA-AAAA"}
-        )
+    def test_confirming_answers_the_same_for_a_name_nobody_holds(self, client, member) -> None:
+        real = client.post("/auth/verify", json={"username": "member", "code": "AAAA-AAAA-AAAA"})
+        absent = client.post("/auth/verify", json={"username": "nobody", "code": "AAAA-AAAA-AAAA"})
         assert (real.status_code, real.json()) == (absent.status_code, absent.json())
 
 
@@ -136,9 +131,7 @@ class TestOneLiveRequestPerAccount:
         client.post("/auth/reset/request", json={"username": "member"})
         assert db.query(PasswordResetRequest).count() == 1
 
-    def test_an_expired_request_is_replaced_rather_than_blocking(
-        self, client, member, db
-    ) -> None:
+    def test_an_expired_request_is_replaced_rather_than_blocking(self, client, member, db) -> None:
         client.post("/auth/reset/request", json={"username": "member"})
         row = db.query(PasswordResetRequest).one()
         row.expires_at = accounts.now() - timedelta(seconds=1)
@@ -153,9 +146,7 @@ class TestOneLiveRequestPerAccount:
         # tree where nothing was replaced and fails on one where it was.
         assert rows[0].expires_at > accounts.now()
 
-    def test_asking_again_does_not_cancel_a_code_already_read_out(
-        self, client, admin, member, db
-    ) -> None:
+    def test_asking_again_does_not_cancel_a_code_already_read_out(self, client, admin, member, db) -> None:
         """An admin has already told the member this code. Replacing the row
         underneath them would answer a second click by invalidating it."""
         client.post("/auth/reset/request", json={"username": "member"})
@@ -175,9 +166,7 @@ class TestOneLiveRequestPerAccount:
 
 
 class TestACodeIsSpentOnce:
-    def test_a_redeemed_code_does_not_work_twice(
-        self, client, admin, member
-    ) -> None:
+    def test_a_redeemed_code_does_not_work_twice(self, client, admin, member) -> None:
         client.post("/auth/reset/request", json={"username": "member"})
         code = client.post(
             f"/api/users/password-resets/{member['user']['id']}/approve",
@@ -197,9 +186,7 @@ class TestACodeIsSpentOnce:
         )
         assert again.status_code == 400
 
-    def test_an_expired_code_does_not_work(
-        self, client, admin, member, db
-    ) -> None:
+    def test_an_expired_code_does_not_work(self, client, admin, member, db) -> None:
         client.post("/auth/reset/request", json={"username": "member"})
         code = client.post(
             f"/api/users/password-resets/{member['user']['id']}/approve",
@@ -215,9 +202,7 @@ class TestACodeIsSpentOnce:
         )
         assert res.status_code == 400
 
-    def test_spacing_and_case_are_not_part_of_the_code(
-        self, client, admin, member
-    ) -> None:
+    def test_spacing_and_case_are_not_part_of_the_code(self, client, admin, member) -> None:
         """Somebody reading a code back drops the hyphens or types it lower
         case, and neither is a different code."""
         client.post("/auth/reset/request", json={"username": "member"})
@@ -236,9 +221,7 @@ class TestACodeIsSpentOnce:
         )
         assert res.status_code == 204, res.text
 
-    def test_the_code_is_not_stored_in_the_clear(
-        self, client, admin, member, db
-    ) -> None:
+    def test_the_code_is_not_stored_in_the_clear(self, client, admin, member, db) -> None:
         client.post("/auth/reset/request", json={"username": "member"})
         code = client.post(
             f"/api/users/password-resets/{member['user']['id']}/approve",
@@ -257,9 +240,7 @@ class TestAResetEndsEverySessionOnTheAccount:
     under a week long token is a week.
     """
 
-    def test_the_members_own_token_stops_working(
-        self, client, admin, member
-    ) -> None:
+    def test_the_members_own_token_stops_working(self, client, admin, member) -> None:
         assert client.get("/auth/me", headers=member["headers"]).status_code == 200
 
         client.post("/auth/reset/request", json={"username": "member"})
@@ -296,9 +277,7 @@ class TestAResetEndsEverySessionOnTheAccount:
             "/auth/reset/redeem",
             json={"username": "member", "code": code, "new_password": "brandnew1"},
         )
-        res = client.post(
-            "/auth/login", json={"username": "member", "password": "brandnew1"}
-        )
+        res = client.post("/auth/login", json={"username": "member", "password": "brandnew1"})
         assert res.status_code == 200, res.text
 
     def test_redeeming_hands_back_no_session(self, client, admin, member) -> None:
@@ -315,7 +294,6 @@ class TestAResetEndsEverySessionOnTheAccount:
         )
         assert res.status_code == 204
         assert res.content == b""
-
 
     def test_the_koreader_sync_password_stops_working(self, client, admin, member) -> None:
         """A device is a second way in that no token governs, so a recovery
@@ -369,8 +347,7 @@ class TestEndingEverySession:
                     elif isinstance(node, ast.AugAssign | ast.AnnAssign):
                         targets = [node.target]
                     named = any(
-                        isinstance(target, ast.Attribute)
-                        and target.attr == "sessions_valid_from"
+                        isinstance(target, ast.Attribute) and target.attr == "sessions_valid_from"
                         for target in targets
                     ) or (
                         isinstance(node, ast.Call)
@@ -383,9 +360,7 @@ class TestEndingEverySession:
 
 
 class TestTheMemberIsToldWhoApproved:
-    def test_the_account_carries_the_approver_afterwards(
-        self, client, admin, member
-    ) -> None:
+    def test_the_account_carries_the_approver_afterwards(self, client, admin, member) -> None:
         client.post("/auth/reset/request", json={"username": "member"})
         code = client.post(
             f"/api/users/password-resets/{member['user']['id']}/approve",
@@ -396,19 +371,15 @@ class TestTheMemberIsToldWhoApproved:
             json={"username": "member", "code": code, "new_password": "brandnew1"},
         )
 
-        token = client.post(
-            "/auth/login", json={"username": "member", "password": "brandnew1"}
-        ).json()["access_token"]
-        res = client.get(
-            "/api/users/me/security", headers={"Authorization": f"Bearer {token}"}
-        )
+        token = client.post("/auth/login", json={"username": "member", "password": "brandnew1"}).json()[
+            "access_token"
+        ]
+        res = client.get("/api/users/me/security", headers={"Authorization": f"Bearer {token}"})
         assert res.status_code == 200, res.text
         assert res.json()["password_reset_approved_by"] == "admin"
         assert res.json()["password_reset_at"] is not None
 
-    def test_an_account_nothing_happened_to_says_so(
-        self, client, member
-    ) -> None:
+    def test_an_account_nothing_happened_to_says_so(self, client, member) -> None:
         res = client.get("/api/users/me/security", headers=member["headers"])
         assert res.json()["password_reset_at"] is None
 
@@ -461,9 +432,7 @@ class TestResetIsRefusedWhereTheAppDoesNotHoldThePassword:
         )
         assert again.status_code == 204, again.text
 
-    def test_the_login_page_is_told_not_to_offer_it(
-        self, client, monkeypatch
-    ) -> None:
+    def test_the_login_page_is_told_not_to_offer_it(self, client, monkeypatch) -> None:
         monkeypatch.setenv("AUTH_MODE", "ldap")
         assert client.get("/auth/config").json()["password_reset_enabled"] is False
 
@@ -487,10 +456,7 @@ class TestResetIsRefusedWhereTheAppDoesNotHoldThePassword:
 
         assert app_holds_the_password(User(username="x", auth_source="")) is True
         assert app_holds_the_password(User(username="x", auth_source="LOCAL")) is True
-        assert (
-            app_holds_the_password(User(username="x", auth_source=AuthMode.LDAP.value))
-            is False
-        )
+        assert app_holds_the_password(User(username="x", auth_source=AuthMode.LDAP.value)) is False
 
 
 class TestOnlyAnAdminAssertionNamesAnAdmin:
@@ -523,9 +489,7 @@ class TestOnlyAnAdminAssertionNamesAnAdmin:
         admin = User(username="a")
         admin.id = 1
         with pytest.raises(ValueError, match=r"email with by=(?!None)"):
-            accounts.record_verification(
-                User(username="x"), VerificationProvenance.EMAIL, by=admin
-            )
+            accounts.record_verification(User(username="x"), VerificationProvenance.EMAIL, by=admin)
 
 
 class TestAnUnconfirmedAccountMayDoNothing:
@@ -537,9 +501,7 @@ class TestAnUnconfirmedAccountMayDoNothing:
     already minted, and those are the same function.
     """
 
-    def test_registering_under_the_policy_hands_back_no_token(
-        self, client, admin, db
-    ) -> None:
+    def test_registering_under_the_policy_hands_back_no_token(self, client, admin, db) -> None:
         _turn_the_policy_on(db)
         res = client.post(
             "/auth/register",
@@ -563,15 +525,11 @@ class TestAnUnconfirmedAccountMayDoNothing:
                 "email": "stranger@example.org",
             },
         )
-        res = client.post(
-            "/auth/login", json={"username": "stranger", "password": "password123"}
-        )
+        res = client.post("/auth/login", json={"username": "stranger", "password": "password123"})
         assert res.status_code == 403
         assert "confirmed" in res.json()["detail"]
 
-    def test_a_token_an_unconfirmed_account_holds_is_refused(
-        self, client, admin, db
-    ) -> None:
+    def test_a_token_an_unconfirmed_account_holds_is_refused(self, client, admin, db) -> None:
         """The gate is in `_user_from_token`, which every token path funnels
         through, rather than in the two `get_current_user` functions: a check
         placed in the callers is a check the next caller does not have.
@@ -594,9 +552,7 @@ class TestAnUnconfirmedAccountMayDoNothing:
         _turn_the_policy_on(db)
         assert client.get("/auth/me", headers=headers).status_code == 401
 
-    def test_the_refusal_lifts_when_an_admin_confirms(
-        self, client, admin, db
-    ) -> None:
+    def test_the_refusal_lifts_when_an_admin_confirms(self, client, admin, db) -> None:
         _turn_the_policy_on(db)
         client.post(
             "/auth/register",
@@ -608,9 +564,7 @@ class TestAnUnconfirmedAccountMayDoNothing:
         )
         stranger = db.query(User).filter(User.username == "stranger").one()
 
-        res = client.post(
-            f"/api/users/{stranger.id}/verify", headers=admin["headers"]
-        )
+        res = client.post(f"/api/users/{stranger.id}/verify", headers=admin["headers"])
         assert res.status_code == 200, res.text
         assert res.json()["verified_by"] == "admin"
         assert (
@@ -624,18 +578,12 @@ class TestAnUnconfirmedAccountMayDoNothing:
     def test_the_policy_being_off_refuses_nobody(self, client, member) -> None:
         assert client.get("/auth/me", headers=member["headers"]).status_code == 200
 
-    def test_an_account_made_while_the_policy_was_off_is_stamped_confirmed(
-        self, client, admin, db
-    ) -> None:
+    def test_an_account_made_while_the_policy_was_off_is_stamped_confirmed(self, client, admin, db) -> None:
         """Turning the switch on afterwards must not strand a member already
         here, which is what stamping at creation buys."""
-        client.post(
-            "/auth/register", json={"username": "household", "password": "password123"}
-        )
+        client.post("/auth/register", json={"username": "household", "password": "password123"})
         _turn_the_policy_on(db)
-        res = client.post(
-            "/auth/login", json={"username": "household", "password": "password123"}
-        )
+        res = client.post("/auth/login", json={"username": "household", "password": "password123"})
         assert res.status_code == 200, res.text
 
     def test_the_first_account_is_never_gated(self, client, db) -> None:
@@ -643,28 +591,20 @@ class TestAnUnconfirmedAccountMayDoNothing:
         yet, so a deployment that switched the policy on first would have no way
         in at all."""
         _turn_the_policy_on(db)
-        res = client.post(
-            "/auth/register", json={"username": "first", "password": "password123"}
-        )
+        res = client.post("/auth/register", json={"username": "first", "password": "password123"})
         assert res.status_code == 201, res.text
         assert res.json()["verification_required"] is False
         assert res.json()["token"] is not None
 
-    def test_an_address_is_required_where_one_will_be_confirmed(
-        self, client, admin, db
-    ) -> None:
+    def test_an_address_is_required_where_one_will_be_confirmed(self, client, admin, db) -> None:
         _turn_the_policy_on(db)
-        res = client.post(
-            "/auth/register", json={"username": "stranger", "password": "password123"}
-        )
+        res = client.post("/auth/register", json={"username": "stranger", "password": "password123"})
         assert res.status_code == 400
         assert db.query(User).filter(User.username == "stranger").first() is None
 
 
 class TestConfirmationDoesNotApplyToADirectoryAccount:
-    def test_an_admin_cannot_confirm_what_a_directory_authenticated(
-        self, client, admin, db
-    ) -> None:
+    def test_an_admin_cannot_confirm_what_a_directory_authenticated(self, client, admin, db) -> None:
         db.add(
             User(
                 username="fromldap",
@@ -674,17 +614,13 @@ class TestConfirmationDoesNotApplyToADirectoryAccount:
         )
         db.commit()
         target = db.query(User).filter(User.username == "fromldap").one()
-        res = client.post(
-            f"/api/users/{target.id}/verify", headers=admin["headers"]
-        )
+        res = client.post(f"/api/users/{target.id}/verify", headers=admin["headers"])
         assert res.status_code == 409
 
     def test_a_directory_row_is_stamped_when_it_is_created(self, db) -> None:
         from auth_backends import upsert_directory_user
 
-        user = upsert_directory_user(
-            db, "kim", is_admin=False, source=AuthMode.LDAP
-        )
+        user = upsert_directory_user(db, "kim", is_admin=False, source=AuthMode.LDAP)
         assert user is not None
         assert user.email_verification_source == VerificationProvenance.DIRECTORY.value
 
@@ -703,9 +639,7 @@ class TestTheCodeIsNeverServedTwice:
         # that is not there and would be relaxed by whoever met it next.
         assert [set(row) & {"code", "code_hash"} for row in listing.json()] == [set()]
 
-    def test_the_queue_says_until_when_the_code_works(
-        self, client, admin, member
-    ) -> None:
+    def test_the_queue_says_until_when_the_code_works(self, client, admin, member) -> None:
         """**What an admin has left after a reload.** The plaintext lives in
         component state and is gone; this field is the only thing that still
         says when it stops working, and dropping it from the response was not
@@ -716,16 +650,12 @@ class TestTheCodeIsNeverServedTwice:
             f"/api/users/password-resets/{member['user']['id']}/approve",
             headers=admin["headers"],
         )
-        row = client.get(
-            "/api/users/password-resets", headers=admin["headers"]
-        ).json()[0]
+        row = client.get("/api/users/password-resets", headers=admin["headers"]).json()[0]
 
         assert row["code_expires_at"] is not None
         assert row["approved_by"] == "admin"
 
-    def test_re_approving_mints_a_different_code(
-        self, client, admin, member
-    ) -> None:
+    def test_re_approving_mints_a_different_code(self, client, admin, member) -> None:
         client.post("/auth/reset/request", json={"username": "member"})
         first = client.post(
             f"/api/users/password-resets/{member['user']['id']}/approve",
@@ -788,9 +718,7 @@ class TestDecliningARequest:
 
 
 class TestTheRecoveryRoutesAreRateLimited:
-    def test_the_address_budget_bounds_a_flood_across_accounts(
-        self, client, member
-    ) -> None:
+    def test_the_address_budget_bounds_a_flood_across_accounts(self, client, member) -> None:
         """A per account limit alone lets one address work through the roster
         slowly, so the address is charged too."""
         from ratelimit import RECOVERY_REQUEST_LIMIT
@@ -801,9 +729,7 @@ class TestTheRecoveryRoutesAreRateLimited:
         res = client.post("/auth/reset/request", json={"username": "member"})
         assert res.status_code == 429
 
-    def test_the_account_budget_bounds_a_flood_against_one_member(
-        self, client, member, monkeypatch
-    ) -> None:
+    def test_the_account_budget_bounds_a_flood_against_one_member(self, client, member, monkeypatch) -> None:
         """And a per address limit alone lets a botnet queue a hundred requests
         against one member, so the account is charged too."""
         import ratelimit
@@ -813,25 +739,15 @@ class TestTheRecoveryRoutesAreRateLimited:
         monkeypatch.setattr(
             ratelimit,
             "recovery_request_address_limiter",
-            ratelimit.SlidingWindowLimiter(
-                ratelimit.RateLimit(max_attempts=1000, window_seconds=60)
-            ),
+            ratelimit.SlidingWindowLimiter(ratelimit.RateLimit(max_attempts=1000, window_seconds=60)),
         )
         monkeypatch.setattr(
             "routers.auth.recovery_request_address_limiter",
             ratelimit.recovery_request_address_limiter,
         )
         for _ in range(ratelimit.RECOVERY_REQUEST_LIMIT.max_attempts):
-            assert (
-                client.post(
-                    "/auth/reset/request", json={"username": "member"}
-                ).status_code
-                == 202
-            )
-        assert (
-            client.post("/auth/reset/request", json={"username": "member"}).status_code
-            == 429
-        )
+            assert client.post("/auth/reset/request", json={"username": "member"}).status_code == 202
+        assert client.post("/auth/reset/request", json={"username": "member"}).status_code == 429
 
     def test_guessing_a_code_is_bounded(self, client, member) -> None:
         from ratelimit import RECOVERY_CODE_LIMIT
@@ -870,9 +786,7 @@ class TestConfirmingByCode:
         user = db.query(User).filter(User.username == "stranger").one()
         code = accounts.start_verification(db, user)
 
-        res = client.post(
-            "/auth/verify", json={"username": "stranger", "code": code}
-        )
+        res = client.post("/auth/verify", json={"username": "stranger", "code": code})
         assert res.status_code == 204, res.text
         db.refresh(user)
         assert user.email_verification_source == VerificationProvenance.EMAIL.value
@@ -897,9 +811,7 @@ class TestConfirmingByCode:
         user = db.query(User).filter(User.username == "stranger").one()
         code = accounts.start_verification(db, user)
         client.post("/auth/verify", json={"username": "stranger", "code": code})
-        again = client.post(
-            "/auth/verify", json={"username": "stranger", "code": code}
-        )
+        again = client.post("/auth/verify", json={"username": "stranger", "code": code})
         assert again.status_code == 400
 
 
@@ -912,9 +824,7 @@ class TestTheOverrideDoesNotRewriteAConfirmationSomebodyElseMade:
     such a row, and a client is not a control.
     """
 
-    def test_a_second_confirmation_keeps_the_first_record(
-        self, client, admin, db
-    ) -> None:
+    def test_a_second_confirmation_keeps_the_first_record(self, client, admin, db) -> None:
         _turn_the_policy_on(db)
         client.post(
             "/auth/register",
@@ -969,9 +879,7 @@ class TestNeitherBranchOfAResendIsFree:
         monkeypatch.setattr(accounts, "verify_password", counting_verify)
         return calls
 
-    def test_both_branches_cost_the_same(
-        self, client, admin, db, monkeypatch
-    ) -> None:
+    def test_both_branches_cost_the_same(self, client, admin, db, monkeypatch) -> None:
         """**Equality, not presence, and the difference is an evasion.**
 
         The first version of this asserted each branch performed *at least one*
@@ -1055,9 +963,7 @@ class TestTheRevocationCutoffCarriesSubSecondPrecision:
 
         assert accounts.session_is_live(db, user, issued) is True
 
-    def test_a_token_with_no_issue_time_is_refused_once_the_column_is_set(
-        self, db
-    ) -> None:
+    def test_a_token_with_no_issue_time_is_refused_once_the_column_is_set(self, db) -> None:
         """A token minted before the column existed carries no `iat` at all."""
         user = self._user(db, accounts.now())
 

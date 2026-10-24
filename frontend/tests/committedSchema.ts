@@ -364,7 +364,8 @@ export function propertiesOf(
   const node = resolved(named, document);
   refuseUnmodelled(node, where);
   const properties = node["properties"] as
-    Readonly<Record<string, SchemaNode>> | undefined;
+    | Readonly<Record<string, SchemaNode>>
+    | undefined;
   if (properties === undefined || Object.keys(properties).length === 0) {
     throw new Error(`${where} declares no fields`);
   }

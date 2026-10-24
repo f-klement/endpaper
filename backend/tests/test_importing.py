@@ -179,9 +179,7 @@ class TestThePrivateBookOracle:
 
     def test_the_rest_of_the_file_still_lands(self, db, member, other):
         """One unusable row must not throw the other four thousand away."""
-        db.add(
-            Book(title="Secret", isbn="9780441013593", added_by_user_id=other.id, is_private=True)
-        )
+        db.add(Book(title="Secret", isbn="9780441013593", added_by_user_id=other.id, is_private=True))
         db.commit()
 
         result = Import.for_member(db, member.id).apply(
@@ -200,9 +198,7 @@ class TestThePrivateBookOracle:
         """The mirror case: the same ISBN, but on a Book the Member can see, is
         an ordinary match. Skipping it would make the privacy rule visible as a
         difference in behaviour."""
-        db.add(
-            Book(title="Dune", isbn="9780441013593", added_by_user_id=member.id, is_private=True)
-        )
+        db.add(Book(title="Dune", isbn="9780441013593", added_by_user_id=member.id, is_private=True))
         db.commit()
 
         result = Import.for_member(db, member.id).apply(
@@ -222,9 +218,7 @@ class TestWhichBookARowIs:
     becomes a status on the wrong Book.
     """
 
-    def test_importing_again_after_trashing_your_own_book_lists_it_in_the_trash(
-        self, db, member
-    ):
+    def test_importing_again_after_trashing_your_own_book_lists_it_in_the_trash(self, db, member):
         db.add(
             Book(
                 title="Dune",
@@ -243,14 +237,10 @@ class TestWhichBookARowIs:
         assert (result.skipped, result.created, result.unmatched_titles) == (0, 0, [])
 
     def test_a_title_two_books_share_takes_no_row_and_creates_nothing(self, db, member):
-        db.add_all(
-            [Book(title="Dune", added_by_user_id=member.id) for _ in range(2)]
-        )
+        db.add_all([Book(title="Dune", added_by_user_id=member.id) for _ in range(2)])
         db.commit()
 
-        result = Import.for_member(db, member.id).apply(
-            parse(row("Dune")), create_missing=True
-        )
+        result = Import.for_member(db, member.id).apply(parse(row("Dune")), create_missing=True)
 
         assert (result.matched, result.created, result.unmatched_titles) == (0, 0, [])
         assert (result.ambiguous, result.ambiguous_titles) == (1, ["Dune"])
@@ -266,9 +256,7 @@ class TestWhichBookARowIs:
 
         Import.for_member(db, member.id).apply(parse(row("Dune", isbn="9780441013593")))
 
-        assert [record.book_id for record in db.query(UserBook)] == [
-            min(copy.id for copy in copies)
-        ]
+        assert [record.book_id for record in db.query(UserBook)] == [min(copy.id for copy in copies)]
 
     def test_a_stored_isbn_ten_is_matched_by_the_isbn_thirteen_in_a_file(self, db, member):
         db.add(Book(title="Dune", isbn="0441013597", added_by_user_id=member.id))
@@ -339,9 +327,7 @@ class TestATitleCollisionNeverReachesAnotherMembersPrivateBook:
 
         assert recognise_stored(index, stored) == recognition.Unknown()
 
-    def test_a_work_key_hit_keeps_an_invisibly_taken_isbn_out_of_the_refusals(
-        self, db, member, other
-    ):
+    def test_a_work_key_hit_keeps_an_invisibly_taken_isbn_out_of_the_refusals(self, db, member, other):
         """The conjunction that decides how much the upload preview discloses.
 
         `recognition` asks the Shelf on both keys before it asks the whole table
@@ -378,17 +364,11 @@ class TestATitleCollisionNeverReachesAnotherMembersPrivateBook:
         db.commit()
 
         index = recognition.Index.build(db, member.id, recognition.Source.CATALOGUE)
-        stored = stored_record(
-            Record(
-                title="The Shared Title", author="Ann Author", isbn="9780441013593"
-            )
-        )
+        stored = stored_record(Record(title="The Shared Title", author="Ann Author", isbn="9780441013593"))
 
         assert isinstance(recognise_stored(index, stored), recognition.Seen)
 
-    def test_a_visible_book_with_the_same_title_is_still_matched(
-        self, db, member, other
-    ):
+    def test_a_visible_book_with_the_same_title_is_still_matched(self, db, member, other):
         """The diagonal, so neither arm above passes by matching nothing at all."""
         db.add(
             Book(
@@ -433,9 +413,7 @@ class TestReadingRecordsArePersonal:
         db.add(UserBook(book_id=book.id, user_id=member.id, rating=5))
         db.commit()
 
-        Import.for_member(db, member.id).apply(
-            parse(row("Dune", isbn="9780441013593", rating=2))
-        )
+        Import.for_member(db, member.id).apply(parse(row("Dune", isbn="9780441013593", rating=2)))
 
         assert db.query(UserBook).one().rating == 5
 
@@ -470,9 +448,7 @@ class TestReadingRecordsArePersonal:
         db.add(Book(title="Dune", isbn="9780441013593", added_by_user_id=member.id))
         db.commit()
 
-        result = Import.for_member(db, member.id).apply(
-            parse(row("Dune", isbn="9780441013593", shelf=""))
-        )
+        result = Import.for_member(db, member.id).apply(parse(row("Dune", isbn="9780441013593", shelf="")))
 
         assert result.statuses_updated == 0
         assert db.query(UserBook).count() == 0
@@ -500,7 +476,9 @@ class TestCreatingBooks:
 
     def test_gaps_are_filled_and_nothing_is_overwritten(self, db, member):
         book = Book(
-            title="Dune", isbn="9780441013593", publisher="Real Publisher",
+            title="Dune",
+            isbn="9780441013593",
+            publisher="Real Publisher",
             added_by_user_id=member.id,
         )
         db.add(book)
@@ -628,9 +606,7 @@ class TestTheTagCaps:
 
         assert result.tags_dropped == 3
 
-    def test_and_counts_the_rest_of_a_cell_the_ceiling_cut_off_mid_way(
-        self, db, member
-    ):
+    def test_and_counts_the_rest_of_a_cell_the_ceiling_cut_off_mid_way(self, db, member):
         """**The break is at position two and the cell repeats a name**, which
         is the only shape where counting the remainder off the position and
         searching for the name disagree.
@@ -693,8 +669,7 @@ class TestTheTagCaps:
 
         assert result.tags_dropped == 0
         carried = [
-            sorted(tag.name for tag in book.tags)
-            for book in db.query(Book).order_by(Book.title).all()
+            sorted(tag.name for tag in book.tags) for book in db.query(Book).order_by(Book.title).all()
         ]
         assert carried == [["bookclub"], ["bookclub"]]
 
@@ -702,9 +677,7 @@ class TestTheTagCaps:
         db.add(Book(title="Dune", isbn="9780441013593", added_by_user_id=member.id))
         db.commit()
 
-        Import.for_member(db, member.id).apply(
-            parse(row("Dune", isbn="9780441013593", shelves="one,two"))
-        )
+        Import.for_member(db, member.id).apply(parse(row("Dune", isbn="9780441013593", shelves="one,two")))
 
         assert db.query(Tag).filter(Tag.name.in_(["one", "two"])).count() == 0
 
@@ -730,9 +703,7 @@ class TestTheReview:
         db.add(Book(title="Dune", isbn="9780441013593", added_by_user_id=member.id))
         db.commit()
 
-        Import.for_member(db, member.id).apply(
-            parse(row("Dune", isbn="9780441013593", review="Loved it."))
-        )
+        Import.for_member(db, member.id).apply(parse(row("Dune", isbn="9780441013593", review="Loved it.")))
 
         assert db.query(Note).one().content == "Loved it."
 
@@ -759,8 +730,7 @@ class TestTheCatalogueIsReadOnce:
 
     def test_the_per_row_cost_is_one_select(self, db, member):
         db.add_all(
-            Book(title=f"Book {n}", isbn=f"978044101{n:04d}", added_by_user_id=member.id)
-            for n in range(12)
+            Book(title=f"Book {n}", isbn=f"978044101{n:04d}", added_by_user_id=member.id) for n in range(12)
         )
         db.commit()
         member_id = member.id
@@ -869,23 +839,17 @@ class TestTheOpdsMatchingRuleIsTheOneImportUses:
     """ISBN where one exists, then the normalised title. Not the MARC import's rule."""
 
     def test_an_isbn_matches_before_a_title(self, db, member):
-        db.add(Book(title="A different spelling", isbn="9780552152976",
-                    added_by_user_id=member.id))
+        db.add(Book(title="A different spelling", isbn="9780552152976", added_by_user_id=member.id))
         db.commit()
 
-        result = OpdsImport.for_member(db, member.id).apply(
-            [held("Small Gods", isbn="9780552152976")]
-        )
+        result = OpdsImport.for_member(db, member.id).apply([held("Small Gods", isbn="9780552152976")])
 
         assert (result.matched, result.created) == (1, 0)
 
-    def test_a_title_matches_case_insensitively_with_no_author_in_the_key(
-        self, db, member
-    ):
+    def test_a_title_matches_case_insensitively_with_no_author_in_the_key(self, db, member):
         """The difference from the MARC import, which folds the author into the key.
         A record crediting nobody still matches a Book credited to someone."""
-        db.add(Book(title="Small Gods", author="Terry Pratchett",
-                    added_by_user_id=member.id))
+        db.add(Book(title="Small Gods", author="Terry Pratchett", added_by_user_id=member.id))
         db.commit()
 
         result = OpdsImport.for_member(db, member.id).apply([held("SMALL GODS")])
@@ -898,16 +862,12 @@ class TestTheOpdsMatchingRuleIsTheOneImportUses:
         assert (result.matched, result.created) == (0, 1)
 
     def test_nothing_is_created_when_the_caller_asked_for_none(self, db, member):
-        result = OpdsImport.for_member(db, member.id).apply(
-            [held("Small Gods")], create_missing=False
-        )
+        result = OpdsImport.for_member(db, member.id).apply([held("Small Gods")], create_missing=False)
 
         assert (result.created, result.unmatched_titles) == (0, ["Small Gods"])
 
     def test_a_feed_listing_one_book_twice_creates_it_once(self, db, member):
-        result = OpdsImport.for_member(db, member.id).apply(
-            [held("Small Gods"), held("Small Gods")]
-        )
+        result = OpdsImport.for_member(db, member.id).apply([held("Small Gods"), held("Small Gods")])
 
         assert (result.created, result.matched) == (1, 1)
 
@@ -917,26 +877,19 @@ class TestFillingGapsAndNeverOverwriting:
         db.add(Book(title="Small Gods", added_by_user_id=member.id))
         db.commit()
 
-        OpdsImport.for_member(db, member.id).apply(
-            [held("Small Gods", author="Terry Pratchett")]
-        )
+        OpdsImport.for_member(db, member.id).apply([held("Small Gods", author="Terry Pratchett")])
 
         assert db.query(Book).one().author == "Terry Pratchett"
 
     def test_an_author_somebody_already_wrote_is_not_replaced(self, db, member):
-        db.add(Book(title="Small Gods", author="T. Pratchett",
-                    added_by_user_id=member.id))
+        db.add(Book(title="Small Gods", author="T. Pratchett", added_by_user_id=member.id))
         db.commit()
 
-        OpdsImport.for_member(db, member.id).apply(
-            [held("Small Gods", author="Terry Pratchett")]
-        )
+        OpdsImport.for_member(db, member.id).apply([held("Small Gods", author="Terry Pratchett")])
 
         assert db.query(Book).one().author == "T. Pratchett"
 
-    def test_an_isbn_is_never_written_onto_a_book_that_matched_on_its_title(
-        self, db, member
-    ):
+    def test_an_isbn_is_never_written_onto_a_book_that_matched_on_its_title(self, db, member):
         """`books.isbn` is unique across the whole table, so filling it can raise
         on a row this Member cannot see and abort the entire sync. The record
         matched on the weaker key, which is also where it is least likely to be
@@ -944,9 +897,7 @@ class TestFillingGapsAndNeverOverwriting:
         db.add(Book(title="Small Gods", added_by_user_id=member.id))
         db.commit()
 
-        OpdsImport.for_member(db, member.id).apply(
-            [held("Small Gods", isbn="9780552152976")]
-        )
+        OpdsImport.for_member(db, member.id).apply([held("Small Gods", isbn="9780552152976")])
 
         assert db.query(Book).one().isbn is None
 
@@ -960,32 +911,25 @@ class TestTheOpdsPrivateBookOracle:
     """
 
     def test_it_is_skipped_rather_than_raising_on_the_unique_index(self, db, member, other):
-        db.add(Book(title="Hidden", isbn="9780552152976", is_private=True,
-                    added_by_user_id=other.id))
+        db.add(Book(title="Hidden", isbn="9780552152976", is_private=True, added_by_user_id=other.id))
         db.commit()
 
-        result = OpdsImport.for_member(db, member.id).apply(
-            [held("Small Gods", isbn="9780552152976")]
-        )
+        result = OpdsImport.for_member(db, member.id).apply([held("Small Gods", isbn="9780552152976")])
 
         assert (result.created, result.skipped) == (0, 1)
 
     def test_its_title_is_never_reported(self, db, member, other):
-        db.add(Book(title="Hidden", isbn="9780552152976", is_private=True,
-                    added_by_user_id=other.id))
+        db.add(Book(title="Hidden", isbn="9780552152976", is_private=True, added_by_user_id=other.id))
         db.commit()
 
-        result = OpdsImport.for_member(db, member.id).apply(
-            [held("Small Gods", isbn="9780552152976")]
-        )
+        result = OpdsImport.for_member(db, member.id).apply([held("Small Gods", isbn="9780552152976")])
 
         assert result.unmatched_titles == []
 
     def test_the_rest_of_the_feed_still_arrives(self, db, member, other):
         """One record that cannot be acted on is counted and skipped, never a
         failed sync."""
-        db.add(Book(title="Hidden", isbn="9780552152976", is_private=True,
-                    added_by_user_id=other.id))
+        db.add(Book(title="Hidden", isbn="9780552152976", is_private=True, added_by_user_id=other.id))
         db.commit()
 
         result = OpdsImport.for_member(db, member.id).apply(
@@ -1018,9 +962,7 @@ class TestOpdsValuesAreBoundedBeforeTheyAreMatched:
 
         assert (first.created, second.matched) == (1, 1)
 
-    def test_a_title_the_column_cannot_hold_is_skipped_rather_than_filed_cut_short(
-        self, db, member
-    ):
+    def test_a_title_the_column_cannot_hold_is_skipped_rather_than_filed_cut_short(self, db, member):
         """The bound is `catalogue.Record`'s and it drops rather than truncates:
         half a title is an assertion nobody made. What reaches here is a record
         naming nothing, and it is counted where a person can see it."""
@@ -1028,9 +970,7 @@ class TestOpdsValuesAreBoundedBeforeTheyAreMatched:
 
         assert (result.created, result.skipped) == (0, 1)
 
-    def test_an_empty_title_matches_nothing_rather_than_every_book(
-        self, db, member
-    ):
+    def test_an_empty_title_matches_nothing_rather_than_every_book(self, db, member):
         """A record naming nothing must not be matched by `""`. The over long
         case is the test above; this one is the empty string it could also
         arrive as."""
@@ -1077,22 +1017,14 @@ def _outside_each_bound() -> list[Any]:
             low, high = catalogue._NUMBER_RANGES[name]
             # Numbers drop rather than clamp: 2200 for a 9999 asserts a date
             # nobody supplied.
-            cases.append(
-                pytest.param(name, CEILING, high + 1, None, id=f"{name}_above_its_range")
-            )
-            cases.append(
-                pytest.param(name, FLOOR, low - 1, None, id=f"{name}_below_its_range")
-            )
+            cases.append(pytest.param(name, CEILING, high + 1, None, id=f"{name}_above_its_range"))
+            cases.append(pytest.param(name, FLOOR, low - 1, None, id=f"{name}_below_its_range"))
         else:
             ceiling = catalogue._TEXT_CEILINGS[name]
             probe = "a" + "x" * ceiling
             # Strings truncate, at the ceiling and from the front: half a title
             # is still the book, and `books.title` is NOT NULL.
-            cases.append(
-                pytest.param(
-                    name, CEILING, probe, probe[:ceiling], id=f"{name}_past_its_ceiling"
-                )
-            )
+            cases.append(pytest.param(name, CEILING, probe, probe[:ceiling], id=f"{name}_past_its_ceiling"))
     return cases
 
 
@@ -1110,11 +1042,7 @@ def _inside_each_bound() -> list[Any]:
             cases.append(pytest.param(name, FLOOR, low, id=f"{name}_at_its_floor"))
         else:
             ceiling = catalogue._TEXT_CEILINGS[name]
-            cases.append(
-                pytest.param(
-                    name, CEILING, "a" + "x" * (ceiling - 1), id=f"{name}_at_its_ceiling"
-                )
-            )
+            cases.append(pytest.param(name, CEILING, "a" + "x" * (ceiling - 1), id=f"{name}_at_its_ceiling"))
     return cases
 
 
@@ -1232,17 +1160,13 @@ class TestTheSecondBoundHasOneConstructibleBypass:
         sides = Counter(
             (name, side)
             for name in _MARC_RECORD_FIELDS
-            for side in (
-                (CEILING, FLOOR) if name in catalogue._NUMBER_RANGES else (CEILING,)
-            )
+            for side in ((CEILING, FLOOR) if name in catalogue._NUMBER_RANGES else (CEILING,))
         )
 
         assert covered == sides
 
     @pytest.mark.parametrize(("name", "side", "probe", "expected"), _outside_each_bound())
-    def test_a_field_widened_after_construction_is_held_to_its_bound(
-        self, name, side, probe, expected
-    ):
+    def test_a_field_widened_after_construction_is_held_to_its_bound(self, name, side, probe, expected):
         assert _is_outside(name, side, probe), (
             f"{name}'s {side} case carries a probe that is not outside that side, "
             "or that cannot tell one end of a truncation from the other, so it "
@@ -1330,16 +1254,8 @@ def _belt_would_drop_outside(name: str) -> tuple[float, float]:
     # `cast` rather than `float()`: the declarations carry ints and the table
     # they are compared against carries ints, so converting would compare a
     # different pair of values and pass for a reason nobody chose.
-    (low,) = [
-        cast(float, limit.ge)
-        for limit in limits
-        if isinstance(limit, annotated_types.Ge)
-    ]
-    (high,) = [
-        cast(float, limit.le)
-        for limit in limits
-        if isinstance(limit, annotated_types.Le)
-    ]
+    (low,) = [cast(float, limit.ge) for limit in limits if isinstance(limit, annotated_types.Ge)]
+    (high,) = [cast(float, limit.le) for limit in limits if isinstance(limit, annotated_types.Le)]
     return (low, high)
 
 
@@ -1429,25 +1345,21 @@ class TestTheMarcPrivateBookOracle:
     """
 
     def test_it_is_skipped_rather_than_raising_on_the_unique_index(self, db, member, other):
-        db.add(Book(title="Hidden", isbn="9780552152976", is_private=True,
-                    added_by_user_id=other.id))
+        db.add(Book(title="Hidden", isbn="9780552152976", is_private=True, added_by_user_id=other.id))
         db.commit()
 
         result = MarcImport.for_member(db, member.id).apply(
-            one_marc_file(catalogued("Small Gods", author="T Pratchett",
-                                     isbn="9780552152976"))
+            one_marc_file(catalogued("Small Gods", author="T Pratchett", isbn="9780552152976"))
         )
 
         assert (result.created, result.skipped) == (0, 1)
 
     def test_its_title_is_never_reported(self, db, member, other):
-        db.add(Book(title="Hidden", isbn="9780552152976", is_private=True,
-                    added_by_user_id=other.id))
+        db.add(Book(title="Hidden", isbn="9780552152976", is_private=True, added_by_user_id=other.id))
         db.commit()
 
         result = MarcImport.for_member(db, member.id).apply(
-            one_marc_file(catalogued("Small Gods", author="T Pratchett",
-                                     isbn="9780552152976"))
+            one_marc_file(catalogued("Small Gods", author="T Pratchett", isbn="9780552152976"))
         )
 
         assert result.unmatched_titles == []
@@ -1455,8 +1367,7 @@ class TestTheMarcPrivateBookOracle:
     def test_the_rest_of_the_file_still_lands(self, db, member, other):
         """One record that cannot be acted on is counted and skipped, never a
         failed transfer."""
-        db.add(Book(title="Hidden", isbn="9780552152976", is_private=True,
-                    added_by_user_id=other.id))
+        db.add(Book(title="Hidden", isbn="9780552152976", is_private=True, added_by_user_id=other.id))
         db.commit()
 
         result = MarcImport.for_member(db, member.id).apply(
@@ -1475,8 +1386,7 @@ class TestTheMarcPrivateBookOracle:
         db.commit()
 
         result = MarcImport.for_member(db, member.id).apply(
-            one_marc_file(catalogued("Small Gods", author="T Pratchett",
-                                     isbn="9780552152976"))
+            one_marc_file(catalogued("Small Gods", author="T Pratchett", isbn="9780552152976"))
         )
 
         assert (result.matched, result.created, result.skipped) == (1, 0, 0)
@@ -1502,14 +1412,14 @@ class TestAFilesHeadingsCrossOnlyThroughEvidence:
     )
 
     def _import_onto_a_matched_book(self, db, member) -> Book:
-        book = Book(title="Small Gods", isbn="9780552152976",
-                    added_by_user_id=member.id)
+        book = Book(title="Small Gods", isbn="9780552152976", added_by_user_id=member.id)
         db.add(book)
         db.commit()
-        MarcImport.for_member(db, member.id).apply(one_marc_file(
-            Record(source="marc", title="Small Gods", isbn="9780552152976",
-                   headings=self._HEADINGS)
-        ))
+        MarcImport.for_member(db, member.id).apply(
+            one_marc_file(
+                Record(source="marc", title="Small Gods", isbn="9780552152976", headings=self._HEADINGS)
+            )
+        )
         db.refresh(book)
         return book
 
@@ -1517,7 +1427,9 @@ class TestAFilesHeadingsCrossOnlyThroughEvidence:
         book = self._import_onto_a_matched_book(db, member)
 
         assert {(c.scheme, c.number) for c in book.classifications} == {
-            ("ddc", "823.914"), ("lcc", "PR6066.R34"), ("gnd", "4026894-9"),
+            ("ddc", "823.914"),
+            ("lcc", "PR6066.R34"),
+            ("gnd", "4026894-9"),
             ("lcsh", "Discworld (Imaginary place)"),
         }
 
@@ -1696,9 +1608,7 @@ class TestTheVanishedMatchCheckReadsOnlyBooksTheImportLoaded:
     def test_an_unrelated_failure_is_raised_whether_or_not_a_hidden_book_was_deleted(
         self, db, member, other, monkeypatch, deleted
     ):
-        theirs = Book(
-            title="Theirs", isbn="9780441013593", added_by_user_id=other.id, is_private=True
-        )
+        theirs = Book(title="Theirs", isbn="9780441013593", added_by_user_id=other.id, is_private=True)
         db.add_all([theirs, Book(title="Small Gods", isbn="9780552152976", added_by_user_id=member.id)])
         db.commit()
         theirs_id = theirs.id
@@ -1827,9 +1737,7 @@ def _creates_outside_the_spine(source: str, spine: str = SPINE) -> list[str]:
         for function in ast.walk(tree)
         if isinstance(function, ast.FunctionDef | ast.AsyncFunctionDef)
         and any(
-            isinstance(call, ast.Call)
-            and isinstance(call.func, ast.Name)
-            and call.func.id == "Book"
+            isinstance(call, ast.Call) and isinstance(call.func, ast.Name) and call.func.id == "Book"
             for call in ast.walk(function)
         )
     ]
@@ -1846,11 +1754,7 @@ def _creates_outside_the_spine(source: str, spine: str = SPINE) -> list[str]:
     sheltered: set[int] = set()
     named_builders: set[str] = set()
     for call in ast.walk(tree):
-        if (
-            isinstance(call, ast.Call)
-            and isinstance(call.func, ast.Name)
-            and call.func.id == spine
-        ):
+        if isinstance(call, ast.Call) and isinstance(call.func, ast.Name) and call.func.id == spine:
             # **Only the `create` argument shelters, because only `create`
             # sits behind the refusal.** `fill_gaps` runs on the matched arm,
             # where the predicate is never reached, so a Book minted through
@@ -1881,9 +1785,7 @@ def _creates_outside_the_spine(source: str, spine: str = SPINE) -> list[str]:
                         and node.value.id == "self"
                     ):
                         here = owner(node)
-                        named_builders.add(
-                            f"{here}.{node.attr}" if here else node.attr
-                        )
+                        named_builders.add(f"{here}.{node.attr}" if here else node.attr)
 
     def surely_names(node: ast.AST, function: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
         """Whether `node` refers to `function`: its name, unless it is
@@ -1901,9 +1803,7 @@ def _creates_outside_the_spine(source: str, spine: str = SPINE) -> list[str]:
     # recursive helper's own call is a reference that is sheltered only once
     # the helper is, which never happens from below.
     references = [node for node in ast.walk(tree) if isinstance(node, ast.Name | ast.Attribute)]
-    functions = [
-        node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
-    ]
+    functions = [node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)]
     sheltered_functions: set[int] = set()
     grew = True
     while grew:
@@ -1914,9 +1814,7 @@ def _creates_outside_the_spine(source: str, spine: str = SPINE) -> list[str]:
             naming = [node for node in references if surely_names(node, function)]
             # Any class's `self.X` may reach this one through inheritance.
             loose = [
-                node
-                for node in references
-                if isinstance(node, ast.Attribute) and node.attr == function.name
+                node for node in references if isinstance(node, ast.Attribute) and node.attr == function.name
             ]
             if naming and all(id(node) in sheltered for node in naming + loose):
                 sheltered_functions.add(id(function))
@@ -1963,15 +1861,9 @@ def _creates_outside_the_spine(source: str, spine: str = SPINE) -> list[str]:
         {
             qualified(call)
             for call in ast.walk(tree)
-            if isinstance(call, ast.Call)
-            and called(call) in constructor_names
-            and id(call) not in sheltered
+            if isinstance(call, ast.Call) and called(call) in constructor_names and id(call) not in sheltered
         }
-        | {
-            qualified(function)
-            for function in constructors
-            if own_key(function) not in everything_called
-        }
+        | {qualified(function) for function in constructors if own_key(function) not in everything_called}
     )
 
 
@@ -1995,9 +1887,7 @@ def _importers_that_never_reach_the_spine(source: str, spine: str = SPINE) -> li
         if not offers_apply:
             continue
         reaches = any(
-            isinstance(call, ast.Call)
-            and isinstance(call.func, ast.Name)
-            and call.func.id == spine
+            isinstance(call, ast.Call) and isinstance(call.func, ast.Name) and call.func.id == spine
             for call in ast.walk(node)
         )
         if not reaches:
@@ -2005,7 +1895,7 @@ def _importers_that_never_reach_the_spine(source: str, spine: str = SPINE) -> li
     return sorted(missing)
 
 
-A_FOURTH_IMPORTER_WRITING_THE_BRANCH_BY_HAND = '''
+A_FOURTH_IMPORTER_WRITING_THE_BRANCH_BY_HAND = """
 class OaiImport:
     def apply(self, records, *, create_missing=True):
         for record in records:
@@ -2022,9 +1912,9 @@ class OaiImport:
         book = Book(title=record.title)
         self._db.add(book)
         return book
-'''
+"""
 
-A_FOURTH_IMPORTER_ROUTED_THROUGH_THE_SPINE = '''
+A_FOURTH_IMPORTER_ROUTED_THROUGH_THE_SPINE = """
 class OaiImport:
     def apply(self, records, *, create_missing=True):
         for record in records:
@@ -2046,17 +1936,17 @@ class OaiImport:
         book = Book(title=record.title)
         self._db.add(book)
         return book
-'''
+"""
 
-A_FOURTH_IMPORTER_BUILDING_A_BOOK_IN_ITS_OWN_LOOP = '''
+A_FOURTH_IMPORTER_BUILDING_A_BOOK_IN_ITS_OWN_LOOP = """
 class OaiImport:
     def apply(self, records, *, create_missing=True):
         for record in records:
             if create_missing:
                 self._db.add(Book(title=record.title))
-'''
+"""
 
-A_FOURTH_IMPORTER_WHOSE_BUILDER_COLLIDES = '''
+A_FOURTH_IMPORTER_WHOSE_BUILDER_COLLIDES = """
 class OpdsImport:
     def apply(self, records):
         for record in records:
@@ -2088,9 +1978,9 @@ class OaiImport:
         book = Book(title=record.title)
         self._db.add(book)
         return book
-'''
+"""
 
-A_FOURTH_IMPORTER_MINTING_ON_THE_MATCHED_ARM = '''
+A_FOURTH_IMPORTER_MINTING_ON_THE_MATCHED_ARM = """
 class OaiImport:
     def apply(self, records, *, create_missing=True):
         for record in records:
@@ -2117,9 +2007,9 @@ class OaiImport:
         book = Book(title=record.title + " (companion)")
         self._db.add(book)
         return book
-'''
+"""
 
-A_FOURTH_IMPORTER_HANDING_ITS_BUILDER_OVER = '''
+A_FOURTH_IMPORTER_HANDING_ITS_BUILDER_OVER = """
 class OaiImport:
     def apply(self, records, *, create_missing=True):
         for record in records:
@@ -2141,10 +2031,10 @@ class OaiImport:
         book = Book(title=record.title)
         self._db.add(book)
         return book
-'''
+"""
 
 
-A_FOURTH_IMPORTER_WHOSE_CREATE_CALLS_A_HELPER = '''
+A_FOURTH_IMPORTER_WHOSE_CREATE_CALLS_A_HELPER = """
 class OaiImport:
     def apply(self, records, *, create_missing=True):
         for record in records:
@@ -2169,7 +2059,7 @@ class OaiImport:
 
     def _book_from(self, record):
         return Book(title=record.title)
-'''
+"""
 
 #: The same helper, also reached from the matched arm.
 A_FOURTH_IMPORTER_WHOSE_HELPER_IS_ALSO_REACHED_OFF_THE_SPINE = (
@@ -2181,7 +2071,7 @@ A_FOURTH_IMPORTER_WHOSE_HELPER_IS_ALSO_REACHED_OFF_THE_SPINE = (
 #: Two classes, one routed and one not, sharing the builder's name.
 A_FOURTH_IMPORTER_WHOSE_HELPER_SITS_BEHIND_A_COLLIDING_NAME = (
     A_FOURTH_IMPORTER_WHOSE_CREATE_CALLS_A_HELPER
-    + '''
+    + """
 
 class OpdsImport:
     def apply(self, records):
@@ -2194,13 +2084,13 @@ class OpdsImport:
 
     def _book_from(self, record):
         return Book(title=record.title)
-'''
+"""
 )
 
 #: A subclass reaching the routed class's `_create` on the matched arm.
 A_FOURTH_IMPORTER_SUBCLASSED_TO_CREATE_ON_THE_MATCHED_ARM = (
     A_FOURTH_IMPORTER_WHOSE_CREATE_CALLS_A_HELPER
-    + '''
+    + """
 
 class OaiRefresh(OaiImport):
     def apply(self, records):
@@ -2215,20 +2105,18 @@ class OaiRefresh(OaiImport):
                 fill_gaps=lambda matched: self._create(record),
                 create_missing=True,
             )
-'''
+"""
 )
 
 #: A mixin the routed class inherits, reaching its `_create` off the spine.
 A_FOURTH_IMPORTER_WHOSE_MIXIN_CREATES_OFF_THE_SPINE = (
-    A_FOURTH_IMPORTER_WHOSE_CREATE_CALLS_A_HELPER.replace(
-        "class OaiImport:", "class OaiImport(Refreshing):"
-    )
-    + '''
+    A_FOURTH_IMPORTER_WHOSE_CREATE_CALLS_A_HELPER.replace("class OaiImport:", "class OaiImport(Refreshing):")
+    + """
 
 class Refreshing:
     def refresh(self, record):
         return self._create(record)
-'''
+"""
 )
 
 
@@ -2258,23 +2146,23 @@ class TestEveryImporterCreatesThroughTheSpine:
         assert _importers_that_never_reach_the_spine(inspect.getsource(importing)) == []
 
     def test_a_fourth_importer_writing_the_branch_by_hand_is_named(self):
-        assert _creates_outside_the_spine(
-            A_FOURTH_IMPORTER_WRITING_THE_BRANCH_BY_HAND
-        ) == ["OaiImport._apply_one"]
+        assert _creates_outside_the_spine(A_FOURTH_IMPORTER_WRITING_THE_BRANCH_BY_HAND) == [
+            "OaiImport._apply_one"
+        ]
 
     def test_a_fourth_importer_that_never_calls_the_spine_is_named(self):
-        assert _importers_that_never_reach_the_spine(
-            A_FOURTH_IMPORTER_WRITING_THE_BRANCH_BY_HAND
-        ) == ["OaiImport"]
+        assert _importers_that_never_reach_the_spine(A_FOURTH_IMPORTER_WRITING_THE_BRANCH_BY_HAND) == [
+            "OaiImport"
+        ]
 
     def test_a_fourth_importer_building_a_book_in_its_own_loop_is_named(self):
         """**The arm the first version of this pass did not have.** It reported
         call sites of constructors and an `apply` entry point has none, so a
         bare `Book(` written straight into the import loop was green: the
         plainest spelling of the thing the guard exists to catch."""
-        assert _creates_outside_the_spine(
-            A_FOURTH_IMPORTER_BUILDING_A_BOOK_IN_ITS_OWN_LOOP
-        ) == ["OaiImport.apply"]
+        assert _creates_outside_the_spine(A_FOURTH_IMPORTER_BUILDING_A_BOOK_IN_ITS_OWN_LOOP) == [
+            "OaiImport.apply"
+        ]
 
     def test_a_fourth_importer_whose_builder_shares_a_name_is_still_named(self):
         """**The name alone used to flip the verdict.** `_create` is what all
@@ -2283,9 +2171,7 @@ class TestEveryImporterCreatesThroughTheSpine:
         module borrowed the three existing call sites and went unreported,
         while the same function called `_mint` was caught. The call site is
         keyed to the class it is written in, so the borrowing stops."""
-        assert _creates_outside_the_spine(A_FOURTH_IMPORTER_WHOSE_BUILDER_COLLIDES) == [
-            "OaiImport._create"
-        ]
+        assert _creates_outside_the_spine(A_FOURTH_IMPORTER_WHOSE_BUILDER_COLLIDES) == ["OaiImport._create"]
 
     def test_a_book_minted_on_the_matched_arm_is_named(self):
         """**Sitting inside the spine call is not the same as sitting behind
@@ -2293,9 +2179,9 @@ class TestEveryImporterCreatesThroughTheSpine:
         so the privacy predicate is never reached on that path. A pass that
         sheltered every argument of the spine call reported this clean, which
         is the guard agreeing with its own name rather than with the rule."""
-        assert _creates_outside_the_spine(
-            A_FOURTH_IMPORTER_MINTING_ON_THE_MATCHED_ARM
-        ) == ["OaiImport._apply_one"]
+        assert _creates_outside_the_spine(A_FOURTH_IMPORTER_MINTING_ON_THE_MATCHED_ARM) == [
+            "OaiImport._apply_one"
+        ]
 
     def test_a_builder_handed_over_rather_than_called_is_clean(self):
         """`create=partial(self._mint, record)` is the same shelter spelled
@@ -2315,16 +2201,16 @@ class TestEveryImporterCreatesThroughTheSpine:
     def test_a_helper_also_reached_off_the_spine_is_named(self):
         """One reference outside the shelter and that call is named. The call
         inside `_create` stays clean, because it is behind the refusal."""
-        assert _creates_outside_the_spine(
-            A_FOURTH_IMPORTER_WHOSE_HELPER_IS_ALSO_REACHED_OFF_THE_SPINE
-        ) == ["OaiImport._apply_one"]
+        assert _creates_outside_the_spine(A_FOURTH_IMPORTER_WHOSE_HELPER_IS_ALSO_REACHED_OFF_THE_SPINE) == [
+            "OaiImport._apply_one"
+        ]
 
     def test_a_routed_class_does_not_shelter_another_class_sharing_its_names(self):
         """`self._create` written in one class is not a reference to another
         class's `_create`, so the unrouted one's helper call is named."""
-        assert _creates_outside_the_spine(
-            A_FOURTH_IMPORTER_WHOSE_HELPER_SITS_BEHIND_A_COLLIDING_NAME
-        ) == ["OpdsImport._create"]
+        assert _creates_outside_the_spine(A_FOURTH_IMPORTER_WHOSE_HELPER_SITS_BEHIND_A_COLLIDING_NAME) == [
+            "OpdsImport._create"
+        ]
 
     @pytest.mark.parametrize(
         "source",
@@ -2345,9 +2231,7 @@ class TestEveryImporterCreatesThroughTheSpine:
         """The other half of the diagonal. Without it a pass that named every
         class it read would score both catches above and mean nothing."""
         assert _creates_outside_the_spine(A_FOURTH_IMPORTER_ROUTED_THROUGH_THE_SPINE) == []
-        assert _importers_that_never_reach_the_spine(
-            A_FOURTH_IMPORTER_ROUTED_THROUGH_THE_SPINE
-        ) == []
+        assert _importers_that_never_reach_the_spine(A_FOURTH_IMPORTER_ROUTED_THROUGH_THE_SPINE) == []
 
 
 STORED = "Stored"
@@ -2372,8 +2256,7 @@ def _module_level_tuples() -> dict[str, tuple[str, ...]]:
     return {
         name: value
         for name, value in vars(importing).items()
-        if isinstance(value, tuple)
-        and all(isinstance(member, str) for member in value)
+        if isinstance(value, tuple) and all(isinstance(member, str) for member in value)
     }
 
 
@@ -2460,12 +2343,7 @@ def _names_bound_in(function: ast.AST) -> set[str]:
             targets = list(node.targets)
         elif isinstance(
             node,
-            ast.AnnAssign
-            | ast.AugAssign
-            | ast.NamedExpr
-            | ast.For
-            | ast.AsyncFor
-            | ast.comprehension,
+            ast.AnnAssign | ast.AugAssign | ast.NamedExpr | ast.For | ast.AsyncFor | ast.comprehension,
         ):
             # One branch over every node that binds through `target`, rather than
             # one arm each: what is asked is what the node binds.
@@ -2473,9 +2351,7 @@ def _names_bound_in(function: ast.AST) -> set[str]:
         elif isinstance(node, ast.withitem) and node.optional_vars is not None:
             targets = [node.optional_vars]
         for target in targets:
-            bound |= {
-                inner.id for inner in ast.walk(target) if isinstance(inner, ast.Name)
-            }
+            bound |= {inner.id for inner in ast.walk(target) if isinstance(inner, ast.Name)}
     return bound
 
 
@@ -2532,11 +2408,7 @@ def _carriers(
 
     def carries(node: ast.expr) -> bool:
         return any(
-            (
-                isinstance(inner, ast.Call)
-                and isinstance(inner.func, ast.Name)
-                and inner.func.id == MINT
-            )
+            (isinstance(inner, ast.Call) and isinstance(inner.func, ast.Name) and inner.func.id == MINT)
             or (isinstance(inner, ast.expr) and holds(inner))
             for inner in ast.walk(node)
         )
@@ -2560,9 +2432,7 @@ def _carriers(
                 if iterated:
                     wanted, into = ast.unparse(value) in containers, records
                 elif (
-                    isinstance(value, ast.Call)
-                    and isinstance(value.func, ast.Name)
-                    and value.func.id == MINT
+                    isinstance(value, ast.Call) and isinstance(value.func, ast.Name) and value.func.id == MINT
                 ) or holds(value):
                     wanted, into = True, records
                 elif ast.unparse(value) in containers or (
@@ -2596,14 +2466,11 @@ def _functions_holding_a_stored_record(source: str) -> set[str]:
     return {
         qualified(function)
         for function in ast.walk(tree)
-        if isinstance(function, ast.FunctionDef | ast.AsyncFunctionDef)
-        and any(_carriers(function))
+        if isinstance(function, ast.FunctionDef | ast.AsyncFunctionDef) and any(_carriers(function))
     }
 
 
-def _names_bound_by_a_loop_over(
-    node: ast.AST, target: str, parents: dict[int, ast.AST]
-) -> ast.AST | None:
+def _names_bound_by_a_loop_over(node: ast.AST, target: str, parents: dict[int, ast.AST]) -> ast.AST | None:
     """The iterable of the enclosing loop that binds `target`, or None.
 
     Walks outward, so a comprehension's generator is found from inside its
@@ -2617,12 +2484,8 @@ def _names_bound_by_a_loop_over(
         bindings: list[tuple[ast.expr, ast.expr]] = []
         if isinstance(cursor, ast.For | ast.AsyncFor):
             bindings = [(cursor.target, cursor.iter)]
-        elif isinstance(
-            cursor, ast.ListComp | ast.SetComp | ast.DictComp | ast.GeneratorExp
-        ):
-            bindings = [
-                (generator.target, generator.iter) for generator in cursor.generators
-            ]
+        elif isinstance(cursor, ast.ListComp | ast.SetComp | ast.DictComp | ast.GeneratorExp):
+            bindings = [(generator.target, generator.iter) for generator in cursor.generators]
         for bound, iterable in bindings:
             if isinstance(bound, ast.Name) and bound.id == target:
                 return iterable
@@ -2702,11 +2565,7 @@ def _reaches_off_a_stored_record(
         findings.append(f"{qualified(node)} {what}")
 
     for call in ast.walk(tree):
-        if not (
-            isinstance(call, ast.Call)
-            and isinstance(call.func, ast.Name)
-            and call.func.id == "Book"
-        ):
+        if not (isinstance(call, ast.Call) and isinstance(call.func, ast.Name) and call.func.id == "Book"):
             continue
         for keyword in call.keywords:
             if keyword.arg is not None:
@@ -2715,10 +2574,7 @@ def _reaches_off_a_stored_record(
                 isinstance(keyword.value, ast.DictComp)
                 and isinstance(keyword.value.generators[0].iter, ast.Name)
                 and keyword.value.generators[0].iter.id in tuples
-                and all(
-                    member in allowed
-                    for member in tuples[keyword.value.generators[0].iter.id]
-                )
+                and all(member in allowed for member in tuples[keyword.value.generators[0].iter.id])
             )
             if not walked:
                 report(
@@ -2859,11 +2715,7 @@ def _functions_annotated_stored() -> set[str]:
                 scan(f"{name}.", vars(value))
             elif inspect.isfunction(value):
                 annotations = inspect.get_annotations(value)
-                if any(
-                    _carries_stored(hint)
-                    for key, hint in annotations.items()
-                    if key != "return"
-                ):
+                if any(_carries_stored(hint) for key, hint in annotations.items() if key != "return"):
                     found.add(f"{prefix}{name}")
 
     scan("", vars(importing))
@@ -2885,54 +2737,54 @@ def _functions_calling_the_seam(source: str) -> set[str]:
     }
 
 
-A_WRITER_NAMING_THE_COVER_COLUMN = '''
+A_WRITER_NAMING_THE_COVER_COLUMN = """
 class OaiImport:
     def _create(self, stored: Stored) -> Book:
         return Book(title=stored.title, cover_url=stored.cover_url)
-'''
+"""
 
-A_WRITER_SPLATTING_THE_WHOLE_RECORD = '''
+A_WRITER_SPLATTING_THE_WHOLE_RECORD = """
 class OaiImport:
     def _create(self, stored: Stored) -> Book:
         return Book(**stored.as_match())
 
     def _also(self, stored: Stored) -> Book:
         return Book(**dataclasses.asdict(stored))
-'''
+"""
 
-A_WRITER_LOOPING_OVER_ANOTHER_MODULES_COLUMNS = '''
+A_WRITER_LOOPING_OVER_ANOTHER_MODULES_COLUMNS = """
 def _fill(book: Book, stored: Stored) -> None:
     for name in book_columns.WORK_DETAIL:
         setattr(book, name, getattr(stored, name))
-'''
+"""
 
-A_WRITER_LOOPING_OVER_A_SECOND_TUPLE_HERE = '''
+A_WRITER_LOOPING_OVER_A_SECOND_TUPLE_HERE = """
 _EVERY_WORK_COLUMN = ("title", "google_books_id")
 
 
 def _fill(book: Book, stored: Stored) -> None:
     for name in _EVERY_WORK_COLUMN:
         setattr(book, name, getattr(stored, name))
-'''
+"""
 
-A_WRITER_BUILDING_THE_NAME_IT_READS = '''
+A_WRITER_BUILDING_THE_NAME_IT_READS = """
 WANTED = {"cover": "cover_url"}
 
 
 def _fill(book: Book, stored: Stored) -> None:
     book.cover_url = getattr(stored, "cover" + "_url")
     book.google_books_id = getattr(stored, WANTED["cover"])
-'''
+"""
 
-A_WRITER_READING_THROUGH_A_SECOND_ALIAS = '''
+A_WRITER_READING_THROUGH_A_SECOND_ALIAS = """
 class OaiImport:
     def _create(self, stored: Stored) -> Book:
         also = stored
         later = also
         return Book(title=later.title, cover_url=later.cover_url)
-'''
+"""
 
-A_FOURTH_READER_INSIDE_THE_TUPLE = '''
+A_FOURTH_READER_INSIDE_THE_TUPLE = """
 def _fill(book: Book, stored: Stored) -> None:
     for name in _MARC_GAP_FIELDS:
         setattr(book, name, getattr(stored, name))
@@ -2956,118 +2808,118 @@ class OaiImport:
         _fill(self._book, stored)
         self._create(stored, index)
         index.holds(stored)
-'''
+"""
 
-A_WRITER_WHOSE_RECORD_MIGHT_BE_MISSING = '''
+A_WRITER_WHOSE_RECORD_MIGHT_BE_MISSING = """
 def _fill(book: Book, stored: Stored | None) -> None:
     book.cover_url = stored.cover_url
     book.categories = stored.categories
-'''
+"""
 
-A_WRITER_QUOTING_ITS_ANNOTATION = '''
+A_WRITER_QUOTING_ITS_ANNOTATION = """
 def _fill(book: Book, stored: "Stored") -> None:
     book.cover_url = stored.cover_url
-'''
+"""
 
-A_WRITER_SHADOWING_THE_MODULES_OWN_TUPLE = '''
+A_WRITER_SHADOWING_THE_MODULES_OWN_TUPLE = """
 def _fill(book: Book, stored: Stored) -> None:
     _MARC_GAP_FIELDS = ("cover_url", "categories")
     for name in _MARC_GAP_FIELDS:
         setattr(book, name, getattr(stored, name))
-'''
+"""
 
-A_WRITER_LOOPING_OVER_AN_EMPTY_TUPLE = '''
+A_WRITER_LOOPING_OVER_AN_EMPTY_TUPLE = """
 def _fill(book: Book, stored: Stored) -> None:
     for name in _NOTHING_YET:
         setattr(book, name, getattr(stored, name))
-'''
+"""
 
-A_WRITER_BATCHING_ITS_RECORDS_INTO_A_LIST = '''
+A_WRITER_BATCHING_ITS_RECORDS_INTO_A_LIST = """
 def _batch(records: Sequence[Record]) -> Book:
     held = [stored_record(record) for record in records]
     return Book(cover_url=held[0].cover_url)
-'''
+"""
 
-A_WRITER_MINTING_ITS_OWN_STORED_RECORD = '''
+A_WRITER_MINTING_ITS_OWN_STORED_RECORD = """
 class OaiImport:
     def _apply_one(self, record: Record) -> None:
         self._create(Stored(record))
-'''
+"""
 
 
-A_WRITER_KEEPING_ITS_RECORD_ON_ITSELF = '''
+A_WRITER_KEEPING_ITS_RECORD_ON_ITSELF = """
 class OaiImport:
     def _apply_one(self, record: Record) -> None:
         self._stored = stored_record(record)
         self._book.cover_url = self._stored.cover_url
-'''
+"""
 
-A_WRITER_KEEPING_ITS_RECORDS_ON_ITSELF = '''
+A_WRITER_KEEPING_ITS_RECORDS_ON_ITSELF = """
 class OaiImport:
     def _apply_one(self, record: Record) -> None:
         self._held = [stored_record(record)]
         print(self._held[0].cover_url)
-'''
+"""
 
-A_WRITER_FEEDING_BOOK_A_MAPPING_FROM_A_CALL = '''
+A_WRITER_FEEDING_BOOK_A_MAPPING_FROM_A_CALL = """
 class OaiImport:
     def _create(self, stored: Stored) -> Book:
         return Book(**dataclasses.asdict(stored), added_by_user_id=1)
-'''
+"""
 
-A_WRITER_FEEDING_BOOK_THE_MODULES_OWN_WALK = '''
+A_WRITER_FEEDING_BOOK_THE_MODULES_OWN_WALK = """
 class OaiImport:
     def _create(self, stored: Stored) -> Book:
         return Book(
             **{name: getattr(stored, name) for name in _MARC_RECORD_FIELDS},
             isbn=stored.isbn,
         )
-'''
+"""
 
-A_WRITER_FEEDING_BOOK_A_WALK_OVER_A_WIDER_TUPLE = '''
+A_WRITER_FEEDING_BOOK_A_WALK_OVER_A_WIDER_TUPLE = """
 class OaiImport:
     def _create(self) -> Book:
         return Book(**{name: None for name in _EVERY_WORK_COLUMN})
-'''
+"""
 
-A_WRITER_READING_A_COLUMN_OFF_A_COLLECTION_IT_WAS_HANDED = '''
+A_WRITER_READING_A_COLUMN_OFF_A_COLLECTION_IT_WAS_HANDED = """
 def _flush(book: Book, batch: list[Stored]) -> None:
     for stored in batch:
         book.cover_url = stored.cover_url
-'''
+"""
 
 #: Spellings that read no column off a bounded record and so must be clean. Every
 #: one was clean before this guard existed, and **seven of the eight were refused by
 #: an earlier version of it**, which is what moved the subject from where a record
 #: travels to which columns it is read for.
 LEGAL_SPELLINGS: Final = {
-    "a mint in an argument position": '''
+    "a mint in an argument position": """
 
 def _ask(record: Record, index: MarcIndex) -> bool:
     return index.holds(stored_record(record))
-''',
-    "a mint yielded": '''
+""",
+    "a mint yielded": """
 
 def _stream(records: Sequence[Record]):
     for record in records:
         yield stored_record(record)
-''',
-    "a hand off through an attribute": '''
+""",
+    "a hand off through an attribute": """
 
 class OaiImport:
     def _apply_one(self, db: Session, record: Record) -> None:
         stored = stored_record(record)
         self._index.find(db, stored)
-''',
-    "a hand off inside a classmethod": '''
+""",
+    "a hand off inside a classmethod": """
 
 class OaiImport:
     @classmethod
     def _held(cls, record: Record) -> None:
         stored = stored_record(record)
         cls._create(stored)
-''',
-    "a hand off to a method from a base in this module": '''
+""",
+    "a hand off to a method from a base in this module": """
 
 class Base:
     def keep(self, stored: Stored) -> None:
@@ -3078,42 +2930,42 @@ class OaiImport(Base):
     def _apply_one(self, record: Record) -> None:
         stored = stored_record(record)
         self.keep(stored)
-''',
-    "a hand off to a helper defined inside its caller": '''
+""",
+    "a hand off to a helper defined inside its caller": """
 
 def _apply_one(record: Record) -> None:
     def keep(stored: Stored) -> None:
         print(stored.title)
 
     keep(stored_record(record))
-''',
-    "a collection of them counted and walked": '''
+""",
+    "a collection of them counted and walked": """
 
 def _flush(batch: list[Stored]) -> int:
     for stored in batch:
         print(stored.title)
     return len(batch)
-''',
-    "an optional one narrowed before use": '''
+""",
+    "an optional one narrowed before use": """
 
 def _maybe(stored: Stored | None) -> str:
     if stored is None:
         return ""
     return stored.title or ""
-''',
-    "a record returned from a helper": '''
+""",
+    "a record returned from a helper": """
 
 def _narrow(stored: Stored) -> Stored | None:
     return stored
-''',
-    "the apply loop batched, then flushed": '''
+""",
+    "the apply loop batched, then flushed": """
 
 def _batch(records: Sequence[Record], index: MarcIndex) -> None:
     held = [stored_record(record) for record in records]
     for stored in held:
         index.holds(stored)
         print(stored.title, stored.isbn)
-''',
+""",
 }
 
 
@@ -3232,9 +3084,7 @@ class TestTheImporterReachesNoColumnOffItsOwnTuple:
         assert set(importing._MARC_GAP_FIELDS) <= _WRITABLE
         assert set(importing._OPDS_GAP_FIELDS) <= _WRITABLE
 
-    @pytest.mark.parametrize(
-        "source", LEGAL_SPELLINGS.values(), ids=list(LEGAL_SPELLINGS)
-    )
+    @pytest.mark.parametrize("source", LEGAL_SPELLINGS.values(), ids=list(LEGAL_SPELLINGS))
     def test_a_spelling_that_reads_no_column_is_clean(self, source):
         """**The criterion, driven.** Every one of these was clean before this guard
         existed and refused by an earlier version of it, and the last is the one a
@@ -3244,34 +3094,26 @@ class TestTheImporterReachesNoColumnOffItsOwnTuple:
         assert _findings(source) == []
 
     def test_a_cover_column_named_on_the_constructor_is_reported(self):
-        assert _findings(A_WRITER_NAMING_THE_COVER_COLUMN) == [
-            "OaiImport._create reaches cover_url"
-        ]
+        assert _findings(A_WRITER_NAMING_THE_COVER_COLUMN) == ["OaiImport._create reaches cover_url"]
 
     def test_a_column_read_off_a_record_kept_on_the_importer_is_reported(self):
         """**The hole two rounds of the other shape left open**, found by a cold
         audit: the tracker followed a plain name, so a record kept on `self` was
         never watched and every column read off it was silent. Receivers are spelled
         rather than named now, so an attribute holds one exactly as a local does."""
-        assert _findings(A_WRITER_KEEPING_ITS_RECORD_ON_ITSELF) == [
-            "OaiImport._apply_one reaches cover_url"
-        ]
+        assert _findings(A_WRITER_KEEPING_ITS_RECORD_ON_ITSELF) == ["OaiImport._apply_one reaches cover_url"]
 
     def test_a_column_read_off_a_collection_kept_on_the_importer_is_reported(self):
         """The same hole one indirection deeper, and the reason a collection is a
         subject of its own rather than a refusal: `self._held[0]` is asked of the
         collection, so how it is indexed does not matter."""
-        assert _findings(A_WRITER_KEEPING_ITS_RECORDS_ON_ITSELF) == [
-            "OaiImport._apply_one reaches cover_url"
-        ]
+        assert _findings(A_WRITER_KEEPING_ITS_RECORDS_ON_ITSELF) == ["OaiImport._apply_one reaches cover_url"]
 
     def test_a_column_read_off_a_batched_record_is_reported(self):
         """**Batching is legal and reading the wrong column off a batch is not**,
         which is the pair that makes the narrowing worth taking: `LEGAL_SPELLINGS`
         holds the batching arm and this holds the write."""
-        assert _findings(A_WRITER_BATCHING_ITS_RECORDS_INTO_A_LIST) == [
-            "_batch reaches cover_url"
-        ]
+        assert _findings(A_WRITER_BATCHING_ITS_RECORDS_INTO_A_LIST) == ["_batch reaches cover_url"]
 
     def test_a_mapping_fed_to_the_constructor_from_a_call_is_reported(self):
         """**The one thing the narrowing would otherwise have lost.** A `**` into
@@ -3332,8 +3174,7 @@ class TestTheImporterReachesNoColumnOffItsOwnTuple:
         importer may not write, but nothing here reads its members: the pass cannot
         resolve an attribute on another module, so it says so."""
         assert _findings(A_WRITER_LOOPING_OVER_ANOTHER_MODULES_COLUMNS) == [
-            "_fill reaches a name this pass cannot resolve: name over "
-            "book_columns.WORK_DETAIL"
+            "_fill reaches a name this pass cannot resolve: name over book_columns.WORK_DETAIL"
         ]
 
     def test_a_loop_over_a_second_tuple_in_the_same_module_is_reported(self):
@@ -3355,9 +3196,7 @@ class TestTheImporterReachesNoColumnOffItsOwnTuple:
     def test_a_read_through_a_second_alias_is_reported(self):
         """Two aliases deep, because one is the spelling somebody reaches for and the
         fixed point is what makes the depth not matter."""
-        assert _findings(A_WRITER_READING_THROUGH_A_SECOND_ALIAS) == [
-            "OaiImport._create reaches cover_url"
-        ]
+        assert _findings(A_WRITER_READING_THROUGH_A_SECOND_ALIAS) == ["OaiImport._create reaches cover_url"]
 
     def test_an_optional_annotation_still_holds_the_record(self):
         """**Both instruments agreed on a wrong answer here**, which is the one
@@ -3399,20 +3238,23 @@ class TestTheImporterReachesNoColumnOffItsOwnTuple:
         reached. A sweep found this arm surviving its own mutation."""
         monkeypatch.setattr(importing, "_NOTHING_YET", (), raising=False)
 
-        assert _reaches_off_a_stored_record(
-            A_WRITER_LOOPING_OVER_AN_EMPTY_TUPLE,
-            allowed=_WRITABLE,
-            tuples=_module_level_tuples(),
-        ) == []
+        assert (
+            _reaches_off_a_stored_record(
+                A_WRITER_LOOPING_OVER_AN_EMPTY_TUPLE,
+                allowed=_WRITABLE,
+                tuples=_module_level_tuples(),
+            )
+            == []
+        )
 
     def test_a_stored_record_minted_outside_the_seam_is_reported(self):
         """**A `NewType` is a cast at runtime, so this is the laundering arm.**
         Without it every signature below the seam can be satisfied by a raw record,
         and the annotation says nothing. It reads this module only, so a launder
         elsewhere is invisible to it and to the type checker both."""
-        assert _mints_a_stored_record_outside_the_seam(
-            A_WRITER_MINTING_ITS_OWN_STORED_RECORD
-        ) == ["OaiImport._apply_one"]
+        assert _mints_a_stored_record_outside_the_seam(A_WRITER_MINTING_ITS_OWN_STORED_RECORD) == [
+            "OaiImport._apply_one"
+        ]
 
 
 class TestTheBeltDoesNotReadACountAsAWidth:
@@ -3449,9 +3291,7 @@ class TestTheBeltDoesNotReadACountAsAWidth:
 _FILLS_A_GAP: Final[dict[str, tuple[str, Callable[[Book], None]]]] = {
     "csv": (
         "publisher",
-        lambda book: importing._fill_gaps(
-            book, csv_import.ImportRow(title="Dune", publisher="Chilton")
-        ),
+        lambda book: importing._fill_gaps(book, csv_import.ImportRow(title="Dune", publisher="Chilton")),
     ),
     "marc": (
         "publisher",
@@ -3470,15 +3310,9 @@ _FILLS_A_GAP: Final[dict[str, tuple[str, Callable[[Book], None]]]] = {
 
 #: The same three fills, each file carrying `""` for the importer's column.
 _SENDS_AN_EMPTY_STRING: Final[dict[str, Callable[[Book], None]]] = {
-    "csv": lambda book: importing._fill_gaps(
-        book, csv_import.ImportRow(title="Dune", publisher="")
-    ),
-    "marc": lambda book: importing._fill_marc_gaps(
-        book, stored_record(Record(title="Dune", publisher=""))
-    ),
-    "opds": lambda book: importing._fill_opds_gaps(
-        book, stored_record(Record(title="Dune", author=""))
-    ),
+    "csv": lambda book: importing._fill_gaps(book, csv_import.ImportRow(title="Dune", publisher="")),
+    "marc": lambda book: importing._fill_marc_gaps(book, stored_record(Record(title="Dune", publisher=""))),
+    "opds": lambda book: importing._fill_opds_gaps(book, stored_record(Record(title="Dune", author=""))),
 }
 
 
@@ -3517,15 +3351,22 @@ class TestACreatedBookStoresABlankAsNull:
     there. A subfield of spaces is truthy, so no decoder drops it first."""
 
     def test_a_marc_record_creates_nulls_rather_than_blanks(self, db, member):
-        MarcImport.for_member(db, member.id).apply(one_marc_file(Record(
-            source="marc", title="Small Gods", subtitle="   ", author=" \t",
-            publisher="\u3000", description="\n", series_name="  ",
-        )))
+        MarcImport.for_member(db, member.id).apply(
+            one_marc_file(
+                Record(
+                    source="marc",
+                    title="Small Gods",
+                    subtitle="   ",
+                    author=" \t",
+                    publisher="\u3000",
+                    description="\n",
+                    series_name="  ",
+                )
+            )
+        )
 
         book = db.query(Book).one()
-        assert {name: getattr(book, name) for name in BLANK_IS_NULL} == dict.fromkeys(
-            BLANK_IS_NULL
-        )
+        assert {name: getattr(book, name) for name in BLANK_IS_NULL} == dict.fromkeys(BLANK_IS_NULL)
 
     def test_an_opds_entry_creates_a_null_author(self, db, member):
         OpdsImport.for_member(db, member.id).apply([held("Small Gods", author="   ")])

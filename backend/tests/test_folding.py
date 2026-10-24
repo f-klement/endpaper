@@ -93,9 +93,7 @@ def _read_roots(source: str) -> list[tuple[ast.Call, ast.expr]]:
         if isinstance(node, ast.ImportFrom) and (node.module or "").split(".")[0] == "sqlalchemy"
         for alias in node.names
     }
-    parents = {
-        id(child): node for node in ast.walk(tree) for child in ast.iter_child_nodes(node)
-    }
+    parents = {id(child): node for node in ast.walk(tree) for child in ast.iter_child_nodes(node)}
 
     def outermost(node: ast.expr) -> ast.expr:
         while True:
@@ -113,9 +111,7 @@ def _read_roots(source: str) -> list[tuple[ast.Call, ast.expr]]:
         if isinstance(func, ast.Name):
             return func.id in imported
         return isinstance(func, ast.Attribute) and (
-            func.attr in _READING_METHODS
-            or func.attr in imported
-            or _on_the_session(node)
+            func.attr in _READING_METHODS or func.attr in imported or _on_the_session(node)
         )
 
     chains: dict[int, ast.expr] = {}
@@ -150,10 +146,7 @@ def _on_the_session(call: ast.Call) -> bool:
     and into `NOT_A_DATABASE_READ`, where it fails until somebody writes down
     what it is: wrong in the safe direction.
     """
-    return (
-        isinstance(call.func, ast.Attribute)
-        and ast.unparse(call.func.value).rsplit(".", 1)[-1] == "db"
-    )
+    return isinstance(call.func, ast.Attribute) and ast.unparse(call.func.value).rsplit(".", 1)[-1] == "db"
 
 
 def _reads_nothing(root: ast.Call) -> bool:
@@ -250,13 +243,9 @@ def _bounds_to_the_books(node: ast.expr, subjects: set[str], carry: str) -> bool
         and node.func.attr == "in_"
         and len(node.args) == 1
     ):
-        return _is_the_book_column(node.func.value, subjects) and _off_the_carry(
-            node.args[0], carry
-        )
+        return _is_the_book_column(node.func.value, subjects) and _off_the_carry(node.args[0], carry)
     if isinstance(node, ast.Compare) and len(node.ops) == 1 and isinstance(node.ops[0], ast.Eq):
-        return _is_the_book_column(node.left, subjects) and _off_the_carry(
-            node.comparators[0], carry
-        )
+        return _is_the_book_column(node.left, subjects) and _off_the_carry(node.comparators[0], carry)
     return False
 
 
@@ -420,9 +409,7 @@ class TestEveryChildOfBooksHasAPolicy:
         """The baseline. Without it every arm above scores a pass it did not
         earn, because a check that reports everything reports these too."""
         assert (
-            folding._undeclared(
-                folding.TRANSFERS, {transfer.table for transfer in folding.TRANSFERS}
-            )
+            folding._undeclared(folding.TRANSFERS, {transfer.table for transfer in folding.TRANSFERS})
             == set()
         )
 
@@ -458,9 +445,7 @@ class TestTheModuleRefusesToImport:
             "children_of_books",
             lambda metadata: children_of_books(metadata) | {extra},
         )
-        with pytest.raises(
-            RuntimeError, match="TRANSFERS and the children of `books` disagree"
-        ) as raised:
+        with pytest.raises(RuntimeError, match="TRANSFERS and the children of `books` disagree") as raised:
             _load_folding()
         message = str(raised.value)
         assert "shelf_marks" in message
@@ -469,9 +454,7 @@ class TestTheModuleRefusesToImport:
 
 
 class TestTheCeilingDropIsLogged:
-    def test_the_overflow_names_the_table_it_came_from(
-        self, client, admin, db, caplog
-    ):
+    def test_the_overflow_names_the_table_it_came_from(self, client, admin, db, caplog):
         """The drop is a loss: nothing regenerates a heading a Member's
         catalogue supplied. One log site serves three tables now, so the line
         carries the table rather than a sentence written per site.
@@ -516,41 +499,28 @@ EVASIONS = {
         "rows = fold.db.query(model).order_by(model.book_id).all()\n"
     ),
     "the same, inside a wholesale move": (
-        "for row in fold.db.query(model).order_by(model.book_id).all():\n"
-        "    row.book_id = fold.keeper.id\n"
+        "for row in fold.db.query(model).order_by(model.book_id).all():\n    row.book_id = fold.keeper.id\n"
     ),
-    "the same, on the loans": (
-        "moved = fold.db.query(Loan).order_by(Loan.book_id).all()\n"
-    ),
+    "the same, on the loans": ("moved = fold.db.query(Loan).order_by(Loan.book_id).all()\n"),
     "a negated membership test": (
         "rows = fold.db.query(model).filter(model.book_id.notin_(fold.loser_ids)).all()\n"
     ),
-    "a null test": (
-        "rows = fold.db.query(model).filter(model.book_id.isnot(None)).all()\n"
-    ),
+    "a null test": ("rows = fold.db.query(model).filter(model.book_id.isnot(None)).all()\n"),
     "the book column of a different table": (
         "rows = fold.db.query(Note).filter(Quote.book_id.in_(ids)).all()\n"
     ),
-    "the column handed to order_by as a string": (
-        "rows = fold.db.query(model).order_by('book_id').all()\n"
-    ),
-    "a filter on the row id": (
-        "rows = fold.db.query(model).filter(model.id.in_(ids)).all()\n"
-    ),
+    "the column handed to order_by as a string": ("rows = fold.db.query(model).order_by('book_id').all()\n"),
+    "a filter on the row id": ("rows = fold.db.query(model).filter(model.id.in_(ids)).all()\n"),
     "the 2.0 scalars spelling": (
         "from sqlalchemy import select\n\nrows = fold.db.scalars(select(model)).all()\n"
     ),
     "the 2.0 execute spelling": (
-        "from sqlalchemy import update\n\n"
-        "fold.db.execute(update(model).values(book_id=fold.keeper.id))\n"
+        "from sqlalchemy import update\n\nfold.db.execute(update(model).values(book_id=fold.keeper.id))\n"
     ),
     "raw SQL through the session": (
-        "from sqlalchemy import text\n\n"
-        "fold.db.execute(text('UPDATE notes SET book_id = 1'))\n"
+        "from sqlalchemy import text\n\nfold.db.execute(text('UPDATE notes SET book_id = 1'))\n"
     ),
-    "a Table read straight off the registry": (
-        "rows = fold.db.execute(transfer.table.select()).all()\n"
-    ),
+    "a Table read straight off the registry": ("rows = fold.db.execute(transfer.table.select()).all()\n"),
     "the bound widened to every Book there is": (
         "rows = fold.db.query(model).filter(model.book_id.in_(range(1, 10 ** 9))).all()\n"
     ),
@@ -644,9 +614,7 @@ class TestEveryReadIsBoundedToTheBooksBeingFolded:
         matches that touch no table are written down with a reason each.
         """
         off_session = [
-            ast.unparse(root)
-            for root, _ in _read_roots(FOLDING.read_text())
-            if not _on_the_session(root)
+            ast.unparse(root) for root, _ in _read_roots(FOLDING.read_text()) if not _on_the_session(root)
         ]
         assert off_session == [call for call, _ in NOT_A_DATABASE_READ]
 
@@ -724,9 +692,7 @@ class TestAMergeHoldsTheKeepersCeilings:
 
 
 class TestAMergeCountsTheKeeperAsItStands:
-    def test_a_reference_committed_after_the_keeper_was_loaded_is_counted(
-        self, admin, make_book, db
-    ):
+    def test_a_reference_committed_after_the_keeper_was_loaded_is_counted(self, admin, make_book, db):
         """The keeper's references were loaded before the merge took its lock,
         and another session committed one more in between. Counted from the
         loaded list the keeper holds 15, takes the loser's, and lands at 17."""

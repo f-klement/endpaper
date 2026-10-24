@@ -71,9 +71,7 @@ def google_search():
     for a test to prove that Google's answer is the one that landed.
     """
     with respx.mock(assert_all_called=False) as mock:
-        mock.get(GOOGLE_BOOKS).mock(
-            return_value=httpx.Response(200, json={"items": [volume()]})
-        )
+        mock.get(GOOGLE_BOOKS).mock(return_value=httpx.Response(200, json={"items": [volume()]}))
         yield silence_catalogues(mock)
 
 
@@ -87,9 +85,7 @@ class TestEnrichBook:
         assert res.json()["found"] is True
         assert res.json()["book"]["page_count"] == 412
 
-    def test_reports_which_fields_changed(
-        self, client, admin, make_book, google_enabled, google_search
-    ):
+    def test_reports_which_fields_changed(self, client, admin, make_book, google_enabled, google_search):
         """A run that finds the volume but adds nothing is the common case."""
         book = make_book(admin["headers"])
 
@@ -100,9 +96,7 @@ class TestEnrichBook:
         assert second["found"] is True
         assert second["updated_fields"] == []
 
-    def test_does_not_overrule_a_typed_value(
-        self, client, admin, make_book, google_enabled, google_search
-    ):
+    def test_does_not_overrule_a_typed_value(self, client, admin, make_book, google_enabled, google_search):
         # Somebody corrected the publisher by hand. Upstream does not win.
         book = make_book(admin["headers"], publisher="Ace Books")
 
@@ -125,27 +119,19 @@ class TestEnrichBook:
 
 
 class TestEnrichmentCandidates:
-    def test_offers_other_editions(
-        self, client, admin, make_book, google_enabled, google_search
-    ):
+    def test_offers_other_editions(self, client, admin, make_book, google_enabled, google_search):
         book = make_book(admin["headers"])
 
-        res = client.get(
-            f"/api/books/{book['id']}/enrich/candidates", headers=admin["headers"]
-        )
+        res = client.get(f"/api/books/{book['id']}/enrich/candidates", headers=admin["headers"])
 
         assert res.status_code == 200
         assert res.json()[0]["title"] == "Dune"
 
-    def test_does_not_suggest_tags(
-        self, client, admin, make_book, google_enabled, google_search
-    ):
+    def test_does_not_suggest_tags(self, client, admin, make_book, google_enabled, google_search):
         """The book already has tags, and they are somebody's deliberate choice."""
         book = make_book(admin["headers"])
 
-        res = client.get(
-            f"/api/books/{book['id']}/enrich/candidates", headers=admin["headers"]
-        )
+        res = client.get(f"/api/books/{book['id']}/enrich/candidates", headers=admin["headers"])
 
         assert res.json()[0]["suggested_tag_ids"] == []
 
@@ -154,9 +140,7 @@ class TestEnrichmentCandidates:
     ):
         book = make_book(admin["headers"], is_private=True)
 
-        res = client.get(
-            f"/api/books/{book['id']}/enrich/candidates", headers=member["headers"]
-        )
+        res = client.get(f"/api/books/{book['id']}/enrich/candidates", headers=member["headers"])
 
         assert res.status_code == 404
 
@@ -172,9 +156,9 @@ class TestEnrichmentCandidates:
         """
         book = make_book(admin["headers"], isbn="9780262033848")
         with respx.mock(assert_all_called=False) as mock:
-            cluster = mock.get(
-                url__startswith="https://openlibrary.org/isbn/"
-            ).mock(return_value=httpx.Response(404))
+            cluster = mock.get(url__startswith="https://openlibrary.org/isbn/").mock(
+                return_value=httpx.Response(404)
+            )
             silence_catalogues(mock)
             res = client.get(
                 f"/api/books/{book['id']}/enrich/candidates",
@@ -185,16 +169,14 @@ class TestEnrichmentCandidates:
         assert cluster.called
         assert "9780262033848" in str(cluster.calls[0].request.url)
 
-    def test_a_book_with_no_isbn_asks_no_cluster(
-        self, client, admin, make_book, google_enabled
-    ):
+    def test_a_book_with_no_isbn_asks_no_cluster(self, client, admin, make_book, google_enabled):
         """There is no handle on the work without one, and the search is the
         whole answer for that book."""
         book = make_book(admin["headers"])
         with respx.mock(assert_all_called=False) as mock:
-            cluster = mock.get(
-                url__startswith="https://openlibrary.org/isbn/"
-            ).mock(return_value=httpx.Response(404))
+            cluster = mock.get(url__startswith="https://openlibrary.org/isbn/").mock(
+                return_value=httpx.Response(404)
+            )
             silence_catalogues(mock)
             res = client.get(
                 f"/api/books/{book['id']}/enrich/candidates",
@@ -225,9 +207,7 @@ class TestEnrichmentCandidates:
         )
 
     def _candidates(self, client, admin, make_book, headings: str):
-        book = make_book(
-            admin["headers"], title="Der Zauberberg", author="Thomas Mann"
-        )
+        book = make_book(admin["headers"], title="Der Zauberberg", author="Thomas Mann")
         with respx.mock(assert_all_called=False) as mock:
             mock.get(url__startswith=K10PLUS).mock(
                 return_value=sru_response(self._catalogue_record(headings))
@@ -250,8 +230,7 @@ class TestEnrichmentCandidates:
         headings.
         """
         nine = "".join(
-            f'<datafield tag="082"><subfield code="a">{100 + index}</subfield>'
-            "</datafield>"
+            f'<datafield tag="082"><subfield code="a">{100 + index}</subfield></datafield>'
             for index in range(9)
         )
         res = self._candidates(client, admin, make_book, nine)
@@ -262,14 +241,10 @@ class TestEnrichmentCandidates:
     def test_candidate_headings_are_evidence_not_a_book_write(
         self, client, admin, make_book, google_enabled, db
     ):
-        book = make_book(
-            admin["headers"], title="Der Zauberberg", author="Thomas Mann"
-        )
+        book = make_book(admin["headers"], title="Der Zauberberg", author="Thomas Mann")
         heading = '<datafield tag="082"><subfield code="a">004</subfield></datafield>'
         with respx.mock(assert_all_called=False) as mock:
-            mock.get(url__startswith=K10PLUS).mock(
-                return_value=sru_response(self._catalogue_record(heading))
-            )
+            mock.get(url__startswith=K10PLUS).mock(return_value=sru_response(self._catalogue_record(heading)))
             silence_catalogues(mock)
             res = client.get(
                 f"/api/books/{book['id']}/enrich/candidates",
@@ -280,12 +255,7 @@ class TestEnrichmentCandidates:
         assert res.json()[0]["classifications"] == [
             {"scheme": "ddc", "number": "004", "label": None, "kind": None}
         ]
-        assert (
-            db.query(Classification)
-            .filter(Classification.book_id == book["id"])
-            .count()
-            == 0
-        )
+        assert db.query(Classification).filter(Classification.book_id == book["id"]).count() == 0
 
     def test_a_heading_the_column_could_not_hold_costs_the_heading(
         self, client, admin, make_book, google_enabled
@@ -322,20 +292,14 @@ class TestCategoriesSerialisation:
         # empty one will eventually handle one of them wrong.
         book = make_book(admin["headers"])
 
-        assert client.get(f"/api/books/{book['id']}", headers=admin["headers"]).json()[
-            "categories"
-        ] == []
+        assert client.get(f"/api/books/{book['id']}", headers=admin["headers"]).json()["categories"] == []
 
 
 class TestKeyHandling:
-    def test_the_stored_key_is_sent_to_google(
-        self, client, admin, make_book, google_enabled
-    ):
+    def test_the_stored_key_is_sent_to_google(self, client, admin, make_book, google_enabled):
         book = make_book(admin["headers"])
         with respx.mock(assert_all_called=False) as mock:
-            route = mock.get(GOOGLE_BOOKS).mock(
-                return_value=httpx.Response(200, json={"items": []})
-            )
+            route = mock.get(GOOGLE_BOOKS).mock(return_value=httpx.Response(200, json={"items": []}))
             silence_catalogues(mock)
 
             client.post(f"/api/books/{book['id']}/enrich", headers=admin["headers"])
@@ -350,9 +314,7 @@ class TestKeyHandling:
         """
         import settings_store
 
-        assert (
-            settings_store.get_raw(db, SettingKey.GOOGLE_BOOKS_API_KEY) == "test-key"
-        )
+        assert settings_store.get_raw(db, SettingKey.GOOGLE_BOOKS_API_KEY) == "test-key"
 
 
 class TestApplyingAChosenEdition:
@@ -465,9 +427,7 @@ class TestApplyingAChosenEdition:
         res = client.get(f"/api/books/{book['id']}", headers=admin["headers"])
         assert res.json()["isbn"] is None
 
-    def test_another_members_private_book_is_not_found(
-        self, client, admin, member, make_book
-    ):
+    def test_another_members_private_book_is_not_found(self, client, admin, member, make_book):
         private = make_book(member["headers"], is_private=True)
 
         res = client.post(
@@ -480,9 +440,7 @@ class TestApplyingAChosenEdition:
 
     def test_requires_authentication(self, client, admin, make_book):
         book = make_book(admin["headers"])
-        res = client.post(
-            f"/api/books/{book['id']}/enrich/apply", json=self.choice()
-        )
+        res = client.post(f"/api/books/{book['id']}/enrich/apply", json=self.choice())
         assert res.status_code == 401
 
 
@@ -529,9 +487,7 @@ def only_google_answering(item: dict):
     what a bound needs: the value under test is the one the catalogue supplies.
     """
     with respx.mock(assert_all_called=False) as mock:
-        mock.get(GOOGLE_BOOKS).mock(
-            return_value=httpx.Response(200, json={"items": [item]})
-        )
+        mock.get(GOOGLE_BOOKS).mock(return_value=httpx.Response(200, json={"items": [item]}))
         silence_catalogues(mock)
         yield
 
@@ -562,18 +518,14 @@ class TestACatalogueCannotWriteWhatTheColumnsRefuse:
     refusing it whole would report `found=False` about a book they did find.
     """
 
-    def test_the_rest_of_the_record_still_lands(
-        self, client, admin, make_book, google_enabled
-    ):
+    def test_the_rest_of_the_record_still_lands(self, client, admin, make_book, google_enabled):
         """Dropping the field rather than the record is the whole difference
         between this and `_match_rows`, so it is pinned rather than described.
         """
         book = make_book(admin["headers"])
 
         with only_google_answering(volume_with(publishedDate="9999-01-01")):
-            res = client.post(
-                f"/api/books/{book['id']}/enrich", headers=admin["headers"]
-            )
+            res = client.post(f"/api/books/{book['id']}/enrich", headers=admin["headers"])
 
         assert res.status_code == 200, res.text
         assert res.json()["book"]["year"] is None
@@ -588,23 +540,19 @@ class TestOneClickEnrichmentLeavesWhatAMemberMustChoose:
     `tests/test_evidence.py`; this pins that the route goes through that door.
     """
 
-    def test_a_volume_carrying_all_three_writes_none_of_them(
-        self, client, admin, make_book, google_enabled
-    ):
+    def test_a_volume_carrying_all_three_writes_none_of_them(self, client, admin, make_book, google_enabled):
         book = make_book(admin["headers"])
 
-        with only_google_answering(
-            volume_with(title="Dune (Dune Chronicles #1)", categories=["Fiction"])
-        ):
-            res = client.post(
-                f"/api/books/{book['id']}/enrich", headers=admin["headers"]
-            )
+        with only_google_answering(volume_with(title="Dune (Dune Chronicles #1)", categories=["Fiction"])):
+            res = client.post(f"/api/books/{book['id']}/enrich", headers=admin["headers"])
 
         written = res.json()["book"]
         assert res.json()["found"] is True
         assert written["page_count"] == 412
         assert (
-            written["categories"], written["series_name"], written["series_index"],
+            written["categories"],
+            written["series_name"],
+            written["series_index"],
             written["google_books_id"],
         ) == ([], None, None, None)
 
@@ -625,9 +573,7 @@ class TestTheTwoRoutesAgreeAboutOneVolume:
     ):
         book = make_book(admin["headers"])
 
-        with only_google_answering(
-            volume_with(description="d" * (DESCRIPTION_MAX + 1))
-        ):
+        with only_google_answering(volume_with(description="d" * (DESCRIPTION_MAX + 1))):
             res = client.get(
                 f"/api/books/{book['id']}/enrich/candidates",
                 headers=admin["headers"],
@@ -645,12 +591,8 @@ class TestTheTwoRoutesAgreeAboutOneVolume:
         because the finding was the disagreement rather than either answer."""
         book = make_book(admin["headers"])
 
-        with only_google_answering(
-            volume_with(description="d" * (DESCRIPTION_MAX + 1))
-        ):
-            res = client.post(
-                f"/api/books/{book['id']}/enrich", headers=admin["headers"]
-            )
+        with only_google_answering(volume_with(description="d" * (DESCRIPTION_MAX + 1))):
+            res = client.post(f"/api/books/{book['id']}/enrich", headers=admin["headers"])
 
         assert res.json()["found"] is True
         assert res.json()["book"]["description"] is None
@@ -688,8 +630,6 @@ class TestTheTwoRoutesAgreeAboutOneVolume:
         book = make_book(admin["headers"])
 
         with only_google_answering(volume_with(title="t" * (TITLE_MAX + 1))):
-            res = client.post(
-                f"/api/books/{book['id']}/enrich", headers=admin["headers"]
-            )
+            res = client.post(f"/api/books/{book['id']}/enrich", headers=admin["headers"])
 
         assert res.json()["found"] is False

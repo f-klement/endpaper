@@ -119,10 +119,7 @@ def _may_be_indexed(path: str) -> bool:
     wrong leaves the response `noindex`, which is the answer a deployment that
     has published nothing wants and the answer a broken one wants too.
     """
-    if not any(
-        path == candidate or path.startswith(f"{candidate}/")
-        for candidate in _INDEXABLE_PATHS
-    ):
+    if not any(path == candidate or path.startswith(f"{candidate}/") for candidate in _INDEXABLE_PATHS):
         return False
     session = SessionLocal()
     try:
@@ -298,9 +295,7 @@ class BodySizeLimitMiddleware:
 
         await self.app(scope, receive, send)
 
-    async def _refuse(
-        self, scope: Scope, receive: Receive, send: Send, code: int, detail: str
-    ) -> None:
+    async def _refuse(self, scope: Scope, receive: Receive, send: Send, code: int, detail: str) -> None:
         # `detail` matches the shape of every other error this API returns, so
         # the frontend's error handling needs no special case.
         response = JSONResponse(status_code=code, content={"detail": detail})

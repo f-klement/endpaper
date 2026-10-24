@@ -14,9 +14,7 @@ def record(client):
     """Post a position and return the created entry."""
 
     def _record(headers, book_id, **payload):
-        res = client.post(
-            f"/api/books/{book_id}/progress", json=payload, headers=headers
-        )
+        res = client.post(f"/api/books/{book_id}/progress", json=payload, headers=headers)
         assert res.status_code == 201, res.text
         return res.json()
 
@@ -95,11 +93,7 @@ class TestRecordingAPosition:
         from models import ReadingProgress
 
         book = make_book(admin["headers"])
-        db.add(
-            ReadingProgress(
-                user_id=admin["user"]["id"], book_id=book["id"], page=10, percent=20
-            )
-        )
+        db.add(ReadingProgress(user_id=admin["user"]["id"], book_id=book["id"], page=10, percent=20))
         with pytest.raises(IntegrityError):
             db.commit()
         db.rollback()
@@ -186,18 +180,14 @@ class TestTheHistory:
             10,
         ]
 
-    def test_a_member_never_sees_another_members_progress(
-        self, client, admin, member, make_book, record
-    ):
+    def test_a_member_never_sees_another_members_progress(self, client, admin, member, make_book, record):
         """A shared shelf does not mean a shared reading diary."""
         book = make_book(admin["headers"])
         record(admin["headers"], book["id"], page=77)
 
         assert history(client, member["headers"], book["id"]) == []
 
-    def test_the_book_payload_carries_only_the_callers_own(
-        self, client, admin, member, make_book, record
-    ):
+    def test_the_book_payload_carries_only_the_callers_own(self, client, admin, member, make_book, record):
         book = make_book(admin["headers"])
         record(admin["headers"], book["id"], page=77)
 
@@ -207,10 +197,7 @@ class TestTheHistory:
 
     def test_a_book_the_caller_cannot_see_is_404(self, client, admin, member, make_book):
         book = make_book(admin["headers"], is_private=True)
-        assert (
-            client.get(f"/api/books/{book['id']}/progress", headers=member["headers"]).status_code
-            == 404
-        )
+        assert client.get(f"/api/books/{book['id']}/progress", headers=member["headers"]).status_code == 404
 
 
 class TestTheBookPayload:
@@ -223,9 +210,7 @@ class TestTheBookPayload:
         assert fetched["my_progress_page"] == 100
         assert fetched["my_progress_percent"] == 50
 
-    def test_a_page_with_no_page_count_derives_no_percent(
-        self, client, admin, make_book, record
-    ):
+    def test_a_page_with_no_page_count_derives_no_percent(self, client, admin, make_book, record):
         book = make_book(admin["headers"])
         record(admin["headers"], book["id"], page=100)
 
@@ -240,9 +225,7 @@ class TestTheBookPayload:
         fetched = client.get(f"/api/books/{book['id']}", headers=admin["headers"]).json()
         assert fetched["my_progress_percent"] == 40
 
-    def test_a_page_past_the_page_count_clamps_to_a_hundred(
-        self, client, admin, make_book, record
-    ):
+    def test_a_page_past_the_page_count_clamps_to_a_hundred(self, client, admin, make_book, record):
         """Provider page counts are off by one often enough that the last page
         computes past 100."""
         book = make_book(admin["headers"], page_count=100)
@@ -270,23 +253,17 @@ class TestDeletingAnEntry:
         book = make_book(admin["headers"])
         entry = record(admin["headers"], book["id"], page=10)
 
-        res = client.delete(
-            f"/api/books/{book['id']}/progress/{entry['id']}", headers=admin["headers"]
-        )
+        res = client.delete(f"/api/books/{book['id']}/progress/{entry['id']}", headers=admin["headers"])
 
         assert res.status_code == 204
         assert history(client, admin["headers"], book["id"]) == []
 
-    def test_another_members_entry_is_404_not_403(
-        self, client, admin, member, make_book, record
-    ):
+    def test_another_members_entry_is_404_not_403(self, client, admin, member, make_book, record):
         """A 403 would confirm the entry exists."""
         book = make_book(admin["headers"])
         entry = record(admin["headers"], book["id"], page=10)
 
-        res = client.delete(
-            f"/api/books/{book['id']}/progress/{entry['id']}", headers=member["headers"]
-        )
+        res = client.delete(f"/api/books/{book['id']}/progress/{entry['id']}", headers=member["headers"])
 
         assert res.status_code == 404
         assert len(history(client, admin["headers"], book["id"])) == 1
@@ -298,9 +275,7 @@ class TestDeletingAnEntry:
         second = make_book(admin["headers"], title="Second")
         entry = record(admin["headers"], first["id"], page=10)
 
-        res = client.delete(
-            f"/api/books/{second['id']}/progress/{entry['id']}", headers=admin["headers"]
-        )
+        res = client.delete(f"/api/books/{second['id']}/progress/{entry['id']}", headers=admin["headers"])
 
         assert res.status_code == 404
 
@@ -309,9 +284,7 @@ class TestDeletingAnEntry:
         book = make_book(admin["headers"])
         entry = record(admin["headers"], book["id"], page=10)
 
-        client.delete(
-            f"/api/books/{book['id']}/progress/{entry['id']}", headers=admin["headers"]
-        )
+        client.delete(f"/api/books/{book['id']}/progress/{entry['id']}", headers=admin["headers"])
 
         fetched = client.get(f"/api/books/{book['id']}", headers=admin["headers"]).json()
         assert fetched["my_status"] == "reading"

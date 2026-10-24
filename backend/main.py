@@ -116,7 +116,6 @@ PREDEFINED_TAGS: list[PredefinedTag] = [
     # Long on purpose. A picker of thirty tags is a list; a picker of a hundred
     # and thirty is a vocabulary, and it is why the categories collapse in the
     # UI rather than all being on screen at once.
-
     # ── Type: what kind of thing it is ──────────────────────────────────────
     PredefinedTag(TagKey.FICTION, "Fiction", TagCategory.TYPE),
     PredefinedTag(TagKey.NON_FICTION, "Non-Fiction", TagCategory.TYPE),
@@ -128,7 +127,6 @@ PREDEFINED_TAGS: list[PredefinedTag] = [
     PredefinedTag(TagKey.PLAY, "Play", TagCategory.TYPE),
     PredefinedTag(TagKey.ESSAYS, "Essays", TagCategory.TYPE),
     PredefinedTag(TagKey.PICTURE_BOOK, "Picture Book", TagCategory.TYPE),
-
     # ── Genre: fiction ──────────────────────────────────────────────────────
     PredefinedTag(TagKey.ADVENTURE, "Adventure", TagCategory.GENRE),
     PredefinedTag(TagKey.CLASSIC, "Classic", TagCategory.GENRE),
@@ -166,7 +164,6 @@ PREDEFINED_TAGS: list[PredefinedTag] = [
     PredefinedTag(TagKey.URBAN_FANTASY, "Urban Fantasy", TagCategory.GENRE),
     PredefinedTag(TagKey.WAR, "War", TagCategory.GENRE),
     PredefinedTag(TagKey.WESTERN, "Western", TagCategory.GENRE),
-
     # ── Genre: non-fiction ──────────────────────────────────────────────────
     PredefinedTag(TagKey.ANTHROPOLOGY, "Anthropology", TagCategory.GENRE),
     PredefinedTag(TagKey.ARCHAEOLOGY, "Archaeology", TagCategory.GENRE),
@@ -220,7 +217,6 @@ PREDEFINED_TAGS: list[PredefinedTag] = [
     PredefinedTag(TagKey.TRUE_CRIME, "True Crime", TagCategory.GENRE),
     PredefinedTag(TagKey.URBANISM, "Urbanism", TagCategory.GENRE),
     PredefinedTag(TagKey.WINE_AND_DRINK, "Wine and Drink", TagCategory.GENRE),
-
     # ── Age: who it is for ──────────────────────────────────────────────────
     PredefinedTag(TagKey.BABY_AND_TODDLER, "Baby and Toddler (0-3)", TagCategory.AGE),
     PredefinedTag(TagKey.CHILDREN, "Children (0-8)", TagCategory.AGE),
@@ -305,18 +301,12 @@ def seed_catalogue_targets() -> None:
                 "needs_key": target.needs_key,
                 "sru_version": target.sru_version,
                 "query_parameter": target.query_parameter,
-                "query_language": (
-                    target.query_language.value if target.query_language else None
-                ),
+                "query_language": (target.query_language.value if target.query_language else None),
                 "record_schema": target.record_schema,
                 "isbn_index": target.isbn_index,
                 "isbn_attribute": target.isbn_attribute,
                 "title_index": target.title_index,
-                "title_query_shape": (
-                    target.title_query_shape.value
-                    if target.title_query_shape
-                    else None
-                ),
+                "title_query_shape": (target.title_query_shape.value if target.title_query_shape else None),
                 "lookup_records": target.lookup_records,
                 "search_multiplier": target.search_multiplier,
                 "search_cap": target.search_cap,
@@ -654,9 +644,7 @@ def healthz(db: DbSession) -> dict[str, str]:
 _fallback = APIRouter(include_in_schema=False)
 
 
-@_fallback.api_route(
-    "/api/{rest:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]
-)
+@_fallback.api_route("/api/{rest:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"])
 @_fallback.api_route(
     "/auth/{rest:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]
 )
@@ -747,11 +735,7 @@ def cache_control_for(full_path: str | os.PathLike[str]) -> str:
     into the safe one, which costs a conditional request and cannot serve
     anything stale.
     """
-    return (
-        CACHE_IMMUTABLE
-        if Path(full_path).parent.name == HASHED_ASSET_DIR
-        else CACHE_REVALIDATE
-    )
+    return CACHE_IMMUTABLE if Path(full_path).parent.name == HASHED_ASSET_DIR else CACHE_REVALIDATE
 
 
 SHELL = "index.html"
@@ -887,9 +871,7 @@ def mount_spa(app: FastAPI, directory: Path) -> None:
     else. What makes a client route survive a refresh is
     `CachePolicyStaticFiles.get_response`, which is where that is explained.
     """
-    app.mount(
-        "/", CachePolicyStaticFiles(directory=str(directory), html=True), name="static"
-    )
+    app.mount("/", CachePolicyStaticFiles(directory=str(directory), html=True), name="static")
 
 
 def mount_frontend_if_enabled(app: FastAPI, directory: Path) -> bool:

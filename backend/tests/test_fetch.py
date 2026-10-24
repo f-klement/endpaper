@@ -52,6 +52,10 @@ from tests.bindings import SourceNames, assignments
 from tests.corpus import application_sources
 from tests.strategies import SURROGATE_CODECS
 
+TREE_GUARDS = {
+    "TestThisIsTheOnlyDoorOutwards": ("application_sources",),
+}
+
 URL = "https://catalogue.test/sru"
 
 BACKEND = Path(__file__).resolve().parent.parent
@@ -114,9 +118,7 @@ DOOR_KEEPERS = {"covers.py", "notifications.py", "fetch.py"}
 #: the tree used a transport; `fetch.PinnedTransport` makes it the sanctioned
 #: way to reach the network, so a module copying the idiom would have walked
 #: through the door guard rather than through the door.
-TRANSPORT_CLASSES = frozenset(
-    {"AsyncHTTPTransport", "HTTPTransport", "AsyncBaseTransport", "BaseTransport"}
-)
+TRANSPORT_CLASSES = frozenset({"AsyncHTTPTransport", "HTTPTransport", "AsyncBaseTransport", "BaseTransport"})
 
 CLIENT_CLASSES = frozenset({"Client", "AsyncClient"}) | TRANSPORT_CLASSES
 REQUEST_VERBS = frozenset(
@@ -237,9 +239,9 @@ def _client_handles(tree: ast.Module, names: _Names) -> set[str]:
     for node in ast.walk(tree):
         if isinstance(node, ast.With | ast.AsyncWith):
             for item in node.items:
-                if isinstance(
-                    item.optional_vars, ast.Name
-                ) and _is_client_expression(item.context_expr, names):
+                if isinstance(item.optional_vars, ast.Name) and _is_client_expression(
+                    item.context_expr, names
+                ):
                     handles.add(item.optional_vars.id)
         elif isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
             arguments = node.args
@@ -248,9 +250,7 @@ def _client_handles(tree: ast.Module, names: _Names) -> set[str]:
                 *arguments.args,
                 *arguments.kwonlyargs,
             ]:
-                if arg.annotation is not None and _annotates_client(
-                    arg.annotation, names
-                ):
+                if arg.annotation is not None and _annotates_client(arg.annotation, names):
                     handles.add(arg.arg)
         for target, value in assignments(node):
             if isinstance(target, ast.Name) and _is_client_expression(value, names):
@@ -282,9 +282,7 @@ def _http_offences(source: str) -> list[str]:
     handles = _client_handles(tree, names)
 
     found = []
-    called = {
-        id(node.func) for node in ast.walk(tree) if isinstance(node, ast.Call)
-    }
+    called = {id(node.func) for node in ast.walk(tree) if isinstance(node, ast.Call)}
 
     # **A transport is reported where it is NAMED, not only where it is called**,
     # and that is the one dimension where the paragraph about pulling a client
@@ -343,9 +341,7 @@ class TestTheCapIsTheWholePoint:
     @pytest.mark.asyncio
     async def test_a_body_over_the_cap_is_refused(self):
         with respx.mock:
-            respx.get(URL).mock(
-                return_value=httpx.Response(200, content=b"x" * 9000)
-            )
+            respx.get(URL).mock(return_value=httpx.Response(200, content=b"x" * 9000))
             with pytest.raises(fetch.ResponseTooLarge):
                 await fetch.get_once(URL, limit=8192)
 
@@ -353,9 +349,7 @@ class TestTheCapIsTheWholePoint:
     async def test_a_body_exactly_at_the_cap_is_allowed(self):
         """The boundary, because an off by one here refuses an honest page."""
         with respx.mock:
-            respx.get(URL).mock(
-                return_value=httpx.Response(200, content=b"x" * 8192)
-            )
+            respx.get(URL).mock(return_value=httpx.Response(200, content=b"x" * 8192))
             answer = await fetch.get_once(URL, limit=8192)
 
         assert len(answer.content) == 8192
@@ -437,9 +431,7 @@ class TestTheCapIsTheWholePoint:
         """`identity` is what was asked for, so saying so is not a refusal."""
         with respx.mock:
             respx.get(URL).mock(
-                return_value=httpx.Response(
-                    200, content=b"fine", headers={"content-encoding": "identity"}
-                )
+                return_value=httpx.Response(200, content=b"fine", headers={"content-encoding": "identity"})
             )
             answer = await fetch.get_once(URL)
 
@@ -516,16 +508,19 @@ class TestTheCapIsTheWholePoint:
         source = (BACKEND / "fetch.py").read_text()
         stated = re.search(r"asks (\w+) sources at once", source)
         assert stated is not None, (
-            "MAX_RESPONSE_BYTES's docstring no longer states how many sources "
-            "`metadata.search` asks at once"
+            "MAX_RESPONSE_BYTES's docstring no longer states how many sources `metadata.search` asks at once"
         )
         words = {
-            "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9,
+            "four": 4,
+            "five": 5,
+            "six": 6,
+            "seven": 7,
+            "eight": 8,
+            "nine": 9,
             "ten": 10,
         }
         assert words.get(stated.group(1)) == _CONCURRENT_SOURCES, (
-            f"the docstring says {stated.group(1)} sources; `metadata.search` "
-            f"asks {_CONCURRENT_SOURCES}"
+            f"the docstring says {stated.group(1)} sources; `metadata.search` asks {_CONCURRENT_SOURCES}"
         )
 
     def test_the_cap_is_resolved_at_call_time_not_at_import(self):
@@ -628,9 +623,9 @@ class TestDecodingMatchesWhatHttpxWouldHaveDone:
         one does, in `tests/strategies.py`, so the arm grows with the registry.
         """
         written = "<x>\ud800</x>".encode(charset)
-        assert fetch.Fetched(200, written, charset).text == written.decode(
-            charset, "replace"
-        ).replace("\ud800", "\N{REPLACEMENT CHARACTER}")
+        assert fetch.Fetched(200, written, charset).text == written.decode(charset, "replace").replace(
+            "\ud800", "\N{REPLACEMENT CHARACTER}"
+        )
 
     def test_a_valid_surrogate_pair_is_still_the_character_it_encodes(self):
         """The repair is of a surrogate with no partner. UTF-7 spells an astral
@@ -731,11 +726,7 @@ class TestDecodingMatchesWhatHttpxWouldHaveDone:
         would pass the one above. 40 levels is well inside the parser's limit.
         """
         with respx.mock:
-            respx.get(URL).mock(
-                return_value=httpx.Response(
-                    200, content=b'{"a":' * 40 + b"1" + b"}" * 40
-                )
-            )
+            respx.get(URL).mock(return_value=httpx.Response(200, content=b'{"a":' * 40 + b"1" + b"}" * 40))
             answer = await fetch.get_once(URL)
 
         parsed = answer.json()
@@ -758,12 +749,8 @@ class TestTheRedirectPolicy:
     @pytest.mark.asyncio
     async def test_a_redirect_to_the_same_host_is_followed(self):
         with respx.mock:
-            respx.get(URL).mock(
-                return_value=httpx.Response(302, headers={"location": f"{URL}/moved"})
-            )
-            respx.get(f"{URL}/moved").mock(
-                return_value=httpx.Response(200, text="arrived")
-            )
+            respx.get(URL).mock(return_value=httpx.Response(302, headers={"location": f"{URL}/moved"}))
+            respx.get(f"{URL}/moved").mock(return_value=httpx.Response(200, text="arrived"))
             answer = await fetch.get_once(URL)
 
         assert answer.text == "arrived"
@@ -772,9 +759,7 @@ class TestTheRedirectPolicy:
     async def test_a_relative_redirect_resolves_against_the_current_hop(self):
         """Open Library's is `location: /books/OL23140636M.json`, not absolute."""
         with respx.mock:
-            respx.get(URL).mock(
-                return_value=httpx.Response(302, headers={"location": "/elsewhere"})
-            )
+            respx.get(URL).mock(return_value=httpx.Response(302, headers={"location": "/elsewhere"}))
             route = respx.get("https://catalogue.test/elsewhere").mock(
                 return_value=httpx.Response(200, text="arrived")
             )
@@ -802,9 +787,7 @@ class TestTheRedirectPolicy:
         for the pod, can send back a 302.
         """
         with respx.mock:
-            respx.get(URL).mock(
-                return_value=httpx.Response(302, headers={"location": location})
-            )
+            respx.get(URL).mock(return_value=httpx.Response(302, headers={"location": location}))
             landed = respx.get(url__startswith=location.rsplit("/", 1)[0]).mock(
                 return_value=httpx.Response(200, text="reached")
             )
@@ -820,9 +803,7 @@ class TestTheRedirectPolicy:
         carry the query. Captured at DEBUG so no level hides a line."""
         location = "https://elsewhere.example/v?key=secret-key&q=x"
         with caplog.at_level(logging.DEBUG), respx.mock:
-            respx.get(URL).mock(
-                return_value=httpx.Response(302, headers={"location": location})
-            )
+            respx.get(URL).mock(return_value=httpx.Response(302, headers={"location": location}))
             with pytest.raises(fetch.RedirectedOffHost) as raised:
                 await fetch.get_once(URL)
 
@@ -835,9 +816,7 @@ class TestTheRedirectPolicy:
         """Same host, and still somewhere an on-path attacker can rewrite."""
         with respx.mock:
             respx.get(URL).mock(
-                return_value=httpx.Response(
-                    302, headers={"location": "http://catalogue.test/sru"}
-                )
+                return_value=httpx.Response(302, headers={"location": "http://catalogue.test/sru"})
             )
             with pytest.raises(fetch.RedirectedOffHost):
                 await fetch.get_once(URL)
@@ -847,9 +826,7 @@ class TestTheRedirectPolicy:
         """`lx2.loc.gov:210` to `lx2.loc.gov:22` is a different service."""
         with respx.mock:
             respx.get(URL).mock(
-                return_value=httpx.Response(
-                    302, headers={"location": "https://catalogue.test:8443/sru"}
-                )
+                return_value=httpx.Response(302, headers={"location": "https://catalogue.test:8443/sru"})
             )
             with pytest.raises(fetch.RedirectedOffHost):
                 await fetch.get_once(URL)
@@ -863,9 +840,7 @@ class TestTheRedirectPolicy:
         """
         with respx.mock:
             respx.get(URL).mock(
-                return_value=httpx.Response(
-                    302, headers={"location": "https://catalogue.test:443/moved"}
-                )
+                return_value=httpx.Response(302, headers={"location": "https://catalogue.test:443/moved"})
             )
             respx.get("https://catalogue.test:443/moved").mock(
                 return_value=httpx.Response(200, text="arrived")
@@ -899,9 +874,7 @@ class TestTheRedirectPolicy:
         HTTP, so forging it needs no TLS.
         """
         with respx.mock:
-            respx.get(URL).mock(
-                return_value=httpx.Response(302, headers={"location": location})
-            )
+            respx.get(URL).mock(return_value=httpx.Response(302, headers={"location": location}))
             with pytest.raises(fetch.RedirectedOffHost) as raised:
                 await fetch.get_once(URL)
 
@@ -953,9 +926,7 @@ class TestTheRedirectPolicy:
         """
         with respx.mock:
             respx.get(URL).mock(
-                return_value=httpx.Response(
-                    302, headers={"location": f"{URL}/moved?version=1.1"}
-                )
+                return_value=httpx.Response(302, headers={"location": f"{URL}/moved?version=1.1"})
             )
             route = respx.get(url__startswith=f"{URL}/moved").mock(
                 return_value=httpx.Response(200, text="arrived")
@@ -968,12 +939,8 @@ class TestTheRedirectPolicy:
     async def test_the_cap_still_applies_after_a_redirect(self):
         """The hop that answers is the hop that can be enormous."""
         with respx.mock:
-            respx.get(URL).mock(
-                return_value=httpx.Response(302, headers={"location": f"{URL}/moved"})
-            )
-            respx.get(f"{URL}/moved").mock(
-                return_value=httpx.Response(200, content=b"x" * 9000)
-            )
+            respx.get(URL).mock(return_value=httpx.Response(302, headers={"location": f"{URL}/moved"}))
+            respx.get(f"{URL}/moved").mock(return_value=httpx.Response(200, content=b"x" * 9000))
             with pytest.raises(fetch.ResponseTooLarge):
                 await fetch.get_once(URL, limit=8192)
 
@@ -1012,9 +979,7 @@ class TestTheDeadlineBoundsTheWholeRequest:
                 yield b"x" * 8
 
         with respx.mock:
-            respx.get(URL).mock(
-                return_value=httpx.Response(200, stream=trickle())
-            )
+            respx.get(URL).mock(return_value=httpx.Response(200, stream=trickle()))
             started = time.monotonic()
             with pytest.raises(fetch.DeadlineExceeded):
                 await fetch.get_once(URL, deadline=time.monotonic() + 0.2)
@@ -1123,11 +1088,7 @@ class TestThisIsTheOnlyDoorOutwards:
     def test_the_door_keepers_are_exactly_the_modules_that_need_to_be(self):
         """An allowlist naming a module that no longer needs it is how the next
         reader learns the wrong rule."""
-        speaking = {
-            name
-            for name, source in application_sources().items()
-            if _http_offences(source)
-        }
+        speaking = {name for name, source in application_sources().items() if _http_offences(source)}
         assert speaking == DOOR_KEEPERS
 
     #: Every shape the first version of this rule let through, plus the two it
@@ -1138,22 +1099,17 @@ class TestThisIsTheOnlyDoorOutwards:
         "plain construction": "import httpx\nc = httpx.AsyncClient()\n",
         "sync construction": "import httpx\nc = httpx.Client()\n",
         "spread over lines": (
-            "import httpx\n\n\ndef f():\n"
-            "    return httpx.AsyncClient(\n        timeout=10,\n    )\n"
+            "import httpx\n\n\ndef f():\n    return httpx.AsyncClient(\n        timeout=10,\n    )\n"
         ),
         "imported class": "from httpx import AsyncClient\nc = AsyncClient()\n",
-        "imported and renamed": (
-            "from httpx import AsyncClient as AC\nc = AC()\n"
-        ),
+        "imported and renamed": ("from httpx import AsyncClient as AC\nc = AC()\n"),
         "module alias": "import httpx as h\nc = h.AsyncClient()\n",
         "rebound constructor": "import httpx\nC = httpx.AsyncClient\nc = C()\n",
         "annotated rebinding": (
             "import httpx\nfrom typing import Any\nC: Any = httpx.AsyncClient\nc = C()\n"
         ),
         "module level verb": "import httpx\nr = httpx.get('u')\n",
-        "module level stream": (
-            "import httpx\nwith httpx.stream('GET', 'u') as r:\n    pass\n"
-        ),
+        "module level stream": ("import httpx\nwith httpx.stream('GET', 'u') as r:\n    pass\n"),
         "aliased module level verb": "import httpx as h\nr = h.post('u')\n",
         "verb on the door's own client": (
             "import fetch\n\n\nasync def f():\n"
@@ -1161,21 +1117,17 @@ class TestThisIsTheOnlyDoorOutwards:
             "        return await client.get('u')\n"
         ),
         "verb on an annotated parameter": (
-            "import httpx\n\n\nasync def f(client: httpx.AsyncClient):\n"
-            "    return await client.get('u')\n"
+            "import httpx\n\n\nasync def f(client: httpx.AsyncClient):\n    return await client.get('u')\n"
         ),
         "verb on an assigned client": (
             "import httpx\nc = httpx.AsyncClient()\n\n\n"
             "async def f():\n    return await c.stream('GET', 'u')\n"
         ),
         "imported verb": "from httpx import get\nr = get('u')\n",
-        "imported and renamed verb": (
-            "from httpx import get as hget\nr = hget('u')\n"
-        ),
+        "imported and renamed verb": ("from httpx import get as hget\nr = hget('u')\n"),
         "transport construction": "import httpx\nt = httpx.AsyncHTTPTransport()\n",
         "transport class as a default argument": (
-            "import httpx\n\n\ndef door(inner=httpx.AsyncHTTPTransport):\n"
-            "    return inner()\n"
+            "import httpx\n\n\ndef door(inner=httpx.AsyncHTTPTransport):\n    return inner()\n"
         ),
         "transport class in a container": (
             "import httpx\nMAKERS = (httpx.AsyncHTTPTransport,)\nt = MAKERS[0]()\n"
@@ -1185,9 +1137,7 @@ class TestThisIsTheOnlyDoorOutwards:
             "    async def handle_async_request(self, request):\n        ...\n"
         ),
         "sync transport construction": "import httpx\nt = httpx.HTTPTransport()\n",
-        "imported transport class": (
-            "from httpx import AsyncHTTPTransport\nt = AsyncHTTPTransport()\n"
-        ),
+        "imported transport class": ("from httpx import AsyncHTTPTransport\nt = AsyncHTTPTransport()\n"),
         "a request handed to a transport": (
             "import httpx\n\n\nasync def f(t: httpx.AsyncBaseTransport, r):\n"
             "    return await t.handle_async_request(r)\n"
@@ -1231,15 +1181,9 @@ class TestThisIsTheOnlyDoorOutwards:
             "        return await f.get(c, url)\n"
         ),
         "a response object": "import httpx\nr = httpx.Response(200)\n",
-        "an exception type": (
-            "import httpx\n\n\ndef f():\n    raise httpx.HTTPError('x')\n"
-        ),
-        "a dict's own get": (
-            "d = {'a': 1}\nv = d.get('a')\n"
-        ),
-        "an unrelated object's stream": (
-            "def f(source):\n    return source.stream('GET', 'u')\n"
-        ),
+        "an exception type": ("import httpx\n\n\ndef f():\n    raise httpx.HTTPError('x')\n"),
+        "a dict's own get": ("d = {'a': 1}\nv = d.get('a')\n"),
+        "an unrelated object's stream": ("def f(source):\n    return source.stream('GET', 'u')\n"),
     }
 
     @pytest.mark.parametrize("shape", INNOCENT.values(), ids=INNOCENT.keys())
@@ -1268,18 +1212,14 @@ class TestACredentialGoesOnlyToTheOriginItWasSetFor:
 
     @respx.mock
     async def test_it_is_sent_to_the_target(self):
-        route = respx.get("https://catalogue.test/sru").mock(
-            return_value=httpx.Response(200, text="ok")
-        )
+        route = respx.get("https://catalogue.test/sru").mock(return_value=httpx.Response(200, text="ok"))
         credential = self._Credential("https://catalogue.test")
         await fetch.get_once("https://catalogue.test/sru", credential=credential)
         assert route.calls.last.request.headers["authorization"] == "Basic secret"
 
     @respx.mock
     async def test_nothing_is_sent_when_no_credential_is_given(self):
-        route = respx.get("https://catalogue.test/sru").mock(
-            return_value=httpx.Response(200, text="ok")
-        )
+        route = respx.get("https://catalogue.test/sru").mock(return_value=httpx.Response(200, text="ok"))
         await fetch.get_once("https://catalogue.test/sru")
         assert "authorization" not in route.calls.last.request.headers
 
@@ -1289,9 +1229,7 @@ class TestACredentialGoesOnlyToTheOriginItWasSetFor:
         respx.get("https://catalogue.test/a").mock(
             return_value=httpx.Response(302, headers={"location": "https://catalogue.test/b"})
         )
-        respx.get("https://catalogue.test/b").mock(
-            return_value=httpx.Response(200, text="ok")
-        )
+        respx.get("https://catalogue.test/b").mock(return_value=httpx.Response(200, text="ok"))
         credential = self._Credential("https://catalogue.test")
         await fetch.get_once("https://catalogue.test/a", credential=credential)
         assert credential.asked == [
@@ -1301,12 +1239,8 @@ class TestACredentialGoesOnlyToTheOriginItWasSetFor:
 
     @respx.mock
     async def test_the_header_is_not_left_on_the_client_for_the_next_request(self):
-        first = respx.get("https://catalogue.test/sru").mock(
-            return_value=httpx.Response(200, text="ok")
-        )
-        second = respx.get("https://elsewhere.test/sru").mock(
-            return_value=httpx.Response(200, text="ok")
-        )
+        first = respx.get("https://catalogue.test/sru").mock(return_value=httpx.Response(200, text="ok"))
+        second = respx.get("https://elsewhere.test/sru").mock(return_value=httpx.Response(200, text="ok"))
         credential = self._Credential("https://catalogue.test")
         async with fetch.catalogue_client() as client:
             await fetch.get(client, "https://catalogue.test/sru", credential=credential)
@@ -1366,7 +1300,7 @@ class TestWhichClassAnAddressIsIn:
             ("fe80::1", fetch.AddressClass.LINK_LOCAL),
             ("10.0.0.5", fetch.AddressClass.PRIVATE),
             ("172.16.0.1", fetch.AddressClass.PRIVATE),
-                        ("100.64.0.1", fetch.AddressClass.PRIVATE),
+            ("100.64.0.1", fetch.AddressClass.PRIVATE),
             ("fd00::5", fetch.AddressClass.PRIVATE),
             ("224.0.0.1", fetch.AddressClass.MULTICAST),
             ("ff02::1", fetch.AddressClass.MULTICAST),
@@ -1377,9 +1311,7 @@ class TestWhichClassAnAddressIsIn:
             ("2001::1", fetch.AddressClass.RESERVED),
         ],
     )
-    def test_an_address_is_in_the_class_its_registry_entry_says(
-        self, address, expected
-    ):
+    def test_an_address_is_in_the_class_its_registry_entry_says(self, address, expected):
         assert fetch.classify(address) == expected
 
     @pytest.mark.parametrize(
@@ -1390,9 +1322,7 @@ class TestWhichClassAnAddressIsIn:
             "64:ff9b::a9fe:a9fe",
         ],
     )
-    def test_a_v4_address_wrapped_in_a_v6_prefix_is_classed_as_the_v4_one(
-        self, spelling
-    ):
+    def test_a_v4_address_wrapped_in_a_v6_prefix_is_classed_as_the_v4_one(self, spelling):
         """The three prefixes that carry a v4 address and are read as v6.
 
         **Two of the three are `is_global`**, so a classifier that did not
@@ -1477,11 +1407,7 @@ class TestWhichClassAnAddressIsIn:
             "fec0::a9fe:a9fe",
         ]
 
-        public = [
-            address
-            for address in unreachable
-            if fetch.classify(address) == fetch.AddressClass.PUBLIC
-        ]
+        public = [address for address in unreachable if fetch.classify(address) == fetch.AddressClass.PUBLIC]
 
         assert public == []
         assert not any(fetch.PUBLIC_ADDRESSES.permits(a) for a in unreachable)
@@ -1527,18 +1453,14 @@ class TestResolveThenPin:
 
     def _client(self, policy, resolver, recorder):
         return httpx.AsyncClient(
-            transport=fetch.PinnedTransport(
-                policy, resolver=resolver, inner=lambda: recorder
-            )
+            transport=fetch.PinnedTransport(policy, resolver=resolver, inner=lambda: recorder)
         )
 
     async def test_the_connection_is_made_to_the_address_that_was_classified(self):
         recorder = _Recorder()
         resolver = _Answers(("10.0.0.10",))
 
-        async with self._client(
-            fetch.HOUSEHOLD_ADDRESSES, resolver, recorder
-        ) as client:
+        async with self._client(fetch.HOUSEHOLD_ADDRESSES, resolver, recorder) as client:
             await client.get("http://calibre.test:8083/opds")
 
         assert str(recorder.requests[0].url) == "http://10.0.0.10:8083/opds"
@@ -1555,9 +1477,7 @@ class TestResolveThenPin:
         """
         recorder = _Recorder()
 
-        async with self._client(
-            fetch.PUBLIC_ADDRESSES, _Answers(("93.184.216.34",)), recorder
-        ) as client:
+        async with self._client(fetch.PUBLIC_ADDRESSES, _Answers(("93.184.216.34",)), recorder) as client:
             await client.get("https://catalogue.test/sru")
 
         pinned = recorder.requests[0]
@@ -1586,9 +1506,7 @@ class TestResolveThenPin:
         recorder = _Recorder()
         resolver = _Answers(("10.0.0.10",))
 
-        async with self._client(
-            fetch.HOUSEHOLD_ADDRESSES, resolver, recorder
-        ) as client:
+        async with self._client(fetch.HOUSEHOLD_ADDRESSES, resolver, recorder) as client:
             with pytest.raises(fetch.AddressRefused):
                 await client.get("http://169.254.169.254/latest/meta-data/")
 
@@ -1606,9 +1524,7 @@ class TestResolveThenPin:
         recorder = _Recorder()
         resolver = _Answers(("10.0.1.9",), ("169.254.169.254",))
 
-        async with self._client(
-            fetch.HOUSEHOLD_ADDRESSES, resolver, recorder
-        ) as client:
+        async with self._client(fetch.HOUSEHOLD_ADDRESSES, resolver, recorder) as client:
             await client.get("http://calibre.test:8083/opds")
             with pytest.raises(fetch.AddressRefused):
                 await client.get("http://calibre.test:8083/opds?page=2")
@@ -1625,9 +1541,7 @@ class TestResolveThenPin:
         recorder = _Recorder()
         resolver = _Answers(("fe80::1", "10.0.1.9"))
 
-        async with self._client(
-            fetch.HOUSEHOLD_ADDRESSES, resolver, recorder
-        ) as client:
+        async with self._client(fetch.HOUSEHOLD_ADDRESSES, resolver, recorder) as client:
             await client.get("http://calibre.test:8083/opds")
 
         assert recorder.requests[0].url.host == "10.0.1.9"
@@ -1644,9 +1558,7 @@ class TestResolveThenPin:
         """
         recorder = _Recorder()
 
-        async with self._client(
-            fetch.HOUSEHOLD_ADDRESSES, _Answers(("10.0.1.9",)), recorder
-        ) as client:
+        async with self._client(fetch.HOUSEHOLD_ADDRESSES, _Answers(("10.0.1.9",)), recorder) as client:
             response = await client.get("http://calibre.test:8083/opds")
 
         assert response.request.url.host == "calibre.test"
@@ -1697,9 +1609,7 @@ class TestResolveThenPin:
 
         assert [recorder.closes for recorder in made] == [1, 1]
 
-    def test_a_proxy_in_the_environment_cannot_take_the_request_out_of_this_door(
-        self, monkeypatch
-    ):
+    def test_a_proxy_in_the_environment_cannot_take_the_request_out_of_this_door(self, monkeypatch):
         """`trust_env=False`, and it is the difference between a pin and a hope.
 
         With it on, httpx mounts a proxy transport **in front of** the one it
@@ -1718,12 +1628,10 @@ class TestResolveThenPin:
         pinned = fetch.pinned_client(fetch.PUBLIC_ADDRESSES)
         trusting = fetch.catalogue_client()
         try:
-            assert isinstance(
-                pinned._transport_for_url(url), fetch.PinnedTransport
+            assert isinstance(pinned._transport_for_url(url), fetch.PinnedTransport)
+            assert not isinstance(trusting._transport_for_url(url), fetch.PinnedTransport), (
+                "the control: the environment moves a request that trusts it"
             )
-            assert not isinstance(
-                trusting._transport_for_url(url), fetch.PinnedTransport
-            ), "the control: the environment moves a request that trusts it"
         finally:
             # Closing them would need an event loop; neither has opened a socket.
             del pinned, trusting
@@ -1731,9 +1639,7 @@ class TestResolveThenPin:
     async def test_a_resolver_answering_nothing_is_a_refusal_and_not_a_crash(self):
         recorder = _Recorder()
 
-        async with self._client(
-            fetch.HOUSEHOLD_ADDRESSES, _Answers(()), recorder
-        ) as client:
+        async with self._client(fetch.HOUSEHOLD_ADDRESSES, _Answers(()), recorder) as client:
             with pytest.raises(fetch.AddressRefused):
                 await client.get("http://calibre.test:8083/opds")
 
@@ -1756,9 +1662,7 @@ class TestResolveThenPin:
             raise socket.gaierror(-2, "Name or service not known")
 
         recorder = _Recorder()
-        async with self._client(
-            fetch.HOUSEHOLD_ADDRESSES, refuses, recorder
-        ) as client:
+        async with self._client(fetch.HOUSEHOLD_ADDRESSES, refuses, recorder) as client:
             with pytest.raises(httpx.HTTPError) as failure:
                 await client.get("http://nowhere.test/opds")
 

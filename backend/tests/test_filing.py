@@ -234,9 +234,7 @@ class TestTheLibraryOfCongressRule:
         The one place the remainder cannot be left as text: comparing `.S75`
         against `.5.S75` puts the digit first and reverses them.
         """
-        order = sorted(
-            ["BF575.5.S75", "BF575.S75"], key=filing.LIBRARY_OF_CONGRESS.sort_key
-        )
+        order = sorted(["BF575.5.S75", "BF575.S75"], key=filing.LIBRARY_OF_CONGRESS.sort_key)
 
         assert order == ["BF575.S75", "BF575.5.S75"]
 
@@ -255,9 +253,7 @@ class TestTheLibraryOfCongressRule:
         by this project's own rule stops tracking `filing.py` the first time a
         rule legitimately changes.
         """
-        order = sorted(
-            ["QA76.5", "QA76.45"], key=filing.LIBRARY_OF_CONGRESS.sort_key
-        )
+        order = sorted(["QA76.5", "QA76.45"], key=filing.LIBRARY_OF_CONGRESS.sort_key)
 
         assert order == ["QA76.45", "QA76.5"]
 
@@ -268,9 +264,7 @@ class TestTheLibraryOfCongressRule:
         already decimal fraction order. The test is here because that is the
         argument for leaving the remainder verbatim.
         """
-        order = sorted(
-            ["BF575.S8", "BF575.S75"], key=filing.LIBRARY_OF_CONGRESS.sort_key
-        )
+        order = sorted(["BF575.S8", "BF575.S75"], key=filing.LIBRARY_OF_CONGRESS.sort_key)
 
         assert order == ["BF575.S75", "BF575.S8"]
 
@@ -281,9 +275,7 @@ class TestTheLibraryOfCongressRule:
         `S7` files first. With the dots and spaces removed both begin `S7` and
         the shorter cutter files second, which is wrong.
         """
-        order = sorted(
-            ["BF575.S75", "BF575.S7 A1"], key=filing.LIBRARY_OF_CONGRESS.sort_key
-        )
+        order = sorted(["BF575.S75", "BF575.S7 A1"], key=filing.LIBRARY_OF_CONGRESS.sort_key)
 
         assert order == ["BF575.S7 A1", "BF575.S75"]
 
@@ -294,9 +286,7 @@ class TestTheLibraryOfCongressRule:
         assert order == ["Q1", "QA1"]
 
     def test_reads_the_class_letters_in_either_case(self):
-        assert filing.LIBRARY_OF_CONGRESS.sort_key(
-            "bf575"
-        ) == filing.LIBRARY_OF_CONGRESS.sort_key("BF575")
+        assert filing.LIBRARY_OF_CONGRESS.sort_key("bf575") == filing.LIBRARY_OF_CONGRESS.sort_key("BF575")
 
     def test_files_a_value_it_cannot_read_under_the_generic_rule(self):
         """Rather than raising or dropping it.
@@ -304,9 +294,9 @@ class TestTheLibraryOfCongressRule:
         The column holds whatever a catalogue wrote, and a shelf order that
         omits a row is worse than one that files it by its text.
         """
-        assert filing.LIBRARY_OF_CONGRESS.sort_key(
+        assert filing.LIBRARY_OF_CONGRESS.sort_key("no such call number") == filing.GENERIC.sort_key(
             "no such call number"
-        ) == filing.GENERIC.sort_key("no such call number")
+        )
 
     def test_orders_a_shelf(self):
         assert filing.LIBRARY_OF_CONGRESS.orders_a_shelf is True
@@ -337,9 +327,7 @@ class TestWhichRuleFilesWhichScheme:
     def test_the_shelf_schemes_are_derived_from_the_rules(self):
         """The other direction, so the tuple cannot drift from what it describes."""
         assert set(filing.SHELF_SCHEMES) == {
-            scheme
-            for scheme, rule in filing.FILING_RULES.items()
-            if rule.orders_a_shelf
+            scheme for scheme, rule in filing.FILING_RULES.items() if rule.orders_a_shelf
         }
 
     def test_the_subject_vocabularies_file_under_the_generic_rule(self):
@@ -398,11 +386,7 @@ class TestTheCorpusReachesEveryClassShape:
             counted[shape] += 1
 
         assert not outside, f"shapes the expression produces and this set omits: {outside}"
-        thin = {
-            shape: count
-            for shape, count in sorted(counted.items())
-            if count < self.MINIMUM_PER_SHAPE
-        }
+        thin = {shape: count for shape, count in sorted(counted.items()) if count < self.MINIMUM_PER_SHAPE}
 
         assert not thin, f"class shapes with too few fixtures: {thin}"
 
@@ -428,8 +412,7 @@ class TestTheCorpusReachesEveryClassShape:
         see.
         """
         assert {
-            class_shape("A" * letters + "1" * digits)
-            for letters, digits in EVERY_CLASS_SHAPE
+            class_shape("A" * letters + "1" * digits) for letters, digits in EVERY_CLASS_SHAPE
         } == EVERY_CLASS_SHAPE
         assert class_shape("KJC1234.5 .A2 1976") == (
             filing._LETTERS_WIDTH,
@@ -460,16 +443,12 @@ class TestTheKeyReadsPastANewline:
     def test_a_number_carrying_a_newline_still_files_under_its_class(self):
         """Without `DOTALL` this falls to the generic rule and files as raw
         text, which stands it apart from every other number in class QA76."""
-        assert filing.LIBRARY_OF_CONGRESS.sort_key("QA76\nS75") == (
-            "QA " + "0076" + "000000" + "\nS75"
-        )
+        assert filing.LIBRARY_OF_CONGRESS.sort_key("QA76\nS75") == ("QA " + "0076" + "000000" + "\nS75")
 
     def test_the_tab_and_the_carriage_return_are_not_evidence_of_the_flag(self):
         """Named so nobody reads them as guarding something they do not: both
         pass with the flag removed."""
-        assert filing.LIBRARY_OF_CONGRESS.sort_key(
-            "QA76\tS75"
-        ) == "QA " + "0076" + "000000" + "\tS75"
+        assert filing.LIBRARY_OF_CONGRESS.sort_key("QA76\tS75") == "QA " + "0076" + "000000" + "\tS75"
 
 
 class TestTheKeyIsAsciiOnly:
@@ -483,9 +462,7 @@ class TestTheKeyIsAsciiOnly:
 
     @pytest.mark.parametrize("number", ["٣٤", "ü9", "ẞ1"])
     def test_a_value_outside_ascii_files_as_its_own_text(self, number):
-        assert filing.LIBRARY_OF_CONGRESS.sort_key(number) == filing.GENERIC.sort_key(
-            number
-        )
+        assert filing.LIBRARY_OF_CONGRESS.sort_key(number) == filing.GENERIC.sort_key(number)
 
 
 class TestTheKeyGrowsByABoundedAmount:
@@ -507,8 +484,7 @@ class TestTheKeyGrowsByABoundedAmount:
 
     def test_the_bound_is_the_worst_shape_measured(self):
         worst = max(
-            len(filing.LIBRARY_OF_CONGRESS.sort_key(value)) - len(value)
-            for value in self._every_shape()
+            len(filing.LIBRARY_OF_CONGRESS.sort_key(value)) - len(value) for value in self._every_shape()
         )
 
         assert worst == filing.MAX_KEY_GROWTH
@@ -516,9 +492,7 @@ class TestTheKeyGrowsByABoundedAmount:
     def test_the_shortest_call_number_is_the_one_that_reaches_it(self):
         """`Q1` is two characters and files as thirteen, which is the sentence
         `MAX_KEY_GROWTH` states."""
-        assert len(filing.LIBRARY_OF_CONGRESS.sort_key("Q1")) - len("Q1") == (
-            filing.MAX_KEY_GROWTH
-        )
+        assert len(filing.LIBRARY_OF_CONGRESS.sort_key("Q1")) - len("Q1") == (filing.MAX_KEY_GROWTH)
 
     @pytest.mark.parametrize("number", CORPUS)
     def test_no_corpus_value_grows_by_more(self, number):
@@ -538,23 +512,17 @@ class TestTheKeyForARowsTwoColumns:
     """
 
     def test_it_applies_the_scheme_s_own_rule(self):
-        assert filing.sort_key_for(
-            ClassificationScheme.LCC, "BF75"
-        ) == filing.LIBRARY_OF_CONGRESS.sort_key("BF75")
-        assert filing.sort_key_for(
-            ClassificationScheme.DDC, "005.13/3"
-        ) == filing.DEWEY.sort_key("005.13/3")
+        assert filing.sort_key_for(ClassificationScheme.LCC, "BF75") == filing.LIBRARY_OF_CONGRESS.sort_key(
+            "BF75"
+        )
+        assert filing.sort_key_for(ClassificationScheme.DDC, "005.13/3") == filing.DEWEY.sort_key("005.13/3")
 
     def test_the_scheme_may_arrive_as_the_string_the_column_holds(self):
         """Which is what a `VARCHAR(20)` returns and what an archive carries."""
-        assert filing.sort_key_for("lcc", "BF75") == (
-            filing.LIBRARY_OF_CONGRESS.sort_key("BF75")
-        )
+        assert filing.sort_key_for("lcc", "BF75") == (filing.LIBRARY_OF_CONGRESS.sort_key("BF75"))
 
     @pytest.mark.parametrize("scheme", ["udc", "", None, 7, ["ddc"]])
-    def test_a_scheme_this_app_cannot_name_files_under_the_generic_rule(
-        self, scheme
-    ):
+    def test_a_scheme_this_app_cannot_name_files_under_the_generic_rule(self, scheme):
         """Rather than raising. One unrecognised row would otherwise fail the
         restore of a whole library, and the generic rule is the answer
         `FILING_RULES` already gives a scheme with no entry.

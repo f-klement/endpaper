@@ -59,40 +59,40 @@ depends_on: str | Sequence[str] | None = None
 #: `targets.SEEDED`: the NKP cannot answer a search, and this one was never
 #: measured answering one.
 _BNE_ROW: dict[str, Any] = {
-    'source': 'bne',
-    'rank': 4,
-    'transport': 'sru',
-    'base_url': 'https://catalogo.bne.es/view/sru/34BNE_INST',
-    'reader': 'marc_gnd',
-    'answers_lookup': True,
-    'answers_search': False,
-    'metered': False,
-    'needs_key': False,
-    'sru_version': '1.2',
-    'query_parameter': 'query',
-    'query_language': 'cql',
-    'record_schema': 'marcxml',
-    'isbn_index': 'alma.isbn',
-    'isbn_attribute': None,
-    'title_index': '',
-    'title_query_shape': None,
-    'lookup_records': 5,
-    'search_multiplier': 0,
-    'search_cap': 0,
-    'refuses_component_parts': True,
-    'requires_isbn_claim': True,
-    'reads_author_identifiers': False,
-    'timeout_seconds': None,
-    'is_seeded': True,
+    "source": "bne",
+    "rank": 4,
+    "transport": "sru",
+    "base_url": "https://catalogo.bne.es/view/sru/34BNE_INST",
+    "reader": "marc_gnd",
+    "answers_lookup": True,
+    "answers_search": False,
+    "metered": False,
+    "needs_key": False,
+    "sru_version": "1.2",
+    "query_parameter": "query",
+    "query_language": "cql",
+    "record_schema": "marcxml",
+    "isbn_index": "alma.isbn",
+    "isbn_attribute": None,
+    "title_index": "",
+    "title_query_shape": None,
+    "lookup_records": 5,
+    "search_multiplier": 0,
+    "search_cap": 0,
+    "refuses_component_parts": True,
+    "requires_isbn_claim": True,
+    "reads_author_identifiers": False,
+    "timeout_seconds": None,
+    "is_seeded": True,
 }
 
 #: What each displaced source's rank becomes, and what it was.
 _MOVED: tuple[tuple[str, int, int], ...] = (
-    ('nlg', 4, 5),
-    ('oenb', 5, 6),
-    ('google_books', 6, 7),
-    ('bnf', 7, 8),
-    ('loc', 8, 9),
+    ("nlg", 4, 5),
+    ("oenb", 5, 6),
+    ("google_books", 6, 7),
+    ("bnf", 7, 8),
+    ("loc", 8, 9),
 )
 
 #: Named columns rather than `sa.table(...)` reflection, because `bulk_insert`
@@ -103,13 +103,31 @@ _TABLE = sa.table(
     *(
         sa.column(name)
         for name in (
-            "source", "rank", "transport", "base_url", "reader",
-            "answers_lookup", "answers_search", "metered", "needs_key",
-            "sru_version", "query_parameter", "query_language",
-            "record_schema", "isbn_index", "isbn_attribute", "title_index",
-            "title_query_shape", "lookup_records", "search_multiplier",
-            "search_cap", "refuses_component_parts", "requires_isbn_claim",
-            "reads_author_identifiers", "timeout_seconds", "is_seeded",
+            "source",
+            "rank",
+            "transport",
+            "base_url",
+            "reader",
+            "answers_lookup",
+            "answers_search",
+            "metered",
+            "needs_key",
+            "sru_version",
+            "query_parameter",
+            "query_language",
+            "record_schema",
+            "isbn_index",
+            "isbn_attribute",
+            "title_index",
+            "title_query_shape",
+            "lookup_records",
+            "search_multiplier",
+            "search_cap",
+            "refuses_component_parts",
+            "requires_isbn_claim",
+            "reads_author_identifiers",
+            "timeout_seconds",
+            "is_seeded",
         )
     ),
 )
@@ -123,11 +141,7 @@ def upgrade() -> None:
     # `google_books` still holds 6, which is the duplicate this avoids rather
     # than the one an earlier version of this comment claimed.
     for source, _was, becomes in reversed(_MOVED):
-        op.execute(
-            _TABLE.update()
-            .where(_TABLE.c.source == op.inline_literal(source))
-            .values(rank=becomes)
-        )
+        op.execute(_TABLE.update().where(_TABLE.c.source == op.inline_literal(source)).values(rank=becomes))
     op.bulk_insert(_TABLE, [_BNE_ROW])
 
 
@@ -137,8 +151,4 @@ def downgrade() -> None:
     # **down** collides with the row above it, so the row nearest the gap goes
     # first.
     for source, was, _becomes in _MOVED:
-        op.execute(
-            _TABLE.update()
-            .where(_TABLE.c.source == op.inline_literal(source))
-            .values(rank=was)
-        )
+        op.execute(_TABLE.update().where(_TABLE.c.source == op.inline_literal(source)).values(rank=was))

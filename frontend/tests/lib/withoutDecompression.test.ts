@@ -86,7 +86,7 @@ describe("what this worker started with", () => {
     // recorded `false` and disarmed the check for every file after it, at
     // `SUITE EXIT: 0` with nothing reported.
     //
-    // **Module scope is read as an unindented call**, which prettier settles
+    // **Module scope is read as an unindented call**, which oxfmt settles
     // and `format:check` runs in CI: a call inside a hook is indented, and this
     // arm is about where the call is rather than about how it is spelled.
     const setup = SETUP_SOURCE;

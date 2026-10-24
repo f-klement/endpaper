@@ -89,11 +89,7 @@ def test_an_import_racing_a_hand_delete_leaves_the_mark_deleted(db, member, make
 
     def the_delete_commits_first(session, *_):
         with SessionLocal() as other:
-            other.add(
-                DeletedHighlight(
-                    user_id=member_id, source=HighlightSource.KOREADER, source_key=key
-                )
-            )
+            other.add(DeletedHighlight(user_id=member_id, source=HighlightSource.KOREADER, source_key=key))
             other.flush()
             other.query(Highlight).filter(Highlight.id == row_id).delete()
             other.commit()

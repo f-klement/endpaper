@@ -247,9 +247,7 @@ def _entry(raw: object) -> ReadwiseEntry | None:
         user_book_id=ident,
         deleted=raw.get("is_deleted") is True,
         is_book=raw.get("category") == "books",
-        title=_clean(raw.get("readable_title"), TITLE_MAX)
-        or _clean(raw.get("title"), TITLE_MAX)
-        or "",
+        title=_clean(raw.get("readable_title"), TITLE_MAX) or _clean(raw.get("title"), TITLE_MAX) or "",
         author=_clean(raw.get("author"), AUTHOR_LINE_MAX),
         asin=_clean(raw.get("asin"), BOOK_IDENTIFIER_MAX),
         highlights=highlights,
@@ -278,9 +276,7 @@ def read_page(body: object) -> Page:
 # ── Which Book a Readwise book is ─────────────────────────────────────────────
 
 
-def _matched(
-    index: recognition.Index, asin: str | None, title: str, author: str | None
-) -> int | None:
+def _matched(index: recognition.Index, asin: str | None, title: str, author: str | None) -> int | None:
     """The Book a Readwise book goes on, or None while it waits.
 
     `recognition.Source.HIGHLIGHTS` is the ladder: an ASIN on one Book the
@@ -391,10 +387,7 @@ def _apply_once(
     db: Session, member_id: int, page: Page, index: recognition.Index, counts: Counts, *, whole: bool
 ) -> set[int]:
     newly: set[int] = set()
-    placed = [
-        (entry, _placed(db, member_id, entry, index, newly, whole=whole))
-        for entry in page.entries
-    ]
+    placed = [(entry, _placed(db, member_id, entry, index, newly, whole=whole)) for entry in page.entries]
     writers = _writers(db, member_id, placed, counts)
     # The page is one answer: a highlight live under any of its books is not
     # removed by another listing it deleted. Removed per entry, a deleted
@@ -422,9 +415,7 @@ def _apply_once(
         )
         if book_id is not None:
             live = [
-                mark
-                for mark in entry.highlights
-                if not mark.deleted and writers.get(mark.id) == position
+                mark for mark in entry.highlights if not mark.deleted and writers.get(mark.id) == position
             ]
             _write(db, member_id, book_id, live, counts)
     db.commit()
@@ -515,10 +506,7 @@ def _rematched(db: Session, member_id: int, index: recognition.Index) -> set[int
         row.user_book_id
         for row in db.query(ReadwiseBook).filter(ReadwiseBook.user_id == member_id)
         if (row.whole_pending and index.sees(row.book_id))
-        or (
-            not index.sees(row.book_id)
-            and _matched(index, row.asin, row.title, row.author) is not None
-        )
+        or (not index.sees(row.book_id) and _matched(index, row.asin, row.title, row.author) is not None)
     }
 
 
@@ -658,9 +646,7 @@ def replace_token(db: Session, login: MemberLogin, envelope: str) -> None:
     login.resume_cursor = None
     login.walk_started_at = None
     login.last_outcome = None
-    db.query(ReadwiseBook).filter(ReadwiseBook.user_id == login.user_id).delete(
-        synchronize_session=False
-    )
+    db.query(ReadwiseBook).filter(ReadwiseBook.user_id == login.user_id).delete(synchronize_session=False)
 
 
 def seal(member_id: int, secret: str) -> str:
@@ -752,9 +738,7 @@ async def _sync(
                 if pages >= MAX_PAGES or left(ends) <= 0:
                     return _finish(db, login, member_id, ReadwiseOutcome.INCOMPLETE, counts, started)
                 try:
-                    page = await _page(
-                        http, token, params | ({"pageCursor": cursor} if cursor else {}), ends
-                    )
+                    page = await _page(http, token, params | ({"pageCursor": cursor} if cursor else {}), ends)
                 except Stopped as stopped:
                     if pages == 0 and cursor and stopped.outcome is ReadwiseOutcome.UNAVAILABLE:
                         login.resume_cursor = None
@@ -781,9 +765,7 @@ async def _sync(
                 cursor = None
                 while True:
                     if pages >= MAX_PAGES or left(ends) <= 0:
-                        return _finish(
-                            db, login, member_id, ReadwiseOutcome.INCOMPLETE, counts, started
-                        )
+                        return _finish(db, login, member_id, ReadwiseOutcome.INCOMPLETE, counts, started)
                     page = await _page(
                         http,
                         token,
@@ -820,9 +802,7 @@ async def _apply(
     )
 
 
-def _resuming(
-    login: MemberLogin, walk_started: datetime, cursor: str | None
-) -> Callable[[], None]:
+def _resuming(login: MemberLogin, walk_started: datetime, cursor: str | None) -> Callable[[], None]:
     """What an export page commits beside its highlights: the cursor the walk
     resumes from and when the walk began. Both, because a retried page that
     kept only the cursor would commit it without the walk's start, and the pull
@@ -860,9 +840,7 @@ def forget(db: Session, member_id: int) -> None:
     login = login_of(db, member_id)
     if login is not None:
         db.delete(login)
-    db.query(ReadwiseBook).filter(ReadwiseBook.user_id == member_id).delete(
-        synchronize_session=False
-    )
+    db.query(ReadwiseBook).filter(ReadwiseBook.user_id == member_id).delete(synchronize_session=False)
     db.commit()
 
 
@@ -895,7 +873,7 @@ async def run_due(now: datetime | None = None) -> int:
             try:
                 await sync(db, member_id, now=moment)
                 ran += 1
-            except (AlreadyRunning, NoToken):
+            except AlreadyRunning, NoToken:
                 continue
             except errors.DATABASE_ERRORS as error:
                 logger.error(

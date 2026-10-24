@@ -14,9 +14,7 @@ returning one of them.
 FACETS = "/api/books/classifications"
 
 
-def heading(
-    scheme: str, number: str, label: str | None = None, kind: str | None = None
-) -> dict:
+def heading(scheme: str, number: str, label: str | None = None, kind: str | None = None) -> dict:
     return {"scheme": scheme, "number": number, "label": label, "kind": kind}
 
 
@@ -32,13 +30,9 @@ class TestTheFacetListSaysWhatEachHeadingAsserts:
 
         rows = client.get(FACETS, headers=admin["headers"]).json()["headings"]
 
-        assert [(row["number"], row["kind"]) for row in rows] == [
-            ("4139307-7", "carrier")
-        ]
+        assert [(row["number"], row["kind"]) for row in rows] == [("4139307-7", "carrier")]
 
-    def test_a_heading_no_record_declared_for_carries_no_kind(
-        self, client, admin, make_book
-    ):
+    def test_a_heading_no_record_declared_for_carries_no_kind(self, client, admin, make_book):
         """Null on the wire, not `subject`. The client reads it as a subject,
         and the two spellings mean different things: one is a catalogue saying
         so and the other is nobody having said."""
@@ -48,9 +42,7 @@ class TestTheFacetListSaysWhatEachHeadingAsserts:
 
         assert rows[0]["kind"] is None
 
-    def test_one_corrected_book_is_enough_for_the_whole_facet_row(
-        self, client, admin, make_book
-    ):
+    def test_one_corrected_book_is_enough_for_the_whole_facet_row(self, client, admin, make_book):
         """`max` over the group rather than grouping on the kind.
 
         A heading is corrected book by book as each is re-enriched, so during
@@ -95,9 +87,7 @@ class TestTheFacetList:
 
         assert sorted(row["scheme"] for row in rows) == ["ddc", "lcc"]
 
-    def test_a_division_counts_a_book_once_however_precisely_it_is_classified(
-        self, client, admin, make_book
-    ):
+    def test_a_division_counts_a_book_once_however_precisely_it_is_classified(self, client, admin, make_book):
         """The `distinct` in `_division_counts`, pinned.
 
         A catalogue that supplies both `004` and `005.133` describes one book
@@ -120,9 +110,7 @@ class TestTheFacetList:
 
         assert [row["division"] for row in divisions] == ["150"]
 
-    def test_labels_a_division_with_this_librarys_word_or_with_nothing(
-        self, client, admin, make_book
-    ):
+    def test_labels_a_division_with_this_librarys_word_or_with_nothing(self, client, admin, make_book):
         """Not Dewey's caption: the seeded tag the division maps to.
 
         080 is quotations and maps to no tag, and an absent label is a real
@@ -136,9 +124,7 @@ class TestTheFacetList:
         labels = {row["division"]: row["label"] for row in divisions}
         assert labels == {"150": "Psychology", "080": None}
 
-    def test_says_nothing_about_another_members_private_book(
-        self, client, admin, member, make_book
-    ):
+    def test_says_nothing_about_another_members_private_book(self, client, admin, member, make_book):
         """The disclosure this endpoint was built carefully to avoid.
 
         The heading is on a private book belonging to somebody else, so it must
@@ -184,8 +170,7 @@ class TestTheFacetList:
         make_book(admin["headers"], classifications=[heading("lcsh", shared)])
         make_book(
             admin["headers"],
-            classifications=[heading("lcsh", shared)]
-            + [heading("gnd", f"{n}") for n in range(7)],
+            classifications=[heading("lcsh", shared)] + [heading("gnd", f"{n}") for n in range(7)],
         )
 
         rows = client.get(FACETS, headers=admin["headers"]).json()["headings"]
@@ -264,21 +249,15 @@ class TestTheHeadingFilter:
     def test_the_scheme_is_part_of_the_match(self, client, admin, make_book):
         make_book(admin["headers"], title="Dewey", classifications=[heading("ddc", "004")])
 
-        body = client.get(
-            "/api/books", params={"classification": "lcc:004"}, headers=admin["headers"]
-        ).json()
+        body = client.get("/api/books", params={"classification": "lcc:004"}, headers=admin["headers"]).json()
 
         assert body["items"] == []
 
-    def test_an_unrecognised_scheme_is_ignored_rather_than_refused(
-        self, client, admin, make_book
-    ):
+    def test_an_unrecognised_scheme_is_ignored_rather_than_refused(self, client, admin, make_book):
         """`row_ids`'s contract: a link is not a form."""
         make_book(admin["headers"], title="Kept")
 
-        res = client.get(
-            "/api/books", params={"classification": "bogus:004"}, headers=admin["headers"]
-        )
+        res = client.get("/api/books", params={"classification": "bogus:004"}, headers=admin["headers"])
 
         assert res.status_code == 200
         assert [row["title"] for row in res.json()["items"]] == ["Kept"]
@@ -313,9 +292,7 @@ class TestTheDivisionFilter:
         make_book(admin["headers"], title="Kept", classifications=[heading("ddc", "155.9042")])
         make_book(admin["headers"], title="Dropped", classifications=[heading("ddc", "004")])
 
-        body = client.get(
-            "/api/books", params={"ddc": "150"}, headers=admin["headers"]
-        ).json()
+        body = client.get("/api/books", params={"ddc": "150"}, headers=admin["headers"]).json()
 
         assert [row["title"] for row in body["items"]] == ["Kept"]
 
@@ -329,9 +306,7 @@ class TestTheDivisionFilter:
         make_book(admin["headers"], title="Econ", classifications=[heading("ddc", "330.1")])
         make_book(admin["headers"], title="Neither", classifications=[heading("ddc", "004")])
 
-        body = client.get(
-            "/api/books", params={"ddc": "150,330"}, headers=admin["headers"]
-        ).json()
+        body = client.get("/api/books", params={"ddc": "150,330"}, headers=admin["headers"]).json()
 
         assert sorted(row["title"] for row in body["items"]) == ["Econ", "Psych"]
 
@@ -341,9 +316,7 @@ class TestTheDivisionFilter:
         """`?ddc=155.9042` is the link a chip would produce if nobody projected."""
         make_book(admin["headers"], title="Kept", classifications=[heading("ddc", "155.1")])
 
-        body = client.get(
-            "/api/books", params={"ddc": "155.9042"}, headers=admin["headers"]
-        ).json()
+        body = client.get("/api/books", params={"ddc": "155.9042"}, headers=admin["headers"]).json()
 
         assert [row["title"] for row in body["items"]] == ["Kept"]
 
@@ -351,9 +324,7 @@ class TestTheDivisionFilter:
         """An LCC number starting with digits must not be read as a division."""
         make_book(admin["headers"], title="LC", classifications=[heading("lcc", "155.9042")])
 
-        body = client.get(
-            "/api/books", params={"ddc": "150"}, headers=admin["headers"]
-        ).json()
+        body = client.get("/api/books", params={"ddc": "150"}, headers=admin["headers"]).json()
 
         assert body["items"] == []
 
@@ -404,9 +375,7 @@ class TestTheDeweySort:
 
         assert [row["title"] for row in body["items"]] == ["Two numbers", "Middle"]
 
-    def test_returns_each_book_once_however_many_headings_it_carries(
-        self, client, admin, make_book
-    ):
+    def test_returns_each_book_once_however_many_headings_it_carries(self, client, admin, make_book):
         """A join would multiply the page; the sort uses a correlated subquery."""
         make_book(
             admin["headers"],

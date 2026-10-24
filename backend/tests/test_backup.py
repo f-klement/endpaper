@@ -150,7 +150,6 @@ def library(client, admin, member, make_book, db, covers_dir):
     return {"book": book, "private": private, "tag_id": tag.id, "field": field}
 
 
-
 def _sign_in(client, account) -> dict[str, str]:
     """Authorization header for a session opened now.
 
@@ -253,21 +252,15 @@ class TestTheArchive:
         aliases = read_manifest(data)["tables"]["author_aliases"]
         assert [row["canonical_name"] for row in aliases] == ["F. Herbert"]
 
-    def test_holds_the_custom_field_values_and_not_only_the_definitions(
-        self, client, admin, library
-    ):
+    def test_holds_the_custom_field_values_and_not_only_the_definitions(self, client, admin, library):
         """Two tables, and only one of them looks wrong when the other is
         missing. An archive carrying the definitions alone restores a library
         where every field is defined and every one of them is empty, which is
         exactly how `author_aliases` failed."""
-        tables = read_manifest(client.get("/api/backup", headers=admin["headers"]).content)[
-            "tables"
-        ]
+        tables = read_manifest(client.get("/api/backup", headers=admin["headers"]).content)["tables"]
 
         assert [row["name"] for row in tables["custom_fields"]] == ["Calibre-web"]
-        assert [row["value"] for row in tables["custom_field_values"]] == [
-            "https://calibre.example/book/12"
-        ]
+        assert [row["value"] for row in tables["custom_field_values"]] == ["https://calibre.example/book/12"]
 
     def test_holds_the_cover_files(self, client, admin, library):
         data = client.get("/api/backup", headers=admin["headers"]).content
@@ -384,9 +377,7 @@ class TestRoundTrip:
         assert restored.name == "Home library"
         assert restored.base_url == "http://library.invalid:8083/opds"
 
-    def test_a_household_server_login_is_not_restored(
-        self, client, admin, library, db, encryption_key
-    ):
+    def test_a_household_server_login_is_not_restored(self, client, admin, library, db, encryption_key):
         """**The archive may move a server's address; it may not move its login
         with it.**
 
@@ -423,15 +414,10 @@ class TestRoundTrip:
         assert res.status_code == 200, res.text
         assert db.query(OpdsServer).count() == 1, "the server row still comes back"
         assert (
-            db.query(CatalogueCredential)
-            .filter(CatalogueCredential.source.startswith("opds-"))
-            .count()
-            == 0
+            db.query(CatalogueCredential).filter(CatalogueCredential.source.startswith("opds-")).count() == 0
         )
 
-    def test_a_roster_catalogues_login_still_is_restored(
-        self, client, admin, library, db, encryption_key
-    ):
+    def test_a_roster_catalogues_login_still_is_restored(self, client, admin, library, db, encryption_key):
         """The control, and it is the half that says the filter is narrow.
 
         A rule dropping every credential would pass the row above while
@@ -484,13 +470,9 @@ class TestRoundTrip:
         )
 
         db.expire_all()
-        assert [(q.text, q.page) for q in db.query(Quote).all()] == [
-            ("Fear is the mind-killer", 214)
-        ]
+        assert [(q.text, q.page) for q in db.query(Quote).all()] == [("Fear is the mind-killer", 214)]
 
-    def test_a_granted_access_request_comes_back_with_its_holder(
-        self, client, admin, member, make_book, db
-    ):
+    def test_a_granted_access_request_comes_back_with_its_holder(self, client, admin, member, make_book, db):
         ebook = make_book(admin["headers"], title="A file", format="ebook")
         url = f"/api/books/{ebook['id']}/access-requests"
         asked = client.post(url, headers=member["headers"]).json()
@@ -511,9 +493,7 @@ class TestRoundTrip:
             (admin["user"]["id"], True)
         ]
 
-    def test_an_archive_from_before_quotes_existed_still_restores(
-        self, client, admin, library
-    ):
+    def test_an_archive_from_before_quotes_existed_still_restores(self, client, admin, library):
         """`quotes` is deliberately absent from `_REQUIRED_TABLES`. Adding a
         table to that set would refuse every backup the library already
         holds, which is the trap the set exists to have escaped once."""
@@ -573,9 +553,7 @@ class TestRoundTrip:
 
         # A restore ends every pre-restore session, so ask again as somebody
         # signed in afterwards. See TestRestoreEndsLiveSessions.
-        book = client.get(
-            f"/api/books/{library['book']['id']}", headers=_sign_in(client, admin)
-        ).json()
+        book = client.get(f"/api/books/{library['book']['id']}", headers=_sign_in(client, admin)).json()
         assert [tag["id"] for tag in book["tags"]] == [library["tag_id"]]
 
     def test_the_covers_come_back(self, client, admin, library, covers_dir):
@@ -593,9 +571,7 @@ class TestRoundTrip:
         assert res.json()["covers"] == 1
         assert list(covers_dir.glob("*.jpg"))
 
-    def test_the_login_background_comes_back_too(
-        self, client, admin, library, covers_dir
-    ):
+    def test_the_login_background_comes_back_too(self, client, admin, library, covers_dir):
         """It lives in the same directory and belongs to no book. Losing it on a
         restore would leave the one screen every visitor sees looking wrong."""
         from tests.helpers import PNG_BYTES
@@ -706,9 +682,7 @@ class TestRefusingABadArchive:
         assert res.status_code == 400
         assert "loans" in res.json()["detail"]
 
-    def test_nothing_is_destroyed_by_a_refused_archive(
-        self, client, admin, library, db
-    ):
+    def test_nothing_is_destroyed_by_a_refused_archive(self, client, admin, library, db):
         """Every check runs before the first row is deleted.
 
         A restore that fails halfway leaves a library that is neither the
@@ -742,9 +716,7 @@ class TestTheConfirmation:
 
     def test_it_changes_nothing_without_confirm(self, client, admin, library, db):
         data = client.get("/api/backup", headers=admin["headers"]).content
-        client.post(
-            "/api/books", json={"title": "Later"}, headers=admin["headers"]
-        )
+        client.post("/api/books", json={"title": "Later"}, headers=admin["headers"])
 
         client.post(
             "/api/backup/restore",
@@ -897,8 +869,7 @@ MANIFEST_DEPTH: Final = 400_000
 #: A JSON value of any shape, small.
 _JSON: Final = st.recursive(
     st.none() | st.booleans() | st.integers() | st.text(max_size=8),
-    lambda inner: st.lists(inner, max_size=3)
-    | st.dictionaries(st.text(max_size=6), inner, max_size=3),
+    lambda inner: st.lists(inner, max_size=3) | st.dictionaries(st.text(max_size=6), inner, max_size=3),
     max_leaves=6,
 )
 
@@ -920,9 +891,7 @@ ARCHIVES: Final = st.builds(
     ArchiveSpec,
     manifest=_MANIFESTS,
     depth=st.just(0) | st.just(MANIFEST_DEPTH),
-    method=st.sampled_from(
-        [zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED, zipfile.ZIP_BZIP2, zipfile.ZIP_LZMA]
-    ),
+    method=st.sampled_from([zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED, zipfile.ZIP_BZIP2, zipfile.ZIP_LZMA]),
     patches=st.just(()) | PATCHES,
 )
 
@@ -955,9 +924,7 @@ class TestAnArchiveIsReadOrRefusedByName:
         very manifest written into it, or is refused because that manifest is
         not one a backup writes. "It did not throw" passes a reader that
         returned an empty dict."""
-        got = answer_of(
-            backup.read_manifest, an_archive(spec), answers=dict, refuses=RestoreError
-        )
+        got = answer_of(backup.read_manifest, an_archive(spec), answers=dict, refuses=RestoreError)
         if spec.patches:
             return
         if got.value is not None:
@@ -972,9 +939,11 @@ class TestAnArchiveIsReadOrRefusedByName:
     def test_the_generator_still_reaches_damage_in_the_entry(self):
         witness(
             ARCHIVES,
-            lambda spec: (refusal := _refusal_of(spec)) is not None
-            and "could not be read" in str(refusal)
-            and not isinstance(refusal.__cause__, json.JSONDecodeError | RecursionError),
+            lambda spec: (
+                (refusal := _refusal_of(spec)) is not None
+                and "could not be read" in str(refusal)
+                and not isinstance(refusal.__cause__, json.JSONDecodeError | RecursionError)
+            ),
             reaches="an entry the zip reader cannot read",
         )
 
@@ -1139,9 +1108,7 @@ class TestRestoringAnOlderArchive:
     default. One default lies, and that one is repaired explicitly.
     """
 
-    def test_a_tag_column_the_archive_predates_is_repaired(
-        self, client, admin, library, db
-    ):
+    def test_a_tag_column_the_archive_predates_is_repaired(self, client, admin, library, db):
         from models import Tag
 
         data = client.get("/api/backup", headers=admin["headers"]).content
@@ -1161,15 +1128,11 @@ class TestRestoringAnOlderArchive:
         fiction = db.query(Tag).filter(Tag.name == "Fiction").one()
         assert fiction.is_predefined is True
 
-    def test_a_tag_the_library_invented_stays_deletable(
-        self, client, admin, library, db
-    ):
+    def test_a_tag_the_library_invented_stays_deletable(self, client, admin, library, db):
         """The repair must not adopt every restored tag as a built-in one."""
         from models import Tag
 
-        client.post(
-            "/api/books/tags", json={"name": "Holiday reads"}, headers=admin["headers"]
-        )
+        client.post("/api/books/tags", json={"name": "Holiday reads"}, headers=admin["headers"])
         data = client.get("/api/backup", headers=admin["headers"]).content
 
         client.post(
@@ -1184,9 +1147,7 @@ class TestRestoringAnOlderArchive:
         assert invented.is_predefined is False
         assert invented.key is None
 
-    def test_the_key_a_pre_key_archive_lacks_is_repaired(
-        self, client, admin, library, db
-    ):
+    def test_the_key_a_pre_key_archive_lacks_is_repaired(self, client, admin, library, db):
         """Without this the whole curated vocabulary restores as invented.
 
         A null key is how a renamed tag is recorded, so an archive that predates
@@ -1210,9 +1171,7 @@ class TestRestoringAnOlderArchive:
         db.expire_all()
         assert db.query(Tag).filter(Tag.name == "Fiction").one().key == "fiction"
 
-    def test_an_archive_claiming_the_same_key_twice_still_restores(
-        self, client, admin, library, db
-    ):
+    def test_an_archive_claiming_the_same_key_twice_still_restores(self, client, admin, library, db):
         """It answered **500** before `_parse_row` blanked the key.
 
         `uq_tags_key` refused the INSERT before `_repair_seeded_tags` could
@@ -1224,9 +1183,7 @@ class TestRestoringAnOlderArchive:
         """
         from models import Tag
 
-        client.post(
-            "/api/books/tags", json={"name": "Holiday reads"}, headers=admin["headers"]
-        )
+        client.post("/api/books/tags", json={"name": "Holiday reads"}, headers=admin["headers"])
         data = client.get("/api/backup", headers=admin["headers"]).content
         manifest = read_manifest(data)
         for row in manifest["tables"]["tags"]:
@@ -1285,9 +1242,7 @@ class TestRestoringPreHttpsCovers:
     the one-shot migration had just cleaned them, with nothing saying so.
     """
 
-    def restore_with_cover(
-        self, client, admin, library, cover: str | None
-    ) -> str | None:
+    def restore_with_cover(self, client, admin, library, cover: str | None) -> str | None:
         data = client.get("/api/backup", headers=admin["headers"]).content
         manifest = read_manifest(data)
         for row in manifest["tables"]["books"]:
@@ -1311,17 +1266,12 @@ class TestRestoringPreHttpsCovers:
 
     def test_an_http_cover_in_the_archive_is_upgraded(self, client, admin, library):
         assert (
-            self.restore_with_cover(
-                client, admin, library, "http://books.google.com/c.jpg"
-            )
+            self.restore_with_cover(client, admin, library, "http://books.google.com/c.jpg")
             == "https://books.google.com/c.jpg"
         )
 
     def test_an_uploaded_cover_path_is_left_alone(self, client, admin, library):
-        assert (
-            self.restore_with_cover(client, admin, library, "/covers/1.jpg")
-            == "/covers/1.jpg"
-        )
+        assert self.restore_with_cover(client, admin, library, "/covers/1.jpg") == "/covers/1.jpg"
 
     def test_a_book_with_no_cover_restores_without_one(self, client, admin, library):
         assert self.restore_with_cover(client, admin, library, None) is None
@@ -1336,9 +1286,7 @@ class TestRestoringPreHttpsCovers:
             "/covers/../api/books/export",
         ],
     )
-    def test_a_cover_no_image_tag_should_load_is_dropped(
-        self, client, admin, library, cover
-    ):
+    def test_a_cover_no_image_tag_should_load_is_dropped(self, client, admin, library, cover):
         """An archive is admin-supplied, and an admin is not a reason to trust
         a file: it may have come from another deployment or been edited by
         hand. A Core insert fires no validator, so the restore path has to
@@ -1346,9 +1294,7 @@ class TestRestoringPreHttpsCovers:
         """
         assert self.restore_with_cover(client, admin, library, cover) is None
 
-    def test_a_dropped_cover_does_not_fail_the_restore(
-        self, client, admin, library, db
-    ):
+    def test_a_dropped_cover_does_not_fail_the_restore(self, client, admin, library, db):
         """One odd cover is not a reason to lose the rest of the library."""
         self.restore_with_cover(client, admin, library, "javascript:alert(1)")
 
@@ -1376,9 +1322,7 @@ class TestRestoringABlankTextColumn:
     }
 
     @pytest.mark.parametrize("blank", ["", " \t"])
-    def test_a_blank_in_the_archive_is_restored_as_null_and_text_is_kept(
-        self, client, admin, library, blank
-    ):
+    def test_a_blank_in_the_archive_is_restored_as_null_and_text_is_kept(self, client, admin, library, blank):
         assert tuple(self.KEPT) == BLANK_IS_NULL
         data = client.get("/api/backup", headers=admin["headers"]).content
         manifest = read_manifest(data)
@@ -1452,9 +1396,7 @@ class TestADecompressionBomb:
                 entry.write(b"\0" * rest)
         return buffer.getvalue()
 
-    def test_an_archive_that_expands_too_far_is_refused(
-        self, client, admin, library
-    ):
+    def test_an_archive_that_expands_too_far_is_refused(self, client, admin, library):
         data = client.get("/api/backup", headers=admin["headers"]).content
         bomb = self._bomb(read_manifest(data), backup.MAX_UNCOMPRESSED_BYTES + 1)
 
@@ -1515,9 +1457,7 @@ class TestRestoreEndsLiveSessions:
     """A restore replaces the users table wholesale, so the id a live token
     names may afterwards belong to somebody else."""
 
-    def test_a_token_issued_before_the_restore_stops_working(
-        self, client, admin, library
-    ):
+    def test_a_token_issued_before_the_restore_stops_working(self, client, admin, library):
         data = client.get("/api/backup", headers=admin["headers"]).content
         assert client.get("/auth/me", headers=admin["headers"]).status_code == 200
 
@@ -1561,14 +1501,10 @@ class TestCollectionsSurvive:
     """Added after `FORMAT_VERSION` 1, so an archive predating them restores as
     a library with none rather than being refused."""
 
-    def test_a_round_trip_returns_the_collection_and_its_books(
-        self, client, admin, library, db
-    ):
+    def test_a_round_trip_returns_the_collection_and_its_books(self, client, admin, library, db):
         from models import Collection
 
-        shelf = client.post(
-            "/api/collections", json={"name": "Ebooks"}, headers=admin["headers"]
-        ).json()
+        shelf = client.post("/api/collections", json={"name": "Ebooks"}, headers=admin["headers"]).json()
         client.patch(
             f"/api/books/{library['book']['id']}/collection",
             json={"collection_id": shelf["id"]},
@@ -1607,9 +1543,7 @@ class TestCollectionsSurvive:
 
         assert body["collections"] == 2
 
-    def test_an_archive_written_before_collections_existed_still_restores(
-        self, client, admin, library
-    ):
+    def test_an_archive_written_before_collections_existed_still_restores(self, client, admin, library):
         data = client.get("/api/backup", headers=admin["headers"]).content
         manifest = read_manifest(data)
         del manifest["tables"]["collections"]
@@ -1635,17 +1569,13 @@ class TestRestoringTheCollectionFold:
     the `cover_url` block beside it exists.
     """
 
-    def test_an_archive_written_before_the_fold_existed_still_restores(
-        self, client, admin, library, db
-    ):
+    def test_an_archive_written_before_the_fold_existed_still_restores(self, client, admin, library, db):
         """The column is NOT NULL, so without the recompute this is an
         `IntegrityError`, which is not `RestoreError`, so the route answers 500
         and the library's older backups become unrestorable."""
         from models import Collection
 
-        client.post(
-            "/api/collections", json={"name": "Ästhetik"}, headers=admin["headers"]
-        )
+        client.post("/api/collections", json={"name": "Ästhetik"}, headers=admin["headers"])
         data = client.get("/api/backup", headers=admin["headers"]).content
         manifest = read_manifest(data)
         for row in manifest["tables"]["collections"]:
@@ -1662,17 +1592,13 @@ class TestRestoringTheCollectionFold:
         db.expire_all()
         assert db.query(Collection).one().name_folded == "ästhetik"
 
-    def test_a_fold_that_disagrees_with_its_name_is_recomputed(
-        self, client, admin, library, db
-    ):
+    def test_a_fold_that_disagrees_with_its_name_is_recomputed(self, client, admin, library, db):
         """The unique index catches two rows folding the same. It can never
         catch one row folding wrongly, and an archive is a file an admin was
         handed rather than a file the app wrote."""
         from models import Collection
 
-        client.post(
-            "/api/collections", json={"name": "Ästhetik"}, headers=admin["headers"]
-        )
+        client.post("/api/collections", json={"name": "Ästhetik"}, headers=admin["headers"])
         data = client.get("/api/backup", headers=admin["headers"]).content
         manifest = read_manifest(data)
         for row in manifest["tables"]["collections"]:
@@ -1700,9 +1626,7 @@ class TestRestoringTheCollectionFold:
         sibling of the test above and the one that reaches the guard: that one
         leaves `name` a string, so it never did.
         """
-        client.post(
-            "/api/collections", json={"name": "Ästhetik"}, headers=admin["headers"]
-        )
+        client.post("/api/collections", json={"name": "Ästhetik"}, headers=admin["headers"])
         data = client.get("/api/backup", headers=admin["headers"]).content
         manifest = read_manifest(data)
         manifest["tables"]["collections"][0]["name"] = 1
@@ -1717,9 +1641,7 @@ class TestRestoringTheCollectionFold:
         assert res.status_code == 400, res.text
         assert "not text" in res.json()["detail"]
 
-    def test_two_collections_folding_the_same_are_refused(
-        self, client, admin, library, db
-    ):
+    def test_two_collections_folding_the_same_are_refused(self, client, admin, library, db):
         """Only an archive taken before `e7b3d02a5c94` can hold such a pair,
         which is the same archive the recompute exists to keep restorable.
         Recomputing keeps the missing column restorable and cannot keep the
@@ -1729,9 +1651,7 @@ class TestRestoringTheCollectionFold:
         `RestoreError`, so the route answers 500 rather than the 400 it
         promises and names neither collection.
         """
-        client.post(
-            "/api/collections", json={"name": "Ästhetik"}, headers=admin["headers"]
-        )
+        client.post("/api/collections", json={"name": "Ästhetik"}, headers=admin["headers"])
         data = client.get("/api/backup", headers=admin["headers"]).content
         manifest = read_manifest(data)
         rows = manifest["tables"]["collections"]
@@ -1755,9 +1675,7 @@ class TestRestoringTheCollectionFold:
         assert "Ästhetik" in detail
         assert "ästhetik" in detail
 
-    def test_two_collections_spelled_identically_are_refused(
-        self, client, admin, library, db
-    ):
+    def test_two_collections_spelled_identically_are_refused(self, client, admin, library, db):
         """The sibling of the test above, and the one an earlier guard missed.
 
         That guard compared the stored spelling rather than the fold, so a pair
@@ -1770,9 +1688,7 @@ class TestRestoringTheCollectionFold:
         consistent, which is the same assumption
         `test_a_name_that_is_not_text_is_refused` turns on.
         """
-        client.post(
-            "/api/collections", json={"name": "Fiction"}, headers=admin["headers"]
-        )
+        client.post("/api/collections", json={"name": "Fiction"}, headers=admin["headers"])
         data = client.get("/api/backup", headers=admin["headers"]).content
         manifest = read_manifest(data)
         rows = manifest["tables"]["collections"]
@@ -1790,16 +1706,12 @@ class TestRestoringTheCollectionFold:
         assert res.status_code == 400, res.text
         assert "Fiction" in res.json()["detail"]
 
-    def test_a_hostile_name_cannot_flood_the_error_body(
-        self, client, admin, library, db
-    ):
+    def test_a_hostile_name_cannot_flood_the_error_body(self, client, admin, library, db):
         """Both refusals quote a name the archive supplied, and `repr` then
         `json.dumps` amplify it about twenty times on the way out. The manifest
         parse is unbounded at 1 GiB, which is pre-existing; this is the
         amplification on top of it, and it costs one slice."""
-        client.post(
-            "/api/collections", json={"name": "Fiction"}, headers=admin["headers"]
-        )
+        client.post("/api/collections", json={"name": "Fiction"}, headers=admin["headers"])
         data = client.get("/api/backup", headers=admin["headers"]).content
         manifest = read_manifest(data)
         rows = manifest["tables"]["collections"]
@@ -1896,9 +1808,7 @@ class TestReadingProgressSurvives:
         assert body["reading_progress"] == 1
         assert body["user_books"] >= 1
 
-    def test_an_archive_written_before_the_table_existed_still_restores(
-        self, client, admin, library
-    ):
+    def test_an_archive_written_before_the_table_existed_still_restores(self, client, admin, library):
         """`FORMAT_VERSION` promises an older archive stays restorable. Making
         every entry in `_TABLES` mandatory would have refused every backup the
         library already holds the moment a table was added.
@@ -1953,11 +1863,7 @@ class TestRestoringTheShelfKey:
         book = Book(title="Filed", added_by_user_id=None)
         db.add(book)
         db.flush()
-        db.add(
-            Classification(
-                book_id=book.id, scheme=ClassificationScheme.LCC, number=self.NUMBER
-            )
-        )
+        db.add(Classification(book_id=book.id, scheme=ClassificationScheme.LCC, number=self.NUMBER))
         db.commit()
         return client.get("/api/backup", headers=admin["headers"]).content
 
@@ -1970,9 +1876,7 @@ class TestRestoringTheShelfKey:
             headers=admin["headers"],
         )
 
-    def test_an_archive_written_before_the_column_existed_still_restores(
-        self, client, admin, library, db
-    ):
+    def test_an_archive_written_before_the_column_existed_still_restores(self, client, admin, library, db):
         """The column is NOT NULL, so without the recompute this is an
         `IntegrityError`, which is not `RestoreError`, so the route answers 500
         and the library's older backups become unrestorable. That is the promise
@@ -1986,13 +1890,9 @@ class TestRestoringTheShelfKey:
 
         assert res.status_code == 200, res.text
         db.expire_all()
-        assert db.query(Classification).one().sort_key == filing.sort_key_for(
-            "lcc", self.NUMBER
-        )
+        assert db.query(Classification).one().sort_key == filing.sort_key_for("lcc", self.NUMBER)
 
-    def test_a_key_that_disagrees_with_its_number_is_recomputed(
-        self, client, admin, library, db
-    ):
+    def test_a_key_that_disagrees_with_its_number_is_recomputed(self, client, admin, library, db):
         """No index can catch this one: any string is a valid key, and the row
         it mis-files is a row that looks completely ordinary. An archive is a
         file an admin was handed rather than a file this app wrote."""
@@ -2004,14 +1904,10 @@ class TestRestoringTheShelfKey:
         self._restore(client, admin, data, manifest)
 
         db.expire_all()
-        assert db.query(Classification).one().sort_key == filing.sort_key_for(
-            "lcc", self.NUMBER
-        )
+        assert db.query(Classification).one().sort_key == filing.sort_key_for("lcc", self.NUMBER)
 
     @pytest.mark.parametrize("scheme", ["lcc", "gnd"])
-    def test_a_number_that_is_not_text_is_refused(
-        self, client, admin, library, db, scheme
-    ):
+    def test_a_number_that_is_not_text_is_refused(self, client, admin, library, db, scheme):
         """The sibling of the `name_folded` case, and the two arms are refused
         for two different reasons.
 
@@ -2037,9 +1933,7 @@ class TestRestoringTheShelfKey:
         assert res.status_code == 400, res.text
         assert "not text" in res.json()["detail"]
 
-    def test_a_scheme_this_app_cannot_name_restores_under_the_generic_rule(
-        self, client, admin, library, db
-    ):
+    def test_a_scheme_this_app_cannot_name_restores_under_the_generic_rule(self, client, admin, library, db):
         """Rather than failing the restore of a whole library over one row. The
         `scheme` column is a plain `VARCHAR(20)` and this path has no validator,
         so an archive may carry a scheme from a deployment this one has never
@@ -2083,9 +1977,7 @@ class TestTheArchiveCarriesACatalogueLoginAndNotItsPlaintext:
         rows = read_manifest(stored)["tables"]["catalogue_credentials"]
         assert rows[0]["envelope"].startswith(f"{credentials.VERSION}.")
 
-    def test_a_restore_brings_it_back_openable_under_the_same_key(
-        self, client, admin, db, stored
-    ):
+    def test_a_restore_brings_it_back_openable_under_the_same_key(self, client, admin, db, stored):
         credentials.forget(db, "bne")
         assert credentials.stored_envelope(db, "bne") == ""
         response = client.post(
@@ -2114,16 +2006,9 @@ class TestTheArchiveCarriesACatalogueLoginAndNotItsPlaintext:
         db.expire_all()
         with pytest.raises(credentials.WrongKeyGeneration):
             credentials.stored(db, "bne", BNE_URL)
-        assert (
-            credentials.view(
-                db, "bne", targets.SEEDED[CatalogueSource.BNE].base_url
-            ).unreadable
-            is True
-        )
+        assert credentials.view(db, "bne", targets.SEEDED[CatalogueSource.BNE].base_url).unreadable is True
 
-    def test_an_archive_taken_before_the_origin_was_bound_still_restores(
-        self, client, admin, db, stored
-    ):
+    def test_an_archive_taken_before_the_origin_was_bound_still_restores(self, client, admin, db, stored):
         """The reason `ck_catalogue_credentials_envelope` still admits `v1`.
 
         `backup._parse_row` asks `credentials.generation_of` whether a row is an
@@ -2138,9 +2023,7 @@ class TestTheArchiveCarriesACatalogueLoginAndNotItsPlaintext:
         manifest["tables"]["catalogue_credentials"] = [
             {
                 "source": "bne",
-                "envelope": sealed_before_the_origin_was_bound(
-                    material, "bne", "alice:hunter2"
-                ),
+                "envelope": sealed_before_the_origin_was_bound(material, "bne", "alice:hunter2"),
             }
         ]
 
@@ -2166,9 +2049,7 @@ class TestTheArchiveCarriesACatalogueLoginAndNotItsPlaintext:
         # address like any other and the older scheme is empty again.
         assert credentials.stored_envelope(db, "bne").split(".")[0] == credentials.VERSION
 
-    def test_an_archive_naming_a_source_shaped_like_a_path_is_refused(
-        self, client, admin, stored
-    ):
+    def test_an_archive_naming_a_source_shaped_like_a_path_is_refused(self, client, admin, stored):
         """The archive picks this value, and the screen now hands it to a client.
 
         A login the key cannot open is listed with a remove button, and the
@@ -2190,14 +2071,10 @@ class TestTheArchiveCarriesACatalogueLoginAndNotItsPlaintext:
         assert response.status_code == 400
         assert "not a catalogue" in response.json()["detail"]
 
-    def test_an_archive_carrying_a_plaintext_password_is_refused(
-        self, client, admin, stored
-    ):
+    def test_an_archive_carrying_a_plaintext_password_is_refused(self, client, admin, stored):
         """The CHECK constraint, and what stands between a hand edit and a send."""
         manifest = read_manifest(stored)
-        manifest["tables"]["catalogue_credentials"] = [
-            {"source": "bne", "envelope": "alice:hunter2"}
-        ]
+        manifest["tables"]["catalogue_credentials"] = [{"source": "bne", "envelope": "alice:hunter2"}]
         response = client.post(
             "/api/backup/restore",
             files={"file": ("backup.zip", rewrite(stored, manifest), "application/zip")},
@@ -2237,8 +2114,7 @@ class TestARestoreDoesNotConfirmAnAccountTheArchiveLeftUnconfirmed:
         manifest = read_manifest(data)
         rows = manifest["tables"]["users"]
         assert any("email_verified_at" in row for row in rows), (
-            "the archive stopped carrying the column, so this test now checks "
-            "nothing"
+            "the archive stopped carrying the column, so this test now checks nothing"
         )
 
         backup.restore(db, data)
@@ -2246,9 +2122,7 @@ class TestARestoreDoesNotConfirmAnAccountTheArchiveLeftUnconfirmed:
         restored = db.query(User).filter(User.username == "waiting").one()
         assert restored.email_verified_at is None
 
-    def test_an_archive_written_before_the_column_is_stamped(
-        self, client, admin, db
-    ):
+    def test_an_archive_written_before_the_column_is_stamped(self, client, admin, db):
         from enums import VerificationProvenance
         from models import User
 
@@ -2262,10 +2136,7 @@ class TestARestoreDoesNotConfirmAnAccountTheArchiveLeftUnconfirmed:
 
         restored = db.query(User).filter(User.username == "admin").one()
         assert restored.email_verified_at is not None
-        assert (
-            restored.email_verification_source
-            == VerificationProvenance.NOT_REQUIRED.value
-        )
+        assert restored.email_verification_source == VerificationProvenance.NOT_REQUIRED.value
 
 
 class TestARestoreWritesOnlyAnImage:
@@ -2310,9 +2181,7 @@ class TestARestoreWritesOnlyAnImage:
         assert response.status_code == 200, response.text
         return response.json()
 
-    def test_a_damaged_cover_entry_is_declined_and_the_rest_restore(
-        self, client, admin, library, covers_dir
-    ):
+    def test_a_damaged_cover_entry_is_declined_and_the_rest_restore(self, client, admin, library, covers_dir):
         """**The cover loop runs after the commit and after the directory was
         emptied**, so a raise there is a 500 on a library whose rows are
         restored and whose covers are gone. The loop declined what it wrote and
@@ -2419,9 +2288,7 @@ class TestARestoreWritesOnlyAnImage:
         assert stored == {name[len(backup.COVERS_PREFIX) :]: body}
         assert restored["covers"] == 1
 
-    def test_the_good_covers_survive_the_bad_ones(
-        self, client, admin, library, covers_dir
-    ):
+    def test_the_good_covers_survive_the_bad_ones(self, client, admin, library, covers_dir):
         """One declined entry does not cost the others, or the rows.
 
         The cover loop runs after the commit, so refusing the whole restore here
@@ -2443,9 +2310,7 @@ class TestARestoreWritesOnlyAnImage:
         assert restored["covers"] == 2
         assert restored["books"] >= 1
 
-    def test_the_count_ignores_a_file_that_is_not_a_cover(
-        self, client, admin, library, covers_dir
-    ):
+    def test_the_count_ignores_a_file_that_is_not_a_cover(self, client, admin, library, covers_dir):
         """The count is read off the directory, so it has to filter it.
 
         The clear loop before the write only unlinks files with a cover suffix,
@@ -2455,16 +2320,12 @@ class TestARestoreWritesOnlyAnImage:
         """
         (COVERS_DIR / "notes.txt").write_bytes(b"not a cover")
 
-        restored = self._restored_with(
-            client, admin, library, {"covers/1.jpg": JPEG_BYTES}
-        )
+        restored = self._restored_with(client, admin, library, {"covers/1.jpg": JPEG_BYTES})
 
         assert restored["covers"] == 1
         assert (COVERS_DIR / "notes.txt").is_file()
 
-    def test_a_declined_entry_is_named_in_the_log(
-        self, client, admin, library, covers_dir, caplog
-    ):
+    def test_a_declined_entry_is_named_in_the_log(self, client, admin, library, covers_dir, caplog):
         """A count alone is not actionable. `RestoreResult` is the OpenAPI
         contract, so the admin's only signal is this line."""
         with caplog.at_level("WARNING", logger="endpaper.backup"):
@@ -2492,9 +2353,7 @@ class TestARestoreWritesOnlyAnImage:
         assert warnings
         assert all("\n" not in record.getMessage() for record in warnings)
 
-    def test_a_declined_entry_is_read_by_its_header_not_its_length(
-        self, client, admin, library, covers_dir
-    ):
+    def test_a_declined_entry_is_read_by_its_header_not_its_length(self, client, admin, library, covers_dir):
         """A refusal costs a fixed window, not the entry's `file_size`.
 
         `_reject_a_bomb` lets an archive declare up to `MAX_UNCOMPRESSED_BYTES`,
@@ -2569,9 +2428,7 @@ class TestARestoreWritesOnlyAnImage:
         guard.
         """
         with caplog.at_level("WARNING", logger="endpaper.backup"):
-            restored = self._restored_with(
-                client, admin, library, {f"covers/{'n' * 300}.jpg": JPEG_BYTES}
-            )
+            restored = self._restored_with(client, admin, library, {f"covers/{'n' * 300}.jpg": JPEG_BYTES})
 
         assert restored["covers"] == 0
         # **The count alone does not say the write was reached.** Zero covers is
@@ -2583,9 +2440,7 @@ class TestARestoreWritesOnlyAnImage:
         assert "n" * 120 in caplog.text
 
     @pytest.mark.parametrize("order", [("1.jpg", "1.png"), ("1.png", "1.jpg")])
-    def test_two_entries_sharing_a_base_both_survive(
-        self, client, admin, library, covers_dir, order
-    ):
+    def test_two_entries_sharing_a_base_both_survive(self, client, admin, library, covers_dir, order):
         """Restore reproduces the directory the archive describes.
 
         A sweep here would delete a cover somebody can see. The route resolves a
@@ -2610,6 +2465,7 @@ class TestARestoreWritesOnlyAnImage:
 
         assert {p.name: p.read_bytes() for p in COVERS_DIR.glob("1.*")} == bodies
         assert restored["covers"] == 2
+
 
 # ── Every value this schema exists to refuse, on whichever engine is running ──
 
@@ -2651,46 +2507,63 @@ NUL = "\x00"
 REFUSED: tuple[Refusal, ...] = (
     # ── catalogue_targets: the index columns reach a CQL query unquoted ──
     Refusal(
-        "catalogue_targets", "isbn_index", "bath.isbn or 1=1",
+        "catalogue_targets",
+        "isbn_index",
+        "bath.isbn or 1=1",
         "the substitution the charset rule exists for",
     ),
     Refusal(
-        "catalogue_targets", "isbn_index", "bath isbn",
+        "catalogue_targets",
+        "isbn_index",
+        "bath isbn",
         "a space alone, which is what a repertoire widened by [:space:] on one "
         "engine would admit and no legitimate index name carries",
     ),
     Refusal(
-        "catalogue_targets", "isbn_index", f"bath.isbn{NUL} or 1=1",
+        "catalogue_targets",
+        "isbn_index",
+        f"bath.isbn{NUL} or 1=1",
         "the NUL concatenation the tree records: nine characters by SQLite's "
         "length() and seventeen bytes on disk",
     ),
     Refusal(
-        "catalogue_targets", "isbn_index", "café",
+        "catalogue_targets",
+        "isbn_index",
+        "café",
         "one non ASCII letter, which a collation this deployment did not choose "
         "could otherwise fold into A-Za-z",
     ),
     Refusal(
-        "catalogue_targets", "title_index", f"WOE{NUL} or 1=1",
+        "catalogue_targets",
+        "title_index",
+        f"WOE{NUL} or 1=1",
         "the second index column, stated rather than assumed to follow",
     ),
     Refusal(
-        "catalogue_targets", "title_index", "dc title",
+        "catalogue_targets",
+        "title_index",
+        "dc title",
         "the second index column's charset rule",
     ),
     Refusal(
-        "catalogue_targets", "isbn_attribute", "7 @and @attr 1=4 x",
+        "catalogue_targets",
+        "isbn_attribute",
+        "7 @and @attr 1=4 x",
         "a string in a column declared INTEGER, which SQLite's affinity permits "
         "and only the typeof arm refuses there",
     ),
     Refusal(
-        "catalogue_targets", "isbn_attribute", 4,
+        "catalogue_targets",
+        "isbn_attribute",
+        4,
         "a use attribute outside the one this schema knows",
     ),
     # ── catalogue_credentials.source: it travels into a URL path ──
     Refusal(
-        "catalogue_credentials", "source", f"bne{NUL}../../books/5?",
-        "the payload that steered an admin's own authenticated DELETE at "
-        "/api/books/5",
+        "catalogue_credentials",
+        "source",
+        f"bne{NUL}../../books/5?",
+        "the payload that steered an admin's own authenticated DELETE at /api/books/5",
     ),
     Refusal("catalogue_credentials", "source", "../../books/5?", "the same payload, plain"),
     Refusal("catalogue_credentials", "source", "BNE", "outside the repertoire"),
@@ -2699,36 +2572,48 @@ REFUSED: tuple[Refusal, ...] = (
     Refusal("catalogue_credentials", "source", "x" * 33, "the ceiling"),
     # ── catalogue_credentials.envelope: the shape that is not a password ──
     Refusal(
-        "catalogue_credentials", "envelope", "v1XYZ" + "z" * 40,
-        "no separator at all, which is what a regex spelled ^v1.*.*.* admits "
-        "and GLOB 'v1.*.*.*' never did",
+        "catalogue_credentials",
+        "envelope",
+        "v1XYZ" + "z" * 40,
+        "no separator at all, which is what a regex spelled ^v1.*.*.* admits and GLOB 'v1.*.*.*' never did",
     ),
     Refusal(
-        "catalogue_credentials", "envelope", "hunter2hunter2hunter2hunter2hunter2hunter2",
+        "catalogue_credentials",
+        "envelope",
+        "hunter2hunter2hunter2hunter2hunter2hunter2",
         "a plaintext password written in by a hand edited archive",
     ),
     Refusal(
-        "catalogue_credentials", "envelope", "xv1." + "a" * 40 + ".b.c",
-        "a valid shape with a character in front of it, which is what an "
-        "unanchored version pattern admits",
+        "catalogue_credentials",
+        "envelope",
+        "xv1." + "a" * 40 + ".b.c",
+        "a valid shape with a character in front of it, which is what an unanchored version pattern admits",
     ),
     Refusal("catalogue_credentials", "envelope", "v1.a.b.c", "shorter than any envelope this build writes"),
     Refusal(
-        "catalogue_credentials", "envelope", "v1." + "a" * 40 + ".b",
+        "catalogue_credentials",
+        "envelope",
+        "v1." + "a" * 40 + ".b",
         "two separators where the shape wants three",
     ),
     # ── opds_servers.credential_key: the two key spaces stay apart ──
     Refusal(
-        "opds_servers", "credential_key", "bne",
+        "opds_servers",
+        "credential_key",
+        "bne",
         "a roster catalogue's key space, which is the row that had the "
         "library's sealed BNE login sent to an address the archive named",
     ),
     Refusal(
-        "opds_servers", "credential_key", f"opds-1{NUL}../../books/5?",
+        "opds_servers",
+        "credential_key",
+        f"opds-1{NUL}../../books/5?",
         "the NUL concatenation the tree records for this column",
     ),
     Refusal(
-        "opds_servers", "credential_key", "xopds-1",
+        "opds_servers",
+        "credential_key",
+        "xopds-1",
         "the prefix off the front, which is the whole of what an anchor is: it "
         "passes every other arm, and an unanchored `~ 'opds-'` admits it",
     ),
@@ -2736,19 +2621,24 @@ REFUSED: tuple[Refusal, ...] = (
     Refusal("opds_servers", "credential_key", "opds.1", "a dot is not in the repertoire"),
     # ── opds_servers.base_url: a sync fetches it ──
     Refusal(
-        "opds_servers", "base_url", "http:/",
-        "one slash, which is what a regex spelled ^http://?* would admit if it "
-        "compiled at all",
+        "opds_servers",
+        "base_url",
+        "http:/",
+        "one slash, which is what a regex spelled ^http://?* would admit if it compiled at all",
     ),
     Refusal("opds_servers", "base_url", "http://", "a scheme and no host"),
     Refusal(
-        "opds_servers", "base_url", "ftp://http://x",
+        "opds_servers",
+        "base_url",
+        "ftp://http://x",
         "an http prefix that is not the prefix, which an unanchored pattern "
         "admits and a sync would then fetch over ftp",
     ),
     Refusal("opds_servers", "base_url", "file:///etc/passwd", "the wrong scheme entirely"),
     Refusal(
-        "opds_servers", "base_url", f"http://x{NUL}" + "y" * 100_000,
+        "opds_servers",
+        "base_url",
+        f"http://x{NUL}" + "y" * 100_000,
         "the megabyte parked behind a NUL, which length() reported as 8",
     ),
     Refusal("opds_servers", "base_url", "http://" + "x" * 300, "the character ceiling"),
@@ -2757,7 +2647,9 @@ REFUSED: tuple[Refusal, ...] = (
     Refusal("opds_servers", "name", "n" * 101, "the ceiling"),
     # ── book_identifiers.value: a token a machine wrote ──
     Refusal(
-        "book_identifiers", "value", f"B0{NUL}" + "x" * 10_000,
+        "book_identifiers",
+        "value",
+        f"B0{NUL}" + "x" * 10_000,
         "the value a character ceiling alone admits on a Core insert",
     ),
     Refusal("book_identifiers", "value", "", "the floor"),
@@ -2768,7 +2660,9 @@ REFUSED: tuple[Refusal, ...] = (
     Refusal("online_links", "url", "data:text/html,x", "a scheme that carries a page"),
     Refusal("online_links", "url", "https://a.example/" + "x" * 2031, "one byte past the cap"),
     Refusal(
-        "online_links", "url", "https://a.example/?" + "&" * 406,
+        "online_links",
+        "url",
+        "https://a.example/?" + "&" * 406,
         "425 bytes stored and 2,049 written, which the export would drop",
     ),
     Refusal("online_links", "relation", "mirror", "a relation this release does not have"),

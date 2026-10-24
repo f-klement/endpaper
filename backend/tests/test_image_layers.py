@@ -85,7 +85,7 @@ def _calls(instruction: str, program: str) -> list[list[str]]:
     calls = []
     for segment in re.split(r"&&|\|\||[;|]", re.sub(r"^RUN\s+", "", instruction, flags=re.IGNORECASE)):
         words = [word.replace('"', "").replace("'", "") for word in segment.split()]
-        calls += [words[i + 1:] for i, word in enumerate(words) if word.lstrip("$({`") == program]
+        calls += [words[i + 1 :] for i, word in enumerate(words) if word.lstrip("$({`") == program]
     return calls
 
 
@@ -114,7 +114,7 @@ def _clauses(mode: str) -> list[tuple[str, str, str]]:
     clauses = []
     for clause in mode.split(","):
         who = re.sub(r"[^ugoa].*", "", clause)
-        for operator, permissions in re.findall(r"([-+=])([rwxXst]*)", clause[len(who):]):
+        for operator, permissions in re.findall(r"([-+=])([rwxXst]*)", clause[len(who) :]):
             clauses.append((who, operator, permissions))
     return clauses
 
@@ -134,7 +134,9 @@ def _opens_to_reading(mode: str) -> bool:
     if re.fullmatch(r"[0-7]{3,4}", mode):
         return int(mode, 8) & 0o005 == 0o005
     return any(
-        operator != "-" and "r" in permissions and set(permissions) & set("xX")
+        operator != "-"
+        and "r" in permissions
+        and set(permissions) & set("xX")
         and (not who or set(who) & set("oa"))
         for who, operator, permissions in _clauses(mode)
     )
@@ -274,9 +276,7 @@ class TestNoInstructionGivesTheAppUserWritePastTheDataDirectory:
                     data_dir, _target(destination, workdir, data_dir)
                 ):
                     offenders.append(instruction)
-        assert not offenders, (
-            f"a COPY hands the app's user files it may then rewrite: {offenders}"
-        )
+        assert not offenders, f"a COPY hands the app's user files it may then rewrite: {offenders}"
 
     def test_no_chown_or_chmod_opens_anything_past_the_data_directory(self) -> None:
         stages = _stages(_DOCKERFILE.read_text())
@@ -373,8 +373,10 @@ class TestTheAppUserCanReadWhatItRuns:
                 elif keyword == "RUN" and copied:
                     for arguments in _calls(instruction, "chmod"):
                         mode, *targets = _operands(arguments) or [""]
-                        if _recursive(arguments) and _opens_to_reading(mode) and any(
-                            _within(_resolve(workdir, t), path) for t in targets
+                        if (
+                            _recursive(arguments)
+                            and _opens_to_reading(mode)
+                            and any(_within(_resolve(workdir, t), path) for t in targets)
                         ):
                             opened = True
             if copied:

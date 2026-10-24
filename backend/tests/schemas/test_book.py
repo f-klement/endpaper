@@ -266,11 +266,7 @@ def _app_body_models() -> dict[str, type[BaseModel]]:
         return found
 
     return _models_from(
-        [
-            parameter.field_info.annotation
-            for route in walk(app)
-            for parameter in route.dependant.body_params
-        ]
+        [parameter.field_info.annotation for route in walk(app) for parameter in route.dependant.body_params]
     )
 
 
@@ -469,11 +465,7 @@ def _is_container(kind: Any) -> bool:
     `str` and `bytes` are `Collection`s too and are excluded: their size is a
     length the probes measure directly.
     """
-    return (
-        isinstance(kind, type)
-        and issubclass(kind, Collection)
-        and not issubclass(kind, (str, bytes))
-    )
+    return isinstance(kind, type) and issubclass(kind, Collection) and not issubclass(kind, (str, bytes))
 
 
 def _is_bounded(field: Any) -> bool:
@@ -481,9 +473,7 @@ def _is_bounded(field: Any) -> bool:
     return _annotation_is_bounded(field.annotation, _constraints(field), field)
 
 
-def _kind_is_bounded(
-    kind: Any, annotation: Any, constraints: list[Any], field: Any
-) -> bool:
+def _kind_is_bounded(kind: Any, annotation: Any, constraints: list[Any], field: Any) -> bool:
     """Whether one kind an annotation admits can be made large."""
     if kind in (str, bytes):
         return not any(_accepts(annotation, constraints, p) for p in _LONG_STRINGS)
@@ -493,17 +483,13 @@ def _kind_is_bounded(
         if field is None or _stated_ceiling(field) is None:
             return False
         elements = _element_types(annotation)
-        return bool(elements) and all(
-            _annotation_is_bounded(element, [], None) for element in elements
-        )
+        return bool(elements) and all(_annotation_is_bounded(element, [], None) for element in elements)
     if kind is Literal or typing.get_origin(kind) is Literal:
         return True
     return isinstance(kind, type) and issubclass(kind, _SIZELESS)
 
 
-def _annotation_is_bounded(
-    annotation: Any, constraints: list[Any], field: Any
-) -> bool:
+def _annotation_is_bounded(annotation: Any, constraints: list[Any], field: Any) -> bool:
     """The rule itself, on an annotation rather than on a field.
 
     Separated so the container arm can ask it about an **element**, which is
@@ -520,9 +506,7 @@ def _annotation_is_bounded(
     as the two defects above, which is reason enough not to keep it.
     """
     kinds = _kinds(annotation)
-    return bool(kinds) and all(
-        _kind_is_bounded(kind, annotation, constraints, field) for kind in kinds
-    )
+    return bool(kinds) and all(_kind_is_bounded(kind, annotation, constraints, field) for kind in kinds)
 
 
 def _unbounded(models: dict[str, type[BaseModel]]) -> list[str]:
@@ -641,9 +625,7 @@ def _disagreements(models: dict[str, type[BaseModel]]) -> list[str]:
     for name, field_name, column, bound in rows:
         if bound is None:
             continue
-        stated.setdefault(column, {}).setdefault(bound, []).append(
-            f"{name}.{field_name}"
-        )
+        stated.setdefault(column, {}).setdefault(bound, []).append(f"{name}.{field_name}")
 
     return sorted(
         f"{column}: "
@@ -671,9 +653,9 @@ class TestEveryFieldARequestBodyCarriesIsBounded:
         holds. The collector walks FastAPI internals, so this names what it has
         to have found: the route this ticket came from, and the two models it
         compared."""
-        assert any(
-            route.path.endswith("/enrich/apply") for route in _api_routes()
-        ), "the route walker no longer finds POST /{book_id}/enrich/apply"
+        assert any(route.path.endswith("/enrich/apply") for route in _api_routes()), (
+            "the route walker no longer finds POST /{book_id}/enrich/apply"
+        )
         assert {"BookCreate", "BookMatch", "BulkRequest"} <= set(bodies)
 
     def test_every_router_module_contributes_routes(self) -> None:
@@ -697,9 +679,7 @@ class TestEveryFieldARequestBodyCarriesIsBounded:
         module that was discovered and contributed nothing is an import that
         half worked.
         """
-        empty = sorted(
-            name for name, routes in _routes_by_module().items() if not routes
-        )
+        empty = sorted(name for name, routes in _routes_by_module().items() if not routes)
         assert empty == [], f"these router modules contributed no routes: {empty}"
 
     def test_the_routers_walk_reaches_every_body_model_the_app_does(
@@ -749,9 +729,7 @@ class TestEveryFieldARequestBodyCarriesIsBounded:
         """
         assert _disagreements(bodies) == []
 
-    def test_every_exemption_still_carries_its_weight(
-        self, bodies: dict[str, type[BaseModel]]
-    ) -> None:
+    def test_every_exemption_still_carries_its_weight(self, bodies: dict[str, type[BaseModel]]) -> None:
         """`_UNBOUNDED_OK` had no staleness check while `_COLUMN_FOR_FIELD` did.
 
         An entry that stopped being true passes silently and then quietly
@@ -765,9 +743,7 @@ class TestEveryFieldARequestBodyCarriesIsBounded:
             assert model is not None, f"{label} names no request body model"
             field = model.model_fields.get(field_name)
             assert field is not None, f"{label} names no field on {model_name}"
-            assert not _is_bounded(field), (
-                f"{label} is bounded now, so the exemption is dead and should go"
-            )
+            assert not _is_bounded(field), f"{label} is bounded now, so the exemption is dead and should go"
 
     def test_every_kind_reaching_the_sizeless_tuple_is_named_in_it(
         self, bodies: dict[str, type[BaseModel]]
@@ -832,9 +808,10 @@ class TestEveryFieldARequestBodyCarriesIsBounded:
         """
         assert len(CATEGORY_SEPARATOR) == 2
         assert CATEGORY_MAX == CLASSIFICATION_NUMBER_MAX
-        assert MAX_CATEGORIES_PER_BOOK * CATEGORY_MAX + (
-            MAX_CATEGORIES_PER_BOOK - 1
-        ) * len(CATEGORY_SEPARATOR) == CATEGORIES_MAX
+        assert (
+            MAX_CATEGORIES_PER_BOOK * CATEGORY_MAX + (MAX_CATEGORIES_PER_BOOK - 1) * len(CATEGORY_SEPARATOR)
+            == CATEGORIES_MAX
+        )
 
     def test_the_rename_map_names_real_fields_and_real_columns(
         self, bodies: dict[str, type[BaseModel]]
@@ -843,11 +820,7 @@ class TestEveryFieldARequestBodyCarriesIsBounded:
         than trusted: a key that is itself a column name would silently
         redirect a field that needed no redirecting."""
         columns = {column.name for column in Book.__table__.columns}
-        fields = {
-            field_name
-            for model in bodies.values()
-            for field_name in model.model_fields
-        }
+        fields = {field_name for model in bodies.values() for field_name in model.model_fields}
         for field_name, column in _COLUMN_FOR_FIELD.items():
             assert field_name in fields, f"{field_name} is on no request body"
             assert column in columns, f"{column} is not a Book column"
@@ -879,9 +852,7 @@ class _Loose(BaseModel):
     suggested_tag_ids: list[_BoundedEntry] = Field(default=[], max_length=500)
 
 
-def _mutated(
-    annotations: dict[str, Any] | None = None, **overrides: Any
-) -> dict[str, type[BaseModel]]:
+def _mutated(annotations: dict[str, Any] | None = None, **overrides: Any) -> dict[str, type[BaseModel]]:
     """`_Loose` with some fields replaced, as the rules see it.
 
     `annotations` replaces a field's **type**, which is how the entry half of
@@ -895,18 +866,14 @@ def _mutated(
     # field then arrives as a `ForwardRef`, which matches no arm of
     # `_is_bounded` and is reported as unbounded: a fixture failure that reads
     # exactly like a real finding.
-    field_types = {
-        name: field.annotation for name, field in _Loose.model_fields.items()
-    } | (annotations or {})
-    unresolved = sorted(
-        name for name, kind in field_types.items() if isinstance(kind, typing.ForwardRef)
+    field_types = {name: field.annotation for name, field in _Loose.model_fields.items()} | (
+        annotations or {}
     )
+    unresolved = sorted(name for name, kind in field_types.items() if isinstance(kind, typing.ForwardRef))
     assert not unresolved, f"the fixture's annotations did not resolve: {unresolved}"
     namespace: dict[str, Any] = {"__annotations__": field_types}
     for field_name, field in _Loose.model_fields.items():
-        namespace[field_name] = Field(
-            default=field.default, **_field_kwargs(field)
-        )
+        namespace[field_name] = Field(default=field.default, **_field_kwargs(field))
     for field_name, replacement in overrides.items():
         namespace[field_name] = replacement
     model = type("Probe", (BaseModel,), namespace)
@@ -948,21 +915,15 @@ class TestTheGuardWouldNoticeEachFieldGoingLoose:
     def test_a_second_string_losing_its_ceiling(self) -> None:
         """The diagonal's other arm: `publisher` and `title` must be pinned
         separately, or one fixture is carrying both."""
-        assert _unbounded(_mutated(publisher=Field(default=None))) == [
-            "Probe.publisher"
-        ]
+        assert _unbounded(_mutated(publisher=Field(default=None))) == ["Probe.publisher"]
 
     def test_a_number_losing_its_ceiling(self) -> None:
-        assert _unbounded(_mutated(series_index=Field(default=None, ge=0))) == [
-            "Probe.series_index"
-        ]
+        assert _unbounded(_mutated(series_index=Field(default=None, ge=0))) == ["Probe.series_index"]
 
     def test_a_list_losing_its_count(self) -> None:
         """The trap this field was: `list[RowIdField]` bounds every entry and
         nothing bounds the number of entries."""
-        assert _unbounded(_mutated(suggested_tag_ids=Field(default=[]))) == [
-            "Probe.suggested_tag_ids"
-        ]
+        assert _unbounded(_mutated(suggested_tag_ids=Field(default=[]))) == ["Probe.suggested_tag_ids"]
 
     def test_a_list_losing_its_entry_bound(self) -> None:
         """The other half of a list's size, and the half the first version of
@@ -970,9 +931,9 @@ class TestTheGuardWouldNoticeEachFieldGoingLoose:
         of any size passed while the field looked bounded. Measured on
         `list[str]` at `max_length=500`: 500 entries of 100,001 characters, so
         50,000,500 accepted, which is the figure the probes actually produce."""
-        assert _unbounded(
-            _mutated(annotations={"suggested_tag_ids": list[int]})
-        ) == ["Probe.suggested_tag_ids"]
+        assert _unbounded(_mutated(annotations={"suggested_tag_ids": list[int]})) == [
+            "Probe.suggested_tag_ids"
+        ]
 
     def test_a_string_widened_past_its_column(self) -> None:
         assert _over_column(_mutated(title=Field(default=None, max_length=501))) == [
@@ -1029,9 +990,9 @@ class TestTheAgreementRuleReportsTheColumnAndNotTheModel:
         assert "publisher" not in "".join(_disagreements(self._pair()))
 
     def test_a_shared_column_bound_differently_is_reported(self) -> None:
-        assert _disagreements(
-            self._pair(title=Field(default=None, max_length=250))
-        ) == ["title: 250 on Wide.title, 500 on Narrow.title"]
+        assert _disagreements(self._pair(title=Field(default=None, max_length=250))) == [
+            "title: 250 on Wide.title, 500 on Narrow.title"
+        ]
 
     def test_the_rule_reads_the_column_and_not_the_field_name(self) -> None:
         """`isbn13` is `isbn` under another name, and a rule keyed on the field
@@ -1092,9 +1053,7 @@ class TestTheShapesThatEscapedTheFirstDraft:
             Annotated[str, MaxLen(9999)],
         ):
             models = self._one("publisher", alias | None)
-            assert _over_column(models) == [
-                "Probe.publisher says 9999, publisher is String(255)"
-            ], alias
+            assert _over_column(models) == ["Probe.publisher says 9999, publisher is String(255)"], alias
 
     def test_a_ceiling_inside_an_alias_that_fits_its_column_is_allowed(self) -> None:
         """The other half, or the rule above is satisfied by reporting every
@@ -1119,6 +1078,7 @@ class TestTheShapesThatEscapedTheFirstDraft:
         """`series_index` is written by three request bodies and is this
         ticket's sharpest field, and a string only agreement rule could not see
         them drift apart."""
+
         def body(name: str, high: float) -> type[BaseModel]:
             return typing.cast(
                 type[BaseModel],
@@ -1133,8 +1093,7 @@ class TestTheShapesThatEscapedTheFirstDraft:
             )
 
         assert _disagreements({"A": body("A", 1000), "B": body("B", 1e20)}) == [
-            "series_index: ge=0 le=1000 on A.series_index, "
-            "ge=0 le=1e+20 on B.series_index"
+            "series_index: ge=0 le=1000 on A.series_index, ge=0 le=1e+20 on B.series_index"
         ]
         assert _disagreements({"A": body("A", 1000), "B": body("B", 1000)}) == []
 
@@ -1150,9 +1109,9 @@ class TestTheShapesThatEscapedTheFirstDraft:
         measured is what this file keeps being wrong about.
         """
         for annotation in (list, set, dict, frozenset, tuple):
-            assert _unbounded(self._one("x", annotation, default=None, max_length=5)) == [
-                "Probe.x"
-            ], annotation
+            assert _unbounded(self._one("x", annotation, default=None, max_length=5)) == ["Probe.x"], (
+                annotation
+            )
 
     def test_a_container_keyed_on_its_abstract_base_needs_no_arm_per_type(
         self,
@@ -1161,9 +1120,7 @@ class TestTheShapesThatEscapedTheFirstDraft:
         refused by the sizeless tuple, which is the right answer for the wrong
         reason and leaves the next person no arm to fix. They are now the
         container rule's, count bound and elements alike."""
-        assert _unbounded(self._one("x", set[int], default=None, max_length=5)) == [
-            "Probe.x"
-        ]
+        assert _unbounded(self._one("x", set[int], default=None, max_length=5)) == ["Probe.x"]
         bounded = Annotated[int, Field(ge=1, le=9)]
         assert _unbounded(self._one("x", set[bounded], default=None, max_length=5)) == []
 
@@ -1172,9 +1129,7 @@ class TestTheShapesThatEscapedTheFirstDraft:
         annotation, so the list half of a `str | list[str]` was never looked
         at. No such field exists here; the shape is the one this file keeps
         paying for."""
-        assert _unbounded(
-            self._one("x", str | list[str], default=None, max_length=500)
-        ) == ["Probe.x"]
+        assert _unbounded(self._one("x", str | list[str], default=None, max_length=500)) == ["Probe.x"]
 
     def test_a_constraint_that_cannot_apply_to_a_probe_reports_rather_than_raises(
         self,
@@ -1188,9 +1143,7 @@ class TestTheShapesThatEscapedTheFirstDraft:
         as a broken test rather than a verdict, and the natural reaction is to
         reach for the exemption list.
         """
-        assert _unbounded(self._one("x", str | int | None, max_length=50)) == [
-            "Probe.x"
-        ]
+        assert _unbounded(self._one("x", str | int | None, max_length=50)) == ["Probe.x"]
         assert _unbounded(self._one("x", str | int | None, le=100)) == ["Probe.x"]
 
     def test_a_non_container_union_member_contributes_no_element_types(self) -> None:
@@ -1385,14 +1338,12 @@ class TestAColumnRewrittenOnWriteIsBoundedAfterTheRewrite:
             assert len(probe) == width
             assert len(rewrite(probe) or "") > width
 
-    def test_the_walk_finds_the_bodies_that_carry_one(
-        self, bodies: dict[str, type[BaseModel]]
-    ) -> None:
+    def test_the_walk_finds_the_bodies_that_carry_one(self, bodies: dict[str, type[BaseModel]]) -> None:
         """A rule over an empty set passes and looks like a rule that holds."""
-        assert {
-            (name, field_name)
-            for name, field_name, _ in _fields_writing_a_rewritten_column(bodies)
-        } == {("BookCreate", "cover_url"), ("BookMatch", "cover_url")}
+        assert {(name, field_name) for name, field_name, _ in _fields_writing_a_rewritten_column(bodies)} == {
+            ("BookCreate", "cover_url"),
+            ("BookMatch", "cover_url"),
+        }
 
     def test_every_such_field_refuses_a_value_the_rewrite_pushes_past_the_column(
         self, bodies: dict[str, type[BaseModel]]
@@ -1405,8 +1356,7 @@ class TestAColumnRewrittenOnWriteIsBoundedAfterTheRewrite:
 
         assert accepted == [], (
             "These request-body fields accept a value the column cannot hold "
-            "once the ORM rewrites it, so the row is stored over width:\n  "
-            + "\n  ".join(accepted)
+            "once the ORM rewrites it, so the row is stored over width:\n  " + "\n  ".join(accepted)
         )
 
     def test_the_same_value_one_character_shorter_is_still_accepted(
@@ -1459,8 +1409,7 @@ def _writes_a_row_from_its_body(endpoint: Any) -> bool:
             )
         )
         or (
-            isinstance(node, ast.Assign)
-            and any(isinstance(target, ast.Attribute) for target in node.targets)
+            isinstance(node, ast.Assign) and any(isinstance(target, ast.Attribute) for target in node.targets)
         )
         for node in ast.walk(tree)
     )
@@ -1473,9 +1422,7 @@ def _bodies_written_onto_a_row() -> dict[str, type[BaseModel]]:
         if not _writes_a_row_from_its_body(route.endpoint):
             continue
         found.update(
-            _models_from(
-                [parameter.field_info.annotation for parameter in route.dependant.body_params]
-            )
+            _models_from([parameter.field_info.annotation for parameter in route.dependant.body_params])
         )
     return found
 
@@ -1489,9 +1436,7 @@ def _fields_over_a_column_that_refuses_null(
     field may accept one, and it is only a body whose route writes that field
     onto that column that turns the two into `UPDATE books SET title=NULL`.
     """
-    refuses_null = {
-        column.name for column in Book.__table__.columns if not column.nullable
-    }
+    refuses_null = {column.name for column in Book.__table__.columns if not column.nullable}
     return sorted(
         (name, field_name, column)
         for name, model in models.items()
@@ -1531,10 +1476,7 @@ def _refuses_a_null(model: type[BaseModel], field_name: str) -> bool:
     except ValidationError as exc:
         return any(
             error["loc"] == (field_name,)
-            or (
-                error["loc"] == ()
-                and re.search(rf"\b{re.escape(field_name)}\b", str(error["msg"]))
-            )
+            or (error["loc"] == () and re.search(rf"\b{re.escape(field_name)}\b", str(error["msg"])))
             for error in exc.errors()
         )
     return False
@@ -1585,8 +1527,7 @@ class TestNoBodyWrittenOntoARowCanClearAColumnThatRefusesNull:
         pairs = _fields_over_a_column_that_refuses_null(written)
 
         assert pairs, (
-            "no field of a body written onto a row names a NOT NULL column, so "
-            "this rule is about nothing"
+            "no field of a body written onto a row names a NOT NULL column, so this rule is about nothing"
         )
         assert len(pairs) >= 3, (
             f"only {len(pairs)} field of a body written onto a row names a NOT "
@@ -1637,8 +1578,7 @@ def _element_ceiling(field: Any) -> int | None:
         (
             ceiling
             for element in elements
-            if (ceiling := _stated_ceiling(FieldInfo.from_annotation(element)))
-            is not None
+            if (ceiling := _stated_ceiling(FieldInfo.from_annotation(element))) is not None
         ),
         default=None,
     )
@@ -1767,8 +1707,7 @@ class TestTheTwoDoorsIntoTheCategoriesColumn:
             BookCreate(title="t", categories=["Fiction; general"])
 
         assert CATEGORY_SEPARATOR.strip() in str(refusal.value), (
-            "the refusal does not name the character it refuses, so nobody can "
-            "act on it"
+            "the refusal does not name the character it refuses, so nobody can act on it"
         )
 
     def test_the_separator_is_refused_inside_a_subject_however_it_is_spelled(
@@ -1805,9 +1744,9 @@ class TestTheTwoDoorsIntoTheCategoriesColumn:
             except ValidationError:
                 continue
             seen += len(accepted)
-            assert not any(
-                CATEGORY_SEPARATOR.strip() in subject for subject in accepted
-            ), f"{candidate!r} was accepted as {accepted!r}, which carries the separator"
+            assert not any(CATEGORY_SEPARATOR.strip() in subject for subject in accepted), (
+                f"{candidate!r} was accepted as {accepted!r}, which carries the separator"
+            )
 
         assert seen, "every candidate was refused, so the property held over nothing"
 
@@ -1823,9 +1762,7 @@ class TestTheTwoDoorsIntoTheCategoriesColumn:
         `test_no_subject_the_create_door_accepts_carries_the_separator`, which is
         driven by a separator bearing candidate.
         """
-        accepted = BookCreate(
-            title="t", categories=["Fiction, general", "  Science   Fiction  "]
-        ).categories
+        accepted = BookCreate(title="t", categories=["Fiction, general", "  Science   Fiction  "]).categories
 
         assert split_categories(join_categories(accepted)) == accepted
         assert accepted == ["Fiction, general", "Science Fiction"]
@@ -2004,9 +1941,7 @@ def _load_schemas_book() -> None:
     when the refusal raises, and every later test in the process would read a
     schema module with none of its models in it.
     """
-    spec = importlib.util.spec_from_file_location(
-        "schemas_book_under_test", _SCHEMAS_BOOK
-    )
+    spec = importlib.util.spec_from_file_location("schemas_book_under_test", _SCHEMAS_BOOK)
     assert spec is not None
     assert spec.loader is not None
     spec.loader.exec_module(importlib.util.module_from_spec(spec))
@@ -2060,9 +1995,7 @@ class TestEveryCreateFieldEitherReachesTheConstructorOrIsPopped:
     def test_a_popped_name_that_is_not_a_field_of_the_body_is_reported(self) -> None:
         """A pop claiming a field nobody sends. Silent today, because `pop` with
         a default does not raise on a name that is not there."""
-        reported = schemas_book._unconstructable_fields(
-            ["gone"], [], {"title": str}, ["title"]
-        )
+        reported = schemas_book._unconstructable_fields(["gone"], [], {"title": str}, ["title"])
 
         assert set(reported) == {"gone"}
 
@@ -2110,9 +2043,7 @@ class TestEveryCreateFieldEitherReachesTheConstructorOrIsPopped:
     ) -> None:
         """The ruling's own case: a twentieth field added to the body and to
         nothing else is a `TypeError` on the constructor."""
-        reported = schemas_book._unconstructable_fields(
-            [], [], {"title": str, "shelf_mark": str}, ["title"]
-        )
+        reported = schemas_book._unconstructable_fields([], [], {"title": str, "shelf_mark": str}, ["title"])
 
         assert set(reported) == {"shelf_mark"}
 
@@ -2197,9 +2128,7 @@ class TestEveryCreateFieldEitherReachesTheConstructorOrIsPopped:
             schemas_book._unconstructable_fields(
                 schemas_book.CARRIED_AS_CHILD_ROWS,
                 schemas_book.RESHAPED_FOR_ITS_COLUMN,
-                schemas_book.dumped_fields(
-                    BookCreate, schemas_book.FOLDED_INTO_ANOTHER_FIELD
-                ),
+                schemas_book.dumped_fields(BookCreate, schemas_book.FOLDED_INTO_ANOTHER_FIELD),
                 _book_columns(),
             )
             == {}
@@ -2208,9 +2137,7 @@ class TestEveryCreateFieldEitherReachesTheConstructorOrIsPopped:
     def test_the_two_cells_do_not_overlap(self) -> None:
         """A name in both is popped for two reasons, which the predicate cannot
         report because a dict holds one fault per name."""
-        assert not set(schemas_book.CARRIED_AS_CHILD_ROWS) & set(
-            schemas_book.RESHAPED_FOR_ITS_COLUMN
-        )
+        assert not set(schemas_book.CARRIED_AS_CHILD_ROWS) & set(schemas_book.RESHAPED_FOR_ITS_COLUMN)
 
     def test_the_popped_list_is_the_two_cells_and_nothing_else(self) -> None:
         """The route loops this, so a name dropped out of it is a field handed to
@@ -2337,9 +2264,7 @@ class TestEveryReshapedFieldIsWrittenAtTheRoute:
         return {
             keyword.arg
             for node in ast.walk(tree)
-            if isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Name)
-            and node.func.id == "Book"
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "Book"
             for keyword in node.keywords
             if keyword.arg is not None
         }
@@ -2356,11 +2281,7 @@ class TestEveryReshapedFieldIsWrittenAtTheRoute:
         """The arm. A popped name with no assignment stores nothing and says
         nothing."""
         keywords = self._constructor_keywords()
-        unwritten = sorted(
-            name
-            for name in schemas_book.RESHAPED_FOR_ITS_COLUMN
-            if name not in keywords
-        )
+        unwritten = sorted(name for name in schemas_book.RESHAPED_FOR_ITS_COLUMN if name not in keywords)
 
         assert unwritten == [], (
             "These fields are popped out of the dump before the constructor and "
@@ -2436,11 +2357,7 @@ class TestEveryReshapedFieldIsWrittenAtTheRoute:
         one answers 200 having left the stored value alone, so the caller sees
         their own edit echoed back by nothing."""
         written = self._attributes_written_by(books_router.update_book_details, "book")
-        unwritten = sorted(
-            name
-            for name in schemas_book.POPPED_BEFORE_THE_ASSIGNMENT
-            if name not in written
-        )
+        unwritten = sorted(name for name in schemas_book.POPPED_BEFORE_THE_ASSIGNMENT if name not in written)
 
         assert unwritten == [], (
             "These fields are popped out of the update dump and never written "
@@ -2453,13 +2370,10 @@ class TestEveryReshapedFieldIsWrittenAtTheRoute:
         child rows must NOT reach the constructor: `Book.classifications` is a
         relationship, so handing it plain dicts raises rather than building rows."""
         keywords = self._constructor_keywords()
-        wrongly_written = sorted(
-            name for name in schemas_book.CARRIED_AS_CHILD_ROWS if name in keywords
-        )
+        wrongly_written = sorted(name for name in schemas_book.CARRIED_AS_CHILD_ROWS if name in keywords)
 
         assert wrongly_written == [], (
-            f"These are written after the insert as rows, not handed to the "
-            f"constructor: {wrongly_written}"
+            f"These are written after the insert as rows, not handed to the constructor: {wrongly_written}"
         )
 
 
@@ -2479,9 +2393,7 @@ class TestTheSchemaModuleRefusesToImport:
         with pytest.raises(RuntimeError, match="location"):
             _load_schemas_book()
 
-    def test_it_refuses_when_the_reshaped_cell_loses_its_column(
-        self, monkeypatch
-    ) -> None:
+    def test_it_refuses_when_the_reshaped_cell_loses_its_column(self, monkeypatch) -> None:
         """The other side of the same name. Without `categories` on the table the
         reshape cell is a claim about a write nobody can perform."""
         monkeypatch.setattr(
@@ -2492,9 +2404,7 @@ class TestTheSchemaModuleRefusesToImport:
         with pytest.raises(RuntimeError, match="categories"):
             _load_schemas_book()
 
-    def test_it_refuses_when_an_update_only_field_has_no_column(
-        self, monkeypatch
-    ) -> None:
+    def test_it_refuses_when_an_update_only_field_has_no_column(self, monkeypatch) -> None:
         """The second refusal, reached in isolation.
 
         `purchase_source` is a field of `BookDetailsUpdate` and not of
@@ -2513,9 +2423,7 @@ class TestTheSchemaModuleRefusesToImport:
 
         assert "purchase_source" in str(refusal.value)
 
-    def test_the_create_refusal_is_the_one_that_names_the_constructor(
-        self, monkeypatch
-    ) -> None:
+    def test_the_create_refusal_is_the_one_that_names_the_constructor(self, monkeypatch) -> None:
         """The pair the arm above needs. `isbn` is a field of `BookCreate` and
         not of `BookDetailsUpdate`, so this fires the first block alone. Two
         refusals in one module worded the same way would make "which block
@@ -2538,9 +2446,7 @@ class TestTheSchemaModuleRefusesToImport:
         monkeypatch.setattr(
             models, "Book", _book_whose_table_has([c for c in _book_columns() if c != "location"])
         )
-        with pytest.raises(
-            RuntimeError, match="`BookCreate` and the create route disagree"
-        ) as refusal:
+        with pytest.raises(RuntimeError, match="`BookCreate` and the create route disagree") as refusal:
             _load_schemas_book()
 
         assert "RESHAPED_FOR_ITS_COLUMN" in str(refusal.value)
@@ -2607,9 +2513,9 @@ class TestADuplicateGroupCannotBeBuiltWithOneMember:
                 books=[self._member(1), self._member(2)],
             )
 
-        assert [
-            (error["type"], error["loc"]) for error in refusal.value.errors()
-        ] == [("greater_than_equal", ("size",))]
+        assert [(error["type"], error["loc"]) for error in refusal.value.errors()] == [
+            ("greater_than_equal", ("size",))
+        ]
 
     def test_no_more_members_than_one_merge_accepts(self):
         """Tied to `MergeRequest`'s own bound rather than to a number beside
@@ -2702,10 +2608,7 @@ class TestTheSizeAgreesWithTheMembership:
     def _members(self, how_many: int):
         from schemas import DuplicateMember
 
-        return [
-            DuplicateMember(id=index, title="Dune")
-            for index in range(1, how_many + 1)
-        ]
+        return [DuplicateMember(id=index, title="Dune") for index in range(1, how_many + 1)]
 
     @pytest.mark.parametrize("shown", UNCAPPED_SIZES)
     def test_an_uncapped_group_says_exactly_what_it_carries(self, shown: int):
@@ -2736,9 +2639,7 @@ class TestTheSizeAgreesWithTheMembership:
     ):
         from schemas import MERGE_BOOKS_MAX, DuplicateGroup
 
-        group = DuplicateGroup(
-            key="k", size=MERGE_BOOKS_MAX + 7, books=self._members(MERGE_BOOKS_MAX)
-        )
+        group = DuplicateGroup(key="k", size=MERGE_BOOKS_MAX + 7, books=self._members(MERGE_BOOKS_MAX))
 
         assert group.size - len(group.books) == 7
 
@@ -2748,9 +2649,7 @@ class TestTheSizeAgreesWithTheMembership:
         from schemas import MERGE_BOOKS_MAX, DuplicateGroup
 
         with pytest.raises(ValidationError):
-            DuplicateGroup(
-                key="k", size=MERGE_BOOKS_MAX - 1, books=self._members(MERGE_BOOKS_MAX)
-            )
+            DuplicateGroup(key="k", size=MERGE_BOOKS_MAX - 1, books=self._members(MERGE_BOOKS_MAX))
 
 
 class TestABlankIsStoredAsNull:
@@ -2810,9 +2709,7 @@ class TestTheNamesAreTheCreditLine:
         """`_unconstructable_fields` is handed what the constructor is: a field
         left out of the dump is no fault of the route's."""
         assert "authors" in BookCreate.model_fields
-        assert "authors" not in schemas_book.dumped_fields(
-            BookCreate, schemas_book.FOLDED_INTO_ANOTHER_FIELD
-        )
+        assert "authors" not in schemas_book.dumped_fields(BookCreate, schemas_book.FOLDED_INTO_ANOTHER_FIELD)
 
     def test_an_excluded_field_nobody_folds_is_refused(self):
         """Excluded and unnamed is input the writer never sees: a 201 that

@@ -129,10 +129,7 @@ def row_ids(raw: str | None, *, field: str) -> list[int]:
     if len(found) > MAX_IDS_IN_A_FILTER:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=(
-                f"Name at most {MAX_IDS_IN_A_FILTER} ids in `{field}`; "
-                f"this asked for {len(found)}."
-            ),
+            detail=(f"Name at most {MAX_IDS_IN_A_FILTER} ids in `{field}`; this asked for {len(found)}."),
         )
     return found
 
@@ -270,10 +267,7 @@ def divisions(raw: str | None) -> list[str]:
     if len(found) > MAX_IDS_IN_A_FILTER:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=(
-                f"Name at most {MAX_IDS_IN_A_FILTER} divisions in `ddc`; "
-                f"this asked for {len(found)}."
-            ),
+            detail=(f"Name at most {MAX_IDS_IN_A_FILTER} divisions in `ddc`; this asked for {len(found)}."),
         )
     return list(found)
 
@@ -313,11 +307,7 @@ def book_for_read(
     `shelf.Loading` carries the measurement, including the one arm of one route
     that pays a statement for the absence.
     """
-    book = (
-        Shelf.seen_by(db, current_user.id)
-        .where(Book.id == book_id)
-        .first(load=Loading.SERIALISED)
-    )
+    book = Shelf.seen_by(db, current_user.id).where(Book.id == book_id).first(load=Loading.SERIALISED)
     if book is None:
         raise _not_found()
     return book
@@ -360,11 +350,7 @@ def book_in_trash(
     The same 404-not-403 rule applies, for the same reason. Somebody else's
     private book stays invisible in the trash too.
     """
-    book = (
-        Shelf.trashed_by(db, current_user.id)
-        .where(Book.id == book_id)
-        .first(load=Loading.SERIALISED)
-    )
+    book = Shelf.trashed_by(db, current_user.id).where(Book.id == book_id).first(load=Loading.SERIALISED)
     if book is None:
         raise _not_found()
     return book
@@ -419,9 +405,7 @@ class PageParams:
         # answered **500** on the main book listing for any member. A million
         # pages is past any real library and keeps the product far inside the
         # driver's range. `tests/test_house_rules.py` is what found this.
-        page: Annotated[
-            int, Query(ge=1, le=MAX_PAGE_NUMBER, description="1-based page number")
-        ] = 1,
+        page: Annotated[int, Query(ge=1, le=MAX_PAGE_NUMBER, description="1-based page number")] = 1,
         page_size: Annotated[
             int, Query(ge=1, le=MAX_PAGE_SIZE, description="Rows per page")
         ] = DEFAULT_PAGE_SIZE,

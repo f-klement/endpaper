@@ -64,9 +64,7 @@ def koreader_source_key(
     return hashlib.sha256("\x00".join(parts).encode()).hexdigest()
 
 
-def keyed(
-    partial_md5: str, marks: Sequence[KoreaderHighlightIn]
-) -> dict[str, KoreaderHighlightIn]:
+def keyed(partial_md5: str, marks: Sequence[KoreaderHighlightIn]) -> dict[str, KoreaderHighlightIn]:
     """One request's marks by key; two marks with one key are one, the later
     winning, which is KOReader's own rule for a match.
 
@@ -98,9 +96,7 @@ def _wall_clock(value: str | None) -> datetime | None:
     return datetime.strptime(value, KOREADER_DATETIME_FORMAT)  # noqa: DTZ007
 
 
-def _alone_in_its_second(
-    partial_md5: str, key: str, mark: KoreaderHighlightIn
-) -> str | None:
+def _alone_in_its_second(partial_md5: str, key: str, mark: KoreaderHighlightIn) -> str | None:
     """The key this mark had while another mark shared its second, if it is
     keyed on its time alone now; so deleting one of a pair on the device does
     not make the other a new row."""
@@ -108,9 +104,7 @@ def _alone_in_its_second(
         partial_md5, mark.highlighted_at, mark.pos0, mark.pos1
     ):
         return None
-    return koreader_source_key(
-        partial_md5, mark.highlighted_at, mark.pos0, mark.pos1, shared_time=True
-    )
+    return koreader_source_key(partial_md5, mark.highlighted_at, mark.pos0, mark.pos1, shared_time=True)
 
 
 def import_koreader(

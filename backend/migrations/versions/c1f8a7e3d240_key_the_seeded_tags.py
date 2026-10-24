@@ -178,11 +178,7 @@ def upgrade() -> None:
 
     keys_by_name = dict(SEEDED)
     rows = connection.execute(sa.text("SELECT id, name FROM tags ORDER BY id")).all()
-    keyed = [
-        {"row_id": row_id, "key": keys_by_name[name]}
-        for row_id, name in rows
-        if name in keys_by_name
-    ]
+    keyed = [{"row_id": row_id, "key": keys_by_name[name]} for row_id, name in rows if name in keys_by_name]
 
     # Before any DDL, on purpose: see the module docstring.
     taken: dict[str, int] = {}
@@ -199,9 +195,7 @@ def upgrade() -> None:
     op.add_column("tags", sa.Column("key", sa.String(length=_KEY_MAX), nullable=True))
 
     if keyed:
-        connection.execute(
-            sa.text("UPDATE tags SET key = :key WHERE id = :row_id"), keyed
-        )
+        connection.execute(sa.text("UPDATE tags SET key = :key WHERE id = :row_id"), keyed)
 
     # After the backfill, so that a backfill which somehow produced a duplicate
     # fails here rather than shipping one. Multiple NULLs are permitted by a

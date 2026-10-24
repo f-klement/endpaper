@@ -14,6 +14,10 @@ from tests.corpus import application_sources
 from tests.test_shelf import _book_owned_offences, _statement_at
 from tests.test_tags import _reaches_private
 
+TREE_GUARDS = {
+    "TestNothingElseDecidesWhoMayBeToldACollectionExists": ("application_sources",),
+}
+
 #: The entity, as the shared pass takes it. One name, resolved to
 #: `models.Collection` per module rather than matched as text: the standard
 #: library's `collections.abc.Collection` is the same seven letters, five
@@ -76,8 +80,8 @@ COLLECTION: Final = frozenset({"Collection"})
 COLLECTION_READERS: Final = {
     "routers/collections.py": [
         (
-            "_named: query = db.query(Collection).filter( Collection.name_folded "
-            "== fold_collection_name(name) )",
+            "_named: query = db.query(Collection).filter(Collection.name_folded == "
+            "fold_collection_name(name))",
             "the collision check behind `uq_collections_name_folded`. "
             "**Deliberately unscoped, and it is the seam.** The index is global, "
             "so a viewer here would race the rule this exists to front, and a "
@@ -132,9 +136,9 @@ COLLECTION_READERS: Final = {
     ],
     "shelving.py": [
         (
-            "listable: return [ row for row in self._db.query(Collection) "
-            ".order_by(func.lower(Collection.name)) .all() if "
-            "self._rule.may_be_told(row.id) ]",
+            "listable: return [ row for row in "
+            "self._db.query(Collection).order_by(func.lower(Collection.name)).all() "
+            "if self._rule.may_be_told(row.id) ]",
             "**the rule itself**, and the one read in the tree whose job is to "
             "decide this question. The comprehension is the filter: the table is "
             "read whole and each row is kept only when one of the three arms "
@@ -225,12 +229,9 @@ class TestNothingElseDecidesWhoMayBeToldACollectionExists:
             entries = COLLECTION_READERS.get(name, [])
             if len(lines) != len(entries):
                 shown = "\n".join(
-                    f"      {name}:{line}  {self._key(sources.get(name, ''), line)}"
-                    for line in lines
+                    f"      {name}:{line}  {self._key(sources.get(name, ''), line)}" for line in lines
                 )
-                report.append(
-                    f"  {name}: {len(lines)} reads, {len(entries)} classified\n{shown}"
-                )
+                report.append(f"  {name}: {len(lines)} reads, {len(entries)} classified\n{shown}")
                 continue
             for line, (expected, _) in zip(lines, entries, strict=True):
                 actual = self._key(sources.get(name, ""), line)
@@ -286,8 +287,7 @@ class TestNothingElseDecidesWhoMayBeToldACollectionExists:
             1,
         )
         assert rewritten != sources["routers/collections.py"], (
-            "the route no longer spells the call this plant rewrites, so "
-            "nothing was planted"
+            "the route no longer spells the call this plant rewrites, so nothing was planted"
         )
         sources["routers/collections.py"] = rewritten
 
@@ -304,8 +304,7 @@ class TestNothingElseDecidesWhoMayBeToldACollectionExists:
         """
         sources = dict(application_sources())
         sources["shelving.py"] += (
-            "\n\ndef every_collection_there_is(db):\n"
-            "    return db.query(Collection).all()\n"
+            "\n\ndef every_collection_there_is(db):\n    return db.query(Collection).all()\n"
         )
         knocked_out = sources["serialisation.py"].replace(
             "db.query(Collection.id, Collection.name)", "db.query(1)", 1

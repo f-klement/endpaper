@@ -45,29 +45,21 @@ API_PREFIXES: Final = ("/api/", "/auth/", "/covers/", "/openapi.json", "/docs", 
 # Wording per status. Keeping these here rather than inline means an error page
 # never accidentally repeats an internal exception message back to the browser.
 _PRESENTATION: Final[dict[int, tuple[str, str, str]]] = {
-    status.HTTP_400_BAD_REQUEST: (
-        "🤔", "That didn't work", "The request wasn't something we could act on."
-    ),
-    status.HTTP_401_UNAUTHORIZED: (
-        "🔑", "Please sign in", "You need to be signed in to see this."
-    ),
-    status.HTTP_403_FORBIDDEN: (
-        "🚫", "Not allowed", "Your account doesn't have access to this."
-    ),
-    status.HTTP_404_NOT_FOUND: (
-        "📭", "Nothing here", "We couldn't find that page or book."
-    ),
-    status.HTTP_413_CONTENT_TOO_LARGE: (
-        "🐘", "That file is too big", "Try a smaller image."
-    ),
+    status.HTTP_400_BAD_REQUEST: ("🤔", "That didn't work", "The request wasn't something we could act on."),
+    status.HTTP_401_UNAUTHORIZED: ("🔑", "Please sign in", "You need to be signed in to see this."),
+    status.HTTP_403_FORBIDDEN: ("🚫", "Not allowed", "Your account doesn't have access to this."),
+    status.HTTP_404_NOT_FOUND: ("📭", "Nothing here", "We couldn't find that page or book."),
+    status.HTTP_413_CONTENT_TOO_LARGE: ("🐘", "That file is too big", "Try a smaller image."),
     status.HTTP_422_UNPROCESSABLE_CONTENT: (
-        "📝", "Something's missing", "Some of the details sent weren't valid."
+        "📝",
+        "Something's missing",
+        "Some of the details sent weren't valid.",
     ),
-    status.HTTP_429_TOO_MANY_REQUESTS: (
-        "⏳", "Too many attempts", "Please wait a moment and try again."
-    ),
+    status.HTTP_429_TOO_MANY_REQUESTS: ("⏳", "Too many attempts", "Please wait a moment and try again."),
     status.HTTP_500_INTERNAL_SERVER_ERROR: (
-        "💥", "Something broke", "That's our fault, not yours. Please try again."
+        "💥",
+        "Something broke",
+        "That's our fault, not yours. Please try again.",
     ),
 }
 
@@ -106,9 +98,7 @@ def wants_html(request: Request) -> bool:
 
 def render_error_page(status_code: int) -> HTMLResponse:
     glyph, title, message = _PRESENTATION.get(status_code, _FALLBACK)
-    html = _TEMPLATE.substitute(
-        status=status_code, title=title, message=message, glyph=glyph
-    )
+    html = _TEMPLATE.substitute(status=status_code, title=title, message=message, glyph=glyph)
     return HTMLResponse(content=html, status_code=status_code)
 
 
@@ -222,9 +212,7 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> Respo
         )
     if wants_html(request):
         return render_error_page(status.HTTP_500_INTERNAL_SERVER_ERROR)
-    return _json_error(
-        status.HTTP_500_INTERNAL_SERVER_ERROR, HTTPStatus.INTERNAL_SERVER_ERROR.phrase
-    )
+    return _json_error(status.HTTP_500_INTERNAL_SERVER_ERROR, HTTPStatus.INTERNAL_SERVER_ERROR.phrase)
 
 
 #: The log record attribute carrying the exception an "Unhandled error" line is

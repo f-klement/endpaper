@@ -42,6 +42,10 @@ import z3950
 from tests.corpus import BACKEND, shipped_modules
 from z3950 import Answer, Record, Syntax, Target
 
+TREE_GUARDS = {
+    "TestTheProvisionalClientIsReachedOnlyThroughTheSeam": ("shipped_modules",),
+}
+
 TARGET = Target(host="catalogue.example", port=210, database="EXAMPLE")
 
 
@@ -246,9 +250,7 @@ class TestATargetsOwnWordsAreNotRepeatedUnbounded:
         # On the base class rather than at the twelve places one is raised: one forgotten
         # call site is one unbounded log line.
         for failure in (z3950.Unreachable, z3950.BadQuery, z3950.DeadlineExceeded, z3950.Closed):
-            assert str(failure("a\x00b " + "y" * 5_000)) == "a b " + "y" * (
-                z3950.MAX_DIAGNOSTIC_CHARS - 4
-            )
+            assert str(failure("a\x00b " + "y" * 5_000)) == "a b " + "y" * (z3950.MAX_DIAGNOSTIC_CHARS - 4)
 
 
 class TestTheThreeDispositionsStayApart:
@@ -261,9 +263,7 @@ class TestTheThreeDispositionsStayApart:
 
     async def test_answering_nothing_fetches_no_records(self):
         client = FakeClient(FakeSession(hits=0))
-        await z3950.search_once(
-            TARGET, '@attr 1=7 "1"', records=z3950.MAX_RECORDS, client=client
-        )
+        await z3950.search_once(TARGET, '@attr 1=7 "1"', records=z3950.MAX_RECORDS, client=client)
         assert client.session.fetched == []
 
     async def test_an_unreachable_target_propagates_from_the_open(self):
@@ -311,9 +311,7 @@ class TestTheAnswerIsBoundedInBytes:
 
     async def test_a_total_exactly_at_the_cap_is_allowed(self):
         session = FakeSession(hits=2, records=[marc(50)])
-        answer = await z3950.search_once(
-            TARGET, "q", records=2, limit=100, client=FakeClient(session)
-        )
+        answer = await z3950.search_once(TARGET, "q", records=2, limit=100, client=FakeClient(session))
         assert sum(len(r.raw) for r in answer.records) == 100
 
     async def test_the_default_cap_is_the_module_constant(self):
@@ -325,9 +323,7 @@ class TestTheAnswerIsBoundedInBytes:
         # A bound a caller can raise is not a bound. Without this,
         # `limit=209_715_200` was accepted and returned 4.8x the maximum, no error.
         with pytest.raises(ValueError, match="limit must not exceed MAX_RESPONSE_BYTES"):
-            await z3950.search_once(
-                TARGET, "q", limit=z3950.MAX_RESPONSE_BYTES + 1, client=FakeClient()
-            )
+            await z3950.search_once(TARGET, "q", limit=z3950.MAX_RESPONSE_BYTES + 1, client=FakeClient())
 
     async def test_a_cap_of_nothing_is_refused_rather_than_looping(self):
         with pytest.raises(ValueError, match="limit must be at least 1"):
@@ -336,9 +332,7 @@ class TestTheAnswerIsBoundedInBytes:
     async def test_the_cap_is_checked_before_the_target_is_asked(self):
         client = FakeClient()
         with pytest.raises(ValueError, match="limit must not exceed MAX_RESPONSE_BYTES"):
-            await z3950.search_once(
-                TARGET, "q", limit=z3950.MAX_RESPONSE_BYTES + 1, client=client
-            )
+            await z3950.search_once(TARGET, "q", limit=z3950.MAX_RESPONSE_BYTES + 1, client=client)
         assert client.session.searched == []
 
 
@@ -367,9 +361,7 @@ class TestALargeHitCountCostsWhatASmallOneCosts:
         # A clamp is silent, and a caller asking for a thousand records has a bug that a
         # smaller number would hide.
         with pytest.raises(ValueError, match="records must not exceed MAX_RECORDS"):
-            await z3950.search_once(
-                TARGET, "q", records=z3950.MAX_RECORDS + 1, client=FakeClient()
-            )
+            await z3950.search_once(TARGET, "q", records=z3950.MAX_RECORDS + 1, client=FakeClient())
 
     async def test_asking_for_no_records_is_refused(self):
         with pytest.raises(ValueError, match="records must be at least 1"):
@@ -409,9 +401,7 @@ class TestOneAssociationIsOneClock:
         session = FakeSession(delay=2.0)
         started = time.monotonic()
         with pytest.raises(z3950.DeadlineExceeded) as raised:
-            await z3950.search_once(
-                TARGET, "q", deadline=time.monotonic() + 0.05, client=FakeClient(session)
-            )
+            await z3950.search_once(TARGET, "q", deadline=time.monotonic() + 0.05, client=FakeClient(session))
         assert z3950.STILL_ANSWERING in str(raised.value)
         assert z3950.BEFORE_STARTING not in str(raised.value)
         assert time.monotonic() - started < 1.0
@@ -444,9 +434,7 @@ class TestOneAssociationIsOneClock:
             async with z3950.association(
                 TARGET, client=client, deadline=time.monotonic() + 0.05
             ) as open_association:
-                await z3950.search(
-                    open_association, "q", deadline=time.monotonic() + 8.0
-                )
+                await z3950.search(open_association, "q", deadline=time.monotonic() + 8.0)
         assert time.monotonic() - started < 1.0
 
     async def test_a_search_deadline_shorter_than_the_association_still_binds(self):
@@ -455,9 +443,7 @@ class TestOneAssociationIsOneClock:
         async with z3950.association(TARGET, client=client) as open_association:
             started = time.monotonic()
             with pytest.raises(z3950.DeadlineExceeded):
-                await z3950.search(
-                    open_association, "q", deadline=time.monotonic() + 0.05
-                )
+                await z3950.search(open_association, "q", deadline=time.monotonic() + 0.05)
             assert time.monotonic() - started < 1.0
 
     async def test_an_association_cannot_be_opened_past_the_module_ceiling(self):
@@ -487,9 +473,7 @@ class TestOneAssociationIsOneClock:
         # is what keeps that true from the other side.
         monkeypatch.setattr(time, "monotonic", lambda: frozen)
         client = FakeClient()
-        async with z3950.association(
-            TARGET, client=client, deadline=frozen + z3950.TIMEOUT_SECONDS
-        ):
+        async with z3950.association(TARGET, client=client, deadline=frozen + z3950.TIMEOUT_SECONDS):
             pass
         assert len(client.opens) == 1
 
@@ -531,9 +515,7 @@ class TestAnAssociationIsNeverLeftBehind:
         # for the life of the process.
         client = FakeClient(open_delay=0.3)
         with pytest.raises(z3950.DeadlineExceeded):
-            async with z3950.association(
-                TARGET, client=client, deadline=time.monotonic() + 0.05
-            ):
+            async with z3950.association(TARGET, client=client, deadline=time.monotonic() + 0.05):
                 pass
         await settle(lambda: client.session.closes == 1)
         assert client.session.closes == 1
@@ -627,9 +609,7 @@ class TestAnAssociationIsNeverLeftBehind:
         session = FakeSession(delay=1.0)
         async with z3950.association(TARGET, client=FakeClient(session)) as open_association:
             with pytest.raises(z3950.DeadlineExceeded):
-                await z3950.search(
-                    open_association, "slow", deadline=time.monotonic() + 0.05
-                )
+                await z3950.search(open_association, "slow", deadline=time.monotonic() + 0.05)
             with pytest.raises(z3950.Closed):
                 await z3950.search(open_association, "after")
         assert session.searched == ["slow"]
@@ -803,9 +783,7 @@ class TestTheModuleCanBeImportedWithNoClientInstalled:
     def test_the_walk_sees_past_the_top_level_statement_list(self):
         # The guard above is only as good as this: `tree.body` alone is not a scope.
         hidden = ast.parse(
-            "import contextlib\n"
-            "with contextlib.suppress(ImportError):\n"
-            "    import z3950_provisional\n"
+            "import contextlib\nwith contextlib.suppress(ImportError):\n    import z3950_provisional\n"
         )
         assert "z3950_provisional" in import_time_names(hidden)
 

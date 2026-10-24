@@ -53,10 +53,7 @@ depends_on: Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    op.execute(
-        "ALTER TABLE custom_fields ADD COLUMN created_by_user_id "
-        "INTEGER REFERENCES users (id)"
-    )
+    op.execute("ALTER TABLE custom_fields ADD COLUMN created_by_user_id INTEGER REFERENCES users (id)")
 
 
 def downgrade() -> None:

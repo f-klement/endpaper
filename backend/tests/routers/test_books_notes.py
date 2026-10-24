@@ -39,16 +39,12 @@ class TestAPrivateNoteIsNotListed:
         listed = client.get(f"/api/books/{book['id']}/notes", headers=member["headers"]).json()
         assert [n["content"] for n in listed] == ["what I actually thought"]
 
-    def test_another_member_does_not(
-        self, client, member, other_user, make_book, private_note
-    ):
+    def test_another_member_does_not(self, client, member, other_user, make_book, private_note):
         """The defect this column was added for: a book anybody may read, and a
         note on it that only its author may."""
         book = make_book(member["headers"])
         private_note(book["id"])
-        listed = client.get(
-            f"/api/books/{book['id']}/notes", headers=other_user["headers"]
-        ).json()
+        listed = client.get(f"/api/books/{book['id']}/notes", headers=other_user["headers"]).json()
         assert listed == []
 
     def test_an_admin_does_not_either(self, client, admin, member, make_book, private_note):
@@ -60,9 +56,7 @@ class TestAPrivateNoteIsNotListed:
         listed = client.get(f"/api/books/{book['id']}/notes", headers=admin["headers"]).json()
         assert listed == []
 
-    def test_a_shared_note_beside_it_is_still_listed(
-        self, client, admin, member, make_book, private_note
-    ):
+    def test_a_shared_note_beside_it_is_still_listed(self, client, admin, member, make_book, private_note):
         """The half that would go quiet if the predicate matched nothing."""
         book = make_book(admin["headers"])
         private_note(book["id"])
@@ -122,9 +116,7 @@ class TestAPrivateNoteIsFourOhFourAndNotFourOhThree:
         )
         assert res.status_code == 404
 
-    def test_an_admin_editing_it_gets_404(
-        self, client, admin, member, make_book, private_note
-    ):
+    def test_an_admin_editing_it_gets_404(self, client, admin, member, make_book, private_note):
         """The admin arm stops at the visibility: without it this is a 200, not
         a 403, because an admin overrides the authorship check."""
         book = make_book(admin["headers"])
@@ -136,24 +128,16 @@ class TestAPrivateNoteIsFourOhFourAndNotFourOhThree:
         )
         assert res.status_code == 404
 
-    def test_an_admin_deleting_it_gets_404(
-        self, client, admin, member, make_book, private_note
-    ):
+    def test_an_admin_deleting_it_gets_404(self, client, admin, member, make_book, private_note):
         book = make_book(admin["headers"])
         note = private_note(book["id"])
-        res = client.delete(
-            f"/api/books/{book['id']}/notes/{note.id}", headers=admin["headers"]
-        )
+        res = client.delete(f"/api/books/{book['id']}/notes/{note.id}", headers=admin["headers"])
         assert res.status_code == 404
 
-    def test_a_plain_member_deleting_it_gets_404(
-        self, client, member, other_user, make_book, private_note
-    ):
+    def test_a_plain_member_deleting_it_gets_404(self, client, member, other_user, make_book, private_note):
         book = make_book(member["headers"])
         note = private_note(book["id"])
-        res = client.delete(
-            f"/api/books/{book['id']}/notes/{note.id}", headers=other_user["headers"]
-        )
+        res = client.delete(f"/api/books/{book['id']}/notes/{note.id}", headers=other_user["headers"])
         assert res.status_code == 404
 
     def test_a_shared_note_somebody_else_wrote_is_still_403(
@@ -174,9 +158,7 @@ class TestAPrivateNoteIsFourOhFourAndNotFourOhThree:
         )
         assert res.status_code == 403
 
-    def test_its_author_can_still_edit_and_delete_it(
-        self, client, member, make_book, private_note
-    ):
+    def test_its_author_can_still_edit_and_delete_it(self, client, member, make_book, private_note):
         book = make_book(member["headers"])
         note = private_note(book["id"])
         edited = client.put(
@@ -187,9 +169,7 @@ class TestAPrivateNoteIsFourOhFourAndNotFourOhThree:
         assert edited.status_code == 200
         assert (edited.json()["content"], edited.json()["is_private"]) == ("revised", True)
         assert (
-            client.delete(
-                f"/api/books/{book['id']}/notes/{note.id}", headers=member["headers"]
-            ).status_code
+            client.delete(f"/api/books/{book['id']}/notes/{note.id}", headers=member["headers"]).status_code
             == 204
         )
 

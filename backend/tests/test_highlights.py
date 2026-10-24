@@ -56,9 +56,7 @@ def test_an_import_lengthening_a_shared_highlight_past_the_quote_ceiling_makes_i
     db.query(Highlight).update({"is_shared": True})
     db.commit()
 
-    highlights.write(
-        db, member_id, HighlightSource.READWISE, book_id, passage("x" * (QUOTE_TEXT_MAX + 1))
-    )
+    highlights.write(db, member_id, HighlightSource.READWISE, book_id, passage("x" * (QUOTE_TEXT_MAX + 1)))
     db.commit()
 
     assert db.query(Highlight.is_shared).scalar() is False
@@ -76,9 +74,7 @@ def _a_share_commits_once_the_row_is_read(db) -> list[int]:
             return
         shared.append(instance.id)
         with SessionLocal() as other:
-            other.query(Highlight).filter(Highlight.id == instance.id).update(
-                {"is_shared": True}
-            )
+            other.query(Highlight).filter(Highlight.id == instance.id).update({"is_shared": True})
             other.commit()
 
     event.listen(db, "loaded_as_persistent", the_share_commits)
@@ -104,19 +100,13 @@ def test_a_share_committed_while_an_import_moves_it_is_taken_back(db, member, ma
     assert db.query(Highlight.book_id, Highlight.is_shared).one() == (second, False)
 
 
-def test_a_second_import_of_an_unchanged_passage_past_the_quote_ceiling_writes_nothing(
-    db, member, make_book
-):
+def test_a_second_import_of_an_unchanged_passage_past_the_quote_ceiling_writes_nothing(db, member, make_book):
     """Clearing the share past the ceiling is part of a write, so a passage
     already past it and unchanged is not written again: its row keeps the time
     it was last changed."""
     book_id = make_book(member["headers"])["id"]
     member_id = member["user"]["id"]
-    marks = {
-        "7": highlights.Mark(
-            text="x" * (QUOTE_TEXT_MAX + 1), note=None, page=None, highlighted_at=None
-        )
-    }
+    marks = {"7": highlights.Mark(text="x" * (QUOTE_TEXT_MAX + 1), note=None, page=None, highlighted_at=None)}
     highlights.write(db, member_id, HighlightSource.READWISE, book_id, marks)
     db.commit()
     long_ago = datetime(2020, 1, 1)
@@ -144,18 +134,14 @@ def test_a_share_committed_while_an_import_lengthens_it_is_taken_back(db, member
     db.commit()
     shared = _a_share_commits_once_the_row_is_read(db)
 
-    highlights.write(
-        db, member_id, HighlightSource.READWISE, book_id, passage("x" * (QUOTE_TEXT_MAX + 1))
-    )
+    highlights.write(db, member_id, HighlightSource.READWISE, book_id, passage("x" * (QUOTE_TEXT_MAX + 1)))
     db.commit()
 
     assert len(shared) == 1
     assert db.query(Highlight.is_shared).scalar() is False
 
 
-def test_a_removal_takes_only_the_member_s_own_row_under_a_shared_key(
-    db, member, other_user, make_book
-):
+def test_a_removal_takes_only_the_member_s_own_row_under_a_shared_key(db, member, other_user, make_book):
     """Two members linking one Readwise account hold the same ids, and one
     member's pull reporting a deletion leaves the other's row."""
     book_id = make_book(member["headers"])["id"]
@@ -190,11 +176,7 @@ def test_a_hand_delete_committed_before_the_held_lookup_stays_deleted(db, member
             return
         deleted.append(True)
         with SessionLocal() as other:
-            other.add(
-                DeletedHighlight(
-                    user_id=member_id, source=HighlightSource.READWISE, source_key="7"
-                )
-            )
+            other.add(DeletedHighlight(user_id=member_id, source=HighlightSource.READWISE, source_key="7"))
             other.flush()
             other.query(Highlight).filter(Highlight.id == row_id).delete()
             other.commit()
@@ -208,9 +190,7 @@ def test_a_hand_delete_committed_before_the_held_lookup_stays_deleted(db, member
     assert db.query(Highlight).count() == 0
 
 
-def test_a_second_delete_racing_the_first_finds_nothing_rather_than_failing(
-    db, member, make_book
-):
+def test_a_second_delete_racing_the_first_finds_nothing_rather_than_failing(db, member, make_book):
     """Both find the row, the other commits first, and this commit then meets
     the unique index on the remembered key: answered as no such row."""
     book = db.get(Book, make_book(member["headers"])["id"])
@@ -221,11 +201,7 @@ def test_a_second_delete_racing_the_first_finds_nothing_rather_than_failing(
 
     def the_other_delete_commits_first(session, *_):
         with SessionLocal() as other:
-            other.add(
-                DeletedHighlight(
-                    user_id=member_id, source=HighlightSource.KOREADER, source_key=key
-                )
-            )
+            other.add(DeletedHighlight(user_id=member_id, source=HighlightSource.KOREADER, source_key=key))
             other.query(Highlight).filter(Highlight.id == row_id).delete()
             other.commit()
 

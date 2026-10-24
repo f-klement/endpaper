@@ -41,9 +41,7 @@ def _upload_cover(client, account, book_id: int) -> str:
 
 
 class TestAuthorisation:
-    def test_a_members_private_cover_is_not_readable_by_another(
-        self, client, admin, member, covers_dir
-    ):
+    def test_a_members_private_cover_is_not_readable_by_another(self, client, admin, member, covers_dir):
         """The whole reason this router replaced a static mount."""
         book_id = _add_book(client, admin, title="A diary", is_private=True)
         url = _upload_cover(client, admin, book_id)
@@ -51,9 +49,7 @@ class TestAuthorisation:
         assert client.get(url, headers=admin["headers"]).status_code == 200
         assert client.get(url, headers=member["headers"]).status_code == 404
 
-    def test_an_invisible_cover_is_404_not_403(
-        self, client, admin, member, covers_dir
-    ):
+    def test_an_invisible_cover_is_404_not_403(self, client, admin, member, covers_dir):
         """A 403 would confirm the book id exists, which is what privacy
         withholds. Same rule the book endpoints already follow."""
         book_id = _add_book(client, admin, title="A diary", is_private=True)
@@ -62,9 +58,7 @@ class TestAuthorisation:
         response = client.get(f"/covers/{book_id}.png", headers=member["headers"])
         assert response.status_code == 404
 
-    def test_a_public_cover_is_readable_by_any_member(
-        self, client, admin, member, covers_dir
-    ):
+    def test_a_public_cover_is_readable_by_any_member(self, client, admin, member, covers_dir):
         """The shared shelf still works: this is not a lockdown of everything."""
         book_id = _add_book(client, admin, title="Dune", is_private=False)
         url = _upload_cover(client, admin, book_id)
@@ -92,9 +86,7 @@ class TestServing:
         book_id = _add_book(client, admin, title="Dune", is_private=False)
         url = _upload_cover(client, admin, book_id)
 
-        cache_control = client.get(url, headers=admin["headers"]).headers[
-            "cache-control"
-        ]
+        cache_control = client.get(url, headers=admin["headers"]).headers["cache-control"]
         assert "private" in cache_control
         assert "public" not in cache_control
 
@@ -105,9 +97,7 @@ class TestServing:
         response = client.get(f"/covers/{book_id}.png", headers=admin["headers"])
         assert response.status_code == 404
 
-    def test_an_extension_the_book_was_not_stored_under_is_404(
-        self, client, admin, covers_dir
-    ):
+    def test_an_extension_the_book_was_not_stored_under_is_404(self, client, admin, covers_dir):
         """The filename is the cache buster, so a book re-covered in another
         format gets a new URL and the old one stops answering."""
         book_id = _add_book(client, admin, title="Dune", is_private=False)
@@ -118,10 +108,7 @@ class TestServing:
         assert response.status_code == 404
 
     def test_a_book_that_does_not_exist_is_404(self, client, admin, covers_dir):
-        assert (
-            client.get("/covers/999999.png", headers=admin["headers"]).status_code
-            == 404
-        )
+        assert client.get("/covers/999999.png", headers=admin["headers"]).status_code == 404
 
     def test_an_extension_we_do_not_serve_is_404(self, client, admin, covers_dir):
         """Otherwise the route is a way to read any file in the covers
@@ -132,22 +119,15 @@ class TestServing:
         response = client.get(f"/covers/{book_id}.svg", headers=admin["headers"])
         assert response.status_code in (404, 422)
 
-    def test_the_extension_is_matched_case_insensitively(
-        self, client, admin, covers_dir
-    ):
+    def test_the_extension_is_matched_case_insensitively(self, client, admin, covers_dir):
         """Some phones upload `.PNG`. The stored name is lower case, so the
         request has to normalise rather than miss."""
         book_id = _add_book(client, admin, title="Dune", is_private=False)
         _upload_cover(client, admin, book_id)
 
-        assert (
-            client.get(f"/covers/{book_id}.PNG", headers=admin["headers"]).status_code
-            == 200
-        )
+        assert client.get(f"/covers/{book_id}.PNG", headers=admin["headers"]).status_code == 200
 
-    def test_a_traversal_attempt_does_not_escape_the_directory(
-        self, client, admin, covers_dir
-    ):
+    def test_a_traversal_attempt_does_not_escape_the_directory(self, client, admin, covers_dir):
         """The book id is parsed as an int and the extension is letters only,
         so neither half can carry a separator. Pinned rather than assumed."""
         for path in (
@@ -199,9 +179,7 @@ class TestTheCoverCookie:
             "/auth/login",
             json={"username": admin["user"]["username"], "password": TEST_PASSWORD},
         )
-        assert "SameSite=lax" in response.headers["set-cookie"].replace(
-            "SameSite=Lax", "SameSite=lax"
-        )
+        assert "SameSite=lax" in response.headers["set-cookie"].replace("SameSite=Lax", "SameSite=lax")
 
     def test_a_cover_loads_with_only_the_cookie(self, client, admin, covers_dir):
         """The point of the whole thing: no Authorization header anywhere."""
@@ -224,9 +202,7 @@ class TestTheCoverCookie:
         )
         assert client.get("/api/books").status_code == 401
 
-    def test_the_cookie_does_not_override_a_valid_header(
-        self, client, admin, member, covers_dir
-    ):
+    def test_the_cookie_does_not_override_a_valid_header(self, client, admin, member, covers_dir):
         """The header still decides, so a cover fetched by the client behaves
         exactly like every other call."""
         book_id = _add_book(client, admin, title="A diary", is_private=True)
@@ -252,9 +228,7 @@ class TestTheCoverCookie:
 
         assert res.status_code == 401
 
-    def test_an_access_token_is_not_accepted_from_the_cookie(
-        self, client, admin, covers_dir
-    ):
+    def test_an_access_token_is_not_accepted_from_the_cookie(self, client, admin, covers_dir):
         """The other direction: the cover route wants the scoped token there,
         so a full token planted in the cookie is refused rather than being a
         second way in."""
@@ -296,9 +270,7 @@ class TestProxyMode:
     software, so it is proved here rather than assumed.
     """
 
-    def test_a_cover_loads_from_the_proxy_header_alone(
-        self, client, proxy_mode, covers_dir
-    ):
+    def test_a_cover_loads_from_the_proxy_header_alone(self, client, proxy_mode, covers_dir):
         account = {"headers": proxy_headers("kim")}
         book_id = _add_book(client, account, title="Dune", is_private=False)
         url = _upload_cover(client, account, book_id)
@@ -345,9 +317,7 @@ class TestASwitchedSessionInProxyMode:
         assert res.status_code == 200, res.text
         return {"Authorization": f"Bearer {res.json()['access_token']}"}
 
-    def test_the_switched_session_sees_its_own_private_cover(
-        self, client, proxy_mode, covers_dir
-    ):
+    def test_the_switched_session_sees_its_own_private_cover(self, client, proxy_mode, covers_dir):
         boss = proxy_headers("boss")
         client.get("/auth/me", headers=boss)
         token = self._switch_into_a_test_account(client, boss)
@@ -360,9 +330,7 @@ class TestASwitchedSessionInProxyMode:
         # in this mode, and must not be what answers.
         assert client.get(url, headers=boss).status_code == 200
 
-    def test_the_proxy_identity_alone_still_cannot_see_it(
-        self, client, proxy_mode, covers_dir
-    ):
+    def test_the_proxy_identity_alone_still_cannot_see_it(self, client, proxy_mode, covers_dir):
         boss = proxy_headers("boss")
         client.get("/auth/me", headers=boss)
         token = self._switch_into_a_test_account(client, boss)
@@ -401,9 +369,7 @@ class TestTheLoginBackground:
         agree or the login page points at nothing."""
         assert self._set(client, admin).startswith("/covers/login_bg.")
 
-    def test_it_is_cached_publicly_unlike_a_book_cover(
-        self, client, admin, covers_dir
-    ):
+    def test_it_is_cached_publicly_unlike_a_book_cover(self, client, admin, covers_dir):
         """Same bytes for everybody, so a shared cache is correct here and
         wrong for a cover."""
         url = self._set(client, admin)
@@ -424,9 +390,7 @@ class TestTheLoginBackground:
         """
         paths = {getattr(route, "path", None) for route in covers_router.router.routes}
 
-        assert (
-            f"{covers_router.router.prefix}/{cover_store.LOGIN_BG_BASE}.{{extension}}" in paths
-        )
+        assert f"{covers_router.router.prefix}/{cover_store.LOGIN_BG_BASE}.{{extension}}" in paths
 
     def test_an_unset_background_is_404_not_a_page(self, client, covers_dir):
         """Falling through to the SPA would answer an <img> with index.html and
@@ -461,10 +425,7 @@ class TestTheMediaTypesAreNotDocuments:
         assert set(covers_router._MEDIA_TYPES) == set(ALLOWED_IMAGE_EXTENSIONS)
 
     def test_every_served_type_is_an_image(self):
-        assert all(
-            media_type.startswith("image/")
-            for media_type in covers_router._MEDIA_TYPES.values()
-        )
+        assert all(media_type.startswith("image/") for media_type in covers_router._MEDIA_TYPES.values())
 
     def test_no_served_type_is_one_a_browser_treats_as_a_document(self):
         """`image/svg+xml` is the trap: it is an `image/*` and it is also a
@@ -518,9 +479,7 @@ class TestWhatTheRouteDoesWithBytesThatAreNotAnImage:
         assert response.headers["content-type"] == "image/jpeg"
         assert response.headers["x-content-type-options"] == "nosniff"
 
-    def test_nothing_invites_the_response_to_be_framed(
-        self, client, admin, covers_dir
-    ):
+    def test_nothing_invites_the_response_to_be_framed(self, client, admin, covers_dir):
         """`frame-ancestors` and `X-Frame-Options` are the two directives a
         non-document response actually enforces about itself, and they refuse
         framing from anywhere.

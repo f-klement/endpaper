@@ -15,9 +15,7 @@ class TestRating:
     def test_records_a_rating(self, client, admin, make_book):
         book = make_book(admin["headers"])
 
-        res = client.patch(
-            f"/api/books/{book['id']}/rating", json={"rating": 4}, headers=admin["headers"]
-        )
+        res = client.patch(f"/api/books/{book['id']}/rating", json={"rating": 4}, headers=admin["headers"])
 
         assert res.status_code == 200
         assert res.json()["my_rating"] == 4
@@ -25,9 +23,7 @@ class TestRating:
     def test_a_rating_is_personal(self, client, admin, member, make_book):
         """A shared shelf does not mean a shared opinion of what is on it."""
         book = make_book(admin["headers"])
-        client.patch(
-            f"/api/books/{book['id']}/rating", json={"rating": 5}, headers=admin["headers"]
-        )
+        client.patch(f"/api/books/{book['id']}/rating", json={"rating": 5}, headers=admin["headers"])
 
         seen_by_member = client.get(f"/api/books/{book['id']}", headers=member["headers"])
 
@@ -35,13 +31,9 @@ class TestRating:
 
     def test_a_null_clears_it(self, client, admin, make_book):
         book = make_book(admin["headers"])
-        client.patch(
-            f"/api/books/{book['id']}/rating", json={"rating": 3}, headers=admin["headers"]
-        )
+        client.patch(f"/api/books/{book['id']}/rating", json={"rating": 3}, headers=admin["headers"])
 
-        res = client.patch(
-            f"/api/books/{book['id']}/rating", json={"rating": None}, headers=admin["headers"]
-        )
+        res = client.patch(f"/api/books/{book['id']}/rating", json={"rating": None}, headers=admin["headers"])
 
         assert res.json()["my_rating"] is None
 
@@ -49,9 +41,7 @@ class TestRating:
         """Rating a book is not a claim to have finished it just now."""
         book = make_book(admin["headers"])
 
-        res = client.patch(
-            f"/api/books/{book['id']}/rating", json={"rating": 5}, headers=admin["headers"]
-        )
+        res = client.patch(f"/api/books/{book['id']}/rating", json={"rating": 5}, headers=admin["headers"])
 
         assert res.json()["my_finished_at"] is None
         assert res.json()["my_started_at"] is None
@@ -59,9 +49,7 @@ class TestRating:
     def test_rating_does_not_change_the_status(self, client, admin, make_book):
         book = make_book(admin["headers"])
 
-        res = client.patch(
-            f"/api/books/{book['id']}/rating", json={"rating": 5}, headers=admin["headers"]
-        )
+        res = client.patch(f"/api/books/{book['id']}/rating", json={"rating": 5}, headers=admin["headers"])
 
         assert res.json()["my_status"] == "unread"
 
@@ -69,20 +57,14 @@ class TestRating:
         # Read access is enough, like status: it changes nothing for anyone else.
         book = make_book(admin["headers"])
 
-        res = client.patch(
-            f"/api/books/{book['id']}/rating", json={"rating": 2}, headers=member["headers"]
-        )
+        res = client.patch(f"/api/books/{book['id']}/rating", json={"rating": 2}, headers=member["headers"])
 
         assert res.status_code == 200
 
-    def test_another_members_private_book_is_not_rateable(
-        self, client, admin, member, make_book
-    ):
+    def test_another_members_private_book_is_not_rateable(self, client, admin, member, make_book):
         book = make_book(admin["headers"], is_private=True)
 
-        res = client.patch(
-            f"/api/books/{book['id']}/rating", json={"rating": 2}, headers=member["headers"]
-        )
+        res = client.patch(f"/api/books/{book['id']}/rating", json={"rating": 2}, headers=member["headers"])
 
         assert res.status_code == 404
 
@@ -140,9 +122,7 @@ class TestReadingDates:
         assert body["my_started_at"] is not None
         assert body["my_finished_at"] is not None
 
-    def test_re_selecting_the_same_status_does_not_move_the_date(
-        self, client, admin, make_book
-    ):
+    def test_re_selecting_the_same_status_does_not_move_the_date(self, client, admin, make_book):
         """A UI with pressable buttons makes this easy to do by accident."""
         book = make_book(admin["headers"])
         first = set_status(client, admin["headers"], book["id"], "read").json()
@@ -210,9 +190,7 @@ class TestGivingUpOnABook:
 
         assert body["my_started_at"] == started["my_started_at"]
 
-    def test_marking_it_straight_away_still_records_a_start(
-        self, client, admin, make_book
-    ):
+    def test_marking_it_straight_away_still_records_a_start(self, client, admin, make_book):
         """It is a claim that reading started, whether or not READING was ever
         pressed."""
         book = make_book(admin["headers"])
@@ -231,9 +209,7 @@ class TestGivingUpOnABook:
 
         assert body["my_finished_at"] is None
 
-    def test_it_is_not_counted_as_finished_in_the_stats(
-        self, client, admin, make_book
-    ):
+    def test_it_is_not_counted_as_finished_in_the_stats(self, client, admin, make_book):
         book = make_book(admin["headers"])
         set_status(client, admin["headers"], book["id"], "read")
         set_status(client, admin["headers"], book["id"], "did_not_finish")
@@ -258,9 +234,7 @@ class TestGivingUpOnABook:
         assert body["my_status"] == "reading"
         assert body["my_finished_at"] is None
 
-    def test_picking_it_back_up_keeps_the_earlier_progress(
-        self, client, admin, make_book
-    ):
+    def test_picking_it_back_up_keeps_the_earlier_progress(self, client, admin, make_book):
         book = make_book(admin["headers"], page_count=300)
         client.post(
             f"/api/books/{book['id']}/progress",
@@ -275,9 +249,7 @@ class TestGivingUpOnABook:
             headers=admin["headers"],
         )
 
-        entries = client.get(
-            f"/api/books/{book['id']}/progress", headers=admin["headers"]
-        ).json()
+        entries = client.get(f"/api/books/{book['id']}/progress", headers=admin["headers"]).json()
         assert sorted(entry["page"] for entry in entries) == [120, 240]
 
     def test_it_does_not_delete_the_reading_progress(self, client, admin, make_book):
@@ -291,9 +263,7 @@ class TestGivingUpOnABook:
 
         set_status(client, admin["headers"], book["id"], "did_not_finish")
 
-        entries = client.get(
-            f"/api/books/{book['id']}/progress", headers=admin["headers"]
-        ).json()
+        entries = client.get(f"/api/books/{book['id']}/progress", headers=admin["headers"]).json()
         assert [entry["page"] for entry in entries] == [120]
 
     def test_it_can_be_filtered_for(self, client, admin, make_book):
@@ -320,9 +290,7 @@ class TestUnratedFilter:
     def test_lists_only_what_you_have_not_rated(self, client, admin, make_book):
         rated = make_book(admin["headers"], title="Rated")
         make_book(admin["headers"], title="Unrated")
-        client.patch(
-            f"/api/books/{rated['id']}/rating", json={"rating": 4}, headers=admin["headers"]
-        )
+        client.patch(f"/api/books/{rated['id']}/rating", json={"rating": 4}, headers=admin["headers"])
 
         res = client.get("/api/books", params={"unrated": True}, headers=admin["headers"])
 
@@ -331,17 +299,13 @@ class TestUnratedFilter:
     def test_is_personal(self, client, admin, member, make_book):
         """Another member's rating does not remove a book from your own list."""
         book = make_book(admin["headers"], title="Dune")
-        client.patch(
-            f"/api/books/{book['id']}/rating", json={"rating": 4}, headers=admin["headers"]
-        )
+        client.patch(f"/api/books/{book['id']}/rating", json={"rating": 4}, headers=admin["headers"])
 
         res = client.get("/api/books", params={"unrated": True}, headers=member["headers"])
 
         assert [b["title"] for b in res.json()["items"]] == ["Dune"]
 
-    def test_a_status_without_a_rating_still_counts_as_unrated(
-        self, client, admin, make_book
-    ):
+    def test_a_status_without_a_rating_still_counts_as_unrated(self, client, admin, make_book):
         # The row exists but `rating` is null, which is the case a naive
         # "no user_books row" implementation would miss.
         book = make_book(admin["headers"], title="Dune")

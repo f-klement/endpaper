@@ -129,6 +129,7 @@ class DegradingEnum(TypeDecorator[str]):
         """
         return self.enum
 
+
 # Many-to-many association table for books <-> tags
 book_tags = Table(
     "book_tags",
@@ -269,9 +270,7 @@ class Collection(Base):
     # cannot (`routers/collections._named`, which folds an incoming name to
     # compare, and `backup._parse_row`, whose Core insert fires no validator)
     # call it directly.
-    __table_args__ = (
-        Index("uq_collections_name_folded", "name_folded", unique=True),
-    )
+    __table_args__ = (Index("uq_collections_name_folded", "name_folded", unique=True),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     name: Mapped[str] = mapped_column(String(COLLECTION_NAME_MAX), nullable=False)
@@ -389,9 +388,7 @@ class AuthorAlias(Base):
     # The key rather than the spelling as written: `authors.author_key` already
     # folds case, accents and punctuation, so storing "Le Guin, Ursula K." as
     # typed would leave "LE GUIN, URSULA K." unfolded on the next import.
-    alias_key: Mapped[str] = mapped_column(
-        String(AUTHOR_KEY_MAX), unique=True, nullable=False
-    )
+    alias_key: Mapped[str] = mapped_column(String(AUTHOR_KEY_MAX), unique=True, nullable=False)
 
     # The name to show, as a member typed or picked it. Not a key: this is the
     # one string in the feature that is a choice rather than a derivation, and
@@ -513,11 +510,7 @@ def _enum_check(
     # another one spells its value the same way. Not reachable from the one
     # caller that excludes anything; raised by the security seat, and identity
     # is what the caller means.
-    values = [
-        member.value
-        for member in members
-        if not any(member is excluded for excluded in excluding)
-    ]
+    values = [member.value for member in members if not any(member is excluded for excluded in excluding)]
     if unsafe := [value for value in values if not _ENUM_VALUE.fullmatch(value)]:
         raise ValueError(f"an enum value cannot be spelled into DDL: {unsafe}")
     listed = f"{column} IN (" + ", ".join(f"'{value}'" for value in values) + ")"
@@ -664,9 +657,7 @@ class AuthorIdentifier(Base):
     # column, and keeping the prefix would let one identifier arrive under two
     # spellings that `uq_author_identifiers_key_scheme` cannot collapse. The
     # same rule `marc_fields.Subfields.gnd_identifier` applies to a subject heading.
-    identifier: Mapped[str] = mapped_column(
-        String(AUTHORITY_IDENTIFIER_MAX), nullable=False
-    )
+    identifier: Mapped[str] = mapped_column(String(AUTHORITY_IDENTIFIER_MAX), nullable=False)
 
     provenance: Mapped[AuthorityProvenance] = mapped_column(String(20), nullable=False)
 
@@ -726,9 +717,7 @@ class Tag(Base):
     # `seed_tags()` would put it back at the next restart and the delete would
     # look like it silently failed. And the picker groups by it, so the
     # library's own tags do not scatter through a curated genre list.
-    is_predefined: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=False, server_default="0"
-    )
+    is_predefined: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="0")
 
     @validates("name")
     def _drop_the_key_on_a_rename(self, _key: str, name: str) -> str:
@@ -795,9 +784,7 @@ class User(Base):
     __tablename__ = "users"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
-    username: Mapped[str] = mapped_column(
-        String(USERNAME_MAX), unique=True, index=True, nullable=False
-    )
+    username: Mapped[str] = mapped_column(String(USERNAME_MAX), unique=True, index=True, nullable=False)
     # Nullable since accounts authenticated by LDAP or by an upstream proxy
     # have no local password. Storing a dummy hash instead would leave a
     # credential that looks usable and is not.
@@ -821,9 +808,7 @@ class User(Base):
     # A column rather than "auth_source is local", because a local account
     # from before this deployment moved to a directory is also local, belongs
     # to a real person, and must not become either of those things.
-    is_test_account: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=False, server_default="0"
-    )
+    is_test_account: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="0")
 
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
@@ -905,9 +890,7 @@ class User(Base):
     # column is null, for the reason `AuthorityProvenance` gives: the question
     # this exists to answer is whether a checked list has quietly become an
     # asserted one, and it has to be answerable by reading one value.
-    email_verification_source: Mapped[str | None] = mapped_column(
-        String(20), nullable=True
-    )
+    email_verification_source: Mapped[str | None] = mapped_column(String(20), nullable=True)
     # The admin who asserted it, and null for every other provenance. No check
     # constraint pairing the two: adding one to `users` forces a batch rewrite
     # of a table that now carries this self referential foreign key, and a
@@ -927,9 +910,7 @@ class User(Base):
     # enough to read down a telephone needs a slow hash, and it is found by the
     # username beside it rather than by an indexed digest.
     verification_code_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    verification_code_expires_at: Mapped[datetime | None] = mapped_column(
-        DateTime, nullable=True
-    )
+    verification_code_expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     # ── Session revocation, for this account alone ────────────────────────
     #
@@ -958,9 +939,7 @@ class User(Base):
     # one at a time, no history, and minting a second replaces the first.
     # **Deliberately NOT on `UserOut`**, like the address: that schema is
     # served inside every book payload.
-    kosync_key_digest: Mapped[str | None] = mapped_column(
-        String(KOSYNC_KEY_DIGEST_HEX), nullable=True
-    )
+    kosync_key_digest: Mapped[str | None] = mapped_column(String(KOSYNC_KEY_DIGEST_HEX), nullable=True)
     kosync_key_set_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     books_added: Mapped[list[Book]] = relationship("Book", back_populates="added_by")
@@ -1023,7 +1002,11 @@ BORROWER_NAME_MAX = 120
 #: set are one value. `title` is not here:
 #: its column refuses null, and `min_length` is its rule.
 BLANK_IS_NULL: Final[tuple[str, ...]] = (
-    "subtitle", "author", "publisher", "description", "series_name",
+    "subtitle",
+    "author",
+    "publisher",
+    "description",
+    "series_name",
 )
 
 
@@ -1146,9 +1129,7 @@ class Book(Base):
     # own shelf taxonomy before they start, and a wrong vocabulary imposed up
     # front is worse than a slightly untidy one that grows. Indexed so the
     # filter and the distinct-values list stay cheap.
-    location: Mapped[str | None] = mapped_column(
-        String(LOCATION_MAX), nullable=True, index=True
-    )
+    location: Mapped[str | None] = mapped_column(String(LOCATION_MAX), nullable=True, index=True)
 
     # Which named part of the shelf this **object** belongs to, or null while
     # it belongs to none.
@@ -1220,9 +1201,7 @@ class Book(Base):
     # condition or where a book is; the shelf location was already here, this
     # is the other half.
 
-    condition: Mapped[BookCondition | None] = mapped_column(
-        DegradingEnum(BookCondition, 20), nullable=True
-    )
+    condition: Mapped[BookCondition | None] = mapped_column(DegradingEnum(BookCondition, 20), nullable=True)
 
     # **Minor units** (cents), not a decimal. SQLite has no decimal type, and
     # SQLAlchemy's Numeric over it round-trips through a float, which is how a
@@ -1241,9 +1220,7 @@ class Book(Base):
     # Free text, like `location`, and for the same reason: "the Oxfam on
     # Cowley Road" is a real answer and no vocabulary chosen up front contains
     # it.
-    purchase_source: Mapped[str | None] = mapped_column(
-        String(PURCHASE_SOURCE_MAX), nullable=True
-    )
+    purchase_source: Mapped[str | None] = mapped_column(String(PURCHASE_SOURCE_MAX), nullable=True)
 
     # Which set of deliberate copies this row belongs to, or null while the
     # library holds one of it.
@@ -1316,9 +1293,7 @@ class Book(Base):
     notes: Mapped[list[Note]] = relationship("Note", back_populates="book", cascade="all, delete-orphan")
     # Cascaded like the notes beside them: purging a book from the trash takes
     # the passages copied out of it, which have no meaning without it.
-    quotes: Mapped[list[Quote]] = relationship(
-        "Quote", back_populates="book", cascade="all, delete-orphan"
-    )
+    quotes: Mapped[list[Quote]] = relationship("Quote", back_populates="book", cascade="all, delete-orphan")
     # Cascaded like the quotes: a passage marked in a purged book marks nothing.
     highlights: Mapped[list[Highlight]] = relationship(
         "Highlight", back_populates="book", cascade="all, delete-orphan"
@@ -1438,8 +1413,7 @@ def children_of_books(metadata: MetaData) -> set[Table]:
     return {
         table
         for table in metadata.tables.values()
-        if table is not books
-        and any(fk.column.table is books for fk in table.foreign_keys)
+        if table is not books and any(fk.column.table is books for fk in table.foreign_keys)
     }
 
 
@@ -1457,15 +1431,11 @@ class UserBook(Base):
     # an index. That lets migrate_schema() apply this to a live database.
     # Nothing enforced one-row-per-(member, book) before, so duplicates were
     # possible and whichever row .first() returned decided the displayed status.
-    __table_args__ = (
-        Index("uq_user_books_user_book", "user_id", "book_id", unique=True),
-    )
+    __table_args__ = (Index("uq_user_books_user_book", "user_id", "book_id", unique=True),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
-    book_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("books.id"), nullable=False, index=True
-    )
+    book_id: Mapped[int] = mapped_column(Integer, ForeignKey("books.id"), nullable=False, index=True)
     status: Mapped[ReadStatus] = mapped_column(String(20), default=ReadStatus.UNREAD)
 
     # 1 to 5, or absent. Per person for the same reason status is: a shared
@@ -1494,9 +1464,7 @@ class UserBook(Base):
     # `books.lending`. There is nothing between yes and no here, and absence of
     # the row already means "has not said" for every member who never touched
     # the book, so a nullable column would be a second, weaker spelling of it.
-    wants_to_discuss: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=False, server_default="0"
-    )
+    wants_to_discuss: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="0")
 
     user: Mapped[User] = relationship("User", back_populates="user_books")
     book: Mapped[Book] = relationship("Book", back_populates="user_books")
@@ -1549,17 +1517,13 @@ class ReadingProgress(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
-    book_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("books.id"), nullable=False, index=True
-    )
+    book_id: Mapped[int] = mapped_column(Integer, ForeignKey("books.id"), nullable=False, index=True)
     #: When the position was recorded. **Deliberately not indexed on its own.**
     #: Nothing filters or orders on it alone: the history reads it under
     #: `(user_id, book_id)` and the per-month statistic reads it under
     #: `user_id`, so the composite above serves both and a second index would
     #: be a write cost on an append-only table for no read.
-    recorded_at: Mapped[datetime] = mapped_column(
-        DateTime, server_default=func.now(), nullable=False
-    )
+    recorded_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), nullable=False)
     #: The page reached, not the pages read. A position can be reconciled with
     #: the book; a delta cannot, so a mistyped delta is uncorrectable and a
     #: re-read looks like twice the reading.
@@ -1807,9 +1771,7 @@ class Loan(Base):
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
-    book_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("books.id"), nullable=False, index=True
-    )
+    book_id: Mapped[int] = mapped_column(Integer, ForeignKey("books.id"), nullable=False, index=True)
     # Null when the book went to somebody with no account. See loaned_to_name.
     loaned_to_user_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("users.id"), nullable=True, index=True
@@ -1818,9 +1780,7 @@ class Loan(Base):
     # The whole point of recording a loan is remembering who has the book, and
     # the people most likely to keep one are exactly those who will never have
     # an account here. Free text, capped, and never joined on.
-    loaned_to_name: Mapped[str | None] = mapped_column(
-        String(BORROWER_NAME_MAX), nullable=True
-    )
+    loaned_to_name: Mapped[str | None] = mapped_column(String(BORROWER_NAME_MAX), nullable=True)
     loaned_by_user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
     loaned_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     returned_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
@@ -1853,8 +1813,7 @@ class Loan(Base):
 
 #: A request is undecided, or carries all three halves of its decision.
 ACCESS_DECISION_SQL = (
-    "(granted IS NULL) = (decided_at IS NULL) "
-    "AND (granted IS NULL) = (decided_by_user_id IS NULL)"
+    "(granted IS NULL) = (decided_at IS NULL) AND (granted IS NULL) = (decided_by_user_id IS NULL)"
 )
 
 
@@ -1894,9 +1853,7 @@ class AccessRequest(Base):
         CheckConstraint(ACCESS_DECISION_SQL, name="ck_access_requests_decision"),
         # A member never asks themselves: the route refuses it first, and this
         # holds it for a restore.
-        CheckConstraint(
-            "holder_user_id <> requested_by_user_id", name="ck_access_requests_two_parties"
-        ),
+        CheckConstraint("holder_user_id <> requested_by_user_id", name="ck_access_requests_two_parties"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
@@ -1906,9 +1863,7 @@ class AccessRequest(Base):
     requested_by_user_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("users.id"), nullable=False, index=True
     )
-    holder_user_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("users.id"), nullable=False, index=True
-    )
+    holder_user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     requested_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     # Null while undecided. `ck_access_requests_decision` holds the three
     # together, so a decision is never half recorded.
@@ -1944,9 +1899,7 @@ class Note(Base):
     __tablename__ = "notes"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
-    book_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("books.id"), nullable=False, index=True
-    )
+    book_id: Mapped[int] = mapped_column(Integer, ForeignKey("books.id"), nullable=False, index=True)
     user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
 
@@ -2124,9 +2077,7 @@ class Quote(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     # No `index=True`: `ix_quotes_book_page` leads with this column. See above.
-    book_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("books.id"), nullable=False
-    )
+    book_id: Mapped[int] = mapped_column(Integer, ForeignKey("books.id"), nullable=False)
     user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
     # `String(n)` documents the intent and generates the DDL; `ck_quotes_text_bounds`
     # is what actually refuses an over-long value. See the constraint.
@@ -2137,9 +2088,7 @@ class Quote(Base):
     page: Mapped[int | None] = mapped_column(Integer, nullable=True)
     note: Mapped[str | None] = mapped_column(String(QUOTE_NOTE_MAX), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime, server_default=func.now(), onupdate=func.now()
-    )
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
 
     book: Mapped[Book] = relationship("Book", back_populates="quotes")
     author: Mapped[User] = relationship("User")
@@ -2277,9 +2226,7 @@ class Highlight(Base):
     #: makes a row it lengthens past the ceiling private (`highlights.write`).
     is_shared: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime, server_default=func.now(), onupdate=func.now()
-    )
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
 
     book: Mapped[Book] = relationship("Book", back_populates="highlights")
     author: Mapped[User] = relationship("User")
@@ -2311,9 +2258,7 @@ class DeletedHighlight(Base):
             "source_key",
             unique=True,
         ),
-        CheckConstraint(
-            _enum_check("source", HighlightSource), name="ck_deleted_highlights_source"
-        ),
+        CheckConstraint(_enum_check("source", HighlightSource), name="ck_deleted_highlights_source"),
         # The byte arm and the NUL clause for the reason `ck_highlights_bounds`
         # carries them: `backup.restore` writes through Core.
         CheckConstraint(
@@ -2547,12 +2492,9 @@ class DigitalReference(Base):
         CheckConstraint(
             DialectSQL(
                 sqlite=(
-                    "instr(partial_md5, char(0)) = 0 "
-                    f"AND partial_md5 GLOB '{'[0-9a-f]' * PARTIAL_MD5_HEX}'"
+                    f"instr(partial_md5, char(0)) = 0 AND partial_md5 GLOB '{'[0-9a-f]' * PARTIAL_MD5_HEX}'"
                 ),
-                postgresql=(
-                    f"(partial_md5 COLLATE \"C\") ~ '^[0-9a-f]{{{PARTIAL_MD5_HEX}}}$'"
-                ),
+                postgresql=(f"(partial_md5 COLLATE \"C\") ~ '^[0-9a-f]{{{PARTIAL_MD5_HEX}}}$'"),
             ),
             name="ck_digital_references_partial_md5",
         ),
@@ -2560,9 +2502,7 @@ class DigitalReference(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     # No `index=True`: `uq_digital_references_location` leads with this column.
-    book_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("books.id"), nullable=False
-    )
+    book_id: Mapped[int] = mapped_column(Integer, ForeignKey("books.id"), nullable=False)
 
     # ── What the client said ─────────────────────────────────────────────
     #
@@ -2577,9 +2517,7 @@ class DigitalReference(Base):
     #: required to be a path at all. A browser file picker cannot hand over a
     #: real filesystem path, so this is whatever the Member confirmed and its
     #: only reader is a person.
-    root_label: Mapped[str] = mapped_column(
-        String(DIGITAL_REFERENCE_PATH_MAX), nullable=False
-    )
+    root_label: Mapped[str] = mapped_column(String(DIGITAL_REFERENCE_PATH_MAX), nullable=False)
 
     #: The file beneath that root.
     #:
@@ -2592,9 +2530,7 @@ class DigitalReference(Base):
     #: own frontend. The rule is settled the way every other two-homes question
     #: here is: the root's name is in `root_label`, so repeating it as the first
     #: segment would be the same fact stored twice.
-    relative_path: Mapped[str] = mapped_column(
-        String(DIGITAL_REFERENCE_PATH_MAX), nullable=False
-    )
+    relative_path: Mapped[str] = mapped_column(String(DIGITAL_REFERENCE_PATH_MAX), nullable=False)
 
     #: Whether a browser corroborated the structure beneath the root, or the
     #: Member supplied all of it.
@@ -2605,9 +2541,7 @@ class DigitalReference(Base):
     #: gave a bare filename, the root is the Member's own guess, and the two
     #: together may name nothing. Without it the two records are identical on
     #: disk and nothing can tell a locatable file from a note to self.
-    root_confirmed: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=False, server_default="0"
-    )
+    root_confirmed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="0")
 
     #: `File.size` as the first look to record a fingerprint saw it, or null
     #: while nobody has said: a later look fills a gap and never replaces it
@@ -2632,9 +2566,7 @@ class DigitalReference(Base):
     #: Book's copies differ by bytes whenever a tool rewrites the file's
     #: metadata. Indexed because its reader is a lookup by value across the
     #: shelf, which `uq_digital_references_location` cannot serve.
-    partial_md5: Mapped[str | None] = mapped_column(
-        String(PARTIAL_MD5_HEX), nullable=True, index=True
-    )
+    partial_md5: Mapped[str | None] = mapped_column(String(PARTIAL_MD5_HEX), nullable=True, index=True)
 
     # ── What this server knows ───────────────────────────────────────────
     #
@@ -2651,9 +2583,7 @@ class DigitalReference(Base):
     #: root, or that what it found was this file. A name promising freshness
     #: would be believed by every reader after it, which is how a reference that
     #: cannot be re-checked becomes a claim that rots.
-    confirmed_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, server_default=func.now()
-    )
+    confirmed_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now())
 
     #: When this server first received a report that the file did not resolve,
     #: or null while nothing has said so. Cleared by the next report that finds
@@ -2808,9 +2738,7 @@ class Classification(Base):
         # downstream, for the reason two paragraphs up, and `_enum_check`
         # carries what the derivation costs when an enum is reordered.
         CheckConstraint(
-            _enum_check(
-                "kind", HeadingKind, nullable=True, excluding=(HeadingKind.SUBJECT,)
-            ),
+            _enum_check("kind", HeadingKind, nullable=True, excluding=(HeadingKind.SUBJECT,)),
             name="ck_classifications_kind",
         ),
     )
@@ -2819,20 +2747,14 @@ class Classification(Base):
     # No `index=True`: `uq_classifications_book_scheme_number` leads with this
     # column, so a second index on it would be a write cost with no read
     # behind it. The same reasoning as `quotes.book_id`.
-    book_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("books.id", ondelete="CASCADE"), nullable=False
-    )
+    book_id: Mapped[int] = mapped_column(Integer, ForeignKey("books.id", ondelete="CASCADE"), nullable=False)
     scheme: Mapped[ClassificationScheme] = mapped_column(String(20), nullable=False)
-    number: Mapped[str] = mapped_column(
-        String(CLASSIFICATION_NUMBER_MAX), nullable=False
-    )
+    number: Mapped[str] = mapped_column(String(CLASSIFICATION_NUMBER_MAX), nullable=False)
     # Null where the source carries the number alone. MARC 082 is exactly that
     # shape: the field holds the number and the printed schedule holds the
     # words, so there is nothing to store and inventing a caption from our own
     # mapping would put our word in a column that records theirs.
-    label: Mapped[str | None] = mapped_column(
-        String(CLASSIFICATION_LABEL_MAX), nullable=True
-    )
+    label: Mapped[str | None] = mapped_column(String(CLASSIFICATION_LABEL_MAX), nullable=True)
     # What the record said it was asserting: a subject, a content type or a
     # carrier. See `enums.HeadingKind`, and `ck_classifications_kind` above for
     # why this one is constrained where `scheme` is not.
@@ -2850,9 +2772,7 @@ class Classification(Base):
     # and `_shelf_order` puts nulls last, so the row would file at the end of
     # every shelf with nothing red anywhere. As it stands such a write raises
     # `IntegrityError` at the flush.
-    sort_key: Mapped[str] = mapped_column(
-        String(CLASSIFICATION_SORT_KEY_MAX), nullable=False
-    )
+    sort_key: Mapped[str] = mapped_column(String(CLASSIFICATION_SORT_KEY_MAX), nullable=False)
 
     book: Mapped[Book] = relationship("Book", back_populates="classifications")
 
@@ -3085,9 +3005,7 @@ class BookIdentifier(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     # No `index=True`: `uq_book_identifiers_book_scheme_value` leads with it.
-    book_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("books.id", ondelete="CASCADE"), nullable=False
-    )
+    book_id: Mapped[int] = mapped_column(Integer, ForeignKey("books.id", ondelete="CASCADE"), nullable=False)
     scheme: Mapped[BookIdentifierScheme] = mapped_column(String(20), nullable=False)
     # Stored as the store wrote it, case included. **Not folded**, unlike
     # `authors.author_key`: a name is a spelling somebody typed and this is an
@@ -3174,9 +3092,7 @@ class OnlineLink(Base):
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
-    book_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("books.id", ondelete="CASCADE"), nullable=False
-    )
+    book_id: Mapped[int] = mapped_column(Integer, ForeignKey("books.id", ondelete="CASCADE"), nullable=False)
     url: Mapped[str] = mapped_column(String(ONLINE_LINK_URL_MAX_BYTES), nullable=False)
     label: Mapped[str | None] = mapped_column(String(ONLINE_LINK_LABEL_MAX), nullable=True)
     # Not `relationship`, which would shadow SQLAlchemy's in this class body.
@@ -3303,9 +3219,7 @@ class CustomField(Base):
     # and `ähnliches` both exist. Same pair of mechanisms as `tags.name`, and
     # the same reason, recorded in `docs/decisions.md` under "SQLite folds case
     # in ASCII and Python does not".
-    name: Mapped[str] = mapped_column(
-        String(CUSTOM_FIELD_NAME_MAX), unique=True, nullable=False
-    )
+    name: Mapped[str] = mapped_column(String(CUSTOM_FIELD_NAME_MAX), unique=True, nullable=False)
     kind: Mapped[CustomFieldKind] = mapped_column(String(20), nullable=False)
 
     # **The Member who defined it, and this one is read.** It carries no
@@ -3338,9 +3252,7 @@ class CustomField(Base):
     #
     # Deliberately not indexed, like the three provenance columns: the table
     # has a ceiling of `MAX_CUSTOM_FIELDS` rows and is read whole.
-    created_by_user_id: Mapped[int | None] = mapped_column(
-        Integer, ForeignKey("users.id"), nullable=True
-    )
+    created_by_user_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id"), nullable=True)
 
     # **No `values` relationship, deliberately.** It would be a way to read
     # every Book's value for a field from a definition nobody had to be allowed
@@ -3402,9 +3314,7 @@ class CustomFieldValue(Base):
     # with `book_id`, which is the only lookup this table has, and `field_id`
     # is read only to delete a definition's rows, which is rare and admin only.
     # The same reasoning `quotes.book_id` records.
-    book_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("books.id", ondelete="CASCADE"), nullable=False
-    )
+    book_id: Mapped[int] = mapped_column(Integer, ForeignKey("books.id", ondelete="CASCADE"), nullable=False)
     field_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("custom_fields.id", ondelete="CASCADE"), nullable=False
     )
@@ -3429,9 +3339,7 @@ class Setting(Base):
 
     key: Mapped[str] = mapped_column(String(64), primary_key=True)
     value: Mapped[str | None] = mapped_column(Text, nullable=True)
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime, server_default=func.now(), onupdate=func.now()
-    )
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
 
 
 class PasswordResetRequest(Base):
@@ -3499,9 +3407,7 @@ class PasswordResetRequest(Base):
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
-    user_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("users.id"), nullable=False
-    )
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
     requested_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     #: When an unapproved request stops occupying the admin's queue.
     expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
@@ -3510,9 +3416,7 @@ class PasswordResetRequest(Base):
     #: plaintext exists once, in the approval response.
     code_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
     code_expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    approved_by_user_id: Mapped[int | None] = mapped_column(
-        Integer, ForeignKey("users.id"), nullable=True
-    )
+    approved_by_user_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id"), nullable=True)
     approved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     #: Set when the member redeemed the code. Null while the request is live,
     #: which is what the partial unique index above is keyed on.
@@ -3892,8 +3796,7 @@ class CatalogueTarget(Base):
         CheckConstraint(
             DialectSQL(
                 sqlite=(
-                    "isbn_attribute IS NULL OR (typeof(isbn_attribute) = 'integer' "
-                    "AND isbn_attribute IN (7))"
+                    "isbn_attribute IS NULL OR (typeof(isbn_attribute) = 'integer' AND isbn_attribute IN (7))"
                 ),
                 postgresql="isbn_attribute IS NULL OR isbn_attribute IN (7)",
             ),
@@ -3917,26 +3820,16 @@ class CatalogueTarget(Base):
     query_parameter: Mapped[str] = mapped_column(String(32), nullable=False, default="")
     query_language: Mapped[str | None] = mapped_column(String(8), nullable=True)
     record_schema: Mapped[str] = mapped_column(String(32), nullable=False, default="")
-    isbn_index: Mapped[str] = mapped_column(
-        String(TARGET_INDEX_MAX), nullable=False, default=""
-    )
+    isbn_index: Mapped[str] = mapped_column(String(TARGET_INDEX_MAX), nullable=False, default="")
     isbn_attribute: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    title_index: Mapped[str] = mapped_column(
-        String(TARGET_INDEX_MAX), nullable=False, default=""
-    )
+    title_index: Mapped[str] = mapped_column(String(TARGET_INDEX_MAX), nullable=False, default="")
     title_query_shape: Mapped[str | None] = mapped_column(String(32), nullable=True)
     lookup_records: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     search_multiplier: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     search_cap: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    refuses_component_parts: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=False
-    )
-    requires_isbn_claim: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=True
-    )
-    reads_author_identifiers: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=False
-    )
+    refuses_component_parts: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    requires_isbn_claim: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    reads_author_identifiers: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     #: NULL on every seeded row. #132 enforces it, under
     #: `metadata.SEARCH_DEADLINE_SECONDS` as the ceiling over the whole fan out.
     timeout_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
@@ -4113,10 +4006,7 @@ class CatalogueCredential(Base):
                     "length(source) BETWEEN 1 AND 32 AND instr(source, char(0)) = 0 "
                     "AND source NOT GLOB '*[^a-z0-9_-]*'"
                 ),
-                postgresql=(
-                    "length(source) BETWEEN 1 AND 32 "
-                    "AND (source COLLATE \"C\") !~ '[^a-z0-9_-]'"
-                ),
+                postgresql=("length(source) BETWEEN 1 AND 32 AND (source COLLATE \"C\") !~ '[^a-z0-9_-]'"),
             ),
             name="ck_catalogue_credentials_source",
         ),
@@ -4485,9 +4375,7 @@ class MemberLogin(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     # No `index=True`: `uq_member_logins_user_service` leads with it.
-    user_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
-    )
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     service: Mapped[MemberLoginService] = mapped_column(String(16), nullable=False)
     envelope: Mapped[str] = mapped_column(Text, nullable=False)
     #: When the member last saved this token.
@@ -4559,9 +4447,7 @@ class ReadwiseBook(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     # No `index=True`: `uq_readwise_books_user_book` leads with it.
-    user_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
-    )
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     #: Readwise's id for the book in this member's account. 64 bits because
     #: Readwise does not bound it and PostgreSQL's `integer` is 32.
     user_book_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
@@ -4577,6 +4463,4 @@ class ReadwiseBook(Base):
     #: book's whole history until a pull by its id reaches the last page. State
     #: rather than an inference from `book_id`, which is committed first: a pull
     #: stopping between the two would otherwise never ask again.
-    whole_pending: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=False, server_default="0"
-    )
+    whole_pending: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="0")

@@ -42,7 +42,11 @@ depends_on: Sequence[str] | None = None
 #: a revision describes the schema on the day it was written: a column joining
 #: that tuple later is a later revision's data step, not this one's.
 _COLUMNS: tuple[str, ...] = (
-    "subtitle", "author", "publisher", "description", "series_name",
+    "subtitle",
+    "author",
+    "publisher",
+    "description",
+    "series_name",
 )
 
 #: Every character `str.isspace` admits, which is the set `str.strip` removes.
@@ -55,11 +59,7 @@ def upgrade() -> None:
     books = sa.table("books", *(sa.column(name, sa.Text) for name in _COLUMNS))
     for name in _COLUMNS:
         column = books.c[name]
-        op.execute(
-            sa.update(books)
-            .where(sa.func.trim(column, _WHITESPACE) == "")
-            .values({name: None})
-        )
+        op.execute(sa.update(books).where(sa.func.trim(column, _WHITESPACE) == "").values({name: None}))
 
 
 def downgrade() -> None:

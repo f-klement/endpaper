@@ -86,9 +86,7 @@ class TestByTag:
         client.post(f"/api/books/{book['id']}/tags/{fantasy.id}", headers=admin["headers"])
         assert stats()["by_tag"][0]["category"] == "genre"
 
-    def test_a_book_with_two_tags_counts_once_under_each(
-        self, client, admin, make_book, db, stats
-    ):
+    def test_a_book_with_two_tags_counts_once_under_each(self, client, admin, make_book, db, stats):
         fantasy = db.query(Tag).filter(Tag.name == "Fantasy").one()
         adult = db.query(Tag).filter(Tag.name == "Adult").one()
         book = make_book(admin["headers"])
@@ -100,9 +98,7 @@ class TestByTag:
 
 class TestByCollection:
     def test_counts_books_per_collection(self, client, admin, make_book, stats):
-        shelf = client.post(
-            "/api/collections", json={"name": "Ebooks"}, headers=admin["headers"]
-        ).json()
+        shelf = client.post("/api/collections", json={"name": "Ebooks"}, headers=admin["headers"]).json()
         for title in ("A", "B"):
             book = make_book(admin["headers"], title=title)
             client.patch(
@@ -125,14 +121,10 @@ class TestByCollection:
         assert stats()["by_collection"] == []
         assert stats()["total"] == 1
 
-    def test_another_members_private_book_is_not_counted(
-        self, client, admin, member, make_book, stats
-    ):
+    def test_another_members_private_book_is_not_counted(self, client, admin, member, make_book, stats):
         """A shelf label everybody can read must not report how many private
         books somebody has put on it."""
-        shelf = client.post(
-            "/api/collections", json={"name": "Ebooks"}, headers=admin["headers"]
-        ).json()
+        shelf = client.post("/api/collections", json={"name": "Ebooks"}, headers=admin["headers"]).json()
         hidden = make_book(admin["headers"], title="Secret", is_private=True)
         client.patch(
             f"/api/books/{hidden['id']}/collection",
@@ -173,9 +165,7 @@ class TestPrivacyIsRespected:
         make_book(admin["headers"], title="Secret", is_private=True)
         assert stats(member["headers"])["per_user"] == []
 
-    def test_private_books_are_excluded_from_by_tag(
-        self, client, admin, member, make_book, db, stats
-    ):
+    def test_private_books_are_excluded_from_by_tag(self, client, admin, member, make_book, db, stats):
         fantasy = db.query(Tag).filter(Tag.name == "Fantasy").one()
         book = make_book(admin["headers"], title="Secret", is_private=True)
         client.post(f"/api/books/{book['id']}/tags/{fantasy.id}", headers=admin["headers"])
@@ -198,9 +188,7 @@ class TestReadingStats:
 
     def test_a_finished_book_appears_in_the_month_series(self, client, admin, make_book):
         book = make_book(admin["headers"])
-        client.put(
-            f"/api/books/{book['id']}/status", json={"status": "read"}, headers=admin["headers"]
-        )
+        client.put(f"/api/books/{book['id']}/status", json={"status": "read"}, headers=admin["headers"])
 
         series = self.stats(client, admin["headers"])["finished_by_month"]
 
@@ -208,29 +196,21 @@ class TestReadingStats:
 
     def test_an_unfinished_book_does_not(self, client, admin, make_book):
         book = make_book(admin["headers"])
-        client.put(
-            f"/api/books/{book['id']}/status", json={"status": "reading"}, headers=admin["headers"]
-        )
+        client.put(f"/api/books/{book['id']}/status", json={"status": "reading"}, headers=admin["headers"])
 
         assert self.stats(client, admin["headers"])["finished_by_month"] == []
 
     def test_the_series_is_personal(self, client, admin, member, make_book):
         book = make_book(admin["headers"])
-        client.put(
-            f"/api/books/{book['id']}/status", json={"status": "read"}, headers=admin["headers"]
-        )
+        client.put(f"/api/books/{book['id']}/status", json={"status": "read"}, headers=admin["headers"])
 
         assert self.stats(client, member["headers"])["finished_by_month"] == []
 
-    def test_another_members_private_book_is_never_counted(
-        self, client, admin, member, make_book
-    ):
+    def test_another_members_private_book_is_never_counted(self, client, admin, member, make_book):
         """Not even as an anonymous number: the privacy predicate applies here
         like everywhere else."""
         private = make_book(admin["headers"], is_private=True)
-        client.put(
-            f"/api/books/{private['id']}/status", json={"status": "read"}, headers=admin["headers"]
-        )
+        client.put(f"/api/books/{private['id']}/status", json={"status": "read"}, headers=admin["headers"])
 
         assert self.stats(client, member["headers"])["finished_by_month"] == []
 
@@ -259,9 +239,7 @@ class TestReadingStats:
 
     def test_the_average_is_personal(self, client, admin, member, make_book):
         book = make_book(admin["headers"])
-        client.patch(
-            f"/api/books/{book['id']}/rating", json={"rating": 5}, headers=admin["headers"]
-        )
+        client.patch(f"/api/books/{book['id']}/rating", json={"rating": 5}, headers=admin["headers"])
 
         assert self.stats(client, member["headers"])["average_rating"] is None
 

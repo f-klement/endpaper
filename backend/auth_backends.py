@@ -297,8 +297,7 @@ def upsert_directory_user(
         # `tests/test_auth_backends.py::TestADirectoryNameWiderThanTheColumnIsRefused`
         # holds the two apart.
         logger.warning(
-            "Refused a name users.username cannot hold: %d characters "
-            "against %d, from a %s identity. %s",
+            "Refused a name users.username cannot hold: %d characters against %d, from a %s identity. %s",
             len(username),
             USERNAME_MAX,
             source.value,
@@ -704,9 +703,7 @@ def authenticate_ldap(db: Session, username: str, password: str) -> User | None:
         # **`.error` and not `.exception`, which is the same decision.** A
         # traceback names the line that raised, so it puts back exactly the
         # three way distinction this paragraph says was removed on purpose.
-        logger.error(
-            "LDAP authentication failed for %s: %s", clipped(username), clipped(failure)
-        )
+        logger.error("LDAP authentication failed for %s: %s", clipped(username), clipped(failure))
         return None
 
     if _address_was_refused(resolved_email):
@@ -714,8 +711,7 @@ def authenticate_ldap(db: Session, username: str, password: str) -> User | None:
         # There is no peer: the value came from the directory this deployment
         # configured, so the attribute is what identifies it.
         logger.warning(
-            "Refused the %r attribute for %s: %d characters, not an address. "
-            "The stored address is cleared.",
+            "Refused the %r attribute for %s: %d characters, not an address. The stored address is cleared.",
             email_attribute,
             clipped(resolved_username),
             len(resolved_email or ""),
@@ -888,9 +884,7 @@ def user_from_proxy_headers(db: Session, request: Request) -> User | None:
             _peer(request),
         )
 
-    return upsert_directory_user(
-        db, username, is_admin=is_admin, source=AuthMode.PROXY, email=email
-    )
+    return upsert_directory_user(db, username, is_admin=is_admin, source=AuthMode.PROXY, email=email)
 
 
 # ── Dispatch ──────────────────────────────────────────────────────────────────

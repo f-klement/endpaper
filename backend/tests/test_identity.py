@@ -113,9 +113,7 @@ class TestTheFoldIgnoresWhatDoesNotSayWhichBookThisIs:
         means `Dune:Messiah` is one word rather than folding with the genuinely
         two word `Dune Messiah`.
         """
-        assert identity.fold_title("Dune:Messiah") != identity.fold_title(
-            "Dune Messiah"
-        )
+        assert identity.fold_title("Dune:Messiah") != identity.fold_title("Dune Messiah")
 
     def test_none_is_the_empty_key_rather_than_an_error(self) -> None:
         assert identity.fold_title(None) == ""
@@ -147,9 +145,7 @@ class TestAMarkAtTheEdgeOfATitleLeavesNothingBehind:
         save it, and keys `ulysses  a novel` with two spaces when the collapse
         runs first.
         """
-        assert identity.fold_title("Ulysses : a novel") == identity.fold_title(
-            "Ulysses a novel"
-        )
+        assert identity.fold_title("Ulysses : a novel") == identity.fold_title("Ulysses a novel")
 
 
 class TestAnAccentSurvivesWhicheverWayItArrived:
@@ -173,9 +169,7 @@ class TestAnAccentSurvivesWhicheverWayItArrived:
         choose between, and deciding they are one book is not this function's
         call to make silently.
         """
-        assert identity.fold_title("Les Misérables") != identity.fold_title(
-            "Les Miserables"
-        )
+        assert identity.fold_title("Les Misérables") != identity.fold_title("Les Miserables")
 
     def test_a_letter_whose_casefold_decomposes_still_keeps_its_accent(self) -> None:
         """The second ordering edge: case is folded before the composition.
@@ -272,9 +266,7 @@ class TestOnlyTheFirstCreditIsInTheKey:
         )
 
     def test_spaced_initials_and_bare_ones_are_one_person(self) -> None:
-        assert identity.fold_credit("J.R.R. Tolkien") == identity.fold_credit(
-            "J. R. R. Tolkien"
-        )
+        assert identity.fold_credit("J.R.R. Tolkien") == identity.fold_credit("J. R. R. Tolkien")
 
     def test_an_empty_leading_segment_is_nobody_rather_than_an_empty_credit(
         self,
@@ -312,9 +304,7 @@ class TestAnArticleIsNeverStrippedFromASurname:
     """
 
     def test_two_surnames_differing_by_a_leading_article_word_stay_apart(self) -> None:
-        assert identity.fold_credit("Das Gupta, Ranjit") != identity.fold_credit(
-            "Gupta, Ranjit"
-        )
+        assert identity.fold_credit("Das Gupta, Ranjit") != identity.fold_credit("Gupta, Ranjit")
 
     def test_an_initial_matching_an_article_is_kept(self) -> None:
         assert identity.fold_credit("A. Milne") != identity.fold_credit("Milne")
@@ -334,9 +324,7 @@ class TestTheWorkKeyIsTitleAndCredit:
 
     def test_the_credit_cannot_be_read_as_part_of_the_title(self) -> None:
         """Without a separator, a longer title and a shorter credit collide."""
-        assert identity.work_key("Dune Frank", "Herbert") != identity.work_key(
-            "Dune", "Frank Herbert"
-        )
+        assert identity.work_key("Dune Frank", "Herbert") != identity.work_key("Dune", "Frank Herbert")
 
     def test_a_boundary_falling_on_no_space_still_needs_the_separator(self) -> None:
         """The arm above chose a pair that collides even with no separator.
@@ -347,9 +335,7 @@ class TestTheWorkKeyIsTitleAndCredit:
         all. This pair puts the boundary where no space falls, which is the only
         shape that can tell the two apart.
         """
-        assert identity.work_key("Dune", "Messiah") != identity.work_key(
-            "DuneMessiah", None
-        )
+        assert identity.work_key("Dune", "Messiah") != identity.work_key("DuneMessiah", None)
 
     def test_neither_separator_is_a_character_a_fold_can_emit(self) -> None:
         """The property, derived from the rule rather than from examples.
@@ -368,12 +354,8 @@ class TestTheWorkKeyIsTitleAndCredit:
         for separator in (identity._KEY_SEPARATOR, identity._YEAR_SEPARATOR):
             assert re.fullmatch(r"[\w\s]", separator, flags=re.UNICODE) is None
 
-    @pytest.mark.parametrize(
-        "text", ["Dune|Frank", "a|b", "||", "Pipe | Dream", "|leading", "a:b", "::"]
-    )
-    def test_a_folded_value_is_only_word_characters_and_spacing(
-        self, text: str
-    ) -> None:
+    @pytest.mark.parametrize("text", ["Dune|Frank", "a|b", "||", "Pipe | Dream", "|leading", "a:b", "::"])
+    def test_a_folded_value_is_only_word_characters_and_spacing(self, text: str) -> None:
         """The witness beside the derived arm above, which is what proves the
         derivation still describes these functions.
 
@@ -402,10 +384,7 @@ class TestTheWorkKeyIsTitleAndCredit:
         """
 
         def separators(key: str) -> int:
-            return sum(
-                key.count(s)
-                for s in (identity._KEY_SEPARATOR, identity._YEAR_SEPARATOR)
-            )
+            return sum(key.count(s) for s in (identity._KEY_SEPARATOR, identity._YEAR_SEPARATOR))
 
         assert separators(identity.work_key("Dune", "Frank Herbert")) == 1
         assert separators(identity.printing_key("Dune", "Frank Herbert", 1965)) == 2
@@ -420,9 +399,7 @@ class TestThePrintingKeyTellsTwoYearsApart:
         )
 
     def test_a_missing_year_is_one_bucket_rather_than_an_error(self) -> None:
-        assert identity.printing_key("Dune", "Frank Herbert", None).endswith(
-            identity._YEAR_SEPARATOR
-        )
+        assert identity.printing_key("Dune", "Frank Herbert", None).endswith(identity._YEAR_SEPARATOR)
 
     def test_it_carries_the_work_key_so_two_works_never_share_a_printing(self) -> None:
         assert identity.printing_key("Dune", "Frank Herbert", 1965) != (
@@ -452,9 +429,7 @@ class TestTheReadingHistoryTitleTakesHalfTheFold:
         assert identity.reading_history_title("The Hobbit!") == "the hobbit!"
 
     def test_it_does_not_drop_punctuation_from_outside_the_edge_set(self) -> None:
-        assert identity.reading_history_title("Ulysses!") != (
-            identity.reading_history_title("Ulysses")
-        )
+        assert identity.reading_history_title("Ulysses!") != (identity.reading_history_title("Ulysses"))
 
     def test_one_title_by_two_people_is_one_key_here_and_two_anywhere_else(
         self,
@@ -469,9 +444,7 @@ class TestTheReadingHistoryTitleTakesHalfTheFold:
         assert identity.reading_history_title("Selected Poems") == (
             identity.reading_history_title("selected poems")
         )
-        assert identity.work_key("Selected Poems", "Yeats") != identity.work_key(
-            "Selected Poems", "Larkin"
-        )
+        assert identity.work_key("Selected Poems", "Yeats") != identity.work_key("Selected Poems", "Larkin")
 
     def test_it_case_folds_rather_than_lowercasing(self) -> None:
         """The arms above are all ASCII, where the two are the same function.
@@ -483,22 +456,16 @@ class TestTheReadingHistoryTitleTakesHalfTheFold:
         2026-09-24, which is the day the normalisation was widened; the
         predicate's author blindness did not move with it.
         """
-        assert identity.reading_history_title("Straße") == (
-            identity.reading_history_title("Strasse")
-        )
+        assert identity.reading_history_title("Straße") == (identity.reading_history_title("Strasse"))
 
     def test_a_run_of_spaces_reads_as_one_here_too(self) -> None:
-        assert identity.reading_history_title("Good  Omens") == (
-            identity.reading_history_title("Good Omens")
-        )
+        assert identity.reading_history_title("Good  Omens") == (identity.reading_history_title("Good Omens"))
 
     def test_a_decomposed_accent_keys_as_the_composed_one_here_too(self) -> None:
         composed = unicodedata.normalize("NFC", "Les Misérables")
         decomposed = unicodedata.normalize("NFD", "Les Misérables")
         assert composed != decomposed
-        assert identity.reading_history_title(composed) == (
-            identity.reading_history_title(decomposed)
-        )
+        assert identity.reading_history_title(composed) == (identity.reading_history_title(decomposed))
 
     def test_case_is_folded_before_the_composition_here_as_well(self) -> None:
         """The ordering `_casefolded` owns, asserted through this caller too.
@@ -531,9 +498,7 @@ class TestTheReadingHistoryTitleTakesHalfTheFold:
         equivalent = "Ϊ́"
         assert precomposed != equivalent
         assert unicodedata.normalize("NFC", equivalent) == equivalent
-        assert identity.reading_history_title(precomposed) == (
-            identity.reading_history_title(equivalent)
-        )
+        assert identity.reading_history_title(precomposed) == (identity.reading_history_title(equivalent))
 
     def test_the_edge_marks_are_exactly_these_nine(self) -> None:
         """The one constant in this file that is retyped rather than read off.
@@ -591,12 +556,8 @@ class TestTheReadingHistoryTitleTakesHalfTheFold:
         `[Hamlet]` and `Hamlet` are one book. These are the two cases the ISBD
         marks alone do not reach, which is why brackets are in the set at all.
         """
-        assert identity.reading_history_title("[Hamlet]") == (
-            identity.reading_history_title("Hamlet")
-        )
-        assert identity.reading_history_title("(Dubliners)") == (
-            identity.reading_history_title("Dubliners")
-        )
+        assert identity.reading_history_title("[Hamlet]") == (identity.reading_history_title("Hamlet"))
+        assert identity.reading_history_title("(Dubliners)") == (identity.reading_history_title("Dubliners"))
 
     @pytest.mark.parametrize(
         ("one", "other"),
@@ -610,9 +571,7 @@ class TestTheReadingHistoryTitleTakesHalfTheFold:
             ("The C++ Programming Language", "The C Programming Language"),
         ],
     )
-    def test_punctuation_a_title_is_about_is_not_stripped(
-        self, one: str, other: str
-    ) -> None:
+    def test_punctuation_a_title_is_about_is_not_stripped(self, one: str, other: str) -> None:
         """The harmful half of what the subset was scored against.
 
         These are books whose punctuation **is** which book they are, and every
@@ -629,9 +588,7 @@ class TestTheReadingHistoryTitleTakesHalfTheFold:
         two rejected candidates from each other: an edge rule spares it and a
         rule reaching inside a title does not.
         """
-        assert identity.reading_history_title(one) != (
-            identity.reading_history_title(other)
-        )
+        assert identity.reading_history_title(one) != (identity.reading_history_title(other))
 
     @pytest.mark.parametrize(
         ("spelling", "title"),
@@ -649,9 +606,7 @@ class TestTheReadingHistoryTitleTakesHalfTheFold:
             ("(Dubliners)", "Dubliners"),
         ],
     )
-    def test_a_catalogue_spelling_reaches_the_title_it_spells(
-        self, spelling: str, title: str
-    ) -> None:
+    def test_a_catalogue_spelling_reaches_the_title_it_spells(self, spelling: str, title: str) -> None:
         """The beneficial half, which had no arm at all until it was asked for.
 
         The harmful half above was an arm from the start and this side was a
@@ -666,14 +621,10 @@ class TestTheReadingHistoryTitleTakesHalfTheFold:
         count: an earlier version of this docstring carried a breakdown that
         disagreed with the list beside it.
         """
-        assert identity.reading_history_title(spelling) == (
-            identity.reading_history_title(title)
-        )
+        assert identity.reading_history_title(spelling) == (identity.reading_history_title(title))
 
     @pytest.mark.parametrize("article", identity._ARTICLES)
-    def test_a_leading_article_survives_here_and_not_in_the_fold(
-        self, article: str
-    ) -> None:
+    def test_a_leading_article_survives_here_and_not_in_the_fold(self, article: str) -> None:
         """Both halves, and the second half is the reason this arm exists.
 
         **Asserting only that this key keeps the article is satisfied by a
@@ -688,9 +639,7 @@ class TestTheReadingHistoryTitleTakesHalfTheFold:
         without one.
         """
         kept = f"{article}Hobbit"
-        assert identity.reading_history_title(kept) != (
-            identity.reading_history_title("Hobbit")
-        )
+        assert identity.reading_history_title(kept) != (identity.reading_history_title("Hobbit"))
         assert identity.fold_title(kept) == identity.fold_title("Hobbit")
 
     def test_a_mark_inside_the_title_survives_here_and_not_in_the_fold(self) -> None:
@@ -709,9 +658,7 @@ class TestTheReadingHistoryTitleTakesHalfTheFold:
         assert identity.reading_history_title("Dune: Messiah") != (
             identity.reading_history_title("Dune Messiah")
         )
-        assert identity.fold_title("Dune: Messiah") == identity.fold_title(
-            "Dune Messiah"
-        )
+        assert identity.fold_title("Dune: Messiah") == identity.fold_title("Dune Messiah")
 
     def test_a_title_of_nothing_but_marks_is_not_the_empty_key(self) -> None:
         """The empty key is not inert, so the strip is not allowed to reach it.
@@ -758,14 +705,11 @@ class TestTheReadingHistoryTitleTakesHalfTheFold:
             candidate
             for n in (1, 2, 3, 4)
             for candidate in ("".join(t) for t in itertools.product(marks, repeat=n))
-            if identity._WHITESPACE.sub(" ", candidate).strip() == candidate
-            and candidate.strip()
+            if identity._WHITESPACE.sub(" ", candidate).strip() == candidate and candidate.strip()
         ]
         keys = {identity.reading_history_title(t) for t in titles}
 
-        assert len(keys) == len(titles), (
-            f"{len(titles)} marks-only titles collapsed onto {len(keys)} keys"
-        )
+        assert len(keys) == len(titles), f"{len(titles)} marks-only titles collapsed onto {len(keys)} keys"
         assert "" not in keys
         assert [k for k in keys if not set(k) <= set(marks)] == []
 
@@ -850,9 +794,7 @@ class TestTheReadingHistoryTitleTakesHalfTheFold:
         for codepoint in range(sys.maxunicode + 1):
             character = chr(codepoint)
             reduced = unicodedata.normalize("NFC", character.casefold())
-            allowed = bool(reduced) and all(
-                c in marks or c.isspace() for c in reduced
-            )
+            allowed = bool(reduced) and all(c in marks or c.isspace() for c in reduced)
             for edge, title in (
                 ("leading", f"{character}Ulysses"),
                 ("trailing", f"Ulysses{character}"),
@@ -872,12 +814,8 @@ class TestTheReadingHistoryTitleTakesHalfTheFold:
         constant is not read as the whole of what this removes.
         """
         assert unicodedata.normalize("NFC", ";") == ";"
-        assert identity.reading_history_title("Γιατί;") == (
-            identity.reading_history_title("Γιατί")
-        )
-        assert identity.reading_history_title("Why Not Me?") != (
-            identity.reading_history_title("Why Not Me")
-        )
+        assert identity.reading_history_title("Γιατί;") == (identity.reading_history_title("Γιατί"))
+        assert identity.reading_history_title("Why Not Me?") != (identity.reading_history_title("Why Not Me"))
 
     def test_whitespace_collapses_before_the_marks_come_off(self) -> None:
         """The predicate's own statement ordering, which nothing else sees.
@@ -891,9 +829,5 @@ class TestTheReadingHistoryTitleTakesHalfTheFold:
         ordinary case rather than the odd one. `fold_title`'s sibling class is
         named for this same mutation and this class had no analogue.
         """
-        assert identity.reading_history_title("Ulysses :\n") == (
-            identity.reading_history_title("Ulysses")
-        )
-        assert identity.reading_history_title("Ulysses\t:") == (
-            identity.reading_history_title("Ulysses")
-        )
+        assert identity.reading_history_title("Ulysses :\n") == (identity.reading_history_title("Ulysses"))
+        assert identity.reading_history_title("Ulysses\t:") == (identity.reading_history_title("Ulysses"))

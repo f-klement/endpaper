@@ -38,10 +38,7 @@ class TestMakingOne:
         assert make_collection(client, admin["headers"], "Sold").json()["book_count"] == 0
 
     def test_the_name_is_tidied(self, client, admin):
-        assert (
-            make_collection(client, admin["headers"], "  Read   twice  ").json()["name"]
-            == "Read twice"
-        )
+        assert make_collection(client, admin["headers"], "  Read   twice  ").json()["name"] == "Read twice"
 
     def test_a_name_of_only_spaces_is_refused(self, client, admin):
         assert make_collection(client, admin["headers"], "   ").status_code == 422
@@ -54,10 +51,7 @@ class TestMakingOne:
         assert res.json()["name"] == "Readtwice"
 
     def test_a_name_of_only_control_characters_is_refused(self, client, admin):
-        assert (
-            make_collection(client, admin["headers"], "\u0000\u0001").status_code
-            == 422
-        )
+        assert make_collection(client, admin["headers"], "\u0000\u0001").status_code == 422
 
     def test_a_name_that_already_exists_returns_that_collection(self, client, admin):
         """Somebody typing a name that is there means that shelf, not an error."""
@@ -204,9 +198,7 @@ class TestRenaming:
         assert res.json()["name"] == "EBOOKS"
 
     def test_an_unknown_collection_is_404(self, client, admin):
-        res = client.patch(
-            "/api/collections/999", json={"name": "Ebooks"}, headers=admin["headers"]
-        )
+        res = client.patch("/api/collections/999", json={"name": "Ebooks"}, headers=admin["headers"])
         assert res.status_code == 404
 
     def test_the_books_keep_their_shelf(self, client, admin, make_book):
@@ -221,9 +213,7 @@ class TestRenaming:
         )
 
         assert (
-            client.get(f"/api/books/{book['id']}", headers=admin["headers"]).json()[
-                "collection_name"
-            ]
+            client.get(f"/api/books/{book['id']}", headers=admin["headers"]).json()["collection_name"]
             == "Digital"
         )
 
@@ -234,18 +224,8 @@ class TestDeleting:
         empties a label off every book in the house at once."""
         shelf = make_collection(client, member["headers"], "Ebooks").json()
 
-        assert (
-            client.delete(
-                f"/api/collections/{shelf['id']}", headers=member["headers"]
-            ).status_code
-            == 403
-        )
-        assert (
-            client.delete(
-                f"/api/collections/{shelf['id']}", headers=admin["headers"]
-            ).status_code
-            == 204
-        )
+        assert client.delete(f"/api/collections/{shelf['id']}", headers=member["headers"]).status_code == 403
+        assert client.delete(f"/api/collections/{shelf['id']}", headers=admin["headers"]).status_code == 204
 
     def test_the_books_survive_and_are_unfiled(self, client, admin, make_book, db):
         shelf = make_collection(client, admin["headers"], "Ebooks").json()
@@ -259,9 +239,7 @@ class TestDeleting:
         assert survivor.json()["collection_id"] is None
         assert db.query(Book).count() == 1
 
-    def test_somebody_elses_private_book_is_unfiled_too(
-        self, client, admin, member, make_book, db
-    ):
+    def test_somebody_elses_private_book_is_unfiled_too(self, client, admin, member, make_book, db):
         """The unfiling is the database's rule, so it reaches rows the deleting
         admin cannot see. A row left pointing at a destroyed collection would
         be a dangling foreign key."""
@@ -274,10 +252,7 @@ class TestDeleting:
         assert db.get(Book, hidden["id"]).collection_id is None
 
     def test_an_unknown_collection_is_404(self, client, admin):
-        assert (
-            client.delete("/api/collections/999", headers=admin["headers"]).status_code
-            == 404
-        )
+        assert client.delete("/api/collections/999", headers=admin["headers"]).status_code == 404
 
 
 class TestWhoMayBeToldACollectionExists:
@@ -296,9 +271,7 @@ class TestWhoMayBeToldACollectionExists:
     are; these say the same things as sentences.
     """
 
-    def test_a_collection_holding_only_a_hidden_book_is_not_listed(
-        self, client, admin, member, make_book
-    ):
+    def test_a_collection_holding_only_a_hidden_book_is_not_listed(self, client, admin, member, make_book):
         """The disclosure the ticket measured. The name was the evidence that
         somebody's books are filed somewhere, served on every page load."""
         shelf = make_collection(client, admin["headers"], "Divorce paperwork").json()
@@ -306,30 +279,22 @@ class TestWhoMayBeToldACollectionExists:
         file_book(client, admin["headers"], secret["id"], shelf["id"])
 
         assert collections(client, member["headers"]).json() == []
-        assert [row["name"] for row in collections(client, admin["headers"]).json()] == [
-            "Divorce paperwork"
-        ]
+        assert [row["name"] for row in collections(client, admin["headers"]).json()] == ["Divorce paperwork"]
 
-    def test_a_collection_holding_a_visible_book_is_listed(
-        self, client, admin, member, make_book
-    ):
+    def test_a_collection_holding_a_visible_book_is_listed(self, client, admin, member, make_book):
         """The arm that proves the rule does not over withhold."""
         shelf = make_collection(client, admin["headers"], "Ebooks").json()
         book = make_book(admin["headers"], title="Dune")
         file_book(client, admin["headers"], book["id"], shelf["id"])
 
-        assert [row["name"] for row in collections(client, member["headers"]).json()] == [
-            "Ebooks"
-        ]
+        assert [row["name"] for row in collections(client, member["headers"]).json()] == ["Ebooks"]
 
     def test_an_empty_collection_is_listed_for_everybody(self, client, admin, member):
         """A collection naming no book discloses no book, so withholding it
         buys nothing and costs the page it is made on."""
         make_collection(client, admin["headers"], "Sold")
 
-        assert [row["name"] for row in collections(client, member["headers"]).json()] == [
-            "Sold"
-        ]
+        assert [row["name"] for row in collections(client, member["headers"]).json()] == ["Sold"]
 
     def test_the_member_who_just_made_one_can_still_see_it(self, client, member):
         """The false refusal a count based rule ships, and it is a loop rather
@@ -337,13 +302,9 @@ class TestWhoMayBeToldACollectionExists:
         and shows nothing, and retyping the name reproduces it exactly."""
         make_collection(client, member["headers"], "Mine")
 
-        assert [row["name"] for row in collections(client, member["headers"]).json()] == [
-            "Mine"
-        ]
+        assert [row["name"] for row in collections(client, member["headers"]).json()] == ["Mine"]
 
-    def test_a_collection_only_your_own_trash_carries_stays_listed(
-        self, client, admin, make_book
-    ):
+    def test_a_collection_only_your_own_trash_carries_stays_listed(self, client, admin, make_book):
         """Trashing the last book on a shelf must not destroy your own access
         to the shelf that book comes back into when it is restored."""
         shelf = make_collection(client, admin["headers"], "Ebooks").json()
@@ -396,9 +357,7 @@ class TestWhoMayBeToldACollectionExists:
         assert [row["name"] for row in listed] == ["Ebooks"]
         assert listed[0]["book_count"] == 0
 
-    def test_destroying_the_hidden_book_gives_the_collection_back(
-        self, client, admin, member, make_book
-    ):
+    def test_destroying_the_hidden_book_gives_the_collection_back(self, client, admin, member, make_book):
         """The non monotonic transition, which is the behaviour most likely to
         be read as a bug and "fixed".
 
@@ -415,13 +374,9 @@ class TestWhoMayBeToldACollectionExists:
         client.delete(f"/api/books/{secret['id']}", headers=admin["headers"])
         client.delete(f"/api/books/{secret['id']}/permanent", headers=admin["headers"])
 
-        assert [row["name"] for row in collections(client, member["headers"]).json()] == [
-            "Sold"
-        ]
+        assert [row["name"] for row in collections(client, member["headers"]).json()] == ["Sold"]
 
-    def test_a_zero_count_no_longer_means_books_you_cannot_see(
-        self, client, admin, member, make_book
-    ):
+    def test_a_zero_count_no_longer_means_books_you_cannot_see(self, client, admin, member, make_book):
         """What the fix buys a reader rather than what it withholds.
 
         `book_count: 0` used to mean "empty, or holding books hidden from you",
@@ -438,9 +393,7 @@ class TestWhoMayBeToldACollectionExists:
         assert [(row["name"], row["book_count"]) for row in rows] == [("Empty", 0)]
 
     @pytest.mark.sqlite_only(reason="counts rows through sqlite3's row_factory, which no other driver has")
-    def test_the_list_costs_three_statements_whatever_it_holds(
-        self, client, admin, member, make_book
-    ):
+    def test_the_list_costs_three_statements_whatever_it_holds(self, client, admin, member, make_book):
         """Three arms, three grouped statements, none of them per row.
 
         Exact and not a ceiling: a smaller count is a weaker inequality, so a
@@ -459,9 +412,7 @@ class TestWhoMayBeToldACollectionExists:
         with rows_at_the_engine() as seen:
             collections(client, member["headers"])
 
-        on_collections = [
-            row for row in seen if " collections" in row.sql or "\nFROM collections" in row.sql
-        ]
+        on_collections = [row for row in seen if " collections" in row.sql or "\nFROM collections" in row.sql]
         on_books = [row for row in seen if "FROM books" in row.sql]
         assert len(on_collections) == 1, [row.sql for row in on_collections]
         assert len(on_books) == 3, [row.sql for row in on_books]

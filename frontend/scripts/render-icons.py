@@ -13,12 +13,13 @@ Maskable icons are cropped to a circle of radius 40% by Android, so the glyph
 is scaled to 58% of the canvas and centred: anything wider risks having its
 outer spine shaved off on a device that masks aggressively.
 """
+
 import re, pathlib, cairosvg
 
 SRC = pathlib.Path("public/icons/books-icon.svg")
 OUT = pathlib.Path("public/icons")
 
-ACCENT = "#13816f"   # --color-accent-600, the bookbinder's green
+ACCENT = "#13816f"  # --color-accent-600, the bookbinder's green
 GLYPH = "#ffffff"
 
 source = SRC.read_text()
@@ -44,7 +45,9 @@ def square(size: int, *, fraction: float = 0.58) -> str:
 
 for name, size in (("icon-192.png", 192), ("icon-512.png", 512), ("apple-touch-icon.png", 180)):
     cairosvg.svg2png(
-        bytestring=square(size).encode(), write_to=str(OUT / name),
-        output_width=size, output_height=size,
+        bytestring=square(size).encode(),
+        write_to=str(OUT / name),
+        output_width=size,
+        output_height=size,
     )
     print("wrote", name, size)

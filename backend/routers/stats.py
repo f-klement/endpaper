@@ -83,9 +83,7 @@ def get_stats(db: DbSession, current_user: CurrentUser) -> StatsOut:
     )
 
     by_tag = (
-        shelf.select(
-            Tag.name, Tag.category, Tag.key, func.count(book_tags.c.book_id).label("count")
-        )
+        shelf.select(Tag.name, Tag.category, Tag.key, func.count(book_tags.c.book_id).label("count"))
         .join(book_tags, Book.id == book_tags.c.book_id)
         .join(Tag, Tag.id == book_tags.c.tag_id)
         .group_by(Tag.id)
@@ -125,9 +123,7 @@ def get_stats(db: DbSession, current_user: CurrentUser) -> StatsOut:
     # Joined out from Book for the privacy predicate, like the aggregation
     # above. Page-unit entries only: a percent cannot be added to a page count.
     progress_rows = (
-        shelf.select(
-            ReadingProgress.book_id, ReadingProgress.recorded_at, ReadingProgress.page
-        )
+        shelf.select(ReadingProgress.book_id, ReadingProgress.recorded_at, ReadingProgress.page)
         .join(ReadingProgress, ReadingProgress.book_id == Book.id)
         .filter(
             ReadingProgress.user_id == current_user.id,
@@ -152,23 +148,15 @@ def get_stats(db: DbSession, current_user: CurrentUser) -> StatsOut:
             TagStat(name=name, category=category, key=key, count=count)
             for name, category, key, count in by_tag
         ],
-        by_collection=[
-            CollectionStat(name=name, count=count) for name, count in by_collection
-        ],
+        by_collection=[CollectionStat(name=name, count=count) for name, count in by_collection],
         by_month=[MonthStat(month=month, count=count) for month, count in by_month],
-        finished_by_month=[
-            MonthStat(month=month, count=count) for month, count in finished_by_month
-        ],
+        finished_by_month=[MonthStat(month=month, count=count) for month, count in finished_by_month],
         # The comprehension narrows `page`, which is nullable on the column
         # and non-null in these rows because the query filters on it. Written
         # out rather than cast, so a query that stops filtering drops the rows
         # instead of adding None to an integer.
         pages_by_month=_pages_by_month(
-            [
-                (book_id, recorded_at, page)
-                for book_id, recorded_at, page in progress_rows
-                if page is not None
-            ]
+            [(book_id, recorded_at, page) for book_id, recorded_at, page in progress_rows if page is not None]
         ),
         # Rounded here rather than in the client: it is one number with one
         # sensible precision, and every client would round it the same way.

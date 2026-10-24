@@ -56,7 +56,6 @@ logger = logging.getLogger("endpaper.imports")
 router = APIRouter(prefix="/api/imports", tags=["imports"])
 
 
-
 def _read_upload(file: UploadFile) -> bytes:
     """The uploaded bytes, read synchronously.
 
@@ -271,9 +270,7 @@ def _require_library_mode(db: Session) -> None:
     `routers/auth.py` gives when registration is closed.
     """
     if not settings_store.library_mode(db):
-        raise HTTPException(
-            status_code=403, detail="MARC import is a library mode feature."
-        )
+        raise HTTPException(status_code=403, detail="MARC import is a library mode feature.")
 
 
 def _read_marc(content: bytes) -> marc.ParsedMarc:
@@ -424,13 +421,10 @@ def import_marc(
     # with no cycle, anywhere between the import's index and its commit,
     # answers the same 409: the importer raises `MetAnotherChange`.
     with a_lost_race_answers_409(db, _MET_ANOTHER_CHANGE):
-        return MarcImport.for_member(db, current_user.id).apply(
-            parsed, create_missing=create_missing
-        )
+        return MarcImport.for_member(db, current_user.id).apply(parsed, create_missing=create_missing)
 
 
 #: The 409 for an import Postgres aborted to break a deadlock.
 _MET_ANOTHER_CHANGE = (
-    "Another change to the same books met this import, and nothing was imported. "
-    "Import the file again."
+    "Another change to the same books met this import, and nothing was imported. Import the file again."
 )

@@ -54,9 +54,7 @@ class TestRequesting:
         assert res.json()["status"] == "pending"
         assert res.json()["requested_by"]["username"] == "member"
 
-    def test_a_copy_that_is_not_digital_is_lent_not_requested(
-        self, client, admin, member, make_book
-    ):
+    def test_a_copy_that_is_not_digital_is_lent_not_requested(self, client, admin, member, make_book):
         book = make_book(admin["headers"], format="paperback")
         res = request(client, member, book)
         assert res.status_code == 409
@@ -81,9 +79,7 @@ class TestRequesting:
         book = with_a_file(client, admin, make_book(admin["headers"], format="audiobook"))
         assert request(client, member, book).status_code == 201
 
-    def test_an_audiobook_with_no_file_is_a_disc_and_is_lent(
-        self, client, admin, member, make_book
-    ):
+    def test_an_audiobook_with_no_file_is_a_disc_and_is_lent(self, client, admin, member, make_book):
         book = make_book(admin["headers"], format="audiobook")
         assert request(client, member, book).json()["detail"]["code"] == "not_digital"
 
@@ -92,9 +88,7 @@ class TestRequesting:
         decide(client, admin, ebook, first["id"], granted=False)
         assert request(client, member, ebook).status_code == 201
 
-    def test_a_private_book_of_another_member_is_not_found(
-        self, client, admin, member, make_book
-    ):
+    def test_a_private_book_of_another_member_is_not_found(self, client, admin, member, make_book):
         hidden = make_book(admin["headers"], format="ebook", is_private=True)
         assert request(client, member, hidden).status_code == 404
 
@@ -125,15 +119,11 @@ class TestWhoReadsARequest:
         request(client, other_user, ebook)
         assert len(listing(client, admin, ebook).json()) == 2
 
-    def test_another_member_reads_only_their_own(
-        self, client, member, other_user, ebook
-    ):
+    def test_another_member_reads_only_their_own(self, client, member, other_user, ebook):
         request(client, member, ebook)
         assert listing(client, other_user, ebook).json() == []
 
-    def test_another_member_cannot_answer_one_they_cannot_read(
-        self, client, member, other_user, ebook
-    ):
+    def test_another_member_cannot_answer_one_they_cannot_read(self, client, member, other_user, ebook):
         asked = request(client, member, ebook).json()
         assert decide(client, other_user, ebook, asked["id"]).status_code == 404
 

@@ -163,7 +163,8 @@ export interface ValueDoor<Input, Answer> {
 
 /** What the door did with one file. */
 export type Outcome<Answer> =
-  { readonly answered: Answer } | { readonly threw: Error };
+  | { readonly answered: Answer }
+  | { readonly threw: Error };
 
 export interface Measured<Answer> {
   readonly outcome: Outcome<Answer>;

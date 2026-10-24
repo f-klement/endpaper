@@ -72,9 +72,7 @@ class ImportCounts:
     left_deleted: int
 
 
-def deleted_keys(
-    db: Session, member_id: int, source: HighlightSource, keys: Sequence[str]
-) -> set[str]:
+def deleted_keys(db: Session, member_id: int, source: HighlightSource, keys: Sequence[str]) -> set[str]:
     """Which of these keys the member deleted here, so an import of `source`
     leaves them deleted."""
     found: set[str] = set()
@@ -90,9 +88,7 @@ def deleted_keys(
     return found
 
 
-def holders(
-    db: Session, member_id: int, source: HighlightSource, keys: Sequence[str]
-) -> dict[str, int]:
+def holders(db: Session, member_id: int, source: HighlightSource, keys: Sequence[str]) -> dict[str, int]:
     """The Book holding each of these keys of the member's, by key; a key held
     nowhere is absent."""
     found: dict[str, int] = {}
@@ -132,11 +128,7 @@ def delete_own(db: Session, book: Book, member_id: int, highlight_id: int) -> bo
         return False
     try:
         if not deleted_keys(db, member_id, row.source, [row.source_key]):
-            db.add(
-                DeletedHighlight(
-                    user_id=member_id, source=row.source, source_key=row.source_key
-                )
-            )
+            db.add(DeletedHighlight(user_id=member_id, source=row.source, source_key=row.source_key))
         # Flushed before the row goes, so a lost race is the unique index
         # refusing the key, never a delete matching no row.
         db.flush()
@@ -243,14 +235,10 @@ def write(
             updated += 1
         else:
             unchanged += 1
-    return ImportCounts(
-        created=created, updated=updated, unchanged=unchanged, left_deleted=left_deleted
-    )
+    return ImportCounts(created=created, updated=updated, unchanged=unchanged, left_deleted=left_deleted)
 
 
-def remove(
-    db: Session, member_id: int, source: HighlightSource, keys: Sequence[str]
-) -> int:
+def remove(db: Session, member_id: int, source: HighlightSource, keys: Sequence[str]) -> int:
     """Remove the member's rows of `source` under these keys, without
     committing, and answer how many went.
 
@@ -271,9 +259,7 @@ def remove(
     return removed
 
 
-def share(
-    db: Session, member_id: int, highlight_id: int, book_id: int, shared: bool
-) -> str | None:
+def share(db: Session, member_id: int, highlight_id: int, book_id: int, shared: bool) -> str | None:
     """Share the member's highlight with `book_id`'s readers, or withdraw it,
     without committing. Answers the passage as written, None when the
     highlight is no longer on `book_id`.
@@ -319,6 +305,6 @@ def settled[T](db: Session, unit: Callable[[], T]) -> T:
     for _ in range(_ATTEMPTS - 1):
         try:
             return unit()
-        except (IntegrityError, StaleDataError):
+        except IntegrityError, StaleDataError:
             db.rollback()
     return unit()

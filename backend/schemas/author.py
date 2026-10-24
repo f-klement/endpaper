@@ -233,9 +233,7 @@ class AuthorIdentifierRequest(BaseModel):
 
     author: AuthorKeyField
     scheme: AuthorityScheme
-    identifier: Annotated[
-        str, StringConstraints(min_length=1, max_length=AUTHORITY_IDENTIFIER_MAX)
-    ]
+    identifier: Annotated[str, StringConstraints(min_length=1, max_length=AUTHORITY_IDENTIFIER_MAX)]
 
     @field_validator("identifier")
     @classmethod

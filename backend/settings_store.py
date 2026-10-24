@@ -200,7 +200,7 @@ def get_json(db: Session, key: SettingKey) -> dict[str, Any]:
     """
     try:
         parsed = json.loads(get_raw(db, key))
-    except (ValueError, RecursionError):
+    except ValueError, RecursionError:
         return {}
     return parsed if isinstance(parsed, dict) else {}
 
@@ -329,9 +329,7 @@ def google_books_api_key(db: Session) -> str:
 #: member. #210 carries this paragraph. Until then the
 #: exception is named and in one place, which is what stops it being a
 #: condition somebody has to notice inside a comprehension.
-_SECRET_IS_A_SETTINGS_ROW: Final[frozenset[CatalogueSource]] = frozenset(
-    {CatalogueSource.GOOGLE_BOOKS}
-)
+_SECRET_IS_A_SETTINGS_ROW: Final[frozenset[CatalogueSource]] = frozenset({CatalogueSource.GOOGLE_BOOKS})
 
 
 def _sources_with_a_credential(db: Session) -> set[CatalogueSource]:
@@ -366,9 +364,7 @@ def _sources_with_a_credential(db: Session) -> set[CatalogueSource]:
     return {
         source
         for source in sealed
-        if credentials.is_held(
-            db, source.value, targets.SEEDED[source].base_url, state
-        )
+        if credentials.is_held(db, source.value, targets.SEEDED[source].base_url, state)
     }
 
 
@@ -559,9 +555,7 @@ def catalogue_logins(db: Session) -> dict[CatalogueSource, credentials.Credentia
     state = credentials.key_state()
     resolved: dict[CatalogueSource, credentials.Credential] = {}
     for target in doors:
-        login = credentials.for_request(
-            db, target.source.value, target.base_url, state
-        )
+        login = credentials.for_request(db, target.source.value, target.base_url, state)
         if login is not None:
             resolved[target.source] = login
     return resolved
@@ -628,9 +622,7 @@ def public_catalogue_may_be_indexed(db: Session) -> bool:
     published cannot invite a crawler to a catalogue that answers 404. The
     conjunction is the same shape as the one above and for the same reason.
     """
-    return public_catalogue_is_published(db) and get_bool(
-        db, SettingKey.PUBLIC_CATALOGUE_INDEXING_ENABLED
-    )
+    return public_catalogue_is_published(db) and get_bool(db, SettingKey.PUBLIC_CATALOGUE_INDEXING_ENABLED)
 
 
 def accounts_are_open_to_outsiders(db: Session) -> bool:

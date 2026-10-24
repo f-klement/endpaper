@@ -115,9 +115,7 @@ class TestStatusSync:
 
 
 class TestStatusesArePersonal:
-    def test_one_member_importing_does_not_change_another_s_status(
-        self, client, admin, member, make_book
-    ):
+    def test_one_member_importing_does_not_change_another_s_status(self, client, admin, member, make_book):
         """The whole point of a per-member status.
 
         Two people can import their own shelves for the same shared book
@@ -168,9 +166,7 @@ class TestUnmatched:
         assert created.title == "Some Other Book"
         assert created.isbn == "9780441013593"
 
-    def test_a_shelf_we_do_not_recognise_leaves_the_status_alone(
-        self, client, admin, make_book, db
-    ):
+    def test_a_shelf_we_do_not_recognise_leaves_the_status_alone(self, client, admin, make_book, db):
         """This used to drop the whole row, and dropping it was wrong.
 
         A row on a custom shelf is still a book. The status is the part that
@@ -188,9 +184,7 @@ class TestUnmatched:
 
 
 class TestPrivacy:
-    def test_another_member_s_private_book_is_not_matched(
-        self, client, admin, member, make_book
-    ):
+    def test_another_member_s_private_book_is_not_matched(self, client, admin, member, make_book):
         # Matching it would confirm the book exists, and would let someone set
         # a status on a book they cannot see.
         make_book(admin["headers"], title="Diary", is_private=True)
@@ -382,14 +376,10 @@ class TestImportedBooksAreNotAssumedOwned:
 
         assert res.json()["updated"] == 2
         # Nothing left waiting to be confirmed.
-        remaining = client.get(
-            "/api/books", params={"ownership": "unknown"}, headers=admin["headers"]
-        ).json()
+        remaining = client.get("/api/books", params={"ownership": "unknown"}, headers=admin["headers"]).json()
         assert remaining["total"] == 0
 
-    def test_matching_an_existing_book_does_not_change_its_ownership(
-        self, client, admin, make_book
-    ):
+    def test_matching_an_existing_book_does_not_change_its_ownership(self, client, admin, make_book):
         # The book was already on the shelf; an import must not cast doubt on
         # something that was previously confirmed.
         make_book(admin["headers"], title="Dune")
@@ -443,9 +433,7 @@ class TestImportedRatingsAndDates:
         """Somebody who has rated a book here has expressed a more recent
         opinion than an export taken from another service."""
         book = make_book(admin["headers"], title="Dune", isbn="9780441013593")
-        client.patch(
-            f"/api/books/{book['id']}/rating", json={"rating": 2}, headers=admin["headers"]
-        )
+        client.patch(f"/api/books/{book['id']}/rating", json={"rating": 2}, headers=admin["headers"])
 
         self.upload(client, admin["headers"], self.csv_with(rating="5"))
 
@@ -479,9 +467,7 @@ class TestImportedRatingsAndDates:
         """The status already matches, so only the rating moved. Reporting zero
         updates would say the import did nothing."""
         book = make_book(admin["headers"], title="Dune", isbn="9780441013593")
-        client.put(
-            f"/api/books/{book['id']}/status", json={"status": "read"}, headers=admin["headers"]
-        )
+        client.put(f"/api/books/{book['id']}/status", json={"status": "read"}, headers=admin["headers"])
 
         res = self.upload(client, admin["headers"], self.csv_with(rating="4", date_read=""))
 
@@ -520,9 +506,7 @@ class TestAnotherMembersPrivateBook:
 
         assert res.status_code == 200
 
-    def test_the_rest_of_the_file_is_still_imported(
-        self, client, admin, member, make_book, db
-    ):
+    def test_the_rest_of_the_file_is_still_imported(self, client, admin, member, make_book, db):
         """One unusable row must not cost the other four thousand."""
         make_book(admin["headers"], isbn=self.ISBN, title="Diary", is_private=True)
 
@@ -573,9 +557,7 @@ class TestTagLimits:
         rows = []
         for index in range(count):
             tags = ";".join(f"tag{index}-{n}" for n in range(per_row))
-            rows.append(
-                f'1,"Book {index}","An Author",="",="",0,Pub,300,2000,,"{tags}",read'
-            )
+            rows.append(f'1,"Book {index}","An Author",="",="",0,Pub,300,2000,,"{tags}",read')
         return csv_bytes(*rows)
 
     def test_one_file_cannot_invent_unlimited_tags(self, client, admin, db):
@@ -611,9 +593,7 @@ class TestTagLimits:
         upload(
             client,
             admin["headers"],
-            csv_bytes(
-                f'1,"Solo","An Author",="",="",0,Pub,300,2000,,"{many}",read'
-            ),
+            csv_bytes(f'1,"Solo","An Author",="",="",0,Pub,300,2000,,"{many}",read'),
             create_missing=True,
             apply_tags=True,
         )
@@ -648,10 +628,7 @@ class TestTagLimits:
         assert db.query(Tag).count() == before
 
 
-REVIEW_CSV = (
-    b'Title,Author,Exclusive Shelf,My Review\n'
-    b'Dune,An Author,read,"A desert planet."\n'
-)
+REVIEW_CSV = b'Title,Author,Exclusive Shelf,My Review\nDune,An Author,read,"A desert planet."\n'
 
 
 class TestImportedReviews:
@@ -660,9 +637,7 @@ class TestImportedReviews:
         upload(client, admin["headers"], REVIEW_CSV, create_missing=True)
 
         [book] = items(client.get("/api/books", headers=admin["headers"]))
-        notes = client.get(
-            f"/api/books/{book['id']}/notes", headers=admin["headers"]
-        ).json()
+        notes = client.get(f"/api/books/{book['id']}/notes", headers=admin["headers"]).json()
         assert [note["content"] for note in notes] == ["A desert planet."]
 
     def test_the_note_it_writes_is_private(self, client, admin):
@@ -673,9 +648,7 @@ class TestImportedReviews:
         upload(client, admin["headers"], REVIEW_CSV, create_missing=True)
 
         [book] = items(client.get("/api/books", headers=admin["headers"]))
-        notes = client.get(
-            f"/api/books/{book['id']}/notes", headers=admin["headers"]
-        ).json()
+        notes = client.get(f"/api/books/{book['id']}/notes", headers=admin["headers"]).json()
         assert [note["is_private"] for note in notes] == [True]
 
     def test_nobody_else_can_read_it(self, client, admin, member):
@@ -684,9 +657,7 @@ class TestImportedReviews:
         upload(client, admin["headers"], REVIEW_CSV, create_missing=True)
 
         [book] = items(client.get("/api/books", headers=member["headers"]))
-        notes = client.get(
-            f"/api/books/{book['id']}/notes", headers=member["headers"]
-        ).json()
+        notes = client.get(f"/api/books/{book['id']}/notes", headers=member["headers"]).json()
         assert notes == []
 
     def test_importing_twice_does_not_append_it_again(self, client, admin):
@@ -694,9 +665,7 @@ class TestImportedReviews:
         upload(client, admin["headers"], REVIEW_CSV, create_missing=True)
 
         [book] = items(client.get("/api/books", headers=admin["headers"]))
-        notes = client.get(
-            f"/api/books/{book['id']}/notes", headers=admin["headers"]
-        ).json()
+        notes = client.get(f"/api/books/{book['id']}/notes", headers=admin["headers"]).json()
         assert len(notes) == 1
 
 
@@ -704,9 +673,7 @@ class TestRateLimit:
     def test_a_burst_of_imports_is_refused(self, client, admin):
         """One import holds the single SQLite writer for its whole duration."""
         content = csv_bytes(goodreads_row("Dune", "read"))
-        codes = [
-            upload(client, admin["headers"], content).status_code for _ in range(5)
-        ]
+        codes = [upload(client, admin["headers"], content).status_code for _ in range(5)]
 
         assert 429 in codes
 
@@ -818,9 +785,7 @@ class TestEndpapersOwnExportSurvivesItsOwnImporter:
             format="paperback",
             location="Shelf 2",
         )
-        collection = client.post(
-            "/api/collections", json={"name": "Ebooks"}, headers=headers
-        ).json()
+        collection = client.post("/api/collections", json={"name": "Ebooks"}, headers=headers).json()
         client.patch(
             f"/api/books/{book['id']}/collection",
             json={"collection_id": collection["id"]},
@@ -828,9 +793,7 @@ class TestEndpapersOwnExportSurvivesItsOwnImporter:
         )
         for name in ("sci-fi", "translated"):
             tag = client.post("/api/books/tags", json={"name": name}, headers=headers)
-            client.post(
-                f"/api/books/{book['id']}/tags/{tag.json()['id']}", headers=headers
-            )
+            client.post(f"/api/books/{book['id']}/tags/{tag.json()['id']}", headers=headers)
         client.patch(
             f"/api/books/{book['id']}",
             json={
@@ -842,16 +805,12 @@ class TestEndpapersOwnExportSurvivesItsOwnImporter:
             },
             headers=headers,
         )
-        client.put(
-            f"/api/books/{book['id']}/status", json={"status": "read"}, headers=headers
-        )
+        client.put(f"/api/books/{book['id']}/status", json={"status": "read"}, headers=headers)
         # Marking it read is what stamps `finished_at`, and the rating is a
         # separate act on a separate route. Both are on the member's own
         # `UserBook` row rather than on the Book, which is why the export reads
         # them off the batch it already loaded.
-        client.patch(
-            f"/api/books/{book['id']}/rating", json={"rating": 4}, headers=headers
-        )
+        client.patch(f"/api/books/{book['id']}/rating", json={"rating": 4}, headers=headers)
         return book
 
     def _export(self, client, headers) -> bytes:
@@ -859,9 +818,7 @@ class TestEndpapersOwnExportSurvivesItsOwnImporter:
         assert res.status_code == 200, res.text
         return res.content
 
-    def test_every_export_column_is_read_back_or_named_as_not_read(
-        self, client, admin, make_book
-    ):
+    def test_every_export_column_is_read_back_or_named_as_not_read(self, client, admin, make_book):
         make_book(admin["headers"])
         export = self._export(client, admin["headers"])
         header = next(csv.reader(io.StringIO(export.decode())))
@@ -869,9 +826,7 @@ class TestEndpapersOwnExportSurvivesItsOwnImporter:
         assert not set(_ROUND_TRIPPED) & set(_NOT_READ_BACK)
         assert sorted(header) == sorted(set(_ROUND_TRIPPED) | set(_NOT_READ_BACK))
 
-    def test_the_importer_reads_each_column_into_the_field_named_here(
-        self, client, admin, make_book
-    ):
+    def test_the_importer_reads_each_column_into_the_field_named_here(self, client, admin, make_book):
         """The pairing, which the partition above does not check.
 
         That one compares a set of column names against a set of field names,
@@ -883,9 +838,7 @@ class TestEndpapersOwnExportSurvivesItsOwnImporter:
 
         mapping = csv_import.parse(export).mapping
 
-        assert {header: field for field, header in mapping.items() if header} == (
-            _ROUND_TRIPPED
-        )
+        assert {header: field for field, header in mapping.items() if header} == (_ROUND_TRIPPED)
 
     def test_every_importer_field_is_filled_by_the_export_or_named_as_absent(self):
         filled = list(_ROUND_TRIPPED.values())
@@ -895,9 +848,7 @@ class TestEndpapersOwnExportSurvivesItsOwnImporter:
             set(filled) | set(_NOT_EXPORTED)
         )
 
-    def test_a_book_carrying_every_exported_field_comes_back_unchanged(
-        self, client, admin, make_book
-    ):
+    def test_a_book_carrying_every_exported_field_comes_back_unchanged(self, client, admin, make_book):
         """One assertion over the whole row, so a field that quietly stops
         arriving cannot hide behind the ones that still do."""
         self._library(client, admin["headers"], make_book)
@@ -924,9 +875,7 @@ class TestEndpapersOwnExportSurvivesItsOwnImporter:
             notes=None,
         )
 
-    def test_a_title_a_spreadsheet_would_run_comes_back_neutralised(
-        self, client, admin, make_book
-    ):
+    def test_a_title_a_spreadsheet_would_run_comes_back_neutralised(self, client, admin, make_book):
         """The one cell the export deliberately does not round trip.
 
         `_csv_safe` prefixes an apostrophe to anything a spreadsheet would
@@ -942,9 +891,7 @@ class TestEndpapersOwnExportSurvivesItsOwnImporter:
 
         assert row.title == '\'=HYPERLINK("http://evil.test","ok")'
 
-    def test_the_guard_applied_to_its_own_output_does_not_grow_the_cell(
-        self, client, admin, make_book
-    ):
+    def test_the_guard_applied_to_its_own_output_does_not_grow_the_cell(self, client, admin, make_book):
         """Otherwise a shelf exported and imported often enough grows a margin
         of apostrophes."""
         make_book(admin["headers"], title="'=already quoted")
@@ -1054,9 +1001,7 @@ class TestATitleTheMemberDeletedAtTheSourceDoesNotComeBack:
         assert body["exclusion_column"] == "HasBeenDeleted"
         assert db.query(Book).count() == 0
 
-    def test_an_ordinary_export_is_read_generically_and_excludes_nothing(
-        self, client, admin
-    ):
+    def test_an_ordinary_export_is_read_generically_and_excludes_nothing(self, client, admin):
         """The other half of the diagonal: the assertions above pass on a route
         that answered `excluded` for every file."""
         res = client.post(
@@ -1071,9 +1016,7 @@ class TestATitleTheMemberDeletedAtTheSourceDoesNotComeBack:
 
 
 class TestADeadlockedImportAsksForTheFileAgain:
-    def test_an_import_postgres_aborted_for_a_deadlock_answers_409(
-        self, client, admin, monkeypatch
-    ):
+    def test_an_import_postgres_aborted_for_a_deadlock_answers_409(self, client, admin, monkeypatch):
         """The import commits once, so the abort left nothing of it behind."""
 
         def deadlocked(*args, **kwargs):
@@ -1138,9 +1081,7 @@ class TestAFailureAfterARowMatchedABookThisImportCreatedAnswers500:
     way: a 409 would ask for the file again on every send."""
 
     @pytest.mark.answers_500(raises=(IntegrityError,))
-    def test_an_unrelated_failure_on_the_matching_row_answers_500(
-        self, client, admin, monkeypatch
-    ):
+    def test_an_unrelated_failure_on_the_matching_row_answers_500(self, client, admin, monkeypatch):
         def unrelated(*args):
             raise IntegrityError("planted", {}, Exception("planted"))
 

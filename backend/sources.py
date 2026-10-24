@@ -111,24 +111,12 @@ class Measured:
 #: These figures drive `ALWAYS_ASKED` through the tier rules below. Re-measure
 #: with the committed sample rather than adjusting a row.
 MEASURED: Final[dict[CatalogueSource, Measured]] = {
-    CatalogueSource.DNB: Measured(
-        answered=91, of=500, p90_seconds=0.258, largest_frame=44
-    ),
-    CatalogueSource.K10PLUS: Measured(
-        answered=210, of=500, p90_seconds=0.512, largest_frame=45
-    ),
-    CatalogueSource.OENB: Measured(
-        answered=55, of=500, p90_seconds=0.538, largest_frame=30
-    ),
-    CatalogueSource.OPEN_LIBRARY: Measured(
-        answered=237, of=500, p90_seconds=2.562, largest_frame=36
-    ),
-    CatalogueSource.NLG: Measured(
-        answered=37, of=500, p90_seconds=0.238, largest_frame=37
-    ),
-    CatalogueSource.NKP: Measured(
-        answered=59, of=500, p90_seconds=0.239, largest_frame=49
-    ),
+    CatalogueSource.DNB: Measured(answered=91, of=500, p90_seconds=0.258, largest_frame=44),
+    CatalogueSource.K10PLUS: Measured(answered=210, of=500, p90_seconds=0.512, largest_frame=45),
+    CatalogueSource.OENB: Measured(answered=55, of=500, p90_seconds=0.538, largest_frame=30),
+    CatalogueSource.OPEN_LIBRARY: Measured(answered=237, of=500, p90_seconds=2.562, largest_frame=36),
+    CatalogueSource.NLG: Measured(answered=37, of=500, p90_seconds=0.238, largest_frame=37),
+    CatalogueSource.NKP: Measured(answered=59, of=500, p90_seconds=0.239, largest_frame=49),
     # **This column is a later pass on the same 500 books**, measured
     # 2026-09-05, where every other column comes from the pass this table's own
     # heading dates, and that is said here rather than left for a reader to
@@ -139,9 +127,7 @@ MEASURED: Final[dict[CatalogueSource, Measured]] = {
     # two books behind the NKP and six ahead of the NLG, and the tail is ordered
     # on `TAIL_MARGINAL` rather than on latency, so a latency figure could not
     # move its position at all.
-    CatalogueSource.BNE: Measured(
-        answered=57, of=500, p90_seconds=0.276, largest_frame=47
-    ),
+    CatalogueSource.BNE: Measured(answered=57, of=500, p90_seconds=0.276, largest_frame=47),
 }
 
 #: What the best tier of each size answers, of the same 500 ISBNs as `MEASURED`.
@@ -308,9 +294,7 @@ DEFAULT_ORDER: Final[tuple[CatalogueSource, ...]] = (
 #: a different question, and `metadata.resolve` is where it went: whether the
 #: reader a row names can actually read what the target answers with.
 LOOKUP_SOURCES: Final[frozenset[CatalogueSource]] = frozenset(
-    target.source
-    for target in targets.SEEDED.values()
-    if target.can(Capability.ANSWERS_ISBN)
+    target.source for target in targets.SEEDED.values() if target.can(Capability.ANSWERS_ISBN)
 )
 
 #: The sources that can answer a title search.
@@ -350,9 +334,7 @@ LOOKUP_SOURCES: Final[frozenset[CatalogueSource]] = frozenset(
 #: `targets.SEEDED[CatalogueSource.NKP]` does not declare
 #: `Capability.ANSWERS_TITLE_SEARCH`, on the row, with the measurement beside it.
 SEARCH_SOURCES: Final[frozenset[CatalogueSource]] = frozenset(
-    target.source
-    for target in targets.SEEDED.values()
-    if target.can(Capability.ANSWERS_TITLE_SEARCH)
+    target.source for target in targets.SEEDED.values() if target.can(Capability.ANSWERS_TITLE_SEARCH)
 )
 
 #: Catalogues whose title search does not fit the default deadline, so the
@@ -417,9 +399,7 @@ METERED: Final[frozenset[CatalogueSource]] = frozenset(
 #: two steps rather than one: **7 of 50 keyless before either change, 8 with the
 #: `020` fix alone, and 39 with the NLG**, none of it involving a key.
 NEEDS_A_KEY: Final[frozenset[CatalogueSource]] = frozenset(
-    target.source
-    for target in targets.SEEDED.values()
-    if target.can(Capability.NEEDS_A_CREDENTIAL)
+    target.source for target in targets.SEEDED.values() if target.can(Capability.NEEDS_A_CREDENTIAL)
 )
 
 #: The sources this build carries a login for, because their library publishes
@@ -434,9 +414,7 @@ NEEDS_A_KEY: Final[frozenset[CatalogueSource]] = frozenset(
 #: `targets.ShippedCredential` is why any of these exist. Derived from the rows,
 #: so a second one is a field on a row rather than a list to remember.
 SHIPS_A_CREDENTIAL: Final[frozenset[CatalogueSource]] = frozenset(
-    target.source
-    for target in targets.SEEDED.values()
-    if target.shipped_credential is not None
+    target.source for target in targets.SEEDED.values() if target.shipped_credential is not None
 )
 
 #: The lookup sources a household that has configured nothing actually asks.
@@ -451,9 +429,7 @@ SHIPS_A_CREDENTIAL: Final[frozenset[CatalogueSource]] = frozenset(
 #: `tests/test_roster_counts.py` holds the register; a measurement taken over one
 #: set does not become a measurement over a larger one because the set grew, so
 #: what needs no credential keeps a name of its own beside this one.
-STOCK_INSTALL_ASKS: Final[frozenset[CatalogueSource]] = LOOKUP_SOURCES - (
-    NEEDS_A_KEY - SHIPS_A_CREDENTIAL
-)
+STOCK_INSTALL_ASKS: Final[frozenset[CatalogueSource]] = LOOKUP_SOURCES - (NEEDS_A_KEY - SHIPS_A_CREDENTIAL)
 
 #: How many enabled lookup sources are asked **together** before the rest are
 #: asked one at a time.
@@ -548,9 +524,7 @@ ALWAYS_ASKED: Final = 2
 #: which is what keeps `_serves` reading "no row" and "no groups" as one thing;
 #: its docstring's last paragraph is the argument.
 SERVES_GROUPS: Final[dict[CatalogueSource, frozenset[str]]] = {
-    target.source: target.serves_groups
-    for target in targets.SEEDED.values()
-    if target.serves_groups
+    target.source: target.serves_groups for target in targets.SEEDED.values() if target.serves_groups
 }
 
 
@@ -606,9 +580,7 @@ def _serves(source: CatalogueSource, registration_group: str | None) -> bool:
     if registration_group in groups:
         return True
     prefix = isbn.group_prefix(registration_group)
-    return prefix is None or not any(
-        isbn.group_prefix(group) == prefix for group in groups
-    )
+    return prefix is None or not any(isbn.group_prefix(group) == prefix for group in groups)
 
 
 #: The key the stored object hangs the list off. An object rather than a bare
@@ -657,13 +629,9 @@ class Plan:
         Moving a metered source up still moves it earlier in the tier below,
         which is where being asked can actually save a miss.
         """
-        return tuple(
-            name for name in self.lookup_chain if name not in METERED
-        )[:ALWAYS_ASKED]
+        return tuple(name for name in self.lookup_chain if name not in METERED)[:ALWAYS_ASKED]
 
-    def lookup_in_turn(
-        self, registration_group: str | None
-    ) -> tuple[CatalogueSource, ...]:
+    def lookup_in_turn(self, registration_group: str | None) -> tuple[CatalogueSource, ...]:
         """Asked one at a time, and only if the first tier found nothing.
 
         Everything in the chain that the first tier did not take, in the
@@ -693,9 +661,7 @@ class Plan:
         """
         leading = frozenset(self.lookup_together)
         return tuple(
-            name
-            for name in self.lookup_chain
-            if name not in leading and _serves(name, registration_group)
+            name for name in self.lookup_chain if name not in leading and _serves(name, registration_group)
         )
 
     @property
@@ -708,9 +674,7 @@ class Plan:
         different property rather than an argument, so a caller that wants the
         slow catalogues has to say so in a name a reader can grep for.
         """
-        return tuple(
-            name for name in self.searched_harder if name not in SLOW_SEARCHES
-        )
+        return tuple(name for name in self.searched_harder if name not in SLOW_SEARCHES)
 
     @property
     def searched_harder(self) -> tuple[CatalogueSource, ...]:
@@ -743,9 +707,7 @@ class Plan:
         constant and a property one underscore apart is a pair a reader has to
         keep straight rather than read.
         """
-        return tuple(
-            name for name in self.searched_harder if name in SLOW_SEARCHES
-        )
+        return tuple(name for name in self.searched_harder if name in SLOW_SEARCHES)
 
     @property
     def lookup_chain(self) -> tuple[CatalogueSource, ...]:
@@ -762,9 +724,7 @@ class Plan:
 
 
 #: What a library that has never opened the settings screen gets.
-DEFAULT_PLAN: Final = Plan(
-    tuple(Preference(source, True) for source in DEFAULT_ORDER)
-)
+DEFAULT_PLAN: Final = Plan(tuple(Preference(source, True) for source in DEFAULT_ORDER))
 
 
 def parse(stored: dict[str, Any]) -> Plan:
@@ -836,9 +796,7 @@ def parse(stored: dict[str, Any]) -> Plan:
     # Every source the stored value did not mention, in the default order. A
     # release that adds a source must not leave it unasked for every library
     # that saved a list before it existed.
-    preferences.extend(
-        Preference(source, True) for source in DEFAULT_ORDER if source not in seen
-    )
+    preferences.extend(Preference(source, True) for source in DEFAULT_ORDER if source not in seen)
     return Plan(tuple(preferences))
 
 
@@ -911,10 +869,7 @@ def in_force(plan: Plan, ready: frozenset[CatalogueSource]) -> Plan:
     or they turn a switch on and watch it come back off.
     """
     return Plan(
-        tuple(
-            Preference(entry.source, entry.enabled and entry.source in ready)
-            for entry in plan.preferences
-        )
+        tuple(Preference(entry.source, entry.enabled and entry.source in ready) for entry in plan.preferences)
     )
 
 
@@ -986,10 +941,7 @@ def describe(
 def serialise(plan: Plan) -> dict[str, Any]:
     """The object to store. Written back in full, never patched."""
     return {
-        _STORED_KEY: [
-            {"source": entry.source.value, "enabled": entry.enabled}
-            for entry in plan.preferences
-        ]
+        _STORED_KEY: [{"source": entry.source.value, "enabled": entry.enabled} for entry in plan.preferences]
     }
 
 
@@ -1011,11 +963,9 @@ def from_wire(entries: list[Preference], current: Plan) -> Plan:
     named = {entry.source: entry.enabled for entry in entries}
     ordered = [Preference(entry.source, named[entry.source]) for entry in entries]
     seen = set(named)
-    ordered.extend(
-        entry for entry in current.preferences if entry.source not in seen
-    )
+    ordered.extend(entry for entry in current.preferences if entry.source not in seen)
     # Through `parse` all the same, so one function decides what a roster is and
     # a source this build does not know is dropped in exactly one place.
-    return parse({_STORED_KEY: [
-        {"source": entry.source.value, "enabled": entry.enabled} for entry in ordered
-    ]})
+    return parse(
+        {_STORED_KEY: [{"source": entry.source.value, "enabled": entry.enabled} for entry in ordered]}
+    )

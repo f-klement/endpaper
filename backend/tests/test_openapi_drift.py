@@ -146,9 +146,7 @@ def produced() -> bytes:
 
 
 class TestTheCommittedSchemaIsTheOneThisCodeProduces:
-    def test_the_committed_document_is_byte_identical_to_a_fresh_generation(
-        self, produced: bytes
-    ) -> None:
+    def test_the_committed_document_is_byte_identical_to_a_fresh_generation(self, produced: bytes) -> None:
         difference = first_difference(_COMMITTED.read_bytes(), produced)
         assert difference is None, (
             "frontend/openapi.json is not what this code produces. If the schema "
@@ -226,9 +224,7 @@ class TestTheComparisonCanFail:
         with pytest.raises(AssertionError, match="exited 1"):
             generate(stub)
 
-    def test_a_generator_that_exits_zero_and_writes_nothing_is_refused(
-        self, tmp_path: Path
-    ) -> None:
+    def test_a_generator_that_exits_zero_and_writes_nothing_is_refused(self, tmp_path: Path) -> None:
         """The route the entry point's unconditional `return 0` leaves open.
 
         Unrefused, the comparison reports the committed document as the whole

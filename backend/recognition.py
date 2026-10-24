@@ -150,9 +150,7 @@ class _Ladder:
 
 
 _LADDERS: Final[Mapping[Source, _Ladder]] = {
-    Source.READING_HISTORY: _Ladder(
-        schemes=None, title=_reading_history_key, copies_take_the_lowest=True
-    ),
+    Source.READING_HISTORY: _Ladder(schemes=None, title=_reading_history_key, copies_take_the_lowest=True),
     Source.CATALOGUE: _Ladder(schemes=None, title=identity.work_key, copies_take_the_lowest=True),
     Source.HIGHLIGHTS: _Ladder(
         schemes=(BookIdentifierScheme.ASIN,),
@@ -208,15 +206,11 @@ def _spelled_anywhere(form: str) -> str:
     an X**: the fallback key is the record's own value, which `parse` refused
     and so may hold any character, and SQLite has no default LIKE escape.
     """
-    escaped = (
-        "\\" + character if character in "\\%_" else character for character in form
-    )
+    escaped = ("\\" + character if character in "\\%_" else character for character in form)
     return "%" + "%".join(escaped) + "%"
 
 
-def _identifier_key(
-    scheme: BookIdentifierScheme, raw: str | None
-) -> tuple[BookIdentifierScheme, str] | None:
+def _identifier_key(scheme: BookIdentifierScheme, raw: str | None) -> tuple[BookIdentifierScheme, str] | None:
     """One stored or incoming identifier, folded to what compares.
 
     An ASIN is upper cased, as Amazon issues it. Nothing else is: a Google
@@ -354,8 +348,7 @@ class Index:
             held_anywhere = _grouped(
                 (key, book_id)
                 for book_id, isbn in anywhere
-                if (key := _isbn_key(isbn)) is not None
-                and (narrow is None or key in narrow.isbn_keys)
+                if (key := _isbn_key(isbn)) is not None and (narrow is None or key in narrow.isbn_keys)
             )
             # The full build reads every shelf row, which the title rung needs.
             # A narrowed one asks the shelf and the trash for the holders alone,
@@ -372,9 +365,7 @@ class Index:
             else:
                 rows, trashed = [], []
             in_trash = _grouped(
-                (key, book_id)
-                for book_id, isbn in trashed
-                if (key := _isbn_key(isbn)) is not None
+                (key, book_id) for book_id, isbn in trashed if (key := _isbn_key(isbn)) is not None
             )
             by_identifier = _grouped(
                 (key, book_id)
@@ -481,8 +472,7 @@ class Index:
         return {
             pair
             for scheme, value in identifiers
-            if scheme in self._ladder.schemes
-            and (pair := _identifier_key(scheme, value)) is not None
+            if scheme in self._ladder.schemes and (pair := _identifier_key(scheme, value)) is not None
         }
 
     def _settle(self, held: set[int]) -> Answer:

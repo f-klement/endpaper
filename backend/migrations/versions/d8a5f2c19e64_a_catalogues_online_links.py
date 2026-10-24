@@ -49,9 +49,7 @@ def upgrade() -> None:
         sa.Column("url", sa.String(length=_URL_MAX_BYTES), nullable=False),
         sa.Column("label", sa.String(length=_LABEL_MAX), nullable=True),
         sa.Column("relation", sa.String(length=10), nullable=True),
-        sa.Column(
-            "created_at", sa.DateTime(), server_default=sa.func.now(), nullable=False
-        ),
+        sa.Column("created_at", sa.DateTime(), server_default=sa.func.now(), nullable=False),
         sa.CheckConstraint(
             "url LIKE 'http://%' OR url LIKE 'https://%'",
             name="ck_online_links_scheme",
@@ -79,9 +77,7 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id"),
     )
     op.create_index(op.f("ix_online_links_id"), "online_links", ["id"])
-    op.create_index(
-        "uq_online_links_book_url", "online_links", ["book_id", "url"], unique=True
-    )
+    op.create_index("uq_online_links_book_url", "online_links", ["book_id", "url"], unique=True)
 
 
 def downgrade() -> None:

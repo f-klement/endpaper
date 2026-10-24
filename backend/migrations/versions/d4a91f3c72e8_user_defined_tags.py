@@ -73,12 +73,10 @@ def downgrade() -> None:
             for_bind(
                 op.get_bind(),
                 sqlite=(
-                    "DELETE FROM book_tags WHERE tag_id IN "
-                    "(SELECT id FROM tags WHERE is_predefined = 0)"
+                    "DELETE FROM book_tags WHERE tag_id IN (SELECT id FROM tags WHERE is_predefined = 0)"
                 ),
                 postgresql=(
-                    "DELETE FROM book_tags WHERE tag_id IN "
-                    "(SELECT id FROM tags WHERE is_predefined = false)"
+                    "DELETE FROM book_tags WHERE tag_id IN (SELECT id FROM tags WHERE is_predefined = false)"
                 ),
             )
         )

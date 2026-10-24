@@ -73,14 +73,10 @@ class TestSetLoginImage:
         assert res.status_code == 403
 
     def test_anonymous_is_401(self, client):
-        res = client.post(
-            "/api/settings/login-image", files={"file": ("bg.png", PNG, "image/png")}
-        )
+        res = client.post("/api/settings/login-image", files={"file": ("bg.png", PNG, "image/png")})
         assert res.status_code == 401
 
-    @pytest.mark.parametrize(
-        "payload", [PNG_BYTES, JPEG_BYTES, WEBP_BYTES], ids=["png", "jpeg", "webp"]
-    )
+    @pytest.mark.parametrize("payload", [PNG_BYTES, JPEG_BYTES, WEBP_BYTES], ids=["png", "jpeg", "webp"])
     def test_accepts_every_supported_format(self, client, admin, payload):
         res = client.post(
             "/api/settings/login-image",
@@ -225,24 +221,18 @@ class TestReadSettings:
 
 class TestUpdateSettings:
     def test_requires_admin(self, client, member):
-        res = client.put(
-            "/api/settings", json={"google_books_enabled": True}, headers=member["headers"]
-        )
+        res = client.put("/api/settings", json={"google_books_enabled": True}, headers=member["headers"])
         assert res.status_code == 403
 
     def test_toggles_a_flag(self, client, admin):
-        res = client.put(
-            "/api/settings", json={"google_books_enabled": True}, headers=admin["headers"]
-        )
+        res = client.put("/api/settings", json={"google_books_enabled": True}, headers=admin["headers"])
         assert res.json()["google_books_enabled"] is True
 
     def test_a_setting_survives_a_restart(self, client, admin, db):
         import settings_store
         from enums import SettingKey
 
-        client.put(
-            "/api/settings", json={"google_books_enabled": True}, headers=admin["headers"]
-        )
+        client.put("/api/settings", json={"google_books_enabled": True}, headers=admin["headers"])
 
         # Read straight from the database, bypassing the request that wrote it.
         assert settings_store.get_bool(db, SettingKey.GOOGLE_BOOKS_ENABLED) is True
@@ -268,9 +258,7 @@ class TestUpdateSettings:
             headers=admin["headers"],
         )
 
-        client.put(
-            "/api/settings", json={"google_books_enabled": True}, headers=admin["headers"]
-        )
+        client.put("/api/settings", json={"google_books_enabled": True}, headers=admin["headers"])
 
         body = client.get("/api/settings", headers=admin["headers"]).json()
         assert body["has_google_books_api_key"] is True
@@ -283,15 +271,10 @@ class TestUpdateSettings:
             headers=admin["headers"],
         )
 
-        client.put(
-            "/api/settings", json={"google_books_api_key": ""}, headers=admin["headers"]
-        )
+        client.put("/api/settings", json={"google_books_api_key": ""}, headers=admin["headers"])
 
         assert (
-            client.get("/api/settings", headers=admin["headers"]).json()[
-                "has_google_books_api_key"
-            ]
-            is False
+            client.get("/api/settings", headers=admin["headers"]).json()["has_google_books_api_key"] is False
         )
 
     def test_the_key_is_trimmed(self, client, admin):
@@ -319,9 +302,7 @@ class TestUpdateSettings:
         assert res.json()["default_locale"] == "de"
 
     def test_rejects_an_unsupported_locale(self, client, admin):
-        res = client.put(
-            "/api/settings", json={"default_locale": "klingon"}, headers=admin["headers"]
-        )
+        res = client.put("/api/settings", json={"default_locale": "klingon"}, headers=admin["headers"])
         assert res.status_code == 422
 
 
@@ -342,9 +323,7 @@ class TestReadinessFlag:
         assert self.features(client)["google_books_ready"] is False
 
     def test_a_toggle_without_a_key_is_not_ready(self, client, admin):
-        client.put(
-            "/api/settings", json={"google_books_enabled": True}, headers=admin["headers"]
-        )
+        client.put("/api/settings", json={"google_books_enabled": True}, headers=admin["headers"])
 
         body = self.features(client)
 
@@ -378,9 +357,7 @@ class TestReadinessFlag:
             headers=admin["headers"],
         )
 
-        client.put(
-            "/api/settings", json={"google_books_api_key": ""}, headers=admin["headers"]
-        )
+        client.put("/api/settings", json={"google_books_api_key": ""}, headers=admin["headers"])
 
         assert self.features(client)["google_books_ready"] is False
 
@@ -407,9 +384,7 @@ class TestKeyFromTheEnvironment:
     def with_env_key(self, monkeypatch, value: str = "env-key") -> None:
         monkeypatch.setenv("GOOGLE_BOOKS_API_KEY", value)
 
-    def test_it_is_reported_as_coming_from_the_environment(
-        self, client, admin, monkeypatch
-    ):
+    def test_it_is_reported_as_coming_from_the_environment(self, client, admin, monkeypatch):
         self.with_env_key(monkeypatch)
 
         body = client.get("/api/settings", headers=admin["headers"]).json()
@@ -429,9 +404,7 @@ class TestKeyFromTheEnvironment:
         assert body["google_books_api_key_from_env"] is False
         assert body["has_google_books_api_key"] is True
 
-    def test_writing_one_is_refused_rather_than_ignored(
-        self, client, admin, monkeypatch
-    ):
+    def test_writing_one_is_refused_rather_than_ignored(self, client, admin, monkeypatch):
         """Silently accepting a value that does nothing is worse than refusing:
         the admin would believe they had changed the key."""
         self.with_env_key(monkeypatch)
@@ -445,9 +418,7 @@ class TestKeyFromTheEnvironment:
         assert res.status_code == 409
         assert "GOOGLE_BOOKS_API_KEY" in res.json()["detail"]
 
-    def test_the_refusal_does_not_block_the_other_settings(
-        self, client, admin, monkeypatch
-    ):
+    def test_the_refusal_does_not_block_the_other_settings(self, client, admin, monkeypatch):
         self.with_env_key(monkeypatch)
 
         res = client.put(
@@ -477,9 +448,7 @@ class TestKeyFromTheEnvironment:
 
     def test_it_makes_the_feature_ready(self, client, admin, monkeypatch):
         self.with_env_key(monkeypatch)
-        client.put(
-            "/api/settings", json={"google_books_enabled": True}, headers=admin["headers"]
-        )
+        client.put("/api/settings", json={"google_books_enabled": True}, headers=admin["headers"])
 
         assert client.get("/api/settings/features").json()["google_books_ready"] is True
 
@@ -492,9 +461,7 @@ class TestKeyFromTheEnvironment:
 
         assert "super-secret-env-key" not in body
 
-    def test_a_blank_environment_value_is_treated_as_absent(
-        self, client, admin, monkeypatch
-    ):
+    def test_a_blank_environment_value_is_treated_as_absent(self, client, admin, monkeypatch):
         monkeypatch.setenv("GOOGLE_BOOKS_API_KEY", "   ")
 
         body = client.get("/api/settings", headers=admin["headers"]).json()
@@ -553,9 +520,7 @@ class TestOverdueWebhookSettings:
             json={"overdue_webhook_url": self.HOOK},
             headers=admin["headers"],
         )
-        body = client.put(
-            "/api/settings", json={"overdue_webhook_url": ""}, headers=admin["headers"]
-        ).json()
+        body = client.put("/api/settings", json={"overdue_webhook_url": ""}, headers=admin["headers"]).json()
         assert body["overdue_webhook_url"] == ""
 
     def test_the_secret_is_never_returned(self, client, admin):
@@ -608,16 +573,12 @@ class TestOverdueWebhookSettings:
         assert body["has_overdue_webhook_secret"] is False
 
     def test_it_stores_the_reminder_interval(self, client, admin):
-        body = client.put(
-            "/api/settings", json={"overdue_reminder_days": 3}, headers=admin["headers"]
-        ).json()
+        body = client.put("/api/settings", json={"overdue_reminder_days": 3}, headers=admin["headers"]).json()
         assert body["overdue_reminder_days"] == 3
 
     def test_zero_days_is_refused(self, client, admin):
         """Zero would mean resending the same list on every tick."""
-        res = client.put(
-            "/api/settings", json={"overdue_reminder_days": 0}, headers=admin["headers"]
-        )
+        res = client.put("/api/settings", json={"overdue_reminder_days": 0}, headers=admin["headers"])
         assert res.status_code == 422
 
     def test_a_member_may_not_read_them(self, client, member):
@@ -660,11 +621,7 @@ class TestEverySecretSettingIsMasked:
         # assertion above would hold with `mask()` deleted from the line it
         # guards. `conftest.py` pops every name in `config._ENV_OVERRIDES` for
         # that reason, and this is the assertion that notices if it stops.
-        assert [
-            name
-            for name, value in stored.items()
-            if settings_store.mask(value) not in body
-        ] == []
+        assert [name for name, value in stored.items() if settings_store.mask(value) not in body] == []
 
     def test_no_pinnable_secret_is_pinned_while_the_suite_runs(self):
         """The walk above goes vacuous under an environment that supplies one.
@@ -679,11 +636,7 @@ class TestEverySecretSettingIsMasked:
 
         import config
 
-        assert [
-            variable
-            for variable in config._ENV_OVERRIDES.values()
-            if os.environ.get(variable)
-        ] == []
+        assert [variable for variable in config._ENV_OVERRIDES.values() if os.environ.get(variable)] == []
 
     def test_the_walk_covers_the_secrets_that_exist(self):
         """A guard that inspects nothing is worse than no guard. These are the
@@ -791,9 +744,7 @@ class TestReminderSenderSettings:
     def test_an_absent_field_leaves_the_secret_alone(self, client, admin):
         """The browser never received the stored value, so a form saving an
         unrelated toggle would otherwise blank it."""
-        client.put(
-            "/api/settings", json={"mail_password": "hunter2222"}, headers=admin["headers"]
-        )
+        client.put("/api/settings", json={"mail_password": "hunter2222"}, headers=admin["headers"])
         body = client.put(
             "/api/settings", json={"overdue_mail_enabled": True}, headers=admin["headers"]
         ).json()
@@ -801,12 +752,8 @@ class TestReminderSenderSettings:
         assert body["has_mail_password"] is True
 
     def test_an_empty_string_clears_it(self, client, admin):
-        client.put(
-            "/api/settings", json={"mail_password": "hunter2222"}, headers=admin["headers"]
-        )
-        body = client.put(
-            "/api/settings", json={"mail_password": ""}, headers=admin["headers"]
-        ).json()
+        client.put("/api/settings", json={"mail_password": "hunter2222"}, headers=admin["headers"])
+        body = client.put("/api/settings", json={"mail_password": ""}, headers=admin["headers"]).json()
 
         assert body["has_mail_password"] is False
 
@@ -835,9 +782,7 @@ class TestReminderSenderSettings:
     def test_every_field_is_bounded(self, client, admin, field, value):
         """A settings row a restore writes through Core is a row the hourly
         ticker reads on every tick."""
-        response = client.put(
-            "/api/settings", json={field: value}, headers=admin["headers"]
-        )
+        response = client.put("/api/settings", json={field: value}, headers=admin["headers"])
         assert response.status_code == 422
 
 
@@ -889,10 +834,7 @@ def _write_tables() -> dict[str, dict[str, object]]:
         for name, value in vars(settings_router).items()
         if isinstance(value, dict)
         and value
-        and all(
-            isinstance(field, str) and isinstance(key, SettingKey)
-            for field, key in value.items()
-        )
+        and all(isinstance(field, str) and isinstance(key, SettingKey) for field, key in value.items())
         # On a word boundary, not `name in written`: a table called `_SENDER`
         # would otherwise be counted as read because `_SENDER_TEXT` appears.
         and re.search(rf"\b{re.escape(name)}\b", written)
@@ -971,9 +913,7 @@ class TestEverySenderFieldIsActuallyWritten:
         # below is what keeps this arm from becoming a hole.
         source = inspect.getsource(settings_router.update_settings)
         by_hand = {
-            field
-            for field in declared - written
-            if re.search(rf"payload\.{re.escape(field)}\b", source)
+            field for field in declared - written if re.search(rf"payload\.{re.escape(field)}\b", source)
         }
 
         assert declared - written - by_hand == set()
@@ -1010,17 +950,13 @@ class TestTheEnvironmentWinsOverTheStoredValue:
 
     def test_the_screen_shows_the_environment_value(self, client, admin, monkeypatch):
         monkeypatch.setenv("MAIL_SERVER", "smtp.deployment.test")
-        client.put(
-            "/api/settings", json={}, headers=admin["headers"]
-        )
+        client.put("/api/settings", json={}, headers=admin["headers"])
         body = client.get("/api/settings", headers=admin["headers"]).json()
 
         assert body["mail_server"] == "smtp.deployment.test"
         assert "mail_server" in body["mail_from_env"]
 
-    def test_a_pinned_setting_refuses_an_edit_and_names_the_variable(
-        self, client, admin, monkeypatch
-    ):
+    def test_a_pinned_setting_refuses_an_edit_and_names_the_variable(self, client, admin, monkeypatch):
         monkeypatch.setenv("MAIL_SERVER", "smtp.deployment.test")
         response = client.put(
             "/api/settings", json={"mail_server": "smtp.typed.test"}, headers=admin["headers"]
@@ -1029,9 +965,7 @@ class TestTheEnvironmentWinsOverTheStoredValue:
         assert response.status_code == 409
         assert "MAIL_SERVER" in response.json()["detail"]
 
-    def test_a_pinned_secret_is_reported_as_pinned_and_never_shown(
-        self, client, admin, monkeypatch
-    ):
+    def test_a_pinned_secret_is_reported_as_pinned_and_never_shown(self, client, admin, monkeypatch):
         monkeypatch.setenv("MAIL_PASSWORD", "from-the-deployment")
         body = client.get("/api/settings", headers=admin["headers"])
 
@@ -1052,9 +986,7 @@ class TestTheEnvironmentWinsOverTheStoredValue:
 
     def test_an_unpinned_setting_is_still_editable(self, client, admin, monkeypatch):
         monkeypatch.setenv("MAIL_SERVER", "smtp.deployment.test")
-        body = client.put(
-            "/api/settings", json={"mail_username": "library"}, headers=admin["headers"]
-        ).json()
+        body = client.put("/api/settings", json={"mail_username": "library"}, headers=admin["headers"]).json()
 
         assert body["mail_username"] == "library"
 
@@ -1310,9 +1242,7 @@ class TestEverySettingsWriteClearsWhatItInvalidates:
         after = client.get("/api/settings/sender-health", headers=admin["headers"]).json()
         assert next(e for e in after if e["sender"] == "email")["last_run_at"] is None
 
-    def test_the_reminder_interval_is_not_a_channel_and_clears_nothing(
-        self, client, admin, db
-    ):
+    def test_the_reminder_interval_is_not_a_channel_and_clears_nothing(self, client, admin, db):
         """It says how often a loan is chased, not whether a channel works, so
         changing it is no evidence about any of them. The mirror of the tests
         above: a rule that cleared on every settings write would be a rule that
@@ -1337,9 +1267,7 @@ class TestEverySettingsWriteClearsWhatItInvalidates:
             datetime.now(UTC).replace(tzinfo=None),
         )
 
-        client.put(
-            "/api/settings", json={"overdue_reminder_days": 3}, headers=admin["headers"]
-        )
+        client.put("/api/settings", json={"overdue_reminder_days": 3}, headers=admin["headers"])
 
         after = client.get("/api/settings/sender-health", headers=admin["headers"]).json()
         assert next(e for e in after if e["sender"] == "telegram")["failures"] == 1
@@ -1379,8 +1307,7 @@ class TestTheProviderList:
             "/api/settings",
             json={
                 "catalogue_sources": [
-                    {"source": source.value, "enabled": False}
-                    for source in sources.DEFAULT_ORDER
+                    {"source": source.value, "enabled": False} for source in sources.DEFAULT_ORDER
                 ]
             },
             headers=admin["headers"],
@@ -1390,9 +1317,7 @@ class TestTheProviderList:
             json={"catalogue_sources": [{"source": "dnb", "enabled": True}]},
             headers=admin["headers"],
         )
-        enabled = {
-            row["source"] for row in self._sources(client, admin) if row["enabled"]
-        }
+        enabled = {row["source"] for row in self._sources(client, admin) if row["enabled"]}
         assert enabled == {"dnb"}
 
     def test_the_order_a_write_sends_is_the_order_that_comes_back(self, client, admin):
@@ -1409,9 +1334,7 @@ class TestTheProviderList:
         listed = [row["source"] for row in self._sources(client, admin)]
         assert listed[:2] == ["loc", "bnf"]
 
-    def test_a_source_this_build_does_not_know_is_dropped_not_refused(
-        self, client, admin
-    ):
+    def test_a_source_this_build_does_not_know_is_dropped_not_refused(self, client, admin):
         """A client one release ahead is not a bad request."""
         response = client.put(
             "/api/settings",
@@ -1426,8 +1349,7 @@ class TestTheProviderList:
             "/api/settings",
             json={
                 "catalogue_sources": [
-                    {"source": "dnb", "enabled": True}
-                    for _ in range(len(sources.DEFAULT_ORDER) + 1)
+                    {"source": "dnb", "enabled": True} for _ in range(len(sources.DEFAULT_ORDER) + 1)
                 ]
             },
             headers=admin["headers"],
@@ -1451,18 +1373,14 @@ class TestASourceThatCannotAnswerSaysSo:
 
     def _google(self, client, admin) -> dict:
         rows = client.get("/api/settings", headers=admin["headers"]).json()
-        return next(
-            row for row in rows["catalogue_sources"] if row["source"] == "google_books"
-        )
+        return next(row for row in rows["catalogue_sources"] if row["source"] == "google_books")
 
     def test_it_is_reported_as_not_ready_without_a_key(self, client, admin):
         row = self._google(client, admin)
         assert row["needs_a_key"] is True
         assert row["ready"] is False
 
-    def test_it_is_ready_once_the_feature_is_on_and_a_key_is_stored(
-        self, client, admin
-    ):
+    def test_it_is_ready_once_the_feature_is_on_and_a_key_is_stored(self, client, admin):
         client.put(
             "/api/settings",
             json={"google_books_enabled": True, "google_books_api_key": "a-real-key"},
@@ -1470,9 +1388,7 @@ class TestASourceThatCannotAnswerSaysSo:
         )
         assert self._google(client, admin)["ready"] is True
 
-    def test_the_stored_switch_is_shown_even_when_it_cannot_answer(
-        self, client, admin
-    ):
+    def test_the_stored_switch_is_shown_even_when_it_cannot_answer(self, client, admin):
         """An admin must see what they set, or they turn it on and watch it
         come back off. The pair is `get_raw` and `in_force`, one level up."""
         assert self._google(client, admin)["enabled"] is True
@@ -1486,18 +1402,13 @@ class TestASourceThatCannotAnswerSaysSo:
         off, and with no key stored it went anonymously rather than not at all.
         """
 
-        assert (
-            CatalogueSource.GOOGLE_BOOKS
-            not in settings_store.catalogue_sources(db).asked
-        )
+        assert CatalogueSource.GOOGLE_BOOKS not in settings_store.catalogue_sources(db).asked
 
     def test_it_is_still_in_the_stored_list_so_it_can_be_offered_back(self, db):
         from enums import CatalogueSource
 
         stored = settings_store.stored_catalogue_sources(db)
-        assert CatalogueSource.GOOGLE_BOOKS in {
-            entry.source for entry in stored.preferences
-        }
+        assert CatalogueSource.GOOGLE_BOOKS in {entry.source for entry in stored.preferences}
 
 
 class TestARouteRefusesRatherThanAnsweringNothing:
@@ -1528,8 +1439,7 @@ class TestARouteRefusesRatherThanAnsweringNothing:
             "/api/settings",
             json={
                 "catalogue_sources": [
-                    {"source": source.value, "enabled": False}
-                    for source in sources.DEFAULT_ORDER
+                    {"source": source.value, "enabled": False} for source in sources.DEFAULT_ORDER
                 ]
             },
             headers=admin["headers"],
@@ -1554,32 +1464,22 @@ class TestARouteRefusesRatherThanAnsweringNothing:
         assert "Catalogue sources" in response.json()["detail"]
 
     def test_a_title_search_is_refused(self, client, admin):
-        response = client.get(
-            "/api/books/search", params={"q": "anything"}, headers=admin["headers"]
-        )
+        response = client.get("/api/books/search", params={"q": "anything"}, headers=admin["headers"])
         assert response.status_code == 409
 
     def test_the_edition_candidates_are_refused(self, client, admin):
         book_id = self._book(client, admin)
-        response = client.get(
-            f"/api/books/{book_id}/enrich/candidates", headers=admin["headers"]
-        )
+        response = client.get(f"/api/books/{book_id}/enrich/candidates", headers=admin["headers"])
         assert response.status_code == 409
 
-    def test_enrichment_is_refused_once_rather_than_failing_halfway(
-        self, client, admin
-    ):
+    def test_enrichment_is_refused_once_rather_than_failing_halfway(self, client, admin):
         """Both halves are optional alone, so the refusal is up front."""
         book_id = self._book(client, admin)
-        response = client.post(
-            f"/api/books/{book_id}/enrich", headers=admin["headers"]
-        )
+        response = client.post(f"/api/books/{book_id}/enrich", headers=admin["headers"])
         assert response.status_code == 409
 
     def test_the_refusal_names_the_setting_rather_than_the_book(self, client, admin):
-        response = client.get(
-            "/api/books/search", params={"q": "anything"}, headers=admin["headers"]
-        )
+        response = client.get("/api/books/search", params={"q": "anything"}, headers=admin["headers"])
         detail = response.json()["detail"]
         assert "switched on" in detail
         assert "not found" not in detail.lower()
@@ -1609,9 +1509,7 @@ class TestTheLookupCacheIsDroppedByEveryWriteThatChangesWhatIsAsked:
             ("google_books_api_key", "a-new-key"),
         ],
     )
-    def test_a_write_that_changes_what_is_asked_clears_it(
-        self, client, admin, cleared, field, value
-    ):
+    def test_a_write_that_changes_what_is_asked_clears_it(self, client, admin, cleared, field, value):
         client.put("/api/settings", json={field: value}, headers=admin["headers"])
         assert cleared == [True]
 
@@ -1655,9 +1553,7 @@ class TestTheScreenStopsOfferingAKeyThereIsNowhereToPut:
 
     @staticmethod
     def _asked(client, admin) -> dict:
-        answered = client.get(
-            "/api/settings/credential-key", headers=admin["headers"]
-        )
+        answered = client.get("/api/settings/credential-key", headers=admin["headers"])
         assert answered.status_code == 200
         return answered.json()
 
@@ -1665,18 +1561,14 @@ class TestTheScreenStopsOfferingAKeyThereIsNowhereToPut:
         self, client, admin, tmp_path, monkeypatch
     ):
         monkeypatch.delenv("CREDENTIAL_ENCRYPTION_KEY", raising=False)
-        monkeypatch.setenv(
-            "CREDENTIAL_ENCRYPTION_KEY_FILE", str(tmp_path / "absent" / "key")
-        )
+        monkeypatch.setenv("CREDENTIAL_ENCRYPTION_KEY_FILE", str(tmp_path / "absent" / "key"))
 
         body = self._asked(client, admin)
 
         assert body["can_generate"] is False
         assert body["configured"] is False
 
-    def test_but_a_directory_that_exists_offers_the_button(
-        self, client, admin, tmp_path, monkeypatch
-    ):
+    def test_but_a_directory_that_exists_offers_the_button(self, client, admin, tmp_path, monkeypatch):
         """The arm that makes the one above evidence rather than a tautology."""
         monkeypatch.delenv("CREDENTIAL_ENCRYPTION_KEY", raising=False)
         monkeypatch.setenv("CREDENTIAL_ENCRYPTION_KEY_FILE", str(tmp_path / "key"))
@@ -1698,9 +1590,7 @@ class TestTheKeyRoutesReportAboutTheKeyAndNeverTheKey:
         assert len(body["phrase"].split()) == 24
 
     def test_and_then_reports_where_it_lives_without_showing_it(self, client, admin):
-        phrase = client.post(
-            "/api/settings/credential-key", headers=admin["headers"]
-        ).json()["phrase"]
+        phrase = client.post("/api/settings/credential-key", headers=admin["headers"]).json()["phrase"]
         body = client.get("/api/settings/credential-key", headers=admin["headers"]).json()
         assert body["configured"] is True
         assert body["location"] == "file"
@@ -1713,9 +1603,7 @@ class TestTheKeyRoutesReportAboutTheKeyAndNeverTheKey:
         assert response.status_code == 409
 
     def test_a_phrase_can_be_typed_back_in(self, client, admin):
-        phrase = client.post(
-            "/api/settings/credential-key", headers=admin["headers"]
-        ).json()["phrase"]
+        phrase = client.post("/api/settings/credential-key", headers=admin["headers"]).json()["phrase"]
         credentials.key_file().unlink()
         response = client.put(
             "/api/settings/credential-key",
@@ -1776,9 +1664,7 @@ class TestTheKeyRoutesReportAboutTheKeyAndNeverTheKey:
             json={"username": "alice", "password": "hunter2"},
             headers=admin["headers"],
         )
-        body = client.delete(
-            "/api/settings/credential-key", headers=admin["headers"]
-        ).json()
+        body = client.delete("/api/settings/credential-key", headers=admin["headers"]).json()
         assert body["unreadable_sources"] == ["bne"]
 
     def test_a_new_key_is_refused_while_sealed_logins_are_stranded(self, client, admin):
@@ -1802,13 +1688,8 @@ class TestTheKeyRoutesReportAboutTheKeyAndNeverTheKey:
             headers=admin["headers"],
         )
         client.delete("/api/settings/credential-key", headers=admin["headers"])
-        client.delete(
-            "/api/settings/catalogue-sources/bne/credential", headers=admin["headers"]
-        )
-        assert (
-            client.post("/api/settings/credential-key", headers=admin["headers"]).status_code
-            == 200
-        )
+        client.delete("/api/settings/catalogue-sources/bne/credential", headers=admin["headers"])
+        assert client.post("/api/settings/credential-key", headers=admin["headers"]).status_code == 200
 
     def test_discarding_the_key_is_admin_only(self, client, member):
         response = client.delete("/api/settings/credential-key", headers=member["headers"])
@@ -1817,9 +1698,7 @@ class TestTheKeyRoutesReportAboutTheKeyAndNeverTheKey:
     def test_and_needs_a_session(self, client):
         assert client.delete("/api/settings/credential-key").status_code == 401
 
-    def test_a_configuration_problem_is_reported_rather_than_500ing(
-        self, client, admin, monkeypatch
-    ):
+    def test_a_configuration_problem_is_reported_rather_than_500ing(self, client, admin, monkeypatch):
         client.post("/api/settings/credential-key", headers=admin["headers"])
         monkeypatch.setenv("CREDENTIAL_ENCRYPTION_KEY", credentials.generate_phrase())
         body = client.get("/api/settings/credential-key", headers=admin["headers"]).json()
@@ -1886,9 +1765,7 @@ class TestACredentialIsStoredSealedAndShownMasked:
         return admin
 
     def _row(self, body, source):
-        return next(
-            entry for entry in body["catalogue_sources"] if entry["source"] == source
-        )
+        return next(entry for entry in body["catalogue_sources"] if entry["source"] == source)
 
     def test_a_roster_row_starts_with_none(self, client, admin):
         body = client.get("/api/settings", headers=admin["headers"]).json()
@@ -1926,9 +1803,7 @@ class TestACredentialIsStoredSealedAndShownMasked:
         assert response.status_code == 409
         assert "CREDENTIAL_ENCRYPTION_KEY" in response.json()["detail"]
 
-    def test_a_mistyped_key_in_the_environment_is_refused_naming_it(
-        self, client, admin, monkeypatch
-    ):
+    def test_a_mistyped_key_in_the_environment_is_refused_naming_it(self, client, admin, monkeypatch):
         """`is_from_env` reads the source's own variable, not the key, so a key
         that is not a phrase reaches `put` and is refused there."""
         monkeypatch.setenv("CREDENTIAL_ENCRYPTION_KEY", "not a recovery phrase")
@@ -1975,9 +1850,7 @@ class TestACredentialIsStoredSealedAndShownMasked:
         assert self._row(body, "bne")["credential_provenance"] == "none"
 
     def test_removing_one_that_is_not_there_is_not_an_error(self, client, keyed):
-        response = client.delete(
-            "/api/settings/catalogue-sources/bne/credential", headers=keyed["headers"]
-        )
+        response = client.delete("/api/settings/catalogue-sources/bne/credential", headers=keyed["headers"])
         assert response.status_code == 200
 
     def test_a_username_with_a_colon_is_a_422(self, client, keyed):
@@ -1998,9 +1871,7 @@ class TestACredentialIsStoredSealedAndShownMasked:
         assert "hunter2" not in response.text
         assert "alice:smith" not in response.text
 
-    def test_a_pinned_variable_that_is_not_a_credential_is_shown_as_broken(
-        self, client, keyed, monkeypatch
-    ):
+    def test_a_pinned_variable_that_is_not_a_credential_is_shown_as_broken(self, client, keyed, monkeypatch):
         """Ignoring it offered an edit while the stored login was used instead."""
         monkeypatch.setenv("CATALOGUE_CREDENTIAL_BNE", "bob")
         body = client.get("/api/settings", headers=keyed["headers"]).json()
@@ -2008,9 +1879,7 @@ class TestACredentialIsStoredSealedAndShownMasked:
         assert row["credential_provenance"] == "env"
         assert row["credential_unreadable"] is True
 
-    def test_a_stored_login_for_a_source_the_roster_lost_can_still_be_removed(
-        self, client, keyed, db
-    ):
+    def test_a_stored_login_for_a_source_the_roster_lost_can_still_be_removed(self, client, keyed, db):
         """No foreign key, on purpose, so an orphan must be removable."""
         credentials.put(
             db,
@@ -2034,9 +1903,7 @@ class TestACredentialIsStoredSealedAndShownMasked:
         )
         assert response.status_code == 404
 
-    def test_a_pinned_credential_refuses_the_write_and_names_the_variable(
-        self, client, keyed, monkeypatch
-    ):
+    def test_a_pinned_credential_refuses_the_write_and_names_the_variable(self, client, keyed, monkeypatch):
         monkeypatch.setenv("CATALOGUE_CREDENTIAL_BNE", "bob:correcthorse")
         response = client.put(
             "/api/settings/catalogue-sources/bne/credential",
@@ -2063,9 +1930,7 @@ class TestACredentialIsStoredSealedAndShownMasked:
         assert row["credential_provenance"] == "shipped"
         assert row["credential_unreadable"] is False
 
-    def test_a_shipped_login_makes_its_source_ready_without_anybody_typing(
-        self, client, admin
-    ):
+    def test_a_shipped_login_makes_its_source_ready_without_anybody_typing(self, client, admin):
         body = client.get("/api/settings", headers=admin["headers"]).json()
         row = self._row(body, "bna")
         assert (row["needs_a_key"], row["has_key"], row["ready"]) == (True, True, True)
@@ -2093,9 +1958,7 @@ class TestACredentialIsStoredSealedAndShownMasked:
         assert row["credential_provenance"] == "shipped"
         assert row["ready"] is True
 
-    def test_a_pinned_variable_still_wins_over_the_shipped_one(
-        self, client, admin, monkeypatch
-    ):
+    def test_a_pinned_variable_still_wins_over_the_shipped_one(self, client, admin, monkeypatch):
         monkeypatch.setenv("CATALOGUE_CREDENTIAL_BNA", "bob:correcthorse")
         body = client.get("/api/settings", headers=admin["headers"]).json()
         assert self._row(body, "bna")["credential_provenance"] == "env"
@@ -2118,9 +1981,7 @@ class TestACredentialIsStoredSealedAndShownMasked:
         assert response.status_code == 403
 
     def test_the_delete_is_admin_only(self, client, member):
-        response = client.delete(
-            "/api/settings/catalogue-sources/bne/credential", headers=member["headers"]
-        )
+        response = client.delete("/api/settings/catalogue-sources/bne/credential", headers=member["headers"])
         assert response.status_code == 403
 
     def test_neither_is_reachable_without_a_session(self, client):
@@ -2131,10 +1992,7 @@ class TestACredentialIsStoredSealedAndShownMasked:
             ).status_code
             == 401
         )
-        assert (
-            client.delete("/api/settings/catalogue-sources/bne/credential").status_code
-            == 401
-        )
+        assert client.delete("/api/settings/catalogue-sources/bne/credential").status_code == 401
 
 
 class TestNoCredentialReachesTheUnauthenticatedFlags:
@@ -2174,9 +2032,7 @@ class TestASealedRowUnderAPinnedSourceIsNotADeadEnd:
         assert response.status_code == 409
         assert "bne" in response.json()["detail"]
 
-    def test_and_can_be_removed_so_the_key_can_be_made(
-        self, client, admin, db, monkeypatch
-    ):
+    def test_and_can_be_removed_so_the_key_can_be_made(self, client, admin, db, monkeypatch):
         client.post("/api/settings/credential-key", headers=admin["headers"])
         client.put(
             "/api/settings/catalogue-sources/bne/credential",
@@ -2186,23 +2042,12 @@ class TestASealedRowUnderAPinnedSourceIsNotADeadEnd:
         client.delete("/api/settings/credential-key", headers=admin["headers"])
         monkeypatch.setenv("CATALOGUE_CREDENTIAL_BNE", "bob:correcthorse")
 
-        removed = client.delete(
-            "/api/settings/catalogue-sources/bne/credential", headers=admin["headers"]
-        )
+        removed = client.delete("/api/settings/catalogue-sources/bne/credential", headers=admin["headers"])
         assert removed.status_code == 200
-        assert (
-            client.post(
-                "/api/settings/credential-key", headers=admin["headers"]
-            ).status_code
-            == 200
-        )
+        assert client.post("/api/settings/credential-key", headers=admin["headers"]).status_code == 200
 
-    def test_with_nothing_stored_the_pinned_refusal_is_honest_again(
-        self, client, admin, monkeypatch
-    ):
+    def test_with_nothing_stored_the_pinned_refusal_is_honest_again(self, client, admin, monkeypatch):
         monkeypatch.setenv("CATALOGUE_CREDENTIAL_BNE", "bob:correcthorse")
-        response = client.delete(
-            "/api/settings/catalogue-sources/bne/credential", headers=admin["headers"]
-        )
+        response = client.delete("/api/settings/catalogue-sources/bne/credential", headers=admin["headers"])
         assert response.status_code == 409
         assert "CATALOGUE_CREDENTIAL_BNE" in response.json()["detail"]

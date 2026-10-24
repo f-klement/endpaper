@@ -22,6 +22,10 @@ from enums import AuthorityScheme, ClassificationScheme, HeadingKind
 from marc_fields import Fields
 from tests.corpus import BACKEND, application_modules
 
+TREE_GUARDS = {
+    "TestTheNamespaceIsDefinedOnce": ("application_modules",),
+}
+
 
 def _marc_element(datafields: str) -> ElementTree.Element:
     """One MARC record element, built from the datafields a test cares about.
@@ -30,10 +34,7 @@ def _marc_element(datafields: str) -> ElementTree.Element:
     test a source profile. Three lines in two files beats a shared helper two
     files import for two different reasons.
     """
-    return ElementTree.fromstring(
-        '<record xmlns="http://www.loc.gov/MARC21/slim">'
-        f"{datafields}</record>"
-    )
+    return ElementTree.fromstring(f'<record xmlns="http://www.loc.gov/MARC21/slim">{datafields}</record>')
 
 
 class TestTheNamespaceIsDefinedOnce:
@@ -69,9 +70,7 @@ class TestTheNamespaceIsDefinedOnce:
 
     def test_a_record_written_by_this_app_is_found_by_that_tag(self):
         """The property the two constants exist for, run rather than asserted."""
-        written = ElementTree.fromstring(
-            f'<collection xmlns="{marc.NAMESPACE}"><record/></collection>'
-        )
+        written = ElementTree.fromstring(f'<collection xmlns="{marc.NAMESPACE}"><record/></collection>')
 
         assert list(written.iter(marc_fields.RECORD_TAG)) != []
 
@@ -86,10 +85,7 @@ class TestFieldsCarriesTheRecordItParsed:
     """
 
     LEADER = "<leader>01533ngm a2200505 c 4500</leader>"
-    EXTENT = (
-        '<datafield tag="300" ind1=" " ind2=" ">'
-        '<subfield code="a">300 Seiten</subfield></datafield>'
-    )
+    EXTENT = '<datafield tag="300" ind1=" " ind2=" "><subfield code="a">300 Seiten</subfield></datafield>'
 
     def test_the_carrier_codes_come_from_the_node_the_fields_were_built_from(self):
         """`ngm` at leader/06 is a projected medium, and the extent says paper.
@@ -98,8 +94,7 @@ class TestFieldsCarriesTheRecordItParsed:
         off its own node rather than off the fields it was handed.
         """
         record = ElementTree.fromstring(
-            '<record xmlns="http://www.loc.gov/MARC21/slim">'
-            f"{self.LEADER}{self.EXTENT}</record>"
+            f'<record xmlns="http://www.loc.gov/MARC21/slim">{self.LEADER}{self.EXTENT}</record>'
         )
 
         assert Fields(record).describes_a_book("Ein Film") is False
@@ -108,7 +103,7 @@ class TestFieldsCarriesTheRecordItParsed:
         """The other half of the diagonal: the extent is doing no work above."""
         record = ElementTree.fromstring(
             '<record xmlns="http://www.loc.gov/MARC21/slim">'
-            f'<leader>01533nam a2200505 c 4500</leader>{self.EXTENT}</record>'
+            f"<leader>01533nam a2200505 c 4500</leader>{self.EXTENT}</record>"
         )
 
         assert Fields(record).describes_a_book("Ein Buch") is True
@@ -125,12 +120,14 @@ class TestTheTitleFieldIsPickedInOnePlace:
 
     def test_the_first_245_is_the_one_read(self):
         """MARC allows one `245` and real files carry two."""
-        fields = Fields(_marc_element(
-            '<datafield tag="245" ind1="1" ind2="0">'
-            '<subfield code="a">First</subfield></datafield>'
-            '<datafield tag="245" ind1="1" ind2="0">'
-            '<subfield code="a">Second</subfield></datafield>'
-        ))
+        fields = Fields(
+            _marc_element(
+                '<datafield tag="245" ind1="1" ind2="0">'
+                '<subfield code="a">First</subfield></datafield>'
+                '<datafield tag="245" ind1="1" ind2="0">'
+                '<subfield code="a">Second</subfield></datafield>'
+            )
+        )
 
         assert fields.title_statement()[0] == "First"
 
@@ -171,20 +168,24 @@ class TestMarcSubfields:
 
     def test_a_repeated_subfield_keeps_every_value(self):
         """082 holds `$a=830 $a=B`, and the letter is not a Dewey number."""
-        fields = Fields(_marc_element('''
+        fields = Fields(
+            _marc_element("""
           <datafield tag="082" ind1="7" ind2="4">
            <subfield code="a">830</subfield><subfield code="a">B</subfield>
-          </datafield>'''))
+          </datafield>""")
+        )
         assert fields.get("082")[0].all("a") == ["830", "B"]
 
     def test_indexing_a_repeated_subfield_gives_the_first_value(self):
         """`$0` arrives as the GND number, then two URIs for the same thing."""
-        fields = Fields(_marc_element('''
+        fields = Fields(
+            _marc_element("""
           <datafield tag="100" ind1="1" ind2=" ">
            <subfield code="0">(DE-588)118181505</subfield>
            <subfield code="0">https://d-nb.info/gnd/118181505</subfield>
            <subfield code="a">Capus, Alex</subfield>
-          </datafield>'''))
+          </datafield>""")
+        )
         assert fields.get("100")[0]["0"] == "(DE-588)118181505"
 
     def test_the_non_sorting_delimiters_are_stripped(self):
@@ -192,21 +193,25 @@ class TestMarcSubfields:
 
         They are invisible in a terminal, and 28 of 85 live records hold one.
         """
-        fields = Fields(_marc_element(
-            '<datafield tag="245" ind1="1" ind2="0">'
-            '<subfield code="a">\x98Die\x9c Deutschen</subfield></datafield>'
-        ))
+        fields = Fields(
+            _marc_element(
+                '<datafield tag="245" ind1="1" ind2="0">'
+                '<subfield code="a">\x98Die\x9c Deutschen</subfield></datafield>'
+            )
+        )
         assert fields.get("245")[0]["a"] == "Die Deutschen"
 
     def test_padding_inside_a_subfield_is_collapsed(self):
         """MARC pads subfields. `245 $a` on the live record 9783446249974 reads
         `Reisen im  Licht der Sterne`, where that record's own `776 $t` spells
         it with one space."""
-        fields = Fields(_marc_element(
-            '<datafield tag="245" ind1="1" ind2="0">'
-            '<subfield code="a">Reisen im  Licht der Sterne</subfield>'
-            "</datafield>"
-        ))
+        fields = Fields(
+            _marc_element(
+                '<datafield tag="245" ind1="1" ind2="0">'
+                '<subfield code="a">Reisen im  Licht der Sterne</subfield>'
+                "</datafield>"
+            )
+        )
         assert fields.get("245")[0]["a"] == "Reisen im Licht der Sterne"
 
     def test_decomposed_text_is_normalised(self):
@@ -214,10 +219,12 @@ class TestMarcSubfields:
 
         Two spellings of one author is enough to store the same person twice.
         """
-        fields = Fields(_marc_element(
-            '<datafield tag="100" ind1="1" ind2=" ">'
-            '<subfield code="a">Mu\u0308ller, Hans</subfield></datafield>'
-        ))
+        fields = Fields(
+            _marc_element(
+                '<datafield tag="100" ind1="1" ind2=" ">'
+                '<subfield code="a">Mu\u0308ller, Hans</subfield></datafield>'
+            )
+        )
         assert fields.get("100")[0]["a"] == "M\u00fcller, Hans"
 
 
@@ -242,11 +249,7 @@ class TestTheVocabularyDecidesWhatAHeadingAsserts:
             '<subfield code="a">CD-ROM</subfield>'
             '<subfield code="0">(DE-588)4139307-7</subfield>'
             '<subfield code="2">gnd-carrier</subfield></datafield>'
-        ) == [
-            Heading(
-                ClassificationScheme.GND, "4139307-7", "CD-ROM", HeadingKind.CARRIER
-            )
-        ]
+        ) == [Heading(ClassificationScheme.GND, "4139307-7", "CD-ROM", HeadingKind.CARRIER)]
 
     def test_a_content_type_is_kept_rather_than_refused(self):
         """The reason the fix is not a filter on the vocabulary code. Refusing
@@ -297,16 +300,16 @@ class TestASubfieldReaderIsNotTwoReaders:
     """The two `$0` questions, which look like one rule and are not."""
 
     def test_the_vocabulary_reader_answers_none_where_there_is_no_dollar_two(self):
-        entry = Fields(_marc_element(
-            '<datafield tag="650"><subfield code="a">X</subfield></datafield>'
-        )).get("650")[0]
+        entry = Fields(_marc_element('<datafield tag="650"><subfield code="a">X</subfield></datafield>')).get(
+            "650"
+        )[0]
 
         assert entry.subject_vocabulary("650") is None
 
     def test_the_identifier_reader_answers_none_where_there_is_no_dollar_zero(self):
-        entry = Fields(_marc_element(
-            '<datafield tag="650"><subfield code="a">X</subfield></datafield>'
-        )).get("650")[0]
+        entry = Fields(_marc_element('<datafield tag="650"><subfield code="a">X</subfield></datafield>')).get(
+            "650"
+        )[0]
 
         assert entry.subject_identifier() is None
 
@@ -316,12 +319,14 @@ class TestASubfieldReaderIsNotTwoReaders:
         with, so it looks at one. A field written in the other order separates
         them, and no live catalogue writes that order: this pins the difference
         rather than the data."""
-        entry = Fields(_marc_element(
-            '<datafield tag="650" ind1=" " ind2="7">'
-            '<subfield code="0">(DE-101)1010836315</subfield>'
-            '<subfield code="0">(DE-588)4026894-9</subfield>'
-            '<subfield code="a">Informatik</subfield></datafield>'
-        )).get("650")[0]
+        entry = Fields(
+            _marc_element(
+                '<datafield tag="650" ind1=" " ind2="7">'
+                '<subfield code="0">(DE-101)1010836315</subfield>'
+                '<subfield code="0">(DE-588)4026894-9</subfield>'
+                '<subfield code="a">Informatik</subfield></datafield>'
+            )
+        ).get("650")[0]
 
         assert entry.gnd_identifier() == "4026894-9"
         assert entry.subject_identifier() == "(DE-101)1010836315"
@@ -358,8 +363,7 @@ class TestTheAuthorsAuthorityIdentifier:
         """21 of 73 live 100 fields carry no `(DE-588)` at all, measured over 85
         records on 2026-08-24. Ordinary, not broken."""
         fields = self._fields(
-            '<datafield tag="100" ind1="1" ind2=" ">'
-            '<subfield code="a">Kane, Sean P.</subfield></datafield>'
+            '<datafield tag="100" ind1="1" ind2=" "><subfield code="a">Kane, Sean P.</subfield></datafield>'
         )
 
         assert fields.author_identifiers() == []
@@ -389,9 +393,7 @@ class TestTheAuthorsAuthorityIdentifier:
             '<subfield code="4">trl</subfield></datafield>',
         )
 
-        assert [row.identifier for row in fields.author_identifiers()] == [
-            "1042243212"
-        ]
+        assert [row.identifier for row in fields.author_identifiers()] == ["1042243212"]
 
     def test_an_added_entry_for_a_work_is_not_a_person_here(self):
         """`$t` links the original title, and the name beside it is that work's
@@ -405,9 +407,7 @@ class TestTheAuthorsAuthorityIdentifier:
             '<subfield code="4">aut</subfield></datafield>',
         )
 
-        assert [row.identifier for row in fields.author_identifiers()] == [
-            "1042243212"
-        ]
+        assert [row.identifier for row in fields.author_identifiers()] == ["1042243212"]
 
     def test_every_identifier_is_filed_under_a_name_in_the_credit_line(self):
         """The property `Fields._author_entries` exists to make structural.
@@ -476,17 +476,13 @@ class TestWhichAddedEntryWroteTheBook:
     def _fields(*datafields: str):
         return Fields(_marc_element("".join(datafields)))
 
-    MAIN = (
-        '<datafield tag="100" ind1="1" ind2=" ">'
-        '<subfield code="a">Ferrante, Elena</subfield></datafield>'
-    )
+    MAIN = '<datafield tag="100" ind1="1" ind2=" "><subfield code="a">Ferrante, Elena</subfield></datafield>'
 
     @staticmethod
     def _added(name: str, *relators: str) -> str:
         roles = "".join(f'<subfield code="4">{value}</subfield>' for value in relators)
         return (
-            '<datafield tag="700" ind1="1" ind2=" ">'
-            f'<subfield code="a">{name}</subfield>{roles}</datafield>'
+            f'<datafield tag="700" ind1="1" ind2=" "><subfield code="a">{name}</subfield>{roles}</datafield>'
         )
 
     def test_a_700_stating_no_role_stays_out_of_the_credit_line(self):
@@ -527,8 +523,7 @@ class TestWhichAddedEntryWroteTheBook:
         """`flip_catalogue_name(", 1901-1990")` is the empty string, so the raw
         `$a` is not blank and the flipped one is."""
         fields = self._fields(
-            '<datafield tag="100" ind1="1" ind2=" ">'
-            '<subfield code="a">, 1901-1990</subfield></datafield>',
+            '<datafield tag="100" ind1="1" ind2=" "><subfield code="a">, 1901-1990</subfield></datafield>',
             self._added("Goldstein, Ann", "aut"),
         )
 
@@ -554,7 +549,7 @@ class TestTheComponentPartRefusal:
     """
 
     @pytest.mark.parametrize(
-        ('leader', 'expected'),
+        ("leader", "expected"),
         [
             ("00733naa a2200229zc 4500", True),
             ("00733nab a2200229zc 4500", True),
@@ -568,8 +563,7 @@ class TestTheComponentPartRefusal:
     )
     def test_the_bibliographic_level_decides(self, leader, expected):
         record = ElementTree.fromstring(
-            '<record xmlns="http://www.loc.gov/MARC21/slim">'
-            f"<leader>{leader}</leader></record>"
+            f'<record xmlns="http://www.loc.gov/MARC21/slim"><leader>{leader}</leader></record>'
         )
         assert marc_fields.is_component_part(record) is expected
 
@@ -583,12 +577,10 @@ def _carrier_record(leader: str = "01533nam a2200505 c 4500", **fields: str) -> 
     size cap fixture. The suite caught it; nothing else would have.
     """
     controls = "".join(
-        f'<controlfield tag="{tag[:3]}">{value}</controlfield>'
-        for tag, value in fields.items()
+        f'<controlfield tag="{tag[:3]}">{value}</controlfield>' for tag, value in fields.items()
     )
     return ElementTree.fromstring(
-        '<record xmlns="http://www.loc.gov/MARC21/slim">'
-        f"<leader>{leader}</leader>{controls}</record>"
+        f'<record xmlns="http://www.loc.gov/MARC21/slim"><leader>{leader}</leader>{controls}</record>'
     )
 
 
@@ -648,7 +640,7 @@ class TestTheCarrierDecides:
     """
 
     @pytest.mark.parametrize(
-        ('leader', 'controls', 'expected'),
+        ("leader", "controls", "expected"),
         [
             # An online resource: one electronic carrier and nothing else.
             ("01533nam a2200505 c 4500", {"007": "cr#|||||||||||"}, False),
@@ -742,12 +734,11 @@ class TestTheCarrierDecides:
 
 def _isbn_fields(*entries: str) -> Fields:
     """A record carrying one `020` per argument, each written as raw subfields."""
-    return Fields(_marc_element(
-        "".join(
-            f'<datafield tag="020" ind1=" " ind2=" ">{entry}</datafield>'
-            for entry in entries
+    return Fields(
+        _marc_element(
+            "".join(f'<datafield tag="020" ind1=" " ind2=" ">{entry}</datafield>' for entry in entries)
         )
-    ))
+    )
 
 
 def _a(value: str) -> str:
@@ -790,9 +781,7 @@ class TestAnInlineQualifierIsAQualifier:
     def test_several_qualifiers_in_one_parenthesis_are_one_qualifier(self):
         """`0877547637 (pbk. : alk. paper)` is the Library of Congress form.
         Two qualifiers, one parenthesis, and the rule counts parentheses."""
-        assert _isbn_fields(_a("0877547637 (pbk. : alk. paper)")).isbn() == (
-            "9780877547631"
-        )
+        assert _isbn_fields(_a("0877547637 (pbk. : alk. paper)")).isbn() == ("9780877547631")
 
     def test_a_qualifier_the_normaliser_deletes_is_qualification_too(self):
         """The half `isbn.parse` answered by alphabet rather than by rule.
@@ -893,9 +882,7 @@ class TestAnInlineQualifierIsAQualifier:
         ["[{}]", "\uff08{}\uff09", "\u3010{}\u3011"],
         ids=["square", "full-width-round", "lenticular"],
     )
-    def test_a_qualifier_in_a_bracket_the_rule_does_not_open_still_qualifies(
-        self, bracket
-    ):
+    def test_a_qualifier_in_a_bracket_the_rule_does_not_open_still_qualifies(self, bracket):
         """The residue decides, not the bracket.
 
         `normalise` deletes the qualifier's characters and leaves a number that
@@ -926,12 +913,8 @@ class TestAnInlineQualifierIsAQualifier:
         the cut, and that is a worse answer than the rest of this rule gives.
         """
         assert _isbn_fields(_a("(9783161484100)")).isbn() == "9783161484100"
-        assert _isbn_fields(
-            _a("(9780441013593)"), _a("9783446249974")
-        ).isbn() == "9783446249974"
-        assert _isbn_fields(
-            _a("(9780441013593)"), _a("9783446249974 (pbk.)")
-        ).isbn() == "9780441013593"
+        assert _isbn_fields(_a("(9780441013593)"), _a("9783446249974")).isbn() == "9783446249974"
+        assert _isbn_fields(_a("(9780441013593)"), _a("9783446249974 (pbk.)")).isbn() == "9780441013593"
 
     def test_an_unbalanced_parenthesis_still_qualifies_and_still_reads(self):
         """A truncated subfield is a real thing a file carries, and the rule
@@ -979,9 +962,11 @@ class TestWhatTheInlineQualifierRuleDeliberatelyDoesNotReach:
     def test_a_parenthesis_in_another_field_carries_content(self):
         """`300 $a` is where the same shape holds the page count, so a cut
         applied to every subfield would leave `pages_from_extent` nothing."""
-        fields = Fields(_marc_element(
-            '<datafield tag="300" ind1=" " ind2=" ">'
-            '<subfield code="a">1 Online-Ressource (240 Seiten)</subfield>'
-            "</datafield>"
-        ))
+        fields = Fields(
+            _marc_element(
+                '<datafield tag="300" ind1=" " ind2=" ">'
+                '<subfield code="a">1 Online-Ressource (240 Seiten)</subfield>'
+                "</datafield>"
+            )
+        )
         assert fields.extent() == "1 Online-Ressource (240 Seiten)"

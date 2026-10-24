@@ -268,8 +268,7 @@ class Reading:
         catalogue as it goes, so loading per row would be one SELECT per line.
         """
         rows = {
-            row.book_id: row
-            for row in self._db.query(UserBook).filter(UserBook.user_id == self._member_id)
+            row.book_id: row for row in self._db.query(UserBook).filter(UserBook.user_id == self._member_id)
         }
         return Records(self._db, self._member_id, rows, None)
 
@@ -538,9 +537,7 @@ def resolve_merge(db: Session, keeper_id: int, loser_ids: Collection[int]) -> No
     ids = frozenset(loser_ids)
     if not ids:
         return
-    on_keeper = {
-        row.user_id for row in db.query(UserBook).filter(UserBook.book_id == keeper_id)
-    }
+    on_keeper = {row.user_id for row in db.query(UserBook).filter(UserBook.book_id == keeper_id)}
     for row in db.query(UserBook).filter(UserBook.book_id.in_(ids)).all():
         if row.user_id in on_keeper:
             db.delete(row)

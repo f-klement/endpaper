@@ -64,7 +64,8 @@ has one. These two were 102 and 30 out against the tree they described.
 | `uv run pytest -m property` | Only the tests whose inputs hypothesis generates |
 | `uv run pytest --hypothesis-profile thorough` | The same properties at ten times the examples |
 | `uv run mypy .` | Type check, strict |
-| `uv run ruff check .` | Backend lint. There is no formatter step: nothing here configures or runs `ruff format` |
+| `uv run ruff check .` | Backend lint |
+| `uv run ruff format --check --config pyproject.toml .` | Backend formatting, as `test:backend` runs it; drop `--check` to apply it |
 | `bun run test:watch` | Re-run on change |
 | `bun run test:coverage` | Frontend coverage |
 | `bun run typecheck` | `tsc --noEmit`, includes the test tree |
@@ -73,8 +74,8 @@ Neither suite touches the network. Both are safe to run alongside a live dev ser
 
 **A command these documents offer is checked against the project.** Offered means written
 in code, inline or fenced, headed by `uv`, `bun`, `uvx` or `bunx`. That prefix is what
-separates an instruction to run something from the row above, which names `ruff format` as
-the thing nothing here runs and has to stay writable. A `bun run` script has to be one
+separates an instruction to run something from a sentence naming a tool, which has to stay
+writable. A `bun run` script has to be one
 `frontend/package.json` declares. A program under `uv run` has to be one
 `backend/pyproject.toml` declares or one this repository invokes, and a verb after it,
 `check` in `ruff check`, has to appear in a command this repository runs. A command

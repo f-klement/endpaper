@@ -46,8 +46,7 @@ def run_migrations_offline() -> None:
     could render, is refused as well.
     """
     raise CommandError(
-        "This migration chain cannot be rendered offline; "
-        "run it against the database instead of with --sql."
+        "This migration chain cannot be rendered offline; run it against the database instead of with --sql."
     )
 
 

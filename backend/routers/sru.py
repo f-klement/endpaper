@@ -75,9 +75,7 @@ DATABASE: Final = "sru"
 #: The port is bounded to five digits by the pattern, so the `int()` below
 #: cannot be handed a number to parse, and range checked after it, because
 #: `65536` is five digits and is not a port.
-_HOST_HEADER: Final = re.compile(
-    r"(?P<host>[A-Za-z0-9.\-]{1,253})(?::(?P<port>[0-9]{1,5}))?"
-)
+_HOST_HEADER: Final = re.compile(r"(?P<host>[A-Za-z0-9.\-]{1,253})(?::(?P<port>[0-9]{1,5}))?")
 
 #: What `<host>` says when the request carries no host this server will echo.
 _FALLBACK_HOST: Final = "localhost"

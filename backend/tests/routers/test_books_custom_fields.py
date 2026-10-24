@@ -45,9 +45,7 @@ def _set(client, headers, book_id, field_id, value):
 
 
 class TestDefiningAFieldForTheLibrary:
-    def test_a_field_appears_on_every_book_as_available(
-        self, client, admin, make_book, text_field
-    ):
+    def test_a_field_appears_on_every_book_as_available(self, client, admin, make_book, text_field):
         first = make_book(admin["headers"], title="One")
         second = make_book(admin["headers"], title="Two")
 
@@ -55,9 +53,7 @@ class TestDefiningAFieldForTheLibrary:
 
         assert [field["name"] for field in listed] == ["Bought from"]
         for book in (first, second):
-            filled = client.get(
-                f"/api/books/{book['id']}/custom-fields", headers=admin["headers"]
-            )
+            filled = client.get(f"/api/books/{book['id']}/custom-fields", headers=admin["headers"])
             assert filled.json() == []
 
     def test_any_member_may_define_one(self, client, member, text_field):
@@ -81,9 +77,7 @@ class TestDefiningAFieldForTheLibrary:
         assert res.json()["kind"] == "text"
 
     def test_a_blank_name_is_refused(self, client, admin):
-        res = client.post(
-            "/api/books/custom-fields", json={"name": "   "}, headers=admin["headers"]
-        )
+        res = client.post("/api/books/custom-fields", json={"name": "   "}, headers=admin["headers"])
 
         assert res.status_code == 422
 
@@ -117,9 +111,7 @@ class TestDefiningAFieldForTheLibrary:
 
 
 class TestFillingItInOnOneBook:
-    def test_the_value_lives_with_the_book_it_describes(
-        self, client, admin, make_book, text_field
-    ):
+    def test_the_value_lives_with_the_book_it_describes(self, client, admin, make_book, text_field):
         book = make_book(admin["headers"])
 
         res = _set(client, admin["headers"], book["id"], text_field["id"], "Oxfam")
@@ -135,22 +127,16 @@ class TestFillingItInOnOneBook:
             }
         ]
 
-    def test_a_value_set_on_one_book_is_not_on_another(
-        self, client, admin, make_book, text_field
-    ):
+    def test_a_value_set_on_one_book_is_not_on_another(self, client, admin, make_book, text_field):
         first = make_book(admin["headers"], title="One")
         second = make_book(admin["headers"], title="Two")
         _set(client, admin["headers"], first["id"], text_field["id"], "Oxfam")
 
-        res = client.get(
-            f"/api/books/{second['id']}/custom-fields", headers=admin["headers"]
-        )
+        res = client.get(f"/api/books/{second['id']}/custom-fields", headers=admin["headers"])
 
         assert res.json() == []
 
-    def test_a_book_with_no_value_shows_nothing(
-        self, client, admin, make_book, text_field, link_field
-    ):
+    def test_a_book_with_no_value_shows_nothing(self, client, admin, make_book, text_field, link_field):
         book = make_book(admin["headers"])
         _set(client, admin["headers"], book["id"], text_field["id"], "Oxfam")
 
@@ -178,9 +164,7 @@ class TestFillingItInOnOneBook:
 
         assert _set(client, admin["headers"], book["id"], 9999, "x").status_code == 404
 
-    def test_a_field_id_past_the_databases_range_is_refused(
-        self, client, admin, make_book
-    ):
+    def test_a_field_id_past_the_databases_range_is_refused(self, client, admin, make_book):
         book = make_book(admin["headers"])
 
         res = _set(client, admin["headers"], book["id"], 2**63, "x")
@@ -257,17 +241,13 @@ class TestAUrlRendersAsALink:
             "a percent encoded fullwidth stop",
         ],
     )
-    def test_a_url_field_refuses_what_is_not_a_web_address(
-        self, client, admin, make_book, link_field, value
-    ):
+    def test_a_url_field_refuses_what_is_not_a_web_address(self, client, admin, make_book, link_field, value):
         book = make_book(admin["headers"])
 
         res = _set(client, admin["headers"], book["id"], link_field["id"], value)
 
         assert res.status_code == 400, res.text
-        assert client.get(
-            f"/api/books/{book['id']}/custom-fields", headers=admin["headers"]
-        ).json() == []
+        assert client.get(f"/api/books/{book['id']}/custom-fields", headers=admin["headers"]).json() == []
 
 
 class TestATabIsDroppedRatherThanCollapsed:
@@ -284,9 +264,7 @@ class TestATabIsDroppedRatherThanCollapsed:
     the member typed a good URL with an invisible character in it.
     """
 
-    def test_the_tab_vanishes_and_the_link_works(
-        self, client, admin, make_book, link_field
-    ):
+    def test_the_tab_vanishes_and_the_link_works(self, client, admin, make_book, link_field):
         book = make_book(admin["headers"])
 
         res = _set(
@@ -312,9 +290,7 @@ class TestAHostABrowserReadsDifferently:
     next reader sees.
     """
 
-    def test_the_stored_value_names_the_host_that_will_be_reached(
-        self, client, admin, make_book, link_field
-    ):
+    def test_the_stored_value_names_the_host_that_will_be_reached(self, client, admin, make_book, link_field):
         book = make_book(admin["headers"])
 
         res = _set(
@@ -343,19 +319,13 @@ class TestAHostABrowserReadsDifferently:
             "https://calibre.example\uff61evil.example/x",
         )
 
-        again = client.get(
-            f"/api/books/{book['id']}/custom-fields", headers=admin["headers"]
-        )
+        again = client.get(f"/api/books/{book['id']}/custom-fields", headers=admin["headers"])
 
-        assert [row["href"] for row in again.json()] == [
-            "https://calibre.example.evil.example/x"
-        ]
+        assert [row["href"] for row in again.json()] == ["https://calibre.example.evil.example/x"]
 
 
 class TestAPercentEscapeIsOnlyRefusedInTheHost:
-    def test_a_path_escape_is_stored_and_linked(
-        self, client, admin, make_book, link_field
-    ):
+    def test_a_path_escape_is_stored_and_linked(self, client, admin, make_book, link_field):
         """The other half of the host rule, asserted so the refusal above is
         not read as "no percent escapes"."""
         book = make_book(admin["headers"])
@@ -405,9 +375,7 @@ class TestRenamingAField:
         )
 
         assert renamed.status_code == 200
-        assert client.get(
-            f"/api/books/{book['id']}/custom-fields", headers=admin["headers"]
-        ).json() == [
+        assert client.get(f"/api/books/{book['id']}/custom-fields", headers=admin["headers"]).json() == [
             {
                 "field_id": text_field["id"],
                 "name": "Provenance",
@@ -417,9 +385,7 @@ class TestRenamingAField:
             }
         ]
 
-    def test_renaming_onto_another_field_is_refused(
-        self, client, admin, text_field, link_field
-    ):
+    def test_renaming_onto_another_field_is_refused(self, client, admin, text_field, link_field):
         res = client.patch(
             f"/api/books/custom-fields/{text_field['id']}",
             json={"name": "calibre-WEB"},
@@ -428,9 +394,7 @@ class TestRenamingAField:
 
         assert res.status_code == 409
 
-    def test_the_refusal_does_not_name_the_field_it_clashed_with(
-        self, client, admin, text_field, link_field
-    ):
+    def test_the_refusal_does_not_name_the_field_it_clashed_with(self, client, admin, text_field, link_field):
         """The clash is found over the whole table, which it has to be, so the
         row it finds may be one the caller may not be told about. Naming it
         handed a hidden name back to anybody who guessed it."""
@@ -497,9 +461,7 @@ class TestRenamingAField:
         )
 
         assert res.status_code == 403
-        assert client.get(
-            "/api/books/custom-fields", headers=member["headers"]
-        ).json() == [
+        assert client.get("/api/books/custom-fields", headers=member["headers"]).json() == [
             {
                 "id": text_field["id"],
                 "name": "Bought from",
@@ -508,9 +470,7 @@ class TestRenamingAField:
             }
         ]
 
-    def test_an_admin_may_rename_a_field_somebody_else_defined(
-        self, client, admin, member
-    ):
+    def test_an_admin_may_rename_a_field_somebody_else_defined(self, client, admin, member):
         """The same asymmetry the delete carries and a weaker version of it: a
         library wide vocabulary with a ceiling of 25 needs somebody who can
         repair a name whose author is unreachable, and this moves a label
@@ -529,9 +489,7 @@ class TestRenamingAField:
 
         assert res.status_code == 200, res.text
 
-    def test_a_field_with_no_author_is_renamable_by_anybody(
-        self, client, admin, member, db
-    ):
+    def test_a_field_with_no_author_is_renamable_by_anybody(self, client, admin, member, db):
         """Every field defined before the author column has a null, and so does
         every field in an archive taken before it. A refusal on a null would
         take the rename away from an entire existing vocabulary on the morning
@@ -560,9 +518,7 @@ class TestRenamingAField:
 
         assert res.status_code == 200, res.text
 
-    def test_a_field_the_member_may_not_be_told_about_is_still_a_404(
-        self, client, admin, member, make_book
-    ):
+    def test_a_field_the_member_may_not_be_told_about_is_still_a_404(self, client, admin, member, make_book):
         """The 403 never reaches a field whose existence is withheld, which is
         what keeps the new refusal from becoming an existence oracle. The
         resolver answers first and it answers 404.
@@ -584,10 +540,7 @@ class TestRenamingAField:
             ).status_code
             == 200
         )
-        assert (
-            _set(client, admin["headers"], book["id"], field["id"], "x").status_code
-            == 200
-        )
+        assert _set(client, admin["headers"], book["id"], field["id"], "x").status_code == 200
 
         res = client.patch(
             f"/api/books/custom-fields/{field['id']}",
@@ -647,10 +600,7 @@ class TestWhatTheListSaysAboutRenaming:
 
     def _listed(self, client, headers):
         """What one member is told, by field name."""
-        return {
-            row["name"]: row
-            for row in client.get("/api/books/custom-fields", headers=headers).json()
-        }
+        return {row["name"]: row for row in client.get("/api/books/custom-fields", headers=headers).json()}
 
     def _define(self, client, headers, name):
         return client.post(
@@ -681,9 +631,7 @@ class TestWhatTheListSaysAboutRenaming:
             ).status_code
             == 200
         )
-        assert (
-            _set(client, owner["headers"], book["id"], field_id, "x").status_code == 200
-        )
+        assert _set(client, owner["headers"], book["id"], field_id, "x").status_code == 200
 
     def test_the_definer_is_told_they_may_rename_it(self, client, admin, member):
         field = self._define(client, member["headers"], "Shelf photo").json()
@@ -691,16 +639,10 @@ class TestWhatTheListSaysAboutRenaming:
         assert field["renamable"] is True
         assert self._listed(client, member["headers"])["Shelf photo"]["renamable"]
 
-    def test_a_member_who_did_not_define_it_is_told_they_may_not(
-        self, client, member, text_field
-    ):
-        assert (
-            self._listed(client, member["headers"])["Bought from"]["renamable"] is False
-        )
+    def test_a_member_who_did_not_define_it_is_told_they_may_not(self, client, member, text_field):
+        assert self._listed(client, member["headers"])["Bought from"]["renamable"] is False
 
-    def test_an_admin_is_told_they_may_rename_somebody_elses(
-        self, client, admin, member
-    ):
+    def test_an_admin_is_told_they_may_rename_somebody_elses(self, client, admin, member):
         """The admin arm is the route's and not `Fields`', so a payload built
         from the class alone would say False here and hide a control from
         somebody the server would have obeyed."""
@@ -708,9 +650,7 @@ class TestWhatTheListSaysAboutRenaming:
 
         assert self._listed(client, admin["headers"])["Shelf photo"]["renamable"]
 
-    def test_a_field_with_no_author_is_published_as_renamable_to_anybody(
-        self, client, admin, member, db
-    ):
+    def test_a_field_with_no_author_is_published_as_renamable_to_anybody(self, client, admin, member, db):
         """The state every row is in on the morning of the upgrade. A client
         reading an author id would see a null and have to carry this rule
         itself."""
@@ -799,25 +739,17 @@ class TestWhatTheListSaysAboutRenaming:
 
 
 class TestDeletingAField:
-    def test_it_stops_appearing_and_takes_its_values(
-        self, client, admin, make_book, text_field
-    ):
+    def test_it_stops_appearing_and_takes_its_values(self, client, admin, make_book, text_field):
         book = make_book(admin["headers"])
         _set(client, admin["headers"], book["id"], text_field["id"], "Oxfam")
 
-        res = client.delete(
-            f"/api/books/custom-fields/{text_field['id']}", headers=admin["headers"]
-        )
+        res = client.delete(f"/api/books/custom-fields/{text_field['id']}", headers=admin["headers"])
 
         assert res.status_code == 204
         assert client.get("/api/books/custom-fields", headers=admin["headers"]).json() == []
-        assert client.get(
-            f"/api/books/{book['id']}/custom-fields", headers=admin["headers"]
-        ).json() == []
+        assert client.get(f"/api/books/{book['id']}/custom-fields", headers=admin["headers"]).json() == []
 
-    def test_it_leaves_another_fields_values_alone(
-        self, client, admin, make_book, text_field, link_field
-    ):
+    def test_it_leaves_another_fields_values_alone(self, client, admin, make_book, text_field, link_field):
         book = make_book(admin["headers"])
         _set(client, admin["headers"], book["id"], text_field["id"], "Oxfam")
         _set(
@@ -828,22 +760,16 @@ class TestDeletingAField:
             "https://calibre.example/1",
         )
 
-        client.delete(
-            f"/api/books/custom-fields/{text_field['id']}", headers=admin["headers"]
-        )
+        client.delete(f"/api/books/custom-fields/{text_field['id']}", headers=admin["headers"])
 
-        remaining = client.get(
-            f"/api/books/{book['id']}/custom-fields", headers=admin["headers"]
-        ).json()
+        remaining = client.get(f"/api/books/{book['id']}/custom-fields", headers=admin["headers"]).json()
         assert [row["field_id"] for row in remaining] == [link_field["id"]]
 
     def test_a_plain_member_may_not(self, client, admin, member, text_field):
         """Admin only, and deliberately asymmetric with defining one: the same
         split `delete_tag` makes, and the sharper case of it. Deleting a field
         destroys what every member typed, on books the caller may not see."""
-        res = client.delete(
-            f"/api/books/custom-fields/{text_field['id']}", headers=member["headers"]
-        )
+        res = client.delete(f"/api/books/custom-fields/{text_field['id']}", headers=member["headers"])
 
         assert res.status_code == 403
         assert len(client.get("/api/books/custom-fields", headers=member["headers"]).json()) == 1
@@ -872,41 +798,29 @@ class TestAFieldOnAPrivateBookIsInvisible:
         return book
 
     def test_another_member_cannot_read_the_value(self, client, member, private_book):
-        res = client.get(
-            f"/api/books/{private_book['id']}/custom-fields", headers=member["headers"]
-        )
+        res = client.get(f"/api/books/{private_book['id']}/custom-fields", headers=member["headers"])
 
         assert res.status_code == 404
         assert "secret" not in res.text
 
-    def test_another_member_cannot_write_one(
-        self, client, member, private_book, text_field
-    ):
-        res = _set(
-            client, member["headers"], private_book["id"], text_field["id"], "Mine now"
-        )
+    def test_another_member_cannot_write_one(self, client, member, private_book, text_field):
+        res = _set(client, member["headers"], private_book["id"], text_field["id"], "Mine now")
 
         assert res.status_code == 404
 
     def test_it_is_404_and_never_403(self, client, member, private_book):
         """A 403 would confirm the id exists, which is what privacy withholds."""
-        res = client.get(
-            f"/api/books/{private_book['id']}/custom-fields", headers=member["headers"]
-        )
+        res = client.get(f"/api/books/{private_book['id']}/custom-fields", headers=member["headers"])
 
         assert res.status_code == 404
         assert res.json()["detail"] == "Book not found"
 
     def test_the_owner_still_sees_it(self, client, admin, private_book):
-        res = client.get(
-            f"/api/books/{private_book['id']}/custom-fields", headers=admin["headers"]
-        )
+        res = client.get(f"/api/books/{private_book['id']}/custom-fields", headers=admin["headers"])
 
         assert [row["value"] for row in res.json()] == ["A secret shop"]
 
-    def test_the_definition_goes_with_it(
-        self, client, member, private_book, text_field
-    ):
+    def test_the_definition_goes_with_it(self, client, member, private_book, text_field):
         """**This asserted the opposite until the definitions were scoped.**
 
         It said a definition is library wide exactly like a tag, so listing
@@ -937,9 +851,7 @@ class TestAFieldOnAPrivateBookIsInvisible:
 
 
 class TestMergingTwoBooks:
-    def test_the_losers_value_is_not_destroyed(
-        self, client, admin, make_book, text_field
-    ):
+    def test_the_losers_value_is_not_destroyed(self, client, admin, make_book, text_field):
         """The cascade would have taken it, silently, exactly as it once would
         have taken the quotes."""
         keeper = make_book(admin["headers"], title="Solaris")
@@ -955,9 +867,7 @@ class TestMergingTwoBooks:
         assert merged.status_code == 200, merged.text
         assert [
             row["value"]
-            for row in client.get(
-                f"/api/books/{keeper['id']}/custom-fields", headers=admin["headers"]
-            ).json()
+            for row in client.get(f"/api/books/{keeper['id']}/custom-fields", headers=admin["headers"]).json()
         ] == ["Oxfam"]
 
     def test_the_keepers_own_value_wins(self, client, admin, make_book, text_field):
@@ -974,9 +884,7 @@ class TestMergingTwoBooks:
 
         assert [
             row["value"]
-            for row in client.get(
-                f"/api/books/{keeper['id']}/custom-fields", headers=admin["headers"]
-            ).json()
+            for row in client.get(f"/api/books/{keeper['id']}/custom-fields", headers=admin["headers"]).json()
         ] == ["A gift"]
 
 
@@ -1023,9 +931,7 @@ class TestNamingAHiddenFieldByItsId:
             ).status_code
             == 200
         )
-        assert _set(
-            client, member["headers"], book["id"], field["id"], "On the landing"
-        ).status_code == 200
+        assert _set(client, member["headers"], book["id"], field["id"], "On the landing").status_code == 200
         return field
 
     def test_it_is_absent_from_the_other_members_list(self, client, admin, hidden_field):
@@ -1058,9 +964,7 @@ class TestNamingAHiddenFieldByItsId:
 
         assert hidden.json() == absent.json()
 
-    def test_writing_a_value_by_its_id_is_a_404(
-        self, client, admin, make_book, hidden_field
-    ):
+    def test_writing_a_value_by_its_id_is_a_404(self, client, admin, make_book, hidden_field):
         """The evasion this gate exists for: guess the id, write it on a book
         you own, read the name off the 200."""
         mine = make_book(admin["headers"], title="Mine")
@@ -1070,23 +974,14 @@ class TestNamingAHiddenFieldByItsId:
         assert res.status_code == 404
         assert "Shelf photo" not in res.text
 
-    def test_no_value_is_written_by_the_refused_call(
-        self, client, admin, make_book, hidden_field
-    ):
+    def test_no_value_is_written_by_the_refused_call(self, client, admin, make_book, hidden_field):
         """A 404 that wrote the row first would be a worse answer than a 200."""
         mine = make_book(admin["headers"], title="Mine")
         _set(client, admin["headers"], mine["id"], hidden_field["id"], "Anything")
 
-        assert (
-            client.get(
-                f"/api/books/{mine['id']}/custom-fields", headers=admin["headers"]
-            ).json()
-            == []
-        )
+        assert client.get(f"/api/books/{mine['id']}/custom-fields", headers=admin["headers"]).json() == []
 
-    def test_retyping_the_name_is_a_loop_rather_than_a_recovery(
-        self, client, admin, make_book, hidden_field
-    ):
+    def test_retyping_the_name_is_a_loop_rather_than_a_recovery(self, client, admin, make_book, hidden_field):
         """**The claim this branch shipped with, driven, and it is false.**
 
         `define` was left returning the colliding row on the ground that it is
@@ -1109,18 +1004,12 @@ class TestNamingAHiddenFieldByItsId:
         assert again.json()["id"] == hidden_field["id"]
 
         mine = make_book(admin["headers"], title="Mine")
-        written = _set(
-            client, admin["headers"], mine["id"], again.json()["id"], "Anything"
-        )
+        written = _set(client, admin["headers"], mine["id"], again.json()["id"], "Anything")
 
         assert written.status_code == 404
-        assert client.get(
-            "/api/books/custom-fields", headers=admin["headers"]
-        ).json() == []
+        assert client.get("/api/books/custom-fields", headers=admin["headers"]).json() == []
 
-    def test_an_absent_id_and_a_hidden_one_cost_the_same_statements(
-        self, client, admin, db, hidden_field
-    ):
+    def test_an_absent_id_and_a_hidden_one_cost_the_same_statements(self, client, admin, db, hidden_field):
         """The bodies are identical, so a clock must not separate them.
 
         **`or` short circuits**, so with the row fetched first an absent id
@@ -1164,9 +1053,7 @@ class TestNamingAHiddenFieldByItsId:
         """**Deliberately ungated.** An admin has no privilege over another
         member's private books, so gating this would leave the field
         undeletable for good, holding a slot in a vocabulary capped at 25."""
-        res = client.delete(
-            f"/api/books/custom-fields/{hidden_field['id']}", headers=admin["headers"]
-        )
+        res = client.delete(f"/api/books/custom-fields/{hidden_field['id']}", headers=admin["headers"])
 
         assert res.status_code == 204
 
@@ -1219,15 +1106,10 @@ class TestTheDefinerIsNotLockedOutOfTheirOwnField:
             ).status_code
             == 200
         )
-        assert (
-            _set(client, admin["headers"], book["id"], field["id"], "On the landing").status_code
-            == 200
-        )
+        assert _set(client, admin["headers"], book["id"], field["id"], "On the landing").status_code == 200
         return field
 
-    def test_it_is_still_on_their_settings_page(
-        self, client, member, defined_by_the_member
-    ):
+    def test_it_is_still_on_their_settings_page(self, client, member, defined_by_the_member):
         listed = client.get("/api/books/custom-fields", headers=member["headers"]).json()
 
         assert [field["id"] for field in listed] == [defined_by_the_member["id"]]
@@ -1240,19 +1122,13 @@ class TestTheDefinerIsNotLockedOutOfTheirOwnField:
         not write is still a lockout."""
         mine = make_book(member["headers"], title="Mine")
 
-        res = _set(
-            client, member["headers"], mine["id"], defined_by_the_member["id"], "Oxfam"
-        )
+        res = _set(client, member["headers"], mine["id"], defined_by_the_member["id"], "Oxfam")
 
         assert res.status_code == 200, res.text
 
-    def test_a_third_member_is_still_told_nothing(
-        self, client, other_user, defined_by_the_member
-    ):
+    def test_a_third_member_is_still_told_nothing(self, client, other_user, defined_by_the_member):
         """The arm admits one member, so the disclosure the scoped list exists
         to close is unchanged for everybody else."""
-        listed = client.get(
-            "/api/books/custom-fields", headers=other_user["headers"]
-        ).json()
+        listed = client.get("/api/books/custom-fields", headers=other_user["headers"]).json()
 
         assert listed == []

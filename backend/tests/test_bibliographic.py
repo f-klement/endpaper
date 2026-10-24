@@ -37,6 +37,10 @@ from models import MAX_PAGE_NUMBER_IN_A_BOOK
 from tests.corpus import BACKEND, application_modules
 from tests.strategies import text_around, witness
 
+TREE_GUARDS = {
+    "TestTheProseRuleIsReachedOnlyThroughACarrierAwareDoor": ("application_modules",),
+}
+
 #: The letter class `bibliographic._AN_INITIAL` scopes a flag out of, written
 #: here rather than parsed back out of that constant: the arm below is about
 #: what the flag does to this class, so reading the class off the thing under
@@ -59,9 +63,7 @@ class TestTitleStatement:
 
     def test_drops_the_bracketed_original_title_of_a_translation(self):
         """The brackets hold a different book's title, in another language."""
-        assert split_title_statement(
-            "[Docker: up and running] ; Praxiswissen Docker"
-        ) == (
+        assert split_title_statement("[Docker: up and running] ; Praxiswissen Docker") == (
             "Praxiswissen Docker",
             None,
         )
@@ -93,9 +95,7 @@ class TestIsbdPunctuation:
         assert bibliographic.strip_isbd_punctuation("Trilogy;") == "Trilogy"
 
     def test_leaves_punctuation_inside_the_value_alone(self):
-        assert bibliographic.strip_isbd_punctuation("Docker: up and running") == (
-            "Docker: up and running"
-        )
+        assert bibliographic.strip_isbd_punctuation("Docker: up and running") == ("Docker: up and running")
 
 
 class TestPageCount:
@@ -246,10 +246,7 @@ class TestAPersonNameInCatalogueOrder:
         assert flip_catalogue_name("Melville, Herman, 1819-1891") == "Herman Melville"
 
     def test_strips_the_bnf_life_dates_and_role_together(self):
-        assert (
-            flip_catalogue_name("Zafón, Carlos (1964-2020). Auteur du texte")
-            == "Carlos Zafón"
-        )
+        assert flip_catalogue_name("Zafón, Carlos (1964-2020). Auteur du texte") == "Carlos Zafón"
 
     def test_leaves_an_ordinary_name_alone(self):
         assert flip_catalogue_name("Mann, Thomas") == "Thomas Mann"
@@ -298,9 +295,7 @@ class TestAPersonNameInCatalogueOrder:
             ("Ewing, J. R., 1950-", "J. R. Ewing"),
         ],
     )
-    def test_still_flips_initials_that_spell_a_suffix_or_a_designator(
-        self, name, flipped
-    ):
+    def test_still_flips_initials_that_spell_a_suffix_or_a_designator(self, name, flipped):
         """Initials dotted, spaced or run together spell `jr`, `sa` or `ag`
         once their punctuation is squashed, so the part after the comma is
         read as written. `Erickson`, `Tomlin, J R`, `Barnett` and `Asthana`
@@ -315,10 +310,7 @@ class TestAPersonNameInCatalogueOrder:
         )
 
     def test_leaves_a_two_comma_corporate_name_in_catalogue_order(self):
-        assert (
-            flip_catalogue_name("Springer, Berlin, Heidelberg")
-            == "Springer, Berlin, Heidelberg"
-        )
+        assert flip_catalogue_name("Springer, Berlin, Heidelberg") == "Springer, Berlin, Heidelberg"
 
 
 class TestACreditLineFromSeparateNames:
@@ -331,10 +323,7 @@ class TestACreditLineFromSeparateNames:
         assert split_authors(credit_line(["Tolkien, J. R. R."])) == ["J. R. R. Tolkien"]
 
     def test_joins_several_names_with_the_stored_separator(self):
-        assert (
-            credit_line(["Pratchett, Terry", "Neil Gaiman"])
-            == "Terry Pratchett, Neil Gaiman"
-        )
+        assert credit_line(["Pratchett, Terry", "Neil Gaiman"]) == "Terry Pratchett, Neil Gaiman"
 
     def test_drops_a_name_that_is_blank_once_flipped(self):
         """`flip_catalogue_name(",")` is empty, so blankness is read after it."""
@@ -353,7 +342,7 @@ class TestACreditLineFromSeparateNames:
 
 
 class TestOnlyTheBranchThatFlipsACellMayTakeItsFullStop:
-    """"Left alone" is the docstring's word, and the noise strip broke it.
+    """ "Left alone" is the docstring's word, and the noise strip broke it.
 
     `_strip_person_noise` removed a terminal full stop from every cell it was
     handed, including the ones the flip then refused to touch, and
@@ -385,10 +374,7 @@ class TestOnlyTheBranchThatFlipsACellMayTakeItsFullStop:
     def test_a_trailing_separator_comma_still_comes_off(self):
         """The one edit a refused cell does take, and it is the edit `.strip()`
         already is: punctuation between fields rather than part of a name."""
-        assert (
-            flip_catalogue_name("Springer, Berlin, Heidelberg,")
-            == "Springer, Berlin, Heidelberg"
-        )
+        assert flip_catalogue_name("Springer, Berlin, Heidelberg,") == "Springer, Berlin, Heidelberg"
 
     def test_the_life_dates_still_come_off_a_cell_it_will_not_flip(self):
         """The bound in the other direction, and the one the first fix for this
@@ -455,9 +441,7 @@ class TestTheTwoLanguageTablesAreOneTable:
         ("stored", "code"),
         [("de", "ger"), ("fr", "fre"), ("nl", "dut")],
     )
-    def test_a_language_with_two_codes_is_written_in_the_bibliographic_one(
-        self, stored, code
-    ):
+    def test_a_language_with_two_codes_is_written_in_the_bibliographic_one(self, stored, code):
         """MARC's own Code List for Languages takes the bibliographic code, and
         both codes read back as the same two letter one, so nothing else here
         can see a reordering of `LANGUAGES` silently choosing the other."""
@@ -532,14 +516,8 @@ class TestTheProseRuleIsReachedOnlyThroughACarrierAwareDoor:
 
         def visit(node: ast.AST, path: str, qualified: str) -> None:
             for child in ast.iter_child_nodes(node):
-                if isinstance(
-                    child, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef
-                ):
-                    inner = (
-                        child.name
-                        if qualified == "<module>"
-                        else f"{qualified}.{child.name}"
-                    )
+                if isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+                    inner = child.name if qualified == "<module>" else f"{qualified}.{child.name}"
                     visit(child, path, inner)
                     continue
                 if isinstance(child, ast.Call):
@@ -621,9 +599,7 @@ class TestTheProseRuleIsReachedOnlyThroughACarrierAwareDoor:
             "routers/metadata.py::_bnf_record",
         }
 
-    def test_a_door_is_named_by_what_encloses_it_and_not_by_its_own_name(
-        self, tmp_path
-    ):
+    def test_a_door_is_named_by_what_encloses_it_and_not_by_its_own_name(self, tmp_path):
         """The same collision one rung in, inside a single file.
 
         A `def` nested in another function, and a method, can take a door's own
@@ -793,9 +769,7 @@ class TestEveryRuleAnswersForAnyString:
             try:
                 function(*arguments)
             except Exception as error:
-                raise AssertionError(
-                    f"{name} raised {type(error).__name__} on {arguments!r}"
-                ) from error
+                raise AssertionError(f"{name} raised {type(error).__name__} on {arguments!r}") from error
 
 
 #: A run of text a catalogue would put between two ISBD separators.
@@ -884,8 +858,7 @@ class TestAValueIsQuotedFromTheRecordNeverRewritten:
         only evidence the substitution ran."""
         witness(
             _TITLE_STATEMENTS,
-            lambda raw: raw.startswith("[")
-            and not split_title_statement(raw)[0].startswith("["),
+            lambda raw: raw.startswith("[") and not split_title_statement(raw)[0].startswith("["),
             reaches="a translation whose original title is dropped",
         )
 
@@ -1140,9 +1113,7 @@ class TestAFlippedNameIsStillAName:
         assert flip_catalogue_name(cell).rstrip(".").split()[-1] == role
 
     @given(built=_ROLE_SURNAME_CELLS)
-    def test_the_life_dates_still_come_off_a_cell_whose_surname_is_a_role_word(
-        self, built
-    ):
+    def test_the_life_dates_still_come_off_a_cell_whose_surname_is_a_role_word(self, built):
         """The arms compete over this cell and only one of them may win.
 
         The role arm reaches the end of the cell, so a refusal that consumed
@@ -1188,8 +1159,10 @@ class TestAFlippedNameIsStillAName:
         cell nor its last word."""
         witness(
             _CATALOGUE_NAMES,
-            lambda name: name.split(",")[0] in bibliographic._PERSON_ROLES
-            or name.split()[-1] in bibliographic._PERSON_ROLES,
+            lambda name: (
+                name.split(",")[0] in bibliographic._PERSON_ROLES
+                or name.split()[-1] in bibliographic._PERSON_ROLES
+            ),
             reaches="a cell whose surname is a role word",
         )
 
@@ -1203,9 +1176,9 @@ class TestAFlippedNameIsStillAName:
     def test_the_generator_still_reaches_a_cell_carrying_life_dates(self):
         witness(
             _CATALOGUE_NAMES,
-            lambda name: any(character.isdigit() for character in name)
-            and not any(
-                character.isdigit() for character in flip_catalogue_name(name)
+            lambda name: (
+                any(character.isdigit() for character in name)
+                and not any(character.isdigit() for character in flip_catalogue_name(name))
             ),
             reaches="a cell whose life dates come off",
         )
@@ -1217,9 +1190,7 @@ class TestAFlippedNameIsStillAName:
         `_drop_isbd_stop` untouched."""
         witness(
             _CATALOGUE_NAMES,
-            lambda name: "," in name
-            and name.endswith(".")
-            and "." in flip_catalogue_name(name),
+            lambda name: "," in name and name.endswith(".") and "." in flip_catalogue_name(name),
             reaches="a flipped name that keeps an initial's full stop",
         )
 
@@ -1296,14 +1267,8 @@ class TestARoleWordCanBeTheSurname:
         person cell in this tree carrying a designation hangs it off a closing
         bracket or off a letter, so none of them is an initial's stop and none
         of them changed."""
-        assert (
-            flip_catalogue_name("Zafón, Carlos (1964-2020). Auteur du texte")
-            == "Carlos Zafón"
-        )
-        assert (
-            flip_catalogue_name("Camus, Albert (1913-1960). Auteur du texte")
-            == "Albert Camus"
-        )
+        assert flip_catalogue_name("Zafón, Carlos (1964-2020). Auteur du texte") == "Carlos Zafón"
+        assert flip_catalogue_name("Camus, Albert (1913-1960). Auteur du texte") == "Albert Camus"
         assert (
             flip_catalogue_name("Bibliothèque nationale de France. Éditeur")
             == "Bibliothèque nationale de France"
@@ -1329,10 +1294,7 @@ class TestARoleWordCanBeTheSurname:
         because no cell of this shape is in this tree while three of the other
         shape are.
         """
-        assert (
-            flip_catalogue_name("Kane, Sean P. Auteur du texte")
-            == "Sean P. Auteur du texte Kane"
-        )
+        assert flip_catalogue_name("Kane, Sean P. Auteur du texte") == "Sean P. Auteur du texte Kane"
 
     @pytest.mark.parametrize(
         ("cell", "settles_at"),
@@ -1349,9 +1311,7 @@ class TestARoleWordCanBeTheSurname:
             ("A A . Autrice", "A A"),
         ],
     )
-    def test_a_prefix_the_initial_pattern_does_not_match_still_costs_the_surname(
-        self, cell, settles_at
-    ):
+    def test_a_prefix_the_initial_pattern_does_not_match_still_costs_the_surname(self, cell, settles_at):
         """**What is left over, stated as one family rather than as a list.**
 
         Every one of these is a full stop that belongs to the name in front of
@@ -1406,9 +1366,7 @@ class TestARoleWordCanBeTheSurname:
             "0x212a",
         ]
 
-        refusal = re.compile(
-            bibliographic._NOT_AN_INITIALS_STOP + r"\.$", re.IGNORECASE
-        )
+        refusal = re.compile(bibliographic._NOT_AN_INITIALS_STOP + r"\.$", re.IGNORECASE)
         for codepoint in widened_by_the_flag:
             for before in ("", " ", ".", "x"):
                 cell = f"{before}{chr(codepoint)}."

@@ -211,9 +211,7 @@ COLUMN_GUESSES: Final[tuple[tuple[str, tuple[str, ...]], ...]] = (
 #: costs a display order list in a column not named here, and the reordering
 #: `bibliographic.credit_line` already names for a suffix its list does not
 #: carry (`John Smith, M.D.` stored as `M.D. John Smith`).
-_DISPLAY_ORDER_AUTHOR_COLUMNS: Final = frozenset(
-    {"author", "authors", "author text", "creator", "creators"}
-)
+_DISPLAY_ORDER_AUTHOR_COLUMNS: Final = frozenset({"author", "authors", "author text", "creator", "creators"})
 
 #: Their status vocabularies, mapped onto ours. Lower case, exact match after
 #: normalising separators, because "to-read", "to read" and "To Read" are one
@@ -459,9 +457,7 @@ def _decode(content: bytes) -> str:
     # every byte string of length three or less, 16,843,008 of them: no over or
     # undercount. An undercount is the direction that would matter, since it is
     # what would let the work past the budget.
-    runs = body.decode("utf-8", errors="replace").count("�") - body.count(
-        _REPLACEMENT_AS_UTF8
-    )
+    runs = body.decode("utf-8", errors="replace").count("�") - body.count(_REPLACEMENT_AS_UTF8)
     if runs > _STRAY_RUN_BUDGET:
         return body.decode("cp1252", errors="replace")
     return body.decode("utf-8", errors=_STRAY_BYTES)
@@ -569,9 +565,7 @@ def _clean(value: str | None) -> str:
     return text.strip()
 
 
-def _int(
-    value: str, *, minimum: int = 1, maximum: int = MAX_PAGE_NUMBER_IN_A_BOOK
-) -> int | None:
+def _int(value: str, *, minimum: int = 1, maximum: int = MAX_PAGE_NUMBER_IN_A_BOOK) -> int | None:
     """A bounded integer, or nothing.
 
     Bounded because a page count of 0 and a year of 12345 are both what a
@@ -755,14 +749,11 @@ def _read_table(text: str) -> _Table:
     try:
         headers = list(reader.fieldnames or [])
         if not headers:
-            raise ImportError_(
-                "That file has no header row, so its columns cannot be read."
-            )
+            raise ImportError_("That file has no header row, so its columns cannot be read.")
         rows = list(_limited(reader))
     except csv.Error as error:
         raise ImportError_(
-            "That file could not be read as a table. It may be damaged, or not "
-            "a CSV at all."
+            "That file could not be read as a table. It may be damaged, or not a CSV at all."
         ) from error
 
     return _Table(headers=headers, delimiter=delimiter, rows=rows)
@@ -830,9 +821,7 @@ def _guessed_mapping(headers: list[str], overrides: Mapping[str, str]) -> dict[s
             mapping[field_name] = header
 
     if mapping["title"] is None:
-        quoted = ", ".join(
-            header[:_MAX_HEADER_QUOTED] for header in headers[:_MAX_HEADERS_QUOTED]
-        )
+        quoted = ", ".join(header[:_MAX_HEADER_QUOTED] for header in headers[:_MAX_HEADERS_QUOTED])
         raise ImportError_(
             "No title column was found. Export a CSV from your old app, or pick "
             f"the right column by hand. This file has: {quoted}"
@@ -894,9 +883,7 @@ def _within_the_column(names: Iterable[str]) -> list[str]:
     return kept
 
 
-def _row_from(
-    raw: dict[str, str], mapping: dict[str, str | None], display_order: bool
-) -> ImportRow | None:
+def _row_from(raw: dict[str, str], mapping: dict[str, str | None], display_order: bool) -> ImportRow | None:
     """One row in this app's terms, or None where it has no title.
 
     `display_order` is whether the mapped author column is one of
@@ -972,9 +959,7 @@ def _infer_status_from_the_date(row: ImportRow) -> None:
 #: the row: an unrecognised value keeps it, a file with no such column loses
 #: nothing, and the count and the column are both on the preview before
 #: anything is written.
-_ROW_EXCLUSIONS: Final = tuple(
-    _normalise_term(header) for header in ("HasBeenDeleted",)
-)
+_ROW_EXCLUSIONS: Final = tuple(_normalise_term(header) for header in ("HasBeenDeleted",))
 
 #: Cell values a row exclusion column is written with when it means yes.
 #:
@@ -1034,9 +1019,7 @@ def _exclusion_columns(headers: list[str]) -> list[str]:
         # naming forty spaces tells a member to remove a column it has not
         # named.
         quoted = ", ".join(
-            sorted({header.strip()[:_MAX_HEADER_QUOTED] for header in repeated})[
-                :_MAX_HEADERS_QUOTED
-            ]
+            sorted({header.strip()[:_MAX_HEADER_QUOTED] for header in repeated})[:_MAX_HEADERS_QUOTED]
         )
         raise ImportError_(
             f"That file has more than one column called {quoted}, so which "
@@ -1081,9 +1064,7 @@ def _guessing_reader(column: str | None = None, unpack: UnpackCell | None = None
         # Once per file, not per row: a header is as long as
         # `csv.field_size_limit` allows, and normalising it 20,000 times would
         # be the cost the cell bound in `_credit` exists to stop.
-        display_order = (
-            _normalise_term(mapping["author"] or "") in _DISPLAY_ORDER_AUTHOR_COLUMNS
-        )
+        display_order = _normalise_term(mapping["author"] or "") in _DISPLAY_ORDER_AUTHOR_COLUMNS
 
         parsed = ParsedFile(
             mapping=mapping,
@@ -1095,9 +1076,7 @@ def _guessing_reader(column: str | None = None, unpack: UnpackCell | None = None
             # a 100,000 character 400 is a refusal this module has paid for
             # once; slicing a padded header from the left reports its padding,
             # which is a count beside a blank on the one file the bound is for.
-            exclusion_column=(
-                exclusions[0].strip()[:_MAX_HEADER_QUOTED] if exclusions else None
-            ),
+            exclusion_column=(exclusions[0].strip()[:_MAX_HEADER_QUOTED] if exclusions else None),
         )
         for raw in table.rows:
             # Before the title is looked at, so the two counts stay apart: what
@@ -1234,8 +1213,7 @@ def _complete(readers: dict[ImportReader, ReaderFn]) -> dict[ImportReader, Reade
     missing = set(ImportReader) - set(readers)
     if missing:
         raise RuntimeError(
-            "import readers with no implementation: "
-            + ", ".join(sorted(reader.value for reader in missing))
+            "import readers with no implementation: " + ", ".join(sorted(reader.value for reader in missing))
         )
     return readers
 

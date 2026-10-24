@@ -16,6 +16,10 @@ import targets
 from enums import CatalogueSource, Locale, SettingKey
 from tests.corpus import application_sources
 
+TREE_GUARDS = {
+    "TestAnOverriddenSettingIsReadWhereItIsPinned": ("application_sources",),
+}
+
 
 class TestDefaults:
     def test_every_key_has_one(self):
@@ -100,9 +104,7 @@ class TestJsonSettings:
 
     def test_a_written_object_reads_back(self, db):
         settings_store.set_json(db, SettingKey.SENDER_HEALTH, {"email": {"failures": 3}})
-        assert settings_store.get_json(db, SettingKey.SENDER_HEALTH) == {
-            "email": {"failures": 3}
-        }
+        assert settings_store.get_json(db, SettingKey.SENDER_HEALTH) == {"email": {"failures": 3}}
 
     def test_an_unwritten_key_is_an_empty_object(self, db):
         assert settings_store.get_json(db, SettingKey.SENDER_HEALTH) == {}
@@ -125,18 +127,14 @@ class TestJsonSettings:
         edited the database by hand. 400,000 levels is past the stack of every interpreter
         this runs on, the suite pod's at under a megabyte and this machine's at
         about eight; the backup archive's named case uses the same depth."""
-        settings_store.set_value(
-            db, SettingKey.CATALOGUE_SOURCES, "[" * 400_000 + "]" * 400_000
-        )
+        settings_store.set_value(db, SettingKey.CATALOGUE_SOURCES, "[" * 400_000 + "]" * 400_000)
         assert settings_store.get_json(db, SettingKey.CATALOGUE_SOURCES) == {}
 
     def test_keys_are_written_in_a_stable_order(self, db):
         """An unchanged record writes an unchanged string, which is what makes
         a settings diff readable and a backup comparison mean anything."""
         settings_store.set_json(db, SettingKey.SENDER_HEALTH, {"telegram": 1, "email": 2})
-        assert settings_store.get_raw(db, SettingKey.SENDER_HEALTH) == (
-            '{"email": 2, "telegram": 1}'
-        )
+        assert settings_store.get_raw(db, SettingKey.SENDER_HEALTH) == ('{"email": 2, "telegram": 1}')
 
 
 class TestLibraryModeAndThePublicCatalogue:
@@ -157,10 +155,7 @@ class TestLibraryModeAndThePublicCatalogue:
     def test_indexing_starts_off_too(self):
         """Publishing a catalogue and inviting a search engine to crawl it are
         different decisions, and the default answer to the second is no."""
-        assert (
-            settings_store.DEFAULTS[SettingKey.PUBLIC_CATALOGUE_INDEXING_ENABLED]
-            == "false"
-        )
+        assert settings_store.DEFAULTS[SettingKey.PUBLIC_CATALOGUE_INDEXING_ENABLED] == "false"
 
     def test_a_fresh_database_publishes_nothing(self, db):
         """The default read through the accessor, not off the table: a default
@@ -190,9 +185,7 @@ class TestLibraryModeAndThePublicCatalogue:
     def test_indexing_needs_a_published_catalogue_as_well(self, db):
         """An indexing row left on while nothing is published cannot invite a
         crawler to a catalogue that answers 404."""
-        settings_store.set_value(
-            db, SettingKey.PUBLIC_CATALOGUE_INDEXING_ENABLED, "true"
-        )
+        settings_store.set_value(db, SettingKey.PUBLIC_CATALOGUE_INDEXING_ENABLED, "true")
         assert settings_store.public_catalogue_may_be_indexed(db) is False
 
     def test_a_published_catalogue_is_still_not_indexed_by_default(self, db):
@@ -203,9 +196,7 @@ class TestLibraryModeAndThePublicCatalogue:
     def test_all_three_together_invite_a_crawler(self, db):
         settings_store.set_value(db, SettingKey.LIBRARY_MODE, "true")
         settings_store.set_value(db, SettingKey.PUBLIC_CATALOGUE_ENABLED, "true")
-        settings_store.set_value(
-            db, SettingKey.PUBLIC_CATALOGUE_INDEXING_ENABLED, "true"
-        )
+        settings_store.set_value(db, SettingKey.PUBLIC_CATALOGUE_INDEXING_ENABLED, "true")
         assert settings_store.public_catalogue_may_be_indexed(db) is True
 
     def test_the_three_switches_are_not_pinnable_from_the_environment(self):
@@ -350,9 +341,7 @@ class TestTheKeyIsResolvedOncePerRequest:
     def key_phrase(self) -> str:
         return credentials.generate_phrase()
 
-    def test_the_shipping_roster_resolves_the_key_once_and_opens_no_envelope(
-        self, db, monkeypatch
-    ):
+    def test_the_shipping_roster_resolves_the_key_once_and_opens_no_envelope(self, db, monkeypatch):
         """Nothing is patched, so this is the roster as it ships.
 
         **The arm that matters has survived two changes to what the roster
@@ -374,14 +363,10 @@ class TestTheKeyIsResolvedOncePerRequest:
         assert set(resolved) == sources.SHIPS_A_CREDENTIAL
         assert tally[0] == 1
 
-    def test_two_sealed_logins_cost_what_one_costs(
-        self, db, key_phrase, monkeypatch
-    ):
+    def test_two_sealed_logins_cost_what_one_costs(self, db, key_phrase, monkeypatch):
         """The count is flat in the number of sources, which is the whole fix."""
         self._seal(db, key_phrase, monkeypatch, "dnb")
-        monkeypatch.setattr(
-            sources, "NEEDS_A_KEY", frozenset({CatalogueSource.DNB})
-        )
+        monkeypatch.setattr(sources, "NEEDS_A_KEY", frozenset({CatalogueSource.DNB}))
         tally = self._counted(monkeypatch)
         assert len(settings_store.catalogue_logins(db)) == 1
         one = tally[0]
@@ -407,9 +392,7 @@ class TestTheKeyIsResolvedOncePerRequest:
             "moves with the roster, which is the defect this exists to catch"
         )
 
-    def test_a_lost_key_is_resolved_once_as_well(
-        self, db, key_phrase, monkeypatch
-    ):
+    def test_a_lost_key_is_resolved_once_as_well(self, db, key_phrase, monkeypatch):
         """The deployment whose key is gone, which is the arm that was 1 + N.
 
         Both critic seats found it independently: `_material` fell through to
@@ -448,18 +431,14 @@ class TestTheKeyIsResolvedOncePerRequest:
             frozenset({CatalogueSource.DNB, CatalogueSource.K10PLUS}),
         )
         monkeypatch.setenv(credentials.env_variable_name("dnb"), "alice:hunter2")
-        monkeypatch.setenv(
-            credentials.env_variable_name("k10plus"), "alice:hunter2"
-        )
+        monkeypatch.setenv(credentials.env_variable_name("k10plus"), "alice:hunter2")
         tally = self._counted(monkeypatch)
 
         assert len(settings_store.catalogue_logins(db)) == 2
 
         assert tally[0] == 1
 
-    def test_the_key_sources_are_read_once_over(
-        self, db, key_phrase, monkeypatch
-    ):
+    def test_the_key_sources_are_read_once_over(self, db, key_phrase, monkeypatch):
         """The second instrument: every store is read once, not once per source.
 
         This counts what the machine actually does, where the test above counts
@@ -491,8 +470,7 @@ class TestTheKeyIsResolvedOncePerRequest:
         assert len(settings_store.catalogue_logins(db)) == 2
 
         assert reads == one_pass, (
-            f"{reads} store reads for two sealed logins, where one pass over "
-            "the stores is one read each"
+            f"{reads} store reads for two sealed logins, where one pass over the stores is one read each"
         )
 
 
@@ -548,9 +526,7 @@ def _answered_calls(node: ast.FunctionDef | ast.AsyncFunctionDef) -> set[str]:
 def _answers_with(node: ast.FunctionDef | ast.AsyncFunctionDef, name: str) -> bool:
     """Whether `name` is written inside one of this function's answers."""
     return any(
-        isinstance(inner, ast.Return)
-        and inner.value is not None
-        and _mentions(inner.value, name)
+        isinstance(inner, ast.Return) and inner.value is not None and _mentions(inner.value, name)
         for inner in ast.walk(node)
     )
 
@@ -625,9 +601,7 @@ def _keyed_readers(store: str) -> tuple[frozenset[str], frozenset[str]]:
     readers = {
         name
         for name, body in bodies.items()
-        if _keyed_parameters(body)
-        and _answers_with_a_value(body)
-        and reaches(name, _THE_TABLE, set())
+        if _keyed_parameters(body) and _answers_with_a_value(body) and reaches(name, _THE_TABLE, set())
     }
     sees_the_environment = {name for name in readers if answers_from(name, set())}
     return frozenset(readers - sees_the_environment), frozenset(sees_the_environment)
@@ -663,8 +637,7 @@ def _keys_named(node: ast.AST) -> frozenset[str]:
     return frozenset(
         inner.attr
         for inner in ast.walk(node)
-        if isinstance(inner, ast.Attribute)
-        and ast.unparse(inner.value).rsplit(".", 1)[-1] == "SettingKey"
+        if isinstance(inner, ast.Attribute) and ast.unparse(inner.value).rsplit(".", 1)[-1] == "SettingKey"
     )
 
 
@@ -693,11 +666,7 @@ def _store_aliases(tree: ast.Module) -> set[str]:
     found = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Import | ast.ImportFrom):
-            found |= {
-                alias.asname or alias.name
-                for alias in node.names
-                if alias.name == "settings_store"
-            }
+            found |= {alias.asname or alias.name for alias in node.names if alias.name == "settings_store"}
     return found
 
 
@@ -920,13 +889,17 @@ def _readers_named(
         return bound.get(node.id, frozenset())
     if isinstance(node, ast.Dict):
         held = [value for value in node.values if value is not None]
-        return frozenset().union(
-            *(_readers_named(value, readers, aliases, bound) for value in held)
-        ) if held else frozenset()
+        return (
+            frozenset().union(*(_readers_named(value, readers, aliases, bound) for value in held))
+            if held
+            else frozenset()
+        )
     if isinstance(node, ast.List | ast.Tuple | ast.Set):
-        return frozenset().union(
-            *(_readers_named(element, readers, aliases, bound) for element in node.elts)
-        ) if node.elts else frozenset()
+        return (
+            frozenset().union(*(_readers_named(element, readers, aliases, bound) for element in node.elts))
+            if node.elts
+            else frozenset()
+        )
     return frozenset()
 
 
@@ -989,9 +962,7 @@ def _reader_bindings(
     Either way the statements arrive in source order, so `_B = _A` resolves in
     the same pass that bound `_A`.
     """
-    statements: list[ast.AST] = (
-        _at_module_scope(tree) if module_level_only else list(ast.walk(tree))
-    )
+    statements: list[ast.AST] = _at_module_scope(tree) if module_level_only else list(ast.walk(tree))
     bare = {
         (alias.asname or alias.name): alias.name
         for node in statements
@@ -1002,9 +973,7 @@ def _reader_bindings(
     if path == _STORE:
         bare |= {name: name for name in readers}
 
-    bound: dict[str, frozenset[str]] = {
-        name: frozenset({reader}) for name, reader in bare.items()
-    }
+    bound: dict[str, frozenset[str]] = {name: frozenset({reader}) for name, reader in bare.items()}
     for statement in statements:
         if isinstance(statement, ast.Assign):
             targets: list[ast.expr] = list(statement.targets)
@@ -1022,9 +991,7 @@ def _reader_bindings(
 
 
 @functools.cache
-def _re_exported_readers(
-    path: str, source: str, readers: frozenset[str]
-) -> dict[str, frozenset[str]]:
+def _re_exported_readers(path: str, source: str, readers: frozenset[str]) -> dict[str, frozenset[str]]:
     """Which readers this module hands out as attributes on itself.
 
     **The cross module half, and the whole of what tells `helpers.get_bool` from
@@ -1046,9 +1013,7 @@ def _re_exported_readers(
     and never mutated**: every caller is handed the same object.
     """
     tree = ast.parse(source)
-    return _reader_bindings(
-        path, tree, readers, _store_aliases_here(tree, path), module_level_only=True
-    )
+    return _reader_bindings(path, tree, readers, _store_aliases_here(tree, path), module_level_only=True)
 
 
 def _defined_here(tree: ast.Module) -> set[str]:
@@ -1138,9 +1103,7 @@ def _reader_calls(
             if isinstance(node, _A_FUNCTION):
                 for inner in ast.walk(node):
                     if isinstance(inner, ast.Call):
-                        plumbing.setdefault(id(inner), set()).update(
-                            _keyed_parameters(node)
-                        )
+                        plumbing.setdefault(id(inner), set()).update(_keyed_parameters(node))
 
     found: list[tuple[int, str, frozenset[str]]] = []
     for node in ast.walk(tree):
@@ -1163,11 +1126,7 @@ def _reader_calls(
         elif isinstance(rooted, ast.Name):
             if rooted.id in bound:
                 reached = bound[rooted.id]
-            elif (
-                isinstance(node.func, ast.Name)
-                and node.func.id in readers
-                and node.func.id not in defined
-            ):
+            elif isinstance(node.func, ast.Name) and node.func.id in readers and node.func.id not in defined:
                 found.append((node.lineno, _UNNAMEABLE, frozenset()))
                 continue
             else:
@@ -1182,12 +1141,9 @@ def _reader_calls(
             continue
 
         arguments = list(node.args) + [keyword.value for keyword in node.keywords]
-        named: frozenset[str] = frozenset().union(
-            *(_named_key(argument, tables) for argument in arguments)
-        )
+        named: frozenset[str] = frozenset().union(*(_named_key(argument, tables) for argument in arguments))
         if not named and any(
-            isinstance(argument, ast.Name)
-            and argument.id in plumbing.get(id(node), set())
+            isinstance(argument, ast.Name) and argument.id in plumbing.get(id(node), set())
             for argument in arguments
         ):
             continue
@@ -1215,9 +1171,7 @@ def _reads_of_a_pinned_key(
     for path, source in sorted(modules.items()):
         if only is not None and path != only:
             continue
-        for line, reader, named in _reader_calls(
-            path, source, off_the_table | in_force, modules
-        ):
+        for line, reader, named in _reader_calls(path, source, off_the_table | in_force, modules):
             examined += 1
             if not named:
                 unreadable.append(f"{path}:{line} {reader}")
@@ -1294,20 +1248,15 @@ _PLANTED_SPELLINGS: Final = (
     "settings_store.{reader}(db, _KEYS[name])\n",
     # A module level name bound to the reader, which is `_ENABLED_KEY`'s idiom
     # one step over.
-    "import settings_store\n"
-    "_READ = settings_store.{reader}\n"
-    "_READ(db, SettingKey.MAIL_USE_TLS)\n",
+    "import settings_store\n_READ = settings_store.{reader}\n_READ(db, SettingKey.MAIL_USE_TLS)\n",
     # A table of them, which is that idiom exactly.
     "import settings_store\n"
     '_READERS = {{"flag": settings_store.{reader}}}\n'
     '_READERS["flag"](db, SettingKey.MAIL_USE_TLS)\n',
     # The module bound by a relative import rather than an absolute one.
-    "from . import settings_store\n"
-    "settings_store.{reader}(db, SettingKey.MAIL_USE_TLS)\n",
+    "from . import settings_store\nsettings_store.{reader}(db, SettingKey.MAIL_USE_TLS)\n",
     # Imported to a bare name and then rebound to another.
-    "from settings_store import {reader}\n"
-    "_ALSO = {reader}\n"
-    "_ALSO(db, SettingKey.MAIL_USE_TLS)\n",
+    "from settings_store import {reader}\n_ALSO = {reader}\n_ALSO(db, SettingKey.MAIL_USE_TLS)\n",
     # The alias inside a function, which is the cheapest way to write the row
     # above and was silent while that one was reported.
     "import settings_store\n"
@@ -1316,31 +1265,23 @@ _PLANTED_SPELLINGS: Final = (
     "    return read(db, SettingKey.MAIL_USE_TLS)\n",
     # Two steps, both at the top level. The second name is bound here and the
     # first is what says which reader it holds.
-    "import settings_store\n"
-    "_A = settings_store.{reader}\n"
-    "_B = _A\n"
-    "_B(db, SettingKey.MAIL_USE_TLS)\n",
+    "import settings_store\n_A = settings_store.{reader}\n_B = _A\n_B(db, SettingKey.MAIL_USE_TLS)\n",
 )
 
 #: Ways of reaching a reader that the pass can see and cannot follow. It has to
 #: report these rather than drop them: dropping is what makes an evasion free.
 _UNFOLLOWABLE_SPELLINGS: Final = (
-    "import settings_store\n"
-    'getattr(settings_store, "get_bool")(db, SettingKey.MAIL_USE_TLS)\n',
-    "import settings_store\n"
-    'settings_store.__dict__["get_bool"](db, SettingKey.MAIL_USE_TLS)\n',
+    'import settings_store\ngetattr(settings_store, "get_bool")(db, SettingKey.MAIL_USE_TLS)\n',
+    'import settings_store\nsettings_store.__dict__["get_bool"](db, SettingKey.MAIL_USE_TLS)\n',
     # A re export: another module imports the reader and this one imports it
     # from there, so nothing here names `settings_store` at all.
     "from helpers import get_bool\nget_bool(db, SettingKey.MAIL_USE_TLS)\n",
     # A computed door built on a reader imported under another name, which is
     # the case a merge of two conditions dropped: `gb` names neither the module
     # nor a reader, and the direct call of it beside this one is an offender.
-    "from settings_store import get_bool as gb\n"
-    "_pick(gb)(db, SettingKey.MAIL_USE_TLS)\n",
+    "from settings_store import get_bool as gb\n_pick(gb)(db, SettingKey.MAIL_USE_TLS)\n",
     # The same door built on a module level binding.
-    "import settings_store\n"
-    "_R = settings_store.get_bool\n"
-    "_pick(_R)(db, SettingKey.MAIL_USE_TLS)\n",
+    "import settings_store\n_R = settings_store.get_bool\n_pick(_R)(db, SettingKey.MAIL_USE_TLS)\n",
     # And on a re export, where the name is a reader's and this module binds it
     # from somewhere else, so only the reader half of the door test sees it.
     "from helpers import get_bool\n_pick(get_bool)(db, SettingKey.MAIL_USE_TLS)\n",
@@ -1400,9 +1341,7 @@ _ATTRIBUTE_SPELLINGS: Final = (
     # this module's imports would walk past.
     (
         "from settings_store import {reader}\n",
-        "def send(db):\n"
-        "    import helpers\n"
-        "    return helpers.{reader}(db, SettingKey.MAIL_USE_TLS)\n",
+        "def send(db):\n    import helpers\n    return helpers.{reader}(db, SettingKey.MAIL_USE_TLS)\n",
     ),
     # The subject binding it a level below `tree.body` in a block that runs,
     # which was the hole a reader of `tree.body` left: the name is an attribute
@@ -1410,10 +1349,7 @@ _ATTRIBUTE_SPELLINGS: Final = (
     # `test_a_subject_binding_only_for_a_type_checker_hands_out_nothing`, which
     # is the same indent and the opposite answer.
     (
-        "try:\n"
-        "    from settings_store import {reader}\n"
-        "except ImportError:\n"
-        "    {reader} = None\n",
+        "try:\n    from settings_store import {reader}\nexcept ImportError:\n    {reader} = None\n",
         "import helpers\nhelpers.{reader}(db, SettingKey.MAIL_USE_TLS)\n",
     ),
     # The `else:` of an `if TYPE_CHECKING:`, which is the ordinary run time and
@@ -1512,9 +1448,7 @@ class TestAnOverriddenSettingIsReadWhereItIsPinned:
         )
 
     @pytest.mark.parametrize("spelling", _UNFOLLOWABLE_SPELLINGS)
-    def test_a_reader_reached_by_a_door_the_pass_cannot_follow_is_reported(
-        self, spelling
-    ):
+    def test_a_reader_reached_by_a_door_the_pass_cannot_follow_is_reported(self, spelling):
         """Not dropped. Everything the loop walks past is free to be an evasion,
         and these three are the ones a critic seat reached the old rule by."""
         _, unreadable, examined = _planted(spelling)
@@ -1526,9 +1460,7 @@ class TestAnOverriddenSettingIsReadWhereItIsPinned:
         subject mentions. Eight calls in the corpus are a generic being
         instantiated, and reporting those would leave this class red on a tree
         with nothing wrong with it."""
-        _, unreadable, examined = _planted(
-            "import settings_store\nPage[BookOut](items=rows)\n"
-        )
+        _, unreadable, examined = _planted("import settings_store\nPage[BookOut](items=rows)\n")
         assert not unreadable
         assert examined == 0
 
@@ -1555,9 +1487,7 @@ class TestAnOverriddenSettingIsReadWhereItIsPinned:
             if _spells_a_reader_call(source, readers) or path == _STORE
         }
         contributed = {
-            path
-            for path, source in modules.items()
-            if _reader_calls(path, source, readers, modules)
+            path for path, source in modules.items() if _reader_calls(path, source, readers, modules)
         }
         assert spelled - {_STORE}, (
             "the text instrument matched nothing but the module that defines "
@@ -1609,12 +1539,10 @@ class TestAnOverriddenSettingIsReadWhereItIsPinned:
         assert "get_int" in off_the_table
 
         offenders, _, _ = _planted(
-            "import settings_store\n"
-            "settings_store.get_int(db, SettingKey.MAIL_PORT, minimum=1, maximum=2)\n",
+            "import settings_store\nsettings_store.get_int(db, SettingKey.MAIL_PORT, minimum=1, maximum=2)\n",
             store=store,
         )
         assert offenders, "a reader that ignores the environment is not an in force door"
-
 
     @pytest.mark.parametrize("spelling", _PLANTED_SPELLINGS)
     def test_a_read_of_a_pinnable_key_off_the_table_is_reported(self, spelling):
@@ -1634,15 +1562,12 @@ class TestAnOverriddenSettingIsReadWhereItIsPinned:
 
     def test_a_key_the_environment_cannot_pin_is_left_alone(self):
         offenders, _, _ = _planted(
-            "import settings_store\n"
-            "settings_store.get_bool(db, SettingKey.LIBRARY_MODE)\n"
+            "import settings_store\nsettings_store.get_bool(db, SettingKey.LIBRARY_MODE)\n"
         )
         assert not offenders, offenders
 
     def test_a_key_held_in_a_local_is_reported_rather_than_skipped(self):
-        _, unreadable, _ = _planted(
-            "import settings_store\nsettings_store.get_bool(db, chosen)\n"
-        )
+        _, unreadable, _ = _planted("import settings_store\nsettings_store.get_bool(db, chosen)\n")
         assert unreadable
 
     def test_a_module_that_wraps_a_read_in_a_keyed_helper_is_reported(self):
@@ -1664,9 +1589,7 @@ class TestAnOverriddenSettingIsReadWhereItIsPinned:
         assert examined == 0
 
     @pytest.mark.parametrize(("subject", "spelling"), _ATTRIBUTE_SPELLINGS)
-    def test_a_reader_reached_as_an_attribute_on_an_importing_module_is_reported(
-        self, subject, spelling
-    ):
+    def test_a_reader_reached_as_an_attribute_on_an_importing_module_is_reported(self, subject, spelling):
         """The spelling this resolution buys: a reader reached as an attribute
         on a module that imported it.
 
@@ -1689,9 +1612,7 @@ class TestAnOverriddenSettingIsReadWhereItIsPinned:
         assert not unreadable
 
     @pytest.mark.parametrize(("subject", "spelling"), _ATTRIBUTE_SPELLINGS)
-    def test_the_same_read_through_a_re_exported_in_force_door_is_not_reported(
-        self, subject, spelling
-    ):
+    def test_the_same_read_through_a_re_exported_in_force_door_is_not_reported(self, subject, spelling):
         """The other half of that diagonal. Without it the resolution is
         satisfied by one that reports every attribute call it can resolve."""
         offenders, unreadable, examined = _planted(
@@ -1735,9 +1656,7 @@ class TestAnOverriddenSettingIsReadWhereItIsPinned:
             "class R:\n    read = settings_store.get_bool\n",
         ],
     )
-    def test_a_reader_bound_inside_a_scope_of_its_own_is_not_an_attribute_on_that_module(
-        self, opener
-    ):
+    def test_a_reader_bound_inside_a_scope_of_its_own_is_not_an_attribute_on_that_module(self, opener):
         """Why the cross module read stops at module scope.
 
         `helpers.read` does not exist: the binding is a local in `send` or an
@@ -1766,10 +1685,7 @@ class TestAnOverriddenSettingIsReadWhereItIsPinned:
         """
         _, unreadable, examined = _planted(
             "import helpers\nhelpers.get_bool(db, SettingKey.MAIL_USE_TLS)\n",
-            alongside={
-                "helpers.py": "if TYPE_CHECKING:\n"
-                "    from settings_store import get_bool\n"
-            },
+            alongside={"helpers.py": "if TYPE_CHECKING:\n    from settings_store import get_bool\n"},
         )
         assert not unreadable
         assert examined == 0
@@ -1793,11 +1709,8 @@ class TestAnOverriddenSettingIsReadWhereItIsPinned:
     @pytest.mark.parametrize(
         "shadow",
         [
-            "def send(db, helpers):\n"
-            "    return helpers.get_bool(db, SettingKey.MAIL_USE_TLS)\n",
-            "def send(db):\n"
-            "    helpers = Fake()\n"
-            "    return helpers.get_bool(db, SettingKey.MAIL_USE_TLS)\n",
+            "def send(db, helpers):\n    return helpers.get_bool(db, SettingKey.MAIL_USE_TLS)\n",
+            "def send(db):\n    helpers = Fake()\n    return helpers.get_bool(db, SettingKey.MAIL_USE_TLS)\n",
             "try:\n"
             "    helpers = Fake()\n"
             "except NameError:\n"
@@ -1807,14 +1720,10 @@ class TestAnOverriddenSettingIsReadWhereItIsPinned:
             # `class`, an `except ... as` and a `TypeVar` all carry the name
             # they bind as a plain string, and removing that clause left every
             # other row of this table green.
-            "def helpers():\n"
-            "    return None\n"
-            "helpers.get_bool(db, SettingKey.MAIL_USE_TLS)\n",
+            "def helpers():\n    return None\nhelpers.get_bool(db, SettingKey.MAIL_USE_TLS)\n",
         ],
     )
-    def test_a_name_this_module_also_binds_itself_is_not_the_module_it_imported(
-        self, shadow
-    ):
+    def test_a_name_this_module_also_binds_itself_is_not_the_module_it_imported(self, shadow):
         """The caller side of the question the subject side already answered.
 
         `subjects` carries no scope analysis, so a parameter or a local called
@@ -1912,9 +1821,7 @@ class TestAnOverriddenSettingIsReadWhereItIsPinned:
         `application_sources()` never returns hands out, so the call is silent, and
         that is the boundary this resolution stops at.
         """
-        _, unreadable, examined = _planted(
-            "import helpers\nhelpers.get_bool(db, SettingKey.MAIL_USE_TLS)\n"
-        )
+        _, unreadable, examined = _planted("import helpers\nhelpers.get_bool(db, SettingKey.MAIL_USE_TLS)\n")
         assert not unreadable
         assert examined == 0
 
@@ -1932,8 +1839,7 @@ class TestAnOverriddenSettingIsReadWhereItIsPinned:
         assert "float_in_force" in in_force
 
         offenders, _, _ = _planted(
-            "import settings_store\n"
-            "settings_store.get_float(db, SettingKey.MAIL_PORT)\n",
+            "import settings_store\nsettings_store.get_float(db, SettingKey.MAIL_PORT)\n",
             store=store,
         )
         assert offenders, "a reader added later is not covered by the rule"
@@ -1982,10 +1888,7 @@ class TestThePlanAndTheLoginsAgreeOnWhoNeedsOne:
         return set(sources.NEEDS_A_KEY) - settings_store._SECRET_IS_A_SETTINGS_ROW
 
     def test_every_source_admitted_on_a_credential_has_one_resolved_for_it(self):
-        gap = sorted(
-            source.value
-            for source in self._admitted_by_a_credential() - self._needs_a_login()
-        )
+        gap = sorted(source.value for source in self._admitted_by_a_credential() - self._needs_a_login())
 
         assert not gap, (
             f"{gap} reach the plan on a held credential and have no login resolved, "
