@@ -144,7 +144,7 @@ class TestMergingTwoBooks:
         held = make_book(admin["headers"], title="Held", format="ebook")
         asked = request(client, member, held).json()
         own = make_book(member["headers"], title="Own", format="ebook")
-        merge(client, member, own, held)
+        merge(client, admin, own, held)
         assert decide(client, member, own, asked["id"]).status_code == 403
         assert decide(client, admin, own, asked["id"]).json()["status"] == "granted"
 
@@ -154,7 +154,7 @@ class TestMergingTwoBooks:
         held = make_book(admin["headers"], title="Held", format="ebook")
         asked = request(client, member, held).json()
         third = make_book(other_user["headers"], title="Third", format="ebook")
-        merge(client, other_user, third, held)
+        merge(client, admin, third, held)
         assert listing(client, other_user, third).json() == []
         assert decide(client, other_user, third, asked["id"]).status_code == 404
         assert len(listing(client, admin, third).json()) == 1

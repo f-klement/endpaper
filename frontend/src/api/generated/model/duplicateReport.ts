@@ -15,16 +15,17 @@ import type { DuplicateGroup } from "./duplicateGroup.ts";
  * what happened instead of being handed it.
  *
  * **A count is a disclosure, and this route had never carried one.** Both
- * numbers count the groups this viewer **can see**, so neither can be moved
- * by a Book the viewer cannot see.
+ * numbers count groups of Books this viewer **can see**, so neither can be
+ * moved by a Book the viewer cannot see.
  *
- * **Can see, not owns**, and the two are separate in this data model on
- * purpose. A member looking at two public Books somebody else added is
- * counted one group and is offered the merge, which is intended and is what
- * `merge_books` reasons about: `visible_to` yields exactly the set a caller
- * may write, because a public Book is a shared shelf. This sentence used to
- * say the viewer's own shelf, which reads as ownership and is the opposite
- * of the rule.
+ * **Of those, only the groups this viewer can merge.** A merge deletes every
+ * Book but the one kept, and a viewer who is not an admin may delete only
+ * Books they added, so a group with no row whose `may_merge_away` is true is
+ * left out of both numbers: its card could fold nothing, and counted it
+ * would take the place of a group the viewer can work on. A group mixing the
+ * viewer's Books with any others is in, and one of the others may be the one
+ * kept. Of a group larger than one merge, the rows shown are chosen from
+ * those the viewer may merge away first.
  */
 export interface DuplicateReport {
   groups: DuplicateGroup[];

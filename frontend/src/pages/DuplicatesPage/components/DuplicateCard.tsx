@@ -32,6 +32,22 @@ function describe(book: DuplicateMember, t: Translate): string {
 }
 
 /**
+ * The ids a merge keeping `keepId` sends: the survivor, and every other entry
+ * the server would let this member fold away, in the order the card shows
+ * them.
+ *
+ * An entry another member added stays out rather than refusing the whole
+ * merge, which the server would do with it in: the member's own duplicates
+ * still fold together, and that entry stays on the card as a choice of
+ * survivor.
+ */
+function mergedInto(group: DuplicateGroup, keepId: number): number[] {
+  return group.books
+    .filter((book) => book.id === keepId || book.may_merge_away)
+    .map((book) => book.id);
+}
+
+/**
  * One suspected duplicate group, with a "keep this one" per entry.
  *
  * The choice is per entry rather than a single merge button, because which
@@ -44,52 +60,59 @@ export default function DuplicateCard({
   onMerge,
 }: DuplicateCardProps) {
   const { t } = useTranslation();
-  const bookIds = group.books.map((book) => book.id);
 
   return (
     <div className="bg-paper-0 border border-paper-200 rounded-2xl p-4 space-y-3 dark:bg-paper-900 dark:border-paper-700">
       <ul className="space-y-2">
-        {group.books.map((book) => (
-          <li
-            key={book.id}
-            className="flex items-center gap-3 border border-paper-100 rounded-xl p-2 dark:border-paper-800"
-          >
-            <CoverImage
-              src={book.cover_url}
-              alt=""
-              className="w-10 h-14 object-cover rounded shrink-0 bg-paper-100 dark:bg-paper-800"
-            />
-
-            <div className="min-w-0 flex-1">
-              <p className="text-sm font-medium text-paper-900 truncate dark:text-paper-100">
-                {book.title}
-              </p>
-              <p className="text-xs text-paper-600 truncate dark:text-paper-400">
-                {describe(book, t)}
-              </p>
-            </div>
-
-            <button
-              type="button"
-              disabled={isMerging}
-              onClick={() => {
-                if (
-                  confirm(
-                    t("duplicates.confirm", {
-                      count: group.books.length - 1,
-                      title: book.title,
-                    }),
-                  )
-                ) {
-                  onMerge(bookIds, book.id);
-                }
-              }}
-              className="shrink-0 px-3 py-1.5 rounded-lg bg-accent-fill text-on-accent text-xs font-medium hover:bg-accent-fill-hover disabled:opacity-40 transition-colors"
+        {group.books.map((book) => {
+          const bookIds = mergedInto(group, book.id);
+          return (
+            <li
+              key={book.id}
+              className="flex items-center gap-3 border border-paper-100 rounded-xl p-2 dark:border-paper-800"
             >
-              {isMerging ? t("duplicates.merging") : t("duplicates.keepThis")}
-            </button>
-          </li>
-        ))}
+              <CoverImage
+                src={book.cover_url}
+                alt=""
+                className="w-10 h-14 object-cover rounded shrink-0 bg-paper-100 dark:bg-paper-800"
+              />
+
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium text-paper-900 truncate dark:text-paper-100">
+                  {book.title}
+                </p>
+                <p className="text-xs text-paper-600 truncate dark:text-paper-400">
+                  {describe(book, t)}
+                </p>
+                {!book.may_merge_away && (
+                  <p className="text-xs text-paper-600 dark:text-paper-400">
+                    {t("duplicates.notYours")}
+                  </p>
+                )}
+              </div>
+
+              <button
+                type="button"
+                disabled={isMerging || bookIds.length < 2}
+                onClick={() => {
+                  if (
+                    confirm(
+                      t("duplicates.confirm", {
+                        count: bookIds.length - 1,
+                        title: book.title,
+                      }),
+                    )
+                  ) {
+                    onMerge(bookIds, book.id);
+                  }
+                }}
+                className="shrink-0 px-3 py-1.5 rounded-lg bg-accent-fill text-on-accent text-xs font-medium hover:bg-accent-fill-hover disabled:opacity-40 transition-colors"
+              >
+                {isMerging ? t("duplicates.merging") : t("duplicates.keepThis")}
+              </button>
+            </li>
+          );
+        })}
       </ul>
 
       {/* A group larger than one merge may name is shown cut to what a merge

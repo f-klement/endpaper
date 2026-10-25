@@ -176,14 +176,17 @@ class TestDetection:
         The arm above plants the private row **inside** an existing group, so
         a total counted over the library still reads 1 and only the size
         moves. This plants a whole group the viewer has no part of, which is
-        the shape only the total can see.
+        the shape only the total can see. Read as an admin, because a member
+        is never offered a group with none of their own rows in it, so read
+        as a member the total would drop the leaked group for that reason
+        instead. An admin does not see a member's private Books either.
         """
         for _ in range(2):
-            make_book(admin["headers"], title="Solaris", author="Lem", is_private=True)
-        make_book(member["headers"], title="Dune", author="Frank Herbert")
-        make_book(member["headers"], title="dune", author="frank herbert")
+            make_book(member["headers"], title="Solaris", author="Lem", is_private=True)
+        make_book(admin["headers"], title="Dune", author="Frank Herbert")
+        make_book(admin["headers"], title="dune", author="frank herbert")
 
-        assert report(client, member["headers"])["total_groups"] == 1
+        assert report(client, admin["headers"])["total_groups"] == 1
 
     def test_requires_authentication(self, client):
         assert client.get("/api/books/duplicates").status_code == 401
@@ -192,7 +195,7 @@ class TestDetection:
 class TestEveryColumnLandsWhereItBelongs:
     """The projection is positional and nothing else checks it.
 
-    Nine columns in the select, nine fields in the row type, seven names in
+    Ten columns in the select, ten fields in the row type, eight names in
     the member construction: three hand ordered lists, five of them mutually
     swappable nullable strings, and a `cast` that asserts the shape rather
     than checking it. Two swaps in that family are not cosmetic.
@@ -204,19 +207,21 @@ class TestEveryColumnLandsWhereItBelongs:
     hand written omission in the keyword construction: swap the two and the
     token renders on the card, with the cast agreeing.
 
-    **And three of the nine decide grouping**, whose ids the card posts to an
+    **And three of the ten decide grouping**, whose ids the card posts to an
     undoable merge. An author landing in publisher groups two different works
     as one and offers that merge; a publisher landing in the group token makes
     the collapse dedupe on publisher and silently drop real duplicates.
     """
 
-    def test_each_column_lands_in_its_own_field_and_the_token_lands_nowhere(self, client, admin, db):
+    def test_each_column_lands_in_its_own_field_and_the_token_lands_nowhere(self, client, member, db):
         """One row, every value distinctive, compared whole.
 
         A whole dict rather than a field at a time: an equality over the
         emitted object is what catches a swap between two fields that are
         both present and both strings, which is the family a per field
-        assertion passes.
+        assertion passes. Read by the member who added both rows and is no
+        admin, so `may_merge_away` is true only if the adder reached it: an
+        admin is answered true whatever the column held.
         """
         from enums import BookFormat
         from models import Book
@@ -231,7 +236,7 @@ class TestEveryColumnLandsWhereItBelongs:
             year=1965,
             isbn="9780441013593",
             cover_url="https://example.invalid/dune-first.jpg",
-            added_by_user_id=admin["user"]["id"],
+            added_by_user_id=member["user"]["id"],
         )
         # A second row of the same work and a **different** publisher, so the
         # group exists only if the author reached the key. Swap author and
@@ -243,17 +248,17 @@ class TestEveryColumnLandsWhereItBelongs:
                     title="Dune",
                     author="Frank Herbert",
                     publisher="Ace Books",
-                    added_by_user_id=admin["user"]["id"],
+                    added_by_user_id=member["user"]["id"],
                 ),
             ]
         )
         db.commit()
 
-        response = client.get("/api/books/duplicates", headers=admin["headers"])
+        response = client.get("/api/books/duplicates", headers=member["headers"])
         [group] = response.json()["groups"]
-        [member] = [row for row in group["books"] if row["id"] == described.id]
+        [row] = [row for row in group["books"] if row["id"] == described.id]
 
-        assert member == {
+        assert row == {
             "id": described.id,
             "title": "Dune",
             "format": "hardcover",
@@ -261,6 +266,7 @@ class TestEveryColumnLandsWhereItBelongs:
             "year": 1965,
             "isbn": "9780441013593",
             "cover_url": "https://example.invalid/dune-first.jpg",
+            "may_merge_away": True,
         }
         assert token not in response.text
 
@@ -295,7 +301,7 @@ class TestTheScanCostsOneStatement:
 class TestTheMemberCap:
     """A group larger than one merge is allowed to name.
 
-    The card sends every id it renders and `MergeRequest` refuses more than
+    The card sends at most the ids it renders and `MergeRequest` refuses more than
     `MERGE_BOOKS_MAX` of them, so a group shown whole above that ceiling
     rendered a button that answered 422 on every click. Reachable from a
     catalogue import of many same titled rows sharing no copy group.
@@ -323,6 +329,18 @@ class TestTheMemberCap:
 
         assert group["size"] == MERGE_BOOKS_MAX + 1
 
+    def test_it_keeps_the_members_own_rows_inside_the_cap(self, client, admin, member, make_book):
+        """Cut in id order, a group whose first rows are all another member's
+        would offer the member nothing to merge, and so would not be shown."""
+        self._one_group_of(make_book, admin, MERGE_BOOKS_MAX)
+        mine = make_book(member["headers"], title="Dune", author="Frank Herbert")
+
+        [group] = groups(client, member["headers"])
+
+        ids = [row["id"] for row in group["books"]]
+        assert mine["id"] in ids
+        assert ids == sorted(ids)
+
     def test_merging_everything_it_shows_is_accepted(self, client, admin, make_book):
         """The diagonal, and the defect: one member over the cap, and every
         button on the card used to be a guaranteed 422."""
@@ -338,8 +356,8 @@ class TestTheAnswerCap:
 
     `DUPLICATE_BOOKS_SHOWN` bounds books rather than groups, because a cap on
     groups leaves the largest group unbounded. Groups are accumulated whole:
-    the merge sends every id the card renders, so a group cut by the budget
-    would offer a merge over a subset nobody chose.
+    the merge sends no id the card does not render, so a group cut by the
+    budget would offer a merge over a subset nobody chose.
     """
 
     def _pairs(self, db, admin, how_many: int) -> None:
@@ -387,6 +405,29 @@ class TestTheAnswerCap:
         body = report(client, admin["headers"])
 
         assert all(group["size"] == len(group["books"]) == 2 for group in body["groups"])
+
+    def test_groups_a_member_cannot_merge_do_not_spend_their_budget(
+        self, client, admin, member, make_book, db
+    ):
+        """Another member's groups sorting first would otherwise fill the page
+        with cards whose every keep is disabled, so the member's own group
+        never shows and merging cannot advance the list."""
+        self._pairs(db, admin, DUPLICATE_BOOKS_SHOWN)
+        mine = [make_book(member["headers"], title="Zebra", author="One Author") for _ in range(2)]
+
+        body = report(client, member["headers"])
+
+        assert [{row["id"] for row in group["books"]} for group in body["groups"]] == [
+            {row["id"] for row in mine}
+        ]
+
+    def test_the_total_leaves_out_groups_the_member_cannot_merge(self, client, admin, member, make_book, db):
+        """Otherwise the capped line promises groups the page will never show."""
+        self._pairs(db, admin, DUPLICATE_BOOKS_SHOWN)
+        for _ in range(2):
+            make_book(member["headers"], title="Zebra", author="One Author")
+
+        assert report(client, member["headers"])["total_groups"] == 1
 
 
 class TestMerge:
@@ -595,6 +636,122 @@ class TestMergeRefusals:
 
     def test_requires_authentication(self, client):
         assert client.post("/api/books/merge", json={"book_ids": [1, 2], "keep_id": 1}).status_code == 401
+
+
+class TestWhoseBooksAMergeMayFoldAway:
+    """A merge deletes its losers, so a member may name only Books they added.
+
+    The keeper is not deleted and keeps every value it holds, so whose it is
+    does not matter. An admin may name any loser.
+    """
+
+    @staticmethod
+    def _nobody_added(db, book):
+        from models import Book
+
+        db.get(Book, book["id"]).added_by_user_id = None
+        db.commit()
+
+    def test_a_member_may_not_merge_away_a_book_another_member_added(self, client, admin, member, make_book):
+        theirs = make_book(admin["headers"], title="Dune")
+        mine = make_book(member["headers"], title="Dune")
+
+        res = merge(client, member["headers"], [mine["id"], theirs["id"]], mine["id"])
+
+        assert res.status_code == 409
+
+    def test_the_refused_loser_is_not_deleted(self, client, admin, member, make_book):
+        theirs = make_book(admin["headers"], title="Dune")
+        mine = make_book(member["headers"], title="Dune")
+
+        merge(client, member["headers"], [mine["id"], theirs["id"]], mine["id"])
+
+        assert client.get(f"/api/books/{theirs['id']}", headers=admin["headers"]).status_code == 200
+
+    def test_the_refused_losers_reading_status_stays_on_it(self, client, admin, member, make_book, db):
+        from models import UserBook
+
+        theirs = make_book(admin["headers"], title="Dune")
+        client.put(f"/api/books/{theirs['id']}/status", json={"status": "reading"}, headers=admin["headers"])
+        mine = make_book(member["headers"], title="Dune")
+
+        merge(client, member["headers"], [mine["id"], theirs["id"]], mine["id"])
+
+        assert (
+            db.query(UserBook).filter(UserBook.user_id == admin["user"]["id"]).one().book_id == theirs["id"]
+        )
+
+    def test_one_refused_loser_refuses_the_whole_merge(self, client, admin, member, make_book):
+        theirs = make_book(admin["headers"], title="Dune")
+        mine = make_book(member["headers"], title="Dune")
+        also_mine = make_book(member["headers"], title="Dune")
+
+        merge(client, member["headers"], [mine["id"], also_mine["id"], theirs["id"]], mine["id"])
+
+        assert client.get(f"/api/books/{also_mine['id']}", headers=member["headers"]).status_code == 200
+
+    def test_a_member_may_merge_their_own_duplicates(self, client, member, make_book):
+        keeper = make_book(member["headers"], title="Dune")
+        loser = make_book(member["headers"], title="Dune")
+
+        res = merge(client, member["headers"], [keeper["id"], loser["id"]], keeper["id"])
+
+        assert res.status_code == 200
+
+    def test_a_member_may_keep_another_members_book_and_fold_their_own_into_it(
+        self, client, admin, member, make_book
+    ):
+        theirs = make_book(admin["headers"], title="Dune")
+        mine = make_book(member["headers"], title="Dune")
+
+        res = merge(client, member["headers"], [theirs["id"], mine["id"]], theirs["id"])
+
+        assert res.status_code == 200
+
+    def test_an_admin_may_merge_away_a_book_another_member_added(self, client, admin, member, make_book):
+        theirs = make_book(member["headers"], title="Dune")
+        mine = make_book(admin["headers"], title="Dune")
+
+        res = merge(client, admin["headers"], [mine["id"], theirs["id"]], mine["id"])
+
+        assert res.status_code == 200
+
+    def test_a_member_may_not_merge_away_a_book_nobody_added(self, client, member, make_book, db):
+        orphan = make_book(member["headers"], title="Dune")
+        self._nobody_added(db, orphan)
+        mine = make_book(member["headers"], title="Dune")
+
+        res = merge(client, member["headers"], [mine["id"], orphan["id"]], mine["id"])
+
+        assert res.status_code == 409
+
+    def test_an_admin_may_merge_away_a_book_nobody_added(self, client, admin, make_book, db):
+        orphan = make_book(admin["headers"], title="Dune")
+        self._nobody_added(db, orphan)
+        mine = make_book(admin["headers"], title="Dune")
+
+        res = merge(client, admin["headers"], [mine["id"], orphan["id"]], mine["id"])
+
+        assert res.status_code == 200
+
+    def test_the_report_marks_a_book_the_caller_may_not_merge_away(self, client, admin, member, make_book):
+        theirs = make_book(admin["headers"], title="Dune")
+        mine = make_book(member["headers"], title="Dune")
+
+        [group] = report(client, member["headers"])["groups"]
+
+        assert {book["id"]: book["may_merge_away"] for book in group["books"]} == {
+            theirs["id"]: False,
+            mine["id"]: True,
+        }
+
+    def test_the_report_lets_an_admin_merge_away_any_book(self, client, admin, member, make_book):
+        make_book(member["headers"], title="Dune")
+        make_book(admin["headers"], title="Dune")
+
+        [group] = report(client, admin["headers"])["groups"]
+
+        assert all(book["may_merge_away"] for book in group["books"])
 
 
 class TestTheLoanInvariant:
