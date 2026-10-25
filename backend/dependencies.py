@@ -368,18 +368,6 @@ def book_for_write(
     return book
 
 
-def owns_or_administers(added_by_user_id: int | None, user: User) -> bool:
-    """Whether `user` added the Book whose adder is `added_by_user_id`, or is an admin.
-
-    The owner rule, spelled once: `book_for_owner` asks it of one Book, and a
-    merge asks it of every loser and of every row the duplicates report
-    offers. It takes the column rather than a `Book` because that report
-    reads tuples, never entities. A null adder is nobody's, so only an admin
-    passes; the purge rule differs there, and `_purgeable_by` says why.
-    """
-    return user.is_admin or added_by_user_id == user.id
-
-
 @refuses(403)
 def book_for_owner(
     book: Annotated[Book, Depends(book_for_read)],
@@ -391,7 +379,7 @@ def book_for_owner(
     someone else's book private would hide it from everyone, so it is not
     something a passing member should be able to do.
     """
-    if not owns_or_administers(book.added_by_user_id, current_user):
+    if book.added_by_user_id != current_user.id and not current_user.is_admin:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only the member who added this book can change that",

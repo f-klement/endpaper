@@ -176,9 +176,7 @@ def _settle_one(
     for the CSV, OPDS and MARC importers only. The Calibre library and store
     imports run in the browser and post each Book to the add door, which
     purges the trashed holders and creates only when the caller added every
-    one, an admin included, and otherwise answers 409 `in_trash`, as this
-    listing does. An admin's exception for a Book nobody added is for the two
-    purge routes, not the door. Its title
+    one, and otherwise answers 409 `in_trash`, as this listing does. Its title
     is listed because the Member can already see that Book in their trash.
 
     What stays with each importer, because each difference has a reason:

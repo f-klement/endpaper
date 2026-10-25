@@ -294,7 +294,7 @@ export const de: Messages = {
   "scan.couldNotAdd": "Das Buch konnte nicht hinzugefügt werden.",
   "scan.openTheOneWeHave": "Vorhandenes Exemplar öffnen",
   "scan.inTrash":
-    "Liegt im Papierkorb und wurde nicht selbst hinzugefügt, deshalb wurde es nicht aufgenommen. Wird es zurückgelegt oder von dem Mitglied, das es hinzugefügt hat (oder von einem Admin, wenn es niemand hinzugefügt hat), endgültig gelöscht, lässt es sich erneut hinzufügen.",
+    "Als Buch eines anderen Mitglieds im Papierkorb und deshalb nicht hinzugefügt. Wird es zurückgelegt oder endgültig gelöscht, lässt es sich erneut hinzufügen.",
   "scan.authorField": "Autor",
   "scan.addCover": "Coverfoto hinzufügen (optional)",
   "scan.replaceCover": "Coverfoto ersetzen (optional)",
@@ -1124,8 +1124,6 @@ export const de: Messages = {
   // falsch, und der kleinste Wert hier ist eins.
   "duplicates.moreInGroup":
     "Weitere Einträge in dieser Gruppe, für einen zweiten Durchgang ({count})",
-  "duplicates.notYours":
-    "Nicht selbst hinzugefügt. Dieser Eintrag kann behalten werden, aber mit einem anderen zusammenführen kann ihn nur das Mitglied, das ihn hinzugefügt hat, oder ein Admin.",
   "duplicates.couldNotLoad": "Die Prüfung auf Doppelte ist fehlgeschlagen.",
 
   // ── Sammelaktionen ──────────────────────────────────────────────────────
@@ -1450,7 +1448,7 @@ export const de: Messages = {
   "import.readAsGeneric": "Als einfache Tabelle gelesen, die Spalten geraten.",
   "import.unmatched": "Nicht im Katalog gefunden:",
   "import.inTrash":
-    "{count} Zeilen nennen ein Buch im Papierkorb, und für sie wurde nichts geschrieben. Wird es zurückgelegt oder von dem Mitglied, das es hinzugefügt hat (oder von einem Admin, wenn es niemand hinzugefügt hat), endgültig gelöscht, lassen sie sich erneut importieren:",
+    "{count} Zeilen nennen ein Buch im Papierkorb, und für sie wurde nichts geschrieben. Wird es zurückgelegt oder endgültig gelöscht, lassen sie sich erneut importieren:",
   "import.ambiguous":
     "{count} Zeilen passen zu zwei oder mehr Büchern in diesem Regal, und für sie wurde nichts geschrieben, statt zwischen ihnen zu raten:",
 
@@ -1468,7 +1466,7 @@ export const de: Messages = {
   "marc.blocked":
     "{count} tragen eine ISBN, die zu einem für dieses Konto nicht sichtbaren Buch gehört, und bleiben unangetastet.",
   "marc.inTrash":
-    "{count} tragen eine ISBN, die nur ein Buch im Papierkorb hat, und bleiben unangetastet, bis es zurückgelegt oder von dem Mitglied, das es hinzugefügt hat (oder von einem Admin, wenn es niemand hinzugefügt hat), endgültig gelöscht ist.",
+    "{count} tragen eine ISBN, die nur ein Buch im Papierkorb hat, und bleiben unangetastet, bis es zurückgelegt oder endgültig gelöscht ist.",
   "marc.ambiguous":
     "{count} passen zu zwei oder mehr Büchern in diesem Regal und bleiben unangetastet, statt zwischen ihnen zu raten.",
   "marc.skipped":
@@ -1484,7 +1482,7 @@ export const de: Messages = {
   "marc.resultSkipped":
     "{count} Datensätze blieben unberücksichtigt: kein Titel, oder eine ISBN, die zu einem für dieses Konto nicht sichtbaren Buch gehört.",
   "marc.resultInTrash":
-    "{count} Datensätze tragen eine ISBN, die nur ein Buch im Papierkorb hat, und für sie wurde nichts geschrieben. Wird es zurückgelegt oder von dem Mitglied, das es hinzugefügt hat (oder von einem Admin, wenn es niemand hinzugefügt hat), endgültig gelöscht, lassen sie sich erneut importieren:",
+    "{count} Datensätze tragen eine ISBN, die nur ein Buch im Papierkorb hat, und für sie wurde nichts geschrieben. Wird es zurückgelegt oder endgültig gelöscht, lassen sie sich erneut importieren:",
   "marc.resultAmbiguous":
     "{count} Datensätze passen zu zwei oder mehr Büchern in diesem Regal, und für sie wurde nichts geschrieben, statt zwischen ihnen zu raten:",
 
@@ -1517,7 +1515,7 @@ export const de: Messages = {
   "calibre.duplicate": "bereits im Katalog",
   "calibre.notAdded": "nicht hinzugefügt",
   "calibre.inTrash":
-    "im Papierkorb und nicht selbst hinzugefügt; wird es zurückgelegt oder von dem Mitglied, das es hinzugefügt hat (oder von einem Admin, wenn es niemand hinzugefügt hat), endgültig gelöscht, lässt es sich erneut importieren",
+    "als Buch eines anderen Mitglieds im Papierkorb; wird es zurückgelegt oder endgültig gelöscht, lässt es sich erneut importieren",
   "calibre.located":
     "Bei {count} liegen die Dateien im gewählten Ordner, und beim Buch wird gespeichert, wo jede Datei liegt.",
   "calibre.already":
@@ -1608,7 +1606,7 @@ export const de: Messages = {
   "stores.duplicate": "bereits im Katalog",
   "stores.notAdded": "nicht hinzugefügt",
   "stores.inTrash":
-    "im Papierkorb und nicht selbst hinzugefügt; wird es zurückgelegt oder von dem Mitglied, das es hinzugefügt hat (oder von einem Admin, wenn es niemand hinzugefügt hat), endgültig gelöscht, lässt es sich erneut importieren",
+    "als Buch eines anderen Mitglieds im Papierkorb; wird es zurückgelegt oder endgültig gelöscht, lässt es sich erneut importieren",
   "stores.failureNotADatabase": "Diese Datei ist keine SQLite-Datenbank.",
   "stores.failureNotAKobo": "Diese Datenbank ist keine Kobo-Bibliothek.",
   "stores.failureNotAnArchive": "Diese Datei ist kein Zip-Archiv.",
@@ -1708,14 +1706,8 @@ export const de: Messages = {
     '"{title}" endgültig löschen? Das lässt sich nicht rückgängig machen.',
   "trash.emptyAll": "Papierkorb leeren",
   "trash.emptyAllConfirm":
-    "Alle selbst hinzugefügten Bücher im Papierkorb endgültig löschen? Bücher anderer Mitglieder bleiben hier. Das lässt sich nicht rückgängig machen.",
-  "trash.emptyAllConfirmAdmin":
-    "Alle selbst hinzugefügten Bücher im Papierkorb endgültig löschen, und alle, bei denen niemand als hinzufügendes Mitglied verzeichnet ist? Bücher anderer Mitglieder bleiben hier. Das lässt sich nicht rückgängig machen.",
+    "Alle {count} Bücher im Papierkorb endgültig löschen? Das lässt sich nicht rückgängig machen.",
   "trash.emptied": "{count} Bücher endgültig gelöscht.",
-  "trash.notYours":
-    "Von einem anderen Mitglied hinzugefügt. Endgültig löschen kann es nur dieses Mitglied.",
-  "trash.noAdder":
-    "Niemand ist als hinzufügendes Mitglied verzeichnet. Endgültig löschen kann es nur ein Admin.",
   "trash.movedCount": "{count} Bücher in den Papierkorb verschoben.",
   "trash.open": "Papierkorb öffnen",
 

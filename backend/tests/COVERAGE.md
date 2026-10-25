@@ -2,9 +2,9 @@
 
 <!-- measured: begin -->
 
-**12095 tests, in 183 files**, counted by the run that reads this line.
-**The 151 rows below sum to 10289.**
-The other 1806 tests are in 35 files this register may not name.
+**12071 tests, in 183 files**, counted by the run that reads this line.
+**The 151 rows below sum to 10266.**
+The other 1805 tests are in 35 files this register may not name.
 The table also carries 3 files this engine does not run, stated as 0.
 <!-- measured: end -->
 
@@ -194,7 +194,7 @@ why the helper uses regexes.
 | `routers/test_books_bulk.py` | 76 | One verb applied to a selection, the three-way count, that a row id past the largest a row can carry is a 400 rather than an `OverflowError` out of the driver, that the dispatch table and `BulkAction` agree with `_dispatch_table` driven by a synthetic enum in both directions, and that no member of `BulkAction` turns a hostile argument into a 500 |
 | `routers/test_collections.py` | 34 | **Shelving, never permission.** Naming a part of the shelf, the case-insensitive uniqueness the database enforces, in ASCII and outside it, counts filtered to the caller, and which collections a caller is told about at all |
 | `routers/test_books_collections.py` | 40 | Filing a book, the two list parameters and the 400 for both at once, the bulk verb, the merge that absorbs a collection, the export column, and that each write door still takes a shelf only the caller's own private books are on |
-| `routers/test_books_duplicates.py` | 62 | Duplicate detection and the merge, incl. the ORM cascade trap and whose Books a merge may fold away |
+| `routers/test_books_duplicates.py` | 48 | Duplicate detection and the merge, incl. the ORM cascade trap |
 | `routers/test_books_notes.py` | 13 | A note's own visibility over the four note routes: a private note absent from another member's listing and from an admin's, 404 rather than 403 on edit and delete for anybody but its author, and an edit that does not mention the flag leaving it alone |
 | `routers/test_books_highlights.py` | 34 | KOReader highlights over the routes: a sidecar imported twice writes nothing the second time, an edited note and an adjusted mark update in place, two marks made in one second stay two, the same position in another file is another row, sharing survives a re-import, a move to another book (from the trash, from a private book) takes the share back, a book without the fingerprint refuses the sidecar, a NUL and a book the caller cannot see are refused, private until shared, no admin arm, only the author shares (404 and 403), a share racing an import that moved the highlight or lengthened it past a quote leaves it private, a passage past the quote ceiling stays private, the device clock returned as given, a merge moving them and taking the share back, and one of a same second pair deleted leaving the other its row |
 | `routers/test_readwise.py` | 31 | **A member's Readwise token and pull, against a fake that follows the documented export.** That a token needs a key, is checked with Readwise, is sealed, never served and never logged, goes with its member, starts the pull over when replaced, and that removing it keeps the highlights; that saving and pulling share the import limiter and the fourth never reaches Readwise; that a pull reads every page, writes private rows keyed on Readwise's id, sends only the token and Readwise's own values, asks from ten minutes before it began, removes what Readwise deleted whatever the category, refuses two answering Books by title or by ASIN and another member's private Book, asks for a book by id once a Book matches and again if that pull stopped, makes a moved highlight private; and that a refused token, a rate limit and a page bound leave the cursor, the last resuming where it stopped, and that a page written again after losing a race keeps the cursor and the walk's start it resumes from |
@@ -217,7 +217,7 @@ why the helper uses regexes.
 | `test_identifiers.py`                      |    10 | Writing identifiers onto a book: duplicates within one payload dropped rather than refused, because a client reading two of its own files may find one book in both, and the repoint a merge performs |
 | `routers/test_books_google.py` | 34 | Enrichment, the chosen-edition apply and that its body cannot overflow the database |
 | `routers/test_books_search.py` | 56 | **Free-text search.** That it works with no API key, that the six catalogues a reader would doubt answer do, how they merge, that a record describing itself with more subjects than a book may hold still comes back as a row where the cap now trims them |
-| `routers/test_books_trash.py` | 56 | **Undoing a delete.** That a trashed book leaves every view, comes back whole, and frees its ISBN again, and that a member's own trashed Book is kept while a Book they cannot see holds the ISBN, and that deleting for good, one Book or the whole trash, reaches only the Books the caller added, and for an admin also those with no recorded adder, while the add door purges only the caller's own |
+| `routers/test_books_trash.py` | 47 | **Undoing a delete.** That a trashed book leaves every view, comes back whole, and frees its ISBN again, and that a member's own trashed Book is kept while a Book they cannot see holds the ISBN |
 | `routers/test_settings.py` | 184 | Feature flags, the masked API key, the overdue webhook settings, admin-only writes |
 | `routers/test_imports.py` | 64 | The import, the private-ISBN branch, the tag caps, the rate limit, and the round trip: that every column of the live export is read back or named as unread, that each one lands in the field named for it, and that every importer field is filled or named as absent, and that an import Postgres aborts for a deadlock answers 409 |
 | `routers/test_books_tags.py` | 67 | **Two vocabularies in one table.** Who may create, who may delete, and the counts |

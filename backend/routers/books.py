@@ -71,7 +71,6 @@ from dependencies import (
     Paging,
     RowId,
     TagIdList,
-    owns_or_administers,
     row_ids,
 )
 from dependencies import divisions as parse_divisions
@@ -1737,14 +1736,11 @@ def _create_book(payload: BookCreate, current_user: User, db: Session, conflict:
             # owner's ruling of 2026-10-17. The trash view holds every
             # member's trashed public Books, so purging here let one member's
             # import destroy a Book somebody else had trashed and could still
-            # restore. It is refused whichever client called, because the
-            # harm does not depend on which one did. Who may purge a holder is
-            # `_purgeable_by`, the rule both purge routes ask too, here without
-            # the admin's exception for a Book nobody added: that exception is
-            # for deleting such a Book on purpose, and an add is not a request
-            # to delete anything. Somebody
-            # else's trashed private Book never reaches this arm: it answers
-            # `Hidden` and keeps its 409.
+            # restore. It is refused whichever client
+            # called, because the harm does not depend on which one did. "Own"
+            # is `added_by_user_id`, since nothing records who trashed a row.
+            # Somebody else's trashed private Book never reaches this arm: it
+            # answers `Hidden` and keeps its 409.
             #
             # **Every holder, not the first one.** Copies made it possible for
             # several rows to hold one ISBN, and freeing only the first was
@@ -1756,7 +1752,7 @@ def _create_book(payload: BookCreate, current_user: User, db: Session, conflict:
             # Decided in full before anything is destroyed, which the answer
             # being one value makes structural.
             holders = Shelf.trashed_by(db, current_user.id).where(Book.id.in_(book_ids)).all()
-            if not all(_purgeable_by(holder, current_user, deliberate=False) for holder in holders):
+            if any(holder.added_by_user_id != current_user.id for holder in holders):
                 _refuse_in_trash()
             for holder in holders:
                 _purge(holder, db)
@@ -1843,7 +1839,7 @@ def _refuse(message: str, book_id: int | None) -> NoReturn:
     caller the holder is hidden from them or the record is a tie, and an object
     body that it is one Book they can see. The door has a third shape, which
     `_refuse_in_trash` raises: an object with a `code` and no `book_id`, for
-    holders the caller sees only in the trash, one of them not the caller's own.
+    holders the caller sees only in the trash, one of them another member's.
     That is not a leak to close: the 409
     itself already says this
     ISBN is held by some row, whatever the body carries, and the only way to
@@ -1862,7 +1858,7 @@ def _refuse(message: str, book_id: int | None) -> NoReturn:
 
 
 #: The `detail.code` on the add door's 409 when only the trash view holds the
-#: ISBN and a holder is not the caller's own. The other refusals of the door carry
+#: ISBN and a holder is another member's. The other refusals of the door carry
 #: no code. The client's `frontend/src/lib/fileLanding.ts`, which every add door
 #: reads the refusal through, compares against this literal, and
 #: `tests/routers/test_books_trash.py` holds the two spellings equal across the
@@ -1872,7 +1868,7 @@ IN_TRASH: Final = "in_trash"
 
 def _refuse_in_trash() -> NoReturn:
     """The 409 for an ISBN only Books in the caller's trash view hold, one of
-    them not the caller's own.
+    them another member's.
 
     **No `book_id`, although naming it would disclose nothing**: every holder
     is in `Shelf.trashed_by`, which the caller already lists with its title.
@@ -1886,9 +1882,7 @@ def _refuse_in_trash() -> NoReturn:
         detail={
             "code": IN_TRASH,
             "message": (
-                "Book with this ISBN is in the trash, and you did not add it. Restore it,"
-                " or ask the member who added it, or an admin if nobody did, to delete it"
-                " for good, and add it again."
+                "Book with this ISBN is in the trash. Restore it, or delete it for good, and add it again."
             ),
         },
     )
@@ -2862,9 +2856,8 @@ def list_classifications(db: DbSession, current_user: CurrentUser) -> Classifica
 class _DuplicateRow(NamedTuple):
     """One catalogue row as this route reads it, and the whole of what it reads.
 
-    Four columns for the grouping (`id`, `title`, `author`, `copy_group`),
-    five more for the card, and the adder, for whether the card may offer the
-    row as a merge's loser. Nothing here is an ORM `Book`, and that is the
+    Four columns for the grouping (`id`, `title`, `author`, `copy_group`) and
+    five more for the card. Nothing here is an ORM `Book`, and that is the
     point rather than tidiness: once no entity survives the scan, no attribute
     read downstream can lazily load a relationship and quietly re-widen the
     query into the per book N+1 this route has already paid for once.
@@ -2879,7 +2872,6 @@ class _DuplicateRow(NamedTuple):
     year: int | None
     isbn: str | None
     cover_url: str | None
-    added_by_user_id: int | None
 
 
 @router.get("/duplicates", response_model=DuplicateReport)
@@ -2931,7 +2923,7 @@ def list_duplicates(db: DbSession, current_user: CurrentUser) -> DuplicateReport
         _DuplicateRow(*row)
         for row in cast(
             "list[tuple[int, str, str | None, str | None, BookFormat | None, "
-            "str | None, int | None, str | None, str | None, int | None]]",
+            "str | None, int | None, str | None, str | None]]",
             Shelf.seen_by(db, current_user.id)
             .select(
                 Book.id,
@@ -2943,7 +2935,6 @@ def list_duplicates(db: DbSession, current_user: CurrentUser) -> DuplicateReport
                 Book.year,
                 Book.isbn,
                 Book.cover_url,
-                Book.added_by_user_id,
             )
             .tuples()
             .all(),
@@ -2960,67 +2951,36 @@ def list_duplicates(db: DbSession, current_user: CurrentUser) -> DuplicateReport
     # see would publish that sibling's title. Nothing the viewer cannot see is
     # in `rows` at all, so such a group cannot arise here; `DuplicateGroup`
     # refuses to be constructed with one if it ever does.
-    #
-    # **A group the viewer cannot merge is left out, and out of the total.**
-    # Its card would offer no keep that folds anything, because `merge_books`
-    # refuses every row in it as a loser; yet it would spend the budget, so
-    # another member's duplicates sorting first could fill the page and hide
-    # every group the viewer can work on, and the capped line would promise
-    # groups that merging never brings. Whether a group can be merged is read
-    # off the rows the card renders, since those are the only ones a keep can
-    # send.
-    #
-    # **So the cap keeps the viewer's own rows first.** Cut in id order, a
-    # group over the cap whose first rows were all other members' would be
-    # left out although the viewer could merge it. The kept rows go back into
-    # id order so the card's order does not depend on whose rows they are.
-    # An admin may merge away every row, so an admin's cut is plain id order.
-    duplicated = [
-        (
-            key,
-            [_duplicate_member(row, current_user) for row in _rendered(members, current_user)],
-            len(members),
-        )
-        for key, members in sorted(groups.items())
-        if len(members) > 1
-    ]
-    workable = [group for group in duplicated if any(member.may_merge_away for member in group[1])]
+    duplicated = sorted((key, members) for key, members in groups.items() if len(members) > 1)
 
     shown: list[DuplicateGroup] = []
     remaining = DUPLICATE_BOOKS_SHOWN
-    for key, members_shown, size in workable:
-        # Whole groups only. The merge action sends no id the card does not
-        # render, so a group cut by the budget would be a merge offered over a
-        # subset nobody chose. A group contributes at most `MERGE_BOOKS_MAX`,
-        # which is below the budget, so the first group always fits and the
-        # answer can stop below the budget but never above it.
+    for key, members in duplicated:
+        # Whole groups only. The merge action sends every id the card renders,
+        # so a group cut by the budget would be a merge offered over a subset
+        # nobody chose. A group contributes at most `MERGE_BOOKS_MAX`, which is
+        # below the budget, so the first group always fits and the answer can
+        # stop below the budget but never above it.
+        members_shown = members[:MERGE_BOOKS_MAX]
         if len(members_shown) > remaining:
             break
         remaining -= len(members_shown)
-        shown.append(DuplicateGroup(key=key, size=size, books=members_shown))
+        shown.append(
+            DuplicateGroup(
+                key=key,
+                size=len(members),
+                books=[_duplicate_member(row) for row in members_shown],
+            )
+        )
 
-    return DuplicateReport(groups=shown, total_groups=len(workable))
-
-
-def _rendered(members: list[_DuplicateRow], viewer: User) -> list[_DuplicateRow]:
-    """The rows of one group the card renders, in id order: at most
-    `MERGE_BOOKS_MAX`, chosen from the rows the viewer may merge away first.
-
-    `sorted` is stable, so between two reads of the same shelf the cut falls
-    on the same rows.
-    """
-    own_first = sorted(members, key=lambda row: not owns_or_administers(row.added_by_user_id, viewer))
-    return sorted(own_first[:MERGE_BOOKS_MAX], key=lambda row: row.id)
+    return DuplicateReport(groups=shown, total_groups=len(duplicated))
 
 
-def _duplicate_member(row: _DuplicateRow, viewer: User) -> DuplicateMember:
-    """The card's view of one row. `author`, `copy_group` and the adder stay
-    behind.
+def _duplicate_member(row: _DuplicateRow) -> DuplicateMember:
+    """The card's view of one row. `author` and `copy_group` stay behind.
 
     The author is the half of the key the group already carries, and the copy
-    group token is a fact about another member's copies. The adder is answered
-    as the one thing the card needs of it, whether `merge_books` would take the
-    row as a loser, so the rule is not spelled a second time in the client.
+    group token is a fact about another member's copies.
     """
     return DuplicateMember(
         id=row.id,
@@ -3030,7 +2990,6 @@ def _duplicate_member(row: _DuplicateRow, viewer: User) -> DuplicateMember:
         year=row.year,
         isbn=row.isbn,
         cover_url=row.cover_url,
-        may_merge_away=owns_or_administers(row.added_by_user_id, viewer),
     )
 
 
@@ -3043,9 +3002,8 @@ def _one_per_copy_group(rows: list[_DuplicateRow]) -> list[_DuplicateRow]:
     group that lands beside a genuine duplicate is being offered as a book, not
     as a copy.
 
-    The id order it leaves behind is the order the member cap cuts at, first
-    among the rows the viewer may merge away and then among the rest, so which
-    members a group over the cap shows is stable between two reads.
+    The id order it leaves behind is also the order the member cap cuts at, so
+    which members a group over the cap shows is stable between two reads.
     """
     seen: set[str] = set()
     kept: list[_DuplicateRow] = []
@@ -3087,11 +3045,6 @@ def merge_books(
     dropped. A status collision (both rows read by the same person) keeps the
     one on the survivor, because deleting somebody's reading history to
     satisfy a unique index is not an acceptable way to resolve it.
-
-    A merge deletes its losers, so each one must be a Book the caller added,
-    unless the caller is an admin; one that is not refuses the whole merge
-    with 409, before anything moves. The survivor may be anybody's: it loses
-    nothing, since it never overwrites a value it holds.
     """
     if payload.keep_id not in payload.book_ids:
         raise HTTPException(status_code=400, detail="keep_id must be one of book_ids")
@@ -3106,20 +3059,10 @@ def merge_books(
     keeper = found[payload.keep_id]
     losers = [book for book in books if book.id != keeper.id]
 
-    # Seeing a public Book is not enough to delete it. Without this a member
-    # could restore another member's trashed Book, fold it into one of their
-    # own, which carries off its owner's reading status, notes and quotes, and
-    # then purge their own. The rule is `book_for_owner`'s, not
-    # `_purgeable_by`'s: an admin may fold away any loser. That is not harmless
-    # to the loser's adder. The fold carries their rows onto the survivor, whose
-    # own adder may then trash and purge it with those rows, so an admin's
-    # merge into a Book the admin added hands the admin that purge. The owner
-    # accepted this: an admin is trusted with every member's Books.
-    if not all(owns_or_administers(loser.added_by_user_id, current_user) for loser in losers):
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Only the member who added a book, or an admin, may merge it into another.",
-        )
+    # No further permission check: `visible_to` already yields exactly the set
+    # this caller may write. Public books are a shared shelf, and a private
+    # book is only visible to the member who added it, so anything that came
+    # back from that filter is theirs to merge. See dependencies.book_for_write.
 
     # Absorbing the columns and moving every child row is `folding.fold`, which
     # is also where the flushes and the ISBN release ordering live. What stays
@@ -4171,31 +4114,6 @@ def _trash(book: Book, db: Session) -> None:
         lending.close(loan, now)
 
 
-def _purgeable_by(book: Book, user: User, *, deliberate: bool) -> bool:
-    """Whether `user` may delete the trashed `book` for good: they added it,
-    or nobody is recorded as adding it, they are an admin, and the purge is
-    `deliberate`.
-
-    `deliberate` is whether the caller asked for this Book to go: true on the
-    two purge routes, false on the add door, which purges a holder only to
-    make room. The owner gave an admin the Books nobody added to delete on
-    purpose; the add door still purges only the caller's own, so an admin's
-    scan does not silently destroy a Book some member trashed and could still
-    restore.
-
-    The trash view, `Shelf.trashed_by`, is wider than this: it lists every
-    member's trashed public Books, which any of them may put back but only the
-    one who added it may destroy. "Added" is `added_by_user_id`, since nothing
-    records who trashed a row. An admin gets no exception for a Book another
-    member added, unlike `book_for_owner`; only a row with no adder, which no
-    member could otherwise ever purge, is theirs. Both purge routes and the
-    add door ask this, so the rule has one spelling.
-    """
-    if book.added_by_user_id is None:
-        return deliberate and user.is_admin
-    return book.added_by_user_id == user.id
-
-
 def _purge(book: Book, db: Session) -> None:
     """Delete a trashed book for good, and its cover files once the caller's
     transaction commits.
@@ -4345,20 +4263,14 @@ def list_quotes(
 
 @router.delete("/trash", response_model=PurgeResult)
 def empty_trash(db: DbSession, current_user: CurrentUser) -> PurgeResult:
-    """Delete for good every Book in the caller's trash that `_purgeable_by`
-    lets them destroy.
+    """Delete everything in the caller's trash for good.
 
-    The rest of the listing is left where it is and not counted. Filtered in
-    Python rather than SQL so the rule has one spelling: the trash is small,
-    and `_purge` loads every row it deletes anyway. There is no automatic
-    expiry: this app has no scheduler, and a sweep at startup would delete on
-    restart timing rather than on any schedule anybody chose.
+    Scoped by `in_trash_for`, so emptying the trash never reaches a book the
+    caller could not see in it. There is no automatic expiry: this app has no
+    scheduler, and a sweep at startup would delete on restart timing rather
+    than on any schedule anybody chose.
     """
-    books = [
-        book
-        for book in Shelf.trashed_by(db, current_user.id).all()
-        if _purgeable_by(book, current_user, deliberate=True)
-    ]
+    books = Shelf.trashed_by(db, current_user.id).all()
     for book in books:
         _purge(book, db)
     db.commit()
@@ -4842,19 +4754,8 @@ def restore_book(book: BookInTrash, db: DbSession, current_user: CurrentUser) ->
 
 
 @router.delete("/{book_id}/permanent", status_code=status.HTTP_204_NO_CONTENT)
-def purge_book(book: BookInTrash, db: DbSession, current_user: CurrentUser) -> None:
-    """Delete one trashed book for good, if `_purgeable_by` lets the caller.
-
-    A Book it refuses is in the caller's trash view, so it answers 409 rather
-    than 404, as the add door answers the same Book, and stays in the trash,
-    where it can still be put back. Not `book_for_owner`'s 403, whose admin
-    exception this rule does not have.
-    """
-    if not _purgeable_by(book, current_user, deliberate=True):
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Only the member who added this book, or an admin if nobody did, may delete it for good.",
-        )
+def purge_book(book: BookInTrash, db: DbSession) -> None:
+    """Delete one trashed book for good."""
     _purge(book, db)
     db.commit()
 
