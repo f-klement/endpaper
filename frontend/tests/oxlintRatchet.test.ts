@@ -946,8 +946,11 @@ function codeOf(configKey: string): string {
   return `${configKey.slice(0, slash)}(${configKey.slice(slash + 1)})`;
 }
 
-/** Every `(rule, stated, found)` where the count is not oxlint's. */
-function countsThatDiffer(
+/**
+ * Every `(rule, stated, found)` the ceiling refuses: oxlint finds more than the
+ * count states, or finds none. A fall to a figure above zero passes.
+ */
+function countsThatRose(
   backlog: Stated[],
   report: Report,
 ): [string, number, number][] {
@@ -957,7 +960,7 @@ function countsThatDiffer(
   }
   return backlog.flatMap(({ rule, stated }): [string, number, number][] => {
     const count = found.get(codeOf(rule)) ?? 0;
-    return count === stated ? [] : [[rule, stated, count]];
+    return count > stated || count === 0 ? [[rule, stated, count]] : [];
   });
 }
 
@@ -1268,11 +1271,17 @@ function waivedIn(
  * had: the first run of this arm found the stated figures wrong on most rows,
  * in both directions.
  *
- * **Equality, not a ceiling.** With found at most stated, a fix that lowers a
- * count without editing it leaves slack, and the next new site fills it green.
- * So every fix and every new site moves a number in the config, and the
- * failure prints each `(rule, stated, found)` that differs, so the repair is
- * one edit per row.
+ * **A ceiling, not an equality**, by the owner's ruling of 2026-10-26. The
+ * arm held equality until then, and a lint tool's own upgrade that fixed two
+ * findings (141 to 139) reddened the merge request bringing it, with nothing
+ * in the tree to repair. A rise still reds, with each `(rule, stated, found)`
+ * printed so the repair is one edit per row, and so does a found zero, which
+ * is a stale entry rather than a fall.
+ *
+ * **What the ceiling costs, which is real**: a fall left unwritten is slack,
+ * and the next new site of that rule fills it green. Writing the found figure
+ * on the entry in the commit that lowered it closes the slack, and review is
+ * what asks for it.
  *
  * **The count reads a tree with no directive text in it.** A directive
  * naming a backlog rule hides its site from any run that honours it, and the
@@ -1309,12 +1318,13 @@ function waivedIn(
  * unused survives the blanking and reds there, if the pattern knows it. A
  * spelling both miss is past this arm.
  *
- * **What equality on a total cannot see**: a fix and a new site of the same
- * rule in one change, which leaves the total where it was, and the same for
- * one waived site swapped for another in the same file. For a refusal in
- * `SITED` the files are held too, so that swap passes only within one file. And a count edited to
- * match a new site is green: the edit is in the diff beside the reason, and
- * review is what reads it.
+ * **What a ceiling on a total cannot see**: a fix and a new site of the same
+ * rule in one change, which leaves the total where it was, a new site filling
+ * slack an earlier fix left, and the same for one waived site swapped for
+ * another in the same file, which `WAIVED` holds by equality. For a refusal in
+ * `SITED` the files are held too, so a new site passes only within a file
+ * already named. And a count edited to match a new site is green: the edit is
+ * in the diff beside the reason, and review is what reads it.
  */
 describe("every backlog count", () => {
   it(
@@ -1377,7 +1387,7 @@ describe("every backlog count", () => {
   });
 
   it(
-    "is the number oxlint finds with every disable directive blanked",
+    "is a ceiling on what oxlint finds with every disable directive blanked",
     () => {
       const backlog = backlogIn(readFileSync(CONFIG, "utf8"));
       const rules = backlog.map(({ rule }) => rule);
@@ -1438,13 +1448,14 @@ describe("every backlog count", () => {
         ),
       );
 
-      const wrong = countsThatDiffer(backlog, counted);
+      const wrong = countsThatRose(backlog, counted);
       expect(
         wrong,
         `(rule, stated, found): ${JSON.stringify(wrong)}. Each count in ` +
-          `${CONFIG}, a backlog row's or a sited refusal's, is held equal to what oxlint finds with every disable ` +
-          `directive blanked. Write the found figure on the entry's own line, ` +
-          `in the commit that moved it. A found 0 means the entry is stale, ` +
+          `${CONFIG}, a backlog row's or a sited refusal's, is a ceiling on what oxlint finds with every disable ` +
+          `directive blanked. Fix the new site, or write the found figure on ` +
+          `the entry's own line in the commit that moved it, with its reason. ` +
+          `A found 0 means the entry is stale, ` +
           `or its key is under an alias prefix the report does not use: ` +
           `delete it, or spell the key as the report's code reads.`,
       ).toEqual([]);
@@ -2342,7 +2353,7 @@ describe("a stated count", () => {
     diagnostics: codes.map((code) => ({ code })),
   });
 
-  it("names every rule whose count differs, either way", () => {
+  it("names every rule whose count rose", () => {
     const found = report(
       "eslint(no-shadow)",
       "eslint(no-shadow)",
@@ -2350,25 +2361,32 @@ describe("a stated count", () => {
     );
     const backlog = [
       { rule: "no-shadow", stated: 1 },
-      { rule: "react/refs", stated: 2 },
+      { rule: "react/refs", stated: 1 },
     ];
 
-    expect(countsThatDiffer(backlog, found)).toEqual([
-      ["no-shadow", 1, 2],
-      ["react/refs", 2, 1],
-    ]);
+    expect(countsThatRose(backlog, found)).toEqual([["no-shadow", 1, 2]]);
+  });
+
+  it("accepts a count that fell to a figure above zero", () => {
+    const found = report("eslint(no-shadow)", "react(refs)");
+    const backlog = [
+      { rule: "no-shadow", stated: 141 },
+      { rule: "react/refs", stated: 1 },
+    ];
+
+    expect(countsThatRose(backlog, found)).toEqual([]);
   });
 
   it("is held to zero for a rule the run did not report", () => {
     expect(
-      countsThatDiffer([{ rule: "no-shadow", stated: 3 }], report()),
+      countsThatRose([{ rule: "no-shadow", stated: 3 }], report()),
     ).toEqual([["no-shadow", 3, 0]]);
   });
 
   it("does not take the findings of another plugin's rule of the same name", () => {
     const found = report("eslint(no-shadow)", "typescript(no-shadow)");
 
-    expect(countsThatDiffer([{ rule: "no-shadow", stated: 1 }], found)).toEqual(
+    expect(countsThatRose([{ rule: "no-shadow", stated: 1 }], found)).toEqual(
       [],
     );
   });

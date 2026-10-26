@@ -30,6 +30,8 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
+import { refusal } from "./coverageRegister";
+
 export const MARKER = "ENDPAPER_COVERAGE_REGISTER_MARKER";
 
 /**
@@ -103,26 +105,6 @@ export function registerReading(path: string): string {
 
 function registerDigest(): string | null {
   return register === null ? null : registerReading(register);
-}
-
-/**
- * A refusal whose printed text is built here, where it is thrown.
- *
- * **A stack string is built on first read**, under whichever
- * `Error.prepareStackTrace` is installed at that moment, and an error thrown
- * from a global setup is printed by vitest's `close()` from its `stack`, after
- * this hook has returned and after whatever else has run since. One full run in
- * three once printed a teardown stack where this text should have been. So the
- * stack is read here and kept as a plain string, which a formatter installed
- * later cannot reach. One installed before the throw still can.
- *
- * **Every refusal in this file goes through here**, and an arm requires every
- * `throw` in the file to throw a call to this function.
- */
-function refusal(message: string): Error {
-  const error = new Error(message);
-  error.stack = error.stack ?? `Error: ${message}`;
-  return error;
 }
 
 export function setup(project?: { config?: { root?: string } }): void {

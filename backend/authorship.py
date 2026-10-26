@@ -237,20 +237,18 @@ class Authorship:
         rows, so a Private Book cannot reach an author page, a count, a
         suggestion or a filter without passing this line first.
         """
-        # `.tuples()` rather than `.all()`: a `Row` is a tuple at runtime and is
-        # not one to a type checker, and `build_index` takes pairs.
-        #
         # Narrowed with `cast` because `Shelf.select` takes `*columns` and so
         # resolves to `Session.query`'s untyped fallback overload rather than
-        # to the two-column one. The cast states the pair this statement
-        # selects; it is the only place that knows it, and getting it wrong is
-        # a mypy error at `build_index` rather than a silent widening.
+        # to the two-column one. A `Row` unpacks and compares as a tuple at
+        # runtime, so the cast states the pair this statement selects and
+        # `build_index` takes; it is the only place that knows it, and getting
+        # it wrong is a mypy error at `build_index` rather than a silent
+        # widening.
         rows = cast(
             "list[tuple[int, str | None]]",
             Shelf.seen_by(self._db, self._viewer_id)
             .select(Book.id, Book.author)
             .filter(Book.author.isnot(None))
-            .tuples()
             .all(),
         )
         # Ordered oldest first, which is what makes "the most recent decision

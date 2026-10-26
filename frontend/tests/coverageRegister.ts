@@ -732,3 +732,29 @@ export function printWhole(
     Atomics.wait(pause, 0, 0, PAUSE_MS);
   }
 }
+
+/** The line every refusal of this guard opens with on standard error. */
+export const REFUSED = "the coverage register refused this run:";
+
+/**
+ * A refusal of this guard, printed by the guard itself and then returned to
+ * throw.
+ *
+ * **Printed here because how vitest prints a thrown error is vitest's, not
+ * ours.** A reporter's throw arrives as an Unhandled Error and a global
+ * setup's through vitest's `close()`, each rendered by the runner and by
+ * whatever stack formatter is installed when it reads the error, and one full
+ * run in three once printed a teardown stack where the text should have been.
+ * The throw still fails the run; what reaches a person is this write, whole,
+ * under `REFUSED`, which is what `coverageRegister.test.ts` reads off a nested
+ * run's standard error.
+ *
+ * `fd` is for the arms that drive the reporter in process, where standard
+ * error is the outer run's own log and a refusal there would read as one of
+ * the run's. **Every `throw` in the reporter and the global setup throws a
+ * call to this function**, held by an arm over both files.
+ */
+export function refusal(message: string, fd = 2): Error {
+  printWhole(`${REFUSED}\n${message}`, fd);
+  return new Error(message);
+}

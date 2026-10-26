@@ -193,7 +193,8 @@ reading app rather than only in a browser.
 Two processes: the API on `:8000` and the Vite dev server on `:5173`, which proxies
 `/api`, `/auth` and `/covers` across to the API. Run them in separate terminals.
 
-**Backend**, with [uv](https://docs.astral.sh/uv/) and Python 3.14:
+**Backend**, with [uv](https://docs.astral.sh/uv/) 0.9.17 or later (an older uv cannot read
+`backend/uv.toml` and stops on every command) and Python 3.14:
 ```bash
 cd backend
 uv sync                       # creates .venv and installs from uv.lock
@@ -339,8 +340,8 @@ The `pg8000` driver is **in the image**, so nothing has to be installed to use i
 pure Python, which is why it is affordable on an Alpine image with no compiler: about
 2.4 MB installed, across five packages. The measurement and the method are in the comment
 beside the dependency in `backend/pyproject.toml`. **Spell the URL
-`postgresql+pg8000://`**; a bare `postgresql://` asks SQLAlchemy for psycopg2, which is
-not here.
+`postgresql+pg8000://`**; a bare `postgresql://` asks SQLAlchemy for its default driver,
+psycopg, which is not here.
 
 **The default connection is not certificate checked and can be cleartext, so either set
 `DATABASE_SSL_MODE` or keep the server on a network you trust.** The default, `prefer`,

@@ -2945,7 +2945,6 @@ def list_duplicates(db: DbSession, current_user: CurrentUser) -> DuplicateReport
                 Book.cover_url,
                 Book.added_by_user_id,
             )
-            .tuples()
             .all(),
         )
     ]

@@ -11,11 +11,7 @@ requires-python = ">=3.14"
 dependencies = [
     "fastapi>=0.115.8",
     "uvicorn[standard]>=0.34.0",
-    # Held below 2.1 because 2.1 drops `select` from the reading methods the
-    # shelf guard derives from Query and Select, so a bare shelf select evades
-    # the book-owned rule (tests/test_shelf.py). Lift it once the guard has
-    # learnt 2.1's spelling.
-    "sqlalchemy>=2.0.38,<2.1",
+    "sqlalchemy>=2.0.38",
     "pyjwt>=2.10.1",
     "bcrypt>=4.2.1",
     "python-multipart>=0.0.20",
@@ -36,8 +32,9 @@ dependencies = [
     #
     # **pg8000 rather than psycopg, and that is what makes it affordable here.**
     # pg8000 is pure Python, so it installs on the image's musl with no libpq and
-    # no compiler; psycopg publishes no musl wheel and psycopg2 wants both. The
-    # cost is measured rather than assumed, and **this comment is its one
+    # no compiler; psycopg and psycopg2 each need libpq, from the system or
+    # bundled into a binary wheel, and a compiler only when built from source.
+    # The cost is measured rather than assumed, and **this comment is its one
     # home**: the published files quote a rounded figure and point here, because
     # a seven digit number in four places is four things to update and nothing
     # recomputes any of them.
@@ -55,9 +52,8 @@ dependencies = [
     # total 419,934 bytes in `uv.lock`.
     #
     # **`postgresql+pg8000://` is the spelling, and a bare `postgresql://` still
-    # fails.** SQLAlchemy resolves that to psycopg2, which is not here and cannot
-    # be: it needs libpq and a compiler. The published tables say the full scheme
-    # for that reason.
+    # fails.** SQLAlchemy resolves that to psycopg, its default driver, which is
+    # not installed. The published tables say the full scheme for that reason.
     #
     # **How much of the connection is verified is `DATABASE_SSL_MODE`, and
     # `database.py` is its one home.** `ssl_context` in `connect_args` is the
@@ -80,6 +76,12 @@ dependencies = [
     # `encode_host` does. It arrives through httpx anyway; declared because the
     # import is this project's, not only httpx's.
     "idna>=3.19",
+    # The same reason: each is imported by the application and arrives through
+    # FastAPI or Pydantic. The floors are the versions locked when they were
+    # declared.
+    "starlette>=1.9.0",
+    "anyio>=4.15.1",
+    "annotated-types>=0.8.0",
 ]
 
 [project.optional-dependencies]
@@ -91,23 +93,39 @@ dependencies = [
 # exercises that path rather than asserting it.
 desktop = ["keyring>=25.7.0"]
 
+# Every entry in a group here is exact, and every runtime entry above is a range.
+# The reason is the entry in docs/decisions.md on dev dependencies being exact;
+# tests/test_dev_dependencies_are_exact_and_runtime_ones_ranged.py holds both.
+# keyring is the exception that rule names: it ships in the desktop extra, so it
+# carries the extra's range here too. An exact pin would fix the one locked
+# version for the extra as well.
 [dependency-groups]
 dev = [
-    "pytest>=8.3.4",
-    "pytest-cov>=6.0.0",
-    "pytest-asyncio>=0.25.2",
-    "pytest-xdist>=3.6.1",
-    "pytest-timeout>=2.4.0",
-    "respx>=0.22.0",
-    "schemathesis>=4.27.5",
-    "ruff>=0.9.4",
-    "mypy>=1.14.1",
-    "pip-audit>=2.9.0",
-    "jsonschema>=4.23.0",
+    "pytest==9.1.1",
+    "pytest-cov==7.1.0",
+    "pytest-asyncio==1.4.0",
+    "pytest-xdist==3.8.0",
+    "pytest-timeout==2.4.0",
+    "respx==0.23.1",
+    "schemathesis==4.32.1",
+    "ruff==0.17.1",
+    "mypy==2.4.0",
+    "pip-audit==2.10.1",
+    "jsonschema==4.26.0",
     "keyring>=25.7.0",
-    "hypothesis>=6.168.0",
-    "mutmut>=3.8.0",
+    "hypothesis==6.170.5",
+    "mutmut==3.8.0",
+    # Imported directly by guards and by the pipeline's tooling, so declared
+    # here rather than left to arrive through pytest and mutmut on their ranges.
+    "packaging==26.3",
+    "libcst==1.9.0",
 ]
+
+# uv's settings, the PyPI release age among them, are in uv.toml beside this file, and
+# none belongs under `[tool.uv]` here: while uv.toml exists uv ignores a setting written
+# there, with a warning. A project field such as `[tool.uv.sources]` is still read here,
+# and this is where one goes. A source may only be a workspace member: a git, URL, path or
+# index source has no upload time on PyPI for the release age to read.
 
 [tool.pytest.ini_options]
 # Tests live in a mirror tree, never beside the module under test.

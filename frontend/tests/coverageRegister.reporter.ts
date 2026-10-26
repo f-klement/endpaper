@@ -59,6 +59,7 @@ import {
   isWhole,
   printWhole,
   problems,
+  refusal,
   writeInstruction,
   writeLine,
 } from "./coverageRegister";
@@ -88,8 +89,16 @@ export default class CoverageRegisterReporter {
    */
   private readonly out: number;
 
-  constructor(options: { out?: number } = {}) {
+  /**
+   * Where a refusal is printed: standard error in a run, the same file as
+   * `out` in the arms that drive this hook in process, for the reason `out`
+   * gives.
+   */
+  private readonly err: number;
+
+  constructor(options: { out?: number; err?: number } = {}) {
     this.out = options.out ?? 1;
+    this.err = options.err ?? 2;
   }
 
   onInit(vitest: typeof this.vitest): void {
@@ -123,10 +132,11 @@ export default class CoverageRegisterReporter {
       rest.length > 0 ||
       typeof project.globTestFiles !== "function"
     )
-      throw new Error(
+      throw refusal(
         "the coverage register reporter could not read this run's project. It " +
           "is reading vitest's own test discovery, so a vitest upgrade that " +
           "moves it has to be followed here rather than silently skipped.",
+        this.err,
       );
 
     const testRoot = join(project.config.root, "tests");
@@ -182,10 +192,11 @@ export default class CoverageRegisterReporter {
     else {
       const missing = discovered.filter((file) => !ran.includes(file));
       if (missing.length > 0)
-        throw new Error(
+        throw refusal(
           "the coverage register reporter ran over as many files as vitest " +
             `discovered and not the same ones: ${missing.join(", ")} was ` +
             "discovered and did not run.",
+          this.err,
         );
     }
 
@@ -196,8 +207,9 @@ export default class CoverageRegisterReporter {
     // variable carrying the switch fails the run instead of passing it unchecked.
     if (process.env[SWITCH] === "off") {
       if (process.env.GITLAB_CI !== undefined)
-        throw new Error(
+        throw refusal(
           `${SWITCH}=off is for a plant copy, and this run is a pipeline.`,
+          this.err,
         );
       console.log(
         `coverage register: not checked, ${SWITCH}=off. No write is offered.`,
@@ -264,8 +276,9 @@ export default class CoverageRegisterReporter {
 
     const wrong = problems(register, census);
     if (wrong.length > 0)
-      throw new Error(
+      throw refusal(
         `tests/COVERAGE.md does not describe this run:\n\n${wrong.join("\n\n")}`,
+        this.err,
       );
   }
 }

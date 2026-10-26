@@ -102,7 +102,7 @@ RUN BUN_INSTALL_CACHE_DIR=/tmp/bun-install-cache bun install --frozen-lockfile \
 #
 # HIGHER RISK HERE THAN IN WEBPAGE, AND VERIFIED RATHER THAN ASSUMED. musl breaks
 # manylinux wheels, and unlike webpage this backend leans on compiled packages:
-# bcrypt, pydantic-core, uvloop, httptools, watchfiles, greenlet, sqlalchemy, pyyaml.
+# bcrypt, pydantic-core, uvloop, httptools, watchfiles, sqlalchemy, pyyaml.
 # Before the switch, the whole lockfile was resolved inside python:3.14.7-alpine: all
 # 28 runtime packages installed from musllinux wheels in about two seconds, nothing
 # fell back to a source build, and the dev group resolved too. Installing is not

@@ -3062,12 +3062,10 @@ is reported and goes on the list with its reason.
 
 **Two derivations, both pinned.** Which tables are children of `books` comes from
 the foreign keys, and which of those carry a member of their own is asserted, so a
-ninth child fails a test rather than defaulting to unguarded. The reading methods
-come from `dir(Query) | dir(Select)` rather than a list, which caught a leak an
-enumeration would have missed, since `select` is itself a method on `Select`. A
-floor of 38 names is asserted against that set: a derivation that can grow
-silently can shrink silently, and 21 real reading paths were droppable with the
-suite green.
+ninth child fails a test rather than defaulting to unguarded. What counts as a
+read is a statement naming one of those entities, keyed on this codebase's own
+names rather than on any library's methods; "A guard is keyed on this codebase's
+own names, never on a library's internals" has the reason.
 
 **What it cost, recorded because it is the argument for the shape.** Five leak
 families over six review rounds, **none found by mutation testing**, whose score
@@ -4870,7 +4868,7 @@ waiting to happen against software the container never executes.
 This matters when adding a Python dependency. **A C-extension package with no musllinux
 wheel does not fail politely:** uv tries to build it from source and dies for want of a
 compiler, in CI, at image-build time. The current native set (bcrypt, pydantic-core, uvloop,
-httptools, watchfiles, greenlet, sqlalchemy) was verified to install from musllinux wheels
+httptools, watchfiles, sqlalchemy) was verified to install from musllinux wheels
 *and* to run on musl before the switch.
 
 ### TypeScript's strictest options are on
@@ -7246,7 +7244,7 @@ Every Docker digest update, whether a base image in the `Dockerfile`, a CI job i
 
 **What it costs:**
 
-- A CI tool image republished for its own fix (a trivy or kaniko digest) reaches the pipeline up to a week later. A tag move for such a fix is a version update and is not held.
+- A CI tool image republished for its own fix (a trivy or kaniko digest) reaches the pipeline up to a week later. A tag move for such a fix is a version update and keeps its own rule's timing, not this window: a Trivy patch automerges after the release age, and a Trivy or kaniko minor waits for a person.
 - **The schedule bounds when the group's merge request opens, not when it changes.** Renovate's `updateNotScheduled` defaults to true, so once the merge request is open every later run keeps rebasing it and adding newly moved digests, each push with a pipeline of its own, outside the window as well as in it.
 - **One red digest holds every other digest in the group.** The merge request cannot automerge until the red one is fixed or dropped, and it keeps taking pushes meanwhile, so a digest that breaks the build holds the rest for as long as nobody looks, a week or more.
 
@@ -13514,6 +13512,18 @@ Before: `script-src 'self'`. After: `script-src 'self' 'wasm-unsafe-eval'`.
 no `new Function`, scanned over its own bundled source, so the wider grant would have bought
 nothing.
 
+**That scan is a walk over the syntax tree of the installed build the engine's module names**, so
+a sql.js bump is judged by what it ships rather than by its version. It refuses every read of
+the global `eval` or `Function` outside `typeof`, `instanceof` and a property read that cannot
+reach a compiler again, and every timer handed a string written in place. Calls alone were not
+enough: emscripten's embind hands `Function` to a helper as an argument, and a rule on callees
+passed it. It was a regex until each review round found a spelling past it; the tree reads what
+the engine runs, so a comment or a string no longer reds and a new spelling of the same call
+needs no new arm. Locals are resolved by scope, so a variable named like a global does not red.
+What it does not look for takes intent and is listed beside the test: a compiler reached through
+`.constructor` from some other function, a non constant computed name, and a string held in a
+variable. Measured on the installed build and on the whole built bundle: no site in either.
+
 **What it newly admits, stated rather than left to be found**: a script that has already
 achieved execution may compile WebAssembly it assembles itself. That is a second order gain for
 an attacker already running code, and it adds no new source of script, because `'self'` still
@@ -16319,9 +16329,9 @@ import error rather than a database, and the only way to run a documented option
 build their own image.
 
 **What decided it was the shape of the package, not the size.** The usual reason to refuse
-a driver in a slim image is the wheel: psycopg publishes no musl wheel and psycopg2 wants
-libpq and a compiler, so either would turn the Alpine runtime into a build image. `pg8000`
-is pure Python, so it installs on musl with nothing. That is also why it was the driver the
+a driver in a slim image is what it links: psycopg and psycopg2 each need libpq, from the
+system or bundled into a binary wheel; `pg8000` needs neither. It is pure Python, so it
+installs on musl with nothing. That is also why it was the driver the
 dialect work chose in the first place.
 
 **The cost is measured, and it has one home.** About 2.4 MB installed across five
@@ -16347,7 +16357,7 @@ suite does not run on the second engine and nothing skips on one. SQLite is the 
 target and what the whole suite runs on. The published prose says so in those words.
 
 **`postgresql+pg8000://` is the spelling, and the bare scheme is the trap.** SQLAlchemy
-resolves `postgresql://` to psycopg2. Nothing in `database.py` rewrites it, so the obvious
+resolves `postgresql://` to its default driver, psycopg. Nothing in `database.py` rewrites it, so the obvious
 URL still fails, with an error naming a package the image deliberately does not carry.
 Every published table and every comment now spells the full scheme; normalising it in code
 is a separate decision and is in the tracker.
@@ -18156,10 +18166,9 @@ Demonstrated: removing `.filter(DigitalReference.book_id == book.id)` from the
 per book reference count, which makes it a count over every member's Books, leaves the
 fragment present and fails the equality check by name.
 
-**Equality is what `test_folding.NOT_A_DATABASE_READ` already used**, and it was named there
-as the rung above this table. It keys on a **call** as `ast.unparse` writes it rather than
-on a statement, so what is borrowed is the comparison and not the cost: a key here is up to
-six source lines. What makes that affordable is that `ruff format` owns the layout, so a
+**Equality is the comparison `WHOLE_BOOK_READERS` uses too.** That registry keys on a
+**call** as `ast.unparse` writes it rather than on a statement, so what is shared is the
+comparison and not the cost: a key here is up to six source lines. What makes that affordable is that `ruff format` owns the layout, so a
 statement is rewrapped only when its text, its nesting, the formatter's version or the
 configured line length changes.
 Flattening the whitespace alone does not make a key independent of layout: a break beside a
@@ -21359,14 +21368,16 @@ table, a key is the test tree or a literal path carrying a separator, and a secu
 refused only in the test tree. **The `./` in a key such as `./recover.py` is load bearing**: a key
 with no separator is matched against every basename.
 
-## A backlog count is held by equality, and a security entry by file
+## A backlog count is held by a ceiling, and a security entry by file
 
 Two stated counts had moved with every arm green, each a new site that arrived silently. Each count
-now sits on its code's own line and equals ruff's figure over findings no refusal covers, read from
-the run that honours no inline directive. **Equality, not a ceiling**, because a fix that lowers a
-count without editing it leaves slack for the next site. A security entry also names each file and
-its share, held as a multiset, because a fix in one file and a new site in another leave a total
-unchanged.
+now sits on its code's own line and is a ceiling on ruff's figure over findings no refusal covers,
+read from the run that honours no inline directive. The owner ruled for a ceiling on both sides
+on 2026-10-26: a tool upgrade that cleared a site reddened the merge request bringing it, with
+nothing in the tree to repair. A rise reds, and so does a found zero. The
+cost is slack, since a fall left unwritten lets the next site in green. A security entry also names
+each file and its share, each share a ceiling, because a fix in one file and a new site in another
+leave a total unchanged.
 
 ## The keys of both ruff configurations are pinned
 
@@ -21394,7 +21405,12 @@ removed. oxlint 1.83.0 has no flag that ignores directives either.
 directory**, links followed and refused if the copy shares a link or an inode with its source so no
 write can reach the checkout, asks oxlint where every directive is, blanks each reported comment
 with spaces, and repeats until oxlint reports none. The counts are read there, and each backlog
-count is held equal to that figure both ways. What the copy adds outside the backlog is held by
+count and each count on a refusal argued from its sites is a ceiling on that figure: a rise reds,
+and so does a found zero, but a fall passes. The owner ruled that way on 2026-10-26, after a lint
+upgrade that fixed two findings, 141 to 139, reddened its merge request with nothing in the tree to
+repair. The cost is slack: a fall left unwritten lets the next new site of that rule in green,
+and for a sited refusal, lets in a site its reason was not argued from, within the files it
+names. What the copy adds outside the backlog is held by
 equality as `(code, file)` pairs down to the message, `WAIVED`, so a waiver of an enforced rule
 reds by name. The copy is checked against the checkout's file count, rule count and every finding
 the honouring run reports, and against the directive pattern as a second instrument.
@@ -21889,7 +21905,7 @@ The frontend has one copy, exported by the register module and used by the house
 
 ## Tests read the parse through one source reader
 
-`tests/sourceReader.ts` holds one node type, one walk, one binding reader and one path resolver. Five binding readers had disagreed on `const { a: b }: Props = x;`, three counting a type name or a key as a binding, and four resolvers disagreed on a `..` past their base. A `..` past the base is kept, because dropping it reads a path out of a space as a path in it. The glob, specifier and citation resolvers therefore resolve from the repository root and map back, so a climb out of `frontend/` lands where it points; the old resolvers got the citation case right only because the dropped `..` absorbed a missing segment.
+`tests/sourceReader.ts` holds one node type, one walk, one binding reader, one scope reader and one path resolver. Five binding readers had disagreed on `const { a: b }: Props = x;`, three counting a type name or a key as a binding, and four resolvers disagreed on a `..` past their base. Two scope readers had disagreed on TypeScript and on a declaration kind neither knew. A `..` past the base is kept, because dropping it reads a path out of a space as a path in it. The glob, specifier and citation resolvers therefore resolve from the repository root and map back, so a climb out of `frontend/` lands where it points; the old resolvers got the citation case right only because the dropped `..` absorbed a missing segment.
 
 Parameters and binding patterns declare no member: a top level `const { a: b } = x` indexes `b` and not `a`, and a parameter's keys and annotation members stay out of the member index. Measured over 714 indexed modules, 155 names left the index and none was gained, and no citation lost its target. No hand written recursive walk over the parse is left under the frontend tests.
 
@@ -22003,7 +22019,7 @@ The uv, bun, trivy and mypy caches each have one job that pushes and every other
 
 **It fails closed.** No `SUITES_PROOF_TOKEN`, any API failure, refusal or timeout, or a crash writes no proof, and both suites run. The skip is a file artifact the test jobs compare with the checkout's own `HEAD`, never a dotenv and never `CI_COMMIT_SHA`, because a pipeline variable outranks both. pip-audit runs on a proven tree; `test:postgres` runs only on tags and patch branches, where nothing is proven.
 
-**The token is a Reporter `read_api` project token, scoped by environment.** Its variable carries the environment scope `suites-proof`, which only `suites:proof` in this file declares. GitLab hands the variable to any job on a protected ref that declares the environment, so a job in a `v*` tag's own yml, or in a merge request pipeline the owner starts, would receive it too; that is why the role is Reporter. Measured on this project: a Maintainer read returns the runner registration token, which is set, and a variable at the default scope reaches every job on `main` and on tags and every merge request pipeline the owner starts. A Reporter cannot read pipeline variables, so the proof does not check them: GitLab passes a `ci.variable` push option to branch pipelines only, and a merge request pipeline, the only candidate, takes none. In `suites:proof`, `CI_JOB_TOKEN` is used only for `GET /job`.
+**The token is a Reporter `read_api` project token, scoped by environment.** Its variable is to carry the environment scope `suites-proof`, which only `suites:proof` in this file declares; until the scope settings are applied it sits at `*` (measured live 2026-10-25). GitLab hands an environment scoped variable to any job on a protected ref that declares the environment, so a job in a `v*` tag's own yml would receive it too; that is why the role is Reporter. Measured on this project: a Maintainer read returns the runner registration token, which is set, and a variable at the default scope reaches every job on `main` and on tags. A merge request pipeline receives no protected variable here by GitLab's documented rule: only one whose source and target branch are both protected does, and `main` is the only protected branch; the setting that allows even that, `protect_merge_request_pipelines`, is off since 2026-10-25. A Reporter cannot read pipeline variables, so the proof does not check them: GitLab passes a `ci.variable` push option to branch pipelines only, and a merge request pipeline, the only candidate, takes none. In `suites:proof`, `CI_JOB_TOKEN` is used only for `GET /job`.
 
 ## The one writer rule is held by a ratchet on references, not by the MARC arm alone
 
@@ -23444,8 +23460,8 @@ exposure. No variable outranks a file, so build:smoke compares the variable agai
 `image.digest` file `build` wrote before anything else runs, and fails by name when they
 differ.
 
-What this does not cover: a `build` retried once build:smoke has started writes a new
-digest, and promote:latest copies one nobody smoked. That predates this change.
+What this did not cover, a `build` retried once build:smoke has started, is closed by
+"The copy takes only the digest the smoke test ran, on main and on a tag".
 
 Whether GitLab expands a dotenv variable in `image: name:` was read from GitLab's own
 documentation on 2026-10-22:
@@ -23460,11 +23476,47 @@ documentation on 2026-10-22:
   `services:variables`; its reproduction names the service image by a dotenv variable
   and the service ran. Not the same keyword, and no staff answer.
 
-So the documentation says it expands, and the change was made. **Only a main pipeline
-proves it**: the first one after merge should show build:smoke pulling `@sha256:...`.
+So the documentation says it expands, and the change was made. Measured on the first main
+pipeline after the merge, 2026-10-22: build:smoke's pod ran the image by `@sha256:` and the
+job passed, so its before_script found the variable equal to `image.digest`.
 If the variable arrives empty, the image is `<image>@`, which is not a valid image
 reference, so the pod never starts and the job is red. That blocks promote:latest rather
 than promoting an untested digest.
+
+## The copy takes only the digest the smoke test ran, on main and on a tag
+
+build:smoke and verify:smoke write the digest they booted to `smoked.digest` as their
+last step, so only a passed smoke test leaves one. promote:latest and publish:dockerhub
+refuse by name when it is absent or names a digest other than the `image.digest` they are
+about to copy. A build job retried once its smoke test started writes a new
+`image.digest` while the smoke test goes on running the old one; before this the copy
+could take the new digest unsmoked.
+
+GitLab's documentation says a retry creates a new job with new artifacts
+(docs.gitlab.com/ci/jobs, read 2026-10-22), and neither that page, the artifacts page nor
+the `needs` reference says which attempt's artifacts a later job receives. The check does
+not rest on the answer: whichever `image.digest` arrives is the one copied and the one
+compared. Unmeasured: no retry was run against GitLab.
+
+The pipeline's default retry, one attempt on an infrastructure failure, does not open the
+window on its own: it retries only an attempt that failed, and the smoke test, which
+`needs` the build job, starts only once an attempt has succeeded. The window is a build
+job retried by hand after it passed. The refusal exits 1, a `script_failure`, which no
+retry rule names, so a refused copy stays refused rather than running again.
+
+The tag path now matches main. release:build hands its digest over as the dotenv variable
+BUILD_DIGEST, the smoke template pulls by it, and publish:dockerhub copies
+`<image>@<digest>` instead of `:<tag>`. It also requires verify:image's report to quote
+`"<image>@<digest>"`, which Trivy writes in `RepoDigests`. The scan stays by tag and its
+pinned gate line is unchanged, because that report already records the digest the tag
+named: v0.20.0's report lists the digest release:build logged, read 2026-10-22.
+
+Both copies are `crane copy`, which puts the manifest's bytes unchanged, so whatever tag
+a copy writes names the digest the smoke test ran.
+
+Proved only by a tag pipeline: that the dotenv variable expands in the tag's smoke image,
+as it does on main (measured 2026-10-22), and that `RepoDigests` names the digest on the
+next scan too.
 
 ## The smoke test refuses a world writable entry
 
@@ -23566,3 +23618,282 @@ checksum discipline. oxfmt alone takes the one part that pays now.
 oxfmt finds no config and formats at its default width of 100; given a file, it finds the config
 from the file. A check run that way fails loudly; a write rewrites 485 files. The scripts run
 from `frontend/`, which is why they are the route.
+
+## A test only commit on main may be carried onto the patch branch
+
+Owner's decision, 2026-10-25. The nightly patch release is cut from the last tag so that
+unreleased features never ship under a third digit bump. That left one gap: a security bump
+can bring a dependency version the tag's tests were never adapted to, while the adaptation
+sits on `main`. On 2026-10-24 the vite advisory bump pulled rolldown 1.2.14 onto a branch from
+v0.20.0, and one house rule test went red for want of a change already on `main`.
+
+A commit on `main` whose last paragraph carries `Autopatch-Backport: tests` marks the test
+paths it touched, and the night carries `main`'s tip of every marked path onto the branch,
+renames followed, merging nothing. Two rounds of merging hunks against the tip each met a case
+the merge got wrong; the tip is what `main` reviewed and its mirror published. A marked commit
+may touch only the two test trees the image build excludes, `backend/tests/` and
+`frontend/tests/`, and the tag's own `.dockerignore` must still exclude both. A config file a
+test reads does not count, `frontend/.oxlintrc.json` included: the build copies it, and its
+counts are measured against `main`'s tools. The build's exclusions come from the tag and the
+mirror's strip list from `main`, both read at run time, because the tag publishes under its own
+older list and the mirror does not unpublish.
+
+Where an unmarked commit in the range touched a marked path together with a path the image
+reads or the mirror strips, the night drops every path that rename connects to it, keeps the
+tag's version, and names it in the branch commit (owner's decision, 2026-10-25). That is never
+worse than no mark, and nothing that ships changes. A marked commit that itself touches such a
+path still refuses, because the mark is a wrong claim a drop would hide. So do a merge, a
+mark with another value, and an unreadable `main` or strip list. A refusal on a commit already
+on `main` repeats every night, since history cannot be amended, and only a release moves past
+it. The push script therefore judges the commit level half before anything lands, and refuses a
+mixed commit beside a marked test: the push is the one point where a split avoids the drop. A
+backport may weaken the gate by design, which is accepted because `main` reviewed it.
+
+Rejected: cutting from `main` (publishes unreleased features), carrying every test change
+since the tag (a test change can depend on source the tag lacks, and would turn the night
+red for a reason nobody marked), judging "test only" by a path list unconnected to the
+build (it goes stale the day the Dockerfile changes), and reading reverts from commit messages
+to cancel a mark (two reviews planted every shape that slipped past it).
+
+## An advisory on several packages clears only when every package moved
+
+A finding merged from one advisory can name more than one package. The patch pipeline treats
+the advisory as cleared only when every package it names moved, and says which one did not when
+it refuses. Judging it by the first package let a bump that moved one of two pass as a fix.
+
+## Every dev dependency is exact, and every runtime library is on a range
+
+A dev dependency is a linter, the type checker, the formatter, a test runner or one of its
+plugins, or a build tool: every entry of a dependency group in `backend/pyproject.toml` and of
+`devDependencies` in `frontend/package.json`. A runtime library is anything the application
+imports when it runs, such as FastAPI, Pydantic, SQLAlchemy and sql.js: every entry of
+`[project].dependencies`, of the optional extras and of `dependencies`. The rule is held by
+group rather than by a list of names, so a new entry on either side is covered the day it lands
+(owner's decision, 2026-10-26).
+
+**A dev tool is exact because the gate is made of it.** Lock maintenance upgrades the whole
+Python lock and recreates the frontend one, and no Renovate package rule reaches inside either,
+so a ranged tool moves there with everything else; a ruff or mypy release that reports
+differently then reds code nobody changed, and on 2026-10-19 one such merge request was red four
+days. An exact pin survives lock maintenance and moves in a merge request of its own.
+
+**A runtime library is a range because pinning it to suit a test is the wrong way round.** In
+the owner's words: "pinning the larger libraries and frameworks and writing tests around them
+sounds insecure, stupid and very brittle." A range lets a security release in through lock
+maintenance without a person moving a pin. Where a guard reads a library's internals, that guard
+is the brittle part, and the fix belongs to the guard rather than to a pin: "A guard is keyed on
+this codebase's own names, never on a library's internals" is that rule. The sql.js engine scan
+is not such a guard: it reads the build the bundle ships for string evaluation, so its red on a
+sql.js release is the content security policy breaking, which is the red wanted.
+
+**An override holds a transitive dev tool only.** Rolldown arrives through vite, whose `~1.2.12`
+still moved it in lock maintenance with vite exact, and rolldown 1.2.14 broke the autopatch
+night of 2026-10-24. So it is held by an `overrides` entry that the lock records (a frozen
+install refuses a manifest the lock does not agree with), and an override outside the range
+vite asks for is refused, so a vite release that moves its rolldown range needs a person to
+move the override in the same merge request. Lock maintenance itself is split into one merge
+request per lock, because Renovate builds it per package file and cannot leave one package out.
+
+**A package this tree imports by name is declared**, on whichever side it belongs, so the rule
+can see it. packaging and libcst arrived through pytest and mutmut, and starlette, anyio and
+annotated-types through FastAPI and Pydantic, so each moved on its parent's range whatever its
+own group said. **A dependency table the rule does not classify is a failure**, so a new one,
+such as `resolutions` in `package.json`, is placed on a side by whoever
+adds it rather than passing unread.
+
+**keyring is a runtime library in the dev group too, and there it keeps its runtime range.** It
+ships in the desktop extra, and the suite installs the dev group to exercise it. One lock
+resolves one version for both entries, so an exact dev pin fixed the shipped extra's version as
+well, and the extra stopped moving in lock maintenance. The rule for a dev entry naming a
+runtime library is therefore the runtime entry's own specifier.
+
+**Every release waits three days before any path takes it**, Python's as well as npm's. A single
+update waits on Renovate's `minimumReleaseAge`, and lock maintenance, which has no release to
+age, on what its own resolver reads: `frontend/bunfig.toml` for bun, and `exclude-newer = "3
+days"` in `backend/uv.toml` for uv. Before this no Python path had an age, and lock maintenance
+automerged a same day PyPI release. The cost is that a security release waits three days too,
+the same trade bun already makes.
+
+**Lock maintenance takes an update with no release timestamp.** The age rules carry no update
+type, so they reach the lock refresh too, and under Renovate's default `timestamp-required` a
+refresh, which has no timestamp, holds its stability check pending for ever and never
+automerges: the lock maintenance merge request of 2026-10-26 sat that way under the npm rule,
+its automerge set and unable to complete. So the lock maintenance block sets `timestamp-optional`. Renovate then waits on nothing
+for a lock, and the age inside a lock run is the resolver's alone, which is why the two files
+above are the release age and not a second copy of it.
+
+**A Docker version update waits the same three days where its registry gives a date.**
+Renovate 44 reads a Docker release date from Docker Hub alone, so an image on another registry
+has none, and its update passes rather than waits: `timestamp-optional` again, because with the
+branch held until the age is met the default would give such an update no merge request at all.
+So the uv and kaniko images, both on ghcr.io, move with no age. The image this project publishes
+is left out, since its digest update is how a release reaches the deploy file. The uv version
+pin that Renovate reads from PyPI carries no age either, and nor does a Python patch: each moves
+in one merge request with the uv image, and Renovate opens a group without its members still
+inside their age, so an age on one half would open the other alone.
+
+**A digest update is not aged.** It takes its tag's date, which is the tag's last rebuild, and
+the digest group opens only in its Tuesday window, so under an age a tag rebuilt in the three
+days before the window would miss it and wait a further week, and one rebuilt every week in
+those days would wait for good. alpine/git is that second case: the cron of its build workflow,
+`build.yml` among the GitHub Actions workflows of alpine-docker/git, is `0 4 * * 0`, every
+Sunday, and each run re-pushes its version tags; its eight most recent scheduled runs, 2026-09-13 to 2026-10-25, all
+succeeded by that repository's GitHub Actions history read on 2026-10-26. Its Docker Hub sha
+tags look monthly only because a sha tag names a commit, and the commits come from a separate
+keepalive workflow on cron `0 0 1 * *`. **The residual is a version tag rebuilt more
+often than every three days**: its update waits until the tag settles, listed as pending on the
+dependency dashboard and paging nobody.
+
+**Whether a held update stays held depends on one word outside this repository.** With
+`platformAutomerge` off, Renovate asks GitLab to merge nothing; it merges an automerging merge
+request on its own next run, and the cluster's merge bot merges one that has been green for
+twenty minutes. That bot honours Renovate's verdict only under its policy `renovate-enabled`,
+which merges a merge request whose description says automerge is enabled. Under its other
+policy, `all`, every green merge request merges, each major and each held image included. The
+word is pinned in the cluster's own repository, not here.
+
+**uv's settings are in `uv.toml`, not in `[tool.uv]`.** A uv older than 0.9.17 cannot parse the
+duration. In `pyproject.toml` it warns, ignores the whole table and resolves the lock again with
+no age; in `uv.toml` it stops with an error. uv 0.9.0 measured both ways. A `required-version`
+floor beside it adds nothing: the parse error comes before the version check, every uv that can
+parse the file is already new enough, and Renovate reads that key from `pyproject.toml` only.
+What `uv.toml` shadows is the settings alone: a project field such as `[tool.uv.sources]` is
+still read from `pyproject.toml`, uv 0.13.5 measured, so one would go there.
+
+## CI credentials are scoped to environments, and a credentialed job runs one pinned entrypoint
+
+The scope table at the top of the pipeline file is the one home in this repository of which
+environment receives which credential. It is a claim about the project's variable settings,
+which no test can read, so a scope changed in GitLab is checked through the variables API. A test derives from each job's steps and the scripts they name which
+credentials it reads, and refuses a job that reads one its environment does not receive, an
+environment that receives one its jobs never read, and a job with no environment that reads any.
+The publishers keep the environment names `github` and `dockerhub` because an unattended patch
+release runs the tag pipeline of the last release's own old pipeline file.
+
+**Protection is not the boundary.** It keeps every credential off unprotected branches and, by
+GitLab's documented rule, out of merge request pipelines here. On `main` and on tags every job
+receives every protected variable, so the environment scope alone separates the credentialed
+jobs from the suites that run dependency code. A job that reads a credential therefore has one
+script step that starts one pinned file under the repository's tooling directory, and no
+`before_script`, `after_script`, hooks or services; each file such a job runs, and each file
+listed beside it as loaded, is pinned by its sha256, so an edit fails until a person has read
+it. The hash is all the test reads of those files. It does not pin the image a job runs in, a
+variable a pinned program reads, or a file a pinned shell script loads that is not listed. A reader of commands was tried and
+rejected: three review rounds each found a spelling past it (an unquoted heredoc body, a program
+started by alias, a sibling module shadowing the standard library), and the set is open. The
+exceptions are the three kaniko builds, which run dependency installs while holding the Docker
+Hub push token (ticket 641, needing a read only pull token), three autopatch jobs whose step
+keeps a shell guard (ticket 660), and the Docker Hub copy (ticket 662). Each is pinned by the
+sha256 of its steps and of each file under the tooling directory they load, and none may declare
+hooks or services.
+
+Every pipeline but `main`'s pulls the dependency caches and the scanner database and pushes
+none of them: merge requests, which Renovate starts as the owner, tags and the patch branch.
+Only `main` writes one, so code a dependency bump decides cannot poison what a later `main` job restores.
+
+A default retry of one covers the reasons GitLab assigns to the infrastructure (runner system
+failure, runner interrupted, external dependency failure, scheduler and API failure, the stuck
+pending pair). Runner system failure also covers a pod evicted for the memory or disk a suite
+took, so that suite reruns once on the same tree. `script_failure`, unknown failure and every timeout are not retried: a rerun cannot turn a red suite into a pass or a
+hung test into a finished one. **A job holding the autopatch push token never retries**, since a
+retried verify starts a second branch pipeline.
+
+Renovate runs with `rebaseWhen: conflicted`, so a merge request that cannot merge reruns once
+per real conflict rather than once per trigger. The cost is that an automerged merge request is
+tested against an older `main`; the merge method is `merge`, `main`'s pipeline runs both suites
+on the merged tree, and a semantic conflict shows up red there rather than on the request. A
+merge request that went red on a broken `main` would then stay red after `main` was fixed, so the
+Renovate job that the image trigger starts ticks its rebase box, but only where three things
+hold: `main`'s own push pipeline at the branch's base failed (a schedule or a UI rerun is not
+`main`'s own); the merge request failed a job of the same name as one that failed there, with
+allowed failures left out on both sides; and every commit on the branch was authored and
+committed by Renovate. The trigger fires after the image is promoted, which waits on the build,
+its smoke test and the two suites, not on the whole pipeline. A merge request red for its own
+reason on a green base, or red only in jobs `main` did not fail, is not rerun, and one rebased
+onto a green `main` that stays red is left until `main` breaks under it again.
+
+## A guard is keyed on this codebase's own names, never on a library's internals
+
+A guard may not read a runtime library's internals or its method inventory (owner's decision,
+2026-10-26, in the same words as the range rule: "insecure, stupid and very brittle"). A guard
+reading either reds lock maintenance on a release that changed nothing this codebase does, and
+a release that shrinks an inventory takes a path out of the guard with nothing red. SQLAlchemy
+2.1 did the second: it drops `select` from `Select`, and the shelf guard's fourth pass, which
+treated every public method of `Query` and `Select` as a read, stopped reporting a bare shelf
+select.
+
+**The fourth pass now reports a statement for naming a guarded entity**, in any expression but
+an import, an annotation, the callee of a call or the type handed to `isinstance` or `issubclass`, and for holding a
+string that is SQL naming a guarded table, read by SQL's grammar wherever the string sits. The entities and tables come
+from the models, the keywords from SQL. No method name is read, so the derived method set, the
+floor of names asserted under it and the test holding the floor are gone. Measured on the tree
+the day it landed, over the four registries the pass feeds: sixteen statements the method keyed
+pass did not report and none it did that this one drops. Seven are declarations or names, two
+are writes in the restore, and seven are clauses built before the query they narrow; every one
+of those feeds a Shelf rooted query or the counted named way past a viewer, so none was a leak.
+
+**Against seventeen evasions a design seat chose**, the method keyed pass caught four on 2.0 and
+four on 2.1, and this one catches fifteen. The two it misses are named in the guard's docstring:
+a relationship comparator handed a keyword, `Book.classifications.any(number="616")`, which
+names no entity, and an entity reached by `getattr` on the models module, a deliberate act.
+Keying on every relationship that targets a guarded entity was measured and refused, because
+every `book.tags` in Python then reports: 36 statements become 82 for the book owned tables and
+12 become 37 for tags.
+
+**A relationship into `Book` is read off the class that owns it.** `join(User.books_added)`
+and `Loan.book.has(...)` count across every member's Books and name no `Book` where a builder
+or a join is read, and they are the ORM's idiomatic spelling of the explicit join
+`routers/stats.py` writes. The pass keys on `<Owner>.<key>` for each relationship the models
+point at `Book`, which an instance's `loan.book` never matches, so it does not pay the cost
+above: on the tree it reported two statements, `lending.RENDERED`'s loader options and the
+overdue digest's in `notifications.py`, each a loader on a query already scoped. A to many
+relationship into `Book` is the exception, read off any receiver: `len(collection.books)` and
+`user.books_added` each load every Book the row collects, other members' Private ones included,
+and an instance names no class to key on. Its keys are derived from the same mappers, so a
+relationship a model gains is covered unedited; on the tree it refused three statements whose
+`books` is a field sharing the name, each registered.
+
+**A by key read of `Book` had no pass.** `db.get_one(Book, book_id)` neither builds a query nor
+joins one, so passes 2 and 3 never saw the three importer loads. A walk reports a call handed
+`Book` itself rather than a column of it, a builtin's call such as `isinstance(x, Book)` aside,
+and its registry carries the three with their reason.
+
+**Raw SQL is read by SQL's grammar, wherever the string sits, and over `books` too.** The first
+version of the raw arm read a string only as an argument of a call and only straight after a
+keyword, so SQL kept in a module constant, a comma join and a schema qualified name all passed,
+and `books` itself had no arm. Every string literal but a docstring is now read: a statement
+that opens with a verb and holds a table keyword after it, a fragment with a keyword before the
+table, or a qualified column, each in any case, because SQL's keywords and an unquoted name are
+case insensitive. A bare table name is read where a table is looked up by name, a subscript's
+key and a call's first argument, and let through elsewhere, because this tree spells a dict key,
+a router tag and an archive entry that way. English that reads as a statement or a fragment (a
+log line), a foreign key's `"tags.id"` and an archive dict looked up by a table's name are the
+false refusals, and a registry entry answers each: seven entries, over four registries, the day
+the case and the lookup positions landed.
+
+**The same premise holds in the merge guard and the public schema guard.** `test_folding` roots a
+read on the session and on the method names `folding.py` itself calls on it, and pins every
+method name the module calls, so a door round the session is a new name somebody classifies.
+`test_public` hands every field of every public model a sentinel through `model_construct` and
+requires `model_dump`, in Python mode and in the JSON mode FastAPI sends, to return each key
+against its own sentinel; that catches a model serializer swapping a value under the same keys,
+which the decorator read caught and the wire key test does not. JSON mode is not optional: a
+serializer bound with `when_used="json"`, a spelling `schemas/common.py` already uses, is
+invisible to a Python mode dump. `model_construct` skips validation, so a `before` validator
+deriving a public value from a withheld column is caught at the wire instead:
+`test_nothing_private_leaves` marks each withheld free text column of the public Book, gives its
+withheld price and dates a sentinel each, and sweeps every route answered without a session for
+them; the withheld enums, the currency and the flags carry neither, and the file names them.
+
+**A runtime guard watching executed SQL was prototyped and not chosen.** It needed a mark on
+every Shelf query and saw only what a test executed.
+
+**So SQLAlchemy is on a plain range again.** With no method inventory read, the `<2.1` cap had
+no reason left, and the backend suite on 2.1.6 was red on one thing only: two tests subclassing
+`Session` passed the private `_warn` argument to `add`, which 2.1 makes keyword only. They pass
+whatever `add` takes now. The Renovate rule that held the cap went with it.
+
+**`tests/test_house_rules.py` still reads Pydantic's compiled schema**, `__pydantic_core_schema__`,
+for the aliases a field is validated from and whether a model admits extras. It reads the
+compiled schema on purpose: an alias a custom schema hook injects leaves no trace on the field.
+Moving it to `model_fields` and `model_config` is ticket 666.

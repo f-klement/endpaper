@@ -24,6 +24,7 @@ import {
   BEGIN,
   END,
   type Census,
+  REFUSED,
   REGISTER_PATH,
   WRITE_SENTINEL,
   blockOf,
@@ -36,11 +37,7 @@ import {
   writeInstruction,
   writeLine,
 } from "./coverageRegister";
-import {
-  MARKER,
-  registerReading,
-  teardown,
-} from "./coverageRegister.globalSetup";
+import { MARKER, registerReading } from "./coverageRegister.globalSetup";
 import CoverageRegisterReporter, { SWITCH } from "./coverageRegister.reporter";
 import { isNode, walk } from "./sourceReader";
 
@@ -66,16 +63,12 @@ const census = (
 /**
  * Whether a line carries anything a person could read.
  *
- * **Lifted out of the filter it came from so that one arm holds it at no spawn
- * cost.** Inside `refusedLines` this predicate was at rung "stated": no refusal
- * this register throws has a whitespace only line, measured over every shape, so
- * arming it there would have meant making a child throw one, which is another
- * nested vitest for a guard on a guard. Here it is a pure function and the arm
- * below is free.
+ * **Lifted out of the stream arms' reader so that one arm holds it at no spawn
+ * cost**, which a nested vitest throwing a whitespace message would not be.
  *
- * `trim`, not a comparison against the empty string: `"\n \n"` splits to one
- * line of a single space, which passes a length check and is contained in any
- * stderr at all, so the readability pair would go green over nothing.
+ * `trim`, not a comparison against the empty string: a message of a single
+ * space passes a length check, and the stream pair would then hold only that
+ * the `REFUSED` line was printed.
  */
 const carriesText = (line: string): boolean => line.trim() !== "";
 
@@ -154,7 +147,7 @@ const underTheSwitch = async (
   const frontend = join(import.meta.dirname, "..");
   const sink = mkdtempSync(join(tmpdir(), "register-switch-"));
   const out = openSync(join(sink, "out"), "w");
-  const reporter = new CoverageRegisterReporter({ out });
+  const reporter = new CoverageRegisterReporter({ out, err: out });
   reporter.onInit({
     projects: [
       {
@@ -396,7 +389,7 @@ describe("the write a run offers", () => {
     // write in the artefact, refusing every row.
     const sink = mkdtempSync(join(tmpdir(), "register-witness-"));
     const out = openSync(join(sink, "out"), "w");
-    const reporter = new CoverageRegisterReporter({ out });
+    const reporter = new CoverageRegisterReporter({ out, err: out });
     reporter.onInit({
       projects: [
         {
@@ -1074,99 +1067,69 @@ describe("the guard is wired into the suite it guards", () => {
 });
 
 /**
- * A global setup refusal keeps its text whatever formats stacks after it is
- * thrown.
+ * Every refusal is printed by the guard itself, so what a person reads is
+ * ours rather than the runner's rendering of a thrown error.
  *
- * **One sighting, and this is what it shows and no more.** A full run once
- * printed a teardown stack where the refusal's text should have been. A stack
- * string is built on first read under whichever `Error.prepareStackTrace` is
- * installed then, and vitest prints this half's refusal from its stack, later.
- * These arms force that order in process: the refusal is built, a formatter
- * that drops every message is installed, and only then is the stack read.
- * Whether that is what happened in the sighting is not established.
- *
- * **`stackTraceLimit` is not raced here, because it is not lazy**: measured
- * 2026-10-08 under bun 1.4.2 and node 24, a limit set to 0 after construction
- * left the stack's frames in place, while a formatter installed after
- * construction replaced the whole string.
+ * **Every `throw` in the reporter and the global setup throws a call to
+ * `refusal`**, read off the parse so a comment naming it is not counted, and
+ * the name is bound by the import from `./coverageRegister` and by no
+ * declaration in either file, since a local one would shadow it. Throws
+ * rather than constructions, because a construction can be spelled many
+ * ways: a count of `new Error` missed `throw Error(...)` and
+ * `new globalThis.Error`, measured. A shadow through a function parameter or
+ * a `catch` binding still passes, since neither is a declaration this counts.
+ * What `refusal` prints is held by the two arms at the bottom of the block
+ * that spawns a run.
  */
-describe("a global setup refusal is printed with its text", () => {
-  it("keeps its text when a formatter is installed after it is thrown", () => {
-    const marker = process.env[MARKER];
-    const formatter = Error.prepareStackTrace;
-    let thrown: unknown = undefined;
-    // **The one refusal that throws before teardown touches anything**, so
-    // driving it in this worker removes nothing of the run's own: with the
-    // marker unset it refuses on its first line.
-    delete process.env[MARKER];
-    try {
-      teardown();
-    } catch (error) {
-      thrown = error;
-    } finally {
-      if (marker !== undefined) process.env[MARKER] = marker;
-    }
-    if (!(thrown instanceof Error))
-      throw new Error("teardown with no marker refused nothing");
+describe("every refusal is printed by the guard itself", () => {
+  for (const file of [
+    "coverageRegister.globalSetup.ts",
+    "coverageRegister.reporter.ts",
+  ])
+    it(`throws nothing but the imported refusal in ${file}`, () => {
+      const path = join(import.meta.dirname, file);
+      const thrown: string[] = [];
+      let declared = 0;
+      let imported = 0;
+      walk(parseAst(readFileSync(path, "utf8"), { lang: "ts" }), (here) => {
+        if (
+          (here.type === "FunctionDeclaration" ||
+            here.type === "VariableDeclarator") &&
+          isNode(here.id) &&
+          here.id.type === "Identifier" &&
+          here.id.name === "refusal"
+        )
+          declared += 1;
+        if (
+          here.type === "ImportDeclaration" &&
+          isNode(here.source) &&
+          here.source.value === "./coverageRegister" &&
+          Array.isArray(here.specifiers)
+        )
+          for (const specifier of here.specifiers)
+            if (
+              isNode(specifier) &&
+              isNode(specifier.local) &&
+              specifier.local.name === "refusal" &&
+              isNode(specifier.imported) &&
+              specifier.imported.name === "refusal"
+            )
+              imported += 1;
+        if (here.type !== "ThrowStatement") return;
+        const argument = isNode(here.argument) ? here.argument : null;
+        thrown.push(
+          argument?.type === "CallExpression" &&
+            isNode(argument.callee) &&
+            argument.callee.type === "Identifier"
+            ? (argument.callee.name as string)
+            : (argument?.type ?? ""),
+        );
+      });
 
-    let stack: string | undefined;
-    Error.prepareStackTrace = () => "Error";
-    try {
-      stack = thrown.stack;
-    } finally {
-      Error.prepareStackTrace = formatter;
-    }
-
-    expect(stack).toContain(thrown.message);
-    expect(thrown.message).toContain("unset at teardown");
-  });
-
-  /**
-   * **The arm above drives one of the file's refusals**, so this is what
-   * stops the others being built some other way: every `throw` in the file
-   * throws a call to `refusal`. Read off the parse, so a comment naming the
-   * constructor is not counted.
-   *
-   * **Throws, not constructions, because a construction can be spelled many
-   * ways.** A count of `new Error` missed `throw Error(...)` and
-   * `new globalThis.Error`, measured, and refused the helper written as an
-   * arrow function bound to a `const`. What this cannot see is the helper's
-   * own body, which the arm above holds by driving it.
-   *
-   * **And exactly one declaration binds that name**, as a function or as a
-   * variable, because a second one declared in a block shadows the helper
-   * there: a `const refusal` building a bare `Error` passed the throw rule
-   * alone, measured. A shadow through a function parameter or a `catch`
-   * binding still passes, since neither is a declaration this counts.
-   */
-  it("throws nothing but a call to the one helper that formats it", () => {
-    const path = join(import.meta.dirname, "coverageRegister.globalSetup.ts");
-    const thrown: string[] = [];
-    let declared = 0;
-    walk(parseAst(readFileSync(path, "utf8"), { lang: "ts" }), (here) => {
-      if (
-        (here.type === "FunctionDeclaration" ||
-          here.type === "VariableDeclarator") &&
-        isNode(here.id) &&
-        here.id.type === "Identifier" &&
-        here.id.name === "refusal"
-      )
-        declared += 1;
-      if (here.type !== "ThrowStatement") return;
-      const argument = isNode(here.argument) ? here.argument : null;
-      thrown.push(
-        argument?.type === "CallExpression" &&
-          isNode(argument.callee) &&
-          argument.callee.type === "Identifier"
-          ? (argument.callee.name as string)
-          : (argument?.type ?? ""),
-      );
+      expect(thrown).not.toHaveLength(0);
+      expect(new Set(thrown)).toEqual(new Set(["refusal"]));
+      expect([declared, imported]).toEqual([0, 1]);
     });
-
-    expect(thrown).not.toHaveLength(0);
-    expect(new Set(thrown)).toEqual(new Set(["refusal"]));
-    expect(declared).toBe(1);
-  });
 });
 
 /**
@@ -1182,16 +1145,12 @@ describe("a global setup refusal is printed with its text", () => {
  * child's stderr.** The fixture wraps the real reporter and the real global
  * setup, records the message of whatever they throw and rethrows it, so an arm
  * below passes only if the half it names threw the message it names. The child's
- * stderr is the wrong instrument for that question: the text an `Error` prints
- * is built when something first reads its `.stack`, by whichever
- * `Error.prepareStackTrace` is installed at that moment, and vitest reassigns
- * that global while it runs. So a refusal thrown here was formatted there, and
- * the two fields the fixture records beside each message say under what.
+ * stderr carries vitest's rendering of the error beside the guard's own print,
+ * and which refusal fired is not a question about either.
  *
- * **Whether a refusal is readable is a different question, and it keeps two
- * arms of its own at the bottom**, one for each of the two routes vitest prints
- * by. Their docstring holds the measurement, and the second of them is the only
- * arm in this file that notices the failure that opened this subject.
+ * **Whether a refusal reaches a person is a different question, and it keeps
+ * two arms of its own at the bottom**, one for each half, reading what the
+ * guard itself printed to the child's stderr.
  */
 describe("the guard fails a run", () => {
   const root = join(import.meta.dirname, "..");
@@ -1224,26 +1183,8 @@ describe("the guard fails a run", () => {
 
   let spawned = 0;
 
-  /**
-   * One refusal, plus the state of the two globals that decide what an `Error`
-   * prints.
-   *
-   * **`stackTraceLimit` is a string because JSON has neither `Infinity` nor
-   * `NaN`**, and this field may hold either. `JSON.stringify` writes both as
-   * `null`, which is also what an unset field reads as, so a number here would
-   * collapse three different states into one. Measured with `node -e`, frames in
-   * `error.stack`: `Infinity` keeps **every** frame, `NaN` keeps **none**, and
-   * `0` keeps none. So `NaN` is the setting under which a stack arrives with no
-   * frames at all while looking like an ordinary reassignment, and it is exactly
-   * the one a number could not have told apart from unset.
-   */
-  type Refusal = {
-    from: string;
-    message: string;
-    prepareStackTrace: boolean;
-    stackTraceLimit: string;
-    engine: string;
-  };
+  /** One refusal: which half threw it, its message, and the child's runtime. */
+  type Refusal = { from: string; message: string; engine: string };
   type Run = {
     pid: number;
     status: number | null;
@@ -1320,7 +1261,7 @@ describe("the guard fails a run", () => {
    * One recorded line, refused rather than trusted.
    *
    * **The probe is held here rather than in an arm of its own, which is what
-   * makes it free.** All four fields are what the fixture's `record` writes, so
+   * makes it free.** All three fields are what the fixture's `record` writes, so
    * a line short of any of them means the wrapper and this reader have stopped
    * agreeing, and refusing at the read reddens whichever of the spawns below
    * produced it. An arm would have cost another nested vitest to say the same
@@ -1331,19 +1272,15 @@ describe("the guard fails a run", () => {
     if (
       typeof parsed.from !== "string" ||
       typeof parsed.message !== "string" ||
-      typeof parsed.prepareStackTrace !== "boolean" ||
-      typeof parsed.stackTraceLimit !== "string" ||
       typeof parsed.engine !== "string"
     )
       throw new Error(
         `${channel} carries a line the fixture's record() did not write, so ` +
-          `this run cannot say what formatted its refusal: ${line}`,
+          `this run cannot say which half refused: ${line}`,
       );
     return {
       from: parsed.from,
       message: parsed.message,
-      prepareStackTrace: parsed.prepareStackTrace,
-      stackTraceLimit: parsed.stackTraceLimit,
       engine: parsed.engine,
     };
   };
@@ -1462,43 +1399,25 @@ describe("the guard fails a run", () => {
       .join("\n");
 
   /**
-   * That half's refusal as lines, blank and whitespace only ones dropped.
+   * What the guard printed for that half's first refusal, as `refusal` writes
+   * it: the `REFUSED` line, then the message the channel recorded. Empty when
+   * the channel holds no refusal from that half with text in it.
    *
-   * **The readability arms assert each line separately rather than the message in
-   * one piece, and the reason is indentation.** Both forms are positive
-   * containment, so neither is in the fragile class and this was never a choice
-   * about that. What separates them is what a runner does to a multi-line error
-   * block, and the likeliest thing it does is **prepend**: indenting the block
-   * destroys a whole message substring and leaves every per line substring
-   * intact.
-   *
-   * Asserting only the first line is the other end and gives up too much. The
-   * reporter's refusal is 110 characters over two non blank lines of **45** and
-   * **63**, and those 63 are the only characters naming the row, which the
-   * literal these arms replaced asserted outright. A global setup refusal is
-   * one line, and there all three forms are the same assertion. **No figure
-   * for that half**: there are two of those refusals now, of different
-   * lengths, and a count beside one of them reads as a count of both.
-   *
-   * **What per line gives up, in full**: the blank line between the parts,
-   * contiguity, order, and that the lines arrived as one block. All four are
-   * right to give up, because the subject of these two arms is that a refusal
-   * reaches a person and not how it was laid out.
-   *
-   * **The caveat is that per line is only as strong as its shortest line, and
-   * that is not a constant.** Over every refusal shape this register can throw,
-   * driven with the fixture's own row patterns, the shortest non blank line is
-   * the 45 character `tests/COVERAGE.md does not describe this run:` that every
-   * reporter refusal carries, including the five line block mismatch. But the
-   * "matches no file" shape is a row pattern plus 37 characters, and a row
-   * pattern is data in a document anybody can edit: against this register's own
-   * rows the shortest is `app/*`, which makes that line **42**. So the mechanism
-   * is that the floor tracks the shortest row rather than sitting at a figure,
-   * and no figure here is a bound. What makes the trade safe is that no shape
-   * approaches a length a stderr would carry by accident.
+   * **The whole block, contiguous**, because it is one synchronous write of
+   * the guard's own: nothing of vitest's can land inside it or reindent it,
+   * which is what the per line comparison this replaced allowed for when it
+   * read vitest's rendering of the thrown error instead.
    */
-  const refusedLines = (run: Run, from: string): string[] =>
-    refused(run, from).split("\n").filter(carriesText);
+  const printed = (run: Run, from: string): string => {
+    const first = run.refusals.find((refusal) => refusal.from === from);
+    return first !== undefined && carriesText(first.message)
+      ? `${REFUSED}\n${first.message}`
+      : "";
+  };
+
+  /** The child's runtime, for a stream arm that has just failed. */
+  const engineOf = (run: Run, from: string): string =>
+    `the child is ${run.refusals.find((refusal) => refusal.from === from)?.engine ?? "unknown"}`;
 
   /**
    * Why the vacuity line above each stream assertion exists.
@@ -1531,43 +1450,6 @@ describe("the guard fails a run", () => {
     `process of its own is a process the timeout's kill does not reach, so a ` +
     `run that hits SPAWNED leaves it behind. A test body on the main thread is ` +
     `a probe that is no longer asking the pool anything`;
-
-  /**
-   * What the child was when that half threw, as a sentence for whichever
-   * assertion is failing: its runtime, and the two globals that decide what an
-   * `Error` prints.
-   *
-   * **Named for the child and not for the formatter, because the child is a
-   * process boundary away from the runner** and forgetting that is what sent
-   * three rounds of this review to the wrong subject.
-   *
-   * **This is the one place the probe's value reaches a person, and that is
-   * deliberate.** No arm pins either field: `prepareStackTrace` being installed
-   * is the precondition of the bare `Error` below, so an arm pinning it would
-   * redden on the vitest release that stopped reassigning, which is red on a
-   * repair rather than on a defect. So the fields are recorded, their **shape**
-   * is held by `asRefusal` at the channel read, where its own docstring says
-   * why, and their value is printed where it explains something: beside a stream
-   * assertion that has just failed.
-   *
-   * Measured through this sentence on 2026-09-26: at the moment the global
-   * setup's teardown throws, `prepareStackTrace` is installed and
-   * `stackTraceLimit` is 10. So the reassignment is live here and the path that
-   * reduces the limit to 1 is not the one these runs take.
-   */
-  const childState = (run: Run, from: string): string => {
-    const recorded = run.refusals.find((refusal) => refusal.from === from);
-    if (recorded === undefined)
-      return `nothing was recorded from ${from}, so this stream has no refusal to carry`;
-    return (
-      `the child at throw time: ${recorded.engine}, ` +
-      `Error.prepareStackTrace installed ` +
-      `${recorded.prepareStackTrace}, Error.stackTraceLimit ` +
-      `${recorded.stackTraceLimit}. A stack string is built on first read under ` +
-      `whichever of those two are installed then, which is how a refusal thrown ` +
-      `here can print with its text gone`
-    );
-  };
 
   beforeAll(() => {
     fixture = mkdtempSync(join(tmpdir(), "endpaper-register-"));
@@ -1609,9 +1491,9 @@ describe("the guard fails a run", () => {
     // its own environment gives it, and **three rounds of review settled it
     // locally and were each correct about the wrong process.** Nothing in the
     // tree decides it and no local check can, which is why `record` reports the
-    // child's runtime beside every refusal and `childState` prints it into any
-    // failing stream assertion. Why the container resolves it that way is not
-    // established here and is not claimed.
+    // child's runtime beside every refusal and the two stream arms print it when
+    // they fail. Why the container resolves it that way is not established here
+    // and is not claimed.
     //
     // **Pin no spelling of that message**, here or in an arm: it is an engine's
     // diagnostic, it moves with an image nobody diffs, and this comment names the
@@ -1620,7 +1502,7 @@ describe("the guard fails a run", () => {
     // **In both rename shapes the arm below reddens and names the hook; where the
     // half simply did not throw it stays green, and that difference is the
     // diagnosis.** Beside the four channel arms below, the `status` assertion says
-    // it a second way; the readability pair after them carries no status
+    // it a second way; the stream pair after them carries no status
     // assertion and never did. A fixture config that stopped loading reddens
     // **every spawning arm** at once rather than emptying the channel quietly.
     // Not the hook arm: it reads the prototype in process, loads no fixture
@@ -1630,12 +1512,6 @@ describe("the guard fails a run", () => {
       join(fixture, "record.ts"),
       `import { appendFileSync } from "node:fs";
 
-// **Never read \`error.stack\` here, and this is the one line that cannot be
-// simplified away.** V8 formats a stack on first access and caches the string,
-// so reading it in this wrapper would freeze it under the throw time formatter
-// and repair the bare \`Error\` that the last arm of this block is the tree's
-// only detector of. The two fields below are the formatter's state and not the
-// formatted text, which is why they are safe to read and \`stack\` is not.
 export function record(from: string, error: unknown): void {
   const channel = process.env[${JSON.stringify(CHANNEL)}];
   if (channel === undefined) return;
@@ -1645,8 +1521,6 @@ export function record(from: string, error: unknown): void {
     JSON.stringify({
       from,
       message,
-      prepareStackTrace: typeof Error.prepareStackTrace === "function",
-      stackTraceLimit: String(Error.stackTraceLimit),
       // **The child is a process boundary away from whatever spawned it**, and
       // three attempts to reason from the runner's engine to this one settled the
       // question on the wrong subject. Asked here instead, where the answer is.
@@ -2143,40 +2017,20 @@ export function teardown(): void {
   /**
    * The two arms whose subject is the child's stderr, and the only two.
    *
-   * The four channel arms above ask which refusal fired, which the stream
-   * cannot answer without also answering for vitest's formatting. These ask the
-   * different question the block would otherwise stop covering: that a refusal reaches a
-   * person, and not only the file the fixture records it in. A guard nobody
-   * can read is a guard nobody acts on.
+   * The four channel arms above ask which refusal fired. These ask whether a
+   * refusal reaches a person, and not only the file the fixture records it in:
+   * a guard nobody can read is a guard nobody acts on.
    *
-   * **One arm for each half, because vitest prints them by different routes,
-   * and only one of the two routes can lose the message.** A reporter's throw
-   * arrives as an Unhandled Error, printed from `message`. The global setup's
-   * arrives through vitest's `close()`, which logs the error object, so what
-   * prints is the `stack` string; a stack string is built when something first
-   * reads it, by whichever `Error.prepareStackTrace` is installed at that
-   * moment, and vitest reassigns that global while it runs.
-   *
-   * **Each asserts, line by line, the message the channel recorded, not a
-   * literal of its own.**
-   * The wording then has one home, at the site that throws it, where before two
-   * of these literals were a strict prefix of another arm's and rewording either
-   * refusal reddened an arm that does not care what the refusal says. It is also
-   * the stronger claim: it holds that the **same** message reached both routes,
-   * where two independent literals would pass while the child recorded one
-   * refusal and printed another.
-   *
-   * That is measured rather than supposed. Assigning
-   * `Error.prepareStackTrace = () => "Error"` inside the child reduces the
-   * second arm's stream to `error during close [Error]` and leaves the first
-   * arm's untouched. **The second arm is the only thing in this file that goes
-   * red under it**, which is why it is here rather than left to the channel.
-   *
-   * **That measurement predates the global setup reading its own stack where
-   * it builds the refusal**, and has not been driven again since. A formatter
-   * in place before the throw still reaches the text; one installed after it
-   * no longer does, which the block named for a global setup refusal being
-   * printed with its text holds in process.
+   * **They read what the guard itself printed, never vitest's rendering of the
+   * thrown error**, by the owner's ruling of 2026-10-26 that a guard keys on
+   * this repository's own output. They used to read vitest's: a reporter's
+   * throw printed as an Unhandled Error from its message, a global setup's
+   * through `close()` from its stack, which is built under whichever
+   * `Error.prepareStackTrace` is installed when vitest reads it. The second
+   * arm reddened three times in October on merge requests touching no
+   * frontend file, its stream reduced to a teardown stack. So `refusal` prints
+   * the message itself, and the comparison is against the channel's record of
+   * the same refusal, so the wording has one home, at the site that throws it.
    */
   it(
     "prints the reporter's refusal where an operator reads it",
@@ -2184,11 +2038,10 @@ export function teardown(): void {
       write(oneTestOut());
 
       const run = runThere();
-      const recorded = refusedLines(run, "reporter");
+      const block = printed(run, "reporter");
 
-      expect(recorded, EMPTY_CHANNEL).not.toHaveLength(0);
-      for (const line of recorded)
-        expect(run.stderr, childState(run, "reporter")).toContain(line);
+      expect(block, EMPTY_CHANNEL).not.toBe("");
+      expect(run.stderr, engineOf(run, "reporter")).toContain(block);
     },
     SPAWNED + 30_000,
   );
@@ -2199,11 +2052,10 @@ export function teardown(): void {
       write(registerFor(body, rows));
 
       const run = runThere("--reporter=default");
-      const recorded = refusedLines(run, "globalSetup");
+      const block = printed(run, "globalSetup");
 
-      expect(recorded, EMPTY_CHANNEL).not.toHaveLength(0);
-      for (const line of recorded)
-        expect(run.stderr, childState(run, "globalSetup")).toContain(line);
+      expect(block, EMPTY_CHANNEL).not.toBe("");
+      expect(run.stderr, engineOf(run, "globalSetup")).toContain(block);
     },
     SPAWNED + 30_000,
   );

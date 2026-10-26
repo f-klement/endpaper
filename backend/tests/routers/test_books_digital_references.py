@@ -399,12 +399,12 @@ class TestTwoReportsAtOnceStayWithinTheCeiling:
         both_counted = threading.Barrier(2, timeout=2)
 
         class Racing(Session):
-            def add(self, instance, _warn=True):
+            def add(self, instance, *args, **kwargs):
                 # On Postgres the advisory lock holds the second report back
                 # before this point, so the barrier breaks and both go on.
                 with contextlib.suppress(threading.BrokenBarrierError):
                     both_counted.wait()
-                super().add(instance, _warn)
+                super().add(instance, *args, **kwargs)
 
         def one(label):
             with Racing(bind=engine, autoflush=False) as db:
@@ -436,10 +436,10 @@ class TestTwoReportsAtOnceStayWithinTheCeiling:
         both_looked = threading.Barrier(2, timeout=2)
 
         class Racing(Session):
-            def add(self, instance, _warn=True):
+            def add(self, instance, *args, **kwargs):
                 with contextlib.suppress(threading.BrokenBarrierError):
                     both_looked.wait()
-                super().add(instance, _warn)
+                super().add(instance, *args, **kwargs)
 
         def one(size):
             with Racing(bind=engine, autoflush=False) as db:
