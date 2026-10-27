@@ -113,7 +113,7 @@ dev = [
     "pip-audit==2.10.1",
     "jsonschema==4.26.0",
     "keyring>=25.7.0",
-    "hypothesis==6.170.5",
+    "hypothesis==6.170.9",
     "mutmut==3.8.0",
     # Imported directly by guards and by the pipeline's tooling, so declared
     # here rather than left to arrive through pytest and mutmut on their ranges.
