@@ -11,7 +11,7 @@
 #
 # Renovate bumps this line: the dockerfile manager reads an `ARG` default that a `FROM`
 # consumes, and the venv, app and runtime stages consume it directly.
-ARG BASE=python:3.14.9-alpine@sha256:d55673c233e28839c1c0c69766428cb6d50174a2ecfdcf915b6f58a0b0991562
+ARG BASE=python:3.14.9-alpine@sha256:dbeb11d16bb95c3a7e3c25c842cb9f20cbc8c18f8be0461a4a0dcc861ad386a0
 
 # Bumped by hand, and BOTH LINES TOGETHER. A version moved without its hash fails the
 # build at `sha256sum -c`, which is the failure you want. Renovate raises the version half
