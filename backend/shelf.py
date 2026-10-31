@@ -1146,8 +1146,8 @@ class Shelf:
             )
         # `cast` because `Session.query` is overloaded per column arity and a
         # `*args` call resolves to the untyped fallback. The rows a caller gets
-        # back are therefore `Any`, which is what each tuple reading call site
-        # narrows with its own `cast` rather than trusting: `authorship.py`, the author
+        # back are therefore `Any`, which is what each `.tuples()` call site
+        # narrows explicitly rather than trusting: `authorship.py`, the author
         # index, and `routers/books.py`, the duplicates scan. **Two, not one**,
         # since the duplicates route stopped hydrating whole Books; the count
         # is not repeated as a figure here because it is the kind that goes

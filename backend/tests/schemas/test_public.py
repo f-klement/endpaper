@@ -150,41 +150,6 @@ WITHHELD: dict[str, str] = {
 }
 
 
-def _serialisation_mismatches(models: set[type[BaseModel]]) -> list[str]:
-    """Each model whose dump is not every declared field holding its own value.
-
-    A distinct sentinel per field, through `model_construct`, so a value moved
-    onto another key or replaced is as visible as a key added or dropped. The
-    sentinel is a string wherever the field is declared, so `warnings=False`
-    keeps pydantic from warning about the type it was handed, and a string is
-    the one value both modes pass through unchanged.
-
-    **Dumped in both modes.** FastAPI sends a response model in JSON mode, and
-    a serializer can be bound to one mode with `when_used="json"`, which
-    `schemas/common.py` already does; a probe in Python mode alone passes one.
-    A serializer that cannot take a string raises, and that is reported too,
-    so a field serializer is refused with its own message rather than an
-    error out of the middle of the probe.
-    """
-    offenders: list[str] = []
-    for model in sorted(models, key=lambda model: model.__name__):
-        sentinels = {name: f"<{model.__name__}.{name}>" for name in model.model_fields}
-        expected = {
-            field.serialization_alias or field.alias or name: sentinels[name]
-            for name, field in model.model_fields.items()
-        }
-        probe = model.model_construct(None, **sentinels)
-        for mode in ("python", "json"):
-            try:
-                produced = probe.model_dump(mode=mode, by_alias=True, warnings=False)
-            except Exception as error:  # noqa: BLE001  any raise is a serializer that is not the field's own value
-                offenders.append(f"{model.__name__}: the {mode} dump raised {error!r}")
-                continue
-            if produced != expected:
-                offenders.append(f"{model.__name__}: the {mode} dump gave {produced}, declared {expected}")
-    return offenders
-
-
 class TestEveryFieldOnBookOutIsClassified:
     def test_the_partition_is_total(self):
         """Every `BookOut` field is published or withheld, and nothing is both.
@@ -446,66 +411,45 @@ class TestThePublicPayloadIsBuiltOnlyFromPublicModels:
             "is published and is not in `model_fields`, so nothing above sees it."
         )
 
-    def test_every_field_serialises_its_own_value_under_its_own_key(self):
+    def test_no_public_model_overrides_its_serialiser(self):
         """`@model_serializer` replaces the whole payload, so every field level
         rule in this file stops describing what is sent.
 
-        **Probed through the public API, never read off the decorator.** Each
-        field is handed a sentinel of its own through `model_construct`, and
-        the dump has to be exactly each field's key against its own sentinel.
-        A serializer that adds a key, drops one, or keeps every key and swaps a
-        value is red by what it does, whatever it is called. The wire test
-        above sees keys alone, so the value swap is this test's.
-
-        One set of sentinels is one input: a serializer whose output turns on
-        the data it is handed can pass it. That needs a branch written for it,
-        a deliberate act rather than a slip. `model_construct` skips
-        validation, so this sees the serialising half only: a
-        `model_validator(mode="before")` that copies a withheld column into a
-        public key on the way in passes here, and
-        `tests/test_nothing_private_leaves.py` catches it at the wire, by a
-        marker in each withheld free text column of the public Book and a
-        sentinel in its withheld price and dates; its `UNMARKED_WITHHELD` names
-        the withheld columns that carry neither. `SerializeAsAny`,
-        which dumps whatever subclass it is handed rather than the declared
-        model, passes here too, and needs a subclass written to be dumped.
+        Read off `__pydantic_decorators__`, which is where pydantic records the
+        decorator. **The first version of this check probed an attribute name
+        that does not exist**, so it inspected nothing and passed while a model
+        serializer on a nested model published the withheld shelf location. It
+        was the wire test above that caught that, and this one is here as the
+        second, independent catch rather than as the only one, which is the
+        arrangement that made the hole visible in the first place.
         """
-        offenders = _serialisation_mismatches(_public_models())
+        offenders = sorted(
+            f"{model.__name__}.{name}"
+            for model in _public_models()
+            for name in model.__pydantic_decorators__.model_serializers
+        )
         assert offenders == [], (
-            f"These public models do not serialise each declared field as itself: "
-            f"{offenders}. A model or field serializer replaces what is sent, so "
-            "every field level rule in this file stops describing it."
+            f"These public models define a model serializer: {offenders}. It "
+            "replaces the whole payload, so every field level rule in this file "
+            "stops describing what is sent."
         )
 
     def test_this_rule_can_see_a_model_serializer_at_all(self):
-        """The check that stops the rule above going vacuous.
+        """The check that stops the rule above going vacuous a second time.
 
-        Asserted against models built here rather than against ours, because
-        the whole point is that none of ours has one. The value swap keeps
-        every key, which is the case the wire test cannot see.
+        It is asserted against a model built here rather than against one of
+        ours, because the whole point is that none of ours has one.
         """
         from pydantic import BaseModel, model_serializer
 
-        class Plain(BaseModel):
-            a: str = ""
-
-        class Swapped(BaseModel):
-            a: str = ""
+        class Decorated(BaseModel):
+            a: int = 1
 
             @model_serializer
-            def _dump(self) -> dict[str, str]:
-                return {"a": "Shelf 3, attic"}
+            def _dump(self) -> dict:
+                return {}
 
-        class SwappedOnTheWire(BaseModel):
-            a: str = ""
-
-            @model_serializer(when_used="json")
-            def _dump(self) -> dict[str, str]:
-                return {"a": "Shelf 3, attic"}
-
-        assert _serialisation_mismatches({Plain}) == []
-        assert _serialisation_mismatches({Swapped}) != []
-        assert _serialisation_mismatches({SwappedOnTheWire}) != []
+        assert set(Decorated.__pydantic_decorators__.model_serializers) == {"_dump"}
 
     def test_no_public_field_carries_an_alias(self):
         """**The evasion that defeated all four of the original checks.**

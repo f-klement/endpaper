@@ -62,14 +62,16 @@
  * **`script-src` had to be relaxed for this and the relaxation is one token.**
  * `backend/middleware.py` grants `'wasm-unsafe-eval'`, which permits compiling
  * WebAssembly and nothing else; `'unsafe-eval'` is still refused, and so is
- * `'unsafe-inline'`. **The engine never reads `eval` or `Function` and hands no
- * string to a timer**, so the wider grant would buy nothing.
- * `tests/lib/sqlite.test.ts` reads the syntax tree of the installed build the
- * import below names and refuses every read of either global that could run it,
- * a call, an alias and an argument alike, and every timer handed a string
- * written in place, so a version bump is judged by what it ships rather than by
- * its number. What that walk does not look for, `Function` reached through some
- * other function's `.constructor` among it, is listed beside it.
+ * `'unsafe-inline'`. **sql.js 1.15.1 contains no `eval(` and no `new Function`,
+ * measured over `dist/sql-wasm-browser.js`**, so the wider grant would have
+ * bought nothing.
+ *
+ * **That measurement is about a version, and this is the only place the version
+ * is written down.** The dependency is pinned exactly and a bot bumps minor and
+ * patch releases automatically, so the sentence above would otherwise go stale
+ * with nothing red: `tests/lib/sqlite.test.ts` compares it against
+ * `package.json` and fails the build when the two part company, which is what
+ * turns a bump into a prompt to re-run the scan.
  * `backend/tests/test_middleware.py` pins the resulting policy by exact
  * equality.
  */

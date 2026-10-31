@@ -15,8 +15,6 @@ import {
   boundBy,
   namesBoundBy,
   resolvePath,
-  SCOPES,
-  scopeBindings,
   walk,
   type Node,
 } from "./sourceReader";
@@ -27,17 +25,6 @@ function targetOf(code: string): unknown {
   if (first!.type === "VariableDeclaration")
     return (first!.declarations as Node[])[0]!.id;
   return (first!.params as unknown[])[0];
-}
-
-/** The names each scope in `code` binds, outermost first, by its kind. */
-function scopesOf(code: string): string[] {
-  const read: string[] = [];
-  walk(parseAst(code, { lang: "ts" }), (node) => {
-    if (!SCOPES.has(node.type)) return;
-    const names = [...scopeBindings(node).names.keys()].toSorted();
-    read.push(`${node.type}: ${names.join(" ")}`);
-  });
-  return read;
 }
 
 describe("the source reader", () => {
@@ -98,42 +85,5 @@ describe("the source reader", () => {
     });
 
     expect(seen).toEqual(["b"]);
-  });
-
-  it("keeps a block's `let` in the block and hoists its `var` and function", () => {
-    expect(
-      scopesOf("function f(p) { { let a; var b; function c() {} } }"),
-    ).toEqual([
-      "Program: f",
-      "FunctionDeclaration: b c p",
-      "BlockStatement: ",
-      "BlockStatement: a b c",
-      "FunctionDeclaration: ",
-      "BlockStatement: ",
-    ]);
-  });
-
-  it("binds a function expression's own name inside it and nowhere else", () => {
-    expect(scopesOf("const g = function h() {};")).toEqual([
-      "Program: g",
-      "FunctionExpression: h",
-      "BlockStatement: ",
-    ]);
-  });
-
-  it("reads the TypeScript declarations and not the type space ones", () => {
-    expect(
-      scopesOf("enum E { A } namespace N {} import Q = N; type T = 1;"),
-    ).toEqual(["Program: E N Q", "TSEnumBody: ", "TSModuleBlock: "]);
-  });
-
-  it("records a declaration kind it does not know rather than walking past it", () => {
-    const named = { type: "Identifier", name: "x" };
-    const program = {
-      type: "Program",
-      body: [{ type: "NextDeclaration", id: named }],
-    };
-
-    expect(scopeBindings(program).unreadable).toEqual(["NextDeclaration"]);
   });
 });

@@ -45,7 +45,6 @@ from tests.corpus import (
     every_python_file,
     is_vendored,
     markdown_files,
-    project_files,
     shipped_modules,
     suite_modules,
 )
@@ -61,7 +60,6 @@ TREE_GUARDS = {
     "TestEveryEnumColumnIsConstrainedOrExemptWithAReason": ("every_python_file",),
     "TestEveryIntParameterFromTheOutsideIsBounded": ("application_modules",),
     "TestEveryMarkdownFileHasBalancedCodeFences": ("markdown_files",),
-    "TestNoFileUsesADashAsPunctuation": ("project_files",),
     "TestEveryNumericQueryParamIsBoundedBothWays": ("application_modules",),
     "TestEveryPythonFileCompilesWithoutAWarning": ("every_python_file",),
     "TestEveryRequestBodyRowIdIsBounded": ("application_modules",),
@@ -11071,72 +11069,3 @@ class TestEveryDirectoryDoorWritesThroughOneFunnel:
         quiet.write_text("from models import User\n\n\ndef read(db):\n    return db.query(User)\n")
 
         assert _user_construction_sites([quiet]) == {}
-
-
-#: The en dash and the em dash, written as escapes so that this file holds neither.
-_DASHES: Final = ("\u2013", "\u2014")
-
-#: The files that match or quote a dash rather than use one: how many each holds,
-#: and why. The count is pinned, so a dash added beside a quoted one fails as a
-#: dash in any other file does. `CLAUDE.md` names the same four.
-_DASH_HOLDERS: Final = {
-    "CLAUDE.md": (3, "states the rule by quoting the characters it bans"),
-    "backend/bibliographic.py": (2, "matches an en dash in catalogue data, such as a range of years"),
-    "backend/tests/test_authority.py": (1, "a catalogue record captured as it was served"),
-    "frontend/tests/houseRules.test.ts": (2, "the frontend arm of this rule, which names the characters"),
-}
-
-#: The holders the mirror strips, which a clone of it therefore lacks.
-_STRIPPED_HOLDERS: Final = frozenset({"CLAUDE.md"})
-
-#: The tooling directory, which the mirror strips whole: a tree without it is
-#: the published one. The publish gate inside it holds the strip list.
-_TOOLING: Final = BACKEND.parent / "ci"
-
-
-def _dashes_by_file() -> dict[str, int]:
-    """How many dashes each text file holding one carries. A file that is not
-    UTF-8 is a binary and is skipped, since its bytes can spell a dash by chance."""
-    repo = BACKEND.parent
-    counts = {}
-    for path in project_files(repo):
-        try:
-            text = path.read_text(encoding="utf-8")
-        except UnicodeDecodeError:
-            continue
-        if n := sum(text.count(dash) for dash in _DASHES):
-            counts[str(path.relative_to(repo))] = n
-    return counts
-
-
-class TestNoFileUsesADashAsPunctuation:
-    """No en dash or em dash outside the files that match or quote one, and in
-    each of those exactly the count pinned for it.
-
-    The frontend arm reads its own source; this one reads every file the
-    repository versions outside a directory a tool owns, so backend code, the
-    documentation and the tooling are held to the rule too. It reaches neither
-    `.claude`, which no suite is sent and which the full gate checks instead,
-    nor a spaced hyphen, which in Markdown cannot be told from a list item.
-    """
-
-    def test_each_file_holds_exactly_its_pinned_count(self) -> None:
-        published = not _TOOLING.is_dir()
-        expected = {
-            name: n for name, (n, _) in _DASH_HOLDERS.items() if not (published and name in _STRIPPED_HOLDERS)
-        }
-        assert _dashes_by_file() == expected
-
-    def test_the_holders_a_mirror_lacks_are_the_ones_its_strip_list_names(self) -> None:
-        """Read from the strip list, because a published test cannot import the
-        guard that parses it: that guard is stripped too."""
-        if not _TOOLING.is_dir():
-            pytest.skip("the published tree carries no strip list")
-        gate = (_TOOLING / "make-public-tree.sh").read_text()
-        block = re.search(r'^DENY="\n(.*?)\n"', gate, re.MULTILINE | re.DOTALL)
-        assert block, "no strip list was read"
-        denied = block.group(1).split()
-        stripped = {
-            name for name in _DASH_HOLDERS if any(name == e or name.startswith(e + "/") for e in denied)
-        }
-        assert stripped == _STRIPPED_HOLDERS

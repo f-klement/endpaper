@@ -322,8 +322,9 @@ class TestThePoolsCapacityIsTheFigureTwoArgumentsRestOn:
 
     **Nothing in this repository sets it.** `create_engine` is called with no
     `pool_size` and no `max_overflow`, so the fifteen is `QueuePool`'s own default
-    of five plus ten. A SQLAlchemy release can move a number that three pieces of
-    reasoning stand on without touching a line of this tree beyond the pin.
+    of five plus ten, and `pyproject.toml` asks for `sqlalchemy>=2.0.38` with no
+    upper bound. A bump can move a number that three pieces of reasoning stand on
+    without touching a line of this tree.
 
     **What rests on it.** `metadata._HARDER_AT_ONCE` refuses to let anything wait
     on its semaphore, because a waiter holds one of these for as long as it waits.

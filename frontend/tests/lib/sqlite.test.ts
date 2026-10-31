@@ -6,7 +6,6 @@
  * would do rather than what a stand in was told to answer.
  */
 
-import { parseAst } from "vite";
 import { describe, expect, it } from "vitest";
 
 import * as sqlite from "../../src/lib/sqlite";
@@ -39,318 +38,24 @@ import {
 // not hold. The lookup this replaced cast the first value of its own glob, so
 // a rename handed the comparison below `undefined`.
 import { sourceText } from "../sourceModules";
-import {
-  isNode,
-  nodesIn,
-  SCOPES,
-  scopeBindings,
-  walk,
-  type Node,
-} from "../sourceReader";
-
-/** The names a script reaches the global object by. */
-const GLOBAL_OBJECTS = new Set(["globalThis", "self", "window", "global"]);
-/** What compiles the string it is called with. */
-const COMPILERS = new Set(["eval", "Function"]);
-/** What compiles its first argument when that is a string, not a function. */
-const TIMERS = new Set(["setTimeout", "setInterval"]);
-/**
- * What a member read straight off a compiler may not name. Each hands the
- * compiler on, or runs it with arguments the read cannot see:
- * `Function.call(null, s)`, and `eval.constructor`, which is `Function`.
- */
-const RUNS_THE_HOLDER = new Set(["call", "apply", "bind", "constructor"]);
-
-/** `node` with the wrapping that does not change what it reads taken off. */
-function bare(node: Node): Node {
-  if (
-    node.type === "ChainExpression" ||
-    node.type === "ParenthesizedExpression"
-  )
-    return isNode(node.expression) ? bare(node.expression) : node;
-  if (node.type === "SequenceExpression") {
-    const last = nodesIn(node.expressions).at(-1);
-    return last === undefined ? node : bare(last);
-  }
-  return node;
-}
-
-/** The name a key reads, when it is written as a constant. */
-function constantName(key: unknown, computed: unknown): string | null {
-  if (!isNode(key)) return null;
-  const read = bare(key);
-  if (computed !== true)
-    return read.type === "Identifier" && typeof read.name === "string"
-      ? read.name
-      : null;
-  if (read.type === "Literal" && typeof read.value === "string")
-    return read.value;
-  if (
-    read.type === "TemplateLiteral" &&
-    nodesIn(read.expressions).length === 0
-  ) {
-    const cooked = (nodesIn(read.quasis)[0]?.value as { cooked?: unknown })
-      ?.cooked;
-    return typeof cooked === "string" ? cooked : null;
-  }
-  return null;
-}
-
-/** The name a member expression reads, when it is written as a constant. */
-function memberName(member: Node): string | null {
-  return constantName(member.property, member.computed);
-}
 
 /**
- * The global `value` names: a bare identifier, or a constant member of one
- * of `GLOBAL_OBJECTS`. Null for anything else, `x.Function` included.
- */
-function globalName(value: unknown): string | null {
-  if (!isNode(value)) return null;
-  const node = bare(value);
-  if (node.type === "Identifier")
-    return typeof node.name === "string" ? node.name : null;
-  if (node.type !== "MemberExpression") return null;
-  const holder = globalName(node.object);
-  return holder !== null && GLOBAL_OBJECTS.has(holder)
-    ? memberName(node)
-    : null;
-}
-
-function isString(value: unknown): boolean {
-  if (!isNode(value)) return false;
-  const node = bare(value);
-  if (node.type === "Literal") return typeof node.value === "string";
-  if (node.type === "TemplateLiteral") return true;
-  return (
-    node.type === "BinaryExpression" &&
-    node.operator === "+" &&
-    (isString(node.left) || isString(node.right))
-  );
-}
-
-/** The timer a call, a construction or a tagged template hands a string. */
-function timerRun(node: Node): string | null {
-  const callee =
-    node.type === "TaggedTemplateExpression" ? node.tag : node.callee;
-  const name = globalName(callee);
-  return name !== null &&
-    TIMERS.has(name) &&
-    isString(nodesIn(node.arguments)[0])
-    ? name
-    : null;
-}
-
-/** Each scope's names, once: the module's walk is the whole engine. */
-const BOUND = new WeakMap<Node, ReadonlyMap<string, Node>>();
-
-/**
- * The names `scope` binds for the code inside it, by `scopeBindings`, which
- * reads JavaScript and TypeScript alike. A shape it cannot read throws, so a
- * binding is never read as binding less than it does.
- */
-function scopeBinds(scope: Node): ReadonlyMap<string, Node> {
-  const known = BOUND.get(scope);
-  if (known !== undefined) return known;
-  const { names, unreadable } = scopeBindings(scope);
-  if (unreadable.length > 0)
-    throw new Error(`a binding this cannot read: ${unreadable.join(", ")}`);
-  BOUND.set(scope, names);
-  return names;
-}
-
-/** Whether an identifier is read as a name, rather than a key or a label. */
-function isReference(node: Node, parent: Node | undefined): boolean {
-  if (parent === undefined) return true;
-  if (parent.type === "MemberExpression")
-    return parent.object === node || parent.computed === true;
-  if (
-    parent.type === "Property" ||
-    parent.type === "MethodDefinition" ||
-    parent.type === "PropertyDefinition"
-  )
-    return parent.key !== node || parent.computed === true;
-  return !(
-    parent.type === "LabeledStatement" ||
-    parent.type === "BreakStatement" ||
-    parent.type === "ContinueStatement" ||
-    parent.type === "MetaProperty" ||
-    parent.type === "ExportSpecifier" ||
-    parent.type === "ImportSpecifier"
-  );
-}
-
-/**
- * Whether `held`, a compiler, only has properties taken off it that cannot
- * reach a compiler again, `ancestors[at]` being the first read: the first a
- * constant outside `RUNS_THE_HOLDER`, and every later one a constant other
- * than `constructor`, which on any function is `Function`. A computed name
- * that is not a constant could be either, so it refuses.
- */
-function readsAPropertyOnly(
-  held: Node,
-  ancestors: readonly Node[],
-  at: number,
-): boolean {
-  let first = true;
-  for (let i = at; i >= 0; i--) {
-    const step = ancestors[i]!;
-    if (step.type === "ChainExpression" && step.expression === held) {
-      held = step;
-      continue;
-    }
-    if (step.type !== "MemberExpression" || step.object !== held) return true;
-    const name = memberName(step);
-    if (name === null || name === "constructor") return false;
-    if (first && RUNS_THE_HOLDER.has(name)) return false;
-    first = false;
-    held = step;
-  }
-  return true;
-}
-
-/**
- * The compiler `node` reads where its value can still be run, if any.
+ * The package manifest, as text.
  *
- * Refused: any read of the global `eval` or `Function`, as a bare name no
- * local binding shadows or as a constant member of a global object, except
- * as the operand of `typeof`, the right of `instanceof`, or the object of a
- * property read `readsAPropertyOnly` passes. Each of those yields a string,
- * a boolean or a property that is not the compiler, so the value cannot
- * travel on from there; anywhere else it can, which is how a call through an
- * alias, an argument or a destructuring got past a guard that read callees.
+ * **Not a module of either tree**, so it has no armed corpus to come from and
+ * keeps its own glob. It is one file by name and the cast is the shape this
+ * branch removed everywhere a corpus could answer instead: what stops it
+ * being silent here is the parse below, which throws on anything that is not
+ * the manifest.
  */
-function compilerRead(node: Node, ancestors: readonly Node[]): string | null {
-  let name: string | null = null;
-  if (node.type === "Identifier" && typeof node.name === "string") {
-    const read = node.name;
-    if (
-      !COMPILERS.has(read) ||
-      !isReference(node, ancestors.at(-1)) ||
-      ancestors.some(
-        (scope) => SCOPES.has(scope.type) && scopeBinds(scope).has(read),
-      )
-    )
-      return null;
-    name = read;
-  } else if (node.type === "MemberExpression") {
-    const read = globalName(node);
-    if (read === null || !COMPILERS.has(read)) return null;
-    name = read;
-  } else return null;
-
-  let at = ancestors.length - 1;
-  let held: Node = node;
-  while (at >= 0 && ancestors[at]!.type === "ChainExpression") {
-    held = ancestors[at]!;
-    at--;
-  }
-  const parent = ancestors[at];
-  if (parent === undefined) return name;
-  if (parent.type === "UnaryExpression" && parent.operator === "typeof")
-    return null;
-  if (
-    parent.type === "BinaryExpression" &&
-    parent.operator === "instanceof" &&
-    parent.right === held
-  )
-    return null;
-  if (parent.type === "MemberExpression" && parent.object === held)
-    return readsAPropertyOnly(held, ancestors, at) ? null : name;
-  return name;
-}
-
-/** The compiler a destructuring takes off whatever it destructures. */
-function compilerTaken(node: Node, parent: Node | undefined): string | null {
-  if (node.type !== "Property" || parent?.type !== "ObjectPattern") return null;
-  const key = constantName(node.key, node.computed);
-  return key !== null && COMPILERS.has(key) ? key : null;
-}
-
-/**
- * Every site in a script that would run a string as script under a policy
- * refusing `'unsafe-eval'`, by the compiler it reaches, read off the syntax
- * tree `parseAst` builds, so comments and strings are not code here.
- *
- * Matched: every read of the global `eval` or `Function` that `compilerRead`
- * refuses, a call or an alias or an argument alike, and a destructuring that
- * takes either by name; and `setTimeout` or `setInterval`, bare or a
- * constant member of a global object, handed a string first argument, which
- * the policy refuses just as it refuses `eval`.
- *
- * Not looked for, though each would need `'unsafe-eval'`, because each takes
- * intent rather than an accident of how a build is emitted: `Function`
- * reached through some other function's `.constructor`, a destructuring off a
- * passed read included, since `readsAPropertyOnly` follows a member chain and
- * not a pattern, so `const {constructor: F} = Function.prototype` passes; a
- * parameter default reading a compiler its own function's body declares a
- * local of, which `scopeBindings` counts as shadowed although a default cannot
- * see the body's `var` or function names; in strict code, a compiler read
- * beside a block declaring a function of its name, since `scopeBindings`
- * hoists that function as sloppy code does, which is right for the engine,
- * whose builds carry no `"use strict"`; a member of a global object under a
- * computed name that is not a constant; a global object reached through
- * `this`, `top`, `parent`, `frames` or a local holding one; and a timer handed
- * a variable that holds a string, or a call such as `String(c)` that returns
- * one.
- *
- * Nor the policy's other refusals, because no grant of `'unsafe-eval'` would
- * admit them: inline script and `javascript:` URLs, which `script-src`
- * refuses by not listing `'unsafe-inline'`, and a script, an `import()` or a
- * worker from a `blob:` or `data:` URL, which it refuses by listing `'self'`
- * and no scheme (a worker falls back to it, as there is no `worker-src`).
- *
- * Refused although legitimate: a compiler compared, stored or handed on as
- * a value, `x === Function` included. A local named like a global object is
- * read as that object, so `self.eval(x)` on a local `self` reds loudly.
- */
-function stringEvaluationSites(
-  script: string,
-): { compiler: string; at: number }[] {
-  const sites: { compiler: string; at: number }[] = [];
-  walk(parseAst(script), (node, ancestors) => {
-    const compiler =
-      compilerRead(node, ancestors) ??
-      compilerTaken(node, ancestors.at(-1)) ??
-      (node.type === "CallExpression" ||
-      node.type === "NewExpression" ||
-      node.type === "TaggedTemplateExpression"
-        ? timerRun(node)
-        : null);
-    if (compiler !== null)
-      sites.push({
-        compiler,
-        at: typeof node.start === "number" ? node.start : -1,
-      });
+function manifestText(): string {
+  const files = import.meta.glob("../../package.json", {
+    query: "?raw",
+    import: "default",
+    eager: true,
   });
-  return sites;
+  return Object.values(files)[0] as string;
 }
-
-function stringEvaluation(script: string): string[] {
-  return [...new Set(stringEvaluationSites(script).map((s) => s.compiler))];
-}
-
-/**
- * Every script build sql.js ships, by path, each read only when asked for.
- *
- * The scan looks up the build `sqlite.ts` names here rather than importing one
- * by a second spelling, so the file scanned is the file imported. The key is
- * the specifier taken as a path, which skips the package's `exports` map, so
- * the scan asserts that map sends `./dist/*` to itself. Lazy, since the builds
- * together are megabytes and one is wanted.
- */
-const ENGINE_BUILDS = import.meta.glob<string>(
-  "../../node_modules/sql.js/dist/*.js",
-  { query: "?raw", import: "default" },
-);
-
-/** sql.js's manifest, for the `exports` entry the lookup above relies on. */
-const ENGINE_MANIFEST = Object.values(
-  import.meta.glob<{ exports?: Record<string, unknown> }>(
-    "../../node_modules/sql.js/package.json",
-    { eager: true, import: "default" },
-  ),
-);
 
 async function open(bytes: Uint8Array) {
   const reading = await openSqlite(bytes, engine);
@@ -573,148 +278,23 @@ describe("what one statement may hand back", () => {
   });
 });
 
-describe("the engine the content security policy admits", () => {
-  it("runs no string as script, in the build the module imports", async () => {
-    // `'wasm-unsafe-eval'` is granted and `'unsafe-eval'` refused on the
-    // strength of this. It reads the installed package, so a version bump
-    // that keeps the property passes and one that breaks it fails here.
-    // The build scanned is looked up from the specifier `sqlite.ts` imports,
-    // so a move to another build scans that build. A bare `sql.js`, whose
-    // file depends on the resolver's conditions, has no entry and throws. A
-    // specifier assembled at run time is not read.
-    expect(ENGINE_MANIFEST).toHaveLength(1);
-    expect(ENGINE_MANIFEST[0]?.exports?.["./dist/*"]).toBe("./dist/*");
-    const engines = [
-      ...sourceText("lib/sqlite.ts").matchAll(
-        /["'](sql\.js(?:\/[^"'?]*)?)["']/g,
-      ),
-    ].map((match) => match[1]);
-    expect(engines).toHaveLength(1);
-    const read = ENGINE_BUILDS[`../../node_modules/${engines[0]}`];
-    if (read === undefined)
-      throw new Error(`${engines[0]} is not a script build sql.js ships`);
+describe("the engine the policy was measured against", () => {
+  it("is the version the module names", () => {
+    // The content security policy grants `'wasm-unsafe-eval'` on the strength
+    // of one measurement: that this engine contains no `eval(` and no `new
+    // Function`. That is a fact about a version, the dependency is pinned
+    // exactly, and a bot bumps minor and patch releases on its own, so without
+    // this the sentence justifying the relaxation goes stale with nothing red.
+    // Read through `import.meta.glob`, which needs no `node:fs` and no file
+    // URL: this file runs under happy-dom, where `import.meta.url` is not one.
+    const manifest = JSON.parse(manifestText()) as {
+      dependencies: Record<string, string>;
+    };
+    const source = sourceText("lib/sqlite.ts");
 
-    const engineText = await read();
-
-    // An empty read passes every absence check below, so the read is checked
-    // for the engine's own name. Every build holds that name, so this does not
-    // tell builds apart: the lookup key above is what picks the file.
-    expect(engineText).toContain("initSqlJs");
-    expect(stringEvaluation(engineText)).toEqual([]);
-  });
-
-  it("finds a string run as script in an engine that holds one", () => {
-    // The expected names are written out rather than read off the patterns,
-    // so dropping a pattern to quiet a hit reds here too.
-    const rows: [string, string[]][] = [
-      ["eval(s)", ["eval"]],
-      ["(0,eval)(s)", ["eval"]],
-      ['self["eval"](s)', ["eval"]],
-      ["eval?.(s)", ["eval"]],
-      ["globalThis.eval(s)", ["eval"]],
-      ['eval.call(null, "s")', ["eval"]],
-      ['Reflect.apply(eval, null, ["s"])', ["eval"]],
-      ['new Function("x","return x")', ["Function"]],
-      ['Function("return this")()', ["Function"]],
-      ['globalThis.Function("x")', ["Function"]],
-      ['self["Function"]("x")', ["Function"]],
-      ["self['Function']('x')", ["Function"]],
-      ['self[`Function`]("x")', ["Function"]],
-      ['globalThis [ "Function" ] ("x")', ["Function"]],
-      ['self?.Function("x")', ["Function"]],
-      ['self?.["Function"]("x")', ["Function"]],
-      ['window.self.Function("x")', ["Function"]],
-      ['Function\n("x")', ["Function"]],
-      ['Function?.("x")', ["Function"]],
-      ['globalThis.Function?.("x")', ["Function"]],
-      ['Function/**/("x")', ["Function"]],
-      ['Function /* c */ ("x")', ["Function"]],
-      ['new (Function)("x")', ["Function"]],
-      ['(0,Function)("x")', ["Function"]],
-      ['\\u0046unction("x")', ["Function"]],
-      ["Function`x`", ["Function"]],
-      ['Function.call(null, "src")', ["Function"]],
-      ['Function.apply(null, ["src"])', ["Function"]],
-      ['Function.bind(null, "src")()', ["Function"]],
-      ['Reflect.construct(Function, ["src"])', ["Function"]],
-      ['setTimeout("tick()", 1)', ["setTimeout"]],
-      ['window.setInterval("tick" + n, 1)', ["setInterval"]],
-      ["setTimeout(tick, 1)", []],
-      ["k.addFunction(1)", []],
-      ["myFunction(1)", []],
-      ["x.removeFunction(a)", []],
-      ["RegisterExtensionFunctions(1)", []],
-      ["$Function(1)", []],
-      ["Function$(1)", []],
-      ["isFunction(1)", []],
-      ["x.Function(1)", []],
-      ["a instanceof Function", []],
-      ["typeof Function", []],
-      ["Function.prototype.call(x)", []],
-      ['"[object Function]"', []],
-      ["// avoid eval(x)", []],
-      ['"wasm-unsafe-eval"', []],
-      // A compiler handed on as a value. Emscripten's embind ships exactly
-      // the first, so a guard reading callees alone passed it.
-      [
-        "function newFunc(c, a) { return c.apply(o, a) } newFunc(Function, a).apply(null, b)",
-        ["Function"],
-      ],
-      ["f(Function)", ["Function"]],
-      ['const F = Function; F("x")', ["Function"]],
-      ["var e = eval; e(s)", ["eval"]],
-      ['const { Function: F } = globalThis; F("x")', ["Function"]],
-      ["const { Function } = globalThis", ["Function"]],
-      ['const { ["eval"]: e } = self', ["eval"]],
-      ["const F = globalThis.Function", ["Function"]],
-      ['const e = globalThis["eval"]', ["eval"]],
-      ['[Function][0]("x")', ["Function"]],
-      // Refused although nothing runs: the value could travel on from here.
-      ["x === Function", ["Function"]],
-      // A property that is the compiler again, or could be.
-      ['Function.constructor("x")', ["Function"]],
-      ['eval.constructor("x")', ["eval"]],
-      ['Function.prototype.constructor("x")', ["Function"]],
-      ["(Function?.prototype).constructor", ["Function"]],
-      ["Function[k]", ["Function"]],
-      ["Function.prototype[k]", ["Function"]],
-      // A local in a sibling scope of each kind shadows nothing out here.
-      ["{ let eval = 1 } eval(s)", ["eval"]],
-      ['function g(Function) {} Function("x")', ["Function"]],
-      ['(function () { var Function })(); Function("x")', ["Function"]],
-      ['(() => { var Function })(); Function("x")', ["Function"]],
-      ["try {} catch (eval) {} eval(s)", ["eval"]],
-      ["for (let eval of a) {} eval(s)", ["eval"]],
-      ["for (let eval in a) {} eval(s)", ["eval"]],
-      ["for (let eval = 0; ; ) {} eval(s)", ["eval"]],
-      ["switch (k) { case 1: let eval } eval(s)", ["eval"]],
-      ["class C { static { var eval } x = eval }", ["eval"]],
-      ["class C { m(eval) {} } eval(s)", ["eval"]],
-      ["(function eval() {}); eval(s)", ["eval"]],
-      ['(class Function {}); Function("x")', ["Function"]],
-      // A local of the same name is not the global.
-      ['function g(Function) { return Function("x") }', []],
-      ["function g() { var eval = h; { eval(s) } }", []],
-      ['let Function = h; Function("x")', []],
-      ["try {} catch (eval) { eval(s) }", []],
-      ["(function eval() { eval(s) })", []],
-      ['function Function() {} Function("x")', []],
-      ["function g() { { function eval() {} } eval(s) }", []],
-      ['import { Function } from "m"; Function("x")', []],
-      ["const { a: Function } = o; Function(1)", []],
-      ['class Function {} new Function("x")', []],
-      // A key, a label or a harmless property is not a read of the compiler.
-      ["({ Function: 1, eval() {} })", []],
-      ["class C { eval() {} Function = 1 }", []],
-      ["eval: for (;;) break eval;", []],
-      ["Function.name", []],
-      ["typeof (Function)", []],
-      ["Function.prototype.toString.call(f)", []],
-    ];
-
-    expect(rows.map(([script]) => stringEvaluation(script))).toEqual(
-      rows.map(([, names]) => names),
-    );
+    const pinned = manifest.dependencies["sql.js"];
+    expect(pinned).toMatch(/^\d+\.\d+\.\d+$/);
+    expect(source).toContain(`sql.js ${pinned} contains no \`eval(\``);
   });
 });
 

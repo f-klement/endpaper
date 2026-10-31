@@ -149,14 +149,12 @@
     // **Two kinds, and the difference is whether a new site is covered.** A
     // refusal argued about the codebase covers every site by its argument, so
     // it carries no count. One argued from its sites covers those sites
-    // alone, so it carries its count the way a backlog row does, as a ceiling
+    // alone, so it carries its count the way a backlog row does, held EQUAL
     // over the same blanked copy, and the ratchet test holds the files they
     // sit in as well. So a new site reds at the run that adds it, rather than
     // arriving under a reason written about the others, **unless a counted
-    // site in the same file goes in the same change, or one already went
-    // with the figure left standing**: the ceiling and the set of files are
-    // held, and no single site is. Write the found figure when a site goes,
-    // so the reason covers only the sites it was argued from.
+    // site in the same file goes in the same change**: the count and the set
+    // of files are held, and no single site is.
 
     // Argued from its sites, by kind, because concurrency is a live choice here
     // and a serial await that should not be one is a real defect: the
@@ -199,9 +197,8 @@
 
     // ---- Backlog. Each count is what oxlint finds over `src` and `tests`
     // with every disable directive blanked, and `oxlintRatchet.test.ts` holds
-    // it as a ceiling: a new site reds, and a fix, a lint upgrade's included,
-    // passes with the figure left as slack until somebody lowers it. Write the
-    // figure its failure prints, as the whole of the comment on the entry's own line: a
+    // it EQUAL, so a fix and a new site each move it. Write the figure its
+    // failure prints, as the whole of the comment on the entry's own line: a
     // breakdown beside it is a figure nothing holds, and is refused. So are a
     // count of 0 and an option on an off entry, which would narrow what the
     // count counts. ----

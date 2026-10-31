@@ -2468,7 +2468,7 @@ class TestADuplicateGroupCannotBeBuiltWithOneMember:
     def _member(self, book_id: int):
         from schemas import DuplicateMember
 
-        return DuplicateMember(id=book_id, title="Dune", may_merge_away=True)
+        return DuplicateMember(id=book_id, title="Dune")
 
     def test_two_members_is_a_group(self):
         from schemas import DuplicateGroup
@@ -2519,7 +2519,7 @@ class TestADuplicateGroupCannotBeBuiltWithOneMember:
 
     def test_no_more_members_than_one_merge_accepts(self):
         """Tied to `MergeRequest`'s own bound rather than to a number beside
-        it: the card sends at most the ids it renders, and the two drifting apart is
+        it: the card sends every id it renders, and the two drifting apart is
         what made a large group's merge button a guaranteed refusal."""
         from schemas import MERGE_BOOKS_MAX, DuplicateGroup, MergeRequest
 
@@ -2608,9 +2608,7 @@ class TestTheSizeAgreesWithTheMembership:
     def _members(self, how_many: int):
         from schemas import DuplicateMember
 
-        return [
-            DuplicateMember(id=index, title="Dune", may_merge_away=True) for index in range(1, how_many + 1)
-        ]
+        return [DuplicateMember(id=index, title="Dune") for index in range(1, how_many + 1)]
 
     @pytest.mark.parametrize("shown", UNCAPPED_SIZES)
     def test_an_uncapped_group_says_exactly_what_it_carries(self, shown: int):

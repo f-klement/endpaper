@@ -40,7 +40,6 @@ function member(overrides: Partial<DuplicateMember> = {}): DuplicateMember {
     year: 1965,
     isbn: "9780441013593",
     cover_url: null,
-    may_merge_away: true,
     ...overrides,
   };
 }
@@ -294,116 +293,6 @@ describe("DuplicatesPage", () => {
       expect(sent.book_ids).toEqual(duplicates.books.map((b) => b.id));
       expect(sent.book_ids).toHaveLength(MEMBER_CAP);
     });
-  });
-
-  it("leaves out of the merge an entry the member may not fold away", async () => {
-    const mine = member();
-    const theirs = member({ may_merge_away: false });
-    const alsoMine = member();
-    const duplicates = {
-      key: "dune|frank herbert",
-      size: 3,
-      books: [mine, theirs, alsoMine],
-    };
-    api.on("/api/books/duplicates", { body: report([duplicates]) });
-    api.on("/api/books/merge", { body: mine });
-    renderWithProviders(<DuplicatesPage />);
-
-    const [first] = await screen.findAllByRole("button", {
-      name: "Keep this one",
-    });
-    await userEvent.setup().click(first!);
-
-    await waitFor(() =>
-      expect(api.lastCall("/api/books/merge", "POST")?.body).toEqual({
-        book_ids: [mine.id, alsoMine.id],
-        keep_id: mine.id,
-      }),
-    );
-  });
-
-  it("still merges the member's own entries into one they may not fold away", async () => {
-    const theirs = member({ may_merge_away: false });
-    const mine = member();
-    const duplicates = {
-      key: "dune|frank herbert",
-      size: 2,
-      books: [theirs, mine],
-    };
-    api.on("/api/books/duplicates", { body: report([duplicates]) });
-    api.on("/api/books/merge", { body: theirs });
-    renderWithProviders(<DuplicatesPage />);
-
-    const [first] = await screen.findAllByRole("button", {
-      name: "Keep this one",
-    });
-    await userEvent.setup().click(first!);
-
-    await waitFor(() =>
-      expect(api.lastCall("/api/books/merge", "POST")?.body).toEqual({
-        book_ids: [theirs.id, mine.id],
-        keep_id: theirs.id,
-      }),
-    );
-  });
-
-  it("offers no keep where nothing could fold into the entry", async () => {
-    const duplicates = {
-      key: "dune|frank herbert",
-      size: 2,
-      books: [member(), member({ may_merge_away: false })],
-    };
-    api.on("/api/books/duplicates", { body: report([duplicates]) });
-    renderWithProviders(<DuplicatesPage />);
-
-    const [mine, theirs] = await screen.findAllByRole("button", {
-      name: "Keep this one",
-    });
-
-    expect(mine).toBeDisabled();
-    expect(theirs).toBeEnabled();
-  });
-
-  it("says why an entry stays out of the merge", async () => {
-    api.on("/api/books/duplicates", {
-      body: report([
-        {
-          key: "dune|frank herbert",
-          size: 2,
-          books: [member(), member({ may_merge_away: false })],
-        },
-      ]),
-    });
-    renderWithProviders(<DuplicatesPage />);
-
-    expect(await screen.findByText(/^Not added by you\./)).toBeInTheDocument();
-  });
-
-  it("says why an entry stays out of the merge in German too", async () => {
-    api.on("/api/books/duplicates", {
-      body: report([
-        {
-          key: "dune|frank herbert",
-          size: 2,
-          books: [member(), member({ may_merge_away: false })],
-        },
-      ]),
-    });
-    renderWithProviders(<DuplicatesPage />, { locale: Locale.de });
-
-    expect(
-      await screen.findByText(/^Nicht selbst hinzugefügt\./),
-    ).toBeInTheDocument();
-  });
-
-  it("says nothing about an entry the member may fold away", async () => {
-    api.on("/api/books/duplicates", {
-      body: report([group(["Dune", "Dune (paperback)"])]),
-    });
-    renderWithProviders(<DuplicatesPage />);
-
-    await screen.findByText("Dune");
-    expect(screen.queryByText(/^Not added by you/)).not.toBeInTheDocument();
   });
 
   it("surfaces a failed check", async () => {

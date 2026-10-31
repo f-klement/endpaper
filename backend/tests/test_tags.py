@@ -39,7 +39,6 @@ from tags import (
 )
 from tests.corpus import BACKEND, application_sources, shipped_modules
 from tests.test_importing import selects
-from tests.test_shelf import ARCHIVE_TABLES_DECLARATION
 
 TREE_GUARDS = {
     "TestNothingElseDecidesATagFromAName": (
@@ -1097,10 +1096,17 @@ class TestTheCeilingOnABook:
         assert room_on(book) is False
 
 
-#: Every statement naming `Tag` **the fourth pass reports**, and why that one is
-#: safe. The pass reports a statement for naming the entity, whatever method
-#: it calls, so a clause built in a helper, `sru.py`'s subject index, is an
-#: entry like any read.
+#: Every read of `Tag` **the fourth pass reports**, and why that one is safe.
+#:
+#: Not every read there is. The pass matches a reading method on `Query` or
+#: `Select`, and a clause built from anything else is invisible to it: the live
+#: member is `sru.py`'s subject index, `Book.tags.any(Tag.name.ilike(...))`,
+#: where neither `any` nor `ilike` is such a method. That read is safe for the
+#: reason the `shelf.py` entry carries, it narrows Books and resolves no name
+#: outward, **and an entry for it cannot be written**, because the arm below
+#: pairs entries with reported lines one for one and an entry for an unreported
+#: line would red the guard. So it is named in the class docstring's list of
+#: what this does not see, which is the only place it can be recorded.
 #:
 #: **Keyed on the enclosing function and the whole flattened statement**,
 #: positionally in line order. `BOOK_OWNED_READERS` keys on the statement
@@ -1232,11 +1238,6 @@ class TestNamingATagForAWriter:
 TAG_READERS: Final = {
     "backup.py": [
         (
-            ARCHIVE_TABLES_DECLARATION,
-            "the archive's table list, a declaration run once at import. Its reason "
-            "is beside the same key in `tests/test_shelf.py`'s `BOOK_OWNED_READERS`.",
-        ),
-        (
             "_repair_seeded_tags: for tag in db.query(Tag).all(): # **One pass,"
             " and that it is safe rests on `_parse_row` blanking the # key.** "
             "`uq_tags_key` is unique, so a key moving from one row to # another"
@@ -1256,19 +1257,6 @@ TAG_READERS: Final = {
             "restore a library missing them.",
         ),
     ],
-    "csv_import.py": [
-        (
-            '_row_from: return ImportRow( title=title[:500], author=_credit(cell("author"), display_order), '
-            'isbn=isbn, status=_match_status(cell("status")), rating=_int(cell("rating"), minimum=1, '
-            'maximum=5), date_read=_parse_date(cell("date_read")), publisher=cell("publisher")[:255] or '
-            'None, year=_year(cell("year")), pages=_int(cell("pages")), '
-            'format=_match_format(cell("format")), tags=_split_tags(cell("tags")), '
-            'notes=cell("notes") or None, )',
-            "reads one cell of an uploaded CSV row, the one mapped to tags; `cell` is the row's own "
-            "lookup and touches no table. The name is the first argument, the position the raw SQL arm "
-            "reads as a table looked up by name.",
-        ),
-    ],
     "main.py": [
         (
             "seed_tags: existing = {name for (name,) in db.query(Tag.name).all()}",
@@ -1276,16 +1264,6 @@ TAG_READERS: Final = {
             "present. No viewer exists at boot and no name leaves the process: "
             "the set is compared against `PREDEFINED_TAGS`, which the mirror "
             "publishes anyway.",
-        ),
-    ],
-    "models.py": [
-        (
-            'book_tags = Table( "book_tags", Base.metadata, Column("book_id", Integer, '
-            'ForeignKey("books.id", ondelete="CASCADE"), primary_key=True), Column("tag_id", Integer, '
-            'ForeignKey("tags.id", ondelete="CASCADE"), primary_key=True), Index("ix_book_tags_tag_id", '
-            '"tag_id"), )',
-            "a foreign key declaration, run once at import. It reads no row; the string is the "
-            "qualified column the raw SQL arm reads as naming the table.",
         ),
     ],
     "routers/books.py": [
@@ -1332,15 +1310,6 @@ TAG_READERS: Final = {
     # the route then named no entity and the new read sat inside the
     # exemption. `test_a_bypass_beside_the_vocabulary_is_not_exempt_for_being_there`
     # is that plant.
-    "sru.py": [
-        (
-            "_field_criteria: return Book.tags.any(Tag.name.ilike(_pattern(term, contains=not exact), "
-            "escape=_LIKE_ESCAPE))",
-            "the subject index's clause, a correlated EXISTS over the tag join that narrows Books. "
-            "`criteria` hands it to `Shelf.seen_by_the_public(db).where(...)` and to nothing else, so it "
-            "can only remove rows from the public shelf, and no Tag leaves: the answer is Books.",
-        ),
-    ],
     "tags.py": [
         (
             "_by_folded_name: self._index = _first_wins(self._db.query(Tag).order_by(Tag.id).all())",
@@ -1481,10 +1450,19 @@ class TestNothingElseDecidesWhoMaySeeATag:
     an inclusion list of vocabularies. This is the second question, asked
     separately.
 
-    **What it does not see.** Everything the shared pass does not see, which
-    `tests/test_shelf.py`'s module docstring lists: a read through a
-    relationship attribute, a query over a name bound at runtime, an entity
-    reached by a computed name.
+    **What it does not see.** Everything the shared pass does not see, which its
+    own docstring lists: raw SQL, a read through a relationship attribute, a
+    query over a name bound at runtime.
+
+    **And a clause built with no reading method, which has a live member.**
+    `sru.py:1298` returns `Book.tags.any(Tag.name.ilike(...))` from a helper.
+    Neither `any` nor `ilike` is on `Query` or `Select`, so the pass never
+    reports it and `TAG_READERS` cannot carry it: the arm below pairs entries
+    with reported lines one for one, so an entry for an unreported line would
+    red the guard. **A refusal in the direction nobody looks**, recorded here
+    because there is nowhere else it can go. That read is safe for the reason
+    the `shelf.py` entry gives, and the shape is not: a second one written
+    tomorrow would be as invisible.
 
     **And where the rows go.** The pass matches a statement that reads the
     entity and says nothing about what the caller does with the result, which

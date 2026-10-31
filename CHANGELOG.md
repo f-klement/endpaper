@@ -1,25 +1,30 @@
 # Changelog
 
+## v0.21.2
+
+_2026-10-31_
+
+**Fixed: a known security problem in a component this app depends on.** Released automatically and carrying nothing else, because a fix was published for pyasn1, serialize-javascript.
+
+- GHSA-M5MM-P8H7-M29V (low) in serialize-javascript
+- CVE-2026-119196 (high) in pyasn1
+- CVE-2026-119194 (high) in pyasn1
+- CVE-2026-119197 (high) in pyasn1
+- CVE-2026-119195 (high) in pyasn1
+
+## v0.21.1
+
+_2026-10-25_
+
+**Fixed: a known security problem in a component this app depends on.** Released automatically and carrying nothing else, because a fix was published for fast-uri, happy-dom.
+
+- GHSA-W74X-V6F9-J3XG (medium) in fast-uri
+- GHSA-XHQ7-XMQJ-769H (low) in fast-uri
+- GHSA-WJR9-J795-JXCR (medium) in fast-uri
+- GHSA-333X-W4R6-6CRP (low) in fast-uri
+- GHSA-834V-8H66-3H79 (high) in happy-dom
+
 ## Unreleased
-
-- **Deleting for good, one book or the whole trash, now reaches only books you added.** Another
-  member's deleted book stays in the trash for them, and the trash page no longer offers to
-  delete it.
-
-- **An admin can delete for good a book in the trash that no member is recorded as adding**, and
-  "Empty the trash" stays on the trash page when more books are in it than the page lists.
-
-- **An admin's "Empty the trash" confirmation now says that it also deletes for good the books in
-  the trash nobody is recorded as adding.**
-
-- **A merge of duplicates no longer folds away a book another member added; only they or an admin
-  can, and the duplicates page says which entries stay out.**
-
-- **The duplicates page no longer lists, or counts, groups made only of another member's books,
-  which you cannot merge, so they can no longer push your own duplicates off the page.**
-
-- **The duplicates page no longer hides a large group whose first twenty entries belong to other
-  members when some of its later entries are yours to merge.**
 
 ## v0.21.0
 

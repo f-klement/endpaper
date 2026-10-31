@@ -13,7 +13,7 @@ exceptions.
 **This rule is smaller for one structural reason, not because it is cleverer.**
 Outside `shelf.py` the correct number of Book queries is zero, so there is
 nothing to decide: no predicate to find, no binding to follow, no scope to
-resolve. Each `ast` pass asks one flat question. `_predicate_calls` is the
+resolve. Five `ast` passes ask five flat questions. `_predicate_calls` is the
 companion of `_imported_predicates`, so this file counts the two as one and calls
 `_book_owned_offences` the fourth pass.
 
@@ -24,9 +24,6 @@ companion of `_imported_predicates`, so this file counts the two as one and call
 | `_query_offences` | who builds a query naming `Book` | `QUERY_BUILDERS` |
 | `_join_offences` | who reaches `books` through a join | `QUERY_BUILDERS`, `JOIN_CALLERS` |
 | `_book_owned_offences` | who reads a Book-owned table at all | `QUERY_BUILDERS`, `BOOK_OWNED_READERS` |
-| `_whole_book_calls` | who hands `Book` itself to a call | `QUERY_BUILDERS`, `WHOLE_BOOK_READERS` |
-| `_raw_sql_offences` | who holds SQL naming `books` | `QUERY_BUILDERS`, `BOOKS_SQL_READERS` |
-| `_relationship_offences` | who names a relationship into `Book` | `QUERY_BUILDERS`, `RELATIONSHIP_READERS` |
 
 `_entity_aliases` resolves which local names mean the guarded entity first, so
 an import alias, a rebinding or an `aliased()` entity is caught rather than
@@ -41,12 +38,8 @@ with a count") publishes a name and a count over every Member's Private Books.
 That is the disclosure `list_tags` made and the reason this module exists.
 
 **It reports every read and decides nothing.** No join, no scope, no viewer, no
-Shelf: a statement naming one of those entities is the whole rule, and
+Shelf: naming one of those entities in a reading call is the whole rule, and
 `BOOK_OWNED_READERS` is where a person records why a given statement is safe.
-**It is keyed on this codebase's own names, never on a library's**: which
-entities, which tables, and the SQL keywords before a table name. What a
-method is called plays no part, so no release of a library can move what this
-reports; `docs/decisions.md` has the reason.
 That is a deliberate retreat from five earlier versions which each tried to
 recognise a correct query and were each demonstrated to leak by the following
 review round, against an allowlist that did not move while they came and went.
@@ -89,19 +82,12 @@ caught would prove nothing about the new one. What is *still* not caught:
   columns in a loop, so no rule reading the arguments to a query can see which
   table it reads. Asserted separately by name instead, and listed in
   `INDIRECT_READERS` and `PARAMETERISED_READERS`.
-* **Raw SQL the grammar in `_raw_sql_naming` does not recognise.** Every
-  string literal but a docstring is read, wherever it sits, for `books` by
-  `_raw_sql_offences` and for the guarded tables by the fourth pass, and a
-  bare table name is read where a table is looked up by name. A string built
-  from pieces at run time, with the keyword in one piece and the table in
-  another, and a statement opening with a comment, are not.
-* **A relationship into a book-owned table**, `Book.classifications` handed
-  to a join off a non Book root, is the fourth pass's only when the statement
-  names the entity too. A relationship into `Book` itself is
-  `_relationship_offences`'s, off its owning class: `join(User.books_added)`
-  and `Loan.book.has(...)` are reported, and `loan.book` on an instance is
-  not. A to many one is reported off any receiver, `len(collection.books)`
-  among them, because it loads every Book it collects.
+* **Raw SQL.** `db.execute(text("SELECT location, count(*) FROM books ..."))`
+  names no `Book` and no book-owned entity anywhere, and evades all four
+  passes. `text()` is already used in the tree (`main.py:451`), and a location
+  index with a count is exactly the shape these rules exist for.
+* **A join through a relationship**, `db.query(Loan).join(Loan.book)`, which
+  names no `Book` at all.
 * **A child table that carries a user.** `notes`, `quotes`, `user_books`,
   `reading_progress`, `loans` and `highlights` are outside the fourth pass on
   purpose: each has a viewer of its own. The figures that follow predate
@@ -175,34 +161,19 @@ caught would prove nothing about the new one. What is *still* not caught:
   `BOOK_OWNED_READERS` carries a reason rather than a count.
 * **`.select()` on any receiver is taken to be the Shelf's own method** by
   `_builds_a_query`, so pass 2 does not report `shelf.select(Book.author)`.
-  The fourth pass makes no such exception, because it reads no method name:
-  `shelf.select(Classification.number)` names the entity, and that is the
-  whole of what it asks.
-* Importing `Book` for a type annotation is not distinguished from importing
-  it to build a listing, which is why the rules test what a statement does
-  rather than that import. A call handed `Book` itself, the by key read
-  `db.get_one(Book, book_id)`, is `_whole_book_calls`'s, and
-  `WHOLE_BOOK_READERS` says why each one is safe.
+  The fourth pass makes no such exception: `select` is a method on
+  SQLAlchemy's `Select`, so it arrives in `_READING_METHODS` with everything
+  else and `shelf.select(Classification.number)` is reported like any other
+  read. That it is covered at all is an accident of deriving the set from the
+  library rather than writing it out, which is the argument for deriving it.
+* Importing `Book` for a `db.get(Book, id)` or a type annotation is not
+  distinguished from importing it to build a listing, which is why the rule tests
+  query shapes rather than that import.
 * **A read through a relationship attribute.** `book.classifications` in
   Python issues a SELECT the ORM writes, and no rule reading source for a
   query call can see it. It is scoped by construction when the `Book` came
   from `dependencies.py` or a Shelf, which is why it is listed rather than
-  chased, but a loop over an unfiltered list of Books would not be. A list
-  of Books off a row that is not a Book, `collection.books`, is not scoped
-  that way, and `_relationship_offences` reports it. The
-  comparator form is the same hole: `Book.classifications.any(number="616")`
-  names the relationship and a keyword, never the entity, so the fourth pass
-  does not see it, and the tag and field rules are blind to it alike:
-  `Book.tags.any(name=x)` names no `Tag`. Inside a statement that hands `Book`
-  to a builder, passes 2 and 3 report it; under a root that does not,
-  `db.query(func.count(Loan.id)).filter(Loan.book.has(Book.tags.any(name=x)))`,
-  the relationship pass does, through `Loan.book`. Keying on every
-  relationship name that targets a guarded entity was measured and refused:
-  every `book.tags` in Python would then report.
-* **An entity reached by a computed name.** `getattr(models,
-  "Classification")` builds the name from a string, so no walk over names
-  resolves it. That takes a line written to reach the entity indirectly,
-  which is a deliberate act rather than a slip.
+  chased, but a loop over an unfiltered list of Books would not be.
 * **An allowlist entry added without thinking.** This rule now decides nothing
   about whether a query is safe, so a wrong entry is a hole it cannot see. That
   is the cost of the collapse and it is paid in review, which is why every
@@ -237,16 +208,21 @@ caught would prove nothing about the new one. What is *still* not caught:
   closing sentence: a shape named here is a claim about the tree, and a claim
   about the tree is a measurement rather than an instance somebody remembered.
 
-  **For the book-owned tables it is caught, and for free.**
+  **For the book-owned tables it is caught, and for free.** `filter`, `where`,
+  `having`, `group_by` and `order_by` are methods on `Query` and `Select`, so
+  they arrive in `_READING_METHODS` with the rest and get no separate handling:
   `shelf.select(Book.title).filter(Classification.number == "616.89")` is a
-  statement naming a guarded entity, and that is all the rule asks, whatever
-  the narrowing method is called. A clause built as a local first,
-  `flagged = DigitalReference.missing_since.isnot(None)`, is reported where it
-  is built, so the clause is classified and not only the query it ends up in.
+  statement naming a guarded entity, and that is all the rule asks. An earlier
+  version of this bullet argued the shape could not be separated without flow
+  analysis and that it leaked existence rather than content. Both were wrong,
+  and what actually removed the problem was deleting the machinery that made
+  it a separate question.
 
 Both critic seats reviewed the first eight of these and called that list
-complete. Later rounds replaced, removed and added bullets as passes changed,
-so the list carries no count. The list is the deliverable for everything the rules
+complete. The fourth pass then replaced one of them with five of its own,
+later rounds removed three that a fix had closed or that the collapse to an
+allowlist dissolved, and added two the collapse created. Eleven bullets,
+counted. The list is the deliverable for everything the rules
 do not catch: a shape that is named here has been decided about, and a shape
 that is neither caught nor named is an oversight. **A shape listed here is a
 claim about the tree and has to be re-measured, not re-read**: the entry above
@@ -266,15 +242,12 @@ The rest of the file tests the Shelf's behaviour.
 """
 
 import ast
-import builtins
 import functools
 import importlib
 import inspect
 import re
-from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Final
 
 import pytest
 from sqlalchemy import (
@@ -290,7 +263,7 @@ from sqlalchemy import (
     select,
 )
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import contains_eager
+from sqlalchemy.orm import Query, contains_eager
 
 import ddc
 import filing
@@ -573,142 +546,6 @@ def _book_owned_entities() -> tuple[frozenset[str], frozenset[str]]:
 #: The entities the fourth pass guards, and the tables it could not name.
 BOOK_OWNED, UNNAMEABLE_BOOK_OWNED = _book_owned_entities()
 
-#: The archive's table list in `backup.py`, as every registry over the fourth pass keys it.
-#:
-#: One declaration naming every vocabulary and every child table, so it is
-#: reported to each of the four registries the pass feeds. Written once here
-#: rather than four times, so a comment edited inside the tuple is one key to
-#: re-read and not four.
-ARCHIVE_TABLES_DECLARATION: Final = (
-    "_TABLES: tuple[tuple[str, Any, Table], ...] = tuple( (name, model, Base.metadata.tables[name]) for "
-    'name, model in ( ("users", User), ("tags", Tag), # The library\'s own field definitions. No foreign '
-    "key of its own, so it # could sit anywhere before the values that reference it; here beside # `tags`, "
-    "which is the other library wide vocabulary. Deliberately # absent from `_REQUIRED_TABLES`: an archive "
-    "taken before custom fields # existed restores with none, which is the state it was written in. "
-    '("custom_fields", CustomField), # Before books, which carry a foreign key into it. Absent from # '
-    "`_REQUIRED_TABLES` on purpose: an archive taken before collections # existed restores with none, which "
-    'is exactly the state it was # written in. ("collections", Collection), ("books", Book), # Straight '
-    "after the books they hang off, and deliberately absent from # `_REQUIRED_TABLES`: an archive taken "
-    "before classifications existed # restores with none, which is the state it was written in. "
-    '("classifications", Classification), # After both parents, `books` above and `custom_fields` further '
-    "up. The # values are the half of the feature a member typed by hand, so an # archive that carried the "
-    "definitions and not these would restore a # library with every field defined and every one of them "
-    "empty, which # is the shape of failure `author_aliases` had. Absent from # `_REQUIRED_TABLES` for the "
-    'same reason as the definitions. ("custom_field_values", CustomFieldValue), ("user_books", UserBook), # '
-    "After user_books, which is the other per-member table, and before # loans purely to keep the reading "
-    "rows together. Both parents # (users, books) are already inserted by this point, which is the # only "
-    'ordering this tuple actually constrains. ("reading_progress", ReadingProgress), # Where each member\'s '
-    "devices last were, after both parents. Absent from # `_REQUIRED_TABLES`, like every table added after "
-    '`FORMAT_VERSION` 1. ("kosync_documents", KosyncDocument), # Which Book each of a member\'s Readwise '
-    "books is, after both parents. # Absent from `_REQUIRED_TABLES`, like every table added after # "
-    '`FORMAT_VERSION` 1. ("readwise_books", ReadwiseBook), ("loans", Loan), # After the loans it replaces '
-    "for a digital copy. Both parents are # inserted by here. Absent from `_REQUIRED_TABLES` for the reason "
-    '# `quotes` is: an older archive restores with no requests. ("access_requests", AccessRequest), '
-    '("notes", Note), # After notes, which it is shaped after and has no relationship with. # Deliberately '
-    "absent from `_REQUIRED_TABLES`: an archive taken before # quotes existed restores with none, which is "
-    'the state it was written # in. ("quotes", Quote), # After the quotes it sits beside; both parents are '
-    "inserted by here. # Absent from `_REQUIRED_TABLES` for the reason `quotes` is: an archive # taken "
-    'before highlights existed restores with none. ("highlights", Highlight), # After the highlights whose '
-    "deletions it remembers; its only foreign # key is `users`. An archive that left it out would restore a "
-    "library # whose next import brings back every highlight a member deleted. # Absent from "
-    '`_REQUIRED_TABLES` for the reason `quotes` is. ("deleted_highlights", DeletedHighlight), # After the '
-    "quotes, which it sits beside for the same reason: its only # foreign key is `books`, which is long "
-    "since inserted by here. # # **Uncapped on restore, like every other table here.** # "
-    "`MAX_DIGITAL_REFERENCES_PER_BOOK` binds the two writers that add to a # library; this one reinstates a "
-    "whole database rather than adding to # one, and refusing rows would produce a restore that silently "
-    "differs # from the archive. The same bargain `classifications` records. # # Absent from "
-    "`_REQUIRED_TABLES` for the reason `quotes` is: an archive # taken before this table existed restores "
-    'with no references, which is # the state it was written in. ("digital_references", DigitalReference), '
-    "# Beside the file references, which it hangs off the same parent as and # sits in the same position "
-    "relative to: `books` is long since inserted # by here. A different claim about the same Book: a "
-    "reference says where # a file is and this says what a store calls the edition. # # **Here on the day "
-    "the table was created**, because the identical # omission for `author_aliases` was silent for months "
-    "and cost a restore # that produced perfectly intact books with every merge undone. # "
-    "`test_holds_every_table` reads the manifest against the metadata, so a # table left out of this tuple "
-    "now fails rather than waiting to be # noticed after a restore. # # **Uncapped on restore, like every "
-    "other table here.** # `MAX_IDENTIFIERS_PER_BOOK` binds the two writers that add to a # library; this "
-    "one reinstates a whole database rather than adding to # one, and refusing rows would produce a restore "
-    "that silently differs # from the archive. # # Absent from `_REQUIRED_TABLES` for the reason "
-    "`digital_references` is: # an archive taken before this table existed restores with none, which # is "
-    'the state it was written in. ("book_identifiers", BookIdentifier), # Beside the identifiers, the other '
-    "catalogue fact hanging off a Book. # Absent from `_REQUIRED_TABLES` for their reason: an archive taken "
-    '# before this table existed restores with none. ("online_links", OnlineLink), # The author merge '
-    "decisions. Its only foreign key is `users`, which is # first in this tuple, so it could sit anywhere "
-    "after that; it is here # beside the other tables that hold what members decided rather than # what the "
-    "catalogue says. # # **It was missing until 2026-08-26**, and the symptom was silent: a # restore "
-    "produced a library where every merged author had split back # into its spellings, with the books "
-    "themselves perfectly intact, # because the merges were never written to `books` in the first place. # "
-    'Nothing errored, and `docs/data-model.md` called this "the one stored # table in the feature" the '
-    "whole time. `test_holds_every_table` now # asserts that the archive's **manifest** carries every table "
-    "in the # metadata, so the next one cannot be forgotten the same way. The # manifest rather than this "
-    "tuple, because `book_tags` is in the # manifest and deliberately not here: it has no model of its own "
-    "and is # read straight from the table. # # Absent from `_REQUIRED_TABLES` for the reason `quotes` and "
-    "# `classifications` are: an archive written before this restores with # no aliases, which is the state "
-    'it was written in. ("author_aliases", AuthorAlias), # Beside the aliases, which it is keyed the same '
-    "way as and shares its # only foreign key with. A different claim about the same spelling: an # alias "
-    "says who two names mean and this says which record in an # external file one of them is. # # **Here on "
-    "the day the table was created**, because the identical # omission for `author_aliases` was silent for "
-    "months: a restore # produced a library whose books were perfectly intact and whose author # decisions "
-    "had all vanished. `test_holds_every_table` reads the # manifest against the metadata, so a table left "
-    "out of this tuple now # fails rather than waiting to be noticed after a restore. # # Absent from "
-    "`_REQUIRED_TABLES` for the reason `author_aliases` is: an # archive written before this restores with "
-    'none, which is the state it # was written in. ("author_identifiers", AuthorIdentifier), # The '
-    "catalogue roster as rows. No foreign key of its own, so its # position here is free; beside `settings` "
-    "because it is the same kind # of thing, a library wide configuration rather than anybody's data. # # "
-    "**Here on the day the table was created**, for the reason the comment # above gives, and with one "
-    "difference worth stating: nothing reads # these rows at runtime, so losing them costs no lookup. What "
-    "it costs # is #130, which is the ticket that puts them on a screen, and # "
-    "`main.seed_catalogue_targets` refills them on the next start anyway. # The reason to be in this tuple "
-    "regardless is that an archive is # supposed to hold the library, and a row a household has edited is # "
-    "theirs the moment #130 ships. # # Absent from `_REQUIRED_TABLES` for the reason `author_identifiers` "
-    "is: # an archive written before this restores with none, which is the state # it was written in. "
-    '("catalogue_targets", CatalogueTarget), # The sealed catalogue logins, straight after the rows they '
-    "hang off. # No foreign key between them, so the position is free; here because # reading one without "
-    "the other is meaningless. # # **This is the table that makes the archive safe to hand around, and # "
-    "the one that makes a restore onto a new machine incomplete.** The # column holds ciphertext and the "
-    "key is never in the database, so # `endpaper.json` carries a credential nobody can use without a key "
-    "the # archive does not contain. That is the whole design and it is strictly # better than the "
-    "plaintext this feature started as. # # **The same property is the trap on a machine nobody "
-    "administers.** A # restore onto a new laptop, or onto the same one after a reinstall, # brings these "
-    "rows back unreadable unless the person still has the # recovery phrase: the key lives in that "
-    "machine's keychain or in a file # under `DATA_DIR`, and neither travels in the zip. \"Keep your key "
-    'safe" # is not a plan for somebody who double clicked an installer, which is # why the phrase exists '
-    "at all and why the settings screen says this # beside the field rather than only here. `RestoreResult` "
-    "counts these # rows for the reason it counts `author_aliases`: silently restoring # none leaves a "
-    "library whose sources look configured and answer with an # authentication error. # # Absent from "
-    "`_REQUIRED_TABLES`, like every table added after # `FORMAT_VERSION` 1: an archive written before this "
-    'restores with none, # which is the state it was written in. ("catalogue_credentials", '
-    "CatalogueCredential), # The household's own OPDS servers, after the credential table their # "
-    "`credential_key` points into. No foreign key in either direction, so # the position is free; here "
-    "because the two are read together. # # **The address is the library's and the login is not in this "
-    "row**, so # this table restores usefully where `catalogue_credentials` restores # unreadable: somebody "
-    "who moves to a new machine gets their servers # back and types the passwords again, which is the same "
-    "bargain the # comment above describes and a better one than losing the addresses # too. # # **An "
-    "orphaned envelope is the failure this ordering does not # prevent**, and it does not need to: an "
-    "archive holding a credential # whose server row is gone leaves a row `credentials.unreadable_sources` "
-    "# reports and `DELETE /api/settings/catalogue-sources/{source}/credential` # removes, which is exactly "
-    "why that route deliberately does not check # the roster. # # Absent from `_REQUIRED_TABLES`, like "
-    "every table added after # `FORMAT_VERSION` 1: an archive written before this restores with none, # "
-    'which is the state it was written in. ("opds_servers", OpdsServer), # The password reset requests, '
-    "whose only foreign key is `users`, first # in this tuple. Here rather than beside the other per member "
-    "tables # because it is not about the catalogue at all: it is the record of who # approved a member's "
-    "way back into their account, which is the half of # that flow the member reads. # # **Carried rather "
-    "than dropped**, and the pending rows come with it. An # archive already holds every password hash in "
-    "the library, so a hash of # a code that stops working within the hour discloses nothing new, and a # "
-    "restore that silently emptied this table would take away the record a # member is entitled to read "
-    'back. # # **This module is the exception to "only a member starts a reset", and # it is named at every '
-    "site that states the rule.** `restore` writes # these rows through `table.insert()` from the archive, "
-    "so an archive # can carry an approved request. That widens nothing: a restore replaces # every "
-    "password hash in the library in the same transaction, so # whoever can hand one to this route already "
-    "holds every account. # # Absent from `_REQUIRED_TABLES`, like every table added after # "
-    '`FORMAT_VERSION` 1. ("password_reset_requests", PasswordResetRequest), # Members\' own logins '
-    "elsewhere, sealed. Its only foreign key is # `users`. **Carried for `catalogue_credentials`' reason "
-    "and with its # cost**: the archive holds ciphertext and never the key, so a restore # onto a machine "
-    "without that key brings each token back unreadable, # and its member enters it again on their account "
-    "page. Absent from # `_REQUIRED_TABLES`, like every table added after `FORMAT_VERSION` 1. "
-    '("member_logins", MemberLogin), ("settings", Setting), ) )'
-)
-
 # ── The allowlist, and how to add to it ──────────────────────────────────────
 #
 # **You are probably reading this because the build went red on a query you
@@ -768,19 +605,16 @@ ARCHIVE_TABLES_DECLARATION: Final = (
 # deleted the number instead, which is the only version of this that cannot go
 # stale, and it went stale again the moment a table was added to the guard.
 #
-# **It also reports plain Python**, and this is the case most likely to look
-# like a bug rather than a rule. Any statement naming a guarded entity is
-# reported, so `d.get(Classification.number)` is, because nothing here knows
-# what the receiver is or whether a table is reached; the type handed to
-# `isinstance` or `issubclass` is the exception, since they answer a bool.
-# `_entity_aliases` not following `book = Book(...)` keeps `book.tags` out of
-# it. The raw SQL arm refuses English that reads as a statement or a fragment,
-# `"Delete the tags from a book"` and `"dropped %d rows from classifications"`,
-# a foreign key's `"tags.id"`, and a table's name where a dict is looked up by
-# it, `archive.get("classifications")`. If you have met one: it is not a
-# bug, the answer is the same as for any other entry, and a reason saying
-# "this is a message, not a query" or "a declaration, it reads no row" is a
-# perfectly good one.
+# **It can also report plain Python**, and this is the case most likely to look
+# like a bug rather than a rule. Six ordinary method names collide with
+# SQLAlchemy's: `count`, `get`, `join`, `union`, `update` and `values`. So
+# `'; '.join(c.number for c in rows)` and `d.get(Classification.number)` are
+# both reported if they name a guarded entity, because nothing here knows what
+# the receiver is. There are none in the tree today, which is why every entry
+# below is a real query, and `_entity_aliases` not following
+# `book = Book(...)` is what keeps it that way. If you have met one: it is not
+# a bug, the answer is the same as for any other entry, and a reason saying
+# "this is a string join, not a query" is a perfectly good one.
 #
 # ## What to do
 #
@@ -803,8 +637,7 @@ ARCHIVE_TABLES_DECLARATION: Final = (
 #    is how every one of those five versions was broken, and it takes ten
 #    minutes.
 # 4. **If it writes rather than reads**, say so and move on. A `delete` or an
-#    `insert` publishes nothing. So does a declaration run at import, such as a
-#    table list or a mapping, which reads no row.
+#    `insert` publishes nothing. Two entries below are writes.
 #
 # **Then add an entry**, in the module's list, saying what the statement does
 # and why that is safe. An entry is a pair: **the whole statement**, as the
@@ -823,13 +656,13 @@ ARCHIVE_TABLES_DECLARATION: Final = (
 # interchangeable. `.one_or_none()`, the fragment that looks least distinctive,
 # was not: it matched one statement. **Write the check the reasons are
 # lined up by, rather than asking the next person to pick a good token.**
-# `WHOLE_BOOK_READERS` below keys on a **call** as `ast.unparse` writes it,
-# which is shorter; a key here is the whole statement, and a declaration's key
-# is the whole declaration with the comments inside it. What makes that
-# affordable is that `ruff format` owns the layout, so a statement is
-# rewrapped only when its own text, its nesting, the formatter's version or the
-# configured line length (110, in `pyproject.toml`) changes, and the first two
-# are edits its entry should be re-read for anyway.
+# Equality is what `test_folding.NOT_A_DATABASE_READ` already keyed on, over a
+# **call** as `ast.unparse` writes it rather than over a statement, so the
+# precedent is the comparison and not the cost: a key here is up to six source
+# lines. What makes that affordable is that `ruff format` owns the layout, so a
+# statement is rewrapped only when its own text, its nesting, the formatter's
+# version or the configured line length (110, in `pyproject.toml`) changes, and
+# the first two are edits its entry should be re-read for anyway.
 # **Flattening alone does not make a key independent of layout**: a
 # break beside a bracket flattens to a space the joined line does not have, so
 # `filter(\n    x\n)` keys as `filter( x )` and `filter(x)` as itself.
@@ -860,12 +693,6 @@ ARCHIVE_TABLES_DECLARATION: Final = (
 BOOK_OWNED_READERS = {
     "backup.py": [
         (
-            ARCHIVE_TABLES_DECLARATION,
-            "a declaration, run once at import: the archive's table list, pairing each name with its model "
-            "and its `Table`. It reads no row. `build_archive` and `restore` read and write these tables "
-            "through the runtime bound columns `INDIRECT_READERS` names, and both are admin only.",
-        ),
-        (
             'manifest["tables"]["book_tags"] = [dict(row._mapping) for row in '
             "db.execute(book_tags.select())]",
             "reads the whole `book_tags` table into the archive manifest. Not "
@@ -874,29 +701,8 @@ BOOK_OWNED_READERS = {
             "only, which is what holds it, and `backup.py` is already named "
             "above as the third way past a viewer.",
         ),
-        (
-            "db.execute(delete(book_tags))",
-            "a write: a restore empties the association table before it inserts the archive's rows. It "
-            "publishes nothing, and `restore` is admin only.",
-        ),
-        (
-            'associations = tables.get("book_tags") or []',
-            "a lookup in the uploaded archive, a dict of rows read off the file, and not in the database. "
-            "The table's name is its key, which is the shape the raw SQL arm reads as a table looked up "
-            "by name. The rows it finds are the restore's own input, and `restore` is admin only.",
-        ),
-        (
-            "db.execute(book_tags.insert(), associations)",
-            "a write: a restore inserts the association rows the archive carries. The rows come from the "
-            "file the admin uploaded, and nothing is returned.",
-        ),
     ],
     "custom_fields.py": [
-        (
-            "VALUES_TABLE = CustomFieldValue.__tablename__",
-            "a name and not a read: the table's name as a string, published so `folding.TRANSFERS` can "
-            "declare a merge policy without importing the value model. No row is read.",
-        ),
         (
             "removed = db.query(CustomFieldValue).filter(CustomFieldValue.field_id == field.id).delete()",
             "deletes every value of a custom field the admin is removing, keyed "
@@ -934,41 +740,6 @@ BOOK_OWNED_READERS = {
             "the argument and so part of the key**: every row it reads is "
             "deleted or repointed on the spot, so this is a write that reads "
             "its own targets rather than a query with an audience.",
-        ),
-    ],
-    "disclosure.py": [
-        (
-            "return book_tags.c.tag_id",
-            "which column a carrier hands the vocabulary reads, chosen by the type. **The reads it feeds "
-            "are already decided**: `Disclosure` puts it in `Shelf.seen_by(...).select(...)` and "
-            "`Shelf.trashed_by(...).select(...)`, and `shelf.entries_any_book_carries`, the named way past "
-            "a viewer, returns ids only and has its callers counted.",
-        ),
-        (
-            "return CustomFieldValue.field_id",
-            "which column a carrier hands the vocabulary reads, chosen by the type. **The reads it feeds "
-            "are already decided**: `Disclosure` puts it in `Shelf.seen_by(...).select(...)` and "
-            "`Shelf.trashed_by(...).select(...)`, and `shelf.entries_any_book_carries`, the named way past "
-            "a viewer, returns ids only and has its callers counted.",
-        ),
-        (
-            "return book_tags, book_tags.c.book_id == Book.id",
-            "the join onto `books` a carrier's visible read takes. Only ever handed to `.join(...)` on a "
-            "Shelf rooted query in `Disclosure`, so it narrows the Shelf's filtered `books` and cannot "
-            "widen it.",
-        ),
-        (
-            "return CustomFieldValue, CustomFieldValue.book_id == Book.id",
-            "the join onto `books` a carrier's visible read takes. Only ever handed to `.join(...)` on a "
-            "Shelf rooted query in `Disclosure`, so it narrows the Shelf's filtered `books` and cannot "
-            "widen it.",
-        ),
-    ],
-    "evidence.py": [
-        (
-            'changed.append("classifications")',
-            "names the field a confirm changed, for the response that lists what moved. A label and not a "
-            "lookup: the list holds field names, and the table's name is the field's.",
         ),
     ],
     "file_references.py": [
@@ -1061,84 +832,6 @@ BOOK_OWNED_READERS = {
             "decide whether exactly one Book holds the file.",
         ),
     ],
-    "folding.py": [
-        (
-            "TRANSFERS: Final[tuple[_Transfer, ...]] = ( _Transfer(_table(book_tags.name), _union_tags), # "
-            "Two rows for one Book often carry the same DDC number, and # "
-            "`uq_classifications_book_scheme_number` would refuse the second on the # flush. Left out, the "
-            "cascade on the loser's deletion takes them and a # merge silently drops the provenance of the "
-            "row that lost. _Transfer( _table(Classification.__tablename__), _deduplicated( Classification, "
-            "held=lambda book: book.classifications, key=lambda row: "
-            "(ClassificationScheme(row.scheme).value, row.number), ceiling=MAX_CLASSIFICATIONS_PER_BOOK, "
-            "absorb=_absorb_heading, ), ), # Notes carry their own history. A merge repoints every one of "
-            "them whatever # its author or its visibility: a rule that skipped a private note here # would "
-            "not hide it, it would delete it. _Transfer(_table(Note.__tablename__), "
-            "_moves_wholesale(Note)), # Quotes move with the notes, or the cascade destroys passages "
-            "somebody # typed out by hand. Page numbers travel unchanged and may now describe a # different "
-            "printing, which is the standing cost of merging two rows that # were two editions: the "
-            "alternative is refusing the merge. _Transfer(_table(Quote.__tablename__), "
-            "_moves_wholesale(Quote)), # Highlights move whatever their author or sharing, as notes do: a "
-            "rule # that skipped a private one would delete it. Nothing to resolve, because # "
-            "`uq_highlights_member_source_key` does not name the Book. Unlike notes, # each moved one is "
-            "private again: see `_carry_highlights`. _Transfer(_table(Highlight.__tablename__), "
-            "_carry_highlights), # `uq_digital_references_location` would refuse the flush where the keeper "
-            "# and a loser were catalogued from the same file, which is the **likely** # case rather than "
-            "an edge: two rows for one Book are commonly two imports # of one library. A repeat is dropped "
-            "after it gives the survivor what one # more look at that location may write: see "
-            "`file_references.absorb`. _Transfer( _table(DigitalReference.__tablename__), _deduplicated( "
-            "DigitalReference, held=lambda book: book.digital_references, key=lambda row: (row.root_label, "
-            "row.relative_path), ceiling=MAX_DIGITAL_REFERENCES_PER_BOOK, absorb=file_references.absorb, ), "
-            "), # **Only an exact repeat is a duplicate here**, which is the difference from # the headings "
-            "above and the whole reason `uq_book_identifiers_book_scheme_value` # carries the value. Two "
-            "Kindle entries a Member declared the same Book carry # two ASINs and both survive: that is the "
-            "merge saying which editions were # folded together, where keying on the scheme alone would "
-            "have made it an # `IntegrityError` instead of a fact. # # **A loser's `calibre_uuid` row is "
-            "dropped like any other at the ceiling**, so # a keeper already carrying eight identifiers "
-            "loses the uuid a re-import is # recognised by, and that record would be added once more. Not "
-            "given a # preference, because keeping it means deleting one of the keeper's stored # rows "
-            "instead, which is a loss of a fact too; the drop is logged. _Transfer( "
-            "_table(BookIdentifier.__tablename__), _deduplicated( BookIdentifier, held=lambda book: "
-            "book.identifiers, key=lambda row: (BookIdentifierScheme(row.scheme).value, row.value), "
-            "ceiling=MAX_IDENTIFIERS_PER_BOOK, ), ), # Two rows for one Book imported from one MARC file "
-            "carry the same links, # and `uq_online_links_book_url` would refuse the flush. A repeat URL is "
-            "# dropped; its text and relation are the same record's. _Transfer( "
-            "_table(OnlineLink.__tablename__), _deduplicated( OnlineLink, held=lambda book: "
-            "book.online_links, key=lambda row: row.url, ceiling=MAX_ONLINE_LINKS_PER_BOOK, ), ), "
-            "_Transfer(_table(Loan.__tablename__), _carry_loans), # Requests carry no uniqueness, so every "
-            "row travels. Two open requests # from one member can result, which the holder answers like any "
-            "other. _Transfer(_table(AccessRequest.__tablename__), _moves_wholesale(AccessRequest)), # "
-            "Progress carries no uniqueness, so unlike the reading records below there # is nothing to "
-            "resolve: two Members' readings of what turned out to be one # Book are two histories of one "
-            "Book. _Transfer(_table(ReadingProgress.__tablename__), _moves_wholesale(ReadingProgress)), "
-            "_Transfer(_table(reading.RECORDS_TABLE), _carry_reading_records), # A device's document names "
-            "the file, not the Book, so the link follows the # Book that survives and nothing collides: the "
-            "key is the member and the # document, which a merge does not touch. "
-            "_Transfer(_table(KosyncDocument.__tablename__), _moves_wholesale(KosyncDocument)), # Which "
-            "Book a member's Readwise book is follows the Book that survives, # for the KOReader document's "
-            "reason: the key is the member and Readwise's # own book id, which a merge does not touch. "
-            "_Transfer(_table(ReadwiseBook.__tablename__), _moves_wholesale(ReadwiseBook)), "
-            "_Transfer(_table(custom_fields.VALUES_TABLE), _carry_custom_field_values), )",
-            "a declaration, run once at import: the merge policy per child table. It reads no row. Every "
-            "read a policy makes is bounded to the Books being folded, which "
-            "`tests/test_folding.py::TestEveryReadIsBoundedToTheBooksBeingFolded` checks by shape.",
-        ),
-    ],
-    "models.py": [
-        (
-            'book_tags = Table( "book_tags", Base.metadata, Column("book_id", Integer, '
-            'ForeignKey("books.id", ondelete="CASCADE"), primary_key=True), Column("tag_id", Integer, '
-            'ForeignKey("tags.id", ondelete="CASCADE"), primary_key=True), Index("ix_book_tags_tag_id", '
-            '"tag_id"), )',
-            "the association table's declaration, run once at import. It reads no row; its name is the "
-            "first argument, the position the raw SQL arm reads as a table looked up by name.",
-        ),
-        (
-            'tags: Mapped[list[Tag]] = relationship("Tag", secondary=book_tags)',
-            "the mapping that tells the ORM `Book.tags` runs through the association table. A declaration "
-            "and not a query; a load through it starts from a `Book` somebody already resolved, which is "
-            "the relationship attribute blind spot the module docstring names.",
-        ),
-    ],
     "recognition.py": [
         (
             "carrying = ( shelf.select(BookIdentifier.value, BookIdentifier.scheme, Book.id) "
@@ -1180,12 +873,6 @@ BOOK_OWNED_READERS = {
             "paginated route here already answers with.",
         ),
         (
-            "flagged = DigitalReference.missing_since.isnot(None)",
-            "the narrowing clause of the missing references listing, built once and handed to the two Shelf "
-            "rooted statements below. On its own it reads nothing; both of its uses are joined outward to "
-            "`books` from a Shelf.",
-        ),
-        (
             "total = ( shelf.select(func.count(DigitalReference.id)) .join(DigitalReference, "
             "DigitalReference.book_id == Book.id) .filter(flagged) .scalar() or 0 )",
             "counts the flagged references on the Books the caller may see, for "
@@ -1211,12 +898,6 @@ BOOK_OWNED_READERS = {
             "machine, and why a per reporter view would need a column the table "
             "deliberately does not have. Paginated, so it is bounded like every "
             "other many-book query here.",
-        ),
-        (
-            "under = DigitalReference.root_label == root_label",
-            "the narrowing clause of the per root listing, built once and handed to the two Shelf rooted "
-            "statements below. On its own it reads nothing; both of its uses are joined outward to `books` "
-            "from a Shelf.",
         ),
         (
             "total = ( shelf.select(func.count(DigitalReference.id)) .join(DigitalReference, "
@@ -1262,133 +943,6 @@ BOOK_OWNED_READERS = {
             ", which is the cost this list pays for not trying to recognise a "
             "correct join. Verified by reading the SQL: the FROM is the "
             "filtered `books` and the join is on `book_tags.book_id == books.id`.",
-        ),
-    ],
-}
-
-
-#: Every call outside the Shelf that is handed `Book` itself, and why it is safe.
-#:
-#: A by key read publishes one whole Book, so the question is where the key
-#: came from. Keyed on the qualified name of the enclosing scope and the call,
-#: in line order; `_whole_book_calls` says why the qualified name is needed.
-WHOLE_BOOK_READERS: Final = {
-    "importing.py": [
-        (
-            "Import._apply_one: self._db.get_one(Book, book_id)",
-            "loads the Book `recognition` matched a CSV row to. The id is a `Seen` answer, which "
-            "`recognition.Index` answers only from the rows it read off `Shelf.seen_by` the importing "
-            "member and from the Books this import created, so it names a Book that member may open.",
-        ),
-        (
-            "MarcImport._apply_one: self._db.get_one(Book, book_id)",
-            "the same load for a MARC record, off the same `Seen` answer and the same Shelf scoped index.",
-        ),
-        (
-            "OpdsImport._apply_one: self._db.get_one(Book, book_id)",
-            "the same load for an OPDS entry, off the same `Seen` answer and the same Shelf scoped index.",
-        ),
-    ],
-    "notifications.py": [
-        (
-            "count_private_overdue: db.query(Loan).join(Book, Loan.book_id == Book.id)",
-            "a join, not a by key read: `JOIN_CALLERS` carries the reason this module reaches `books`.",
-        ),
-        (
-            "count_overdue: db.query(Loan).join(Book, Loan.book_id == Book.id)",
-            "the same join, for the count over every Book; `JOIN_CALLERS` again.",
-        ),
-    ],
-}
-
-
-#: Every statement outside the Shelf holding SQL that names `books`, and why it is safe.
-#:
-#: Raw SQL names no `Book`, so passes 2 and 3 cannot see it, and `books` is
-#: not a book-owned table, so the fourth pass does not read it either. A
-#: location index written as `text("SELECT location, count(*) FROM books ...")`
-#: is the shape these rules exist for. Keyed on the whole statement, in line
-#: order, as `BOOK_OWNED_READERS` is; `_raw_sql_naming` says which strings count.
-BOOKS_SQL_READERS: Final = {
-    "database.py": [
-        (
-            'db.execute( text("SELECT id FROM books WHERE id = :book FOR NO KEY UPDATE"), '
-            '{"book": book_id}, )',
-            "a row lock on one Book the caller already resolved, taken by id on Postgres. It returns the id "
-            "it was handed and nothing else.",
-        ),
-    ],
-    "models.py": [
-        (
-            'books = metadata.tables.get("books")',
-            "the `books` table object out of a `MetaData`, for `children_of_books` to compare foreign keys "
-            "against. Schema, not rows: no statement is issued.",
-        ),
-    ],
-    "schema.py": [
-        (
-            'columns = {column["name"] for column in inspector.get_columns("books")}',
-            "the column names of `books`, read off the schema at startup to decide whether a legacy "
-            "database needs the column below. It reads no row.",
-        ),
-        (
-            'connection.execute(text("ALTER TABLE books ADD COLUMN is_private BOOLEAN NOT NULL DEFAULT 0"))',
-            "a schema change at startup, before any request is served. It reads no row.",
-        ),
-    ],
-}
-
-
-#: Every statement outside the Shelf naming a relationship into `Book` off its
-#: owning class, or reading a to many one off an instance, and why it is safe.
-#: `_relationship_offences` says which spellings count. Keyed on the whole
-#: statement, in line order, as `BOOK_OWNED_READERS` is. `JOIN_CALLERS` is not
-#: excluded: a module wide exemption would hide every later statement there.
-RELATIONSHIP_READERS: Final = {
-    "importing.py": [
-        (
-            "book = _settle_one( index.books.recognise(title=row.title, author=row.author, isbn=row.isbn), "
-            "tally, load=lambda book_id: self._db.get_one(Book, book_id), unmatched_title=row.title, "
-            "create=lambda: self._create(row, index), fill_gaps=lambda matched: _fill_gaps(matched, row), "
-            "create_missing=create_missing, )",
-            "`index.books` is the importer's `recognition.Index`, not a relationship: an attribute of "
-            "`_CatalogueIndex` sharing the name, whose every candidate came from `Shelf.seen_by`.",
-        ),
-        (
-            "index.books.remember(book)",
-            "the same `recognition.Index`, told about a Book this importer has just created for its "
-            "own member. It reads no row.",
-        ),
-    ],
-    "lending.py": [
-        (
-            "RENDERED: Final[tuple[Any, ...]] = ( joinedload(Loan.book).joinedload(Book.added_by), "
-            "joinedload(Loan.book).selectinload(Book.tags), "
-            "joinedload(Loan.book).selectinload(Book.classifications), "
-            "joinedload(Loan.book).selectinload(Book.identifiers), "
-            "joinedload(Loan.book).selectinload(Book.online_links), joinedload(Loan.loaned_to), "
-            "joinedload(Loan.loaned_by), )",
-            "loader options, a declaration run once at import. They say how to load the Book of a loan "
-            "a query already chose, and choose no row themselves. `Loans` applies them to a query it "
-            "has already scoped, and `routers/loans.py` to the viewer scoped overdue query; a query "
-            "they are handed to chooses the rows.",
-        ),
-    ],
-    "notifications.py": [
-        (
-            "return ( lending.Loans.for_a_channel(db) .overdue(now) .as_query() "
-            ".options(joinedload(Loan.book), joinedload(Loan.loaned_to)) "
-            ".filter((Loan.notified_at.is_(None)) | (Loan.notified_at < cutoff)) "
-            ".order_by(Loan.due_at, Loan.id) .all() )",
-            "a loader option on a query `Loans.for_a_channel` already scoped to the public shelf. It "
-            "says how to load the Book of each overdue loan and chooses no row itself.",
-        ),
-    ],
-    "schemas/book.py": [
-        (
-            "shown = len(self.books)",
-            "`self` is a `DuplicateGroup`, a response model, and `books` its list of members the "
-            "endpoint already chose through the Shelf. Not a relationship: a field sharing the name.",
         ),
     ],
 }
@@ -1606,9 +1160,11 @@ def _names_entity(node: ast.AST, aliases: set[str]) -> bool:
     """Whether an expression is a guarded entity itself, not a column of it.
 
     **`Classification.__table__` is the same entity**, and it is the Core
-    handle every mapped class carries. Without this hop
-    `T = CustomFieldValue.__table__` would not make `T` an alias, and
-    `T.select()` would name nothing this file looks for.
+    handle every mapped class carries. Without this hop the Core-select arm
+    below missed `Classification.__table__.select()` while catching the
+    identical `book_tags.select()`, and the rule that then existed read the
+    same statement as a Shelf and forgave it. Found by attacking the rule, not
+    by reading it.
     """
     if isinstance(node, ast.Attribute) and node.attr == "__table__":
         return _names_entity(node.value, aliases)
@@ -1624,6 +1180,9 @@ def _entities_named_in(node: ast.AST, aliases: set[str]) -> set[str]:
     a column out of the same rows, and publishing which authors, locations or
     series exist is the same leak by a narrower door. The attribute form also
     catches `models.Book`, which a name-only check would miss.
+
+    The names rather than a yes or no, because the fourth pass has to ask
+    whether the entity a chain **reads** is the entity that chain **joins**.
     """
     found = set()
     for child in ast.walk(node):
@@ -1829,379 +1388,99 @@ def _join_offences(source: str) -> list[int]:
     return sorted(offences)
 
 
-def _whole_book_calls(source: str) -> list[tuple[int, str]]:
-    """Every call this module hands `Book` itself to, rather than a column of it.
-
-    **The by key read**, `db.get(Book, book_id)` or `db.get_one(Book, book_id)`,
-    which passes 2 and 3 cannot see: neither method starts a query or joins
-    one, and the entity sits in an argument. Keyed on the entity alone, so no
-    method name is consulted. A column, `Book.id`, is the other passes'
-    business, and a row built in memory, `Book(...)`, puts the entity in the
-    callee rather than in an argument.
-
-    **A call to a Python builtin is not one**, `isinstance(x, Book)` and
-    `getattr(Book, sort_key)` among them: the language's own names, which no
-    library release moves, and none of them reads a row. A module that binds
-    a builtin's name itself is read as calling its own. An entity computed at
-    run time, `db.get(type(book), other_id)`, names nothing and passes; the
-    id is the part a by key read has to justify, and this cannot see either.
-
-    Each is returned with its key for `WHOLE_BOOK_READERS`: the enclosing
-    classes and functions, then the call as `ast.unparse` writes it. The
-    qualified name is what tells apart the three identical loads in
-    `importing.py`, one per importer.
-    """
-    tree = ast.parse(source)
-    aliases = _entity_aliases(tree, _BOOK)
-    builtin = set(dir(builtins)) - _module_level_names(tree)
-    found: list[tuple[int, str]] = []
-
-    def walk(node: ast.AST, scope: tuple[str, ...]) -> None:
-        for child in ast.iter_child_nodes(node):
-            inner = scope
-            if isinstance(child, ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef):
-                inner = (*scope, child.name)
-            if (
-                isinstance(child, ast.Call)
-                and not (isinstance(child.func, ast.Name) and child.func.id in builtin)
-                and any(
-                    _names_entity(argument, aliases)
-                    for argument in [*child.args, *(keyword.value for keyword in child.keywords)]
-                )
-            ):
-                found.append((child.lineno, f"{'.'.join(scope)}: {ast.unparse(child)}"))
-            walk(child, inner)
-
-    walk(tree, ())
-    return sorted(found)
-
-
-def _relationships_into(entity: type) -> dict[str, frozenset[str]]:
-    """Every relationship whose target is this entity, keyed by the class that owns it.
-
-    Read off the models' own mappers, as `_book_owned_entities` is, so a
-    relationship added tomorrow is in the set without anybody editing this
-    file.
-    """
-    found: dict[str, set[str]] = {}
-    for mapper in Base.registry.mappers:
-        for relationship in mapper.relationships:
-            if relationship.mapper.class_ is entity:
-                found.setdefault(mapper.class_.__name__, set()).add(relationship.key)
-    return {owner: frozenset(keys) for owner, keys in found.items()}
-
-
-#: Every relationship into `Book`, by the class that owns it.
-RELATIONSHIPS_INTO_BOOK: Final = _relationships_into(Book)
-
-
-def _to_many_keys_into(entity: type) -> frozenset[str]:
-    """The key of every relationship into this entity that loads a list of them.
-
-    Off the same mappers as `_relationships_into`, so a collection of Books
-    a model gains tomorrow is read without anybody editing this file.
-    """
-    return frozenset(
-        relationship.key
-        for mapper in Base.registry.mappers
-        for relationship in mapper.relationships
-        if relationship.mapper.class_ is entity and relationship.uselist
-    )
-
-
-#: The relationships into `Book` that an instance can read many Books through.
-TO_MANY_INTO_BOOK: Final = _to_many_keys_into(Book)
-
-
-def _relationship_offences(source: str) -> list[int]:
-    """Statement line numbers that name a relationship into `Book` off the class owning it,
-    or read a list of Books off any instance.
-
-    **The class qualified spelling, `User.books_added`, and never an instance's
-    `loan.book`.** `db.query(User.username, func.count()).join(User.books_added)`,
-    `db.query(Collection.name, func.count()).join(Collection.books)` and
-    `db.query(func.count(Loan.id)).filter(Loan.book.has(...))` each count
-    across every member's Books and name no `Book` anywhere a pass above reads.
-    They are the ORM's idiomatic spellings of a join or a correlated EXISTS
-    into `books`, so an author simplifying an explicit join lands on one.
-
-    Keying on every relationship *name* was measured and refused, because every
-    `book.tags` in Python then reports. This keys on the owning class, which an
-    instance attribute never is: `_entity_aliases` resolves the owner's local
-    names, so `models.Loan.book` and an alias of `Loan` count, and `loan.book`
-    does not.
-
-    **A to many relationship into `Book` is read off any receiver**, because
-    an instance reaches through it every Book the row collects, other
-    members' Private ones included: `len(collection.books)` counts a
-    household wide collection, and `user.books_added` lazy loads every Book
-    a member added. A scalar `loan.book` reaches the one Book its row
-    already points at, which is why the scalar keys stay class only. The
-    receiver is not resolved, so a schema's own `self.books` or an
-    importer's `index.books` reports too and is registered with its reason:
-    a receiver this cannot type is the read it must not guess past.
-
-    **Not caught: an `association_proxy` or a hybrid property reaching Books.**
-    The keys come from `mapper.relationships`, which lists neither, so
-    `list(user.lent)` through a proxy over `loans` passes. None exists today,
-    and adding one is a models change, a deliberate act.
-    """
-    tree = ast.parse(source)
-    present = {node.attr for node in ast.walk(tree) if isinstance(node, ast.Attribute)}
-    wanted = {owner: keys for owner, keys in RELATIONSHIPS_INTO_BOOK.items() if keys & present}
-    owner_names = {owner: _entity_aliases(tree, frozenset({owner})) for owner in wanted}
-    statements = _enclosing_statements(tree)
-    found = set()
-    for node in ast.walk(tree):
-        if not (isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Load)):
-            continue
-        if node.attr in TO_MANY_INTO_BOOK or any(
-            node.attr in keys and _names_entity(node.value, owner_names[owner])
-            for owner, keys in wanted.items()
-        ):
-            statement = statements.get(id(node))
-            found.add(statement.lineno if statement is not None else node.lineno)
-    return sorted(found)
-
-
-def _tables_of(entities: frozenset[str]) -> frozenset[str]:
-    """The table names these entities map to, for the raw SQL arm.
-
-    The same derivation `_book_owned_entities` makes in the other direction:
-    a mapped class names its `local_table`, and an association table is the
-    module level `Table` that names it.
-    """
-    tables = set()
-    for mapper in Base.registry.mappers:
-        if mapper.class_.__name__ in entities and isinstance(mapper.local_table, Table):
-            tables.add(mapper.local_table.name)
-    for attribute, value in vars(models).items():
-        if attribute in entities and isinstance(value, Table):
-            tables.add(value.name)
-    return frozenset(tables)
-
-
-#: The words a SQL statement opens with. SQL's, not a library's, so no release
-#: of SQLAlchemy can move them.
-_SQL_VERBS: Final = (
-    "SELECT",
-    "INSERT",
-    "UPDATE",
-    "DELETE",
-    "WITH",
-    "ALTER",
-    "CREATE",
-    "DROP",
-    "REPLACE",
-    "PRAGMA",
+#: Every method on SQLAlchemy's `Query` and `Select` that a caller can hand a
+#: column or an entity to, plus `query` itself, which lives on `Session`.
+#:
+#: **Derived from the library, not written down here.** The one enumeration
+#: this rule still needs is the set of ways a table gets read, and this file
+#: has been wrong about that twice by hand: `outerjoin` was covered while
+#: `outerjoin_from` was not, `with_entities` while `add_columns` and
+#: `add_entity` were not. `dir()` cannot forget a sibling. It is deliberately
+#: over-broad, because a method wrongly counted as a read costs one allowlist
+#: entry with a reason beside it, and a method wrongly missed costs a
+#: disclosure.
+#:
+#: `filter`, `where`, `having`, `group_by` and `order_by` arrive here with the
+#: rest and get no special handling, which is the whole point: a narrowing
+#: clause naming a guarded entity is a statement naming a guarded entity.
+_READING_METHODS = frozenset(
+    {name for cls in (Query, Select) for name in dir(cls) if not name.startswith("_")} | {"query"}
 )
 
-#: The keywords a table name follows inside a statement.
-_SQL_TABLE_KEYWORDS: Final = ("FROM", "JOIN", "UPDATE", "INTO", "TABLE")
-
-
-def _raw_sql_naming(tables: frozenset[str], *, key_columns: bool = True) -> Callable[[str], bool] | None:
-    """Whether a string is SQL naming one of these tables as an identifier.
-
-    Three shapes, each read off SQL's grammar rather than off the call the
-    string is handed to, so a statement kept in a module constant is read where
-    it is written:
-
-    * **A statement**: it opens with a verb in `_SQL_VERBS`, holds a keyword
-      in `_SQL_TABLE_KEYWORDS` after that verb, and names the table anywhere
-      as a word. A comma join, `FROM books b, classifications c`, and a schema
-      qualified `public.classifications` are both a word. The keyword is what
-      keeps `"Create the file's tags and put them on the books"`, a route's
-      parameter description, from reading as a statement, and reading it
-      after the verb is what keeps `"Update the tags on a book"` from being
-      its own keyword.
-    * **A fragment**: a keyword in `_SQL_TABLE_KEYWORDS` before the name,
-      optionally quoted or schema qualified. A subquery, a join handed to
-      `select_from` and the half of a statement split across a `+` all take
-      this shape.
-    * **A qualified column**, the whole string `classifications.number`, as
-      `literal_column` takes it. `key_columns=False` leaves out the one column
-      every child's foreign key spells this way, so the `books` arm reads
-      `"books.location"` and not `"books.id"`.
-
-    **Every shape in any case**, because SQL's keywords and an unquoted
-    identifier are both case insensitive, and an arm reading upper case only
-    let `text("book_id in (select book_id from classifications)")` through.
-    The price is English: `"dropped %d rows from classifications"`, a log
-    line, reads as a fragment and is refused, and so is English that opens
-    with a verb and holds a keyword, `"Delete the tags from a book"`. A
-    registry entry answers each. A SQL statement that opens with a comment is
-    the false negative the first shape costs. The third reports a foreign key,
-    `ForeignKey("tags.id")`, which is a declaration and is registered as one.
-    A bare table name is not this function's: `_raw_sql_offences` reads it
-    where a table is looked up by name.
-    """
-    if not tables:
-        return None
-    names = "|".join(re.escape(table) for table in sorted(tables))
-    statement = re.compile(rf"^[\s(]*(?:{'|'.join(_SQL_VERBS)})\b", re.IGNORECASE)
-    keyword = re.compile(rf"\b(?:{'|'.join(_SQL_TABLE_KEYWORDS)})\b", re.IGNORECASE)
-    word = re.compile(rf"\b(?:{names})\b", re.IGNORECASE)
-    qualifier = r"(?:[\"`]?\w+[\"`]?\.)?"
-    fragment = re.compile(
-        rf"\b(?:{'|'.join(_SQL_TABLE_KEYWORDS)})\s+{qualifier}[\"`]?(?:{names})\b", re.IGNORECASE
-    )
-    # `(?!id\b)` for the foreign key's spelling, `"books.id"`, and only that.
-    which = r"\w+" if key_columns else r"(?!id\b)\w+"
-    column = re.compile(rf"^[\"`]?(?:{names})[\"`]?\.{which}$", re.IGNORECASE)
-
-    def naming(value: str) -> bool:
-        opened = statement.search(value)
-        return (
-            (
-                opened is not None
-                and keyword.search(value, opened.end()) is not None
-                and word.search(value) is not None
-            )
-            or fragment.search(value) is not None
-            or column.search(value) is not None
-        )
-
-    return naming
-
-
-def _docstrings(tree: ast.Module) -> set[int]:
-    """The string nodes that are a module's, a class's or a function's docstring."""
-    found: set[int] = set()
-    for node in ast.walk(tree):
-        if (
-            isinstance(node, ast.Module | ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef)
-            and node.body
-            and isinstance(node.body[0], ast.Expr)
-            and isinstance(node.body[0].value, ast.Constant)
-        ):
-            found.add(id(node.body[0].value))
-    return found
-
-
-def _raw_sql_offences(source: str, tables: frozenset[str], *, key_columns: bool = True) -> list[int]:
-    """Statement line numbers holding a string that is SQL naming one of these tables.
-
-    **Every string literal in the module but a docstring**, wherever it sits:
-    an argument, a module constant, one piece of an f-string. Reading only the
-    strings handed to a call missed the commonest way raw SQL is written,
-    which is a constant named once and executed elsewhere. `_raw_sql_naming`
-    says which strings count.
-
-    **A bare table name counts where a table is looked up by name**: the key
-    of a subscript and the first argument of a call. That is how
-    `Base.metadata.tables["classifications"]`, `table("classifications")` and
-    a reflected `Table("classifications", MetaData(), ...)` reach a table with
-    no entity and no SQL. The same string anywhere else is a dict key, a
-    router tag or an archive entry, which this tree writes often and which
-    reads nothing. At these two positions it still refuses some statements
-    that read nothing, each registered with its reason; the decisions entry
-    for this guard carries the count.
-    """
-    naming = _raw_sql_naming(tables, key_columns=key_columns)
-    if naming is None:
-        return []
-    tree = ast.parse(source)
-    owner = _enclosing_statements(tree)
-    skipped = _docstrings(tree)
-    looked_up: set[int] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Subscript) and isinstance(node.ctx, ast.Load):
-            looked_up.add(id(node.slice))
-        elif isinstance(node, ast.Call) and node.args:
-            looked_up.add(id(node.args[0]))
-    found = set()
-    for node in ast.walk(tree):
-        if (
-            isinstance(node, ast.Constant)
-            and isinstance(node.value, str)
-            and id(node) not in skipped
-            and (naming(node.value) or (id(node) in looked_up and node.value in tables))
-        ):
-            statement = owner.get(id(node))
-            found.add(statement.lineno if statement is not None else node.lineno)
-    return sorted(found)
-
-
-@functools.cache
-def _table_name_aliases(tables: frozenset[str]) -> frozenset[str]:
-    """Module level names in this backend whose value is one of these table names.
-
-    `custom_fields.VALUES_TABLE` is one: a name read where the table is wanted,
-    which `Base.metadata.tables[custom_fields.VALUES_TABLE]` turns into a read
-    naming no entity and no SQL. Read off each module's `vars()` after import,
-    so a name computed from `__tablename__` counts as surely as a literal.
-    Dunder names are left out: `tags.__name__` is the string `"tags"`.
-    """
-    names = set()
-    for dotted in _backend_module_names():
-        module = importlib.import_module(dotted)
-        names |= {
-            attribute
-            for attribute, value in vars(module).items()
-            if isinstance(value, str) and value in tables and not attribute.startswith("__")
-        }
-    return frozenset(names)
-
-
-#: The builtins that compare a type and return a bool, so an entity handed to
-#: one reads nothing. Python's names, not a library's.
-_TYPE_TESTS: Final = frozenset({"isinstance", "issubclass"})
-
-
-def _names_types(node: ast.expr) -> bool:
-    """Whether a type test's second argument only names types.
-
-    A dotted name, or a tuple or a `|` union of them: `Book`, `models.Book`,
-    `(Book, Loan)`, `Book | Loan`, and `None` inside a union, as
-    `Book | None` spells an optional type. Anything else is an expression that
-    runs, and `type(db.query(Classification).first())` runs a query, so
-    skipping it whole would hide that read from every pass.
-    """
-    if isinstance(node, ast.Constant):
-        return node.value is None
-    if isinstance(node, ast.Tuple):
-        return all(_names_types(element) for element in node.elts)
-    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
-        return _names_types(node.left) and _names_types(node.right)
-    while isinstance(node, ast.Attribute):
-        node = node.value
-    return isinstance(node, ast.Name)
-
-
-def _not_a_mention(tree: ast.Module) -> set[int]:
-    """The nodes a name of the entity may sit in without being a read.
-
-    An annotation, the callee of any call, and the type a type test is handed
-    when `_names_types` says it only names one.
-    `Mapped[list[Classification]]` and `-> Classification` describe a type,
-    `Classification(book_id=...)` builds a row in memory, and
-    `isinstance(row, Classification)` answers a bool: none reaches a table.
-    The callee is skipped for every call and not only a constructor, so
-    `Classification.__table__.select()` is still reported, through the
-    receiver the callee is an attribute of. An import binds a name and holds
-    no expression, so it needs no exclusion.
-    """
-    skipped: set[int] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Call):
-            skipped.add(id(node.func))
-            # The type position only, and only when it names a type. The first
-            # argument is a value, and
-            # `isinstance(db.query(Classification).first(), Classification)`
-            # reads a row there; so does `type(db.query(Classification).first())`
-            # in the second.
-            if (
-                isinstance(node.func, ast.Name)
-                and node.func.id in _TYPE_TESTS
-                and len(node.args) > 1
-                and _names_types(node.args[1])
-            ):
-                skipped |= {id(child) for child in ast.walk(node.args[1])}
-        for annotation in (getattr(node, "annotation", None), getattr(node, "returns", None)):
-            if isinstance(annotation, ast.AST):
-                skipped |= {id(child) for child in ast.walk(annotation)}
-    return skipped
+#: The reading paths `_READING_METHODS` must contain, whatever SQLAlchemy does.
+#:
+#: **A derivation is trusted and its coverage is asserted**, which is the
+#: pattern the two derivations above already follow:
+#: `test_every_child_of_books_is_classified` and
+#: `test_every_book_owned_table_has_a_name_this_rule_can_look_for` exist for the
+#: same reason. This was the only derived set in the file without that second
+#: half, and it is the one the whole pass rests on.
+#:
+#: What it defends against is **shrinking**, which is silent where growing is
+#: not. Measured by dropping one name at a time and re-running: of the 130
+#: names in the derived set, **8 were pinned by some existing test and 122 could
+#: be removed with the suite still green**, among them `group_by`, `having`,
+#: `distinct`, `union`, `subquery` and `exists`. A SQLAlchemy release that
+#: trimmed `Query` or renamed a `Select` method would have taken a real reading
+#: path out of the guard and said nothing.
+#:
+#: Two things already backstop part of it and neither is enough. `_QUERY_BUILDERS`
+#: independently covers the five methods history proved dangerous here, which is
+#: why dropping `with_entities` alone changes nothing; and if `Query` vanished
+#: entirely the import would fail, which is loud. The exposure is the quiet
+#: middle: a version that keeps the class and trims it.
+#:
+#: Growing is still free and still unlisted. A method added to `Select`
+#: tomorrow is covered the day it appears, which is the whole reason the set is
+#: derived rather than written out.
+_READING_FLOOR = frozenset(
+    {
+        # The five a hand-written version of this set got wrong twice.
+        "query",
+        "select_from",
+        "with_entities",
+        "add_columns",
+        "add_entity",
+        # Joining.
+        "join",
+        "outerjoin",
+        "join_from",
+        "outerjoin_from",
+        # Choosing and narrowing.
+        "select",
+        "filter",
+        "where",
+        "having",
+        "group_by",
+        "order_by",
+        "distinct",
+        "with_only_columns",
+        "column",
+        "values",
+        "correlate",
+        # Slicing, which publishes a sample rather than the whole table.
+        "limit",
+        "offset",
+        "slice",
+        # Composition, each of which reads the table into something else.
+        "union",
+        "union_all",
+        "intersect",
+        "except_",
+        "subquery",
+        "cte",
+        "lateral",
+        "alias",
+        "scalar_subquery",
+        "exists",
+        "from_statement",
+        # Terminals that return rows or a count of them.
+        "get",
+        "count",
+        "delete",
+        "update",
+    }
+)
 
 
 def _enclosing_statements(tree: ast.Module) -> dict[int, ast.stmt]:
@@ -2226,7 +1505,7 @@ def _enclosing_statements(tree: ast.Module) -> dict[int, ast.stmt]:
 
 
 def _book_owned_offences(source: str, entities: frozenset[str] = BOOK_OWNED) -> list[int]:
-    """Statement line numbers where this module names one of these entities.
+    """Statement line numbers where this module reads one of these entities.
 
     **`entities` defaults to `BOOK_OWNED` and the default is the rule this file
     is about.** It is a parameter because `tests/test_tags.py` asks the same
@@ -2241,43 +1520,50 @@ def _book_owned_offences(source: str, entities: frozenset[str] = BOOK_OWNED) -> 
     `db.query(Classification.number, func.count(Classification.id))
     .group_by(Classification.number)` names no `Book` at all.
 
-    **It asks nothing about whether the query is correct.** There is no notion
-    here of a join, a scope, a viewer or a Shelf. What decides safety is the
-    allowlist, and `BOOK_OWNED_READERS` says why that is so and what it costs.
+    **It asks nothing about whether the query is correct.** Naming one of these
+    entities in a reading call is the whole rule; there is no notion here of a
+    join, a scope, a viewer or a Shelf. What decides safety is the allowlist,
+    and `BOOK_OWNED_READERS` says why that is so and what it costs.
 
-    **It is keyed on this codebase's own names and on no library's.** A
-    statement is reported when an expression in it names a guarded entity or
-    a module level name holding a guarded table's name
-    (`_table_name_aliases`), or when a string in it is SQL naming a guarded
-    table (`_raw_sql_offences`). What the
-    method is called plays no part, so a release of SQLAlchemy that adds,
-    renames or drops one cannot move what this reports. Left out of
-    "expression": an import, an annotation, and the callee of a call, which is
-    a row built in memory. So a clause built as a local and applied later is
-    reported where it is built, and so is every write.
+    Three things are a read, and the first covers almost everything: a call to
+    a method on SQLAlchemy's `Query` or `Select` with a guarded entity among
+    its arguments, the bare and qualified `select()` functions, and
+    `<Table>.select()`, which is the Core spelling reached through an
+    association table or through a mapped class's `__table__`.
 
-    What it lets through is in the module docstring's list of blind spots.
+    **A write is reported when a clause on it names the entity, and not
+    otherwise.** That is an accident of where SQLAlchemy puts things rather
+    than a policy, and it cuts both ways, so it is written down instead of
+    tidied. `book_tags.delete().where(book_tags.c.tag_id == tag_id)` at
+    `routers/books.py:259` is reported, because `delete` and `where` are both
+    `Query` methods. `db.execute(book_tags.insert(), associations)` at
+    `backup.py:548` is **not**: `insert` lives on `Table`, so it is in no
+    derived set, and the rows are a plain list naming nothing.
+
+    Neither is a disclosure, so nothing is being missed that this rule cares
+    about. What would be missed is a reader concluding that every write is
+    reported and that a green build means their insert was looked at. It was
+    not.
     """
     tree = ast.parse(source)
-    tables = _tables_of(entities)
-    aliases = _entity_aliases(tree, entities) | _table_name_aliases(tables)
+    aliases = _entity_aliases(tree, entities)
+    select_names, module_names = _sqlalchemy_names(tree)
     owner = _enclosing_statements(tree)
-    passed_over = _not_a_mention(tree)
 
-    def reads(node: ast.AST) -> bool:
-        if id(node) in passed_over:
-            return False
-        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
-            return node.id in aliases
-        if isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Load):
-            return node.attr in aliases
-        return False
-
-    offences = set(_raw_sql_offences(source, tables))
+    offences = set()
     for node in ast.walk(tree):
-        if reads(node):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        arguments = [*node.args, *(keyword.value for keyword in node.keywords)]
+        named = any(_entities_named_in(a, aliases) for a in arguments)
+        core_select = (
+            isinstance(func, ast.Attribute) and func.attr == "select" and _names_entity(func.value, aliases)
+        )
+        reading_method = isinstance(func, ast.Attribute) and func.attr in _READING_METHODS
+        if core_select or (named and (reading_method or _builds_a_query(func, select_names, module_names))):
             statement = owner.get(id(node))
-            offences.add(statement.lineno if statement is not None else getattr(node, "lineno", 0))
+            offences.add(statement.lineno if statement is not None else node.lineno)
     return sorted(offences)
 
 
@@ -2483,28 +1769,6 @@ def _predicate_calls(source: str) -> set[str]:
     } & named
 
 
-def _registry_report(
-    offences: Callable[[str], list[int]], registry: dict[str, list[tuple[str, str]]], excluded: set[str]
-) -> list[str]:
-    """Every module whose statements this pass reports and the registry does not hold.
-
-    Counted per module, then each entry compared with its statement by
-    equality, in line order, as `BOOK_OWNED_READERS` is.
-    """
-    sources = {name: source for name, source in application_sources().items() if name not in excluded}
-    found = {name: lines for name, source in sources.items() if (lines := offences(source))}
-    report = []
-    for name in sorted(set(found) | set(registry)):
-        lines = found.get(name, [])
-        entries = registry.get(name, [])
-        if len(lines) != len(entries):
-            shown = "\n".join(f"      {name}:{line}  {_statement_at(sources[name], line)}" for line in lines)
-            report.append(f"  {name}: {len(lines)} statements, {len(entries)} allowed\n{shown}")
-            continue
-        report += [f"  {name}:{one}" for one in _entries_off_their_statements(sources[name], lines, entries)]
-    return report
-
-
 @pytest.fixture
 def user(db) -> User:
     u = User(username="reader", password_hash="x")
@@ -2583,188 +1847,6 @@ class TestTheShelfIsTheOnlyWayIn:
             for line in _join_offences(source)
         )
         assert offenders == [], f"These statements reach books through a join outside the Shelf: {offenders}"
-
-    def test_only_the_counted_calls_hand_the_book_entity_to_a_call(self):
-        """The by key read, which neither pass above sees.
-
-        `db.get_one(Book, book_id)` neither builds a query nor joins one, so
-        the three importers' loads were on no list. Each is an entry with the
-        reason its id is safe.
-        """
-        sources = application_sources()
-        found = {
-            name: keys
-            for name, source in sorted(sources.items())
-            if name not in QUERY_BUILDERS
-            if (keys := [key for _, key in _whole_book_calls(source)])
-        }
-        allowed = {name: [key for key, _ in entries] for name, entries in WHOLE_BOOK_READERS.items()}
-        assert found == allowed, (
-            "A call outside the Shelf is handed `Book` itself. Say where its key "
-            "came from in WHOLE_BOOK_READERS, keyed as printed here, or ask the "
-            f"Shelf or `dependencies.py` for the Book instead: {found}"
-        )
-
-    def test_a_by_key_read_is_reported_and_a_column_or_a_new_row_is_not(self):
-        """The one fact the walk rests on, against statements built here."""
-        source = (
-            "from models import Book\n"
-            "def f(db, book_id):\n"
-            "    db.add(Book(title='x'))\n"
-            "    db.query(Loan).filter(Loan.book_id == Book.id)\n"
-            "    return db.get(Book, book_id)\n"
-        )
-        assert _whole_book_calls(source) == [(5, "f: db.get(Book, book_id)")]
-
-    def test_only_the_counted_statements_hold_sql_naming_books(self):
-        """Raw SQL over `books` itself, which no other pass reads.
-
-        The qualified column shape reads `"books.location"` and leaves out
-        `"books.id"`: every child spells its foreign key that way, and each is
-        a declaration.
-        """
-        report = _registry_report(
-            lambda source: _raw_sql_offences(source, frozenset({"books"}), key_columns=False),
-            BOOKS_SQL_READERS,
-            QUERY_BUILDERS,
-        )
-        assert not report, (
-            "A statement holds SQL naming `books`, and either is not in BOOKS_SQL_READERS or is not the "
-            "statement its entry was written for.\n\n" + "\n".join(report) + "\n\n  Raw SQL over `books` "
-            "has no privacy predicate unless you wrote one. Ask `Shelf` for the rows instead; if the "
-            "statement reads no Book's data, add it to BOOKS_SQL_READERS with the reason."
-        )
-
-    def test_sql_naming_a_table_is_read_wherever_the_string_sits(self):
-        """The one fact the raw SQL arm rests on: a string is read as SQL by its
-        own grammar, not by the call it is handed to.
-
-        The constant, the comma join and the schema qualified name are the three
-        an earlier arm missed, because it read only a string inside a call and
-        only a name straight after a keyword; the lower case subquery and the
-        capitals are what an upper case arm missed. A log line and an error
-        that read as a fragment are refused, the price `_raw_sql_naming`
-        names. A route's description holds no keyword after its verb and is
-        not SQL.
-        """
-        books = frozenset({"books"})
-        constant = (
-            'LOCATIONS = "SELECT location, count(*) FROM books GROUP BY location"\n'
-            "def f(db):\n"
-            "    return db.execute(text(LOCATIONS)).all()\n"
-        )
-        comma = (
-            'def f(db):\n    return db.execute(text("SELECT c.number FROM classifications c, books")).all()\n'
-        )
-        qualified = 'def f(db):\n    return db.execute(text("select location from public.books")).all()\n'
-        lowercase = (
-            "def f(db, n):\n"
-            '    return db.query(Loan).filter(text("book_id in (select id from books where location = :n)"))'
-            "\n"
-        )
-        capitals = 'def f(db):\n    return db.execute(text("SELECT LOCATION FROM BOOKS")).all()\n'
-        english = (
-            "def f(n):\n"
-            '    logger.info("dropped %d rows from books", n)\n'
-            '    raise HTTPException(422, "cannot write into books")\n'
-        )
-        description = 'CREATE = Query(description="Create the file\'s tags and put them on the books")\n'
-        assert _raw_sql_offences(constant, books) == [1]
-        assert _raw_sql_offences(comma, books) == [2]
-        assert _raw_sql_offences(qualified, books) == [2]
-        assert _raw_sql_offences(lowercase, books) == [2]
-        assert _raw_sql_offences(capitals, books) == [2]
-        assert _raw_sql_offences(english, books) == [2, 3]
-        assert _raw_sql_offences(description, books) == []
-
-    def test_a_table_looked_up_by_name_is_read_and_a_name_used_as_a_key_is_not(self):
-        """The bare table name, at the two positions a table is looked up by.
-
-        A subscript's key and a call's first argument reach a table with no
-        entity and no SQL. A dict key in a literal, a list element and a
-        subscript being written to read nothing.
-        """
-        tables = frozenset({"classifications"})
-        looked_up = (
-            "def f(db):\n"
-            '    a = Base.metadata.tables["classifications"]\n'
-            '    b = table("classifications", column("number"))\n'
-            '    c = Table("classifications", MetaData(), autoload_with=db.bind)\n'
-        )
-        keys = (
-            "def f(n):\n"
-            '    seen = {"classifications": n}\n'
-            '    router = APIRouter(tags=["classifications"])\n'
-            '    restored["classifications"] = n\n'
-        )
-        assert _raw_sql_offences(looked_up, tables) == [2, 3, 4]
-        assert _raw_sql_offences(keys, tables) == []
-
-    def test_only_the_counted_statements_reach_books_through_a_relationship(self):
-        """A relationship into `Book`, named off the class that owns it.
-
-        `join(User.books_added)` and `Loan.book.has(...)` reach `books` and
-        name no `Book` where passes 2 and 3 look. `JOIN_CALLERS` is not
-        excluded here, so its module's one such statement is registered.
-        """
-        report = _registry_report(_relationship_offences, RELATIONSHIP_READERS, QUERY_BUILDERS)
-        assert not report, (
-            "A statement names a relationship into `Book` off its owning class, and either is not in "
-            "RELATIONSHIP_READERS or is not the statement its entry was written for.\n\n"
-            + "\n".join(report)
-            + "\n\n  A join or an EXISTS through one of these reads every member's Books, Private ones "
-            "included. Ask `Shelf` for the rows instead; if the statement reads no Book, add it to "
-            "RELATIONSHIP_READERS with the reason."
-        )
-
-    def test_a_relationship_off_its_class_is_reported_and_off_an_instance_is_not(self):
-        """The one fact the relationship pass rests on, against statements built here."""
-        source = (
-            "import models\n"
-            "from models import Loan, User\n"
-            "def f(db, loan, x):\n"
-            "    db.query(User.username, func.count()).join(User.books_added).all()\n"
-            "    db.query(func.count(Loan.id)).filter(Loan.book.has(title=x)).scalar()\n"
-            "    db.query(Loan).join(models.Loan.book).all()\n"
-            "    print(loan.book.title)\n"
-            "    db.query(Loan).join(Loan.loaned_to).all()\n"
-        )
-        assert _relationship_offences(source) == [4, 5, 6]
-
-    def test_a_list_of_books_read_off_any_instance_is_reported(self):
-        """A to many relationship into `Book` loads every Book it collects,
-        whoever's they are, so the instance spelling counts for it; the scalar
-        `loan.book` reaches one Book its row already names, and does not.
-
-        The keys are the models' own, so the set holding both of today's is
-        what says the derivation reads them rather than nothing.
-        """
-        assert {"books", "books_added"} <= TO_MANY_INTO_BOOK
-        source = (
-            "def f(collection, user, loan):\n"
-            "    shown = len(collection.books)\n"
-            "    titles = [b.title for b in user.books_added]\n"
-            "    print(loan.book.title)\n"
-        )
-        assert _relationship_offences(source) == [2, 3]
-
-    def test_a_type_test_passes_over_its_type_and_reads_its_value(self):
-        """`isinstance` answers a bool about its second argument, and its first
-        is any expression, a query among them. The second is passed over only
-        while it names types: a query inside `type()` there runs too."""
-        source = (
-            "import models\n"
-            "from models import Classification\n"
-            "def f(db, row):\n"
-            "    isinstance(row, Classification)\n"
-            "    isinstance(db.query(Classification).first(), Classification)\n"
-            "    isinstance(row, type(db.query(Classification).first()))\n"
-            "    isinstance(row, (Classification, models.Classification))\n"
-            "    issubclass(type(row), Classification | models.Classification)\n"
-            "    isinstance(row, Classification | None)\n"
-            "    isinstance(row, type(db.query(Classification).first()) | None)\n"
-        )
-        assert _book_owned_offences(source) == [5, 6, 10]
 
     def test_only_the_counted_statements_read_a_table_that_belongs_only_to_a_book(self):
         """The fourth pass, over the tables the three above structurally cannot
@@ -3392,33 +2474,6 @@ class TestTheShelfIsTheOnlyWayIn:
             "        func.coalesce(CustomFieldValue.value, Classification.label))\n"
             "        .join(Classification, Classification.book_id == Book.id).all())\n"
         ),
-        # Raw SQL, in the three spellings the first raw arm missed, and the two
-        # names for a table that are not its entity: the name constant
-        # `custom_fields` publishes, and a qualified column.
-        "raw SQL held in a module constant": (
-            'HEADINGS = "SELECT number, count(*) FROM classifications GROUP BY number"\n'
-            "def f(db):\n"
-            "    return db.execute(text(HEADINGS)).all()\n"
-        ),
-        "raw SQL with a comma join": (
-            "def f(db):\n"
-            '    sql = "SELECT c.number FROM books b, classifications c WHERE c.book_id = b.id"\n'
-            "    return db.execute(text(sql)).all()\n"
-        ),
-        "raw SQL naming a schema qualified table": (
-            'def f(db):\n    return db.execute(text("SELECT number FROM public.classifications")).all()\n'
-        ),
-        "the table reached by the name constant": (
-            "import custom_fields\n"
-            "from database import Base\n"
-            "def f(db):\n"
-            "    values = Base.metadata.tables[custom_fields.VALUES_TABLE]\n"
-            "    query = select(values.c.field_id, func.count()).group_by(values.c.field_id)\n"
-            "    return db.execute(query).all()\n"
-        ),
-        "a qualified column as a string": (
-            'def f(db):\n    return db.execute(select(literal_column("classifications.number"))).all()\n'
-        ),
     }
 
     @pytest.mark.parametrize("shape", sorted(BOOK_OWNED_EVASIONS))
@@ -3439,6 +2494,32 @@ class TestTheShelfIsTheOnlyWayIn:
         )
         assert _join_offences(source) == [], (
             f"{shape} is caught by an older pass, so it proves nothing about the fourth one"
+        )
+
+    def test_the_derived_reading_methods_still_cover_every_known_path(self):
+        """The floor under the derivation, and the half it was missing.
+
+        `_READING_METHODS` is derived so that a method added to SQLAlchemy is
+        covered without an edit here. The cost of deriving it is that a method
+        **removed** from SQLAlchemy is uncovered without an edit either, and
+        silently: measured by dropping one name at a time, 122 of the 130 could
+        go with this suite still green.
+
+        If this fails, SQLAlchemy has renamed or removed something. Do not just
+        delete the name from the floor: work out which reading path it was, and
+        whether the pass still reports that path under its new spelling.
+        """
+        assert len(_READING_FLOOR) >= 30, (
+            "The floor has been emptied or gutted, which makes the assertion "
+            "below vacuous. It held 38 names when it was written, measured "
+            "against the reading paths in SQLAlchemy 2.x."
+        )
+        missing = sorted(_READING_FLOOR - _READING_METHODS)
+        assert not missing, (
+            "These reading paths are no longer in the set derived from "
+            "SQLAlchemy's Query and Select, so a query using one of them no "
+            "longer reports. Find out what each was renamed to, and add the "
+            f"new spelling rather than removing the old one: {missing}"
         )
 
     def test_the_evasion_table_counts_what_the_dict_holds(self):

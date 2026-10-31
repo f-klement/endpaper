@@ -79,21 +79,19 @@ import ignoreRules from "../../.gitignore?raw";
 // it was one edit in the file holding the rules it disarmed.
 import { sourceEntries as entries, sourceText } from "./sourceModules";
 
-// The node, the walk, the names a binding binds, what a scope binds and where
-// a path lands, each in one home. `sourceReader.ts` says what its copies here disagreed on.
+// The node, the walk, the names a binding binds and where a path lands, each
+// in one home. `sourceReader.ts` says what its copies here disagreed on.
 import {
+  boundBy,
   childrenOf,
   isNode,
   namesBoundBy,
   nodesIn,
   parentsOf,
   resolvePath,
-  SCOPES,
-  scopeBindings,
   walk,
   type Descent,
   type Node,
-  type ScopeBindings,
 } from "./sourceReader";
 
 // The one enumeration of `tests/`, and the one thing that refuses a corpus
@@ -976,6 +974,81 @@ const PIN_RENDERER = "asRows";
 const WHOLE_VALUE_MATCHERS = new Set(["toEqual", "toStrictEqual"]);
 
 /**
+ * Every node that opens a scope a name can be bound in.
+ *
+ * **The grammar's list rather than anybody's memory, and a kind missing
+ * from it is a silent miss.** Its bindings land in the map of the scope
+ * outside it, where the outer declaration was added first and wins, so the
+ * pin and the generator reach one node and the group reads as held. That
+ * is a false acceptance, which is the defect this whole rule is about, and
+ * it is the opposite of what the first version of this sentence claimed.
+ *
+ * **So nothing here is self correcting and a row per construct is what
+ * makes it loud.** Most members turn a refusal into an acceptance when
+ * they go, the block statement and the arrow the most of any; the enum
+ * body refuses something legitimate instead and the program does both,
+ * because without it a foreign import binds nowhere and the nothing it
+ * resolves to reads as the runner; and a handful move no row. **The breakdown is deliberately not written down**, because
+ * it is a property of the rows and it went stale in the commit that added
+ * one: remove a member at a time and read it off, which is how every
+ * figure here was taken.
+ *
+ * **The members that move no row are measured rather than assumed.** A
+ * shadow written in a function declaration, a static block, a class
+ * declaration or a class expression is caught by the scope inside or
+ * around it, driven each way; the two bodiless function kinds cannot hold
+ * a generator at all.
+ */
+const SCOPES = new Set([
+  "Program",
+  "FunctionDeclaration",
+  "FunctionExpression",
+  "ArrowFunctionExpression",
+  "TSDeclareFunction",
+  "TSEmptyBodyFunctionExpression",
+  "BlockStatement",
+  "StaticBlock",
+  "TSModuleBlock",
+  "ForStatement",
+  "ForInStatement",
+  "ForOfStatement",
+  "CatchClause",
+  "SwitchStatement",
+  "ClassDeclaration",
+  "ClassExpression",
+  // An enum body is a namespace of its own, so its members bind inside it
+  // and nowhere else. It is here rather than exempted at the reader below
+  // because that is what it is: without it, every member of every enum is a
+  // declaration the reader does not know, and one enum anywhere in the file
+  // would refuse every name in it.
+  "TSEnumBody",
+]);
+
+/** The three specifiers an import binds a local name through. */
+const IMPORT_BINDINGS = new Set([
+  "ImportSpecifier",
+  "ImportDefaultSpecifier",
+  "ImportNamespaceSpecifier",
+]);
+
+/**
+ * The declaration kinds carrying a name that binds in the type space alone.
+ *
+ * **They are named because they are the exception to the refusal below**,
+ * which records any other kind declaring a name the reader does not read,
+ * rather than walking past it. Keyed on carrying an `id` that is an
+ * identifier, which is what declaring a name looks like whatever the kind is
+ * called. Censused that way over every module of `src` and `tests`, 689
+ * files: these two are the only kinds that reach it, at 618 and 464
+ * occurrences, so the exemption is what keeps the refusal off ordinary
+ * TypeScript and nothing else is being waved through.
+ */
+const BINDS_IN_THE_TYPE_SPACE = new Set([
+  "TSTypeAliasDeclaration",
+  "TSInterfaceDeclaration",
+]);
+
+/**
  * The properties that make a call a table driven generator.
  *
  * **Two members, and an enumeration of two is still an enumeration.** A
@@ -1002,6 +1075,99 @@ const RUNNER_NAMES = new Set(["it", "test", "describe"]);
 
 /** The module a runner name has to come from to be the runner. */
 const RUNNER_MODULE = "vitest";
+
+/** What one scope binds, and the binding shapes it could not read. */
+interface ScopeBindings {
+  readonly names: Map<string, Node>;
+  readonly unreadable: string[];
+}
+
+/**
+ * What `scope` binds, read off the constructs that bind rather than off the
+ * statements a scope is allowed to hold.
+ *
+ * **Three sources, and the third is the one a block walk misses.** What the
+ * scope node itself binds, which is its parameters, a catch's parameter and
+ * an expression's own name; what is declared in its own region, found by
+ * walking until the next scope so that a nested block keeps its own; and,
+ * for a function body and the module body, what a `var` hoists out of a
+ * nested block into.
+ */
+function scopeBindings(scope: Node): ScopeBindings {
+  const names = new Map<string, Node>();
+  const unreadable: string[] = [];
+  const add = (value: unknown): void => {
+    if (!isNode(value) || value.type !== "Identifier") return;
+    const name = text(value.name);
+    if (name !== null && !names.has(name)) names.set(name, value);
+  };
+  const take = (pattern: unknown): void => {
+    const bound = boundBy(pattern);
+    unreadable.push(...bound.unreadable);
+    for (const one of bound.identifiers) add(one);
+  };
+
+  for (const one of nodesIn(scope.params)) take(one);
+  if (scope.type === "CatchClause") take(scope.param);
+  if (scope.type === "FunctionExpression" || scope.type === "ClassExpression")
+    add(scope.id);
+
+  walk(childrenOf(scope), (child) => {
+    if (SCOPES.has(child.type)) {
+      // A nested declaration binds its own name out here even though its
+      // body is somebody else's scope. **Written as the two exceptions
+      // rather than as a list of declarations**, which is what it was: a
+      // function expression and a class expression bind their own name
+      // inward only, and every other scope node either carries a
+      // declaration's name or carries no `id` at all, where this is a no
+      // op. Naming the declarations instead left `declare function` out,
+      // measured, and that is a shadow nobody sees.
+      if (
+        child.type !== "FunctionExpression" &&
+        child.type !== "ClassExpression"
+      )
+        add(child.id);
+      return false;
+    }
+    if (child.type === "VariableDeclarator") take(child.id);
+    else if (IMPORT_BINDINGS.has(child.type)) add(child.local);
+    else if (
+      child.type === "TSEnumDeclaration" ||
+      child.type === "TSModuleDeclaration" ||
+      child.type === "TSImportEqualsDeclaration"
+    )
+      add(child.id);
+    // **A declaration kind this reader does not know is recorded, not
+    // walked past.** `boundBy` already does that for a pattern shape, and
+    // for one round this one did not do it for a declaration kind, so
+    // `import T = A.rows` was a shadow that went unseen and the group read
+    // as held while driving another table. The key is carrying an `id`
+    // that is an identifier, which is what declaring a name looks like
+    // whatever the kind is called.
+    else if (
+      !BINDS_IN_THE_TYPE_SPACE.has(child.type) &&
+      isNode(child.id) &&
+      child.id.type === "Identifier"
+    )
+      unreadable.push(child.type);
+  });
+
+  if (scope.type === "Program" || Array.isArray(scope.params)) {
+    walk(childrenOf(scope), (child) => {
+      if (
+        Array.isArray(child.params) ||
+        child.type === "ClassDeclaration" ||
+        child.type === "ClassExpression"
+      ) {
+        if (child.type === "FunctionDeclaration") add(child.id);
+        return false;
+      }
+      if (child.type === "VariableDeclaration" && text(child.kind) === "var")
+        for (const one of nodesIn(child.declarations)) take(one.id);
+    });
+  }
+  return { names, unreadable };
+}
 
 /** The declaration a name reaches, or why it reaches none. */
 interface Resolution {
@@ -1963,9 +2129,9 @@ const ACCEPTED: [string, string][] = [
  * declaration kind outside the reader in `scopeBindings` are each
  * recorded, so those two lists are backed by a refusal rather than by
  * being right. What a dropped `SCOPES` member costs is not one answer:
- * its own docstring, in `sourceReader.ts`, measures it member by member,
- * and the three it holds that declare a name are backed by that same
- * record while most of the rest are not.
+ * its own docstring measures it member by member, and the three it holds
+ * that declare a name are backed by that same record while most of the
+ * rest are not.
  *
  * **What the declaration record cannot see is a kind binding a name
  * through neither a pattern nor an identifier `id`**, and the live

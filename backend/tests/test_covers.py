@@ -16,7 +16,6 @@ import ast
 import asyncio
 import gzip
 import logging
-import selectors
 from pathlib import Path
 from time import monotonic
 from typing import Final
@@ -28,7 +27,6 @@ import respx
 
 import cover_store
 import covers
-import deadline
 import fetch
 from tests.bindings import SourceNames
 from tests.conftest import REAL_RESOLVE_AND_STORE
@@ -704,56 +702,11 @@ class _AsyncTrickle(httpx.AsyncByteStream):
     def __init__(self, *, interval: float, chunks: int) -> None:
         self._interval = interval
         self._chunks = chunks
-        self.sent = 0
 
     async def __aiter__(self):
         for _ in range(self._chunks):
             await asyncio.sleep(self._interval)
-            self.sent += 1
             yield self.CHUNK
-
-
-class _VirtualClock:
-    """Time that passes only when the event loop would otherwise wait.
-
-    **A bound measured on the wall clock is a bound on the scheduler too.** Under
-    a CPU limit the trickle guard read `1.4995 < 1.4` and
-    `1.8928 < 1.4` on code that was correct. Here every sleep and every
-    `asyncio.timeout` lands at exactly the instant it was scheduled for, so a
-    throttled run and an idle one take the same path.
-
-    The loop it drives has no real I/O to wait on, because respx answers inside
-    the transport. Work handed to a thread may be overtaken by the next timer
-    rather than waited for, so a test that hands one off is not deterministic
-    here and must not use this clock. Time spent blocking the loop's own thread
-    does not advance it either, so a blocking call on the path, which the wall
-    clock bounds this replaced would have caught, is invisible here.
-    """
-
-    def __init__(self) -> None:
-        self.now = 0.0
-
-    def monotonic(self) -> float:
-        return self.now
-
-    def loop(self) -> asyncio.AbstractEventLoop:
-        clock = self
-
-        class Selector(selectors.DefaultSelector):
-            def select(self, timeout: float | None = None):
-                ready = super().select(0)
-                if ready or timeout == 0:
-                    return ready
-                if timeout is None:
-                    raise RuntimeError("the loop is idle with no timer to advance to")
-                clock.now += timeout
-                return []
-
-        class Loop(asyncio.SelectorEventLoop):
-            def time(self) -> float:
-                return clock.now
-
-        return Loop(Selector())
 
 
 async def _slow_redirect_to_the_dnb(request):
@@ -779,11 +732,10 @@ async def _headers_after_three_seconds(request):
 class _NeverAnswers(httpx.AsyncByteStream):
     """Headers, and then nothing for longer than any bound here.
 
-    The shape a per read timeout **does** eventually catch in production, at the
-    client's own figure rather than at the caller's budget. Under respx no
-    client timeout applies, so without the hop bound the chunk lands at 30 and
-    the verdict is True; a guard using it asserts on the instant as well, which
-    catches a bound at the wrong figure. It is here because the trickle
+    The shape a per read timeout **does** eventually catch, at the client's own
+    figure rather than at the caller's budget, which is why a guard using it
+    asserts on the seconds and not only on the verdict: without the hop bound
+    the answer is still None, ten seconds later. It is here because the trickle
     above cannot reach `_check`, which returns on the first chunk, so a guard on
     that function has to be about a chunk that never comes.
     """
@@ -915,32 +867,32 @@ class TestDownloading:
         assert fetched is not None
         assert fetched.startswith(b"\xff\xd8\xff")
 
-    def test_a_trickled_body_stops_at_the_budget(self, monkeypatch):
+    def test_a_trickled_body_stops_at_the_budget(self):
         """httpx's timeout is per read, so it does not bound a download at all.
 
-        **The chunks arrive at 0.98x of the budget**, so the first is in and the
-        second is in flight when the budget ends. A read that consults the clock
-        only once a chunk has arrived takes the second and returns at 1.96;
-        a hop with no budget reads all six inside `TIMEOUT_SECONDS` and returns
-        the image. Only a cut mid read stops at 1.0 with one chunk sent.
-
-        On `_VirtualClock`, shared with `deadline` so the budget and the loop
-        read one clock. `_download` rather than `download`, which is
-        `asyncio.run` on the shipped loop.
+        **The chunks arrive at 0.98x of the budget, which is the shape, and the
+        bound is 1.4x of it, which is the measurement.** The version this
+        replaces trickled at 0.01s against a 0.2s budget and allowed 3.0s: at
+        fifteen times the budget it passed on the code that overshot and on the
+        code that does not, so it distinguished nothing. Measured on this tree,
+        the overshooting shape returned after **1.973s** against 1.0s, because
+        the clock was consulted only once a chunk had already arrived and the
+        read in flight had a full budget of its own.
         """
-        clock = _VirtualClock()
-        monkeypatch.setattr(deadline, "time", clock)
-        body = _AsyncTrickle(interval=0.98, chunks=6)
         with respx.mock(assert_all_called=False) as mock:
             mock.get(url__startswith=AT_OPEN_LIBRARY).mock(
-                return_value=httpx.Response(200, stream=body, headers={"content-type": "image/jpeg"})
+                return_value=httpx.Response(
+                    200,
+                    stream=_AsyncTrickle(interval=0.98, chunks=6),
+                    headers={"content-type": "image/jpeg"},
+                )
             )
-            fetching = covers._download(covers.open_library_url(ENGLISH), deadline=deadline.in_(1.0))
-            fetched = asyncio.run(fetching, loop_factory=clock.loop)
+            started = monotonic()
+            fetched = covers.download(covers.open_library_url(ENGLISH), deadline=monotonic() + 1.0)
+            spent = monotonic() - started
 
         assert fetched is None
-        assert body.sent == 1
-        assert clock.now == pytest.approx(1.0)
+        assert spent < 1.4
 
 
 class TestStoring:
@@ -1186,7 +1138,7 @@ class TestTheInteractiveBudget:
 
         assert route.call_count == 0
 
-    def test_a_check_of_a_trickling_service_answers_inside_the_budget(self, monkeypatch):
+    def test_a_check_of_a_trickling_service_answers_inside_the_budget(self):
         """The arm that was missing, and the one that cost the most.
 
         The guard this replaces read `request.extensions["timeout"]["read"]` and
@@ -1205,23 +1157,24 @@ class TestTheInteractiveBudget:
                     headers={"content-type": "image/jpeg"},
                 )
             )
-            verdict, now = _check_on_the_clock(monkeypatch, budget=1.0)
+            started = monotonic()
+            verdict = _await(_check_one(covers.open_library_url(ENGLISH), budget=1.0))
+            spent = monotonic() - started
 
         # True at all is the half that catches the buffering coming back: at
         # three bytes a chunk, `aiter_raw(512)` needs 171 of them, so the hop
-        # bound cuts first and the verdict is None. `now` is the half that
-        # catches the bound going away as well, since the buffered read would
-        # then finish at 3.42 and answer True. The first chunk lands at 0.02.
+        # bound cuts first and the verdict is None. `spent` is the half that
+        # catches the bound going away instead, since the buffered read would
+        # then finish at about 3.4s and answer True.
         assert verdict is True
-        assert now == pytest.approx(0.02)
+        assert spent < 0.5
 
-    def test_a_check_of_a_service_that_never_answers_stops_at_the_budget(self, monkeypatch):
+    def test_a_check_of_a_service_that_never_answers_stops_at_the_budget(self):
         """The arm the trickle cannot reach, since `_check` returns on a chunk.
 
-        Without the hop bound the chunk lands at 30 and the verdict is True.
-        In production the client's own read timeout, `fetch.TIMEOUT_SECONDS`,
-        would cut it at a figure that has nothing to do with the budget a
-        person is waiting through.
+        Without the hop bound this waits out the client's own read timeout,
+        which is `fetch.TIMEOUT_SECONDS` and has nothing to do with the budget
+        a person is waiting through.
         """
         with respx.mock(assert_all_called=False) as mock:
             mock.get(url__startswith=AT_OPEN_LIBRARY).mock(
@@ -1229,12 +1182,14 @@ class TestTheInteractiveBudget:
                     200, stream=_NeverAnswers(), headers={"content-type": "image/jpeg"}
                 )
             )
-            verdict, now = _check_on_the_clock(monkeypatch, budget=1.0)
+            started = monotonic()
+            verdict = _await(_check_one(covers.open_library_url(ENGLISH), budget=1.0))
+            spent = monotonic() - started
 
         assert verdict is None
-        assert now == pytest.approx(1.0)
+        assert spent < 1.4
 
-    def test_a_check_of_a_service_slow_to_send_its_headers_stops_at_the_budget(self, monkeypatch):
+    def test_a_check_of_a_service_slow_to_send_its_headers_stops_at_the_budget(self):
         """The hop's bound covers the wait for headers, not only the body.
 
         Every other stall in this class sends its headers inside the budget, so
@@ -1244,31 +1199,36 @@ class TestTheInteractiveBudget:
         """
         with respx.mock(assert_all_called=False) as mock:
             mock.get(url__startswith=AT_OPEN_LIBRARY).mock(side_effect=_headers_after_three_seconds)
-            verdict, now = _check_on_the_clock(monkeypatch, budget=1.0)
+            started = monotonic()
+            verdict = _await(_check_one(covers.open_library_url(ENGLISH), budget=1.0))
+            spent = monotonic() - started
 
         assert verdict is None
-        assert now == pytest.approx(1.0)
+        assert spent < 1.4
 
     def test_a_hop_is_bounded_even_when_no_budget_was_given(self, monkeypatch):
         """The backfill passes no deadline, and used to get no bound with it.
 
         `min(TIMEOUT_SECONDS, remaining)` with nothing remaining is
         `TIMEOUT_SECONDS`, so dropping the `min` and keeping only the budget
-        leaves this walk unbounded. The shipped figure is waited out, which the
-        virtual clock makes free.
+        leaves this walk unbounded. `TIMEOUT_SECONDS` is moved rather than
+        waited out, because six seconds of suite time is the same evidence.
         """
+        monkeypatch.setattr(covers, "TIMEOUT_SECONDS", 0.5)
         with respx.mock(assert_all_called=False) as mock:
             mock.get(url__startswith=AT_OPEN_LIBRARY).mock(
                 return_value=httpx.Response(
                     200, stream=_NeverAnswers(), headers={"content-type": "image/jpeg"}
                 )
             )
-            verdict, now = _check_on_the_clock(monkeypatch)
+            started = monotonic()
+            verdict = _await(_check_one(covers.open_library_url(ENGLISH)))
+            spent = monotonic() - started
 
         assert verdict is None
-        assert now == pytest.approx(covers.TIMEOUT_SECONDS)
+        assert spent < 1.0
 
-    def test_a_second_hop_gets_what_the_first_one_left(self, monkeypatch):
+    def test_a_second_hop_gets_what_the_first_one_left(self):
         """The only arm that can see `_hop_seconds` being recomputed per hop.
 
         **Every other guard here drives one hop, so the recomputation was
@@ -1278,8 +1238,10 @@ class TestTheInteractiveBudget:
         hoist costs is the walk ceiling: each hop gets the **whole** budget
         rather than what is left, so two hops are two budgets.
 
-        The first hop answers at 0.8 of a 1.0 second budget and the second never
-        answers, so the shipped walk stops at 1.0 and the hoisted one at 1.8.
+        Measured with the first hop answering at 0.8 of a 1.0 second budget and
+        the second never answering: shipped **1.002s**, hoisted **1.818s**. The
+        bound sits between them with room on both sides rather than beside
+        either.
         """
         with respx.mock(assert_all_called=False) as mock:
             mock.get(url__startswith=AT_OPEN_LIBRARY).mock(side_effect=_slow_redirect_to_the_dnb)
@@ -1288,10 +1250,12 @@ class TestTheInteractiveBudget:
                     200, stream=_NeverAnswers(), headers={"content-type": "image/jpeg"}
                 )
             )
-            verdict, now = _check_on_the_clock(monkeypatch, budget=1.0)
+            started = monotonic()
+            verdict = _await(_check_one(covers.open_library_url(ENGLISH), budget=1.0))
+            spent = monotonic() - started
 
         assert verdict is None
-        assert now == pytest.approx(1.0)
+        assert spent < 1.4
 
     def test_the_budget_is_shorter_than_a_single_timeout_chain(self):
         # Three checks plus a download at six seconds each is the 24 this bounds.
@@ -1774,24 +1738,8 @@ async def _check_one(url: str, *, budget: float | None = None) -> bool | None:
     guard about what one check **costs** cannot read it through `resolve`.
     """
     async with covers._client() as client:
-        until = None if budget is None else deadline.in_(budget)
-        return await covers._check(client, url, until)
-
-
-def _check_on_the_clock(
-    monkeypatch: pytest.MonkeyPatch, *, budget: float | None = None
-) -> tuple[bool | None, float]:
-    """`_check_one` on Open Library's URL under `_VirtualClock`, and the instant it returned.
-
-    `deadline` reads the same clock, so the budget and the loop's timers agree
-    to the instant and a bound is asserted exactly rather than with room for
-    the scheduler.
-    """
-    clock = _VirtualClock()
-    monkeypatch.setattr(deadline, "time", clock)
-    checking = _check_one(covers.open_library_url(ENGLISH), budget=budget)
-    verdict = asyncio.run(checking, loop_factory=clock.loop)
-    return verdict, clock.now
+        deadline = None if budget is None else monotonic() + budget
+        return await covers._check(client, url, deadline)
 
 
 def await_resolve(isbn: str, supplied: str) -> str | None:

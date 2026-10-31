@@ -26,7 +26,7 @@ repeat the argument.
 <!-- index: begin -->
 | Section | Entry | Words |
 |---|---|---|
-|  | [Backend](decisions.md#backend) | 34,525 |
+|  | [Backend](decisions.md#backend) | 34,542 |
 | Backend | [`bcrypt` directly, not `passlib`](decisions.md#bcrypt-directly-not-passlib) | 98 |
 | Backend | [Settings are functions, not module constants](decisions.md#settings-are-functions-not-module-constants) | 59 |
 | Backend | [`DATA_DIR` exists at all](decisions.md#data_dir-exists-at-all) | 22 |
@@ -157,7 +157,7 @@ repeat the argument.
 | Backend | [A `ValueError` no SRU handler caught, and a bound that could not have helped](decisions.md#a-valueerror-no-sru-handler-caught-and-a-bound-that-could-not-have-helped) | 139 |
 | Backend | [What was deliberately not done](decisions.md#what-was-deliberately-not-done) | 38 |
 | Backend | [What adding a catalogue cost, which is the seam's own report card](decisions.md#what-adding-a-catalogue-cost-which-is-the-seams-own-report-card) | 31 |
-| Backend | [The privacy rule covers the tables that belong only to a Book, and does not try to be clever about it](decisions.md#the-privacy-rule-covers-the-tables-that-belong-only-to-a-book-and-does-not-try-to-be-clever-about-it) | 485 |
+| Backend | [The privacy rule covers the tables that belong only to a Book, and does not try to be clever about it](decisions.md#the-privacy-rule-covers-the-tables-that-belong-only-to-a-book-and-does-not-try-to-be-clever-about-it) | 502 |
 | Backend | [The shared bibliographic vocabulary is a module, and MARC reading is not](decisions.md#the-shared-bibliographic-vocabulary-is-a-module-and-marc-reading-is-not) | 248 |
 | Backend | [The catalogue family publishes its decoders, and three readers are not decoders](decisions.md#the-catalogue-family-publishes-its-decoders-and-three-readers-are-not-decoders) | 281 |
 | Backend | [A list filter's toggle is a patch, not a helper over an array](decisions.md#a-list-filters-toggle-is-a-patch-not-a-helper-over-an-array) | 92 |
@@ -237,11 +237,11 @@ repeat the argument.
 | A write names what it made stale | [Deleting a custom field is admin only, defining one is not](decisions.md#deleting-a-custom-field-is-admin-only-defining-one-is-not) | 341 |
 | A write names what it made stale | [`MAX_CUSTOM_FIELDS` is the only ceiling the feature needs](decisions.md#max_custom_fields-is-the-only-ceiling-the-feature-needs) | 134 |
 | A write names what it made stale | [Settings is an index of six routes, and the descriptions are the page](decisions.md#settings-is-an-index-of-six-routes-and-the-descriptions-are-the-page) | 433 |
-|  | [Tooling](decisions.md#tooling) | 5,527 |
+|  | [Tooling](decisions.md#tooling) | 5,528 |
 | Tooling | [Bun, not npm](decisions.md#bun-not-npm) | 27 |
 | Tooling | [`bunfig.toml` configures a security scanner](decisions.md#bunfigtoml-configures-a-security-scanner) | 66 |
 | Tooling | [`--import-mode=importlib` for pytest](decisions.md#--import-modeimportlib-for-pytest) | 10 |
-| Tooling | [Alpine, and the musl bar for new dependencies](decisions.md#alpine-and-the-musl-bar-for-new-dependencies) | 85 |
+| Tooling | [Alpine, and the musl bar for new dependencies](decisions.md#alpine-and-the-musl-bar-for-new-dependencies) | 86 |
 | Tooling | [TypeScript's strictest options are on](decisions.md#typescripts-strictest-options-are-on) | 23 |
 | Tooling | [Each test runs in a transaction, and pysqlite is not allowed to open it](decisions.md#each-test-runs-in-a-transaction-and-pysqlite-is-not-allowed-to-open-it) | 270 |
 | Tooling | [Mutation testing is a tool a seat reaches for, and never a gate](decisions.md#mutation-testing-is-a-tool-a-seat-reaches-for-and-never-a-gate) | 220 |
@@ -271,7 +271,7 @@ repeat the argument.
 | Product | [No bookshop or retailer is a catalogue source](decisions.md#no-bookshop-or-retailer-is-a-catalogue-source) | 252 |
 |  | [Multi workstation is joined terminals, and the container stays the documented alternative](decisions.md#multi-workstation-is-joined-terminals-and-the-container-stays-the-documented-alternative) | 496 |
 |  | [VIAF is the wrong supplier for resolution and the right one for discovery](decisions.md#viaf-is-the-wrong-supplier-for-resolution-and-the-right-one-for-discovery) | 447 |
-|  | [An identifier two files disagree about is shown and never stored](decisions.md#an-identifier-two-files-disagree-about-is-shown-and-never-stored) | 17,454 |
+|  | [An identifier two files disagree about is shown and never stored](decisions.md#an-identifier-two-files-disagree-about-is-shown-and-never-stored) | 17,431 |
 | An identifier two files disagree about is shown and never stored | [VIAF was refused as a supplier and is used as an enrichment, and both are right](decisions.md#viaf-was-refused-as-a-supplier-and-is-used-as-an-enrichment-and-both-are-right) | 251 |
 | An identifier two files disagree about is shown and never stored | [A VIAF cluster is verified against the confirmed record, never trusted](decisions.md#a-viaf-cluster-is-verified-against-the-confirmed-record-never-trusted) | 300 |
 | An identifier two files disagree about is shown and never stored | [Storing an identifier and resolving one are different acts](decisions.md#storing-an-identifier-and-resolving-one-are-different-acts) | 173 |
@@ -338,7 +338,7 @@ repeat the argument.
 | An identifier two files disagree about is shown and never stored | [Settled by the owner, and not a seat's to reopen](decisions.md#settled-by-the-owner-and-not-a-seats-to-reopen) | 195 |
 | An identifier two files disagree about is shown and never stored | [An apk finding is acted on, because the rebuild is the fix and a digest bump is not](decisions.md#an-apk-finding-is-acted-on-because-the-rebuild-is-the-fix-and-a-digest-bump-is-not) | 385 |
 | An identifier two files disagree about is shown and never stored | [One CVE against two ecosystems is two findings](decisions.md#one-cve-against-two-ecosystems-is-two-findings) | 161 |
-| An identifier two files disagree about is shown and never stored | [Docker digest updates wait for one merge request a week, except the release pin](decisions.md#docker-digest-updates-wait-for-one-merge-request-a-week-except-the-release-pin) | 646 |
+| An identifier two files disagree about is shown and never stored | [Docker digest updates wait for one merge request a week, except the release pin](decisions.md#docker-digest-updates-wait-for-one-merge-request-a-week-except-the-release-pin) | 623 |
 | An identifier two files disagree about is shown and never stored | [The ledger reads one line, not the whole tag message](decisions.md#the-ledger-reads-one-line-not-the-whole-tag-message) | 135 |
 | An identifier two files disagree about is shown and never stored | [A `$` anchored pattern is not a `fullmatch`](decisions.md#a--anchored-pattern-is-not-a-fullmatch) | 43 |
 | An identifier two files disagree about is shown and never stored | [A rebuild finding is not ledgered, so a failed rebuild is retried](decisions.md#a-rebuild-finding-is-not-ledgered-so-a-failed-rebuild-is-retried) | 150 |
@@ -582,7 +582,7 @@ repeat the argument.
 |  | [A born digital title depends on two of the title search sources](decisions.md#a-born-digital-title-depends-on-two-of-the-title-search-sources) | 321 |
 |  | [An envelope is bound to the origin it may be sent to, and a restore drops household logins as the belt](decisions.md#an-envelope-is-bound-to-the-origin-it-may-be-sent-to-and-a-restore-drops-household-logins-as-the-belt) | 1,209 |
 |  | [Reading a Calibre library through SQLite in the browser, not on the server](decisions.md#reading-a-calibre-library-through-sqlite-in-the-browser-not-on-the-server) | 222 |
-|  | [The content security policy grants `'wasm-unsafe-eval'` and nothing else](decisions.md#the-content-security-policy-grants-wasm-unsafe-eval-and-nothing-else) | 340 |
+|  | [The content security policy grants `'wasm-unsafe-eval'` and nothing else](decisions.md#the-content-security-policy-grants-wasm-unsafe-eval-and-nothing-else) | 148 |
 |  | [The Calibre index wins and the OPF fills its gaps, with two exceptions](decisions.md#the-calibre-index-wins-and-the-opf-fills-its-gaps-with-two-exceptions) | 97 |
 |  | [What the reference library actually contains, measured rather than quoted](decisions.md#what-the-reference-library-actually-contains-measured-rather-than-quoted) | 254 |
 |  | [Identifiers other than the ISBN had nowhere to go, and the count is what justified the table](decisions.md#identifiers-other-than-the-isbn-had-nowhere-to-go-and-the-count-is-what-justified-the-table) | 156 |
@@ -695,7 +695,7 @@ repeat the argument.
 |  | [The naive regex translation of a GLOB fails two different ways](decisions.md#the-naive-regex-translation-of-a-glob-fails-two-different-ways) | 141 |
 |  | [A NUL arm is subsumed by a column type, not by an engine](decisions.md#a-nul-arm-is-subsumed-by-a-column-type-not-by-an-engine) | 129 |
 |  | [Creation is not preservation](decisions.md#creation-is-not-preservation) | 347 |
-|  | [The Postgres driver is a runtime dependency, and the image is the reason](decisions.md#the-postgres-driver-is-a-runtime-dependency-and-the-image-is-the-reason) | 791 |
+|  | [The Postgres driver is a runtime dependency, and the image is the reason](decisions.md#the-postgres-driver-is-a-runtime-dependency-and-the-image-is-the-reason) | 792 |
 |  | [The channel's loans are the public shelf's, not a second spelling of it](decisions.md#the-channels-loans-are-the-public-shelfs-not-a-second-spelling-of-it) | 106 |
 |  | [The loan door has three constructors, not two](decisions.md#the-loan-door-has-three-constructors-not-two) | 138 |
 |  | [What stayed outside that door, and why](decisions.md#what-stayed-outside-that-door-and-why) | 137 |
@@ -756,7 +756,7 @@ repeat the argument.
 |  | [`AddedRule` moved to `dialect.py`, and the move was measured rather than asserted](decisions.md#addedrule-moved-to-dialectpy-and-the-move-was-measured-rather-than-asserted) | 302 |
 |  | [What the envelope ceiling's derivation still cannot see](decisions.md#what-the-envelope-ceilings-derivation-still-cannot-see) | 453 |
 |  | [A guard over another tree's source names no file in it](decisions.md#a-guard-over-another-trees-source-names-no-file-in-it) | 254 |
-|  | [An allowlist entry is keyed on the statement, because a fragment names a token](decisions.md#an-allowlist-entry-is-keyed-on-the-statement-because-a-fragment-names-a-token) | 310 |
+|  | [An allowlist entry is keyed on the statement, because a fragment names a token](decisions.md#an-allowlist-entry-is-keyed-on-the-statement-because-a-fragment-names-a-token) | 319 |
 |  | [Every CHECK is compared as text, and a fourth premise arm asks a boot what it built](decisions.md#every-check-is-compared-as-text-and-a-fourth-premise-arm-asks-a-boot-what-it-built) | 810 |
 |  | [An enum list in a CHECK is derived from its enum, so growing the enum names the missing revision](decisions.md#an-enum-list-in-a-check-is-derived-from-its-enum-so-growing-the-enum-names-the-missing-revision) | 1,220 |
 |  | [The diagonal that drives a walk reads the test tree, not one file](decisions.md#the-diagonal-that-drives-a-walk-reads-the-test-tree-not-one-file) | 732 |
@@ -851,9 +851,9 @@ repeat the argument.
 |  | [A refusal over a whole lint population is `lint.ignore`, read by selecting it again](decisions.md#a-refusal-over-a-whole-lint-population-is-lintignore-read-by-selecting-it-again) | 506 |
 |  | [The application's `lint.ignore` refuses two exception rules, and B008 is on](decisions.md#the-applications-lintignore-refuses-two-exception-rules-and-b008-is-on) | 745 |
 |  | [The application's per file table is read](decisions.md#the-applications-per-file-table-is-read) | 83 |
-|  | [A backlog count is held by a ceiling, and a security entry by file](decisions.md#a-backlog-count-is-held-by-a-ceiling-and-a-security-entry-by-file) | 131 |
+|  | [A backlog count is held by equality, and a security entry by file](decisions.md#a-backlog-count-is-held-by-equality-and-a-security-entry-by-file) | 93 |
 |  | [The keys of both ruff configurations are pinned](decisions.md#the-keys-of-both-ruff-configurations-are-pinned) | 131 |
-|  | [The frontend backlog counts are read over a copy with every disable directive blanked](decisions.md#the-frontend-backlog-counts-are-read-over-a-copy-with-every-disable-directive-blanked) | 475 |
+|  | [The frontend backlog counts are read over a copy with every disable directive blanked](decisions.md#the-frontend-backlog-counts-are-read-over-a-copy-with-every-disable-directive-blanked) | 387 |
 |  | [The frontend's property runs draw a fresh seed, and say where they are](decisions.md#the-frontends-property-runs-draw-a-fresh-seed-and-say-where-they-are) | 384 |
 |  | [One module runs every property, and the door is closed by derivation where one exists](decisions.md#one-module-runs-every-property-and-the-door-is-closed-by-derivation-where-one-exists) | 295 |
 |  | [The oracle for a reader is counted work, not "did it throw"](decisions.md#the-oracle-for-a-reader-is-counted-work-not-did-it-throw) | 441 |
@@ -878,7 +878,7 @@ repeat the argument.
 |  | [A bounded run's timeout is read off a marker, not off the timer's exit status](decisions.md#a-bounded-runs-timeout-is-read-off-a-marker-not-off-the-timers-exit-status) | 79 |
 |  | [One home for what this project wrote, and a ratchet on call sites instead of policing walks](decisions.md#one-home-for-what-this-project-wrote-and-a-ratchet-on-call-sites-instead-of-policing-walks) | 581 |
 |  | [The internal declaration rule has one copy per language, spelled for the pipeline's engine](decisions.md#the-internal-declaration-rule-has-one-copy-per-language-spelled-for-the-pipelines-engine) | 286 |
-|  | [Tests read the parse through one source reader](decisions.md#tests-read-the-parse-through-one-source-reader) | 199 |
+|  | [Tests read the parse through one source reader](decisions.md#tests-read-the-parse-through-one-source-reader) | 182 |
 |  | [Test readers of `openapi.json` go through one module](decisions.md#test-readers-of-openapijson-go-through-one-module) | 239 |
 |  | [A write pressed on a row of a list goes through `useRowWrite`, and a page wide busy flag stays at its site](decisions.md#a-write-pressed-on-a-row-of-a-list-goes-through-userowwrite-and-a-page-wide-busy-flag-stays-at-its-site) | 308 |
 |  | [One module owns a Book's Categories column](decisions.md#one-module-owns-a-books-categories-column) | 122 |
@@ -890,7 +890,7 @@ repeat the argument.
 |  | [One rule decides who may be told a vocabulary entry exists](decisions.md#one-rule-decides-who-may-be-told-a-vocabulary-entry-exists) | 455 |
 |  | [One reader for the pipeline file, and the shell runners keep theirs, held equal](decisions.md#one-reader-for-the-pipeline-file-and-the-shell-runners-keep-theirs-held-equal) | 507 |
 |  | [A cache's one writer is stated at its job, not held by a guard](decisions.md#a-caches-one-writer-is-stated-at-its-job-not-held-by-a-guard) | 279 |
-|  | [What "main is gated" means once the image builds beside the suites](decisions.md#what-main-is-gated-means-once-the-image-builds-beside-the-suites) | 655 |
+|  | [What "main is gated" means once the image builds beside the suites](decisions.md#what-main-is-gated-means-once-the-image-builds-beside-the-suites) | 613 |
 |  | [The one writer rule is held by a ratchet on references, not by the MARC arm alone](decisions.md#the-one-writer-rule-is-held-by-a-ratchet-on-references-not-by-the-marc-arm-alone) | 211 |
 |  | [The internal declaration rule stays in three copies, held equal by a pin](decisions.md#the-internal-declaration-rule-stays-in-three-copies-held-equal-by-a-pin) | 181 |
 |  | [A name's meaning is answered by one resolver, and a test that reads an import alias itself is counted per function](decisions.md#a-names-meaning-is-answered-by-one-resolver-and-a-test-that-reads-an-import-alias-itself-is-counted-per-function) | 90 |
@@ -925,9 +925,7 @@ repeat the argument.
 |  | [A tie inside one copy group takes the lowest id; any other tie is no answer](decisions.md#a-tie-inside-one-copy-group-takes-the-lowest-id-any-other-tie-is-no-answer) | 188 |
 |  | [A tie at the add door refuses without naming a Book](decisions.md#a-tie-at-the-add-door-refuses-without-naming-a-book) | 180 |
 |  | [An import row whose ISBN only the trash view holds is listed "in the trash"](decisions.md#an-import-row-whose-isbn-only-the-trash-view-holds-is-listed-in-the-trash) | 219 |
-|  | [The add door refuses another member's trashed holder, and purges only the caller's own](decisions.md#the-add-door-refuses-another-members-trashed-holder-and-purges-only-the-callers-own) | 587 |
-|  | [Deleting for good reaches only the trashed Books the caller added](decisions.md#deleting-for-good-reaches-only-the-trashed-books-the-caller-added) | 743 |
-|  | [A merge folds away only the Books the caller added, unless the caller is an admin](decisions.md#a-merge-folds-away-only-the-books-the-caller-added-unless-the-caller-is-an-admin) | 652 |
+|  | [The add door refuses another member's trashed holder, and purges only the caller's own](decisions.md#the-add-door-refuses-another-members-trashed-holder-and-purges-only-the-callers-own) | 573 |
 |  | [Hidden outranks the trash, and the disclosure that costs is accepted](decisions.md#hidden-outranks-the-trash-and-the-disclosure-that-costs-is-accepted) | 290 |
 |  | [ISBNs compare by `isbn.parse`](decisions.md#isbns-compare-by-isbnparse) | 89 |
 |  | [The add door finds an ISBN stored with hyphens or a lower case x](decisions.md#the-add-door-finds-an-isbn-stored-with-hyphens-or-a-lower-case-x) | 239 |
@@ -945,14 +943,8 @@ repeat the argument.
 |  | [An audiobook records no file location](decisions.md#an-audiobook-records-no-file-location) | 111 |
 |  | [A test asserting SQLite's behaviour says so, and an unmarked one fails](decisions.md#a-test-asserting-sqlites-behaviour-says-so-and-an-unmarked-one-fails) | 339 |
 |  | [A call inside a comprehension's condition is not refused by a guard](decisions.md#a-call-inside-a-comprehensions-condition-is-not-refused-by-a-guard) | 208 |
-|  | [build:smoke and scan:image take the digest build pushed](decisions.md#buildsmoke-and-scanimage-take-the-digest-build-pushed) | 325 |
-|  | [The copy takes only the digest the smoke test ran, on main and on a tag](decisions.md#the-copy-takes-only-the-digest-the-smoke-test-ran-on-main-and-on-a-tag) | 343 |
+|  | [build:smoke and scan:image take the digest build pushed](decisions.md#buildsmoke-and-scanimage-take-the-digest-build-pushed) | 306 |
 |  | [The smoke test refuses a world writable entry](decisions.md#the-smoke-test-refuses-a-world-writable-entry) | 301 |
 |  | [The release pin guard reads globs with PurePosixPath.full_match](decisions.md#the-release-pin-guard-reads-globs-with-pureposixpathfull_match) | 318 |
 |  | [oxfmt formats the frontend, not prettier or Biome](decisions.md#oxfmt-formats-the-frontend-not-prettier-or-biome) | 422 |
-|  | [A test only commit on main may be carried onto the patch branch](decisions.md#a-test-only-commit-on-main-may-be-carried-onto-the-patch-branch) | 460 |
-|  | [An advisory on several packages clears only when every package moved](decisions.md#an-advisory-on-several-packages-clears-only-when-every-package-moved) | 54 |
-|  | [Every dev dependency is exact, and every runtime library is on a range](decisions.md#every-dev-dependency-is-exact-and-every-runtime-library-is-on-a-range) | 1,299 |
-|  | [CI credentials are scoped to environments, and a credentialed job runs one pinned entrypoint](decisions.md#ci-credentials-are-scoped-to-environments-and-a-credentialed-job-runs-one-pinned-entrypoint) | 742 |
-|  | [A guard is keyed on this codebase's own names, never on a library's internals](decisions.md#a-guard-is-keyed-on-this-codebases-own-names-never-on-a-librarys-internals) | 1,118 |
 <!-- index: end -->
