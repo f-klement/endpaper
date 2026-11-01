@@ -27,6 +27,17 @@ junit-*.xml
 trivy-*.json
 .uv-cache/
 
+# Pipeline job artifacts. A job extracts the artifacts of every job it needs into its own
+# checkout, beside the versioned files, where a test walking the tree would otherwise
+# read them as this repository's own. Written without a trailing separator, so they are not
+# among the root directories the frontend's document corpus drops as publish output.
+/audit-base
+/suites-proof
+/autopatch
+/outbound
+/image.digest
+/smoked.digest
+
 # Competitor research, internal
 
 # Technology evaluation, internal working notes

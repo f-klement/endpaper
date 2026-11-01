@@ -334,7 +334,7 @@ describe("CalibreImport", () => {
     });
 
     expect(
-      screen.getByText(/^Dune · in the trash as another member's book/),
+      screen.getByText(/^Dune · in the trash and not added by you/),
     ).toBeInTheDocument();
   });
 

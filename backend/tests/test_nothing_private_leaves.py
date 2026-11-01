@@ -48,12 +48,27 @@ one that is:
   column on `books`, derived from the table, plus one row each in `tags`,
   `classifications`, `notes`, `quotes` and `custom_field_values`. **Everything
   else does not**: no `loans` row, no `user_books` row, no `reading_progress`
-  row, and no integer, date or boolean anywhere. A route serving one of those
+  row, and no integer, date or boolean on the private Book. A route serving one of those
   for a private Book passes this sweep, and the fixture marking five related
   tables is what would otherwise read as covering all of them.
+
+**The public Book is swept too, for what its public record withholds.** Each
+free text column `tests/schemas/test_public.py::WITHHELD` names carries
+`WITHHELD_MARKER` on the public Book, and its withheld price and dates carry a
+value of their own in `WITHHELD_SENTINELS`, so a value a validator or a
+serializer copies from one, under any key, is caught by what is sent rather
+than by how the schema was written. `UNMARKED_WITHHELD` names the withheld
+columns that carry neither, and why. What this cannot see:
+
+* **A withheld column in `UNMARKED_WITHHELD`**: an enum value such as `good`
+  is a common word, so a sweep for it proves nothing, and the currency is
+  too short to hold a marker.
+* **A value derived rather than copied**: a public `year` computed from
+  `purchased_at`, or a price rounded, is not the string swept for.
 """
 
 import re
+from datetime import date, datetime
 from typing import cast, get_args, get_type_hints
 
 import pytest
@@ -78,6 +93,7 @@ from models import (
     Tag,
 )
 from tests.conftest import auth_header
+from tests.schemas.test_public import WITHHELD
 
 #: A string that occurs in no fixture, no seeded tag and no real library.
 #:
@@ -103,6 +119,32 @@ PUBLIC_MARKER = "ZQPUBLICQZ"
 #: shared term returns it for a private one too, and the shared term also catches
 #: a route that filters the query and forgets the shelf.
 SHARED_TERM = "catalogued"
+
+#: The same again, for the columns the public Book carries and its public record
+#: withholds. Ten characters for `MARKER`'s reason.
+WITHHELD_MARKER = "ZQXWTHLDQZ"
+
+#: A value no fixture and no real library holds, for each withheld column of
+#: the public Book that is a number or a date, where the marker cannot go.
+#: Swept for as the string each one is sent as.
+WITHHELD_SENTINELS: dict[str, tuple[object, str]] = {
+    "purchase_price_minor": (987654321, "987654321"),
+    "purchased_at": (date(1903, 7, 19), "1903-07-19"),
+    "added_at": (datetime(1904, 8, 21, 10, 11, 12), "1904-08-21"),
+}
+
+#: The withheld columns on `books` that carry neither the marker nor a
+#: sentinel, each with the reason. Asserted to be the complement, so a column
+#: `WITHHELD` gains fails until somebody marks it or says why it cannot be.
+UNMARKED_WITHHELD: dict[str, str] = {
+    "lending": "an enum, whose values are common words a sweep cannot tell from text",
+    "condition": "an enum, for the same reason",
+    "ownership": "an enum, for the same reason",
+    "purchase_currency": "three characters, too short for the marker",
+    "is_private": "true would take the Book off the public shelf the sweep reads",
+    "deleted_at": "a value would put the Book in the trash, off the public shelf",
+    "collection_id": "a key, whose value is an identity rather than content",
+}
 
 #: Query strings applied to every call, rather than one per route.
 #:
@@ -245,6 +287,21 @@ def _free_text_columns() -> list[str]:
     return names
 
 
+def _withheld_columns() -> list[str]:
+    """The free text columns on `books` that the public record withholds.
+
+    The intersection, so a column `WITHHELD` gains is marked the day it does,
+    and a withheld field that is not a column, such as `added_by`, is left to
+    the schema probe.
+    """
+    return [name for name in _free_text_columns() if name in WITHHELD]
+
+
+def _withheld_strings() -> list[str]:
+    """What the withheld sweep looks for: the marker and each sentinel as sent."""
+    return [WITHHELD_MARKER, *(sent for _, sent in WITHHELD_SENTINELS.values())]
+
+
 def _publish(db) -> None:
     """Both switches on, so the catalogue answers rather than 404ing.
 
@@ -294,6 +351,11 @@ def marked(db, admin, member):
         author=f"{PUBLIC_MARKER} author",
         added_by_user_id=admin["user"]["id"],
     )
+    for name in _withheld_columns():
+        limit = getattr(columns[name].type, "length", None) or 200
+        setattr(public, name, f"{WITHHELD_MARKER} {name}"[:limit])
+    for name, (value, _) in WITHHELD_SENTINELS.items():
+        setattr(public, name, value)
     db.add_all([private, public])
     db.commit()
     db.refresh(private)
@@ -347,8 +409,8 @@ def _drive(client, call: str, probe: str, book_id: int):
     return client.request(method, url)
 
 
-def _seen(client, call: str, marked: dict, marker: str) -> bool:
-    """Whether a marker came back from any probe of one call, for either Book id.
+def _seen(client, call: str, marked: dict, *markers: str) -> bool:
+    """Whether any of these markers came back from any probe of one call, for either Book id.
 
     Headers as well as the body: a marker reaching a `Location`, an `ETag` or a
     filename is as sent as one in the payload.
@@ -357,7 +419,7 @@ def _seen(client, call: str, marked: dict, marker: str) -> bool:
         for book_id in (marked["private"], marked["public"]):
             response = _drive(client, call, probe, book_id)
             headers = " ".join(f"{k}: {v}" for k, v in response.headers.items())
-            if marker in response.text or marker in headers:
+            if any(marker in response.text or marker in headers for marker in markers):
                 return True
     return False
 
@@ -374,6 +436,16 @@ class TestNothingPrivateLeavesByARoute:
             "row still says the Book is there and lets a stranger count them. "
             "Rows for a reader this instance cannot name come from "
             "`Shelf.seen_by_the_public(db).outbound_page(...)`."
+        )
+
+    @pytest.mark.parametrize("call", _calls())
+    def test_no_probe_returns_what_the_public_record_withholds(self, client, marked, call):
+        assert not _seen(client, call, marked, *_withheld_strings()), (
+            f"{call} returned a column of a public Book that its public record "
+            "withholds, to a caller with no session. `WITHHELD` in "
+            "`tests/schemas/test_public.py` says why each one stays in the "
+            "household; a validator or serializer deriving a public value from "
+            "one sends it as surely as the field would."
         )
 
     def test_there_are_calls_to_sweep(self):
@@ -431,6 +503,13 @@ class TestTheSweepWouldNotice:
         assert response.status_code == 200
         assert MARKER in response.text
 
+    def test_the_withheld_columns_are_there_to_be_leaked(self, client, marked, admin):
+        """The control for the withheld sweep: its owner reads the public Book
+        with the marker in it, so its absence above is a refusal."""
+        response = client.get(f"/api/books/{marked['public']}", headers=auth_header(admin["access_token"]))
+        assert response.status_code == 200
+        assert [s for s in _withheld_strings() if s not in response.text] == []
+
     def test_another_member_is_refused_the_same_book(self, client, marked, admin):
         """The diagonal. Without it the control above would pass on a
         deployment where every Book is visible to everybody."""
@@ -449,6 +528,18 @@ class TestTheMarkedColumns:
         marked = set(_free_text_columns())
         assert {"title", "author", "description", "isbn", "location"} <= marked
         assert len(marked) >= 10
+
+    def test_every_withheld_column_is_marked_or_says_why_not(self):
+        """The marked, the sentinelled and the unmarked withheld columns are
+        each column of `books` that `WITHHELD` names, once."""
+        on_books = {column.name for column in cast(Table, Book.__table__).columns if column.name in WITHHELD}
+        parts = [set(_withheld_columns()), set(WITHHELD_SENTINELS), set(UNMARKED_WITHHELD)]
+        assert sorted(name for part in parts for name in part) == sorted(on_books)
+
+    def test_the_withheld_columns_include_the_room(self):
+        """`location` is the column a household would least want published,
+        and the one a validator reading the row could most easily copy."""
+        assert "location" in _withheld_columns()
 
     def test_the_closed_vocabularies_are_excluded_and_stay_excluded(self):
         """The four enum backed columns.

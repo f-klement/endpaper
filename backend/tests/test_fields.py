@@ -53,7 +53,7 @@ from tests.test_house_rules import (
     column_mentions,
     declared_schema_fields,
 )
-from tests.test_shelf import _book_owned_offences, _statement_at
+from tests.test_shelf import ARCHIVE_TABLES_DECLARATION, _book_owned_offences, _statement_at
 from tests.test_tags import _reaches_private
 
 TREE_GUARDS = {
@@ -85,11 +85,8 @@ CUSTOM_FIELD: Final = frozenset({"CustomField"})
 #:   bound at run time, so this pass cannot see which table it reads.
 #:   `tests/test_shelf.py` lists it as a parameterised reader and asserts it
 #:   admin only. It is unfiltered on purpose, because an archive missing rows
-#:   restores a library missing them.
-#: * **A raw `text(...)` read.** Names no entity, so the pass is blind to it.
-#:   No live member, measured 2026-10-01 over `application_sources()`.
-#:   `tests/test_shelf.py` carries the same hole for `books`, with the argument
-#:   for naming it rather than chasing it.
+#:   restores a library missing them. The `_TABLES` declaration naming the
+#:   entity is an entry below; the read is not.
 #: * **A computed entity.** `model = getattr(models, "CustomField")` then
 #:   `db.query(model)`. The alias resolver follows an assignment from a name
 #:   and not from a call, so the pass reports nothing: measured 2026-10-01,
@@ -98,6 +95,11 @@ CUSTOM_FIELD: Final = frozenset({"CustomField"})
 #:   level. No live member: no module outside `shelf.py` reaches an entity off `models`
 #:   through `getattr`. Contrived, and named because a list of three read as
 #:   closed.
+#: * **Raw SQL the grammar does not recognise.** Every string literal is read
+#:   as SQL by `tests/test_shelf.py::_raw_sql_naming`, whose docstring says
+#:   which spellings it lets through, and a bare table name where a table is
+#:   looked up by name by `_raw_sql_offences`. No live member: the tree's raw
+#:   SQL names `books` only.
 #:
 #: Keyed on the enclosing function and the whole flattened statement,
 #: positionally in line order, the key `COLLECTION_READERS` uses and for the
@@ -105,6 +107,13 @@ CUSTOM_FIELD: Final = frozenset({"CustomField"})
 #: identical statements and differ only in which door they serve, so keyed on
 #: the statement alone their reasons would be interchangeable.
 FIELD_READERS: Final = {
+    "backup.py": [
+        (
+            ARCHIVE_TABLES_DECLARATION,
+            "the archive's table list, a declaration run once at import. Its reason "
+            "is beside the same key in `tests/test_shelf.py`'s `BOOK_OWNED_READERS`.",
+        ),
+    ],
     "custom_fields.py": [
         (
             "definitions: return db.query(CustomField).order_by(CustomField.id).all()",
@@ -161,6 +170,14 @@ FIELD_READERS: Final = {
             "every instance read of the name anywhere in the tree. The whole "
             "table rather than one id for the reason `definitions` gives: "
             "`MAX_CUSTOM_FIELDS` is 25.",
+        ),
+    ],
+    "models.py": [
+        (
+            'field_id: Mapped[int] = mapped_column( Integer, ForeignKey("custom_fields.id", '
+            'ondelete="CASCADE"), nullable=False )',
+            "a foreign key declaration, run once at import. It reads no row; the string is the "
+            "qualified column the raw SQL arm reads as naming the table.",
         ),
     ],
     "routers/books.py": [
@@ -316,7 +333,7 @@ def _definition_callers(sources: dict[str, str]) -> list[str]:
     past exactly as a bare call in that shape does.
 
     **Those two are outside the rule and are named rather than chased**, the
-    way the sibling registry in `tests/test_shelving.py` names raw SQL:
+    way the sibling registry in `tests/test_shelving.py` names its own:
 
     * **Binding the function to a local and calling the local.**
       `read = custom_fields.definitions` then `read(db)`. Following it is flow

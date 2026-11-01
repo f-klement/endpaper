@@ -104,14 +104,14 @@ is discarded, and only a token naming a test account does. See [security.md](sec
 | GET | `/api/books/locations` | user | Distinct shelf locations, most-populated first |
 | GET | `/api/books/duplicates` | user | Books that look like the same work |
 | GET | `/api/books/trash` | user | What the caller has deleted and could put back |
-| DELETE | `/api/books/trash` | user | Empties it for good. Returns `{purged}` |
-| POST | `/api/books/merge` | user | Fold several entries into one. **409** when Postgres aborted the merge to break a deadlock with another change to the same Books: nothing is merged, and the same request can be sent again |
+| DELETE | `/api/books/trash` | user | Deletes for good every book in the trash the caller added, and an admin also every one with no recorded adder; leaves the rest. Returns `{purged}`, counting only those destroyed |
+| POST | `/api/books/merge` | user | Fold several entries into one. **409** when an entry other than `keep_id` was added by another member or by nobody and the caller is not an admin: nothing is merged. **409** also when Postgres aborted the merge to break a deadlock with another change to the same Books: nothing is merged, and the same request can be sent again |
 | POST | `/api/books/bulk` | user | One verb applied to a selection of books |
 | POST | `/api/books/covers/backfill?after_id=` | user | Fetch and store the covers of books that have none. Bounded per run: send the reply's `next_after_id` back to carry on, and it returns 0 at the end. `after_id` is 0 to 2^63-1; outside that is a **422** |
 | GET | `/api/books/{id}` | read | **404** if absent *or* invisible |
 | DELETE | `/api/books/{id}` | write | 204. Moves it to the trash, reversibly |
 | POST | `/api/books/{id}/restore` | trashed | Puts it back, with everything on it |
-| DELETE | `/api/books/{id}/permanent` | trashed | 204. Destroys it and its cover file |
+| DELETE | `/api/books/{id}/permanent` | trashed | 204. Destroys it and its cover file. **409** for a book another member added, or for one with no recorded adder unless the caller is an admin; it stays in the trash |
 | PATCH | `/api/books/{id}/privacy` | **owner** | **403** for another member |
 | PUT | `/api/books/{id}/status` | read | Sets *your* status only |
 | PUT | `/api/books/{id}/refresh` | write | **400** without an ISBN |
@@ -302,29 +302,34 @@ person confirms.
 **The scan is unpaginated and the answer is capped**, which are two different statements.
 Grouping needs the whole catalogue, because a pair split across two pages is two singletons,
 so every request reads one row per visible book. What the cap cuts is the finished grouping:
-`{groups, total_groups}`, where `total_groups` is everything the scan found and `groups`
-carries at most 200 books in all. **It is a cap and not a page.** Nothing resumes, because
-the rows here are the ones the caller is there to delete, so an offset would name a
-different group on every request. A group is never split by the cap, and a group is shown
-with at most the 20 members `POST /merge` accepts, with `size` saying how many there really
-are: the card sends every id it renders, so showing more would be a button that cannot work.
+`{groups, total_groups}`, where `total_groups` is every group the scan found that the caller
+can merge and `groups` carries at most 200 books in all. A group the caller can merge is one
+holding at least one entry they may fold away, and each entry says so in `may_merge_away`; a
+group with no entry the caller may fold away is left out, so it cannot fill the page. **It is
+a cap and not a page.** Nothing resumes, because the rows here are the ones the caller is
+there to delete, so an offset would name a different group on every request. A group is
+never split by the cap, and a group is shown with at most the 20 members `POST /merge`
+accepts, chosen from the entries the caller may fold away first, with `size` saying how many
+there really are: the card never sends more ids than it renders, so showing more would be a
+button that cannot work.
 
 **Deliberate copies never appear here.** Each `copy_group` is collapsed to one row before
 the matching runs, so two paperbacks of one title are not offered for merge. They would
 otherwise be the strongest match this endpoint can produce, and merging them destroys a
 book the library holds.
 
-`POST /merge` takes `{book_ids, keep_id}` and `keep_id` must appear in `book_ids`, spelled
-out rather than inferred so a mistyped request fails instead of silently keeping whichever
-row sorted first. The survivor absorbs only what it is missing, and tags, notes, quotes,
-classifications, loans and statuses are repointed rather than dropped. A classification
-both rows carry is dropped rather than moved (the pair is unique per book, scheme and
-number), though the survivor takes its caption first if it had none. The survivor is
-capped at 8 like every other book, and a merge that would carry it past that drops the
-overflow, which is where those rows were going anyway before classifications were
-repointed at all. Where the same member holds a status
-on two of the merged rows, the survivor's own row wins: deleting somebody's reading history to
-satisfy a unique index is not an acceptable resolution.
+`POST /merge` takes `{book_ids, keep_id}` and `keep_id` must appear in `book_ids`, spelled out
+rather than inferred so a mistyped request fails instead of silently keeping whichever row
+sorted first. Every entry but the survivor is deleted, so each must be one the caller added,
+unless the caller is an admin; the survivor may be anybody's. The survivor absorbs only what
+it is missing, and tags, notes, quotes, classifications, loans and statuses are repointed
+rather than dropped. A classification both rows carry is dropped rather than moved (the pair
+is unique per book, scheme and number), though the survivor takes its caption first if it had
+none. The survivor is capped at 8 like every other book, and a merge that would carry it past
+that drops the overflow, which is where those rows were going anyway before classifications
+were repointed at all. Where the same member holds a status on two of the merged rows, the
+survivor's own row wins: deleting somebody's reading history to satisfy a unique index is not
+an acceptable resolution.
 
 Merging two rows that were copies of each other is a member saying they were never two
 objects, and it works: the survivor is left an ordinary book with no `copy_group`.

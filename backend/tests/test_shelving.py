@@ -11,7 +11,7 @@ import ast
 from typing import Final
 
 from tests.corpus import application_sources
-from tests.test_shelf import _book_owned_offences, _statement_at
+from tests.test_shelf import ARCHIVE_TABLES_DECLARATION, _book_owned_offences, _statement_at
 from tests.test_tags import _reaches_private
 
 TREE_GUARDS = {
@@ -33,12 +33,12 @@ COLLECTION: Final = frozenset({"Collection"})
 #: last two have none and say so**, because a family with no live member is the
 #: one nobody notices acquiring its first:
 #:
-#: * `backup.py` puts `("collections", Collection)` in `_TABLES` and reads it
-#:   through a runtime bound name, so the whole table is dumped and no pass
-#:   that reads the arguments to `query()` sees it. Safe because the route is
-#:   admin only, which `tests/test_shelf.py` asserts separately, and unfiltered
-#:   on purpose because an archive missing rows restores a library missing
-#:   them.
+#: * `backup.py` reads the table through a runtime bound name, so the whole
+#:   table is dumped and the read itself names nothing. The `_TABLES`
+#:   declaration naming `Collection` is an entry below; the read is not. Safe
+#:   because the route is admin only, which `tests/test_shelf.py` asserts
+#:   separately, and unfiltered on purpose because an archive missing rows
+#:   restores a library missing them.
 #: * `Book.collection_id` is a column of `books`, not of this table. It is the
 #:   shelf rule's, not this one's, and it is why the CSV export's
 #:   `book.collection.name` is reported nowhere: the rows come off a Shelf and
@@ -46,15 +46,6 @@ COLLECTION: Final = frozenset({"Collection"})
 #: * Where the rows **go**. The pass matches a statement that reads the entity
 #:   and says nothing about what the caller does with the result, which is why
 #:   the arm over the reader's private state exists beside it.
-#: * **A raw `text(...)` read over the table.** `db.execute(text("SELECT id,
-#:   name FROM collections"))` names no entity anywhere, so the pass is blind
-#:   to it and an unentried module holding one stays green. **No live member**,
-#:   measured 2026-09-30 over `application_sources()`. The shape is written in this
-#:   repository, by the `e7b3d02a5c94` revision that folded collection names
-#:   outside ASCII, and `migrations/` is one of the directories that corpus
-#:   excludes. `tests/test_shelf.py` carries the same hole for `books` on its
-#:   own blind spot list, with the argument for naming it rather than chasing
-#:   it.
 #: * **A root name bound from outside this backend.** `_entity_aliases`
 #:   subtracts a bare `Collection` imported from anywhere the backend corpus
 #:   does not hold, because `collections.abc.Collection` is the same seven
@@ -67,6 +58,11 @@ COLLECTION: Final = frozenset({"Collection"})
 #:   `from shelving import Collection` struck the name out and left a whole
 #:   module unreportable with nothing red. That is closed; what is left is the
 #:   deliberate false refusal.
+#: * **Raw SQL the grammar does not recognise.** Every string literal is read
+#:   as SQL by `tests/test_shelf.py::_raw_sql_naming`, whose docstring says
+#:   which spellings it lets through, and a bare table name where a table is
+#:   looked up by name by `_raw_sql_offences`. No live member: the tree's raw
+#:   SQL names `books` only.
 #:
 #: **Keyed on the enclosing function and the whole flattened statement**,
 #: positionally in line order, the same key `TAG_READERS` uses and for the same
@@ -78,6 +74,39 @@ COLLECTION: Final = frozenset({"Collection"})
 #: A reason, not a restatement. "Admin only, and the name never leaves" is a
 #: reason; "reads a Collection" is not.
 COLLECTION_READERS: Final = {
+    "backup.py": [
+        (
+            ARCHIVE_TABLES_DECLARATION,
+            "the archive's table list, a declaration run once at import. Its reason "
+            "is beside the same key in `tests/test_shelf.py`'s `BOOK_OWNED_READERS`.",
+        ),
+        (
+            '_refuse_a_colliding_pair: for row in tables.get("collections") or []: name = row.get("name") '
+            "if not isinstance(name, str): continue # `_parse_row` refuses it, with the table in the "
+            "message. folded = fold_collection_name(name) seen = first_by_fold.get(folded) if seen is not "
+            "None: # Any second row folding the same, **including one spelled # identically**. An earlier "
+            "version compared `seen != name` and so # let two rows both named `Fiction` through, on the "
+            "assumption that # only a pre-revision archive reaches here and that such an archive # came "
+            "from a database whose old index caught the ASCII pair. That # is the trusted-archive "
+            "assumption `_parse_row` above explicitly # withholds: a hand edited file is not required to "
+            "be self # consistent. The index is on the fold rather than the name, so the # identical pair "
+            "collides too, and the 500 it caused named neither # collection. raise RestoreError( "
+            '"This backup holds two collections whose names fold the same: " '
+            'f"{seen[:120]!r} and {name[:120]!r}. Merge them in the library " '
+            '"the backup came from, take a new backup, and restore that." ) first_by_fold[folded] = name',
+            "reads the collection rows of the uploaded archive, a dict read off the file, to refuse two "
+            "names that fold the same before anything is written. Not the database: the table's name is "
+            "the dict's key. Admin only, as every restore is.",
+        ),
+    ],
+    "models.py": [
+        (
+            'collection_id: Mapped[int | None] = mapped_column( Integer, ForeignKey("collections.id", '
+            'ondelete="SET NULL"), nullable=True, index=True, )',
+            "a foreign key declaration, run once at import. It reads no row; the string is the "
+            "qualified column the raw SQL arm reads as naming the table.",
+        ),
+    ],
     "routers/collections.py": [
         (
             "_named: query = db.query(Collection).filter(Collection.name_folded == "

@@ -4568,6 +4568,11 @@ export const getMergeBooksUrl = () => {
  * dropped. A status collision (both rows read by the same person) keeps the
  * one on the survivor, because deleting somebody's reading history to
  * satisfy a unique index is not an acceptable way to resolve it.
+ *
+ * A merge deletes its losers, so each one must be a Book the caller added,
+ * unless the caller is an admin; one that is not refuses the whole merge
+ * with 409, before anything moves. The survivor may be anybody's: it loses
+ * nothing, since it never overwrites a value it holds.
  * @summary Merge Books
  */
 export const mergeBooks = async (
@@ -5691,12 +5696,14 @@ export const getEmptyTrashUrl = () => {
 };
 
 /**
- * Delete everything in the caller's trash for good.
+ * Delete for good every Book in the caller's trash that `_purgeable_by`
+ * lets them destroy.
  *
- * Scoped by `in_trash_for`, so emptying the trash never reaches a book the
- * caller could not see in it. There is no automatic expiry: this app has no
- * scheduler, and a sweep at startup would delete on restart timing rather
- * than on any schedule anybody chose.
+ * The rest of the listing is left where it is and not counted. Filtered in
+ * Python rather than SQL so the rule has one spelling: the trash is small,
+ * and `_purge` loads every row it deletes anyway. There is no automatic
+ * expiry: this app has no scheduler, and a sweep at startup would delete on
+ * restart timing rather than on any schedule anybody chose.
  * @summary Empty Trash
  */
 export const emptyTrash = async (
@@ -10075,7 +10082,12 @@ export const getPurgeBookUrl = (bookId: number) => {
 };
 
 /**
- * Delete one trashed book for good.
+ * Delete one trashed book for good, if `_purgeable_by` lets the caller.
+ *
+ * A Book it refuses is in the caller's trash view, so it answers 409 rather
+ * than 404, as the add door answers the same Book, and stays in the trash,
+ * where it can still be put back. Not `book_for_owner`'s 403, whose admin
+ * exception this rule does not have.
  * @summary Purge Book
  */
 export const purgeBook = async (

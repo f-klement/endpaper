@@ -3617,6 +3617,10 @@
             ],
             "title": "Isbn"
           },
+          "may_merge_away": {
+            "title": "May Merge Away",
+            "type": "boolean"
+          },
           "publisher": {
             "anyOf": [
               {
@@ -3646,13 +3650,14 @@
         },
         "required": [
           "id",
-          "title"
+          "title",
+          "may_merge_away"
         ],
         "title": "DuplicateMember",
         "type": "object"
       },
       "DuplicateReport": {
-        "description": "The duplicates worth working on, and how many there are in all.\n\n`groups` is capped by `DUPLICATE_BOOKS_SHOWN`. `total_groups` is not: it is\nwhat the scan found, so a member whose import ran twice is told the size of\nwhat happened instead of being handed it.\n\n**A count is a disclosure, and this route had never carried one.** Both\nnumbers count the groups this viewer **can see**, so neither can be moved\nby a Book the viewer cannot see.\n\n**Can see, not owns**, and the two are separate in this data model on\npurpose. A member looking at two public Books somebody else added is\ncounted one group and is offered the merge, which is intended and is what\n`merge_books` reasons about: `visible_to` yields exactly the set a caller\nmay write, because a public Book is a shared shelf. This sentence used to\nsay the viewer's own shelf, which reads as ownership and is the opposite\nof the rule.",
+        "description": "The duplicates worth working on, and how many there are in all.\n\n`groups` is capped by `DUPLICATE_BOOKS_SHOWN`. `total_groups` is not: it is\nwhat the scan found, so a member whose import ran twice is told the size of\nwhat happened instead of being handed it.\n\n**A count is a disclosure, and this route had never carried one.** Both\nnumbers count groups of Books this viewer **can see**, so neither can be\nmoved by a Book the viewer cannot see.\n\n**Of those, only the groups this viewer can merge.** A merge deletes every\nBook but the one kept, and a viewer who is not an admin may delete only\nBooks they added, so a group with no row whose `may_merge_away` is true is\nleft out of both numbers: its card could fold nothing, and counted it\nwould take the place of a group the viewer can work on. A group mixing the\nviewer's Books with any others is in, and one of the others may be the one\nkept. Of a group larger than one merge, the rows shown are chosen from\nthose the viewer may merge away first.",
         "properties": {
           "groups": {
             "items": {
@@ -6375,7 +6380,7 @@
         "type": "object"
       },
       "PurgeResult": {
-        "description": "How many books emptying the trash destroyed.",
+        "description": "How many Books emptying the trash destroyed: those in it the caller\nadded. Another member's trashed Book is left in place and not counted.",
         "properties": {
           "purged": {
             "minimum": 0.0,
@@ -10483,7 +10488,7 @@
     },
     "/api/books/merge": {
       "post": {
-        "description": "Fold several catalogue entries into one.\n\nThe survivor absorbs anything the others have and it lacks: a cover, an\nISBN, a page count. It never overwrites a value it already holds, on the\nsame principle as enrichment, since the kept row is the one a person chose.\n\nTags, notes, quotes, highlights, loans and reading statuses are repointed rather than\ndropped. A status collision (both rows read by the same person) keeps the\none on the survivor, because deleting somebody's reading history to\nsatisfy a unique index is not an acceptable way to resolve it.",
+        "description": "Fold several catalogue entries into one.\n\nThe survivor absorbs anything the others have and it lacks: a cover, an\nISBN, a page count. It never overwrites a value it already holds, on the\nsame principle as enrichment, since the kept row is the one a person chose.\n\nTags, notes, quotes, highlights, loans and reading statuses are repointed rather than\ndropped. A status collision (both rows read by the same person) keeps the\none on the survivor, because deleting somebody's reading history to\nsatisfy a unique index is not an acceptable way to resolve it.\n\nA merge deletes its losers, so each one must be a Book the caller added,\nunless the caller is an admin; one that is not refuses the whole merge\nwith 409, before anything moves. The survivor may be anybody's: it loses\nnothing, since it never overwrites a value it holds.",
         "operationId": "merge_books",
         "requestBody": {
           "content": {
@@ -10998,7 +11003,7 @@
     },
     "/api/books/trash": {
       "delete": {
-        "description": "Delete everything in the caller's trash for good.\n\nScoped by `in_trash_for`, so emptying the trash never reaches a book the\ncaller could not see in it. There is no automatic expiry: this app has no\nscheduler, and a sweep at startup would delete on restart timing rather\nthan on any schedule anybody chose.",
+        "description": "Delete for good every Book in the caller's trash that `_purgeable_by`\nlets them destroy.\n\nThe rest of the listing is left where it is and not counted. Filtered in\nPython rather than SQL so the rule has one spelling: the trash is small,\nand `_purge` loads every row it deletes anyway. There is no automatic\nexpiry: this app has no scheduler, and a sweep at startup would delete on\nrestart timing rather than on any schedule anybody chose.",
         "operationId": "empty_trash",
         "responses": {
           "200": {
@@ -13564,7 +13569,7 @@
     },
     "/api/books/{book_id}/permanent": {
       "delete": {
-        "description": "Delete one trashed book for good.",
+        "description": "Delete one trashed book for good, if `_purgeable_by` lets the caller.\n\nA Book it refuses is in the caller's trash view, so it answers 409 rather\nthan 404, as the add door answers the same Book, and stays in the trash,\nwhere it can still be put back. Not `book_for_owner`'s 403, whose admin\nexception this rule does not have.",
         "operationId": "purge_book",
         "parameters": [
           {

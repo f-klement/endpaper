@@ -34,8 +34,9 @@ const REFERENCE_CEILING = "reference_ceiling";
 const FILE_HELD_ELSEWHERE = "file_held_elsewhere";
 /**
  * The add door's `code` on a 409 for an ISBN only Books in the member's trash
- * view hold, one of them another member's. The door purges the member's own
- * trashed Book and adds afresh, so only somebody else's answers this.
+ * view hold, one of them not the member's own. The door purges the member's
+ * own trashed Book and adds afresh, so only one somebody else added, or that
+ * nobody is recorded as adding, answers this.
  * `IN_TRASH` in `backend/routers/books.py` is the other spelling, and the
  * backend suite holds the value declared here equal to it.
  */
@@ -379,9 +380,11 @@ export async function reportEach<T = DigitalReferenceIn>(
  *   is a tie between Books outside one copy group and also how a holder the
  *   member cannot see answers. No file lands.
  * - `in-trash`: refused because only the member's trash view holds the ISBN,
- *   one holder being another member's (`refusedForTheTrash`). It names no
- *   Book either, and is not a tie: the member can put that Book back, or
- *   delete it for good, and add again. No file lands.
+ *   one holder not being the member's own (`refusedForTheTrash`). It names no
+ *   Book either, and is not a tie: the member can put that Book back, or ask
+ *   the member who added it, or an admin if nobody did, to delete it for
+ *   good, and add again. No file
+ *   lands.
  * - `failed`: refused for any other reason, `thrown` saying why. A duplicate
  *   naming a Book is one of these even where its files were put on the copy
  *   of their kind, because no Book was made.

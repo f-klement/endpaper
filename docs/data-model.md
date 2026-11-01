@@ -1199,7 +1199,9 @@ twenty call sites. A second rule that every query must remember would be the one
 forgotten. The trash view opts out with `in_trash_for(user_id)`, a separate function rather
 than a flag on this one: a predicate that means "on the shelf" or "in the trash" depending
 on an argument is one a caller can get backwards, and getting it backwards shows every
-deleted book in the library.
+deleted book in the library. It is the set a member may **see** in the trash, not the set
+they may destroy: deleting for good, one book or the whole trash, reaches only the books in
+it the caller added, and for an admin also those with no recorded adder.
 
 Three details worth keeping:
 

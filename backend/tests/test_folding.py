@@ -30,7 +30,6 @@ from models import Book, DigitalReference, User, children_of_books
 from routers.books import report_digital_reference
 from schemas import MAX_CLASSIFICATIONS_PER_BOOK, MAX_DIGITAL_REFERENCES_PER_BOOK
 from schemas.digital import DigitalReferenceIn
-from tests.test_shelf import _READING_METHODS
 
 FOLDING = Path(__file__).resolve().parent.parent / "folding.py"
 
@@ -64,24 +63,31 @@ _NARROWING = frozenset({"filter", "where"})
 def _read_roots(source: str) -> list[tuple[ast.Call, ast.expr]]:
     """The innermost call of every chain in this module that could reach a table.
 
-    Three ways in, and the second exists because the first is not enough.
+    Three ways in, and none reads a library's method names.
 
-    **Any call on the session.** `_READING_METHODS` is derived from `Query` and
-    `Select` and so contains neither `execute` nor `scalars`, measured: the 2.0
-    spellings `db.scalars(select(model))` and `db.execute(update(model))` are
-    invisible to a rule keyed on that set, and the 2.0 style is live in this
-    backend. The session is the only door to the database from this module, so
-    every call through it is a root whatever it is called.
+    **Any call on the session.** The session is the only door to the database
+    from this module, so every call through it is a root whatever it is called:
+    `db.scalars(select(model))` and `db.execute(update(model))` as surely as
+    `db.query(model)`. A statement built off the session and executed through
+    it, `fold.db.execute(transfer.table.select())`, is rooted at the `execute`.
 
-    **Any call whose method is in `_READING_METHODS`**, which catches a read
-    that never touches the session on its way to being built:
-    `transfer.table.select()` reads a whole table off a live `Table` object this
-    module holds ten of.
+    **Any call to a method this module calls on the session**, `_SESSION_CALLS`,
+    whatever the receiver. So a session reached under another name,
+    `self.session.query(model)`, is a root with no fold to be bounded by and is
+    reported.
 
     **Any call on a name this module imported from SQLAlchemy**, which catches
     the bare `select(model)` and `text(...)` spellings. Derived from the
     module's own imports rather than listed, so a builder imported tomorrow is a
     root the day it appears.
+
+    What reaches the database through none of the three, a connection taken off
+    the session, is a method name this module has never called, and
+    `test_every_method_this_module_calls_is_classified` is what refuses one.
+    The one it lets through is a session under another name read through a
+    method filed as plain: `fold.session.get(Classification, row_id)` is no
+    root, since `get` is also a dict's. It reads one row by a key already in
+    hand, which is a read written on purpose rather than an index.
 
     Each answer is the root and the whole chain built on it: the root is what
     names the table, and the narrowing that bounds it is a later link.
@@ -111,7 +117,7 @@ def _read_roots(source: str) -> list[tuple[ast.Call, ast.expr]]:
         if isinstance(func, ast.Name):
             return func.id in imported
         return isinstance(func, ast.Attribute) and (
-            func.attr in _READING_METHODS or func.attr in imported or _on_the_session(node)
+            func.attr in _SESSION_CALLS or func.attr in imported or _on_the_session(node)
         )
 
     chains: dict[int, ast.expr] = {}
@@ -142,9 +148,9 @@ def _on_the_session(call: ast.Call) -> bool:
     """Whether this call is made on the request's `Session`.
 
     Read off the receiver's last segment, which is `db` at every call site in
-    this backend. A session spelled anything else falls out of the session arm
-    and into `NOT_A_DATABASE_READ`, where it fails until somebody writes down
-    what it is: wrong in the safe direction.
+    this backend. A session spelled anything else is still a root, through the
+    method it calls, and has no fold to be bounded by, so it is reported until
+    somebody writes down what it is: wrong in the safe direction.
     """
     return isinstance(call.func, ast.Attribute) and ast.unparse(call.func.value).rsplit(".", 1)[-1] == "db"
 
@@ -291,11 +297,11 @@ def _carry_of(root: ast.Call) -> str | None:
 def _unbounded_reads(source: str) -> list[int]:
     """Reads here that are not confined to the Books being folded.
 
-    **This module is invisible to the fourth pass in `tests/test_shelf.py`**,
-    which finds a read of a Book owned table by the entity's name appearing
-    inside a reading call. Every read here is built on the model its transfer
-    was constructed with, so the name is in an argument and that pass sees
-    nothing where it used to see three allowlisted statements.
+    **This module's reads are invisible to the fourth pass in
+    `tests/test_shelf.py`**, which finds a read of a Book owned table by the
+    entity's name appearing in a statement. Every read here is built on the
+    model its transfer was constructed with, so no read names the entity; the
+    pass sees the `TRANSFERS` declaration alone, and classifies it there.
 
     **What it sees is the argument a narrowing call is handed, never a token in
     the chain.** The first version of this rule asked whether `"book_id"`
@@ -309,14 +315,11 @@ def _unbounded_reads(source: str) -> list[int]:
     `BOOK_OWNED_READERS` entries it replaced were enforced by a count and a
     positional fragment, so a fourth read appearing at all, in any spelling,
     failed until a person wrote a sentence about it. A shape rule refuses a
-    shape and asks nobody anything, so `READ_ROOTS` below carries the count and
-    `NOT_A_DATABASE_READ` carries the sentences.
+    shape and asks nobody anything, so `READ_ROOTS` below carries the count.
     """
     offences = []
     for root, chain in _read_roots(source):
         if _reads_nothing(root):
-            continue
-        if not _on_the_session(root) and ast.unparse(root) in dict(NOT_A_DATABASE_READ):
             continue
         subjects = _subjects(root)
         carry = _carry_of(root)
@@ -338,35 +341,31 @@ def _unbounded_reads(source: str) -> list[int]:
 #: spelling, failed that pass until a person described it. `_unbounded_reads`
 #: refuses a shape and asks nobody to look, so the looking is this number's job.
 #:
-#: Thirteen: five queries, two `Session.delete`s of a row in hand, the
-#: `Session.expire` of the keeper after its lock, three `flush`es and the two
-#: plain Python calls in `NOT_A_DATABASE_READ`. The fifth query is
-#: `_carry_highlights`, bounded to the losers' ids.
-READ_ROOTS = 13
+#: Eleven: five queries, two `Session.delete`s of a row in hand, the
+#: `Session.expire` of the keeper after its lock and three `flush`es. The fifth
+#: query is `_carry_highlights`, bounded to the losers' ids.
+READ_ROOTS = 11
 
-#: Calls the derived reading set matches that touch no table, and why.
+#: Every method name `folding.py` calls, by what the call reaches.
 #:
-#: Keyed on the call as `ast.unparse` writes it and checked by **equality** in
-#: line order, so an entry cannot drift onto a neighbouring statement.
-#: `BOOK_OWNED_READERS` keys on a whole statement and compares it the same way,
-#: and the comment above that table is where the reason and its measurement
-#: live.
+#: **This module's own vocabulary, pinned.** `_read_roots` finds a read by the
+#: session it goes through, so a door to the database that bypasses it is a
+#: method name this module has not called before: `connection`, `execute` on a
+#: connection, `select` on a `Table`. A name new here fails
+#: `test_every_method_this_module_calls_is_classified` until a person says
+#: which group it is in, which is the question a new door needs asked.
 #:
-#: Both are here because `_READING_METHODS` is derived from `Query` and `Select`
-#: and is deliberately over broad. Neither is a session call.
-NOT_A_DATABASE_READ = [
-    (
-        "kept.get(token)",
-        "a dict lookup. `Query.get` shares the name; this is the local map of "
-        "the keeper's own rows, built two lines above out of a relationship on "
-        "the Book the route resolved.",
-    ),
-    (
-        "{loan.id: loan for loan in [*on_keeper, *moved]}.values()",
-        "deduplicates two lists of Loan objects already in hand. `Query.values` "
-        "shares the name; this reads a dict comprehension.",
-    ),
-]
+#: Called on the session or on a query built on it. Each is a root wherever it
+#: is called, so this set is also part of what `_read_roots` reads.
+_SESSION_CALLS = frozenset({"all", "delete", "expire", "filter", "flush", "order_by", "query"})
+#: Builds a clause and reaches nothing on its own.
+_CLAUSE_CALLS = frozenset({"in_"})
+#: Another module's merge rule, guarded where that module's reads are.
+_DELEGATED_CALLS = frozenset({"close", "is_open", "resolve_merge"})
+#: Plain Python on values already in hand, reaching no table.
+_PLAIN_CALLS = frozenset(
+    {"add", "append", "carry", "clear", "get", "getLogger", "info", "now", "replace", "values"}
+)
 
 
 def _extra_child() -> Table:
@@ -609,14 +608,33 @@ class TestEveryReadIsBoundedToTheBooksBeingFolded:
             f"move this number: {[ast.unparse(root) for root, _ in roots]}"
         )
 
-    def test_every_matched_call_off_the_session_is_described(self):
-        """The derived reading set is over broad on purpose, so the calls it
-        matches that touch no table are written down with a reason each.
+    def test_every_method_this_module_calls_is_classified(self):
+        """The door `_read_roots` cannot see, refused by name.
+
+        A read through a connection taken off the session is rooted at the
+        connection, which names nothing and so reads nothing by the session
+        rule. What it cannot avoid is calling a method this module has not
+        called before.
         """
-        off_session = [
-            ast.unparse(root) for root, _ in _read_roots(FOLDING.read_text()) if not _on_the_session(root)
-        ]
-        assert off_session == [call for call, _ in NOT_A_DATABASE_READ]
+        called = {
+            node.func.attr
+            for node in ast.walk(ast.parse(FOLDING.read_text()))
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+        }
+        groups = (_SESSION_CALLS, _CLAUSE_CALLS, _DELEGATED_CALLS, _PLAIN_CALLS)
+        classified: set[str] = set().union(*groups)
+        assert sum(len(group) for group in groups) == len(classified), "a name is in two groups"
+        assert called == classified, (
+            "folding.py started or stopped calling these methods. Say what each "
+            "reaches in the groups beside READ_ROOTS, and if it reaches the "
+            "database without the session, bound it to the Books being folded: "
+            f"{sorted(called ^ classified)}"
+        )
+
+    def test_a_session_under_another_name_is_reported(self):
+        """What the method set held for this rule before it was this module's
+        own: `query` on a receiver that is not `db` is a root with no fold."""
+        assert _unbounded_reads("rows = self.session.query(model).filter(model.book_id == 1).all()\n") == [1]
 
 
 class TestAMergeHoldsTheKeepersCeilings:

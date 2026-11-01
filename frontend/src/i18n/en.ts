@@ -314,10 +314,10 @@ export const en = {
   "scan.authorPlaceholder": "Author name",
   "scan.couldNotAdd": "Could not add the book.",
   "scan.openTheOneWeHave": "Open the copy already in the library",
-  // The add door's refusal for an ISBN only the trash holds, one holder being
-  // another member's. Said on the single scan and on a rapid queue row.
+  // The add door's refusal for an ISBN only the trash holds, one holder not
+  // being the caller's own. Said on the single scan and on a rapid queue row.
   "scan.inTrash":
-    "In the trash as another member's book, so it was not added. Put it back, or delete it for good, and add it again.",
+    "In the trash and not added by you, so it was not added. Put it back, or ask the member who added it, or an admin if nobody did, to delete it for good, and add it again.",
   "scan.addCover": "Add cover photo (optional)",
   "scan.replaceCover": "Replace cover photo (optional)",
   "scan.privateBook": "Private (only visible to me)",
@@ -1280,6 +1280,8 @@ export const en = {
   // group one over the member cap withholds exactly one entry.
   "duplicates.moreInGroup":
     "More entries in this group, left for a second pass ({count})",
+  "duplicates.notYours":
+    "Not added by you. It can be the one kept, but only the member who added it or an admin can fold it into another.",
   "duplicates.couldNotLoad": "Could not check for duplicates.",
 
   // ── Bulk actions ────────────────────────────────────────────────────────
@@ -1699,7 +1701,7 @@ export const en = {
   "import.readAsGeneric": "Read as a plain table, with the columns guessed.",
   "import.unmatched": "Not found in the catalogue:",
   "import.inTrash":
-    "{count} rows name a book in the trash, and nothing was written for them. Put it back, or delete it for good, and import again:",
+    "{count} rows name a book in the trash, and nothing was written for them. Put it back, or have the member who added it, or an admin if nobody did, delete it for good, and import again:",
   "import.ambiguous":
     "{count} rows match two or more books on this shelf, and nothing was written for them rather than guessing between them:",
 
@@ -1717,7 +1719,7 @@ export const en = {
   "marc.blocked":
     "{count} carry an ISBN that belongs to a book this account cannot see, and will be left alone.",
   "marc.inTrash":
-    "{count} carry an ISBN that only a book in the trash holds, and will be left alone until it is put back or deleted for good.",
+    "{count} carry an ISBN that only a book in the trash holds, and will be left alone until it is put back, or deleted for good by the member who added it, or by an admin if nobody did.",
   "marc.ambiguous":
     "{count} match two or more books on this shelf, and will be left alone rather than guessed between.",
   "marc.skipped": "{count} records have no title and will be left out.",
@@ -1730,7 +1732,7 @@ export const en = {
   "marc.resultSkipped":
     "{count} records were left out: no title, or an ISBN that belongs to a book this account cannot see.",
   "marc.resultInTrash":
-    "{count} records carry an ISBN that only a book in the trash holds, and nothing was written for them. Put it back, or delete it for good, and import again:",
+    "{count} records carry an ISBN that only a book in the trash holds, and nothing was written for them. Put it back, or have the member who added it, or an admin if nobody did, delete it for good, and import again:",
   "marc.resultAmbiguous":
     "{count} records match two or more books on this shelf, and nothing was written for them rather than guessing between them:",
 
@@ -1762,7 +1764,7 @@ export const en = {
   "calibre.duplicate": "already in the catalogue",
   "calibre.notAdded": "not added",
   "calibre.inTrash":
-    "in the trash as another member's book; put it back, or delete it for good, and import again",
+    "in the trash and not added by you; put it back, or ask the member who added it, or an admin if nobody did, to delete it for good, and import again",
   "calibre.located":
     "{count} have their files in the folder you picked, and where each file is will be saved on its book.",
   // Names the exception for `rapid.alreadyHeld`'s reason.
@@ -1862,7 +1864,7 @@ export const en = {
   "stores.duplicate": "already in the catalogue",
   "stores.notAdded": "not added",
   "stores.inTrash":
-    "in the trash as another member's book; put it back, or delete it for good, and import again",
+    "in the trash and not added by you; put it back, or ask the member who added it, or an admin if nobody did, to delete it for good, and import again",
   "stores.failureNotADatabase": "That file is not a SQLite database.",
   "stores.failureNotAKobo": "That database is not a Kobo library.",
   "stores.failureNotAnArchive": "That file is not a zip archive.",
@@ -1968,8 +1970,15 @@ export const en = {
     'Delete "{title}" for good? This one cannot be undone.',
   "trash.emptyAll": "Empty the trash",
   "trash.emptyAllConfirm":
-    "Delete all {count} books in the trash for good? This cannot be undone.",
+    "Delete every book you added in the trash for good? Books other members added stay here. This cannot be undone.",
+  // An admin's empty also destroys the Books nobody is recorded as adding.
+  "trash.emptyAllConfirmAdmin":
+    "Delete every book you added in the trash for good, and every one nobody is recorded as adding? Books other members added stay here. This cannot be undone.",
   "trash.emptied": "{count} books deleted for good.",
+  "trash.notYours":
+    "Added by another member, so only they can delete it for good.",
+  "trash.noAdder":
+    "Nobody is recorded as adding it, so only an admin can delete it for good.",
   "trash.movedCount": "{count} books moved to the trash.",
   "trash.open": "Open trash",
 

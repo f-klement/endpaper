@@ -435,7 +435,7 @@ class Index:
             hidden = _union(self._held_anywhere, keys) - trashed - self._visible
             # Hidden first: a holder nobody here may see refuses the row
             # whatever else is in the trash, and `InTrash` promises that every
-            # holder is one this Member could restore or purge.
+            # holder is one this Member could put back.
             if hidden:
                 return Hidden()
             if trashed:
