@@ -23765,10 +23765,27 @@ still read from `pyproject.toml`, uv 0.13.5 measured, so one would go there.
 The scope table at the top of the pipeline file is the one home in this repository of which
 environment receives which credential. It is a claim about the project's variable settings,
 which no test can read, so a scope changed in GitLab is checked through the variables API. A test derives from each job's steps and the scripts they name which
-credentials it reads, and refuses a job that reads one its environment does not receive, an
-environment that receives one its jobs never read, and a job with no environment that reads any.
-The publishers keep the environment names `github` and `dockerhub` because an unattended patch
-release runs the tag pipeline of the last release's own old pipeline file.
+credentials it reads, and refuses a job that reads one its environment does not receive and a
+job with no environment that reads any.
+
+**Four environments, each credential in exactly one** (`publish`, `gitlab-write`, `pager`,
+`gitlab-read`; owner decision of 2026-11-02, the rule the sibling project adopted). Each variable is one
+entry whose scope is one plain environment name, so the GitLab side is one field per variable and
+nothing is copied. The per job environments before it needed wildcard scopes and a job list per
+credential, which the owner judged too much upkeep. The cost is that a job may hold a credential
+of its environment it does not read, `publish:github` the Docker Hub ones; what holds the line is
+that every job with an environment runs no code a dependency decides. Every job starts with a
+guard script in the tooling directory, which fails a job with no environment that holds one, so a scope left at
+`*` turns the suites red before any code runs. Releases up to v0.21.2 name the old environments,
+so a patch release on one of them would not publish: the first release cut from this pipeline
+file ends that.
+
+**The image builds hold no credential.** They logged in to Docker Hub with the publishing token
+for the base image pulls, which their RUN steps' dependency installs could read. They pull
+through `mirror.gcr.io` instead, which needs no login; every base is pinned by digest, so the
+mirror serves those bytes or nothing. `autopatch:plan`, which restores a cache and reads the
+audit jobs' reports, gave up the pager token too: an armed refusal fails the job and
+`autopatch:page` sends the page, so the summary is in the job log rather than in the message.
 
 **Protection is not the boundary.** It keeps every credential off unprotected branches and, by
 GitLab's documented rule, out of merge request pipelines here. On `main` and on tags every job
@@ -23781,9 +23798,8 @@ it. The hash is all the test reads of those files. It does not pin the image a j
 variable a pinned program reads, or a file a pinned shell script loads that is not listed. A reader of commands was tried and
 rejected: three review rounds each found a spelling past it (an unquoted heredoc body, a program
 started by alias, a sibling module shadowing the standard library), and the set is open. The
-exceptions are the three kaniko builds, which run dependency installs while holding the Docker
-Hub push token (ticket 641, needing a read only pull token), three autopatch jobs whose step
-keeps a shell guard (ticket 660), and the Docker Hub copy (ticket 662). Each is pinned by the
+exceptions are two autopatch jobs whose step keeps a shell guard (ticket 660), and the Docker
+Hub copy (ticket 662). Each is pinned by the
 sha256 of its steps and of each file under the tooling directory they load, and none may declare
 hooks or services.
 

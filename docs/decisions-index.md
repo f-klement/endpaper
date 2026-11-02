@@ -953,6 +953,6 @@ repeat the argument.
 |  | [A test only commit on main may be carried onto the patch branch](decisions.md#a-test-only-commit-on-main-may-be-carried-onto-the-patch-branch) | 460 |
 |  | [An advisory on several packages clears only when every package moved](decisions.md#an-advisory-on-several-packages-clears-only-when-every-package-moved) | 54 |
 |  | [Every dev dependency is exact, and every runtime library is on a range](decisions.md#every-dev-dependency-is-exact-and-every-runtime-library-is-on-a-range) | 1,299 |
-|  | [CI credentials are scoped to environments, and a credentialed job runs one pinned entrypoint](decisions.md#ci-credentials-are-scoped-to-environments-and-a-credentialed-job-runs-one-pinned-entrypoint) | 742 |
+|  | [CI credentials are scoped to environments, and a credentialed job runs one pinned entrypoint](decisions.md#ci-credentials-are-scoped-to-environments-and-a-credentialed-job-runs-one-pinned-entrypoint) | 948 |
 |  | [A guard is keyed on this codebase's own names, never on a library's internals](decisions.md#a-guard-is-keyed-on-this-codebases-own-names-never-on-a-librarys-internals) | 1,118 |
 <!-- index: end -->
