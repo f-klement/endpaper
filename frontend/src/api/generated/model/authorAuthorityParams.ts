@@ -13,8 +13,6 @@ export type AuthorAuthorityParams = {
    * @maxLength 300
    */
   author: string;
-  /**
-   * Search the authority file for this name instead of the author's own. Forces the name search route.
-   */
+  /** Search the authority file for this name instead of the author's own. Forces the name search route. */
   q?: string | null;
 };

@@ -7,8 +7,6 @@
  */
 
 export type RestoreBackupParams = {
-  /**
-   * Must be true. Restoring replaces everything.
-   */
+  /** Must be true. Restoring replaces everything. */
   confirm?: boolean;
 };

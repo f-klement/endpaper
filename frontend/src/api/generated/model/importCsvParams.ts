@@ -8,20 +8,12 @@
 import type { ImportReader } from "./importReader.ts";
 
 export type ImportCsvParams = {
-  /**
-   * Add books from the export that are not in the catalogue
-   */
+  /** Add books from the export that are not in the catalogue */
   create_missing?: boolean;
-  /**
-   * Create the file's tags and put them on the books
-   */
+  /** Create the file's tags and put them on the books */
   apply_tags?: boolean;
-  /**
-   * Correct a guessed column, as field=header pairs separated by commas, e.g. title=Book Name,author=Written By
-   */
+  /** Correct a guessed column, as field=header pairs separated by commas, e.g. title=Book Name,author=Written By */
   overrides?: string | null;
-  /**
-   * Read the file as this service's export, rather than detecting
-   */
+  /** Read the file as this service's export, rather than detecting */
   reader?: ImportReader | null;
 };

@@ -10,9 +10,7 @@ import type { PublicBookSort } from "./publicBookSort.ts";
 
 export type ListPublicBooksParams = {
   q?: string | null;
-  /**
-   * Comma-separated tag ids
-   */
+  /** Comma-separated tag ids */
   tags?: string | null;
   format?: BookFormat | null;
   series?: string | null;

@@ -8,12 +8,8 @@
 import type { ImportReader } from "./importReader.ts";
 
 export type PreviewImportParams = {
-  /**
-   * Correct a guessed column, as field=header pairs
-   */
+  /** Correct a guessed column, as field=header pairs */
   overrides?: string | null;
-  /**
-   * Read the file as this service's export, rather than detecting
-   */
+  /** Read the file as this service's export, rather than detecting */
   reader?: ImportReader | null;
 };

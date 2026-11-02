@@ -7,8 +7,6 @@
  */
 
 export type ImportMarcParams = {
-  /**
-   * Add records this catalogue does not already hold
-   */
+  /** Add records this catalogue does not already hold */
   create_missing?: boolean;
 };

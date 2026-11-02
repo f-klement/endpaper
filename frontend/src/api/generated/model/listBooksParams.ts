@@ -14,38 +14,24 @@ import type { ReadStatus } from "./readStatus.ts";
 export type ListBooksParams = {
   q?: string | null;
   status?: ReadStatus | null;
-  /**
-   * Comma-separated tag ids
-   */
+  /** Comma-separated tag ids */
   tags?: string | null;
   ownership?: OwnershipStatus | null;
   format?: BookFormat | null;
   lending?: LendingWillingness | null;
   series?: string | null;
-  /**
-   * Only books credited to this author, by key or by any spelling
-   */
+  /** Only books credited to this author, by key or by any spelling */
   author?: string | null;
   location?: string | null;
-  /**
-   * Only books filed in this collection
-   */
+  /** Only books filed in this collection */
   collection_id?: number | null;
-  /**
-   * Only books in no collection at all
-   */
+  /** Only books in no collection at all */
   unfiled?: boolean;
-  /**
-   * Only books you have not rated
-   */
+  /** Only books you have not rated */
   unrated?: boolean;
-  /**
-   * Only books somebody has offered to talk about
-   */
+  /** Only books somebody has offered to talk about */
   discuss?: boolean;
-  /**
-   * Only books carrying this heading, as `scheme:number`. Repeat the parameter for more than one; they are ANDed.
-   */
+  /** Only books carrying this heading, as `scheme:number`. Repeat the parameter for more than one; they are ANDed. */
   classification?: string[] | null;
   ddc?: string | null;
   sort?: BookSort;

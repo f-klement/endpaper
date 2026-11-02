@@ -7,8 +7,6 @@
  */
 
 export type ApplyEnrichmentParams = {
-  /**
-   * Replace fields that already have a value
-   */
+  /** Replace fields that already have a value */
   overwrite?: boolean;
 };

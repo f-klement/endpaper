@@ -7,8 +7,6 @@
  */
 
 export type SyncServerParams = {
-  /**
-   * Add books the feed lists and this catalogue lacks
-   */
+  /** Add books the feed lists and this catalogue lacks */
   create_missing?: boolean;
 };

@@ -8,8 +8,6 @@
 import type { MatcherName } from "./matcherName.ts";
 
 export type ListAuthorSuggestionsParams = {
-  /**
-   * Which matching strategy proposes the groups
-   */
+  /** Which matching strategy proposes the groups */
   matcher?: MatcherName;
 };
