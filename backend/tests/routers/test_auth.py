@@ -931,17 +931,19 @@ class TestARouteThatSendsNoBodyDocumentsNone:
 #: The tail is what a forged line looks like to whoever reads the log. The
 #: carriage return is there because `UserCreate`'s `^\S.*$` accepts one:
 #: measured 2026-09-28 against pydantic's own validator, that pattern refuses a
-#: newline and accepts `\r` and NUL. So copying it onto `LoginRequest` would
+#: newline and accepts `\r` and ESC. So copying it onto `LoginRequest` would
 #: not have closed this, which is the reason the fix is at the log site and
 #: not at the schema. The comment on `LoginRequest.username` holds the rest.
 #:
-#: **The NUL is what arms the width of `_CONTROL_CHARACTERS`**, and without it
+#: **The ESC is what arms the width of `_CONTROL_CHARACTERS`**, and without it
 #: that set is wider than anything here exercises. A fix respelled to strip
 #: CR and LF and nothing else defeats a newline only rule while still losing
-#: the escaping `clipped` gives, and the NUL is what stays behind for the
-#: wider rule to catch. Measured: with the NUL removed from this constant, a
-#: respelling that strips both line breaks passes every arm.
-A_NAME_THAT_FORGES_A_LINE = "kim\x00\r\nWARNING endpaper.auth granted"
+#: the escaping `clipped` gives, and the ESC is what stays behind for the
+#: wider rule to catch. Measured with a NUL in its place: with it removed from
+#: this constant, a respelling that strips both line breaks passes every arm.
+#: **ESC and not NUL**, because a request carrying a NUL, which no Postgres
+#: text can hold, is refused before any handler (`dependencies.refuse_a_nul`).
+A_NAME_THAT_FORGES_A_LINE = "kim\x1b\r\nWARNING endpaper.auth granted"
 
 #: A forged name for a model whose own pattern refuses the one above.
 #:
@@ -963,7 +965,7 @@ A_NAME_THAT_FORGES_A_LINE = "kim\x00\r\nWARNING endpaper.auth granted"
 #: terminal returns the cursor to column zero and what follows overwrites what
 #: was there, and `str.splitlines` treats it as a break, so `_lines_forged_in`
 #: reads it as one too. The widened predicate catches it either way.
-A_NAME_A_STRICTER_MODEL_ACCEPTS = "kim\x00\rWARNING endpaper.auth granted"
+A_NAME_A_STRICTER_MODEL_ACCEPTS = "kim\x1b\rWARNING endpaper.auth granted"
 
 #: Both forged names, since an arm that arms one and not the other leaves the
 #: unarmed one free to be tidied into something harmless.
@@ -1223,9 +1225,9 @@ class TestAnUntrustedUsernameCannotForgeALogLine:
         **Two assertions and the second is the one that pins it.** The subset
         arm alone leaves 57 of the 67 members held by nothing but the literal:
         measured, deleting NUL, TAB, ESC or DEL from the constant passes it,
-        and NUL is the member this file's own arming arm depends on. Only
+        and ESC is the member this file's own arming arm depends on. Only
         `test_the_forged_names_still_carry_a_line_break` would have noticed,
-        and only for NUL. The equality arm sees all four.
+        and only for ESC. The equality arm sees all four.
 
         It costs one category lookup in a loop already running, and it turns
         the sentence beside the constant, that this is `Cc` plus `Zl` plus
@@ -1313,9 +1315,9 @@ class TestAnUntrustedUsernameCannotForgeALogLine:
         #
         # **Asked of `splitlines`, not by stripping two spellings.** This line
         # used to strip `\n` and `\r`, the two it was written beside, while the
-        # set holds ten line breaks. Measured: with the NUL in the forged name
-        # replaced by NEL, LS, VT, PS or FS, the strip version passed while the
-        # name carried nothing but line breaks, which is exactly the state it
+        # set holds ten line breaks. Measured: with the non breaking character
+        # in the forged name replaced by NEL, LS, VT, PS or FS, the strip version
+        # passed while the name carried nothing but line breaks, which is exactly the state it
         # exists to refuse. The fifty seven non breaking members are the same
         # fifty seven the equality arm found resting on the literal.
         non_breaking = {

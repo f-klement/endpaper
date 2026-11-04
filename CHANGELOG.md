@@ -45,6 +45,36 @@ _2026-10-25_
 - **The duplicates page no longer hides a large group whose first twenty entries belong to other
   members when some of its later entries are yours to merge.**
 
+- A cover upload or download whose save fails no longer leaves its image behind to be picked up
+  later by a copy or a merge of that book.
+
+- On a Postgres database the classification filter's list of headings and Dewey divisions loads
+  again instead of failing.
+
+- An id or an SRU number past what a Postgres column holds is now refused with 422 or an SRU
+  diagnostic instead of failing; ids above 2147483647 are refused on SQLite too.
+
+- On a Postgres database a write the database refuses is answered as a refusal instead of failing,
+  and a book file of 2 GiB or more can be referenced.
+
+- An after_id cursor past 2147483647 on the cover or identifier backfill is refused with 422 rather
+  than failing on a Postgres database.
+
+- Text containing a NUL character sent to any API route is refused with 422 on every database,
+  rather than failing on Postgres or being stored on SQLite.
+
+- An SRU rec.id or dc.date term past 2147483647 is answered with a diagnostic on SQLite too, where
+  it was searched before.
+
+- A JSON body nested thousands of levels deep is answered with 422 rather than a server error.
+
+- Restoring a backup whose text contains a NUL character drops the character, so a backup taken on
+  SQLite can be restored onto Postgres.
+
+- Restoring a backup logs a warning naming each table and column a NUL character was dropped from.
+
+- A CSV import drops a NUL character from the file and imports the rest of it.
+
 ## v0.21.0
 
 _2026-10-24_

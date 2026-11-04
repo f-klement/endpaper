@@ -585,6 +585,26 @@ class TestValidatorRejections:
         assert isinstance(res.json()["detail"], list)
 
 
+class TestADeepBody:
+    """pydantic puts the whole rejected body in an error's `input`, and the
+    encode recursed into it before `input` was dropped: a body nested past the
+    recursion limit answered an anonymous 500 and logged a traceback as deep.
+
+    Twice the limit rather than deeper: in the test client's thread `json.loads`
+    gives up at 20000 and the request answers Starlette's 400 before any
+    validation, so a deeper body here would test the parser instead."""
+
+    def test_answers_the_422_a_shallow_body_answers(self, client):
+        def sent(depth: int) -> httpx.Response:
+            body = "[" * depth + "]" * depth
+            return client.post("/auth/login", content=body, headers={"Content-Type": "application/json"})
+
+        deep, shallow = sent(2 * sys.getrecursionlimit()), sent(2)
+
+        assert (deep.status_code, shallow.status_code) == (422, 422)
+        assert deep.json() == shallow.json()
+
+
 def _schema() -> dict[str, Any]:
     """The document this API publishes.
 

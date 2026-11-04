@@ -228,12 +228,14 @@ class TestTheRememberedKeyIsBoundedInBytes:
         )
         db.commit()
 
+    @pytest.mark.sqlite_only(reason="asserts the CHECK refusing what Postgres's column type refuses first")
     def test_one_byte_past_the_budget_is_refused(self, db, member):
         with pytest.raises(IntegrityError) as refusal:
             self._insert(db, member["user"]["id"], 4 * HIGHLIGHT_SOURCE_KEY_MAX + 1)
 
         assert "ck_deleted_highlights_bounds" in str(refusal.value)
 
+    @pytest.mark.sqlite_only(reason="plants what only SQLite stores: too long, behind a NUL, or raw bytes")
     def test_the_budget_itself_is_stored(self, db, member):
         self._insert(db, member["user"]["id"], 4 * HIGHLIGHT_SOURCE_KEY_MAX)
 

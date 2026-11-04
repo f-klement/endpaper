@@ -106,7 +106,7 @@ class TestAddingABookWithSubjects:
         than an assertion, so they are removed. Only the separator is refused."""
         res = client.post(
             "/api/books",
-            json={"title": "Brave New World", "categories": ["  Science\x00  Fiction "]},
+            json={"title": "Brave New World", "categories": ["  Science\x01  Fiction "]},
             headers=admin["headers"],
         )
 
@@ -134,7 +134,7 @@ class TestAddingABookWithSubjects:
             "/api/books",
             json={
                 "title": "Brave New World",
-                "categories": ["Science Fiction", "  \x00 ", "Dystopia"],
+                "categories": ["Science Fiction", "  \x01 ", "Dystopia"],
             },
             headers=admin["headers"],
         )
@@ -322,7 +322,7 @@ class TestEditingTheSubjectsOfABookThatExists:
 
         res = client.patch(
             f"/api/books/{book_id}",
-            json={"categories": ["Satire", " \x00  ", "Utopia"]},
+            json={"categories": ["Satire", " \x01  ", "Utopia"]},
             headers=admin["headers"],
         )
 

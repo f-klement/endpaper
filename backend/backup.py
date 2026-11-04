@@ -425,6 +425,7 @@ def _parse_row(
     table: Table,
 ) -> dict[str, Any]:
     parsed = dict(row)
+    _drop_nuls(parsed, table)
     _parse_dates(parsed, parsers)
     _storable_cover(parsed)
     _blank_text_is_null(parsed, table)
@@ -433,6 +434,29 @@ def _parse_row(
     _file_classification(parsed, table)
     _refuse_a_bad_credential(parsed, table)
     return parsed
+
+
+def _drop_nuls(parsed: dict[str, Any], table: Table) -> None:
+    """Every NUL in a row's text, dropped, before any other rule reads the text.
+
+    SQLite stores a NUL and Postgres text cannot hold one, so an archive taken
+    on SQLite before requests refused a NUL could carry one in a note or a
+    description, and restoring it onto Postgres failed the insert with a 500.
+    Dropped rather than refused, as `_storable_cover` drops a bad cover: one
+    stray character is not a reason to fail a whole restore, and refusing would
+    leave such a library unable to move to Postgres. First, so a value that was
+    only a NUL is blank to `_blank_text_is_null` and a name is folded without one.
+
+    Logged as `_storable_cover` logs its drop, so a changed value is on record.
+    Only the column is named, never the value: it is a member's text. Read off
+    the table's columns rather than the row's keys, so every name logged is
+    the schema's and an archive cannot write its own text into the log.
+    """
+    for column in table.columns:
+        value = parsed.get(column.name)
+        if isinstance(value, str) and "\x00" in value:
+            parsed[column.name] = value.replace("\x00", "")
+            logger.warning("Dropped a NUL from %s.%s in the archive", table.name, column.name)
 
 
 def _parse_dates(parsed: dict[str, Any], parsers: dict[str, type[date] | type[datetime]]) -> None:

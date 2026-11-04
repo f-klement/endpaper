@@ -24,7 +24,10 @@ is refused, a shape this tree does not use.
 
 An override in `package.json`, and a `resolutions` entry, holds a transitive dev
 tool only, and exactly: it names the dev dependency that pulls the package in, in
-`_OVERRIDDEN_FOR`, and it stays inside the range that parent asks for.
+`_OVERRIDDEN_FOR`, and it stays inside the range every package in `bun.lock` that
+depends on it asks for. Once a release carries this test, a night that raised an
+override past one of those ranges reds it on the patch branch, which fails that
+night's verify and pages.
 """
 
 from __future__ import annotations
@@ -231,7 +234,12 @@ def _bun_lock() -> dict[str, Any]:
 
 
 def _satisfies(version: str, wanted: str) -> bool:
-    """Whether `version` is inside `wanted`: exact, `~` or `^`, the forms these parents use."""
+    """Whether `version` is inside `wanted`: exact, `~` or `^`, the forms these parents use.
+
+    Any other form, `*` or `>=1` or a union, fails the assertion by name rather
+    than being read: a lock adding one reds loudly, and the reading is widened
+    then, against the range that arrived.
+    """
     m = re.fullmatch(r"([~^]?)(\d+)\.(\d+)\.(\d+)", wanted)
     assert m, f"a range this cannot read: {wanted!r}"
     floor = tuple(int(part) for part in m.groups()[1:])
@@ -243,12 +251,43 @@ def _satisfies(version: str, wanted: str) -> bool:
     return have == floor
 
 
-def test_each_override_satisfies_the_range_its_parent_asks_for() -> None:
-    packages = _bun_lock()["packages"]
-    # An override that is loose or names no parent is the test above's to refuse.
+#: The tables of a locked package whose ranges the override must satisfy.
+_ASKING_TABLES = ("dependencies", "optionalDependencies", "peerDependencies")
+
+
+def _parents(packages: dict[str, Any], name: str) -> list[tuple[str, str]]:
+    """Every locked package asking for `name`, with the range it asks for.
+
+    bun applies an override to every one of them, so each range is checked,
+    whoever `_OVERRIDDEN_FOR` names.
+    """
+    found: list[tuple[str, str]] = []
+    for key, entry in packages.items():
+        meta = entry[2] if len(entry) > 2 and isinstance(entry[2], dict) else {}
+        found.extend((key, meta[table][name]) for table in _ASKING_TABLES if name in meta.get(table, {}))
+    return found
+
+
+def _outside_a_parent(packages: dict[str, Any], overrides: list[tuple[str, str]]) -> list[tuple[str, ...]]:
+    """Each exact override outside a range a parent asks for, or with no parent at all."""
     held = [
-        (name, wanted.lstrip("=v"), packages[_OVERRIDDEN_FOR[name]][2]["dependencies"][name])
-        for name, wanted in _frontend_entries("override")
-        if name in _OVERRIDDEN_FOR and _NPM_EXACT.fullmatch(wanted)
+        (name, wanted.lstrip("=v"), parent, asked)
+        for name, wanted in overrides
+        if _NPM_EXACT.fullmatch(wanted)  # a loose one is the test above's to refuse
+        for parent, asked in _parents(packages, name) or [("nothing in the lock", "")]
     ]
-    assert [entry for entry in held if not _satisfies(entry[1], entry[2])] == []
+    return [entry for entry in held if not entry[3] or not _satisfies(entry[1], entry[3])]
+
+
+def test_an_override_outside_a_second_parent_s_range_is_refused() -> None:
+    packages = {
+        "vite": ["vite@8.3.5", "", {"dependencies": {"rolldown": "~1.2.14"}}, "sha512-"],
+        "other": ["other@1.0.0", "", {"peerDependencies": {"rolldown": "^1.3.0"}}, "sha512-"],
+        "rolldown": ["rolldown@1.2.16", "", {}, "sha512-"],
+    }
+    outside = _outside_a_parent(packages, [("rolldown", "1.2.16")])
+    assert outside == [("rolldown", "1.2.16", "other", "^1.3.0")]
+
+
+def test_each_override_satisfies_the_range_every_parent_asks_for() -> None:
+    assert _outside_a_parent(_bun_lock()["packages"], _frontend_entries("override")) == []

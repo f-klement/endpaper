@@ -1293,8 +1293,9 @@ The bytes are untrusted input from a third party, and are treated as such:
   an upload goes through. Never from the URL, which has no extension in the DNB's case anyway.
 - Capped at `MAX_UPLOAD_BYTES` and read in chunks, so a service answering with an endless body
   is refused at the cap rather than filling the container's memory.
-- Written through `cover_store.save`, so a failure mid-write cannot leave a book pointing
-  at a file that is no longer there, and so the other formats of the same book go with it.
+- Written through `cover_store.write` and tied to the row's commit by `cover_store.settle`,
+  so a failure mid-write cannot leave a book pointing at a file that is no longer there, and
+  the other formats of the same book go only once the row naming the new file commits.
 - Served by the authenticated cover route, which applies `visible_to()`. Storing covers does
   not widen who can see one.
 - Deleted when a book is purged and when a merge discards the loser's, because a cover file

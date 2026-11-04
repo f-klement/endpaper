@@ -196,8 +196,9 @@ def upsert_directory_user(
     """Find or create the local row backing a directory identity.
 
     `None` means the identity was refused and no row exists for it: today the
-    one cause is a name wider than the column, argued at that check. Both
-    callers already answer `User | None`, so a refused sign-in is a failed one.
+    one cause is a name the column cannot hold, wider than it or carrying a
+    NUL, argued at those checks. Both callers already answer `User | None`, so
+    a refused sign-in is a failed one.
 
     Admin status is re-applied on every sign-in, so removing someone from the
     admin group in the directory takes effect the next time they log in rather
@@ -300,6 +301,16 @@ def upsert_directory_user(
             "Refused a name users.username cannot hold: %d characters against %d, from a %s identity. %s",
             len(username),
             USERNAME_MAX,
+            source.value,
+            clipped(username),
+        )
+        return None
+    # **A NUL is a name the column cannot hold either**: Postgres text refuses
+    # one, and it did so at the lookup below as a driver error, a 500 where the
+    # wide name above gets a refused sign in.
+    if "\x00" in username:
+        logger.warning(
+            "Refused a name users.username cannot hold: it carries a NUL, from a %s identity. %s",
             source.value,
             clipped(username),
         )

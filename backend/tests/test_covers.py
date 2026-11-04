@@ -970,7 +970,7 @@ class TestStoring:
         def full(book_id, data):
             raise OSError(28, "No space left on device")
 
-        monkeypatch.setattr(cover_store, "save", full)
+        monkeypatch.setattr(cover_store, "write", full)
         with caplog.at_level(logging.WARNING), respx.mock(assert_all_called=False) as mock:
             mock.get(url__startswith=AT_OPEN_LIBRARY).mock(return_value=image())
             assert covers.store(7, covers.open_library_url(ENGLISH)) is None
@@ -993,16 +993,17 @@ class TestStoring:
         assert stored == "/covers/7.png"
         assert (covers_dir / "7.png").is_file()
 
-    def test_it_replaces_a_cover_stored_in_another_format(self, covers_dir):
-        """Two formats of the same book both existing means which one is served
-        depends on lookup order. `cover_store.save` owns that rule."""
+    def test_a_cover_stored_in_another_format_waits_for_the_callers_commit(self, covers_dir):
+        """The row naming the PNG has not changed yet, and may never: removing
+        it here left that row naming a deleted file when the commit failed.
+        `cover_store.settle` is where it goes."""
         (covers_dir / "7.png").write_bytes(PNG_BYTES)
 
         with respx.mock(assert_all_called=False) as mock:
             mock.get(url__startswith=AT_OPEN_LIBRARY).mock(return_value=image())
             covers.store(7, covers.open_library_url(ENGLISH))
 
-        assert not (covers_dir / "7.png").exists()
+        assert (covers_dir / "7.png").exists()
         assert (covers_dir / "7.jpg").exists()
 
 

@@ -8,15 +8,18 @@ from pydantic import AfterValidator, BaseModel, Field, PlainSerializer
 DEFAULT_PAGE_SIZE = 50
 MAX_PAGE_SIZE = 200
 
-#: The largest value SQLite stores in an INTEGER column.
+#: The largest value an `Integer` column holds on every engine this runs on,
+#: which is Postgres's four byte INTEGER. SQLite's INTEGER holds `2**63 - 1`.
 #:
 #: Every caller-supplied row id is bounded by it, and that is not decoration: a
 #: Python int has no ceiling, so a larger one passes validation, reaches the
-#: driver and raises `OverflowError` from inside the query. That answers **500**
-#: to a value the caller chose, which is the app calling its own code buggy.
-#: Measured once already on `POST /api/books/covers/backfill?after_id=`; see
-#: `tests/test_house_rules.py`.
-MAX_ROW_ID = 2**63 - 1
+#: driver and fails inside the query, as `OverflowError` on SQLite and as
+#: SQLSTATE 22003 on Postgres. That answers **500** to a value the caller
+#: chose, which is the app calling its own code buggy. Measured once already on
+#: `POST /api/books/covers/backfill?after_id=`; see `tests/test_house_rules.py`.
+#: An id between the two ceilings is refused on SQLite too. A row reaches one
+#: there only after two billion inserts or from a restored archive carrying it.
+MAX_ROW_ID = 2**31 - 1
 
 #: A row id arriving in a **request body**, where there is no `Path()` or
 #: `Query()` to carry the bounds.

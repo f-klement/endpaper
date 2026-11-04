@@ -226,7 +226,8 @@ class TestEveryColumnLandsWhereItBelongs:
         from enums import BookFormat
         from models import Book
 
-        token = "copy-group-token-that-must-not-be-published"
+        # Within `copy_group`'s 32 characters, which Postgres enforces.
+        token = "copy-group-token-unpublished"
         described = Book(
             title="Dune",
             author="Frank Herbert",

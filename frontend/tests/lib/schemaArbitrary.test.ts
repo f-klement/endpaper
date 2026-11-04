@@ -20,11 +20,8 @@ import { describe, expect, it } from "vitest";
 import {
   committedSchema,
   escaped,
-  itemsOf,
   operationById,
-  propertiesOf,
   responseOf,
-  statedBound,
 } from "../committedSchema";
 import { holds, PROFILE, PROPERTY, witness } from "../property";
 import {
@@ -90,22 +87,13 @@ function holdsAtBound(value: unknown): boolean {
   return Object.values(value).some(holdsAtBound);
 }
 
-/** A tag id's declared maximum, read off the document. */
-function tagIdBound(): number {
-  const ids = propertiesOf("BookMatch")["suggested_tag_ids"]!;
-  return statedBound(itemsOf(ids), "maximum");
-}
-
-/** Whether a list of enrichment candidates suggests a tag id at its bound. */
-function holdsTagIdAtBound(body: unknown): boolean {
-  if (!Array.isArray(body)) return false;
-  return body.some((match: { suggested_tag_ids?: unknown }) =>
-    (Array.isArray(match.suggested_tag_ids)
-      ? match.suggested_tag_ids
-      : []
-    ).includes(tagIdBound()),
-  );
-}
+/**
+ * The largest signed 64 bit integer, as the double JSON parsing makes of it.
+ * Written here rather than read off the document, which declares no bound
+ * past the safe range: the backend caps a row id at a 32 bit column's
+ * ceiling.
+ */
+const PAST_SAFE = 2 ** 63;
 
 /** Every string under `SESSION_KEY` in `value`, however deep. */
 function sessionsIn(value: unknown): unknown[] {
@@ -222,13 +210,17 @@ describe("the schema deriver", () => {
   });
 
   it("draws an integer at a declared bound past the safe range", async () => {
-    // A tag id's declared maximum is the largest signed 64 bit integer, which
-    // the drawn range is clamped short of; only the edge reaches it.
-    expect(tagIdBound()).toBeGreaterThan(Number.MAX_SAFE_INTEGER);
-    await witness(answersOf("enrichment_candidates"), {
-      "suggests a tag id at its declared maximum": (answer) =>
-        holdsTagIdAtBound(answer.body),
-    });
+    // The drawn range is clamped short of the bound, which fast-check cannot
+    // draw over; only the edge reaches it. Unclamped, the first draw never
+    // returns and blocks the event loop, so a red here is a hung run rather
+    // than a timeout.
+    await witness(
+      arbitraryOf(
+        { type: "integer", minimum: 1, maximum: PAST_SAFE },
+        "Here/id",
+      ),
+      { "is the declared maximum": (value) => value === PAST_SAFE },
+    );
   });
 
   it(

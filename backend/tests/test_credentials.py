@@ -2592,14 +2592,17 @@ class TestTheSourceRuleAndItsConstraintAgree:
         ],
     )
     def test_both_answer_the_same(self, db, source):
-        from sqlalchemy.exc import IntegrityError
+        """A refusal by the column's type counts as the constraint's: on
+        Postgres a value past `VARCHAR(32)` or carrying a NUL is a `DataError`
+        before the CHECK is read."""
+        from sqlalchemy.exc import DataError, IntegrityError
 
         expected = credentials.is_safe_source(source)
         try:
             db.add(CatalogueCredential(source=source, envelope="v1." + "a" * 40 + ".b.c"))
             db.commit()
             accepted = True
-        except IntegrityError:
+        except IntegrityError, DataError:
             db.rollback()
             accepted = False
         assert accepted == expected, f"the two rules disagree about {source!r}"
@@ -2610,10 +2613,11 @@ class TestTheSourceRuleAndItsConstraintAgree:
         Reduced from the parametrisation because a case that once failed and is
         now one entry in a list of thirty is a case somebody trims.
         """
-        from sqlalchemy.exc import IntegrityError
+        from sqlalchemy.exc import DataError, IntegrityError
 
         assert credentials.is_safe_source("bne\x00../../books/5?") is False
         db.add(CatalogueCredential(source="bne\x00../../books/5?", envelope="v1." + "a" * 40 + ".b.c"))
-        with pytest.raises(IntegrityError):
+        # Postgres text refuses the NUL before the CHECK is read.
+        with pytest.raises((IntegrityError, DataError)):
             db.commit()
         db.rollback()

@@ -1,4 +1,5 @@
-"""Tests for backend/dependencies.py: book access control and pagination.
+"""Tests for backend/dependencies.py: book access control, pagination and the
+NUL refusal.
 
 These are the regression tests for a real set of holes. Before the resolvers
 existed, every endpoint below could be called by any signed-in member against
@@ -11,8 +12,13 @@ Each is exercised here from three sides: the owner, another member, and a
 member acting on someone else's *private* book.
 """
 
+import sys
+from typing import Any
+from urllib.parse import quote
+
 import pytest
 
+from dependencies import NUL_REFUSED
 from tests.helpers import PNG_BYTES, items
 
 # Every endpoint that takes a book id, as (label, method, path suffix, body).
@@ -290,3 +296,99 @@ class TestLoanVisibility:
             headers=member["headers"],
         )
         assert res.status_code == 404
+
+
+#: A value no Postgres text column can hold.
+WITH_A_NUL = "a\x00b"
+
+
+def _resolved(document: dict[str, Any], schema: dict[str, Any]) -> dict[str, Any]:
+    while "$ref" in schema:
+        schema = document["components"]["schemas"][schema["$ref"].rsplit("/", 1)[-1]]
+    return schema
+
+
+def _admits_text(document: dict[str, Any], schema: dict[str, Any]) -> bool:
+    schema = _resolved(document, schema)
+    if schema.get("type") == "string":
+        return schema.get("format") != "binary" and "contentMediaType" not in schema
+    choices = schema.get("anyOf", []) + schema.get("oneOf", [])
+    return any(_admits_text(document, choice) for choice in choices)
+
+
+def _one(
+    template: str, method: str, path: dict[str, str], loc: tuple[Any, ...], **sent: Any
+) -> dict[str, Any]:
+    url = template
+    for name, value in path.items():
+        url = url.replace("{" + name + "}", quote(value, safe=""))
+    return {"method": method.upper(), "url": url, "loc": list(loc), **sent}
+
+
+def _nul_carrying_requests(document: dict[str, Any]) -> list[dict[str, Any]]:
+    """One request per published string, each carrying a NUL in that string
+    alone: every path and query parameter, and every top level property of a
+    JSON or form body, or its first item where the property is a list."""
+    found: list[dict[str, Any]] = []
+    for template, operations in document["paths"].items():
+        for method, operation in operations.items():
+            parameters = [p for p in operation.get("parameters", []) if p["in"] in ("path", "query")]
+            texts = {p["name"] for p in parameters if _admits_text(document, p["schema"])}
+            fill = {p["name"]: "x" if p["name"] in texts else "1" for p in parameters if p["in"] == "path"}
+            for p in parameters:
+                name = p["name"]
+                if name not in texts:
+                    continue
+                if p["in"] == "path":
+                    found.append(_one(template, method, {**fill, name: WITH_A_NUL}, ("path", name)))
+                else:
+                    found.append(_one(template, method, fill, ("query", name), params={name: WITH_A_NUL}))
+            for media, content in operation.get("requestBody", {}).get("content", {}).items():
+                body = _resolved(document, content.get("schema", {}))
+                key = "json" if media == "application/json" else "data"
+                for name, schema in body.get("properties", {}).items():
+                    items = _resolved(document, schema).get("items", {})
+                    if _admits_text(document, schema):
+                        sent = {key: {name: WITH_A_NUL}}
+                        found.append(_one(template, method, fill, ("body", name), **sent))
+                    elif key == "json" and _admits_text(document, items):
+                        listed = {"json": {name: [WITH_A_NUL]}}
+                        found.append(_one(template, method, fill, ("body", name, 0), **listed))
+    return found
+
+
+class TestANulIsRefusedWhereverAPublishedRouteTakesText:
+    """Postgres text cannot hold a NUL, so one reaching a column answered 500
+    there. `refuse_a_nul` refuses it at the door, ahead of every route's own
+    dependencies, so the requests here carry no session and nothing else the
+    route needs: a 401 or a 422 for a missing field means the NUL got past."""
+
+    def test_every_string_the_schema_publishes_refuses_a_nul_by_its_location(self, client) -> None:
+        requests = _nul_carrying_requests(client.app.openapi())
+        exercised = {sent["loc"][0] for sent in requests}
+        assert exercised == {"path", "query", "body"}, "a location was never exercised"
+
+        passed: list[str] = []
+        for sent in requests:
+            loc = sent.pop("loc")
+            res = client.request(sent.pop("method"), sent.pop("url"), **sent)
+            detail = res.json().get("detail") if res.status_code == 422 else None
+            expected = [{"type": "value_error", "loc": loc, "msg": f"Value error, {NUL_REFUSED}"}]
+            if detail != expected:
+                where = f"{res.request.method} {res.request.url.path}"
+                passed.append(f"{loc} on {where}: {res.status_code} {detail}")
+
+        assert passed == [], "\n".join(passed)
+
+    def test_a_nul_nested_past_the_recursion_limit_is_refused_by_its_location(self, client) -> None:
+        """`json.loads` parses a body nested past Python's recursion limit, and a
+        recursive walk of it raised `RecursionError` before any session was asked
+        for: an anonymous 500. Walked, the NUL at the bottom is named."""
+        depth = 2 * sys.getrecursionlimit()
+        body = "[" * depth + '"\\u0000"' + "]" * depth
+        res = client.post("/auth/login", content=body, headers={"Content-Type": "application/json"})
+
+        assert res.status_code == 422
+        assert res.json()["detail"] == [
+            {"type": "value_error", "loc": ["body", *[0] * depth], "msg": f"Value error, {NUL_REFUSED}"}
+        ]

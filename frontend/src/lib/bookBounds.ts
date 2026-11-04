@@ -49,7 +49,7 @@ export type BoundedText = keyof typeof TEXT_CEILINGS;
 
 /** What a number has to fall inside, closed at both ends. */
 export const NUMBER_RANGES = {
-  collection_id: [1, 9223372036854775807],
+  collection_id: [1, 2147483647],
   page_count: [1, 100000],
   series_index: [0, 1000],
   year: [1, 2200],

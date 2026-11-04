@@ -22,7 +22,7 @@ export interface SweepIn {
   /**
    * @maxItems 500
    * @items.minimum 1
-   * @items.maximum 9223372036854776000
+   * @items.maximum 2147483647
    */
   missing?: number[];
   /**

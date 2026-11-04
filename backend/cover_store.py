@@ -11,15 +11,14 @@ entry out of an archive. It never names the directory, the filename, the
 extension set, or which writer applies. `uploads.py` keeps the sniffing and the
 atomic write and stops being a door a caller configures.
 
-**Which writer sweeps is decided by the argument, not by the caller.** `save`
-takes a book id and sweeps the other formats of that book, and `write` with
-`sweep` is the same split at the one thing a caller decides, which is when its
-row commits; `restore` takes a filename out of an archive and must not sweep,
-because a library that holds both `1.jpg` and `1.png` is a library whose rows
-name both (`restore` carries that reasoning). An upload cannot reach `restore`
-without inventing a filename, and a restore cannot reach `save` without
-discarding the name the archive gave it. The one word edit is now a different
-argument.
+**Which writer sweeps is decided by the argument, not by the caller.** `write`
+takes a book id, and `settle` sweeps the other formats of that book once the
+row naming the new file commits; `restore` takes a filename out of an archive
+and must not sweep, because a library that holds both `1.jpg` and `1.png` is a
+library whose rows name both (`restore` carries that reasoning). An upload
+cannot reach `restore` without inventing a filename, and a restore cannot reach
+`write` without discarding the name the archive gave it. The one word edit is
+now a different argument.
 
 **Every write of bytes from outside this directory sniffs them**, including the
 three whose caller already did. `copy` and `move` are the exception and the only
@@ -37,15 +36,20 @@ question: where a cover comes from, and what URL one is served at.
 names its own blind spots.
 """
 
+from functools import partial
 from pathlib import Path
 from typing import Final
 
+from sqlalchemy.orm import Session
+
 from config import ALLOWED_IMAGE_EXTENSIONS, COVERS_DIR
+from database import on_commit, on_rollback
 from uploads import replace_image, sniff_image_extension, sweep_other_formats, write_image
 
 # No logger. Every failure here is raised, and the caller that can say what the
 # failure cost is the one that logs it: `covers.adopt` names the book a move came
-# from, `backup.restore` collects the entries it declined into one line.
+# from, `backup.restore` collects the entries it declined into one line. A
+# failure of `settle`'s rollback half is logged by `database.on_rollback`.
 
 #: The login background's base name. Not a book, so `book_ids` and `remove`
 #: never see it: both of those read or write an integer stem. It lives in this
@@ -110,7 +114,7 @@ def _first_on_disk(base: str) -> Path | None:
 
     **`sorted`, and the order itself does not matter: being the same order twice
     does.** `ALLOWED_IMAGE_EXTENSIONS` is a frozenset, whose iteration order is
-    not stable between processes, and a base can have two formats on disk: `save`
+    not stable between processes, and a base can have two formats on disk: `settle`
     sweeps the losers but `restore` deliberately does not.
 
     Unordered, the consequences are not cosmetic. `covers.local_url_for` reads
@@ -221,27 +225,17 @@ def files() -> list[Path]:
 # ── Writing ───────────────────────────────────────────────────────────────────
 
 
-def save(book_id: int, data: bytes) -> Path:
-    """Store `data` as this book's cover, replacing any other format of it.
+def write(book_id: int, data: bytes) -> Path:
+    """Store `data` as this book's cover, touching no other format of it.
 
-    The sweep is the point: one book has one cover, and two formats of it leave
-    `path_of` picking between them. It happens only once the write has succeeded,
-    because the order that deleted first left a book with no cover at all when
-    the write then failed. `uploads.replace_image` carries that incident.
+    The caller's row naming the new file has not committed yet, so the caller
+    hands the file to `settle`, which sweeps the other formats once it does.
+    Swept before the commit, a replace in another format deletes the old file,
+    and a commit that then fails leaves the row naming it.
 
     Raises `NotAnImage` if the bytes are not one this app serves, and `OSError` if
     the write fails. The caller decides which of those is a 400, which is a
     counted failure and which is a 500.
-    """
-    return replace_image(COVERS_DIR, str(book_id), _identify(data), data)
-
-
-def write(book_id: int, data: bytes) -> Path:
-    """`save` without its sweep, for a caller whose row naming the new file has
-    not committed yet. That caller hands `sweep` to `database.on_commit`.
-
-    Swept before the commit, a replace in another format deletes the old file,
-    and a commit that then fails leaves the row naming it. Raises as `save` does.
     """
     return write_image(COVERS_DIR, str(book_id), _identify(data), data)
 
@@ -249,6 +243,89 @@ def write(book_id: int, data: bytes) -> Path:
 def sweep(book_id: int, kept: Path) -> None:
     """Remove this book's cover in every format but the file `write` returned."""
     sweep_other_formats(COVERS_DIR, str(book_id), kept)
+
+
+def on_disk(book_id: int) -> frozenset[Path]:
+    """Every file stored for this book now, in any format. `settle` reads it back."""
+    return frozenset(
+        candidate
+        for extension in ALLOWED_IMAGE_EXTENSIONS
+        if (candidate := COVERS_DIR / f"{book_id}.{extension}").is_file()
+    )
+
+
+def settle(db: Session, book_id: int, extension: str, before: frozenset[Path]) -> None:
+    """Tie this book's file in `extension`, just written, to `db`'s transaction.
+
+    Committed, the file is the book's only cover and every other format goes.
+    Ended any other way, the file goes **if it was not in `before`**, which is
+    `on_disk` taken before the write. Each half is what makes the other safe:
+
+    * **The sweep waits for the commit**, because a JPEG swept as a PNG lands
+      and a commit that then fails leaves the row naming the JPEG.
+    * **The new name goes on a rollback**, because `path_of` reads the disk in
+      sorted order: a PNG to JPEG upload whose commit failed left `N.jpg`
+      beside the `N.png` the row names, and a copy or a merge then took the
+      image whose upload failed.
+    * **A name that was already there stays**, because that is a same format
+      replace and the file is the one the surviving row names: removing it
+      would leave the book with no cover at all. The rollback cannot restore
+      its old bytes, so that member sees the new image under the old row,
+      which is one of the two covers rather than neither.
+
+    What it lets through: a process killed between the write and the commit
+    runs neither half, so the new file stays beside the old one. Two requests
+    writing one book at once are let through too. In two formats, each
+    commit's sweep can take the other's file. In one format, a write landing
+    between `before` and this request's own write is replaced by it and then,
+    on a rollback, discarded.
+
+    The file the rollback may discard is the one the name holds when this
+    runs, not the one the write renamed into place. Most callers settle in the
+    same thread straight after the write. The cover backfill settles only once
+    its wave of downloads is read, up to a download's time budget later, so a same format write by
+    another request in that gap is taken as the backfill's own, and a backfill
+    that then rolls back discards it. A file already gone when this runs
+    queues no discard, since nothing of this request's is left, but its sweep
+    still runs on the commit: the row then names a format no file holds, and
+    the book is a backfill candidate again.
+    """
+    kept = COVERS_DIR / f"{book_id}.{extension}"
+    on_commit(db, partial(sweep, book_id, kept))
+    if kept not in before:
+        try:
+            written = _identity(kept)
+        except FileNotFoundError:
+            # Another request's sweep or a purge took it since the write. A
+            # raise here answers the backfill with a 500 and strands the files
+            # its unsettled books wrote.
+            return
+        on_rollback(db, partial(_discard, kept, written))
+
+
+def _identity(path: Path) -> tuple[int, int]:
+    """The inode and its change time. The inode alone is not enough on NFS
+    over ZFS, where a freed inode number can be handed to a later file with no
+    generation to tell them apart; a rename or a new file stamps the change
+    time."""
+    stat = path.stat()
+    return stat.st_ino, stat.st_ctime_ns
+
+
+def _discard(path: Path, written: tuple[int, int]) -> None:
+    """Unlink `path` if it is still the file `settle` saw, by `_identity`.
+
+    **Not by name**, because a second request writing the same name since then
+    may have committed a row naming it, and the unlink would leave that row with
+    no file. `write_image` promotes every write with a rename, so a later write
+    is a different file. A write landing between the `stat` and the unlink is
+    let through.
+    """
+    try:
+        if _identity(path) == written:
+            path.unlink()
+    except FileNotFoundError:
+        pass
 
 
 def save_login_background(data: bytes) -> Path:
@@ -259,7 +336,7 @@ def save_login_background(data: bytes) -> Path:
 def restore(name: str, data: bytes) -> Path:
     """Write one cover out of an archive, under the name the archive gave it.
 
-    **Does not sweep, and that is the whole reason it is not `save`.** The sweep
+    **Does not sweep, and that is the whole reason it has no `settle`.** The sweep
     exists so an upload replacing a book's JPEG with a PNG does not leave two
     files whose lookup order decides which is used. `backup.restore` empties this
     directory before it writes, so the only file a sweep could reach here is a

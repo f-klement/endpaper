@@ -26,7 +26,7 @@ repeat the argument.
 <!-- index: begin -->
 | Section | Entry | Words |
 |---|---|---|
-|  | [Backend](decisions.md#backend) | 34,525 |
+|  | [Backend](decisions.md#backend) | 34,971 |
 | Backend | [`bcrypt` directly, not `passlib`](decisions.md#bcrypt-directly-not-passlib) | 98 |
 | Backend | [Settings are functions, not module constants](decisions.md#settings-are-functions-not-module-constants) | 59 |
 | Backend | [`DATA_DIR` exists at all](decisions.md#data_dir-exists-at-all) | 22 |
@@ -102,7 +102,7 @@ repeat the argument.
 | Backend | [Reading dates are derived, not entered](decisions.md#reading-dates-are-derived-not-entered) | 53 |
 | Backend | [Series is two columns, not a table](decisions.md#series-is-two-columns-not-a-table) | 46 |
 | Backend | [Location is free text](decisions.md#location-is-free-text) | 53 |
-| Backend | [Every row id a caller supplies is bounded at both ends](decisions.md#every-row-id-a-caller-supplies-is-bounded-at-both-ends) | 462 |
+| Backend | [Every row id a caller supplies is bounded at both ends](decisions.md#every-row-id-a-caller-supplies-is-bounded-at-both-ends) | 487 |
 | Backend | [A book belongs to one collection, not many](decisions.md#a-book-belongs-to-one-collection-not-many) | 323 |
 | Backend | [Every book that existed before collections is unfiled, and no default was invented](decisions.md#every-book-that-existed-before-collections-is-unfiled-and-no-default-was-invented) | 151 |
 | Backend | [A collection is never a privacy boundary, and its label is not per library](decisions.md#a-collection-is-never-a-privacy-boundary-and-its-label-is-not-per-library) | 689 |
@@ -162,7 +162,9 @@ repeat the argument.
 | Backend | [The catalogue family publishes its decoders, and three readers are not decoders](decisions.md#the-catalogue-family-publishes-its-decoders-and-three-readers-are-not-decoders) | 281 |
 | Backend | [A list filter's toggle is a patch, not a helper over an array](decisions.md#a-list-filters-toggle-is-a-patch-not-a-helper-over-an-array) | 92 |
 | Backend | [`useLibrary`'s width is guarded structurally rather than by a number](decisions.md#uselibrarys-width-is-guarded-structurally-rather-than-by-a-number) | 84 |
-| Backend | [One module owns the covers directory, and the sweep is chosen by the argument](decisions.md#one-module-owns-the-covers-directory-and-the-sweep-is-chosen-by-the-argument) | 256 |
+| Backend | [One module owns the covers directory, and the sweep is chosen by the argument](decisions.md#one-module-owns-the-covers-directory-and-the-sweep-is-chosen-by-the-argument) | 261 |
+| Backend | [Two requests writing one Book's cover at once are not serialised](decisions.md#two-requests-writing-one-books-cover-at-once-are-not-serialised) | 274 |
+| Backend | [A process killed between a cover write and its commit leaves the new file](decisions.md#a-process-killed-between-a-cover-write-and-its-commit-leaves-the-new-file) | 115 |
 | Backend | [A payload's per viewer half is a type, and it carries no defaults](decisions.md#a-payloads-per-viewer-half-is-a-type-and-it-carries-no-defaults) | 275 |
 | Backend | [`LoanOut.book` is `BookColumns`, and it stops there rather than at four fields](decisions.md#loanoutbook-is-bookcolumns-and-it-stops-there-rather-than-at-four-fields) | 245 |
 | Backend | [A measured number lives where the column is declared](decisions.md#a-measured-number-lives-where-the-column-is-declared) | 231 |
@@ -416,9 +418,9 @@ repeat the argument.
 | The National Library of Greece, and the rule that was refusing its records | [The National Library of Greece is plaintext too, and the identity check is what that costs](decisions.md#the-national-library-of-greece-is-plaintext-too-and-the-identity-check-is-what-that-costs) | 258 |
 |  | [An address at account creation](decisions.md#an-address-at-account-creation) | 511 |
 | An address at account creation | [An email address belongs to creating an account, and a directory account has no creation moment to attach one to](decisions.md#an-email-address-belongs-to-creating-an-account-and-a-directory-account-has-no-creation-moment-to-attach-one-to) | 490 |
-|  | [What the three seats caught, this wave](decisions.md#what-the-three-seats-caught-this-wave) | 397 |
+|  | [What the three seats caught, this wave](decisions.md#what-the-three-seats-caught-this-wave) | 398 |
 | What the three seats caught, this wave | [A fix round wrote an unmeasured reason into the paragraph about unmeasured reasons](decisions.md#a-fix-round-wrote-an-unmeasured-reason-into-the-paragraph-about-unmeasured-reasons) | 211 |
-| What the three seats caught, this wave | [Both critic seats found the same two things, from opposite ends](decisions.md#both-critic-seats-found-the-same-two-things-from-opposite-ends) | 160 |
+| What the three seats caught, this wave | [Both critic seats found the same two things, from opposite ends](decisions.md#both-critic-seats-found-the-same-two-things-from-opposite-ends) | 161 |
 |  | [The Czech National Library, and a server that renders one record a page](decisions.md#the-czech-national-library-and-a-server-that-renders-one-record-a-page) | 1,698 |
 | The Czech National Library, and a server that renders one record a page | [The search path is refused because the server renders one record per response](decisions.md#the-search-path-is-refused-because-the-server-renders-one-record-per-response) | 273 |
 | The Czech National Library, and a server that renders one record a page | [The ticket named the shape correctly, and the first fix dismissed it](decisions.md#the-ticket-named-the-shape-correctly-and-the-first-fix-dismissed-it) | 372 |
@@ -694,6 +696,7 @@ repeat the argument.
 |  | [A grep cannot find what it does not spell](decisions.md#a-grep-cannot-find-what-it-does-not-spell) | 99 |
 |  | [The naive regex translation of a GLOB fails two different ways](decisions.md#the-naive-regex-translation-of-a-glob-fails-two-different-ways) | 141 |
 |  | [A NUL arm is subsumed by a column type, not by an engine](decisions.md#a-nul-arm-is-subsumed-by-a-column-type-not-by-an-engine) | 129 |
+|  | [A refusal on Postgres is classified by SQLSTATE, and a bound is the narrowest engine's](decisions.md#a-refusal-on-postgres-is-classified-by-sqlstate-and-a-bound-is-the-narrowest-engines) | 291 |
 |  | [Creation is not preservation](decisions.md#creation-is-not-preservation) | 347 |
 |  | [The Postgres driver is a runtime dependency, and the image is the reason](decisions.md#the-postgres-driver-is-a-runtime-dependency-and-the-image-is-the-reason) | 791 |
 |  | [The channel's loans are the public shelf's, not a second spelling of it](decisions.md#the-channels-loans-are-the-public-shelfs-not-a-second-spelling-of-it) | 106 |
@@ -722,7 +725,7 @@ repeat the argument.
 |  | [The result banner is never drawn over a run](decisions.md#the-result-banner-is-never-drawn-over-a-run) | 99 |
 |  | [The rapid add's progress is not a live region](decisions.md#the-rapid-adds-progress-is-not-a-live-region) | 74 |
 |  | [The rule that one module writes a shelf in bulk is two assertions, not one](decisions.md#the-rule-that-one-module-writes-a-shelf-in-bulk-is-two-assertions-not-one) | 334 |
-|  | [oxlint is adopted as a ratchet, and the suppression list is two lists](decisions.md#oxlint-is-adopted-as-a-ratchet-and-the-suppression-list-is-two-lists) | 565 |
+|  | [oxlint is adopted as a ratchet, and the suppression list is two lists](decisions.md#oxlint-is-adopted-as-a-ratchet-and-the-suppression-list-is-two-lists) | 488 |
 |  | [Three more ruff families, and what each suppression is standing on](decisions.md#three-more-ruff-families-and-what-each-suppression-is-standing-on) | 1,939 |
 |  | [The tooling tree's disciplines run in the backend suite, not in a job step](decisions.md#the-tooling-trees-disciplines-run-in-the-backend-suite-not-in-a-job-step) | 250 |
 |  | [Turning a linter on is not the same as fixing what it finds](decisions.md#turning-a-linter-on-is-not-the-same-as-fixing-what-it-finds) | 282 |

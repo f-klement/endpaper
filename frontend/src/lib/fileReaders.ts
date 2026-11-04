@@ -11,7 +11,7 @@ import { supportedExtension, type SupportedExtension } from "./fileName";
  *
  * **A registry rather than a branch at the call site**, and the branch it
  * replaces said so itself: "a reader for another format joins here". Two
- * tickets joining there at once is two trios editing one expression, which is
+ * tickets joining there at once is two duos editing one expression, which is
  * the collision a worktree does not prevent. Here each format is a key.
  *
  * **Every reader answers the same shape**, which is what lets the page treat

@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, Final
 
 from sqlalchemy import String, create_engine, event, exc, text
-from sqlalchemy.engine import make_url
+from sqlalchemy.engine import Engine, ExceptionContext, make_url
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import DeclarativeBase, Session, SessionTransaction, sessionmaker
 from sqlalchemy.sql.functions import FunctionElement
@@ -459,6 +459,68 @@ def _pin_the_postgres_session_zone(connection: Any, _record: Any) -> None:
         connection.autocommit = was_autocommitting
 
 
+def server_fields(error: exc.DBAPIError) -> dict[str, object] | None:
+    """The server's fields of a driver error, or None where it carries none.
+
+    pg8000 hands them over as a dict in the exception's first argument, keyed
+    by Postgres's one letter field codes: `C` the SQLSTATE, `n` a constraint.
+    SQLite errors carry none. The one reader of that shape, so a driver that
+    moves it is followed here once.
+    """
+    original = error.orig
+    fields = original.args[0] if original is not None and original.args else None
+    return fields if isinstance(fields, dict) else None
+
+
+#: The SQLAlchemy class for each SQLSTATE class the application tells apart,
+#: as PEP 249 names them. Class 22 is a data exception: a value too long for
+#: its VARCHAR (22001), out of range for its INTEGER (22003), a NUL in text
+#: (22021). Class 23 is an integrity constraint violation: a NOT NULL (23502),
+#: a foreign key (23503), a unique key (23505), a CHECK (23514).
+_ERROR_CLASS_BY_SQLSTATE_CLASS: Final[dict[str, type[exc.DBAPIError]]] = {
+    "22": exc.DataError,
+    "23": exc.IntegrityError,
+}
+
+
+@event.listens_for(Engine, "handle_error", retval=True)
+def _a_refusal_is_raised_as_its_kind(context: ExceptionContext) -> exc.DBAPIError | None:
+    """Raise a server refusal as the class its SQLSTATE names.
+
+    **pg8000 raises `IntegrityError` for 23505 alone** and `ProgrammingError`
+    for every other SQLSTATE, so on Postgres a CHECK or a foreign key refusal
+    passed every `except IntegrityError` in the application and answered 500
+    where SQLite, whose driver raises `IntegrityError` for all of class 23,
+    answered the route's refusal. Translated here, once, rather than at each
+    catch.
+
+    Only the class changes: the statement, the driver's own exception as
+    `orig` and the hidden parameters are the original's. A SQLSTATE outside
+    the map, a deadlock among them, and a driver error carrying none are left
+    as they were.
+
+    **On `Engine`, the class, and not on `engine`**, so the engine
+    `migrations/env.py` builds for a revision raises a refusal as its kind
+    too: an upgrade a stored row breaks a new CHECK for is an
+    `IntegrityError` on both engines.
+    """
+    error = context.sqlalchemy_exception
+    if not isinstance(error, exc.DBAPIError):
+        return None
+    fields = server_fields(error)
+    sqlstate = fields.get("C") if fields is not None else None
+    kind = _ERROR_CLASS_BY_SQLSTATE_CLASS.get(sqlstate[:2]) if isinstance(sqlstate, str) else None
+    if kind is None or isinstance(error, kind):
+        return None
+    return kind(
+        error.statement,
+        error.params,
+        context.original_exception,
+        hide_parameters=error.hide_parameters,
+        connection_invalidated=error.connection_invalidated,
+    )
+
+
 # ── Where a query's two dialects differ ──────────────────────────────────────
 #
 # **Expressions only.** A query module names a concept and the arm for each
@@ -638,6 +700,60 @@ def _forget_after_commit(db: Session, transaction: SessionTransaction) -> None:
     # what a rollback left.
     if transaction.parent is None:
         db.info[_AFTER_COMMIT].clear()
+
+
+# ── What a transaction runs unless it commits ────────────────────────────────
+#
+# The twin of `on_commit`, for an action that undoes a write the transaction
+# made outside the database: a cover file written before its row commits goes
+# again if the row never does. It shares `on_commit`'s outermost transaction
+# rule, and every entry runs, logged rather than raised, because the request is
+# already failing and a raise here would replace its error with this one.
+
+#: The key in `Session.info` holding one session's rollback queue.
+_UNLESS_COMMITTED: Final = "unless_committed_queue"
+
+
+def on_rollback(db: Session, fn: Callable[[], None]) -> None:
+    """Run `fn` once the session's current transaction ends without committing.
+
+    Only the outermost transaction counts: a SAVEPOINT released or rolled back
+    says nothing about whether the outer one commits. A rollback, or a close
+    without a commit, runs the entries in the order they were enqueued; a
+    commit forgets them.
+    """
+    # Begun here for `on_commit`'s reason: a transaction that never began ends
+    # nothing, so the entry would wait for whatever transaction came next.
+    if not db.in_transaction():
+        db.begin()
+    queue: list[Callable[[], None]] | None = db.info.get(_UNLESS_COMMITTED)
+    if queue is None:
+        queue = db.info[_UNLESS_COMMITTED] = []
+        event.listen(db, "after_commit", _forget_unless_committed)
+        event.listen(db, "after_transaction_end", _run_unless_committed)
+    queue.append(fn)
+
+
+def _forget_unless_committed(db: Session) -> None:
+    # Releasing a SAVEPOINT fires `after_commit` too, and says nothing about
+    # whether the outer transaction will.
+    if not db.in_nested_transaction():
+        db.info[_UNLESS_COMMITTED].clear()
+
+
+def _run_unless_committed(db: Session, transaction: SessionTransaction) -> None:
+    # On a commit `_forget_unless_committed` has already emptied the queue, so
+    # what is left here is what a rollback or a close left.
+    if transaction.parent is not None:
+        return
+    queue: list[Callable[[], None]] = db.info[_UNLESS_COMMITTED]
+    pending = queue[:]
+    queue.clear()
+    for fn in pending:
+        try:
+            fn()
+        except Exception:
+            logger.exception("A rollback action failed: %r", fn)
 
 
 class Base(DeclarativeBase):

@@ -19,9 +19,17 @@ from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
+from sqlalchemy.exc import DataError, IntegrityError
 
 import auth_backends
 import targets
+
+#: What a write the database refuses raises, on either engine. A CHECK is an
+#: `IntegrityError` everywhere; on Postgres a value its column's type cannot
+#: hold, past a VARCHAR or carrying a NUL, is a `DataError` before any CHECK is
+#: read (`database._a_refusal_is_raised_as_its_kind`).
+REFUSED_BY_THE_DATABASE = (IntegrityError, DataError)
+
 
 # ── Image payloads ────────────────────────────────────────────────────────────
 #

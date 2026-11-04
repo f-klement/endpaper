@@ -651,6 +651,15 @@ class TestLendingToSomeoneWithoutAnAccount:
         ).json()
         assert body["loaned_to_name"] == "Ada"
 
+    def test_a_name_carrying_a_nul_is_422(self, client, admin, book):
+        """Postgres text cannot hold a NUL, and the insert answered 500 there."""
+        res = client.post(
+            "/api/loans",
+            json={"book_id": book["id"], "loaned_to_name": "Ada\x00Ada"},
+            headers=admin["headers"],
+        )
+        assert res.status_code == 422
+
     def test_an_overlong_name_is_422(self, client, admin, book):
         res = client.post(
             "/api/loans",

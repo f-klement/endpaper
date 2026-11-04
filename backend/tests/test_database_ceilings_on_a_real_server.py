@@ -33,9 +33,9 @@ import marc
 import recognition
 from catalogue import Heading, Link, Record
 from classifications import add_headings
-from database import engine
+from database import engine, server_fields
 from enums import ClassificationScheme
-from errors import MetAnotherChange, server_fields
+from errors import MetAnotherChange
 from importing import Import, MarcImport, OpdsImport
 from models import MAX_ONLINE_LINKS_PER_BOOK, Book, Classification, OnlineLink, UserBook
 from schemas import MAX_CLASSIFICATIONS_PER_BOOK

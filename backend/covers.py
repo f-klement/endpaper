@@ -51,14 +51,16 @@ from collections.abc import Awaitable, Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from enum import Enum, StrEnum, auto
+from pathlib import Path
 from typing import Final
 from urllib.parse import urljoin, urlsplit
 
 import httpx
+from sqlalchemy.orm import Session
 
 import cover_store
 import fetch
-from config import MAX_UPLOAD_BYTES
+from config import ALLOWED_IMAGE_EXTENSIONS, MAX_UPLOAD_BYTES
 from deadline import in_, left
 from isbn import parse as parse_isbn
 from uploads import sniff_image_extension
@@ -769,7 +771,7 @@ async def resolve(raw_isbn: str, supplied: str | None = None, deadline: float | 
 #   synchronously**, 22 of `download` and 4 of `store`, counted with `ast`
 #   rather than by line. An async door makes every one of them a coroutine to
 #   await, for a door whose one application caller is in this file.
-# * **`store` writes to disk.** `cover_store.save` is blocking IO, so an `async
+# * **`store` writes to disk.** `cover_store.write` is blocking IO, so an `async
 #   def store` would do it on the event loop, which is the thing being avoided
 #   rather than a cost of avoiding it.
 
@@ -958,6 +960,10 @@ def store(book_id: int, url: str, deadline: float | None = None) -> str | None:
 
     Where the file goes and what it is called are `cover_store`'s: this function
     knows a book id and some bytes.
+
+    **The other formats stay**, and so does the new file whatever happens to
+    the row: this holds no session, so which of the two survives is the
+    caller's to settle once it knows, through `settle`.
     """
     data = download(url, deadline)
     if data is None:
@@ -965,7 +971,7 @@ def store(book_id: int, url: str, deadline: float | None = None) -> str | None:
         return None
 
     try:
-        destination = cover_store.save(book_id, data)
+        destination = cover_store.write(book_id, data)
     except (OSError, cover_store.NotAnImage) as error:
         # A full or unwritable volume, or bytes `download` should already have
         # refused. Counted as a failed download rather than raised: the book is
@@ -978,6 +984,20 @@ def store(book_id: int, url: str, deadline: float | None = None) -> str | None:
     record(CoverOutcome.DOWNLOADED)
     logger.info("Stored a %d byte cover for book %d from %s", len(data), book_id, url)
     return local_url(book_id, destination.suffix.lstrip("."))
+
+
+def settle(db: Session, book_id: int, url: str | None, before: frozenset[Path]) -> None:
+    """Tie the file `url` names to `db`'s transaction, when it is this book's.
+
+    `cover_store.settle` with the URL a caller is about to commit read back to
+    the file it names, by building each URL this book's cover can have rather
+    than parsing this one. Anything else, a remote URL or None, names no file
+    this app wrote for the book, so there is nothing to settle.
+    """
+    for extension in ALLOWED_IMAGE_EXTENSIONS:
+        if url == local_url(book_id, extension):
+            cover_store.settle(db, book_id, extension, before)
+            return
 
 
 def resolve_and_store(

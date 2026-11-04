@@ -1,4 +1,5 @@
-"""Reusable request dependencies: book access control and pagination.
+"""Reusable request dependencies: book access control, pagination, and the
+NUL refusal every published route takes.
 
 Access to a book was previously decided inline in each handler, and most of
 them decided nothing at all: any signed-in member could delete, retag,
@@ -21,10 +22,12 @@ the read check necessarily belongs to the caller. That is why the write rule
 needs no separate private-book branch.
 """
 
-from typing import Annotated
+from typing import Annotated, Final
 
-from fastapi import Depends, HTTPException, Query, status
+from fastapi import Depends, HTTPException, Query, Request, params, status
 from fastapi import Path as PathParam
+from fastapi.exceptions import RequestValidationError
+from fastapi.routing import APIRoute
 from sqlalchemy.orm import Session
 
 import ddc
@@ -442,3 +445,101 @@ BookForOwner = Annotated[Book, Depends(book_for_owner)]
 Paging = Annotated[PageParams, Depends()]
 CurrentUser = Annotated[User, Depends(get_current_user)]
 DbSession = Annotated[Session, Depends(get_db)]
+
+
+#: What a refused NUL says, in the words a field validator's refusal carries.
+NUL_REFUSED: Final = "A request may not carry a NUL character."
+
+
+#: How many places in one body a refusal names. A body carrying more NULs is
+#: refused all the same; the cap is what keeps naming them linear in the body,
+#: since each name is a copy of a path as deep as the body is.
+_NULS_NAMED: Final = 16
+
+
+def _nuls_in(value: object, loc: tuple[str | int, ...]) -> list[tuple[str | int, ...]]:
+    """Where in a parsed JSON value a string, or an object's key, carries a NUL,
+    in document order, up to `_NULS_NAMED` places.
+
+    **Walked with a stack, not by recursion.** `json.loads` parses a body nested
+    far deeper than Python's recursion limit, so a recursive walk raised
+    `RecursionError` on a few kilobytes of brackets and answered an anonymous
+    500. One path is kept and cut back to each entry's depth as it is popped,
+    because building a fresh path tuple at every level made a deep body cost
+    its depth squared.
+    """
+    found: list[tuple[str | int, ...]] = []
+    path: list[str | int] = []
+    # Each entry: a value, the depth of its parent's path, and the step to it.
+    stack: list[tuple[object, int, str | int | None]] = [(value, 0, None)]
+    while stack and len(found) < _NULS_NAMED:
+        item, depth, step = stack.pop()
+        del path[depth:]
+        if step is not None:
+            path.append(step)
+        if isinstance(item, str):
+            if "\x00" in item:
+                found.append((*loc, *path))
+        elif isinstance(item, list):
+            stack.extend((child, len(path), index) for index, child in reversed(list(enumerate(item))))
+        elif isinstance(item, dict):
+            for key, child in reversed(list(item.items())):
+                stack.append((child, len(path), key))
+                # A key is checked as a string at its own value's place, ahead of the value.
+                stack.append((key, len(path), key))
+    return found
+
+
+async def refuse_a_nul(request: Request) -> None:
+    """Refuse a NUL in any string a published route is sent, with the 422 a
+    field validator's refusal gives.
+
+    **Postgres text cannot hold a NUL**, so a string carrying one that reached
+    a column failed in the driver, SQLSTATE 22021, and the route answered 500.
+    Refused here, once for the whole app as a global dependency in `main`,
+    rather than per field: a field added tomorrow is covered without anybody
+    remembering it. Path, query, a JSON body at any depth, and a form body's
+    text fields. A header is not read, since the server refuses a NUL in one.
+
+    **Only a route the schema publishes.** One left out of it speaks another
+    protocol, SRU or the KOReader sync server, and answers a NUL in that
+    protocol's own refusal; a JSON 422 would be an answer its client cannot
+    read.
+
+    **The body is read only where FastAPI already read it**, a route with a
+    body parameter, so this parses nothing twice and never drains a stream a
+    handler reads itself. It runs before every other dependency, so a NUL is
+    refused before a caller is identified: the 422 says nothing about the
+    caller, the account or the row.
+    """
+    route = request.scope.get("route")
+    if not isinstance(route, APIRoute) or not route.include_in_schema:
+        return
+    found: list[tuple[str | int, ...]] = [
+        ("path", name)
+        for name, value in request.path_params.items()
+        if isinstance(value, str) and "\x00" in value
+    ]
+    found += [("query", name) for name, value in request.query_params.multi_items() if "\x00" in value]
+    if route.body_field is not None:
+        if isinstance(route.body_field.field_info, params.Form):
+            form = await request.form()
+            found += [
+                ("body", name)
+                for name, value in form.multi_items()
+                if isinstance(value, str) and "\x00" in value
+            ]
+        elif await request.body():
+            try:
+                body = await request.json()
+            except ValueError:
+                # Not JSON: FastAPI handed the bytes to the model, which refuses them.
+                body = None
+            found += _nuls_in(body, ("body",))
+    if found:
+        raise RequestValidationError(
+            [
+                {"type": "value_error", "loc": loc, "msg": f"Value error, {NUL_REFUSED}", "input": None}
+                for loc in found
+            ]
+        )

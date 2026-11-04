@@ -5480,9 +5480,12 @@ class TestTheStoredKeyIsTheRulesKey:
         """Parametrised over the enum, so a fifth scheme is covered the day it
         is added rather than the day somebody remembers this file."""
         rule = filing.rule_for(scheme)
+        # Postgres text cannot hold a NUL, so the values carrying one are a
+        # question for SQLite alone; `ClassificationIn` refuses them at the door.
+        storable = [value for value in CORPUS if "\x00" not in value or db.bind.dialect.name == "sqlite"]
         mismatches = [
             (value, stored, rule.sort_key(value))
-            for value in CORPUS
+            for value in storable
             if (stored := self._stored(db, scheme, value)) != rule.sort_key(value)
         ]
 

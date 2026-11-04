@@ -67,7 +67,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Self
 
-from sqlalchemy import func, nullslast, or_, select
+from sqlalchemy import func, literal, nullslast, or_, select
 from sqlalchemy.orm import Query, Session, joinedload, selectinload
 from sqlalchemy.sql.elements import ColumnElement, UnaryExpression
 
@@ -223,8 +223,15 @@ def _division_key(number: Any) -> Any:
     projection, and `tests/test_shelf.py::TestTheDivisionProjectionsAgree`
     compares them across all 1,000 three digit numbers rather than trusting
     that they agree.
+
+    **The two positions are rendered into the SQL, not bound**, and
+    `_division_counts` is why. It selects and groups by this expression, and
+    bound, each copy gets parameters of its own: Postgres then reads
+    `substr(number, $1, $2)` and `substr(number, $3, $4)` as two expressions
+    and refuses the SELECT for a column outside its GROUP BY. SQLite compares
+    the values and never noticed.
     """
-    return func.substr(number, 1, 2)
+    return func.substr(number, literal(1, literal_execute=True), literal(2, literal_execute=True))
 
 
 def _shelf_order(scheme: ClassificationScheme) -> tuple[UnaryExpression[Any], ...]:

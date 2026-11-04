@@ -286,6 +286,16 @@ class TestBadInput:
         res = upload(client, admin["headers"], b"")
         assert res.status_code == 400
 
+    def test_a_nul_costs_its_own_character_and_the_cell_keeps_the_rest(self, client, admin, db):
+        """Postgres text cannot hold a NUL, so a cell carrying one answered 500
+        there, and the request door never reads an uploaded file."""
+        res = upload(
+            client, admin["headers"], csv_bytes(goodreads_row("Du\x00ne", "read")), create_missing=True
+        )
+
+        assert res.status_code == 200, res.text
+        assert [book.title for book in db.query(Book)] == ["Dune"]
+
     def test_requires_authentication(self, client):
         res = client.post(
             "/api/imports/csv",

@@ -330,6 +330,15 @@ MAX_MASKS_IN_A_TERM: Final = 8
 SQLITE_MIN_INTEGER: Final = -(2**63)
 SQLITE_MAX_INTEGER: Final = 2**63 - 1
 
+#: The integers a **term** may carry, which is narrower than the above: a term
+#: is compared with `books.id` or `books.year`, both `Integer`, and Postgres
+#: casts the bound value to the column's four byte INTEGER, so anything past
+#: it raised SQLSTATE 22003 there and answered 500. A parameter is bound to
+#: LIMIT and OFFSET, which take eight bytes on both engines, and keeps the
+#: wider range.
+COLUMN_MIN_INTEGER: Final = -(2**31)
+COLUMN_MAX_INTEGER: Final = 2**31 - 1
+
 #: How many records one response may carry, whatever `maximumRecords` asked for.
 #:
 #: **Clamped rather than refused**, which is what the specification expects: a
@@ -1219,7 +1228,8 @@ def _integer(term: Term, index: Index) -> int:
     **The range check is not tidiness.** Without it a term of twenty digits
     parses here, reaches SQLite and raises `OverflowError` from inside the
     driver, which is not an `SruError` and so leaves `respond` as a 500. See
-    `SQLITE_MAX_INTEGER`.
+    `SQLITE_MAX_INTEGER`, and `COLUMN_MAX_INTEGER` for why a term's range is
+    narrower.
     """
     if term.masked:
         raise SruError(Diagnostic.TERM_IN_INVALID_FORMAT, f"{index.qualified} takes a number")
@@ -1228,7 +1238,7 @@ def _integer(term: Term, index: Index) -> int:
         value = int(text)
     except ValueError:
         raise SruError(Diagnostic.TERM_IN_INVALID_FORMAT, f"{index.qualified} takes a number") from None
-    if not SQLITE_MIN_INTEGER <= value <= SQLITE_MAX_INTEGER:
+    if not COLUMN_MIN_INTEGER <= value <= COLUMN_MAX_INTEGER:
         raise SruError(
             Diagnostic.TERM_IN_INVALID_FORMAT,
             f"{index.qualified} takes a number this catalogue can hold",

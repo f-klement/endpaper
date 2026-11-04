@@ -10,7 +10,7 @@ export interface LoanCreate {
   acknowledge_not_lendable?: boolean;
   /**
    * @minimum 1
-   * @maximum 9223372036854776000
+   * @maximum 2147483647
    */
   book_id: number;
   due_at?: string | null;

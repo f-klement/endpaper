@@ -704,6 +704,14 @@ class TestADirectoryNameWiderThanTheColumnIsRefused:
         assert auth_backends.upsert_directory_user(db, too_wide, is_admin=False, source=AuthMode.LDAP) is None
         assert db.query(User).count() == 0
 
+    def test_a_name_carrying_a_nul_writes_no_row(self, db):
+        """The other name the column cannot hold: Postgres text refuses a NUL,
+        and did so at the lookup as a driver error rather than a refusal."""
+        refused = auth_backends.upsert_directory_user(db, "kim\x00", is_admin=False, source=AuthMode.LDAP)
+
+        assert refused is None
+        assert db.query(User).count() == 0
+
     def test_a_name_of_exactly_the_column_width_signs_in(self, db):
         """The accepting case, without which refusing everything satisfies the
         rule above."""
@@ -740,6 +748,7 @@ class TestADirectoryNameWiderThanTheColumnIsRefused:
         assert first.is_admin is False
         assert db.query(User).count() == 2
 
+    @pytest.mark.sqlite_only(reason="stores a row wider than its VARCHAR, which only SQLite does")
     def test_a_row_already_wider_than_the_column_can_no_longer_sign_in(self, db):
         """The residue, pinned as deliberate rather than left to be found.
 

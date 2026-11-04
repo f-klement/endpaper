@@ -106,8 +106,8 @@ function integerOf(node: SchemaNode): fc.Arbitrary<number> {
   const min = numberAt(node, "minimum");
   const max = numberAt(node, "maximum");
   // Clamped to what a double holds exactly: a bound past it, such as the
-  // largest signed 64 bit integer an id column declares, made fast-check
-  // draw over a range it cannot represent and never return. The bound itself
+  // largest signed 64 bit integer a BIGINT column would declare, makes
+  // fast-check draw over a range it cannot represent and never return. The bound itself
   // is still drawn as an edge, as the double JSON parsing makes of it.
   return withEdges(
     fc.integer({

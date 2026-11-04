@@ -63,7 +63,7 @@ export interface BookMatch {
   /**
    * @maxItems 500
    * @items.minimum 1
-   * @items.maximum 9223372036854776000
+   * @items.maximum 2147483647
    */
   suggested_tag_ids?: number[];
   title?: string | null;

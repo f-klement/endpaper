@@ -569,10 +569,12 @@ class _Tally:
 #: `InvalidRequestError`; a gap fill's UPDATE at the flush raises
 #: `StaleDataError`; a child row's INSERT raises a foreign key violation.
 #: **Every `SQLAlchemyError` rather than those three**, because the last one's
-#: type is the driver's choice: pg8000 raises `IntegrityError` for 23505 alone
-#: and `ProgrammingError` for 23503, so a list naming `IntegrityError` let the
-#: violation through as a 500. **Never `Exception`**: a privacy refusal in
-#: `shelf.py` is a `ValueError` or a `TypeError`, which a resend raises again.
+#: type is the driver's choice: pg8000 raises 23503 as `ProgrammingError`, and
+#: it is `database._a_refusal_is_raised_as_its_kind` that makes it
+#: `IntegrityError`, so a list naming
+#: `IntegrityError` holds only while that listener does. **Never `Exception`**:
+#: a privacy refusal in `shelf.py` is a `ValueError` or a `TypeError`, which a
+#: resend raises again.
 _MEETING_A_GONE_ROW: Final = SQLAlchemyError
 
 

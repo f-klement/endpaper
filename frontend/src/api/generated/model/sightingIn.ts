@@ -18,7 +18,7 @@ export interface SightingIn {
   partial_md5?: string | null;
   /**
    * @minimum 1
-   * @maximum 9223372036854776000
+   * @maximum 2147483647
    */
   reference_id: number;
   size_bytes?: number | null;

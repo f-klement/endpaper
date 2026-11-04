@@ -180,13 +180,6 @@
     // directive, which the blanked copy the count reads removes.
     "no-control-regex": "off", // 2
 
-    // Argued from its site, `lib/bookBounds.ts`. The rule is RIGHT:
-    // 9223372036854775807 is SQLite's max int64 and JS rounds it to ...808. It
-    // stays because the value is a declaration mirroring the backend's bound
-    // rather than arithmetic, and no collection id can reach it. If that stops
-    // being true this is a defect, not a suppression.
-    "no-loss-of-precision": "off", // 1
-
     // The rule is WRONG about this tree rather than unpaid, at every JSX site. It
     // requires React in scope for JSX, which the automatic runtime removed.
     // `tsconfig.json` sets `"jsx": "react-jsx"`, so the compiler supplies the

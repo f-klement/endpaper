@@ -106,7 +106,13 @@ class DegradingEnum(TypeDecorator[str]):
         shapes an archive carries and `backup._parse_row` passes through
         untouched, so it would turn a restore that failed loudly into a forged
         string in the column, which the read end would then log on every page.
+
+        **That refusal is sqlite3's and not every driver's**, so it is made
+        here: pg8000 binds a dict or a list as JSON text, and the column stored
+        `{"a": 1}` on Postgres.
         """
+        if value is not None and not isinstance(value, str):
+            raise TypeError(f"{type(self).__name__} binds a string, not a {type(value).__name__}")
         return value
 
     def process_result_value(self, value: object, dialect: object) -> StrEnum | None:
@@ -2315,8 +2321,9 @@ DIGITAL_REFERENCE_PATH_MAX = 4094
 #:
 #: `File.size` is a JavaScript number and arrives as a JSON number, so anything
 #: above `Number.MAX_SAFE_INTEGER` was rounded before it was sent and is not the
-#: size of any file. Bounded at the producer's limit rather than at SQLite's,
-#: which is 2**63 and would store the rounded value as though it meant something.
+#: size of any file. Bounded at the producer's limit rather than at the
+#: column's, which is 2**63 and would store the rounded value as though it meant
+#: something.
 DIGITAL_REFERENCE_MAX_SIZE = 2**53 - 1
 
 #: How many hex digits KOReader's partial MD5 is: an MD5 digest, 16 bytes,
@@ -2546,7 +2553,9 @@ class DigitalReference(Base):
     #: `File.size` as the first look to record a fingerprint saw it, or null
     #: while nobody has said: a later look fills a gap and never replaces it
     #: (`file_references`). Half of the fingerprint a re-check compares against.
-    size_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    #: `BigInteger` because `DIGITAL_REFERENCE_MAX_SIZE` is past what a four
+    #: byte INTEGER holds on Postgres.
+    size_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
 
     #: `File.lastModified`, on the size's rule. The other half, and the half
     #: that moves when somebody edits the file's metadata in place.

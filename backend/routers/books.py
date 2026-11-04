@@ -1637,9 +1637,16 @@ def _store_cover(book: Book) -> bool:
     # restated here: `covers.resolve_and_store`'s own note is the one place that
     # number lives, and the version of this comment that carried a second copy
     # went stale the day the walk grew a per hop wall clock bound.
+    before = cover_store.on_disk(book.id)
     resolved = covers.resolve_and_store(
         book.id, book.isbn, book.cover_url, budget=covers.INTERACTIVE_BUDGET_SECONDS
     )
+    # Before the equality test below: a file written under the name the row
+    # already holds is settled all the same, so its sweep runs where the
+    # caller commits. The session is the Book's own, because every caller
+    # commits through it and none of them is handed one here.
+    if (db := Session.object_session(book)) is not None:
+        covers.settle(db, book.id, resolved, before)
     if resolved is None or resolved == book.cover_url:
         return False
     book.cover_url = resolved
@@ -3351,7 +3358,7 @@ def backfill_covers(
             # unhandled-exception handler, which classes a bad request as a bug
             # in our own code. Every other numeric query parameter here is
             # bounded at both ends for the same reason.
-            le=2**63 - 1,
+            le=MAX_ROW_ID,
             description="Carry on past this book id. From the previous reply.",
         ),
     ] = 0,
@@ -3436,6 +3443,14 @@ def backfill_covers(
         if url != book.cover_url:
             book.cover_url = url
         if covers.is_local(url):
+            # Empty, because that is `on_disk` as of the candidate read: no file
+            # under this id is what made the book a candidate. A commit that
+            # fails takes the file with it. Read here, the disk would already
+            # hold this run's write; read at submission, it would still leave
+            # the download between it and the write. So another request's
+            # write since the candidate read stays the concurrency
+            # `cover_store.settle` lets through, wherever `before` is taken.
+            covers.settle(db, book.id, url, frozenset())
             return "stored"
         # Resolved to a remote URL this server could not download. Counted
         # separately from "no image service has one": with no egress every book
@@ -3797,7 +3812,7 @@ async def backfill_from_identifiers(
             # Bounded above for `backfill_covers`' reason: a Python int has no
             # ceiling and SQLite's does, so an unbounded value reaches the
             # driver and raises `OverflowError` from inside the query.
-            le=2**63 - 1,
+            le=MAX_ROW_ID,
             description="Carry on past this book id. From the previous reply.",
         ),
     ] = 0,
@@ -4711,9 +4726,11 @@ def add_copy(
     # not shared**: `cover_store.remove` deletes by id, so two rows pointing at one
     # file would mean purging either copy blanks the other's cover.
     if covers.is_local(book.cover_url):
+        before = cover_store.on_disk(copy.id)
         copied = covers.duplicate(copy.id, book.id)
         if copied is not None:
             copy.cover_url = copied
+            covers.settle(db, copy.id, copied, before)
             db.commit()
             db.refresh(copy)
     else:
@@ -5206,12 +5223,12 @@ async def upload_cover(
     # refusal. What the file is called, and that the other formats of this book
     # go with it, are `cover_store`'s.
     data = await read_image_upload(file)
+    before = cover_store.on_disk(book.id)
     destination = cover_store.write(book.id, data)
     book.cover_url = covers.local_url(book.id, destination.suffix.lstrip("."))
-    # The other formats go once the row names the new file. Swept before the
-    # commit, a PNG replacing a JPEG deletes the JPEG, and a commit that fails
-    # leaves the row naming it.
-    on_commit(db, partial(cover_store.sweep, book.id, destination))
+    # The other formats go once the row names the new file, and the new file
+    # goes if it never does. `cover_store.settle` says what each half stops.
+    covers.settle(db, book.id, book.cover_url, before)
     db.commit()
     db.refresh(book)
     return book_to_out(book, current_user, db)

@@ -9,8 +9,8 @@ cover somebody can see. Two `ast` passes ask whether any module but this one
 still knows either fact.
 
 The rest drive the module itself. The two that matter most are the pair that
-tells the writers apart: `save` sweeps the other formats of a book and `restore`
-must not, and neither an argument nor a comment is worth much on its own, so both
+tells the writers apart: a settled `write` sweeps the other formats of a book and
+`restore` must not, and neither an argument nor a comment is worth much on its own, so both
 directions are asserted.
 
 `_to_serve` and `_within` are reached directly by the containment tests below.
@@ -169,7 +169,7 @@ class TestTheDirectoryHasOneOwner:
         assert corpus >= _ALLOWED_TO_WRITE
 
 
-class TestSavingABookCover:
+class TestWritingABookCover:
     def test_it_names_the_file_from_the_bytes(self, covers_dir):
         """Whatever anybody called it, and whatever format the last one was.
 
@@ -178,18 +178,18 @@ class TestSavingABookCover:
         and the allowlist tests next door. The test named for the property is
         the one that has to see it.
         """
-        assert cover_store.save(7, PNG_BYTES).name == "7.png"
-        assert cover_store.save(8, WEBP_BYTES).name == "8.webp"
+        assert cover_store.write(7, PNG_BYTES).name == "7.png"
+        assert cover_store.write(8, WEBP_BYTES).name == "8.webp"
 
-    def test_it_sweeps_the_other_formats_of_the_same_book(self, covers_dir):
-        cover_store.save(7, JPEG_BYTES)
-        cover_store.save(7, PNG_BYTES)
+    def test_the_sweep_takes_the_other_formats_of_the_same_book(self, covers_dir):
+        cover_store.write(7, JPEG_BYTES)
+        cover_store.sweep(7, cover_store.write(7, PNG_BYTES))
 
         assert sorted(path.name for path in covers_dir.glob("7.*")) == ["7.png"]
 
-    def test_it_leaves_another_book_alone(self, covers_dir):
-        cover_store.save(7, JPEG_BYTES)
-        cover_store.save(8, PNG_BYTES)
+    def test_the_sweep_leaves_another_book_alone(self, covers_dir):
+        cover_store.write(7, JPEG_BYTES)
+        cover_store.sweep(8, cover_store.write(8, PNG_BYTES))
 
         assert (covers_dir / "7.jpg").is_file()
         assert (covers_dir / "8.png").is_file()
@@ -197,7 +197,7 @@ class TestSavingABookCover:
     def test_it_refuses_bytes_that_are_not_an_image(self, covers_dir):
         """The rule the five call sites used to keep by hand, kept here instead."""
         with pytest.raises(cover_store.NotAnImage):
-            cover_store.save(7, NOT_AN_IMAGE)
+            cover_store.write(7, NOT_AN_IMAGE)
 
         assert list(covers_dir.iterdir()) == []
 
@@ -212,13 +212,89 @@ class TestSavingABookCover:
             cover_store.save_login_background(NOT_AN_IMAGE)
 
 
+class TestSettlingAWriteAgainstItsCommit:
+    """A write lands at once and its row lands at the commit, so each way the
+    transaction ends decides which file survives. Against the suite's own
+    session, because the behaviour is SQLAlchemy's event order."""
+
+    def _replace(self, db, data: bytes) -> Path:
+        before = cover_store.on_disk(7)
+        written = cover_store.write(7, data)
+        cover_store.settle(db, 7, written.suffix.lstrip("."), before)
+        return written
+
+    def test_a_commit_keeps_the_new_format_alone(self, db, covers_dir):
+        cover_store.write(7, JPEG_BYTES)
+        self._replace(db, PNG_BYTES)
+
+        db.commit()
+
+        assert sorted(path.name for path in covers_dir.glob("7.*")) == ["7.png"]
+
+    def test_a_rollback_keeps_the_old_format_alone(self, db, covers_dir):
+        """The row still names the JPEG, and `path_of` would answer with
+        whichever of the two sorts first."""
+        cover_store.write(7, PNG_BYTES)
+        self._replace(db, JPEG_BYTES)
+
+        db.rollback()
+
+        assert sorted(path.name for path in covers_dir.glob("7.*")) == ["7.png"]
+
+    def test_a_rollback_of_a_same_format_replace_keeps_the_file(self, db, covers_dir):
+        """That file is the one the surviving row names."""
+        cover_store.write(7, JPEG_BYTES)
+        self._replace(db, JPEG_BYTES)
+
+        db.rollback()
+
+        assert (covers_dir / "7.jpg").is_file()
+
+    def test_a_rollback_leaves_a_file_another_request_wrote_since(self, db, covers_dir):
+        """Two uploads in one format to one book, the second committed first: its
+        row names the file, and the first one's rollback must not take it."""
+        cover_store.write(7, JPEG_BYTES)
+        self._replace(db, PNG_BYTES)
+        cover_store.write(7, PNG_BYTES)
+
+        db.rollback()
+
+        assert (covers_dir / "7.png").is_file()
+
+    def test_a_file_gone_before_it_is_settled_is_no_error(self, db, covers_dir):
+        """The backfill settles seconds after its write, and another request's
+        sweep or a purge can take the file in between."""
+        cover_store.write(7, PNG_BYTES)
+        before = cover_store.on_disk(7)
+        cover_store.write(7, JPEG_BYTES).unlink()
+
+        cover_store.settle(db, 7, "jpg", before)
+        db.rollback()
+
+        assert sorted(path.name for path in covers_dir.glob("7.*")) == ["7.png"]
+
+    def test_a_discard_of_a_file_already_gone_is_no_error(self, covers_dir):
+        """A concurrent sweep can take the file before the rollback runs."""
+        cover_store._discard(covers_dir / "7.jpg", (1, 1))
+
+    def test_a_discard_leaves_a_reused_inode_with_a_new_change_time(self, covers_dir):
+        """On NFS over ZFS a freed inode number can be given to a later file,
+        which a committed row may name."""
+        written = cover_store.write(7, JPEG_BYTES)
+        stat = written.stat()
+
+        cover_store._discard(written, (stat.st_ino, stat.st_ctime_ns - 1))
+
+        assert written.is_file()
+
+
 class TestRestoringFromAnArchive:
     """The writer that must not sweep. `cover_store.restore` says why."""
 
     def test_it_leaves_a_sibling_the_same_archive_wrote(self, covers_dir):
         """The defect the split exists to prevent, asserted as the difference.
 
-        `save` in the same position deletes the loser, and a row naming it then
+        A settled `write` in the same position deletes the loser, and a row naming it then
         404s with the restore's own count still reporting it.
         """
         cover_store.restore("1.jpg", JPEG_BYTES)
@@ -298,7 +374,7 @@ class TestFindingWhatIsStored:
         assert cover_store.path_of(7) is None
 
     def test_it_finds_whichever_format_is_there(self, covers_dir):
-        cover_store.save(7, WEBP_BYTES)
+        cover_store.write(7, WEBP_BYTES)
 
         assert cover_store.path_of(7) == covers_dir / "7.webp"
 
@@ -346,7 +422,7 @@ class TestFindingWhatIsStored:
             (covers_dir / "7.jpg").rmdir()
 
     def test_book_ids_skips_a_name_that_is_not_a_number(self, covers_dir):
-        cover_store.save(7, JPEG_BYTES)
+        cover_store.write(7, JPEG_BYTES)
         cover_store.save_login_background(PNG_BYTES)
 
         assert cover_store.book_ids() == {7}
@@ -354,7 +430,7 @@ class TestFindingWhatIsStored:
     def test_files_holds_the_login_background_too(self, covers_dir):
         """An archive that dropped it would restore a library with no login page
         background and no way to tell that it once had one."""
-        cover_store.save(7, JPEG_BYTES)
+        cover_store.write(7, JPEG_BYTES)
         cover_store.save_login_background(PNG_BYTES)
 
         assert [path.name for path in cover_store.files()] == ["7.jpg", "login_bg.png"]
@@ -362,18 +438,18 @@ class TestFindingWhatIsStored:
 
 class TestServingOne:
     def test_it_answers_with_the_file(self, covers_dir):
-        cover_store.save(7, JPEG_BYTES)
+        cover_store.write(7, JPEG_BYTES)
 
         assert cover_store.cover_to_serve(7, "jpg") == covers_dir / "7.jpg"
 
     def test_a_format_that_is_not_there_is_none(self, covers_dir):
         """A book holding a JPEG says nothing about a request for its PNG."""
-        cover_store.save(7, JPEG_BYTES)
+        cover_store.write(7, JPEG_BYTES)
 
         assert cover_store.cover_to_serve(7, "png") is None
 
     def test_the_extension_is_matched_case_insensitively(self, covers_dir):
-        cover_store.save(7, JPEG_BYTES)
+        cover_store.write(7, JPEG_BYTES)
 
         assert cover_store.cover_to_serve(7, "JPG") == covers_dir / "7.jpg"
 
@@ -427,13 +503,13 @@ class TestServingOne:
 
 class TestMovingAndCopying:
     def test_copy_leaves_the_source_where_it_was(self, covers_dir):
-        cover_store.save(7, JPEG_BYTES)
+        cover_store.write(7, JPEG_BYTES)
 
         assert cover_store.copy(8, 7) == covers_dir / "8.jpg"
         assert (covers_dir / "7.jpg").is_file()
 
     def test_move_takes_the_source_with_it(self, covers_dir):
-        cover_store.save(7, JPEG_BYTES)
+        cover_store.write(7, JPEG_BYTES)
 
         assert cover_store.move(8, 7) == covers_dir / "8.jpg"
         assert not (covers_dir / "7.jpg").exists()
@@ -455,14 +531,14 @@ class TestMovingAndCopying:
     def test_moving_a_book_onto_its_own_id_keeps_the_cover(self, covers_dir):
         """Unreachable through `merge_books`, which passes two distinct ids. What
         it would cost is a deleted cover reported as a successful move."""
-        cover_store.save(7, JPEG_BYTES)
+        cover_store.write(7, JPEG_BYTES)
 
         assert cover_store.move(7, 7) == covers_dir / "7.jpg"
         assert (covers_dir / "7.jpg").is_file()
 
     def test_the_receiving_book_keeps_one_cover(self, covers_dir):
-        cover_store.save(7, JPEG_BYTES)
-        cover_store.save(8, PNG_BYTES)
+        cover_store.write(7, JPEG_BYTES)
+        cover_store.write(8, PNG_BYTES)
         cover_store.move(8, 7)
 
         assert sorted(path.name for path in covers_dir.glob("8.*")) == ["8.jpg"]
@@ -472,7 +548,7 @@ class TestRemovingAndClearing:
     def test_remove_takes_every_format_of_one_book(self, covers_dir):
         cover_store.restore("7.jpg", JPEG_BYTES)
         cover_store.restore("7.png", PNG_BYTES)
-        cover_store.save(8, JPEG_BYTES)
+        cover_store.write(8, JPEG_BYTES)
 
         cover_store.remove(7)
 
@@ -487,7 +563,7 @@ class TestRemovingAndClearing:
         assert cover_store.login_background_path() is not None
 
     def test_clear_empties_the_directory(self, covers_dir):
-        cover_store.save(7, JPEG_BYTES)
+        cover_store.write(7, JPEG_BYTES)
         cover_store.save_login_background(PNG_BYTES)
 
         cover_store.clear()
@@ -515,7 +591,7 @@ class TestTheNamesThisModuleOwns:
         allowlist. A format the app serves that the store cannot write is a
         cover nobody can upload; one it writes that the app does not serve is a
         file the cover route will never hand back."""
-        written = {cover_store.save(7, body).suffix.lstrip(".") for body in _EVERY_FORMAT}
+        written = {cover_store.write(7, body).suffix.lstrip(".") for body in _EVERY_FORMAT}
 
         assert written == set(ALLOWED_IMAGE_EXTENSIONS) - {"jpeg"}
 

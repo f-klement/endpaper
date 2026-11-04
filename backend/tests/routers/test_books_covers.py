@@ -509,7 +509,78 @@ class TestARaiseInTheBodyRunsNoTail:
         assert res.status_code == 500
         db.expire_all()
         assert db.get(Book, book["id"]).cover_url == f"/covers/{book['id']}.jpg"
+        assert cover_store.on_disk(book["id"]) == {covers_dir / f"{book['id']}.jpg"}
+
+    def test_replacing_a_cover_in_the_same_format(
+        self, client, admin, make_book, covers_dir, db, refuse_commits
+    ):
+        """The upload wrote over the file the surviving row names, so removing
+        the new file on the rollback would leave that row with none."""
+        book = make_book(admin["headers"], title="Dune")
+        _give_a_cover(db, covers_dir, book["id"])
+        refuse_commits(kind="dirty")
+
+        res = client.post(
+            f"/api/books/{book['id']}/cover",
+            files={"file": ("cover.jpg", JPEG_BYTES, "image/jpeg")},
+            headers=admin["headers"],
+        )
+
+        assert res.status_code == 500
         assert (covers_dir / f"{book['id']}.jpg").is_file()
+
+
+def download_a_png(monkeypatch) -> None:
+    """The real `resolve_and_store` over a download that always answers a PNG."""
+    from tests.conftest import REAL_RESOLVE_AND_STORE
+
+    monkeypatch.setattr(covers, "resolve_and_store", REAL_RESOLVE_AND_STORE)
+    monkeypatch.setattr(covers, "download", lambda url, deadline=None: PNG_BYTES)
+
+
+_REMOTE = "https://covers.openlibrary.org/b/isbn/x-L.jpg"
+
+
+@pytest.mark.answers_500(raises=(CommitRefused,))
+class TestACoverWrittenForARowThatNeverCommitsGoes:
+    """A file named by book id that no committed row names is one the next
+    read picks up: the backfill skips the book for having a file, and
+    `path_of` hands it to a copy or a merge. One test per route that writes a
+    cover before its commit, because each reaches the write by its own path."""
+
+    def test_adding_a_book(self, client, admin, covers_dir, monkeypatch, refuse_commits):
+        download_a_png(monkeypatch)
+        refuse_commits(kind="dirty")
+
+        res = client.post(
+            "/api/books", json={"title": "Dune", "cover_url": _REMOTE}, headers=admin["headers"]
+        )
+
+        assert res.status_code == 500
+        assert cover_store.book_ids() == set()
+
+    def test_the_backfill(self, client, admin, make_book, covers_dir, monkeypatch, refuse_commits):
+        make_book(admin["headers"], title="Dune", cover_url=_REMOTE)
+        download_a_png(monkeypatch)
+        refuse_commits(kind="dirty")
+
+        res = client.post("/api/books/covers/backfill", headers=admin["headers"])
+
+        assert res.status_code == 500
+        assert cover_store.book_ids() == set()
+
+    def test_adding_a_copy(self, client, admin, make_book, covers_dir, db, refuse_commits):
+        """The second copy, so the source is already in a copy group and the
+        first commit carries only the new row."""
+        book = make_book(admin["headers"], title="Dune")
+        _give_a_cover(db, covers_dir, book["id"])
+        first = client.post(f"/api/books/{book['id']}/copies", json={}, headers=admin["headers"])
+        refuse_commits(kind="dirty")
+
+        res = client.post(f"/api/books/{book['id']}/copies", json={}, headers=admin["headers"])
+
+        assert res.status_code == 500
+        assert cover_store.book_ids() == {book["id"], first.json()["id"]}
 
 
 class TestAMemberCannotChooseWhereTheServerConnects:

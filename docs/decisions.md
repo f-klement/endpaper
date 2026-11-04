@@ -1664,8 +1664,10 @@ suggestions becomes six spellings of "living room" inside a week.
 
 ### Every row id a caller supplies is bounded at both ends
 
-A Python int has no ceiling and SQLite's does. An id past 2**63-1 passes
-validation, reaches the driver and raises `OverflowError` from inside the query,
+A Python int has no ceiling and an `Integer` column does. The narrowest is
+Postgres's four byte INTEGER, 2**31-1, and `MAX_ROW_ID` holds every engine to
+it. An unbounded id past it passes validation, reaches the driver and fails
+inside the query, as `OverflowError` on SQLite or SQLSTATE 22003 on Postgres,
 which lands in the unhandled-exception handler and answers **500**: the app
 calling its own code buggy over a value the caller chose. 422 is the honest
 answer.
@@ -3157,9 +3159,9 @@ door that refusal left open: a caller names what it is storing, and the module d
 directory, the name, the extension, the sweep and the containment check.
 
 **The choice between the two writers is now a different argument rather than a different
-word.** `save` takes a book id and sweeps; `restore` takes a filename out of an archive and
-does not. An upload cannot reach `restore` without inventing a filename, and a restore cannot
-reach `save` without discarding the name the archive gave it.
+word.** `write` takes a book id and `settle` sweeps once its row commits; `restore` takes a
+filename out of an archive and does not. An upload cannot reach `restore` without inventing a
+filename, and a restore cannot reach `write` without discarding the name the archive gave it.
 
 **Every write sniffs, including the three whose caller already sniffed.** That is what makes
 "nothing in this directory is anything but `ALLOWED_IMAGE_EXTENSIONS`" a property of one module
@@ -3170,6 +3172,38 @@ passes over every non test backend module, and it names its own blind spots. The
 there because an `ast.alias` is neither a `Name` nor an `Attribute`, so a bare
 `from uploads import replace_image` was caught by nothing: both critic seats found that hole
 independently.
+
+### Two requests writing one Book's cover at once are not serialised
+
+**Two cover writes to one Book in flight together can leave its row naming no file, and that
+is accepted.** A writes `N.png`, B writes `N.jpg`; A commits and its sweep takes `N.jpg`; B
+commits naming `N.jpg` and its sweep takes `N.png`. The Book shows no cover until the next
+upload, refresh or backfill writes one. The same holds in one format where a write lands
+between a request's `before` and its own write and that request then rolls back.
+`cover_store.settle` closes every single request case, and its docstring names this one.
+The cover backfill widens the one format case: `settle` reads the inode when it runs, and the
+backfill runs it up to a download's time budget after the write, so a same format write by
+another request in that gap is taken as the backfill's own and goes if the backfill rolls back.
+Carrying the inode out of the write would close it at the cost of a signature through
+`resolve_and_store`, for the same window this entry already accepts.
+
+It needs two members, or one member in two tabs, writing a cover for one Book inside one
+commit window, and the repair is one press. Closing it needs either a lock per Book held from
+the write to the commit, which is a lock across a download on the add and refresh paths and
+across processes once there is more than one worker, or a sweep that reads the committed row
+back and keeps the file it names, which is a query inside an after commit hook on a session
+that has just ended its transaction. Neither is worth one commit window.
+
+### A process killed between a cover write and its commit leaves the new file
+
+**A kill between the write and the commit runs neither half of `settle`, and that is
+accepted.** No session event reaches a killed process, so the new file stays beside the old
+one: `path_of` may then prefer the new format, and a copy or a merge takes the image whose row
+never committed. It never leaves a row naming a missing file. The window is one commit long.
+
+The fix is a design of its own: `covers.duplicate` and `merge_books`' adoption would read
+the extension off the source row's `cover_url` rather than off the disk, so a stray format
+is never chosen. That changes what a copy reads and is not worth one commit window today.
 
 ### A payload's per viewer half is a type, and it carries no defaults
 
@@ -9152,8 +9186,8 @@ Found by a design critic, which had to read the reason rather than the number to
 
 ### Both critic seats found the same two things, from opposite ends
 
-**#111 and #103, the wave's own process note, because `CLAUDE.md` claims this is the
-strongest signal the three seat process produces and it is worth having an instance
+**#111 and #103, the wave's own process note, because `CLAUDE.md` then claimed this was the
+strongest signal the three seat process produced and it is worth having an instance
 recorded.** The design seat and the security seat reviewed independently and converged on
 two defects neither was looking for: **the roster count had gone stale in fifteen places**,
 eleven of them published, and **`fetch._IDENTITY` claimed a live measurement the eighth
@@ -16287,6 +16321,31 @@ type rather than stated in a comment:
 because that column has no ceiling for one to make readable. The asymmetry has its own case, so
 regularising the three is a test failure rather than a tidy.
 
+## A refusal on Postgres is classified by SQLSTATE, and a bound is the narrowest engine's
+
+2026-11-04. pg8000 raises `IntegrityError` for 23505 alone, so
+`database._a_refusal_is_raised_as_its_kind` reclassifies class 23 as `IntegrityError` and
+class 22 as `DataError` on every engine. Translation rather than a bound, because a CHECK
+refusal is the database's answer and there is no earlier place to give it. Where a value is
+the caller's, the bound moves to the door instead: a row id and an SRU term stop at
+Postgres's four byte INTEGER, and a NUL in any string a published route is sent is a 422,
+since Postgres text holds none. Where the column was the wrong width for a value the API
+rightly takes, the column moved: `digital_references.size_bytes` is BIGINT.
+
+**A password containing a NUL is refused at the door like any other request string**, so an
+account whose password holds one can no longer sign in. Only an API client could have set
+one, since `UserCreate.password` and the reset bound only length, and an admin reset to a
+password without a NUL recovers it where local reset is enabled. Exempting the field would
+mean naming fields at the door again.
+
+**An archive and a CSV file drop a NUL rather than refuse it.** Refusing would leave a SQLite
+library holding one unable to move to Postgres, and a CSV import repairs a bad cell rather
+than refusing the file. `backup.restore` logs each value it changes by table and column,
+never the value, as `_storable_cover` does per cover. Two archived values that differ only by
+a NUL, such as tags `x` and `x` with one after it, become equal and fail the restore on a
+unique constraint, where they would have failed on the NUL anyway; that needs a hand edited
+archive or a write from before the door, and is accepted.
+
 ## Creation is not preservation
 
 2026-09-17. A schema that can be created proves nothing about what it refuses. Every CHECK
@@ -17003,13 +17062,6 @@ frontend lint configuration holds their count and their files beside the reason:
 reds unless a counted site in the same file goes in the same change. `no-control-regex` fires
 on `lib/safeHref.ts`, where the character class **is** the URL sanitisation. A backlog entry is different: a rule this tree
 would pass if somebody did the work, and it carries its count.
-
-**One refusal records that the rule is right.** `no-loss-of-precision` on
-`lib/bookBounds.ts` is correct: `9223372036854775807` is SQLite's max int64 and JavaScript
-rounds it to `...808`. It stays off because the value is a declaration mirroring the
-backend's bound rather than arithmetic, and no collection id can reach it. That is a
-different thing from the other three and is written down as such, because a reader who
-thinks it is a false positive will eventually delete the note.
 
 **The backlog was not triaged, deliberately.** Turning a noisy rule on produces findings in
 files that open tickets rewrite, so the counts are recorded and the work is not done here.

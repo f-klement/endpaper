@@ -1348,7 +1348,12 @@ def parse(
     file itself is: it is the member's own upload, and the column is theirs to
     remove.
     """
-    text = _decode(content)
+    # A NUL costs its own character and nothing else, as a stray byte does in
+    # `_decode` and as a restore drops one. Postgres text cannot hold one, so a
+    # cell carrying it failed the import with a 500 there, and the request door
+    # never reads an uploaded file. Before the empty check, so a file of NULs is
+    # empty.
+    text = _decode(content).replace("\x00", "")
     if not text.strip():
         raise ImportError_("That file is empty.")
 

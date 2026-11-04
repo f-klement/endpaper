@@ -58,6 +58,7 @@ from migrations.versions import (
 )
 from schemas.opds import OpdsServerIn
 from tests.corpus import BACKEND, application_modules
+from tests.helpers import REFUSED_BY_THE_DATABASE
 from tests.test_dialect import ADDED_RULES, SWAP_CHAIN, THE_SWAPS, _swap_rows
 from tests.test_filing import CORPUS
 
@@ -1424,7 +1425,7 @@ class TestCustomFieldsOnABook:
             connection.execute(text("INSERT INTO books (title) VALUES ('Solaris')"))
             connection.commit()
 
-            with pytest.raises(IntegrityError):
+            with pytest.raises(REFUSED_BY_THE_DATABASE):
                 connection.execute(
                     text("INSERT INTO custom_field_values (book_id, field_id, value) VALUES (1, 1, :value)"),
                     {"value": "x" * 501},
@@ -1696,6 +1697,46 @@ class TestKeyingTheSeededTags:
         assert self.keys()["Computing"] == "computing"
 
 
+#: Where `_as_the_models_build_it` builds the metadata on a server. Rolled back
+#: with the transaction it is created in, so nothing outlives the read.
+_MODELS_SCHEMA: Final = "endpaper_models_probe"
+
+
+def _as_the_models_build_it() -> tuple[dict[str, dict[str, str]], dict[str, tuple[str, str]]]:
+    """`create_all` on this server, read back as the chain's tables are read:
+    `{table: {column: type}}` and `_installed_checks()`.
+
+    **For a server, which reads back what it was given in its own words.**
+    Postgres stores a CHECK as a parse tree and deparses it with casts added,
+    `provenance::text <> 'catalogue'::text` for `provenance <> 'catalogue'`,
+    and reflects `Float` as `DOUBLE PRECISION` and `DateTime` as `TIMESTAMP`.
+    So the metadata's own text never equals what the chain installed there,
+    whatever either says. Built by the same server and read by the same
+    reflection, the two copies differ only where their declarations do.
+
+    In a schema of its own inside one transaction, rolled back after the read:
+    Postgres DDL is transactional, so the suite's tables are never touched.
+    """
+    with engine.connect() as connection:
+        transaction = connection.begin()
+        try:
+            connection.execute(text(f"CREATE SCHEMA {_MODELS_SCHEMA}"))
+            Base.metadata.create_all(
+                connection.execution_options(schema_translate_map={None: _MODELS_SCHEMA})
+            )
+            inspector = inspect(connection)
+            types = {
+                table: {
+                    column["name"]: str(column["type"])
+                    for column in inspector.get_columns(table, schema=_MODELS_SCHEMA)
+                }
+                for table in inspector.get_table_names(schema=_MODELS_SCHEMA)
+            }
+            return types, _installed_checks(inspector, _MODELS_SCHEMA)
+        finally:
+            transaction.rollback()
+
+
 class TestTheMigrationsAndTheModelsAgree:
     """What the suite builds and what production runs must be one schema.
 
@@ -1817,15 +1858,27 @@ class TestTheMigrationsAndTheModelsAgree:
         assert not wrong, "\n".join(wrong)
 
     def test_every_column_agrees_on_type(self):
+        """On SQLite against the declared type's own spelling, which is what
+        SQLite stores and reflects; on a server against what `create_all`
+        builds there (`_as_the_models_build_it` says why)."""
         migrated = self._reflected()
+        declared = (
+            {
+                table.name: {column.name: str(column.type) for column in table.columns}
+                for table in Base.metadata.sorted_tables
+            }
+            if engine.dialect.name == "sqlite"
+            else _as_the_models_build_it()[0]
+        )
         wrong: list[str] = []
         for table in Base.metadata.sorted_tables:
             for column in table.columns:
                 built = migrated.get(table.name, {}).get(column.name)
                 if built is None:
                     continue
-                if built[1] != str(column.type):
-                    wrong.append(f"{table.name}.{column.name}: migration {built[1]}, model {column.type}")
+                model = declared[table.name][column.name]
+                if built[1] != model:
+                    wrong.append(f"{table.name}.{column.name}: migration {built[1]}, model {model}")
 
         assert not wrong, "\n".join(wrong)
 
@@ -1883,8 +1936,10 @@ class TestTheMigrationsAndTheModelsAgree:
         site and this inherits.
         """
         at_head()
-        declared = _declared_checks()
         installed = _installed_checks()
+        # Postgres deparses a CHECK in its own words, so on a server the
+        # model's text is compared as that server deparses it.
+        declared = _declared_checks() if engine.dialect.name == "sqlite" else _as_the_models_build_it()[1]
 
         wrong = [
             f"{name}:\n  model     ({declared[name][0]}): {declared[name][1]}\n"
@@ -2981,6 +3036,7 @@ class TestTheMigratedDatabaseCarriesTheBoundsItPromises:
 
         assert "ck_digital_references_bounds" in str(refusal.value)
 
+    @pytest.mark.sqlite_only(reason="asserts the CHECK refusing what Postgres's column type refuses first")
     def test_a_null_carrying_value_cannot_walk_past_the_character_bound(self):
         """The arm the character inequality cannot supply on its own.
 
@@ -3257,7 +3313,7 @@ def _declared_checks() -> dict[str, tuple[str, str]]:
     return declared
 
 
-def _installed_checks() -> dict[str, tuple[str, str]]:
+def _installed_checks(inspector: Any = None, schema: str | None = None) -> dict[str, tuple[str, str]]:
     """Every named CHECK the database in front of us carries, in the same shape.
 
     The other copy of `_declared_checks`, and deliberately the same return type:
@@ -3280,10 +3336,10 @@ def _installed_checks() -> dict[str, tuple[str, str]]:
     nobody thought to list is compared rather than missed, and a constraint
     installed on a table that does not declare it is visible from this side.
     """
-    inspector = inspect(engine)
+    inspector = inspector or inspect(engine)
     installed: dict[str, tuple[str, str]] = {}
-    for table in inspector.get_table_names():
-        for constraint in inspector.get_check_constraints(table):
+    for table in inspector.get_table_names(schema=schema):
+        for constraint in inspector.get_check_constraints(table, schema=schema):
             name = constraint.get("name")
             # **Refused rather than skipped**, because `_declared_checks` skips
             # an unnamed CHECK too: a constraint with no name would be in
@@ -3640,6 +3696,7 @@ class TestEveryTextCeilingIsInstalledWithItsByteArm:
 
         assert self._installed_check(rule.constraint) == " ".join(rule.before.split())
 
+    @pytest.mark.sqlite_only(reason="asserts the CHECK refusing what Postgres's column type refuses first")
     def test_the_upgrade_refuses_a_row_the_new_ceiling_cannot_hold(self) -> None:
         """The revision's own account of what it does to existing rows.
 
@@ -3758,6 +3815,7 @@ class TestTheIdentifierBoundsSurvivedIntoTheMigration:
         them."""
         assert what_a_store_calls_a_book._VALUE_MAX == models.BOOK_IDENTIFIER_MAX
 
+    @pytest.mark.sqlite_only(reason="asserts the CHECK refusing what Postgres's column type refuses first")
     def test_a_value_past_the_ceiling_is_refused(self):
         book = self._migrated()
 
@@ -3766,6 +3824,7 @@ class TestTheIdentifierBoundsSurvivedIntoTheMigration:
 
         assert "ck_book_identifiers_bounds" in str(refusal.value)
 
+    @pytest.mark.sqlite_only(reason="asserts the CHECK refusing what Postgres's column type refuses first")
     def test_a_null_carrying_value_cannot_walk_past_the_character_bound(self):
         """The arm the character inequality cannot supply on its own.
 
@@ -4178,6 +4237,7 @@ class TestTheGlobRulesThatLearnedAboutNul:
             connection.execute(text("DROP TABLE IF EXISTS _alembic_tmp_catalogue_targets"))
             connection.commit()
 
+    @pytest.mark.sqlite_only(reason="plants what only SQLite stores: too long, behind a NUL, or raw bytes")
     def test_the_previous_schema_stored_a_megabyte_behind_a_nul(self) -> None:
         """The defect that is **not** truncation, measured rather than argued.
 
@@ -4198,6 +4258,7 @@ class TestTheGlobRulesThatLearnedAboutNul:
 
         assert (characters, stored) == (8, 1_000_009)
 
+    @pytest.mark.sqlite_only(reason="asserts the CHECK refusing what Postgres's column type refuses first")
     def test_an_address_hiding_a_payload_behind_a_nul_is_refused(self) -> None:
         """The same address against the migrated schema."""
         self._migrated()
@@ -4208,6 +4269,7 @@ class TestTheGlobRulesThatLearnedAboutNul:
 
         assert "ck_opds_servers_base_url" in str(refusal.value)
 
+    @pytest.mark.sqlite_only(reason="asserts the CHECK refusing what Postgres's column type refuses first")
     def test_an_address_past_the_column_width_is_refused(self) -> None:
         """256 characters, one past `models.BASE_URL_MAX`, which is the width
         `String()` declares and the length the route's own model refuses beyond.
@@ -4304,6 +4366,7 @@ class TestTheGlobRulesThatLearnedAboutNul:
                 text("SELECT length(base_url), length(CAST(base_url AS BLOB)) FROM probe")
             ).one() == (9, 1_000_009)
 
+    @pytest.mark.sqlite_only(reason="asserts the CHECK refusing what Postgres's column type refuses first")
     def test_the_shipped_rule_refuses_one_byte_past_the_budget(self) -> None:
         """The boundary, so the budget is pinned rather than merely exceeded.
 
@@ -4328,6 +4391,7 @@ class TestTheGlobRulesThatLearnedAboutNul:
 
         assert "ck_opds_servers_base_url" in str(refusal.value)
 
+    @pytest.mark.sqlite_only(reason="plants what only SQLite stores: too long, behind a NUL, or raw bytes")
     def test_the_shipped_rule_stores_a_value_exactly_on_the_budget(self) -> None:
         """The other half of that boundary, which is what makes it one.
 
@@ -4390,6 +4454,7 @@ class TestTheGlobRulesThatLearnedAboutNul:
             connection.execute(text("UPDATE catalogue_targets SET transport = 'z3950' WHERE source = 'oenb'"))
         assert "ck_catalogue_targets_transport" in str(transport.value)
 
+    @pytest.mark.sqlite_only(reason="plants what only SQLite stores: too long, behind a NUL, or raw bytes")
     def test_the_envelope_rule_is_deliberately_untouched(self) -> None:
         """The third GLOB rule, and the one this revision leaves alone.
 
@@ -4902,6 +4967,7 @@ class TestTheBoundsThisRevisionPutOnBytes:
         assert isinstance(book_id, int)
         return book_id
 
+    @pytest.mark.sqlite_only(reason="asserts the CHECK refusing what Postgres's column type refuses first")
     def test_an_identifier_behind_a_lead_byte_is_refused_at_the_budget(self) -> None:
         """The class the character ceiling and the NUL clause both admit.
 
@@ -4934,6 +5000,7 @@ class TestTheBoundsThisRevisionPutOnBytes:
 
     # ── catalogue_targets: two index columns and an address ────────────────
 
+    @pytest.mark.sqlite_only(reason="asserts the CHECK refusing what Postgres's column type refuses first")
     @pytest.mark.parametrize("column", ["isbn_index", "title_index"])
     def test_an_index_name_past_the_bound_is_refused(self, column: str) -> None:
         """**ASCII rather than a lead byte, and the reason is this class's
@@ -4978,6 +5045,7 @@ class TestTheBoundsThisRevisionPutOnBytes:
 
         assert (counted, stored) == (models.TARGET_INDEX_MAX, models.TARGET_INDEX_MAX)
 
+    @pytest.mark.sqlite_only(reason="asserts the CHECK refusing what Postgres's column type refuses first")
     @pytest.mark.parametrize(
         ("value", "why"),
         [
@@ -5011,6 +5079,7 @@ class TestTheBoundsThisRevisionPutOnBytes:
 
         assert "ck_catalogue_targets_base_url" in str(refusal.value), why
 
+    @pytest.mark.sqlite_only(reason="asserts the CHECK refusing what Postgres's column type refuses first")
     def test_an_address_hiding_a_payload_behind_a_nul_is_refused(self) -> None:
         """`instr` is what makes the character ceiling readable here, exactly as
         on the sibling column: without it `length()` stops at the NUL and the
@@ -5025,6 +5094,7 @@ class TestTheBoundsThisRevisionPutOnBytes:
 
         assert "ck_catalogue_targets_base_url" in str(refusal.value)
 
+    @pytest.mark.sqlite_only(reason="asserts the CHECK refusing what Postgres's column type refuses first")
     def test_an_address_behind_a_lead_byte_is_refused_at_the_budget(self) -> None:
         """The value neither the prefix nor the character ceiling can see.
 
@@ -5045,6 +5115,7 @@ class TestTheBoundsThisRevisionPutOnBytes:
 
         assert "ck_catalogue_targets_base_url" in str(refusal.value)
 
+    @pytest.mark.sqlite_only(reason="plants what only SQLite stores: too long, behind a NUL, or raw bytes")
     def test_an_address_exactly_on_the_byte_budget_is_stored(self) -> None:
         """The other half of that boundary, which is what makes it one. Without
         it the arm could be tightened to any number at all and only the case
@@ -5361,6 +5432,7 @@ class TestTheBoundsThisRevisionPutOnBytes:
 
         assert "ck_catalogue_credentials_envelope" in str(refusal.value)
 
+    @pytest.mark.sqlite_only(reason="asserts the CHECK refusing what Postgres's column type refuses first")
     def test_the_value_the_previous_revision_stored_whole_is_now_refused(
         self,
     ) -> None:
@@ -5383,6 +5455,7 @@ class TestTheBoundsThisRevisionPutOnBytes:
 
         assert "ck_catalogue_credentials_envelope" in str(refusal.value)
 
+    @pytest.mark.sqlite_only(reason="plants what only SQLite stores: too long, behind a NUL, or raw bytes")
     def test_a_nul_carrying_envelope_under_the_ceiling_is_capped_not_refused(
         self,
     ) -> None:
@@ -5419,6 +5492,7 @@ class TestTheBoundsThisRevisionPutOnBytes:
                 text("SELECT length(envelope), length(CAST(envelope AS BLOB)) FROM catalogue_credentials")
             ).one() == (47, models.CATALOGUE_ENVELOPE_MAX_BYTES)
 
+    @pytest.mark.sqlite_only(reason="asserts the CHECK refusing what Postgres's column type refuses first")
     def test_a_blob_walks_every_glob_rule_and_not_the_byte_arm(self) -> None:
         """The storage class the charset rules cannot see, and the arm that can.
 
@@ -5445,6 +5519,7 @@ class TestTheBoundsThisRevisionPutOnBytes:
 
         assert "ck_catalogue_targets_indexes" in str(refusal.value)
 
+    @pytest.mark.sqlite_only(reason="plants what only SQLite stores: too long, behind a NUL, or raw bytes")
     def test_the_same_shape_one_byte_under_the_ceiling_is_stored(self) -> None:
         """The boundary from below, and the case that says the refusal above is
         the byte arm and not the shape or the floor: the two values differ by one
@@ -5830,6 +5905,7 @@ class TestTheApiBoundIsTheCeilingAMigratedDatabaseInstalls:
                 == _opds_api_bounds()[field]
             )
 
+    @pytest.mark.sqlite_only(reason="asserts the CHECK refusing what Postgres's column type refuses first")
     @pytest.mark.parametrize("field", sorted(_opds_api_bounds()))
     def test_one_character_past_it_is_refused_by_this_columns_own_rule(self, field: str) -> None:
         """The other side, and the half a bound alone is not: without it the API

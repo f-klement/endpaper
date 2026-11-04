@@ -343,20 +343,21 @@ class TestAPercentEscapeIsOnlyRefusedInTheHost:
 
 
 class TestControlCharactersDoNotSurvive:
-    def test_a_nul_is_removed_from_a_value(self, client, admin, make_book, text_field):
-        """`str.split()` does not drop a NUL: it is not whitespace. Measured on
-        the live route, `a\\x00b` was stored unchanged, serialised as
-        `\\u0000`, and invisible everywhere a person could notice it."""
+    def test_a_control_character_is_removed_from_a_value(self, client, admin, make_book, text_field):
+        """`str.split()` does not drop a control character: it is not
+        whitespace, and stored it is invisible everywhere a person could
+        notice it. A NUL is refused before this, by
+        `dependencies.refuse_a_nul`."""
         book = make_book(admin["headers"])
 
-        res = _set(client, admin["headers"], book["id"], text_field["id"], "a\x00b\x01c")
+        res = _set(client, admin["headers"], book["id"], text_field["id"], "a\x1bb\x01c")
 
         assert res.json()[0]["value"] == "abc"
 
-    def test_a_nul_is_removed_from_a_name(self, client, admin):
+    def test_a_control_character_is_removed_from_a_name(self, client, admin):
         res = client.post(
             "/api/books/custom-fields",
-            json={"name": "Calibre\x00web"},
+            json={"name": "Calibre\x01web"},
             headers=admin["headers"],
         )
 

@@ -149,7 +149,7 @@ class TestCreating:
         like the first. It is not whitespace, so the collapse alone left it."""
         res = client.post(
             "/api/books/tags",
-            json={"name": "Holiday\u0000reads"},
+            json={"name": "Holiday\u0001reads"},
             headers=admin["headers"],
         )
 

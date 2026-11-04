@@ -105,6 +105,61 @@ class TestAStatementErrorNamesNoValue:
         assert marker not in rendered
 
 
+class TestARefusalIsRaisedAsItsKind:
+    """`database._a_refusal_is_raised_as_its_kind`, on whichever engine the run
+    is on. pg8000 raises a CHECK, a foreign key and a NOT NULL refusal as
+    `ProgrammingError`; SQLite's driver raises all three as `IntegrityError`,
+    which is what the application catches.
+
+    Temporary tables, so each statement is portable SQL and the refusal is the
+    constraint's alone rather than some other column's."""
+
+    @pytest.mark.parametrize(
+        "refused",
+        [
+            "INSERT INTO probe_parent (id, n) VALUES (1, 0)",
+            "INSERT INTO probe_parent (id, n) VALUES (1, NULL)",
+            "INSERT INTO probe_child (parent_id) VALUES (99)",
+        ],
+        ids=["check", "not null", "foreign key"],
+    )
+    def test_a_constraint_refusal_arrives_as_an_integrity_error(self, refused: str):
+        with engine.connect() as connection:
+            connection.execute(
+                text(
+                    "CREATE TEMPORARY TABLE IF NOT EXISTS probe_parent "
+                    "(id INTEGER PRIMARY KEY, n INTEGER NOT NULL CHECK (n > 0))"
+                )
+            )
+            connection.execute(
+                text(
+                    "CREATE TEMPORARY TABLE IF NOT EXISTS probe_child "
+                    "(parent_id INTEGER REFERENCES probe_parent (id))"
+                )
+            )
+            with pytest.raises(exc.IntegrityError):
+                connection.execute(text(refused))
+            connection.rollback()
+
+    @staticmethod
+    def _raised(sqlstate: str) -> exc.DBAPIError | None:
+        """The listener's answer to a pg8000 `ProgrammingError` carrying `sqlstate`."""
+        original = Exception({"S": "ERROR", "C": sqlstate, "M": "planted"})
+        raised = exc.ProgrammingError("SELECT 1", None, original)
+        context = SimpleNamespace(sqlalchemy_exception=raised, original_exception=original)
+        return database._a_refusal_is_raised_as_its_kind(context)
+
+    def test_a_value_the_column_cannot_hold_arrives_as_a_data_error(self):
+        """Class 22, which SQLite never raises for a length or a NUL, so this
+        arm hands the listener the driver's exception rather than a server's."""
+        assert isinstance(self._raised("22001"), exc.DataError)
+
+    def test_a_deadlock_is_left_as_the_driver_raised_it(self):
+        """A 40P01 is a race to answer 409 for (`errors.a_lost_race_answers_409`),
+        not a refusal, so an `except IntegrityError` must not swallow it."""
+        assert self._raised("40P01") is None
+
+
 #: Where this backend builds an engine, by the function that builds one. The
 #: walk below matches the name at the call, so the third rule in the class
 #: refuses importing any of them under another one.
@@ -1377,6 +1432,79 @@ class TestTheSessionZoneIsALiteralAndNotAnEnvironmentRead:
         assert isinstance(argument, ast.JoinedStr), ast.unparse(argument)
         assert interpolated == ["_SESSION_TIME_ZONE"]
         assert shadows == [], "the listener rebinds the name it interpolates"
+
+
+class TestOnRollback:
+    """What a session runs once its transaction ends without a commit.
+
+    Against the suite's own session, for `TestOnCommit`'s reason. A cover file
+    written before its row commits is the entry this exists for.
+    """
+
+    @pytest.fixture
+    def ran(self) -> list[str]:
+        return []
+
+    def test_an_entry_runs_once_the_transaction_rolls_back_and_only_once(self, db, ran):
+        database.on_rollback(db, lambda: ran.append("discard"))
+        assert ran == []
+
+        db.rollback()
+        db.rollback()
+
+        assert ran == ["discard"]
+
+    def test_a_close_without_a_commit_is_a_rollback(self, db, ran):
+        database.on_rollback(db, lambda: ran.append("discard"))
+
+        db.close()
+
+        assert ran == ["discard"]
+
+    def test_a_commit_forgets_what_was_enqueued(self, db, ran):
+        database.on_rollback(db, lambda: ran.append("discard"))
+
+        db.commit()
+        db.rollback()
+
+        assert ran == []
+
+    def test_releasing_a_savepoint_is_not_the_commit(self, db, ran):
+        database.on_rollback(db, lambda: ran.append("discard"))
+
+        with db.begin_nested():
+            pass
+        db.rollback()
+
+        assert ran == ["discard"]
+
+    def test_a_savepoint_ending_is_not_the_rollback(self, db, ran):
+        """A savepoint released inside the request, then the outer commit: the
+        row names the new file, so the discard must not have run at the release."""
+        database.on_rollback(db, lambda: ran.append("discard"))
+
+        with db.begin_nested():
+            pass
+        db.commit()
+
+        assert ran == []
+
+    def test_a_failing_entry_does_not_skip_the_ones_after_it(self, db, ran, caplog):
+        """The request is already failing, so a raise would replace its error."""
+
+        def discard_the_cover():
+            raise OSError("the mount went away")
+
+        database.on_rollback(db, discard_the_cover)
+        database.on_rollback(db, lambda: ran.append("the next one"))
+
+        with caplog.at_level(logging.ERROR, logger="endpaper.database"):
+            db.rollback()
+
+        assert ran == ["the next one"]
+        failures = [r for r in caplog.records if r.exc_info]
+        assert [r.exc_info[0] for r in failures] == [OSError]
+        assert "discard_the_cover" in failures[0].getMessage()
 
 
 class TestOnCommit:

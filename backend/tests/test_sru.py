@@ -1516,35 +1516,38 @@ class TestAnIntegerTheCatalogueCannotHoldIsRefusedRatherThanRaised:
     with no credentials.
 
     The boundaries are asserted rather than described, because the whole defect
-    was a boundary nobody had looked for: `2**63 - 1` is accepted at every site
-    and `2**63` is refused.
+    was a boundary nobody had looked for. A term is held to an `Integer`
+    column's range on Postgres, `sru.COLUMN_MAX_INTEGER`, and a parameter to
+    SQLite's, `2**63 - 1`: each is accepted at its edge and refused one past it.
     """
 
     OVER = str(2**63)
     AT = str(2**63 - 1)
+    TERM_OVER = str(sru.COLUMN_MAX_INTEGER + 1)
+    TERM_AT = str(sru.COLUMN_MAX_INTEGER)
 
     def test_a_record_id_past_the_range_is_a_diagnostic(self, db, shelf):
-        response = respond(db, query=f"rec.id={self.OVER}")
+        response = respond(db, query=f"rec.id={self.TERM_OVER}")
         assert diagnostic_of(response) == sru.Diagnostic.TERM_IN_INVALID_FORMAT
 
     def test_a_record_id_at_the_range_is_answered(self, db, shelf):
-        response = respond(db, query=f"rec.id={self.AT}")
+        response = respond(db, query=f"rec.id={self.TERM_AT}")
         assert diagnostic_of(response) is None
         assert number_of_records(response) == 0
 
     def test_a_year_past_the_range_is_a_diagnostic(self, db, shelf):
-        response = respond(db, query=f"dc.date>{self.OVER}")
+        response = respond(db, query=f"dc.date>{self.TERM_OVER}")
         assert diagnostic_of(response) == sru.Diagnostic.TERM_IN_INVALID_FORMAT
 
     def test_a_negative_year_past_the_range_is_a_diagnostic(self, db, shelf):
-        """**The arm a positive only bound would miss.** `-(2**63) - 1`
+        """**The arm a positive only bound would miss.** One below the floor
         overflows exactly as the positive end does, and a ceiling with no floor
         would have left one of the three routes open."""
-        response = respond(db, query=f"dc.date>-{2**63 + 1}")
+        response = respond(db, query=f"dc.date>{sru.COLUMN_MIN_INTEGER - 1}")
         assert diagnostic_of(response) == sru.Diagnostic.TERM_IN_INVALID_FORMAT
 
     def test_a_year_at_the_range_is_answered(self, db, shelf):
-        response = respond(db, query=f"dc.date<{self.AT}")
+        response = respond(db, query=f"dc.date<{self.TERM_AT}")
         assert diagnostic_of(response) is None
 
     def test_a_start_record_past_the_range_is_a_diagnostic(self, db, shelf):

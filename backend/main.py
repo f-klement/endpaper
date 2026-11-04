@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Final, NamedTuple
 
 import anyio.to_thread
-from fastapi import APIRouter, FastAPI, HTTPException, status
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.routing import APIRoute
 from fastapi.staticfiles import StaticFiles
@@ -38,7 +38,7 @@ from config import (
     validate_secret_key,
 )
 from database import engine
-from dependencies import DbSession
+from dependencies import DbSession, refuse_a_nul
 from enums import TagCategory, TagKey
 from errors import AnswerUnhandledErrors, register_error_handlers, wants_html
 from middleware import BodySizeLimitMiddleware, SecurityHeadersMiddleware
@@ -397,6 +397,8 @@ app = FastAPI(
     ),
     generate_unique_id_function=custom_operation_id,
     lifespan=lifespan,
+    # Ahead of every route's own dependencies: see `refuse_a_nul`.
+    dependencies=[Depends(refuse_a_nul)],
 )
 
 # Added first of all, so it sits innermost: a route's unhandled exception is

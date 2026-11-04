@@ -832,7 +832,6 @@ describe("the oxlint suppression list", () => {
 const REFUSALS = [
   "no-await-in-loop",
   "no-control-regex",
-  "no-loss-of-precision",
   "react/react-in-jsx-scope",
 ];
 
@@ -876,7 +875,6 @@ const SITED: Record<string, string[]> = {
     "tests/zipFixtures.ts",
   ],
   "no-control-regex": ["src/lib/pdf.ts", "src/lib/safeHref.ts"],
-  "no-loss-of-precision": ["src/lib/bookBounds.ts"],
 };
 
 /**

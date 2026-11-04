@@ -11,6 +11,7 @@ directory being written to.
 """
 
 import json
+import logging
 import lzma
 import zipfile
 import zlib
@@ -1359,6 +1360,54 @@ class TestRestoringABlankTextColumn:
             )
             for row in rows
         }
+
+
+class TestRestoringANul:
+    """SQLite stores a NUL and Postgres text cannot hold one, so an archive taken
+    on SQLite before the request door refused one could not be restored onto
+    Postgres at all: the insert failed and the restore answered 500."""
+
+    def test_a_nul_in_the_archive_is_dropped_and_the_text_around_it_kept(self, client, admin, library):
+        data = client.get("/api/backup", headers=admin["headers"]).content
+        manifest = read_manifest(data)
+        book = next(row for row in manifest["tables"]["books"] if row["id"] == library["book"]["id"])
+        book.update(title="Du\x00ne", description="\x00")
+        manifest["tables"]["notes"][0]["content"] = "Lent\x00 to Ana"
+
+        response = client.post(
+            "/api/backup/restore",
+            params={"confirm": True},
+            files={"file": ("backup.zip", rewrite(data, manifest), "application/zip")},
+            headers=admin["headers"],
+        )
+        assert response.status_code == 200, response.text
+
+        session = SessionLocal()
+        try:
+            restored = session.get(Book, library["book"]["id"])
+            assert restored is not None
+            assert (restored.title, restored.description) == ("Dune", None)
+            assert [note.content for note in session.query(Note)] == ["Lent to Ana"]
+        finally:
+            session.close()
+
+    def test_each_drop_is_logged_by_its_column_and_never_its_value(self, client, admin, library, caplog):
+        data = client.get("/api/backup", headers=admin["headers"]).content
+        manifest = read_manifest(data)
+        book = next(row for row in manifest["tables"]["books"] if row["id"] == library["book"]["id"])
+        book["title"] = "Du\x00ne"
+
+        with caplog.at_level(logging.WARNING, logger="endpaper.backup"):
+            response = client.post(
+                "/api/backup/restore",
+                params={"confirm": True},
+                files={"file": ("backup.zip", rewrite(data, manifest), "application/zip")},
+                headers=admin["headers"],
+            )
+        assert response.status_code == 200, response.text
+
+        dropped = [record.getMessage() for record in caplog.records if "NUL" in record.getMessage()]
+        assert dropped == ["Dropped a NUL from books.title in the archive"]
 
 
 class TestADecompressionBomb:

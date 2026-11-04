@@ -31,6 +31,8 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.requests import ClientDisconnect
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from database import server_fields
+
 logger = logging.getLogger("endpaper.errors")
 
 _TEMPLATE_PATH: Final = Path(__file__).parent / "templates" / "error.html"
@@ -144,10 +146,14 @@ async def validation_exception_handler(request: Request, exc: Exception) -> Resp
     #
     # The client flattens the remaining `loc`, `msg` and `type` into a message,
     # which is what it always rendered; nothing displayed `input`.
-    reported = [
-        {key: value for key, value in entry.items() if key != "input"}
-        for entry in jsonable_encoder(exc.errors())
-    ]
+    #
+    # **Dropped before the encode, not after.** `input` can be the whole body,
+    # and `jsonable_encoder` recurses into it: a body nested a few thousand
+    # deep raised `RecursionError` here, an anonymous 500 with a traceback
+    # that deep in the log.
+    reported = jsonable_encoder(
+        [{key: value for key, value in entry.items() if key != "input"} for entry in exc.errors()]
+    )
     return _json_error(status.HTTP_422_UNPROCESSABLE_CONTENT, reported)
 
 
@@ -255,18 +261,6 @@ def database_error_summary(error: DBAPIError | PendingRollbackError) -> str:
     constraint = fields.get("n") if fields is not None else None
     summary = f"{type(error).__name__}({type(error.orig).__name__})"
     return f"{summary} on {constraint}" if isinstance(constraint, str) else summary
-
-
-def server_fields(error: DBAPIError) -> dict[str, object] | None:
-    """The server's fields of a driver error, or None where it carries none.
-
-    pg8000 hands them over as a dict in the exception's first argument, keyed
-    by Postgres's one letter field codes: `C` the SQLSTATE, `n` a constraint.
-    SQLite errors carry none.
-    """
-    original = error.orig
-    fields = original.args[0] if original is not None and original.args else None
-    return fields if isinstance(fields, dict) else None
 
 
 #: The SQLSTATE Postgres aborts a transaction with to break a deadlock.

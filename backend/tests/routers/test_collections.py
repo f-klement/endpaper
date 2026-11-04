@@ -46,7 +46,7 @@ class TestMakingOne:
     def test_a_control_character_is_removed_from_the_name(self, client, admin):
         """The name is case-insensitively unique, so an invisible character is
         a second shelf spelled like the first."""
-        res = make_collection(client, admin["headers"], "Read\u0000twice")
+        res = make_collection(client, admin["headers"], "Read\u0001twice")
 
         assert res.json()["name"] == "Readtwice"
 

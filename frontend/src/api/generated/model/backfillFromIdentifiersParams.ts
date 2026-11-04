@@ -10,7 +10,7 @@ export type BackfillFromIdentifiersParams = {
   /**
    * Carry on past this book id. From the previous reply.
    * @minimum 0
-   * @maximum 9223372036854776000
+   * @maximum 2147483647
    */
   after_id?: number;
 };

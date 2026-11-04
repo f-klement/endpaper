@@ -55,6 +55,7 @@ from models import (
 # One walk of the tree, shared, so a rule added here scans the corpus every
 # other rule scans. See its docstring for why the exclusion lives there.
 from tests.corpus import application_sources
+from tests.helpers import REFUSED_BY_THE_DATABASE
 
 TREE_GUARDS = {
     "TestAHighlightReadIsNarrowedToItsReader": ("application_sources",),
@@ -235,7 +236,7 @@ class TestQuote:
         hole; it is now neither.
         """
         db.add(Quote(book_id=book.id, user_id=user.id, text="x" * 2_001))
-        with pytest.raises(IntegrityError):
+        with pytest.raises(REFUSED_BY_THE_DATABASE):
             db.commit()
 
     def test_an_excerpt_at_the_ceiling_is_stored(self, db, user, book):
@@ -247,7 +248,7 @@ class TestQuote:
         """The same CHECK covers `note`, which is the field an over-long value
         is most likely to reach: it is optional, so nothing else looks at it."""
         db.add(Quote(book_id=book.id, user_id=user.id, text="ok", note="y" * 1_001))
-        with pytest.raises(IntegrityError):
+        with pytest.raises(REFUSED_BY_THE_DATABASE):
             db.commit()
 
     def test_a_null_remark_satisfies_the_length_check(self, db, user, book):
@@ -274,7 +275,7 @@ class TestQuote:
         `f4a1c62d0b97` is the revision this exercises.
         """
         db.add(Quote(book_id=book.id, user_id=user.id, text="a\x00" + "x" * 8_000))
-        with pytest.raises(IntegrityError):
+        with pytest.raises(REFUSED_BY_THE_DATABASE):
             db.commit()
 
     def test_a_nul_carrying_remark_cannot_either(self, db, user, book):
@@ -292,7 +293,7 @@ class TestQuote:
                 note="a\x00" + "y" * 4_000,
             )
         )
-        with pytest.raises(IntegrityError):
+        with pytest.raises(REFUSED_BY_THE_DATABASE):
             db.commit()
 
     def test_the_schema_admits_a_nul_which_is_why_this_column_bounds_bytes(self):
@@ -841,12 +842,23 @@ class TestTheBorrowerRuleHasOneSpelling:
         db.add(loan)
         try:
             db.commit()
-        except IntegrityError:
+        # A NUL in the name is refused by Postgres's text type before the CHECK.
+        except REFUSED_BY_THE_DATABASE:
             db.rollback()
             return False
         db.delete(loan)
         db.commit()
         return True
+
+    @staticmethod
+    def _askable(db, name: str | None) -> bool:
+        """Whether the database can be asked about this name at all.
+
+        Postgres text cannot hold a NUL, so what the CHECK makes of a name
+        carrying one is SQLite's question; a request carrying one is refused
+        on both, by `dependencies.refuse_a_nul`.
+        """
+        return db.bind.dialect.name == "sqlite" or "\x00" not in (name or "")
 
     @pytest.mark.parametrize(("member", "name"), PAIRS)
     def test_the_two_spellings_agree_on_every_pair(self, db, book, user, member, name):
@@ -855,6 +867,8 @@ class TestTheBorrowerRuleHasOneSpelling:
         A single case walking the table would pass with every arm but one
         deleted and would never say which pair it was watching.
         """
+        if not self._askable(db, name):
+            pytest.skip("Postgres text cannot hold a NUL")
         stored = self._database_accepts(db, book, user, member, name)
         predicate = names_exactly_one_borrower(user.id if member else None, name)
         assert stored == predicate
@@ -869,15 +883,16 @@ class TestTheBorrowerRuleHasOneSpelling:
         which is the state this class was written in and had to be corrected
         out of, and the direction it appears on says which side moved.
         """
+        askable = [(member, name) for member, name in self.PAIRS if self._askable(db, name)]
         stricter = [
             (member, name)
-            for member, name in self.PAIRS
+            for member, name in askable
             if names_exactly_one_borrower(user.id if member else None, name)
             and not self._database_accepts(db, book, user, member, name)
         ]
         laxer = [
             (member, name)
-            for member, name in self.PAIRS
+            for member, name in askable
             if self._database_accepts(db, book, user, member, name)
             and not names_exactly_one_borrower(user.id if member else None, name)
         ]
@@ -1245,6 +1260,7 @@ class TestTheAuthorityIdentifierConstraints:
 
         assert "ck_author_identifiers_bounds" in str(refusal.value)
 
+    @pytest.mark.sqlite_only(reason="asserts the CHECK refusing what Postgres's column type refuses first")
     def test_an_identifier_past_the_bound_is_refused(self, db):
         """A stored denial of service bound: a catalogue response has no size
         cap anywhere in `metadata.py`."""
@@ -1965,7 +1981,7 @@ class TestTheColumnRefusesWhatTheSchemaWouldHaveRefused:
         """
         book = self._book(db)
         past_the_byte_budget = 4 * models.DIGITAL_REFERENCE_PATH_MAX + 1
-        with pytest.raises(IntegrityError):
+        with pytest.raises(REFUSED_BY_THE_DATABASE):
             self._insert(
                 db,
                 book,
@@ -2005,7 +2021,7 @@ class TestTheColumnRefusesWhatTheSchemaWouldHaveRefused:
         """
         book = self._book(db)
         past_the_byte_budget = 4 * models.DIGITAL_REFERENCE_PATH_MAX + 1
-        with pytest.raises(IntegrityError):
+        with pytest.raises(REFUSED_BY_THE_DATABASE):
             self._insert(
                 db,
                 book,
@@ -2017,6 +2033,14 @@ class TestTheColumnRefusesWhatTheSchemaWouldHaveRefused:
         book = self._book(db)
         with pytest.raises(IntegrityError):
             self._insert(db, book, size_bytes=models.DIGITAL_REFERENCE_MAX_SIZE + 1)
+
+    def test_the_largest_size_a_browser_reports_is_stored(self, db):
+        """The accepting side of the ceiling, and on Postgres the column's own
+        width: a four byte INTEGER refused every size from 2 GiB up."""
+        book = self._book(db)
+        self._insert(db, book, size_bytes=models.DIGITAL_REFERENCE_MAX_SIZE)
+
+        assert db.query(models.DigitalReference.size_bytes).scalar() == models.DIGITAL_REFERENCE_MAX_SIZE
 
     def test_a_negative_size_is_refused(self, db):
         book = self._book(db)

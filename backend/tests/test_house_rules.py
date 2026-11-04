@@ -12,6 +12,7 @@ import dataclasses
 import functools
 import importlib
 import inspect
+import json
 import re
 import sys
 import tomllib
@@ -28,7 +29,7 @@ import pydantic
 import pytest
 import respx
 from pydantic import AliasChoices, AliasPath, BaseModel
-from sqlalchemy import CheckConstraint
+from sqlalchemy import BigInteger, CheckConstraint
 
 import marc_fields
 import metadata
@@ -37,6 +38,7 @@ import sources
 import targets
 from database import Base
 from enums import CatalogueSource
+from schemas.common import MAX_ROW_ID
 from tests.bindings import SourceNames
 from tests.corpus import (
     BACKEND,
@@ -906,6 +908,76 @@ class TestEveryIntParameterFromTheOutsideIsBounded:
         no int in them. Dragging every alias into scope rather than only the int
         ones would report each of them for having no numeric bound."""
         assert self._probe("CurrentUser", "CurrentUser = Annotated[User, Depends(get_it)]") == []
+
+
+#: The schema the client is generated from, which `test_openapi_drift.py` holds
+#: equal to what this code produces.
+_COMMITTED_SCHEMA: Final = Path(__file__).resolve().parents[2] / "frontend" / "openapi.json"
+
+
+class TestEveryIntegerCeilingFitsAColumn:
+    """Every integer `maximum` the committed schema publishes fits an `Integer`
+    column, unless a `BigInteger` column carries the field's name.
+
+    `TestEveryIntParameterFromTheOutsideIsBounded` asks for *a* ceiling and
+    cannot tell `2**63 - 1` from `MAX_ROW_ID`, so a literal bound passed it while
+    the value it let through failed inside a Postgres comparison with an int4
+    column, SQLSTATE 22003, a 500. Read off the document because that is where
+    every bound lands, whichever alias or literal spelled it.
+
+    Lets through a field that is wide on purpose and shares its name with a
+    `BigInteger` column it is not stored in; the name is the only link the
+    document carries.
+    """
+
+    @staticmethod
+    def _ceilings(node: object, name: str = "") -> Iterable[tuple[str, float]]:
+        if isinstance(node, list):
+            for item in node:
+                yield from TestEveryIntegerCeilingFitsAColumn._ceilings(item, name)
+            return
+        if not isinstance(node, dict):
+            return
+        if node.get("type") == "integer":
+            # A float as well: pydantic writes `2**53 - 1` as `9007199254740991.0`.
+            for key in ("maximum", "exclusiveMaximum"):
+                ceiling = node.get(key)
+                if isinstance(ceiling, int | float) and not isinstance(ceiling, bool):
+                    yield name, ceiling
+        if "in" in node and isinstance(node.get("name"), str):
+            name = node["name"]
+        for key, value in node.items():
+            if key == "properties" and isinstance(value, dict):
+                for field, schema in value.items():
+                    yield from TestEveryIntegerCeilingFitsAColumn._ceilings(schema, field)
+            else:
+                # A dict's values are not the field: `size_bytes: dict[str, int]`
+                # would otherwise borrow the name of a BigInteger column.
+                inherited = "" if key == "additionalProperties" else name
+                yield from TestEveryIntegerCeilingFitsAColumn._ceilings(value, inherited)
+
+    def test_a_dict_s_values_do_not_take_the_field_s_name(self) -> None:
+        wide = {"type": "integer", "maximum": 2**63 - 1}
+        node = {"properties": {"size_bytes": {"type": "object", "additionalProperties": wide}}}
+
+        assert list(self._ceilings(node)) == [("", 2**63 - 1)]
+
+    def test_no_published_ceiling_is_past_what_its_column_holds(self) -> None:
+        document = json.loads(_COMMITTED_SCHEMA.read_text(encoding="utf-8"))
+        wide_columns = {
+            column.name
+            for table in Base.metadata.tables.values()
+            for column in table.columns
+            if isinstance(column.type, BigInteger)
+        }
+        ceilings = list(self._ceilings(document))
+        assert any(ceiling == MAX_ROW_ID for _, ceiling in ceilings), "read no row id ceiling"
+
+        past = sorted(
+            {(name, value) for name, value in ceilings if value > MAX_ROW_ID and name not in wide_columns}
+        )
+
+        assert past == [], f"these ceilings are past what an Integer column holds: {past}"
 
 
 class TestEveryRequestBodyRowIdIsBounded:
