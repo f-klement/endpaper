@@ -555,7 +555,7 @@ repeat the argument.
 |  | [A historical revision is compared by what it built, not by its source](decisions.md#a-historical-revision-is-compared-by-what-it-built-not-by-its-source) | 122 |
 |  | [The test suite's schema is the migrated one, not the declared one](decisions.md#the-test-suites-schema-is-the-migrated-one-not-the-declared-one) | 105 |
 |  | [A corpus is stated as an exclusion, never as a total](decisions.md#a-corpus-is-stated-as-an-exclusion-never-as-a-total) | 141 |
-|  | [Four test modules keep their own copy of the walk over the backend's source](decisions.md#four-test-modules-keep-their-own-copy-of-the-walk-over-the-backends-source) | 97 |
+|  | [Four test modules keep their own copy of the walk over the backend's source](decisions.md#four-test-modules-keep-their-own-copy-of-the-walk-over-the-backends-source) | 103 |
 |  | [An SRU diagnostic is a refusal to answer, not an answer of nothing](decisions.md#an-sru-diagnostic-is-a-refusal-to-answer-not-an-answer-of-nothing) | 430 |
 |  | [A third party's diagnostic text is not logged, only its URI](decisions.md#a-third-partys-diagnostic-text-is-not-logged-only-its-uri) | 71 |
 |  | [Free and credentialled is a real combination, and two guards rested on its not being one](decisions.md#free-and-credentialled-is-a-real-combination-and-two-guards-rested-on-its-not-being-one) | 282 |
@@ -967,4 +967,5 @@ repeat the argument.
 |  | [A route path in backticks is a claim about the route table](decisions.md#a-route-path-in-backticks-is-a-claim-about-the-route-table) | 99 |
 |  | [The publish gate refuses a stripped Python module's stem](decisions.md#the-publish-gate-refuses-a-stripped-python-modules-stem) | 106 |
 |  | [A recorded catalogue zero carrying any diagnostic is not a zero](decisions.md#a-recorded-catalogue-zero-carrying-any-diagnostic-is-not-a-zero) | 74 |
+|  | [The keep-updated label is the one exception to rebasing only on conflict](decisions.md#the-keep-updated-label-is-the-one-exception-to-rebasing-only-on-conflict) | 307 |
 <!-- index: end -->

@@ -12938,9 +12938,9 @@ sides empty at once.
 `_source_modules` is defined four times in the test tree, in `test_shelf.py`,
 `test_custom_fields.py`, `test_fetch.py` and `test_reading.py`, each spelling the exclusion as
 `parts[0] not in {"tests", "migrations", ".venv"}`. That is the enumeration `_is_vendored`
-exists to replace: the pipeline puts `UV_CACHE_DIR` inside the build directory, so `.uv-cache/`
-appears under `backend/` with third party packages in it and every rule reading one of these
-walks is asked about code nobody here can fix.
+exists to replace: the pipeline once put `UV_CACHE_DIR` under `backend/`, so `.uv-cache/`
+appeared there with third party packages in it and every rule reading one of these walks
+was asked about code nobody here can fix. Any tool cache under `backend/` does the same.
 
 `test_shelf.py`'s copy is gone and it imports the one beside `_is_vendored`. The other three
 belong to rules this work does not own and are raised rather than taken.
@@ -24064,3 +24064,28 @@ it counts no record and carries no `diagnostics` element. A fatal diagnostic usu
 zero count, so without the second check a source that errored would pass as one that matched
 nothing. A real zero carrying a non fatal diagnostic is refused too, and that is accepted: a
 refusal is the safe direction, and it names the diagnostic.
+
+## The keep-updated label is the one exception to rebasing only on conflict
+
+Renovate rebases a merge request only when it conflicts, with one exception: the automerging
+updates that regenerate the committed API schema or its client carry the keep-updated label,
+and Renovate rebases a branch carrying it whenever `main` moves past it. Each regeneration runs
+against its own base, so two such merge requests merged one after the other would leave `main`
+with a schema neither of them generated, and the drift test red on `main`. A rebase rebuilds the
+branch from `main` and runs the regeneration again (Renovate 44 runs post upgrade tasks on every
+branch rebuild), and Renovate never automerges in the run that pushed, so a labelled merge
+request merges only once a run finds it generated on the current `main`. The cluster's merge
+warden leaves a labelled merge request alone while it is behind its target, and merges at most
+one per run, so it waits for that rebase rather than merging a tree nothing generated.
+
+The labelled updates are the Python minors, patches and lock refresh, which regenerate the schema
+and the client, and the frontend lock refresh and the orval and oxfmt minors and patches, which
+regenerate the client. A held major carries no label, so it is not rebuilt on every push to
+`main` while it waits for a person, and an update that regenerates nothing keeps the rule above.
+
+**The cost is a pipeline per push to `main` for each labelled merge request**, and that cost does
+not stop when the merge request is red for its own reason: the label applies whatever its
+pipeline's status, so a red labelled merge request reruns until somebody fixes or closes it,
+which is the rerun storm rebasing only on conflict was chosen to end. Taken knowingly: the
+alternative is a drift that reaches `main`, where it reddens every pipeline until a person
+regenerates.

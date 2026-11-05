@@ -71,7 +71,7 @@ class TestTheVendoredRuleIsAShape:
 VENDORED_KINDS: Final = {
     "a virtualenv": ".venv/lib/python3.14/site-packages/pydantic",
     "an environment whose directory is not hidden": "env/lib/python3.14/site-packages/pydantic",
-    "the cache the pipeline creates under backend": ".uv-cache/cyclonedx/model",
+    "the cache the pipeline once put under backend": ".uv-cache/cyclonedx/model",
     "bytecode beside a module of ours": "routers/__pycache__",
     "a dependency tree": "node_modules/marked/lib",
     "a tool nobody has written yet": ".some-tool/wheel",

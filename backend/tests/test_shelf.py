@@ -6510,7 +6510,7 @@ class TestTheModulesTheseRulesWalk:
     **The walk is `corpus.application_sources` and this file no longer
     keeps its own.** The copy here excluded a tool's directory by naming `.venv`
     and nothing else, so a `.uv-cache/` under `backend/` in CI, which is where
-    the pipeline puts it, was source as far as every rule in this file was
+    the pipeline once put it, was source as far as every rule in this file was
     concerned. `is_vendored` is the structural rule and it has its own tests
     beside it.
     """

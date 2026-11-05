@@ -20,10 +20,10 @@ this comparison. All four were a docstring edit in a router or a schema module,
 because FastAPI puts a route's docstring into the schema description.
 
 **So this is a tripwire for prose, and that is deliberate.** Editing a docstring
-under `routers/` or `schemas/` reddens this file. The remedy is
-`bun run api:generate`, which rewrites the committed document and the generated
-client together. Regenerating to silence this test is the same act as changing
-the API contract, so it is a thing to do on purpose.
+under `routers/` or `schemas/` reddens this file. The remedy is to regenerate
+the committed document and the generated client together, by the command this
+checkout's instructions give, and commit both. Regenerating to silence this test
+is the same act as changing the API contract, so it is a thing to do on purpose.
 
 **The generator runs as a subprocess rather than through `main.app.openapi()`
 here.** The committed bytes are what that script writes, with a two space
@@ -40,6 +40,15 @@ switch, no normalising of whitespace or key order, and no tolerance for a
 missing final newline. Whether one is ever added belongs to whoever owns the API
 contract and not to whoever is trying to get a suite green, because every one of
 those options turns a red into a silence.
+
+**The dependency bot regenerates without the dev group**, from wheels only, so that no dev
+package's code runs beside its credential. That is only sound while no dev package changes the
+bytes, and `TestNoDevPackageChangesTheSchema` measures it on every run rather than assuming it:
+it generates again with every module only the dev group installs made unimportable, which is
+what a runtime only environment offers, and holds the two documents equal. Measured
+2026-11-05 in both real environments: identical bytes, while the dump in the dev environment
+imported `rich` and `pygments`, which httpx loads for its command line when they are present.
+An optional import like that is the route by which a dev package could change the schema.
 
 Generation costs about 3.6s, measured three times on the development host. The
 fixture below is module scoped so a run pays it once, and on a full run with
@@ -82,7 +91,62 @@ def not_a_verdict(returncode: int, stdout: bytes) -> str | None:
     return None
 
 
-def generate(generator: Path = _GENERATOR) -> bytes:
+#: Run as `python -c` with the generator's path as its argument: makes every top level module
+#: that only dev group distributions provide unimportable, then runs the generator. The dev only
+#: set is the dev group's closure in `uv.lock` less the runtime dependencies' closure, extras
+#: followed, markers ignored, so a package that is runtime on any platform counts as runtime. A
+#: module some other installed distribution also provides stays importable. Two evasions need a
+#: deliberate act and pass it: a dev only distribution acting through a `.pth` file, which runs
+#: at interpreter start before this finder exists, and a package installed here only by the dev
+#: group but runtime under another platform's marker, which is counted runtime.
+_WITHOUT_DEV = """
+import importlib.abc, importlib.metadata as md, runpy, sys, tomllib
+from pathlib import Path
+
+generator = Path(sys.argv[1])
+lock = tomllib.loads((Path.cwd() / "uv.lock").read_text())
+packages = {p["name"]: p for p in lock["package"]}
+(root,) = [p for p in lock["package"] if p.get("source", {}).get("virtual") == "."]
+
+def closure(starts):
+    seen, todo = set(), list(starts)
+    while todo:
+        dep = todo.pop()
+        key = (dep["name"], tuple(dep.get("extra", [])))
+        if key in seen:
+            continue
+        seen.add(key)
+        package = packages.get(dep["name"], {})
+        todo += package.get("dependencies", [])
+        for extra in key[1]:
+            todo += package.get("optional-dependencies", {}).get(extra, [])
+    return {name for name, _ in seen}
+
+def norm(name):
+    return name.lower().replace("_", "-").replace(".", "-")
+
+dev_only = closure(root["dev-dependencies"]["dev"]) - closure(root["dependencies"])
+blocked = {
+    module
+    for module, dists in md.packages_distributions().items()
+    if all(norm(d) in dev_only for d in dists)
+}
+if not blocked:
+    sys.exit("no module maps to a dev only distribution, so nothing would be blocked")
+
+class Blocked(importlib.abc.MetaPathFinder):
+    def find_spec(self, name, path=None, target=None):
+        if name.partition(".")[0] in blocked:
+            raise ModuleNotFoundError(f"{name} is installed only by the dev group", name=name)
+        return None
+
+sys.meta_path.insert(0, Blocked())
+sys.argv = [str(generator)]
+runpy.run_path(str(generator), run_name="__main__")
+"""
+
+
+def generate(generator: Path = _GENERATOR, *, without_dev: bool = False) -> bytes:
     """The document the generator writes, exactly as it writes it.
 
     **stdout only.** The generator replays the migrations against a throwaway
@@ -94,9 +158,12 @@ def generate(generator: Path = _GENERATOR) -> bytes:
     Checking `not_a_verdict` as a function leaves its call site unchecked, and the
     call site is what a mutation removes: with this function callable against a
     stub, deleting the `assert` reddens two named arms instead of nothing.
+
+    `without_dev` runs it with the dev group's modules unimportable, `_WITHOUT_DEV`.
     """
+    command = [sys.executable, "-c", _WITHOUT_DEV] if without_dev else [sys.executable]
     result = subprocess.run(
-        [sys.executable, str(generator)],
+        [*command, str(generator)],
         cwd=_BACKEND,
         capture_output=True,
         check=False,
@@ -150,8 +217,8 @@ class TestTheCommittedSchemaIsTheOneThisCodeProduces:
         difference = first_difference(_COMMITTED.read_bytes(), produced)
         assert difference is None, (
             "frontend/openapi.json is not what this code produces. If the schema "
-            "change was intended, regenerate the document and the client together "
-            "with `bun run api:generate` and commit both. "
+            "change was intended, regenerate the document and the client together, "
+            "by the command this checkout's instructions give, and commit both. "
             f"{difference}"
         )
 
@@ -235,3 +302,19 @@ class TestTheComparisonCanFail:
         stub.write_text("pass\n")
         with pytest.raises(AssertionError, match="wrote nothing"):
             generate(stub)
+
+
+class TestNoDevPackageChangesTheSchema:
+    def test_a_generation_without_the_dev_group_is_byte_identical(self, produced: bytes) -> None:
+        difference = first_difference(produced, generate(without_dev=True))
+        assert difference is None, (
+            "a module only the dev group installs changes the schema, so a regeneration without "
+            f"the dev group writes other bytes than this suite expects. {difference}"
+        )
+
+    def test_a_generator_importing_a_dev_only_module_fails_under_the_block(self, tmp_path: Path) -> None:
+        """Or the arm above passes on a block that blocks nothing. pytest is dev only."""
+        stub = tmp_path / "imports_pytest.py"
+        stub.write_text("import pytest\nprint('{}')\n")
+        with pytest.raises(AssertionError, match="exited 1"):
+            generate(stub, without_dev=True)

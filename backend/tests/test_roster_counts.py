@@ -485,11 +485,11 @@ DATED_REGISTERS = ("CHANGELOG.md",)
 #: **The tool directories are not listed here and must not be**, because this
 #: was a name list and the name list is what broke. It read `.venv`,
 #: `node_modules` and `__pycache__`, which is every cache anybody had seen
-#: locally, and CI sets `UV_CACHE_DIR` to `.uv-cache` inside the build
-#: directory. The census then walked third party source and found roster sized
-#: numbers beside roster nouns in it, in a Pygments lexer and in a charset
-#: detector, neither of which any verdict here could ever cover. **Ten of twenty
-#: pushes to `main` went red on that and none of them locally**, because the
+#: locally, and CI then set `UV_CACHE_DIR` to `.uv-cache` under `backend/`.
+#: The census walked third party source and found roster sized numbers
+#: beside roster nouns in it, in a Pygments lexer and in a charset detector,
+#: neither of which any verdict here could ever cover. **Ten of twenty pushes
+#: to `main` went red on that and none of them locally**, because the
 #: difference was the environment rather than the tree.
 #:
 #: **The phrases are deliberately not quoted here.** The first fix spelled both
@@ -1658,7 +1658,7 @@ class TestEveryRosterCountInTheTreeIsAccountedFor:
     def test_the_census_reads_nothing_this_project_did_not_write(self):
         """The regression that turned `main` red on half its pushes.
 
-        `UV_CACHE_DIR` is `.uv-cache` in the backend job, so CI has third party
+        `UV_CACHE_DIR` was `.uv-cache` in the backend job, so CI had third party
         source under `backend/` that no developer has locally. The census walked
         it and reported prose in a syntax highlighter and a charset detector,
         which no verdict here could ever cover.
