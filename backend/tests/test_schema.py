@@ -6059,9 +6059,9 @@ class TestABlankTextColumnIsNull:
 
     **Engine neutral SQL on purpose**: the revision's `trim(value, characters)`
     is `btrim` on PostgreSQL and could disagree with SQLite's about a character
-    outside ASCII. This class passes on PostgreSQL 18 when run there by hand;
-    the `test:postgres` selection does not include this file, so CI runs it on
-    SQLite only and the PostgreSQL result is a by hand measurement.
+    outside ASCII. CI runs this class on PostgreSQL 18 in the nightly whole
+    suite run; the `test:postgres` selection on the release paths does not
+    include this file.
     """
 
     PREVIOUS = "c7b41e92f80a"

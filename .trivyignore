@@ -1,0 +1,13 @@
+# Advisories accepted deliberately, each with a reason and an expiry. Trivy and the
+# nightly patch decider both stop honouring an entry on its `exp:` date, read in UTC.
+# The nightly reads the copy in the release tag it patches, so an entry here takes
+# effect from the next release cut from main: a patch release keeps its tag's copy.
+
+# deepmerge 4.3.1: build time only, behind workbox-build 7.4.1, its latest release; no patched deepmerge exists.
+GHSA-gcqx-w48m-w2h4 exp:2027-02-03
+
+# glob 11.1.0: build time only; workbox-build 7.4.1, its latest release, asks ^11, and the fix is 14.0.2.
+GHSA-3g3m-2fjr-6pw4 exp:2027-02-03
+
+# minimatch 10.2.6: build time only, held by glob 11 under workbox-build 7.4.1; the fix is 11.0.1.
+GHSA-g3hv-75wg-m249 exp:2027-02-03

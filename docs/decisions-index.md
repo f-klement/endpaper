@@ -889,7 +889,7 @@ repeat the argument.
 |  | [An id in the path is a 404, an id in the body is a 400](decisions.md#an-id-in-the-path-is-a-404-an-id-in-the-body-is-a-400) | 129 |
 |  | [One module applies outside evidence to an existing Book](decisions.md#one-module-applies-outside-evidence-to-an-existing-book) | 598 |
 |  | [Refresh rewrites nine columns and leaves four](decisions.md#refresh-rewrites-nine-columns-and-leaves-four) | 495 |
-|  | [A blank text column is null](decisions.md#a-blank-text-column-is-null) | 312 |
+|  | [A blank text column is null](decisions.md#a-blank-text-column-is-null) | 320 |
 |  | [One rule decides who may be told a vocabulary entry exists](decisions.md#one-rule-decides-who-may-be-told-a-vocabulary-entry-exists) | 455 |
 |  | [One reader for the pipeline file, and the shell runners keep theirs, held equal](decisions.md#one-reader-for-the-pipeline-file-and-the-shell-runners-keep-theirs-held-equal) | 507 |
 |  | [A cache's one writer is stated at its job, not held by a guard](decisions.md#a-caches-one-writer-is-stated-at-its-job-not-held-by-a-guard) | 279 |
@@ -946,7 +946,7 @@ repeat the argument.
 |  | [A tie has its own outcome and its own sentence, true of both cases it covers](decisions.md#a-tie-has-its-own-outcome-and-its-own-sentence-true-of-both-cases-it-covers) | 149 |
 |  | [Each caller maps a landing in an exhaustive switch](decisions.md#each-caller-maps-a-landing-in-an-exhaustive-switch) | 60 |
 |  | [An audiobook records no file location](decisions.md#an-audiobook-records-no-file-location) | 111 |
-|  | [A test asserting SQLite's behaviour says so, and an unmarked one fails](decisions.md#a-test-asserting-sqlites-behaviour-says-so-and-an-unmarked-one-fails) | 339 |
+|  | [A test asserting SQLite's behaviour says so, and an unmarked one fails](decisions.md#a-test-asserting-sqlites-behaviour-says-so-and-an-unmarked-one-fails) | 431 |
 |  | [A call inside a comprehension's condition is not refused by a guard](decisions.md#a-call-inside-a-comprehensions-condition-is-not-refused-by-a-guard) | 208 |
 |  | [build:smoke and scan:image take the digest build pushed](decisions.md#buildsmoke-and-scanimage-take-the-digest-build-pushed) | 325 |
 |  | [The copy takes only the digest the smoke test ran, on main and on a tag](decisions.md#the-copy-takes-only-the-digest-the-smoke-test-ran-on-main-and-on-a-tag) | 366 |

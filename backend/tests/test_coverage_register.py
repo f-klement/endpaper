@@ -917,9 +917,9 @@ def _is_silenced_by_the_engine(path: Path, names: Sequence[str], classes: Sequen
     **What this cannot ask is whether the condition is ever false.** A module
     level skip that runs on every engine, and a condition true on every engine,
     both answer True here and both make the row's claim wrong. Deciding that
-    needs the other engine rather than the syntax, and the only place it is
-    written down is the handful of paths the pipeline's `test:postgres` job
-    names by hand.
+    needs the other engine rather than the syntax: the pipeline's
+    `nightly:postgres` job runs every file there, and `test:postgres` the
+    handful of paths it names by hand.
 
     **A third condition, and it is what bounds the second.** A module body
     carrying a row of 0 must be built only from statements
@@ -1618,10 +1618,9 @@ class TestEveryNumberInTheRegisterIsThisRunsOwn:
         less so this could not fire on one by accident, which is false: the row
         of 0 is about the engine and not about the count, and on the other
         engine the narrowed run collects **more** of exactly that file. The
-        pipeline's `test:postgres` job runs a few named paths, one of which is
-        the file this register's only row of 0 names. What keeps this arm green
-        on that leg is that the job does not also name this one, so this arm
-        never runs there.
+        pipeline's Postgres jobs collect the file this register's only row of 0
+        names, and `nightly:postgres` collects this one too. What keeps this arm
+        green there is its `sqlite_only` mark, so it never runs on that engine.
         """
         live = _rows_of_zero_that_collected(census, register)
 

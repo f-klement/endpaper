@@ -332,9 +332,8 @@ Environment variables:
 server, and it is what the whole test suite runs on. Postgres is the one other engine the
 schema is created on: the pipeline builds it on a real server from the same migration
 chain, finishes a database left half migrated, and runs the engine aware part of the suite
-against the result. The rest of the suite asserts SQLite behaviour and is not run there,
-so "supported" here means the schema and its constraints, not a second set of test
-results.
+against the result before every release. The whole suite runs against Postgres every
+night as well, less the tests that assert SQLite's own behaviour on purpose.
 
 The `pg8000` driver is **in the image**, so nothing has to be installed to use it. It is
 pure Python, which is why it is affordable on an Alpine image with no compiler: about

@@ -22024,7 +22024,7 @@ Settled by the owner. `_checked_collection` already answered 400 for a collectio
 
 `subtitle`, `author`, `publisher`, `description` and `series_name` hold no empty or whitespace only string. `models.BLANK_IS_NULL` names them and `models.blank_as_none` is the rule, with four callers: `Book`'s `@validates` hook for every ORM write (the request bodies, evidence, and the MARC, OPDS and CSV creates, which build a `Book` from a record with no request body), the two request bodies' `mode="before"` validators, `backup._parse_row` for a restore, and `evidence.is_empty`. Revision d3f8a1c6b250 nulled the stored ones.
 
-* **Only all whitespace changes.** Text keeps its spaces, because trimming is a second rule nobody asked for. Whitespace is `str.isspace`'s 29 characters on both engines; a character that looks blank and is not whitespace (zero width space, Hangul filler, byte order mark, Mongolian vowel separator U+180E, which left the whitespace set in Unicode 6.3) is a value and is kept. A test runs every one of the 29 and the four lookalikes through the revision on SQLite in CI; PostgreSQL 18 was measured by hand, because the `test:postgres` selection does not include that file.
+* **Only all whitespace changes.** Text keeps its spaces, because trimming is a second rule nobody asked for. Whitespace is `str.isspace`'s 29 characters on both engines; a character that looks blank and is not whitespace (zero width space, Hangul filler, byte order mark, Mongolian vowel separator U+180E, which left the whitespace set in Unicode 6.3) is a value and is kept. A test runs every one of the 29 and the four lookalikes through the revision on SQLite in CI, and on PostgreSQL 18 in the nightly whole suite run, since the `test:postgres` selection on the release paths does not include that file.
 * **Why the model is the home.** It is the one hook every ORM write passes, so a new writer is covered without knowing the rule. It does not fire on a Core insert or `Query.update`, so the restore calls the function itself, as it does `covers.storable` for `cover_url`; no `Query.update` or bulk write touches the five columns today.
 * **Why the request bodies keep their validators.** They run before `max_length`, so a blank wider than the column is null rather than a 422. They call the same function over the same tuple, so it is one rule at two sites, not two rules.
 
@@ -23471,11 +23471,17 @@ from a call under one, is allowed; one in its `else` is not. The table valued fo
 `tests/sqlite_only.py`: `typeof`, `CAST(... AS BLOB)`, an assertion on the dialect name, a
 statement on an engine the test built, and anything sent through the raw DBAPI cursor.
 
-**The whole suite on Postgres is refused as the guard for now.** Measured at the base of the
-wave, a full run on Postgres left several hundred failures, most of them application defects not
-yet separated from the SQLite assumptions, so the job would have turned red on every tag. The
-mark and the side guard come first, and a whole suite job is the natural next guard once that
-list is fixed or carried.
+**The whole suite on Postgres runs nightly, and the selection stays the release guard.** Once
+the SQLite assumptions were marked or fixed, the whole suite passed on Postgres. It takes about
+fourteen minutes on builder through the suite runner, against the selection's minute in CI, so `test:postgres`
+keeps the selection on tags and patch branches and `nightly:postgres` runs the whole suite on
+the scheduled pipeline. It sits in the last stage with no needs and `when: always`, so it waits
+for the unattended patch night to finish whatever its result: started beside the night, it
+would take a runner slot from the patch branch pipeline `autopatch:verify` waits on, and in an
+earlier stage its red would skip the night and fire `autopatch:page`. A red night pages through
+the patch night's pager on a Gatus endpoint of its own, because Gatus alerts only on the
+transition into failure: on the shared endpoint a Postgres red would leave it failing, and the
+next failed patch night would page nobody.
 
 ## A call inside a comprehension's condition is not refused by a guard
 
