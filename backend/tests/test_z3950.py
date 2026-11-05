@@ -34,7 +34,7 @@ import ctypes
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from threading import Lock
+from threading import Barrier, Event, Lock
 
 import pytest
 
@@ -47,6 +47,17 @@ TREE_GUARDS = {
 }
 
 TARGET = Target(host="catalogue.example", port=210, database="EXAMPLE")
+
+#: The deadline a case gives work it expects to be abandoned. **Seconds and not
+#: milliseconds, because the clock starts before the open**, which runs on a thread the
+#: association starts: on a loaded gate node 0.05s did not cover it, so the search never
+#: began and the case read "before starting" where it pinned "still answering".
+BUDGET = 1.0
+
+#: How long a held fake waits for its case to let it go. Far past `BUDGET`, so a release
+#: that waited for the client sees it answer and returns rather than raises; short enough
+#: that such a red ends rather than hangs.
+HELD_SECONDS = 5.0
 
 
 def marc(size: int, *, syntax: Syntax = Syntax.MARC21, reported: str = "USmarc") -> Record:
@@ -63,6 +74,11 @@ class FakeSession:
     search_error: Exception | None = None
     fetch_error: Exception | None = None
     delay: float = 0.0
+    #: When given, a search waits on it, and logs `answered` once it is let go. A
+    #: search still in the client at the release shows as `search` with no `answered`.
+    held: Event | None = None
+    #: How long a held search waits before it answers anyway.
+    hold: float = HELD_SECONDS
     #: Every call in the order the client saw it, which is what shows an interleave.
     log: list[str] = field(default_factory=list)
     closes: int = 0
@@ -83,6 +99,9 @@ class FakeSession:
 
     def search(self, pqf: str) -> int:
         self._record(f"search {pqf}")
+        if self.held is not None:
+            self.held.wait(self.hold)
+            self._record(f"answered {pqf}")
         if self.delay:
             time.sleep(self.delay)
         if self.search_error is not None:
@@ -110,13 +129,15 @@ class FakeClient:
 
     session: FakeSession = field(default_factory=FakeSession)
     open_error: Exception | None = None
-    open_delay: float = 0.0
+    #: When given, the open waits on it rather than answering. A sleep instead races
+    #: the deadline on a stalled node, and the open can win.
+    open_held: Event | None = None
     opens: list[tuple[Target, float]] = field(default_factory=list)
 
     def open(self, target: Target, *, timeout: float) -> FakeSession:
         self.opens.append((target, timeout))
-        if self.open_delay:
-            time.sleep(self.open_delay)
+        if self.open_held is not None:
+            self.open_held.wait(HELD_SECONDS)
         if self.open_error is not None:
             raise self.open_error
         return self.session
@@ -398,13 +419,24 @@ class TestOneAssociationIsOneClock:
         assert time.monotonic() - started < 1.0
 
     async def test_a_slow_target_is_released_at_the_deadline_and_not_after_it(self):
-        session = FakeSession(delay=2.0)
-        started = time.monotonic()
-        with pytest.raises(z3950.DeadlineExceeded) as raised:
-            await z3950.search_once(TARGET, "q", deadline=time.monotonic() + 0.05, client=FakeClient(session))
+        # **Whether the release came late is read off the client, not a clock.** The search
+        # is held past the deadline, so a release that waited for it would see it answer
+        # and return hits. The hold starts when the search does, after any setup, so setup
+        # cannot spend it; a release more than two to three seconds past the deadline sees
+        # the search answer. The honest path reds only if the loop stalls for two seconds
+        # exactly at the deadline.
+        held = Event()
+        session = FakeSession(held=held, hold=BUDGET + 2.0)
+        try:
+            with pytest.raises(z3950.DeadlineExceeded) as raised:
+                await z3950.search_once(
+                    TARGET, "q", deadline=time.monotonic() + BUDGET, client=FakeClient(session)
+                )
+            assert session.log == ["search q"], "the release waited for the search"
+        finally:
+            held.set()
         assert z3950.STILL_ANSWERING in str(raised.value)
         assert z3950.BEFORE_STARTING not in str(raised.value)
-        assert time.monotonic() - started < 1.0
 
     async def test_a_search_whose_own_deadline_has_passed_never_reaches_the_session(self):
         session = FakeSession()
@@ -428,14 +460,19 @@ class TestOneAssociationIsOneClock:
         # returned a hit count, ten times its own ceiling, contained live only by the
         # client's socket timeout, which surfaced as `Unreachable [10004] Connection
         # lost`. A bound held by a client accident is not held by the seam.
-        client = FakeClient(FakeSession(delay=2.0))
-        started = time.monotonic()
-        with pytest.raises(z3950.DeadlineExceeded):
-            async with z3950.association(
-                TARGET, client=client, deadline=time.monotonic() + 0.05
-            ) as open_association:
-                await z3950.search(open_association, "q", deadline=time.monotonic() + 8.0)
-        assert time.monotonic() - started < 1.0
+        # The search's own deadline is past `HELD_SECONDS`, so a widened clock lets the
+        # held search answer and the block returns rather than raises.
+        held = Event()
+        client = FakeClient(FakeSession(held=held))
+        try:
+            with pytest.raises(z3950.DeadlineExceeded):
+                async with z3950.association(
+                    TARGET, client=client, deadline=time.monotonic() + BUDGET
+                ) as open_association:
+                    await z3950.search(open_association, "q", deadline=time.monotonic() + 2 * HELD_SECONDS)
+            assert client.session.log == ["search q"], "the search outlived its association's clock"
+        finally:
+            held.set()
 
     async def test_a_search_deadline_shorter_than_the_association_still_binds(self):
         # Narrowing is composition and must keep working: the fix is `min`, not "ignore".
@@ -513,10 +550,16 @@ class TestAnAssociationIsNeverLeftBehind:
         # and the client keeps working because a thread cannot be cancelled. Measured
         # before the fix: sessions built 1, closed 0, which is a connection and a socket
         # for the life of the process.
-        client = FakeClient(open_delay=0.3)
-        with pytest.raises(z3950.DeadlineExceeded):
-            async with z3950.association(TARGET, client=client, deadline=time.monotonic() + 0.05):
-                pass
+        let_it_open = Event()
+        client = FakeClient(open_held=let_it_open)
+        try:
+            with pytest.raises(z3950.DeadlineExceeded) as raised:
+                async with z3950.association(TARGET, client=client, deadline=time.monotonic() + BUDGET):
+                    pass
+        finally:
+            let_it_open.set()
+        # The open's own door, and not the check before it, which never opens anything.
+        assert z3950.STILL_ANSWERING in str(raised.value)
         await settle(lambda: client.session.closes == 1)
         assert client.session.closes == 1
 
@@ -526,11 +569,17 @@ class TestAnAssociationIsNeverLeftBehind:
         # `metadata.SEARCH_DEADLINE_SECONDS` is 4.0 against a 10.0s ceiling, so the outer
         # clock always expires first. Measured before the fix, under
         # `asyncio.timeout(0.05)`: 3 of 3 runs left a live connection handle 3.0s later.
-        client = FakeClient(open_delay=0.3)
-        with pytest.raises(TimeoutError):  # noqa: PT012  the cancellation is what is under test
-            async with asyncio.timeout(0.05):
-                async with z3950.association(TARGET, client=client):
-                    pass
+        # 0.05s cannot be spent before the open: nothing reads the clock or yields to the
+        # loop between here and the submit, so the cancellation lands after it.
+        let_it_open = Event()
+        client = FakeClient(open_held=let_it_open)
+        try:
+            with pytest.raises(TimeoutError):  # noqa: PT012  the cancellation is what is under test
+                async with asyncio.timeout(0.05):
+                    async with z3950.association(TARGET, client=client):
+                        pass
+        finally:
+            let_it_open.set()
         await settle(lambda: client.session.closes == 1)
         assert client.session.closes == 1
 
@@ -545,13 +594,26 @@ class TestAnAssociationIsNeverLeftBehind:
 
     async def test_releasing_does_not_wait_for_the_close(self):
         # Awaiting it measured 3.007s against a 0.500s deadline. The single worker thread
-        # is what orders the close, not a wait, so this returns immediately.
-        client = FakeClient(FakeSession(close_error=None))
-        client.session.delay = 0.0
-        started = time.monotonic()
+        # is what orders the close, not a wait. **The close here does not return until
+        # this case lets it**, so a release that waited for it would leave the block
+        # with the close already counted. An instant close, timed, cannot tell the two
+        # apart: waiting for it costs nothing. **It lets through a release that waits
+        # with a timeout shorter than the hold**, because telling a bounded wait from
+        # none takes a clock or a probe into the worker thread.
+        let_it_close = Event()
+
+        class HeldClose(FakeSession):
+            def close(self) -> None:
+                let_it_close.wait(5)
+                super().close()
+
+        client = FakeClient(HeldClose())
         async with z3950.association(TARGET, client=client):
             pass
-        assert time.monotonic() - started < 0.5
+        assert client.session.closes == 0, "the release waited for the close"
+        let_it_close.set()
+        await settle(lambda: client.session.closes == 1)
+        assert client.session.closes == 1
 
     async def test_a_failing_close_does_not_replace_the_bodys_exception(self):
         client = FakeClient(FakeSession(close_error=RuntimeError("stuck")))
@@ -590,12 +652,18 @@ class TestAnAssociationIsNeverLeftBehind:
         # a mutation removing the latch survived, because the missing session raised
         # `Closed` anyway and the test could not tell the two apart. "Abandoned at a
         # deadline" and "closed normally" are different things to read in a log.
-        session = FakeSession(delay=1.0)
-        async with z3950.association(TARGET, client=FakeClient(session)) as abandoned:
-            with pytest.raises(z3950.DeadlineExceeded):
-                await z3950.search(abandoned, "slow", deadline=time.monotonic() + 0.05)
-            with pytest.raises(z3950.Closed) as raised:
-                await z3950.search(abandoned, "after")
+        # A deadline spent before the search starts does not end the association, so a
+        # short one turns this into a second search on a live session under load.
+        held = Event()
+        session = FakeSession(held=held)
+        try:
+            async with z3950.association(TARGET, client=FakeClient(session)) as abandoned:
+                with pytest.raises(z3950.DeadlineExceeded):
+                    await z3950.search(abandoned, "slow", deadline=time.monotonic() + BUDGET)
+                with pytest.raises(z3950.Closed) as raised:
+                    await z3950.search(abandoned, "after")
+        finally:
+            held.set()
         assert z3950.STILL_ANSWERING in str(raised.value)
 
         client = FakeClient()
@@ -606,12 +674,16 @@ class TestAnAssociationIsNeverLeftBehind:
         assert "was closed" in str(closed.value)
 
     async def test_work_after_an_abandonment_raises_too(self):
-        session = FakeSession(delay=1.0)
-        async with z3950.association(TARGET, client=FakeClient(session)) as open_association:
-            with pytest.raises(z3950.DeadlineExceeded):
-                await z3950.search(open_association, "slow", deadline=time.monotonic() + 0.05)
-            with pytest.raises(z3950.Closed):
-                await z3950.search(open_association, "after")
+        held = Event()
+        session = FakeSession(held=held)
+        try:
+            async with z3950.association(TARGET, client=FakeClient(session)) as open_association:
+                with pytest.raises(z3950.DeadlineExceeded):
+                    await z3950.search(open_association, "slow", deadline=time.monotonic() + BUDGET)
+                with pytest.raises(z3950.Closed):
+                    await z3950.search(open_association, "after")
+        finally:
+            held.set()
         assert session.searched == ["slow"]
 
 
@@ -847,11 +919,18 @@ class TestTheBoundsAgreeWithEachOther:
 async def test_the_event_loop_is_not_blocked_while_a_client_works():
     """The client is blocking, so it has to run off the loop or a fan out serialises.
 
-    Each association costs 0.6s of its own: the fake sleeps 0.3s in the search and 0.3s
-    in the record. Two of them in parallel are therefore about 0.6s and two of them
-    serialised would be about 1.2s, so the bound sits between the two and not near either.
+    **Both searches have to be inside the client at once to get past the barrier**, so
+    a serialised pair breaks it rather than merely running slower. Nothing is timed,
+    so a loaded node cannot red it, and the barrier's timeout is paid only by a
+    broken run.
     """
-    clients = [FakeClient(FakeSession(delay=0.3)) for _ in range(2)]
-    started = time.monotonic()
+    both_inside = Barrier(2, timeout=5)
+
+    class MeetsTheOther(FakeSession):
+        def search(self, pqf: str) -> int:
+            both_inside.wait()
+            return super().search(pqf)
+
+    clients = [FakeClient(MeetsTheOther()) for _ in range(2)]
     await asyncio.gather(*(z3950.search_once(TARGET, "q", client=c) for c in clients))
-    assert time.monotonic() - started < 0.9
+    assert not both_inside.broken, "the two searches were never inside the client together"

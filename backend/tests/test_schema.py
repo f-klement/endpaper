@@ -1997,8 +1997,21 @@ class TestTheMigrationsAndTheModelsAgree:
 #:
 #: Written to a file rather than to stdout. `import main` configures logging, and
 #: a handler on stdout would put log lines through the same pipe as the report.
+#:
+#: **The child bounds itself by the CPU it spends and reports where it stood.** Its
+#: first lines cap its own CPU seconds, so a spin dies by SIGXCPU, and arm
+#: `faulthandler` twice, so that SIGXCPU and the approach of the wall backstop both
+#: print every thread's stack to stderr before the child goes. Set in the child
+#: rather than in a `preexec_fn`, which runs between fork and exec in a parent
+#: holding xdist's threads. The interpreter's own start is counted against the
+#: limit but runs before it is set, so it is the only CPU left unbounded, and it
+#: is a fraction of a second.
 _BOOT_PROBE: Final = """
-import json, os, sys
+import faulthandler, json, os, resource, signal, sys
+_cpu = int(os.environ["ENDPAPER_PROBE_CPU_SECONDS"])
+resource.setrlimit(resource.RLIMIT_CPU, (_cpu, _cpu + 5))
+faulthandler.register(signal.SIGXCPU, all_threads=True, chain=True)
+faulthandler.dump_traceback_later(float(os.environ["ENDPAPER_PROBE_DUMP_AFTER"]), exit=True)
 sys.path.insert(0, os.environ["ENDPAPER_PROBE_BACKEND"])
 
 if sys.argv[1] == "application":
@@ -2068,11 +2081,22 @@ class TestTheSchemaTheApplicationBootsIsTheRevisions:
     covers something this does not and neither replaces the other.
     """
 
-    #: Long enough that a slow node is not a failure, short enough that a child
-    #: that hangs is reported rather than sitting on a worker until the run is
-    #: killed. The whole test, both children, measured 4.43s on `builder`,
-    #: which bounds either of them.
-    TIMEOUT: Final = 180
+    #: **A child is bounded by the CPU it spends, so a node stall shorter than the
+    #: backstop below does not red it and a spin still does.** A child blocked on a
+    #: disk spends no CPU, so only `WALL_SECONDS` reads a stall: the
+    #: wall clock bound this replaced, 180s, reddened during a node wide write
+    #: stall that left the whole job with nothing runnable for over three minutes,
+    #: with no hang in the application. The whole test, both children, measured
+    #: 4.43s and 6.20s of wall clock on `builder`, which bounds either child's
+    #: CPU, so sixty CPU seconds is about ten times the larger.
+    CPU_SECONDS: Final = 60
+
+    #: The backstop for a child that waits without spending CPU: a lock, a read
+    #: that never returns. Generous, because the stall above has to fit inside it.
+    #: The child prints every thread's stack and exits `DUMP_MARGIN` before it, so
+    #: a red here says where the child stood.
+    WALL_SECONDS: Final = 300
+    DUMP_MARGIN: Final = 20
 
     @staticmethod
     def _booted(how: str, root: Path) -> dict[str, Any]:
@@ -2093,24 +2117,40 @@ class TestTheSchemaTheApplicationBootsIsTheRevisions:
             # The machine running this may have a real one, and `generate_key`
             # writes. The failing backend is what a container has anyway.
             "PYTHON_KEYRING_BACKEND": "keyring.backends.fail.Keyring",
+            "ENDPAPER_PROBE_CPU_SECONDS": str(TestTheSchemaTheApplicationBootsIsTheRevisions.CPU_SECONDS),
+            "ENDPAPER_PROBE_DUMP_AFTER": str(
+                TestTheSchemaTheApplicationBootsIsTheRevisions.WALL_SECONDS
+                - TestTheSchemaTheApplicationBootsIsTheRevisions.DUMP_MARGIN
+            ),
         }
         # Both children are SQLite whatever this run is against, so the two
         # shapes are comparable on the engine the image ships with.
         environment.pop("ENDPAPER_TEST_DATABASE_URL", None)
 
-        finished = subprocess.run(
-            [sys.executable, "-c", _BOOT_PROBE, how],
-            env=environment,
-            capture_output=True,
-            text=True,
-            timeout=TestTheSchemaTheApplicationBootsIsTheRevisions.TIMEOUT,
-        )
+        try:
+            finished = subprocess.run(
+                [sys.executable, "-c", _BOOT_PROBE, how],
+                env=environment,
+                capture_output=True,
+                text=True,
+                timeout=TestTheSchemaTheApplicationBootsIsTheRevisions.WALL_SECONDS,
+            )
+        except subprocess.TimeoutExpired as expired:
+            # Reached only where the child's own dump did not end it first, which is
+            # a child that could not even run its watchdog thread.
+            # Typed as bytes, and a str under `text=True`.
+            raw: object = expired.stderr
+            stderr = raw.decode(errors="replace") if isinstance(raw, bytes) else str(raw or "")
+            pytest.fail(f"the {how} probe outlived its wall backstop:\n{stderr[-6000:]}")
 
         assert finished.returncode == 0, (
-            f"the {how} probe did not finish, so this rule measured nothing:\n{finished.stderr[-2000:]}"
+            f"the {how} probe did not finish, so this rule measured nothing:\n{finished.stderr[-6000:]}"
         )
         return dict(json.loads(report.read_text()))
 
+    # Two children in turn, each backstopped at `WALL_SECONDS`, so the global per
+    # test ceiling in `pyproject.toml` would cut the second one short.
+    @pytest.mark.timeout(2 * WALL_SECONDS + 60)
     def test_a_boot_builds_nothing_the_revisions_do_not(self, tmp_path: Path):
         """The application's schema against the revisions' own.
 

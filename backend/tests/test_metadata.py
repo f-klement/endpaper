@@ -4892,6 +4892,8 @@ class TestTheCandidates:
                 )
             )
 
+            outlived: list[bool] = []
+
             async def _forever(
                 isbn: str,
                 limit: int,
@@ -4899,14 +4901,20 @@ class TestTheCandidates:
                 *,
                 plan: sources.Plan,
             ) -> list[dict[str, object]]:
-                await asyncio.sleep(30)
+                # Ten times the budget. The deadline's cancel lands in the sleep, so an
+                # append means the response waited the cluster out.
+                await asyncio.sleep(10)
+                outlived.append(True)
                 return []
 
             monkeypatch.setattr(metadata, "editions", _forever)
-            monkeypatch.setattr(metadata, "SEARCH_DEADLINE_SECONDS", 0.05)
+            # The search half is held to the same constant and has to answer inside it,
+            # so it is seconds and not the 0.05s that a loaded node can spend first.
+            monkeypatch.setattr(metadata, "SEARCH_DEADLINE_SECONDS", 1.0)
             rows = await candidates("Introduction to Algorithms", isbn=ENGLISH_ISBN, limit=5)
 
         assert [row.isbn for row in rows] == ["9780262046305"]
+        assert not outlived, "the response waited the slow cluster out"
 
 
 class TestTheAustrianNationalLibrary:

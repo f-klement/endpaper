@@ -997,24 +997,26 @@ class TestTheDeadlineBoundsTheWholeRequest:
         chunk has already arrived. A sender pacing chunks just inside the budget
         therefore got two of them. Measured with the old shape, a 1.0 second
         budget returned after **1.982s**; with `asyncio.timeout` around the
-        walk, 1.018s. The assertion is 1.5x, which the old shape fails and the
-        new one clears with room.
+        walk, 1.018s. The assertion counts the chunks sent before the release:
+        the old shape took two, the new one at most one, and a slow node only
+        delays the first. A bound on the wall time read the client's setup too.
         """
         budget = 0.4
+        sent = 0
 
         async def paced():
+            nonlocal sent
             for _ in range(50):
                 await asyncio.sleep(budget * 0.98)
+                sent += 1
                 yield b"x" * 8
 
         with respx.mock:
             respx.get(URL).mock(return_value=httpx.Response(200, stream=paced()))
-            started = time.monotonic()
             with pytest.raises(fetch.DeadlineExceeded):
                 await fetch.get_once(URL, deadline=time.monotonic() + budget)
-            spent = time.monotonic() - started
 
-        assert spent < budget * 1.5
+        assert sent <= 1
 
     @pytest.mark.asyncio
     async def test_the_default_deadline_is_the_timeout(self):

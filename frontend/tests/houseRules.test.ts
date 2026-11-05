@@ -3551,32 +3551,44 @@ describe("a module is replaced by an alias, never by a module mock", () => {
    *
    * This test exists because a docstring in `tests/doubles/zxing.ts` said it
    * did, for a round, while nothing read the config at all.
+   *
+   * **Its timeout is stated because the work is real and the default is not
+   * sized for it.** Each `resolveConfig` bundles `vite.config.ts`, runs `git
+   * describe` in a subprocess and loads the plugins cold, and both commands
+   * are needed, since a plugin's `apply` can differ between them. It took
+   * 154 ms targeted on builder and 7,809 ms in a whole suite on a loaded
+   * node, against vitest's 5,000 ms default. Thirty seconds is about four
+   * times the worst reading; a healthy run never waits on it.
    */
-  it("keeps the doubles out of the application build", async () => {
-    const { resolveConfig } = await import("vite");
-    // No root passed: vite falls back to the working directory and finds the
-    // config the way a build does, which is the thing under test.
-    for (const command of ["build", "serve"] as const) {
-      const resolved = await resolveConfig({}, command);
+  it(
+    "keeps the doubles out of the application build",
+    { timeout: 30_000 },
+    async () => {
+      const { resolveConfig } = await import("vite");
+      // No root passed: vite falls back to the working directory and finds the
+      // config the way a build does, which is the thing under test.
+      for (const command of ["build", "serve"] as const) {
+        const resolved = await resolveConfig({}, command);
 
-      // **Assert a config was found, or this passes by reading nothing.**
-      // Measured from a different working directory: `configFile` comes back
-      // `undefined` and `resolve.alias` is byte identical, because the project
-      // contributes nothing to it, which is the correct state and is also
-      // exactly what never opening the file looks like. Same shape as a script
-      // that takes a ref and reads whichever repository the shell is in.
-      expect(resolved.configFile).toMatch(/vite\.config\.ts$/);
+        // **Assert a config was found, or this passes by reading nothing.**
+        // Measured from a different working directory: `configFile` comes back
+        // `undefined` and `resolve.alias` is byte identical, because the project
+        // contributes nothing to it, which is the correct state and is also
+        // exactly what never opening the file looks like. Same shape as a script
+        // that takes a ref and reads whichever repository the shell is in.
+        expect(resolved.configFile).toMatch(/vite\.config\.ts$/);
 
-      // **The directory, not the two names in use.** A `find` that is a RegExp
-      // serialises to `{}`, so the discriminating half of an entry is erased
-      // before this sees it, and vite's own defaults already contain two such
-      // entries. Naming the words `zxing` and `doubles` would therefore pass on
-      // a double keyed by a pattern, and it would be an inclusion list one test
-      // after this file removed one for being an inclusion list. Measured
-      // absent from the resolved default.
-      expect(JSON.stringify(resolved.resolve.alias)).not.toContain("/tests/");
-    }
-  });
+        // **The directory, not the two names in use.** A `find` that is a RegExp
+        // serialises to `{}`, so the discriminating half of an entry is erased
+        // before this sees it, and vite's own defaults already contain two such
+        // entries. Naming the words `zxing` and `doubles` would therefore pass on
+        // a double keyed by a pattern, and it would be an inclusion list one test
+        // after this file removed one for being an inclusion list. Measured
+        // absent from the resolved default.
+        expect(JSON.stringify(resolved.resolve.alias)).not.toContain("/tests/");
+      }
+    },
+  );
 
   it("still aliases them for the suite", () => {
     // The other half, and it is what stops the test above passing because

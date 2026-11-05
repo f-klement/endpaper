@@ -21151,7 +21151,7 @@ report, and a missing, empty or unreadable report refuses. It applies where that
 which is PyPI.
 
 **The record is a file in the commit the tag points at**, `accepted-unfixable.txt`, opening with a
-`release <tag>` line. `release-audit` takes `--release`, which `test:backend` passes as the tag or
+`release <tag>` line. `release-audit` takes `--release`, which `audit:backend` passes as the tag or
 the patch branch's version, and a record naming another release, none, or two honours nothing. The
 forward port carries the file to `main`, so without the line a tag a person cut there honoured a
 severity judged on another night for another tree, and `main`'s own plain audit refused the
@@ -22068,7 +22068,7 @@ The uv, bun, trivy and mypy caches each have one job that pushes and every other
 
 **A tag always runs both suites in full.** A release commit is pushed straight to `main` and has no merge request, so the one pipeline that could prove its tag is `main`'s own push pipeline. A push option there narrowing the suites (`-o ci.variable=...`) would go unseen, because the proof cannot read pipeline variables. A merge request pipeline could prove a tag in general, so the rule is that tags always run the suites, not that a proof is impossible.
 
-**What it gives up, and why that is accepted.** A flake or a clock dependent failure that only a second run on `main` would have caught goes unseen on a proven commit; the tree already passed once, unretried, and nothing on `main` was asked to differ from it. pip-audit runs ahead of ruff, mypy and pytest so a proven tree is audited too, and that reaches every pipeline: on the day an advisory is published, every merge request's backend job reds before any check has run, and its author gets no ruff, mypy or pytest result until the advisory is handled. The graph refuses `:latest` on an image that failed its smoke test, and a proof from a pipeline whose suite passed only on a retry. `main`'s own suite, green on a retry, still promotes.
+**What it gives up, and why that is accepted.** A flake or a clock dependent failure that only a second run on `main` would have caught goes unseen on a proven commit; the tree already passed once, unretried, and nothing on `main` was asked to differ from it. pip-audit runs in `audit:backend`, which reads no proof, so a proven tree is audited too. An advisory published against a package already on `main` reds `main`'s audit and no merge request's, whose audit refuses only what its own lock adds, and ruff, mypy and pytest run and report in `test:backend` either way. The graph refuses `:latest` on an image that failed its smoke test, and a proof from a pipeline whose suite passed only on a retry. `main`'s own suite, green on a retry, still promotes.
 
 **It fails closed.** No `SUITES_PROOF_TOKEN`, any API failure, refusal or timeout, or a crash writes no proof, and both suites run. The skip is a file artifact the test jobs compare with the checkout's own `HEAD`, never a dotenv and never `CI_COMMIT_SHA`, because a pipeline variable outranks both. pip-audit runs on a proven tree; `test:postgres` runs only on tags and patch branches, where nothing is proven.
 
@@ -24089,3 +24089,33 @@ pipeline's status, so a red labelled merge request reruns until somebody fixes o
 which is the rerun storm rebasing only on conflict was chosen to end. Taken knowingly: the
 alternative is a drift that reaches `main`, where it reddens every pipeline until a person
 regenerates.
+
+## The advisory audit is a job of its own, and still gates every publish
+
+Owner's decision, 2026-11-05. `pip-audit` moved out of `test:backend` into `audit:backend`.
+
+**Why.** The audit reads a live advisory feed, so an advisory published overnight reds it
+with nothing in the tree changed. Inside `test:backend` that red read as a failed suite and
+stopped the suite running at all: in the seven days to 2026-11-05 two of the reds on `main`
+were this, each reported as `test:backend` failing before a single test ran. Apart, a red
+`test:backend` means a check or a test failed, and a red `audit:backend` means an advisory.
+
+**What did not move.** The commands, the release arm's accepted unfixable list and its
+release scoping, and the merge request's differential arm are byte for byte the ones
+`test:backend` ran; the pipeline's self test holds them equal to the decider's own commands
+at the new site, and holds the job's rules to the backend suite's line for line. The job may
+not fail and has no manual start. `release:build`, `publish:github` and `promote:latest` need
+it beside the suites, and a guard holds every publish job to it over hard needs. So an
+advisory still stops a publish.
+
+**What it costs.** One more pod per pipeline, which syncs the locked environment from the
+pulled uv cache before auditing. It is not pinned to a node: `test:backend`'s pin exists for
+the suite's run time, which this job does not carry.
+
+## No guard that every long explicit test timeout carries a reason
+
+Considered 2026-11-05 while giving one vitest case an explicit timeout. Every explicit
+timeout in `frontend/tests` already sits beside a comment saying why. The failure such a
+guard would catch is a bare number with no reason, which costs a reader a lookup and no
+wrong result, and a text check over comments is the kind of guard that is evaded by
+accident and policed by hand. The risk does not justify a check.

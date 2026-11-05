@@ -958,14 +958,24 @@ class TestMailSender:
         hourly run is never held by a server that went quiet."""
         lend()
         monkeypatch.setattr(notifications, "MAIL_DEADLINE_SECONDS", 0.05)
-        monkeypatch.setattr(mailer, "send", lambda *_: time.sleep(1.0))
+        # Held rather than slept, and read rather than timed: a run that waited for the
+        # thread returns only after the send finished. A bound on the run's wall time
+        # also timed the digest's own queries, which a loaded node slows.
+        let_it_send = threading.Event()
+        finished = threading.Event()
 
-        started = time.monotonic()
-        result = await notifications.run_digest(mail_on)
-        spent = time.monotonic() - started
+        def quiet(*_: object) -> None:
+            let_it_send.wait(5.0)
+            finished.set()
+
+        monkeypatch.setattr(mailer, "send", quiet)
+        try:
+            result = await notifications.run_digest(mail_on)
+            assert not finished.is_set(), "the run waited for the mail thread"
+        finally:
+            let_it_send.set()
 
         assert result["reason"] is OverdueNotifyReason.UNREACHABLE
-        assert spent < 0.9
 
 
 class TestThreeSendersOneDigest:
