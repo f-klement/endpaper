@@ -835,11 +835,10 @@ class TestTheCostOfTheWidestLegalResponseIsBounded:
     #:
     #: **Not a decoration.** Fifty rows numbered from one is nine single digit
     #: identifiers and forty one double, and the figure moves by one byte for
-    #: every digit. It holds because the engine under the fixtures restarts the
-    #: table; a sequence on another engine does not, and this file is outside
-    #: the selection that runs there today. Asserted so that arriving on such
-    #: an engine is a failure that says what happened rather than a page that
-    #: quietly weighs something else.
+    #: every digit. It holds because the reset between tests restarts every
+    #: id, on Postgres by setting each sequence back (`tests/conftest.py`).
+    #: Asserted so that a reset which stops doing so is a failure that says
+    #: what happened rather than a page that quietly weighs something else.
     IDENTIFIER_DIGITS = 91
 
     #: Every MARC field this fixture's record carries, by tag.
@@ -1082,11 +1081,14 @@ class TestTheCostOfTheWidestLegalResponseIsBounded:
         db.query(Classification).delete()
         db.query(OnlineLink).delete()
         db.query(Book).delete()
-        # `books` is AUTOINCREMENT, so emptying it no longer restarts its ids, and
-        # `IDENTIFIER_DIGITS` was measured with a page numbered from 1. The
-        # identifiers are not this class's subject, so the shelf starts there again.
+        # Emptying `books` restarts its ids on neither engine (it is AUTOINCREMENT
+        # on SQLite, a sequence on Postgres), and `IDENTIFIER_DIGITS` was measured
+        # with a page numbered from 1. The identifiers are not this class's
+        # subject, so the shelf starts there again.
         if db.get_bind().dialect.name == "sqlite":
             db.execute(text("DELETE FROM sqlite_sequence WHERE name = 'books'"))
+        else:
+            db.execute(text("SELECT setval(pg_get_serial_sequence('books', 'id'), 1, false)"))
         db.commit()
 
     def page_bytes(self, db: Any, admin: dict, fill: str, credits: int = 1, links: bool = True) -> int:

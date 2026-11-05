@@ -55,7 +55,7 @@ from models import (
 # One walk of the tree, shared, so a rule added here scans the corpus every
 # other rule scans. See its docstring for why the exclusion lives there.
 from tests.corpus import application_sources
-from tests.helpers import REFUSED_BY_THE_DATABASE
+from tests.helpers import REFUSED_BY_THE_DATABASE, duplicated_key
 
 TREE_GUARDS = {
     "TestAHighlightReadIsNarrowedToItsReader": ("application_sources",),
@@ -1280,13 +1280,7 @@ class TestTheAuthorityIdentifierConstraints:
         with pytest.raises(IntegrityError) as refusal:
             db.commit()
 
-        # SQLite names the **columns** for a unique index violation and not the
-        # index, where it names a CHECK by its own name. Matching on the pair is
-        # therefore the strongest form available here, and it is still specific:
-        # a foreign key or a NOT NULL firing instead would not print it.
-        assert "UNIQUE constraint failed: author_identifiers.author_key, author_identifiers.scheme" in str(
-            refusal.value
-        )
+        assert duplicated_key(refusal.value) == ("author_identifiers.author_key", "author_identifiers.scheme")
 
     def test_two_spellings_may_share_one_identifier(self, db):
         """Not unique on the identifier, because that is exactly the case a

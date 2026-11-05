@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sys
 from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -11,6 +12,8 @@ from sqlalchemy import Connection, event, inspect, text
 
 from database import engine
 from tests import sqlite_only
+from tests.helpers import rows_at_the_engine
+from tests.test_schema import _driver
 
 Authors = tuple[tuple[Path, int], ...]
 
@@ -29,6 +32,21 @@ def authors() -> Iterator[list[Authors]]:
         yield seen
     finally:
         event.remove(engine, "before_cursor_execute", record)
+
+
+@contextmanager
+def judged(*, marked: bool) -> Iterator[list[str]]:
+    """Judge the block as a test that is `marked` or not, and hand back what the
+    guard recorded against it. The test's own judging is put back after, so the
+    entries recorded here are never charged to the test running this."""
+    own = dict(sqlite_only.JUDGING)
+    recorded: list[str] = []
+    sqlite_only.JUDGING.update(marked=marked, seen=recorded)
+    try:
+        yield recorded
+    finally:
+        sqlite_only.JUDGING.clear()
+        sqlite_only.JUDGING.update(own)
 
 
 def _foreign_keys_on(connection: Connection) -> int:
@@ -60,18 +78,56 @@ class TestTheGuardKnowsWhoSpelledAStatement:
     def test_an_unmarked_test_running_a_pragma_is_recorded(self) -> None:
         """The listener in conftest is the whole guard: without it registered,
         every arm here still passes and no unmarked test is ever refused."""
-        own = dict(sqlite_only.JUDGING)
-        sqlite_only.JUDGING.update(marked=False, seen=[])
-        try:
-            with engine.connect() as connection:
-                line = sys._getframe().f_lineno + 1
-                connection.execute(text("PRAGMA foreign_keys"))
-            recorded = list(sqlite_only.JUDGING["seen"])
-        finally:
-            sqlite_only.JUDGING.clear()
-            sqlite_only.JUDGING.update(own)
+        with judged(marked=False) as recorded, engine.connect() as connection:
+            line = sys._getframe().f_lineno + 1
+            connection.execute(text("PRAGMA foreign_keys"))
 
         assert [entry.split(": ", 1)[0] for entry in recorded] == [f"tests/test_sqlite_only.py:{line}"]
+
+
+class TestTheRowCounterIsSeenAsWellAsTheStatements:
+    """The row counter reads through a `sqlite3` row factory rather than a
+    statement, so the listener never sees it, and it records itself instead."""
+
+    @pytest.mark.sqlite_only(reason="runs the row counter, a sqlite3 row_factory")
+    def test_an_unmarked_caller_is_recorded(self) -> None:
+        with judged(marked=False) as recorded, rows_at_the_engine():
+            pass
+
+        assert len(recorded) == 1
+        assert recorded[0].startswith("tests/helpers.py:")
+        assert "row counter" in recorded[0]
+
+    @pytest.mark.sqlite_only(reason="runs the row counter, a sqlite3 row_factory")
+    def test_a_caller_under_the_sqlite_gate_is_not(self) -> None:
+        with judged(marked=False) as recorded:
+            if engine.dialect.name == "sqlite":
+                with rows_at_the_engine():
+                    pass
+
+        assert recorded == []
+
+    @pytest.mark.sqlite_only(reason="runs the row counter, a sqlite3 row_factory")
+    def test_a_marked_caller_is_not(self) -> None:
+        with judged(marked=True) as recorded, rows_at_the_engine():
+            pass
+
+        assert recorded == []
+
+
+class TestTheDriverConnectionIsSeenToo:
+    """`_driver` in `test_schema.py` hands a test the `sqlite3` connection,
+    whose reads are no statement the listener sees, so it records itself. Without
+    its call, a copy of its marked caller left unmarked is green on SQLite."""
+
+    @pytest.mark.sqlite_only(reason="reads the sqlite3 connection under a SQLAlchemy one")
+    def test_an_unmarked_caller_is_recorded(self) -> None:
+        with engine.connect() as connection, judged(marked=False) as recorded:
+            _driver(connection)
+
+        assert len(recorded) == 1
+        assert recorded[0].startswith("tests/test_schema.py:")
+        assert "sqlite3 driver connection" in recorded[0]
 
 
 class TestAStatementUnderTheSqliteGateIsAllowed:

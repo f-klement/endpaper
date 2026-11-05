@@ -946,11 +946,15 @@ function codeOf(configKey: string): string {
 
 /**
  * Every `(rule, stated, found)` the ceiling refuses: oxlint finds more than the
- * count states, or finds none. A fall to a figure above zero passes.
+ * count states, or finds none. A fall passes, and is handed to `slack` as a
+ * `lint slack:` line, because the next new site of that rule fills it green
+ * and somebody has to write the found figure down. **The verdict and the report
+ * are one call**, so an arm cannot keep the one and drop the other.
  */
 function countsThatRose(
   backlog: Stated[],
   report: Report,
+  slack: (line: string) => void,
 ): [string, number, number][] {
   const found = new Map<string, number>();
   for (const { code } of report.diagnostics) {
@@ -958,8 +962,26 @@ function countsThatRose(
   }
   return backlog.flatMap(({ rule, stated }): [string, number, number][] => {
     const count = found.get(codeOf(rule)) ?? 0;
+    if (count < stated) {
+      slack(
+        `lint slack: oxlint ${rule} is stated at ${String(stated)} and found at ${String(count)}`,
+      );
+    }
     return count > stated || count === 0 ? [[rule, stated, count]] : [];
   });
+}
+
+/** Where the arm sends its slack: the log, which `lint slack:` is read from. */
+function printSlack(line: string): void {
+  console.warn(line);
+}
+
+/**
+ * Where a fixture's slack goes: nowhere, as in a log it reads as live. For
+ * fixtures only: handed to the live oxlint arm, it would hide a real fall.
+ */
+function ignoreSlack(): void {
+  // Deliberately empty.
 }
 
 /** A finding as one string, so two reports can be compared as sets. */
@@ -1446,7 +1468,7 @@ describe("every backlog count", () => {
         ),
       );
 
-      const wrong = countsThatRose(backlog, counted);
+      const wrong = countsThatRose(backlog, counted, printSlack);
       expect(
         wrong,
         `(rule, stated, found): ${JSON.stringify(wrong)}. Each count in ` +
@@ -2362,7 +2384,9 @@ describe("a stated count", () => {
       { rule: "react/refs", stated: 1 },
     ];
 
-    expect(countsThatRose(backlog, found)).toEqual([["no-shadow", 1, 2]]);
+    expect(countsThatRose(backlog, found, ignoreSlack)).toEqual([
+      ["no-shadow", 1, 2],
+    ]);
   });
 
   it("accepts a count that fell to a figure above zero", () => {
@@ -2372,21 +2396,55 @@ describe("a stated count", () => {
       { rule: "react/refs", stated: 1 },
     ];
 
-    expect(countsThatRose(backlog, found)).toEqual([]);
+    expect(countsThatRose(backlog, found, ignoreSlack)).toEqual([]);
   });
 
   it("is held to zero for a rule the run did not report", () => {
     expect(
-      countsThatRose([{ rule: "no-shadow", stated: 3 }], report()),
+      countsThatRose([{ rule: "no-shadow", stated: 3 }], report(), ignoreSlack),
     ).toEqual([["no-shadow", 3, 0]]);
   });
 
   it("does not take the findings of another plugin's rule of the same name", () => {
     const found = report("eslint(no-shadow)", "typescript(no-shadow)");
 
-    expect(countsThatRose([{ rule: "no-shadow", stated: 1 }], found)).toEqual(
-      [],
+    const backlog = [{ rule: "no-shadow", stated: 1 }];
+
+    expect(countsThatRose(backlog, found, ignoreSlack)).toEqual([]);
+  });
+});
+
+describe("the slack under a stated count", () => {
+  const report = (...codes: string[]): Report => ({
+    ...BASELINE,
+    diagnostics: codes.map((code) => ({ code })),
+  });
+
+  it("is reported for each rule found below its count", () => {
+    const found = report(
+      "eslint(no-shadow)",
+      "react(refs)",
+      "react(refs)",
+      "react(refs)",
     );
+    const backlog = [
+      { rule: "no-shadow", stated: 3 },
+      { rule: "react/refs", stated: 2 },
+      { rule: "unicorn/no-null", stated: 1 },
+    ];
+    const said: string[] = [];
+    const wrong = countsThatRose(backlog, found, (line) => {
+      said.push(line);
+    });
+
+    expect(wrong).toEqual([
+      ["react/refs", 2, 3],
+      ["unicorn/no-null", 1, 0],
+    ]);
+    expect(said).toEqual([
+      "lint slack: oxlint no-shadow is stated at 3 and found at 1",
+      "lint slack: oxlint unicorn/no-null is stated at 1 and found at 0",
+    ]);
   });
 });
 

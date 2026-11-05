@@ -75,6 +75,12 @@ _2026-10-25_
 
 - A CSV import drops a NUL character from the file and imports the rest of it.
 
+- Release images are built without the CI layer cache or a prebuilt YAZ image, from digest pinned
+  base images alone, so no other pipeline can alter what a release publishes.
+
+- The release image scan reads the image by the digest the build pushed, so a later push to the
+  release tag cannot change what is scanned.
+
 ## v0.21.0
 
 _2026-10-24_
@@ -3047,7 +3053,7 @@ byte identical, which is about the schema and was never about this.
   `POST /api/books/{id}/enrich/apply`, bounded four of its seventeen fields and left the
   rest open, so a member chose how large a stored value was and how much parsing the
   server did. The sharpest was `series_index`, which had no ceiling at all while
-  `GET /api/series` computes a range over it: a stored `1e9` is roughly 70 GB and ten
+  `GET /api/books/series` computes a range over it: a stored `1e9` is roughly 70 GB and ten
   minutes of work, on every request, for every member. `suggested_tag_ids` bounded each
   entry's value and not the number of entries. The guard is not a per field assertion:
   every field naming a column two request bodies both write must carry the same bound in
@@ -4412,7 +4418,7 @@ with a sentence and no way forward.
 
 ### Changed
 
-- `POST /api/books/bulk/ownership` is removed. `POST /api/books/bulk` with
+- POST /api/books/bulk/ownership is removed. `POST /api/books/bulk` with
   `set_ownership` has the same body, the same permission rules and the same
   result.
 - `GET /api/healthz` is the health endpoint. Container probes should point at

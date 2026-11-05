@@ -236,8 +236,8 @@ class TestNoModuleWorksOutWhatIsLeftForItself:
     def test_it_reads_every_module_that_carries_a_deadline(self):
         """A count is what a widened exclusion walks past: dropping `opds.py`
         from the walk leaves a `> 20` arm green, and `opds` is one of the five
-        modules the rule exists for. Named, not counted, for the reason
-        `test_adr_depth` gives about a row removed from a table.
+        modules the rule exists for. Named, not counted: a subset assertion
+        goes red when one of these five leaves the walk, and a floor does not.
         """
         walked = {path.relative_to(BACKEND).as_posix() for path in _modules_that_could_read_a_clock()}
 

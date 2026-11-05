@@ -10582,11 +10582,10 @@ export const getDeleteProgressUrl = (bookId: number, progressId: number) => {
 /**
  * Remove one of the caller's own entries. A mistyped page is the case.
  *
- * 404 for somebody else's row and for one belonging to a different book, not
- * 403, for the same reason an invisible book is: a 403 would confirm the id
- * exists. The book/entry pairing is enforced so an id from another book
- * cannot be deleted through a book the caller happens to have access to,
- * which is the rule `_note_for_edit` states for notes.
+ * The rule for a row under a Book is in `docs/data-model.md`, under the
+ * privacy rule. Somebody else's entry is 404 rather than 403, because every
+ * reader of a progress entry filters on the caller, so its existence is
+ * itself private.
  *
  * The status is left alone. Deleting the only entry does not put the book
  * back to unread: somebody pressed READING, or this endpoint did on their

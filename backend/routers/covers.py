@@ -185,7 +185,7 @@ def _not_found() -> HTTPException:
 
     Three of the five pinned a `Session` and the `User` the cover cookie
     resolved to. The other two are in `get_login_background`, which is public:
-    measured, `GET /api/covers/login_bg.png` answers 404 with no `Authorization`
+    measured, `GET /covers/login_bg.png` answers 404 with no `Authorization`
     header and no cookie. Those pinned no identity and needed no session at all,
     which is the sharper half: an unauthenticated caller could grow that object
     without ever signing in.

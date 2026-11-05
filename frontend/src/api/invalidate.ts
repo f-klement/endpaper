@@ -162,9 +162,9 @@ const BOOK_RECORD = /^\/api\/books\/\d+(\/copies)?$/;
  * client can produce and asserts each one is classified deliberately. That
  * test is the guard on the four exclusions below, all of which are outward
  * calls this app does not own: `/api/books/lookup` (Open Library),
- * `/api/books/search` (Google Books, billed), `/api/authors/authority` (lobid
- * and Wikidata, rate limited at 10 a minute) and `/api/authors/wikipedia`
- * (Wikidata, sharing that same counter). None is derived from the books table,
+ * `/api/books/search` (Google Books, billed), `/api/books/authors/authority`
+ * (lobid and Wikidata, rate limited at 10 a minute) and
+ * `/api/books/authors/wikipedia` (Wikidata, sharing that same counter). None is derived from the books table,
  * so none belongs to any write, and a fifth one arriving unclassified fails
  * that test rather than quietly joining every invalidate.
  *

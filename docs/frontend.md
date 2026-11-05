@@ -297,7 +297,9 @@ served for `/` by the precache route's `directoryIndex`, which takes the navigat
 from the forward-auth portal Endpaper can sit behind, and the app then boots signed out
 believing it is signed in. `frontend/scripts/check-build.ts` builds the app and
 asserts it, because the same bug once survived a fix that changed the config without
-changing the build. Run it with `bun run check:build`; CI runs it on every push.
+changing the build. Run it with `bun run check:build`; CI runs it on every push. The same
+check refuses any emitted script that runs a string as script, since the content security
+policy refuses `'unsafe-eval'` for the whole bundle.
 
 The usual service-worker trap still applies to assets: the precache holds hashed asset
 names, so a client can hold a stale bundle after a deploy. `autoUpdate` resolves it on the

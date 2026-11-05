@@ -13873,7 +13873,7 @@
     },
     "/api/books/{book_id}/progress/{progress_id}": {
       "delete": {
-        "description": "Remove one of the caller's own entries. A mistyped page is the case.\n\n404 for somebody else's row and for one belonging to a different book, not\n403, for the same reason an invisible book is: a 403 would confirm the id\nexists. The book/entry pairing is enforced so an id from another book\ncannot be deleted through a book the caller happens to have access to,\nwhich is the rule `_note_for_edit` states for notes.\n\nThe status is left alone. Deleting the only entry does not put the book\nback to unread: somebody pressed READING, or this endpoint did on their\nbehalf, and removing a mistyped page number is not a claim about that.",
+        "description": "Remove one of the caller's own entries. A mistyped page is the case.\n\nThe rule for a row under a Book is in `docs/data-model.md`, under the\nprivacy rule. Somebody else's entry is 404 rather than 403, because every\nreader of a progress entry filters on the caller, so its existence is\nitself private.\n\nThe status is left alone. Deleting the only entry does not put the book\nback to unread: somebody pressed READING, or this endpoint did on their\nbehalf, and removing a mistyped page number is not a claim about that.",
         "operationId": "delete_progress",
         "parameters": [
           {

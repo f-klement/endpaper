@@ -666,7 +666,7 @@ def _refuse_a_rewritten_register(session: pytest.Session) -> None:
         # **A refusal, never a quiet return.** The reading is taken
         # unconditionally at module scope, so this state means somebody
         # removed it, and a guard that is not armed reporting a pass is the
-        # whole failure this file is about. `test_coverage_register_writer`
+        # whole failure this file is about. The register writer's own test
         # blanks the global and drives this.
         _refuse_the_short_session(
             session,
@@ -937,20 +937,27 @@ def clean_database(_schema_once: None) -> None:
     and enforced. `Base.metadata.sorted_tables` is dependency ordered, so
     reversing it deletes children first.
 
-    Ids still restart at 1 **on SQLite**, which the `covers_dir` fixture depends
-    on: SQLite gives an insert `max(rowid) + 1`, and an empty table has none.
-    `books` is the exception, declared `AUTOINCREMENT` so that a deleted Book's
-    id is never reused, and its counter in `sqlite_sequence` is emptied with the
-    rows. **Postgres does not restart**, measured:
-    eighteen columns there default to `nextval(...)` and a DELETE does not touch
-    a sequence. So every case that reads a literal id is a case that runs on one
-    engine, which is why the pipeline's Postgres job selects rather than running
-    the suite.
+    Ids restart at 1 in every test, which the `covers_dir` fixture and every
+    literal id depend on. SQLite gives an insert `max(rowid) + 1`, and an empty
+    table has none; `books` is the exception, declared `AUTOINCREMENT` so that a
+    deleted Book's id is never reused, and its counter in `sqlite_sequence` is
+    emptied with the rows. **Postgres restarts nothing on a DELETE**: its id
+    columns default to `nextval(...)`, so every sequence is set back by hand,
+    and without that a case reading a literal id passes on one engine only.
     """
     _empty_and_reseed()
 
 
 _HAS_A_SEQUENCE = text("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'sqlite_sequence'")
+
+#: Every sequence in the schema the suite runs in, set so its next value is 1.
+#: One statement rather than one per table, and read off the catalogue rather
+#: than off the models, so a sequence a revision adds is restarted too.
+_RESTART_EVERY_SEQUENCE = text(
+    "SELECT setval(c.oid::regclass, 1, false) FROM pg_class c "
+    "JOIN pg_namespace n ON n.oid = c.relnamespace "
+    "WHERE c.relkind = 'S' AND n.nspname = current_schema()"
+)
 
 
 def _empty_and_reseed() -> None:
@@ -968,8 +975,11 @@ def _empty_and_reseed() -> None:
         # test's last one, and every literal id and cover file name moves. The
         # table exists only once some table declares `AUTOINCREMENT`, so not on
         # a database a schema test built at an older revision.
-        if connection.dialect.name == "sqlite" and connection.execute(_HAS_A_SEQUENCE).first():
-            connection.execute(text("DELETE FROM sqlite_sequence"))
+        if connection.dialect.name == "sqlite":
+            if connection.execute(_HAS_A_SEQUENCE).first():
+                connection.execute(text("DELETE FROM sqlite_sequence"))
+        elif connection.dialect.name == "postgresql":
+            connection.execute(_RESTART_EVERY_SEQUENCE)
         # From the metadata, not `Tag.__table__`. A declarative class types that
         # attribute as the wider `FromClause`, which has no `insert`, which is
         # the same trap `backup.py` documents for `delete()`.
@@ -1098,6 +1108,31 @@ def offline_covers(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
+#: The line the crash net adds, as a PEP 678 note, to what it raises at teardown.
+#: **The mutation sweep credits a teardown error carrying it as a catch**, where any
+#: other teardown error with a traceback is a broken fixture and reads as no catch. The
+#: sweep holds the same text, and its own tests hold the two equal. A
+#: constant rather than a literal at the raise, because pytest prints the raising
+#: fixture's source in the traceback, and a literal there would print the note in
+#: every traceback through the fixture, a broken one's included.
+CRASH_NET_NOTE = "raised again at teardown by the crash net, a_crashing_route_fails_its_test"
+
+
+def crash_net_refusal(crash: object, message: str) -> BaseException:
+    """What the crash net raises for one crash, carrying `CRASH_NET_NOTE`.
+
+    The route's own exception where the log record holds one, which says what is
+    wrong, and otherwise a failure naming the record's message.
+    """
+    refusal = (
+        crash
+        if isinstance(crash, BaseException)
+        else pytest.fail.Exception(f"a route crashed during this test: {message}")
+    )
+    refusal.add_note(CRASH_NET_NOTE)
+    return refusal
+
+
 class _Crashes(logging.Handler):
     """Keeps every "Unhandled error serving" record the 500 handler writes."""
 
@@ -1123,7 +1158,8 @@ def a_crashing_route_fails_its_test(request: pytest.FixtureRequest) -> Iterator[
     So the net is the 500 handler's own log line. At teardown the route's
     exception is raised again, which is what the client used to do and says
     what is wrong, unless the test is marked `answers_500` with the exception
-    types it provokes on purpose. **The mark names them**, so a marked test
+    types it provokes on purpose. The raise carries `CRASH_NET_NOTE`, which is how
+    the mutation sweep tells this judge from a broken fixture. **The mark names them**, so a marked test
     still fails on a crash it did not intend; a mark naming none is refused.
 
     **Loud when it cannot see.** A disabled logger delivers to no handler, and
@@ -1160,9 +1196,7 @@ def a_crashing_route_fails_its_test(request: pytest.FixtureRequest) -> Iterator[
         crash = getattr(record, errors.UNHANDLED, None)
         if isinstance(crash, expected):
             continue
-        if isinstance(crash, BaseException):
-            raise crash
-        pytest.fail(f"a route crashed during this test: {record.getMessage()}")
+        raise crash_net_refusal(crash, record.getMessage())
 
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
@@ -1194,13 +1228,8 @@ def _record_sqlites_own_sql(_connection: Any, _cursor: Any, statement: str, *_re
     add and remove a listener. The regular expression is the cheap half and runs
     on every statement; the frame walk runs only on a match.
     """
-    judging = sqlite_only.JUDGING
-    if not judging or judging["marked"] or not sqlite_only.spells_sqlites_own_sql(statement):
-        return
-    authors = sqlite_only.authors_of(sys._getframe(1))
-    if sqlite_only.needs_the_mark(authors):
-        path, line = authors[0]
-        judging["seen"].append(f"{path.relative_to(sqlite_only.TESTS.parent)}:{line}: {statement[:100]!r}")
+    if sqlite_only.spells_sqlites_own_sql(statement):
+        sqlite_only.judge(repr(statement[:100]), sys._getframe(1))
 
 
 @pytest.fixture(autouse=True)
@@ -1221,7 +1250,7 @@ def sqlite_only_sql_is_marked(request: pytest.FixtureRequest) -> Iterator[None]:
         sqlite_only.JUDGING.clear()
     if seen:
         pytest.fail(
-            "this test runs SQL only SQLite understands, so on another engine it "
+            "this test runs SQL or an instrument only SQLite understands, so on another engine it "
             "fails rather than skipping. Mark it "
             f"`@pytest.mark.{sqlite_only.MARK}(reason=...)` if SQLite's behaviour is "
             'its subject, or put the statement under `if ... dialect.name == "sqlite"` '

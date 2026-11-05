@@ -2212,7 +2212,7 @@ So a Tag carrying a non-ASCII capital never matched, the import decided the name
 the insert hit the binary `unique=True` on `tags.name` with a name already there. That raised
 `IntegrityError` **and took the whole file with it**: a member with one German shelf name
 imported nothing, every time, with a 500. Any member could plant such a tag through
-`POST /api/tags` or one earlier import.
+`POST /api/books/tags` or one earlier import.
 
 The fix is to fold on one side only: `tags.Mint._by_folded_name` reads the Tag
 table once and keys it with Python's `.lower()`, so a cache miss means genuinely new. It also
@@ -2675,9 +2675,10 @@ test would inherit it.
 
 The reset calls no `seed_tags()`. That helper opens its own session, which is a
 second connection, and the point of this shape is that a reset never needs one.
-Ids still restart at 1, which `covers_dir` depends on, because SQLite gives an insert into a table
-without `AUTOINCREMENT` `max(rowid) + 1`, and the reset empties `sqlite_sequence`, which holds
-the counter of `books`, the one table that has it.
+Ids restart at 1 on both engines, which `covers_dir` and every literal id depend on: SQLite
+gives an insert into a table without `AUTOINCREMENT` `max(rowid) + 1`, the reset empties
+`sqlite_sequence`, which holds the counter of `books`, and on Postgres the reset sets every
+sequence back.
 
 **One number in this file was wrong for a whole day and is worth naming.** The
 rebuild cost was derived as 40.6s over 3236 rebuilds, giving 12ms. 40.6s was a
@@ -5383,7 +5384,7 @@ now guarded; the prose is not, and six lines of it were found by review rather t
 run. There is no cheap guard for it: a rule matching the digits in a document would fire on
 every legitimate mention, of which `docs/api.md` still carries fifteen.
 
-**`docs/api.md` said `POST /api/imports/goodreads` answers 422 for a file that is not an
+**`docs/api.md` said POST /api/imports/goodreads answers 422 for a file that is not an
 export, where `routers/imports.py::_parse` answers 400 and
 `tests/routers/test_imports.py` asserts 400.** Pre-existing, unrelated to this change, found
 while counting the class, and corrected in the same pass.
@@ -7351,23 +7352,20 @@ sink, because these ids also become `--ignore=<id>` arguments to `bun audit fix`
 so a guard on the tag message would leave a command line unguarded. Nothing else
 inspects an id: both readers take the scanner's value verbatim.
 
-### A rebuild release builds with the kaniko cache off
+### The release image reads nothing from this project's registry
 
-`build:` on main and `release:build` share a `--cache-repo` and a six hour TTL,
-and every layer before `RUN apk upgrade --no-cache` is identical between them, so
-a push to main in the six hours before the nightly run served the patch release
-the very layer it was cut to replace. Apk only: a lockfile bump changes a file in
-the build context and busts its own layer, while `apk upgrade` changes nothing
-kaniko hashes. Under retry nightly the cost is a wasted attempt and a public tag
-whose rebuild changed nothing, not a stuck pipeline.
+Every job holds the job token, which writes any repository and tag in the registry, and a merge
+request's dependency code can read it from the environment. A protection rule cannot separate a
+Renovate pipeline from a release while both run as the owner. So release:build uses no kaniko
+cache and no prebuilt YAZ image, and everything after it names the image by digest:
+verify:image scans by the digest in `image.digest`, so a push to `:<tag>` after the build
+changes nothing a release reads. The cost is a cold release build with a YAZ compile.
 
-**The obvious fix does not work and the reason is worth keeping.** `ap-finalise`
-runs in the nightly pipeline and `release:build` in the pipeline the tag push
-creates, so a `reports: dotenv` cannot reach it. The tag annotation can, and this
-pipeline already treats tag messages as its record: `finalise` writes an
-`autopatch-rebuild:` line and `release:build` reads `CI_COMMIT_TAG_MESSAGE`. Two
-spellings of one literal is the drift that would rot, so a test imports the
-constant and asserts it appears in the job.
+With no cache, every release re-runs `apk upgrade`, which a cached layer would serve from a build
+on main hours earlier, so a rebuild release needs no switch of its own. `finalise` still writes
+an `autopatch-rebuild:` line into the tag message, as a record nothing reads. Splitting the push
+from the build was considered and refused: the token stays in the build job's environment either
+way.
 
 ### A finding with no advisory id is refused
 
@@ -11870,7 +11868,7 @@ ignored them would make the wrong answer the easy one, at a hundred groups at a 
 
 **No second endpoint.** The proposal is `keep_name` on `AuthorSuggestionOut` rather than a
 `/authors/matches` of its own, which was built first and withdrawn: two endpoints answering
-one question is two places for the next change to land, which is the reason `/bulk/ownership`
+one question is two places for the next change to land, which is the reason /bulk/ownership
 was removed, and the difference between them was one computed field.
 
 **What may not change is the person a row points at**, which is `authorship._would_repoint`,
@@ -13554,9 +13552,12 @@ enough: emscripten's embind hands `Function` to a helper as an argument, and a r
 passed it. It was a regex until each review round found a spelling past it; the tree reads what
 the engine runs, so a comment or a string no longer reds and a new spelling of the same call
 needs no new arm. Locals are resolved by scope, so a variable named like a global does not red.
-What it does not look for takes intent and is listed beside the test: a compiler reached through
-`.constructor` from some other function, a non constant computed name, and a string held in a
-variable. Measured on the installed build and on the whole built bundle: no site in either.
+What it does not look for is listed beside `stringEvaluationSites`: a compiler reached through
+`.constructor` from some other function, the AsyncFunction family included, a timer reached
+through `call` or `apply`, a non constant computed name, and a string held in a variable. The
+same walk runs over every script the production build writes, in `check:build`, so a dependency
+that ships a compiler call anywhere in the bundle fails CI rather than failing in the browser. It
+reads presence, not reach, so a feature probe under `try` is refused too.
 
 **What it newly admits, stated rather than left to be found**: a script that has already
 achieved execution may compile WebAssembly it assembles itself. That is a second order gain for
@@ -18458,8 +18459,8 @@ rule that only `covers.py` may know an image host. Keyed by stem, a walk of that
 `routers/` collapses into one set member, leaves the expectation table matching, and goes
 undriven.
 
-**What was refused.** `test_published_markdown_guard._outside_the_repository` keeps its own
-copy of the dotted directory rule. Making it call `_is_vendored` is the obvious tidy and is
+**What was refused.** The published Markdown guard's walk of files outside the repository keeps
+its own copy of the dotted directory rule. Making it call `_is_vendored` is the obvious tidy and is
 wrong: that walk is the deliberate control for `_markdown_sources`, which does reach the
 shared predicate, and the guard's subject is the two answers being derived independently.
 Coupling them would let one defect move both while the comparison still passed.
@@ -23558,17 +23559,18 @@ retry rule names, so a refused copy stays refused rather than running again.
 
 The tag path now matches main. release:build hands its digest over as the dotenv variable
 BUILD_DIGEST, the smoke template pulls by it, and publish:dockerhub copies
-`<image>@<digest>` instead of `:<tag>`. It also requires verify:image's report to quote
-`"<image>@<digest>"`, which Trivy writes in `RepoDigests`. The scan stays by tag and its
-pinned gate line is unchanged, because that report already records the digest the tag
-named: v0.20.0's report lists the digest release:build logged, read 2026-10-22.
+`<image>@<digest>` instead of `:<tag>`. It also requires verify:image's report to name
+`<image>@<digest>` as the reference it scanned, on the report's top level `ArtifactName` line:
+verify:image scans by the digest in `image.digest`, and a label of the scanned image, printed in
+the same report, is not read. Trivy 0.76.1 writes a digest reference as `ArtifactName` exactly
+as given (measured 2026-11-05 on a public image, not on this project's registry).
 
 Both copies are `crane copy`, which puts the manifest's bytes unchanged, so whatever tag
 a copy writes names the digest the smoke test ran.
 
 Proved only by a tag pipeline: that the dotenv variable expands in the tag's smoke image,
-as it does on main (measured 2026-10-22), and that `RepoDigests` names the digest on the
-next scan too.
+as it does on main (measured 2026-10-22), and that Trivy writes the digest reference as
+`ArtifactName` on this project's registry too.
 
 ## The smoke test refuses a world writable entry
 
@@ -23846,14 +23848,20 @@ jobs from the suites that run dependency code. A job that reads a credential the
 script step that starts one pinned file under the repository's tooling directory, and no
 `before_script`, `after_script`, hooks or services; each file such a job runs, and each file
 listed beside it as loaded, is pinned by its sha256, so an edit fails until a person has read
-it. The hash is all the test reads of those files. It does not pin the image a job runs in, a
-variable a pinned program reads, or a file a pinned shell script loads that is not listed. A reader of commands was tried and
-rejected: three review rounds each found a spelling past it (an unquoted heredoc body, a program
-started by alias, a sibling module shadowing the standard library), and the set is open. The
-exceptions are two autopatch jobs whose step keeps a shell guard (ticket 660), and the Docker
-Hub copy (ticket 662). Each is pinned by the
-sha256 of its steps and of each file under the tooling directory they load, and none may declare
-hooks or services.
+it. The hash is all the test reads of those files. The image each such job runs in is pinned by
+its reference, name and digest, so a Renovate digest bump fails until a person has read the new
+image. It does not pin the rest of an `image` key (an entrypoint), a variable a pinned program
+reads, or a file a pinned shell script loads that is not listed. A reader of commands was tried
+and rejected: three review rounds each found a spelling past it (an unquoted heredoc body, a
+program started by alias, a sibling module shadowing the standard library), and the set is open.
+
+No credentialed job is outside that shape. The autopatch verify and forward port jobs start
+`gitlab.py`, which returns before it reads the token unless `AUTOPATCH_RELEASE` says a tag went
+out, so neither keeps a shell guard in its step. publish:dockerhub's checks and copies live in a
+pinned script that takes the release tag as its argument; the export scan's one home arm lets the
+registry login names through and reds on every other pipeline variable. A job that ever needs
+the exception table again is pinned there by the sha256 of its steps and of each file under the
+tooling directory they load, and may declare no hooks or services.
 
 Every pipeline but `main`'s pulls the dependency caches and the scanner database and pushes
 none of them: merge requests, which Renovate starts as the owner, tags and the patch branch.
@@ -23961,7 +23969,92 @@ no reason left, and the backend suite on 2.1.6 was red on one thing only: two te
 `Session` passed the private `_warn` argument to `add`, which 2.1 makes keyword only. They pass
 whatever `add` takes now. The Renovate rule that held the cap went with it.
 
-**`tests/test_house_rules.py` still reads Pydantic's compiled schema**, `__pydantic_core_schema__`,
-for the aliases a field is validated from and whether a model admits extras. It reads the
-compiled schema on purpose: an alias a custom schema hook injects leaves no trace on the field.
-Moving it to `model_fields` and `model_config` is ticket 666.
+**`tests/test_house_rules.py` reads Pydantic's compiled schema**, `__pydantic_core_schema__`,
+for the aliases a field is validated from and whether a model admits extras, and that is the
+one accepted exception. The attribute is documented on `BaseModel`, so it is Pydantic's
+interface and not an internal. A change to its shape reds
+`test_every_model_carries_a_schema_this_rule_can_read` by name rather than passing a model
+unread. And a reader of `model_fields` and `model_config` would miss an alias a custom schema
+hook injects, which leaves no trace on the field, and would drop three of the rule's plants.
+
+## The check:build string evaluation wiring is measured by plant, not by a test
+
+The scan over the built bundle runs in `check:build`, and no suite test drives that script: a
+test would have to build the frontend first. Its wiring was measured by planting a compiler call
+in a `.js` and then a `.mjs` under `public/`, each refused by name. That is accepted because CI
+runs `check:build` in the frontend job on every pipeline, merge requests and tags included, and
+the rules themselves are held by the walk's own test file; what the plants measured is only that
+the script hands every emitted script to them.
+
+## The string evaluation scan names its gaps rather than detecting them
+
+`stringEvaluationSites` does not look for a compiler reached through another function's
+`.constructor`, a timer reached through `call` or `apply`, or the other shapes its docstring
+lists, and it has no exception for one reviewed site. Both are accepted. The walk refuses every
+site it matches by name and the build fails loudly on it; a gap needs a dependency written in
+that shape on purpose, and the browser refuses the call at runtime. A scoped exception is
+designed when a dependency first needs one, against that dependency, because an exception
+designed before any site exists has nothing to be measured on.
+
+## Renovate's managers keep `fileMatch`
+
+Renovate 44 names `managerFilePatterns` as the successor of `fileMatch` for custom managers. This
+repository keeps `fileMatch`: the deployed Renovate reads it, and the guards that read the custom
+managers (the uv and bun constraint arms, the suite runner's pin arm) match on it, so a
+migration is one change across the Renovate configuration and those guards together, made when
+the deployed Renovate drops the old key. That release fails those guards loudly rather than passing a
+manager unread.
+
+## A failed forward port pages and is not retried
+
+`autopatch:forward-port` holds the push token, and a job holding that token never retries (*CI
+credentials are scoped to environments*). A retry on an infrastructure failure was considered
+for it and left out: it needs an exception to the derived `retry: 0` arms in `test_pipeline.py`,
+and the failure it would cover is already seen, since a failed forward port turns its Gatus
+endpoint failing and `autopatch:page` fires on the pipeline's failure.
+
+## An npm advisory is its GHSA
+
+bun names an advisory by GHSA and `--ignore` takes nothing else, while one CVE can stand behind
+several GHSAs on several packages. So merging, the ledger and the finalise clearing check all
+read `_identity`: GHSAs for an npm finding that has any, every id otherwise. Reading the CVE at
+any one of the three refuses or withholds a fix bun can apply.
+
+**A closed issue whose marker names only a CVE refiles once.** `gitlab.py` matches tonight's
+advisory against a closed issue's marker by GHSA, so an issue closed before the marker carried
+the GHSA does not cover it, and one new issue opens. That is accepted: it errs loud, once per
+such issue, and the new issue's marker carries the GHSA, so it does not happen twice.
+
+## A backport mark is not refused for a `.dockerignore` negation
+
+The nightly backport refuses a marked commit onto a path the tag's `.dockerignore` does not exclude,
+reading each excluded prefix as a whole line. A negation re-including a test file under an
+excluded tree is not read, only named in the check's comment. No release tag has a negation, and
+adding one under a test tree is a deliberate act, which the threat model of the repository's
+guards leaves to review.
+
+## A route path in backticks is a claim about the route table
+
+Prose names routes, and a route renamed or removed left its old path in a decision, a changelog
+line and an agent's skill with nothing reading it. The check reads a backtick span holding an
+optional method and a path and matches it against the app's own table, so nobody keeps a list.
+Backticks are the marker: a removed route is written without them, so the checker never reads
+tense. A path on another host is written with its host. It reads no fenced block and no method
+in its own table cell; those are where it stays silent.
+
+## The publish gate refuses a stripped Python module's stem
+
+A stem is how an import, a `::` test id and prose citing a test spell it, and the path arm saw
+none of them: three published files named stripped tests that way with the gate green. Matching
+the stem as a whole identifier keeps a published `<stem>_more` quiet. It replaced a suite check
+over the names a published test evaluates, which the gate's arm now covers, prose included. The
+stem goes into the pattern unescaped; every stem on the DENY list is a fixed literal of letters,
+digits and underscores, and a dot in a future one would over match, which is the safe direction.
+
+## A recorded catalogue zero carrying any diagnostic is not a zero
+
+The recording reader in `test_metadata.py` takes an SRU envelope as "answered nothing" only when
+it counts no record and carries no `diagnostics` element. A fatal diagnostic usually comes with a
+zero count, so without the second check a source that errored would pass as one that matched
+nothing. A real zero carrying a non fatal diagnostic is refused too, and that is accepted: a
+refusal is the safe direction, and it names the diagnostic.

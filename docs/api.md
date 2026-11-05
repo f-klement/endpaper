@@ -476,7 +476,7 @@ disclose which of the two it was.
 `PATCH /{id}/ownership` sets one book. A selection goes through `POST /bulk` with
 `set_ownership`, like every other bulk verb.
 
-A separate `/bulk/ownership` existed until v0.2.0 with an identical body, permission walk
+A separate /bulk/ownership existed until v0.2.0 with an identical body, permission walk
 and result. It was removed before the first tag rather than after, because dropping an
 endpoint after a release is a breaking change rather than a tidy-up.
 
@@ -2187,7 +2187,7 @@ A member's own Readwise access token, and the pull it allows. Pull only: the tok
 time of the last pull, and the page cursor and book ids Readwise itself gave go to
 `readwise.io`; nothing of the library does. A pull stopped part way through the export resumes from its
 page cursor on the next; one stopped while asking for books by id asks for them again. A pull
-reads Readwise's `/api/v2/export/` from where the last complete one left off, with
+reads `readwise.io/api/v2/export/` from where the last complete one left off, with
 deletions, and runs once a day by itself (`ENABLE_READWISE_TICKER`) as well as on request.
 Highlights arrive private, with `source` `readwise` and Readwise's highlight id as the
 source key; a deletion at Readwise removes the row, a highlight the member deleted here is

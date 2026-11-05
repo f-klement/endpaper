@@ -1,13 +1,15 @@
 /**
- * Build the app, then assert two things about what came out of it.
+ * Build the app, then assert three things about what came out of it.
  *
  * 1. The generated service worker cannot answer a navigation out of the
  *    precache.
  * 2. The shell references its scripts at `/assets/`, absolute, which is what
  *    the backend's cache and fallback rules are keyed on.
+ * 3. No emitted script runs a string as script, which the content security
+ *    policy refuses for the whole bundle.
  *
- * Both are properties of the **build**, and neither is visible in a config or a
- * source file, which is why they are here together rather than in the suite.
+ * All three are properties of the **build**, and none is visible in a config or
+ * a source file, which is why they are here together rather than in the suite.
  *
  * Run it with `bun run check:build`. It is a build check rather than a vitest
  * test, and the reason is the whole point of the check: the thing to inspect is
@@ -19,9 +21,9 @@
  * artefact and scanning it is what the publish gate does, and this
  * follows it: produce the bytes, inspect the bytes, exit non-zero.
  *
- * Nothing here is type checked. `tsconfig.json` includes `src`, `tests` and
- * `vite.config.ts` and not this directory, which is what lets the file import
- * `node:fs` at all.
+ * `bun run` strips types and checks none, so `tsconfig.json` includes this
+ * directory and `bun run typecheck` reads this file: a changed export of
+ * `tests/stringEvaluation.ts` reds there rather than only when CI builds.
  *
  * ── What it is guarding ──────────────────────────────────────────────────────
  *
@@ -39,10 +41,12 @@
  * v0.5.0 while the build kept shipping it. So this check reads the build, not
  * the config.
  */
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { build, type ResolvedConfig } from "vite";
+
+import { stringEvaluationSites } from "../tests/stringEvaluation";
 
 /**
  * Where the build wrote, asked for rather than assumed.
@@ -79,7 +83,9 @@ if (!resolved) {
 }
 
 const OUT_DIR = resolve(resolved.root, resolved.build.outDir);
-const SW = resolve(OUT_DIR, "sw.js");
+/** The worker's name, spelled here alone: the scan below checks it read it. */
+const SW_NAME = "sw.js";
+const SW = resolve(OUT_DIR, SW_NAME);
 
 /** Every `url` in the built worker, minified form and readable form alike. */
 function precachedURLs(source: string): string[] {
@@ -197,6 +203,52 @@ if (!existsSync(shellPath)) {
   }
 }
 
+// ── String evaluation anywhere in the bundle ─────────────────────────────────
+//
+// `backend/middleware.py` sends `script-src 'self' 'wasm-unsafe-eval'`, so the
+// browser refuses `eval`, `Function` and a timer handed a string in every
+// script this build emits, while happy-dom applies no policy and every test
+// stays green. The engine test in `tests/lib/sqlite.test.ts` reads sql.js
+// before a build exists; this reads what ships, every dependency included.
+// The rule, and what it does not look for, is `stringEvaluationSites`.
+//
+// Every `.js`, `.mjs` and `.cjs` under the output directory, read by walking
+// it rather than from a list, so a new chunk, a new worker or a module vendored
+// into `public/` is scanned without this learning its name. Rollup emits `.js`
+// alone, but `public/` is copied verbatim, so the other two reach the browser
+// unread if the filter names one extension. A file that does not parse is
+// refused, since a scan that skipped it would pass whatever it holds.
+const scripts = readdirSync(OUT_DIR, { recursive: true, encoding: "utf8" })
+  .filter((path) => /\.[cm]?js$/.test(path))
+  .sort();
+
+for (const path of scripts) {
+  let sites: { compiler: string; at: number }[];
+  try {
+    sites = stringEvaluationSites(readFileSync(resolve(OUT_DIR, path), "utf8"));
+  } catch (error) {
+    reject(`${path} could not be scanned for string evaluation: ${error}`);
+    continue;
+  }
+  for (const { compiler, at } of sites)
+    reject(
+      `${path} reaches ${compiler} at offset ${at}, which the content ` +
+        "security policy refuses without 'unsafe-eval'. Find the dependency " +
+        "that emits it rather than widening the policy. A site the browser " +
+        "never reaches, such as a feature probe under try, is refused too: " +
+        "see stringEvaluationSites for what to do then.",
+    );
+}
+
+// A walk that found nothing passes every check above, so it must have read
+// the worker checked earlier and, below it, the hashed chunks.
+if (!scripts.includes(SW_NAME) || !scripts.some((p) => p.startsWith("assets/"))) {
+  reject(
+    `the string evaluation scan read ${scripts.length} scripts, missing ${SW_NAME} ` +
+      "or every chunk under assets/, so it did not walk what the build wrote.",
+  );
+}
+
 if (failures.length > 0) {
   console.error(`==> ${OUT_DIR} REJECTED`);
   for (const failure of failures) console.error(`    FAIL: ${failure}`);
@@ -207,3 +259,6 @@ console.log(
   `==> ${SW} OK: ${urls.length} precached URLs, no HTML, no navigation fallback`,
 );
 console.log("==> index.html OK: every asset referenced at /assets/");
+console.log(
+  `==> ${scripts.length} scripts OK: no string run as script, ${scripts.join(", ")}`,
+);

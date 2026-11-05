@@ -7,6 +7,7 @@ importlib import mode this suite uses.
 
 import datetime as dt
 import re
+import sys
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -23,12 +24,40 @@ from sqlalchemy.exc import DataError, IntegrityError
 
 import auth_backends
 import targets
+from tests import sqlite_only
 
 #: What a write the database refuses raises, on either engine. A CHECK is an
 #: `IntegrityError` everywhere; on Postgres a value its column's type cannot
 #: hold, past a VARCHAR or carrying a NUL, is a `DataError` before any CHECK is
 #: read (`database._a_refusal_is_raised_as_its_kind`).
 REFUSED_BY_THE_DATABASE = (IntegrityError, DataError)
+
+
+def duplicated_key(refusal: BaseException) -> tuple[str, ...]:
+    """The `table.column` names of the unique key `refusal` was raised over, on
+    either engine, or `()` when it is not a uniqueness refusal.
+
+    A test asking which key refused cannot match one engine's wording. SQLite
+    says `UNIQUE constraint failed: t.a, t.b` and never names the index;
+    Postgres sends SQLSTATE 23505 with the table in its `t` field and the
+    columns in the detail, `Key (a, b)=(...) already exists.` Either way the
+    columns are what is specific: a foreign key or a NOT NULL firing instead
+    names none of them.
+    """
+    from sqlalchemy.exc import DBAPIError
+
+    from database import server_fields
+
+    if not isinstance(refusal, DBAPIError):
+        return ()
+    fields = server_fields(refusal)
+    if fields is None:
+        sqlite = re.search(r"UNIQUE constraint failed: ([\w.]+(?:, [\w.]+)*)", str(refusal.orig))
+        return tuple(sqlite.group(1).split(", ")) if sqlite else ()
+    postgres = re.match(r"Key \(([^)]*)\)=", str(fields.get("D", "")))
+    if fields.get("C") != "23505" or postgres is None:
+        return ()
+    return tuple(f"{fields.get('t')}.{column.strip()}" for column in postgres.group(1).split(","))
 
 
 # ── Image payloads ────────────────────────────────────────────────────────────
@@ -134,15 +163,18 @@ def rows_at_the_engine() -> Iterator[list[Statement]]:
 
     **SQLite only, and loudly.** `row_factory` is a `sqlite3` API; on another
     driver the same attribute means something else, and a silent zero would
-    make every reading over this pass. The suite runs on SQLite unless
-    `ENDPAPER_TEST_DATABASE_URL` asks otherwise, and the one job that asks
-    runs a selection holding no caller of this.
+    make every reading over this pass. So a caller carries the `sqlite_only`
+    mark, and an unmarked one fails on the default run as well: the reading is
+    no statement, so the guard's listener never sees it, and without the
+    `judge` call below a copy of a marked caller left unmarked was green on
+    SQLite and red only on a Postgres run.
     """
     from sqlalchemy import event
     from sqlalchemy.orm import Session
 
     from database import engine
 
+    sqlite_only.judge("the row counter, a sqlite3 row_factory", sys._getframe())
     assert engine.dialect.name == "sqlite", (
         f"the row counter is a sqlite3 row_factory and this engine is "
         f"{engine.dialect.name}, where the same attribute means something "

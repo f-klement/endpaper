@@ -57,8 +57,9 @@ from migrations.versions import (
     f4a1c62d0b97_bind_every_text_ceiling_on_bytes_too as bind_every_text_ceiling,
 )
 from schemas.opds import OpdsServerIn
+from tests import sqlite_only
 from tests.corpus import BACKEND, application_modules
-from tests.helpers import REFUSED_BY_THE_DATABASE
+from tests.helpers import REFUSED_BY_THE_DATABASE, duplicated_key
 from tests.test_dialect import ADDED_RULES, SWAP_CHAIN, THE_SWAPS, _swap_rows
 from tests.test_filing import CORPUS
 
@@ -98,7 +99,9 @@ def build_pre_alembic_database() -> None:
 
     with engine.connect() as connection:
         connection.execute(text("DROP INDEX IF EXISTS uq_user_books_user_book"))
-        connection.execute(text("INSERT INTO users (username, password_hash, is_admin) VALUES ('kim','x',1)"))
+        connection.execute(
+            text("INSERT INTO users (username, password_hash, is_admin) VALUES ('kim','x',TRUE)")
+        )
         connection.execute(text("INSERT INTO books (title) VALUES ('An Old Book')"))
         connection.execute(text("INSERT INTO user_books (user_id, book_id, status) VALUES (1,1,'unread')"))
         connection.execute(text("INSERT INTO user_books (user_id, book_id, status) VALUES (1,1,'read')"))
@@ -255,6 +258,9 @@ def _dump(live: sqlite3.Connection) -> list[str]:
 
 
 def _driver(connection: Connection) -> sqlite3.Connection:
+    """The `sqlite3` connection under `connection`. A read through it is no
+    statement the guard's listener sees, so a caller is judged here instead."""
+    sqlite_only.judge("the sqlite3 driver connection", sys._getframe())
     live = connection.connection.driver_connection
     assert isinstance(live, sqlite3.Connection), type(live)
     return live
@@ -382,6 +388,9 @@ class TestAdoptingAPreAlembicDatabase:
 
 
 class TestLegacyFixups:
+    @pytest.mark.sqlite_only(
+        reason="builds a books table from before Alembic, which only a SQLite install ever had"
+    )
     def test_adds_is_private_to_a_database_that_predates_it(self):
         drop_everything()
         with engine.connect() as connection:
@@ -396,6 +405,9 @@ class TestLegacyFixups:
         columns = {column["name"] for column in inspect(engine).get_columns("books")}
         assert "is_private" in columns
 
+    @pytest.mark.sqlite_only(
+        reason="builds a books table from before Alembic, which only a SQLite install ever had"
+    )
     def test_existing_rows_default_to_public(self):
         drop_everything()
         with engine.connect() as connection:
@@ -475,7 +487,7 @@ class TestHyphenatingTheAgeTags:
             connection.execute(
                 text(
                     "INSERT INTO books (title, is_private, added_at, ownership) "
-                    "VALUES ('Dune', 0, datetime('now'), 'owned')"
+                    "VALUES ('Dune', FALSE, CURRENT_TIMESTAMP, 'owned')"
                 )
             )
             book_id = connection.execute(text("SELECT id FROM books")).scalar_one()
@@ -562,18 +574,18 @@ class TestLendingToSomeoneWithoutAnAccount:
         schema.upgrade_to(self.PREVIOUS)
         with engine.connect() as connection:
             connection.execute(
-                text("INSERT INTO users (username, password_hash, is_admin) VALUES ('kim','x',1)")
+                text("INSERT INTO users (username, password_hash, is_admin) VALUES ('kim','x',TRUE)")
             )
             connection.execute(
                 text(
                     "INSERT INTO books (title, is_private, added_at, ownership) "
-                    "VALUES ('Dune', 0, datetime('now'), 'owned')"
+                    "VALUES ('Dune', FALSE, CURRENT_TIMESTAMP, 'owned')"
                 )
             )
             connection.execute(
                 text(
                     "INSERT INTO loans (book_id, loaned_to_user_id, loaned_by_user_id, "
-                    "loaned_at) VALUES (1, 1, 1, datetime('now'))"
+                    "loaned_at) VALUES (1, 1, 1, CURRENT_TIMESTAMP)"
                 )
             )
             connection.commit()
@@ -605,7 +617,7 @@ class TestLendingToSomeoneWithoutAnAccount:
                 text(
                     "INSERT INTO loans (book_id, loaned_to_name, loaned_by_user_id, "
                     "loaned_at, returned_at) "
-                    "VALUES (1, 'the neighbour', 1, datetime('now'), datetime('now'))"
+                    "VALUES (1, 'the neighbour', 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
                 )
             )
             connection.commit()
@@ -621,7 +633,7 @@ class TestLendingToSomeoneWithoutAnAccount:
                 text(
                     "INSERT INTO loans (book_id, loaned_to_user_id, loaned_to_name, "
                     "loaned_by_user_id, loaned_at) "
-                    "VALUES (1, 1, 'the neighbour', 1, datetime('now'))"
+                    "VALUES (1, 1, 'the neighbour', 1, CURRENT_TIMESTAMP)"
                 )
             )
 
@@ -632,11 +644,11 @@ class TestLendingToSomeoneWithoutAnAccount:
         schema.upgrade_to_head()
 
         with engine.connect() as connection:
-            connection.execute(text("UPDATE loans SET returned_at = datetime('now') WHERE id = 1"))
+            connection.execute(text("UPDATE loans SET returned_at = CURRENT_TIMESTAMP WHERE id = 1"))
             connection.execute(
                 text(
                     "INSERT INTO loans (book_id, loaned_to_user_id, loaned_by_user_id, "
-                    "loaned_at) VALUES (1, 1, 1, datetime('now'))"
+                    "loaned_at) VALUES (1, 1, 1, CURRENT_TIMESTAMP)"
                 )
             )
             connection.commit()
@@ -651,7 +663,7 @@ class TestLendingToSomeoneWithoutAnAccount:
             connection.execute(
                 text(
                     "INSERT INTO loans (book_id, loaned_to_name, loaned_by_user_id, "
-                    "loaned_at) VALUES (1, 'the neighbour', 1, datetime('now'))"
+                    "loaned_at) VALUES (1, 'the neighbour', 1, CURRENT_TIMESTAMP)"
                 )
             )
 
@@ -661,11 +673,11 @@ class TestLendingToSomeoneWithoutAnAccount:
         self.build_database_with_a_loan()
         schema.upgrade_to_head()
         with engine.connect() as connection:
-            connection.execute(text("UPDATE loans SET returned_at = datetime('now') WHERE id = 1"))
+            connection.execute(text("UPDATE loans SET returned_at = CURRENT_TIMESTAMP WHERE id = 1"))
             connection.execute(
                 text(
                     "INSERT INTO loans (book_id, loaned_to_name, loaned_by_user_id, "
-                    "loaned_at) VALUES (1, 'the neighbour', 1, datetime('now'))"
+                    "loaned_at) VALUES (1, 'the neighbour', 1, CURRENT_TIMESTAMP)"
                 )
             )
             connection.commit()
@@ -709,7 +721,7 @@ class TestUpgradingStoredCovers:
                 connection.execute(
                     text(
                         "INSERT INTO books (title, cover_url, is_private, added_at, "
-                        "ownership) VALUES (:t, :c, 0, datetime('now'), 'owned')"
+                        "ownership) VALUES (:t, :c, FALSE, CURRENT_TIMESTAMP, 'owned')"
                     ),
                     {"t": title, "c": cover},
                 )
@@ -805,7 +817,7 @@ class TestCollectionsAndTheIsbnIndexThatSurvivesThem:
         schema.upgrade_to(self.PREVIOUS)
         with engine.connect() as connection:
             connection.execute(
-                text("INSERT INTO users (username, password_hash, is_admin) VALUES ('kim','x',1)")
+                text("INSERT INTO users (username, password_hash, is_admin) VALUES ('kim','x',TRUE)")
             )
             for _ in range(2):
                 connection.execute(
@@ -935,7 +947,7 @@ class TestWideningTheClassificationNumber:
             connection.execute(
                 text(
                     "INSERT INTO books (title, is_private, added_at, ownership) "
-                    "VALUES ('Clean Code', 0, datetime('now'), 'owned')"
+                    "VALUES ('Clean Code', FALSE, CURRENT_TIMESTAMP, 'owned')"
                 )
             )
             connection.execute(
@@ -1092,7 +1104,7 @@ class TestFoldingCollectionNamesOutsideAscii:
         schema.upgrade_to(self.PREVIOUS)
         with engine.connect() as connection:
             connection.execute(
-                text("INSERT INTO users (username, password_hash, is_admin) VALUES ('kim','x',1)")
+                text("INSERT INTO users (username, password_hash, is_admin) VALUES ('kim','x',TRUE)")
             )
             for name in ("Fiction", self.UPPER, self.LOWER):
                 connection.execute(text("INSERT INTO collections (name) VALUES (:name)"), {"name": name})
@@ -1182,6 +1194,9 @@ class TestFoldingCollectionNamesOutsideAscii:
 
         assert self.dangling_books() == 0
 
+    @pytest.mark.sqlite_only(
+        reason="observes SQLite reusing the highest freed rowid, which a sequence never does"
+    )
     def test_a_freed_id_is_not_reused_by_a_book_that_should_not_have_it(self):
         """The failure mode above, made visible.
 
@@ -1506,7 +1521,7 @@ class TestKeyingTheSeededTags:
             connection.execute(
                 text(
                     "INSERT INTO books (title, is_private, added_at, ownership) "
-                    "VALUES ('Dune', 0, datetime('now'), 'owned')"
+                    "VALUES ('Dune', FALSE, CURRENT_TIMESTAMP, 'owned')"
                 )
             )
             book_id = connection.execute(text("SELECT id FROM books")).scalar_one()
@@ -2380,7 +2395,7 @@ class TestTheAuthorityIdentifierConstraintsOnAMigratedDatabase:
             with pytest.raises(IntegrityError) as refusal:
                 connection.execute(text(self._insert(identifier="'9999'")))
 
-        assert "UNIQUE constraint failed" in str(refusal.value)
+        assert duplicated_key(refusal.value) == ("author_identifiers.author_key", "author_identifiers.scheme")
 
     def test_created_at_is_not_nullable(self):
         """The column that shipped as `nullable=True` against a NOT NULL model
@@ -2463,7 +2478,7 @@ class TestAnAddressPerMember:
         schema.upgrade_to(self.PREVIOUS)
         with engine.connect() as connection:
             connection.execute(
-                text("INSERT INTO users (username, password_hash, is_admin) VALUES ('kim','x',1)")
+                text("INSERT INTO users (username, password_hash, is_admin) VALUES ('kim','x',TRUE)")
             )
             connection.commit()
 
@@ -2619,7 +2634,7 @@ class TestTheSeededCatalogueTargetsMatchTheCode:
     @pytest.mark.parametrize(
         ("column", "value"),
         [
-            ("requires_isbn_claim", 0),
+            ("requires_isbn_claim", False),
             ("transport", "z3950"),
             ("isbn_index", "num=1 or num"),
             ("title_index", "a b"),
@@ -2674,7 +2689,7 @@ class TestTheSeededCatalogueTargetsMatchTheCode:
         self._rows()
         with engine.connect() as connection:
             connection.execute(
-                text("UPDATE catalogue_targets SET requires_isbn_claim = 0 WHERE source = 'dnb'")
+                text("UPDATE catalogue_targets SET requires_isbn_claim = FALSE WHERE source = 'dnb'")
             )
             connection.commit()
 
@@ -2716,7 +2731,7 @@ class TestTheStoredShelfKey:
             connection.execute(
                 text(
                     "INSERT INTO books (title, is_private, added_at, ownership) "
-                    "VALUES ('Clean Code', 0, datetime('now'), 'owned')"
+                    "VALUES ('Clean Code', FALSE, CURRENT_TIMESTAMP, 'owned')"
                 )
             )
             for scheme, number in self.FILED:
@@ -2919,7 +2934,7 @@ class TestANoteCarriesItsOwnVisibility:
         command.downgrade(schema._alembic_config(), self.PREVIOUS)
         with engine.connect() as connection:
             connection.execute(
-                text("INSERT INTO users (username, password_hash, is_admin) VALUES ('reader', 'x', 0)")
+                text("INSERT INTO users (username, password_hash, is_admin) VALUES ('reader', 'x', FALSE)")
             )
             connection.execute(text("INSERT INTO books (title) VALUES ('Dune')"))
             connection.execute(
@@ -2952,13 +2967,13 @@ class TestANoteCarriesItsOwnVisibility:
         at_head()
         with engine.connect() as connection:
             connection.execute(
-                text("INSERT INTO users (username, password_hash, is_admin) VALUES ('reader', 'x', 0)")
+                text("INSERT INTO users (username, password_hash, is_admin) VALUES ('reader', 'x', FALSE)")
             )
             connection.execute(text("INSERT INTO books (title) VALUES ('Dune')"))
             connection.execute(
                 text(
                     "INSERT INTO notes (book_id, user_id, content, is_private) "
-                    "VALUES (1, 1, 'what I actually thought', 1)"
+                    "VALUES (1, 1, 'what I actually thought', TRUE)"
                 )
             )
             connection.commit()
@@ -3086,9 +3101,11 @@ class TestTheMigratedDatabaseCarriesTheBoundsItPromises:
         # so this asserts the three that make up the location. Asserting the
         # index name instead passes on any unique index over any columns, which
         # is what a first draft of this did.
-        assert "digital_references.book_id" in str(refusal.value)
-        assert "digital_references.root_label" in str(refusal.value)
-        assert "digital_references.relative_path" in str(refusal.value)
+        assert duplicated_key(refusal.value) == (
+            "digital_references.book_id",
+            "digital_references.root_label",
+            "digital_references.relative_path",
+        )
 
     def test_the_model_declares_a_constraint_that_enforces_the_bound(self):
         """The models' own table, built on a throwaway engine and probed.
@@ -3951,8 +3968,11 @@ class TestTheIdentifierBoundsSurvivedIntoTheMigration:
         # The columns rather than the index name: SQLite names the key's
         # columns in a UNIQUE violation and never the index that declared it,
         # so asserting the name here passes on any `IntegrityError` at all.
-        assert "UNIQUE constraint failed" in str(refusal.value)
-        assert "book_identifiers.value" in str(refusal.value)
+        assert duplicated_key(refusal.value) == (
+            "book_identifiers.book_id",
+            "book_identifiers.scheme",
+            "book_identifiers.value",
+        )
 
     def test_the_downgrade_takes_the_table_and_nothing_else(self):
         """The table is the only place an identifier lives, so a downgrade can
@@ -4439,7 +4459,7 @@ class TestTheGlobRulesThatLearnedAboutNul:
 
         with engine.connect() as connection, pytest.raises(IntegrityError) as reused:
             connection.execute(text(statement), parameters)
-        assert "UNIQUE constraint failed" in str(reused.value)
+        assert duplicated_key(reused.value) == ("opds_servers.credential_key",)
 
         with engine.connect() as connection, pytest.raises(IntegrityError) as borrowed:
             connection.execute(
@@ -5955,7 +5975,7 @@ class TestACustomFieldRecordsWhoDefinedIt:
         schema.upgrade_to(self.PREVIOUS)
         with engine.connect() as connection:
             connection.execute(
-                text("INSERT INTO users (username, password_hash, is_admin) VALUES ('kim','x',1)")
+                text("INSERT INTO users (username, password_hash, is_admin) VALUES ('kim','x',TRUE)")
             )
             connection.execute(text("INSERT INTO books (title, added_by_user_id) VALUES ('Dune', 1)"))
             connection.execute(text("INSERT INTO custom_fields (name, kind) VALUES ('Bought from', 'text')"))
@@ -6167,7 +6187,7 @@ class TestADeletedBooksIdIsNeverReused:
         schema.upgrade_to(self.PREVIOUS)
         with engine.connect() as connection:
             connection.execute(
-                text("INSERT INTO users (username, password_hash, is_admin) VALUES ('kim','x',1)")
+                text("INSERT INTO users (username, password_hash, is_admin) VALUES ('kim','x',TRUE)")
             )
             for title in ("Mort", "Small Gods", "Pyramids"):
                 connection.execute(

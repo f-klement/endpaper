@@ -20,7 +20,8 @@ SQLite's own statement (`PRAGMA`) or its reserved namespace (`sqlite_`, which
 SQLite keeps for its own objects) fails the test unless it is marked, or unless
 the statement, or a call in the test tree on the way to it, sits under
 `if ... dialect.name == "sqlite"`, the shape a portable test uses for an SQLite
-only step.
+only step. An instrument that reads SQLite without running a statement, such
+as the row counter in `tests/helpers.py`, is judged the same way through `judge`.
 
 What it lets through, stated rather than implied: a SQLite only function or cast
 (`typeof`, `CAST(... AS BLOB)`, `char(0)`, `GLOB`), which is an open list rather
@@ -28,7 +29,10 @@ than a namespace; a test asserting `engine.dialect.name` without executing
 anything; a statement on an engine the test built itself; and a statement sent
 through the raw DBAPI cursor, which no SQLAlchemy event sees. A statement
 SQLAlchemy's own dialect or Alembic spells while reflecting or migrating is
-portable by construction and is not the test's.
+portable by construction and is not the test's. A statement or an instrument
+reached from a class, module or session scoped fixture runs before the test's
+judging starts, so nothing records it; on Postgres such a caller still fails
+loudly at the instrument's own engine assertion.
 """
 
 from __future__ import annotations
@@ -69,6 +73,25 @@ _SQLITES_OWN = re.compile(r"\bPRAGMA(?:\b|_\w)|\bsqlite_\w", re.IGNORECASE)
 #: nothing. Here rather than in conftest so a test can switch it, which is how
 #: `test_sqlite_only.py` proves the listener is registered at all.
 JUDGING: dict[str, Any] = {}
+
+
+def judge(what: str, frame: FrameType | None) -> None:
+    """Note `what` against the test being judged when the test tree reached it
+    under no gate and the test is unmarked.
+
+    The one door every instrument records through: the statement listener in
+    `tests/conftest.py`, the row counter in `tests/helpers.py` and `_driver` in
+    `tests/test_schema.py`. The last two read through a `sqlite3` API rather
+    than a statement and so pass the listener by. Without its own call here a
+    caller copied from a marked one and left unmarked is green on SQLite and red
+    only on a Postgres run.
+    """
+    if not JUDGING or JUDGING["marked"]:
+        return
+    authors = authors_of(frame)
+    if needs_the_mark(authors):
+        path, line = authors[0]
+        JUDGING["seen"].append(f"{path.relative_to(TESTS.parent)}:{line}: {what}")
 
 
 def spells_sqlites_own_sql(statement: str) -> bool:

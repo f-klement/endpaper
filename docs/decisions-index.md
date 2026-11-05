@@ -26,7 +26,7 @@ repeat the argument.
 <!-- index: begin -->
 | Section | Entry | Words |
 |---|---|---|
-|  | [Backend](decisions.md#backend) | 34,971 |
+|  | [Backend](decisions.md#backend) | 34,978 |
 | Backend | [`bcrypt` directly, not `passlib`](decisions.md#bcrypt-directly-not-passlib) | 98 |
 | Backend | [Settings are functions, not module constants](decisions.md#settings-are-functions-not-module-constants) | 59 |
 | Backend | [`DATA_DIR` exists at all](decisions.md#data_dir-exists-at-all) | 22 |
@@ -143,7 +143,7 @@ repeat the argument.
 | Backend | [`unrated` names its correlation explicitly](decisions.md#unrated-names-its-correlation-explicitly) | 43 |
 | Backend | [Python 3.14 is a hard requirement, and PEP 649 is why](decisions.md#python-314-is-a-hard-requirement-and-pep-649-is-why) | 34 |
 | Backend | [The test suites were slow for reasons nobody had measured](decisions.md#the-test-suites-were-slow-for-reasons-nobody-had-measured) | 451 |
-| Backend | [The per-test reset deletes rows, and two faster designs were refused](decisions.md#the-per-test-reset-deletes-rows-and-two-faster-designs-were-refused) | 468 |
+| Backend | [The per-test reset deletes rows, and two faster designs were refused](decisions.md#the-per-test-reset-deletes-rows-and-two-faster-designs-were-refused) | 475 |
 | Backend | [The per test ceiling is derived from the tree, not chosen from a distribution](decisions.md#the-per-test-ceiling-is-derived-from-the-tree-not-chosen-from-a-distribution) | 274 |
 | Backend | [A verdict is a claim about a denominator, and the layer everyone reads had none](decisions.md#a-verdict-is-a-claim-about-a-denominator-and-the-layer-everyone-reads-had-none) | 502 |
 | Backend | [The remote test runner was reporting on a tree nobody had](decisions.md#the-remote-test-runner-was-reporting-on-a-tree-nobody-had) | 167 |
@@ -273,7 +273,7 @@ repeat the argument.
 | Product | [No bookshop or retailer is a catalogue source](decisions.md#no-bookshop-or-retailer-is-a-catalogue-source) | 252 |
 |  | [Multi workstation is joined terminals, and the container stays the documented alternative](decisions.md#multi-workstation-is-joined-terminals-and-the-container-stays-the-documented-alternative) | 496 |
 |  | [VIAF is the wrong supplier for resolution and the right one for discovery](decisions.md#viaf-is-the-wrong-supplier-for-resolution-and-the-right-one-for-discovery) | 447 |
-|  | [An identifier two files disagree about is shown and never stored](decisions.md#an-identifier-two-files-disagree-about-is-shown-and-never-stored) | 17,454 |
+|  | [An identifier two files disagree about is shown and never stored](decisions.md#an-identifier-two-files-disagree-about-is-shown-and-never-stored) | 17,439 |
 | An identifier two files disagree about is shown and never stored | [VIAF was refused as a supplier and is used as an enrichment, and both are right](decisions.md#viaf-was-refused-as-a-supplier-and-is-used-as-an-enrichment-and-both-are-right) | 251 |
 | An identifier two files disagree about is shown and never stored | [A VIAF cluster is verified against the confirmed record, never trusted](decisions.md#a-viaf-cluster-is-verified-against-the-confirmed-record-never-trusted) | 300 |
 | An identifier two files disagree about is shown and never stored | [Storing an identifier and resolving one are different acts](decisions.md#storing-an-identifier-and-resolving-one-are-different-acts) | 173 |
@@ -346,7 +346,7 @@ repeat the argument.
 | An identifier two files disagree about is shown and never stored | [A rebuild finding is not ledgered, so a failed rebuild is retried](decisions.md#a-rebuild-finding-is-not-ledgered-so-a-failed-rebuild-is-retried) | 150 |
 | An identifier two files disagree about is shown and never stored | [The ledger key names the ecosystem](decisions.md#the-ledger-key-names-the-ecosystem) | 120 |
 | An identifier two files disagree about is shown and never stored | [An advisory id is one whitespace free token](decisions.md#an-advisory-id-is-one-whitespace-free-token) | 73 |
-| An identifier two files disagree about is shown and never stored | [A rebuild release builds with the kaniko cache off](decisions.md#a-rebuild-release-builds-with-the-kaniko-cache-off) | 176 |
+| An identifier two files disagree about is shown and never stored | [The release image reads nothing from this project's registry](decisions.md#the-release-image-reads-nothing-from-this-projects-registry) | 161 |
 | An identifier two files disagree about is shown and never stored | [A finding with no advisory id is refused](decisions.md#a-finding-with-no-advisory-id-is-refused) | 65 |
 | An identifier two files disagree about is shown and never stored | [A guard proved on one validated field, then trusted for the fields beside it](decisions.md#a-guard-proved-on-one-validated-field-then-trusted-for-the-fields-beside-it) | 333 |
 |  | [Open, and not resolved in this ticket](decisions.md#open-and-not-resolved-in-this-ticket) | 1,234 |
@@ -584,7 +584,7 @@ repeat the argument.
 |  | [A born digital title depends on two of the title search sources](decisions.md#a-born-digital-title-depends-on-two-of-the-title-search-sources) | 321 |
 |  | [An envelope is bound to the origin it may be sent to, and a restore drops household logins as the belt](decisions.md#an-envelope-is-bound-to-the-origin-it-may-be-sent-to-and-a-restore-drops-household-logins-as-the-belt) | 1,209 |
 |  | [Reading a Calibre library through SQLite in the browser, not on the server](decisions.md#reading-a-calibre-library-through-sqlite-in-the-browser-not-on-the-server) | 222 |
-|  | [The content security policy grants `'wasm-unsafe-eval'` and nothing else](decisions.md#the-content-security-policy-grants-wasm-unsafe-eval-and-nothing-else) | 340 |
+|  | [The content security policy grants `'wasm-unsafe-eval'` and nothing else](decisions.md#the-content-security-policy-grants-wasm-unsafe-eval-and-nothing-else) | 379 |
 |  | [The Calibre index wins and the OPF fills its gaps, with two exceptions](decisions.md#the-calibre-index-wins-and-the-opf-fills-its-gaps-with-two-exceptions) | 97 |
 |  | [What the reference library actually contains, measured rather than quoted](decisions.md#what-the-reference-library-actually-contains-measured-rather-than-quoted) | 254 |
 |  | [Identifiers other than the ISBN had nowhere to go, and the count is what justified the table](decisions.md#identifiers-other-than-the-isbn-had-nowhere-to-go-and-the-count-is-what-justified-the-table) | 156 |
@@ -762,7 +762,7 @@ repeat the argument.
 |  | [An allowlist entry is keyed on the statement, because a fragment names a token](decisions.md#an-allowlist-entry-is-keyed-on-the-statement-because-a-fragment-names-a-token) | 310 |
 |  | [Every CHECK is compared as text, and a fourth premise arm asks a boot what it built](decisions.md#every-check-is-compared-as-text-and-a-fourth-premise-arm-asks-a-boot-what-it-built) | 810 |
 |  | [An enum list in a CHECK is derived from its enum, so growing the enum names the missing revision](decisions.md#an-enum-list-in-a-check-is-derived-from-its-enum-so-growing-the-enum-names-the-missing-revision) | 1,220 |
-|  | [The diagonal that drives a walk reads the test tree, not one file](decisions.md#the-diagonal-that-drives-a-walk-reads-the-test-tree-not-one-file) | 732 |
+|  | [The diagonal that drives a walk reads the test tree, not one file](decisions.md#the-diagonal-that-drives-a-walk-reads-the-test-tree-not-one-file) | 741 |
 |  | [The mutation sweep takes its own interrupt back](decisions.md#the-mutation-sweep-takes-its-own-interrupt-back) | 611 |
 |  | [The fold is one thing and the predicate is another](decisions.md#the-fold-is-one-thing-and-the-predicate-is-another) | 433 |
 |  | [Whitespace is stripped after punctuation is removed, never before](decisions.md#whitespace-is-stripped-after-punctuation-is-removed-never-before) | 234 |
@@ -949,13 +949,22 @@ repeat the argument.
 |  | [A test asserting SQLite's behaviour says so, and an unmarked one fails](decisions.md#a-test-asserting-sqlites-behaviour-says-so-and-an-unmarked-one-fails) | 339 |
 |  | [A call inside a comprehension's condition is not refused by a guard](decisions.md#a-call-inside-a-comprehensions-condition-is-not-refused-by-a-guard) | 208 |
 |  | [build:smoke and scan:image take the digest build pushed](decisions.md#buildsmoke-and-scanimage-take-the-digest-build-pushed) | 325 |
-|  | [The copy takes only the digest the smoke test ran, on main and on a tag](decisions.md#the-copy-takes-only-the-digest-the-smoke-test-ran-on-main-and-on-a-tag) | 343 |
+|  | [The copy takes only the digest the smoke test ran, on main and on a tag](decisions.md#the-copy-takes-only-the-digest-the-smoke-test-ran-on-main-and-on-a-tag) | 366 |
 |  | [The smoke test refuses a world writable entry](decisions.md#the-smoke-test-refuses-a-world-writable-entry) | 301 |
 |  | [The release pin guard reads globs with PurePosixPath.full_match](decisions.md#the-release-pin-guard-reads-globs-with-pureposixpathfull_match) | 318 |
 |  | [oxfmt formats the frontend, not prettier or Biome](decisions.md#oxfmt-formats-the-frontend-not-prettier-or-biome) | 422 |
 |  | [A test only commit on main may be carried onto the patch branch](decisions.md#a-test-only-commit-on-main-may-be-carried-onto-the-patch-branch) | 460 |
 |  | [An advisory on several packages clears only when every package moved](decisions.md#an-advisory-on-several-packages-clears-only-when-every-package-moved) | 54 |
 |  | [Every dev dependency is exact, and every runtime library is on a range](decisions.md#every-dev-dependency-is-exact-and-every-runtime-library-is-on-a-range) | 1,299 |
-|  | [CI credentials are scoped to environments, and a credentialed job runs one pinned entrypoint](decisions.md#ci-credentials-are-scoped-to-environments-and-a-credentialed-job-runs-one-pinned-entrypoint) | 948 |
-|  | [A guard is keyed on this codebase's own names, never on a library's internals](decisions.md#a-guard-is-keyed-on-this-codebases-own-names-never-on-a-librarys-internals) | 1,118 |
+|  | [CI credentials are scoped to environments, and a credentialed job runs one pinned entrypoint](decisions.md#ci-credentials-are-scoped-to-environments-and-a-credentialed-job-runs-one-pinned-entrypoint) | 1,042 |
+|  | [A guard is keyed on this codebase's own names, never on a library's internals](decisions.md#a-guard-is-keyed-on-this-codebases-own-names-never-on-a-librarys-internals) | 1,156 |
+|  | [The check:build string evaluation wiring is measured by plant, not by a test](decisions.md#the-checkbuild-string-evaluation-wiring-is-measured-by-plant-not-by-a-test) | 93 |
+|  | [The string evaluation scan names its gaps rather than detecting them](decisions.md#the-string-evaluation-scan-names-its-gaps-rather-than-detecting-them) | 101 |
+|  | [Renovate's managers keep `fileMatch`](decisions.md#renovates-managers-keep-filematch) | 78 |
+|  | [A failed forward port pages and is not retried](decisions.md#a-failed-forward-port-pages-and-is-not-retried) | 70 |
+|  | [An npm advisory is its GHSA](decisions.md#an-npm-advisory-is-its-ghsa) | 127 |
+|  | [A backport mark is not refused for a `.dockerignore` negation](decisions.md#a-backport-mark-is-not-refused-for-a-dockerignore-negation) | 71 |
+|  | [A route path in backticks is a claim about the route table](decisions.md#a-route-path-in-backticks-is-a-claim-about-the-route-table) | 99 |
+|  | [The publish gate refuses a stripped Python module's stem](decisions.md#the-publish-gate-refuses-a-stripped-python-modules-stem) | 106 |
+|  | [A recorded catalogue zero carrying any diagnostic is not a zero](decisions.md#a-recorded-catalogue-zero-carrying-any-diagnostic-is-not-a-zero) | 74 |
 <!-- index: end -->

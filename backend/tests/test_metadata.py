@@ -3054,6 +3054,18 @@ class TestARecordedSearchComesBackInItsPinnedOrder:
     #: refuses to let a free source go unrecorded anyway.
     REFUSED_WHOLE: Final = {CatalogueSource.OENB: "k"}
 
+    #: Recorded sources whose catalogue matched no record for `QUERY`, each with
+    #: why. Empty today.
+    #:
+    #: **An entry is the catalogue's own zero, not a reader's refusal**: its
+    #: recording is an SRU envelope whose `numberOfRecords` is 0, which
+    #: `_the_catalogue_said_zero` reads from the bytes without a reader. A source
+    #: whose records a reader refuses goes in `REFUSED_WHOLE`, and a free source
+    #: cannot go in `UNRECORDED`, so without this a free source that answers
+    #: nothing for this query had no passing path. A bespoke door has no such
+    #: count and cannot use it.
+    ANSWERED_NOTHING: Final[dict[CatalogueSource, str]] = {}
+
     #: The transports whose requests go through httpx, which is all `respx`
     #: serves. A recorded source on any other would open a real socket from the
     #: runner before anything here could go red. BESPOKE is here only because
@@ -3239,14 +3251,68 @@ class TestARecordedSearchComesBackInItsPinnedOrder:
         assert sorted(searched.asked) == sorted(ALL_SOURCES.searched)
         assert {source for source in searched.asked if source in recorded} == recorded
 
+    @staticmethod
+    def _the_catalogue_said_zero(path: Path) -> bool:
+        """Whether the recording at `path` is an SRU envelope counting no
+        record and carrying no diagnostic. Read by local name, so SRU 1.x and
+        2.0 both answer. Any diagnostic refuses, fatal or not: a fatal one
+        usually comes with a zero count, and without the second check a source
+        that errored would pass as one that matched nothing."""
+        if path.suffix != ".xml":
+            return False
+        names = [
+            (element.tag.rpartition("}")[2], element.text)
+            for element in ElementTree.fromstring(path.read_bytes()).iter()
+        ]
+        counts = [text for name, text in names if name == "numberOfRecords"]
+        return counts == ["0"] and all(name != "diagnostics" for name, _ in names)
+
     def test_every_recording_has_a_row_in_the_order(self):
         """A recording whose catalogue answers nothing pins nothing about it,
-        unless `REFUSED_WHOLE` names it, and then it must answer nothing."""
+        unless `REFUSED_WHOLE` or `ANSWERED_NOTHING` names it, and then it must
+        answer nothing."""
         answering = {part for entry in self.ORDER for part in entry[1].split("+")}
 
+        assert not set(self.REFUSED_WHOLE) & set(self.ANSWERED_NOTHING)
         assert {source for source in self._recordings() if source.value not in answering} == set(
             self.REFUSED_WHOLE
-        )
+        ) | set(self.ANSWERED_NOTHING)
+
+    def test_a_source_that_answered_nothing_says_so_in_its_own_envelope(self):
+        recordings = self._recordings()
+
+        assert [s for s in self.ANSWERED_NOTHING if not self._the_catalogue_said_zero(recordings[s])] == []
+
+    @pytest.mark.parametrize(
+        ("body", "zero"),
+        [
+            (
+                '<searchRetrieveResponse xmlns="http://www.loc.gov/zing/srw/"><numberOfRecords>0'
+                "</numberOfRecords></searchRetrieveResponse>",
+                True,
+            ),
+            ("<searchRetrieveResponse><numberOfRecords>0</numberOfRecords></searchRetrieveResponse>", True),
+            ("<searchRetrieveResponse><numberOfRecords>3</numberOfRecords></searchRetrieveResponse>", False),
+            ("<searchRetrieveResponse/>", False),
+            (
+                "<searchRetrieveResponse><numberOfRecords>0</numberOfRecords>"
+                "<diagnostics><diagnostic/></diagnostics></searchRetrieveResponse>",
+                False,
+            ),
+        ],
+    )
+    def test_only_an_envelope_counting_no_record_reads_as_zero(self, tmp_path: Path, body: str, zero: bool):
+        """A recording refused by a reader still counts its records, so it
+        cannot pass for a catalogue that matched nothing."""
+        path = tmp_path / "source.xml"
+        path.write_text(body, encoding="utf-8")
+
+        assert self._the_catalogue_said_zero(path) is zero
+
+    def test_a_recording_refused_whole_is_not_a_zero(self):
+        recordings = self._recordings()
+
+        assert [s for s in self.REFUSED_WHOLE if self._the_catalogue_said_zero(recordings[s])] == []
 
     async def test_a_recording_refused_whole_answers_once_its_code_is_lifted(
         self, monkeypatch: pytest.MonkeyPatch

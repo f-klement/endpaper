@@ -3765,17 +3765,27 @@ def _bounds_column(sqltext: str, column_name: str) -> bool:
     `created_by_user_id`. No enum column collides today, which is what made it
     safe to be wrong.
 
+    **In either engine's spelling.** SQLite hands back the clause as written,
+    `col IN (...)`; Postgres stores it parsed and hands back its own deparse,
+    `col::text = ANY (ARRAY[...]::text[])`, or for a list of one value
+    `col::text = 'value'::text` (measured on Postgres 18 through reflection,
+    2026-11-05, on `member_logins`). Without those arms every installed bound
+    reads as absent on Postgres. The one value form counts only as the whole
+    clause, because an equality inside an OR restricts nothing.
+
     Still a text match on SQL rather than a parse, so it has a known blind spot
     with no live instance: a column name inside a quoted literal in a CHECK on
     the same table. Parsing SQL to close that is not a cheap fix and is recorded
     rather than done.
     """
+    column = re.escape(column_name)
     return bool(
         re.search(
-            rf"(?<![A-Za-z0-9_]){re.escape(column_name)}\s+IN\s*\(",
+            rf"(?<![A-Za-z0-9_]){column}(?:\s+IN\s*\(|\)?(?:::[A-Za-z ]+?)?\s*=\s*ANY\s*\()",
             sqltext,
             re.IGNORECASE,
         )
+        or re.fullmatch(rf"\(*{column}\)?::[A-Za-z ]+ = '[^']*'::[A-Za-z ]+\)*", sqltext.strip())
     )
 
 
@@ -3897,8 +3907,9 @@ def _installed_checks(table_name: str) -> list[str]:
     Read back through reflection rather than from `Base.metadata`, because the
     whole point is to ask an artefact the models cannot describe wrongly.
 
-    **A clause comes back as the DDL text SQLite stored**, so a batch rebuild
-    that re-emitted it quoted would stop matching in `_bounds_column`. That
+    **A clause comes back as the DDL text SQLite stored, or as Postgres's own
+    deparse of it**, which is why `_bounds_column` reads both spellings. A
+    batch rebuild that re-emitted it quoted would stop matching there. That
     fails a rule rather than passing one: a column whose clause no longer
     matches reads as unconstrained.
     """
@@ -4213,6 +4224,19 @@ class TestEveryEnumColumnIsConstrainedOrExemptWithAReason:
         """
         assert _bounds_column("provenance IN ('catalogue', 'member')", "provenance")
         assert not _bounds_column("provenance <> 'catalogue' OR created_by_user_id IS NULL", "provenance")
+        # The same two as Postgres hands them back.
+        assert _bounds_column(
+            "provenance::text = ANY "
+            "(ARRAY['catalogue'::character varying, 'member'::character varying]::text[])",
+            "provenance",
+        )
+        assert not _bounds_column(
+            "provenance::text <> 'catalogue'::text OR created_by_user_id IS NULL", "provenance"
+        )
+        # A list of one value, which Postgres deparses as an equality, bounds
+        # the column only as the whole clause.
+        assert _bounds_column("service::text = 'readwise'::text", "service")
+        assert not _bounds_column("service::text = 'readwise'::text OR user_id IS NULL", "service")
         assert _declares_check("author_identifiers.provenance")
         # The migrated database carries both constraints too, so the same
         # evasion is available there and is pinned there.
