@@ -80,9 +80,10 @@ ENV CI_COMMIT_TAG=$APP_VERSION
 # --frozen-lockfile fails the build if the lockfile and manifest disagree, rather
 # than silently resolving something the lockfile never pinned. bunfig.toml arrives
 # with the sources and configures the security scanner that screens packages during
-# this install. `build` runs `tsc --noEmit` first, so a type error fails the image
-# build. The install cache is pointed at a path this line deletes: left at its default,
-# under root's home, it would put about as much again as node_modules into the layer.
+# this install. `build` type checks what ships first, by `tsconfig.build.json`, so a
+# type error fails the image build. The install cache is pointed at a path this line
+# deletes: left at its default, under root's home, it would put about as much again as
+# node_modules into the layer.
 #
 # `chmod -R a+rX,go-w dist` for the reasons the app stage gives: Vite copies `public/`
 # with the modes the checkout gave it, so the app's user may be unable to read a file, or

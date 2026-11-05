@@ -1,0 +1,12 @@
+{
+  /* The type check the image's build runs, over what ships and nothing else.
+
+     The Dockerfile's frontend stage copies `frontend/` less what `.dockerignore`
+     strips, which takes `tests/` among others, so a check reading the whole of
+     `tsconfig.json` there sees a different tree from a checkout and fails on an
+     import a checkout resolves. `bun run typecheck` still reads `tsconfig.json`,
+     scripts and tests included. `tests/imageBuildContext.test.ts` fails when
+     this check reads a file the image's build context lacks. */
+  "extends": "./tsconfig.json",
+  "include": ["src", "types", "vite.config.ts"]
+}
