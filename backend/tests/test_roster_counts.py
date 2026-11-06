@@ -79,7 +79,7 @@ sentence, each for its own reason:
 * **the number and its noun are in different table cells**, `| 8 | sources
   asked at once |`. The gap may not carry a `|`, because reading across a cell
   boundary turns a row's count into a claim about whatever the description
-  beside it mentions, which is what both coverage registers are full of. The
+  beside it mentions, which is what any table with a count column is full of. The
   cost and the count of what it refuses are at `_CLAIM`. No sentence is named
   because the tree holds none of that shape, counted the same way.
 
@@ -409,10 +409,9 @@ _NOUN = r"(?:sources?|catalogues?|providers?)"
 #: the 590 files `scope()` then reported, the strict pattern matched 428 against
 #: a permissive 435, and **seven** crossed a cell. **Five** of the ten in the two
 #: `COVERAGE.md` files did, every
-#: one of them a test count beside a roster noun in the next column. Remove it
-#: and those five become candidates the moment a test count passes through a
-#: live cardinality, which is a number that moves whenever anybody writes a
-#: test. The other two are this file's own examples of the shape.
+#: one of them a test count beside a roster noun in the next column. Neither
+#: register carries a count column now, so the rule holds the shape rather than
+#: a live instance. The other two are this file's own examples of the shape.
 #:
 #: **What it refuses that nothing else would**: a claim genuinely written as a
 #: value column and a description column, `| 8 | sources asked at once |`. There
@@ -2010,11 +2009,11 @@ class TestTheCensusSeesWhatItClaimsTo:
     def test_a_number_in_one_table_cell_does_not_claim_the_next_one(self):
         """A row is several facts and the grammar used to read across them.
 
-        Both `COVERAGE.md` tables put a test count in one column and a sentence
-        about the catalogue chain in the next, so the count of a test file was a
-        roster claim whenever it passed through a live cardinality, which is a
-        number that moves whenever anybody writes a test. Measured 2026-09-06,
-        five such rows sit in those two documents and none of them is a claim.
+        A table with a count in one column and a sentence about the catalogue
+        chain in the next makes the count a roster claim whenever it passes
+        through a live cardinality. Measured 2026-09-06, the two `COVERAGE.md`
+        tables then carried a test count column and five such rows, none of
+        them a claim.
         """
         _word, value = a_spelled_cardinality()
         row = f"| `test_thing.py` | {value} | **The catalogue chain.** Merging |\n"

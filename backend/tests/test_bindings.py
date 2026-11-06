@@ -156,7 +156,6 @@ ASNAME_READS: Final[dict[str, dict[str, int]]] = {
     },
     "test_classifications.py": {"_imported": 3},
     "test_cover_store.py": {"_names_used": 1},
-    "test_coverage_register.py": {"_pytest_bindings": 2, "_written_to": 2},
     "test_database.py": {
         "TestEveryEngineHidesItsParameters.test_no_engine_builder_is_imported_under_another_name": 1,
         "_binds": 1,

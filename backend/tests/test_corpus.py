@@ -1,17 +1,18 @@
 """`tests/corpus.py` hands over what this project wrote, and nothing else walks a tree.
 
-Three questions, one class each: whether the vendored rule decides by shape,
-whether every population refuses vendored code on a tree planted with it and
-still reaches this project's own, and whether this checkout's populations are
-still the whole of it. The fourth class is the ratchet that keeps the walks in
-one home.
+One question per class: whether the vendored rule decides by shape, whether
+every population refuses vendored code on a tree planted with it and still
+reaches this project's own, whether each walk holds what the predicate the tree
+guard selection asks holds, and whether this checkout's populations are still
+the whole of it. Then the ratchet that keeps the walks in one home, and the
+declarations that name the tests making them.
 """
 
 import ast
 import inspect
 from collections.abc import Callable, Iterable
 from pathlib import Path
-from typing import Any, Final
+from typing import Final
 
 import pytest
 
@@ -31,6 +32,7 @@ from tests.declaration import SENTENCE, declares
 TREE_GUARDS = {
     "TestEveryWalkSaysWhichTestsMakeIt": ("suite_modules",),
     "TestOnlyTheCorpusWalks": ("suite_modules",),
+    "TestEachWalkHoldsWhatItsPredicateHolds": ("project_files.readmit",),
     "TestThisCheckoutsPopulationsAreTheWholeOfIt": (
         "application_modules",
         "every_python_file",
@@ -122,7 +124,9 @@ def _populations() -> dict[str, Callable[[Path], Iterable[Path | str]]]:
     return {
         name: function
         for name, function in inspect.getmembers(corpus, inspect.isfunction)
-        if function.__module__ == corpus.__name__ and not name.startswith("_") and name != "is_vendored"
+        if function.__module__ == corpus.__name__
+        and not name.startswith("_")
+        and name not in {"is_vendored", "tree_guards"}
     }
 
 
@@ -170,6 +174,38 @@ class TestEveryPopulationRefusesVendoredCode:
         }
 
         assert reached == WHAT_EACH_POPULATION_REACHES
+
+
+def _in_an_environment(path: Path, root: Path) -> bool:
+    return any((parent / "pyvenv.cfg").is_file() for parent in path.parents if parent.is_relative_to(root))
+
+
+class TestEachWalkHoldsWhatItsPredicateHolds:
+    """The tree guard selection adds a walker for a changed path its population's
+    `HOLDS` predicate holds, so a walk reading a file its predicate refuses is a change no tree
+    guard run adds that walker for. A walk may read less, by what it prunes on the
+    filesystem: an environment known by its marker, which the planted tree carries."""
+
+    def test_every_population_has_a_predicate(self) -> None:
+        assert set(corpus.HOLDS) == set(_populations()) | {READMITTED}
+
+    @pytest.mark.parametrize("kind", sorted(VENDORED_KINDS))
+    def test_every_walk_is_its_predicate_less_what_it_prunes(self, kind: str, tmp_path: Path) -> None:
+        root = tmp_path / "tests" / "backend"
+        _a_tree_with_vendored_code_in_it(root, kind)
+        planted = {path for path in root.rglob("*") if path.is_file()}
+        walks = {**_populations(), READMITTED: lambda at: corpus.project_files(at, readmit=lambda _: True)}
+
+        wrong = {}
+        for name, walk in walks.items():
+            walked = {root / path if isinstance(path, str) else path for path in walk(root)}
+            asked = {path for path in planted if corpus.HOLDS[name](path.relative_to(root))}
+            beyond = walked - asked
+            short = {path for path in asked - walked if not _in_an_environment(path, root)}
+            if beyond or short:
+                wrong[name] = sorted(str(path.relative_to(root)) for path in beyond | short)
+
+        assert wrong == {}
 
 
 class TestThisCheckoutsPopulationsAreTheWholeOfIt:
@@ -254,8 +290,9 @@ WALKS: Final = {
     # The home.
     "corpus.py": 1,
     # The instruments the arming above compares the populations against, which
-    # must not route through the walk they check.
-    "test_corpus.py": 2,
+    # must not route through the walk they check, and the planted tree the
+    # predicates are asked of.
+    "test_corpus.py": 3,
 }
 
 
@@ -546,8 +583,7 @@ def _walking_tests(source: str, package: str = "tests") -> tuple[dict[str, set[s
     statements = [
         s
         for s in tree.body
-        if not isinstance(s, (ast.Import, ast.ImportFrom))
-        and not _bound(s) & {"TREE_GUARDS", "TREE_GUARDS_LEFT_OUT"}
+        if not isinstance(s, (ast.Import, ast.ImportFrom)) and "TREE_GUARDS" not in _bound(s)
     ]
     reads: dict[str, set[str]] = {}
     for statement in statements:
@@ -574,15 +610,6 @@ def _walking_tests(source: str, package: str = "tests") -> tuple[dict[str, set[s
     return tests, set(reads) - set(tests) - named
 
 
-def _declared(source: str, constant: str) -> Any:
-    """The value a module binds to `constant` at module level, or None where it binds none."""
-    for statement in ast.parse(source).body:
-        for target, value in assignments(statement):
-            if isinstance(target, ast.Name) and target.id == constant:
-                return ast.literal_eval(value)
-    return None
-
-
 def _misdeclared(
     source: str, package: str = "tests"
 ) -> tuple[dict[str, list[str]], dict[str, list[str]], list[str]] | None:
@@ -592,12 +619,10 @@ def _misdeclared(
     with what each is said to read, and the walks no test reaches.
     """
     walking, unreached = _walking_tests(source, package)
-    declared = _declared(source, "TREE_GUARDS")
+    declared = corpus.tree_guards(source)
     said = {name: set(populations) for name, populations in dict(declared or {}).items()}
-    left_out = set(_declared(source, "TREE_GUARDS_LEFT_OUT") or ())
     if (
-        set(said) | left_out == set(walking)
-        and not set(said) & left_out
+        set(said) == set(walking)
         and not unreached
         and (declared is not None) == bool(walking)
         and all(said[name] == walking[name] for name in said)
@@ -618,9 +643,7 @@ class TestEveryWalkSaysWhichTestsMakeIt:
     by its populations, so a change is judged by the guards reading it and not
     only by the files it touched; twice a targeted run was green and the full run
     red on such a guard. A declaration is read and never derived at run time, so
-    this holds the tests and their populations to what the module calls. A test
-    left out of the added set on purpose is in `TREE_GUARDS_LEFT_OUT` instead,
-    with its reason.
+    this holds the tests and their populations to what the module calls.
     """
 
     def test_every_module_declares_exactly_the_tests_that_walk(self) -> None:
@@ -644,18 +667,6 @@ class TestEveryWalkSaysWhichTestsMakeIt:
             "that judges with it, which then declares it; no declaration clears it where "
             "it is."
         )
-
-    @pytest.mark.parametrize(("constant", "opening"), [("TREE_GUARDS", "{"), ("TREE_GUARDS_LEFT_OUT", "(")])
-    def test_a_declaration_starts_one_line_with_its_name(self, constant: str, opening: str) -> None:
-        """A declaration is also read as text rather than parsed, from the line it starts."""
-        wrong = [
-            path.name
-            for path in suite_modules()
-            if (source := path.read_text(encoding="utf-8")).count(f"\n{constant} = {opening}")
-            != (_declared(source, constant) is not None)
-        ]
-
-        assert wrong == []
 
     @pytest.mark.parametrize(
         ("source", "tests"),

@@ -5436,7 +5436,7 @@ class TestTheAustrianNationalLibrarySearch:
     #: produce that red; a pod losing the CPU for half a second can, and the mechanism is
     #: recorded rather than assumed. **That red is a pipeline backend job's, which is not
     #: the pod the figures above were taken in**: this block carries readings from both,
-    #: so each names its own. The pipeline's job pod is quota bound at 2 CPUs and
+    #: so each names its own. The pipeline's job pod was quota bound at 2 CPUs and
     #: throttled in a third to a half of all periods, read from its own cgroup on
     #: 2026-09-20, so a burst loses up to a full 100ms period at a time and 0.5589s is
     #: about six such periods. **That is the ceiling and not the average**: the same

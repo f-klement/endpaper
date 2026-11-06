@@ -2,16 +2,22 @@
   // oxfmt, replacing prettier 3.9 on 2026-10-24. The reasons are in
   // `docs/decisions.md`; what follows is what breaks if a line here moves.
   //
-  // **`printWidth` is the only option, because it is the only default oxfmt
+  // **`printWidth` is the only formatting option, because it is the only default oxfmt
   // and prettier disagree on**: oxfmt's is 100 and prettier's is 80. Left at
   // 100, oxfmt rewrites 485 of the 780 files under `src tests`; at 80 it
   // rewrites 10, all one union layout (oxc issue 25841). Everything else here
   // is prettier's default and oxfmt's alike, so naming it would be a second
   // copy of a default that can drift from the first.
-  //
-  // **`tests/COVERAGE.md` is formatted by this file too**, and the tool that
-  // writes that register depends on its column padding. Any option added here
-  // is checked against that file staying byte identical.
   "$schema": "./node_modules/oxfmt/configuration_schema.json",
-  "printWidth": 80
+  "printWidth": 80,
+  // **The frontend coverage register is not formatted**, because oxfmt pads a
+  // Markdown table to its widest cell. One row wider than the rest then repads
+  // every line of the table, and two branches that each add a row conflict on
+  // all of it rather than on two lines. Measured on the table as it was on
+  // 2026-11-06: one long row moved every line of it, and a merge of two
+  // branches each adding one row conflicted on 242. Unpadded, the same pair
+  // merges clean.
+  // `coverageRegister.test.ts` refuses a padded row, so formatting it by hand
+  // is caught too.
+  "ignorePatterns": ["tests/COVERAGE.md"]
 }

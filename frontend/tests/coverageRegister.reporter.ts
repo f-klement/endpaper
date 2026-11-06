@@ -1,51 +1,25 @@
 /**
- * Fails the run when `tests/COVERAGE.md` disagrees with it.
+ * Fails the run when `tests/COVERAGE.md` does not describe it.
  *
  * **A reporter rather than a test, and the reason is measured.** A test file
- * can see its own tasks and nothing else, so no test in this suite can count
- * the suite. The only listing vitest offers without running, `vitest list`, is
- * a static read: it answers 7 for `api/query-client.test.ts` where the run
- * collects 16, and 3,399 for the tree where the run collects 3,885, because it
- * counts an `it.each` as one. Measured 2026-09-20 on vitest 5.0.0. A register
- * checked against that instrument would be wrong about every generated case,
- * which is most of what this one gets wrong by hand.
+ * can see its own tasks and nothing else, so no test in this suite can see
+ * which files the suite holds and which of them collected a test. vitest's
+ * own discovery and the run's own modules are both here.
  *
- * **Throwing here fails the run**, measured on the same day: vitest awaits each
- * reporter's hook and reports what it throws as an unhandled error, exiting 1.
- * `coverageRegister.test.ts` drives a whole vitest run against a fixture tree
- * to hold that, because a reporter wired up wrong is silent in exactly the
- * direction that matters.
+ * **Throwing here fails the run**, measured 2026-09-20 on vitest 5.0.0: vitest
+ * awaits each reporter's hook and reports what it throws as an unhandled
+ * error, exiting 1. `coverageRegister.test.ts` drives a whole vitest run
+ * against a fixture tree to hold that, because a reporter wired up wrong is
+ * silent in exactly the direction that matters.
  *
- * **Only its counts answer for a run that collected the whole tree.** A
- * narrowed run would report every filtered file's own count as a fraction of
- * its row, which is a guard that cries wolf until somebody deletes it. The
- * rules about which files the document names do not depend on running any of
- * them, so they are asked of vitest's discovery and hold on any green run.
- * `isWhole` is where that line is drawn and `problems` is what honours it.
- *
- * **The two sides can disagree, and both branches below are for a way they
- * do.** A run can take fewer files than were discovered, which is an ordinary
- * narrowing; and it can take as many under different names, which is the two
- * instruments having stopped spelling the same tree and is refused outright.
- * A sentence here saying they cannot is read as covering both, and what it
- * costs is a size test nobody keeps.
- *
- * **The backend half's own fail open has no twin here, and that is measured
- * rather than assumed.** Two things of vitest's make it so. A name pattern
- * marks a matching task `skip` rather than removing it, and `allTests()`
- * yields a skipped task, so no count moves; the backend's equivalent
- * deselects the item outright and leaves its gate open on a figure that is
- * one low. And the per file slot is created for every file discovered, so a
- * file collecting nothing is present with a count of 0 rather than absent,
- * which is the whole reason the backend half needs a row of 0 and this one
- * does not. **A caveat missing beside a twin that carries one reads as
- * forgotten**, so both are written here rather than left out as inapplicable.
- *
- * **The always on rules fire at different moments in the two halves.** There
- * they are arms inside a file a narrowed run may not collect at all; here
- * they are a reporter, so they run on every invocation, a single file debug
- * run included. The asymmetry is wanted: a register this run can already
- * contradict reaches a person sooner on this side.
+ * **Every rule here but one holds on a narrowed run.** Which files the
+ * document names is asked of vitest's discovery rather than of what ran, so a
+ * run of one file still refuses a row naming nothing and a file with no row;
+ * and a file collecting nothing is asked of the files that ran. So those rules
+ * run on every invocation, a single file debug run included, where the backend
+ * half's are arms inside a file a narrowed run may not collect. **The one that
+ * does not** is the refusal of a test that would not run, which a run vitest
+ * narrowed inside a file cannot ask: see `narrowedInside`.
  */
 
 import { readFileSync, writeFileSync } from "node:fs";
@@ -53,25 +27,33 @@ import { join, relative } from "node:path";
 
 import {
   type Census,
-  THIS_REGISTER,
-  countWrittenOut,
   declaresItselfInternal,
-  isWhole,
-  printWhole,
   problems,
   refusal,
-  writeInstruction,
-  writeLine,
 } from "./coverageRegister";
 import { MARKER, OWNER } from "./coverageRegister.globalSetup";
 
-/**
- * Set to `off` by the plant harness for every arm it runs: the register is
- * red by construction on a branch that adds a test, so a plant's baseline
- * would refuse exactly there. Only that word turns this reporter off; the
- * suite runner refuses any other value before a run starts.
- */
-export const SWITCH = "ENDPAPER_COVERAGE_REGISTER";
+/** One collected test, as much of vitest's `TestCase` as this reads. */
+type Collected = {
+  fullName: string;
+  options: { mode: string; fails?: boolean };
+  result(): { state: string };
+};
+
+/** The parts of a test specification that narrow a run inside a file. */
+type Specification = {
+  testLines?: readonly number[];
+  testIds?: readonly string[];
+  testNamePattern?: RegExp;
+  testTagsFilter?: readonly string[];
+};
+
+/** Why a collected test would not run, or `undefined` for one that runs. */
+function whyItWouldNotRun(test: Collected): string | undefined {
+  if (test.options.fails === true) return "expected to fail";
+  if (test.result().state !== "skipped") return undefined;
+  return test.options.mode === "todo" ? "todo" : "skipped";
+}
 
 export default class CoverageRegisterReporter {
   private vitest: {
@@ -79,25 +61,24 @@ export default class CoverageRegisterReporter {
       config: { root: string };
       globTestFiles?: () => Promise<{ testFiles: string[] }>;
     }[];
+    getGlobalTestNamePattern?: () => RegExp | undefined;
+    config?: { tagsFilter?: readonly string[] };
   } = {};
 
   /**
-   * Where the write goes: standard output in a run, a file in the arm that
-   * drives this hook in process, because a worker's own standard output is
-   * the run's artefact too. A write printed there is read as a second write
-   * for this register and refuses the real one at merge.
+   * Whether a specification of this run narrows it inside a file, which
+   * `onTestRunStart` is the one hook to see.
    */
-  private readonly out: number;
+  private specified = false;
 
   /**
-   * Where a refusal is printed: standard error in a run, the same file as
-   * `out` in the arms that drive this hook in process, for the reason `out`
-   * gives.
+   * Where a refusal is printed: standard error in a run, a file in the arms
+   * that drive this hook in process, because a worker's own standard error is
+   * the outer run's log and a refusal there would read as one of the run's.
    */
   private readonly err: number;
 
-  constructor(options: { out?: number; err?: number } = {}) {
-    this.out = options.out ?? 1;
+  constructor(options: { err?: number } = {}) {
     this.err = options.err ?? 2;
   }
 
@@ -105,10 +86,49 @@ export default class CoverageRegisterReporter {
     this.vitest = vitest;
   }
 
+  onTestRunStart(specifications: readonly Specification[]): void {
+    this.specified = specifications.some(
+      (specification) =>
+        (specification.testLines?.length ?? 0) > 0 ||
+        (specification.testIds?.length ?? 0) > 0 ||
+        specification.testNamePattern !== undefined ||
+        (specification.testTagsFilter?.length ?? 0) > 0,
+    );
+  }
+
+  /**
+   * Whether vitest narrowed this run inside a file.
+   *
+   * **vitest marks a test its filter left out exactly as it marks `it.skip`**,
+   * so on such a run every filtered test would read as one that would not run.
+   * The conditions are vitest 5's own for a partial run (`isPartialRun`): a
+   * name pattern, a line, a test id or a tag, on the command line or on a
+   * specification. Its last, a focused test, is left to `onTestRunEnd`,
+   * because a focus narrows only the file holding it: that file is left out
+   * and every other one judged, so one focus does not hide a skip elsewhere.
+   * A vitest that moves the global pattern is refused rather than read as
+   * unfiltered, which is the direction that would refuse every `-t` run.
+   */
+  private narrowedInside(): boolean {
+    if (typeof this.vitest.getGlobalTestNamePattern !== "function")
+      throw refusal(
+        "the coverage register reporter could not read this run's test name " +
+          "pattern, so it cannot tell a test vitest filtered out from one a " +
+          "file skips. A vitest upgrade that moves it has to be followed here.",
+        this.err,
+      );
+    return (
+      this.specified ||
+      this.vitest.getGlobalTestNamePattern() !== undefined ||
+      (this.vitest.config?.tagsFilter?.length ?? 0) > 0
+    );
+  }
+
   async onTestRunEnd(
     modules: readonly {
       moduleId: string;
-      children: { allTests(): Iterable<unknown> };
+      task?: { containsOnly?: boolean };
+      children: { allTests(): Iterable<Collected> };
     }[],
     _errors: readonly unknown[],
     reason: string,
@@ -143,137 +163,50 @@ export default class CoverageRegisterReporter {
     const here = (file: string) =>
       relative(testRoot, file).replaceAll("\\", "/");
     const found = (await project.globTestFiles()).testFiles;
-    const discovered = found.map(here);
-    const ran = modules.map((module) => here(module.moduleId));
+    const discovered = new Set(found.map(here));
+
+    // **A module that ran and was not discovered escapes every row rule**,
+    // which reads discovery, so it is refused rather than judged. It means the
+    // two instruments have stopped spelling the same tree.
+    const strays = modules
+      .map((module) => here(module.moduleId))
+      .filter((file) => !discovered.has(file));
+    if (strays.length > 0)
+      throw refusal(
+        "the coverage register reporter saw files run that vitest's discovery " +
+          `did not return: ${strays.join(", ")}.`,
+        this.err,
+      );
 
     // **Whether a file is one the register may not name is a property of the
     // file**, so it is read for everything vitest discovered rather than for
-    // what this run executed. Read once and keyed by the relative path,
-    // because the loop below wants the same bytes for the files that ran.
-    const sources = new Map<string, string>();
-    for (const file of found)
-      sources.set(here(file), readFileSync(file, "utf8"));
+    // what this run executed.
     const internal = new Set(
-      [...sources]
-        .filter(([, source]) => declaresItselfInternal(source))
-        .map(([file]) => file),
+      found
+        .filter((file) => declaresItselfInternal(readFileSync(file, "utf8")))
+        .map(here),
     );
+    const counts = new Map(
+      modules.map((module) => [
+        here(module.moduleId),
+        [...module.children.allTests()].length,
+      ]),
+    );
+    const wouldNotRun = this.narrowedInside()
+      ? []
+      : modules
+          .filter((module) => module.task?.containsOnly !== true)
+          .flatMap((module) =>
+            [...module.children.allTests()].flatMap((test) => {
+              const why = whyItWouldNotRun(test);
+              return why === undefined
+                ? []
+                : [`${here(module.moduleId)} > ${test.fullName} (${why})`];
+            }),
+          );
+    const census: Census = { discovered, counts, internal, wouldNotRun };
 
-    const counts = new Map<string, number>();
-    const writtenOut = new Map<string, number>();
-    for (const module of modules) {
-      const file = here(module.moduleId);
-      // A module outside what the glob discovered has no entry above. It is
-      // read here rather than defaulted, because a figure counted off an empty
-      // string is a wrong number where a second read is the right one.
-      const source = sources.get(file) ?? readFileSync(module.moduleId, "utf8");
-      counts.set(file, [...module.children.allTests()].length);
-      writtenOut.set(file, countWrittenOut(source, file));
-    }
-
-    const census: Census = {
-      discovered: new Set(discovered),
-      counts,
-      writtenOut,
-      internal,
-    };
-
-    // **Counted first, then compared, and the order is what decides which
-    // failure is silent.** A narrowed run is ordinary and says so; a run of the
-    // right size over a different set of names means the two sides have stopped
-    // spelling the same tree, and comparing sets first would turn that into a
-    // guard that skips every run from then on with nothing said.
-    if (!isWhole(census))
-      console.log(
-        `coverage register: counts not checked, this run took ${ran.length} ` +
-          `of ${discovered.length} test files. The rules about which files ` +
-          "the document names still ran.",
-      );
-    else {
-      const missing = discovered.filter((file) => !ran.includes(file));
-      if (missing.length > 0)
-        throw refusal(
-          "the coverage register reporter ran over as many files as vitest " +
-            `discovered and not the same ones: ${missing.join(", ")} was ` +
-            "discovered and did not run.",
-          this.err,
-        );
-    }
-
-    // **Here, where the document is read**, so the checks above about the run
-    // itself still run under the switch, as they do in the backend half.
-    // Printed, so the run's own output says what it did not check. A pipeline
-    // runs vitest directly rather than through the suite runner, so there a CI
-    // variable carrying the switch fails the run instead of passing it unchecked.
-    if (process.env[SWITCH] === "off") {
-      if (process.env.GITLAB_CI !== undefined)
-        throw refusal(
-          `${SWITCH}=off is for a plant copy, and this run is a pipeline.`,
-          this.err,
-        );
-      console.log(
-        `coverage register: not checked, ${SWITCH}=off. No write is offered.`,
-      );
-      return;
-    }
-
-    const itsRegister = join(testRoot, "COVERAGE.md");
-    const register = readFileSync(itsRegister, "utf8");
-
-    // **Printed, never applied.** This process is the one checking the
-    // register, so it is the one process that must not write it: a guard that
-    // heals itself asserts nothing. What it does instead is put the whole
-    // write on one line of the run's own output, where a separate and
-    // deliberate invocation can pick it up. `printWhole` is what makes that
-    // line whole at any length; its comment says what `console.log` lost
-    // here. Nothing here opens the register
-    // for writing, and the global setup fails the run if anything else does.
-    //
-    // **And only a run about this repository's own register offers one.** A
-    // write names a fixed path while these figures are whichever run's they
-    // are, and this suite spawns runs over fixture libraries that import
-    // this very module. Without this question such a child printed a well
-    // formed write naming the real register and carrying the fixture's
-    // counts, onto a stream two arms assert against and therefore into an
-    // artefact. The problems below are still reported, because they are
-    // true about the document this run read.
-    //
-    // **What this question catches and what it does not**, because a cross
-    // check written here caught neither and claimed both.
-    //
-    // It catches a run that wrongly believes a register is its own, which
-    // is the direction that writes a figure into the wrong document. That
-    // is driven end to end by a nested run over a fixture library.
-    //
-    // **It does not catch the gate wrongly closed**, which is a write
-    // withheld forever and reads downstream as the other register being
-    // current. A change to this code is covered by the in process witness
-    // in `coverageRegister.test.ts`, which drives this hook with this
-    // repository's own root and requires a write. **A change to the
-    // environment is covered by nothing**: a root the comparison never
-    // recognises, a symlinked checkout being the measured case, is silence
-    // at exit 0 and no arm here sees it.
-    //
-    // A second derivation from the working directory was tried and
-    // deleted. Gated on the question being open it cannot see the closed
-    // direction at all, and ungated it throws on every nested run, because
-    // the working directory does not follow a root flag and the two
-    // disagree there by construction.
-    //
-    // **What keeps this true today is a condition the runner guarantees by
-    // accident**: it ships the tree into a container and starts the suite
-    // with the project root as the real path this module resolves to, so
-    // the comparison holds without anything asserting that it must.
-    const instruction =
-      itsRegister === THIS_REGISTER ? writeInstruction(register, census) : null;
-    // **This is the one print site, and nothing holds that it stays one.** A
-    // second print beside it is seen by no arm here, and it matters in one
-    // shape: a `console.log` of a write past 65,536 bytes, kept for debugging
-    // say, puts a cut copy beside the whole one, and the applier refuses the
-    // artefact at merge rather than the run failing. A second `printWhole`,
-    // or a shorter write, prints two identical copies, which are read as one.
-    if (instruction !== null) printWhole(writeLine(instruction), this.out);
-
+    const register = readFileSync(join(testRoot, "COVERAGE.md"), "utf8");
     const wrong = problems(register, census);
     if (wrong.length > 0)
       throw refusal(

@@ -26,8 +26,8 @@ const ROOT = join(import.meta.dirname, "..");
  * Where a nested run records that a worker loaded this file.
  *
  * **What a run did, not its exit status**, because a sanctioned run of one
- * file still ends red whenever `tests/COVERAGE.md` lags the tree, which is
- * every branch that adds a test, and this arm is not about the register.
+ * file still ends red whenever `tests/COVERAGE.md` lacks a row for a file the
+ * tree has, and this arm is not about the register.
  */
 const LOADED = "ENDPAPER_SANCTIONED_RUN_LOADED";
 

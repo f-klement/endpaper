@@ -2603,9 +2603,11 @@ FULL, which is what makes a commit survive a power cut on somebody's only copy
 of a hand built catalogue.
 
 Before that, `pytest-xdist` at `-n 2` had already halved it from 1370s. `-n 2`
-and not `-n auto`: the CI pod is capped at two cores, and `auto` spawns one
-worker per core only to be throttled back, which is the same work done slower
-and makes the pod look like it needs a bigger limit.
+and not `-n auto`: a CI pod is capped at two cores unless its job asks for more,
+and `auto` spawns one worker per core only to be throttled back, which is the
+same work done slower and makes the pod look like it needs a bigger limit. The
+backend suite's own job asks for four and runs four workers; see *The CI
+backend suite runs four workers on four CPUs; addopts stays at two*.
 
 **The frontend was not slow because of its tests.** `environment` was **168s of
 a 245s run**, building a jsdom once per test file, and 11 of 78 files touch no
@@ -2713,8 +2715,8 @@ ceiling it replaces, and against a job that ended naming no test at all, that is
 
 This repository states that rule in several places and already enforced it in the instruments
 that report on a run. The mutation sweep asks for a machine readable report and refuses a run
-that produced none. The coverage register refuses to compare when its census is short. The frontend test config fails a run whose
-reporter set was replaced. **The ordinary suite run, which is the one every contributor and every
+that produced none. The coverage register judges only the test files a run reached. The frontend
+test config fails a run whose reporter set was replaced. **The ordinary suite run, which is the one every contributor and every
 job reads, had two verdicts and no denominator**: it counted what ran and compared it with
 nothing.
 
@@ -12244,9 +12246,10 @@ be overwritten by interleaved log output, measured on this work, and the failure
 
 **What the failure lines cannot say is how many tests ran**, so on their own they do not separate a
 finished run from one that died early, which would show few failures for the wrong reason. Two
-things separate them and both are needed: the runner's own exit line, and the coverage register
-arm's rendered block, which only a run that reached collection can print. Read those two beside the
-names rather than quoting a total.
+things separate them and both are needed: the runner's own exit line, and the session's own
+refusal of a run that reported fewer tests than it collected, which `tests/conftest.py` makes at
+the end of a run that claims its whole collection. Read those two beside the names rather than
+quoting a total.
 
 **Four shapes were refused, so nobody proposes them again.** A maintainer who adds a negation
 meets 41 red lines in one suite and 2 in another and reaches for exactly these:
@@ -12469,9 +12472,9 @@ carries one.
 **What it does carry is a table row**, and that turned out to be the real finding. Five
 rows across the two registers put a test count in one column and a sentence about the
 catalogue chain in the next, and the grammar read across the cell boundary and joined them.
-None is a claim today, because none of those counts is currently a live cardinality. Each
-would have become one the day its file gained or lost a test, and gone away again on the
-next, taking a verdict with it each way. **So the exclusion is a property of the grammar
+None was a claim, because none of those counts was then a live cardinality, and each would have
+become one the day its file gained or lost a test. The registers carry no count column now, so the
+rule holds the shape rather than an instance. **So the exclusion is a property of the grammar
 and not a name in a list**: a claim's gap may not carry a `|`. Measured over the walk this
 replaces, zero of the 423 grammar matches it read crossed a cell boundary, so the rule
 refuses nothing that was being read. That figure is the old walk's and does not reproduce
@@ -20393,7 +20396,7 @@ sloppiness. The faces it wore:
 |---|---|---|
 | the death signal is the only layer that reaches that row | two outer layers reach it and are slower | *The death signal an arm carries is the uncatchable one* |
 | 40 of 40 runs left going, 0 after | runs left **running**, a wider population than runs leaked | the same entry |
-| a suite pod is quota bound at 2 CPUs, restored as evidence | the pipeline job pod is, and the suite pod had been resized | *A deadline test turns on a fact, because every clock available to it is wider than the thing it measures* |
+| a suite pod is quota bound at 2 CPUs, restored as evidence | the pipeline job pod was then, and the suite pod had been resized | *A deadline test turns on a fact, because every clock available to it is wider than the thing it measures* |
 | a hundredfold headroom | about six, once the sources the row assertion cannot move are timed directly | the same entry |
 | keying on the mapper refutes counting relationship loads | it refutes an **absolute** reading only, and the relative one needs them | *A row count is a second instrument, and the two numbers are read together* |
 | the funnel bounds every directory door | it bounds the LDAP door; the proxy door was bounded before it existed | *The directory username is bounded where the row is written, not by a column constraint* |
@@ -21030,7 +21033,7 @@ size written here would be a property of the documentation rather than of the gu
 
 **Closing it needs a derivation of the tree that is not a glob, and `frontend/tests/COVERAGE.md` is
 the wrong one rather than the only one**: its reporter already checks a row per collected file, and
-a corpus guard standing on it would be red on every branch that adds a test, for reasons that have
+a corpus guard standing on it would be red whenever a row is missing, for reasons that have
 nothing to do with the corpus, which is how a rule teaches people to edit it. A filesystem walk is
 the other candidate and is not refused here. `node:fs` is already imported across this test tree
 and the type check is green on it, so the dependency is paid, and the home's own stated reason for
@@ -21798,22 +21801,69 @@ inwards, and a property holds it to the expression it replaced. **The obvious re
 for the publisher, a pattern excluding both parentheses was linear on a run of them and slower than
 the original on spaces then one parenthesis then text.
 
-## The coverage register's write is printed in a loop until every byte is out
+## The coverage register's refusal is printed in a loop until every byte is out
 
 Once vitest touches standard output, bun marks the pipe non blocking on the descriptor every later
 writer shares, and its `console.log` then keeps what the pipe takes at once and drops the rest with
-no error. The frontend register's write is one long line, so a write moving nine padded rows arrived
-cut. The fix is at the printer, because the cause is in the printing process: the reporter writes
+no error. The fix is at the printer, because the cause is in the printing process: the reporter writes
 synchronously in a loop, retrying only on `EAGAIN`, throws on any other error, and fails the run
 when no byte moves before a deadline, so a reader that closes or stalls is loud rather than a
-silent loss. Chunked lines and an awaited stream callback were each measured to lose bytes, and a
-file artefact was not needed.
+silent loss. Chunked lines and an awaited stream callback were each measured to lose bytes.
 
-**The applier takes only what a guard could have printed.** It writes only the two named registers,
-refuses one reached through a symbolic or hard link, takes a pair only as a whole table row looked
-up in the register as it was, with one digit run per row and one pair per row, and a block only in
-plain sentence characters. **Residue**: a second print site beside the printer, which the applier
-refuses at merge rather than in the run.
+## The coverage registers carry a row per test file and no figure
+
+Both `COVERAGE.md` registers state what each test file covers and nothing that a run counts. The
+per file counts, the generated block and the headline are gone, because a count moved on every
+branch that added a test, so each register was red by construction until a merge rewrote it, and
+the owner does not read the figures (settled 2026-11-06). The run prints its own totals.
+
+**What is still checked**, on both sides: a test file the register may name has a row, a row names
+a file the tree has, no file has two rows, and a test file the run reached collects at least one
+test. The last is the protection a row of 0 used to buy: a file collecting nothing is a row
+describing tests that do not run.
+
+**Reached is the run's own report, not a comparison of file sets.** The backend reads pytest's
+collection report for each module, so a file collecting nothing is reached with no items where a
+narrowed run never reaches the file at all, and each file is judged on its own: a narrowing
+elsewhere hides nothing the run did reach. Comparing the walk with the collection instead is what
+once let one file collecting nothing make a whole run read as narrowed and switch every count
+check off.
+
+**A module ending its own collection is excused on SQLite only, and only under a name ending
+`_on_a_real_server.py`**, which is the shape of the files that need a real Postgres server; on
+Postgres the same skip is reported, and so is one under any other name on SQLite. Without the
+name, quarantining a file with one module level skip was a single honest edit the default run
+passed and only the nightly Postgres run reported.
+
+**On a whole run every test file must be reached.** A run of the suite's own test paths with no
+`-k`, `-m`, `--deselect`, `--ignore`, `--lf` or `--sw` is what `test:backend` and
+`nightly:postgres` make, and there a file left unreached was switched off by something nobody
+asked for on the command line: a `collect_ignore`, an ignore hook or a plugin dropping items. It fails rather than skips. A
+narrowed run still skips naming what it could not judge.
+
+**The frontend's rule is vitest's own**, which fails a file with no test, with the reporter's
+check behind it for the day `passWithNoTests` is turned on. **Its twin of the backend's marker
+rule** refuses by name any collected test that is skipped, todo or expected to fail, read off the
+run's results, so `skipIf`, `runIf`, a skip inside the body and a runner reached through a local
+name are one rule; oxlint's `no-disabled-tests` reads only the direct spellings. It is asked only
+of a run vitest did not narrow inside a file, because vitest marks a test its name pattern, line,
+tag or focus left out exactly as it marks a skipped one. A focus narrows only the file holding it,
+so that file alone is left out and the run's other files are still asked.
+
+**With no figure there is nothing to write**, so the writer, the gate's class of expected
+failures, the push route for a register commit, the switch that turned the registers off for a
+plant arm, and the refusal of a run that rewrote its own register went with the figures. A
+branch adding a test file writes its row in the same change.
+
+**Neither table is padded.** oxfmt pads a Markdown table to its widest cell, so one wider row in
+the frontend register repadded all 120 lines, and two branches each adding a row conflicted on
+242. `frontend/.oxfmtrc.json` now ignores that file and its arm refuses a padded row; unpadded,
+the same two branches merge clean, or conflict on two lines when both rows land in one place.
+
+**Residue, stated**: a file under the server only name switched off by an unconditional module
+level skip passes on SQLite and is reported by the nightly Postgres run alone, the one Postgres
+job that runs the register's arms; on a run narrowed from the command line, a file it never reached
+is named in a skip rather than judged.
 
 ## `Shelf.matching` is left whole although ruff's C901 counts it over ten
 
@@ -21910,7 +21960,7 @@ the drawing exports are read from the runner's source, and every function the ru
 time must be one whose body the parse read. A form the parse cannot read, a cast, a wrapped call or
 a re-export, reds by name instead of passing as drawing nothing.
 
-## A hand plant is a mode of the mutation sweep, run with the coverage registers off
+## A hand plant is a mode of the mutation sweep
 
 The isolated copy, the baseline, the group kill and the stop handling a hand plant needs were
 already in the mutation sweep and guarded there, so a plant is a mode of it rather than a second
@@ -21919,13 +21969,10 @@ message is read only on pytest's own lines, because the log of a test about that
 message as data and would turn a catch into an invalid run. A plant may not edit the runner's own
 scripts, which run on the host.
 
-**The coverage registers are switched off for every arm rather than their reds tolerated.** They
-are red by construction on any branch adding a test until the wave's register write, and tolerating
-them would put the registers' test ids and the frontend reporter's error text into the verdict
-reader, where one missed subtraction reads a survivor as caught. The switch is one variable,
-accepted in one spelling, refused on a tree with git history and failing in a pipeline, so it
-reaches a suite only in a plant copy, and the verdict line names it. A plant aimed at a register's
-own checks therefore survives, which is the loud direction.
+**Every arm runs with every guard on.** A register used to be red by construction on any branch
+adding a test, and the arms ran with both registers switched off for that; with no figure in
+either register there is nothing red by construction, so a plant aimed at a register's own checks
+is caught like any other.
 
 ## A bounded run's timeout is read off a marker, not off the timer's exit status
 
@@ -23324,48 +23371,6 @@ hook writing it is the hook's own job, not a write the queue must refuse. Closin
 `BatchFailure` carrying the key alone and the queue looking the row up. A security review found
 it.
 
-## The register writer accepts a log from another path when both trees are clean at one commit
-
-The coverage register writer refused every log whose ship line named another path, so a gate's
-logs, shipped from the gate's own detached worktree, could not be applied, and the register cost
-a second full run of both suites on the commit the gate had just measured.
-
-The suite runner now prints `==> the tree shipped is commit <sha>, clean`, or `..., with
-uncommitted changes`, right after the ship line, taken at the tar. The writer accepts a foreign
-path only when that record equals the applier's own `<sha>, clean`. Everything else is refused
-as before.
-
-- **One writer and one place that decides**, and it works for any run from any clean worktree
-  at the applier's commit, not only the gate's.
-- **Recorded at the tar, not when the run is asked for**: a worktree can move while its run
-  waits for a node. The record is taken on both sides of the tar and printed only when the two
-  agree, so a commit or an edit landing during the tar ships with no record rather than under
-  the earlier one. Measured cost: about 20 ms per record on the development host, in a worktree
-  and the main checkout alike, against a tar the runner's comment puts at 2.3 s.
-- **Untracked files are changes on both sides**, because the ship carries them, and both status
-  calls pass `--untracked-files=normal` so `status.showUntrackedFiles=no` cannot hide them. The
-  test stub answers a status without the flag as clean, which is what real git does under that
-  setting, so dropping the flag reds a named arm on each side. Ignored files are in neither
-  answer; they ship and are not compared, so the claim is "the same versioned files".
-- **A root that is not the top of its own repository records no commit**, so a copy inside a
-  checkout cannot borrow that checkout's commit.
-- **A record belongs to the ship line before it**, so in concatenated logs one run's record
-  cannot vouch for another's path.
-- **`subprocess` joins the writer's permitted imports for one `git` call**; an arm holds that
-  `git` is the only command it runs. S603 and S607 are a named refusal for that file, in the
-  linter's configuration and in `BANDIT_REFUSALS`, as for the other scripts that ask git.
-- **A refusal names its case and the way out**: no record (an older log, a tree git could not
-  answer for, or one that moved during the tar), two records for one ship, a dirty tree on
-  either side, or another commit.
-
-**False refusals considered and accepted.** A second write after the first, because the first
-write dirties the applier: both logs go in one call. An applier with any unrelated uncommitted
-edit, tracked skill files included, which are versioned but not shipped: strict on purpose,
-commit or set the edit aside first. An applier at a descendant of the gated commit, such as a
-merge made after gating: the same files are not provable, so it is refused.
-`assume-unchanged` and `skip-worktree` hide an edit from both sides; accepted, since either takes
-a deliberate `update-index`, or a sparse checkout nobody here uses.
-
 ## Landing a picked file on a Book has one home, `lib/fileLanding.ts`
 
 The Scan page's rapid queue and the Calibre card on the library settings page both land a
@@ -23646,13 +23651,13 @@ The guard's glob arm reds on the fnmatch matcher; that was planted and measured.
 unchanged. Measured on builder with 2 CPUs, `format:check` fell from about 12 s to between
 0.2 and 0.28 s.
 
-**Its output is prettier's on all but one layout.** With `printWidth: 80`, the only option in
-`frontend/.oxfmtrc.json`, oxfmt differed on 10 of the 780 files, 58 lines; two of the files
+**Its output is prettier's on all but one layout.** With `printWidth: 80`, the only formatting option in `frontend/.oxfmtrc.json`, oxfmt differed on 10 of the 780 files, 58 lines; two of the files
 are the generated client. Every hunk is a union that prettier 3.9 keeps flat after `=`, `:`
 or `as` and oxfmt writes one member per line. oxc holds prettier 3.8's layout there on purpose, as
 `union-annotation-flat-retry` in its divergence list, until the 3.9 style settles (oxc issue
-25841). The reformat is one commit, listed in `.git-blame-ignore-revs`. `tests/COVERAGE.md`,
-whose column padding the coverage register's writer depends on, came out byte identical.
+25841). The reformat is one commit, listed in `.git-blame-ignore-revs`. `tests/COVERAGE.md`
+came out byte identical; oxfmt has since been told to leave it alone, so that one wider row does
+not repad its whole table.
 
 **Pinned exactly, because a bump can move output.** oxfmt is 0.x and releases about weekly.
 A bump that reformats anything reddens `format:check` and so cannot automerge; it is taken
@@ -23665,8 +23670,7 @@ the frontend job's client diff is what catches that.
 
 **Why not Biome.** Configured toward prettier it still differed on 20 files and 349 lines,
 in five layout classes rather than one. It refused `src/index.css` without a Tailwind option,
-and it padded the table in `tests/doubles/README.md` one column wider than prettier, which
-is the kind of table the coverage register's padding depends on. It was also 6 to 9 times
+and it padded the table in `tests/doubles/README.md` one column wider than prettier. It was also 6 to 9 times
 slower than oxfmt.
 
 **Why not Vite+.** It bundles oxfmt with oxlint, Vitest and Vite under one `vp` command, but
@@ -24119,3 +24123,60 @@ timeout in `frontend/tests` already sits beside a comment saying why. The failur
 guard would catch is a bare number with no reason, which costs a reader a lookup and no
 wrong result, and a text check over comments is the kind of guard that is evaded by
 accident and policed by hand. The risk does not justify a check.
+
+## The CI backend suite runs four workers on four CPUs; addopts stays at two
+
+**Decided 2026-11-06 by the owner** (pipeline ticket, Q53): one test:backend pod with 4 CPUs
+and pytest at `-n 4`, no split of the suite.
+
+**The worker count is on the job's command line, not in addopts.** addopts' `-n 2` is what
+every other pytest in the pipeline takes (test:postgres, nightly:postgres), and those run at
+the shared runner's 2 CPU default. Moving addopts to 4 would put four workers in 2 CPU pods,
+which is the throttled shape the addopts comment warns against. The job sets
+`KUBERNETES_CPU_LIMIT: "4"` and `-n 4` side by side, and a pipeline test holds the two equal.
+
+**A pod granted fewer CPUs stops the job before the suite, by name.** A runner that does not
+allow the raise ignores the variable and starts the pod at two, and four workers on two CPUs
+would run the job into its timeout with no cause in the log. So the job reads its own cgroup
+quota first and fails in seconds, naming the runner setting.
+
+**The local suite runner is unchanged and could not get heavier from this.** It always passes
+its own `-n`, sized per node, which wins over addopts; builder already runs four workers under
+4000m there, the other nodes fewer.
+
+**The request stays at one CPU.** The pod is pinned to builder, and a larger request is what
+would hold it Pending, which counts against the 25 minute bound. The limit is a ceiling CFS
+enforces by throttling. The cost is that under contention the pod's CPU weight follows its
+one CPU request, so the four cores are bought only while builder has them idle; three clean
+main pipelines under 25 minutes, the ticket's closing test, is what measures whether they are
+there. The shared runner's sum is in its values file.
+
+## The tree guard selection asks the corpus instead of a shell copy of it
+
+The suite runner's tree guard mode kept a shell copy of two rules owned in Python: which populations
+of `backend/tests/corpus.py` hold a path, and which test declares which populations in
+`TREE_GUARDS`. Both now come from the tree guard selection, a Python script the mode runs through
+the interpreter pin's wrapper. It asks each population the predicate its walk filters with,
+`corpus.HOLDS`, and reads each declaration with `corpus.tree_guards`, the reader `test_corpus.py`
+holds the declarations to. The pytest option lists stay in the shell, where the status guard pins
+them against the parser a run builds, by the owner's decision of 2026-11-06.
+
+**The reason the pipeline file's shell readers kept their own (*One reader for the pipeline file,
+and the shell runners keep theirs, held equal*) does not apply here.** That decision rests on hosts
+not known to carry Python. Before an ordinary backend suite run the suite runner already asks the
+interpreter pin's wrapper for Python, to check the generated files; only a plant copy and a run with
+that preflight switched off skip the check. So the host is one the pinned interpreter is asked of
+anyway. Where the wrapper finds none, the generated file check warns and the run goes ahead; the
+tree guard mode refuses with exit 2 instead, because a run that cannot say which guards read the
+branch would print a green line over a branch it never judged.
+
+**The predicate is the walk's filter, not a copy beside it.** Each walk filters with its own entry
+of `HOLDS`, so changing what a population holds moves the walk and the selection together. A walk
+may hold less than its predicate, by what it prunes on the filesystem: an environment known only by
+its marker file, and what the ignore file covers. A changed path is held by both, which adds walkers
+and misses none. `TestEachWalkHoldsWhatItsPredicateHolds` holds every population to that, on the
+planted tree of every vendored kind. The status guard keeps examples of a path only for the rules
+the selection adds itself: both roots asked, and the paths the pod is never shipped.
+
+**No test is exempted from the run judging its branch.** A guard red by construction on a branch is
+raised as a decision instead.

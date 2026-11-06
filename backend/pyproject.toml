@@ -138,10 +138,12 @@ pythonpath = ["."]
 # basename. The default "prepend" mode derives module names from the basename
 # and refuses to collect the second one.
 # `-n 2`, not `-n auto`. The suite is expected to share a small CI host with
-# other work, and the runner is capped at two cores for that reason. `auto`
+# other work, and a CI job gets two cores unless it asks for more. `auto`
 # would spawn one worker per core only to be throttled back, which is the same
 # work done slower, and a throttled job looks like one that needs a bigger
-# limit. Raise both numbers together or neither.
+# limit. Raise both numbers together or neither: a job that asks for more
+# cores passes its own `-n` beside its own limit, which wins over this one, and
+# the CI job running this suite does.
 #
 # Parallel is safe here by construction rather than by luck being noticed late:
 # tests/conftest.py builds DATA_DIR with `tempfile.mkdtemp()` at import time, so
@@ -156,8 +158,8 @@ pythonpath = ["."]
 # that publishes. They are not restated anywhere that publishes, which the
 # decision register says of itself too: the one attributed reading is in a
 # document the gate strips.
-# `tests/COVERAGE.md` recomputes the test count on every run, which is what a
-# number that has to stay true looks like.
+# The run prints the test count every time, which is what a number that has to
+# stay true looks like.
 #
 # **A duration is a fact about a machine and a worker count, not about this
 # line.** Recorded readings of this suite are far apart, and they differ in the

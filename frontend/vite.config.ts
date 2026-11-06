@@ -346,9 +346,7 @@ export default defineConfig({
     include: ["tests/**/*.test.{ts,tsx}"],
     // **`tests/COVERAGE.md` is checked by a reporter rather than by a test**,
     // and `tests/coverageRegister.reporter.ts` says why: no test file here can
-    // see another file's tasks, and vitest's own `list` counts an `it.each` as
-    // one test. So the only instrument that can count this suite is the run,
-    // and a reporter is where a run's own figures are.
+    // see another file's tasks, and a reporter sees the whole run's.
     //
     // `default` is repeated because naming any reporter replaces the set rather
     // than adding to it, which is how a change here silences the output

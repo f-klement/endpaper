@@ -28,7 +28,9 @@ Support files that mirror nothing live at the root of each tree: `conftest.py`,
 **What each suite actually covers, area by area, with its deliberate gaps, is in
 [`backend/tests/COVERAGE.md`](../backend/tests/COVERAGE.md) and
 [`frontend/tests/COVERAGE.md`](../frontend/tests/COVERAGE.md).** This page is about how to
-work in them.
+work in them. Each register has a row for every test file it may name, saying what the file
+covers, and its suite fails a run when a file has no row or a row names a file that is gone.
+**A new test file takes its row in the same change**: nothing writes one later.
 
 ## Running
 
@@ -53,9 +55,8 @@ collection. The frontend refuses in vitest's global setup, so the type check, th
 and the build never ask. A vitest started in any directory but `frontend/` itself, without
 `--root` or `--config`, loads no configuration and so does not refuse.
 
-**Neither line quotes a size.** Both registers state theirs, and both are now recomputed
-by the run that reads them, so a count copied here would be a third home for a figure that
-has one. These two were 102 and 30 out against the tree they described.
+**Neither line quotes a size.** The run prints its own count, and a count written down
+anywhere goes stale on the next branch that adds a test.
 
 | Command | Purpose |
 |---|---|

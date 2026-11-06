@@ -25,16 +25,18 @@ repository root, where the ignore file lives.
 level dict bound to `TREE_GUARDS` from each such test to the populations it
 calls, because such a test judges files it does not live in, so a run choosing
 tests by what a change touched adds it when the change touched a path one of
-them holds. A walking test
-left out of that set on purpose is named in `TREE_GUARDS_LEFT_OUT` with its
-reason. `test_corpus.py` holds each declaration to what its module calls.
+them holds. `test_corpus.py` holds each declaration to what its module
+calls, and the run makes that choice by asking `HOLDS` and `tree_guards`
+here.
 """
 
 from __future__ import annotations
 
+import ast
 import os
 from collections.abc import Callable
-from pathlib import Path
+from pathlib import Path, PurePath
+from typing import Any, Final
 
 # **The only import from this test tree, and it has to stay the only one.**
 # Tooling outside the suite loads this file by path, where this tree is not a
@@ -58,8 +60,7 @@ REPO = BACKEND.parent
 #: `.venv` by convention only, and the pipeline has built one under `backend/`
 #: with no dot, after which a walk reported the standard library's own `xml`.
 #: Everything installed into an environment sits under one of these two, which
-#: is the closed fact the open directory name is not. Public because a copy is
-#: kept outside this package, and a test compares the two.
+#: is the closed fact the open directory name is not.
 TOOL_DIRECTORIES = frozenset({"__pycache__", "node_modules", "site-packages", "dist-packages"})
 
 
@@ -71,7 +72,11 @@ def is_vendored(path: Path, root: Path = BACKEND) -> bool:
     part is one level deeper from the repository than from `backend/`; the
     wrong root raises `ValueError` rather than answering about nothing.
     """
-    return any(part.startswith(".") or part in TOOL_DIRECTORIES for part in path.relative_to(root).parts)
+    return _owned(path.relative_to(root))
+
+
+def _owned(relative: PurePath) -> bool:
+    return any(part.startswith(".") or part in TOOL_DIRECTORIES for part in relative.parts)
 
 
 def _environment(directory: Path) -> bool:
@@ -99,9 +104,56 @@ def _walk(top: Path, prune: Callable[[Path], bool]) -> list[Path]:
     return sorted(found)
 
 
+#: The two languages the browser's own source is written in.
+_BROWSER_SUFFIXES = frozenset({".ts", ".tsx"})
+
+#: Every population by name, with what it holds: a predicate over a path relative
+#: to the population's root, never the whole path, as a checkout under a directory
+#: called `tests` would otherwise drop every file it holds. **Each walk below
+#: filters with its own, and the tree guard selection asks the same one of a
+#: changed path**, so the selection cannot part from the walk. A walk also prunes what a
+#: predicate cannot ask: an environment known by its marker file and, for the
+#: repository populations, what the ignore file covers. `project_files.readmit` is
+#: `project_files` called with `readmit`, read as readmitting every directory; the
+#: walk prunes a `.git` directory, never a worktree's `.git` file.
+HOLDS: Final[dict[str, Callable[[PurePath], bool]]] = {
+    "unowned_files": lambda path: not _owned(path.parent),
+    "every_python_file": lambda path: path.suffix == ".py" and not _owned(path),
+    "application_modules": lambda path: (
+        HOLDS["every_python_file"](path) and not {"tests", "migrations"} & set(path.parts)
+    ),
+    "application_sources": lambda path: HOLDS["application_modules"](path),
+    "shipped_modules": lambda path: HOLDS["every_python_file"](path) and "tests" not in path.parts,
+    "suite_modules": lambda path: HOLDS["every_python_file"](path) and path.parts[0] == "tests",
+    "project_files.readmit": lambda path: path.parent.parts[:1] != (".git",),
+    "project_files": lambda path: HOLDS["project_files.readmit"](path) and HOLDS["unowned_files"](path),
+    "markdown_files": lambda path: HOLDS["project_files"](path) and path.suffix == ".md",
+    "browser_modules": lambda path: (
+        path.parts[:2] == ("frontend", "src") and path.suffix in _BROWSER_SUFFIXES and not _owned(path)
+    ),
+}
+
+
+def _held(root: Path, walked: list[Path], holds: Callable[[PurePath], bool]) -> list[Path]:
+    return [path for path in walked if holds(path.relative_to(root))]
+
+
+def tree_guards(source: str) -> Any:
+    """The value a test module's source binds to `TREE_GUARDS` at module level, or None."""
+    for statement in ast.parse(source).body:
+        if isinstance(statement, ast.Assign):
+            targets, value = statement.targets, statement.value
+        elif isinstance(statement, ast.AnnAssign) and statement.value is not None:
+            targets, value = [statement.target], statement.value
+        else:
+            continue
+        if any(isinstance(target, ast.Name) and target.id == "TREE_GUARDS" for target in targets):
+            return ast.literal_eval(value)
+    return None
+
+
 # The backend populations. Each is a filter over `unowned_files`, so the rule
-# about tools is applied once and the populations differ only in which of this
-# project's own directories they take.
+# about tools is applied once and the populations differ only in their predicate.
 
 
 def unowned_files(root: Path = BACKEND) -> list[Path]:
@@ -111,7 +163,8 @@ def unowned_files(root: Path = BACKEND) -> list[Path]:
     project's, and only a directory marks a tool's territory. The Python
     populations below are narrower: they drop a dotted module name too.
     """
-    return _walk(root, lambda directory: is_vendored(directory, root) or _environment(directory))
+    walked = _walk(root, lambda directory: is_vendored(directory, root) or _environment(directory))
+    return _held(root, walked, HOLDS["unowned_files"])
 
 
 def every_python_file(root: Path = BACKEND) -> list[Path]:
@@ -120,14 +173,7 @@ def every_python_file(root: Path = BACKEND) -> list[Path]:
     **The working tree, not what git tracks.** The suite runner ships the
     working tree, so an untracked module is read before it is committed.
     """
-    return [path for path in unowned_files(root) if path.suffix == ".py" and not is_vendored(path, root)]
-
-
-def _relative_parts(path: Path, root: Path) -> set[str]:
-    """The parts of `path` below `root`. Matched there rather than against the
-    whole path, because a checkout under a directory called `tests` would
-    otherwise drop every file it holds."""
-    return set(path.relative_to(root).parts)
+    return _held(root, unowned_files(root), HOLDS["every_python_file"])
 
 
 def application_modules(root: Path = BACKEND) -> list[Path]:
@@ -136,14 +182,12 @@ def application_modules(root: Path = BACKEND) -> list[Path]:
     The rules over application semantics read this, because a fixture or a
     generated revision has no share in them.
     """
-    return [
-        path for path in every_python_file(root) if not {"tests", "migrations"} & _relative_parts(path, root)
-    ]
+    return _held(root, unowned_files(root), HOLDS["application_modules"])
 
 
 def shipped_modules(root: Path = BACKEND) -> list[Path]:
     """The application and its migrations: what the image carries, a test excluded."""
-    return [path for path in every_python_file(root) if "tests" not in _relative_parts(path, root)]
+    return _held(root, unowned_files(root), HOLDS["shipped_modules"])
 
 
 def suite_modules(root: Path = BACKEND) -> list[Path]:
@@ -152,7 +196,7 @@ def suite_modules(root: Path = BACKEND) -> list[Path]:
     **Not named `test_...`**, since pytest would collect a function of that name
     imported into a test module and fail it for want of a `root` fixture.
     """
-    return [path for path in every_python_file(root) if path.relative_to(root).parts[0] == "tests"]
+    return _held(root, unowned_files(root), HOLDS["suite_modules"])
 
 
 def application_sources(root: Path = BACKEND) -> dict[str, str]:
@@ -180,7 +224,7 @@ def _unignored(root: Path, top: Path, readmit: Callable[[Path], bool]) -> list[P
     ]
 
 
-def project_files(root: Path = REPO, *, readmit: Callable[[Path], bool] = lambda _: False) -> list[Path]:
+def project_files(root: Path = REPO, *, readmit: Callable[[Path], bool] | None = None) -> list[Path]:
     """Every file under `root` the ignore file does not cover, in a directory no tool owns.
 
     **Dotted file names are kept**, as `unowned_files` keeps them: a census of
@@ -192,7 +236,9 @@ def project_files(root: Path = REPO, *, readmit: Callable[[Path], bool] = lambda
     inlined in the pipeline file. `.git` and what the ignore file covers stay
     pruned whatever it answers. A caller passing it states why at its site.
     """
-    return _unignored(root, root, readmit)
+    if readmit is None:
+        return _held(root, _unignored(root, root, lambda _: False), HOLDS["project_files"])
+    return _held(root, _unignored(root, root, readmit), HOLDS["project_files.readmit"])
 
 
 def markdown_files(root: Path = REPO) -> list[Path]:
@@ -201,11 +247,7 @@ def markdown_files(root: Path = REPO) -> list[Path]:
     **Wider than what is published, deliberately.** A broken document is broken
     for whoever opens it next, from the mirror or from this checkout.
     """
-    return [path for path in project_files(root) if path.suffix == ".md"]
-
-
-#: The two languages the browser's own source is written in.
-_BROWSER_SUFFIXES = frozenset({".ts", ".tsx"})
+    return _held(root, project_files(root), HOLDS["markdown_files"])
 
 
 def browser_modules(root: Path = REPO) -> list[Path]:
@@ -218,8 +260,4 @@ def browser_modules(root: Path = REPO) -> list[Path]:
     top = root / "frontend" / "src"
     if not top.is_dir():
         return []
-    return [
-        path
-        for path in _unignored(root, top, lambda _: False)
-        if path.suffix in _BROWSER_SUFFIXES and not is_vendored(path, root)
-    ]
+    return _held(root, _unignored(root, top, lambda _: False), HOLDS["browser_modules"])

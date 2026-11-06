@@ -1062,7 +1062,7 @@ class TestThePoliciesTheProseNames:
     #: Derived from the policy at collection time rather than written out, so a
     #: class added to `AddressClass` and refused arrives here with no edit, and
     #: a class moved into the policy leaves. A skip would have done the same job
-    #: and cost the coverage register its "no skips" invariant.
+    #: and been refused by the coverage register's "no skips" rule.
     REFUSED = sorted(set(fetch.AddressClass) - fetch.HOUSEHOLD_ADDRESSES.admits, key=str)
 
     @pytest.mark.parametrize("address_class", REFUSED)

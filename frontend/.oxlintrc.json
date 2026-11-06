@@ -202,13 +202,13 @@
     // wave that adopted oxlint was told not to, because turning a noisy rule on
     // produces findings in files other open tickets rewrite.
     "unicorn/no-array-sort": "off", // 178
-    "unicorn/consistent-function-scoping": "off", // 140
-    "no-shadow": "off", // 35
+    "unicorn/consistent-function-scoping": "off", // 139
+    "no-shadow": "off", // 31
     "unicorn/prefer-set-has": "off", // 14
     "no-useless-concat": "off", // 11
     "oxc/no-map-spread": "off", // 8
     "unicorn/no-array-reverse": "off", // 6
-    "preserve-caught-error": "off", // 5
+    "preserve-caught-error": "off", // 4
     "unicorn/no-useless-spread": "off", // 4
     "unicorn/prefer-string-starts-ends-with": "off", // 2
     "no-underscore-dangle": "off", // 2

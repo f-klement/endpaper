@@ -26,7 +26,7 @@ repeat the argument.
 <!-- index: begin -->
 | Section | Entry | Words |
 |---|---|---|
-|  | [Backend](decisions.md#backend) | 34,978 |
+|  | [Backend](decisions.md#backend) | 35,011 |
 | Backend | [`bcrypt` directly, not `passlib`](decisions.md#bcrypt-directly-not-passlib) | 98 |
 | Backend | [Settings are functions, not module constants](decisions.md#settings-are-functions-not-module-constants) | 59 |
 | Backend | [`DATA_DIR` exists at all](decisions.md#data_dir-exists-at-all) | 22 |
@@ -142,7 +142,7 @@ repeat the argument.
 | Backend | [One bulk endpoint, not six](decisions.md#one-bulk-endpoint-not-six) | 39 |
 | Backend | [`unrated` names its correlation explicitly](decisions.md#unrated-names-its-correlation-explicitly) | 43 |
 | Backend | [Python 3.14 is a hard requirement, and PEP 649 is why](decisions.md#python-314-is-a-hard-requirement-and-pep-649-is-why) | 34 |
-| Backend | [The test suites were slow for reasons nobody had measured](decisions.md#the-test-suites-were-slow-for-reasons-nobody-had-measured) | 451 |
+| Backend | [The test suites were slow for reasons nobody had measured](decisions.md#the-test-suites-were-slow-for-reasons-nobody-had-measured) | 484 |
 | Backend | [The per-test reset deletes rows, and two faster designs were refused](decisions.md#the-per-test-reset-deletes-rows-and-two-faster-designs-were-refused) | 475 |
 | Backend | [The per test ceiling is derived from the tree, not chosen from a distribution](decisions.md#the-per-test-ceiling-is-derived-from-the-tree-not-chosen-from-a-distribution) | 274 |
 | Backend | [A verdict is a claim about a denominator, and the layer everyone reads had none](decisions.md#a-verdict-is-a-claim-about-a-denominator-and-the-layer-everyone-reads-had-none) | 502 |
@@ -523,14 +523,14 @@ repeat the argument.
 |  | [Encoding is decided per byte where the file is UTF-8, and per file where it is not](decisions.md#encoding-is-decided-per-byte-where-the-file-is-utf-8-and-per-file-where-it-is-not) | 594 |
 |  | [The duplicate 409 withholds the id, and does not hide which case it was](decisions.md#the-duplicate-409-withholds-the-id-and-does-not-hide-which-case-it-was) | 156 |
 |  | [A guard's file set is derived from the publish gate, never listed beside it](decisions.md#a-guards-file-set-is-derived-from-the-publish-gate-never-listed-beside-it) | 686 |
-|  | [The ignore file rule had three homes with three refusal shapes, and one module replaced them](decisions.md#the-ignore-file-rule-had-three-homes-with-three-refusal-shapes-and-one-module-replaced-them) | 1,621 |
+|  | [The ignore file rule had three homes with three refusal shapes, and one module replaced them](decisions.md#the-ignore-file-rule-had-three-homes-with-three-refusal-shapes-and-one-module-replaced-them) | 1,634 |
 |  | [The ASCII narrowing rule is about alphanumeric predicates, not digits](decisions.md#the-ascii-narrowing-rule-is-about-alphanumeric-predicates-not-digits) | 222 |
 |  | [A MARC `700` that states no role is not an author](decisions.md#a-marc-700-that-states-no-role-is-not-an-author) | 371 |
 |  | [The heading count was already derived, and the sentence around it was wrong](decisions.md#the-heading-count-was-already-derived-and-the-sentence-around-it-was-wrong) | 64 |
 |  | [A candidate name added at the end of a list is a different change from one added in it](decisions.md#a-candidate-name-added-at-the-end-of-a-list-is-a-different-change-from-one-added-in-it) | 268 |
 |  | [A value assertion names its input only where one column feeds it](decisions.md#a-value-assertion-names-its-input-only-where-one-column-feeds-it) | 291 |
 |  | [A catalogue login is resolved by the route, never read by the module that sends it](decisions.md#a-catalogue-login-is-resolved-by-the-route-never-read-by-the-module-that-sends-it) | 524 |
-|  | [A test count is not a roster count, and the census refuses one by grammar](decisions.md#a-test-count-is-not-a-roster-count-and-the-census-refuses-one-by-grammar) | 1,523 |
+|  | [A test count is not a roster count, and the census refuses one by grammar](decisions.md#a-test-count-is-not-a-roster-count-and-the-census-refuses-one-by-grammar) | 1,526 |
 |  | [The suite runner ships the repository it belongs to, not the caller's directory](decisions.md#the-suite-runner-ships-the-repository-it-belongs-to-not-the-callers-directory) | 210 |
 |  | [The census's declaration window is bracketed where the number may be read](decisions.md#the-censuss-declaration-window-is-bracketed-where-the-number-may-be-read) | 150 |
 |  | [An unverified account may do nothing, and the admin override is what makes that safe](decisions.md#an-unverified-account-may-do-nothing-and-the-admin-override-is-what-makes-that-safe) | 212 |
@@ -824,7 +824,7 @@ repeat the argument.
 |  | [The commit subject is a publication channel, and the publish fails rather than rewriting it](decisions.md#the-commit-subject-is-a-publication-channel-and-the-publish-fails-rather-than-rewriting-it) | 265 |
 |  | [The outbound commit message is an artefact, so there is one evaluation and nothing to compare](decisions.md#the-outbound-commit-message-is-an-artefact-so-there-is-one-evaluation-and-nothing-to-compare) | 366 |
 |  | [A secret scanner that asks a library inherits the library's blind spots](decisions.md#a-secret-scanner-that-asks-a-library-inherits-the-librarys-blind-spots) | 279 |
-|  | [The sentence wider than its measurement is written by the careful seat, not the careless one](decisions.md#the-sentence-wider-than-its-measurement-is-written-by-the-careful-seat-not-the-careless-one) | 1,117 |
+|  | [The sentence wider than its measurement is written by the careful seat, not the careless one](decisions.md#the-sentence-wider-than-its-measurement-is-written-by-the-careful-seat-not-the-careless-one) | 1,118 |
 |  | [A guard's verdict can be a property of the tree rather than of the guard](decisions.md#a-guards-verdict-can-be-a-property-of-the-tree-rather-than-of-the-guard) | 567 |
 |  | [A role word can be the surname, and a flip manufactures the stop that hides it](decisions.md#a-role-word-can-be-the-surname-and-a-flip-manufactures-the-stop-that-hides-it) | 850 |
 |  | [An instrument's output is a sample until somebody derives the population](decisions.md#an-instruments-output-is-a-sample-until-somebody-derives-the-population) | 1,033 |
@@ -836,7 +836,7 @@ repeat the argument.
 |  | [A branded date type was refused, and the reason is that the branding is free and the slot is impossible](decisions.md#a-branded-date-type-was-refused-and-the-reason-is-that-the-branding-is-free-and-the-slot-is-impossible) | 480 |
 |  | [A database side default on a naive column is the one ambiguous stored value, and the wire did not make it one](decisions.md#a-database-side-default-on-a-naive-column-is-the-one-ambiguous-stored-value-and-the-wire-did-not-make-it-one) | 150 |
 |  | [The database connection's default is weaker than the mail path's, deliberately](decisions.md#the-database-connections-default-is-weaker-than-the-mail-paths-deliberately) | 348 |
-|  | [A shared corpus owes a single file caller a refusal, and the module that holds it cannot see itself](decisions.md#a-shared-corpus-owes-a-single-file-caller-a-refusal-and-the-module-that-holds-it-cannot-see-itself) | 1,233 |
+|  | [A shared corpus owes a single file caller a refusal, and the module that holds it cannot see itself](decisions.md#a-shared-corpus-owes-a-single-file-caller-a-refusal-and-the-module-that-holds-it-cannot-see-itself) | 1,231 |
 |  | [An author column on the custom field row, rather than the cheaper alternative](decisions.md#an-author-column-on-the-custom-field-row-rather-than-the-cheaper-alternative) | 240 |
 |  | [The provenance arm was widened to the declaration rather than given an exemption](decisions.md#the-provenance-arm-was-widened-to-the-declaration-rather-than-given-an-exemption) | 142 |
 |  | [A schema declaration counts as a read of a guarded column](decisions.md#a-schema-declaration-counts-as-a-read-of-a-guarded-column) | 234 |
@@ -869,7 +869,8 @@ repeat the argument.
 |  | [A security waiver in the application stays at its line, and is held by value](decisions.md#a-security-waiver-in-the-application-stays-at-its-line-and-is-held-by-value) | 449 |
 |  | [A suppression comment is read the way ruff reads it, and may not name a policing rule](decisions.md#a-suppression-comment-is-read-the-way-ruff-reads-it-and-may-not-name-a-policing-rule) | 321 |
 |  | [A parsed XML document is bounded by depth while it parses, and fed to its parser in chunks](decisions.md#a-parsed-xml-document-is-bounded-by-depth-while-it-parses-and-fed-to-its-parser-in-chunks) | 341 |
-|  | [The coverage register's write is printed in a loop until every byte is out](decisions.md#the-coverage-registers-write-is-printed-in-a-loop-until-every-byte-is-out) | 209 |
+|  | [The coverage register's refusal is printed in a loop until every byte is out](decisions.md#the-coverage-registers-refusal-is-printed-in-a-loop-until-every-byte-is-out) | 104 |
+|  | [The coverage registers carry a row per test file and no figure](decisions.md#the-coverage-registers-carry-a-row-per-test-file-and-no-figure) | 695 |
 |  | [`Shelf.matching` is left whole although ruff's C901 counts it over ten](decisions.md#shelfmatching-is-left-whole-although-ruffs-c901-counts-it-over-ten) | 79 |
 |  | [LDAP TLS is checked in the handshake by the standard library, and referrals are not followed](decisions.md#ldap-tls-is-checked-in-the-handshake-by-the-standard-library-and-referrals-are-not-followed) | 176 |
 |  | [A parsed XML document is bounded by its namespaces, names, attributes and density](decisions.md#a-parsed-xml-document-is-bounded-by-its-namespaces-names-attributes-and-density) | 337 |
@@ -877,7 +878,7 @@ repeat the argument.
 |  | [A helper reached only from a sheltered create is sheltered](decisions.md#a-helper-reached-only-from-a-sheltered-create-is-sheltered) | 117 |
 |  | [The classifications call graph types a receiver, and falls back by name only to what builds a heading](decisions.md#the-classifications-call-graph-types-a-receiver-and-falls-back-by-name-only-to-what-builds-a-heading) | 127 |
 |  | [A runner export that draws is found by parse, and the parse is held to the real export list](decisions.md#a-runner-export-that-draws-is-found-by-parse-and-the-parse-is-held-to-the-real-export-list) | 117 |
-|  | [A hand plant is a mode of the mutation sweep, run with the coverage registers off](decisions.md#a-hand-plant-is-a-mode-of-the-mutation-sweep-run-with-the-coverage-registers-off) | 210 |
+|  | [A hand plant is a mode of the mutation sweep](decisions.md#a-hand-plant-is-a-mode-of-the-mutation-sweep) | 158 |
 |  | [A bounded run's timeout is read off a marker, not off the timer's exit status](decisions.md#a-bounded-runs-timeout-is-read-off-a-marker-not-off-the-timers-exit-status) | 79 |
 |  | [One home for what this project wrote, and a ratchet on call sites instead of policing walks](decisions.md#one-home-for-what-this-project-wrote-and-a-ratchet-on-call-sites-instead-of-policing-walks) | 581 |
 |  | [The internal declaration rule has one copy per language, spelled for the pipeline's engine](decisions.md#the-internal-declaration-rule-has-one-copy-per-language-spelled-for-the-pipelines-engine) | 286 |
@@ -939,7 +940,6 @@ repeat the argument.
 |  | [The scan queue's rules live in a pure module, whose interface is an event](decisions.md#the-scan-queues-rules-live-in-a-pure-module-whose-interface-is-an-event) | 320 |
 |  | [A queue row's state fields are declared absent on every arm that cannot carry them](decisions.md#a-queue-rows-state-fields-are-declared-absent-on-every-arm-that-cannot-carry-them) | 577 |
 | A queue row's state fields are declared absent on every arm that cannot carry them | [The `batch-ran` event carries row facts, by design](decisions.md#the-batch-ran-event-carries-row-facts-by-design) | 77 |
-|  | [The register writer accepts a log from another path when both trees are clean at one commit](decisions.md#the-register-writer-accepts-a-log-from-another-path-when-both-trees-are-clean-at-one-commit) | 524 |
 |  | [Landing a picked file on a Book has one home, `lib/fileLanding.ts`](decisions.md#landing-a-picked-file-on-a-book-has-one-home-libfilelandingts) | 261 |
 |  | [A file another Book holds stays there, and the book's other files are still sent](decisions.md#a-file-another-book-holds-stays-there-and-the-books-other-files-are-still-sent) | 184 |
 |  | [A location held only by a Book the file may not land on is not sent](decisions.md#a-location-held-only-by-a-book-the-file-may-not-land-on-is-not-sent) | 106 |
@@ -970,4 +970,6 @@ repeat the argument.
 |  | [The keep-updated label is the one exception to rebasing only on conflict](decisions.md#the-keep-updated-label-is-the-one-exception-to-rebasing-only-on-conflict) | 307 |
 |  | [The advisory audit is a job of its own, and still gates every publish](decisions.md#the-advisory-audit-is-a-job-of-its-own-and-still-gates-every-publish) | 226 |
 |  | [No guard that every long explicit test timeout carries a reason](decisions.md#no-guard-that-every-long-explicit-test-timeout-carries-a-reason) | 73 |
+|  | [The CI backend suite runs four workers on four CPUs; addopts stays at two](decisions.md#the-ci-backend-suite-runs-four-workers-on-four-cpus-addopts-stays-at-two) | 297 |
+|  | [The tree guard selection asks the corpus instead of a shell copy of it](decisions.md#the-tree-guard-selection-asks-the-corpus-instead-of-a-shell-copy-of-it) | 373 |
 <!-- index: end -->

@@ -731,10 +731,8 @@ function escaped(text: string, marks: RegExp): string {
  * **A rule group here is a local table feeding one `it.each`, and each caller
  * holds its own table against a written list of these.** Without that list a
  * row can be deleted in silence: the generator makes one arm fewer, nothing
- * else reads the table, and the only thing that moves is the frontend
- * coverage register, which a merge re-renders as a matter of course, so the
- * one trace of a case leaving is erased by the ordinary process that follows
- * it.
+ * else reads the table, and the only thing that moves is the run's own test
+ * count, which nothing compares, so a case leaves without a trace.
  *
  * **What holds the lists themselves is `a table driven rule group is held by
  * a pin on one declaration`, and two things it does not hold are written
@@ -10522,9 +10520,9 @@ describe("the corpus under src has one pattern", () => {
  * **Closing it needs a derivation of the tree that is not a glob, and
  * `tests/COVERAGE.md` is the wrong one rather than the only one.** Its
  * reporter already checks a row per collected file, and a corpus guard
- * standing on it would be red on every branch that adds a test, for reasons
- * that have nothing to do with the corpus, which is how a rule teaches
- * people to edit it. A filesystem walk is the other candidate and is not
+ * standing on it would be red whenever a row is missing, for reasons that
+ * have nothing to do with the corpus, which is how a rule teaches people to
+ * edit it. A filesystem walk is the other candidate and is not
  * refused here: `node:fs` is already imported across this test tree and the
  * type check is green on it, so the dependency is paid. What is missing is a
  * measurement of what it costs and how it behaves under the container
