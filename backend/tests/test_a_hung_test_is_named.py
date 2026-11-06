@@ -151,6 +151,10 @@ def run_a_bounded_inner_pytest(
         "pytest",
         "-p",
         "no:cacheprovider",
+        # The plugin is installed for the handoff checks and loads by entry point; this
+        # run owns its configuration, order and seed included.
+        "-p",
+        "no:randomly",
         "-q",
         f"--junitxml={project / 'report.xml'}",
     ]

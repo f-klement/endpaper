@@ -341,11 +341,25 @@ class TestTheCensusMeasuresRatherThanAgrees:
 
         assert found == {"test_planted.py", "helpers.py"}
 
-    def test_the_run_reports_reaching_the_module_asking(self, reached: dict[str, str]) -> None:
+    def test_the_run_reports_reaching_the_module_asking(
+        self, reached: dict[str, str], request: pytest.FixtureRequest
+    ) -> None:
         """A hook nobody calls reads as a run that reached nothing, which skips
         the rule above on every run: the silent direction. This module is
-        running, so it was reached."""
-        assert reached.get(Path(__file__).name) == "passed", sorted(reached)[:5]
+        running, so it was reached.
+
+        **Unless the run named a node inside it**, as the tree guard mode names
+        a declared class and a seeded rerun names a test: pytest then reports
+        no module on the way, so the file is left unjudged rather than read as
+        empty, which is what is asserted instead."""
+        here = Path(__file__).name
+        named_inside = any(
+            "::" in arg and Path(arg.split("::")[0]).name == here for arg in request.config.args
+        )
+        if named_inside:
+            assert here not in reached, sorted(reached)[:5]
+        else:
+            assert reached.get(here) == "passed", sorted(reached)[:5]
 
 
 def _planted(counts: dict[str, int], on_disk: set[str]) -> Census:

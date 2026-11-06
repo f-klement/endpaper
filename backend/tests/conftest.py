@@ -112,6 +112,32 @@ for _profile, _examples in PROPERTY_PROFILES.items():
 ACTIVE_PROPERTY_PROFILE = os.environ.get("HYPOTHESIS_PROFILE", "suite")
 hypothesis_settings.load_profile(ACTIVE_PROPERTY_PROFILE)
 
+#: How many times the global per test ceiling a property gets under a profile
+#: deeper than `suite`.
+#:
+#: **A property's time grows with its example count, and the global ceiling was
+#: sized for the suite's.** The deep run shares its machine with the rest of the
+#: suite in CI, a case its measurement did not cover, so at the global ceiling a
+#: slower example reds the run with a timeout rather than a counterexample.
+#: Doubled rather than scaled by ten, because the ceiling is still what names a
+#: hang, and it has to fire inside the job's own bound; the pipeline tests hold
+#: that order for any job that loads a deep profile.
+DEEP_PROPERTY_CEILING_FACTOR = 2
+
+
+def deep_property_ceiling(global_ceiling: float, max_examples: int) -> float | None:
+    """The per test ceiling a property runs under, or None to keep the global.
+
+    Judged by the examples the loaded profile spends rather than by its name,
+    because `--hypothesis-profile` on the command line wins over the variable
+    this module reads. A falsy global ceiling is pytest-timeout's "off", and
+    stays off.
+    """
+    if not global_ceiling or max_examples <= PROPERTY_PROFILES["suite"]:
+        return None
+    return global_ceiling * DEEP_PROPERTY_CEILING_FACTOR
+
+
 # ── Environment must be set before the app is imported ────────────────────────
 
 
@@ -1113,8 +1139,19 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
 
     **A mark without a reason is refused on every engine**, so the refusal reaches
     the author on the run they make rather than on a Postgres run they do not.
+
+    **Under a deep profile, a `property` test also gets `deep_property_ceiling`**
+    as its timeout marker. A test carrying its own marker keeps it: that site
+    already decided its ceiling.
     """
+    ceiling = deep_property_ceiling(config.getoption("timeout"), hypothesis_settings().max_examples)
     for item in items:
+        if (
+            ceiling is not None
+            and item.get_closest_marker("property") is not None
+            and item.get_closest_marker("timeout") is None
+        ):
+            item.add_marker(pytest.mark.timeout(ceiling))
         for mark in item.iter_markers(sqlite_only.MARK):
             try:
                 reason = sqlite_only.reason_of(mark.args, mark.kwargs)

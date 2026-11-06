@@ -17461,6 +17461,65 @@ first time, which is the defect this whole ticket was opened for wearing differe
 The cost is that a failure may not reproduce on a rerun, so `print_blob` is on and the
 shrunk example is in the output.
 
+## The thorough property run is a release path job, and its red stops the release
+
+`test:properties-thorough` runs `-m property` under `HYPOTHESIS_PROFILE=thorough` on every tag
+and on the unattended patch branch, the rules test:postgres runs under, and on no push
+pipeline, whose 25 minute bound has no room for it.
+
+**On the patch branch as well as the tag**, because `autopatch:verify` tags only a commit whose
+branch pipeline went green, and tags that same sha: a red on the branch stops the night before
+a tag exists, where on the tag alone it would stop the release after one.
+
+**Seeded by the commit, `--hypothesis-seed=$CI_COMMIT_SHA`**, and this is what makes the line
+above true. Unseeded, the tag run draws a fresh sample, so a counterexample the branch run
+missed can still red the tag. With the seed, the tag replays the examples the branch passed, a
+rerun of a red job replays its counterexample, and a release sha run by hand before tagging
+draws what the tag will draw. **That holds for a property that is itself deterministic.**
+Hypothesis chooses each next example from the outcomes so far, so a property over code that
+reads the clock, iterates a set under a per process hash seed or touches the network diverges
+after its first differing call, and no arm proves any property deterministic.
+
+**This narrows "Not derandomised" above, for this one job, and keeps its purpose.** That
+decision refuses a fixed seed because a fixed seed makes every run the same sweep, which can
+never find what it did not find the first time. The seed here changes with every commit, so
+each new commit still searches new inputs; only runs of the same sha repeat, and those are the
+runs that must agree. The cost is that rerunning the job on one sha explores nothing new.
+
+**Its red blocks the release.** release:build needs it, and publish:github needs it optionally,
+a gate on a v* tag. A counterexample is a defect in a property the tree states as true:
+`deadline=None` removes the wall clock, and `print_blob` names the shrunk example. The cost is
+that a defect only 2,000 examples reach, sitting in code unchanged since the last release, can
+stop a release that did not touch it. The loud outcome is preferred over a release shipped over
+a known false property.
+
+**A red night holds the nightly patches until a hand cut release.** The patch branch is cut
+from the last release tag, so a fix that lands on `main` never reaches it, and each night's
+patch commit is a new seed, so the counterexample may or may not show again. When the night
+goes red on a counterexample, the owner pins the `print_blob` example as its own test, fixes it
+on `main`, and cuts a release by hand; the next night cuts from that tag. A security patch that
+cannot wait goes out in that hand cut release as well.
+
+**Every property gets twice the global per test ceiling under this profile.** One property's
+time grows with its example count: the slowest took 226 s against a 360 s ceiling on an idle
+node, and on a tag the job shares that node with test:backend, which was not measured. A
+timeout there reds a release naming no counterexample. `deep_property_ceiling` in
+`tests/conftest.py` doubles the ceiling for `property` tests when the loaded profile spends
+more than `suite`, and leaves a ceiling switched off (`--timeout=0`) off. Ordering the job
+after test:backend instead was refused: it adds the job's whole run, about six minutes, to the
+tag pipeline's critical path.
+
+**The hang margin is held as the ceiling under the job bound, not as the ceiling plus the
+run.** The pipeline tests hold 720 s below the job's 1,500 s, the same ordering rule every
+reporting job is held to. A hang that begins after 780 s of run is reaped by the job bound and
+named by nothing. Accepted because the whole job measured 347 s on `builder` with nothing else
+running, so the run would have to more than double before a hang could land past the margin;
+the first tag's budget printout is the figure to read this against.
+
+**The schemathesis contract tests are in the selection and are not deepened.**
+`tests/api_contract.py` sets its own budget of 20 examples per operation, which wins over any
+profile, so they spend here what they spend in the suite.
+
 ## A generator is derived from the rule, and a witness beside it proves it still reaches the class
 
 **A property is only a claim about the inputs its generator can produce, and a weakened
@@ -24180,3 +24239,185 @@ the selection adds itself: both roots asked, and the paths the pod is never ship
 
 **No test is exempted from the run judging its branch.** A guard red by construction on a branch is
 raised as a decision instead.
+
+## The handoff checks report what a branch's tests lost, after the suite in the same pod
+
+The suite runner's tree guard mode runs three checks over a branch's changed tests: which of
+them pass on the base's code, which assertions a test lost, and which give mixed outcomes
+between seeds 1 to 5 of pytest-randomly.
+
+### The checks are a stage of the tree guard mode, not a sibling mode
+
+The suite runner's tree guard mode already derives the merge base and the changed paths
+and already runs once per handoff in the suite pod. A sibling mode would derive both again
+and start a second pod (its dependency sync and start, tens of seconds each run). So the mode hands
+the base and the paths to the runner in `ENDPAPER_CI_HANDOFF_*`, the runner ships `git archive`
+of the base into the pod's own `/tmp`, and runs the checks after the suite in the same pod.
+`--handoff-budget=0` turns them off for one run.
+
+**Budget and limit: 180 s for the three, 60 s per seeded rerun**, measured on `builder`. Only
+the tree guard mode sets them: the suite runner unsets an inherited `ENDPAPER_CI_HANDOFF_*`, so a
+plain targeted run pays nothing, and the runner refuses a base that is not a full sha, since
+it is a word in `git archive`'s argv.
+
+### Reports, never a failure
+
+A finding needs a reader's judgement (a removed test may be dead, a literal may be a corrected
+expectation), and a check that failed the run would be argued with by editing the test, which
+is the weakening it looks for.
+
+### A changed test is read off the syntax tree, not the diff
+
+The pod has no `.git`, and both sides are already there. A test is changed when it is new, or
+its definition's tree differs from the base's; a new name holding a base test's decorators,
+arguments and body is a rename or move and is not changed, since it would pass at base by
+being the same test. The cost: a test changed only through a fixture or helper is not rerun.
+
+### A lost assert is judged by what it checked, not by a count
+
+A split, a fold into `parametrize` and asserts moved into a helper are the edits a review asks
+for, and reported as findings they teach the reader to skip the section. So they print apart,
+as `perhaps a refactor`, outside the findings count. Counting asserts per test and per file
+could not tell them from a weakening: two fix rounds tuned that count in opposite directions,
+one letting an assert dropped beside a new test through as a helper move, the next calling a
+split that kept the test's name a finding. Counts cannot tell an assert moved from an assert
+dropped.
+
+So an assert is kept when its check, the syntax tree of what it asserts without positions or
+message, is still made somewhere in the branch's changed test files, counted as a multiset,
+with a kept test matched against its own branch side first and a literal change inside one
+test left to the literal rule. The two sides of a lone `==` or `!=` are put in one order first,
+so `1 == x` matches `x == 1`. Any other rewording (a merged tuple compare, a renamed local,
+`self.assertEqual` becoming `assert`) reads as a lost check; the line names the check, so each
+is quick to dismiss, and a general equivalence is not worth building. A shortened literal
+`parametrize` list is a finding, under the same name or a rename, and a reworded assertion
+message is no changed literal.
+
+**The count and cases rule stays only where the checks are not all still made**: a fold, whose
+literals change, and a kept test whose asserts moved into a parametrised helper. There the
+file's new tests, weighted by their cases, and the cases a kept test's literal list gained must
+hold at least the gone tests' cases and the assertions they run. A gone test's empty literal
+list counts as no cases. A new test whose list is not a literal, or a kept test whose list is
+no longer a literal or that gained one that is not, leaves the gone tests `perhaps`, since only
+a run could count it.
+
+**The pool a dropped check is credited from leaves out the base's own assertions outside test
+functions.** Without that, a helper or fixture in a changed file that already made the check
+paid for every test dropping it, with no line: at `main` 4b0b1249, 241 of the 13,640 asserts
+inside test functions had such a copy, in 29 of 202 test files. Over the 350 most recent
+commits on `main` changing a backend test file, the subtraction changed no verdict. A
+`perhaps` line names only the places that hold more copies of the check in the branch than at
+base, so an untouched helper that already made the check is not offered as the place that
+proves it kept.
+
+### What it lets through, accepted
+
+- **A check dropped from one test beside an equal one added to another reads as a move.** That
+  is a split keeping the name, the honest case; the dishonest one needs the same check written
+  twice, and a finding an honest split raises teaches the reader to skip findings.
+- **An unrelated case added to a kept test beside a dropped test reads as a fold**, the same
+  let through a new test already has.
+- **A fold into a kept test whose named constant grew is still a finding.** `cases` counts only
+  a literal list, so a test over a name bound to a list that gained the gone test's case is not
+  credited. Across `backend/tests` at the reviewed tip, 11 of 675 `parametrize` decorators take
+  a name bound to a module level literal in their own file, in 6 files: a false finding there
+  costs a reader one line, and resolving names is more than this check is worth.
+- **A renamed test or helper can be named as a gained place beside the real payer.** A gain is
+  judged per place name, so a rename reads as a place that gained. It changes only the line's
+  text, never a verdict: no probe found a line naming a non payer alone, and dropping the real
+  payer turns the line into a finding. Pairing places across renames is a design change for a
+  cosmetic gain.
+- **A helper moved between a changed `test_*.py` file and a file the check does not read**,
+  `conftest.py` among them, shifts the multiset by one, and the `Weakenings` docstring says so.
+  Moved out, an honest split reads as a finding; moved in, its check pays for one dropped.
+  Reading conftest and helper modules would close it, and that is a design round for a check
+  that never fails a run.
+
+### The seeded reruns turn pytest-randomly on for themselves
+
+Every pytest run the checks make passes `-p no:randomly` except the five seeded reruns, which
+pass `-p randomly` after addopts' own `-p no:randomly`. **No guard refuses a nested pytest run
+that loads pytest-randomly through its own configuration.** One site did, the collecting stub's
+nested run in the suite runner's status guard, which reads the planted tree's configuration
+rather than the repository's addopts and went red about one run in two; it now passes
+`-p no:randomly` itself. A grep of the tree found no other nested run of that shape, and a
+guard for a shape with no second instance is not worth its upkeep.
+
+### The register's reach check is fixed in the test, not in the mode or the declaration
+
+Pytest emits no collect report for a module it passes on the way to a node named by id, so
+`test_the_run_reports_reaching_the_module_asking` was red on any id run: the checks' own seeded
+reruns, the tree guard mode naming a declared class, and a plain `pytest file::test`. Moving the
+test out of the declared class left the reruns red under every seed. So the test asserts what is
+true on each kind of run: reached as passed when the module was collected whole, left unjudged
+when a node inside it was named.
+
+### HYPOTHESIS_PROFILE is carried into the pod, not refused
+
+Carried, with the suite profile as the default, and refused only when it is not a Python name,
+because it is written into the pod manifest. Refusing every set value would remove the
+documented way of asking for the thorough profile through the runner.
+
+## The mutation sweep narrows each mutant's run to the tests whose coverage contexts reach it
+
+A recording arm runs the selection once under coverage with per test contexts, and each mutant
+then runs only the tests recorded as executing its function. A wall clock `--budget` bounds the
+whole sweep and names each mutant it left unrun.
+
+### Narrowing by coverage is for the sweep only
+
+A sweep asks which tests execute a function; a tree guard reads files without executing them,
+so selecting the ordinary suite by coverage would drop it. Mutation stays out of CI.
+
+### The coverage configuration and the contexts plugin live in a dotted directory of the copy
+
+The recording arm needs `core = "ctrace"`. It is written into the sweep's own copy as
+`.mutation-sweep/mutation-sweep-coverage.toml` and named with `--cov-config`, with `include`
+set to the mutated files, beside a plugin loaded with `-p` that prints only the per line
+contexts. `-o pythonpath` reaches the plugin: the project's own `pythonpath` from
+`[tool.pytest.ini_options]`, read as a list or as one string split the way pytest splits it,
+then `../.mutation-sweep`. Both files are removed once the recording arm ends. The project's
+`[tool.coverage]` tables stay as they were.
+
+Why: the pin is a fact about one consumer, pytest-cov's per test contexts, and every other
+coverage run on 3.14 keeps the faster default core. A past commit can be swept with today's
+tool without editing its pyproject. The plugin replaces coverage's JSON report, which repeated
+every line's contexts inside each function and class region: 42,972,112 bytes on the backup
+change against 1,562,033 for the table the sweep reads. The directory is dotted because every
+population in `backend/tests/corpus.py` takes a dotted part for a tool's: placed in `backend/`,
+the plugin was an application module to the guards walking those populations during the
+recording arm. A walk that readmits every directory still reads both files. The project's
+entries come first on `pythonpath` so that `sys.path` otherwise matches the controls and the
+mutant arms. A commit lacking `pythonpath` should now import the plugin too, where before its
+recording went red and fell back: pytest 9 applies `pythonpath` before it imports a `-p`
+plugin, read from its source and not run on such a commit.
+
+What it costs: someone running `pytest --cov-context=test` by hand gets the under recording
+`sys.monitoring` does, and the sweep's under recorded tripwire is the only guard, and only for
+the sweep. A commit that configures pytest outside `[tool.pytest.ini_options]` gets the
+plugin's directory alone on its path, and a recording that goes red for it falls back to the
+whole selection.
+
+### More than one contexts line refuses narrowing
+
+The plugin prints its line once, so a second is a test printing the mark, and either could be
+the narrower of the two. Taking the last let a test narrow every arm; taking the first is the
+same bet the other way round. NOT NARROWED costs time and never a verdict. The match is
+anchored to a line's start, so a failure summary quoting the mark is not taken for it.
+
+### A red recording baseline runs a plain baseline before the sweep is refused
+
+A suite red only under coverage is a fact about the recording, so the sweep falls back to the
+whole selection rather than refusing a tree that is green. Cost: a tree genuinely red pays one
+extra suite run before the refusal.
+
+### Every distinct set of tests the arms run is run on the shipped tree first
+
+A narrowed arm runs a different command from the baseline: fewer tests, and no tracer. A test
+leaning on one dropped from its worker, or green only under ctrace, is red without any mutant,
+and that red on a mutant arm read as a catch. So each distinct set runs unmutated first, and a
+mutant whose control did not pass is INVALID, never run. INVALID rather than a fallback to the
+whole selection, because the fallback would need its own control and the red names are the
+finding a seat acts on. Cost: one run per distinct set, shared by every arm running it; a plain
+baseline is already the control for the whole selection. A red that depends on how
+`--dist loadfile` shares files among workers can still pass its control and read as a catch.

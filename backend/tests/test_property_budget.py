@@ -34,12 +34,19 @@ worse copy of one that already exists.
 """
 
 import ast
+from typing import cast
 
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from tests.conftest import ACTIVE_PROPERTY_PROFILE, PROPERTY_PROFILES
+from tests.conftest import (
+    ACTIVE_PROPERTY_PROFILE,
+    DEEP_PROPERTY_CEILING_FACTOR,
+    PROPERTY_PROFILES,
+    deep_property_ceiling,
+    pytest_collection_modifyitems,
+)
 from tests.corpus import BACKEND, suite_modules
 from tests.test_house_rules import is_generated
 
@@ -106,6 +113,69 @@ class TestTheBudgetIsSpent:
         """Otherwise there is one profile wearing two names, and the deep run is
         something somebody believes they did."""
         assert settings.get_profile("thorough").max_examples > settings.get_profile("suite").max_examples
+
+
+class TestADeepRunGivesEachPropertyALongerCeiling:
+    """`deep_property_ceiling` in `conftest.py` says why the deep run needs one."""
+
+    def test_the_suite_profile_keeps_the_global_ceiling(self):
+        assert deep_property_ceiling(360, PROPERTY_PROFILES["suite"]) is None
+
+    def test_every_deeper_profile_multiplies_the_global_ceiling(self):
+        for name, examples in PROPERTY_PROFILES.items():
+            if examples > PROPERTY_PROFILES["suite"]:
+                assert deep_property_ceiling(360, examples) == 360 * DEEP_PROPERTY_CEILING_FACTOR, name
+
+    def test_a_ceiling_switched_off_stays_off_under_a_deep_profile(self):
+        """`--timeout=0` is pytest-timeout's "off", so a deep run reproduced with
+        it is not handed a ceiling of zero."""
+        assert deep_property_ceiling(0, PROPERTY_PROFILES["thorough"]) is None
+
+    def test_the_collection_hook_gives_a_property_the_deep_ceiling(self):
+        """The arm below reads the hook's wiring only at the profile its run
+        loaded, which in every suite run is `suite`, where the hook adds nothing.
+        This one loads the deep profile, so dropping the marker from the hook
+        reds the ordinary suite rather than only the release path job."""
+
+        class Item:
+            nodeid = "tests/test_x.py::test_x"
+
+            def __init__(self) -> None:
+                self.own = [pytest.mark.property.mark]
+
+            def get_closest_marker(self, name: str):
+                return next((m for m in reversed(self.own) if m.name == name), None)
+
+            def add_marker(self, marker) -> None:
+                self.own.append(marker.mark)
+
+            def iter_markers(self, name: str):
+                return (m for m in self.own if m.name == name)
+
+        class Config:
+            @staticmethod
+            def getoption(name: str):
+                assert name == "timeout", name
+                return 360
+
+        item = Item()
+        settings.load_profile("thorough")
+        try:
+            pytest_collection_modifyitems(cast(pytest.Config, Config()), cast(list[pytest.Item], [item]))
+        finally:
+            settings.load_profile(ACTIVE_PROPERTY_PROFILE)
+        marker = item.get_closest_marker("timeout")
+        assert marker is not None, item.own
+        assert marker.args == (360 * DEEP_PROPERTY_CEILING_FACTOR,), item.own
+
+    @pytest.mark.property
+    def test_this_property_runs_under_the_ceiling_its_profile_gives(self, request: pytest.FixtureRequest):
+        """Asked of a running property, so the hook's wiring is read on every run
+        at whatever profile it loaded: the suite's in every suite run, a deep one
+        in the release path job."""
+        expected = deep_property_ceiling(request.config.getoption("timeout"), settings().max_examples)
+        marker = request.node.get_closest_marker("timeout")
+        assert (marker.args[0] if marker else None) == expected, (marker, expected)
 
 
 #: The two settings keywords that lower how much a test actually runs.

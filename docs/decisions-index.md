@@ -736,6 +736,7 @@ repeat the argument.
 | The container rule took five review rounds, and four of them were one defect | [Two findings answered rather than fixed, with the reason](decisions.md#two-findings-answered-rather-than-fixed-with-the-reason) | 234 |
 |  | [A comment beginning `# noqa` is a blanket suppression, whatever it goes on to say](decisions.md#a-comment-beginning--noqa-is-a-blanket-suppression-whatever-it-goes-on-to-say) | 121 |
 |  | [Property based tests run in the ordinary suite, and the budget is a test rather than a number](decisions.md#property-based-tests-run-in-the-ordinary-suite-and-the-budget-is-a-test-rather-than-a-number) | 565 |
+|  | [The thorough property run is a release path job, and its red stops the release](decisions.md#the-thorough-property-run-is-a-release-path-job-and-its-red-stops-the-release) | 719 |
 |  | [A generator is derived from the rule, and a witness beside it proves it still reaches the class](decisions.md#a-generator-is-derived-from-the-rule-and-a-witness-beside-it-proves-it-still-reaches-the-class) | 346 |
 |  | [The LIKE escaping has a property at one of its two sites, and the reason is the door in front of each](decisions.md#the-like-escaping-has-a-property-at-one-of-its-two-sites-and-the-reason-is-the-door-in-front-of-each) | 315 |
 |  | [`flip_catalogue_name` is stable on a name and not on a cell that is not one](decisions.md#flip_catalogue_name-is-stable-on-a-name-and-not-on-a-cell-that-is-not-one) | 186 |
@@ -972,4 +973,19 @@ repeat the argument.
 |  | [No guard that every long explicit test timeout carries a reason](decisions.md#no-guard-that-every-long-explicit-test-timeout-carries-a-reason) | 73 |
 |  | [The CI backend suite runs four workers on four CPUs; addopts stays at two](decisions.md#the-ci-backend-suite-runs-four-workers-on-four-cpus-addopts-stays-at-two) | 297 |
 |  | [The tree guard selection asks the corpus instead of a shell copy of it](decisions.md#the-tree-guard-selection-asks-the-corpus-instead-of-a-shell-copy-of-it) | 373 |
+|  | [The handoff checks report what a branch's tests lost, after the suite in the same pod](decisions.md#the-handoff-checks-report-what-a-branchs-tests-lost-after-the-suite-in-the-same-pod) | 1,407 |
+| The handoff checks report what a branch's tests lost, after the suite in the same pod | [The checks are a stage of the tree guard mode, not a sibling mode](decisions.md#the-checks-are-a-stage-of-the-tree-guard-mode-not-a-sibling-mode) | 150 |
+| The handoff checks report what a branch's tests lost, after the suite in the same pod | [Reports, never a failure](decisions.md#reports-never-a-failure) | 41 |
+| The handoff checks report what a branch's tests lost, after the suite in the same pod | [A changed test is read off the syntax tree, not the diff](decisions.md#a-changed-test-is-read-off-the-syntax-tree-not-the-diff) | 72 |
+| The handoff checks report what a branch's tests lost, after the suite in the same pod | [A lost assert is judged by what it checked, not by a count](decisions.md#a-lost-assert-is-judged-by-what-it-checked-not-by-a-count) | 472 |
+| The handoff checks report what a branch's tests lost, after the suite in the same pod | [What it lets through, accepted](decisions.md#what-it-lets-through-accepted) | 307 |
+| The handoff checks report what a branch's tests lost, after the suite in the same pod | [The seeded reruns turn pytest-randomly on for themselves](decisions.md#the-seeded-reruns-turn-pytest-randomly-on-for-themselves) | 104 |
+| The handoff checks report what a branch's tests lost, after the suite in the same pod | [The register's reach check is fixed in the test, not in the mode or the declaration](decisions.md#the-registers-reach-check-is-fixed-in-the-test-not-in-the-mode-or-the-declaration) | 90 |
+| The handoff checks report what a branch's tests lost, after the suite in the same pod | [HYPOTHESIS_PROFILE is carried into the pod, not refused](decisions.md#hypothesis_profile-is-carried-into-the-pod-not-refused) | 44 |
+|  | [The mutation sweep narrows each mutant's run to the tests whose coverage contexts reach it](decisions.md#the-mutation-sweep-narrows-each-mutants-run-to-the-tests-whose-coverage-contexts-reach-it) | 702 |
+| The mutation sweep narrows each mutant's run to the tests whose coverage contexts reach it | [Narrowing by coverage is for the sweep only](decisions.md#narrowing-by-coverage-is-for-the-sweep-only) | 31 |
+| The mutation sweep narrows each mutant's run to the tests whose coverage contexts reach it | [The coverage configuration and the contexts plugin live in a dotted directory of the copy](decisions.md#the-coverage-configuration-and-the-contexts-plugin-live-in-a-dotted-directory-of-the-copy) | 316 |
+| The mutation sweep narrows each mutant's run to the tests whose coverage contexts reach it | [More than one contexts line refuses narrowing](decisions.md#more-than-one-contexts-line-refuses-narrowing) | 72 |
+| The mutation sweep narrows each mutant's run to the tests whose coverage contexts reach it | [A red recording baseline runs a plain baseline before the sweep is refused](decisions.md#a-red-recording-baseline-runs-a-plain-baseline-before-the-sweep-is-refused) | 42 |
+| The mutation sweep narrows each mutant's run to the tests whose coverage contexts reach it | [Every distinct set of tests the arms run is run on the shipped tree first](decisions.md#every-distinct-set-of-tests-the-arms-run-is-run-on-the-shipped-tree-first) | 137 |
 <!-- index: end -->
