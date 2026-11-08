@@ -104,15 +104,21 @@ class Reader {
     if (char === "[" && this.longOpening() >= 0) {
       return this.longBody(this.lastLevel);
     }
-    if (char === "-") {
-      this.at += 1;
-      this.space();
-      const number = this.number();
-      if (number === null) throw new Refusal();
-      return -number;
-    }
+    if (char === "-") return this.negative();
+    return this.number() ?? this.keyword();
+  }
+
+  /** A minus sign, which Lua allows only before a number here. */
+  private negative(): number {
+    this.at += 1;
+    this.space();
     const number = this.number();
-    if (number !== null) return number;
+    if (number === null) throw new Refusal();
+    return -number;
+  }
+
+  /** `true`, `false` or `nil`; any other name is a variable, and refused. */
+  private keyword(): boolean | null {
     const word = this.word();
     if (word === "true") return true;
     if (word === "false") return false;
@@ -140,41 +146,71 @@ class Reader {
         this.at += 1;
         return table;
       }
-      let key: LuaKey;
-      if (this.source[this.at] === "[" && this.longOpeningAhead() < 0) {
-        this.at += 1;
-        const read = this.value(depth);
-        if (read === null || read instanceof Map) throw new Refusal();
-        key = read;
-        this.space();
-        if (this.source[this.at] !== "]") throw new Refusal();
-        this.at += 1;
-        this.expect("=");
-        table.set(key, this.value(depth));
+      // The key first, because a field spells it first: `[k] = v`, `name = v`,
+      // or a bare `v` that takes the next position.
+      const key = this.fieldKey(depth);
+      const value = this.value(depth);
+      if (key === null) {
+        table.set(next, value);
+        next += 1;
       } else {
-        const mark = this.at;
-        const word = this.word();
-        this.space();
-        if (
-          word !== null &&
-          this.source[this.at] === "=" &&
-          this.source[this.at + 1] !== "="
-        ) {
-          this.at += 1;
-          table.set(word, this.value(depth));
-        } else {
-          this.at = mark;
-          table.set(next, this.value(depth));
-          next += 1;
-        }
+        table.set(key, value);
       }
-      this.space();
-      const separator = this.source[this.at];
-      if (separator === "," || separator === ";") {
-        this.at += 1;
-      } else if (separator !== "}") {
-        throw new Refusal();
-      }
+      this.separator();
+    }
+  }
+
+  /**
+   * The key of the field starting here, consuming it and its `=`, or null for
+   * a positional value. A long bracket is a string value rather than a key.
+   */
+  private fieldKey(depth: number): LuaKey | null {
+    if (this.source[this.at] === "[" && this.longOpeningAhead() < 0) {
+      return this.bracketKey(depth);
+    }
+    return this.nameKey();
+  }
+
+  /** `[key] =`: a key is a string, a number or a boolean, never nil or a table. */
+  private bracketKey(depth: number): LuaKey {
+    this.at += 1;
+    const key = this.value(depth);
+    if (key === null || key instanceof Map) throw new Refusal();
+    this.space();
+    if (this.source[this.at] !== "]") throw new Refusal();
+    this.at += 1;
+    this.expect("=");
+    return key;
+  }
+
+  /**
+   * `name =`, or null with nothing consumed: a name before `==` or before no
+   * `=` at all is the start of a positional value, which `value` refuses.
+   */
+  private nameKey(): string | null {
+    const mark = this.at;
+    const word = this.word();
+    this.space();
+    if (
+      word !== null &&
+      this.source[this.at] === "=" &&
+      this.source[this.at + 1] !== "="
+    ) {
+      this.at += 1;
+      return word;
+    }
+    this.at = mark;
+    return null;
+  }
+
+  /** The `,` or `;` between fields, or the `}` that closes the table. */
+  private separator(): void {
+    this.space();
+    const separator = this.source[this.at];
+    if (separator === "," || separator === ";") {
+      this.at += 1;
+    } else if (separator !== "}") {
+      throw new Refusal();
     }
   }
 
@@ -207,38 +243,53 @@ class Reader {
       this.at += 1;
       return ESCAPES[char]!;
     }
-    if (char === "\r") {
-      this.at += this.source[this.at + 1] === "\n" ? 2 : 1;
-      return "\n";
-    }
-    if (char === "z") {
-      this.at += 1;
-      while (/\s/.test(this.source[this.at] ?? "")) this.at += 1;
-      return "";
-    }
-    if (char === "x") {
-      const hex = this.source.slice(this.at + 1, this.at + 3);
-      if (!/^[0-9a-fA-F]{2}$/.test(hex)) throw new Refusal();
-      this.at += 3;
-      return this.byte(parseInt(hex, 16));
-    }
-    if (char === "u") {
-      const match = /^\{([0-9a-fA-F]{1,6})\}/.exec(
-        this.source.slice(this.at + 1, this.at + 9),
-      );
-      const point = match ? parseInt(match[1]!, 16) : NaN;
-      if (!match || point > 0x10ffff) throw new Refusal();
-      this.at += 1 + match[0].length;
-      return String.fromCodePoint(point);
-    }
+    if (char === "\r") return this.lineBreakEscape();
+    if (char === "z") return this.skippedSpace();
+    if (char === "x") return this.hexEscape();
+    if (char === "u") return this.unicodeEscape();
+    return this.decimalEscape();
+  }
+
+  /** A backslash before a line break: `\r\n` or a lone `\r` is one newline. */
+  private lineBreakEscape(): string {
+    this.at += this.source[this.at + 1] === "\n" ? 2 : 1;
+    return "\n";
+  }
+
+  /** `\z`, which drops the whitespace after it, line breaks included. */
+  private skippedSpace(): string {
+    this.at += 1;
+    while (/\s/.test(this.source[this.at] ?? "")) this.at += 1;
+    return "";
+  }
+
+  /** `\xXX`: exactly two hex digits, one byte. */
+  private hexEscape(): string {
+    const hex = this.source.slice(this.at + 1, this.at + 3);
+    if (!/^[0-9a-fA-F]{2}$/.test(hex)) throw new Refusal();
+    this.at += 3;
+    return this.byte(parseInt(hex, 16));
+  }
+
+  /** `\u{XXX}`: one to six hex digits, no further than U+10FFFF. */
+  private unicodeEscape(): string {
+    const match = /^\{([0-9a-fA-F]{1,6})\}/.exec(
+      this.source.slice(this.at + 1, this.at + 9),
+    );
+    const point = match ? parseInt(match[1]!, 16) : NaN;
+    if (!match || point > 0x10ffff) throw new Refusal();
+    this.at += 1 + match[0].length;
+    return String.fromCodePoint(point);
+  }
+
+  /** `\ddd`: up to three decimal digits, one byte, so no higher than 255. */
+  private decimalEscape(): string {
     const digits = /^\d{1,3}/.exec(this.source.slice(this.at, this.at + 3));
-    if (digits) {
-      const value = Number(digits[0]);
-      if (value > 255) throw new Refusal();
-      this.at += digits[0].length;
-      return this.byte(value);
-    }
-    throw new Refusal();
+    if (!digits) throw new Refusal();
+    const value = Number(digits[0]);
+    if (value > 255) throw new Refusal();
+    this.at += digits[0].length;
+    return this.byte(value);
   }
 
   /**

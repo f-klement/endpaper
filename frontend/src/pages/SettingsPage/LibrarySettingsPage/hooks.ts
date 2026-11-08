@@ -49,7 +49,11 @@ import type {
   MarcPreviewOut,
 } from "../../../api/generated/model";
 import { useInvalidate } from "../../../api/invalidate";
-import type { CalibreBook, CalibreFailure } from "../../../lib/calibre";
+import type {
+  CalibreBook,
+  CalibreFailure,
+  CalibreReading,
+} from "../../../lib/calibre";
 import {
   readSidecar,
   type SidecarHighlight,
@@ -84,6 +88,7 @@ import {
   type Held,
   type HolderQuestion,
   type Landing,
+  type LandingRequest,
 } from "../../../lib/fileLanding";
 import { locate } from "../../hooks";
 
@@ -631,6 +636,172 @@ export interface UseCalibreImportResult {
   reset: () => void;
 }
 
+/** The preview's counts and sample over the books read so far. */
+function summariseCalibre(
+  read: readonly CalibreBook[],
+  locatedBooks: number,
+  crossChecked: number,
+  filled: number,
+  disagreed: number,
+): CalibrePreview {
+  return {
+    total: read.length,
+    importable: read.filter((book) => toBookCreate(book) !== null).length,
+    withIsbn: read.filter((book) => book.isbn !== null).length,
+    withSeries: read.filter((book) => book.seriesName !== null).length,
+    withFile: read.filter((book) => book.files.length > 0).length,
+    located: locatedBooks,
+    crossChecked,
+    filled,
+    disagreed,
+    rows: read.slice(0, PREVIEW_ROWS).map((book) => ({
+      title: book.title ?? "",
+      author: book.authors[0] ?? null,
+      isbn: book.isbn,
+    })),
+  };
+}
+
+/**
+ * Open a picked database file and read it as a Calibre library.
+ *
+ * **The engine is imported here rather than at the top of the module**, so a
+ * session that never opens this card never downloads a third of a megabyte of
+ * WebAssembly. It is resolved once per pick; the module graph is cached after
+ * the first await.
+ */
+async function openCalibreLibrary(
+  file: File,
+): Promise<CalibreReading | { readonly ok: false; failure: SqliteFailure }> {
+  const [{ openSqliteFile }, { readCalibreLibrary }] = await Promise.all([
+    import("../../../lib/sqlite"),
+    import("../../../lib/calibre"),
+  ]);
+  const opened = await openSqliteFile(file);
+  if (!opened.ok) return opened;
+  try {
+    return readCalibreLibrary(opened.database);
+  } finally {
+    // Always, a library that failed to read included: the engine holds the
+    // whole file in WebAssembly memory until it is told not to.
+    opened.database.close();
+  }
+}
+
+/**
+ * Each book's files as references, by Calibre id, leaving out a book none of
+ * whose files could be located.
+ */
+async function locateEachBook(
+  held: ReadonlyMap<number, readonly File[]>,
+): Promise<Map<number, DigitalReferenceIn[]>> {
+  const references = new Map<number, DigitalReferenceIn[]>();
+  await Promise.all(
+    [...held].map(async ([id, files]) => {
+      const found = await Promise.all(files.map(locate));
+      const usable = found.filter((one) => one !== undefined);
+      if (usable.length > 0) references.set(id, usable);
+    }),
+  );
+  return references;
+}
+
+/** Where one importable Calibre book's files are, keyed for the holder lookup. */
+interface CalibreFiles {
+  readonly key: string;
+  readonly references: readonly DigitalReferenceIn[];
+}
+
+/**
+ * The books a write sends, each book's files keyed by its body, which is what
+ * the shared loop hands back, and the holder lookup's question for each book
+ * with files.
+ */
+function calibreBatch(
+  books: readonly CalibreBook[],
+  located: ReadonlyMap<number, readonly DigitalReferenceIn[]>,
+): {
+  readonly bodies: BookCreate[];
+  readonly filesOf: ReadonlyMap<BookCreate, CalibreFiles>;
+  readonly questions: HolderQuestion[];
+} {
+  const filesOf = new Map<BookCreate, CalibreFiles>();
+  const bodies: BookCreate[] = [];
+  for (const book of books) {
+    const body = toBookCreate(book);
+    if (body === null) continue;
+    bodies.push(body);
+    const references = located.get(book.id);
+    if (references !== undefined) {
+      filesOf.set(body, { key: String(book.id), references });
+    }
+  }
+  const questions: HolderQuestion[] = [...filesOf].map(
+    ([body, { key, references }]) => ({
+      key,
+      references,
+      format: body.format ?? "",
+    }),
+  );
+  return { bodies, filesOf, questions };
+}
+
+/**
+ * What `land` is asked for one book. A book with no located files was never
+ * asked about, so its holder is `undefined`, which `land` adds.
+ */
+function calibreLandingRequest(
+  body: BookCreate,
+  files: CalibreFiles | undefined,
+  held: ReadonlyMap<string, Held | null>,
+): LandingRequest<BookCreate> {
+  return {
+    body,
+    references: files?.references ?? [],
+    format: body.format ?? "",
+    held: files === undefined ? undefined : held.get(files.key),
+    // A Calibre record's identifiers are the library's own fields, never read
+    // out of a file's name.
+    identifierWasRead: true,
+  };
+}
+
+/**
+ * What a landing makes of the row on the Calibre card: a count for each
+ * outcome but three. A tie, the trash refusal and a failure are thrown, so the
+ * loop lists the book: a failure with the status the server answered, a tie as
+ * `HeldUnnamed`, and the trash refusal as itself, each of the last two with its
+ * own sentence.
+ *
+ * **A book of another format is counted, not offered**: this card has no press
+ * for the copy the scan page offers.
+ */
+function throwUnlessLanded(landing: Landing): void {
+  switch (landing.kind) {
+    case "tie":
+      throw new HeldUnnamed();
+    case "in-trash":
+    case "failed":
+      // Rethrown as the server answered, so `writeBooks` lists the row with
+      // its status, and the trash refusal as in the trash.
+      throw landing.thrown;
+    default:
+      // A kind added to `Landing` and not named in `Landed` is a compile error
+      // here rather than a book silently counted as written.
+      landing.kind satisfies Landed;
+  }
+}
+
+/**
+ * The `Landing` kinds that put the book on the shelf. Each must still be a
+ * kind of `Landing`, so one removed from it is a compile error here.
+ */
+type Landed = KindOf<
+  Landing,
+  "added" | "added-unreferenced" | "on-holder" | "other-format" | "at-ceiling"
+>;
+type KindOf<Union extends { kind: string }, Kind extends Union["kind"]> = Kind;
+
 /**
  * Bringing a Calibre library across, by the route that holds no lock on it.
  *
@@ -682,39 +853,7 @@ export function useCalibreImport(): UseCalibreImportResult {
   // state value captured when the loop started would say `false` for ever.
   const stopped = useRef(false);
 
-  function summarise(
-    read: readonly CalibreBook[],
-    locatedBooks: number,
-    crossChecked: number,
-    filled: number,
-    disagreed: number,
-  ): CalibrePreview {
-    return {
-      total: read.length,
-      importable: read.filter((book) => toBookCreate(book) !== null).length,
-      withIsbn: read.filter((book) => book.isbn !== null).length,
-      withSeries: read.filter((book) => book.seriesName !== null).length,
-      withFile: read.filter((book) => book.files.length > 0).length,
-      located: locatedBooks,
-      crossChecked,
-      filled,
-      disagreed,
-      rows: read.slice(0, PREVIEW_ROWS).map((book) => ({
-        title: book.title ?? "",
-        author: book.authors[0] ?? null,
-        isbn: book.isbn,
-      })),
-    };
-  }
-
-  /**
-   * Read the index, and report what it turned out to be.
-   *
-   * **The engine is imported here rather than at the top of the module**, so a
-   * session that never opens this card never downloads a third of a megabyte of
-   * WebAssembly. It is resolved once per pick; the module graph is cached after
-   * the first await.
-   */
+  /** Read the index, and report what it turned out to be. */
   async function read(file: File) {
     setIsReading(true);
     setFailure(null);
@@ -724,28 +863,13 @@ export function useCalibreImport(): UseCalibreImportResult {
     setLocated(new Map());
     setPreview(null);
     try {
-      const [{ openSqliteFile }, { readCalibreLibrary }] = await Promise.all([
-        import("../../../lib/sqlite"),
-        import("../../../lib/calibre"),
-      ]);
-      const opened = await openSqliteFile(file);
-      if (!opened.ok) {
-        setFailure(opened.failure);
+      const reading = await openCalibreLibrary(file);
+      if (!reading.ok) {
+        setFailure(reading.failure);
         return;
       }
-      try {
-        const reading = readCalibreLibrary(opened.database);
-        if (!reading.ok) {
-          setFailure(reading.failure);
-          return;
-        }
-        setBooks(reading.books);
-        setPreview(summarise(reading.books, 0, 0, 0, 0));
-      } finally {
-        // Always, including on the failure paths above: the engine holds the
-        // whole file in WebAssembly memory until it is told not to.
-        opened.database.close();
-      }
+      setBooks(reading.books);
+      setPreview(summariseCalibre(reading.books, 0, 0, 0, 0));
     } catch (thrown) {
       setError(thrown);
     } finally {
@@ -772,19 +896,14 @@ export function useCalibreImport(): UseCalibreImportResult {
       const merged = await crossCheckFolder(books, files, (done, total) =>
         setProgress({ done, total }),
       );
-      const references = new Map<number, DigitalReferenceIn[]>();
-      await Promise.all(
-        [...filesOfEachBook(merged.books, files)].map(async ([id, held]) => {
-          const found = await Promise.all(held.map(locate));
-          const usable = found.filter((one) => one !== undefined);
-          if (usable.length > 0) references.set(id, usable);
-        }),
+      const references = await locateEachBook(
+        filesOfEachBook(merged.books, files),
       );
 
       setBooks(merged.books);
       setLocated(references);
       setPreview(
-        summarise(
+        summariseCalibre(
           merged.books,
           references.size,
           merged.crossChecked,
@@ -810,35 +929,10 @@ export function useCalibreImport(): UseCalibreImportResult {
     setIsImporting(true);
     setResult(null);
 
-    // Keyed by the body, which is what the shared loop hands back.
-    const filesOf = new Map<
-      BookCreate,
-      {
-        readonly key: string;
-        readonly references: readonly DigitalReferenceIn[];
-      }
-    >();
-    const bodies: BookCreate[] = [];
-    for (const book of books) {
-      const body = toBookCreate(book);
-      if (body === null) continue;
-      bodies.push(body);
-      const references = located.get(book.id);
-      if (references !== undefined) {
-        filesOf.set(body, { key: String(book.id), references });
-      }
-    }
-
+    const { bodies, filesOf, questions } = calibreBatch(books, located);
     // **Asked once for the batch, before anything is added**, so a library
     // imported twice adds nothing twice, whatever its books carry. Every file
     // of a book is asked about, in the same batched requests.
-    const questions: HolderQuestion[] = [...filesOf].map(
-      ([body, { key, references }]) => ({
-        key,
-        references,
-        format: body.format ?? "",
-      }),
-    );
     const held: ReadonlyMap<string, Held | null> = await askWhoHolds(
       questions,
       (files) => findFileHolders({ files }),
@@ -847,26 +941,11 @@ export function useCalibreImport(): UseCalibreImportResult {
 
     /**
      * One book, landed by `lib/fileLanding.land`, and what that makes of it
-     * on this card: a count for each outcome but three. A tie, the trash
-     * refusal and a failure are thrown, so the loop lists the book: a failure
-     * with the status the server answered, a tie as `HeldUnnamed`, and the
-     * trash refusal as itself, each of the last two with its own sentence.
-     *
-     * **A book of another format is counted, not offered**: this card has no
-     * press for the copy the scan page offers.
+     * on this card: `throwUnlessLanded` says which outcomes the loop lists.
      */
     async function addOne(body: BookCreate) {
-      const files = filesOf.get(body);
       const landing = await land(
-        {
-          body,
-          references: files?.references ?? [],
-          format: body.format ?? "",
-          held: files === undefined ? undefined : held.get(files.key),
-          // A Calibre record's identifiers are the library's own fields,
-          // never read out of a file's name.
-          identifierWasRead: true,
-        },
+        calibreLandingRequest(body, filesOf.get(body), held),
         {
           create: (data) => scanAdd.mutateAsync({ data }),
           report: (bookId, data) =>
@@ -875,23 +954,7 @@ export function useCalibreImport(): UseCalibreImportResult {
         },
       );
       landings.push(landing);
-      switch (landing.kind) {
-        case "added":
-        case "added-unreferenced":
-        case "on-holder":
-        case "other-format":
-        case "at-ceiling":
-          return;
-        case "tie":
-          throw new HeldUnnamed();
-        case "in-trash":
-        case "failed":
-          // Rethrown as the server answered, so `writeBooks` lists the row
-          // with its status, and the trash refusal as in the trash.
-          throw landing.thrown;
-        default:
-          landing satisfies never;
-      }
+      throwUnlessLanded(landing);
     }
 
     const outcome = await writeBooks(bodies, {
@@ -1043,6 +1106,54 @@ export interface UseStoreImportResult {
 }
 
 /**
+ * Open one picked file with its store's reader, as the state its row shows.
+ * Only `error` comes from a throw.
+ */
+async function readStore(id: StoreId, file: File): Promise<StoreSource> {
+  try {
+    const reading = await STORES[id].open(file);
+    return reading.ok
+      ? { status: "read", fileName: file.name, library: reading.library }
+      : { status: "failed", fileName: file.name, failure: reading.failure };
+  } catch (thrown) {
+    // A reader answers rather than throws, so reaching here is a bug in one.
+    // It still costs one source: see `StoreSource`.
+    return { status: "error", fileName: file.name, error: thrown };
+  }
+}
+
+/** Every book that read, in the order the stores are offered. */
+function storeBooksOf(sources: StoreSources): readonly StoreBookFromSource[] {
+  return STORE_IDS.flatMap((id) => {
+    const source = sources[id];
+    if (source?.status !== "read") return [];
+    // **Paired with its source's ownership claim rather than flattened away.**
+    // Whether a store established ownership is a fact about the read, and this
+    // is the one place several reads become one list: dropping it here is what
+    // made every store import write `owned`, a library loan included.
+    const { ownershipStated } = source.library;
+    return source.library.books.map((book) => ({ book, ownershipStated }));
+  });
+}
+
+/** What the sources that read hold together, or null while none has. */
+function storePreviewOf(sources: StoreSources): StorePreview | null {
+  const read = STORE_IDS.map((id) => sources[id]).filter(
+    (source): source is Extract<StoreSource, { status: "read" }> =>
+      source?.status === "read",
+  );
+  if (read.length === 0) return null;
+  const books = read.flatMap((source) => [...source.library.books]);
+  return {
+    total: books.length,
+    // The ownership flag does not change whether a book is importable, which
+    // turns on a title, so the cheaper call is right here.
+    importable: books.filter((book) => storeToBookCreate(book, true) !== null)
+      .length,
+  };
+}
+
+/**
  * Importing from the stores a member's own devices and exports carry.
  *
  * **Several sources in one pass, and that is the shape of the rule.** A member
@@ -1106,17 +1217,7 @@ export function useStoreImport(): UseStoreImportResult {
       [id]: { status: "reading", fileName: file.name },
     }));
 
-    let answer: StoreSource;
-    try {
-      const reading = await STORES[id].open(file);
-      answer = reading.ok
-        ? { status: "read", fileName: file.name, library: reading.library }
-        : { status: "failed", fileName: file.name, failure: reading.failure };
-    } catch (thrown) {
-      // A reader answers rather than throws, so reaching here is a bug in one.
-      // It still costs one source: see `StoreSource`.
-      answer = { status: "error", fileName: file.name, error: thrown };
-    }
+    const answer = await readStore(id, file);
 
     // **What the read found is decided first and written once**, so that the
     // check below is one site rather than one per outcome. Written per outcome
@@ -1125,20 +1226,6 @@ export function useStoreImport(): UseStoreImportResult {
     // noticed in the wild and was the one arm no test reached.
     if (picks.current.get(id) !== pick) return;
     setSources((current) => ({ ...current, [id]: answer }));
-  }
-
-  /** Every book that read, in the order the stores are offered. */
-  function readBooks(): readonly StoreBookFromSource[] {
-    return STORE_IDS.flatMap((id) => {
-      const source = sources[id];
-      if (source?.status !== "read") return [];
-      // **Paired with its source's ownership claim rather than flattened away.**
-      // Whether a store established ownership is a fact about the read, and this
-      // is the one place several reads become one list: dropping it here is what
-      // made every store import write `owned`, a library loan included.
-      const { ownershipStated } = source.library;
-      return source.library.books.map((book) => ({ book, ownershipStated }));
-    });
   }
 
   /**
@@ -1150,21 +1237,7 @@ export function useStoreImport(): UseStoreImportResult {
    * render it would run again on each of the progress updates the write loop
    * makes, which is where a member is least able to afford it.
    */
-  const preview = useMemo<StorePreview | null>(() => {
-    const read = STORE_IDS.map((id) => sources[id]).filter(
-      (source): source is Extract<StoreSource, { status: "read" }> =>
-        source?.status === "read",
-    );
-    if (read.length === 0) return null;
-    const books = read.flatMap((source) => [...source.library.books]);
-    return {
-      total: books.length,
-      // The ownership flag does not change whether a book is importable, which
-      // turns on a title, so the cheaper call is right here.
-      importable: books.filter((book) => storeToBookCreate(book, true) !== null)
-        .length,
-    };
-  }, [sources]);
+  const preview = useMemo(() => storePreviewOf(sources), [sources]);
 
   /** Write them, through the loop every import on this page shares. */
   async function confirm() {
@@ -1173,7 +1246,7 @@ export function useStoreImport(): UseStoreImportResult {
     setIsImporting(true);
     setResult(null);
 
-    const bodies = readBooks()
+    const bodies = storeBooksOf(sources)
       .map(({ book, ownershipStated }) =>
         storeToBookCreate(book, ownershipStated),
       )
@@ -1393,6 +1466,48 @@ async function sendTo(
 }
 
 /**
+ * One picked file read as a sidecar, keyed by its place in the pick. A file
+ * past the parser's bound is refused unread.
+ */
+async function readPickedSidecar(file: File, picked: number) {
+  return {
+    key: `${picked}:${file.name}`,
+    name: file.name,
+    reading:
+      file.size > MAX_SOURCE_LENGTH
+        ? ({ ok: false, reason: "too-large" } as const)
+        : await file.text().then(readSidecar, () => ({
+            ok: false as const,
+            reason: "unreadable" as const,
+          })),
+  };
+}
+
+/**
+ * Send one read sidecar's marks to the one Book holding its fingerprint, or
+ * say why not. `imported` is called with the Book once its marks are written.
+ */
+async function importSidecar(
+  reading: SidecarReading & { ok: true },
+  holders: ReadonlyMap<string, ReadonlySet<number> | undefined>,
+  imported: (bookId: number) => void,
+): Promise<SidecarOutcome> {
+  if (reading.highlights.length === 0) return { kind: "empty" };
+  const books = holders.get(reading.partialMd5);
+  if (books === undefined) return { kind: "failed" };
+  if (books.size === 0) return { kind: "unmatched" };
+  if (books.size > 1) return { kind: "ambiguous" };
+  const [bookId] = [...books] as [number];
+  try {
+    const counts = await sendTo(bookId, reading.partialMd5, reading.highlights);
+    imported(bookId);
+    return { kind: "imported", ...counts, oversized: reading.oversized };
+  } catch {
+    return { kind: "failed" };
+  }
+}
+
+/**
  * Import the highlights in KOReader sidecars the member picked.
  *
  * **Matched by fingerprint and nothing else.** Each sidecar's
@@ -1412,19 +1527,7 @@ export function useKoreaderHighlightImport(): UseKoreaderHighlightImportResult {
   const [isRunning, setRunning] = useState(false);
 
   async function run(files: readonly File[]): Promise<void> {
-    const read = await Promise.all(
-      files.map(async (file, picked) => ({
-        key: `${picked}:${file.name}`,
-        name: file.name,
-        reading:
-          file.size > MAX_SOURCE_LENGTH
-            ? ({ ok: false, reason: "too-large" } as const)
-            : await file.text().then(readSidecar, () => ({
-                ok: false as const,
-                reason: "unreadable" as const,
-              })),
-      })),
-    );
+    const read = await Promise.all(files.map(readPickedSidecar));
     const digests = [
       ...new Set(
         read.flatMap(({ reading }) =>
@@ -1436,29 +1539,12 @@ export function useKoreaderHighlightImport(): UseKoreaderHighlightImportResult {
     ];
     const holders = await holdersOf(digests);
 
-    const outcomeOf = async (
-      reading: SidecarReading & { ok: true },
-    ): Promise<SidecarOutcome> => {
-      if (reading.highlights.length === 0) return { kind: "empty" };
-      const books = holders.get(reading.partialMd5);
-      if (books === undefined) return { kind: "failed" };
-      if (books.size === 0) return { kind: "unmatched" };
-      if (books.size > 1) return { kind: "ambiguous" };
-      const [bookId] = [...books] as [number];
-      try {
-        const counts = await sendTo(
-          bookId,
-          reading.partialMd5,
-          reading.highlights,
-        );
+    const outcomeOf = (reading: SidecarReading & { ok: true }) =>
+      importSidecar(reading, holders, (bookId) => {
         void queryClient.invalidateQueries({
           queryKey: getGetHighlightsQueryKey(bookId),
         });
-        return { kind: "imported", ...counts, oversized: reading.oversized };
-      } catch {
-        return { kind: "failed" };
-      }
-    };
+      });
     const done: SidecarRow[] = await Promise.all(
       read.map(async ({ key, name, reading }) =>
         reading.ok

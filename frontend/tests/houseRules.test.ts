@@ -5096,11 +5096,14 @@ describe("every wallpaper export is imported by name somewhere", () => {
     return [...sourcesAsImported(), ...testEntries()];
   }
 
+  // **Sixty seconds, because this arm parses the whole tree**: on a node at a
+  // load average near 8 it ran past vitest's five second default, red with no
+  // assertion failed.
   it("leaves none of them unreached", () => {
     expect(
       unreferenced(WALLPAPER, sourceText(WALLPAPER_MODULE), scope()),
     ).toEqual([]);
-  });
+  }, 60_000);
 
   it("is reading a door and a tree, not two empty sets", () => {
     // Both halves of the comparison, asserted: a subject with no exports and a
@@ -7855,6 +7858,9 @@ function datesRenderedRawIn(path: string, source: string): string[] {
  * down, so a sharpening that starts refusing one reds by name.
  */
 describe("a dated field named in a JSX child is handed to a door call", () => {
+  // **Sixty seconds, because this arm parses the whole tree**: on a node at a
+  // load average near 8 it ran past vitest's five second default, red with no
+  // assertion failed.
   it("hands every dated field a child names to the door", () => {
     // **What the walk consumed is recorded, not asserted about afterwards.**
     // An earlier version said in a comment that there was no filter here, which
@@ -7869,7 +7875,7 @@ describe("a dated field named in a JSX child is handed to a door call", () => {
 
     expect(walked).toEqual(entries().map(([path]) => path));
     expect(reported).toEqual([]);
-  });
+  }, 60_000);
 
   it("finds dated fields in child positions that the door is handed", () => {
     // **The anti vacuity line, and it is a difference rather than a floor.**

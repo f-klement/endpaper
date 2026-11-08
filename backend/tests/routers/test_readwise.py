@@ -7,6 +7,7 @@ and a deletion sent only under `includeDeleted=true`. It records every request
 so a test can read what left this server.
 """
 
+import asyncio
 import logging
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime, timedelta
@@ -491,6 +492,22 @@ class TestTheCursorMovesOnlyWhenEverythingArrived:
         assert pull(client, linked["headers"])["outcome"] == "synced"
         assert "pageCursor" not in fake.requests[asked].url.params
 
+    def test_a_resumed_pull_out_of_time_before_its_first_page_keeps_its_cursor(
+        self, client, linked, fake, db, monkeypatch
+    ):
+        pull(client, linked["headers"])
+        fake.put(
+            entry(7, mark(updated_at=now())),
+            entry(8, mark(202, updated_at=now()), title="Emma"),
+        )
+        monkeypatch.setattr(readwise, "MAX_PAGES", 1)
+        pull(client, linked["headers"])
+        monkeypatch.setattr(readwise, "MAX_PAGES", 500)
+        monkeypatch.setattr(readwise, "SYNC_SECONDS", 0)
+
+        assert pull(client, linked["headers"])["outcome"] == "incomplete"
+        assert login(db).resume_cursor == "1"
+
     def test_a_retried_page_keeps_its_resume_cursor(self, client, linked, make_book, fake, db, monkeypatch):
         """A hand delete beats the first page's commit, and the page is written
         again: the rollback took the cursor and the walk's start with it, so the
@@ -541,3 +558,48 @@ class TestTheCursorMovesOnlyWhenEverythingArrived:
         pull(client, linked["headers"])
 
         assert all("ids" not in request.url.params for request in fake.requests[asked:])
+
+
+class TestTheDailyJob:
+    """`run_due` as the ticker calls it: its own sessions, Readwise behind the fake."""
+
+    def test_it_pulls_every_member_due_and_answers_how_many_ran(self, client, linked, other_user, fake, db):
+        assert save(client, other_user["headers"]).status_code == 200
+        fake.put(entry())
+
+        assert asyncio.run(readwise.run_due()) == 2
+        db.expire_all()
+        assert [row.last_outcome for row in db.query(MemberLogin)] == ["synced", "synced"]
+
+    @staticmethod
+    def _the_first_pull_raises(client, other_user, fake) -> int:
+        """Two members due, the first request of the pass raising. Answers
+        how many pulls `run_due` says ran."""
+        assert save(client, other_user["headers"]).status_code == 200
+        fake.put(entry())
+        raised: list[str] = []
+
+        def the_first_request_breaks(_params: httpx.QueryParams) -> int | None:
+            if not raised:
+                raised.append("once")
+                raise RuntimeError("the export broke")
+            return None
+
+        fake.refusing = the_first_request_breaks
+        return asyncio.run(readwise.run_due())
+
+    def test_a_pull_that_raises_is_logged_and_the_next_member_is_still_pulled(
+        self, client, linked, other_user, fake, caplog
+    ):
+        assert self._the_first_pull_raises(client, other_user, fake) == 1
+        assert "A Readwise pull failed" in caplog.text
+
+    def test_a_failed_pull_logs_no_token(self, client, linked, other_user, fake, caplog):
+        # The root at DEBUG: the pass writes through several `endpaper.*` loggers, none with a
+        # level of its own, and the app leaves the root at INFO, where a DEBUG line would pass.
+        caplog.set_level(logging.DEBUG)
+        self._the_first_pull_raises(client, other_user, fake)
+
+        # The failure has to be in the log for its absence of a token to mean anything.
+        assert "A Readwise pull failed" in caplog.text
+        assert TOKEN not in caplog.text

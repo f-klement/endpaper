@@ -5,10 +5,16 @@
  * used; none was taken off a device.
  */
 
+import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 
-import { readSidecar } from "../../src/lib/koreaderSidecar";
+import {
+  readSidecar,
+  type SidecarReading,
+} from "../../src/lib/koreaderSidecar";
 import { MAX_SOURCE_LENGTH } from "../../src/lib/luaTable";
+
+import { holds, PROFILE, PROPERTY, witness } from "../property";
 
 const DIGEST = "0123456789abcdef0123456789abcdef";
 
@@ -249,5 +255,261 @@ describe("a sidecar that cannot be imported", () => {
   },
 }`);
     expect(reading).toMatchObject({ ok: true, highlights: [], oversized: 1 });
+  });
+
+  it("counts a mark the server would refuse for a NUL, and still sends the others", () => {
+    // The server refuses a NUL in a position, the passage, the note or the
+    // chapter, and one such mark sent would refuse the whole sidecar.
+    const reading = readSidecar(`return {
+  ["partial_md5_checksum"] = "${DIGEST}",
+  ["annotations"] = {
+    [1] = { ["drawer"] = "lighten", ["pos0"] = "a", ["pos1"] = "b", ["text"] = "kept" },
+    [2] = { ["drawer"] = "lighten", ["pos0"] = "c", ["pos1"] = "d", ["text"] = "x\\0y" },
+    [3] = { ["drawer"] = "lighten", ["pos0"] = "e", ["pos1"] = "f", ["text"] = "z", ["note"] = "n\\000" },
+    [4] = { ["drawer"] = "lighten", ["pos0"] = "g", ["pos1"] = "h", ["text"] = "also kept", ["chapter"] = "c\\0" },
+  },
+}`);
+    expect(reading).toMatchObject({
+      ok: true,
+      highlights: [
+        { text: "kept", chapter: null },
+        { text: "also kept", chapter: null },
+      ],
+      oversized: 2,
+    });
+  });
+});
+
+/** One mark as the property writes it into an `annotations` array. */
+interface Mark {
+  readonly drawer: boolean;
+  readonly pos0: string;
+  readonly pos1: string;
+  readonly text: string;
+  readonly note: string | null;
+}
+
+/** Text cut into a sidecar somewhere, written as fields so it prints as them. */
+interface Splice {
+  readonly at: number;
+  readonly cut: number;
+  readonly insert: string;
+}
+
+interface Drawn {
+  readonly marks: readonly Mark[];
+  readonly splice: Splice | null;
+}
+
+/** What a field's text is drawn from: any code point, and the ones a dump escapes. */
+const FIELD = fc.string({
+  unit: fc.oneof(
+    fc.constantFrom('"', "\\", "\n", "\r", " ", "\u0000"),
+    fc.string({ unit: "binary", minLength: 1, maxLength: 1 }),
+  ),
+  maxLength: 12,
+});
+
+/** Lua tokens, whole and broken, that a splice cuts into a sidecar. */
+const FRAGMENTS = [
+  "",
+  '"',
+  "'",
+  "\\",
+  "\n",
+  "{",
+  "}",
+  "[",
+  "]",
+  "[[",
+  "]]",
+  "=",
+  "==",
+  ",",
+  ";",
+  "--",
+  "--[[",
+  "-",
+  "\\x4",
+  "\\u{110000}",
+  "\\999",
+  "\\z",
+  "0x",
+  "1e",
+  "nil",
+  "true",
+  "return",
+  "x",
+];
+
+const DRAWN: fc.Arbitrary<Drawn> = fc.record({
+  marks: fc.array(
+    fc.record({
+      drawer: fc.boolean(),
+      pos0: FIELD,
+      pos1: FIELD,
+      text: FIELD,
+      note: fc.option(FIELD),
+    }),
+    { minLength: 1, maxLength: 4 },
+  ),
+  splice: fc.option(
+    fc.record({
+      at: fc.nat({ max: 4_000 }),
+      cut: fc.nat({ max: 3 }),
+      insert: fc.constantFrom(...FRAGMENTS),
+    }),
+    { freq: 2 },
+  ),
+});
+
+/** A Lua string literal, escaped as KOReader's dump escapes one. */
+function lua(value: string): string {
+  // A line break as a backslash before a real one, and a NUL as three digits.
+  const spelled: Readonly<Record<string, string>> = {
+    "\n": "\\\n",
+    "\r": "\\r",
+    "\u0000": "\\000",
+    '"': '\\"',
+    "\\": "\\\\",
+  };
+  return `"${Array.from(value, (char) => spelled[char] ?? char).join("")}"`;
+}
+
+function sidecarOf({ marks, splice }: Drawn): string {
+  const entries = marks.map((mark, index) => {
+    const fields = [
+      ...(mark.drawer ? ['["drawer"] = "lighten"'] : []),
+      `["pos0"] = ${lua(mark.pos0)}`,
+      `["pos1"] = ${lua(mark.pos1)}`,
+      `["text"] = ${lua(mark.text)}`,
+      ...(mark.note === null ? [] : [`["note"] = ${lua(mark.note)}`]),
+    ];
+    return `    [${index + 1}] = { ${fields.join(", ")} },`;
+  });
+  const whole = `return {
+  ["partial_md5_checksum"] = "${DIGEST}",
+  ["annotations"] = {
+${entries.join("\n")}
+  },
+}`;
+  if (splice === null) return whole;
+  const at = splice.at % (whole.length + 1);
+  return whole.slice(0, at) + splice.insert + whole.slice(at + splice.cut);
+}
+
+function trimmed(value: string | null): string | null {
+  const kept = value?.trim() ?? "";
+  return kept === "" ? null : kept;
+}
+
+/** The marks a well formed sidecar of these holds: highlights with a key. */
+function keyed(marks: readonly Mark[]): Mark[] {
+  return marks.filter(
+    (mark) =>
+      mark.drawer &&
+      mark.pos0 !== "" &&
+      mark.pos1 !== "" &&
+      trimmed(mark.text) !== null,
+  );
+}
+
+/** What a well formed sidecar of these marks reads as. */
+function writtenAs(marks: readonly Mark[]): SidecarReading {
+  // The fields the server refuses a NUL in, each as the property writes it.
+  const stored = (mark: Mark) =>
+    ![mark.pos0, mark.pos1, mark.text, mark.note ?? ""].some((field) =>
+      field.includes("\u0000"),
+    );
+  return {
+    ok: true,
+    partialMd5: DIGEST,
+    title: null,
+    highlights: keyed(marks)
+      .filter(stored)
+      .map((mark) => ({
+        pos0: mark.pos0,
+        pos1: mark.pos1,
+        text: trimmed(mark.text) ?? "",
+        note: trimmed(mark.note),
+        chapter: null,
+        page: null,
+        highlightedAt: null,
+      })),
+    oversized: keyed(marks).filter((mark) => !stored(mark)).length,
+  };
+}
+
+/**
+ * What is wrong with an answer to a sidecar something was cut into: only a
+ * refusal the reader declares, or highlights the server can key.
+ */
+function faults(reading: SidecarReading): string[] {
+  if (!reading.ok)
+    return ["unreadable", "no-fingerprint"].includes(reading.reason)
+      ? []
+      : [`refused as ${reading.reason}`];
+  const found = /^[0-9a-f]{32}$/.test(reading.partialMd5)
+    ? []
+    : [`a fingerprint of ${reading.partialMd5}`];
+  for (const mark of reading.highlights) {
+    if ([mark.pos0, mark.pos1, mark.text].includes(""))
+      found.push("a highlight with an empty field");
+    for (const field of [
+      mark.pos0,
+      mark.pos1,
+      mark.text,
+      mark.note,
+      mark.chapter,
+    ])
+      if (field?.includes("\u0000")) found.push("a field carrying a NUL");
+  }
+  return found;
+}
+
+describe("any sidecar a member picks", () => {
+  it(
+    "reads back what it was written with, and answers for any cut into it",
+    PROPERTY,
+    async () => {
+      expect(
+        await holds(
+          DRAWN,
+          async (drawn) => {
+            const reading = readSidecar(sidecarOf(drawn));
+            const whole = drawn.splice === null;
+            expect(whole ? reading : null).toEqual(
+              whole ? writtenAs(drawn.marks) : null,
+            );
+            expect(whole ? [] : faults(reading)).toEqual([]);
+            return reading;
+          },
+          {
+            "is a whole sidecar read to a highlight": (drawn, reading) =>
+              drawn.splice === null &&
+              reading.ok &&
+              reading.highlights.length > 0,
+            "is a cut sidecar refused as unreadable": (drawn, reading) =>
+              drawn.splice !== null &&
+              !reading.ok &&
+              reading.reason === "unreadable",
+          },
+        ),
+      ).toBe(PROFILE.runs);
+    },
+  );
+
+  it("draws passages a dump escapes, and marks that are not highlights", async () => {
+    await witness(DRAWN, {
+      "writes a passage with a quote, a backslash or a line break": ({
+        marks,
+      }) => marks.some((mark) => /["\\\n\r]/.test(mark.text)),
+      "writes a page bookmark, which has no drawer": ({ marks }) =>
+        marks.some((mark) => !mark.drawer),
+      "writes a NUL into a passage or a note": ({ marks }) =>
+        marks.some((mark) =>
+          `${mark.text}${mark.note ?? ""}`.includes("\u0000"),
+        ),
+    });
   });
 });

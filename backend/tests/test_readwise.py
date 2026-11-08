@@ -69,6 +69,11 @@ class TestReadingAPage:
 
         assert page.entries[0].highlights[0].text is None
 
+    def test_a_highlight_that_is_not_an_object_is_dropped(self):
+        page = readwise.read_page({"results": [_entry(highlights=["Fear is the mind-killer.", {"id": 1}])]})
+
+        assert [mark.id for mark in page.entries[0].highlights] == [1]
+
     def test_a_nul_is_removed_from_a_passage(self):
         page = readwise.read_page({"results": [_entry(highlights=[{"id": 1, "text": "a\x00b"}])]})
 

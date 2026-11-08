@@ -109,6 +109,10 @@ _2026-10-25_
 - The error page uses the app's green accent, and its status line and button meet WCAG AA
   contrast in both light and dark mode.
 
+- A KOReader highlight whose passage or note contains a NUL character is now left out and
+  counted, instead of making the whole file's import fail; a chapter name containing one is
+  dropped from its highlight.
+
 ## v0.21.0
 
 _2026-10-24_

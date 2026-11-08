@@ -1248,9 +1248,12 @@ const REACHING: Readonly<Record<string, number>> = {
   "./propertyBudget.test.ts": 1,
   "./lib/audiobook.test.ts": 2,
   "./lib/calibre.test.ts": 1,
+  "./lib/calibreFolder.test.ts": 1,
   "./lib/cbz.test.ts": 1,
   "./lib/epub.test.ts": 1,
   "./lib/fb2.test.ts": 2,
+  "./lib/fileDigest.test.ts": 1,
+  "./lib/koreaderSidecar.test.ts": 1,
   "./lib/mobi.test.ts": 1,
   "./lib/pdf.test.ts": 1,
   "./lib/schemaArbitrary.test.ts": 1,
@@ -1515,6 +1518,9 @@ describe("every property", () => {
     ).toEqual(REACHING);
   });
 
+  // **Sixty seconds, the bound the door describe's `beforeAll` has**: this
+  // arm parses the whole tree, and on a node at a load average near 8 it ran
+  // past vitest's five second default, red with no assertion failed.
   it("is in a module this guard knows about, and every one of them", () => {
     // **The population, derived and asserted.** A property added elsewhere
     // reds here once, and the person adding it reads this guard.
@@ -1524,12 +1530,15 @@ describe("every property", () => {
       "./lib/adobeDigitalEditions.test.ts",
       "./lib/audiobook.test.ts",
       "./lib/calibre.test.ts",
+      "./lib/calibreFolder.test.ts",
       "./lib/cbz.test.ts",
       "./lib/digitalReference.test.ts",
       "./lib/epub.test.ts",
       "./lib/fb2.test.ts",
+      "./lib/fileDigest.test.ts",
       "./lib/fileName.test.ts",
       "./lib/kindle.test.ts",
+      "./lib/koreaderSidecar.test.ts",
       "./lib/mobi.test.ts",
       "./lib/opf.test.ts",
       "./lib/pdf.test.ts",
@@ -1564,13 +1573,15 @@ describe("every property", () => {
       "./propertyBudget.test.ts",
     ]);
     expect(testEntries().length).toBeGreaterThan(withProperties().length);
-  });
+  }, 60_000);
 });
 
 /**
  * Where a stranger's bytes or names enter the application: the reader
  * registry, the store registry, the audiobook tag reader, the Calibre intake
- * and the two string doors a picked file's name and path go through.
+ * and the walk over a picked Calibre folder, the KOReader sidecar reader, the
+ * KOReader file digest and the two string doors a picked file's name and path
+ * go through.
  *
  * **Stated, and what holds it is the equality below**: a root dropped from
  * here takes its closure with it, and a module of that closure that has a
@@ -1580,15 +1591,18 @@ describe("every property", () => {
  * page loads lazily. It groups what the audiobook reader and the file name
  * door already answered, strings each bounded by those doors, and reads no
  * byte of its own, so it is outside the rule as it stands rather than
- * covered by it. **Nothing here can see a seventh root**: the population is
- * what these six reach, by construction.
+ * covered by it. **Nothing here can see a root missing from this list**: the
+ * population is what these reach, by construction.
  */
 const ROOTS = [
   "lib/audiobook.ts",
   "lib/calibre.ts",
+  "lib/calibreFolder.ts",
   "lib/digitalReference.ts",
+  "lib/fileDigest.ts",
   "lib/fileName.ts",
   "lib/fileReaders.ts",
+  "lib/koreaderSidecar.ts",
   "lib/stores.ts",
 ];
 
@@ -1606,6 +1620,7 @@ const THROUGH_A_DOOR: Readonly<Record<string, string>> = {
   "lib/isbn.ts": "every door that reads an identifier",
   "lib/isbnLabel.ts": "the doors that read an identifier, through isbn.ts",
   "lib/kobo.ts": "the store property, through the Kobo opener",
+  "lib/luaTable.ts": "the sidecar property, through koreaderSidecar.ts",
   "lib/moonReader.ts": "the store property, through the Moon+ opener",
   "lib/sqliteRow.ts": "the store and Calibre doors, whose cells it decodes",
   "lib/year.ts": "every door that reads a date",

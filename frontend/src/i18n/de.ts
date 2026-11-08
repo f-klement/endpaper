@@ -1891,7 +1891,8 @@ export const de: Messages = {
   "highlights.importReading": "Wird gelesen und importiert...",
   "highlights.outcomeImported":
     "Neu: {created}. Aktualisiert: {updated}. Unverändert: {unchanged}.",
-  "highlights.outcomeOversized": "Als zu lang ausgelassen: {count}.",
+  "highlights.outcomeOversized":
+    "Ausgelassen, weil zu lang oder mit einem Zeichen, das nicht gespeichert werden kann: {count}.",
   "highlights.outcomeUnmatched":
     "Kein sichtbares Buch hält diese Datei. Erst die Datei auf der Scan Seite hinzufügen, dann erneut importieren.",
   "highlights.outcomeAmbiguous":

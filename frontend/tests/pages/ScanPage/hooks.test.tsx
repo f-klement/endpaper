@@ -2174,6 +2174,41 @@ describe("useRapidIntake and a file with no usable metadata", () => {
     });
   });
 
+  it("counts a copy made after scanning restarted as one added book from a run nobody stopped", async () => {
+    // Restarting the scanner clears the batch's verdict, so the copy's verdict
+    // has nothing to move by one and starts from nothing instead.
+    api.on("/api/books/scan", DUPLICATE);
+    api.on(
+      HOLDER,
+      { body: [makeBook({ id: 77, format: BookFormat.hardcover })] },
+      "GET",
+    );
+    api.on("/api/books/77/copies", { body: makeBook({ id: 90 }) }, "POST");
+    api.on("/api/books/90/digital-references", { body: {} });
+    const file = await epubInFolder();
+    const { result } = renderRapid();
+
+    act(() => result.current.pickFiles([file]));
+    await settled(result);
+    act(() => result.current.addAll());
+    await waitFor(() => expect(result.current.result?.failed).toBe(1));
+    act(() => result.current.start());
+    expect(result.current.result).toBeNull();
+
+    act(() => result.current.addAsCopy(result.current.entries[0]!.key));
+    await waitFor(() => expect(result.current.entries).toHaveLength(0));
+
+    expect(result.current.result).toEqual({
+      added: 1,
+      failed: 0,
+      unreferenced: 0,
+      already: 0,
+      atCeiling: 0,
+      filesLeft: 0,
+      stopped: false,
+    });
+  });
+
   it("leaves a file another Book holds on it when filing the row as a copy, and counts it", async () => {
     // A location only a print copy holds is refused on the new copy too, on
     // every press. Counted unrecorded, the row promised that picking the folder

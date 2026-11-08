@@ -16,9 +16,12 @@
 
 import { createHash } from "node:crypto";
 
+import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 
 import { md5, PARTIAL_MD5_OFFSETS, partialMd5 } from "../../src/lib/fileDigest";
+
+import { edges, holds, PROFILE, PROPERTY, witness } from "../property";
 
 /** A byte pattern no window can mistake for another window. */
 function patterned(length: number): Uint8Array<ArrayBuffer> {
@@ -108,5 +111,69 @@ describe("partialMd5", () => {
     expect(read).toEqual(
       PARTIAL_MD5_OFFSETS.map((offset) => [offset, offset + 1024]),
     );
+  });
+});
+
+/** The windows below 70,000 bytes, and their edges: where a read starts and stops. */
+const NEAR_A_WINDOW = PARTIAL_MD5_OFFSETS.flatMap((offset) =>
+  offset < 70_000 ? [...edges(offset), ...edges(offset + 1024)] : [],
+);
+
+/** A book file: patterned bytes of a drawn length, with a few bytes changed. */
+const BOOK_FILE = fc
+  .record({
+    length: fc.oneof(
+      fc.nat({ max: 70_000 }),
+      fc.constantFrom(...NEAR_A_WINDOW),
+    ),
+    edits: fc.array(fc.tuple(fc.nat(), fc.nat({ max: 255 })), { maxLength: 8 }),
+  })
+  .map(({ length, edits }) => {
+    const bytes = patterned(length);
+    for (const [at, value] of edits) if (length > 0) bytes[at % length] = value;
+    return bytes;
+  });
+
+describe("any book file a member picks", () => {
+  it(
+    "digests to node's MD5 of the windows KOReader reads",
+    PROPERTY,
+    async () => {
+      expect(
+        await holds(
+          BOOK_FILE,
+          async (bytes) => {
+            const independent = createHash("md5");
+            for (const offset of PARTIAL_MD5_OFFSETS.filter(
+              (at) => at < bytes.length,
+            ))
+              independent.update(bytes.subarray(offset, offset + 1024));
+            expect(await partialMd5(new Blob([bytes]))).toBe(
+              independent.digest("hex"),
+            );
+            expect(md5(bytes)).toBe(
+              createHash("md5").update(bytes).digest("hex"),
+            );
+          },
+          {
+            "is a file whose last window is cut short": (bytes) =>
+              PARTIAL_MD5_OFFSETS.some(
+                (offset) =>
+                  offset < bytes.length && bytes.length < offset + 1024,
+              ),
+            "is a file reaching the window at 65,536": (bytes) =>
+              bytes.length > 65_536,
+          },
+        ),
+      ).toBe(PROFILE.runs);
+    },
+  );
+
+  it("draws a file ending at a window's edge, and an empty one", async () => {
+    await witness(BOOK_FILE, {
+      "ends at a window's edge": (bytes) =>
+        bytes.length > 0 && NEAR_A_WINDOW.includes(bytes.length),
+      "is empty": (bytes) => bytes.length === 0,
+    });
   });
 });

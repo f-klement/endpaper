@@ -116,22 +116,12 @@ export function useSession(): Session {
   const me = useMe({ query: { enabled: isProxy, retry: false } });
   const refetchMe = me.refetch;
 
-  // Under proxy the server is the authority on who this is, token or no token,
-  // so nothing here has to reason about precedence: it asks again and reads
-  // the answer. Storing the switched account and displaying it instead would
-  // be a second opinion, and the two would disagree the moment a token expired.
-  //
-  // Nobody at all until the mode is known, rather than falling back to the
-  // stored account while the config request is in flight. Under proxy that
-  // fallback is a **different person**: whatever a previous session left in
-  // localStorage, which is not who the upstream says is here. The app renders
-  // a spinner throughout (`isResolving`), so this changes nothing on screen,
-  // and it is what stops the identity flipping between two answers.
-  const user = config.isPending
-    ? null
-    : isProxy
-      ? (me.data ?? null)
-      : storedUser;
+  const { user, isResolving, proxyUnidentified, isSwitched } = whoIsHere(
+    isProxy,
+    config.isPending,
+    me,
+    storedUser,
+  );
 
   useCacheClearedOnIdentityChange(user?.id ?? null, queryClient);
 
@@ -172,20 +162,69 @@ export function useSession(): Session {
   return {
     mode,
     user,
-    isResolving: config.isPending || (isProxy && me.isPending),
-    proxyUnidentified: isProxy && me.isError,
-    // Both halves, because a stored token is not the same claim as a session
-    // the server is honouring. It re-reads `is_switch_target` per request and
-    // falls back to the header the moment a token stops qualifying: expiry,
-    // the flag coming off the row, or a leftover entry from before this
-    // deployment moved to proxy auth. On any of those the stored account and
-    // the server's answer disagree, and offering "Return to my account" to
-    // somebody who already is themselves is the same second opinion the
-    // comment above `user` refuses.
-    isSwitched: isProxy && storedUser !== null && me.data?.id === storedUser.id,
+    isResolving,
+    proxyUnidentified,
+    isSwitched,
     signIn,
     signOut,
   };
+}
+
+/** The part of the /auth/me query an identity is read from. */
+interface MeAnswer {
+  data: UserOut | undefined;
+  isPending: boolean;
+  isError: boolean;
+}
+
+/**
+ * Who is at the keyboard, from the config query, /auth/me and the account
+ * stored with the token.
+ */
+function whoIsHere(
+  isProxy: boolean,
+  configPending: boolean,
+  me: MeAnswer,
+  storedUser: UserOut | null,
+): Pick<Session, "user" | "isResolving" | "proxyUnidentified" | "isSwitched"> {
+  // Under proxy the server is the authority on who this is, token or no token,
+  // so nothing here has to reason about precedence: it asks again and reads
+  // the answer. Storing the switched account and displaying it instead would
+  // be a second opinion, and the two would disagree the moment a token expired.
+  //
+  // Nobody at all until the mode is known, rather than falling back to the
+  // stored account while the config request is in flight. Under proxy that
+  // fallback is a **different person**: whatever a previous session left in
+  // localStorage, which is not who the upstream says is here. The app renders
+  // a spinner throughout (`isResolving`), so this changes nothing on screen,
+  // and it is what stops the identity flipping between two answers.
+  const user = configPending ? null : isProxy ? (me.data ?? null) : storedUser;
+
+  return {
+    user,
+    isResolving: configPending || (isProxy && me.isPending),
+    proxyUnidentified: isProxy && me.isError,
+    isSwitched: isSwitchedInto(isProxy, storedUser, me.data),
+  };
+}
+
+/**
+ * A switch into a test account that the server is still honouring.
+ *
+ * Both halves, because a stored token is not the same claim as a session the
+ * server is honouring. It re-reads `is_switch_target` per request and falls
+ * back to the header the moment a token stops qualifying: expiry, the flag
+ * coming off the row, or a leftover entry from before this deployment moved
+ * to proxy auth. On any of those the stored account and the server's answer
+ * disagree, and offering "Return to my account" to somebody who already is
+ * themselves is the same second opinion `whoIsHere` refuses.
+ */
+function isSwitchedInto(
+  isProxy: boolean,
+  storedUser: UserOut | null,
+  current: UserOut | undefined,
+): boolean {
+  return isProxy && storedUser !== null && current?.id === storedUser.id;
 }
 
 /**
@@ -508,6 +547,23 @@ async function movedAmong(
 }
 
 /**
+ * A saved reference confirmed again by the file found at its path, carrying
+ * what this look at the file saw. A field it could not read goes as `null`.
+ */
+async function sightingOf(
+  reference: DigitalReferenceOut,
+  file: File,
+): Promise<SightingIn> {
+  const look = await locate(file);
+  return {
+    reference_id: reference.id,
+    size_bytes: look?.size_bytes ?? null,
+    file_modified_at: look?.file_modified_at ?? null,
+    partial_md5: look?.partial_md5 ?? null,
+  };
+}
+
+/**
  * Compare one root's saved references with the files a pick holds under it,
  * and write the sightings.
  *
@@ -541,15 +597,7 @@ async function sweepRoot(
 
   const [sightings, moved] = await Promise.all([
     Promise.all(
-      present.map(async (one): Promise<SightingIn> => {
-        const look = await locate(held.get(one.relative_path)!);
-        return {
-          reference_id: one.id,
-          size_bytes: look?.size_bytes ?? null,
-          file_modified_at: look?.file_modified_at ?? null,
-          partial_md5: look?.partial_md5 ?? null,
-        };
-      }),
+      present.map((one) => sightingOf(one, held.get(one.relative_path)!)),
     ),
     movedAmong(absent, unclaimed),
   ]);
@@ -674,20 +722,6 @@ export function useFolderSweep(): UseFolderSweepResult {
   const [isMarking, setIsMarking] = useState(false);
   const latest = useRef(0);
 
-  const refresh = useCallback(
-    (bookIds: Iterable<number>) => {
-      for (const bookId of new Set(bookIds)) {
-        void queryClient.invalidateQueries({
-          queryKey: getListDigitalReferencesQueryKey(bookId),
-        });
-      }
-      void queryClient.invalidateQueries({
-        queryKey: getListMissingDigitalReferencesQueryKey(),
-      });
-    },
-    [queryClient],
-  );
-
   const sweep = useCallback(
     (files: readonly File[]) => {
       const pick = (latest.current += 1);
@@ -697,26 +731,20 @@ export function useFolderSweep(): UseFolderSweepResult {
         (result) => {
           if (pick !== latest.current) return;
           setSwept(result);
-          refresh(
-            result.flatMap((one) =>
-              one.kind === "checked" ? one.bookIds : [],
-            ),
-          );
+          refreshReferences(queryClient, sweptBookIds(result));
         },
         () => {
           if (pick === latest.current) setFailed(true);
         },
       );
     },
-    [refresh],
+    [queryClient],
   );
 
   const mark = useCallback(
     (root: string) => {
-      const one = swept?.find(
-        (each) => each.kind === "checked" && each.root === root,
-      );
-      if (one?.kind !== "checked" || one.notFound.length === 0) return;
+      const one = markableUnder(swept, root);
+      if (one === undefined) return;
       const pick = latest.current;
       setIsMarking(true);
       setFailed(false);
@@ -724,11 +752,11 @@ export function useFolderSweep(): UseFolderSweepResult {
         .then(
           (ids) => {
             if (pick !== latest.current) return;
-            const done = { ...one, marked: ids.length };
-            setSwept((current) =>
-              (current ?? []).map((each) => (each === one ? done : each)),
+            setSwept((current) => withMarked(current, one, ids.length));
+            refreshReferences(
+              queryClient,
+              one.notFound.map((file) => file.bookId),
             );
-            refresh(one.notFound.map((file) => file.bookId));
           },
           () => {
             if (pick === latest.current) setFailed(true);
@@ -736,8 +764,58 @@ export function useFolderSweep(): UseFolderSweepResult {
         )
         .finally(() => setIsMarking(false));
     },
-    [swept, refresh],
+    [swept, queryClient],
   );
 
   return { sweep, swept, markMissing: mark, isMarking, failed };
+}
+
+type CheckedSweep = Extract<FolderSweep, { kind: "checked" }>;
+
+/** Every Book whose references a sweep wrote. */
+function sweptBookIds(swept: readonly FolderSweep[]): number[] {
+  return swept.flatMap((one) => (one.kind === "checked" ? one.bookIds : []));
+}
+
+/**
+ * The checked sweep of `root`, when it left anything to mark. A root taken
+ * for a different folder wrote nothing and has nothing to mark.
+ */
+function markableUnder(
+  swept: readonly FolderSweep[] | null,
+  root: string,
+): CheckedSweep | undefined {
+  const one = swept?.find(
+    (each): each is CheckedSweep =>
+      each.kind === "checked" && each.root === root,
+  );
+  return one?.notFound.length ? one : undefined;
+}
+
+/** The sweeps with `one` replaced by itself carrying how many were marked. */
+function withMarked(
+  current: readonly FolderSweep[] | null,
+  one: CheckedSweep,
+  marked: number,
+): FolderSweep[] {
+  const done = { ...one, marked };
+  return (current ?? []).map((each) => (each === one ? done : each));
+}
+
+/**
+ * Make stale what a sweep or a press wrote: each Book's own list of
+ * references, and the list of every reference flagged missing.
+ */
+function refreshReferences(
+  queryClient: QueryClient,
+  bookIds: Iterable<number>,
+): void {
+  for (const bookId of new Set(bookIds)) {
+    void queryClient.invalidateQueries({
+      queryKey: getListDigitalReferencesQueryKey(bookId),
+    });
+  }
+  void queryClient.invalidateQueries({
+    queryKey: getListMissingDigitalReferencesQueryKey(),
+  });
 }

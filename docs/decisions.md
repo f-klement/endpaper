@@ -24876,13 +24876,19 @@ killed; planting that mutant ends the run on the cap.
 * The glob matcher's bracket edge cases are reached by no test; the pinned omit list holds no
   bracket, so a bracket arrives only through a reviewed scorer change.
 
-## SonarQube is read by hand at a wave's end and before a tag, and never gated on
+## SonarQube is read by hand before a release tag, and never gated on
 
-**What.** A SonarQube analysis of one commit, with both suites' coverage, run by hand on a
-wave's final merged tree and before every release tag. It never runs from the local gate, the
-pipeline or a push (owner, 2026-11-07): the analysis is a reading for whoever leads the wave to
-triage, not a check a commit waits on. A test refuses a code line naming it in the files those
-three run.
+**What.** A SonarQube analysis of one commit, with both suites' coverage, run by hand before
+every release tag and at no other time. It never runs from the local gate, the pipeline or a
+push (owner, 2026-11-07): the analysis is a reading for whoever leads the wave to triage, not a
+check a commit waits on. A test refuses a code line naming it in the files those three run.
+
+**Not at a wave's end** (owner, 2026-11-08). The one scan run so far found real defects only in
+code older than the wave: a backtracking regex, an error page contrast failure and a
+bidirectional control character. It found nothing in the wave's own new code, so a per wave
+scan bought nothing a tag scan would not. **Accepted**: a wave's defects of the kinds SonarQube
+reads wait for the next tag. Once two or three tag scans in a row find nothing new, the scan is
+retired.
 
 **The verdict is an exit code, and an empty gate is not a pass.** 0 is a passed gate with at
 least one condition carrying a value, 1 a failed gate, 2 no verdict (a refusal, an error on the

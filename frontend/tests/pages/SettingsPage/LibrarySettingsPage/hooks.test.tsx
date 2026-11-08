@@ -60,6 +60,7 @@ import {
   unloadable,
 } from "../../../lazyImports";
 import { partialMd5 } from "../../../../src/lib/fileDigest";
+import { MAX_SOURCE_LENGTH } from "../../../../src/lib/luaTable";
 
 const require = createRequire(import.meta.url);
 
@@ -1766,6 +1767,28 @@ describe("importing KOReader highlights", () => {
     );
     expect(holding).toHaveLength(1);
     expect(chunks.flat()).toHaveLength(5001);
+  });
+
+  it("refuses a sidecar past the parser's bound without reading it", async () => {
+    mockApi();
+    const file = sidecar();
+    Object.defineProperty(file, "size", { value: MAX_SOURCE_LENGTH + 1 });
+    // Every way a `File` hands over its bytes, so a refactor reading by
+    // another one before the size check reds here as a `text()` read does.
+    const reads = ["text", "arrayBuffer", "bytes", "stream", "slice"].map(
+      (way) => {
+        const spy = vi.fn<() => unknown>();
+        Object.defineProperty(file, way, { value: spy });
+        return [way, spy] as const;
+      },
+    );
+
+    const result = await pick([file]);
+
+    expect(result.current.rows?.[0]?.outcome).toEqual({ kind: "too-large" });
+    expect(
+      reads.filter(([, spy]) => spy.mock.calls.length > 0).map(([way]) => way),
+    ).toEqual([]);
   });
 
   it("does not guess between two books holding the file", async () => {

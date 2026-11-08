@@ -5,9 +5,17 @@
  * plain values and callbacks.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type Dispatch,
+  type RefObject,
+  type SetStateAction,
+} from "react";
 
-import { useQueryClient } from "@tanstack/react-query";
+import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 
 import { classifyError } from "../../components/ErrorState";
 import type { RequestFailure } from "../../components/ErrorState";
@@ -40,6 +48,7 @@ import type {
   AlreadyHeldOut,
   AlreadyHeldParams,
   AskedFileIn,
+  BookLookup,
   BookMatch,
   BookOut,
   CollectionOut,
@@ -47,12 +56,14 @@ import type {
   CatalogueSource,
   DigitalReferenceIn,
   HoldersOut,
+  Locale,
   LocationOut,
   TagOut,
 } from "../../api/generated/model";
 import { QUERY_FLOOR } from "../../lib/bookBounds";
 import { writeOneAtATime, type BulkProgress } from "../../lib/bulkWrite";
 import { referenceFor } from "../../lib/digitalReference";
+import type { FileMetadata, FileReader } from "../../lib/fileReaders";
 import {
   libraryIndexIn,
   readCalibreLibrary,
@@ -359,35 +370,22 @@ export function useScanFlow(
   );
 
   // Fold the query result into the editable draft exactly once per lookup.
-  if (isbn !== null && pending.draft === null && !lookupQuery.isPending) {
-    if (lookupQuery.data) {
-      const next = draftFromLookup(lookupQuery.data);
-      setPending((current) => withSuggestions(current, next, carriedIn.tagIds));
-    } else if (lookupQuery.error && nobodyKnows(lookupQuery.error)) {
-      // Neither source knew it: offer manual entry rather than a dead end.
-      // The carried tags stay: nothing was suggested to join them.
-      update({ draft: blankDraft(isbn) });
-    }
-  }
+  const settled = settledLookup(isbn, pending.draft, lookupQuery, carriedIn);
+  if (settled) setPending(settled);
 
-  // **Every other throw is no catalogue having answered**, so no draft: a
-  // blank form would say nobody knows the book when nobody was asked. Null
-  // while a retry is in flight, which keeps the old error and must not keep
-  // the offer to retry beside the spinner.
-  const unanswered =
-    isbn !== null &&
-    pending.draft === null &&
-    !lookupQuery.isFetching &&
-    lookupQuery.error != null &&
-    !nobodyKnows(lookupQuery.error)
-      ? lookupQuery.error
-      : null;
+  const unanswered = unansweredLookup(isbn, pending.draft, lookupQuery);
 
-  const scanAdd = useScanAdd();
-  const addAnotherCopy = useAddCopy();
-  const uploadCover = useUploadCover();
-  const addTag = useAddBookTag();
-  const addTagByName = useAddBookTagByName();
+  const writes: ScanWrites = {
+    account,
+    onAdded,
+    setAddError,
+    invalidate,
+    scanAdd: useScanAdd(),
+    addAnotherCopy: useAddCopy(),
+    uploadCover: useUploadCover(),
+    addTag: useAddBookTag(),
+    addTagByName: useAddBookTagByName(),
+  };
 
   function reset() {
     setIsbn(null);
@@ -413,128 +411,6 @@ export function useScanFlow(
     setPending((current) =>
       blankPending({ ...carried, location: current.location }),
     );
-  }
-
-  async function confirm() {
-    const { draft } = book;
-    if (!draft) return;
-    setAddError(null);
-
-    try {
-      const added = await scanAdd.mutateAsync({
-        data: toScanRequest({ ...book, draft }),
-      });
-
-      // The book exists by now. A failed cover or tag is not worth discarding
-      // it and making the member scan again, so these are best-effort.
-      if (book.coverFile) {
-        await uploadCover
-          .mutateAsync({ bookId: added.id, data: { file: book.coverFile } })
-          .catch(() => undefined);
-      }
-      const [, named] = await Promise.all([
-        Promise.all(
-          book.tagIds.map((tagId) =>
-            addTag
-              .mutateAsync({ bookId: added.id, tagId })
-              .catch(() => undefined),
-          ),
-        ),
-        // The names typed on this form, applied now that there is a book to
-        // apply them to. One request each, the same one `BookDetail` sends,
-        // and the server invents the tag if the library has none.
-        Promise.all(
-          book.tagNames.map((name) =>
-            addTagByName
-              .mutateAsync({ bookId: added.id, data: { name } })
-              .catch(() => undefined),
-          ),
-        ),
-      ]);
-
-      // Only after the write succeeded. Remembering a value for a book that
-      // was rejected as a duplicate would carry one nothing was filed with.
-      //
-      // **A typed name carries as the tag it became.** Each attach answers
-      // with the book, so the ids it now holds are read off the answers rather
-      // than carrying the name, which would invent the tag again on the next
-      // book after somebody had deleted it. **Only an id the form did not
-      // already hold**: an answer lists every tag on the book, the suggested
-      // ones included, which `chosenTags` has just left out.
-      const typed = tagIdsTheNamesBecame(named, book.tagIds);
-      rememberCarried(account, {
-        ...carriedOf(book),
-        tagIds: [
-          ...chosenTags(book.tagIds, book.draft, carriedIn.tagIds),
-          ...typed,
-        ],
-      });
-
-      // The catalogue, not the whole cache. A keyless invalidate here also
-      // refetched `/api/settings/features` and, worse, `/api/books/search`,
-      // which is a billed Google Books call the query's own `staleTime` exists
-      // to avoid re-spending. Measured: 4 requests, of which 2 were about a
-      // book having been added.
-      //
-      // **A typed name can still be left off, and it is quieter than it was
-      // rather than closed.** The attaches above are best effort by design,
-      // so a network failure leaves the book saved without that tag; and the
-      // by name door answers 200 with the book either way, so a name the
-      // server will not hand this member is dropped there too. What went is
-      // the 404 the old create then attach pair produced when the typed name
-      // collided with a tag the member cannot see: the create handed back
-      // that row and the attach by id then refused it.
-      // `backend/tests/routers/test_books_tags.py::TestANameTypedAgainstAHiddenTagIsNotAttached`
-      // holds why the refusal is silent and what it does not close. The
-      // member lands on the saved book, where its tags are what they are.
-      invalidate.catalogue();
-      onAdded(added.id);
-    } catch (error) {
-      setAddError(error);
-    }
-  }
-
-  /**
-   * Add the scanned book as another copy of the one already in the catalogue.
-   *
-   * **The draft's tags, uploaded cover and privacy tick are not carried over**,
-   * unlike `confirm()`, which applies the first two. Neither of those belongs
-   * to the copy: the tags come from the book being copied, which already has
-   * them, and a cover uploaded here would be a photo of the same edition. Both
-   * are editable on the new copy's own page, and the UI says so before the
-   * press.
-   *
-   * **The privacy tick is the one worth knowing about.** A copy inherits
-   * `is_private` from the book it copies, because `CopyCreate` has no such
-   * field, so ticking private and then pressing this makes a **public** copy if
-   * the book being copied is public. The checkbox sits directly above this
-   * button and is inert for this press. The backend refusing to take a privacy
-   * flag here is deliberate: privacy follows the Book, and a copy is a
-   * different Book only in the sense of being a different row.
-   */
-  async function addCopy() {
-    const holder = addError instanceof ApiError ? addError.bookId : undefined;
-    // Nothing to copy: either there was no conflict, or the book that holds
-    // the ISBN is somebody else's private one and its id was withheld.
-    if (holder === undefined) return;
-
-    setAddError(null);
-    try {
-      const copy = await addAnotherCopy.mutateAsync({
-        bookId: holder,
-        // `toCopyRequest`, not a literal. See its docstring: this was the
-        // second writer of a request body and the one the schema guard could
-        // not see.
-        data: toCopyRequest(book),
-      });
-      // Only what the copy was filed with: `carriedByACopy` says why.
-      rememberCarried(account, carriedByACopy(book));
-      // A copy is a new book. Same group as `confirm`, same reason.
-      invalidate.catalogue();
-      onAdded(copy.id);
-    } catch (error) {
-      setAddError(error);
-    }
   }
 
   function chooseMatch(match: BookMatch) {
@@ -564,7 +440,7 @@ export function useScanFlow(
       setEnteredByHand(false);
       setIsbn(nextIsbn);
     },
-    isLookingUp: isbn !== null && pending.draft === null && unanswered === null,
+    isLookingUp: stillLookingUp(isbn, pending.draft, unanswered),
     lookupError: unanswered,
     // A refetch rather than `lookup` again: the ISBN is the same, so the key
     // does not change and the failed answer would simply be read back.
@@ -576,40 +452,266 @@ export function useScanFlow(
     },
     enteredByHand,
 
-    createTag: (name) =>
-      setPending((current) =>
-        // Folded rather than appended, so pressing the button twice does not
-        // send the same name twice. The comparison is the client's own and is
-        // deliberately not the server's fold: what it prevents is a duplicate
-        // chip, and what decides which names are one tag is `tags.folded`, on
-        // the server, where the whole vocabulary is visible.
-        current.tagNames.includes(name)
-          ? current
-          : { ...current, tagNames: [...current.tagNames, name] },
-      ),
+    createTag: (name) => setPending((current) => withTagName(current, name)),
     forgetTagName: (name) =>
       setPending((current) => ({
         ...current,
         tagNames: current.tagNames.filter((held) => held !== name),
       })),
     toggleTag: (tagId) =>
-      setPending((current) => ({
-        ...current,
-        tagIds: current.tagIds.includes(tagId)
-          ? current.tagIds.filter((id) => id !== tagId)
-          : [...current.tagIds, tagId],
-      })),
+      setPending((current) => withTagToggled(current, tagId)),
 
     locations,
 
-    confirm: () => void confirm(),
-    isAdding: scanAdd.isPending,
+    confirm: () => void fileTheBook(book, carriedIn.tagIds, writes),
+    isAdding: writes.scanAdd.isPending,
     error: addError,
     reset,
 
-    addCopy: () => void addCopy(),
-    isAddingCopy: addAnotherCopy.isPending,
+    addCopy: () => void fileACopy(book, addError, writes),
+    isAddingCopy: writes.addAnotherCopy.isPending,
   };
+}
+
+/** The lookup's state, as much of it as `useScanFlow`'s helpers read. */
+interface LookupState {
+  readonly data: BookLookup | undefined;
+  readonly error: unknown;
+  readonly isPending: boolean;
+  readonly isFetching: boolean;
+}
+
+/**
+ * The change a settled lookup makes to a form still waiting for its draft, or
+ * null where there is none to make: no ISBN asked, a draft already landed, the
+ * lookup still in flight, or a throw that is not an answer.
+ */
+function settledLookup(
+  isbn: string | null,
+  draft: BookDraft | null,
+  lookup: LookupState,
+  carriedIn: { readonly tagIds: readonly number[] },
+): ((current: PendingBook) => PendingBook) | null {
+  if (isbn === null || draft !== null || lookup.isPending) return null;
+  const { data } = lookup;
+  if (data) {
+    const next = draftFromLookup(data);
+    return (current) => withSuggestions(current, next, carriedIn.tagIds);
+  }
+  // Neither source knew it: offer manual entry rather than a dead end. The
+  // carried tags stay: nothing was suggested to join them.
+  if (nobodyKnows(lookup.error)) {
+    return (current) => ({ ...current, draft: blankDraft(isbn) });
+  }
+  return null;
+}
+
+/**
+ * Why the lookup went unanswered, or null.
+ *
+ * **Every throw but a 404 is no catalogue having answered**, so no draft: a
+ * blank form would say nobody knows the book when nobody was asked. Null
+ * while a retry is in flight, which keeps the old error and must not keep the
+ * offer to retry beside the spinner.
+ */
+function unansweredLookup(
+  isbn: string | null,
+  draft: BookDraft | null,
+  lookup: LookupState,
+): unknown {
+  return isbn !== null &&
+    draft === null &&
+    !lookup.isFetching &&
+    lookup.error != null &&
+    !nobodyKnows(lookup.error)
+    ? lookup.error
+    : null;
+}
+
+/** An ISBN asked about, no draft yet, and no failure to show instead. */
+function stillLookingUp(
+  isbn: string | null,
+  draft: BookDraft | null,
+  unanswered: unknown,
+): boolean {
+  return isbn !== null && draft === null && unanswered === null;
+}
+
+/**
+ * A typed tag name held for the book.
+ *
+ * Folded rather than appended, so pressing the button twice does not send the
+ * same name twice. The comparison is the client's own and is deliberately not
+ * the server's fold: what it prevents is a duplicate chip, and what decides
+ * which names are one tag is `tags.folded`, on the server, where the whole
+ * vocabulary is visible.
+ */
+function withTagName(current: PendingBook, name: string): PendingBook {
+  return current.tagNames.includes(name)
+    ? current
+    : { ...current, tagNames: [...current.tagNames, name] };
+}
+
+/** One tag added, or taken off where it was already chosen. */
+function withTagToggled(current: PendingBook, tagId: number): PendingBook {
+  return {
+    ...current,
+    tagIds: current.tagIds.includes(tagId)
+      ? current.tagIds.filter((id) => id !== tagId)
+      : [...current.tagIds, tagId],
+  };
+}
+
+/** The requests `useScanFlow`'s two writes make, and where their answers go. */
+interface ScanWrites {
+  readonly account: number;
+  readonly onAdded: (bookId: number) => void;
+  readonly setAddError: (error: unknown) => void;
+  readonly invalidate: ReturnType<typeof useInvalidate>;
+  readonly scanAdd: ReturnType<typeof useScanAdd>;
+  readonly addAnotherCopy: ReturnType<typeof useAddCopy>;
+  readonly uploadCover: ReturnType<typeof useUploadCover>;
+  readonly addTag: ReturnType<typeof useAddBookTag>;
+  readonly addTagByName: ReturnType<typeof useAddBookTagByName>;
+}
+
+/** `useScanFlow.confirm`: the book, then its cover and tags, then the carry. */
+async function fileTheBook(
+  book: PendingBook,
+  carriedTagIds: readonly number[],
+  writes: ScanWrites,
+) {
+  const { draft } = book;
+  if (!draft) return;
+  writes.setAddError(null);
+
+  try {
+    const added = await writes.scanAdd.mutateAsync({
+      data: toScanRequest({ ...book, draft }),
+    });
+    const named = await addTheExtras(added.id, book, writes);
+
+    // Only after the write succeeded. Remembering a value for a book that
+    // was rejected as a duplicate would carry one nothing was filed with.
+    //
+    // **A typed name carries as the tag it became.** Each attach answers
+    // with the book, so the ids it now holds are read off the answers rather
+    // than carrying the name, which would invent the tag again on the next
+    // book after somebody had deleted it. **Only an id the form did not
+    // already hold**: an answer lists every tag on the book, the suggested
+    // ones included, which `chosenTags` has just left out.
+    const typed = tagIdsTheNamesBecame(named, book.tagIds);
+    rememberCarried(writes.account, {
+      ...carriedOf(book),
+      tagIds: [...chosenTags(book.tagIds, book.draft, carriedTagIds), ...typed],
+    });
+
+    // The catalogue, not the whole cache. A keyless invalidate here also
+    // refetched `/api/settings/features` and, worse, `/api/books/search`,
+    // which is a billed Google Books call the query's own `staleTime` exists
+    // to avoid re-spending. Measured: 4 requests, of which 2 were about a
+    // book having been added.
+    //
+    // **A typed name can still be left off, and it is quieter than it was
+    // rather than closed.** The attaches are best effort by design, so a
+    // network failure leaves the book saved without that tag; and the by
+    // name door answers 200 with the book either way, so a name the server
+    // will not hand this member is dropped there too. What went is the 404
+    // the old create then attach pair produced when the typed name collided
+    // with a tag the member cannot see: the create handed back that row and
+    // the attach by id then refused it.
+    // `backend/tests/routers/test_books_tags.py::TestANameTypedAgainstAHiddenTagIsNotAttached`
+    // holds why the refusal is silent and what it does not close. The
+    // member lands on the saved book, where its tags are what they are.
+    writes.invalidate.catalogue();
+    writes.onAdded(added.id);
+  } catch (error) {
+    writes.setAddError(error);
+  }
+}
+
+/**
+ * The cover and tags of a book just made, answering each by-name attach.
+ *
+ * The book exists by now. A failed cover or tag is not worth discarding it and
+ * making the member scan again, so these are best effort.
+ */
+async function addTheExtras(
+  bookId: number,
+  book: PendingBook,
+  writes: ScanWrites,
+): Promise<(BookOut | undefined)[]> {
+  if (book.coverFile) {
+    await writes.uploadCover
+      .mutateAsync({ bookId, data: { file: book.coverFile } })
+      .catch(() => undefined);
+  }
+  const [, named] = await Promise.all([
+    Promise.all(
+      book.tagIds.map((tagId) =>
+        writes.addTag.mutateAsync({ bookId, tagId }).catch(() => undefined),
+      ),
+    ),
+    // The names typed on this form, applied now that there is a book to
+    // apply them to. One request each, the same one `BookDetail` sends,
+    // and the server invents the tag if the library has none.
+    Promise.all(
+      book.tagNames.map((name) =>
+        writes.addTagByName
+          .mutateAsync({ bookId, data: { name } })
+          .catch(() => undefined),
+      ),
+    ),
+  ]);
+  return named;
+}
+
+/**
+ * `useScanFlow.addCopy`: the scanned book as another copy of the one already
+ * in the catalogue.
+ *
+ * **The draft's tags, uploaded cover and privacy tick are not carried over**,
+ * unlike `fileTheBook`, which applies the first two. Neither of those belongs
+ * to the copy: the tags come from the book being copied, which already has
+ * them, and a cover uploaded here would be a photo of the same edition. Both
+ * are editable on the new copy's own page, and the UI says so before the
+ * press.
+ *
+ * **The privacy tick is the one worth knowing about.** A copy inherits
+ * `is_private` from the book it copies, because `CopyCreate` has no such
+ * field, so ticking private and then pressing this makes a **public** copy if
+ * the book being copied is public. The checkbox sits directly above this
+ * button and is inert for this press. The backend refusing to take a privacy
+ * flag here is deliberate: privacy follows the Book, and a copy is a
+ * different Book only in the sense of being a different row.
+ */
+async function fileACopy(
+  book: PendingBook,
+  addError: unknown,
+  writes: ScanWrites,
+) {
+  const holder = addError instanceof ApiError ? addError.bookId : undefined;
+  // Nothing to copy: either there was no conflict, or the book that holds
+  // the ISBN is somebody else's private one and its id was withheld.
+  if (holder === undefined) return;
+
+  writes.setAddError(null);
+  try {
+    const copy = await writes.addAnotherCopy.mutateAsync({
+      bookId: holder,
+      // `toCopyRequest`, not a literal. See its docstring: this was the
+      // second writer of a request body and the one the schema guard could
+      // not see.
+      data: toCopyRequest(book),
+    });
+    // Only what the copy was filed with: `carriedByACopy` says why.
+    rememberCarried(writes.account, carriedByACopy(book));
+    // A copy is a new book. Same group as `fileTheBook`, same reason.
+    writes.invalidate.catalogue();
+    writes.onAdded(copy.id);
+  } catch (error) {
+    writes.setAddError(error);
+  }
 }
 
 export interface UseBookSearchResult {
@@ -724,7 +826,10 @@ export function useBookSearch(): UseBookSearchResult {
     },
   );
 
-  const answered = !search.isFetching && search.data !== undefined;
+  // **Only once the answer is in.** While a search is in flight the data on
+  // hand is the previous query's, and offering a longer search off it would
+  // name catalogues that have nothing to do with what is being typed.
+  const answer = search.isFetching ? undefined : search.data;
 
   return {
     isConfigured,
@@ -741,19 +846,8 @@ export function useBookSearch(): UseBookSearchResult {
     },
     matches: search.data?.matches ?? [],
     isSearching: search.isFetching,
-    isEmpty:
-      submitted.length >= MIN_QUERY_LENGTH &&
-      answered &&
-      search.data.matches.length === 0 &&
-      // Nothing asked is not nothing found, and the panel says something else
-      // for it. Both would otherwise be true at once.
-      !askedNothing(search.data),
+    ...readTheAnswer(answer, submitted),
     error: search.error,
-    // **Only once the answer is in.** While a search is in flight the data on
-    // hand is the previous query's, and offering a longer search off it would
-    // name catalogues that have nothing to do with what is being typed.
-    unasked: answered ? search.data.unasked : [],
-    askedNothing: answered && askedNothing(search.data),
     // **A refetch when it is already true, not just the state flip.** A harder
     // search can be refused its long slot and answered as an ordinary one, and
     // that answer is cached under `harder: true` with `unasked` still populated,
@@ -770,7 +864,33 @@ export function useBookSearch(): UseBookSearchResult {
       setHarder(true);
     },
     isSearchingHarder: harder && search.isFetching,
-    hasSearchedHarder: harder && answered,
+    hasSearchedHarder: harder && answer !== undefined,
+  };
+}
+
+/**
+ * What a search's answer says about itself, or nothing while none is in.
+ *
+ * `answer` is undefined while a search is in flight as well as before one has
+ * run: `useBookSearch` says why the previous query's data must not answer.
+ */
+function readTheAnswer(
+  answer: BookSearchOut | undefined,
+  submitted: string,
+): Pick<UseBookSearchResult, "isEmpty" | "unasked" | "askedNothing"> {
+  if (answer === undefined) {
+    return { isEmpty: false, unasked: [], askedNothing: false };
+  }
+  const nothingAsked = askedNothing(answer);
+  return {
+    isEmpty:
+      submitted.length >= MIN_QUERY_LENGTH &&
+      answer.matches.length === 0 &&
+      // Nothing asked is not nothing found, and the panel says something else
+      // for it. Both would otherwise be true at once.
+      !nothingAsked,
+    unasked: answer.unasked,
+    askedNothing: nothingAsked,
   };
 }
 
@@ -1266,772 +1386,41 @@ export function useRapidIntake(): UseRapidIntakeResult {
   // waiting, which is every moment a stop has nothing to interrupt.
   const endTheWait = useRef<(() => void) | null>(null);
   const [location, setLocation] = useState(readLastLocation);
-  const [result, setResult] = useState<{
-    added: number;
-    failed: number;
-    unreferenced: number;
-    already: number;
-    atCeiling: number;
-    filesLeft: number;
-    stopped: boolean;
-  } | null>(null);
-
-  const queryClient = useQueryClient();
-  const invalidate = useInvalidate();
-  const scanAdd = useScanAdd();
-  const reportReference = useReportDigitalReference();
-  const addAnotherCopy = useAddCopy();
+  const [result, setResult] = useState<IntakeResult | null>(null);
   // **The whole of `addAsCopy`, not the copy request's own pending flag.** That
   // flag drops when the copy exists, and a batch started during the reference
   // request after it would re-walk the row and overwrite the copy's verdict.
   const [isAddingCopy, setIsAddingCopy] = useState(false);
   const locations = useKnownLocations();
-  // **The locale, and nothing else this hook says to a member.** Every reason a
-  // row carries is a name now, and the last `t` went with them; this is for the
-  // paced lookup, which breaks ties towards the reader's own printing exactly
-  // as the search box does.
-  const { locale } = useTranslation();
 
-  /**
-   * What happened, applied to the queue as it stands when React gets to it
-   * rather than as this render saw it: a subject dropped while a lookup was in
-   * flight stays dropped.
-   */
-  function apply(event: QueueEvent) {
-    setEntries((current) => queueAfter(current, event));
-  }
-
-  function capture(isbn: string) {
-    setEntries((current) => {
-      const queued = queueAfter(current, { kind: "captured", isbn });
-      // A repeat comes back as the same queue, and is not looked up again.
-      if (queued !== current) void lookUp(isbn);
-      return queued;
-    });
-  }
-
-  async function lookUp(isbn: string) {
-    const key = scannedKey(isbn);
-    try {
-      const lookup = await queryClient.fetchQuery({
-        queryKey: getLookupIsbnQueryKey({ isbn }),
-        queryFn: () => lookupIsbn({ isbn }),
-        staleTime: 60_000,
-      });
-      apply({ kind: "isbn-answered", key, lookup });
-    } catch (error) {
-      // Kept in the queue either way rather than dropped, so a book on the
-      // shelf does not silently vanish between the shelf and the catalogue.
-      apply({
-        kind: "not-answered",
-        key,
-        asked: "looking-up",
-        unknown: nobodyKnows(error),
-      });
-    }
-  }
-
-  /**
-   * Read picked files, one entry each.
-   *
-   * **The reader is imported inside this call rather than at the top of the
-   * module**, so a session that never picks a file never downloads a zip walk
-   * and an XML reader. It is resolved once for the batch: the module graph is
-   * cached after the first await, and asking per file would serialise every
-   * read behind something already in memory.
-   *
-   * **A file the walk does not read is counted, never dropped in silence.** The
-   * formats epic settled which extensions are in and which are out, so a folder
-   * of CBR or DJVU produces a count and an explanation rather than an empty
-   * queue that reads as a broken picker.
-   *
-   * **A file that cannot be read is no longer the end of it.** Its name is still
-   * a signal, so it becomes a candidate carrying what the name said, with a note
-   * of what the file itself could not say. Only a name that reduces to nothing
-   * is a failure now.
-   *
-   * **Audio takes a different route and the docstring above says why it must.**
-   * One file is one book for every format here except an audiobook, which is
-   * usually a folder of chapter files, so its rows cannot be made until every
-   * file in the pick has been read and grouped. `readAudio` is that route.
-   *
-   * The queue is asked what it already holds (`notYetQueued`) inside the
-   * updater, and the reads start from there, which is the shape `capture` uses
-   * and for the same reason: the
-   * queue is the only record of what has been picked, so asking anything else
-   * would be a second one to keep in step. The skipped count is taken **before**
-   * it, because an updater that counts is an updater run twice under a strict
-   * render counting twice.
-   */
-  function pickFiles(files: readonly File[]) {
-    // **A Calibre library is read through its index, not file by file**, the
-    // way the Settings import reads it: one row a book, with every format
-    // file on it, rather than a row per file the index already describes.
-    const index = libraryIndexIn(files);
-    if (index !== undefined) {
-      pickLibrary(files, index);
-      return;
-    }
-    walkFiles(files);
-  }
-
-  /** The ordinary walk: one row per file, or per audiobook. */
-  function walkFiles(files: readonly File[]) {
-    const walked = files.map((file) => ({
-      file,
-      extension: supportedExtension(file.name),
-    }));
-    setSkipped(walked.filter((walk) => walk.extension === null).length);
-    setLibraryNotice(null);
-
-    const supported = walked.filter(
-      (walk): walk is { file: File; extension: SupportedExtension } =>
-        walk.extension !== null,
-    );
-
-    setEntries((current) => {
-      const unqueued = notYetQueued(current, supported, (walk) =>
-        pickedKey(walk.file),
-      );
-      // **The audio half gets one row for the whole pick, not one each.** Which
-      // files are one book is decided by what they say, so nothing can be
-      // grouped until every one of them has been read. The row claims them
-      // meanwhile, which is what keeps a second pick of the same folder from
-      // queueing them again, and `readAudio` replaces it with the books.
-      const audio = unqueued.filter((walk) => isAudio(walk.extension));
-      const fresh = unqueued.filter((walk) => !isAudio(walk.extension));
-      const pending = audio.length > 0 ? pendingAudio(audio) : null;
-      if (pending) void readAudio(audio, pending.key);
-      if (fresh.length > 0) void readFiles(fresh.map((walk) => walk.file));
-      return queueAfter(current, {
-        kind: "picked",
-        rows: [
-          ...(pending ? [pending] : []),
-          ...fresh.map((walk) => ({
-            key: pickedKey(walk.file),
-            // Taken while the `File` is still in hand. After the read the
-            // queue holds a key and a label and could not derive this if it
-            // wanted to.
-            reference: referenceFor(walk.file) ?? undefined,
-            // Cleaned for the reason every derived value is: a name is
-            // somebody else's text, and this one is printed beside a title
-            // that was.
-            label: plainName(walk.file.name),
-            // The extension answers this, and it is the same kind of evidence
-            // a zip container is rather than the guess `format` is nullable to
-            // refuse.
-            format: FORMAT_FOR_EXTENSION[walk.extension],
-          })),
-        ],
-      });
-    });
-  }
-
-  /**
-   * Queue a Calibre library folder: one row while its index is read, then a
-   * row for each of its books.
-   *
-   * Keyed by the folder's name, so picking the same library again while it
-   * is read queues nothing, and its books by their Calibre id under it, so a
-   * second pick afterwards queues only books not already in the queue.
-   */
-  function pickLibrary(files: readonly File[], index: File) {
-    setSkipped(0);
-    setLibraryNotice(null);
-    const root = index.webkitRelativePath.split("/")[0]!;
-    const key = `calibre:${root}`;
-    setEntries((current) => {
-      const queued = queueAfter(current, {
-        kind: "picked",
-        rows: [{ key, label: plainName(root), format: "" }],
-      });
-      // A library still being read comes back as the same queue, and is not
-      // read again.
-      if (queued !== current) void readLibrary(files, index, key);
-      return queued;
-    });
-  }
-
-  /**
-   * Read a library folder through its index and queue its books.
-   *
-   * **Read only, by construction**: the index is a `File` the browser read
-   * into memory, and `lib/sqlite.ts` refuses a copy torn structurally, which
-   * a live library caught mid write can be; a copy whose pages agree but
-   * whose rows are mid transaction is read as it stands. **An index this
-   * cannot read leaves an ordinary folder**, so its files are read one by one
-   * as any folder's are, and `libraryNotice` says so: one row per file is
-   * what this door exists to replace, so the member is told why it is back.
-   *
-   * **A book file the index names for no book is left out and counted**, the
-   * walk's own rule for what it passes over.
-   *
-   * Each book is `draftFromCalibre`'s, checked against the `metadata.opf`
-   * beside it, and carries a reference for each of its files the folder holds,
-   * with the fingerprint read now, while the files are in hand. Then the
-   * holder lookup, once, as `readFiles` asks it.
-   */
-  async function readLibrary(
-    files: readonly File[],
-    index: File,
-    pendingKey: string,
-  ) {
-    const read = await readIndexed(index, files);
-    if (read === null) {
-      apply({ kind: "removed", key: pendingKey });
-      walkFiles(files.filter((file) => file !== index));
-      setLibraryNotice({ kind: "index-unread" });
-      return;
-    }
-
-    const { checked, filesOfEachBook } = read;
-    const paired = filesOfEachBook(checked, files);
-    const indexed = new Set([...paired.values()].flat());
-    // Not under a folder whose name starts with a dot at the library's root:
-    // Calibre keeps deleted books' files in `.caltrash`, and inviting the
-    // member to add them back would be the wrong sentence.
-    const unindexed = files.filter(
-      (file) =>
-        supportedExtension(file.name) !== null &&
-        !indexed.has(file) &&
-        !file.webkitRelativePath.split("/")[1]?.startsWith("."),
-    ).length;
-    if (unindexed > 0)
-      setLibraryNotice({ kind: "unindexed", count: unindexed });
-    const located = new Map(
-      await Promise.all(
-        [...paired].map(
-          async ([id, held]) =>
-            [
-              id,
-              (await Promise.all(held.map(locate))).filter(
-                (one) => one !== undefined,
-              ),
-            ] as const,
-        ),
-      ),
-    );
-
-    const books = checked.map((book) => ({
-      book,
-      files: located.get(book.id) ?? [],
-    }));
-    // Every file of each row that has one, as `readFiles` asks for its own.
-    const questions = libraryRows(pendingKey, books).flatMap((row) =>
-      row.reference === undefined
-        ? []
-        : [{ key: row.key, references: filesOf(row), format: row.format }],
-    );
-    apply({ kind: "library-read", pendingKey, books });
-    await recordHolders(questions);
-  }
-
-  /**
-   * The one row a pick of audio files stands as while they are being read.
-   *
-   * **A row rather than a flag beside the queue.** A pick of forty chapter
-   * files has nothing to show until it has been grouped, and a picker
-   * that shows nothing reads as one that is broken. It also carries the claim
-   * on those files, so nothing else has to remember them.
-   *
-   * Named after the folder they came from where there is one, which is what a
-   * person named after the book, and after the first file where there is not.
-   */
-  function pendingAudio(
-    picked: readonly { file: File; extension: SupportedExtension }[],
-  ): Picked {
-    const first = picked[0]!.file;
-    const folders = foldersOf(first);
-    const keys = picked.map((walk) => pickedKey(walk.file));
-    return {
-      key: groupKey(keys),
-      label: plainName(folders.at(-1) ?? first.name),
-      format: BookFormat.audiobook,
-      claims: keys,
-    };
-  }
-
-  /** Mark each asked row with the Book holding its file, or with none. */
-  async function recordHolders(questions: readonly HolderQuestion[]) {
-    if (questions.length === 0) return;
-    apply({
-      kind: "holders-answered",
-      held: await askWhoHolds(questions, whoHolds),
-    });
-  }
-
-  async function readFiles(files: readonly File[]) {
-    const { readerFor } = await import("../../lib/fileReaders");
-    const questions: HolderQuestion[] = [];
-    // Every fingerprint first, together: twelve small slices a file, so a
-    // pick of hundreds holds a few megabytes at most, and the read loop below
-    // stays the one sequential step.
-    const located = await Promise.all(files.map(locate));
-    for (const [position, file] of files.entries()) {
-      const key = pickedKey(file);
-      const reference = located[position];
-      if (reference) {
-        const extension = supportedExtension(file.name);
-        questions.push({
-          key,
-          references: [reference],
-          format: extension ? FORMAT_FOR_EXTENSION[extension] : "",
-        });
-      }
-      let said: BookDraft | undefined;
-      let note: ScanReason | undefined;
-      try {
-        // **Which reader opens this is `lib/fileReaders.ts`'s question, not
-        // this loop's.** An extension with no reader falls through to its name,
-        // which is this path's whole point: for a PDF an unusable metadata
-        // block is the common case rather than the exception.
-        const reader = await readerFor(file.name);
-        const reading = reader ? await reader(file) : null;
-        if (reading && !reading.ok) {
-          note = { kind: "file", failure: reading.failure };
-        } else if (reading) {
-          said = draftFromFile(reading.metadata);
-        }
-      } catch {
-        // A bug in the reader rather than anything the file did. Still one
-        // entry, and the name is still a signal.
-        note = { kind: "unreadable" };
-      }
-      apply({
-        kind: "file-read",
-        key,
-        naming: { name: file.name, folders: foldersOf(file) },
-        reference,
-        said,
-        note,
-      });
-    }
-    // **Once for the pick, after every file is read**, so a re-picked folder
-    // says which of its rows are already in the library before anybody
-    // presses add, at one request per `FILES_PER_LOOKUP` files.
-    await recordHolders(questions);
-  }
-
-  /**
-   * Read the picked audio files, then queue the **books** they are.
-   *
-   * **Every file first, rows afterwards**, which is the inversion this format
-   * brings: which files are one book is decided by what they say, so nothing
-   * can be shown until the whole pick has been read. That is affordable only
-   * because the reader seeks to the tags rather than reading the file:
-   * `lib/audiobook.ts` carries the measurement.
-   *
-   * **One file's failure is a note on the candidate, never the end of it.** A
-   * folder of untagged chapter MP3s is still one book, named after the folder,
-   * which is the ordinary case for anything a person ripped themselves.
-   */
-  async function readAudio(
-    picked: readonly { file: File; extension: SupportedExtension }[],
-    pendingKey: string,
-  ) {
-    const [audiobook, groups] = await Promise.all([
-      import("../../lib/audiobook"),
-      import("../../lib/audiobookGroups"),
-    ]);
-
-    const read: AudioFileNaming[] = [];
-    // **Beside the namings rather than in them**, because what a member is told
-    // is not a fact about the grouping: see `queue.Grouping`, which is
-    // where these end up so a split can still say what each file said.
-    const reasons = new Map<string, ScanReason>();
-    for (const { file, extension } of picked) {
-      // **Nothing is dropped here, and the loop used to drop it.** A file the
-      // reader has no arm for is still a file the member picked and still has a
-      // name, and skipping it took it out of the pick with no row and no count:
-      // a pick made entirely of them replaced its own reading row with nothing.
-      const audio = audiobook.isAudioExtension(extension) ? extension : null;
-      let tags: AudioTags | null = null;
-      // `file.unsupported`, not an audio reason: a file routed here that this
-      // has no arm for is not an audio file that said nothing. Spelled as the
-      // `FileFailure` it is, which is the name the picked file path gives it.
-      let note: ScanReason | undefined = audio
-        ? undefined
-        : { kind: "file", failure: "unsupported" };
-      if (audio) {
-        try {
-          const reading = await audiobook.readAudioTags(file, audio);
-          if (reading.ok) tags = reading.tags;
-          else note = { kind: "audio", failure: reading.failure };
-        } catch {
-          // A bug in the reader rather than anything the file did. The file is
-          // still one part of a book and its name still says something.
-          note = { kind: "unreadable" };
-        }
-      }
-      const key = pickedKey(file);
-      if (note) reasons.set(key, note);
-      read.push({
-        key,
-        name: file.name,
-        folders: foldersOf(file),
-        tags,
-        // **`true` for a file the reader has no arm for**, so it is a
-        // candidate on its own rather than a member of whatever untagged book
-        // shares its folder: `entryForGroup` shows a note only for a group of
-        // one, so the other way round computes a reason nobody sees and adds a
-        // file to a book's count that is not part of the book. Unreachable
-        // while `tests/lib/fileName.test.ts` holds the two extension sets
-        // equal, which is what makes this a defence rather than a path.
-        whole: audio === null || audiobook.AUDIO_EXTENSIONS[audio] === "book",
-      });
-    }
-
-    apply({
-      kind: "audio-grouped",
-      pendingKey,
-      groups: groups.groupAudiobooks(read),
-      reasons,
-    });
-  }
-
-  /**
-   * File one candidate's parts as a book each.
-   *
-   * **The group is replaced in place rather than removed and re-picked**, so
-   * the member does not lose the shelf, the queue position or anything the
-   * catalogue has already answered for the rows around it.
-   *
-   * Nothing happens for a row that is not a group of several, which is what a
-   * button pressed twice does.
-   */
-  async function splitTheGroup(key: string) {
-    const groups = await import("../../lib/audiobookGroups");
-    apply({ kind: "split", key, apart: groups.splitApart });
-  }
-
-  /**
-   * Ask the catalogue about one file, and never twice about the same one.
-   *
-   * **One call per file, which is what makes the pace's arithmetic true.** A
-   * name carrying an ISBN, and a file stating one, take the route a barcode
-   * takes, because an ISBN is an identifier rather than a guess; anything else
-   * is a title search. The record found is filled from the row's own draft
-   * where it left a field blank, `types.enrichedDraft`. Neither
-   * falls back to the other on a miss, since a second call per file would double
-   * a budget that was priced on one.
-   *
-   * **A miss leaves a book rather than an error.** The entry keeps the draft its
-   * name produced and says the catalogues did not have it, which for a title
-   * that exists only as a file is the ordinary outcome: six of the eight sources
-   * a title search fans out to refuse a record that says it is electronic.
-   */
-  async function lookUpTheName(entry: ScannedEntry) {
-    try {
-      if (entry.isbn) {
-        const lookup = await queryClient.fetchQuery({
-          queryKey: getLookupIsbnQueryKey({ isbn: entry.isbn }),
-          queryFn: () => lookupIsbn({ isbn: entry.isbn }),
-          staleTime: 60_000,
-        });
-        apply({ kind: "isbn-answered", key: entry.key, lookup });
-        return;
-      }
-      if (!entry.query) return;
-      const params = {
-        q: entry.query,
-        limit: FALLBACK_MATCH_LIMIT,
-        lang: locale,
-      };
-      const answer = await queryClient.fetchQuery({
-        queryKey: getSearchBooksQueryKey(params),
-        queryFn: () => searchBooks(params),
-        // The same five minutes the search box holds, and for the same reason:
-        // a member who stops a run and starts it again should not re-spend a
-        // quota to be told what it was just told.
-        staleTime: 5 * 60_000,
-      });
-      apply({
-        kind: "search-answered",
-        key: entry.key,
-        matches: answer.matches,
-      });
-    } catch (error) {
-      // `entry` is the row as the run found it, before it was asked, which
-      // is the state where it goes back to.
-      apply({
-        kind: "not-answered",
-        key: entry.key,
-        asked: entry.state,
-        unknown: nobodyKnows(error),
-      });
-    }
-  }
-
-  /**
-   * The paced run, over whichever set the press that started it named.
-   *
-   * **Sequential, with a floor of `FALLBACK_INTERVAL_MS` between starts.** The
-   * floor is measured from the start of the previous call rather than its end,
-   * so a slow catalogue spends the wait instead of adding to it, and the last
-   * file does not wait for a file that is not there.
-   *
-   * **Over the queue as it stood when the press happened**, which is what makes
-   * the figure on the button true. A file picked during a run joins the next
-   * one.
-   *
-   * **One loop for both presses, taking the predicate rather than the list.**
-   * The pace is priced against a limiter the whole page shares, so a second
-   * mechanism beside this one would be a second run able to start while this is
-   * going: `isLookingUp` is what refuses that, and it refuses it once here
-   * rather than once per caller. The predicate is passed rather than the
-   * filtered array so the run reads the entries it starts from, which is what
-   * makes the count on the button and the list the loop walks the same set.
-   */
-  async function runTheLookups(over: (entry: ScannedEntry) => boolean) {
-    // **The rendered state, and a ref was tried here and taken back out.** A
-    // press is a discrete event, which React flushes before it delivers the
-    // next, so a second press cannot see this as it was, and there are two
-    // presses: one per set. Two calls inside one tick would both pass, and a
-    // ref refused the second.
-    //
-    // **What that would now cost is no longer nothing.** While there was one
-    // entry point the two loops walked the same list and asked the same query
-    // keys, so React Query answered the second out of the first's flight. The
-    // two sets here are disjoint by construction, so two runs would ask
-    // different rows: 30 starts a minute each is the whole of `METADATA_LIMIT`,
-    // which is the one outcome `FALLBACK_STARTS_PER_MINUTE` is priced to
-    // refuse. What holds is that nothing calls both in one tick. **Anything
-    // that ever does needs the ref back**, and it is this paragraph rather than
-    // a test that says so, because a guard nothing can watch go wrong is a
-    // guard nothing can watch go missing.
-    if (isLookingUp) return;
-    const walking = entries.filter(over);
-    if (walking.length === 0) return;
-
-    stopRequested.current = false;
-    setIsLookingUp(true);
-    try {
-      for (const [index, entry] of walking.entries()) {
-        if (stopRequested.current) break;
-        // **A row removed since the press is not asked about.** The run walks
-        // the queue as it stood, so without this a removed row, or a whole
-        // discarded queue, still spends one metered lookup each.
-        if (!liveEntries.current.some((one) => one.key === entry.key)) continue;
-        apply({ kind: "asked", key: entry.key });
-        const startedAt = Date.now();
-        await lookUpTheName(entry);
-        if (index === walking.length - 1) break;
-        const remaining = FALLBACK_INTERVAL_MS - (Date.now() - startedAt);
-        if (remaining > 0) await delay(remaining, endTheWait);
-      }
-    } finally {
-      setIsLookingUp(false);
-    }
-  }
-
-  /**
-   * Write the whole queue, one book at a time, until a member stops it.
-   *
-   * **The loop is `lib/bulkWrite.ts`**, which the two import cards on the
-   * settings page walk too: the concurrency rule, the stop between books, the
-   * progress report and the short count that is not damage are one set of rules
-   * with one home. What stays here is what a scanned row is, which is a book
-   * and possibly a sighting.
-   */
-  async function addAll() {
-    const ready = entries.filter(isReady);
-    if (ready.length === 0) return;
-
-    stopAddingRequested.current = false;
-    setIsAdding(true);
-    // **The previous run's verdict goes when this one starts.** A stop leaves
-    // rows in the queue precisely so they can be added, so a second press is
-    // the ordinary path now, and the banner saying what the last run did not
-    // reach would stand over those rows while they are being written.
-    setResult(null);
-    const shelf = normaliseLocation(location);
-
-    // **Asked again for every row nobody has asked about yet**, which is a
-    // row whose pick lookup failed or had not answered when this was pressed.
-    // This is the guarantee that a re-picked folder adds nothing twice; the
-    // lookup at the pick is what lets the queue say so beforehand.
-    const unasked = ready.flatMap((entry) =>
-      entry.reference !== undefined && entry.heldBy === undefined
-        ? [{ key: entry.key, references: filesOf(entry), format: entry.format }]
-        : [],
-    );
-    const heldNow = await askWhoHolds(unasked, whoHolds);
-    const landings: Landing[] = [];
-
-    /**
-     * One row, landed by `lib/fileLanding.land`, and what that makes of it
-     * here.
-     *
-     * **Only a throw makes the row a failure**, because the shared loop
-     * records one by nothing else. So a row whose book was made, or which is
-     * on its holder already, returns; at the ceiling it returns too, which
-     * takes it out of the queue as a counted row. A book of another format
-     * throws `HeldInAnotherFormat`, which is the copy offer, and a tie throws
-     * `HeldUnnamed`, which is its own reason, as the trash refusal is.
-     */
-    async function addOne(entry: ReadyEntry) {
-      const landing = await land(
-        {
-          // The same request builder as the one-book flow, so a field added
-          // there cannot quietly go missing from a rapid run. Everything a
-          // rapid run does not offer takes its blank value: no cover, no
-          // tags, not private. `format` is the exception and is carried off
-          // the entry, because a picked file answers it and a barcode does
-          // not.
-          body: toScanRequest({
-            ...blankPending({ location: shelf }),
-            format: entry.format,
-            draft: entry.draft,
-          }),
-          references: filesOf(entry),
-          format: entry.format,
-          held: heldNow.get(entry.key) ?? entry.heldBy,
-          identifierWasRead: theIsbnWasRead(entry),
-        },
-        {
-          create: (data) => scanAdd.mutateAsync({ data }),
-          report: (bookId, data) =>
-            reportReference.mutateAsync({ bookId, data }),
-          copiesOf: listCopies,
-        },
-      );
-      landings.push(landing);
-      switch (landing.kind) {
-        case "added":
-        case "added-unreferenced":
-        case "on-holder":
-        case "at-ceiling":
-          return;
-        case "other-format":
-          throw new HeldInAnotherFormat(landing.holderId);
-        case "tie":
-          throw new HeldUnnamed();
-        case "in-trash":
-        case "failed":
-          // Rethrown rather than reported here: the row is the loop's to
-          // record, and swallowing it would count a book that is not in the
-          // catalogue. The failure mapping names the trash refusal.
-          throw landing.thrown;
-        default:
-          landing satisfies never;
-      }
-    }
-
-    const outcome = await writeOneAtATime(ready, {
-      post: addOne,
-      onProgress: setAddProgress,
-      stopped: () => stopAddingRequested.current,
-    });
-
-    // **On any book at all, including a run the member stopped.** The shelf is
-    // where those books physically went, so the next run should offer it; a
-    // member who stopped because the shelf was wrong changes one field, and one
-    // who stopped for any other reason would otherwise type it again.
-    if (outcome.added > 0) rememberLastLocation(shelf);
-    // Once for the batch rather than once per book, and the catalogue rather
-    // than everything: a rapid run leaves the scanner open, so a keyless
-    // invalidate re-spent the search quota in the middle of a shelf.
-    invalidate.catalogue();
-    apply({
-      kind: "batch-ran",
-      walked: outcome.attempted.map((entry) => entry.key),
-      failures: outcome.failures.map(({ item, thrown }) =>
-        thrown instanceof HeldInAnotherFormat
-          ? { row: item, heldInAnotherFormat: thrown.holderId }
-          : { row: item, reason: reasonForRefusedRow(thrown) },
-      ),
-    });
-    setIsAdding(false);
-    setAddProgress(null);
-    const counts = countLandings(landings);
-    setResult({
-      // From the landings rather than the shared loop, which counts every
-      // row that did not throw, a row already in the library among them.
-      added: counts.added,
-      failed: outcome.failures.length,
-      unreferenced: counts.unreferenced,
-      already: counts.already,
-      atCeiling: counts.atCeiling,
-      filesLeft: counts.filesLeft,
-      stopped: outcome.stopped,
-    });
-  }
-
-  /**
-   * File one row as its own copy of the book its ISBN belongs to, and say
-   * where the file is on that copy.
-   *
-   * **The press `lib/fileLanding.whereItLands` refuses to make for the member.** The copy
-   * route is the one the single book flow's "add as another copy" uses, with
-   * the same body builder, so a copy made here inherits the work, the tags and
-   * the privacy of the holder exactly as one made there does. The format is
-   * the file's, which is the whole point of the copy.
-   *
-   * The row leaves the queue once the copy exists, whatever the reference
-   * does, for the reason `addOne` gives: a created book put back as a failure
-   * is added again into a duplicate. The verdict above the queue moves by one
-   * row, so it keeps describing what is left beneath it. The files go through
-   * `lib/fileLanding.recordOnCopy`, so a location another Book holds is left
-   * there as it is on the holder path.
-   */
-  async function addAsCopy(key: string) {
-    const entry = entries.find((one) => one.key === key);
-    if (entry?.copyOf === undefined || entry.reference === undefined) return;
-    setIsAddingCopy(true);
-    try {
-      await copyTheRow(key, entry.copyOf, entry);
-    } finally {
-      setIsAddingCopy(false);
-    }
-  }
-
-  /** `addAsCopy`'s requests, between the hold being taken and released. */
-  async function copyTheRow(
-    key: string,
-    holderId: number,
-    entry: ScannedEntry,
-  ) {
-    const format = entry.format;
-    let copyId: number;
-    try {
-      const copy = await addAnotherCopy.mutateAsync({
-        bookId: holderId,
-        data: toCopyRequest({
-          ...blankPending({ location: normaliseLocation(location) }),
-          format,
-        }),
-      });
-      copyId = copy.id;
-      // The offer goes the moment the copy exists, so a second press while
-      // the reference is in flight cannot post a second copy.
-      apply({ kind: "copy-made", key });
-    } catch (error) {
-      // The offer stays, so the press can be made again; the reason says why
-      // this one did not take.
-      apply({ kind: "copy-refused", key, reason: reasonForError(error) });
-      return;
-    }
-    const { left, recorded } = await recordOnCopy(
-      copyId,
-      filesOf(entry),
-      (bookId, data) => reportReference.mutateAsync({ bookId, data }),
-    );
-    // A copy is a new book, the reason `useScanFlow.addCopy` gives.
-    invalidate.catalogue();
-    apply({ kind: "removed", key });
-    setResult((last) => ({
-      added: (last?.added ?? 0) + 1,
-      failed: Math.max(0, (last?.failed ?? 0) - 1),
-      unreferenced: (last?.unreferenced ?? 0) + (recorded ? 0 : 1),
-      already: last?.already ?? 0,
-      atCeiling: last?.atCeiling ?? 0,
-      filesLeft: (last?.filesLeft ?? 0) + left,
-      stopped: last?.stopped ?? false,
-    }));
-  }
-
-  // One reading of the queue for every control that quotes a figure.
-  const figures = figuresOf(entries);
+  const intake: Intake = {
+    entries,
+    location,
+    isLookingUp,
+    setEntries,
+    setSkipped,
+    setLibraryNotice,
+    setIsLookingUp,
+    setIsAdding,
+    setIsAddingCopy,
+    setAddProgress,
+    setResult,
+    stopRequested,
+    stopAddingRequested,
+    liveEntries,
+    endTheWait,
+    // **The locale, and nothing else this hook says to a member.** Every
+    // reason a row carries is a name now, and the last `t` went with them;
+    // this is for the paced lookup, which breaks ties towards the reader's
+    // own printing exactly as the search box does.
+    locale: useTranslation().locale,
+    queryClient: useQueryClient(),
+    invalidate: useInvalidate(),
+    scanAdd: useScanAdd(),
+    reportReference: useReportDigitalReference(),
+    addAnotherCopy: useAddCopy(),
+  };
+  const apply = (event: QueueEvent) => applyTo(intake, event);
 
   return {
     isActive,
@@ -2044,13 +1433,14 @@ export function useRapidIntake(): UseRapidIntakeResult {
     location,
     setLocation,
     locations,
-    capture,
-    pickFiles,
+    capture: (isbn) => capture(intake, isbn),
+    pickFiles: (files) => pickFiles(intake, files),
     isReading: isReading(entries),
     skipped,
-    figures,
-    lookUpTheNames: () => void runTheLookups(needsALookup),
-    lookUpTheKeptNames: () => void runTheLookups(canBeAskedAgain),
+    // One reading of the queue for every control that quotes a figure.
+    figures: figuresOf(entries),
+    lookUpTheNames: () => void runTheLookups(intake, needsALookup),
+    lookUpTheKeptNames: () => void runTheLookups(intake, canBeAskedAgain),
     stopLookingUp: () => {
       stopRequested.current = true;
       // The run may be between two calls rather than inside one, and the loop
@@ -2065,7 +1455,7 @@ export function useRapidIntake(): UseRapidIntakeResult {
     keepTheName: (key) => apply({ kind: "kept-the-name", key }),
     keepEveryNameForNow: () => apply({ kind: "kept-every-name-for-now" }),
     remove: (key) => apply({ kind: "removed", key }),
-    splitApart: (key) => void splitTheGroup(key),
+    splitApart: (key) => void splitTheGroup(intake, key),
     dropSubject: (key, subject) =>
       apply({ kind: "subject-dropped", key, subject }),
     clear: () => {
@@ -2076,9 +1466,9 @@ export function useRapidIntake(): UseRapidIntakeResult {
       setLibraryNotice(null);
     },
     libraryNotice,
-    addAll: () => void addAll(),
+    addAll: () => void addAll(intake),
     isAdding,
-    addAsCopy: (key) => void addAsCopy(key),
+    addAsCopy: (key) => void addAsCopy(intake, key),
     isAddingCopy,
     stopAdding: () => {
       // No wait to interrupt, unlike the paced lookup: the write has no floor
@@ -2087,6 +1477,910 @@ export function useRapidIntake(): UseRapidIntakeResult {
     },
     addProgress,
     result,
+  };
+}
+
+/** What a rapid run's batch did, as `UseRapidIntakeResult.result` says. */
+type IntakeResult = NonNullable<UseRapidIntakeResult["result"]>;
+
+/**
+ * `useRapidIntake`'s state and requests as one render saw them, which every
+ * phase of the intake below is handed.
+ *
+ * **The phases read a render's values exactly as the closures they were did**:
+ * a run started in one render keeps that render's queue and shelf, and reads
+ * what moved since only through the refs, which is why those are refs.
+ */
+interface Intake {
+  readonly entries: ScannedEntry[];
+  readonly location: string;
+  readonly isLookingUp: boolean;
+  readonly locale: Locale;
+  readonly setEntries: Dispatch<SetStateAction<ScannedEntry[]>>;
+  readonly setSkipped: (count: number) => void;
+  readonly setLibraryNotice: (notice: LibraryNotice | null) => void;
+  readonly setIsLookingUp: (running: boolean) => void;
+  readonly setIsAdding: (running: boolean) => void;
+  readonly setIsAddingCopy: (running: boolean) => void;
+  readonly setAddProgress: (progress: BulkProgress | null) => void;
+  readonly setResult: Dispatch<SetStateAction<IntakeResult | null>>;
+  readonly stopRequested: RefObject<boolean>;
+  readonly stopAddingRequested: RefObject<boolean>;
+  readonly liveEntries: RefObject<ScannedEntry[]>;
+  readonly endTheWait: RefObject<(() => void) | null>;
+  readonly queryClient: QueryClient;
+  readonly invalidate: ReturnType<typeof useInvalidate>;
+  readonly scanAdd: ReturnType<typeof useScanAdd>;
+  readonly reportReference: ReturnType<typeof useReportDigitalReference>;
+  readonly addAnotherCopy: ReturnType<typeof useAddCopy>;
+}
+
+/**
+ * What happened, applied to the queue as it stands when React gets to it
+ * rather than as this render saw it: a subject dropped while a lookup was in
+ * flight stays dropped.
+ */
+function applyTo(intake: Intake, event: QueueEvent) {
+  intake.setEntries((current) => queueAfter(current, event));
+}
+
+function capture(intake: Intake, isbn: string) {
+  intake.setEntries((current) => {
+    const queued = queueAfter(current, { kind: "captured", isbn });
+    // A repeat comes back as the same queue, and is not looked up again.
+    if (queued !== current) void lookUpTheBarcode(intake, isbn);
+    return queued;
+  });
+}
+
+/**
+ * The catalogues' answer for one ISBN, through the cache the confirm card's
+ * lookup shares, so a barcode asked twice inside a minute is asked once.
+ */
+function fetchTheIsbn(queryClient: QueryClient, isbn: string) {
+  return queryClient.fetchQuery({
+    queryKey: getLookupIsbnQueryKey({ isbn }),
+    queryFn: () => lookupIsbn({ isbn }),
+    staleTime: 60_000,
+  });
+}
+
+async function lookUpTheBarcode(intake: Intake, isbn: string) {
+  const key = scannedKey(isbn);
+  try {
+    const lookup = await fetchTheIsbn(intake.queryClient, isbn);
+    applyTo(intake, { kind: "isbn-answered", key, lookup });
+  } catch (error) {
+    // Kept in the queue either way rather than dropped, so a book on the
+    // shelf does not silently vanish between the shelf and the catalogue.
+    applyTo(intake, {
+      kind: "not-answered",
+      key,
+      asked: "looking-up",
+      unknown: nobodyKnows(error),
+    });
+  }
+}
+
+/**
+ * Read picked files, one entry each.
+ *
+ * **The reader is imported inside this call rather than at the top of the
+ * module**, so a session that never picks a file never downloads a zip walk
+ * and an XML reader. It is resolved once for the batch: the module graph is
+ * cached after the first await, and asking per file would serialise every
+ * read behind something already in memory.
+ *
+ * **A file the walk does not read is counted, never dropped in silence.** The
+ * formats epic settled which extensions are in and which are out, so a folder
+ * of CBR or DJVU produces a count and an explanation rather than an empty
+ * queue that reads as a broken picker.
+ *
+ * **A file that cannot be read is no longer the end of it.** Its name is still
+ * a signal, so it becomes a candidate carrying what the name said, with a note
+ * of what the file itself could not say. Only a name that reduces to nothing
+ * is a failure now.
+ *
+ * **Audio takes a different route and the docstring above says why it must.**
+ * One file is one book for every format here except an audiobook, which is
+ * usually a folder of chapter files, so its rows cannot be made until every
+ * file in the pick has been read and grouped. `readAudio` is that route.
+ *
+ * The queue is asked what it already holds (`notYetQueued`) inside the
+ * updater, and the reads start from there, which is the shape `capture` uses
+ * and for the same reason: the
+ * queue is the only record of what has been picked, so asking anything else
+ * would be a second one to keep in step. The skipped count is taken **before**
+ * it, because an updater that counts is an updater run twice under a strict
+ * render counting twice.
+ */
+function pickFiles(intake: Intake, files: readonly File[]) {
+  // **A Calibre library is read through its index, not file by file**, the
+  // way the Settings import reads it: one row a book, with every format
+  // file on it, rather than a row per file the index already describes.
+  const index = libraryIndexIn(files);
+  if (index !== undefined) {
+    pickLibrary(intake, files, index);
+    return;
+  }
+  walkFiles(intake, files);
+}
+
+/** A picked file whose extension Endpaper reads. */
+interface Walked {
+  readonly file: File;
+  readonly extension: SupportedExtension;
+}
+
+/** The ordinary walk: one row per file, or per audiobook. */
+function walkFiles(intake: Intake, files: readonly File[]) {
+  const walked = files.map((file) => ({
+    file,
+    extension: supportedExtension(file.name),
+  }));
+  intake.setSkipped(walked.filter((walk) => walk.extension === null).length);
+  intake.setLibraryNotice(null);
+
+  const supported = walked.filter(
+    (walk): walk is Walked => walk.extension !== null,
+  );
+
+  intake.setEntries((current) => {
+    const unqueued = notYetQueued(current, supported, (walk) =>
+      pickedKey(walk.file),
+    );
+    // **The audio half gets one row for the whole pick, not one each.** Which
+    // files are one book is decided by what they say, so nothing can be
+    // grouped until every one of them has been read. The row claims them
+    // meanwhile, which is what keeps a second pick of the same folder from
+    // queueing them again, and `readAudio` replaces it with the books.
+    const audio = unqueued.filter((walk) => isAudio(walk.extension));
+    const fresh = unqueued.filter((walk) => !isAudio(walk.extension));
+    const pending = audio.length > 0 ? pendingAudio(audio) : null;
+    if (pending) void readAudio(intake, audio, pending.key);
+    if (fresh.length > 0)
+      void readFiles(
+        intake,
+        fresh.map((walk) => walk.file),
+      );
+    return queueAfter(current, {
+      kind: "picked",
+      rows: [...(pending ? [pending] : []), ...fresh.map(pickedRow)],
+    });
+  });
+}
+
+/** The row a picked file stands as until it has been read. */
+function pickedRow(walk: Walked): Picked {
+  return {
+    key: pickedKey(walk.file),
+    // Taken while the `File` is still in hand. After the read the queue
+    // holds a key and a label and could not derive this if it wanted to.
+    reference: referenceFor(walk.file) ?? undefined,
+    // Cleaned for the reason every derived value is: a name is somebody
+    // else's text, and this one is printed beside a title that was.
+    label: plainName(walk.file.name),
+    // The extension answers this, and it is the same kind of evidence a zip
+    // container is rather than the guess `format` is nullable to refuse.
+    format: FORMAT_FOR_EXTENSION[walk.extension],
+  };
+}
+
+/**
+ * Queue a Calibre library folder: one row while its index is read, then a
+ * row for each of its books.
+ *
+ * Keyed by the folder's name, so picking the same library again while it
+ * is read queues nothing, and its books by their Calibre id under it, so a
+ * second pick afterwards queues only books not already in the queue.
+ */
+function pickLibrary(intake: Intake, files: readonly File[], index: File) {
+  intake.setSkipped(0);
+  intake.setLibraryNotice(null);
+  const root = index.webkitRelativePath.split("/")[0]!;
+  const key = `calibre:${root}`;
+  intake.setEntries((current) => {
+    const queued = queueAfter(current, {
+      kind: "picked",
+      rows: [{ key, label: plainName(root), format: "" }],
+    });
+    // A library still being read comes back as the same queue, and is not
+    // read again.
+    if (queued !== current) void readLibrary(intake, files, index, key);
+    return queued;
+  });
+}
+
+/**
+ * Read a library folder through its index and queue its books.
+ *
+ * **Read only, by construction**: the index is a `File` the browser read
+ * into memory, and `lib/sqlite.ts` refuses a copy torn structurally, which
+ * a live library caught mid write can be; a copy whose pages agree but
+ * whose rows are mid transaction is read as it stands. **An index this
+ * cannot read leaves an ordinary folder**, so its files are read one by one
+ * as any folder's are, and `libraryNotice` says so: one row per file is
+ * what this door exists to replace, so the member is told why it is back.
+ *
+ * **A book file the index names for no book is left out and counted**, the
+ * walk's own rule for what it passes over.
+ *
+ * Each book is `draftFromCalibre`'s, checked against the `metadata.opf`
+ * beside it, and carries a reference for each of its files the folder holds,
+ * with the fingerprint read now, while the files are in hand. Then the
+ * holder lookup, once, as `readFiles` asks it.
+ */
+async function readLibrary(
+  intake: Intake,
+  files: readonly File[],
+  index: File,
+  pendingKey: string,
+) {
+  const read = await readIndexed(index, files);
+  if (read === null) {
+    applyTo(intake, { kind: "removed", key: pendingKey });
+    walkFiles(
+      intake,
+      files.filter((file) => file !== index),
+    );
+    intake.setLibraryNotice({ kind: "index-unread" });
+    return;
+  }
+
+  const { checked, filesOfEachBook } = read;
+  const paired = filesOfEachBook(checked, files);
+  const unindexed = unindexedIn(files, new Set([...paired.values()].flat()));
+  if (unindexed > 0)
+    intake.setLibraryNotice({ kind: "unindexed", count: unindexed });
+  const located = await locateEach(paired);
+
+  const books = checked.map((book) => ({
+    book,
+    files: located.get(book.id) ?? [],
+  }));
+  // Every file of each row that has one, as `readFiles` asks for its own.
+  const questions = libraryRows(pendingKey, books).flatMap((row) =>
+    row.reference === undefined
+      ? []
+      : [{ key: row.key, references: filesOf(row), format: row.format }],
+  );
+  applyTo(intake, { kind: "library-read", pendingKey, books });
+  await recordHolders(intake, questions);
+}
+
+/**
+ * How many book files of a library folder its index names for no book.
+ *
+ * Not under a folder whose name starts with a dot at the library's root:
+ * Calibre keeps deleted books' files in `.caltrash`, and inviting the member
+ * to add them back would be the wrong sentence.
+ */
+function unindexedIn(
+  files: readonly File[],
+  indexed: ReadonlySet<File>,
+): number {
+  return files.filter(
+    (file) =>
+      supportedExtension(file.name) !== null &&
+      !indexed.has(file) &&
+      !file.webkitRelativePath.split("/")[1]?.startsWith("."),
+  ).length;
+}
+
+/** Each book's files located, the ones that could not be left out. */
+async function locateEach<Id>(
+  paired: ReadonlyMap<Id, readonly File[]>,
+): Promise<Map<Id, DigitalReferenceIn[]>> {
+  return new Map(
+    await Promise.all(
+      [...paired].map(
+        async ([id, held]) =>
+          [
+            id,
+            (await Promise.all(held.map(locate))).filter(
+              (one) => one !== undefined,
+            ),
+          ] as const,
+      ),
+    ),
+  );
+}
+
+/**
+ * The one row a pick of audio files stands as while they are being read.
+ *
+ * **A row rather than a flag beside the queue.** A pick of forty chapter
+ * files has nothing to show until it has been grouped, and a picker
+ * that shows nothing reads as one that is broken. It also carries the claim
+ * on those files, so nothing else has to remember them.
+ *
+ * Named after the folder they came from where there is one, which is what a
+ * person named after the book, and after the first file where there is not.
+ */
+function pendingAudio(picked: readonly Walked[]): Picked {
+  const first = picked[0]!.file;
+  const folders = foldersOf(first);
+  const keys = picked.map((walk) => pickedKey(walk.file));
+  return {
+    key: groupKey(keys),
+    label: plainName(folders.at(-1) ?? first.name),
+    format: BookFormat.audiobook,
+    claims: keys,
+  };
+}
+
+/** Mark each asked row with the Book holding its file, or with none. */
+async function recordHolders(
+  intake: Intake,
+  questions: readonly HolderQuestion[],
+) {
+  if (questions.length === 0) return;
+  applyTo(intake, {
+    kind: "holders-answered",
+    held: await askWhoHolds(questions, whoHolds),
+  });
+}
+
+async function readFiles(intake: Intake, files: readonly File[]) {
+  const { readerFor } = await import("../../lib/fileReaders");
+  const questions: HolderQuestion[] = [];
+  // Every fingerprint first, together: twelve small slices a file, so a
+  // pick of hundreds holds a few megabytes at most, and the read loop below
+  // stays the one sequential step.
+  const located = await Promise.all(files.map(locate));
+  for (const [position, file] of files.entries()) {
+    const key = pickedKey(file);
+    const reference = located[position];
+    if (reference) {
+      const extension = supportedExtension(file.name);
+      questions.push({
+        key,
+        references: [reference],
+        format: extension ? FORMAT_FOR_EXTENSION[extension] : "",
+      });
+    }
+    const { metadata, note } = await readOneFile(readerFor, file);
+    applyTo(intake, {
+      kind: "file-read",
+      key,
+      naming: { name: file.name, folders: foldersOf(file) },
+      reference,
+      // **Outside `readOneFile`'s catch, because it cannot throw**: it only
+      // bounds a typed record, and nothing it calls throws. Were that to
+      // change, the throw would end the pick here and leave this file and
+      // every later one in its reading row.
+      said: metadata && draftFromFile(metadata),
+      note,
+    });
+  }
+  // **Once for the pick, after every file is read**, so a re-picked folder
+  // says which of its rows are already in the library before anybody
+  // presses add, at one request per `FILES_PER_LOOKUP` files.
+  await recordHolders(intake, questions);
+}
+
+/**
+ * What one picked file said about itself, or why it said nothing.
+ *
+ * **The record, never a draft**: a function taking the `File` and handing back
+ * a draft is the shape `houseRules.test.ts` refuses, because it puts the bytes
+ * one spread away from a request body. `readFiles` makes the draft.
+ */
+async function readOneFile(
+  readerFor: (name: string) => Promise<FileReader | null>,
+  file: File,
+): Promise<{
+  metadata: FileMetadata | undefined;
+  note: ScanReason | undefined;
+}> {
+  try {
+    // **Which reader opens this is `lib/fileReaders.ts`'s question, not
+    // this loop's.** An extension with no reader falls through to its name,
+    // which is this path's whole point: for a PDF an unusable metadata
+    // block is the common case rather than the exception.
+    const reader = await readerFor(file.name);
+    const reading = reader ? await reader(file) : null;
+    if (reading && !reading.ok) {
+      return {
+        metadata: undefined,
+        note: { kind: "file", failure: reading.failure },
+      };
+    }
+    return { metadata: reading?.metadata, note: undefined };
+  } catch {
+    // A bug in the reader rather than anything the file did. Still one
+    // entry, and the name is still a signal.
+    return { metadata: undefined, note: { kind: "unreadable" } };
+  }
+}
+
+/**
+ * Read the picked audio files, then queue the **books** they are.
+ *
+ * **Every file first, rows afterwards**, which is the inversion this format
+ * brings: which files are one book is decided by what they say, so nothing
+ * can be shown until the whole pick has been read. That is affordable only
+ * because the reader seeks to the tags rather than reading the file:
+ * `lib/audiobook.ts` carries the measurement.
+ *
+ * **One file's failure is a note on the candidate, never the end of it.** A
+ * folder of untagged chapter MP3s is still one book, named after the folder,
+ * which is the ordinary case for anything a person ripped themselves.
+ */
+async function readAudio(
+  intake: Intake,
+  picked: readonly Walked[],
+  pendingKey: string,
+) {
+  const [audiobook, groups] = await Promise.all([
+    import("../../lib/audiobook"),
+    import("../../lib/audiobookGroups"),
+  ]);
+
+  const read: AudioFileNaming[] = [];
+  // **Beside the namings rather than in them**, because what a member is told
+  // is not a fact about the grouping: see `queue.Grouping`, which is
+  // where these end up so a split can still say what each file said.
+  const reasons = new Map<string, ScanReason>();
+  for (const { file, extension } of picked) {
+    const { tags, note, whole } = await readOneAudio(
+      audiobook,
+      file,
+      extension,
+    );
+    const key = pickedKey(file);
+    if (note) reasons.set(key, note);
+    read.push({ key, name: file.name, folders: foldersOf(file), tags, whole });
+  }
+
+  applyTo(intake, {
+    kind: "audio-grouped",
+    pendingKey,
+    groups: groups.groupAudiobooks(read),
+    reasons,
+  });
+}
+
+/** What one picked audio file said, and whether it is a book on its own. */
+async function readOneAudio(
+  audiobook: typeof import("../../lib/audiobook"),
+  file: File,
+  extension: SupportedExtension,
+): Promise<{ tags: AudioTags | null; note?: ScanReason; whole: boolean }> {
+  // **Nothing is dropped here, and the loop used to drop it.** A file the
+  // reader has no arm for is still a file the member picked and still has a
+  // name, and skipping it took it out of the pick with no row and no count:
+  // a pick made entirely of them replaced its own reading row with nothing.
+  //
+  // `file.unsupported`, not an audio reason: a file routed here that this has
+  // no arm for is not an audio file that said nothing. Spelled as the
+  // `FileFailure` it is, which is the name the picked file path gives it.
+  //
+  // **`whole` is true for a file the reader has no arm for**, so it is a
+  // candidate on its own rather than a member of whatever untagged book
+  // shares its folder: `entryForGroup` shows a note only for a group of one,
+  // so the other way round computes a reason nobody sees and adds a file to a
+  // book's count that is not part of the book. Unreachable while
+  // `tests/lib/fileName.test.ts` holds the two extension sets equal, which is
+  // what makes this a defence rather than a path.
+  if (!audiobook.isAudioExtension(extension)) {
+    return {
+      tags: null,
+      note: { kind: "file", failure: "unsupported" },
+      whole: true,
+    };
+  }
+  const whole = audiobook.AUDIO_EXTENSIONS[extension] === "book";
+  try {
+    const reading = await audiobook.readAudioTags(file, extension);
+    return reading.ok
+      ? { tags: reading.tags, whole }
+      : {
+          tags: null,
+          note: { kind: "audio", failure: reading.failure },
+          whole,
+        };
+  } catch {
+    // A bug in the reader rather than anything the file did. The file is
+    // still one part of a book and its name still says something.
+    return { tags: null, note: { kind: "unreadable" }, whole };
+  }
+}
+
+/**
+ * File one candidate's parts as a book each.
+ *
+ * **The group is replaced in place rather than removed and re-picked**, so
+ * the member does not lose the shelf, the queue position or anything the
+ * catalogue has already answered for the rows around it.
+ *
+ * Nothing happens for a row that is not a group of several, which is what a
+ * button pressed twice does.
+ */
+async function splitTheGroup(intake: Intake, key: string) {
+  const groups = await import("../../lib/audiobookGroups");
+  applyTo(intake, { kind: "split", key, apart: groups.splitApart });
+}
+
+/**
+ * Ask the catalogue about one file, and never twice about the same one.
+ *
+ * **One call per file, which is what makes the pace's arithmetic true.** A
+ * name carrying an ISBN, and a file stating one, take the route a barcode
+ * takes, because an ISBN is an identifier rather than a guess; anything else
+ * is a title search. The record found is filled from the row's own draft
+ * where it left a field blank, `types.enrichedDraft`. Neither
+ * falls back to the other on a miss, since a second call per file would double
+ * a budget that was priced on one.
+ *
+ * **A miss leaves a book rather than an error.** The entry keeps the draft its
+ * name produced and says the catalogues did not have it, which for a title
+ * that exists only as a file is the ordinary outcome: six of the eight sources
+ * a title search fans out to refuse a record that says it is electronic.
+ */
+async function lookUpTheName(intake: Intake, entry: ScannedEntry) {
+  try {
+    if (entry.isbn) {
+      const lookup = await fetchTheIsbn(intake.queryClient, entry.isbn);
+      applyTo(intake, { kind: "isbn-answered", key: entry.key, lookup });
+      return;
+    }
+    if (!entry.query) return;
+    const params = {
+      q: entry.query,
+      limit: FALLBACK_MATCH_LIMIT,
+      lang: intake.locale,
+    };
+    const answer = await intake.queryClient.fetchQuery({
+      queryKey: getSearchBooksQueryKey(params),
+      queryFn: () => searchBooks(params),
+      // The same five minutes the search box holds, and for the same reason:
+      // a member who stops a run and starts it again should not re-spend a
+      // quota to be told what it was just told.
+      staleTime: 5 * 60_000,
+    });
+    applyTo(intake, {
+      kind: "search-answered",
+      key: entry.key,
+      matches: answer.matches,
+    });
+  } catch (error) {
+    // `entry` is the row as the run found it, before it was asked, which
+    // is the state where it goes back to.
+    applyTo(intake, {
+      kind: "not-answered",
+      key: entry.key,
+      asked: entry.state,
+      unknown: nobodyKnows(error),
+    });
+  }
+}
+
+/**
+ * The paced run, over whichever set the press that started it named.
+ *
+ * **Sequential, with a floor of `FALLBACK_INTERVAL_MS` between starts.** The
+ * floor is measured from the start of the previous call rather than its end,
+ * so a slow catalogue spends the wait instead of adding to it, and the last
+ * file does not wait for a file that is not there.
+ *
+ * **Over the queue as it stood when the press happened**, which is what makes
+ * the figure on the button true. A file picked during a run joins the next
+ * one.
+ *
+ * **One loop for both presses, taking the predicate rather than the list.**
+ * The pace is priced against a limiter the whole page shares, so a second
+ * mechanism beside this one would be a second run able to start while this is
+ * going: `isLookingUp` is what refuses that, and it refuses it once here
+ * rather than once per caller. The predicate is passed rather than the
+ * filtered array so the run reads the entries it starts from, which is what
+ * makes the count on the button and the list the loop walks the same set.
+ */
+async function runTheLookups(
+  intake: Intake,
+  over: (entry: ScannedEntry) => boolean,
+) {
+  // **The rendered state, and a ref was tried here and taken back out.** A
+  // press is a discrete event, which React flushes before it delivers the
+  // next, so a second press cannot see this as it was, and there are two
+  // presses: one per set. Two calls inside one tick would both pass, and a
+  // ref refused the second.
+  //
+  // **What that would now cost is no longer nothing.** While there was one
+  // entry point the two loops walked the same list and asked the same query
+  // keys, so React Query answered the second out of the first's flight. The
+  // two sets here are disjoint by construction, so two runs would ask
+  // different rows: 30 starts a minute each is the whole of `METADATA_LIMIT`,
+  // which is the one outcome `FALLBACK_STARTS_PER_MINUTE` is priced to
+  // refuse. What holds is that nothing calls both in one tick. **Anything
+  // that ever does needs the ref back**, and it is this paragraph rather than
+  // a test that says so, because a guard nothing can watch go wrong is a
+  // guard nothing can watch go missing.
+  if (intake.isLookingUp) return;
+  const walking = intake.entries.filter(over);
+  if (walking.length === 0) return;
+
+  intake.stopRequested.current = false;
+  intake.setIsLookingUp(true);
+  try {
+    await walkTheLookups(intake, walking);
+  } finally {
+    intake.setIsLookingUp(false);
+  }
+}
+
+/** `runTheLookups`'s loop: one row at a time, the floor between starts. */
+async function walkTheLookups(intake: Intake, walking: ScannedEntry[]) {
+  for (const [index, entry] of walking.entries()) {
+    if (intake.stopRequested.current) break;
+    // **A row removed since the press is not asked about.** The run walks
+    // the queue as it stood, so without this a removed row, or a whole
+    // discarded queue, still spends one metered lookup each.
+    if (!intake.liveEntries.current.some((one) => one.key === entry.key))
+      continue;
+    applyTo(intake, { kind: "asked", key: entry.key });
+    const startedAt = Date.now();
+    await lookUpTheName(intake, entry);
+    if (index === walking.length - 1) break;
+    const remaining = FALLBACK_INTERVAL_MS - (Date.now() - startedAt);
+    if (remaining > 0) await delay(remaining, intake.endTheWait);
+  }
+}
+
+/**
+ * Write the whole queue, one book at a time, until a member stops it.
+ *
+ * **The loop is `lib/bulkWrite.ts`**, which the two import cards on the
+ * settings page walk too: the concurrency rule, the stop between books, the
+ * progress report and the short count that is not damage are one set of rules
+ * with one home. What stays here is what a scanned row is, which is a book
+ * and possibly a sighting.
+ */
+async function addAll(intake: Intake) {
+  const ready = intake.entries.filter(isReady);
+  if (ready.length === 0) return;
+
+  intake.stopAddingRequested.current = false;
+  intake.setIsAdding(true);
+  // **The previous run's verdict goes when this one starts.** A stop leaves
+  // rows in the queue precisely so they can be added, so a second press is
+  // the ordinary path now, and the banner saying what the last run did not
+  // reach would stand over those rows while they are being written.
+  intake.setResult(null);
+  const shelf = normaliseLocation(intake.location);
+
+  // **Asked again for every row nobody has asked about yet**, which is a
+  // row whose pick lookup failed or had not answered when this was pressed.
+  // This is the guarantee that a re-picked folder adds nothing twice; the
+  // lookup at the pick is what lets the queue say so beforehand.
+  const heldNow = await askWhoHolds(unaskedOf(ready), whoHolds);
+  const landings: Landing[] = [];
+
+  const outcome = await writeOneAtATime(ready, {
+    post: async (entry) => {
+      const landing = await landOne(intake, entry, shelf, heldNow);
+      landings.push(landing);
+      // **Only a throw makes the row a failure**, because the shared loop
+      // records one by nothing else. `REFUSAL_FOR_LANDING` says which do.
+      const refusal = refusalOf(landing.kind, landing);
+      if (refusal) throw refusal.thrown;
+    },
+    onProgress: intake.setAddProgress,
+    stopped: () => intake.stopAddingRequested.current,
+  });
+
+  // **On any book at all, including a run the member stopped.** The shelf is
+  // where those books physically went, so the next run should offer it; a
+  // member who stopped because the shelf was wrong changes one field, and one
+  // who stopped for any other reason would otherwise type it again.
+  if (outcome.added > 0) rememberLastLocation(shelf);
+  // Once for the batch rather than once per book, and the catalogue rather
+  // than everything: a rapid run leaves the scanner open, so a keyless
+  // invalidate re-spent the search quota in the middle of a shelf.
+  intake.invalidate.catalogue();
+  applyTo(intake, {
+    kind: "batch-ran",
+    walked: outcome.attempted.map((entry) => entry.key),
+    failures: outcome.failures.map(failureOf),
+  });
+  intake.setIsAdding(false);
+  intake.setAddProgress(null);
+  const counts = countLandings(landings);
+  intake.setResult({
+    // From the landings rather than the shared loop, which counts every
+    // row that did not throw, a row already in the library among them.
+    added: counts.added,
+    failed: outcome.failures.length,
+    unreferenced: counts.unreferenced,
+    already: counts.already,
+    atCeiling: counts.atCeiling,
+    filesLeft: counts.filesLeft,
+    stopped: outcome.stopped,
+  });
+}
+
+/** The rows of a batch with a file nobody has asked the holders about. */
+function unaskedOf(ready: readonly ReadyEntry[]): HolderQuestion[] {
+  return ready.flatMap((entry) =>
+    entry.reference !== undefined && entry.heldBy === undefined
+      ? [{ key: entry.key, references: filesOf(entry), format: entry.format }]
+      : [],
+  );
+}
+
+/** One row of `addAll`, landed by `lib/fileLanding.land`. */
+function landOne(
+  intake: Intake,
+  entry: ReadyEntry,
+  shelf: string,
+  heldNow: Awaited<ReturnType<typeof askWhoHolds>>,
+): Promise<Landing> {
+  return land(
+    {
+      // The same request builder as the one-book flow, so a field added
+      // there cannot quietly go missing from a rapid run. Everything a
+      // rapid run does not offer takes its blank value: no cover, no
+      // tags, not private. `format` is the exception and is carried off
+      // the entry, because a picked file answers it and a barcode does
+      // not.
+      body: toScanRequest({
+        ...blankPending({ location: shelf }),
+        format: entry.format,
+        draft: entry.draft,
+      }),
+      references: filesOf(entry),
+      format: entry.format,
+      held: heldNow.get(entry.key) ?? entry.heldBy,
+      identifierWasRead: theIsbnWasRead(entry),
+    },
+    {
+      create: (data) => intake.scanAdd.mutateAsync({ data }),
+      report: (bookId, data) =>
+        intake.reportReference.mutateAsync({ bookId, data }),
+      copiesOf: listCopies,
+    },
+  );
+}
+
+/**
+ * What each landing makes of its row for the shared loop: nothing for a row
+ * that landed, and the value to throw for one that did not.
+ *
+ * **A row whose book was made, or which is on its holder already, lands**; at
+ * the ceiling it lands too, which takes it out of the queue as a counted row.
+ * A book of another format throws `HeldInAnotherFormat`, which is the copy
+ * offer, and a tie throws `HeldUnnamed`, which is its own reason, as the trash
+ * refusal is. The trash refusal and a failure are rethrown rather than
+ * reported here: the row is the loop's to record, and swallowing it would
+ * count a book that is not in the catalogue.
+ *
+ * **A total `Record` keyed on the union, for the reason `REASON_FOR_FAILURE`
+ * gives**: a landing kind added to `Landing` does not compile until it is
+ * given a verdict here.
+ */
+const REFUSAL_FOR_LANDING: {
+  [Kind in Landing["kind"]]: (
+    landing: Extract<Landing, { kind: Kind }>,
+  ) => { readonly thrown: unknown } | null;
+} = {
+  added: () => null,
+  "added-unreferenced": () => null,
+  "on-holder": () => null,
+  "at-ceiling": () => null,
+  "other-format": (landing) => ({
+    thrown: new HeldInAnotherFormat(landing.holderId),
+  }),
+  tie: () => ({ thrown: new HeldUnnamed() }),
+  "in-trash": (landing) => ({ thrown: landing.thrown }),
+  failed: (landing) => ({ thrown: landing.thrown }),
+};
+
+/** The arm for one landing, generic for the reason `reasonFor` gives. */
+function refusalOf<Kind extends Landing["kind"]>(
+  kind: Kind,
+  landing: Extract<Landing, { kind: Kind }>,
+): { readonly thrown: unknown } | null {
+  return REFUSAL_FOR_LANDING[kind](landing);
+}
+
+/** One refused row of the batch, as the queue's `batch-ran` event takes it. */
+function failureOf({ item, thrown }: { item: ReadyEntry; thrown: unknown }) {
+  return thrown instanceof HeldInAnotherFormat
+    ? { row: item, heldInAnotherFormat: thrown.holderId }
+    : { row: item, reason: reasonForRefusedRow(thrown) };
+}
+
+/**
+ * File one row as its own copy of the book its ISBN belongs to, and say
+ * where the file is on that copy.
+ *
+ * **The press `lib/fileLanding.whereItLands` refuses to make for the member.** The copy
+ * route is the one the single book flow's "add as another copy" uses, with
+ * the same body builder, so a copy made here inherits the work, the tags and
+ * the privacy of the holder exactly as one made there does. The format is
+ * the file's, which is the whole point of the copy.
+ *
+ * The row leaves the queue once the copy exists, whatever the reference
+ * does, by the rule `REFUSAL_FOR_LANDING` holds, that a row whose book was
+ * made lands: a created book put back as a failure is added again into a
+ * duplicate. The verdict above the queue moves by one row, so it keeps
+ * describing what is left beneath it. The files go through
+ * `lib/fileLanding.recordOnCopy`, so a location another Book holds is left
+ * there as it is on the holder path.
+ */
+async function addAsCopy(intake: Intake, key: string) {
+  const entry = intake.entries.find((one) => one.key === key);
+  if (entry?.copyOf === undefined || entry.reference === undefined) return;
+  intake.setIsAddingCopy(true);
+  try {
+    await copyTheRow(intake, key, entry.copyOf, entry);
+  } finally {
+    intake.setIsAddingCopy(false);
+  }
+}
+
+/** `addAsCopy`'s requests, between the hold being taken and released. */
+async function copyTheRow(
+  intake: Intake,
+  key: string,
+  holderId: number,
+  entry: ScannedEntry,
+) {
+  let copyId: number;
+  try {
+    const copy = await intake.addAnotherCopy.mutateAsync({
+      bookId: holderId,
+      data: toCopyRequest({
+        ...blankPending({ location: normaliseLocation(intake.location) }),
+        format: entry.format,
+      }),
+    });
+    copyId = copy.id;
+    // The offer goes the moment the copy exists, so a second press while
+    // the reference is in flight cannot post a second copy.
+    applyTo(intake, { kind: "copy-made", key });
+  } catch (error) {
+    // The offer stays, so the press can be made again; the reason says why
+    // this one did not take.
+    applyTo(intake, {
+      kind: "copy-refused",
+      key,
+      reason: reasonForError(error),
+    });
+    return;
+  }
+  const { left, recorded } = await recordOnCopy(
+    copyId,
+    filesOf(entry),
+    (bookId, data) => intake.reportReference.mutateAsync({ bookId, data }),
+  );
+  // A copy is a new book, the reason `useScanFlow.addCopy` gives.
+  intake.invalidate.catalogue();
+  applyTo(intake, { kind: "removed", key });
+  intake.setResult((last) => afterACopy(last, recorded, left));
+}
+
+/** The batch's verdict moved by one row made into a copy. */
+function afterACopy(
+  last: IntakeResult | null,
+  recorded: boolean,
+  left: number,
+): IntakeResult {
+  const was = last ?? {
+    added: 0,
+    failed: 0,
+    unreferenced: 0,
+    already: 0,
+    atCeiling: 0,
+    filesLeft: 0,
+    stopped: false,
+  };
+  return {
+    ...was,
+    added: was.added + 1,
+    failed: Math.max(0, was.failed - 1),
+    unreferenced: was.unreferenced + (recorded ? 0 : 1),
+    filesLeft: was.filesLeft + left,
   };
 }
 

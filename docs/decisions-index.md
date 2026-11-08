@@ -996,11 +996,11 @@ repeat the argument.
 |  | [The HTML export carries six columns, not the CSV's](decisions.md#the-html-export-carries-six-columns-not-the-csvs) | 114 |
 |  | [Five exports a minute is held to the formats the menu offers](decisions.md#five-exports-a-minute-is-held-to-the-formats-the-menu-offers) | 76 |
 |  | [CRAP under 10 on every pipeline, as a ratchet, with a scorer of our own in Go](decisions.md#crap-under-10-on-every-pipeline-as-a-ratchet-with-a-scorer-of-our-own-in-go) | 3,689 |
-|  | [SonarQube is read by hand at a wave's end and before a tag, and never gated on](decisions.md#sonarqube-is-read-by-hand-at-a-waves-end-and-before-a-tag-and-never-gated-on) | 998 |
-| SonarQube is read by hand at a wave's end and before a tag, and never gated on | [SonarQube's style rules are not this repository's rules](decisions.md#sonarqubes-style-rules-are-not-this-repositorys-rules) | 116 |
-| SonarQube is read by hand at a wave's end and before a tag, and never gated on | [A regex SonarQube calls super linear is accepted where its input is bounded](decisions.md#a-regex-sonarqube-calls-super-linear-is-accepted-where-its-input-is-bounded) | 63 |
-| SonarQube is read by hand at a wave's end and before a tag, and never gated on | [The DDC heading separator is possessive, and its test refuses by size](decisions.md#the-ddc-heading-separator-is-possessive-and-its-test-refuses-by-size) | 81 |
-| SonarQube is read by hand at a wave's end and before a tag, and never gated on | [The error page takes the app's accent as literal values](decisions.md#the-error-page-takes-the-apps-accent-as-literal-values) | 145 |
-| SonarQube is read by hand at a wave's end and before a tag, and never gated on | [A bidirectional control character is refused in every file the suite reads](decisions.md#a-bidirectional-control-character-is-refused-in-every-file-the-suite-reads) | 132 |
+|  | [SonarQube is read by hand before a release tag, and never gated on](decisions.md#sonarqube-is-read-by-hand-before-a-release-tag-and-never-gated-on) | 1,083 |
+| SonarQube is read by hand before a release tag, and never gated on | [SonarQube's style rules are not this repository's rules](decisions.md#sonarqubes-style-rules-are-not-this-repositorys-rules) | 116 |
+| SonarQube is read by hand before a release tag, and never gated on | [A regex SonarQube calls super linear is accepted where its input is bounded](decisions.md#a-regex-sonarqube-calls-super-linear-is-accepted-where-its-input-is-bounded) | 63 |
+| SonarQube is read by hand before a release tag, and never gated on | [The DDC heading separator is possessive, and its test refuses by size](decisions.md#the-ddc-heading-separator-is-possessive-and-its-test-refuses-by-size) | 81 |
+| SonarQube is read by hand before a release tag, and never gated on | [The error page takes the app's accent as literal values](decisions.md#the-error-page-takes-the-apps-accent-as-literal-values) | 145 |
+| SonarQube is read by hand before a release tag, and never gated on | [A bidirectional control character is refused in every file the suite reads](decisions.md#a-bidirectional-control-character-is-refused-in-every-file-the-suite-reads) | 132 |
 |  | [The local gate runs the backend job's two ruff steps](decisions.md#the-local-gate-runs-the-backend-jobs-two-ruff-steps) | 129 |
 <!-- index: end -->

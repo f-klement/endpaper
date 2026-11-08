@@ -170,7 +170,7 @@
     // in `lib/takeout.ts` and the scan hooks. A lookup
     // paced against a rate limit, in the scan hooks. And the test tree,
     // awaiting its own fixtures and steps in the order the arm is about.
-    "no-await-in-loop": "off", // 60
+    "no-await-in-loop": "off", // 59
 
     // Argued from its sites. In `lib/safeHref.ts` the U+0000 to U+0020
     // character class IS the URL sanitisation logic, so the rule fires on the
@@ -202,8 +202,8 @@
     // wave that adopted oxlint was told not to, because turning a noisy rule on
     // produces findings in files other open tickets rewrite.
     "unicorn/no-array-sort": "off", // 178
-    "unicorn/consistent-function-scoping": "off", // 139
-    "no-shadow": "off", // 31
+    "unicorn/consistent-function-scoping": "off", // 137
+    "no-shadow": "off", // 29
     "unicorn/prefer-set-has": "off", // 14
     "no-useless-concat": "off", // 11
     "oxc/no-map-spread": "off", // 8

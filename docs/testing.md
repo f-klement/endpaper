@@ -112,7 +112,7 @@ a gap stated rather than a lesson that did not travel.
 | A long run of one unit is a named atom, so it is drawn at every seed and prints as itself | named atoms at, around and far past a bound | `FAR_PAST_ANY_DEPTH`, `WIDE`, `MANIFEST_DEPTH` |
 | Every class a property's oracle depends on has a witness, asked of what the byte door did rather than of the spec where the door can be asked | per module, at a fresh seed | `strategies.witness` beside each property; the catalogue surrogate witness asks the response's bytes, since after the repair no door can show one |
 | Every bound a byte door declares has a positive control in the same file | the ledger refuses a missing one | a named case at the bound and one past it, reading the module's constant |
-| The population of byte doors is derived, not remembered | every module the six roots reach | `_BYTE_DOORS` in `tests/test_house_rules.py`, the functions calling an entry point of the XML, JSON, zip and CSV readers, each row naming the property that drives the byte door above it; `parse_qs` and the hand written CQL parser are outside it, with properties of their own |
+| The population of byte doors is derived from stated roots, not remembered | every module reached from the roots `propertyBudget.test.ts` states; the closure is derived, the roots are a stated list | `_BYTE_DOORS` in `tests/test_house_rules.py`, the functions calling an entry point of the XML, JSON, zip and CSV readers, each row naming the property that drives the byte door above it; `parse_qs` and the hand written CQL parser are outside it, with properties of their own |
 | A fresh seed every run; nothing cached, nothing committed | the runner prints the seed | not derandomised, no example database |
 | The examples that run are counted against a floor | `propertyBudget.test.ts` | `test_property_budget.py` |
 
@@ -420,7 +420,7 @@ somebody decides which side of the door the new name is on.
   deleted or loosened reds nothing. A ledger the suite's setup keeps per file refuses a bound a
   driven door declared and no control in that file overran.
 - **Every door has a property**, or is named as reached only through one: every module the
-  six roots named in `tests/propertyBudget.test.ts` reach for a value, following every import
+  roots named in `tests/propertyBudget.test.ts` reach for a value, following every import
   under `src/`, the generated client's excepted, as Vite's server transform resolves it, globs
   included, with the string keyed aliases vitest's main process resolved the run by. A module loaded as a
   Web Worker, by `new Worker(new URL(...))` or a `?worker` import, is not followed: that

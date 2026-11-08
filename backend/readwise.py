@@ -389,16 +389,7 @@ def _apply_once(
     newly: set[int] = set()
     placed = [(entry, _placed(db, member_id, entry, index, newly, whole=whole)) for entry in page.entries]
     writers = _writers(db, member_id, placed, counts)
-    # The page is one answer: a highlight live under any of its books is not
-    # removed by another listing it deleted. Removed per entry, a deleted
-    # listing would take the row a live one was keeping, or meet its update.
-    alive = {
-        mark.id
-        for entry in page.entries
-        if not entry.deleted
-        for mark in entry.highlights
-        if not mark.deleted
-    }
+    alive = _alive(page)
     for position, (entry, book_id) in enumerate(placed):
         # Deletions first, whatever the category: a highlight deleted under a
         # book deleted whole, or under one moved out of `books`, is removed.
@@ -420,6 +411,22 @@ def _apply_once(
             _write(db, member_id, book_id, live, counts)
     db.commit()
     return newly
+
+
+def _alive(page: Page) -> set[int]:
+    """The highlights live under any book of the page.
+
+    The page is one answer: a highlight live under any of its books is not
+    removed by another listing it deleted. Removed per entry, a deleted
+    listing would take the row a live one was keeping, or meet its update.
+    """
+    return {
+        mark.id
+        for entry in page.entries
+        if not entry.deleted
+        for mark in entry.highlights
+        if not mark.deleted
+    }
 
 
 def _placed(
@@ -701,8 +708,32 @@ async def _sync(
     # as today's for the daily job.
     db.commit()
     counts = Counts()
+    token = _token(login, member_id)
+    if token is None:
+        return _finish(db, login, member_id, ReadwiseOutcome.UNREADABLE, counts, started)
+
+    index = await anyio.to_thread.run_sync(build_index, db, member_id)
+    asked = await anyio.to_thread.run_sync(_rematched, db, member_id, index)
+    ends = in_(SYNC_SECONDS)
+    # **An export walk a bound stopped resumes where it stopped**, from the page cursor
+    # it kept, and its cursor is then the time it first started, so nothing
+    # changed in between is skipped.
+    walk_started = (login.walk_started_at or started) if login.resume_cursor else started
+    login.walk_started_at = walk_started
     try:
-        token = Token(
+        async with client() as http:
+            reader = _Reader(http, token, ends)
+            asked |= await _walk_export(db, member_id, login, reader, index, counts, walk_started)
+            await _ask_by_id(db, member_id, reader, index, counts, asked)
+    except Stopped as stopped:
+        return _finish(db, login, member_id, stopped.outcome, counts, started)
+    return _finish(db, login, member_id, ReadwiseOutcome.SYNCED, counts, walk_started)
+
+
+def _token(login: MemberLogin, member_id: int) -> Token | None:
+    """The member's token, unsealed, or None when it cannot be."""
+    try:
+        return Token(
             credentials.unseal_member_login(
                 credentials.require_key(),
                 _SERVICE.value,
@@ -712,76 +743,106 @@ async def _sync(
             )
         )
     except credentials.CredentialError:
-        return _finish(db, login, member_id, ReadwiseOutcome.UNREADABLE, counts, started)
+        return None
 
-    index = await anyio.to_thread.run_sync(build_index, db, member_id)
-    asked = await anyio.to_thread.run_sync(_rematched, db, member_id, index)
-    ends = in_(SYNC_SECONDS)
-    pages = 0
-    # **An export walk a bound stopped resumes where it stopped**, from the page cursor
-    # it kept, and its cursor is then the time it first started, so nothing
-    # changed in between is skipped. A resumed cursor Readwise no longer takes
-    # is dropped, so the next pull starts the walk over.
+
+@dataclass
+class _Reader:
+    """How one pull reads the export: the client, the token, and the two
+    bounds every page is read under, `MAX_PAGES` and the pull's deadline."""
+
+    http: httpx.AsyncClient
+    token: Token
+    ends: float
+    pages: int = 0
+
+    async def read(self, params: dict[str, str], cursor: str | None) -> Page:
+        """The page at `cursor`, or the first. Raises `Stopped` as `_page`
+        does, and with `INCOMPLETE` once either bound is spent."""
+        if self.pages >= MAX_PAGES or left(self.ends) <= 0:
+            raise Stopped(ReadwiseOutcome.INCOMPLETE)
+        page = await _page(
+            self.http, self.token, params | ({"pageCursor": cursor} if cursor else {}), self.ends
+        )
+        self.pages += 1
+        return page
+
+
+async def _walk_export(
+    db: Session,
+    member_id: int,
+    login: MemberLogin,
+    reader: _Reader,
+    index: recognition.Index,
+    counts: Counts,
+    walk_started: datetime,
+) -> set[int]:
+    """Read the export from the kept cursor, or its start, to its last page,
+    applying each page as it arrives. Answers the Readwise books this walk
+    newly matched, which are asked for again by id."""
+    params = {"includeDeleted": "true"}
+    if login.synced_through is not None:
+        params["updatedAfter"] = login.synced_through.strftime("%Y-%m-%dT%H:%M:%SZ")
+    whole = login.synced_through is None
+    asked: set[int] = set()
     cursor = login.resume_cursor
-    walk_started = (login.walk_started_at or started) if cursor else started
-    login.walk_started_at = walk_started
     # Once one cursor is too long to keep, none is kept for the rest of this
     # walk: resuming from a later one would carry no start time to resume with.
     keeping = True
+    while True:
+        page = await _export_page(reader, login, params, cursor)
+        cursor = page.next_cursor
+        keeping = keeping and (cursor is None or len(cursor) <= READWISE_CURSOR_MAX)
+        asked |= await _apply(
+            db,
+            member_id,
+            page,
+            index,
+            counts,
+            whole=whole,
+            carry=_resuming(login, walk_started, cursor if keeping else None),
+        )
+        if cursor is None:
+            return asked
+
+
+async def _export_page(
+    reader: _Reader, login: MemberLogin, params: dict[str, str], cursor: str | None
+) -> Page:
+    """The export page at `cursor`. **A resumed cursor Readwise no longer
+    takes is dropped**, so the next pull starts the walk over."""
     try:
-        async with client() as http:
-            params = {"includeDeleted": "true"}
-            if login.synced_through is not None:
-                params["updatedAfter"] = login.synced_through.strftime("%Y-%m-%dT%H:%M:%SZ")
-            whole = login.synced_through is None
-            while True:
-                if pages >= MAX_PAGES or left(ends) <= 0:
-                    return _finish(db, login, member_id, ReadwiseOutcome.INCOMPLETE, counts, started)
-                try:
-                    page = await _page(http, token, params | ({"pageCursor": cursor} if cursor else {}), ends)
-                except Stopped as stopped:
-                    if pages == 0 and cursor and stopped.outcome is ReadwiseOutcome.UNAVAILABLE:
-                        login.resume_cursor = None
-                    raise
-                pages += 1
-                cursor = page.next_cursor
-                keeping = keeping and (cursor is None or len(cursor) <= READWISE_CURSOR_MAX)
-                asked |= await _apply(
-                    db,
-                    member_id,
-                    page,
-                    index,
-                    counts,
-                    whole=whole,
-                    carry=_resuming(login, walk_started, cursor if keeping else None),
-                )
-                if cursor is None:
-                    break
-            wanted = sorted(asked)
-            for start in range(0, len(wanted), IDS_PER_REQUEST):
-                ids = wanted[start : start + IDS_PER_REQUEST]
-                await anyio.to_thread.run_sync(_pending, db, member_id, ids, True)
-                chunk = ",".join(str(ident) for ident in ids)
-                cursor = None
-                while True:
-                    if pages >= MAX_PAGES or left(ends) <= 0:
-                        return _finish(db, login, member_id, ReadwiseOutcome.INCOMPLETE, counts, started)
-                    page = await _page(
-                        http,
-                        token,
-                        {"ids": chunk} | ({"pageCursor": cursor} if cursor else {}),
-                        ends,
-                    )
-                    pages += 1
-                    await _apply(db, member_id, page, index, counts, whole=True)
-                    cursor = page.next_cursor
-                    if cursor is None:
-                        break
-                # Cleared only once the walk for these ids reached its last page.
-                await anyio.to_thread.run_sync(_pending, db, member_id, ids, False)
+        return await reader.read(params, cursor)
     except Stopped as stopped:
-        return _finish(db, login, member_id, stopped.outcome, counts, started)
-    return _finish(db, login, member_id, ReadwiseOutcome.SYNCED, counts, walk_started)
+        if reader.pages == 0 and cursor and stopped.outcome is ReadwiseOutcome.UNAVAILABLE:
+            login.resume_cursor = None
+        raise
+
+
+async def _ask_by_id(
+    db: Session,
+    member_id: int,
+    reader: _Reader,
+    index: recognition.Index,
+    counts: Counts,
+    asked: set[int],
+) -> None:
+    """Read every highlight of the Readwise books in `asked` by their ids,
+    `IDS_PER_REQUEST` to a request, each page applied whole."""
+    wanted = sorted(asked)
+    for start in range(0, len(wanted), IDS_PER_REQUEST):
+        ids = wanted[start : start + IDS_PER_REQUEST]
+        await anyio.to_thread.run_sync(_pending, db, member_id, ids, True)
+        chunk = ",".join(str(ident) for ident in ids)
+        cursor = None
+        while True:
+            page = await reader.read({"ids": chunk}, cursor)
+            await _apply(db, member_id, page, index, counts, whole=True)
+            cursor = page.next_cursor
+            if cursor is None:
+                break
+        # Cleared only once the walk for these ids reached its last page.
+        await anyio.to_thread.run_sync(_pending, db, member_id, ids, False)
 
 
 async def _apply(

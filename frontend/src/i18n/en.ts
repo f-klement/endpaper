@@ -2174,7 +2174,8 @@ export const en = {
   "highlights.importReading": "Reading and importing...",
   "highlights.outcomeImported":
     "New: {created}. Updated: {updated}. Unchanged: {unchanged}.",
-  "highlights.outcomeOversized": "Left out as too long: {count}.",
+  "highlights.outcomeOversized":
+    "Left out as too long, or as holding a character that cannot be stored: {count}.",
   "highlights.outcomeUnmatched":
     "No book you can see holds this file. Add the file from the scan page, then import again.",
   "highlights.outcomeAmbiguous":

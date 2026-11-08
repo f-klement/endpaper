@@ -51,7 +51,10 @@ export type SidecarReading =
       /** `doc_props.title`, to name the sidecar to the member. */
       readonly title: string | null;
       readonly highlights: readonly SidecarHighlight[];
-      /** Marks left out because a field is past what the server stores. */
+      /**
+       * Marks left out because a field is past what the server stores or
+       * carries a NUL it refuses.
+       */
       readonly oversized: number;
     }
   | {
@@ -62,7 +65,10 @@ export type SidecarReading =
 /**
  * The server's bounds (`models.HIGHLIGHT_*`, `KOREADER_POSITION_MAX`,
  * `MAX_PAGE_NUMBER_IN_A_BOOK`). A mark past one is left out and counted
- * rather than sent, so one long passage does not refuse the whole book.
+ * rather than sent, so one long passage does not refuse the whole book. A NUL
+ * is held the same way, in the fields the server refuses one in: a position,
+ * the passage or the note leaves the mark out, and a chapter is dropped from
+ * its mark, as one too long is.
  */
 const TEXT_MAX = 10_000;
 const NOTE_MAX = 10_000;
@@ -257,11 +263,27 @@ function fits(draft: Draft): draft is Draft & {
     draft.text !== null &&
     draft.pos0.length <= POSITION_MAX &&
     draft.pos1.length <= POSITION_MAX &&
-    !draft.pos0.includes("\u0000") &&
-    !draft.pos1.includes("\u0000") &&
     draft.text.length <= TEXT_MAX &&
-    (draft.note === null || draft.note.length <= NOTE_MAX)
+    (draft.note === null || draft.note.length <= NOTE_MAX) &&
+    ![draft.pos0, draft.pos1, draft.text, draft.note].some(carriesNul)
   );
+}
+
+function carriesNul(value: string | null): boolean {
+  return value?.includes("\u0000") ?? false;
+}
+
+/**
+ * A chapter the server would store, or null. One too long or carrying a NUL
+ * is dropped from its mark rather than leaving the mark out, because the
+ * passage is still worth keeping without it.
+ */
+function storableChapter(chapter: string | null): string | null {
+  return chapter !== null &&
+    chapter.length <= CHAPTER_MAX &&
+    !carriesNul(chapter)
+    ? chapter
+    : null;
 }
 
 /** The highlights a sidecar holds, or why it could not be read. */
@@ -292,10 +314,7 @@ export function readSidecar(source: string): SidecarReading {
     pos1: draft.pos1,
     text: draft.text,
     note: draft.note,
-    chapter:
-      draft.chapter !== null && draft.chapter.length <= CHAPTER_MAX
-        ? draft.chapter
-        : null,
+    chapter: storableChapter(draft.chapter),
     page: draft.page,
     highlightedAt: draft.highlightedAt,
   }));

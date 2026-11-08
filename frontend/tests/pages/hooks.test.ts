@@ -7,8 +7,11 @@ import { MemoryRouter, useLocation } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  getListDigitalReferencesQueryKey,
   getPurgeBookMutationOptions,
   getRestoreBookMutationOptions,
+  useListDigitalReferences,
+  useListMissingDigitalReferences,
 } from "../../src/api/generated/endpoints/books/books";
 import { AuthMode, type UserOut } from "../../src/api/generated/model";
 import {
@@ -691,50 +694,50 @@ function stored(
 
 type Sent = { seen: { reference_id: number }[]; missing: number[] };
 
+const UNDER = "/api/books/digital-references";
+const SWEEP = "/api/books/digital-references/sweep";
+
+/** The server holding these references under `Books`, served in pages of
+ * `REFERENCES_PER_PAGE`, answering a sweep with every id it was sent. */
+function holding(...references: ReturnType<typeof stored>[]) {
+  api.on(
+    UNDER,
+    (url) => {
+      const page = Number(new URL(url, "http://x").searchParams.get("page"));
+      const start = (page - 1) * REFERENCES_PER_PAGE;
+      return {
+        body: {
+          items: references.slice(start, start + REFERENCES_PER_PAGE),
+          total: references.length,
+          page,
+          page_size: REFERENCES_PER_PAGE,
+        },
+      };
+    },
+    "GET",
+  );
+  api.on(
+    SWEEP,
+    (_url, init) => {
+      const body = JSON.parse(String(init?.body)) as Sent;
+      return {
+        body: {
+          seen: body.seen.map((one) => one.reference_id),
+          missing: body.missing,
+        },
+      };
+    },
+    "POST",
+  );
+}
+
+function sweeps(): Sent[] {
+  return api.calls
+    .filter((call) => call.url.includes(SWEEP))
+    .map((call) => call.body as Sent);
+}
+
 describe("sweepFolder", () => {
-  const UNDER = "/api/books/digital-references";
-  const SWEEP = "/api/books/digital-references/sweep";
-
-  /** The server holding these references under `Books`, served in pages of
-   * `REFERENCES_PER_PAGE`, answering a sweep with every id it was sent. */
-  function holding(...references: ReturnType<typeof stored>[]) {
-    api.on(
-      UNDER,
-      (url) => {
-        const page = Number(new URL(url, "http://x").searchParams.get("page"));
-        const start = (page - 1) * REFERENCES_PER_PAGE;
-        return {
-          body: {
-            items: references.slice(start, start + REFERENCES_PER_PAGE),
-            total: references.length,
-            page,
-            page_size: REFERENCES_PER_PAGE,
-          },
-        };
-      },
-      "GET",
-    );
-    api.on(
-      SWEEP,
-      (_url, init) => {
-        const body = JSON.parse(String(init?.body)) as Sent;
-        return {
-          body: {
-            seen: body.seen.map((one) => one.reference_id),
-            missing: body.missing,
-          },
-        };
-      },
-      "POST",
-    );
-  }
-
-  function sweeps(): Sent[] {
-    return api.calls
-      .filter((call) => call.url.includes(SWEEP))
-      .map((call) => call.body as Sent);
-  }
-
   it("confirms a file still there and lists one that is gone without marking it", async () => {
     holding(stored(1, "Le Guin/Dune.epub"), stored(2, "Gone.epub"));
 
@@ -765,6 +768,30 @@ describe("sweepFolder", () => {
 
     expect(sweeps()[0]!.seen).toEqual([
       expect.objectContaining({ reference_id: 1, size_bytes: 5 }),
+    ]);
+  });
+
+  it("still confirms a file whose bytes and date cannot be read, saying neither", async () => {
+    holding(stored(1, "Dune.epub"));
+    const unreadable = picked("Dune.epub");
+    Object.defineProperties(unreadable, {
+      lastModified: { value: Number.NaN },
+      slice: {
+        value: () => {
+          throw new Error("NotReadableError");
+        },
+      },
+    });
+
+    await sweepFolder([unreadable]);
+
+    expect(sweeps()[0]!.seen).toEqual([
+      {
+        reference_id: 1,
+        size_bytes: 5,
+        file_modified_at: null,
+        partial_md5: null,
+      },
     ]);
   });
 
@@ -875,6 +902,34 @@ function inFolder(root: string): File {
   return file;
 }
 
+/** Book 10's own list of saved files, which the Book page shows. */
+const BOOK_TEN_FILES = "/api/books/10/digital-references";
+/** Every reference flagged missing. It must be stubbed after `holding`,
+ * whose route is a prefix of it. */
+const MISSING = "/api/books/digital-references/missing";
+const emptyPage = {
+  items: [],
+  total: 0,
+  page: 1,
+  page_size: REFERENCES_PER_PAGE,
+};
+
+/** How many times the open list at `path` has been fetched. */
+function gets(path: string): number {
+  return api.calls.filter(
+    (call) => call.method === "GET" && call.url.includes(path),
+  ).length;
+}
+
+/** A sweep of a pick holding `Kept.epub`, with `Gone.epub` saved beside it. */
+async function sweptWithOneGone() {
+  holding(stored(1, "Kept.epub"), stored(2, "Gone.epub"));
+  const rendered = renderHookWithProviders(() => useFolderSweep());
+  act(() => rendered.result.current.sweep([picked("Kept.epub")]));
+  await waitFor(() => expect(rendered.result.current.swept).not.toBeNull());
+  return rendered;
+}
+
 describe("useFolderSweep", () => {
   it("shows the latest pick's answer when an earlier one finishes last", async () => {
     const first = heldOpen();
@@ -925,5 +980,133 @@ describe("useFolderSweep", () => {
     });
 
     expect(result.current.swept?.map((one) => one.root)).toEqual(["New"]);
+  });
+
+  it("marks a root's files not found on the press and says how many", async () => {
+    const { result } = await sweptWithOneGone();
+
+    act(() => result.current.markMissing("Books"));
+
+    await waitFor(() =>
+      expect(result.current.swept).toEqual([
+        expect.objectContaining({ root: "Books", marked: 1 }),
+      ]),
+    );
+    expect(sweeps().at(-1)).toEqual({
+      root_label: "Books",
+      seen: [],
+      missing: [2],
+    });
+    expect(result.current.isMarking).toBe(false);
+  });
+
+  it("refreshes the listing of each Book a press marked", async () => {
+    const { result, queryClient } = await sweptWithOneGone();
+    const refreshed = vi.spyOn(queryClient, "invalidateQueries");
+
+    act(() => result.current.markMissing("Books"));
+
+    await waitFor(() =>
+      expect(refreshed).toHaveBeenCalledWith({
+        queryKey: getListDigitalReferencesQueryKey(20),
+      }),
+    );
+  });
+
+  it("reloads an open list of a Book's files once a sweep confirms one", async () => {
+    holding(stored(1, "Kept.epub"));
+    api.on(BOOK_TEN_FILES, { body: [] }, "GET");
+    const { result } = renderHookWithProviders(() => ({
+      folder: useFolderSweep(),
+      files: useListDigitalReferences(10),
+    }));
+    await waitFor(() => expect(result.current.files.isSuccess).toBe(true));
+
+    act(() => result.current.folder.sweep([picked("Kept.epub")]));
+
+    await waitFor(() => expect(gets(BOOK_TEN_FILES)).toBe(2));
+  });
+
+  it("reloads an open list of missing files once a press marks one", async () => {
+    holding(stored(1, "Kept.epub"), stored(2, "Gone.epub"));
+    api.on(MISSING, { body: emptyPage }, "GET");
+    const { result } = renderHookWithProviders(() => ({
+      folder: useFolderSweep(),
+      missing: useListMissingDigitalReferences(),
+    }));
+    await waitFor(() => expect(result.current.missing.isSuccess).toBe(true));
+    act(() => result.current.folder.sweep([picked("Kept.epub")]));
+    await waitFor(() => expect(result.current.folder.swept).not.toBeNull());
+    // Mount and the sweep's own refresh: a count, so a baseline taken before
+    // that refresh started cannot let it pass for the press's.
+    await waitFor(() => expect(gets(MISSING)).toBe(2));
+    const press = heldOpen();
+    api.on(SWEEP, press.respond, "POST");
+
+    act(() => result.current.folder.markMissing("Books"));
+
+    // A refresh sent before the mark lands can be answered with the list as
+    // it was, so the member would see no change.
+    await waitFor(() => expect(sweeps()).toHaveLength(2));
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(gets(MISSING)).toBe(2);
+    press.release({ body: { seen: [], missing: [2] } });
+    await waitFor(() => expect(gets(MISSING)).toBe(3));
+  });
+
+  it("does nothing on a press under a folder where every saved file was found", async () => {
+    holding(stored(1, "Kept.epub"));
+    const { result } = renderHookWithProviders(() => useFolderSweep());
+    act(() => result.current.sweep([picked("Kept.epub")]));
+    await waitFor(() => expect(result.current.swept).not.toBeNull());
+    const sent = sweeps().length;
+
+    act(() => result.current.markMissing("Books"));
+
+    expect(result.current.isMarking).toBe(false);
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(result.current.swept).toEqual([
+      expect.objectContaining({ notFound: [], marked: null }),
+    ]);
+    expect(sweeps()).toHaveLength(sent);
+  });
+
+  it("sends nothing on a press under a folder taken for a different one", async () => {
+    holding(stored(1, "Theirs/Dune.epub"));
+    const { result } = renderHookWithProviders(() => useFolderSweep());
+    act(() => result.current.sweep([picked("Mine/Kindred.epub")]));
+    await waitFor(() => expect(result.current.swept).not.toBeNull());
+
+    act(() => result.current.markMissing("Books"));
+
+    expect(result.current.isMarking).toBe(false);
+    expect(sweeps()).toEqual([]);
+  });
+
+  it("reports a sweep the server refused", async () => {
+    api.on(UNDER, { status: 500, body: {} }, "GET");
+    const { result } = renderHookWithProviders(() => useFolderSweep());
+
+    act(() => result.current.sweep([picked("Dune.epub")]));
+
+    await waitFor(() => expect(result.current.failed).toBe(true));
+    expect(result.current.swept).toBeNull();
+  });
+
+  it("reports a press the server refused and keeps the sweep unmarked", async () => {
+    const { result } = await sweptWithOneGone();
+    api.on(SWEEP, { status: 500, body: {} }, "POST");
+
+    act(() => result.current.markMissing("Books"));
+
+    await waitFor(() => expect(result.current.failed).toBe(true));
+    expect(result.current.swept).toEqual([
+      expect.objectContaining({ marked: null }),
+    ]);
+    expect(result.current.isMarking).toBe(false);
   });
 });
